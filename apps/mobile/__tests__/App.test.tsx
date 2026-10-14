@@ -65,18 +65,20 @@ test('home renders and navigates to capture', async () => {
   expect(texts(tree)).toContain('Measure the fit.');
 });
 
-async function reachPreview(store = testStore()) {
+async function reachPreview(
+  store = testStore(),
+  values: Record<string, string> = {
+    'Holder top, millimetres': '62',
+    'Holder bottom, millimetres': '58',
+    'Holder depth, millimetres': '35',
+    'Cup width, millimetres': '86',
+  },
+) {
   let tree!: ReactTestRenderer.ReactTestRenderer;
   await act(async () => {
     tree = ReactTestRenderer.create(<App repository={store} />);
   });
   await press(tree, 'Open cup-holder example');
-  const values: Record<string, string> = {
-    'Holder top, millimetres': '62',
-    'Holder bottom, millimetres': '58',
-    'Holder depth, millimetres': '35',
-    'Cup width, millimetres': '86',
-  };
   for (const [label, value] of Object.entries(values)) {
     const input = tree.root.find(
       n =>
@@ -102,13 +104,13 @@ test('confirmed measurements become a FitSpec revision with an editable cup widt
   const store = testStore();
   const tree = await reachPreview(store);
   expect(texts(tree)).toEqual(
-    expect.arrayContaining(['Your design study', 'Revision 1', '86 mm']),
+    expect.arrayContaining(['Your design study', 'Revision 0', '86 mm']),
   );
   await pressWider(tree);
   expect(texts(tree)).toEqual(
-    expect.arrayContaining(['Revision 2', '87 mm', '62 mm']),
+    expect.arrayContaining(['Revision 1', '87 mm', '62 mm']),
   );
-  expect((await onlyProject(store)).fit?.revision).toBe(2);
+  expect((await onlyProject(store)).fit?.revision).toBe(1);
 });
 
 test('a stale preview edit is rejected and the latest revision is shown', async () => {
@@ -125,7 +127,7 @@ test('a stale preview edit is rejected and the latest revision is shown', async 
 
   await pressWider(tree);
   const shown = texts(tree);
-  expect(shown).toEqual(expect.arrayContaining(['Revision 2', '90 mm']));
+  expect(shown).toEqual(expect.arrayContaining(['Revision 1', '90 mm']));
   expect(shown.some(t => t.startsWith('This preview was out of date'))).toBe(
     true,
   );
@@ -457,4 +459,102 @@ test('a measured project reopens with provenance and protected edits preserve it
     (original.fit as import('@scan-to-make/contracts').FitSpec).dimensions
       .cupOuterDiameter,
   );
+});
+
+const firstMeasurements = {
+  'Holder top, millimetres': '70',
+  'Holder bottom, millimetres': '60',
+  'Holder depth, millimetres': '40',
+  'Cup width, millimetres': '90',
+};
+
+test('first measured save is one create containing user dimensions, with no intermediate seed write', async () => {
+  const bytes = new Map<string, string>();
+  const cas = jest.fn(
+    async (id: string, expected: string | null, next: string) => {
+      if (expected !== null) {
+        throw new Error('Updates unavailable');
+      }
+      if (bytes.has(id)) {
+        return false;
+      }
+      bytes.set(id, next);
+      return true;
+    },
+  );
+  const store = createSavedProjects({
+    listIds: async () => [...bytes.keys()],
+    read: async id => bytes.get(id) ?? null,
+    compareAndSwap: cas,
+  });
+  let tree = await reachPreview(store, firstMeasurements);
+  expect(texts(tree)).toContain('Your design study');
+  expect(cas).toHaveBeenCalledTimes(1);
+  const saved = await onlyProject(store);
+  expect(saved.fit?.template).toBe('cup-holder-adapter');
+  if (saved.fit?.template !== 'cup-holder-adapter') {
+    throw new Error('Wrong template');
+  }
+  const keys = [
+    'holderInnerTopDiameter',
+    'holderInnerBottomDiameter',
+    'insertionDepth',
+    'cupOuterDiameter',
+  ] as const;
+  keys.forEach((key, index) => {
+    expect(
+      (saved.fit as import('@scan-to-make/contracts').FitSpec).dimensions[key]
+        .nominalMm,
+    ).toBe([70, 60, 40, 90][index]);
+    expect(
+      (saved.fit as import('@scan-to-make/contracts').FitSpec).dimensions[key]
+        .sourceId,
+    ).toMatch(/^manual-entry-/);
+  });
+  await act(async () => tree.unmount());
+  await act(async () => {
+    tree = ReactTestRenderer.create(<App repository={store} />);
+  });
+  await press(tree, 'Your saved projects');
+  await press(tree, 'Open Cup holder & cup');
+  expect(texts(tree)).toEqual(
+    expect.arrayContaining(['70 mm', '60 mm', '40 mm', '90 mm']),
+  );
+});
+
+test('failed first measured create leaves no synthetic project, retains entries and can retry', async () => {
+  const bytes = new Map<string, string>();
+  let fail = true;
+  const store = createSavedProjects({
+    listIds: async () => [...bytes.keys()],
+    read: async id => bytes.get(id) ?? null,
+    compareAndSwap: async (id, expected, next) => {
+      if (fail) {
+        throw new Error('Disk unavailable');
+      }
+      if ((bytes.get(id) ?? null) !== expected) {
+        return false;
+      }
+      bytes.set(id, next);
+      return true;
+    },
+  });
+  const tree = await reachPreview(store, firstMeasurements);
+  expect(bytes.size).toBe(0);
+  expect(
+    texts(tree).some(t =>
+      t.startsWith('These measurements could not be saved'),
+    ),
+  ).toBe(true);
+  for (const [label, value] of Object.entries(firstMeasurements)) {
+    expect(
+      tree.root.find(
+        n => n.props.accessibilityLabel === label && n.props.onChangeText,
+      ).props.value,
+    ).toBe(value);
+  }
+  fail = false;
+  await press(tree, 'Review measurements');
+  expect(texts(tree)).toContain('Your design study');
+  expect(bytes.size).toBe(1);
 });

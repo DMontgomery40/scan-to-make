@@ -1,7 +1,11 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Alert, BackHandler, StatusBar, Text } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import type { FitSpec, FitSpecPatch } from '@scan-to-make/contracts';
+import {
+  applyFitSpecPatch,
+  type FitSpec,
+  type FitSpecPatch,
+} from '@scan-to-make/contracts';
 import type {
   SavedProjects,
   SavedProject,
@@ -166,9 +170,17 @@ function App({ repository: injected }: { repository?: SavedProjects }) {
   const submitPatch = async (patch: FitSpecPatch): Promise<FitSpec> => {
     setSaving(true);
     try {
-      let target = measured;
+      const target = measured;
       if (!target) {
         const id = newProjectId();
+        // Validate the user's protected patch before any persistent write. This
+        // is the initial snapshot, so its saved and fit revisions both start at
+        // zero; the temporary seed and its transition are never persisted.
+        const initialFit = {
+          ...applyFitSpecPatch(seedSpec(), patch),
+          id,
+          revision: 0,
+        };
         const created = await repository.create({
           id,
           brief: {
@@ -176,13 +188,16 @@ function App({ repository: injected }: { repository?: SavedProjects }) {
             context: 'A measured cup-holder example',
             addition: 'An insert to support a cup',
           },
-          fit: { ...seedSpec(), id },
+          fit: initialFit,
         });
-        if (created.status !== 'ok') {
+        if (
+          created.status !== 'ok' ||
+          created.project.fit?.template !== 'cup-holder-adapter'
+        ) {
           throw new Error(failure(created));
         }
-        target = created.project;
-        setMeasured(target);
+        setMeasured(created.project);
+        return created.project.fit;
       }
       const result = await repository.change(target.id, target.revision, {
         kind: 'patch-fit',
