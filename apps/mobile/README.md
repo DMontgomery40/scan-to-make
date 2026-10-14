@@ -31,11 +31,24 @@ HERMES=/path/to/hermes npm run hermes:probes   # core probes on a Hermes VM (not
 
 ## D004 device run (needs the Mac and real phones)
 
+Use a current Ruby (the local build was verified with Ruby 3.2.9 and Bundler
+2.7.1), Node 22.11 or newer, and full Xcode. If `xcode-select -p` points to
+CommandLineTools, set `DEVELOPER_DIR` to your Xcode installation for the commands
+below, for example `/Applications/Xcode.app/Contents/Developer`.
+
 ```sh
-npm install
-cd ios && bundle install && bundle exec pod install && cd ..
+npm ci
+bundle install
+cd ios && bundle exec pod install && cd ..
 npm run ios -- --mode Release --device     # or: npm run android -- --mode release
 ```
+
+For a simulator check, open `ios/ScanToMake.xcworkspace`, select the
+`ScanToMake` scheme and a simulator, and build the Release configuration.
+Release bundles JavaScript, so it does not need Metro running. The native
+Swift/Objective-C++ module and Home → four manual measurements → Preview flow
+were verified on an iPhone 17 Pro simulator with Xcode 27.0. AR is unavailable
+there; this verifies compilation and interaction, not capture or physical fit.
 
 Use a Release build, because Debug JS makes UI-thread numbers meaningless. On the phone, open **Capture spike (D004)** and tap **Start 2-minute run**. Keep the app in the foreground and pan slowly over a cup holder. The run auto-stops after 5 s of warm-up plus 120 s of scoring. Tap **Share report (JSON)** and post the JSON in #build-room.
 
@@ -53,6 +66,7 @@ Mock sources (simulator, emulator without ARCore, tests) always score "Not yet k
 ## Known gaps
 
 - No camera preview is rendered yet. ARKit runs headless, and ARCore runs on an offscreen GL context. Frame rate and thermal numbers are only representative once the AR preview view and the real capture workload are in. Depth is enabled where supported; mesh reconstruction is enabled on LiDAR iPhones.
-- iOS has not been built here; the Swift/ObjC++ module still needs a Mac build.
+- Native capture start/stop is available in the developer spike harness only;
+  the consumer capture screen currently checks support and accepts manual sizes.
 - The design dimensions (support height, wall, clearance) are seeded from the contracts fixture until FIT-001 supplies template defaults.
 - The FitSpec store is in memory, so a relaunch loses the project until CORE-002's persisted service replaces it.

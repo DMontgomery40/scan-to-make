@@ -19,7 +19,7 @@ export function HomeScreen({
         <Text style={type.label}>FIRST PROJECT</Text>
         <Text style={type.heading}>Cup holder adapter</Text>
         <Text style={styles.copy}>
-          Scan your cup holder, confirm three measurements, and preview an
+          Scan your cup holder, confirm four measurements, and preview an
           adapter that fits your cup.
         </Text>
         <View style={styles.action}>

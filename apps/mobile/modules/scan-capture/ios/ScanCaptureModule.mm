@@ -1,4 +1,5 @@
 #import "ScanCaptureModule.h"
+#import <ARKit/ARKit.h>
 
 #if __has_include("ScanCapture/ScanCapture-Swift.h")
 #import "ScanCapture/ScanCapture-Swift.h"
