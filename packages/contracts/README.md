@@ -78,3 +78,60 @@ const next = applyProjectFitSpecPatch(drawer, {
 ```
 
 Drawer patches require the explicit template discriminator. Protected edits use `authorizedInterfaceIds: ['drawer-cavity']`; an authorization list supplied by a model is still not authentication or human consent. No-op, stale-revision and safe-integer-exhaustion rules match the cup API. New general clients should consume `ProjectFitSpec` and `ProjectFitSpecPatch`; existing cup clients can remain unchanged until their UI/transport integration is deliberately updated.
+
+## Portable saved projects
+
+Import `@scan-to-make/contracts/saved-project` for a separate, versioned project envelope and repository. It has no Node runtime imports; the platform supplies storage. The existing fit exports and Node project-store format are unchanged. No records are migrated automatically between these two formats.
+
+```ts
+type SavedProject = {
+  formatVersion: '0.1.0';
+  id: string;
+  revision: number;
+  brief: { object: string; context: string; addition: string };
+  fit: ProjectFitSpec | null;
+};
+```
+
+Brief text is preserved exactly, including empty/incomplete fields. A general project starts with `fit: null`; viewing a template example does not attach one. IDs are 1–128 ASCII letters, digits, underscores or hyphens, beginning with a letter/digit. Generate a new unique ID for each project. An attached fit shares that ID; it must not reuse a fixed example seed identity.
+
+`SavedProjectSchema`, `SavedProjectChangeSchema`, `decodeSavedProject` and `applySavedProjectChange` are the portable validation/transition boundary. `createSavedProjects(storage)` supplies these asynchronous operations:
+
+| Operation | Behavior |
+| --- | --- |
+| `list()` | Sorted entries `{id, result}`; each entry has its own load outcome, including unreadable entries. |
+| `load(id)` | Reads and validates current bytes; no cache or implicit recovery. |
+| `create({id, brief, fit})` | Exclusive creation at saved revision zero; optional initial fit must also be revision zero. |
+| `change(id, expectedRevision, change)` | Compares saved revision, validates one explicit change, then atomically replaces the bytes it read. |
+
+The only change operations are `{kind: 'replace-brief', brief}`, `{kind: 'attach-fit', fit}` and `{kind: 'patch-fit', patch}`. Attaching is allowed only once, with fit revision zero. Replacing or removing an attached fit is not supported. A fit patch goes through the existing template-specific authorization and revision rules; no unrestricted `put` operation can inject a replacement fit/evidence snapshot.
+
+Saved-project and fit revisions are distinct. A brief edit increments only the saved revision. An attachment increments the saved revision while its fit starts at zero. An effective fit patch increments both; a no-op increments neither. The fit revision cannot exceed the saved revision. Exhausted safe-integer revisions reject effective edits. Inputs are detached and validated before the first asynchronous storage call, and returned records are detached from stored bytes.
+
+Results are discriminated by `status`. Successful load/write returns `{status: 'ok', project}`; list returns `{status: 'ok', entries}`. Other outcomes are:
+
+| Status | Meaning |
+| --- | --- |
+| `missing` | No current bytes for the requested ID. |
+| `exists` | Exclusive create collided; `latest` is the existing validated record. |
+| `stale` | Revision/CAS conflict; `latest` is the current validated record and `scope` is `project` or `fit`. |
+| `corrupt` | Malformed JSON, invalid data or storage-key/record identity mismatch. |
+| `unsupported-version` | A future/unrecognized project or known-template fit version; includes `scope` and `version`. |
+| `invalid-change` | Invalid input, exhausted revision, missing/already-attached fit or a rejected protected/template edit. |
+| `storage-error` | Storage operation failed; the caller must not report a confirmed save. |
+
+A failed compare-and-swap reloads the latest record. If it disappeared or became unreadable, that load outcome is returned instead of `stale`. No retry overwrites intervening work. Corrupt/future bytes remain untouched by both `create` and `change`. A storage failure may have an uncertain outcome if the adapter failed after committing; retain the draft and reload before retrying.
+
+### Storage adapter contract
+
+```ts
+interface SavedProjectStorage {
+  listIds(): Promise<string[]>;
+  read(id: string): Promise<string | null>;
+  compareAndSwap(id: string, expected: string | null, next: string): Promise<boolean>;
+}
+```
+
+`read` must return a whole stored string or `null` for absence. `compareAndSwap` must compare the **entire exact stored string** (or absence for `null`) and replace it atomically, returning `true` only after successful persistence. Every writer to that namespace must participate in the same atomicity mechanism. A `getItem` followed by `setItem` without shared serialization/transaction is insufficient. One shared runtime may serialize these operations through one shared queue; separate runtimes/processes require a transaction or equivalent shared locking. Use a dedicated namespace, never the existing Node project-store files, and preserve unknown/corrupt entries for explicit recovery.
+
+The repository neither supplies platform storage nor promises encryption, cross-process locking or crash durability. Those are properties of the adapter and must be verified there. It stores briefs and measured fit data only, without captures, preview acceptance or print authorization. A consumer must wait for hydration before editing, retain drafts on errors/conflicts, and report a save only after an `ok` write result. Contract tests use an isolated in-memory adapter to prove repository behavior; native process-kill/relaunch proof belongs to the app integration.
