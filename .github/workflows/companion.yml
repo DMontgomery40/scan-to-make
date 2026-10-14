@@ -4,6 +4,7 @@ on:
     branches: [main]
     paths:
       - 'services/companion/**'
+      - 'tools/templates/drawer-organizer/**'
       - 'services/project/**'
       - 'packages/contracts/**'
       - '.github/workflows/companion.yml'
@@ -11,6 +12,7 @@ on:
     branches: [main]
     paths:
       - 'services/companion/**'
+      - 'tools/templates/drawer-organizer/**'
       - 'services/project/**'
       - 'packages/contracts/**'
       - '.github/workflows/companion.yml'
