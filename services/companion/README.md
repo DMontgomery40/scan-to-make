@@ -1,0 +1,48 @@
+# Companion preparation and intent journal
+
+This library stages exact file bytes, binds a draft print plan to the current accepted design, and keeps a durable once-only intention journal. Its separate read-only MCP discovery entrypoint initializes a trusted local server, reads tool schemas and closes it. It has **no tool execution, network listener, upload, print, heating or motion operation**. Creating an intent does not authorize physical dispatch.
+
+```sh
+npm ci --prefix packages/contracts --ignore-scripts
+npm ci --prefix services/project --ignore-scripts
+npm ci --prefix services/companion --ignore-scripts
+npm test --prefix services/companion
+```
+
+Construct `new CompanionJournal(privateDirectory, projectStore)` in a trusted local companion. `stageArtifact(sourcePath, expectedArtifactRef)` copies a regular file into a unique private snapshot, verifies SHA-256 and byte length, and seals the snapshot read-only. Metadata is private; callers receive an ID and artifact identity, never a writable source location. Source changes do not alter the snapshot. Staging also accepts synthetic/nonprintable bytes: integrity is not geometry or G-code inspection.
+
+`createPlan({projectId, snapshotId, selection})` requires the current accepted project revision and verifies the snapshot again. The plan records the accepted design identity separately from the proposed printable artifact. It includes printer ID/model, selected plate, complete declared nozzle diameters, material/tray positions, bed and settings digest. Its digest binds every field. Model names, physical tray ranges and complete filament coverage still require validation against the actual discovered MCP schema and inspected selected plate; merely storing them does not establish support. Printer IDs must come from a trusted pairing registry with one stable ID per actual printer; callers cannot choose aliases to evade the journal.
+
+`beginAttempt(plan, approval)` rechecks the plan digest, current accepted design/revision and exact staged bytes, then flushes one intention record before returning. Approval records must name that exact plan, identify an actor, explicitly confirm, and expire within five minutes according to the companion's clock. These fields represent an authenticated human decision supplied by the caller; a model-supplied `confirmed: true` is not authorization. This method does not call a printer and does not freeze project edits. The later executor must recheck project/approval freshness and printer state after any human response and immediately before dispatch.
+
+One unreconciled attempt blocks the printer, including a recorded `started`, `unconfirmed` or `uncertain` outcome. A new service instance reads the same history and cannot replay the old plan. `recordOutcome(printerId, attemptId, {state})` appends the observed backend classification once. Unknown responses, disconnects, crashes and generic errors must be classified as uncertain; an error is not evidence of rejection. `started` is a dispatch receipt, not physical-print or fit verification.
+
+`reconcile(printerId, attemptId, {actorId, confirmed: true, resolution})` records an explicit operator decision (`finished`, `cancelled`, `rejected`) after checking the actual job. It preserves every original event. The old plan still cannot be retried; a new plan and fresh human approval are required. Callers authenticate the operator and verify the job evidence. Reconciliation is not automatic and cannot be delegated to a model's guess.
+
+Files and directories use private permissions. Per-printer filesystem locks serialize readers/writers across instances; the JSONL journal is append-only and every event is flushed. Malformed history or an interrupted lock fails visibly. An operator must verify that no writer remains and inspect the actual printer/job and journal before recovering a lock. No automatic lock expiry, replay or power-loss guarantee is supplied. Use a local filesystem supporting the file/locking operations.
+
+## Read-only MCP discovery
+
+Import `discoverPrinterTools` and `createPreparedPrintValidator` from `@scan-to-make/companion/mcp-discovery`. Supply command, arguments, working directory and environment from trusted operator configuration, never a mobile/model request. Discovery uses the pinned MCP SDK to initialize a stdio server and collect every `tools/list` page. Limits bound time, page count, tool count, decoded catalog bytes and protocol buffer. Duplicate names, cursor loops, missing `print_3mf` or invalid print schemas reject. Cancellation and initialization failures await the same subprocess shutdown and verify actual PID disappearance, including forced termination when required. Stderr is drained without returning its possibly sensitive contents. Only detached, deeply frozen metadata escapes; there is no client or `tools/call` API.
+
+`createPreparedPrintValidator(catalog)` checks the actual discovered public `print_3mf` input schema without coercion, defaults or mutation. It allows only `three_mf_path`, `bambu_model`, `plate_index`, `nozzle_diameters`, `bed_type`, `use_ams`, `ams_slots` and `connection_mode`. Credentials, executable/bridge overrides and all other request keys reject. Validation proves argument shape, not file existence, supported installed firmware, live identity, readiness, safety or permission to execute. The catalog can become stale and must be refreshed when the configured server changes. The journal and discovery remain separate until prepared-file inspection and authenticated execution are integrated.
+
+Routine tests use protocol fixture subprocesses and record every received method to prove no tool is called. Separate opt-in installed-process evidence uses `BAMBU_MCP_ENTRY=/absolute/path/to/bambu-printer-mcp/dist/index.js npm test --prefix services/companion`. That test uses a private empty working/home directory, explicit empty model/serial/token, human-confirmation defaults, and a preload blocking socket connections/sends. It does not read a printer or use the user's live configuration. Without that environment variable the installed-process test is reported as skipped; fixture results do not imply it passed.
+
+Protocol implementation uses the pinned SDK's public client/stdio APIs: [MCP client documentation](https://modelcontextprotocol.io/docs/develop/build-client). No server implementation is copied into this package.
+
+## Checked accepted-STL export
+
+Import `exportAcceptedStl` from `@scan-to-make/companion/stl-export` and provide the trusted project store, project ID, explicit expected revision, source path and a new output path. The accepted artifact must have media type `model/stl`. Export captures at most 32 MiB, verifies exact accepted SHA-256/length, independently parses strict single-solid ASCII STL or exact-length binary STL, and rejects empty meshes, nonfinite coordinates/normals, degenerate triangles and more than 500,000 triangles. Binary STL headers beginning with `solid` are correctly distinguished by their declared count and exact byte length.
+
+After preparing a private flushed temporary copy, export rechecks revision and artifact acceptance, then publishes exclusively to the new destination. Concurrent exporters cannot overwrite each other, existing destination files survive, and source symlinks reject. The immutable receipt names the project/revision, exact artifact, output path, triangle count and bounds. Caller-selected paths/revision are captured before asynchronous work. Authentication and authorization of local paths belong to the trusted caller.
+
+STL itself does not encode units: reported bounds interpret coordinates using the project's declared millimetres; this does not establish the generator's scale or frame provenance. These checks are structural sanity and exact-byte evidence. An open mesh can pass; manifoldness, intersections, wall strength, functional fit, printer-envelope/material checks and slicing remain separate. The revision-labelled export is not a lock on later project edits or later modifications to the exported file. Any print route must independently inspect its own exact snapshot after slicing. This increment enables accepted-STL export only, not checked 3MF/G-code export.
+
+## Remaining integration gates
+
+The existing `bambu-printer-mcp` remains a separate process. Its actual public `print_3mf` schema uses `three_mf_path`, `bambu_model`, `plate_index`, full `nozzle_diameters`, `use_ams`/`ams_slots` and model-specific `connection_mode`. Discovery validates a narrow prepared-argument projection against that schema. This package does not translate a journal plan into those arguments or send them yet.
+
+Before enabling a print/prepared-G-code export route, integrate authenticated pairing/project access, genuine geometry and slicer provenance tying these two artifact identities together, prepared-file/selected-plate inspection, discovered model/route support, exact model/nozzle/material/AMS checks, fresh observed identity/ready/error state, human elicitation and once-only dispatch through the existing MCP gate. Unsliced input must not silently change approved bytes through auto-slicing. Accepted-STL export is available separately and does not authorize that route. Stop/cancel/heater-off in the existing MCP remain available independently of this journal and any future billing/design service.
+
+Source baseline for protocol facts: `bambu-printer-mcp` 1.1.26, `src/index.ts` public `print_3mf` schema/handler and response handling; `src/printers/bambu.ts` returns `dispatch: started | unconfirmed`. No implementation code was copied or imported from that GPL server.
