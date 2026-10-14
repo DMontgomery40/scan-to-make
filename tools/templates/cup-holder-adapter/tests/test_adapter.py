@@ -33,9 +33,34 @@ class SizingTests(unittest.TestCase):
         self.assertAlmostEqual(s["topZMm"], 34.8 + 45.0)
         self.assertAlmostEqual(s["cupEngagedHeightMm"], 45.0 - 2.4)
 
+    def test_inverted_taper_still_insertable(self):
+        spec = copy.deepcopy(FIXTURE)
+        spec["dimensions"]["holderInnerBottomDiameter"] = {
+            "nominalMm": 64.0, "lowerMm": 63.8, "upperMm": 64.2,
+            "source": "manual", "sourceId": "m-bottom"}
+        spec["dimensions"]["holderInnerTopDiameter"] = {
+            "nominalMm": 62.0, "lowerMm": 61.8, "upperMm": 62.2,
+            "source": "manual", "sourceId": "m-top"}
+        s = sizing(spec)
+        # Bottom is capped by the rim opening: straight insert, never wedged.
+        self.assertAlmostEqual(s["rInsertOuterBottomMm"], 61.8 / 2 - 0.3)
+        self.assertAlmostEqual(s["rInsertOuterBottomMm"], s["rInsertOuterTopMm"])
+        self.assertLessEqual(2 * s["rInsertOuterBottomMm"] + 2 * 0.3, 61.8 + 1e-9)
+        build(spec)  # emits geometry instead of refusing a valid holder
+
+    def test_clearance_interval_consumed_at_upper_bound(self):
+        spec = copy.deepcopy(FIXTURE)
+        spec["dimensions"]["radialClearance"] = {
+            "nominalMm": 0.3, "lowerMm": 0.2, "upperMm": 0.5,
+            "source": "design", "sourceId": "design-clearance"}
+        s = sizing(spec)
+        self.assertAlmostEqual(s["radialClearanceMm"], 0.5)
+        self.assertAlmostEqual(s["rInsertOuterTopMm"], 61.8 / 2 - 0.5)
+        self.assertAlmostEqual(s["rCradleInnerMm"], 86.2 / 2 + 0.5)
+
     def test_guarantees_hold_over_interval(self):
         s = sizing(FIXTURE)
-        c = FIXTURE["dimensions"]["radialClearance"]["nominalMm"]
+        c = FIXTURE["dimensions"]["radialClearance"]["upperMm"]
         # insert fits even the smallest holder; cradle takes even the largest cup
         self.assertLessEqual(2 * s["rInsertOuterBottomMm"] + 2 * c,
                              FIXTURE["dimensions"]["holderInnerBottomDiameter"]["lowerMm"] + 1e-9)

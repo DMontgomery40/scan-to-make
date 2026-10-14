@@ -6,11 +6,15 @@ Z-up, origin at holder base centre): a tapered hollow insert that slides into
 the holder, a floor at the holder rim, and a cradle ring that holds the cup.
 
 Sizing policy (conservative over the declared intervals, never nominal-only):
-  * insert outside  = holder LOWER bound / 2 - radial clearance (per side),
-    so the insert fits the smallest holder the spec allows;
+  * radial clearance is consumed at its UPPER bound everywhere, so a printer
+    that needs the largest declared clearance is still covered;
+  * insert outside top = holder top LOWER bound / 2 - clearance, and the
+    insert bottom is additionally capped by that same rim opening, so the
+    widest insert section can always pass the rim during insertion (an
+    inverted-taper holder yields a straight insert, never a wedged one);
   * insert length   = insertion depth LOWER bound, so it never bottoms out
     early in the shallowest holder;
-  * cradle inside   = cup UPPER bound / 2 + radial clearance, so the largest
+  * cradle inside   = cup UPPER bound / 2 + clearance, so the largest
     cup the spec allows still drops in.
 Wall thickness and support height are design values, taken at nominal.
 
@@ -68,11 +72,16 @@ def sizing(spec: dict) -> dict:
         raise ValueError("expected mm units in the holder-base-center frame")
     for key in DIM_KEYS:
         _dim(spec, key, allow_zero=(key == "radialClearance"))
-    clearance = _dim(spec, "radialClearance", allow_zero=True)[0]
+    clearance = _dim(spec, "radialClearance", allow_zero=True)[2]
     wall = _dim(spec, "wallThickness")[0]
     depth = _dim(spec, "insertionDepth")[1]
-    r_out_bottom = _dim(spec, "holderInnerBottomDiameter")[1] / 2.0 - clearance
-    r_out_top = _dim(spec, "holderInnerTopDiameter")[1] / 2.0 - clearance
+    bottom_lower = _dim(spec, "holderInnerBottomDiameter")[1]
+    top_lower = _dim(spec, "holderInnerTopDiameter")[1]
+    r_out_top = top_lower / 2.0 - clearance
+    # The bottom section must pass the rim on its way in, so it is capped by
+    # the rim opening as well as by its seated envelope (inverted tapers
+    # therefore produce a straight insert instead of an uninsertable one).
+    r_out_bottom = min(bottom_lower, top_lower) / 2.0 - clearance
     r_cup_in = _dim(spec, "cupOuterDiameter")[2] / 2.0 + clearance
     support = _dim(spec, "cupSupportHeight")[0]
     derived = {
@@ -164,7 +173,8 @@ def build_manifest(spec: dict, derived: dict, stl: bytes) -> dict:
                       "version": GENERATOR_VERSION, "segments": SEGMENTS},
         "sourceSpec": {"id": spec.get("id"), "revision": spec.get("revision"),
                        "template": spec.get("template")},
-        "sizingPolicy": ("outside: holder lower bound - clearance; length: depth lower "
+        "sizingPolicy": ("clearance at upper bound; outside: holder lower bounds - "
+                         "clearance, bottom capped by rim opening; length: depth lower "
                          "bound; cradle: cup upper bound + clearance; wall/support nominal"),
         "derived": derived,
         "artifact": {"sha256": hashlib.sha256(stl).hexdigest(),

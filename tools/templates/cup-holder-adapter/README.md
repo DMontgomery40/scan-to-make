@@ -17,10 +17,13 @@ python3 -m unittest discover -s tests -v
 Every FitSpec dimension arrives as a conservative interval. Geometry consumes
 the ends that guarantee fit across the whole interval:
 
-- insert outside = holder **lower** bound / 2 − radial clearance (per side,
-  the contract convention — never a diameter allowance)
+- radial clearance (per side, the contract convention — never a diameter
+  allowance) is consumed at its **upper** bound everywhere
+- insert outside = holder **lower** bounds / 2 − clearance, with the bottom
+  additionally capped by the rim opening so an inverted-taper holder yields
+  a straight, insertable section instead of a wedged one
 - insert length = insertion depth **lower** bound (never bottoms out early)
-- cradle inside = cup **upper** bound / 2 + radial clearance
+- cradle inside = cup **upper** bound / 2 + clearance
 - wall thickness and support height are design choices, taken at nominal
 
 The cup rests on the floor at `depth + wall`; engaged support height is
