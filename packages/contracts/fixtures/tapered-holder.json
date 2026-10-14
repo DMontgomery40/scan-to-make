@@ -1,0 +1,18 @@
+{
+  "schemaVersion": "0.1.0",
+  "id": "fixture-cup-adapter",
+  "revision": 0,
+  "template": "cup-holder-adapter",
+  "units": "mm",
+  "frame": {"handedness": "right", "upAxis": "z", "origin": "holder-base-center"},
+  "dimensions": {
+    "holderInnerBottomDiameter": {"nominalMm": 58, "lowerMm": 57.8, "upperMm": 58.2, "source": "manual", "sourceId": "measurement-holder-bottom"},
+    "holderInnerTopDiameter": {"nominalMm": 62, "lowerMm": 61.8, "upperMm": 62.2, "source": "manual", "sourceId": "measurement-holder-top"},
+    "insertionDepth": {"nominalMm": 35, "lowerMm": 34.8, "upperMm": 35.2, "source": "manual", "sourceId": "measurement-holder-depth"},
+    "cupOuterDiameter": {"nominalMm": 86, "lowerMm": 85.8, "upperMm": 86.2, "source": "manual", "sourceId": "measurement-cup-width"},
+    "cupSupportHeight": {"nominalMm": 45, "lowerMm": 45, "upperMm": 45, "source": "design", "sourceId": "design-height"},
+    "wallThickness": {"nominalMm": 2.4, "lowerMm": 2.4, "upperMm": 2.4, "source": "design", "sourceId": "design-wall"},
+    "radialClearance": {"nominalMm": 0.3, "lowerMm": 0.3, "upperMm": 0.3, "source": "design", "sourceId": "design-clearance"}
+  },
+  "interfaces": {"holder-insert": {"fitEvidence": []}}
+}
