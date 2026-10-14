@@ -88,3 +88,50 @@ The iOS and Android adapters use platform SQLite, one complete UTF-8 BLOB per pr
 The library loads before editing, reports corrupt/future entries individually, and preserves their bytes. Failed or stale saves retain the draft and offer saving a separate copy. Opening another brief with unsaved changes requires an explicit discard. Storage errors may have uncertain outcomes; inspect the saved version before retrying. The new namespace is independent of the Node service store and does not migrate it.
 
 Verification: `npm run typecheck`, `npm run lint`, `npm test -- --runInBand`, and on macOS `python3 scripts/native-storage-tests/test.py`. The native test compiles the production iOS storage methods with a minimal React promise bridge stub; it exercises separate native processes and eight competing writers against an isolated temporary SQLite database. It is host-native evidence, distinct from the app's simulator restart walkthrough. Android compilation requires an installed Android SDK and is not established by the iOS checks.
+
+## Native drawer design preview
+
+**Explore drawer organizer** opens a clearly labelled synthetic design study. A
+saved general brief can also attach this study without replacing its text. The
+reference cavity sizes are not scans or physical measurements. Saving the first
+study persists the validated entries once; subsequent expected-revision fit
+patches invalidate prior preview and acceptance when they change the fit.
+
+For the iOS Simulator, start the local worker from the repository root:
+
+```sh
+npm ci --prefix services/project
+npm ci --prefix services/companion
+npm run generate:serve --prefix services/companion
+```
+
+Generation posts the complete immutable saved fit to `127.0.0.1:9077`. The iOS
+bridge limits both declared and streamed response size before JSON reaches JS,
+refuses redirects, and supports cancellation and a 40-second resource deadline.
+The portable verifier checks source equality, canonical base64, byte length and
+SHA-256 using CommonCrypto. The current saved record must still match before the
+receipt attaches; no Node project store or revision reset is involved.
+
+Verified STL bytes live under Application Support in a content-addressed cache.
+Writes flush a private temporary file, publish it atomically, then flush the
+directory. Every reopen, render, acceptance and export boundary checks the actual
+length and SHA-256 again. Explicit regeneration can replace a damaged entry only
+with newly verified bytes of the same digest, preserving the damaged inode under
+a separate diagnostic name. This cache is local to the app, has no automatic
+cleanup, and does not claim physical-device power-loss testing or protection from
+external filesystem writers. Uninstall removes it with local projects.
+
+SceneKit displays vertices from the returned binary STL (up to 500,000 triangles),
+with drag rotation and pinch zoom. It does not manufacture a procedural substitute.
+The UI requires a loaded verified mesh before explicit design acceptance. Export
+rechecks the current accepted binding and passes a file URL containing the exact
+verified bytes to the native share sheet; it does not export the scene or text.
+Missing/damaged files block review/export, and stale or failed writes retain the
+saved record. Design acceptance is neither physical-fit evidence nor print
+permission. No printer action exists in this flow.
+
+The generation bridge, mesh and STL share are currently iOS-only. The fixed
+loopback endpoint is a same-Mac Simulator prototype, not real-device pairing,
+hosted transport or authentication. Android still supports local project storage;
+its generated-preview action reports unavailable. ASCII STL rendering, cache
+management and real-device transport are separate work.

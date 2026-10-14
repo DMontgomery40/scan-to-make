@@ -136,11 +136,13 @@ export function BriefReviewScreen({
   onEdit,
   onBack,
   onExample,
+  onDrawer,
 }: {
   brief: ProjectBrief;
   onEdit: () => void;
   onBack: () => void;
   onExample: () => void;
+  onDrawer: () => void;
 }) {
   const [error, setError] = useState<string | null>(null);
   const share = async () => {
@@ -190,10 +192,15 @@ export function BriefReviewScreen({
         <Text style={styles.number}>WHAT’S NEXT</Text>
         <Text style={type.heading}>From an idea to a fitted part.</Text>
         <Text style={type.body}>
-          Custom scanning and part creation aren’t available yet. Keep your
-          brief, or explore how measurements shape a design with the cup-holder
-          example.
+          Custom scanning is not available yet. Explore a drawer tray using
+          synthetic reference sizes, or see how measurements shape a cup-holder
+          study.
         </Text>
+        <Button
+          label="Try a drawer design study"
+          variant="secondary"
+          onPress={onDrawer}
+        />
         <Button
           label="Explore measured example"
           variant="secondary"

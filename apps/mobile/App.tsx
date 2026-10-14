@@ -15,6 +15,7 @@ import type {
 import { seedSpec } from './src/fit/fitDraft';
 import { StaleRevisionError } from './src/project/fitSpecStore';
 import { localSavedProjects, newProjectId } from './src/project/savedProjects';
+import { DrawerScreen } from './src/screens/DrawerScreen';
 import { CaptureScreen } from './src/screens/CaptureScreen';
 import { HomeScreen } from './src/screens/HomeScreen';
 import { PreviewScreen } from './src/screens/PreviewScreen';
@@ -38,7 +39,8 @@ type Route =
   | 'preview'
   | 'about'
   | 'spike'
-  | 'projects';
+  | 'projects'
+  | 'drawer';
 const PARENT: Record<Route, Route | null> = {
   home: null,
   brief: 'home',
@@ -48,6 +50,7 @@ const PARENT: Record<Route, Route | null> = {
   preview: 'capture',
   spike: 'about',
   projects: 'home',
+  drawer: 'home',
 };
 const failure = (result: WriteProjectResult) =>
   result.status === 'stale' || result.status === 'exists'
@@ -66,6 +69,7 @@ function App({ repository: injected }: { repository?: SavedProjects }) {
   const [briefProject, setBriefProject] = useState<SavedProject | null>(null);
   const [brief, setBrief] = useState<ProjectBrief>(emptyBrief);
   const [measured, setMeasured] = useState<SavedProject | null>(null);
+  const [drawer, setDrawer] = useState<SavedProject | null>(null);
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState('Not saved yet');
   const [saveFailed, setSaveFailed] = useState(false);
@@ -138,6 +142,12 @@ function App({ repository: injected }: { repository?: SavedProjects }) {
       ],
     );
   };
+  const updateDrawer = (project: SavedProject) => {
+    setDrawer(project);
+    // The brief and drawer routes can display the same saved project. Keep its
+    // revision and fit current without replacing an unrelated or unsaved brief.
+    setBriefProject(current => current?.id === project.id ? project : current);
+  };
   const openProject = async (id: string) => {
     setOpening(true);
     setOpenError(null);
@@ -149,6 +159,11 @@ function App({ repository: injected }: { repository?: SavedProjects }) {
       return;
     }
     if (result.project.fit) {
+      if (result.project.fit.template === 'drawer-tray') {
+        updateDrawer(result.project);
+        setRoute('drawer');
+        return;
+      }
       if (result.project.fit.template !== 'cup-holder-adapter') {
         setOpenError(
           'This measured template cannot be edited in this app yet. Its saved data is unchanged.',
@@ -264,12 +279,26 @@ function App({ repository: injected }: { repository?: SavedProjects }) {
           </>
         );
         break;
+      case 'drawer':
+        screen = (
+          <DrawerScreen
+            initial={drawer}
+            repository={repository}
+            onProject={updateDrawer}
+            onBack={() => setRoute('home')}
+          />
+        );
+        break;
       case 'briefReview':
         screen = (
           <BriefReviewScreen
             brief={brief}
             onBack={() => setRoute('home')}
             onEdit={() => setRoute('brief')}
+            onDrawer={() => {
+              setDrawer(briefProject);
+              setRoute('drawer');
+            }}
             onExample={() => {
               setMeasured(null);
               setRoute('capture');
@@ -326,6 +355,10 @@ function App({ repository: injected }: { repository?: SavedProjects }) {
       default:
         screen = (
           <HomeScreen
+            onDrawer={() => {
+              setDrawer(null);
+              setRoute('drawer');
+            }}
             onStartScan={() => {
               setMeasured(null);
               setRoute('capture');

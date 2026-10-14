@@ -11,6 +11,7 @@ export function HomeScreen({
   onAbout,
   brief,
   onProjects,
+  onDrawer,
 }: {
   onStartScan: () => void;
   onNewProject: () => void;
@@ -18,6 +19,7 @@ export function HomeScreen({
   onAbout: () => void;
   brief: ProjectBrief | null;
   onProjects: () => void;
+  onDrawer: () => void;
 }) {
   return (
     <Screen
@@ -79,6 +81,11 @@ export function HomeScreen({
         </Pressable>
       ) : null}
 
+      <Button
+        label="Explore drawer organizer"
+        variant="secondary"
+        onPress={onDrawer}
+      />
       <View style={styles.workflow}>
         <Text style={type.label}>FROM REAL LIFE TO SOMETHING USEFUL</Text>
         <View style={styles.steps}>
