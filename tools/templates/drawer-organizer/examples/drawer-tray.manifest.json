@@ -1,0 +1,47 @@
+{
+  "schemaVersion": "0.1.0",
+  "kind": "drawer-tray",
+  "generator": {
+    "name": "tools/templates/drawer-organizer/drawer.py",
+    "version": "0.1.0"
+  },
+  "sourceSpec": {
+    "id": "fixture-drawer-tray",
+    "revision": 0,
+    "template": "drawer-tray",
+    "schemaVersion": "0.2.0"
+  },
+  "sizingPolicy": "peripheral clearance at upper bound; outer width/depth from drawer lower bounds; wall, floor and tray height nominal; divider top is tray height minus 2 mm",
+  "derived": {
+    "peripheralClearanceMm": 0.6,
+    "wallMm": 2.0,
+    "floorMm": 2.0,
+    "outerWidthMm": 297.8,
+    "outerDepthMm": 397.8,
+    "outerHeightMm": 40.0,
+    "innerWidthMm": 293.8,
+    "innerDepthMm": 393.8,
+    "clearCellWidthMm": 96.60000000000001,
+    "clearCellDepthMm": 195.9,
+    "worstCaseClearCellWidthMm": 96.60000000000001,
+    "worstCaseClearCellDepthMm": 195.9,
+    "dividerTopMm": 38.0,
+    "dividersAcross": 2,
+    "dividersAlong": 1,
+    "dividerCentersAcrossMm": [
+      -49.3,
+      49.30000000000001
+    ],
+    "dividerCentersAlongMm": [
+      0.0
+    ]
+  },
+  "cornerRadiusAssumedMm": 0,
+  "evidenceBoundary": "Synthetic fixture only. This preview geometry is not physical-fit evidence; full-drawer-envelope evidence requires the printed tray to be inserted, seated and removed by hand.",
+  "artifact": {
+    "sha256": "d1906903d69a7028f37cb6c2590d843a44bb6c776f929dbce722f47ee1d3667e",
+    "mediaType": "model/stl",
+    "byteLength": 18284
+  },
+  "status": "preview-geometry-not-print-authorized"
+}
