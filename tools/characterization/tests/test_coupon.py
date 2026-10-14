@@ -146,6 +146,37 @@ class ManifestTests(unittest.TestCase):
                                   material="unspecified-material", slicer_settings="x")
         self.assertEqual(manifest["scopeStatus"], "template-replace-before-evidence")
         self.assertEqual(self.manifest["scopeStatus"], "declared-by-operator-not-verified-here")
+        self.assertEqual(self.manifest["slicerSettingsEvidence"], {"source": "declared-string"})
+
+    def test_missing_slicer_settings_stays_template_scope(self):
+        tris, layout = build(PARAMS)
+        manifest = build_manifest(PARAMS, layout, self.stl, printer_id="p1s-01",
+                                  printer_model="Bambu P1S", nozzle_mm=0.4, material="PLA")
+        self.assertEqual(manifest["scopeStatus"], "template-replace-before-evidence")
+        self.assertEqual(manifest["slicerSettingsEvidence"], {"source": "unspecified"})
+        self.assertEqual(manifest["calibrationScope"]["slicerSettingsSha256"],
+                         hashlib.sha256(b"unspecified-settings").hexdigest())
+
+    def test_slicer_settings_file_digest_and_cli(self):
+        import io, contextlib, tempfile  # noqa: PLC0415
+        from coupon import main  # noqa: PLC0415
+        payload = b'{"layer_height": 0.2}\n'
+        with tempfile.TemporaryDirectory() as tmp:
+            settings_path = os.path.join(tmp, "profile.json")
+            with open(settings_path, "wb") as fh:
+                fh.write(payload)
+            with contextlib.redirect_stdout(io.StringIO()):
+                code = main(["generate", "--out-dir", tmp, "--printer-id", "p1s-01",
+                             "--printer-model", "Bambu P1S", "--material", "PLA",
+                             "--slicer-settings-file", settings_path])
+            self.assertEqual(code, 0)
+            import json as json_mod  # noqa: PLC0415
+            with open(os.path.join(tmp, "characterization-coupon.manifest.json")) as fh:
+                man = json_mod.load(fh)
+        self.assertEqual(man["calibrationScope"]["slicerSettingsSha256"],
+                         hashlib.sha256(payload).hexdigest())
+        self.assertEqual(man["slicerSettingsEvidence"], {"source": "file-bytes"})
+        self.assertEqual(man["scopeStatus"], "declared-by-operator-not-verified-here")
 
     def test_non_unit_orientation_rejected(self):
         tris, layout = build(PARAMS)
@@ -166,8 +197,18 @@ class ProfileTests(unittest.TestCase):
         self.assertAlmostEqual(profile["xyScaleCorrection"], 100 / 99.6)
         self.assertAlmostEqual(profile["outerBiasMm"], 0.15)
         self.assertAlmostEqual(profile["holeBiasMm"], -0.175, msg="holes printing small = negative bias")
-        self.assertEqual(profile["recommendedRadialClearanceMm"], 0.15)
+        self.assertEqual(profile["printedPairClearanceMm"], 0.15)
+        self.assertNotIn("recommendedRadialClearanceMm", profile)
+        self.assertIsNone(profile["roundOuterBiasMm"])
         self.assertEqual(profile["minReliableWallMm"], 1.6)
+
+    def test_round_boss_bias_when_measured(self):
+        profile = derive_profile(PARAMS, {
+            "shrinkageBarMm": 100.0, "squareBossMm": 20.0, "roundBossMm": 20.12,
+            "ringBoresMm": [4.0, 6.0, 8.0, 10.0],
+            "firstFreeSlotIndex": None, "minReliableWallMm": None,
+        })
+        self.assertAlmostEqual(profile["roundOuterBiasMm"], 0.12)
 
     def test_derive_profile_rejects_garbage(self):
         base = {"shrinkageBarMm": 100.0, "squareBossMm": 20.0,

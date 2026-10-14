@@ -11,7 +11,7 @@ interface/printer/nozzle/material/orientation combination.
 # generate STL + manifest (stdlib Python 3 only, fully deterministic)
 python3 coupon.py generate --out-dir examples \
   --printer-id p1s-01 --printer-model "Bambu P1S" --nozzle-mm 0.4 \
-  --material "PLA" --slicer-settings "your-exported-profile-name"
+  --material "PLA" --slicer-settings-file exported-profile.json
 
 # after printing and measuring, derive the capability profile
 python3 coupon.py profile --measured measurements.json
@@ -50,29 +50,45 @@ generated, no supports. Then record:
 3. Square boss outside-caliper across X → `squareBossMm`
 4. Bar outermost-faces outside-caliper → `shrinkageBarMm`
 5. Thinnest fin that printed complete and survives a firm finger flex → `minReliableWallMm`
+6. Optional: round boss diameter across vertices → `roundBossMm`
 
-`coupon.py profile` turns those into XY scale (+correction), outer bias,
-mean hole bias (negative = holes print small), recommended radial clearance,
-and minimum reliable wall.
+`coupon.py profile` turns those into XY scale (+correction), square and
+round outer bias, mean hole bias (negative = holes print small),
+`printedPairClearanceMm`, and minimum reliable wall.
+
+Two different clearances, do not conflate them: the ladder measures a
+printed peg in a printed slot, so `printedPairClearanceMm` stacks outer and
+hole bias together. The contracts `radialClearance` is the per-side gap
+between a printed insert and an *unprinted* holder bore; sizing that
+interface uses XY scale plus (round) outer bias at holder scale. The profile
+never feeds a FitSpec silently — a human or a later explicit step converts.
 
 ## How this plugs into CORE-001
 
 The manifest's `artifact` is exactly the contracts `ArtifactRef`
 (`sha256`/`mediaType`/`byteLength` of the emitted bytes) and its
 `calibrationScope` matches `CalibrationScopeSchema` — both verified against
-the built `packages/contracts` validators, including a full `FitSpec`
-carrying this coupon as `FitEvidence.couponArtifact`. Radial clearance here
-is per-side, same convention as the contract (never a diameter allowance).
-Reuse rule from the contract stands: evidence belongs to its exact scope —
-another printer, nozzle, material, orientation, or settings digest needs its
-own coupon.
+the built `packages/contracts` validators. Shape compatibility is all that
+claims: this generic coupon has no insert geometry, so it **cannot** serve
+as `FitEvidence` for a `holder-insert` snapshot. Fit evidence still needs a
+printed insert (or insert-band coupon) tried in the real holder; this coupon
+helps choose the dimensions that get printed. Referencing a capability
+profile from a FitSpec would be a contracts change, handled separately.
+Per-side clearance naming follows the contract (never a diameter allowance).
+Scope discipline stands: another printer, nozzle, material, orientation, or
+settings digest needs its own coupon.
 
 ## Honest limits
 
 - Defaults are a **template scope** (`scopeStatus:
-  template-replace-before-evidence`). Declaring real printer/material values
-  is an operator claim; nothing here verifies them, and a digest of your
-  settings string is stored, never the settings themselves.
+  template-replace-before-evidence`) — including when printer/material are
+  declared but slicer settings are left unspecified. Declaring real values
+  is an operator claim; nothing here verifies them. Settings evidence is
+  recorded honestly in `slicerSettingsEvidence.source`: `file-bytes` means
+  the digest covers an exported settings file's exact bytes
+  (`--slicer-settings-file`), `declared-string` means it covers only the
+  name/text passed to `--slicer-settings`, `unspecified` means no settings
+  were supplied. Settings contents themselves are never stored.
 - Round features are 64-facet polygons; caliper across vertices reads the
   nominal diameter. Faceting is part of the measured artifact identity.
 - This generator has been verified structurally (closed-mesh volume equals

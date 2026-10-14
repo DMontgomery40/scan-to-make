@@ -73,13 +73,16 @@
     ],
     "slicerSettingsSha256": "90867f0f51ddba2a09b40d489d7e9cc439b98fc546d8b0ca35931567e4e7d312"
   },
+  "slicerSettingsEvidence": {
+    "source": "unspecified"
+  },
   "scopeStatus": "template-replace-before-evidence",
   "measurements": [
     {
       "id": "first-free-slot",
       "nominalMm": null,
       "how": "Push the peg down each slot. Pips on the base number slots 1..n, tightest first. Record the first slot the peg slides through under its own weight.",
-      "feeds": "recommendedRadialClearanceMm"
+      "feeds": "printedPairClearanceMm"
     },
     {
       "id": "ring-bores",
@@ -97,6 +100,13 @@
       "nominalMm": 20.0,
       "how": "Outside-caliper the square boss across X at mid-height.",
       "feeds": "outerBiasMm"
+    },
+    {
+      "id": "round-boss",
+      "nominalMm": 20.0,
+      "optional": true,
+      "how": "Outside-caliper the round boss diameter at mid-height, across vertices.",
+      "feeds": "roundOuterBiasMm"
     },
     {
       "id": "shrinkage-bar",

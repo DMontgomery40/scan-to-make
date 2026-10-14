@@ -14,13 +14,15 @@ Geometry is built only from boxes, cylinders and rings (no CSG subtraction),
 so it renders deterministically with the standard library alone and emits a
 binary STL plus a JSON manifest. The manifest's artifact identity
 {sha256, mediaType, byteLength} matches the ArtifactRef shape in
-packages/contracts, so a printed coupon can be cited directly as
-FitEvidence.couponArtifact under a declared calibration scope.
+packages/contracts. The coupon informs dimension choices; it is NOT
+holder-fit evidence: FitEvidence requires an actual insert (or insert-band
+coupon) with insert geometry tried in the real holder, which this generic
+characterization plate does not contain.
 
 Usage:
   python3 coupon.py generate --out-dir examples \
       --printer-id p1s-01 --printer-model "Bambu P1S" --nozzle-mm 0.4 \
-      --material "PLA" --slicer-settings "profile-name-or-export"
+      --material "PLA" --slicer-settings-file exported-profile.json
   python3 coupon.py profile --measured measurements.json
 """
 
@@ -208,14 +210,27 @@ def to_binary_stl(tris: list[Tri]) -> bytes:
 
 def build_manifest(params: CouponParams, layout: Layout, stl_bytes: bytes, *,
                    printer_id: str, printer_model: str, nozzle_mm: float,
-                   material: str, slicer_settings: str,
+                   material: str, slicer_settings: str = "unspecified-settings",
+                   slicer_settings_sha256: str | None = None,
                    orientation: tuple[float, float, float] = (0.0, 0.0, 1.0)) -> dict:
     norm = math.hypot(*orientation)
     if abs(norm - 1.0) >= 1e-6:
         raise ValueError("orientation must be a unit vector (insertion axis)")
     if nozzle_mm <= 0:
         raise ValueError("nozzle_mm must be positive")
-    unspecified = any(v.startswith("unspecified") for v in (printer_id, printer_model, material))
+    if slicer_settings_sha256 is not None:
+        if len(slicer_settings_sha256) != 64 or any(
+                ch not in "0123456789abcdef" for ch in slicer_settings_sha256):
+            raise ValueError("slicer_settings_sha256 must be lowercase hex sha256")
+        settings_digest = slicer_settings_sha256
+        settings_source = "file-bytes"
+    else:
+        settings_digest = hashlib.sha256(slicer_settings.encode()).hexdigest()
+        settings_source = ("unspecified" if slicer_settings.startswith("unspecified")
+                           else "declared-string")
+    unspecified = (any(v.startswith("unspecified")
+                       for v in (printer_id, printer_model, material))
+                   or settings_source == "unspecified")
     params_json = json.dumps({
         "pegWidthMm": params.peg_width_mm,
         "pegFootReliefMm": params.peg_foot_relief_mm,
@@ -230,12 +245,15 @@ def build_manifest(params: CouponParams, layout: Layout, stl_bytes: bytes, *,
     measurements = [
         {"id": "first-free-slot", "nominalMm": None,
          "how": "Push the peg down each slot. Pips on the base number slots 1..n, tightest first. Record the first slot the peg slides through under its own weight.",
-         "feeds": "recommendedRadialClearanceMm"},
+         "feeds": "printedPairClearanceMm"},
         {"id": "ring-bores", "nominalMm": list(params.ring_bores_mm),
          "how": "Largest pin/drill shank that passes each ring, or inside-caliper the bore.",
          "feeds": "holeBiasMm"},
         {"id": "square-boss", "nominalMm": params.boss_mm,
          "how": "Outside-caliper the square boss across X at mid-height.", "feeds": "outerBiasMm"},
+        {"id": "round-boss", "nominalMm": params.boss_mm, "optional": True,
+         "how": "Outside-caliper the round boss diameter at mid-height, across vertices.",
+         "feeds": "roundOuterBiasMm"},
         {"id": "shrinkage-bar", "nominalMm": params.shrinkage_bar_mm,
          "how": "Outside-caliper the outermost X faces of the bar end fins.", "feeds": "xyScale"},
         {"id": "wall-ladder", "nominalMm": list(params.wall_steps_mm),
@@ -255,8 +273,9 @@ def build_manifest(params: CouponParams, layout: Layout, stl_bytes: bytes, *,
             "printerId": printer_id, "printerModel": printer_model,
             "nozzleDiameterMm": nozzle_mm, "material": material,
             "orientation": list(orientation),
-            "slicerSettingsSha256": hashlib.sha256(slicer_settings.encode()).hexdigest(),
+            "slicerSettingsSha256": settings_digest,
         },
+        "slicerSettingsEvidence": {"source": settings_source},
         "scopeStatus": ("template-replace-before-evidence" if unspecified
                         else "declared-by-operator-not-verified-here"),
         "measurements": measurements,
@@ -268,8 +287,15 @@ def derive_profile(params: CouponParams, measured: dict) -> dict:
 
     measured keys: shrinkageBarMm, squareBossMm, ringBoresMm (list aligned
     with params.ring_bores_mm), firstFreeSlotIndex (0-based or None),
-    minReliableWallMm (one of params.wall_steps_mm or None).
-    Biases are measured-minus-nominal: negative hole bias means holes print small.
+    minReliableWallMm (one of params.wall_steps_mm or None), and optional
+    roundBossMm. Biases are measured-minus-nominal: negative hole bias means
+    holes print small.
+
+    printedPairClearanceMm is a printed-peg-in-printed-slot result (outer and
+    hole bias stacked). It is NOT the contracts radialClearance, which is
+    the per-side gap between a printed insert and an unprinted holder bore;
+    sizing that interface uses xyScale plus (round) outer bias. Nothing here
+    feeds a FitSpec silently.
     """
     bar = float(measured["shrinkageBarMm"])
     boss = float(measured["squareBossMm"])
@@ -287,12 +313,19 @@ def derive_profile(params: CouponParams, measured: dict) -> dict:
     wall = measured.get("minReliableWallMm")
     if wall is not None and float(wall) not in params.wall_steps_mm:
         raise ValueError("minReliableWallMm must be one of the printed wall steps")
+    round_boss = measured.get("roundBossMm")
+    round_bias = None
+    if round_boss is not None:
+        if float(round_boss) <= 0:
+            raise ValueError("roundBossMm must be positive")
+        round_bias = float(round_boss) - params.boss_mm
     return {
         "xyScaleMeasured": bar / params.shrinkage_bar_mm,
         "xyScaleCorrection": params.shrinkage_bar_mm / bar,
         "outerBiasMm": boss - params.boss_mm,
+        "roundOuterBiasMm": round_bias,
         "holeBiasMm": sum(m - n for m, n in zip(bores, params.ring_bores_mm)) / len(bores),
-        "recommendedRadialClearanceMm": clearance,
+        "printedPairClearanceMm": clearance,
         "minReliableWallMm": wall,
     }
 
@@ -307,8 +340,11 @@ def main(argv: list[str] | None = None) -> int:
     gen.add_argument("--printer-model", default="unspecified-model")
     gen.add_argument("--nozzle-mm", type=float, default=0.4)
     gen.add_argument("--material", default="unspecified-material")
-    gen.add_argument("--slicer-settings", default="unspecified-settings",
-                     help="profile name or exported settings text; stored as sha256 only")
+    settings_group = gen.add_mutually_exclusive_group()
+    settings_group.add_argument("--slicer-settings",
+                                help="declared profile name/text; digest covers the string only")
+    settings_group.add_argument("--slicer-settings-file",
+                                help="exported settings file; digest covers its exact bytes")
     prof = sub.add_parser("profile", help="derive a capability profile from measurements JSON")
     prof.add_argument("--measured", required=True, help="path to measurements JSON file")
     args = parser.parse_args(argv)
@@ -318,9 +354,16 @@ def main(argv: list[str] | None = None) -> int:
         import os
         tris, layout = build(params)
         stl = to_binary_stl(tris)
-        manifest = build_manifest(params, layout, stl, printer_id=args.printer_id,
-                                  printer_model=args.printer_model, nozzle_mm=args.nozzle_mm,
-                                  material=args.material, slicer_settings=args.slicer_settings)
+        settings_sha = None
+        if args.slicer_settings_file:
+            with open(args.slicer_settings_file, "rb") as fh:
+                settings_sha = hashlib.sha256(fh.read()).hexdigest()
+        manifest = build_manifest(
+            params, layout, stl, printer_id=args.printer_id,
+            printer_model=args.printer_model, nozzle_mm=args.nozzle_mm,
+            material=args.material,
+            slicer_settings=args.slicer_settings or "unspecified-settings",
+            slicer_settings_sha256=settings_sha)
         os.makedirs(args.out_dir, exist_ok=True)
         stl_path = os.path.join(args.out_dir, f"{args.name}.stl")
         man_path = os.path.join(args.out_dir, f"{args.name}.manifest.json")
