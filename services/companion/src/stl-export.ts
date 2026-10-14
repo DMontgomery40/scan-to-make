@@ -2,7 +2,7 @@ import { constants } from 'node:fs';
 import { open, link, unlink, lstat } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
-import type { ArtifactRef } from '@scan-to-make/contracts';
+import { validateArtifactRef, type ArtifactRef } from '@scan-to-make/contracts';
 import type { ProjectStore } from '@scan-to-make/project';
 
 type Point = readonly [number, number, number];
@@ -116,6 +116,13 @@ async function readBoundedSnapshot(path: string, artifact: ArtifactRef): Promise
   } finally { await file.close(); }
 }
 
+/** Trusted local path only; captures bounded exact bytes and checks STL structure, not printability. */
+export async function readVerifiedStl(path: string, input: ArtifactRef): Promise<{bytes: Buffer; geometry: StlGeometrySummary}> {
+  const artifact = validateArtifactRef(input);
+  const bytes = await readBoundedSnapshot(path, artifact);
+  return {bytes, geometry: inspectStl(bytes)};
+}
+
 /**
  * Export exact accepted STL bytes for an explicit project revision. The caller
  * authenticates project access and authorizes the local output path. STL carries
@@ -130,8 +137,7 @@ export async function exportAcceptedStl(projects: Pick<ProjectStore, 'load'>, in
   if (!initial.acceptedArtifact) throw new Error('Project requires an accepted artifact');
   const artifact = initial.acceptedArtifact.artifact;
   if (artifact.mediaType !== 'model/stl') throw new Error('Accepted artifact must be STL');
-  const bytes = await readBoundedSnapshot(request.sourcePath, artifact);
-  const geometry = inspectStl(bytes);
+  const {bytes, geometry} = await readVerifiedStl(request.sourcePath, artifact);
   const outputPath = resolve(request.outputPath);
   const temporary = join(dirname(outputPath), `.accepted-stl-${randomUUID()}.tmp`);
   const file = await open(temporary, 'wx', 0o600);
