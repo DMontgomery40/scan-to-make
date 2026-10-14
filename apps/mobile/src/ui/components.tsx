@@ -35,7 +35,15 @@ export function Screen({
   return (
     <KeyboardAvoidingView
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      style={[styles.screen, { paddingTop: insets.top }]}
+      style={[
+        styles.screen,
+        {
+          paddingTop: insets.top,
+          paddingBottom: insets.bottom,
+          paddingLeft: insets.left,
+          paddingRight: insets.right,
+        },
+      ]}
     >
       <ScrollView
         contentContainerStyle={styles.content}
@@ -70,11 +78,7 @@ export function Screen({
         <View style={styles.body}>{children}</View>
       </ScrollView>
       {footer ? (
-        <View
-          style={[styles.footer, { paddingBottom: insets.bottom + space.lg }]}
-        >
-          {footer}
-        </View>
+        <View style={styles.footer}>{footer}</View>
       ) : null}
     </KeyboardAvoidingView>
   );
@@ -199,6 +203,7 @@ const styles = StyleSheet.create({
   footer: {
     paddingHorizontal: space.xl,
     paddingTop: space.md,
+    paddingBottom: space.lg,
     gap: space.sm,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: colors.line,
