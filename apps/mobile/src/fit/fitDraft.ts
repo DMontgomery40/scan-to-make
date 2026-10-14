@@ -1,5 +1,4 @@
 import {
-  applyFitSpecPatch,
   validateFitSpec,
   type Dimension,
   type FitSpec,
@@ -154,10 +153,6 @@ export function planMeasurements(
   };
 }
 
-export function applyPlan(base: FitSpec, plan: MeasurementPlan): FitSpec {
-  return applyFitSpecPatch(base, plan.patch);
-}
-
 export function canAdjustCupWidth(spec: FitSpec, deltaMm: number): boolean {
   const d = spec.dimensions.cupOuterDiameter;
   return d.lowerMm + deltaMm > 0 && d.upperMm + deltaMm <= MAX_REASONABLE_MM;
@@ -167,9 +162,9 @@ export function canAdjustCupWidth(spec: FitSpec, deltaMm: number): boolean {
  * Design edit from the preview. Cup width is outside the holder-insert
  * interface, so no authorization is sent and fit evidence is preserved.
  */
-export function adjustCupWidth(spec: FitSpec, deltaMm: number): FitSpec {
+export function cupWidthPatch(spec: FitSpec, deltaMm: number): FitSpecPatch {
   const d = spec.dimensions.cupOuterDiameter;
-  return applyFitSpecPatch(spec, {
+  return {
     expectedRevision: spec.revision,
     dimensions: {
       cupOuterDiameter: {
@@ -180,5 +175,5 @@ export function adjustCupWidth(spec: FitSpec, deltaMm: number): FitSpec {
         sourceId: `${PREVIEW_SOURCE_PREFIX}cup-width-r${spec.revision + 1}`,
       },
     },
-  });
+  };
 }

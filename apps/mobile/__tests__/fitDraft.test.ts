@@ -1,7 +1,10 @@
-import { validateFitSpec } from '@scan-to-make/contracts';
 import {
-  adjustCupWidth,
-  applyPlan,
+  applyFitSpecPatch,
+  validateFitSpec,
+  type FitSpec,
+} from '@scan-to-make/contracts';
+import {
+  cupWidthPatch,
   canAdjustCupWidth,
   contractFixture,
   isUserMeasured,
@@ -10,6 +13,11 @@ import {
   seedSpec,
   type MeasuredKey,
 } from '../src/fit/fitDraft';
+
+const applyPlan = (
+  base: FitSpec,
+  plan: { patch: Parameters<typeof applyFitSpecPatch>[1] },
+) => applyFitSpecPatch(base, plan.patch);
 import { contractsConsumerFailures } from '../src/spike/contractsProbe';
 
 const ENTRIES: Record<MeasuredKey, number> = {
@@ -89,7 +97,10 @@ describe('fit draft over packages/contracts', () => {
       seedSpec(),
       planMeasurements(seedSpec(), ENTRIES, 'ruler'),
     );
-    const wider = adjustCupWidth(first, 1);
+    const patch = cupWidthPatch(first, 1);
+    expect(patch.expectedRevision).toBe(first.revision);
+    expect(patch.authorizedInterfaceIds).toBeUndefined();
+    const wider = applyFitSpecPatch(first, patch);
     expect(wider.revision).toBe(2);
     expect(wider.dimensions.cupOuterDiameter).toMatchObject({
       nominalMm: 87,

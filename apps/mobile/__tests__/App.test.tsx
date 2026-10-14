@@ -7,6 +7,8 @@ import ReactTestRenderer, { act } from 'react-test-renderer';
 import { Text } from 'react-native';
 import App from '../App';
 import { mockCaptureSource } from '../src/capture/captureSource';
+import { cupWidthPatch } from '../src/fit/fitDraft';
+import { memoryFitSpecStore } from '../src/project/fitSpecStore';
 import { SpikeScreen } from '../src/screens/SpikeScreen';
 import { RUN_TARGET_MS, SAMPLE_INTERVAL_MS } from '../src/spike/useSpikeRun';
 
@@ -38,10 +40,10 @@ test('home renders and navigates to capture', async () => {
   expect(texts(tree)).toContain('Confirm measurements');
 });
 
-test('confirmed measurements become a FitSpec revision with an editable cup width', async () => {
+async function reachPreview(store = memoryFitSpecStore()) {
   let tree!: ReactTestRenderer.ReactTestRenderer;
   await act(async () => {
-    tree = ReactTestRenderer.create(<App />);
+    tree = ReactTestRenderer.create(<App store={store} />);
   });
   await press(tree, 'Start');
   const values: Record<string, string> = {
@@ -59,19 +61,47 @@ test('confirmed measurements become a FitSpec revision with an editable cup widt
     await act(async () => input.props.onChangeText(value));
   }
   await press(tree, 'Preview adapter');
-  expect(texts(tree)).toEqual(
-    expect.arrayContaining(['Your adapter', 'Revision 1', '86 mm']),
-  );
+  return tree;
+}
 
+function pressWider(tree: ReactTestRenderer.ReactTestRenderer) {
   const wider = tree.root.find(
     n =>
       n.props.accessibilityLabel === 'Wider cup, 1 millimetre' &&
       typeof n.props.onPress === 'function',
   );
-  await act(async () => wider.props.onPress());
+  return act(async () => wider.props.onPress());
+}
+
+test('confirmed measurements become a FitSpec revision with an editable cup width', async () => {
+  const store = memoryFitSpecStore();
+  const tree = await reachPreview(store);
+  expect(texts(tree)).toEqual(
+    expect.arrayContaining(['Your adapter', 'Revision 1', '86 mm']),
+  );
+  await pressWider(tree);
   expect(texts(tree)).toEqual(
     expect.arrayContaining(['Revision 2', '87 mm', '62 mm']),
   );
+  expect((await store.get('draft-cup-adapter'))?.revision).toBe(2);
+});
+
+test('a stale preview edit is rejected and the latest revision is shown', async () => {
+  const store = memoryFitSpecStore();
+  const tree = await reachPreview(store);
+  const elsewhere = (await store.get('draft-cup-adapter'))!;
+  await store.applyPatch(elsewhere.id, cupWidthPatch(elsewhere, 4));
+
+  await pressWider(tree);
+  const shown = texts(tree);
+  expect(shown).toEqual(expect.arrayContaining(['Revision 2', '90 mm']));
+  expect(shown.some(t => t.startsWith('This preview was out of date'))).toBe(
+    true,
+  );
+  expect(
+    (await store.get('draft-cup-adapter'))?.dimensions.cupOuterDiameter
+      .nominalMm,
+  ).toBe(90);
 });
 
 test('spike harness runs a mock session to an inconclusive report', async () => {

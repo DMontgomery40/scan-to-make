@@ -1,14 +1,15 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import type { Dimension, FitSpec } from '@scan-to-make/contracts';
+import type { Dimension, FitSpec, FitSpecPatch } from '@scan-to-make/contracts';
 import {
-  adjustCupWidth,
   canAdjustCupWidth,
+  cupWidthPatch,
   isPreviewAdjusted,
   isUserMeasured,
   toolForDimension,
   type DimensionKey,
 } from '../fit/fitDraft';
+import { StaleRevisionError } from '../project/fitSpecStore';
 import { Button, Card, Screen } from '../ui/components';
 import { colors, radius, space, type } from '../ui/theme';
 
@@ -109,16 +110,17 @@ function DimensionRow({
 
 function Stepper({
   spec,
-  onChange,
+  disabled,
+  onStep,
 }: {
   spec: FitSpec;
-  onChange: (next: FitSpec) => void;
+  disabled: boolean;
+  onStep: (deltaMm: number) => void;
 }) {
-  const step = (delta: number) => onChange(adjustCupWidth(spec, delta));
   return (
     <View style={styles.stepper}>
       {[-CUP_STEP_MM, CUP_STEP_MM].map(delta => {
-        const enabled = canAdjustCupWidth(spec, delta);
+        const enabled = !disabled && canAdjustCupWidth(spec, delta);
         return (
           <Pressable
             key={delta}
@@ -129,7 +131,7 @@ function Stepper({
             accessibilityState={{ disabled: !enabled }}
             disabled={!enabled}
             hitSlop={6}
-            onPress={() => step(delta)}
+            onPress={() => onStep(delta)}
             style={({ pressed }) => [
               styles.stepButton,
               pressed && styles.stepPressed,
@@ -146,16 +148,33 @@ function Stepper({
 
 export function PreviewScreen({
   spec,
-  onChange,
+  saving,
+  onPatch,
   onEdit,
   onBack,
 }: {
   spec: FitSpec;
-  onChange: (next: FitSpec) => void;
+  saving: boolean;
+  /** Patches are bound to the revision on screen; stale ones are rejected. */
+  onPatch: (patch: FitSpecPatch) => Promise<unknown>;
   onEdit: () => void;
   onBack: () => void;
 }) {
   const evidence = spec.interfaces['holder-insert'].fitEvidence.length;
+  const [notice, setNotice] = useState<string | null>(null);
+
+  const stepCup = async (deltaMm: number) => {
+    setNotice(null);
+    try {
+      await onPatch(cupWidthPatch(spec, deltaMm));
+    } catch (error) {
+      setNotice(
+        error instanceof StaleRevisionError
+          ? 'This preview was out of date, so it now shows the latest version. Check it and try again.'
+          : 'That change could not be saved.',
+      );
+    }
+  };
   return (
     <Screen
       title="Your adapter"
@@ -217,11 +236,16 @@ export function PreviewScreen({
             k={k}
             trailing={
               k === 'cupOuterDiameter' ? (
-                <Stepper spec={spec} onChange={onChange} />
+                <Stepper spec={spec} disabled={saving} onStep={stepCup} />
               ) : undefined
             }
           />
         ))}
+        {notice ? (
+          <Text accessibilityLiveRegion="polite" style={styles.notice}>
+            {notice}
+          </Text>
+        ) : null}
       </Card>
 
       <Text style={[type.caption, styles.revision]}>
@@ -289,4 +313,5 @@ const styles = StyleSheet.create({
   stepDisabled: { opacity: 0.35 },
   stepText: { fontSize: 20, fontWeight: '600', color: colors.ink },
   revision: { textAlign: 'center' },
+  notice: { ...type.caption, color: colors.pending },
 });

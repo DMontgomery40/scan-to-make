@@ -5,11 +5,7 @@ import {
   type FitSpec,
 } from '@scan-to-make/contracts';
 import taperedHolder from '../../../../packages/contracts/fixtures/tapered-holder.json';
-import {
-  applyPlan,
-  HOLDER_INSERT_KEYS,
-  planMeasurements,
-} from '../fit/fitDraft';
+import { HOLDER_INSERT_KEYS, planMeasurements } from '../fit/fitDraft';
 
 function stableJson(value: unknown): string {
   return JSON.stringify(value, (_key, v) =>
@@ -177,7 +173,7 @@ export function contractsConsumerFailures(): string[] {
       },
       'calipers',
     );
-    const after = applyPlan(withEvidence, plan);
+    const after = applyFitSpecPatch(withEvidence, plan.patch);
     return (
       plan.clearsFitEvidence &&
       after.revision === 1 &&

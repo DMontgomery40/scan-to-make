@@ -7,10 +7,10 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import type { FitSpec } from '@scan-to-make/contracts';
+import type { FitSpec, FitSpecPatch } from '@scan-to-make/contracts';
 import { nativeCaptureSource } from '../capture/captureSource';
+import { StaleRevisionError } from '../project/fitSpecStore';
 import {
-  applyPlan,
   isUserMeasured,
   MEASURED_KEYS,
   measurementError,
@@ -65,12 +65,14 @@ function initialText(spec: FitSpec): Record<MeasuredKey, string> {
 
 export function CaptureScreen({
   base,
+  saving,
   onBack,
-  onConfirm,
+  onSubmit,
 }: {
   base: FitSpec;
+  saving: boolean;
   onBack: () => void;
-  onConfirm: (spec: FitSpec) => void;
+  onSubmit: (patch: FitSpecPatch) => Promise<void>;
 }) {
   const [arStatus, setArStatus] = useState<ArStatus>('checking');
   const [text, setText] = useState(() => initialText(base));
@@ -112,14 +114,16 @@ export function CaptureScreen({
   const confirm = () => {
     setSubmitError(null);
     const plan = planMeasurements(base, entries, tool);
-    const apply = () => {
+    const apply = async () => {
       try {
-        onConfirm(applyPlan(base, plan));
+        await onSubmit(plan.patch);
       } catch (error) {
         setSubmitError(
-          `These measurements could not be saved. ${
-            error instanceof Error ? error.message : ''
-          }`.trim(),
+          error instanceof StaleRevisionError
+            ? 'This project changed since you opened it. Your entries are kept; check them and confirm again.'
+            : `These measurements could not be saved. ${
+                error instanceof Error ? error.message : ''
+              }`.trim(),
         );
       }
     };
@@ -157,7 +161,7 @@ export function CaptureScreen({
           ) : null}
           <Button
             label="Preview adapter"
-            disabled={!valid}
+            disabled={!valid || saving}
             accessibilityHint={valid ? undefined : 'Enter all four sizes first'}
             onPress={confirm}
           />

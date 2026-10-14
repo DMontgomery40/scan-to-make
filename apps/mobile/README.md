@@ -10,7 +10,8 @@ React Native 0.87 (TypeScript, Hermes, New Architecture) shell for the D004 capt
 | `src/capture/captureSource.ts` | `CaptureSource` interface: native module wrapper plus a labelled mock |
 | `src/spike/d004.ts` | D004 pass-criteria scoring; pure TypeScript |
 | `src/spike/runtimeProbes.ts` | Core probes for the "runs unchanged on Hermes" criterion |
-| `src/fit/fitDraft.ts` | App-side use of `@scan-to-make/contracts`: fixture seed, measurement patches, cup-width edits |
+| `src/fit/fitDraft.ts` | Builds contract `FitSpecPatch`es (measurements, cup-width edits) from the screen state; never applies them |
+| `src/project/fitSpecStore.ts` | `FitSpecStore`: the only path that applies patches. It rejects stale `expectedRevision`. In-memory now; CORE-002's project service should implement the same interface |
 | `src/spike/contractsProbe.ts` | Contract consumer check (tapered-holder fixture, revisions, holder-insert protection) |
 | `modules/scan-capture/` | Local autolinked TurboModule: ARKit (Swift + ObjC++) and ARCore (Kotlin) |
 
@@ -54,3 +55,4 @@ Mock sources (simulator, emulator without ARCore, tests) always score "Not yet k
 - No camera preview is rendered yet. ARKit runs headless, and ARCore runs on an offscreen GL context. Frame rate and thermal numbers are only representative once the AR preview view and the real capture workload are in. Depth is enabled where supported; mesh reconstruction is enabled on LiDAR iPhones.
 - iOS has not been built here; the Swift/ObjC++ module still needs a Mac build.
 - The design dimensions (support height, wall, clearance) are seeded from the contracts fixture until FIT-001 supplies template defaults.
+- The FitSpec store is in memory, so a relaunch loses the project until CORE-002's persisted service replaces it.
