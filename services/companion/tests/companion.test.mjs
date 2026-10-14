@@ -105,3 +105,10 @@ test('forged reconciliation and unknown attempts cannot release a printer',async
  await assert.rejects(journal.recordOutcome(selection.printerId,'not-an-attempt',{state:'started'}));
  const next=await plan();await assert.rejects(journal.beginAttempt(next,approval(next)));
 });
+
+test('approval expiring during verification cannot persist an intent',async()=>{
+ const p=await plan();let clockSamples=0;
+ const advancing=new CompanionJournal(join(root,'companion'),projects,()=>clockSamples++===0?now:now+60001);
+ await assert.rejects(advancing.beginAttempt(p,approval(p)));
+ assert.deepEqual(await journal.history(selection.printerId),[]);
+});

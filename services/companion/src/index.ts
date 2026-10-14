@@ -90,7 +90,10 @@ export class CompanionJournal {
     throw new Error('Project revision or accepted design changed after plan preparation');
    const snapshot=await this.readSnapshot(plan.snapshotId);
    if(!sameRef(snapshot.artifact,plan.printableArtifact))throw new Error('Snapshot identity does not match the plan');
-   const intent=intentSchema.parse({kind:'intent',attemptId:randomUUID(),atMs:now,plan,approval});
+   const checkedNow=integer.parse(this.clock());
+   if(approval.expiresAtMs<=checkedNow||approval.expiresAtMs>checkedNow+300000)
+    throw new Error('Approval expired or became invalid during verification');
+   const intent=intentSchema.parse({kind:'intent',attemptId:randomUUID(),atMs:checkedNow,plan,approval});
    await this.append(plan.selection.printerId,intent);return intent;
   });
  }
