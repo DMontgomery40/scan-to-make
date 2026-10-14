@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { BackHandler, StatusBar } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import type { PlaceholderCupHolderFitSpec } from './src/contracts/placeholder';
+import type { FitSpec } from '@scan-to-make/contracts';
+import { seedSpec } from './src/fit/fitDraft';
 import { CaptureScreen } from './src/screens/CaptureScreen';
 import { HomeScreen } from './src/screens/HomeScreen';
 import { PreviewScreen } from './src/screens/PreviewScreen';
@@ -18,7 +19,7 @@ const PARENT: Record<Route, Route | null> = {
 
 function App() {
   const [route, setRoute] = useState<Route>('home');
-  const [spec, setSpec] = useState<PlaceholderCupHolderFitSpec | null>(null);
+  const [spec, setSpec] = useState<FitSpec | null>(null);
 
   useEffect(() => {
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
@@ -37,7 +38,7 @@ function App() {
     case 'capture':
       screen = (
         <CaptureScreen
-          initial={spec}
+          base={spec ?? seedSpec()}
           onBack={() => setRoute('home')}
           onConfirm={next => {
             setSpec(next);
@@ -50,6 +51,7 @@ function App() {
       screen = spec ? (
         <PreviewScreen
           spec={spec}
+          onChange={setSpec}
           onEdit={() => setRoute('capture')}
           onBack={() => setRoute('capture')}
         />

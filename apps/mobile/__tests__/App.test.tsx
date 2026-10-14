@@ -38,6 +38,42 @@ test('home renders and navigates to capture', async () => {
   expect(texts(tree)).toContain('Confirm measurements');
 });
 
+test('confirmed measurements become a FitSpec revision with an editable cup width', async () => {
+  let tree!: ReactTestRenderer.ReactTestRenderer;
+  await act(async () => {
+    tree = ReactTestRenderer.create(<App />);
+  });
+  await press(tree, 'Start');
+  const values: Record<string, string> = {
+    'Holder top, millimetres': '62',
+    'Holder bottom, millimetres': '58',
+    'Holder depth, millimetres': '35',
+    'Cup width, millimetres': '86',
+  };
+  for (const [label, value] of Object.entries(values)) {
+    const input = tree.root.find(
+      n =>
+        n.props.accessibilityLabel === label &&
+        typeof n.props.onChangeText === 'function',
+    );
+    await act(async () => input.props.onChangeText(value));
+  }
+  await press(tree, 'Preview adapter');
+  expect(texts(tree)).toEqual(
+    expect.arrayContaining(['Your adapter', 'Revision 1', '86 mm']),
+  );
+
+  const wider = tree.root.find(
+    n =>
+      n.props.accessibilityLabel === 'Wider cup, 1 millimetre' &&
+      typeof n.props.onPress === 'function',
+  );
+  await act(async () => wider.props.onPress());
+  expect(texts(tree)).toEqual(
+    expect.arrayContaining(['Revision 2', '87 mm', '62 mm']),
+  );
+});
+
 test('spike harness runs a mock session to an inconclusive report', async () => {
   jest.useFakeTimers();
   try {

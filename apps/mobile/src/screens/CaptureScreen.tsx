@@ -1,33 +1,51 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { StyleSheet, Text, TextInput, View } from 'react-native';
 import {
-  userConfirmed,
-  validatePlaceholderFitSpec,
-  type PlaceholderCupHolderFitSpec,
-  type PlaceholderDimensionKey,
-} from '../contracts/placeholder';
+  Alert,
+  Pressable,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
+import type { FitSpec } from '@scan-to-make/contracts';
 import { nativeCaptureSource } from '../capture/captureSource';
+import {
+  applyPlan,
+  isUserMeasured,
+  MEASURED_KEYS,
+  measurementError,
+  planMeasurements,
+  toolForDimension,
+  TOOL_UNCERTAINTY_MM,
+  type MeasuredKey,
+  type MeasuringTool,
+} from '../fit/fitDraft';
 import { Button, Card, Screen } from '../ui/components';
 import { colors, radius, space, type } from '../ui/theme';
 
-const FIELDS: { key: PlaceholderDimensionKey; label: string; hint: string }[] =
-  [
-    {
-      key: 'holderOpening',
-      label: 'Holder opening',
-      hint: 'Inside width across the top of the cup holder.',
-    },
-    {
-      key: 'holderDepth',
-      label: 'Holder depth',
-      hint: 'From the top edge down to the floor of the holder.',
-    },
-    {
-      key: 'cupBase',
-      label: 'Cup base',
-      hint: 'Width across the bottom of the cup you want to fit.',
-    },
-  ];
+const FIELDS: Record<MeasuredKey, { label: string; hint: string }> = {
+  holderInnerTopDiameter: {
+    label: 'Holder top',
+    hint: 'Inside width across the top edge of the holder.',
+  },
+  holderInnerBottomDiameter: {
+    label: 'Holder bottom',
+    hint: 'Inside width near the floor. Often a little smaller than the top.',
+  },
+  insertionDepth: {
+    label: 'Holder depth',
+    hint: 'How far down the adapter can sit inside the holder.',
+  },
+  cupOuterDiameter: {
+    label: 'Cup width',
+    hint: 'Widest part of the cup or bottle that needs to fit.',
+  },
+};
+
+const TOOLS: { tool: MeasuringTool; label: string }[] = [
+  { tool: 'ruler', label: `Ruler · ±${TOOL_UNCERTAINTY_MM.ruler} mm` },
+  { tool: 'calipers', label: `Calipers · ±${TOOL_UNCERTAINTY_MM.calipers} mm` },
+];
 
 type ArStatus = 'checking' | 'available' | 'unavailable';
 
@@ -36,24 +54,35 @@ function parseMm(text: string): number {
   return trimmed === '' ? Number.NaN : Number(trimmed);
 }
 
+function initialText(spec: FitSpec): Record<MeasuredKey, string> {
+  const text = {} as Record<MeasuredKey, string>;
+  for (const key of MEASURED_KEYS) {
+    const d = spec.dimensions[key];
+    text[key] = isUserMeasured(d) ? String(d.nominalMm) : '';
+  }
+  return text;
+}
+
 export function CaptureScreen({
-  initial,
+  base,
   onBack,
   onConfirm,
 }: {
-  initial: PlaceholderCupHolderFitSpec | null;
+  base: FitSpec;
   onBack: () => void;
-  onConfirm: (spec: PlaceholderCupHolderFitSpec) => void;
+  onConfirm: (spec: FitSpec) => void;
 }) {
   const [arStatus, setArStatus] = useState<ArStatus>('checking');
-  const [text, setText] = useState<Record<PlaceholderDimensionKey, string>>({
-    holderOpening: initial ? String(initial.holderOpening.valueMm) : '',
-    holderDepth: initial ? String(initial.holderDepth.valueMm) : '',
-    cupBase: initial ? String(initial.cupBase.valueMm) : '',
-  });
-  const [touched, setTouched] = useState<
-    Partial<Record<PlaceholderDimensionKey, boolean>>
-  >({});
+  const [text, setText] = useState(() => initialText(base));
+  const [tool, setTool] = useState<MeasuringTool>(() =>
+    isUserMeasured(base.dimensions.holderInnerTopDiameter)
+      ? toolForDimension(base.dimensions.holderInnerTopDiameter)
+      : 'ruler',
+  );
+  const [touched, setTouched] = useState<Partial<Record<MeasuredKey, boolean>>>(
+    {},
+  );
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -70,17 +99,43 @@ export function CaptureScreen({
     };
   }, []);
 
-  const spec: PlaceholderCupHolderFitSpec = useMemo(
-    () => ({
-      kind: 'cup-holder-adapter',
-      holderOpening: userConfirmed(parseMm(text.holderOpening)),
-      holderDepth: userConfirmed(parseMm(text.holderDepth)),
-      cupBase: userConfirmed(parseMm(text.cupBase)),
-    }),
-    [text],
-  );
-  const errors = validatePlaceholderFitSpec(spec);
-  const valid = Object.keys(errors).length === 0;
+  const entries = useMemo(() => {
+    const values = {} as Record<MeasuredKey, number>;
+    for (const key of MEASURED_KEYS) {
+      values[key] = parseMm(text[key]);
+    }
+    return values;
+  }, [text]);
+  const errors = MEASURED_KEYS.map(key => measurementError(entries[key], tool));
+  const valid = errors.every(e => e === null);
+
+  const confirm = () => {
+    setSubmitError(null);
+    const plan = planMeasurements(base, entries, tool);
+    const apply = () => {
+      try {
+        onConfirm(applyPlan(base, plan));
+      } catch (error) {
+        setSubmitError(
+          `These measurements could not be saved. ${
+            error instanceof Error ? error.message : ''
+          }`.trim(),
+        );
+      }
+    };
+    if (plan.clearsFitEvidence) {
+      Alert.alert(
+        'Change the holder fit?',
+        'New holder measurements change how the adapter fits the holder, so your earlier fit test result will be cleared.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Change and clear', style: 'destructive', onPress: apply },
+        ],
+      );
+    } else {
+      apply();
+    }
+  };
 
   const viewportMessage = {
     checking: 'Checking for AR…',
@@ -96,12 +151,17 @@ export function CaptureScreen({
       subtitle="Then confirm the sizes that matter for a good fit."
       onBack={onBack}
       footer={
-        <Button
-          label="Preview adapter"
-          disabled={!valid}
-          accessibilityHint={valid ? undefined : 'Enter all three sizes first'}
-          onPress={() => onConfirm(spec)}
-        />
+        <>
+          {submitError ? (
+            <Text style={styles.errorText}>{submitError}</Text>
+          ) : null}
+          <Button
+            label="Preview adapter"
+            disabled={!valid}
+            accessibilityHint={valid ? undefined : 'Enter all four sizes first'}
+            onPress={confirm}
+          />
+        </>
       }
     >
       <View
@@ -116,15 +176,41 @@ export function CaptureScreen({
       <Card>
         <Text style={type.heading}>Confirm measurements</Text>
         <Text style={type.caption}>
-          In millimetres. A ruler or calipers works.
+          In millimetres. What did you measure with?
         </Text>
-        {FIELDS.map(field => {
-          const error = touched[field.key] ? errors[field.key] : undefined;
+        <View style={styles.segment} accessibilityRole="radiogroup">
+          {TOOLS.map(option => {
+            const selected = option.tool === tool;
+            return (
+              <Pressable
+                key={option.tool}
+                accessibilityRole="radio"
+                accessibilityState={{ selected }}
+                onPress={() => setTool(option.tool)}
+                style={[
+                  styles.segmentItem,
+                  selected && styles.segmentItemSelected,
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.segmentText,
+                    selected && styles.segmentTextSelected,
+                  ]}
+                >
+                  {option.label}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+
+        {MEASURED_KEYS.map((key, index) => {
+          const field = FIELDS[key];
+          const error = touched[key] ? errors[index] : null;
           return (
-            <View key={field.key} style={styles.field}>
-              <Text style={styles.fieldLabel} nativeID={`${field.key}-label`}>
-                {field.label}
-              </Text>
+            <View key={key} style={styles.field}>
+              <Text style={styles.fieldLabel}>{field.label}</Text>
               <View
                 style={[styles.inputRow, error ? styles.inputRowError : null]}
               >
@@ -134,11 +220,9 @@ export function CaptureScreen({
                   keyboardType="decimal-pad"
                   inputMode="decimal"
                   returnKeyType="done"
-                  value={text[field.key]}
-                  onChangeText={value =>
-                    setText(t => ({ ...t, [field.key]: value }))
-                  }
-                  onBlur={() => setTouched(t => ({ ...t, [field.key]: true }))}
+                  value={text[key]}
+                  onChangeText={value => setText(t => ({ ...t, [key]: value }))}
+                  onBlur={() => setTouched(t => ({ ...t, [key]: true }))}
                   placeholder="0"
                   placeholderTextColor={colors.line}
                   style={styles.input}
@@ -180,6 +264,28 @@ const styles = StyleSheet.create({
     color: colors.viewportInk,
     textAlign: 'center',
   },
+  segment: {
+    flexDirection: 'row',
+    borderRadius: radius.md,
+    backgroundColor: colors.background,
+    padding: space.xs,
+    gap: space.xs,
+    marginTop: space.xs,
+  },
+  segmentItem: {
+    flex: 1,
+    minHeight: 44,
+    borderRadius: radius.md - 4,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  segmentItemSelected: {
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.line,
+  },
+  segmentText: { ...type.caption, fontWeight: '600' },
+  segmentTextSelected: { color: colors.ink },
   field: { marginTop: space.md, gap: space.xs },
   fieldLabel: { ...type.body, fontWeight: '600' },
   inputRow: {
@@ -194,5 +300,5 @@ const styles = StyleSheet.create({
   inputRowError: { borderColor: colors.fail },
   input: { flex: 1, minHeight: 48, fontSize: 18, color: colors.ink },
   unit: { ...type.body, color: colors.muted },
-  errorText: { color: colors.fail },
+  errorText: { ...type.caption, color: colors.fail },
 });
