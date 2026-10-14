@@ -34,7 +34,7 @@ const FIELDS: Record<MeasuredKey, { label: string; hint: string }> = {
   },
   insertionDepth: {
     label: 'Holder depth',
-    hint: 'How far down the adapter can sit inside the holder.',
+    hint: 'How far down the part can sit inside the holder.',
   },
   cupOuterDiameter: {
     label: 'Cup width',
@@ -130,7 +130,7 @@ export function CaptureScreen({
     if (plan.clearsFitEvidence) {
       Alert.alert(
         'Change the holder fit?',
-        'New holder measurements change how the adapter fits the holder, so your earlier fit test result will be cleared.',
+        'New holder measurements change how the insert fits the holder, so your earlier fit test result will be cleared.',
         [
           { text: 'Cancel', style: 'cancel' },
           { text: 'Change and clear', style: 'destructive', onPress: apply },

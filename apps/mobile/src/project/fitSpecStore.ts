@@ -5,11 +5,8 @@ import {
   type FitSpecPatch,
 } from '@scan-to-make/contracts';
 
-/**
- * The app's only path for changing a FitSpec. Every edit is a contract
- * `FitSpecPatch` carrying `expectedRevision`, and stores must reject stale
- * revisions. The in-memory store stands in for the CORE-002 project service
- * (services/project), which is expected to implement this same interface.
+/** Legacy isolated fit-store interface used by unit tests.
+ * Consumer persistence uses the saved-project repository in savedProjects.ts.
  */
 export interface FitSpecStore {
   create(spec: FitSpec): Promise<FitSpec>;
@@ -29,7 +26,7 @@ export class StaleRevisionError extends Error {
   }
 }
 
-/** Not persisted; relaunch recovery arrives with the CORE-002 service. */
+/** In-memory fixture store; never used as the consumer persistence fallback. */
 export function memoryFitSpecStore(): FitSpecStore {
   const specs = new Map<string, FitSpec>();
   return {
