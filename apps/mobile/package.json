@@ -8,9 +8,13 @@
     "lint": "eslint .",
     "start": "react-native start",
     "test": "jest",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "contracts:build": "npm ci --prefix ../../packages/contracts --no-audit --no-fund && npm run build --prefix ../../packages/contracts",
+    "postinstall": "npm run contracts:build",
+    "hermes:probes": "scripts/hermes-probes.sh"
   },
   "dependencies": {
+    "@scan-to-make/contracts": "file:../../packages/contracts",
     "@scan-to-make/scan-capture": "file:./modules/scan-capture",
     "react": "19.2.3",
     "react-native": "0.87.1",
@@ -18,6 +22,7 @@
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",
+    "@babel/plugin-transform-export-namespace-from": "^7.29.7",
     "@babel/preset-env": "^7.25.3",
     "@babel/runtime": "^7.25.0",
     "@react-native-community/cli": "20.2.0",
