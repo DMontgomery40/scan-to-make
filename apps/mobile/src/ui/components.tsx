@@ -14,6 +14,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { Verdict } from '../spike/d004';
 import { colors, radius, space, type } from './theme';
+import { NativeActionButton } from './NativeActionButton';
 
 export function Screen({
   title,
@@ -57,7 +58,14 @@ export function Screen({
         automaticallyAdjustKeyboardInsets={false}
       >
         <View style={styles.topbar}>
-          {onBack ? (
+          {onBack && Platform.OS === 'ios' ? (
+            <NativeActionButton
+              label="‹ Back"
+              accessibilityLabel="Back"
+              onPress={onBack}
+              compact
+            />
+          ) : onBack ? (
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="Back"
@@ -106,6 +114,17 @@ export function Button({
   accessibilityHint?: string;
 }) {
   const primary = variant === 'primary';
+  if (Platform.OS === 'ios') {
+    return (
+      <NativeActionButton
+        label={label}
+        onPress={onPress}
+        primary={primary}
+        disabled={disabled}
+        accessibilityHint={accessibilityHint}
+      />
+    );
+  }
   return (
     <Pressable
       accessibilityRole="button"

@@ -37,9 +37,17 @@ import { SpikeScreen } from '../src/screens/SpikeScreen';
 import { RUN_TARGET_MS, SAMPLE_INTERVAL_MS } from '../src/spike/useSpikeRun';
 
 function texts(tree: ReactTestRenderer.ReactTestRenderer): string[] {
-  return tree.root
-    .findAllByType(Text)
-    .map(t => [t.props.children].flat().join(''));
+  return [
+    ...tree.root
+      .findAllByType(Text)
+      .map(t => [t.props.children].flat().join('')),
+    // UIKit renders these titles; they are not React Native Text descendants.
+    ...tree.root
+      .findAll(
+        n => typeof n.type === 'string' && String(n.type) === 'STMActionButton',
+      )
+      .map(n => n.props.buttonTitle),
+  ];
 }
 
 function press(tree: ReactTestRenderer.ReactTestRenderer, label: string) {
@@ -173,7 +181,8 @@ test('project brief requires object, surroundings and addition before review', a
       n =>
         n.props.accessibilityRole === 'button' &&
         typeof n.props.onPress === 'function' &&
-        n.findAllByType(Text).some(t => t.props.children === 'Review brief'),
+        (n.props.accessibilityLabel === 'Review brief' ||
+          n.findAllByType(Text).some(t => t.props.children === 'Review brief')),
     );
   expect(review().props.disabled).toBe(true);
   const fields = [
