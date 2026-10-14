@@ -7,6 +7,7 @@ import {
   StyleSheet,
   Text,
   View,
+  useWindowDimensions,
   type StyleProp,
   type ViewStyle,
 } from 'react-native';
@@ -32,10 +33,22 @@ export function Screen({
   accessory?: ReactNode;
 }) {
   const insets = useSafeAreaInsets();
+  const { height } = useWindowDimensions();
+  // A fixed action stack plus the software keyboard can consume a short window.
+  // Keep the form and actions in one scroll surface at these sizes.
+  const scrollFooter = Platform.OS === 'ios' && height < 500;
   return (
     <KeyboardAvoidingView
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      style={[styles.screen, { paddingTop: insets.top }]}
+      style={[
+        styles.screen,
+        {
+          paddingTop: insets.top,
+          paddingBottom: insets.bottom,
+          paddingLeft: insets.left,
+          paddingRight: insets.right,
+        },
+      ]}
     >
       <ScrollView
         contentContainerStyle={styles.content}
@@ -68,13 +81,12 @@ export function Screen({
         </Text>
         {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
         <View style={styles.body}>{children}</View>
+        {footer && scrollFooter ? (
+          <View style={styles.inlineFooter}>{footer}</View>
+        ) : null}
       </ScrollView>
-      {footer ? (
-        <View
-          style={[styles.footer, { paddingBottom: insets.bottom + space.lg }]}
-        >
-          {footer}
-        </View>
+      {footer && !scrollFooter ? (
+        <View style={styles.footer}>{footer}</View>
       ) : null}
     </KeyboardAvoidingView>
   );
@@ -199,11 +211,13 @@ const styles = StyleSheet.create({
   footer: {
     paddingHorizontal: space.xl,
     paddingTop: space.md,
+    paddingBottom: space.lg,
     gap: space.sm,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: colors.line,
     backgroundColor: colors.background,
   },
+  inlineFooter: { marginTop: space.lg, gap: space.sm },
   button: {
     minHeight: 56,
     paddingVertical: 14,
