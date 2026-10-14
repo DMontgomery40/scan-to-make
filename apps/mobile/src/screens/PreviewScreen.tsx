@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Share, Pressable, StyleSheet, Text, View } from 'react-native';
 import type { Dimension, FitSpec, FitSpecPatch } from '@scan-to-make/contracts';
 import {
   canAdjustCupWidth,
@@ -177,21 +177,41 @@ export function PreviewScreen({
   };
   return (
     <Screen
-      title="Your design"
-      subtitle="Cup-holder example · Review your measurements."
+      title="Your design study"
+      eyebrow="MEASURED EXAMPLE / 02"
+      subtitle="Cup holder & cup. A study of the space your part needs to fit."
       onBack={onBack}
       footer={
         <>
           <Button
+            label="Share measurements"
+            onPress={async () => {
+              try {
+                setNotice(null);
+                await Share.share({
+                  message:
+                    'Scan to Make — cup-holder measurement study\n\n' +
+                    Object.entries(spec.dimensions)
+                      .map(
+                        ([key, d]) =>
+                          `${LABELS[key as DimensionKey]}: ${mm(
+                            d.nominalMm,
+                          )} mm (${mm(d.lowerMm)}–${mm(
+                            d.upperMm,
+                          )} mm; ${sourceLabel(d)})`,
+                      )
+                      .join('\n') +
+                    '\n\nMeasurements only. No printable model or verified fit.',
+                });
+              } catch {
+                setNotice('The share sheet could not open. Try again.');
+              }
+            }}
+          />
+          <Button
             label="Edit measurements"
             variant="secondary"
             onPress={onEdit}
-          />
-          <Button
-            label="Print a fit test"
-            disabled
-            accessibilityHint="Fit tests are not available yet"
-            onPress={() => {}}
           />
         </>
       }
@@ -199,15 +219,14 @@ export function PreviewScreen({
       <Card style={styles.previewCard}>
         <MeasurementSketch spec={spec} />
         <Text style={styles.previewNote}>
-          The 3D adapter preview will appear here once the fit geometry is
-          connected.
+          Measurement sketch · not a printable model
         </Text>
       </Card>
 
       <Card>
         <View style={styles.cardHeader}>
-          <Text style={type.heading}>Holder fit</Text>
-          <Text style={styles.badge}>Protected</Text>
+          <Text style={type.heading}>The receiving space</Text>
+          <Text style={styles.badge}>Fit-critical</Text>
         </View>
         <Text style={type.caption}>
           {evidence > 0
@@ -216,7 +235,7 @@ export function PreviewScreen({
               } recorded. Changing these sizes clears ${
                 evidence === 1 ? 'it' : 'them'
               }.`
-            : 'No fit test yet. Changing these sizes later means a new fit test.'}
+            : 'These are the inside measurements of your holder. Physical fit still needs to be tested.'}
         </Text>
         {HOLDER_ROWS.map(k => (
           <DimensionRow key={k} spec={spec} k={k} />
@@ -224,10 +243,10 @@ export function PreviewScreen({
       </Card>
 
       <Card>
-        <Text style={type.heading}>Cup</Text>
+        <Text style={type.heading}>The object to hold</Text>
         <Text style={type.caption}>
-          Adjusting the cup width keeps your holder fit. It does not tell you
-          how well a different cup will be held.
+          Explore the cup width in 1 mm steps. Your holder measurements stay the
+          same; a new size still needs a real fit check.
         </Text>
         {CUP_ROWS.map(k => (
           <DimensionRow
@@ -256,9 +275,13 @@ export function PreviewScreen({
 }
 
 const styles = StyleSheet.create({
-  previewCard: { alignItems: 'center', paddingVertical: space.xl },
+  previewCard: {
+    alignItems: 'center',
+    paddingVertical: 28,
+    backgroundColor: '#E5E9DC',
+  },
   sketch: { alignItems: 'center', gap: space.xs },
-  bar: { height: 8, borderRadius: radius.pill },
+  bar: { height: 6, borderRadius: radius.pill },
   cupBar: { backgroundColor: colors.accent, marginBottom: space.sm },
   holderBar: { backgroundColor: colors.ink },
   depth: {
@@ -285,8 +308,8 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: space.md,
-    paddingVertical: space.sm,
+    gap: 8,
+    paddingVertical: 16,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: colors.line,
   },
@@ -314,7 +337,7 @@ const styles = StyleSheet.create({
     borderColor: colors.accent,
   },
   stepDisabled: { opacity: 0.35 },
-  stepText: { fontSize: 20, fontWeight: '600', color: colors.ink },
+  stepText: { fontSize: 24, fontWeight: '600', color: colors.ink },
   revision: { textAlign: 'center' },
   notice: { ...type.caption, color: colors.pending },
 });

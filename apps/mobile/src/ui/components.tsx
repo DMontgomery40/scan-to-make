@@ -1,5 +1,7 @@
 import React, { type ReactNode } from 'react';
 import {
+  KeyboardAvoidingView,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -18,34 +20,49 @@ export function Screen({
   onBack,
   children,
   footer,
+  eyebrow,
+  accessory,
 }: {
   title: string;
   subtitle?: string;
   onBack?: () => void;
   children: ReactNode;
   footer?: ReactNode;
+  eyebrow?: string;
+  accessory?: ReactNode;
 }) {
   const insets = useSafeAreaInsets();
   return (
-    <View style={[styles.screen, { paddingTop: insets.top }]}>
+    <KeyboardAvoidingView
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      style={[styles.screen, { paddingTop: insets.top }]}
+    >
       <ScrollView
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
+        automaticallyAdjustKeyboardInsets={false}
       >
-        {onBack ? (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Back"
-            hitSlop={12}
-            onPress={onBack}
-            style={({ pressed }) => [
-              styles.back,
-              pressed && styles.backPressed,
-            ]}
-          >
-            <Text style={styles.backText}>‹ Back</Text>
-          </Pressable>
-        ) : null}
+        <View style={styles.topbar}>
+          {onBack ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Back"
+              hitSlop={12}
+              onPress={onBack}
+              style={({ pressed }) => [
+                styles.back,
+                pressed && styles.backPressed,
+              ]}
+            >
+              <Text style={styles.backText}>‹ Back</Text>
+            </Pressable>
+          ) : (
+            <Text style={styles.brand}>SCAN TO MAKE</Text>
+          )}
+          {accessory}
+        </View>
+        {eyebrow ? <Text style={styles.eyebrow}>{eyebrow}</Text> : null}
         <Text accessibilityRole="header" style={type.title}>
           {title}
         </Text>
@@ -59,7 +76,7 @@ export function Screen({
           {footer}
         </View>
       ) : null}
-    </View>
+    </KeyboardAvoidingView>
   );
 }
 
@@ -152,17 +169,31 @@ export function Stat({ label, value }: { label: string; value: string }) {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.background },
-  content: { padding: space.xl, paddingBottom: space.xxl },
+  content: {
+    paddingHorizontal: space.xl,
+    paddingTop: space.sm,
+    paddingBottom: 40,
+  },
+  topbar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    minHeight: 52,
+    marginBottom: space.lg,
+  },
+  brand: { ...type.label, color: colors.ink, letterSpacing: 2 },
+  eyebrow: { ...type.label, color: colors.accent, marginBottom: space.md },
   back: {
     alignSelf: 'flex-start',
-    marginBottom: space.md,
+    minHeight: 48,
+    justifyContent: 'center',
     marginLeft: -space.sm,
     paddingVertical: space.xs,
     paddingHorizontal: space.sm,
     borderRadius: radius.md,
   },
   backPressed: { backgroundColor: colors.pressedOverlay },
-  backText: { fontSize: 16, color: colors.accent, fontWeight: '600' },
+  backText: { fontSize: 15, color: colors.ink, fontWeight: '500' },
   subtitle: { ...type.body, color: colors.muted, marginTop: space.sm },
   body: { marginTop: space.xl, gap: space.lg },
   footer: {
@@ -175,12 +206,13 @@ const styles = StyleSheet.create({
   },
   button: {
     minHeight: 56,
+    paddingVertical: 14,
     borderRadius: radius.md,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: space.lg,
   },
-  buttonPrimary: { backgroundColor: colors.accent },
+  buttonPrimary: { backgroundColor: colors.ink },
   buttonPrimaryPressed: { backgroundColor: colors.accentPressed },
   buttonSecondary: {
     backgroundColor: colors.surface,
@@ -196,8 +228,6 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
     borderRadius: radius.lg,
     padding: space.lg,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.line,
     gap: space.sm,
   },
   pill: {

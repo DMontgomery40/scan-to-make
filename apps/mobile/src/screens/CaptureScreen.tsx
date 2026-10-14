@@ -142,17 +142,18 @@ export function CaptureScreen({
   };
 
   const viewportMessage = {
-    checking: 'Checking for AR…',
+    checking: 'Checking camera support…',
     available:
-      'AR is available on this phone. The live scan view is coming next.',
+      'Camera scanning is not ready yet. Use a ruler or calipers for this example.',
     unavailable:
-      'AR scanning is not available here. Enter the sizes by hand for now.',
+      'Camera scanning is unavailable here. You can still measure by hand.',
   }[arStatus];
 
   return (
     <Screen
-      title="Confirm measurements"
-      subtitle="Cup-holder example · Measure the holder and cup to explore their fit."
+      title="Measure the fit."
+      eyebrow="MEASURED EXAMPLE / 01"
+      subtitle="Cup holder & cup. Four real sizes to start with."
       onBack={onBack}
       footer={
         <>
@@ -160,7 +161,7 @@ export function CaptureScreen({
             <Text style={styles.errorText}>{submitError}</Text>
           ) : null}
           <Button
-            label="Review design"
+            label="Review measurements"
             disabled={!valid || saving}
             accessibilityHint={valid ? undefined : 'Enter all four sizes first'}
             onPress={confirm}
@@ -169,18 +170,33 @@ export function CaptureScreen({
       }
     >
       <View
-        style={styles.viewport}
-        accessibilityRole="image"
-        accessibilityLabel={viewportMessage}
+        style={styles.guide}
+        accessible
+        accessibilityLabel="Measure the inside opening, inside base and usable depth of the holder, plus the outside width of your cup."
       >
-        <View style={styles.reticle} />
-        <Text style={styles.viewportText}>{viewportMessage}</Text>
+        <View style={styles.guideDrawing}>
+          <View style={styles.holderShape}>
+            <Text style={styles.guideLetter}>C</Text>
+          </View>
+          <Text style={styles.topLabel}>A · OPENING</Text>
+          <Text style={styles.bottomLabel}>B · BASE</Text>
+          <View style={styles.cupShape}>
+            <Text style={styles.guideLetter}>D</Text>
+          </View>
+        </View>
+        <Text style={styles.guideCaption}>
+          Measure inside the holder. Outside the cup.
+        </Text>
+      </View>
+      <View style={styles.support}>
+        <View style={styles.supportDot} />
+        <Text style={styles.supportText}>{viewportMessage}</Text>
       </View>
 
       <Card>
-        <Text style={type.heading}>Confirm measurements</Text>
+        <Text style={type.heading}>Your measuring tool</Text>
         <Text style={type.caption}>
-          In millimetres. What did you measure with?
+          We keep a range around each size, based on your tool.
         </Text>
         <View style={styles.segment} accessibilityRole="radiogroup">
           {TOOLS.map(option => {
@@ -189,7 +205,8 @@ export function CaptureScreen({
               <Pressable
                 key={option.tool}
                 accessibilityRole="radio"
-                accessibilityState={{ selected }}
+                accessibilityLabel={option.label}
+                accessibilityState={{ checked: selected }}
                 onPress={() => setTool(option.tool)}
                 style={[
                   styles.segmentItem,
@@ -214,7 +231,12 @@ export function CaptureScreen({
           const error = touched[key] ? errors[index] : null;
           return (
             <View key={key} style={styles.field}>
-              <Text style={styles.fieldLabel}>{field.label}</Text>
+              <View style={styles.fieldHeader}>
+                <Text style={styles.fieldLetter}>
+                  {['A', 'B', 'C', 'D'][index]}
+                </Text>
+                <Text style={styles.fieldLabel}>{field.label}</Text>
+              </View>
               <View
                 style={[styles.inputRow, error ? styles.inputRowError : null]}
               >
@@ -228,7 +250,7 @@ export function CaptureScreen({
                   onChangeText={value => setText(t => ({ ...t, [key]: value }))}
                   onBlur={() => setTouched(t => ({ ...t, [key]: true }))}
                   placeholder="0"
-                  placeholderTextColor={colors.line}
+                  placeholderTextColor={colors.muted}
                   style={styles.input}
                 />
                 <Text style={styles.unit}>mm</Text>
@@ -245,28 +267,77 @@ export function CaptureScreen({
 }
 
 const styles = StyleSheet.create({
-  viewport: {
-    height: 220,
-    borderRadius: radius.lg,
+  guide: {
     backgroundColor: colors.viewport,
+    padding: 22,
+    borderRadius: 24,
+    gap: 18,
+  },
+  guideDrawing: { height: 128, position: 'relative' },
+  holderShape: {
+    position: 'absolute',
+    left: 22,
+    top: 30,
+    width: 106,
+    height: 76,
+    borderWidth: 2,
+    borderTopWidth: 0,
+    borderColor: '#C5D1BC',
+    borderBottomLeftRadius: 18,
+    borderBottomRightRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
-    padding: space.xl,
-    gap: space.lg,
   },
-  reticle: {
-    width: 96,
-    height: 96,
-    borderRadius: 48,
+  cupShape: {
+    position: 'absolute',
+    right: 16,
+    top: 23,
+    width: 76,
+    height: 84,
+    borderRadius: 24,
     borderWidth: 2,
-    borderColor: colors.viewportInk,
-    borderStyle: 'dashed',
-    opacity: 0.6,
+    borderColor: '#D99870',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  viewportText: {
-    ...type.caption,
-    color: colors.viewportInk,
-    textAlign: 'center',
+  guideLetter: { color: '#E2E9D9', fontSize: 18, fontWeight: '500' },
+  topLabel: {
+    position: 'absolute',
+    top: 0,
+    left: 22,
+    color: '#C5D1BC',
+    fontSize: 10,
+    letterSpacing: 1.5,
+  },
+  bottomLabel: {
+    position: 'absolute',
+    bottom: 0,
+    left: 22,
+    color: '#C5D1BC',
+    fontSize: 10,
+    letterSpacing: 1.5,
+  },
+  guideCaption: { color: '#D1DAC9', fontSize: 13, lineHeight: 19 },
+  support: {
+    flexDirection: 'row',
+    gap: 10,
+    alignItems: 'flex-start',
+    paddingHorizontal: 4,
+  },
+  supportDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: colors.muted,
+    marginTop: 7,
+  },
+  supportText: { ...type.caption, flex: 1 },
+  fieldHeader: { flexDirection: 'row', gap: 10, alignItems: 'center' },
+  fieldLetter: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.accent,
+    width: 18,
   },
   segment: {
     flexDirection: 'row',
@@ -290,7 +361,7 @@ const styles = StyleSheet.create({
   },
   segmentText: { ...type.caption, fontWeight: '600' },
   segmentTextSelected: { color: colors.ink },
-  field: { marginTop: space.md, gap: space.xs },
+  field: { marginTop: 20, gap: 8 },
   fieldLabel: { ...type.body, fontWeight: '600' },
   inputRow: {
     flexDirection: 'row',
@@ -302,7 +373,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
   },
   inputRowError: { borderColor: colors.fail },
-  input: { flex: 1, minHeight: 48, fontSize: 18, color: colors.ink },
+  input: { flex: 1, minHeight: 58, fontSize: 24, color: colors.ink },
   unit: { ...type.body, color: colors.muted, marginLeft: space.sm },
   errorText: { ...type.caption, color: colors.fail },
 });

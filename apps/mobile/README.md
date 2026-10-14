@@ -1,12 +1,13 @@
 # Scan to Make: mobile shell (UI-001)
 
-React Native 0.87 (TypeScript, Hermes, New Architecture) shell for the D004 capture/preview spike. This is a scaffold: capture and preview screens are stubs, and the spike harness measures a headless AR session.
+React Native 0.87 (TypeScript, Hermes, New Architecture) shell for the D004 capture/preview spike. The consumer UI supports a general project brief and an explicitly selected cup-holder measurement study. Custom capture/generation and printing are not implemented; the separate developer harness measures a headless AR session.
 
 ## Layout
 
 | Path | What it is |
 | --- | --- |
-| `App.tsx`, `src/screens/` | Home, capture (stub), preview (stub), spike harness |
+| `App.tsx`, `src/screens/` | Home, project brief/editor/review, measured example, design study, About and developer harness |
+| `src/project/projectBrief.ts` | Template-independent object, surroundings and intended-addition brief; held in app state for this session and shareable through the native share sheet |
 | `src/capture/captureSource.ts` | `CaptureSource` interface: native module wrapper plus a labelled mock |
 | `src/spike/d004.ts` | D004 pass-criteria scoring; pure TypeScript |
 | `src/spike/runtimeProbes.ts` | Core probes for the "runs unchanged on Hermes" criterion |
@@ -46,11 +47,11 @@ npm run ios -- --mode Release --device     # or: npm run android -- --mode relea
 For a simulator check, open `ios/ScanToMake.xcworkspace`, select the
 `ScanToMake` scheme and a simulator, and build the Release configuration.
 Release bundles JavaScript, so it does not need Metro running. The native
-Swift/Objective-C++ module and Home → four manual measurements → Preview flow
+Swift/Objective-C++ module and Home → measured example → four manual measurements → design study flow
 were verified on an iPhone 17 Pro simulator with Xcode 27.0. AR is unavailable
 there; this verifies compilation and interaction, not capture or physical fit.
 
-Use a Release build, because Debug JS makes UI-thread numbers meaningless. On the phone, open **Capture spike (D004)** and tap **Start 2-minute run**. Keep the app in the foreground and pan slowly over a cup holder. The run auto-stops after 5 s of warm-up plus 120 s of scoring. Tap **Share report (JSON)** and post the JSON in #build-room.
+Use a Release build, because Debug JS makes UI-thread numbers meaningless. On the phone, open **About Scan to Make → Open spike harness** and tap **Start 2-minute run**. Keep the app in the foreground and pan slowly over a cup holder. The run auto-stops after 5 s of warm-up plus 120 s of scoring. Tap **Share report (JSON)** and post the JSON in #build-room.
 
 Each report carries the thresholds it was scored with and the raw 1-second samples, so it can be re-scored if the team changes the interpretation.
 
@@ -70,3 +71,9 @@ Mock sources (simulator, emulator without ARCore, tests) always score "Not yet k
   the consumer capture screen currently checks support and accepts manual sizes.
 - The design dimensions (support height, wall, clearance) are seeded from the contracts fixture until FIT-001 supplies template defaults.
 - The FitSpec store is in memory, so a relaunch loses the project until CORE-002's persisted service replaces it.
+
+## Consumer flow
+
+Home starts with a general project idea: object, surroundings/constraints, and the addition to make. The brief remains editable across navigation and can be shared as text. It is held only for the current app session; no restart persistence, scan data, generated geometry or verified fit is claimed. Empty or whitespace-only fields block review. Incomplete drafts reopen in the editor.
+
+The cup-holder example is a separate, explicitly selected measurement study. It preserves all four contract measurements, tool uncertainty and expected-revision edits. Its proportional sketch is input evidence, not a printable part. Measurement summaries can be shared; no print action is exposed.
