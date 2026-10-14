@@ -13,17 +13,21 @@ export function HomeScreen({
   return (
     <Screen
       title="Scan to Make"
-      subtitle="Make something that fits the things around you."
+      subtitle="Scan objects and their surroundings. Describe an addition. Make something that fits."
     >
+      <Text style={styles.copy}>
+        Custom scan-and-describe projects are coming. For now, explore a
+        measurement example.
+      </Text>
       <Card>
-        <Text style={type.label}>FIRST PROJECT</Text>
+        <Text style={type.label}>TRY AN EXAMPLE</Text>
         <Text style={type.heading}>Cup holder adapter</Text>
         <Text style={styles.copy}>
-          Scan your cup holder, confirm four measurements, and preview an
-          adapter that fits your cup.
+          Enter four measurements for a cup holder and cup, then review their
+          sizes in a sketch.
         </Text>
         <View style={styles.action}>
-          <Button label="Start" onPress={onStartScan} />
+          <Button label="Open cup-holder example" onPress={onStartScan} />
         </View>
       </Card>
 

@@ -151,8 +151,8 @@ export function CaptureScreen({
 
   return (
     <Screen
-      title="Scan your cup holder"
-      subtitle="Then confirm the sizes that matter for a good fit."
+      title="Confirm measurements"
+      subtitle="Cup-holder example · Measure the holder and cup to explore their fit."
       onBack={onBack}
       footer={
         <>
@@ -160,7 +160,7 @@ export function CaptureScreen({
             <Text style={styles.errorText}>{submitError}</Text>
           ) : null}
           <Button
-            label="Preview adapter"
+            label="Review design"
             disabled={!valid || saving}
             accessibilityHint={valid ? undefined : 'Enter all four sizes first'}
             onPress={confirm}

@@ -36,7 +36,7 @@ test('home renders and navigates to capture', async () => {
     tree = ReactTestRenderer.create(<App />);
   });
   expect(texts(tree)).toContain('Cup holder adapter');
-  await press(tree, 'Start');
+  await press(tree, 'Open cup-holder example');
   expect(texts(tree)).toContain('Confirm measurements');
 });
 
@@ -45,7 +45,7 @@ async function reachPreview(store = memoryFitSpecStore()) {
   await act(async () => {
     tree = ReactTestRenderer.create(<App store={store} />);
   });
-  await press(tree, 'Start');
+  await press(tree, 'Open cup-holder example');
   const values: Record<string, string> = {
     'Holder top, millimetres': '62',
     'Holder bottom, millimetres': '58',
@@ -60,7 +60,7 @@ async function reachPreview(store = memoryFitSpecStore()) {
     );
     await act(async () => input.props.onChangeText(value));
   }
-  await press(tree, 'Preview adapter');
+  await press(tree, 'Review design');
   return tree;
 }
 
@@ -77,7 +77,7 @@ test('confirmed measurements become a FitSpec revision with an editable cup widt
   const store = memoryFitSpecStore();
   const tree = await reachPreview(store);
   expect(texts(tree)).toEqual(
-    expect.arrayContaining(['Your adapter', 'Revision 1', '86 mm']),
+    expect.arrayContaining(['Your design', 'Revision 1', '86 mm']),
   );
   await pressWider(tree);
   expect(texts(tree)).toEqual(

@@ -177,8 +177,8 @@ export function PreviewScreen({
   };
   return (
     <Screen
-      title="Your adapter"
-      subtitle="Check the sizes before you print anything."
+      title="Your design"
+      subtitle="Cup-holder example · Review your measurements."
       onBack={onBack}
       footer={
         <>
