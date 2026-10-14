@@ -10,17 +10,23 @@ React Native 0.87 (TypeScript, Hermes, New Architecture) shell for the D004 capt
 | `src/capture/captureSource.ts` | `CaptureSource` interface: native module wrapper plus a labelled mock |
 | `src/spike/d004.ts` | D004 pass-criteria scoring; pure TypeScript |
 | `src/spike/runtimeProbes.ts` | Core probes for the "runs unchanged on Hermes" criterion |
-| `src/contracts/placeholder.ts` | **Placeholder**, to be replaced by `packages/contracts` (CORE-001) |
+| `src/fit/fitDraft.ts` | App-side use of `@scan-to-make/contracts`: fixture seed, measurement patches, cup-width edits |
+| `src/spike/contractsProbe.ts` | Contract consumer check (tapered-holder fixture, revisions, holder-insert protection) |
 | `modules/scan-capture/` | Local autolinked TurboModule: ARKit (Swift + ObjC++) and ARCore (Kotlin) |
 
 ## Checks (Linux or macOS)
 
 ```sh
-npm install
+npm install        # postinstall also runs `npm ci` and builds ../../packages/contracts
 npm run typecheck
 npm run lint
 npm test
+HERMES=/path/to/hermes npm run hermes:probes   # core probes on a Hermes VM (not a device)
 ```
+
+`@scan-to-make/contracts` is linked with a `file:` dependency. Metro watches `packages/contracts` and resolves Babel helpers from this app's `node_modules`. Jest maps the package to its built `dist/`. Babel adds `@babel/plugin-transform-export-namespace-from` for zod 4's ESM build.
+
+`hermes:probes` needs a `hermes` CLI built from the tag matching `node_modules/hermes-compiler`. For RN 0.87.1 that is `hermes-v250829098.0.17`.
 
 ## D004 device run (needs the Mac and real phones)
 
@@ -39,7 +45,7 @@ Each report carries the thresholds it was scored with and the raw 1-second sampl
 | Holds 30 fps for 2 min | Native frames are pooled into 5-s windows after warm-up. Every window must reach 29.5 fps (30 minus a quantisation tolerance). |
 | No thermal throttling | The thermal state must never exceed iOS `fair` (Android `light`). Android `moderate` and above count as throttling. |
 | Preview stays anchored | Not yet known: needs the native AR preview view and an observer check |
-| TS core on Hermes | Every probe in `CORE_PROBES` passes on Hermes. Add contracts/geometry probes when they land. |
+| TS core on Hermes | Every probe in `CORE_PROBES` passes on Hermes. This includes the contracts consumer check; geometry probes come with FIT-001. |
 
 Mock sources (simulator, emulator without ARCore, tests) always score "Not yet known".
 
@@ -47,4 +53,4 @@ Mock sources (simulator, emulator without ARCore, tests) always score "Not yet k
 
 - No camera preview is rendered yet. ARKit runs headless, and ARCore runs on an offscreen GL context. Frame rate and thermal numbers are only representative once the AR preview view and the real capture workload are in. Depth is enabled where supported; mesh reconstruction is enabled on LiDAR iPhones.
 - iOS has not been built here; the Swift/ObjC++ module still needs a Mac build.
-- The repo has no workspace root yet. When `packages/contracts` lands, Metro needs `watchFolders` (or a workspace) to import it.
+- The design dimensions (support height, wall, clearance) are seeded from the contracts fixture until FIT-001 supplies template defaults.

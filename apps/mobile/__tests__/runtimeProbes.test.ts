@@ -1,8 +1,4 @@
 import { detectEngine, runCoreProbes } from '../src/spike/runtimeProbes';
-import {
-  userConfirmed,
-  validatePlaceholderFitSpec,
-} from '../src/contracts/placeholder';
 
 describe('core probes', () => {
   it('all pass under Jest, reported as node rather than Hermes', () => {
@@ -34,26 +30,5 @@ describe('core probes', () => {
     } finally {
       delete g.HermesInternal;
     }
-  });
-});
-
-describe('placeholder contract', () => {
-  const spec = (opening: number) => ({
-    kind: 'cup-holder-adapter' as const,
-    holderOpening: userConfirmed(opening),
-    holderDepth: userConfirmed(60),
-    cupBase: userConfirmed(66),
-  });
-
-  it('accepts plausible sizes', () => {
-    expect(validatePlaceholderFitSpec(spec(82))).toEqual({});
-  });
-
-  it('rejects missing, non-positive and implausible sizes', () => {
-    expect(
-      validatePlaceholderFitSpec(spec(Number.NaN)).holderOpening,
-    ).toBeDefined();
-    expect(validatePlaceholderFitSpec(spec(0)).holderOpening).toBeDefined();
-    expect(validatePlaceholderFitSpec(spec(1000)).holderOpening).toBeDefined();
   });
 });

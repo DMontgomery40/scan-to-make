@@ -1,8 +1,4 @@
-import {
-  userConfirmed,
-  validatePlaceholderFitSpec,
-  type PlaceholderCupHolderFitSpec,
-} from '../contracts/placeholder';
+import { contractsConsumerFailures } from './contractsProbe';
 import {
   buildReport,
   type JsEngine,
@@ -31,31 +27,15 @@ interface Probe {
 }
 
 /**
- * Each probe returns null on success or a failure description. Add
- * packages/contracts (CORE-001) and fit geometry (FIT-001) probes here once
- * they publish; the placeholder probe goes away with the placeholder.
+ * Each probe returns null on success or a failure description. Add fit
+ * geometry (FIT-001) probes here once it publishes.
  */
 export const CORE_PROBES: readonly Probe[] = [
   {
-    name: 'placeholder-contract',
+    name: 'contracts-consumer',
     run() {
-      const spec: PlaceholderCupHolderFitSpec = {
-        kind: 'cup-holder-adapter',
-        holderOpening: userConfirmed(82),
-        holderDepth: userConfirmed(60),
-        cupBase: userConfirmed(66.5),
-      };
-      const roundTrip = JSON.parse(
-        JSON.stringify(spec),
-      ) as PlaceholderCupHolderFitSpec;
-      if (Object.keys(validatePlaceholderFitSpec(roundTrip)).length > 0) {
-        return 'valid spec rejected';
-      }
-      const bad = { ...roundTrip, cupBase: userConfirmed(Number.NaN) };
-      if (!validatePlaceholderFitSpec(bad).cupBase) {
-        return 'invalid spec accepted';
-      }
-      return null;
+      const failures = contractsConsumerFailures();
+      return failures.length ? failures.join('; ') : null;
     },
   },
   {
