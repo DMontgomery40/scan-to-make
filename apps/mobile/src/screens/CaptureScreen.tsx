@@ -278,7 +278,7 @@ const styles = StyleSheet.create({
   },
   segmentItem: {
     flex: 1,
-    minHeight: 44,
+    minHeight: 48,
     borderRadius: radius.md - 4,
     alignItems: 'center',
     justifyContent: 'center',
@@ -303,6 +303,6 @@ const styles = StyleSheet.create({
   },
   inputRowError: { borderColor: colors.fail },
   input: { flex: 1, minHeight: 48, fontSize: 18, color: colors.ink },
-  unit: { ...type.body, color: colors.muted },
+  unit: { ...type.body, color: colors.muted, marginLeft: space.sm },
   errorText: { ...type.caption, color: colors.fail },
 });

@@ -300,8 +300,8 @@ const styles = StyleSheet.create({
   },
   stepper: { flexDirection: 'row', gap: space.xs },
   stepButton: {
-    width: 44,
-    height: 44,
+    width: 48,
+    height: 48,
     borderRadius: radius.md,
     borderWidth: 1,
     borderColor: colors.line,
@@ -309,7 +309,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: colors.background,
   },
-  stepPressed: { opacity: 0.7 },
+  stepPressed: {
+    backgroundColor: colors.accentSoft,
+    borderColor: colors.accent,
+  },
   stepDisabled: { opacity: 0.35 },
   stepText: { fontSize: 20, fontWeight: '600', color: colors.ink },
   revision: { textAlign: 'center' },

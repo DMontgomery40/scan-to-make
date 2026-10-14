@@ -38,7 +38,10 @@ export function Screen({
             accessibilityLabel="Back"
             hitSlop={12}
             onPress={onBack}
-            style={styles.back}
+            style={({ pressed }) => [
+              styles.back,
+              pressed && styles.backPressed,
+            ]}
           >
             <Text style={styles.backText}>‹ Back</Text>
           </Pressable>
@@ -85,7 +88,11 @@ export function Button({
         styles.button,
         primary ? styles.buttonPrimary : styles.buttonSecondary,
         disabled && styles.buttonDisabled,
-        pressed && !disabled && styles.buttonPressed,
+        pressed &&
+          !disabled &&
+          (primary
+            ? styles.buttonPrimaryPressed
+            : styles.buttonSecondaryPressed),
       ]}
     >
       <Text
@@ -149,8 +156,12 @@ const styles = StyleSheet.create({
   back: {
     alignSelf: 'flex-start',
     marginBottom: space.md,
+    marginLeft: -space.sm,
     paddingVertical: space.xs,
+    paddingHorizontal: space.sm,
+    borderRadius: radius.md,
   },
+  backPressed: { backgroundColor: colors.pressedOverlay },
   backText: { fontSize: 16, color: colors.accent, fontWeight: '600' },
   subtitle: { ...type.body, color: colors.muted, marginTop: space.sm },
   body: { marginTop: space.xl, gap: space.lg },
@@ -163,20 +174,21 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
   },
   button: {
-    minHeight: 52,
+    minHeight: 56,
     borderRadius: radius.md,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: space.lg,
   },
   buttonPrimary: { backgroundColor: colors.accent },
+  buttonPrimaryPressed: { backgroundColor: colors.accentPressed },
   buttonSecondary: {
     backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.line,
   },
+  buttonSecondaryPressed: { backgroundColor: colors.pressedOverlay },
   buttonDisabled: { opacity: 0.4 },
-  buttonPressed: { opacity: 0.8 },
   buttonText: { fontSize: 16, fontWeight: '600' },
   buttonTextPrimary: { color: colors.accentInk },
   buttonTextSecondary: { color: colors.ink },
