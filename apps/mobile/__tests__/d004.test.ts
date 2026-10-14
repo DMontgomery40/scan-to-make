@@ -12,7 +12,11 @@ const HERMES_OK: RuntimeCheck = {
   engine: 'hermes',
   probes: [{ name: 'p', passed: true, detail: 'ok' }],
 };
-const ANCHOR_OK: AnchorObservation = { observerConfirmed: true, maxDriftMm: 2 };
+const ANCHOR_OK: AnchorObservation = {
+  observerConfirmed: true,
+  maxDriftMm: 2,
+  measurementMethod: 'External calibrated reference',
+};
 
 function run(
   seconds: number,
@@ -24,6 +28,16 @@ function run(
     frames: 60,
     thermal: 'nominal',
     tracking: 'normal',
+    runId: 'native-test-run',
+    previewVisible: true,
+    trackingNormalThroughout: true,
+    renderedFrames: 60,
+    anchorId: 'surface-probe',
+    anchorVisible: true,
+    anchorMethod: 'existing-plane-geometry-center-raycast',
+    previewContent: 'known-orange-sphere-diameter-10mm-v1',
+    contentAttached: true,
+    renderedProbeFrames: 60,
     ...sample(i + 1),
   }));
 }
@@ -37,7 +51,15 @@ function score(
     samples,
     runtime: HERMES_OK,
     anchor: ANCHOR_OK,
-    session: null,
+    session: {
+      framework: 'arkit',
+      deviceModel: 'test',
+      osVersion: 'test',
+      depthEnabled: false,
+      meshEnabled: false,
+      previewSupported: true,
+      runId: 'native-test-run',
+    },
     errors: [],
     createdAt: new Date(0),
     ...overrides,
@@ -148,7 +170,7 @@ describe('D004 scoring', () => {
     expect(report.verdict).toBe('inconclusive');
   });
 
-  it('scores anchoring from the observer and drift', () => {
+  it('separates qualitative anchoring from numeric drift', () => {
     expect(verdicts(score(run(126), { anchor: null })).anchor).toBe(
       'inconclusive',
     );
@@ -163,7 +185,7 @@ describe('D004 scoring', () => {
       verdicts(
         score(run(126), { anchor: { observerConfirmed: true, maxDriftMm: 9 } }),
       ).anchor,
-    ).toBe('fail');
+    ).toBe('pass');
     expect(
       verdicts(
         score(run(126), {
@@ -202,9 +224,77 @@ describe('D004 scoring', () => {
 
   it('records thresholds and raw samples for re-scoring', () => {
     const report = score(run(126));
-    expect(report.schema).toBe('scan-to-make.d004-spike-report.v0');
+    expect(report.schema).toBe('scan-to-make.d004-spike-report.v1');
     expect(report.thresholds).toEqual(D004_THRESHOLDS);
     expect(report.samples).toHaveLength(126);
     expect(JSON.parse(JSON.stringify(report))).toEqual(report);
+  });
+});
+
+describe('visible native evidence gates', () => {
+  it.each([
+    { previewVisible: false },
+    { renderedFrames: 0 },
+    { runId: 'another-session' },
+    { previewVisible: undefined },
+  ])(
+    'does not qualify capture or anchor with missing/inactive evidence %j',
+    change => {
+      const report = score(run(126, second => (second === 60 ? change : {})));
+      expect(verdicts(report)).toMatchObject({
+        fps: 'inconclusive',
+        thermal: 'inconclusive',
+        anchor: 'inconclusive',
+      });
+    },
+  );
+  it.each([
+    { anchorId: '' },
+    { anchorId: 'different-anchor' },
+    { contentAttached: false },
+    { renderedProbeFrames: 0 },
+    { renderedProbeFrames: 59 },
+    { trackingNormalThroughout: false },
+    { previewContent: '' },
+    { anchorVisible: false },
+    { tracking: 'limited:relocalizing' },
+    { anchorMethod: 'estimated-plane' },
+  ])(
+    'requires retained rendered real-surface content throughout the observer window %j',
+    change => {
+      expect(
+        verdicts(score(run(126, second => (second === 60 ? change : {}))))
+          .anchor,
+      ).toBe('inconclusive');
+    },
+  );
+  it('cannot upgrade mock or headless runs through observer input', () => {
+    expect(verdicts(score(run(126), { source: 'mock' })).anchor).toBe(
+      'inconclusive',
+    );
+    expect(verdicts(score(run(126), { session: null })).anchor).toBe(
+      'inconclusive',
+    );
+  });
+  it('does not infer quantitative drift from qualitative confirmation or anchor poses', () => {
+    const unmeasured = score(run(126), {
+      anchor: { observerConfirmed: true, maxDriftMm: null },
+    });
+    expect(unmeasured.verdict).toBe('pass');
+    expect(unmeasured.quantitativeDrift.verdict).toBe('inconclusive');
+    expect(
+      score(run(126), { anchor: { observerConfirmed: true, maxDriftMm: 0 } })
+        .quantitativeDrift.verdict,
+    ).toBe('inconclusive');
+    expect(
+      score(run(126), {
+        anchor: {
+          observerConfirmed: true,
+          maxDriftMm: 9,
+          measurementMethod: 'External calibrated scale',
+        },
+      }).quantitativeDrift.verdict,
+    ).toBe('fail');
+    expect(score(run(126)).quantitativeDrift.verdict).toBe('pass');
   });
 });

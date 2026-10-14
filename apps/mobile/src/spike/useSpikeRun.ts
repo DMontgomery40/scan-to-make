@@ -5,7 +5,12 @@ import type {
   CaptureSessionInfo,
   CaptureSource,
 } from '../capture/captureSource';
-import { buildReport, D004_THRESHOLDS, type SpikeReport } from './d004';
+import {
+  buildReport,
+  D004_THRESHOLDS,
+  type SpikeReport,
+  type AnchorObservation,
+} from './d004';
 import { runCoreProbes } from './runtimeProbes';
 
 export const SAMPLE_INTERVAL_MS = 1000;
@@ -81,6 +86,12 @@ export function useSpikeRun(source: CaptureSource) {
 
     unsubscribe.current = source.subscribe({
       onSample(sample) {
+        if (
+          !active.current ||
+          (session.current?.runId && sample.runId !== session.current.runId)
+        ) {
+          return;
+        }
         samples.current.push(sample);
         setState(s => ({ ...s, latest: sample }));
         if (sample.tMs >= RUN_TARGET_MS) {
@@ -88,8 +99,12 @@ export function useSpikeRun(source: CaptureSource) {
         }
       },
       onError(message) {
+        if (!active.current) {
+          return;
+        }
         errors.current.push(message);
         setState(s => ({ ...s, errors: [...errors.current] }));
+        finish();
       },
     });
 
@@ -97,6 +112,8 @@ export function useSpikeRun(source: CaptureSource) {
       session.current = await source.start(SAMPLE_INTERVAL_MS);
       if (active.current) {
         setState(s => ({ ...s, phase: 'running', session: session.current }));
+      } else {
+        await source.stop();
       }
     } catch (error) {
       errors.current.push(
@@ -128,5 +145,21 @@ export function useSpikeRun(source: CaptureSource) {
     [source],
   );
 
-  return { state, start, stop: finish };
+  const observe = useCallback((anchor: AnchorObservation) => {
+    setState(current => {
+      if (current.phase !== 'done' || !current.report) {
+        return current;
+      }
+      const report = current.report;
+      return {
+        ...current,
+        report: buildReport({
+          ...report,
+          anchor,
+          createdAt: new Date(report.createdAt),
+        }),
+      };
+    });
+  }, []);
+  return { state, start, stop: finish, observe };
 }

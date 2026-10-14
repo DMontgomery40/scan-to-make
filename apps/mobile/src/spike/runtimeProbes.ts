@@ -79,7 +79,8 @@ export const CORE_PROBES: readonly Probe[] = [
         createdAt: new Date(0),
       });
       const [fps, thermal] = report.criteria;
-      if (fps.verdict !== 'pass' || thermal.verdict !== 'pass') {
+      // This fixture has counters but no visible native session evidence.
+      if (fps.verdict !== 'inconclusive' || thermal.verdict !== 'inconclusive') {
         return `fixture scored ${fps.verdict}/${thermal.verdict}`;
       }
       return report.summary.meanFps === 60

@@ -16,7 +16,7 @@ RCT_EXPORT_MODULE(ScanCapture)
 - (instancetype)init
 {
   if (self = [super init]) {
-    _session = [ScanCaptureSession new];
+    _session = [ScanCaptureSession shared];
     __weak ScanCaptureModule *weakSelf = self;
     _session.onSample = ^(NSDictionary<NSString *, id> *sample) {
       [weakSelf emitOnSample:sample];
