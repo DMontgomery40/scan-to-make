@@ -48,7 +48,9 @@ export function ProjectsScreen({
               {entry.status === 'ok' ? (
                 <>
                   <Text style={type.label}>
-                    {entry.project.fit ? 'MEASURED PROJECT' : 'PROJECT BRIEF'}
+                    {entry.project.fit?.template === 'drawer-tray'
+                      ? 'DRAWER DESIGN STUDY'
+                      : entry.project.fit ? 'MEASURED PROJECT' : 'PROJECT BRIEF'}
                   </Text>
                   <Text style={type.heading}>
                     {entry.project.brief.object.trim() || 'Untitled project'}

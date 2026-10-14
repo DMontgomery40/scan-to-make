@@ -558,3 +558,44 @@ test('failed first measured create leaves no synthetic project, retains entries 
   expect(texts(tree)).toContain('Your design study');
   expect(bytes.size).toBe(1);
 });
+
+test('drawer study saves edited reference sizes once, reopens, and keeps a general brief', async () => {
+  const store = testStore();
+  await store.create({id: 'general', fit: null, brief: {object: 'Kitchen drawer', context: 'Under the counter', addition: 'Tea compartments'}});
+  const loaded = await store.load('general');
+  if (loaded.status !== 'ok') throw new Error('load');
+  const { DrawerScreen } = require('../src/screens/DrawerScreen');
+  let tree!: ReactTestRenderer.ReactTestRenderer;
+  await act(async () => {tree = ReactTestRenderer.create(<DrawerScreen initial={loaded.project} repository={store} onProject={() => {}} onBack={() => {}} />);});
+  const input = tree.root.find(n => n.props.accessibilityLabel === 'Drawer width, millimetres' && typeof n.props.onChangeText === 'function');
+  await act(async () => input.props.onChangeText('320'));
+  await press(tree, 'Add divider across');
+  await press(tree, 'Save drawer sizes');
+  const saved = await onlyProject(store);
+  expect(saved.brief).toEqual(loaded.project.brief);
+  expect(saved.fit?.template).toBe('drawer-tray');
+  expect(saved.fit?.revision).toBe(0);
+  expect(saved.revision).toBe(1);
+  if (saved.fit?.template !== 'drawer-tray') throw new Error('drawer');
+  expect(saved.fit.dimensions.drawerInnerWidth.nominalMm).toBe(320);
+  expect(saved.fit.dimensions.drawerInnerWidth.source).toBe('reference');
+  expect(saved.fit.parameters.dividersAcross).toBe(3);
+  expect(saved.preview).toBeNull();
+  await act(async () => tree.unmount());
+  await act(async () => {tree = ReactTestRenderer.create(<DrawerScreen initial={saved} repository={store} onProject={() => {}} onBack={() => {}} />);});
+  expect(tree.root.find(n => n.props.accessibilityLabel === 'Drawer width, millimetres' && typeof n.props.onChangeText === 'function').props.value).toBe('320');
+});
+
+test('failed first drawer save leaves no synthetic seed and retains entered sizes', async () => {
+  const store = testStore();
+  const failed = {...store, create: jest.fn(async () => ({status: 'storage-error' as const}))};
+  const { DrawerScreen } = require('../src/screens/DrawerScreen');
+  let tree!: ReactTestRenderer.ReactTestRenderer;
+  await act(async () => {tree = ReactTestRenderer.create(<DrawerScreen initial={null} repository={failed} onProject={() => {}} onBack={() => {}} />);});
+  const input = tree.root.find(n => n.props.accessibilityLabel === 'Drawer width, millimetres' && typeof n.props.onChangeText === 'function');
+  await act(async () => input.props.onChangeText('321'));
+  await press(tree, 'Save drawer sizes');
+  expect((await store.list())).toEqual({status:'ok',entries:[]});
+  expect(input.props.value).toBe('321');
+  expect(texts(tree)).toContain('These sizes could not be saved. Your entries are still here.');
+});
