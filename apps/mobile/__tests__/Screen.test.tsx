@@ -69,3 +69,62 @@ test.each([false, true])(
     await act(async () => tree.unmount());
   },
 );
+
+test('short iOS windows keep actions in the scrollable form without resetting a draft', async () => {
+  const native = require('react-native');
+  let height = 852;
+  const dimensions = jest
+    .spyOn(native, 'useWindowDimensions')
+    .mockImplementation(() => ({
+      width: height < 500 ? 852 : 393,
+      height,
+      scale: 3,
+      fontScale: 1,
+    }));
+  const render = () => (
+    <SafeAreaInsetsContext.Provider
+      value={{ top: 0, left: 59, right: 59, bottom: 21 }}
+    >
+      <Screen
+        title="Draft"
+        footer={<Button label="Save draft" onPress={() => {}} />}
+      >
+        <Draft />
+      </Screen>
+    </SafeAreaInsetsContext.Provider>
+  );
+  let tree!: ReactTestRenderer.ReactTestRenderer;
+  try {
+    await act(async () => {
+      tree = ReactTestRenderer.create(render());
+    });
+    await act(async () => {
+      tree.root
+        .findByType(TextInput)
+        .props.onChangeText('Unsaved while rotating');
+      height = 393;
+      tree.update(render());
+    });
+    expect(
+      tree.root.findByType(native.ScrollView).findAllByType(Button),
+    ).toHaveLength(1);
+    expect(tree.root.findByType(TextInput).props.value).toBe(
+      'Unsaved while rotating',
+    );
+    await act(async () => {
+      height = 852;
+      tree.update(render());
+    });
+    expect(tree.root.findByType(TextInput).props.value).toBe(
+      'Unsaved while rotating',
+    );
+    expect(
+      tree.root.findByType(native.ScrollView).findAllByType(Button),
+    ).toHaveLength(0);
+  } finally {
+    if (tree) {
+      await act(async () => tree.unmount());
+    }
+    dimensions.mockRestore();
+  }
+});
