@@ -11,6 +11,10 @@
     "./mcp-discovery": {
       "types": "./dist/mcp-discovery.d.ts",
       "import": "./dist/mcp-discovery.js"
+    },
+    "./stl-export": {
+      "types": "./dist/stl-export.d.ts",
+      "import": "./dist/stl-export.js"
     }
   },
   "scripts": {
