@@ -30,6 +30,44 @@ HERMES=/path/to/hermes npm run hermes:probes   # core probes on a Hermes VM (not
 
 `hermes:probes` needs a `hermes` CLI built from the tag matching `node_modules/hermes-compiler`. For RN 0.87.1 that is `hermes-v250829098.0.17`.
 
+## Android local build and persistence check
+
+Use an already provisioned Android SDK and JDK 17 (the React Native Gradle
+plugin requests a Java 17 toolchain). The repository does not pin a JDK 21
+runtime. The current scaffold requests
+SDK platform 37, Build Tools 37.0.0 and NDK 27.1.12297006. Set `ANDROID_HOME` to
+that SDK directory; keep local SDK paths and license state outside Git. The
+Gradle wrapper pins Gradle 9.4.1. SDK installation and license acceptance are
+separate environment setup, not something the build instructions automate.
+
+From this directory, after installing dependencies:
+
+```sh
+cd android
+./gradlew :app:assembleRelease -PreactNativeArchitectures=arm64-v8a
+```
+
+Use the ABI matching the selected emulator (`arm64-v8a` on an Apple Silicon
+emulator, or `x86_64` for an x86 emulator). The APK is
+`android/app/build/outputs/apk/release/app-release.apk`, relative to this mobile
+app directory. This local Release variant bundles JavaScript and uses the
+repository's development signing key; it is not a production distribution.
+
+With an explicitly selected, already running emulator, install the APK and
+launch `com.scantomake/.MainActivity`. Record the emulator serial, Android API
+and ABI with the build head and APK hash. In the app, create a synthetic general
+project with distinctive object, surroundings and addition text, then Save
+draft. Force-stop `com.scantomake`, launch it again, and reopen the saved project.
+Verify every value, edit and save the text, then repeat force-stop/relaunch and
+verify the edited values. Do not clear app data or uninstall between restarts.
+Also save an explicitly labelled drawer study with distinctive dimensions and
+verify it reopens after restart. This proves local synthetic-project retention;
+it does not prove camera capture or physical fit.
+
+Android generated-artifact transport, mesh viewing and STL export remain
+unavailable. The Android ARCore harness is offscreen and cannot qualify visible
+anchored preview. Do not grant camera access for the persistence walkthrough.
+
 ## D004 device run (needs the Mac and real phones)
 
 Use a current Ruby (the local build was verified with Ruby 3.2.9 and Bundler
