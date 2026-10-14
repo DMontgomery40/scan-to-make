@@ -3,7 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" } },
+  "exports": {
+    ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" },
+    "./saved-project": { "types": "./dist/saved-project.d.ts", "import": "./dist/saved-project.js" }
+  },
   "files": ["dist", "fixtures", "README.md"],
   "scripts": {
     "build": "tsc -p tsconfig.json",
