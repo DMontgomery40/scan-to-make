@@ -92,3 +92,35 @@ test('untrusted project ids cannot escape the store directory', async () => {
     await assert.rejects(store.load(id));
   }
 });
+
+const drawerFixture = JSON.parse(await readFile(new URL('../../../packages/contracts/fixtures/drawer-tray.json', import.meta.url), 'utf8'));
+
+test('drawer projects retain their template, provenance and accepted artifact across store restart', async () => {
+  await store.create(drawerFixture);
+  await store.attachPreview(drawerFixture.id,0,artifact);
+  await store.acceptPreview(drawerFixture.id,0,artifact);
+  const loaded=await new ProjectStore(directory).load(drawerFixture.id);
+  assert.deepEqual(loaded.spec,drawerFixture);
+  assert.deepEqual(loaded.acceptedArtifact,{specRevision:0,artifact});
+});
+
+test('drawer layout revisions invalidate previews, reject stale writes and preserve no-op acceptance', async () => {
+  await store.create(drawerFixture);await store.attachPreview(drawerFixture.id,0,artifact);
+  await store.acceptPreview(drawerFixture.id,0,artifact);
+  const noOp=await store.applyPatch(drawerFixture.id,{template:'drawer-tray',expectedRevision:0,dimensions:{},parameters:{dividersAcross:2}});
+  assert.deepEqual(noOp.acceptedArtifact,{specRevision:0,artifact});
+  const next=await store.applyPatch(drawerFixture.id,{template:'drawer-tray',expectedRevision:0,dimensions:{},parameters:{dividersAcross:3}});
+  assert.equal(next.spec.revision,1);assert.equal(next.spec.parameters.dividersAcross,3);
+  assert.equal(next.preview,null);assert.equal(next.acceptedArtifact,null);
+  await assert.rejects(store.applyPatch(drawerFixture.id,{template:'drawer-tray',expectedRevision:0,dimensions:{}}));
+  await assert.rejects(store.acceptPreview(drawerFixture.id,0,artifact));
+  assert.equal((await new ProjectStore(directory).load(drawerFixture.id)).spec.revision,1);
+});
+
+test('cross-template and unauthorized drawer writes leave persisted bytes unchanged', async () => {
+  await store.create(drawerFixture);
+  const file=join(directory,drawerFixture.id+'.json');const before=await readFile(file,'utf8');
+  await assert.rejects(store.applyPatch(drawerFixture.id,{expectedRevision:0,dimensions:{cupOuterDiameter:changedCup}}));
+  await assert.rejects(store.applyPatch(drawerFixture.id,{template:'drawer-tray',expectedRevision:0,dimensions:{trayHeight:{...drawerFixture.dimensions.trayHeight,sourceId:'new-source'}}}));
+  assert.equal(await readFile(file,'utf8'),before);
+});

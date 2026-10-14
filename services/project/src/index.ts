@@ -3,8 +3,8 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import {
-  FitSpecSchema, ArtifactRefSchema, FitSpecPatchSchema,
-  validateFitSpec, validateArtifactRef, applyFitSpecPatch,
+  ProjectFitSpecSchema, ArtifactRefSchema, ProjectFitSpecPatchSchema,
+  validateProjectFitSpec, validateArtifactRef, applyProjectFitSpecPatch,
   type ArtifactRef,
 } from '@scan-to-make/contracts';
 
@@ -18,7 +18,7 @@ function sameArtifact(a: ArtifactRef, b: ArtifactRef): boolean {
 
 export const ProjectRecordSchema = z.strictObject({
   formatVersion: z.literal('0.1.0'),
-  spec: FitSpecSchema,
+  spec: ProjectFitSpecSchema,
   preview: revisionArtifact.nullable(),
   acceptedArtifact: revisionArtifact.nullable(),
 }).superRefine((record, ctx) => {
@@ -39,7 +39,7 @@ export class ProjectStore {
   constructor(private readonly directory: string) {}
 
   async create(input: unknown): Promise<ProjectRecord> {
-    const spec = validateFitSpec(input);
+    const spec = validateProjectFitSpec(input);
     const id = projectId.parse(spec.id);
     if (spec.revision !== 0) throw new Error('New projects must begin at revision zero');
     const record = ProjectRecordSchema.parse({ formatVersion: '0.1.0', spec, preview: null, acceptedArtifact: null });
@@ -55,10 +55,10 @@ export class ProjectStore {
 
   async applyPatch(id: string, input: unknown): Promise<ProjectRecord> {
     id = projectId.parse(id);
-    const patch = FitSpecPatchSchema.parse(input);
+    const patch = ProjectFitSpecPatchSchema.parse(input);
     return this.withLock(id, async () => {
       const record = await this.readRecord(id);
-      const spec = applyFitSpecPatch(record.spec, patch);
+      const spec = applyProjectFitSpecPatch(record.spec, patch);
       if (spec.revision === record.spec.revision) return record;
       const next = ProjectRecordSchema.parse({ ...record, spec, preview: null, acceptedArtifact: null });
       await this.writeRecord(id, next, false);
