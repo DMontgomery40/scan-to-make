@@ -7,7 +7,7 @@ const cup = JSON.parse(readFileSync(new URL('../fixtures/tapered-holder.json', i
 const drawer = JSON.parse(readFileSync(new URL('../fixtures/drawer-tray.json', import.meta.url)));
 const brief = () => ({object:'Kitchen drawer', context:'', addition:'An organizer'});
 const input = (id='project-1', fit=null) => ({id, brief:brief(), fit:fit && {...structuredClone(fit),id}});
-const record = (fit=null) => ({formatVersion:'0.1.0', revision:0, ...input('project-1',fit)});
+const record = (fit=null) => ({formatVersion:'0.2.0', revision:0, ...input('project-1',fit),preview:null,acceptedArtifact:null});
 const replace = text => ({kind:'replace-brief',brief:{...brief(),addition:text}});
 
 // A real in-memory implementation of the storage protocol, not native persistence proof.
@@ -154,4 +154,119 @@ test('create and change snapshot caller-owned input before asynchronous storage'
   change.brief.addition='mutated edit';assert.equal(ok(await writing).brief.addition,'original edit');
   const loaded=ok(await repo.load('project-1'));loaded.brief.object='mutated output';
   assert.equal(ok(await api.createSavedProjects(raw).load('project-1')).brief.object,'Kitchen drawer');
+});
+
+const artifact = () => ({sha256:'a'.repeat(64),mediaType:'model/stl',byteLength:1234});
+const binding = project => ({sourceFit:structuredClone(project.fit),artifact:artifact()});
+const legacy = fit => {const value=record(fit);delete value.preview;delete value.acceptedArtifact;return {...value,formatVersion:'0.1.0'};};
+const reverseKeys = value => Array.isArray(value) ? value.map(reverseKeys) : value && typeof value==='object'
+  ? Object.fromEntries(Object.entries(value).reverse().map(([key,item])=>[key,reverseKeys(item)])) : value;
+
+test('preview and explicit acceptance persist exact source/artifact for both templates',async()=>{
+  for(const fit of [cup,drawer]){
+    const {raw,repo}=repository();const created=ok(await repo.create(input('project-1',fit)));
+    const review=binding(created);
+    const preview=ok(await repo.change(created.id,0,{kind:'attach-preview',...review}));
+    assert.equal(preview.revision,1);assert.equal(preview.fit.revision,0);
+    assert.deepEqual(preview.preview,review);assert.equal(preview.acceptedArtifact,null);
+    const accepted=ok(await repo.change(created.id,1,{kind:'accept-preview',...reverseKeys(review)}));
+    assert.equal(accepted.revision,2);assert.equal(accepted.fit.revision,0);
+    assert.deepEqual(accepted.acceptedArtifact,review);
+    assert.deepEqual(ok(await api.createSavedProjects(raw).load(created.id)),accepted);
+  }
+});
+
+test('review rejects missing fit, changed source at same revision and unseen artifacts without writing',async()=>{
+  const {raw,repo}=repository();const created=ok(await repo.create(input('project-1',drawer)));
+  const review=binding(created);const before=raw.bytes.get(created.id);
+  const altered=structuredClone(review);altered.sourceFit.parameters.dividersAcross=3;
+  for(const change of [{kind:'accept-preview',...review},{kind:'attach-preview',...altered},
+    {kind:'attach-preview',...review,sourceFit:{...review.sourceFit,id:'other'}},
+    {kind:'attach-preview',...review,artifact:{...artifact(),byteLength:0}}]){
+    assert.equal((await repo.change(created.id,0,change)).status,'invalid-change');
+    assert.equal(raw.bytes.get(created.id),before);
+  }
+  const draft=ok(await repo.create(input('draft')));
+  assert.equal((await repo.change(draft.id,0,{kind:'attach-preview',...review})).status,'invalid-change');
+  ok(await repo.change(created.id,0,{kind:'attach-preview',...review}));
+  const attachedBytes=raw.bytes.get(created.id);
+  for(const alteredArtifact of [{...artifact(),sha256:'b'.repeat(64)},{...artifact(),byteLength:1235},{...artifact(),mediaType:'application/octet-stream'}]){
+    assert.equal((await repo.change(created.id,1,{kind:'accept-preview',sourceFit:review.sourceFit,artifact:alteredArtifact})).status,'invalid-change');
+    assert.equal(raw.bytes.get(created.id),attachedBytes);
+  }
+});
+
+test('brief edits and exact no-ops preserve acceptance while replacement preview clears it',async()=>{
+  const {raw,repo}=repository();const created=ok(await repo.create(input('project-1',drawer)));const review=binding(created);
+  ok(await repo.change(created.id,0,{kind:'attach-preview',...review}));
+  const accepted=ok(await repo.change(created.id,1,{kind:'accept-preview',...review}));
+  const bytes=raw.bytes.get(created.id);
+  for(const change of [{kind:'attach-preview',...reverseKeys(review)},{kind:'accept-preview',...review},
+    {kind:'patch-fit',patch:{template:'drawer-tray',expectedRevision:0,dimensions:{},parameters:{dividersAcross:2}}}]){
+    assert.deepEqual(ok(await repo.change(created.id,2,change)),accepted);assert.equal(raw.bytes.get(created.id),bytes);
+  }
+  const edited=ok(await repo.change(created.id,2,replace('A wider description')));
+  assert.equal(edited.revision,3);assert.deepEqual(edited.acceptedArtifact,review);
+  const replaced=ok(await repo.change(created.id,3,{kind:'attach-preview',...review,artifact:{...artifact(),sha256:'b'.repeat(64)}}));
+  assert.equal(replaced.revision,4);assert.equal(replaced.fit.revision,0);assert.equal(replaced.acceptedArtifact,null);
+});
+
+test('effective fit edits invalidate both review states and reject old source after reopen',async()=>{
+  for(const fit of [cup,drawer]){
+    const {raw,repo}=repository();const created=ok(await repo.create(input('project-1',fit)));const review=binding(created);
+    ok(await repo.change(created.id,0,{kind:'attach-preview',...review}));
+    ok(await repo.change(created.id,1,{kind:'accept-preview',...review}));
+    const patch=fit.template==='drawer-tray' ? {template:'drawer-tray',expectedRevision:0,dimensions:{},parameters:{dividersAcross:3}}
+      : {expectedRevision:0,dimensions:{cupOuterDiameter:{...fit.dimensions.cupOuterDiameter,sourceId:'new-source'}}};
+    const edited=ok(await repo.change(created.id,2,{kind:'patch-fit',patch}));
+    assert.equal(edited.revision,3);assert.equal(edited.fit.revision,1);
+    assert.equal(edited.preview,null);assert.equal(edited.acceptedArtifact,null);
+    const reopened=api.createSavedProjects(raw);assert.deepEqual(ok(await reopened.load(created.id)),edited);
+    assert.equal((await reopened.change(created.id,3,{kind:'attach-preview',...review})).status,'invalid-change');
+    assert.equal((await reopened.change(created.id,3,{kind:'accept-preview',...review})).status,'invalid-change');
+  }
+});
+
+test('legacy reads and no-ops preserve original bytes; mutation migrates using exact original CAS',async()=>{
+  const {raw,repo}=repository();const old=legacy(drawer);const bytes=JSON.stringify(old,null,3)+'\n';raw.bytes.set(old.id,bytes);
+  const loaded=ok(await repo.load(old.id));assert.deepEqual(loaded,record(drawer));assert.equal(raw.bytes.get(old.id),bytes);
+  assert.deepEqual(ok(await repo.change(old.id,0,{kind:'replace-brief',brief:old.brief})),loaded);
+  assert.equal(raw.bytes.get(old.id),bytes);
+  const checks=[];const migrating=api.createSavedProjects({...raw,async compareAndSwap(id,expected,next){checks.push(expected);return raw.compareAndSwap(id,expected,next);}});
+  const changed=ok(await migrating.change(old.id,0,{kind:'attach-preview',...binding(loaded)}));
+  assert.deepEqual(checks,[bytes]);assert.equal(changed.formatVersion,'0.2.0');assert.equal(changed.revision,1);
+  assert.equal(JSON.parse(raw.bytes.get(old.id)).formatVersion,'0.2.0');
+});
+
+test('failed migration and conflicting migration preserve old bytes or the winning edit',async()=>{
+  const {raw,repo}=repository();const old=legacy(cup);const bytes=JSON.stringify(old);raw.bytes.set(old.id,bytes);
+  const failing=api.createSavedProjects({...raw,async compareAndSwap(){throw Error('unavailable');}});
+  assert.equal((await failing.change(old.id,0,replace('new'))).status,'storage-error');assert.equal(raw.bytes.get(old.id),bytes);
+  const writes=await Promise.all([repo.change(old.id,0,replace('one')),api.createSavedProjects(raw).change(old.id,0,replace('two'))]);
+  assert.deepEqual(writes.map(x=>x.status).sort(),['ok','stale']);
+  assert.deepEqual(ok(await repo.load(old.id)),writes.find(x=>x.status==='ok').project);
+  assert.equal(writes.find(x=>x.status==='stale').latest.formatVersion,'0.2.0');
+});
+
+test('stored review data must match current fit and accepted data must equal preview',()=>{
+  const valid=record(drawer);valid.preview=binding(valid);valid.acceptedArtifact=structuredClone(valid.preview);
+  assert.equal(api.decodeSavedProject(JSON.stringify(reverseKeys(valid))).status,'ok');
+  for(const mutate of [x=>x.fit=null,x=>x.preview=null,x=>x.preview.sourceFit.parameters.dividersAcross=3,
+    x=>x.acceptedArtifact.artifact.byteLength++,x=>x.acceptedArtifact.sourceFit.dimensions.drawerInnerWidth.sourceId='other',
+    x=>x.preview.artifact.extra=true,x=>delete x.preview]){
+    const bad=structuredClone(valid);mutate(bad);assert.equal(api.decodeSavedProject(JSON.stringify(bad)).status,'corrupt');
+  }
+  const injected=legacy(drawer);injected.preview=valid.preview;
+  assert.equal(api.decodeSavedProject(JSON.stringify(injected)).status,'corrupt');
+});
+
+test('review changes snapshot caller input, enforce saved revision and preserve max-revision no-ops',async()=>{
+  const {raw,repo}=repository();const created=ok(await repo.create(input('project-1',drawer)));const review=binding(created);
+  const change={kind:'attach-preview',...structuredClone(review)};const pending=repo.change(created.id,0,change);
+  change.sourceFit.parameters.dividersAcross=4;change.artifact.byteLength=50;
+  const attached=ok(await pending);assert.deepEqual(attached.preview,review);
+  const stale=await repo.change(created.id,0,{kind:'accept-preview',...review});assert.equal(stale.status,'stale');assert.equal(stale.scope,'project');
+  const max={...attached,revision:Number.MAX_SAFE_INTEGER};raw.bytes.set(max.id,JSON.stringify(max));
+  assert.deepEqual(ok(await repo.change(max.id,max.revision,{kind:'attach-preview',...review})),max);
+  assert.equal((await repo.change(max.id,max.revision,{kind:'accept-preview',...review})).status,'invalid-change');
 });

@@ -85,12 +85,15 @@ Import `@scan-to-make/contracts/saved-project` for a separate, versioned project
 
 ```ts
 type SavedProject = {
-  formatVersion: '0.1.0';
+  formatVersion: '0.2.0';
   id: string;
   revision: number;
   brief: { object: string; context: string; addition: string };
   fit: ProjectFitSpec | null;
+  preview: SavedArtifactBinding | null;
+  acceptedArtifact: SavedArtifactBinding | null;
 };
+type SavedArtifactBinding = { sourceFit: ProjectFitSpec; artifact: ArtifactRef };
 ```
 
 Brief text is preserved exactly, including empty/incomplete fields. A general project starts with `fit: null`; viewing a template example does not attach one. IDs are 1–128 ASCII letters, digits, underscores or hyphens, beginning with a letter/digit. Generate a new unique ID for each project. An attached fit shares that ID; it must not reuse a fixed example seed identity.
@@ -104,9 +107,13 @@ Brief text is preserved exactly, including empty/incomplete fields. A general pr
 | `create({id, brief, fit})` | Exclusive creation at saved revision zero; optional initial fit must also be revision zero. |
 | `change(id, expectedRevision, change)` | Compares saved revision, validates one explicit change, then atomically replaces the bytes it read. |
 
-The only change operations are `{kind: 'replace-brief', brief}`, `{kind: 'attach-fit', fit}` and `{kind: 'patch-fit', patch}`. Attaching is allowed only once, with fit revision zero. Replacing or removing an attached fit is not supported. A fit patch goes through the existing template-specific authorization and revision rules; no unrestricted `put` operation can inject a replacement fit/evidence snapshot.
+Brief/fit changes are `{kind: 'replace-brief', brief}`, `{kind: 'attach-fit', fit}` and `{kind: 'patch-fit', patch}`. Attaching a fit is allowed only once, with fit revision zero. Replacing or removing an attached fit is not supported. A fit patch goes through the existing template-specific authorization and revision rules; no unrestricted `put` operation can inject a replacement fit/evidence snapshot.
 
-Saved-project and fit revisions are distinct. A brief edit increments only the saved revision. An attachment increments the saved revision while its fit starts at zero. An effective fit patch increments both; a no-op increments neither. The fit revision cannot exceed the saved revision. Exhausted safe-integer revisions reject effective edits. Inputs are detached and validated before the first asynchronous storage call, and returned records are detached from stored bytes.
+Artifact review uses `{kind: 'attach-preview', sourceFit, artifact}` followed by `{kind: 'accept-preview', sourceFit, artifact}`. The full validated source fit must equal the current fit, including measurements, provenance and evidence; matching ID/revision alone is insufficient. Object property order does not matter. Acceptance requires an already attached preview with the same full source and exact SHA-256, media type and byte length. It cannot implicitly attach an unseen artifact. A different preview clears acceptance. Reattaching or accepting the identical binding is a no-op and preserves acceptance.
+
+Saved-project and fit revisions are distinct. A brief or review-state edit increments only the saved revision. A fit attachment increments the saved revision while its fit starts at zero. An effective fit patch increments both and clears preview and acceptance; a no-op increments neither. Brief-only edits preserve review state. The fit revision cannot exceed the saved revision. Exhausted safe-integer revisions reject effective edits. Inputs are detached and validated before the first asynchronous storage call, and returned records are detached from stored bytes.
+
+`decodeSavedProject` accepts strict legacy `0.1.0` saved-project records and normalizes them in memory to `0.2.0` with null review state. Reads and no-ops never write or migrate stored bytes. The next successful effective change writes `0.2.0`, with compare-and-swap against the **original stored string**, including its whitespace/order. A failed or conflicting migration leaves the old bytes or winning concurrent write intact. New projects use `0.2.0`; older clients that only understand `0.1.0` cannot edit migrated records. This does not migrate the separate Node project-store format.
 
 Results are discriminated by `status`. Successful load/write returns `{status: 'ok', project}`; list returns `{status: 'ok', entries}`. Other outcomes are:
 
@@ -134,4 +141,4 @@ interface SavedProjectStorage {
 
 `read` must return a whole stored string or `null` for absence. `compareAndSwap` must compare the **entire exact stored string** (or absence for `null`) and replace it atomically, returning `true` only after successful persistence. Every writer to that namespace must participate in the same atomicity mechanism. A `getItem` followed by `setItem` without shared serialization/transaction is insufficient. One shared runtime may serialize these operations through one shared queue; separate runtimes/processes require a transaction or equivalent shared locking. Use a dedicated namespace, never the existing Node project-store files, and preserve unknown/corrupt entries for explicit recovery.
 
-The repository neither supplies platform storage nor promises encryption, cross-process locking or crash durability. Those are properties of the adapter and must be verified there. It stores briefs and measured fit data only, without captures, preview acceptance or print authorization. A consumer must wait for hydration before editing, retain drafts on errors/conflicts, and report a save only after an `ok` write result. Contract tests use an isolated in-memory adapter to prove repository behavior; native process-kill/relaunch proof belongs to the app integration.
+The repository neither supplies platform storage nor promises encryption, cross-process locking or crash durability. Those are properties of the adapter and must be verified there. It stores briefs, measured fit data and artifact review metadata, without captures, artifact bytes or print authorization. Metadata does not verify an STL or its physical fit. Consumers must verify the exact cached bytes against the artifact hash/length before rendering, accepting or exporting, including after reopening; missing or corrupt bytes must disable those actions. A consumer must wait for hydration before editing, retain drafts on errors/conflicts, and report a save only after an `ok` write result. Contract tests use an isolated in-memory adapter to prove repository behavior; native process-kill/relaunch proof belongs to the app integration.
