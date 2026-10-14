@@ -180,36 +180,33 @@ export function CaptureScreen({
       <Card>
         <Text style={type.heading}>Confirm measurements</Text>
         <Text style={type.caption}>
-          Enter sizes in millimetres. How precise is your tool?
+          In millimetres. What did you measure with?
         </Text>
-        <View style={styles.toolSection}>
-          <Text style={[type.label, styles.toolLabel]}>MEASUREMENT TOOL</Text>
-          <View style={styles.segment} accessibilityRole="radiogroup">
-            {TOOLS.map(option => {
-              const selected = option.tool === tool;
-              return (
-                <Pressable
-                  key={option.tool}
-                  accessibilityRole="radio"
-                  accessibilityState={{ selected }}
-                  onPress={() => setTool(option.tool)}
+        <View style={styles.segment} accessibilityRole="radiogroup">
+          {TOOLS.map(option => {
+            const selected = option.tool === tool;
+            return (
+              <Pressable
+                key={option.tool}
+                accessibilityRole="radio"
+                accessibilityState={{ selected }}
+                onPress={() => setTool(option.tool)}
+                style={[
+                  styles.segmentItem,
+                  selected && styles.segmentItemSelected,
+                ]}
+              >
+                <Text
                   style={[
-                    styles.segmentItem,
-                    selected && styles.segmentItemSelected,
+                    styles.segmentText,
+                    selected && styles.segmentTextSelected,
                   ]}
                 >
-                  <Text
-                    style={[
-                      styles.segmentText,
-                      selected && styles.segmentTextSelected,
-                    ]}
-                  >
-                    {option.label}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
+                  {option.label}
+                </Text>
+              </Pressable>
+            );
+          })}
         </View>
 
         {MEASURED_KEYS.map((key, index) => {
@@ -249,7 +246,7 @@ export function CaptureScreen({
 
 const styles = StyleSheet.create({
   viewport: {
-    height: 240,
+    height: 220,
     borderRadius: radius.lg,
     backgroundColor: colors.viewport,
     alignItems: 'center',
@@ -258,26 +255,18 @@ const styles = StyleSheet.create({
     gap: space.lg,
   },
   reticle: {
-    width: 104,
-    height: 104,
-    borderRadius: 52,
-    borderWidth: 2.5,
+    width: 96,
+    height: 96,
+    borderRadius: 48,
+    borderWidth: 2,
     borderColor: colors.viewportInk,
     borderStyle: 'dashed',
-    opacity: 0.7,
+    opacity: 0.6,
   },
   viewportText: {
-    ...type.body,
+    ...type.caption,
     color: colors.viewportInk,
     textAlign: 'center',
-    fontWeight: '500',
-  },
-  toolSection: {
-    marginTop: space.lg,
-    gap: space.sm,
-  },
-  toolLabel: {
-    marginBottom: space.xs,
   },
   segment: {
     flexDirection: 'row',
@@ -285,35 +274,35 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
     padding: space.xs,
     gap: space.xs,
+    marginTop: space.xs,
   },
   segmentItem: {
     flex: 1,
-    minHeight: 48,
+    minHeight: 44,
     borderRadius: radius.md - 4,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: space.sm,
   },
   segmentItemSelected: {
     backgroundColor: colors.surface,
-    borderWidth: 1.5,
+    borderWidth: 1,
     borderColor: colors.line,
   },
-  segmentText: { ...type.caption, fontWeight: '600', color: colors.muted },
-  segmentTextSelected: { color: colors.ink, fontWeight: '700' },
-  field: { marginTop: space.lg, gap: space.xs },
-  fieldLabel: { ...type.subheading },
+  segmentText: { ...type.caption, fontWeight: '600' },
+  segmentTextSelected: { color: colors.ink },
+  field: { marginTop: space.md, gap: space.xs },
+  fieldLabel: { ...type.body, fontWeight: '600' },
   inputRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    borderWidth: 1.5,
+    borderWidth: 1,
     borderColor: colors.line,
     borderRadius: radius.md,
     paddingHorizontal: space.md,
     backgroundColor: colors.background,
   },
-  inputRowError: { borderColor: colors.fail, borderWidth: 2 },
-  input: { flex: 1, minHeight: 52, fontSize: 18, fontWeight: '500', color: colors.ink },
-  unit: { ...type.body, color: colors.muted, marginLeft: space.sm, fontWeight: '600' },
-  errorText: { ...type.caption, color: colors.fail, fontWeight: '500' },
+  inputRowError: { borderColor: colors.fail },
+  input: { flex: 1, minHeight: 48, fontSize: 18, color: colors.ink },
+  unit: { ...type.body, color: colors.muted },
+  errorText: { ...type.caption, color: colors.fail },
 });

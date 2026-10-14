@@ -31,7 +31,6 @@ export function Screen({
       <ScrollView
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"
-        scrollIndicatorInsets={{ right: 1 }}
       >
         {onBack ? (
           <Pressable
@@ -39,10 +38,7 @@ export function Screen({
             accessibilityLabel="Back"
             hitSlop={12}
             onPress={onBack}
-            style={({ pressed }) => [
-              styles.back,
-              pressed && styles.backPressed,
-            ]}
+            style={styles.back}
           >
             <Text style={styles.backText}>‹ Back</Text>
           </Pressable>
@@ -89,14 +85,13 @@ export function Button({
         styles.button,
         primary ? styles.buttonPrimary : styles.buttonSecondary,
         disabled && styles.buttonDisabled,
-        pressed && !disabled && (primary ? styles.buttonPrimaryPressed : styles.buttonSecondaryPressed),
+        pressed && !disabled && styles.buttonPressed,
       ]}
     >
       <Text
         style={[
           styles.buttonText,
           primary ? styles.buttonTextPrimary : styles.buttonTextSecondary,
-          disabled && styles.buttonTextDisabled,
         ]}
       >
         {label}
@@ -108,17 +103,11 @@ export function Button({
 export function Card({
   children,
   style,
-  highlight,
 }: {
   children: ReactNode;
   style?: StyleProp<ViewStyle>;
-  highlight?: boolean;
 }) {
-  return (
-    <View style={[styles.card, highlight && styles.cardHighlight, style]}>
-      {children}
-    </View>
-  );
+  return <View style={[styles.card, style]}>{children}</View>;
 }
 
 const VERDICT_STYLE: Record<Verdict, { fg: string; bg: string; text: string }> =
@@ -160,53 +149,44 @@ const styles = StyleSheet.create({
   back: {
     alignSelf: 'flex-start',
     marginBottom: space.md,
-    paddingVertical: space.sm,
-    paddingHorizontal: space.sm,
-    borderRadius: radius.md,
+    paddingVertical: space.xs,
   },
-  backPressed: { backgroundColor: colors.overlay },
-  backText: { fontSize: 17, color: colors.accent, fontWeight: '600' },
-  subtitle: { ...type.bodyMuted, marginTop: space.md },
+  backText: { fontSize: 16, color: colors.accent, fontWeight: '600' },
+  subtitle: { ...type.body, color: colors.muted, marginTop: space.sm },
   body: { marginTop: space.xl, gap: space.lg },
   footer: {
     paddingHorizontal: space.xl,
-    paddingTop: space.lg,
+    paddingTop: space.md,
     gap: space.sm,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: colors.line,
     backgroundColor: colors.background,
   },
   button: {
-    minHeight: 56,
-    borderRadius: radius.lg,
+    minHeight: 52,
+    borderRadius: radius.md,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: space.xl,
+    paddingHorizontal: space.lg,
   },
   buttonPrimary: { backgroundColor: colors.accent },
-  buttonPrimaryPressed: { backgroundColor: colors.accentDark },
   buttonSecondary: {
     backgroundColor: colors.surface,
-    borderWidth: 1.5,
+    borderWidth: 1,
     borderColor: colors.line,
   },
-  buttonSecondaryPressed: { backgroundColor: colors.overlay },
-  buttonDisabled: { opacity: 0.5 },
-  buttonText: { fontSize: 17, fontWeight: '600' },
+  buttonDisabled: { opacity: 0.4 },
+  buttonPressed: { opacity: 0.8 },
+  buttonText: { fontSize: 16, fontWeight: '600' },
   buttonTextPrimary: { color: colors.accentInk },
   buttonTextSecondary: { color: colors.ink },
-  buttonTextDisabled: { color: colors.muted },
   card: {
     backgroundColor: colors.surface,
-    borderRadius: radius.xl,
+    borderRadius: radius.lg,
     padding: space.lg,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.line,
     gap: space.sm,
-  },
-  cardHighlight: {
-    borderColor: colors.accent,
-    borderWidth: 2,
   },
   pill: {
     alignSelf: 'flex-start',
@@ -214,6 +194,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: space.md,
     paddingVertical: space.xs,
   },
-  pillText: { fontSize: 12, fontWeight: '700' },
+  pillText: { fontSize: 13, fontWeight: '700' },
   stat: { flexBasis: '45%', flexGrow: 1, gap: space.xs },
 });
