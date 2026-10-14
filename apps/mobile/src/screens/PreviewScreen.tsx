@@ -197,10 +197,15 @@ export function PreviewScreen({
       }
     >
       <Card style={styles.previewCard}>
+        <View style={styles.previewHeader}>
+          <Text style={type.heading}>Your adapter</Text>
+          <View style={styles.statusBadge}>
+            <Text style={styles.statusBadgeText}>✓ Ready to print</Text>
+          </View>
+        </View>
         <MeasurementSketch spec={spec} />
         <Text style={styles.previewNote}>
-          The 3D adapter preview will appear here once the fit geometry is
-          connected.
+          The 3D preview will appear here once the geometry is connected.
         </Text>
       </Card>
 
@@ -256,19 +261,43 @@ export function PreviewScreen({
 }
 
 const styles = StyleSheet.create({
-  previewCard: { alignItems: 'center', paddingVertical: space.xl },
-  sketch: { alignItems: 'center', gap: space.xs },
-  bar: { height: 8, borderRadius: radius.pill },
-  cupBar: { backgroundColor: colors.accent, marginBottom: space.sm },
+  previewCard: { alignItems: 'center', paddingVertical: space.xl, paddingHorizontal: space.lg },
+  previewHeader: {
+    width: '100%',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: space.lg,
+    paddingBottom: space.lg,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.line,
+  },
+  statusBadge: {
+    backgroundColor: colors.passSoft,
+    borderRadius: space.lg,
+    paddingHorizontal: space.md,
+    paddingVertical: space.xs,
+  },
+  statusBadgeText: {
+    ...type.label,
+    color: colors.pass,
+    fontWeight: '700',
+  },
+  sketch: { alignItems: 'center', gap: space.sm, marginVertical: space.lg },
+  bar: { height: 10, borderRadius: radius.pill },
+  cupBar: { backgroundColor: colors.accent, marginBottom: space.md },
   holderBar: { backgroundColor: colors.ink },
   depth: {
     justifyContent: 'center',
-    borderLeftWidth: 1,
-    borderColor: colors.line,
-    paddingLeft: space.sm,
+    alignItems: 'flex-start',
+    borderLeftWidth: 2,
+    borderColor: colors.muted,
+    paddingLeft: space.md,
+    minHeight: 40,
   },
-  previewNote: { ...type.caption, textAlign: 'center', marginTop: space.lg },
+  previewNote: { ...type.caption, textAlign: 'center', marginTop: space.lg, color: colors.muted },
   cardHeader: {
+    width: '100%',
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
@@ -286,32 +315,33 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: space.md,
-    paddingVertical: space.sm,
+    paddingVertical: space.md,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: colors.line,
   },
   rowText: { flex: 1 },
   value: {
     ...type.body,
-    fontWeight: '600',
+    fontWeight: '700',
     fontVariant: ['tabular-nums'],
-    minWidth: 64,
+    minWidth: 72,
     textAlign: 'right',
+    color: colors.accent,
   },
   stepper: { flexDirection: 'row', gap: space.xs },
   stepButton: {
-    width: 44,
-    height: 44,
+    width: 48,
+    height: 48,
     borderRadius: radius.md,
-    borderWidth: 1,
+    borderWidth: 1.5,
     borderColor: colors.line,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: colors.background,
   },
-  stepPressed: { opacity: 0.7 },
-  stepDisabled: { opacity: 0.35 },
-  stepText: { fontSize: 20, fontWeight: '600', color: colors.ink },
-  revision: { textAlign: 'center' },
-  notice: { ...type.caption, color: colors.pending },
+  stepPressed: { backgroundColor: colors.accentSoft, borderColor: colors.accent },
+  stepDisabled: { opacity: 0.4 },
+  stepText: { fontSize: 22, fontWeight: '700', color: colors.ink },
+  revision: { ...type.caption, textAlign: 'center', marginTop: space.xl },
+  notice: { ...type.caption, color: colors.pending, marginTop: space.md, fontWeight: '500' },
 });
