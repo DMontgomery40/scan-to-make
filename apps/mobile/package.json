@@ -18,7 +18,8 @@
     "@scan-to-make/scan-capture": "file:./modules/scan-capture",
     "react": "19.2.3",
     "react-native": "0.87.1",
-    "react-native-safe-area-context": "^5.5.2"
+    "react-native-safe-area-context": "^5.5.2",
+    "@scan-to-make/local-project-storage": "file:./modules/local-project-storage"
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",
