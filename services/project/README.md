@@ -1,6 +1,6 @@
 # Local project store
 
-Persists the shared FitSpec and its revision-bound preview/acceptance as private JSON records. This is a local worker library, with no HTTP listener or printer connection.
+Persists the shared discriminated ProjectFitSpec and its revision-bound preview/acceptance as private JSON records. This is a local worker library, with no HTTP listener or printer connection.
 
 ```sh
 npm ci --prefix packages/contracts --ignore-scripts
@@ -21,3 +21,10 @@ Preview acceptance is a design-review record, not authorization to print. Caller
 Writes use an exclusive per-project directory lock shared across store instances/processes, a unique private temporary file, file flush, and atomic rename (or an exclusive hard link for creation). Readers see a whole old or new record. Record files are created with mode 0600 and new store/lock directories with mode 0700. Existing directory permissions are not changed. Use a local filesystem that supports atomic same-directory rename and hard links; this is not a distributed/network-filesystem database or a power-loss durability guarantee.
 
 If a process dies while holding the lock, further writes fail with an interrupted-write/busy error. Do not automatically delete locks or blindly retry. An operator must first verify that no writer remains, inspect the current record and leftover temporary files, then recover that specific lock. Reads remain available. This first version intentionally prefers a visible recovery step to potentially overwriting another writer.
+
+
+## Template boundary
+
+The same `create`, `load`, `applyPatch`, `attachPreview` and `acceptPreview` operations accept both supported variants through `ProjectFitSpecSchema`. Existing cup-holder records stay byte/schema compatible and require no eager migration; drawer-tray records carry schema `0.2.0` inside the existing project-record envelope. Callers narrow `record.spec.template` before using dimensions. Drawer patches carry `template: 'drawer-tray'`; a patch cannot change a saved project's template.
+
+A drawer divider edit invalidates the revision-bound preview/acceptance even if its prior outer-envelope fit observation remains applicable. Unauthorized or cross-template writes leave persisted bytes untouched. File locking, exact artifact identity and restart/reload rules apply equally to both templates. This is the stable local library boundary for a future mobile transport; it does not itself add an HTTP endpoint, credentials or app-relaunch persistence to the mobile UI.
