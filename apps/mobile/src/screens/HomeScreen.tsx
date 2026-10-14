@@ -10,12 +10,14 @@ export function HomeScreen({
   onOpenBrief,
   onAbout,
   brief,
+  onProjects,
 }: {
   onStartScan: () => void;
   onNewProject: () => void;
   onOpenBrief: () => void;
   onAbout: () => void;
   brief: ProjectBrief | null;
+  onProjects: () => void;
 }) {
   return (
     <Screen
@@ -52,6 +54,11 @@ export function HomeScreen({
         <Button label="Describe a project" onPress={onNewProject} />
       </View>
 
+      <Button
+        label="Your saved projects"
+        variant="secondary"
+        onPress={onProjects}
+      />
       {brief ? (
         <Pressable
           accessibilityRole="button"
@@ -61,7 +68,7 @@ export function HomeScreen({
           onPress={onOpenBrief}
           style={({ pressed }) => [styles.draft, pressed && styles.pressed]}
         >
-          <Text style={type.label}>YOUR BRIEF · THIS SESSION</Text>
+          <Text style={type.label}>CURRENT BRIEF</Text>
           <Text style={type.heading} numberOfLines={2}>
             {brief.object.trim() || 'Untitled project'}
           </Text>

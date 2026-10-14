@@ -7,12 +7,12 @@ React Native 0.87 (TypeScript, Hermes, New Architecture) shell for the D004 capt
 | Path | What it is |
 | --- | --- |
 | `App.tsx`, `src/screens/` | Home, project brief/editor/review, measured example, design study, About and developer harness |
-| `src/project/projectBrief.ts` | Template-independent object, surroundings and intended-addition brief; held in app state for this session and shareable through the native share sheet |
+| `src/project/projectBrief.ts` | Template-independent object, surroundings and intended-addition brief; saved locally through the portable saved-project contract and shareable through the native share sheet |
 | `src/capture/captureSource.ts` | `CaptureSource` interface: native module wrapper plus a labelled mock |
 | `src/spike/d004.ts` | D004 pass-criteria scoring; pure TypeScript |
 | `src/spike/runtimeProbes.ts` | Core probes for the "runs unchanged on Hermes" criterion |
 | `src/fit/fitDraft.ts` | Builds contract `FitSpecPatch`es (measurements, cup-width edits) from the screen state; never applies them |
-| `src/project/fitSpecStore.ts` | `FitSpecStore`: the only path that applies patches. It rejects stale `expectedRevision`. In-memory now; CORE-002's project service should implement the same interface |
+| `src/project/fitSpecStore.ts` | Legacy in-memory fit store retained for isolated tests; consumer persistence uses `savedProjects.ts` |
 | `src/spike/contractsProbe.ts` | Contract consumer check (tapered-holder fixture, revisions, holder-insert protection) |
 | `modules/scan-capture/` | Local autolinked TurboModule: ARKit (Swift + ObjC++) and ARCore (Kotlin) |
 
@@ -70,10 +70,21 @@ Mock sources (simulator, emulator without ARCore, tests) always score "Not yet k
 - Native capture start/stop is available in the developer spike harness only;
   the consumer capture screen currently checks support and accepts manual sizes.
 - The design dimensions (support height, wall, clearance) are seeded from the contracts fixture until FIT-001 supplies template defaults.
-- The FitSpec store is in memory, so a relaunch loses the project until CORE-002's persisted service replaces it.
+- Local projects are device-local and unencrypted; uninstalling the app removes them. No cloud sync, account, import/export backup or cross-device recovery is implemented.
 
 ## Consumer flow
 
-Home starts with a general project idea: object, surroundings/constraints, and the addition to make. The brief remains editable across navigation and can be shared as text. It is held only for the current app session; no restart persistence, scan data, generated geometry or verified fit is claimed. Empty or whitespace-only fields block review. Incomplete drafts reopen in the editor.
+Home starts with a general project idea: object, surroundings/constraints, and the addition to make. The brief remains editable across navigation and can be shared as text. Save draft preserves incomplete text locally. Review also saves before continuing. No scan data, generated geometry or verified fit is claimed. Empty or whitespace-only fields block review. Incomplete drafts reopen in the editor.
 
 The cup-holder example is a separate, explicitly selected measurement study. It preserves all four contract measurements, tool uncertainty and expected-revision edits. Its proportional sketch is input evidence, not a printable part. Measurement summaries can be shared; no print action is exposed.
+
+
+## Local saved projects
+
+`src/project/savedProjects.ts` adapts `@scan-to-make/contracts/saved-project` to the standalone `modules/local-project-storage` native module. General briefs have no fit attached. Measured examples create separate unique project IDs and preserve all four dimensions and their provenance. All fit edits use protected expected-revision patches; saved-project and fit revisions remain separate.
+
+The iOS and Android adapters use platform SQLite, one complete UTF-8 BLOB per project, parameterized statements and a write transaction. Exact-byte comparison and replacement occur under SQLite locking across connections/processes using the same database. There is no JS-only get/set race or memory fallback. FULL synchronous commits precede successful resolution. Normal process termination/relaunch is verified on iOS Simulator; power-loss durability on physical devices is not claimed. Writes bypassing SQLite, filesystem corruption and external file replacement are outside the concurrency guarantee.
+
+The library loads before editing, reports corrupt/future entries individually, and preserves their bytes. Failed or stale saves retain the draft and offer saving a separate copy. Opening another brief with unsaved changes requires an explicit discard. Storage errors may have uncertain outcomes; inspect the saved version before retrying. The new namespace is independent of the Node service store and does not migrate it.
+
+Verification: `npm run typecheck`, `npm run lint`, `npm test -- --runInBand`, and on macOS `python3 scripts/native-storage-tests/test.py`. The native test compiles the production iOS storage methods with a minimal React promise bridge stub; it exercises separate native processes and eight competing writers against an isolated temporary SQLite database. It is host-native evidence, distinct from the app's simulator restart walkthrough. Android compilation requires an installed Android SDK and is not established by the iOS checks.

@@ -43,11 +43,19 @@ export function BriefScreen({
   onChange,
   onBack,
   onReview,
+  onSave,
+  saveStatus,
+  saving,
+  onSaveCopy,
 }: {
   brief: ProjectBrief;
   onChange: (brief: ProjectBrief) => void;
   onBack: () => void;
   onReview: () => void;
+  onSave: () => void;
+  saveStatus: string;
+  saving: boolean;
+  onSaveCopy?: () => void;
 }) {
   const [touched, setTouched] = useState<
     Partial<Record<keyof ProjectBrief, boolean>>
@@ -60,16 +68,35 @@ export function BriefScreen({
       subtitle="Start with the real thing. Tell us what you want to change."
       onBack={onBack}
       footer={
-        <Button
-          label="Review brief"
-          disabled={!ready}
-          accessibilityHint={
-            ready
-              ? undefined
-              : 'Describe your object, surroundings and addition first'
-          }
-          onPress={onReview}
-        />
+        <>
+          <Text accessibilityLiveRegion="polite" style={type.caption}>
+            {saveStatus}
+          </Text>
+          {onSaveCopy ? (
+            <Button
+              label="Save draft as separate project"
+              variant="secondary"
+              disabled={saving}
+              onPress={onSaveCopy}
+            />
+          ) : null}
+          <Button
+            label="Save draft"
+            variant="secondary"
+            disabled={saving}
+            onPress={onSave}
+          />
+          <Button
+            label="Review brief"
+            disabled={!ready || saving}
+            accessibilityHint={
+              ready
+                ? undefined
+                : 'Describe your object, surroundings and addition first'
+            }
+            onPress={onReview}
+          />
+        </>
       }
     >
       {FIELDS.map(field => (
@@ -87,6 +114,7 @@ export function BriefScreen({
             onBlur={() => setTouched(t => ({ ...t, [field.key]: true }))}
             placeholder={field.placeholder}
             placeholderTextColor="#697064"
+            editable={!saving}
             multiline
             maxLength={1200}
             textAlignVertical="top"
@@ -98,8 +126,7 @@ export function BriefScreen({
         </View>
       ))}
       <Text style={styles.sessionNote}>
-        Your brief stays here while the app is open. You can share a copy on the
-        next screen.
+        Save your draft to keep it on this device, even before it is complete.
       </Text>
     </Screen>
   );
@@ -174,8 +201,7 @@ export function BriefReviewScreen({
         />
       </View>
       <Text style={styles.sessionNote}>
-        This brief is kept for this session. Share a copy to keep it after
-        closing the app.
+        Keep a copy outside this device by sharing your brief.
       </Text>
       {error ? (
         <Text accessibilityLiveRegion="polite" style={styles.error}>
