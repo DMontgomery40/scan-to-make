@@ -142,3 +142,39 @@ interface SavedProjectStorage {
 `read` must return a whole stored string or `null` for absence. `compareAndSwap` must compare the **entire exact stored string** (or absence for `null`) and replace it atomically, returning `true` only after successful persistence. Every writer to that namespace must participate in the same atomicity mechanism. A `getItem` followed by `setItem` without shared serialization/transaction is insufficient. One shared runtime may serialize these operations through one shared queue; separate runtimes/processes require a transaction or equivalent shared locking. Use a dedicated namespace, never the existing Node project-store files, and preserve unknown/corrupt entries for explicit recovery.
 
 The repository neither supplies platform storage nor promises encryption, cross-process locking or crash durability. Those are properties of the adapter and must be verified there. It stores briefs, measured fit data and artifact review metadata, without captures, artifact bytes or print authorization. Metadata does not verify an STL or its physical fit. Consumers must verify the exact cached bytes against the artifact hash/length before rendering, accepting or exporting, including after reopening; missing or corrupt bytes must disable those actions. A consumer must wait for hydration before editing, retain drafts on errors/conflicts, and report a save only after an `ok` write result. Contract tests use an isolated in-memory adapter to prove repository behavior; native process-kill/relaunch proof belongs to the app integration.
+
+
+## Portable generation protocol
+
+`@scan-to-make/contracts/generation` exports strict request, response, receipt and error schemas plus `verifyGenerationResponse`. It has no Node runtime dependency. The current version is `0.1.0`:
+
+```ts
+type GenerationRequest = { formatVersion: '0.1.0'; sourceFit: ProjectFitSpec };
+type GenerationResponse = {
+  formatVersion: '0.1.0';
+  receipt: {
+    sourceFit: DrawerFitSpec;
+    artifact: ArtifactRef; // model/stl, SHA-256, exact byteLength
+    geometry: { encoding: 'ascii' | 'binary'; triangleCount: number;
+      boundsMm: { min: [number, number, number]; max: [number, number, number] } };
+    generator: { name: 'drawer-tray'; version: '0.1.0' };
+    assumptions: { cornerRadiusAssumedMm: 0 };
+    status: 'preview-only';
+  };
+  stlBase64: string;
+};
+```
+
+Units and coordinate frame are carried by the full source fit. There are no filesystem paths, download URLs or shadow project IDs. The generator receipt is preview evidence, not proof of physical fit or permission to print. The current local worker accepts drawer trays; a valid cup fit receives `unsupported-template`.
+
+```ts
+const {receipt, bytes} = await verifyGenerationResponse(
+  decodedResponse, requestedFit, platformSha256,
+);
+```
+
+`platformSha256(bytes: Uint8Array): Promise<string>` must return the SHA-256 as 64 lowercase hex characters, without modifying its argument; platform failures reject normally. The verifier snapshots and validates the response and expected source before awaiting the hash. It rejects a different full source fit (even with the same ID/revision), noncanonical base64 and byte-length/digest mismatches. It returns detached receipt metadata and decoded bytes. The worker separately structurally validates STL; the portable verifier checks transport integrity and source binding, not mesh topology.
+
+`MAX_GENERATION_REQUEST_BYTES` is 256 KiB and `MAX_GENERATED_STL_BYTES` is 32 MiB. `MAX_GENERATION_RESPONSE_BYTES` includes base64 expansion, the request-size metadata allowance and 4 KiB overhead. A transport must enforce these limits while receiving bytes, before allocating or parsing an unbounded response. `GENERATION_TIMEOUT_MS` is 30,000 ms. Error codes are available through `GenerationErrorCodeSchema` and `{error: {code, message}}` through `GenerationErrorSchema`; HTTP mappings and cancellation behavior are documented in the [local companion](../../services/companion/README.md#local-drawer-generation).
+
+Verification binds the result to the request, not necessarily to the project's latest fit. Reload the latest saved project and call `change` with its current saved revision and `{kind: 'attach-preview', sourceFit: receipt.sourceFit, artifact: receipt.artifact}`. The repository checks full current-fit equality, so an intervening fit edit rejects the response while a brief-only edit can preserve it. Cache the verified exact bytes immutably and recheck their digest/length when reopening, accepting or exporting; share those bytes rather than serializing a viewer mesh. A missing/corrupt cache must disable review/export actions. Durable cache, native hashing, bounded transport and rendering are supplied by the consuming platform.

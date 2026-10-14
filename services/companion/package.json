@@ -15,11 +15,16 @@
     "./stl-export": {
       "types": "./dist/stl-export.d.ts",
       "import": "./dist/stl-export.js"
+    },
+    "./generation": {
+      "types": "./dist/generation.d.ts",
+      "import": "./dist/generation.js"
     }
   },
   "scripts": {
     "build": "npm run build --prefix ../project && tsc -p tsconfig.json",
-    "test": "npm run build && node --test tests/*.test.mjs"
+    "test": "npm run build && node --test tests/*.test.mjs",
+    "generate:serve": "npm run build && node dist/generation-cli.js"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.32.1",
