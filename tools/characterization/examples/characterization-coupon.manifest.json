@@ -4,7 +4,7 @@
   "generator": {
     "name": "tools/characterization/coupon.py",
     "version": "0.1.0",
-    "paramsSha256": "c61d84382f768f18fce6c90278e53e6d40689a55ede6c86ddf1467a6f6dee0e0"
+    "paramsSha256": "548979ae61934e23c96bd0c2c6ea676481928475138f8b0af92d602834e7a8df"
   },
   "parameters": {
     "bossMm": 20.0,
@@ -17,6 +17,8 @@
       0.2,
       0.3
     ],
+    "pegFootHeightMm": 1.2,
+    "pegFootReliefMm": 0.3,
     "pegWidthMm": 12.0,
     "ringBoresMm": [
       4.0,
@@ -55,9 +57,9 @@
     ]
   },
   "artifact": {
-    "sha256": "6756e119c24faac0382605549e77bf94b7ba11c54c8329f884cd4fef7e405111",
+    "sha256": "dd44ee4b818d5369e290c1954896e3abe575d6249a711e194ee69f5895935e95",
     "mediaType": "model/stl",
-    "byteLength": 139884
+    "byteLength": 140484
   },
   "calibrationScope": {
     "printerId": "unspecified-printer",

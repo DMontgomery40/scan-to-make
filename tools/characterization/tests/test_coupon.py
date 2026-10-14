@@ -15,7 +15,7 @@ import unittest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from coupon import CouponParams, build, build_manifest, derive_profile, to_binary_stl  # noqa: E402
 
-GOLDEN_SHA256 = "6756e119c24faac0382605549e77bf94b7ba11c54c8329f884cd4fef7e405111"
+GOLDEN_SHA256 = "dd44ee4b818d5369e290c1954896e3abe575d6249a711e194ee69f5895935e95"
 PARAMS = CouponParams()
 
 
@@ -64,13 +64,29 @@ class CouponGeometryTests(unittest.TestCase):
         slots = PARAMS.slot_widths_mm
         total_x = 6.0 * (len(slots) + 1) + sum(slots)
         ladder = total_x * 14 * 3 + 7 * (6 * 10 * 10) + sum(i + 1 for i in range(6)) * (1.2 * 1.2 * 1.5)
-        peg = 12 * 6 * 18 + 12 * 12 * 6
+        relief, foot_h = PARAMS.peg_foot_relief_mm, PARAMS.peg_foot_height_mm
+        peg = ((12 - 2 * relief) * (6 - 2 * relief) * foot_h
+               + 12 * 6 * (18 - foot_h) + 12 * 12 * 6)
         rings = sum((poly_area(b / 2 + 3) - poly_area(b / 2)) * 8 for b in PARAMS.ring_bores_mm)
         bosses = 20 * 20 * 6 + poly_area(10) * 6
         bar = 100 * 8 * 4 + 2 * (6 * 8 * 6)
         strip_len = sum(PARAMS.wall_steps_mm) + 12 * 4 + 16
         walls = strip_len * 18 * 2.5 + sum(w * 14 * 9.5 for w in PARAMS.wall_steps_mm)
         self.assertAlmostEqual(vol, ladder + peg + rings + bosses + bar + walls, places=4)
+
+    def test_peg_insertion_end_is_relieved(self):
+        relief, foot_h = PARAMS.peg_foot_relief_mm, PARAMS.peg_foot_height_mm
+        self.assertGreater(relief, 0)
+        foot = [v for t in self.tris for v in t if 20.0 < v[1] < 34.0 and v[2] < foot_h]
+        self.assertTrue(foot)
+        # First-layer flare zone is narrower than nominal on every side, so it
+        # cannot be the section that decides which slot the peg enters.
+        self.assertAlmostEqual(min(v[0] for v in foot), relief, places=6)
+        self.assertAlmostEqual(max(v[0] for v in foot), PARAMS.peg_width_mm - relief, places=6)
+        body = [v for t in self.tris for v in t
+                if 23.0 < v[1] < 31.0 and abs(v[2] - foot_h) < 1e-9]
+        self.assertAlmostEqual(min(v[0] for v in body), 0.0, places=6)
+        self.assertAlmostEqual(max(v[0] for v in body), PARAMS.peg_width_mm, places=6)
 
     def test_slot_widths_are_peg_plus_two_sided_clearance(self):
         self.assertEqual(self.layout.slot_widths_mm,
@@ -98,6 +114,8 @@ class CouponGeometryTests(unittest.TestCase):
             build(CouponParams(clearance_steps_mm=(-0.1,)))
         with self.assertRaises(ValueError):
             build(CouponParams(peg_width_mm=0))
+        with self.assertRaises(ValueError):
+            build(CouponParams(peg_foot_relief_mm=6.0))
 
 
 class ManifestTests(unittest.TestCase):

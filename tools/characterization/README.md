@@ -28,7 +28,9 @@ byte-identical output; the test suite pins the golden SHA-256.
 
 - **Clearance ladder** — a 12.00 mm peg and six slots of width
   peg + 2×clearance for clearance steps 0.00/0.05/0.10/0.15/0.20/0.30 mm
-  per side. Pips on the base number the slots 1–6, tightest first.
+  per side. Pips on the base number the slots 1–6, tightest first. The peg's
+  insertion end is relieved 0.3 mm per side over its first 1.2 mm so
+  first-layer elephant's foot cannot decide the reading.
 - **Ring bores** — through-holes of Ø 4/6/8/10 mm (64-facet), wall 3 mm.
 - **Bosses** — 20 mm square and Ø 20 mm round outer references.
 - **Shrinkage bar** — outermost faces exactly 100.00 mm apart.

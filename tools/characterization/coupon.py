@@ -44,6 +44,8 @@ Tri = tuple[Vec, Vec, Vec]
 @dataclass(frozen=True)
 class CouponParams:
     peg_width_mm: float = 12.0
+    peg_foot_relief_mm: float = 0.3
+    peg_foot_height_mm: float = 1.2
     clearance_steps_mm: tuple[float, ...] = (0.0, 0.05, 0.10, 0.15, 0.20, 0.30)
     ring_bores_mm: tuple[float, ...] = (4.0, 6.0, 8.0, 10.0)
     ring_wall_mm: float = 3.0
@@ -55,6 +57,10 @@ class CouponParams:
     def validate(self) -> None:
         if self.peg_width_mm <= 0:
             raise ValueError("peg_width_mm must be positive")
+        if self.peg_foot_relief_mm < 0 or 2.0 * self.peg_foot_relief_mm >= self.peg_width_mm:
+            raise ValueError("peg_foot_relief_mm must be in [0, peg_width_mm/2)")
+        if not 0.0 <= self.peg_foot_height_mm < 18.0:
+            raise ValueError("peg_foot_height_mm must be in [0, peg height)")
         steps = list(self.clearance_steps_mm)
         if any(s < 0 for s in steps) or steps != sorted(steps) or len(set(steps)) != len(steps):
             raise ValueError("clearance_steps_mm must be non-negative, unique and increasing")
@@ -149,7 +155,12 @@ def build(params: CouponParams) -> tuple[list[Tri], Layout]:
     box(tris, x, 2.0, 3.0, post_w, 10.0, post_top - 3.0)
 
     # Peg: exact nominal width, thinner than slot depth, widened finger tab.
-    box(tris, 0.0, 24.0, 0.0, params.peg_width_mm, 6.0, 18.0)
+    # The insertion end is relieved per side for the first foot_height so
+    # first-layer elephant's foot cannot decide which slot the peg enters.
+    relief, foot_h = params.peg_foot_relief_mm, params.peg_foot_height_mm
+    box(tris, relief, 24.0 + relief, 0.0, params.peg_width_mm - 2.0 * relief,
+        6.0 - 2.0 * relief, foot_h)
+    box(tris, 0.0, 24.0, foot_h, params.peg_width_mm, 6.0, 18.0 - foot_h)
     box(tris, 0.0, 21.0, 12.0, params.peg_width_mm, 12.0, 6.0)
 
     # Ring bores and bosses on the build plate (through-holes, no plate below).
@@ -207,6 +218,8 @@ def build_manifest(params: CouponParams, layout: Layout, stl_bytes: bytes, *,
     unspecified = any(v.startswith("unspecified") for v in (printer_id, printer_model, material))
     params_json = json.dumps({
         "pegWidthMm": params.peg_width_mm,
+        "pegFootReliefMm": params.peg_foot_relief_mm,
+        "pegFootHeightMm": params.peg_foot_height_mm,
         "clearanceStepsMm": list(params.clearance_steps_mm),
         "ringBoresMm": list(params.ring_bores_mm),
         "ringWallMm": params.ring_wall_mm, "bossMm": params.boss_mm,
