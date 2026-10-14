@@ -142,6 +142,12 @@ function App({ repository: injected }: { repository?: SavedProjects }) {
       ],
     );
   };
+  const updateDrawer = (project: SavedProject) => {
+    setDrawer(project);
+    // The brief and drawer routes can display the same saved project. Keep its
+    // revision and fit current without replacing an unrelated or unsaved brief.
+    setBriefProject(current => current?.id === project.id ? project : current);
+  };
   const openProject = async (id: string) => {
     setOpening(true);
     setOpenError(null);
@@ -154,7 +160,7 @@ function App({ repository: injected }: { repository?: SavedProjects }) {
     }
     if (result.project.fit) {
       if (result.project.fit.template === 'drawer-tray') {
-        setDrawer(result.project);
+        updateDrawer(result.project);
         setRoute('drawer');
         return;
       }
@@ -278,7 +284,7 @@ function App({ repository: injected }: { repository?: SavedProjects }) {
           <DrawerScreen
             initial={drawer}
             repository={repository}
-            onProject={setDrawer}
+            onProject={updateDrawer}
             onBack={() => setRoute('home')}
           />
         );

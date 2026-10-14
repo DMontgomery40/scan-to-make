@@ -599,3 +599,51 @@ test('failed first drawer save leaves no synthetic seed and retains entered size
   expect(input.props.value).toBe('321');
   expect(texts(tree)).toContain('These sizes could not be saved. Your entries are still here.');
 });
+
+
+async function returnToBriefAfterDrawerSave() {
+  const store = testStore();
+  await store.create({id: 'navigation-project', fit: null, brief: {
+    object: 'Kitchen drawer', context: 'Under counter', addition: 'Tea compartments',
+  }});
+  let tree!: ReactTestRenderer.ReactTestRenderer;
+  await act(async () => { tree = ReactTestRenderer.create(<App repository={store} />); });
+  await press(tree, 'Your saved projects');
+  await press(tree, 'Open Kitchen drawer');
+  await press(tree, 'Try a drawer design study');
+  const width = tree.root.find(n => n.props.accessibilityLabel === 'Drawer width, millimetres' && typeof n.props.onChangeText === 'function');
+  await act(async () => width.props.onChangeText('321'));
+  await press(tree, 'Save drawer sizes');
+  await press(tree, 'Back');
+  await press(tree, 'Open brief for Kitchen drawer');
+  return {tree, store};
+}
+
+test('returning through the brief reopens the saved drawer sizes', async () => {
+  const {tree, store} = await returnToBriefAfterDrawerSave();
+  await press(tree, 'Try a drawer design study');
+  expect(tree.root.find(n => n.props.accessibilityLabel === 'Drawer width, millimetres' && typeof n.props.onChangeText === 'function').props.value).toBe('321');
+  await press(tree, 'Add divider across');
+  await press(tree, 'Save drawer sizes');
+  await press(tree, 'Back');
+  await press(tree, 'Open brief for Kitchen drawer');
+  await press(tree, 'Try a drawer design study');
+  const saved = await onlyProject(store);
+  expect(saved.fit?.revision).toBe(1);
+  expect(saved.revision).toBe(2);
+  expect(texts(tree)).toContain('3');
+});
+
+test('brief edits after drawer attachment save at the current revision and preserve the fit', async () => {
+  const {tree, store} = await returnToBriefAfterDrawerSave();
+  const before = await onlyProject(store);
+  await press(tree, 'Edit idea');
+  const addition = tree.root.find(n => n.props.accessibilityLabel === 'What would you like to add?' && typeof n.props.onChangeText === 'function');
+  await act(async () => addition.props.onChangeText('Tea and coffee compartments'));
+  await press(tree, 'Save draft');
+  const after = await onlyProject(store);
+  expect(after.brief.addition).toBe('Tea and coffee compartments');
+  expect(after.fit).toEqual(before.fit);
+  expect(after.revision).toBe(before.revision + 1);
+  expect(texts(tree)).toContain('Saved on this device');
+});
