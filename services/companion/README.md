@@ -1,6 +1,6 @@
 # Companion preparation and intent journal
 
-First increment of PRINT-001. This library stages exact file bytes, binds a draft print plan to the current accepted design, and keeps a durable once-only intention journal. It has **no MCP client, network listener, upload, print, heating or motion operation**. Creating an intent does not authorize physical dispatch.
+This library stages exact file bytes, binds a draft print plan to the current accepted design, and keeps a durable once-only intention journal. Its separate read-only MCP discovery entrypoint initializes a trusted local server, reads tool schemas and closes it. It has **no tool execution, network listener, upload, print, heating or motion operation**. Creating an intent does not authorize physical dispatch.
 
 ```sh
 npm ci --prefix packages/contracts --ignore-scripts
@@ -21,9 +21,19 @@ One unreconciled attempt blocks the printer, including a recorded `started`, `un
 
 Files and directories use private permissions. Per-printer filesystem locks serialize readers/writers across instances; the JSONL journal is append-only and every event is flushed. Malformed history or an interrupted lock fails visibly. An operator must verify that no writer remains and inspect the actual printer/job and journal before recovering a lock. No automatic lock expiry, replay or power-loss guarantee is supplied. Use a local filesystem supporting the file/locking operations.
 
+## Read-only MCP discovery
+
+Import `discoverPrinterTools` and `createPreparedPrintValidator` from `@scan-to-make/companion/mcp-discovery`. Supply command, arguments, working directory and environment from trusted operator configuration, never a mobile/model request. Discovery uses the pinned MCP SDK to initialize a stdio server and collect every `tools/list` page. Limits bound time, page count, tool count, decoded catalog bytes and protocol buffer. Duplicate names, cursor loops, missing `print_3mf` or invalid print schemas reject. Cancellation and initialization failures await the same subprocess shutdown and verify actual PID disappearance, including forced termination when required. Stderr is drained without returning its possibly sensitive contents. Only detached, deeply frozen metadata escapes; there is no client or `tools/call` API.
+
+`createPreparedPrintValidator(catalog)` checks the actual discovered public `print_3mf` input schema without coercion, defaults or mutation. It allows only `three_mf_path`, `bambu_model`, `plate_index`, `nozzle_diameters`, `bed_type`, `use_ams`, `ams_slots` and `connection_mode`. Credentials, executable/bridge overrides and all other request keys reject. Validation proves argument shape, not file existence, supported installed firmware, live identity, readiness, safety or permission to execute. The catalog can become stale and must be refreshed when the configured server changes. The journal and discovery remain separate until prepared-file inspection and authenticated execution are integrated.
+
+Routine tests use protocol fixture subprocesses and record every received method to prove no tool is called. Separate opt-in installed-process evidence uses `BAMBU_MCP_ENTRY=/absolute/path/to/bambu-printer-mcp/dist/index.js npm test --prefix services/companion`. That test uses a private empty working/home directory, explicit empty model/serial/token, human-confirmation defaults, and a preload blocking socket connections/sends. It does not read a printer or use the user's live configuration. Without that environment variable the installed-process test is reported as skipped; fixture results do not imply it passed.
+
+Protocol implementation uses the pinned SDK's public client/stdio APIs: [MCP client documentation](https://modelcontextprotocol.io/docs/develop/build-client). No server implementation is copied into this package.
+
 ## Remaining integration gates
 
-The existing `bambu-printer-mcp` remains a separate process. Its actual public `print_3mf` schema uses `three_mf_path`, `bambu_model`, `plate_index`, full `nozzle_diameters`, `use_ams`/`ams_slots` and model-specific `connection_mode`. The companion must discover/validate that schema instead of exposing arbitrary bridge methods or executable overrides. This package does not translate or send those arguments yet.
+The existing `bambu-printer-mcp` remains a separate process. Its actual public `print_3mf` schema uses `three_mf_path`, `bambu_model`, `plate_index`, full `nozzle_diameters`, `use_ams`/`ams_slots` and model-specific `connection_mode`. Discovery validates a narrow prepared-argument projection against that schema. This package does not translate a journal plan into those arguments or send them yet.
 
 Before enabling a print/export route, integrate authenticated pairing/project access, genuine geometry and slicer provenance tying these two artifact identities together, prepared-file/selected-plate inspection, discovered model/route support, exact model/nozzle/material/AMS checks, fresh observed identity/ready/error state, human elicitation and once-only dispatch through the existing MCP gate. Unsliced input must not silently change approved bytes through auto-slicing. Checked export is not implemented in this increment. Stop/cancel/heater-off in the existing MCP remain available independently of this journal and any future billing/design service.
 
