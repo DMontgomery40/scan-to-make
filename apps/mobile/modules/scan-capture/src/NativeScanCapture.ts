@@ -16,6 +16,24 @@ export type CaptureSampleEvent = {
   thermal: string;
   /** Raw platform tracking state, e.g. iOS "normal" or Android "TRACKING". */
   tracking: string;
+  /** Optional iOS preview evidence; absent on legacy/headless sources. */
+  runId?: string;
+  sessionElapsedMs?: number;
+  previewVisible?: boolean;
+  trackingNormalThroughout?: boolean;
+  renderedFrames?: number;
+  depthFrames?: number;
+  meshAnchorCount?: number;
+  anchorId?: string;
+  anchorVisible?: boolean;
+  previewContent?: string;
+  contentAttached?: boolean;
+  renderedProbeFrames?: number;
+  anchorMethod?: string;
+  anchorPlacedAtSessionMs?: number;
+  anchorTransform?: Array<number>;
+  cameraTransform?: Array<number>;
+  probeMessage?: string;
 };
 
 export type CaptureSessionInfo = {
@@ -26,6 +44,9 @@ export type CaptureSessionInfo = {
   /** Whether the session runs the depth / mesh workload a real scan needs. */
   depthEnabled: boolean;
   meshEnabled: boolean;
+  runId?: string;
+  previewSupported?: boolean;
+  measurementOrigin?: string;
 };
 
 export interface Spec extends TurboModule {

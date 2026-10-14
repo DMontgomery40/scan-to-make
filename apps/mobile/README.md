@@ -1,6 +1,6 @@
 # Scan to Make: mobile shell (UI-001)
 
-React Native 0.87 (TypeScript, Hermes, New Architecture) shell for the D004 capture/preview spike. The consumer UI supports a general project brief and an explicitly selected cup-holder measurement study. Custom capture/generation and printing are not implemented; the separate developer harness measures a headless AR session.
+React Native 0.87 (TypeScript, Hermes, New Architecture) app with an isolated D004 capture/preview harness. The consumer UI supports a general project brief and an explicitly selected cup-holder measurement study. Custom capture/generation and printing are not implemented; the separate developer harness measures a headless AR session.
 
 ## Layout
 
@@ -51,7 +51,7 @@ Swift/Objective-C++ module and Home → measured example → four manual measure
 were verified on an iPhone 17 Pro simulator with Xcode 27.0. AR is unavailable
 there; this verifies compilation and interaction, not capture or physical fit.
 
-Use a Release build, because Debug JS makes UI-thread numbers meaningless. On the phone, open **About Scan to Make → Open spike harness** and tap **Start 2-minute run**. Keep the app in the foreground and pan slowly over a cup holder. The run auto-stops after 5 s of warm-up plus 120 s of scoring. Tap **Share report (JSON)** and post the JSON in #build-room.
+Use a Release build, because Debug JS makes UI-thread numbers meaningless. On the phone, open **About Scan to Make → Open spike harness** and tap **Start 2-minute run**. Keep the app in the foreground with the preview visible. On iOS, map a real surface, center it in the preview and tap to place the known orange 10 mm sphere. Only existing-plane geometry is accepted; no estimated surface fallback is used. Scored time starts at successful probe placement. Keep the probe visible while moving around it. The run auto-stops after 5 s of warm-up plus 120 s of scoring (one sample of completion slack). Tap **Share report (JSON)** and post the JSON in #build-room.
 
 Each report carries the thresholds it was scored with and the raw 1-second samples, so it can be re-scored if the team changes the interpretation.
 
@@ -59,14 +59,14 @@ Each report carries the thresholds it was scored with and the raw 1-second sampl
 | --- | --- |
 | Holds 30 fps for 2 min | Native frames are pooled into 5-s windows after warm-up. Every window must reach 29.5 fps (30 minus a quantisation tolerance). |
 | No thermal throttling | The thermal state must never exceed iOS `fair` (Android `light`). Android `moderate` and above count as throttling. |
-| Preview stays anchored | Not yet known: needs the native AR preview view and an observer check |
+| Preview stays anchored | Complete visible native run with the same retained surface-attached probe, normal tracking and explicit observer confirmation. Numeric drift is separate. |
 | TS core on Hermes | Every probe in `CORE_PROBES` passes on Hermes. This includes the contracts consumer check; geometry probes come with FIT-001. |
 
 Mock sources (simulator, emulator without ARCore, tests) always score "Not yet known".
 
 ## Known gaps
 
-- No camera preview is rendered yet. ARKit runs headless, and ARCore runs on an offscreen GL context. Frame rate and thermal numbers are only representative once the AR preview view and the real capture workload are in. Depth is enabled where supported; mesh reconstruction is enabled on LiDAR iPhones.
+- The iOS developer harness has a same-session visible ARKit preview and known anchor probe; physical-device performance and stability remain unqualified. Android ARCore still runs on an offscreen GL context and cannot satisfy the visible-preview report gates. Depth and mesh are configured only where supported, with observed workload reported separately.
 - Native capture start/stop is available in the developer spike harness only;
   the consumer capture screen currently checks support and accepts manual sizes.
 - The design dimensions (support height, wall, clearance) are seeded from the contracts fixture until FIT-001 supplies template defaults.
@@ -135,3 +135,45 @@ loopback endpoint is a same-Mac Simulator prototype, not real-device pairing,
 hosted transport or authentication. Android still supports local project storage;
 its generated-preview action reports unavailable. ASCII STL rendering, cache
 management and real-device transport are separate work.
+
+
+## Visible iOS capture probe
+
+The developer harness mounts an `ARSCNView` without starting a session or
+requesting camera access. Explicit Start creates one `ARSession`, shared by the
+preview, delivered-frame counters, depth and mesh configuration. Stop, preview
+removal, interruption or leaving the foreground pauses it. A new run creates a
+new session/run identity, clears the probe and resets observations.
+
+A tap places retained known preview geometry (an orange sphere, 10 mm diameter)
+on an existing-plane-geometry center raycast. This is a runtime stability probe,
+not a scan asset or generated fitted part. Its original anchor transform and
+sampled camera transforms are raw pose evidence, never a drift measurement.
+No frames/images or captured reference assets are retained or persisted.
+
+Report schema `scan-to-make.d004-spike-report.v1` keeps configuration separate
+from observation: `depthEnabled`/`meshEnabled` describe configuration, while raw
+windows record observed depth frames and mesh anchor counts. Delivered AR frames,
+unique-frame render callbacks, visible-preview state, probe geometry identity,
+anchor ID/attachment, in-frustum probe renders and tracking are recorded with
+one run ID. Preparation windows have zero scored time; the report retains their
+session-relative time. The preview must be at least 95% visible. Reports preserve
+raw one-second windows and distinguish delivered mean FPS from rendered mean FPS.
+
+Native capture/thermal qualification requires matching visible/rendered evidence
+throughout scored windows. Qualitative anchoring additionally requires the same
+real-surface probe retained and rendered in view with normal tracking for the
+full scored run, followed by an explicit observer choice. Mock, headless, hidden,
+unattached, unrendered or unobserved runs cannot qualify. A recorded negative
+observation fails qualitative stability. Unmeasured numeric drift remains
+inconclusive; an optional nonnegative measured maximum and external method are
+scored separately against the recorded 5 mm reference, outside the qualitative
+D004 overall verdict. Neither result establishes mechanical fit.
+
+Source tests cover evidence gates, explicit observation/reset, background and
+interruption cleanup. Release Simulator proves compilation, unsupported fallback,
+mock report behavior and Hermes execution only. Real camera preview, raycast
+placement, retained-content rendering, two-minute native performance, thermal
+behavior and physical stability require a separately authorized real-device run.
+No signing changes, access grants, pairing, cloud or printer operations are
+provided by this milestone.

@@ -13,7 +13,7 @@ Pod::Spec.new do |s|
   s.source       = { :git => "https://github.com/DMontgomery40/scan-to-make.git", :tag => "#{s.version}" }
 
   s.source_files = "ios/**/*.{h,m,mm,swift}"
-  s.frameworks   = "ARKit"
+  s.frameworks   = "ARKit", "SceneKit", "UIKit"
   s.swift_version = "5.9"
 
   install_modules_dependencies(s)

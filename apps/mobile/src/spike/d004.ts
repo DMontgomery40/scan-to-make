@@ -134,6 +134,10 @@ export interface RunSummary {
   maxThermal: ThermalLevel | null;
   rawThermalSeen: string[];
   trackingNormalFraction: number | null;
+  meanRenderedFps: number | null;
+  observedDepthFrames: number;
+  maxObservedMeshAnchors: number;
+  renderedProbeSeconds: number;
 }
 
 export function summarizeRun(
@@ -165,6 +169,28 @@ export function summarizeRun(
     windowsTotal: windows.length,
     maxThermal,
     rawThermalSeen: [...rawThermal],
+    meanRenderedFps:
+      scoredMs > 0 && scored.every(s => s.renderedFrames !== undefined)
+        ? scored.reduce((sum, s) => sum + (s.renderedFrames ?? 0), 0) /
+          (scoredMs / 1000)
+        : null,
+    observedDepthFrames: samples.reduce(
+      (sum, s) => sum + (s.depthFrames ?? 0),
+      0,
+    ),
+    maxObservedMeshAnchors: samples.reduce(
+      (maximum, s) => Math.max(maximum, s.meshAnchorCount ?? 0),
+      0,
+    ),
+    renderedProbeSeconds: scored
+      .filter(
+        s =>
+          s.previewVisible &&
+          s.contentAttached &&
+          s.anchorVisible &&
+          (s.renderedProbeFrames ?? 0) > 0,
+      )
+      .reduce((sum, s) => sum + s.intervalMs / 1000, 0),
     trackingNormalFraction: scored.length
       ? scored.filter(s => isTrackingNormal(s.tracking)).length / scored.length
       : null,
@@ -186,6 +212,8 @@ export interface AnchorObservation {
   /** Observer's on-device judgment that the preview stayed on the interface. */
   observerConfirmed: boolean | null;
   maxDriftMm: number | null;
+  /** External measurement procedure; a fixed ARAnchor pose is not drift evidence. */
+  measurementMethod?: string;
 }
 
 export type JsEngine = 'hermes' | 'node' | 'unknown';
@@ -203,10 +231,30 @@ export interface RuntimeCheck {
 
 export interface ScoreInput {
   source: 'native' | 'mock';
+  session?: CaptureSessionInfo | null;
   samples: readonly CaptureSample[];
   runtime: RuntimeCheck;
   anchor: AnchorObservation | null;
   thresholds?: D004Thresholds;
+}
+
+export function visibleNativeRun(input: ScoreInput): boolean {
+  const scored = scoredSamples(input.samples, input.thresholds);
+  const session = input.session;
+  return (
+    input.source === 'native' &&
+    session?.framework === 'arkit' &&
+    session.previewSupported === true &&
+    !!session.runId &&
+    scored.length > 0 &&
+    scored.every(
+      s =>
+        s.runId === session.runId &&
+        s.previewVisible === true &&
+        Number.isFinite(s.renderedFrames) &&
+        (s.renderedFrames ?? 0) > 0,
+    )
+  );
 }
 
 const fmt = (n: number, digits = 1) => n.toFixed(digits);
@@ -220,11 +268,12 @@ export function scoreFps(
     id: 'fps' as const,
     label: `AR capture holds ${t.minFps} fps for ${t.minRunSeconds / 60} min`,
   };
-  if (input.source === 'mock') {
+  if (!visibleNativeRun(input)) {
     return {
       ...base,
       verdict: 'inconclusive',
-      detail: 'Mock samples. Run on a device with the native module.',
+      detail:
+        'Needs a real, visible preview rendered by the same native session for every scored window.',
     };
   }
   if (
@@ -271,11 +320,12 @@ export function scoreThermal(
     id: 'thermal' as const,
     label: 'No thermal throttling during the run',
   };
-  if (input.source === 'mock') {
+  if (!visibleNativeRun(input)) {
     return {
       ...base,
       verdict: 'inconclusive',
-      detail: 'Mock samples. Run on a device with the native module.',
+      detail:
+        'Needs a real, visible preview rendered by the same native session for every scored window.',
     };
   }
   const limit = THERMAL_RANK[t.maxThermal];
@@ -321,6 +371,26 @@ export function scoreThermal(
   };
 }
 
+export function hasAnchoredPreview(input: ScoreInput): boolean {
+  const scored = scoredSamples(input.samples, input.thresholds);
+  return (
+    visibleNativeRun(input) &&
+    scored.every(
+      s =>
+        !!s.anchorId &&
+        s.anchorId === scored[0].anchorId &&
+        s.anchorMethod === 'existing-plane-geometry-center-raycast' &&
+        s.previewContent === 'known-orange-sphere-diameter-10mm-v1' &&
+        s.contentAttached === true &&
+        (s.renderedProbeFrames ?? 0) > 0 &&
+        s.renderedProbeFrames === s.renderedFrames &&
+        s.trackingNormalThroughout === true &&
+        s.anchorVisible === true &&
+        isTrackingNormal(s.tracking),
+    )
+  );
+}
+
 export function scoreAnchor(input: ScoreInput): CriterionResult {
   const t = input.thresholds ?? D004_THRESHOLDS;
   const base = {
@@ -328,35 +398,66 @@ export function scoreAnchor(input: ScoreInput): CriterionResult {
     label: 'AR preview stays anchored to the captured interface',
   };
   const anchor = input.anchor;
-  if (!anchor || anchor.observerConfirmed === null) {
+  const anchored = hasAnchoredPreview(input);
+  if (
+    !anchored ||
+    !anchor ||
+    anchor.observerConfirmed === null ||
+    summarizeRun(input.samples, t).scoredSeconds < t.minRunSeconds
+  ) {
     return {
       ...base,
       verdict: 'inconclusive',
       detail:
-        'Needs the native AR preview view and an on-device observer check.',
-    };
-  }
-  if (anchor.maxDriftMm !== null && anchor.maxDriftMm > t.maxAnchorDriftMm) {
-    return {
-      ...base,
-      verdict: 'fail',
-      detail: `Drift ${fmt(anchor.maxDriftMm)} mm exceeds ${
-        t.maxAnchorDriftMm
-      } mm.`,
+        'Needs a complete visible native run with the same surface probe tracked in view, plus an explicit observer check.',
     };
   }
   if (!anchor.observerConfirmed) {
     return {
       ...base,
       verdict: 'fail',
-      detail: 'Observer saw the preview drift off the interface.',
+      detail: 'Observer saw the probe slip from the surface.',
     };
   }
-  const drift =
-    anchor.maxDriftMm === null
-      ? 'drift not measured'
-      : `max drift ${fmt(anchor.maxDriftMm)} mm`;
-  return { ...base, verdict: 'pass', detail: `Observer confirmed; ${drift}.` };
+  return {
+    ...base,
+    verdict: 'pass',
+    detail:
+      'Observer confirmed qualitative stability. This is not a numeric drift or mechanical-fit measurement.',
+  };
+}
+
+/** Separate from the agreed qualitative D004 criterion and overall verdict. */
+export function scoreDrift(input: ScoreInput): CriterionResult {
+  const base = {
+    id: 'anchor' as const,
+    label: 'Measured drift (separate evidence)',
+  };
+  const observation = input.anchor;
+  if (
+    !visibleNativeRun(input) ||
+    scoreAnchor(input).verdict === 'inconclusive' ||
+    !observation?.measurementMethod?.trim() ||
+    observation.maxDriftMm === null ||
+    !Number.isFinite(observation.maxDriftMm) ||
+    observation.maxDriftMm < 0
+  ) {
+    return {
+      ...base,
+      verdict: 'inconclusive',
+      detail: 'No valid external drift measurement and method recorded.',
+    };
+  }
+  const limit = (input.thresholds ?? D004_THRESHOLDS).maxAnchorDriftMm;
+  return {
+    ...base,
+    verdict: observation.maxDriftMm <= limit ? 'pass' : 'fail',
+    detail: `Recorded maximum ${fmt(
+      observation.maxDriftMm,
+    )} mm against ${limit} mm; method: ${
+      observation.measurementMethod
+    }. Not mechanical-fit evidence.`,
+  };
 }
 
 export function scoreHermes(input: ScoreInput): CriterionResult {
@@ -403,7 +504,7 @@ export function overallVerdict(criteria: readonly CriterionResult[]): Verdict {
   return criteria.every(c => c.verdict === 'pass') ? 'pass' : 'inconclusive';
 }
 
-export const REPORT_SCHEMA = 'scan-to-make.d004-spike-report.v0';
+export const REPORT_SCHEMA = 'scan-to-make.d004-spike-report.v1';
 
 export interface SpikeReport {
   schema: typeof REPORT_SCHEMA;
@@ -416,6 +517,7 @@ export interface SpikeReport {
   anchor: AnchorObservation | null;
   errors: string[];
   criteria: CriterionResult[];
+  quantitativeDrift: CriterionResult;
   verdict: Verdict;
   /** Raw 1-s native samples, so the run can be re-scored later. */
   samples: CaptureSample[];
@@ -451,6 +553,7 @@ export function buildReport(
     anchor: input.anchor,
     errors: [...input.errors],
     criteria,
+    quantitativeDrift: scoreDrift(input),
     verdict,
     samples: [...input.samples],
   };
