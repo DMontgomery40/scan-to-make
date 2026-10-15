@@ -120,7 +120,22 @@ class AppDataModel: Identifiable {
     private var lastObservedPause: Bool?
     var evaluationStarted = Date()
     private(set) var captureStopped = false
+    private(set) var stopMessage: String?
     var evaluationWriteError: String?
+
+    enum CameraRelease: Equatable {
+        case notRequested
+        case pending
+        case confirmed
+        case unconfirmed
+    }
+
+    static let cancellationConfirmationLimit: TimeInterval = 5
+
+    // Held until the session reports a terminal state so teardown finishes before it is released.
+    private(set) var cameraRelease: CameraRelease = .notRequested
+    private var cancellingSession: ObjectCaptureSession?
+    private var cancellationTasks: [Task<Void, Never>] = []
     var passCount = 1
     var flipCount = 0
 
@@ -145,6 +160,7 @@ class AppDataModel: Identifiable {
     isolated deinit {
         NotificationCenter.default.removeObserver(self)
         for task in tasks { task.cancel() }
+        for task in cancellationTasks { task.cancel() }
     }
 
     /// Once reconstruction and viewing are complete, this should be called to let the app know it can go back to the new capture
@@ -157,22 +173,70 @@ class AppDataModel: Identifiable {
 
     // Only a deliberate Begin action may create a session after a retained stop.
     func beginCapture() {
-        guard objectCaptureSession == nil, photogrammetrySession == nil else { return }
+        guard objectCaptureSession == nil, photogrammetrySession == nil, cameraRelease != .pending else { return }
         captureStopped = false
+        stopMessage = nil
+        cameraRelease = .notRequested
         reset()
     }
 
-    func stopCapture(reason: String = "Stopped by user") {
+    func stopCapture(reason: String = "Stopped by user", message: String? = nil) {
         guard !captureStopped, let session = objectCaptureSession else { return }
         captureStopped = true
+        stopMessage = message
         record("interrupted", detail: reason + "; original files retained")
         detachListeners()
+        awaitCancellation(of: session)
         session.cancel()
-        record("cancel-requested", detail: "Public cancellation requested; hardware release not verified")
+        record("cancel-requested", detail: "Public cancellation requested; awaiting session confirmation")
         objectCaptureSession = nil
         showOverlaySheets = false
         UIApplication.shared.isIdleTimerDisabled = false
         state = .notSet
+    }
+
+    private func awaitCancellation(of session: ObjectCaptureSession) {
+        cancellingSession = session
+        cameraRelease = .pending
+        cancellationTasks = [
+            Task<Void, Never> { [weak self] in
+                var terminal = AppDataModel.isTerminal(session.state)
+                if !terminal {
+                    for await newState in session.stateUpdates where AppDataModel.isTerminal(newState) {
+                        terminal = true
+                        break
+                    }
+                }
+                guard terminal, !Task.isCancelled else { return }
+                self?.finishCancellation(of: session, confirmed: true)
+            },
+            Task<Void, Never> { [weak self] in
+                try? await Task.sleep(for: .seconds(AppDataModel.cancellationConfirmationLimit))
+                guard !Task.isCancelled else { return }
+                self?.finishCancellation(of: session, confirmed: false)
+            }
+        ]
+    }
+
+    private func finishCancellation(of session: ObjectCaptureSession, confirmed: Bool) {
+        guard let cancellingSession, cancellingSession.id == session.id else { return }
+        for task in cancellationTasks { task.cancel() }
+        cancellationTasks.removeAll()
+        cameraRelease = confirmed ? .confirmed : .unconfirmed
+        if confirmed {
+            record("cancel-confirmed", detail: "Session reported \(String(describing: session.state))")
+        } else {
+            record("cancel-unconfirmed",
+                   detail: "No terminal session state within \(Int(Self.cancellationConfirmationLimit))s")
+        }
+        self.cancellingSession = nil
+    }
+
+    private static func isTerminal(_ state: ObjectCaptureSession.CaptureState) -> Bool {
+        switch state {
+            case .completed, .failed: return true
+            default: return false
+        }
     }
 
     // Don't touch the showOverlaySheets directly, call setShowOverlaySheets() instead.
@@ -251,6 +315,37 @@ extension AppDataModel {
             }
             logger.log("^^^ Got nil from stateUpdates iterator!  Ending observation task...")
         })
+
+        tasks.append(Task<Void, Never> { [weak self] in
+            var watchdog = CaptureWatchdog()
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(1))
+                guard !Task.isCancelled, let self, !self.captureStopped,
+                      self.objectCaptureSession?.id == model.id else { return }
+                // Finishing writes the retained images; interrupting it would lose them.
+                switch model.state {
+                    case .finishing, .completed, .failed: return
+                    default: break
+                }
+                let reason = watchdog.observe(tracking: AppDataModel.watchdogTracking(model.cameraTracking),
+                                              paused: model.isPaused,
+                                              shots: model.numberOfShotsTaken,
+                                              thermalCritical: ProcessInfo.processInfo.thermalState == .critical,
+                                              at: ProcessInfo.processInfo.systemUptime)
+                if let reason {
+                    self.stopCapture(reason: reason.detail, message: reason.message)
+                    return
+                }
+            }
+        })
+    }
+
+    private static func watchdogTracking(_ tracking: Tracking) -> CaptureWatchdog.Tracking {
+        switch tracking {
+            case .normal: return .normal
+            case .notAvailable: return .notAvailable
+            default: return .limited
+        }
     }
 
     private func detachListeners() {
@@ -485,6 +580,7 @@ extension AppDataModel {
             "detailTruncated": detail.count > 512,
             "elapsedSeconds": Date().timeIntervalSince(evaluationStarted),
             "modelState": String(describing: state), "sessionAvailable": objectCaptureSession != nil,
+            "thermalState": Self.thermalStateName, "cameraRelease": String(describing: cameraRelease),
             "shots": objectCaptureSession?.numberOfShotsTaken ?? 0,
             "completedCurrentPass": objectCaptureSession?.userCompletedScanPass ?? false
         ]
@@ -524,6 +620,15 @@ extension AppDataModel {
             try bytes.write(to: folder.appendingPathComponent("evaluation.json"), options: .atomic)
             evaluationWriteError = nil
         } catch { evaluationWriteError = "Evaluation report could not be saved. Original images may still be available in Files." }
+    }
+    private static var thermalStateName: String {
+        switch ProcessInfo.processInfo.thermalState {
+            case .nominal: return "nominal"
+            case .fair: return "fair"
+            case .serious: return "serious"
+            case .critical: return "critical"
+            @unknown default: return "unknown"
+        }
     }
     private static var hardwareIdentifier: String {
         var size = 0

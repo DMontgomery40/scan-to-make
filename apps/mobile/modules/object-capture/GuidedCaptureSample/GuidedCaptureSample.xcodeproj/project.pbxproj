@@ -46,6 +46,7 @@
 		64C12FD32BFEB4A4002D3E7E /* ScanPasses-iPad-FixedHeight-unflippable-low.mp4 in Resources */ = {isa = PBXBuildFile; fileRef = 64C12FC42BFEB4A4002D3E7E /* ScanPasses-iPad-FixedHeight-unflippable-low.mp4 */; };
 		64F43E522BFEB06E0069D4F3 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 64F43E512BFEB06E0069D4F3 /* Assets.xcassets */; };
 		8DB8EB4A2C095965004F3E19 /* AppDataModel+Orbit.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DB8EB492C09595F004F3E19 /* AppDataModel+Orbit.swift */; };
+		5CA7D0620A1B2C3D4E5F6071 /* CaptureWatchdog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5CA7D0610A1B2C3D4E5F6071 /* CaptureWatchdog.swift */; };
 		8DB8EB4C2C0A46ED004F3E19 /* BottomOverlayButtons.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DB8EB4B2C0A46E4004F3E19 /* BottomOverlayButtons.swift */; };
 		8DB8EB4E2C0A5945004F3E19 /* TopOverlayButtons.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DB8EB4D2C0A5940004F3E19 /* TopOverlayButtons.swift */; };
 		8DB8EB502C0A6023004F3E19 /* TutorialPageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DB8EB4F2C0A601C004F3E19 /* TutorialPageView.swift */; };
@@ -96,6 +97,7 @@
 		64C12FC92BFEB4A4002D3E7E /* ScanPasses-iPhone-FixedHeight-unflippable-low.mp4 */ = {isa = PBXFileReference; lastKnownFileType = file; path = "ScanPasses-iPhone-FixedHeight-unflippable-low.mp4"; sourceTree = "<group>"; };
 		64F43E512BFEB06E0069D4F3 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		8DB8EB492C09595F004F3E19 /* AppDataModel+Orbit.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppDataModel+Orbit.swift"; sourceTree = "<group>"; };
+		5CA7D0610A1B2C3D4E5F6071 /* CaptureWatchdog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureWatchdog.swift; sourceTree = "<group>"; };
 		8DB8EB4B2C0A46E4004F3E19 /* BottomOverlayButtons.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BottomOverlayButtons.swift; sourceTree = "<group>"; };
 		8DB8EB4D2C0A5940004F3E19 /* TopOverlayButtons.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TopOverlayButtons.swift; sourceTree = "<group>"; };
 		8DB8EB4F2C0A601C004F3E19 /* TutorialPageView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TutorialPageView.swift; sourceTree = "<group>"; };
@@ -142,6 +144,7 @@
 				64A07E0F2BFE9C7E00FDE113 /* Views */,
 				64A07DCC2BFE7CDA00FDE113 /* AppDataModel.swift */,
 				8DB8EB492C09595F004F3E19 /* AppDataModel+Orbit.swift */,
+				5CA7D0610A1B2C3D4E5F6071 /* CaptureWatchdog.swift */,
 				64A07DCD2BFE7CDA00FDE113 /* CaptureFolderManager.swift */,
 				64A07DD12BFE7CDA00FDE113 /* FeedbackMessages.swift */,
 				64A07DD32BFE7CDA00FDE113 /* GuidedCaptureSampleApp.swift */,
@@ -325,6 +328,7 @@
 				64A07E132BFE9E0F00FDE113 /* CapturePrimaryView.swift in Sources */,
 				64A07E142BFE9E0F00FDE113 /* HelpPageView.swift in Sources */,
 				8DB8EB4A2C095965004F3E19 /* AppDataModel+Orbit.swift in Sources */,
+				5CA7D0620A1B2C3D4E5F6071 /* CaptureWatchdog.swift in Sources */,
 				64A07E152BFE9E0F00FDE113 /* ContentView.swift in Sources */,
 				64A07E162BFE9E0F00FDE113 /* PlayerView.swift in Sources */,
 				64A07E172BFE9E0F00FDE113 /* ModelView.swift in Sources */,

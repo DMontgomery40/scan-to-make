@@ -17,7 +17,22 @@ struct GuidedCaptureSampleApp: App {
                     SwiftUI.Form {
                         if appModel.captureStopped {
                             SwiftUI.Section("Capture stopped") {
+                                if let message = appModel.stopMessage {
+                                    Text(message).bold()
+                                }
                                 Text("Your capture files have been kept. Choose Begin when you want to start a new capture.")
+                                switch appModel.cameraRelease {
+                                    case .pending:
+                                        Label("Releasing the camera…", systemImage: "hourglass")
+                                    case .confirmed:
+                                        Label("Camera released.", systemImage: "checkmark.circle")
+                                    case .unconfirmed:
+                                        Label("iOS didn't confirm the camera was released. If the Camera app is black, restart iPhone.",
+                                              systemImage: "exclamationmark.triangle")
+                                            .foregroundStyle(.orange)
+                                    case .notRequested:
+                                        EmptyView()
+                                }
                                 if let message = appModel.evaluationWriteError {
                                     Text(message).foregroundStyle(.red)
                                 }
@@ -31,13 +46,15 @@ struct GuidedCaptureSampleApp: App {
                             LabeledContent("Object Capture", value: ObjectCaptureSession.isSupported ? "Supported" : "Unavailable")
                             LabeledContent("Reconstruction", value: PhotogrammetrySession.isSupported ? "Supported" : "Unavailable")
                             Text("Requires a physical LiDAR device, A14 or later, iOS 18 or later. No camera starts until you choose Begin.")
+                            Text("Capture stops on its own and releases the camera if no images arrive, tracking doesn't start, or it's left unattended.")
                         }
                         SwiftUI.Section {
                             Button("Begin guided capture") {
                                 appModel.beginCapture()
                                 started = true
                             }
-                                .disabled(!ObjectCaptureSession.isSupported || !PhotogrammetrySession.isSupported)
+                                .disabled(!ObjectCaptureSession.isSupported || !PhotogrammetrySession.isSupported
+                                          || appModel.cameraRelease == .pending)
                             Text("Completed captures and original images remain in Files → On My iPhone → Capture Evaluation. Share the entire capture folder for independent inspection. Keep personal captures private.")
                         }
                     }.navigationTitle("Capture Evaluation")

@@ -10,9 +10,14 @@ xcodebuild -project GuidedCaptureSample/GuidedCaptureSample.xcodeproj \
   -destination 'generic/platform=iOS' -derivedDataPath /tmp/capture-evaluation \
   CODE_SIGNING_ALLOWED=NO build
 python3 -m unittest discover -s tests -v
+./tests/watchdog/run_watchdog_checks.sh
 ```
 
 Apple's sample requires physical LiDAR hardware with A14 or later. This target deliberately does not compile for Simulator. On launch, the evaluation landing screen displays `ObjectCaptureSession.isSupported` and `PhotogrammetrySession.isSupported` separately. Begin is disabled if either is unavailable. The camera/session is created only after Begin; permission refusal and capture failure use the sample's error/restart flow. Device build, signing, installation, launch, usable capture, reconstruction and accuracy are separate results.
+
+## Camera release
+
+A capture never holds the camera waiting for someone to tap Stop. `CaptureWatchdog` stops the session, retaining its files, when tracking is unavailable for 15 s (no camera images), not normal for 90 s, the session stays paused for 5 minutes, no new shot arrives for 5 minutes, or the thermal state is critical. Paused time does not count toward the tracking and progress limits. Stopping keeps the session until it reports a terminal state; `evaluation.json` records `cancel-confirmed`, or `cancel-unconfirmed` after 5 s, and the landing screen shows the same result. Begin stays disabled until one of the two is recorded. A confirmed cancellation is the session's own report, not an independent hardware check.
 
 ## Capture matrix and recovery
 
