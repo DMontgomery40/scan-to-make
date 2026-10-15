@@ -172,10 +172,15 @@ export class PreparedJobStore {
       this.requireFreshApproval(job, approval, checkedNow);
       const intent = intentSchema.parse({kind: 'intent', intentId: randomUUID(), jobId: job.id,
         jobSha256: job.sha256, atMs: checkedNow, approval});
+      const intentBytes = Buffer.from(JSON.stringify(intent) + '\n');
+      if (intentBytes.length > this.bound.maxMetadataBytes) throw new Error('Prepared job intent metadata byte limit exceeded');
       const folder = join(this.directory, job.id);
       const temporary = join(folder, `intent.${randomUUID()}.tmp`);
-      await writeSynced(temporary, Buffer.from(JSON.stringify(intent) + '\n'));
+      await writeSynced(temporary, intentBytes);
       try {
+        // The write above can outlast the approval window; freshness must still
+        // hold at publication, or nothing is published.
+        this.requireFreshApproval(job, approval, integer.parse(this.clock()));
         // link() is the once-only commit: it fails if the intent already exists,
         // and the visible intent is never a partial write.
         await link(temporary, join(folder, 'intent.json'));

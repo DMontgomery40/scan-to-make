@@ -115,6 +115,27 @@ test('selection changes produce a different job digest, so old approvals never b
  assert.equal(intent.jobId,second.jobId);
 });
 
+test('oversized serialized intent rejects before publishing an unreadable intent',async t=>{
+ const f=await accepted(t);
+ const capped=new PreparedJobStore(f.storage,join(f.root,'prepared'),{clock:()=>1800000000000,maxMetadataBytes:4096});
+ const prepared=await capped.prepare(request());
+ await assert.rejects(capped.claimIntent(prepared.jobId,{...approval(prepared.job),actorId:'x'.repeat(5000)}),/limit/);
+ assert.equal((await capped.loadPreparedJob(prepared.jobId)).intent,null);
+ const intent=await capped.claimIntent(prepared.jobId,approval(prepared.job));
+ assert.deepEqual((await capped.loadPreparedJob(prepared.jobId)).intent,intent);
+});
+
+test('approval expiring during the intent write never publishes an intent',async t=>{
+ const f=await accepted(t);const T=1800000000000;
+ const prepared=await f.jobs.prepare(request());
+ let calls=0;const advancing=()=>++calls<=2?T:T+120000;
+ const store=new PreparedJobStore(f.storage,join(f.root,'prepared'),{clock:advancing});
+ await assert.rejects(store.claimIntent(prepared.jobId,approval(prepared.job,T)),/approval/i);
+ assert.equal((await f.fresh().loadPreparedJob(prepared.jobId)).intent,null);
+ const intent=await f.jobs.claimIntent(prepared.jobId,approval(prepared.job,T));
+ assert.deepEqual((await f.fresh().loadPreparedJob(prepared.jobId)).intent,intent);
+});
+
 test('corrupt retained intent fails closed instead of looking unclaimed',async t=>{
  const f=await accepted(t);const prepared=await f.jobs.prepare(request());
  await f.jobs.claimIntent(prepared.jobId,approval(prepared.job));
