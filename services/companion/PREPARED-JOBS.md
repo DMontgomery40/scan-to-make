@@ -92,3 +92,43 @@ lock requires manual inspection before recovery.
 - Run the maintained checks with `npm test --prefix services/companion`
   (the prepared-job cases live in `tests/prepared-jobs.test.mjs` and use
   isolated synthetic fixtures only).
+
+## Trusted production from an accepted STL
+
+The internal `prepareProduced` method accepts a current portable project ID,
+revision, strong ETag, client job UUID, exact accepted STL bytes, and a selection
+without `slicerSettingsSha256`. Configure both `production` and `inspection` on
+the store. `createPreparedProducer` supplies the maintained macOS producer with
+fixed host configuration: Python path, producer script and SHA-256 pin, bundle,
+binary SHA-256 pin, version, and bundled machine/process/filament preset names.
+Requests cannot choose executables, paths, presets, or receipts. This method is
+not exposed by HTTP and adds no device permissions.
+
+Source identity and STL structure are checked before slicing. Slicing runs
+outside the project edit lock. The final commit uses the existing lock to check
+the current ETag, revision and acceptance, inspect the exact output, and check
+authorization/cancellation after fsync. A concurrent project edit rejects the
+result. Retry the same job UUID and unchanged request after an ambiguous result:
+a persisted job is reverified and returned without slicing or inspecting again.
+A different request, producer configuration, or imported/produced identity rejects.
+
+The optional `production` record is sealed in the job digest. The job retains
+`source.stl`, `settings.json`, and `production.json` alongside the printable and
+job metadata. Reopen verifies their exact lengths and SHA-256 values, their
+manifest bindings and the current accepted source. Source is capped at32MiB,
+settings at8MiB, manifest at1MiB, and G-code at the store's printable limit.
+The runner requires enforced macOS isolation, limits runtime/logs, and reaps its
+owned slicer group on cancellation. Unsupported platforms refuse execution.
+The original user home is resolved by the producer for its read-denial profile;
+the slicer itself receives a fresh scratch home and no inherited credentials.
+
+For **trusted-produced jobs only**, `selection.slicerSettingsSha256` means the
+SHA-256 of the exact retained exported-settings bytes from that run. Imported
+jobs keep their caller-declared meaning. This is not proof of complete internal
+settings equivalence, calibration, physical fit, or observed printer/tray state.
+No `CalibrationScope` is created or modified.
+
+Produced jobs are temporarily excluded from existing discovery because older
+native clients reject the new optional record. Direct verified GET can return
+them to compatible consumers. Restoring discovery requires an explicit native
+parser and compatibility negotiation update; it is not an implicit rollout.
