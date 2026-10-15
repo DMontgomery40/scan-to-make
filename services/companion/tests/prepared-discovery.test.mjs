@@ -102,7 +102,7 @@ test('metadata budget yields a continuation and the maximum page never exceeds f
  const f=await fixture(t);await seed(f,51);
  const page=JSON.parse((await listing(f,'&limit=50')).bytes);assert.equal(page.jobs.length,50);assert.ok(page.nextCursor);assert.ok(Buffer.byteLength(JSON.stringify(page))<64*1024);
  for(let n=1;n<=8;n++)await writeFile(join(f.root,'jobs',uuid(n),'job.json'),Buffer.alloc(1024*1024+1,32));
- const bounded=JSON.parse((await listing(f)).bytes);assert.equal(bounded.unreadable,8);assert.deepEqual(bounded.jobs,[]);assert.ok(bounded.nextCursor);
+ const bounded=JSON.parse((await listing(f)).bytes);assert.equal(bounded.unreadable,7);assert.deepEqual(bounded.jobs,[]);assert.ok(bounded.nextCursor);
  const continued=JSON.parse((await listing(f,'&cursor='+bounded.nextCursor)).bytes);assert.equal(continued.jobs[0].jobId,uuid(9));assert.equal(continued.jobs.length,20);
 });
 

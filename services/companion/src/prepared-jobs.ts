@@ -249,7 +249,7 @@ export class PreparedJobStore {
       if (cursor && position === 0) throw new PreparedJobFailure('invalid-cursor');
       const jobs: {jobId: string; jobSha256: string; printableArtifact: ArtifactRef; model: string; plateIndex: number}[] = [];
       let unreadable = 0, scanned = 0, budget = DISCOVERY.metadataBytes;
-      while (position < entries.length && scanned < DISCOVERY.records && jobs.length < request.limit && budget >= this.bound.maxMetadataBytes) {
+      while (position < entries.length && scanned < DISCOVERY.records && jobs.length < request.limit && budget > this.bound.maxMetadataBytes) {
         assertActive();
         const entry = entries[position++]!; scanned++;
         if (!entry.directory) {unreadable++; continue;}
@@ -260,7 +260,8 @@ export class PreparedJobStore {
           job = this.parseJob(entry.id, bytes);
         } catch {
           unreadable++;
-          budget -= bytes?.length ?? this.bound.maxMetadataBytes;
+          // A rejected oversized read may consume the one-byte overflow probe.
+          budget -= bytes?.length ?? this.bound.maxMetadataBytes + 1;
           continue;
         }
         budget -= bytes.length;
