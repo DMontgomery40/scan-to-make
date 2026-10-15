@@ -706,7 +706,7 @@ test('only accepted saved projects expose the inspected files browser', async ()
   await store.change(fit.id,0,{kind:'attach-preview',sourceFit:fit,artifact});
   await store.change(fit.id,1,{kind:'accept-preview',sourceFit:fit,artifact});
   await press(tree,'Refresh projects');await press(tree,'Inspected files');
-  expect(texts(tree)).toContain('Imported sliced files for this saved project.');
+  expect(texts(tree)).toContain('Inspected print files for this saved project.');
   await press(tree,'Back');expect(texts(tree)).toContain('Your projects');
   await act(async()=>tree.unmount());
 });

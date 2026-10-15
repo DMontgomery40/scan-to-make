@@ -23,6 +23,7 @@ BUNDLE = 'com.scantomake.preparedfiletests'
 parser = argparse.ArgumentParser()
 parser.add_argument('--simulator', required=True, help='Already booted Simulator UUID')
 parser.add_argument('--evidence', type=Path, required=True)
+parser.add_argument('--produced-fixture', type=Path, help='Retained operator-produced job directory; replay only, no slicer run')
 args = parser.parse_args()
 args.evidence.mkdir(parents=True, exist_ok=True)
 env = dict(os.environ, DEVELOPER_DIR='/Applications/Xcode.app/Contents/Developer')
@@ -42,7 +43,7 @@ with tempfile.TemporaryDirectory(prefix='native-prepared-files-') as temp:
         run([str(temp / 'pairing-test')],stdout=log,stderr=subprocess.STDOUT)
     fixture_log = open(temp / 'fixture.log', 'w+')
     fixture = subprocess.Popen(['node', str(REPO / 'apps/mobile/scripts/pairing-fixture/server.mjs')],
-                               cwd=REPO, env=dict(env, SCAN_PREPARED_FIXTURE='1'),
+                               cwd=REPO, env=dict(env, SCAN_PREPARED_FIXTURE='1', **({'SCAN_PRODUCED_FIXTURE_DIR':str(args.produced_fixture.resolve())} if args.produced_fixture else {})),
                                stdout=fixture_log, stderr=subprocess.STDOUT)
     fixture_root = None
     installed = False
@@ -88,7 +89,7 @@ with tempfile.TemporaryDirectory(prefix='native-prepared-files-') as temp:
         assert completed.returncode == 0, 'Native host failed; see runtime.log'
         container = Path(subprocess.check_output(['xcrun','simctl','get_app_container',args.simulator,BUNDLE,'data'],env=env,text=True).strip())
         result = json.loads((container / 'Documents/results-2.json').read_text())
-        assert result['passed'] and len(result['cases']) == 2 and result['runId'] == run_id
+        assert result['passed'] and len(result['cases']) == len(prepared['jobs']) and result['runId'] == run_id
         first=json.loads((container / 'Documents/results-1.json').read_text())
         assert first['passed'] and first['runId']==run_id and first['phase']==1 and result['phase']==2
         for case in result['cases']:
@@ -99,9 +100,9 @@ with tempfile.TemporaryDirectory(prefix='native-prepared-files-') as temp:
         result['independentByteComparison']=True
         result['bridgeSha256'] = hashlib.sha256((REPO / 'apps/mobile/modules/local-project-storage/ios/PreparedFileBridge.mm').read_bytes()).hexdigest()
         result['simulator'] = args.simulator
-        result['source'] = 'synthetic file-inspection protocol fixture; no geometry or slicing provenance'
+        result['source'] = 'retained produced evidence plus synthetic imported protocol fixtures; no slicing rerun or physical fit claim' if args.produced_fixture else 'synthetic file-inspection protocol fixture; no geometry or slicing provenance'
         (args.evidence / 'results.json').write_text(json.dumps(result, indent=2) + '\n')
-        print(json.dumps({'passed':True,'cases':2,'evidence':str(args.evidence.resolve()),'restart':True}))
+        print(json.dumps({'passed':True,'cases':len(prepared['jobs']),'evidence':str(args.evidence.resolve()),'restart':True}))
     finally:
         if installed:
             subprocess.run(['xcrun','simctl','terminate',args.simulator,BUNDLE],env=env,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)

@@ -375,9 +375,19 @@ the app’s Documents folder, accessible in Files.
 A stale cursor removes old handles and offers Refresh. Refresh replaces pages.
 Opening connection settings, leaving the foreground or leaving the screen
 invalidates its selection and pending results. Local project and pairing changes
-are checked again before listing, reviewing and exporting. File inspection copy
-identifies imported sliced files without claiming they derive from the accepted
-design or that a printed part will fit. There is no preparation or dispatch UI.
+are checked again before listing, reviewing and exporting. Imported-file copy does not claim derivation from the accepted design. A verified
+optional production record identifies companion slicing, the exact accepted STL,
+retained exported-settings bytes, manifest and slicer identity. Its canonical job
+digest includes these fields. The client bounds and validates every reference and
+requires the settings digest to match the selected settings. Settings identity is
+not calibration or physical-fit proof. There is no preparation or dispatch UI.
+
+Discovery explicitly sends `productionVersion=1`. Older companions remain usable:
+only an explicit first-page HTTP 400 `invalid-request` permits one retry without
+that query. Continuation pages preserve the resulting mode; refresh tries the
+current capability again. Authentication, stale state, malformed success responses
+and pagination failures never trigger a downgrade. Metadata and download routes
+never accept the discovery query.
 
 For an isolated ordinary-app navigation fixture, start the existing loopback
 fixture with `SCAN_PREPARED_FIXTURE=1 SCAN_PREPARED_FIXTURE_COUNT=21` after building
@@ -390,3 +400,13 @@ Moving one fixture job directory outside `prepared` between pages exercises
 cursor-stale recovery. Keep credentials and runtime evidence outside Git.
 The native bridge harness also exercises two actual collection pages and strict
 query rejection on both process runs.
+
+To replay a retained operator-produced bundle alongside the synthetic imported
+files, set `SCAN_PRODUCED_FIXTURE_DIR` to a private directory containing `job.json`,
+`source.stl`, `settings.json`, `production.json` and `printable.bin`. The fixture
+checks the accepted source identity and reopens the exact bundle through the real
+store; it does not rerun slicing or inspection. The native harness accepts the same
+directory with `--produced-fixture /private/retained-job`, exercises compatible
+collection pagination, reopens every file after process restart and independently
+compares exports. Keep those artifacts and credentials outside Git. This replay
+proves native consumption of retained evidence, not physical fit or print safety.

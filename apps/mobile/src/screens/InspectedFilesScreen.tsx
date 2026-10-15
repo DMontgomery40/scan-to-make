@@ -7,6 +7,7 @@ import {
   preparedNative,
   preparedError,
   type PreparedSummary,
+  type DiscoveryMode,
   type PreparedJob,
   type ProjectAcknowledgment,
 } from '../prepared/preparedFiles';
@@ -42,6 +43,7 @@ export function InspectedFilesScreen({
     [message, setMessage] = useState('Loading inspected files…');
   const [items, setItems] = useState<PreparedSummary[]>([]),
     [cursor, setCursor] = useState<string | null>(null);
+  const [mode, setMode] = useState<DiscoveryMode>('production-v1');
   const [ack, setAck] = useState<ProjectAcknowledgment | null>(null);
   const [selected, setSelected] = useState<{
     summary: PreparedSummary;
@@ -51,6 +53,7 @@ export function InspectedFilesScreen({
   function clear() {
     setItems([]);
     setCursor(null);
+    setMode('production-v1');
     setAck(null);
     setSelected(null);
     setUnreadable(0);
@@ -99,6 +102,7 @@ export function InspectedFilesScreen({
       setAck(next);
       setItems(page.jobs);
       setCursor(page.nextCursor);
+      setMode(page.mode);
       setUnreadable(page.unreadable);
       setMessage(
         page.jobs.length
@@ -129,7 +133,7 @@ export function InspectedFilesScreen({
   return (
     <Screen
       title={selected ? 'File inspection' : 'Inspected files'}
-      subtitle="Imported sliced files for this saved project."
+      subtitle="Inspected print files for this saved project."
       onBack={onBack}
     >
       <Text accessibilityLiveRegion="polite" style={type.body}>
@@ -138,7 +142,11 @@ export function InspectedFilesScreen({
       {selected ? (
         <>
           <Card>
-            <Text style={type.label}>IMPORTED SLICED FILE</Text>
+            <Text style={type.label}>
+              {selected.job.production
+                ? 'SLICED BY YOUR COMPANION'
+                : 'IMPORTED SLICED FILE'}
+            </Text>
             <Text style={type.heading}>
               {selected.job.printableArtifact.mediaType === 'model/3mf'
                 ? '3MF'
@@ -169,10 +177,22 @@ export function InspectedFilesScreen({
             <Text style={type.body}>
               Bed: {selected.job.inspection.receipt.inspection.bedType}
             </Text>
-            <Text style={type.caption}>
-              This inspection describes the imported file. It does not confirm
-              that it was sliced from your design or that it will fit.
-            </Text>
+            {selected.job.production ? (
+              <>
+                <Text style={type.body}>
+                  Slicer: {selected.job.production.slicer.version}
+                </Text>
+                <Text style={type.caption}>
+                  The source matches this accepted design. Settings were saved
+                  from this slicing run. Physical fit still needs checking.
+                </Text>
+              </>
+            ) : (
+              <Text style={type.caption}>
+                This inspection describes the imported file. It does not confirm
+                that it was sliced from your design or that it will fit.
+              </Text>
+            )}
             <Button
               label="Save file"
               disabled={busy || paused}
@@ -255,7 +275,7 @@ export function InspectedFilesScreen({
                 run(async () => {
                   if (!clients || !ack) return;
                   const token = epoch.current;
-                  const page = await clients.files.list(id, ack, cursor);
+                  const page = await clients.files.list(id, ack, cursor, mode);
                   if (token !== epoch.current) return;
                   if (
                     items.length &&
