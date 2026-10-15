@@ -315,3 +315,48 @@ Fault controls require `SCAN_NATIVE_FAULTS=1`; the fixture writes a random
 control key in its private directory. Its test-only mode endpoint requires
 that key. Artifact corruption happens only after the real authenticated route
 returns 200. This opt-in control is confined to the loopback fixture.
+
+### Prepared-file native foundation
+
+`PreparedFilesClient` validates an inspected job's complete structured record and
+digest, current project/revision and accepted design identity. Its input is an
+already acknowledged portable snapshot and a job handle. Local edits or a pairing
+change during GET prevent export. Only explicit 429 responses to GET retry, at
+most three attempts. This foundation has no preparation or discovery screen.
+
+`PreparedFileBridge` accepts only exact prepared-job metadata/download GET routes,
+current ETags and 3MF/G-code artifact identities. It keeps credentials native,
+refuses redirects, bounds streams, verifies headers/hash/length and exports exact
+verified bytes into Documents as `Imported-sliced-<sha256>.<extension>`.
+Capture routes and their existing bridge are unchanged. Native pairing accepts
+known explicit capability sets, including prepared-only invitations, without
+adding generation permission. Run CocoaPods installation when rebuilding the app
+so its existing native-source glob includes the new bridge.
+
+From repository root, after building companion dependencies:
+
+```sh
+python3 apps/mobile/scripts/native-prepared-file-tests/test.py \
+  --simulator BOOTED_SIMULATOR_UUID --evidence /tmp/native-prepared-evidence
+```
+
+The separate disposable Simulator host compiles the production pairing and
+prepared-file bridges. It uses real scoped pairing and Simulator Keychain,
+checks GET/download route restrictions, exits, relaunches, reopens and exports
+both supported media types. The Python harness independently compares exported
+bytes with retained server bytes. Runtime is bounded and the test disconnects,
+removes its app and deletes fixture credentials. React dispatch is a harness
+seam; this is native foundation proof, not an integrated consumer screen.
+
+The fixture uses synthetic bytes and a protocol inspector, not genuine sliced
+geometry. Its settings digest hashes an actual synthetic settings JSON file;
+it does not prove slicer provenance, derivation from the accepted design, physical
+compatibility or print authorization. The client never creates a preparation
+request or dispatch intent. Native structured validation can also consume the
+actual fixture responses during Jest:
+
+```sh
+cd apps/mobile
+NATIVE_PREPARED_CONTRACT=/tmp/native-prepared-evidence/fixture-contract.json \
+  npm test -- --runInBand __tests__/preparedFiles.test.ts
+```

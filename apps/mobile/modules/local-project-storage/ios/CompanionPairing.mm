@@ -35,12 +35,18 @@ NSURL *STMCompanionBaseURL(NSString *value) {
   c.path = @"";
   return c.URL;
 }
+static BOOL ValidScopes(id value) {
+  if (![value isKindOfClass:NSArray.class] || [value count]<2 || [value count]>8) return NO;
+  NSSet *allowed=[NSSet setWithArray:@[@"generation:health",@"generation:create",@"projects:read",@"projects:write",@"captures:read",@"captures:import",@"prepared-jobs:read",@"prepared-jobs:prepare"]];
+  NSMutableSet *seen=[NSMutableSet new];
+  for(id scope in value){if(![scope isKindOfClass:NSString.class]||![allowed containsObject:scope]||[seen containsObject:scope])return NO;[seen addObject:scope];}
+  return [seen containsObject:@"generation:health"];
+}
 static BOOL ValidRecord(NSDictionary *r) {
   return [r isKindOfClass:NSDictionary.class] && STMCompanionBaseURL(r[@"baseUrl"]) &&
     [r[@"protocolVersion"] isEqual:@"0.1.0"] && [r[@"deviceId"] isKindOfClass:NSString.class] && [[NSUUID alloc] initWithUUIDString:r[@"deviceId"]] &&
     Matches(r[@"token"], @"[A-Za-z0-9_-]{43}") && [r[@"expiresAt"] isKindOfClass:NSNumber.class] &&
-    [r[@"expiresAt"] doubleValue] > 0 && [r[@"scopes"] isKindOfClass:NSArray.class] &&
-    [r[@"scopes"] containsObject:@"generation:health"] && [r[@"scopes"] containsObject:@"generation:create"];
+    [r[@"expiresAt"] doubleValue] > 0 && ValidScopes(r[@"scopes"]);
 }
 NSDictionary *STMReadPairing(NSError **error) {
   NSMutableDictionary *q = [Query() mutableCopy]; q[(__bridge id)kSecReturnData] = @YES;
