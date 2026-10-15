@@ -118,6 +118,8 @@ export async function runProduce(
   request: ProduceRequest,
   options: {producer?: PreparedProducer} = {},
 ): Promise<{jobId: string; jobSha256: string; created: boolean}> {
+  // Validate before the ID becomes a filesystem lock path.
+  const jobId = z.uuid().parse(request.jobId).toLowerCase();
   if (!isAbsolute(request.captureDir) || !isAbsolute(request.inspectorConfig) || !isAbsolute(request.producerConfig)) {
     throw new Error('Produce paths must be absolute');
   }
@@ -127,14 +129,14 @@ export async function runProduce(
   const selection = JSON.parse(new TextDecoder('utf-8', {fatal: true}).decode(await readAbsoluteBytes(request.selectionPath, 65536)));
   const production = options.producer ?? createPreparedProducer(producerConfig);
   const jobsDir = join(request.captureDir, 'prepared-jobs');
-  return withJobProduceLock(jobsDir, request.jobId, async () => {
+  return withJobProduceLock(jobsDir, jobId, async () => {
     const storage = new FileSavedProjectStorage(join(request.captureDir, 'projects'));
     const store = new PreparedJobStore(storage, jobsDir, {inspection: {process: inspection}, production});
     const result = await store.prepareProduced({
       projectId: request.projectId,
       projectRevision: request.projectRevision,
       expectedProjectETag: request.expectedProjectETag,
-      jobId: request.jobId,
+      jobId,
       source,
       selection,
     });

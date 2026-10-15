@@ -166,3 +166,13 @@ test('live produce path stays macOS-gated; injected fixtures stay portable',asyn
  assert.equal(f.calls(),0);assert.deepEqual(await jobDirs(f.root),[]);
  const portable=await runProduce({...f.request,jobId:randomUUID()},{producer:f.producer});assert.equal(portable.created,true);
 });
+
+
+test('invalid job IDs are rejected before creating lock or store directories',async t=>{
+ const f=await setup(t);
+ for(const jobId of ['../../escaped','not-a-uuid','']){
+  await assert.rejects(runProduce({...f.request,jobId},{producer:f.producer}));
+  await assert.rejects(lstat(join(f.root,'prepared-jobs')), {code:'ENOENT'});
+  assert.equal(f.calls(),0);
+ }
+});
