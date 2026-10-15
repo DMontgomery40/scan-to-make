@@ -70,7 +70,7 @@ export function createCaptureRoutes(services:CaptureServices){
     const jobId=prepared?.[2]?.toLowerCase();
     if(jobId&&!z.uuid().safeParse(jobId).success)throw new Failure(400,'invalid-request');
     if(prepared&&!services.preparedJobs)throw new Failure(404,'not-found');
-    const captureRoute=url.pathname.includes('/captures');
+    const captureRoute=!!match&&match[0]!==`/v1/saved-projects/${id}`;
     if(captureRoute&&!services.captures)throw new Failure(404,'not-found');
     const writing=request.method==='PUT'||request.method==='POST';
     const scope:RemoteScope=prepared?(writing?'prepared-jobs:prepare':'prepared-jobs:read'):captureRoute?(writing?'captures:import':'captures:read'):(writing?'projects:write':'projects:read');

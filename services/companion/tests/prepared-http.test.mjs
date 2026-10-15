@@ -18,20 +18,21 @@ const bytes=Buffer.from('isolated protocol fixture printable');
 const artifact={sha256:createHash('sha256').update(bytes).digest('hex'),byteLength:bytes.length,mediaType:'model/3mf'};
 const selection={printerId:'fixture',model:'p1s',plateIndex:0,nozzleDiameters:[0.4],bedType:'textured_plate',materials:[{projectSlot:0,material:'PLA',physicalTray:254}],slicerSettingsSha256:'a'.repeat(64)};
 const envelope=()=>({selection,printableArtifact:artifact,printableBase64:bytes.toString('base64')});
-async function fixture(t,mode='ok'){
+async function fixture(t,mode='ok',projectId=fit.id){
+ const projectFit={...fit,id:projectId};
  const root=await mkdtemp(join(tmpdir(),'prepared-http-'));t.after(()=>rm(root,{recursive:true,force:true}));
  const auth=await RemoteAuthStore.create(join(root,'auth'),{host:'companion.example-tail.ts.net',allowedLogins:['alice@example.test']});
  const invite=await auth.createPairing('alice@example.test',['generation:health','generation:create','projects:read','projects:write','captures:read','captures:import','prepared-jobs:read','prepared-jobs:prepare']);
  const phone=await auth.exchange('alice@example.test',{code:invite.code,deviceName:'isolated'});
  const storage=new FileSavedProjectStorage(join(root,'projects')),projects=createSavedProjects(storage);
- await projects.create({id:fit.id,brief:{object:'Cup',context:'Desk',addition:'Holder'},fit});
- const binding={sourceFit:fit,artifact:{...artifact,mediaType:'model/stl'}};
- await projects.change(fit.id,0,{kind:'attach-preview',...binding});await projects.change(fit.id,1,{kind:'accept-preview',...binding});
+ await projects.create({id:projectId,brief:{object:'Cup',context:'Desk',addition:'Holder'},fit:projectFit});
+ const binding={sourceFit:projectFit,artifact:{...artifact,mediaType:'model/stl'}};
+ await projects.change(projectId,0,{kind:'attach-preview',...binding});await projects.change(projectId,1,{kind:'accept-preview',...binding});
  const log=join(root,'calls.jsonl'),inspection={process:{command:process.execPath,args:[fileURLToPath(new URL('./fixtures/inspection-server.mjs',import.meta.url)),mode,log]},options:{timeoutMs:5000}};
  const makeJobs=()=>new PreparedJobStore(new FileSavedProjectStorage(join(root,'projects')),join(root,'jobs'),{inspection,maxPrintableBytes:1024});
  const f={root,auth,phone,storage,projects,log,makeJobs,headers:{authorization:`Bearer ${phone.token}`,'x-scan-device':phone.deviceId}};
  f.server=await startGenerationServer({port:0,remoteAuth:auth,capture:{storage,preparedJobs:makeJobs()}});t.after(()=>f.server.close());
- const snapshot=await wire(f,`/v1/saved-projects/${fit.id}`);assert.equal(snapshot.status,200);f.etag=snapshot.headers.etag;
+ const snapshot=await wire(f,`/v1/saved-projects/${projectId}`);assert.equal(snapshot.status,200);f.etag=snapshot.headers.etag;
  return f;
 }
 function wire(f,path,{method='GET',headers={},body}={}){
@@ -119,4 +120,16 @@ test('explicit prepared pairing and CLI configuration enable a fresh listener wi
  const client={...f,server:{url},headers:{authorization:`Bearer ${phone.token}`,'x-scan-device':phone.deviceId}};
  const id=randomUUID();assert.equal((await wire(client,route(id),post(client))).status,201);assert.deepEqual((await get(client,id,true)).bytes,bytes);
  const stopped=new Promise(resolve=>child.once('exit',resolve));child.kill('SIGTERM');await stopped;
+});
+
+
+test('project IDs beginning captures do not select capture routes or USDZ content type',async t=>{
+ const f=await fixture(t,'ok','captures-edge');
+ for(const captures of [undefined,{}]){
+  await f.server.close();f.server=await startGenerationServer({port:0,remoteAuth:f.auth,capture:{storage:f.storage,preparedJobs:f.makeJobs(),captures}});
+  const id=randomUUID(),path=route(id).replace('/'+fit.id+'/', '/captures-edge/');
+  assert.equal((await wire(f,path,post(f))).status,201);
+  const downloaded=await retryBusy(()=>wire(f,path.replace('?','/artifacts/printable?'),{headers:{'if-match':f.etag}}));
+  assert.equal(downloaded.status,200);assert.deepEqual(downloaded.bytes,bytes);
+ }
 });
