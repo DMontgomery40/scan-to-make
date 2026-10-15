@@ -121,3 +121,79 @@ test('pre-aborted discovery rejects and an empty store does not create an index 
  const page=JSON.parse((await listing(f)).bytes);assert.deepEqual(page,{jobs:[],nextCursor:null,unreadable:0,requiresVerifiedGet:true});
  await assert.rejects(readFile(join(f.root,'jobs')),error=>error.code==='ENOENT');
 });
+
+const production={requestSha256:'a'.repeat(64),producerIdentity:'b'.repeat(64),
+ sourceArtifact:{sha256:'c'.repeat(64),mediaType:'model/stl',byteLength:16},
+ settingsArtifact:{sha256:'d'.repeat(64),mediaType:'application/json',byteLength:2},
+ manifestArtifact:{sha256:'e'.repeat(64),mediaType:'application/json',byteLength:2},
+ slicer:{version:'02.08.02.61',binarySha256:'f'.repeat(64)}};
+const handle=async (root,id)=>({jobId:id,jobSha256:JSON.parse(await readFile(join(root,'jobs',id,'job.json'))).sha256,printableArtifact:artifact,model:'p1s',plateIndex:0});
+function cursorMode(value){const body=JSON.parse(Buffer.from(value,'base64url'));return {keys:Object.keys(body).sort(),productionVersion:body.productionVersion};}
+
+test('omitted discovery keeps produced jobs hidden and the imported-only response shape',async t=>{
+ const f=await fixture(t);await seed(f,3,(job,n)=>{if(n===2)job.production=structuredClone(production);});
+ const omitted=await listing(f);assert.equal(omitted.status,200);
+ const page=JSON.parse(omitted.bytes);
+ assert.deepEqual(page,{jobs:[await handle(f.root,uuid(1)),await handle(f.root,uuid(3))],nextCursor:null,unreadable:0,requiresVerifiedGet:true});
+ assert.deepEqual(page.jobs.map(job=>job.jobId),[uuid(1),uuid(3)]);
+ const store=await f.makeJobs().listPreparedJobs({projectId:fit.id,projectRevision:2,expectedProjectETag:f.etag});
+ assert.deepEqual(store,page);
+});
+
+test('productionVersion=1 returns imported and produced summaries in catalog order',async t=>{
+ const f=await fixture(t);await seed(f,3,(job,n)=>{if(n===2)job.production=structuredClone(production);});
+ const opted=await listing(f,'&productionVersion=1');assert.equal(opted.status,200);
+ const page=JSON.parse(opted.bytes);
+ assert.deepEqual(page.jobs,[await handle(f.root,uuid(1)),await handle(f.root,uuid(2)),await handle(f.root,uuid(3))]);
+ assert.equal(page.nextCursor,null);assert.equal(page.unreadable,0);assert.equal(page.requiresVerifiedGet,true);
+ const store=await f.makeJobs().listPreparedJobs({projectId:fit.id,projectRevision:2,expectedProjectETag:f.etag,productionVersion:1});
+ assert.deepEqual(store.jobs.map(job=>job.jobId),[uuid(1),uuid(2),uuid(3)]);
+});
+
+test('unknown and duplicate productionVersion queries are invalid-request',async t=>{
+ const f=await fixture(t);
+ for(const query of ['&productionVersion=2','&productionVersion=0','&productionVersion=01','&productionVersion=1.0','&productionVersion=','&productionVersion=1&productionVersion=1','&productionVersion=1&productionVersion=2']){
+  const result=await listing(f,query);assert.equal(result.status,400,query);
+  assert.equal(JSON.parse(result.bytes).error.code,'invalid-request',query);
+ }
+});
+
+test('discovery cursors bind productionVersion mode and reject cross-mode reuse',async t=>{
+ const f=await fixture(t);await seed(f,3,(job,n)=>{if(n===2)job.production=structuredClone(production);});
+ const omitted=JSON.parse((await listing(f,'&limit=1')).bytes);
+ assert.deepEqual(omitted.jobs.map(job=>job.jobId),[uuid(1)]);
+ assert.deepEqual(cursorMode(omitted.nextCursor),{keys:['after','catalog','etag','projectId','projectRevision','version'],productionVersion:undefined});
+ const crossedToOptIn=await listing(f,'&limit=1&productionVersion=1&cursor='+omitted.nextCursor);
+ assert.equal(crossedToOptIn.status,400);assert.equal(JSON.parse(crossedToOptIn.bytes).error.code,'invalid-cursor');
+ const sameOmitted=JSON.parse((await listing(f,'&limit=1&cursor='+omitted.nextCursor)).bytes);
+ assert.deepEqual(sameOmitted.jobs.map(job=>job.jobId),[uuid(3)]);assert.equal(sameOmitted.nextCursor,null);
+ const opted=JSON.parse((await listing(f,'&limit=1&productionVersion=1')).bytes);
+ assert.deepEqual(opted.jobs.map(job=>job.jobId),[uuid(1)]);
+ assert.deepEqual(cursorMode(opted.nextCursor),{keys:['after','catalog','etag','productionVersion','projectId','projectRevision','version'],productionVersion:1});
+ const crossedToLegacy=await listing(f,'&limit=1&cursor='+opted.nextCursor);
+ assert.equal(crossedToLegacy.status,400);assert.equal(JSON.parse(crossedToLegacy.bytes).error.code,'invalid-cursor');
+ const sameOpted=JSON.parse((await listing(f,'&limit=1&productionVersion=1&cursor='+opted.nextCursor)).bytes);
+ assert.deepEqual(sameOpted.jobs.map(job=>job.jobId),[uuid(2)]);
+ const last=JSON.parse((await listing(f,'&limit=1&productionVersion=1&cursor='+sameOpted.nextCursor)).bytes);
+ assert.deepEqual(last.jobs.map(job=>job.jobId),[uuid(3)]);assert.equal(last.nextCursor,null);
+});
+
+test('uninspected produced jobs stay hidden in both discovery modes',async t=>{
+ const f=await fixture(t);await seed(f,3,(job,n)=>{if(n>1)job.production=structuredClone(production);if(n===3)delete job.inspection;});
+ assert.deepEqual(JSON.parse((await listing(f)).bytes).jobs.map(job=>job.jobId),[uuid(1)]);
+ const opted=JSON.parse((await listing(f,'&productionVersion=1')).bytes);
+ assert.deepEqual(opted.jobs.map(job=>job.jobId),[uuid(1),uuid(2)]);
+ assert.equal((await get(f,uuid(1))).status,200);
+});
+
+test('opt-in listing keeps ETag, revision, limit and verified-GET rules',async t=>{
+ const f=await fixture(t);await seed(f,2,(job,n)=>{if(n===2)job.production=structuredClone(production);});
+ const path=`/v1/saved-projects/${fit.id}/prepared-jobs?projectRevision=2&productionVersion=1`;
+ assert.equal((await wire(f,path)).status,428);
+ assert.equal((await listing(f,'&productionVersion=1&limit=51')).status,400);
+ assert.equal(JSON.parse((await listing(f,'&productionVersion=1&limit=0')).bytes).error.code,'invalid-request');
+ const page=JSON.parse((await listing(f,'&productionVersion=1&limit=1')).bytes);
+ assert.equal(page.requiresVerifiedGet,true);assert.equal(page.jobs.length,1);assert.ok(page.nextCursor);
+ await f.projects.change(fit.id,2,{kind:'replace-brief',brief:{object:'Changed',context:'Desk',addition:'Holder'}});
+ assert.equal((await listing(f,'&productionVersion=1')).status,412);
+});

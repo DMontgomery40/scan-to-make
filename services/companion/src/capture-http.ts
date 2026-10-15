@@ -81,14 +81,16 @@ export function createCaptureRoutes(services:CaptureServices){
     disconnected=()=>{if(!response.writableEnded)controller.abort();};response.once('close',disconnected);
     const assertActive=()=>{if(controller.signal.aborted)throw new Failure(499,'cancelled');};
     const ifMatch=header('if-match'),ifNoneMatch=header('if-none-match');
-    let revision=0,listLimit:number|undefined,listCursor:string|undefined;
+    let revision=0,listLimit:number|undefined,listCursor:string|undefined,productionVersion:1|undefined;
     if(captureRoute||prepared){
      const keys=[...url.searchParams.keys()];const raw=url.searchParams.get('projectRevision');
-     if((listing?(new Set(keys).size!==keys.length||keys.some(key=>!['projectRevision','limit','cursor'].includes(key))):keys.length!==1||keys[0]!=='projectRevision')||raw===null||! /^(0|[1-9][0-9]*)$/.test(raw)||!Number.isSafeInteger(Number(raw)))throw new Failure(400,'invalid-request');
+     if((listing?(new Set(keys).size!==keys.length||keys.some(key=>!['projectRevision','limit','cursor','productionVersion'].includes(key))):keys.length!==1||keys[0]!=='projectRevision')||raw===null||! /^(0|[1-9][0-9]*)$/.test(raw)||!Number.isSafeInteger(Number(raw)))throw new Failure(400,'invalid-request');
      if(listing){
       const limit=url.searchParams.get('limit');listCursor=url.searchParams.get('cursor')??undefined;
-      if(limit!==null&&(!/^[1-9][0-9]*$/.test(limit)||Number(limit)>50)||listCursor!==undefined&&listCursor.length>1024)throw new Failure(400,'invalid-request');
+      const version=url.searchParams.get('productionVersion');
+      if(limit!==null&&(!/^[1-9][0-9]*$/.test(limit)||Number(limit)>50)||listCursor!==undefined&&listCursor.length>1024||version!==null&&version!=='1')throw new Failure(400,'invalid-request');
       listLimit=limit===null?undefined:Number(limit);
+      if(version==='1')productionVersion=1;
      }
      revision=Number(raw);
      if(ifNoneMatch!==undefined||ifMatch===undefined)throw new Failure(428,'precondition-required');
@@ -115,7 +117,7 @@ export function createCaptureRoutes(services:CaptureServices){
       const result=await projects.put(id,text,{ifMatch,ifNoneMatch},async()=>{assertActive();await authorize(scope);assertActive();});response.statusCode=ifNoneMatch==='*'?201:200;response.setHeader('ETag',result.etag);await send(response,result.bytes);
      }
     }else if(listing){
-     const result=await services.preparedJobs!.listPreparedJobs({projectId:id,projectRevision:revision,expectedProjectETag:ifMatch!,limit:listLimit,cursor:listCursor},controller.signal);
+     const result=await services.preparedJobs!.listPreparedJobs({projectId:id,projectRevision:revision,expectedProjectETag:ifMatch!,limit:listLimit,cursor:listCursor,...(productionVersion===1?{productionVersion}:{})},controller.signal);
      await services.storage.withCurrentProject(id,revision,async()=>{
       await authorize(scope);assertActive();response.setHeader('ETag',ifMatch!);await send(response,JSON.stringify(result));
      },ifMatch);
