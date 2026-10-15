@@ -1,6 +1,7 @@
 import { mkdir, open, readFile, rename, link, unlink, rmdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
+export { FileSavedProjectStorage } from './saved-project-storage.js';
 import { z } from 'zod';
 import {
   ProjectFitSpecSchema, ArtifactRefSchema, ProjectFitSpecPatchSchema,
