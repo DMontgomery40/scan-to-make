@@ -322,9 +322,9 @@ returns 200. This opt-in control is confined to the loopback fixture.
 digest, current project/revision and accepted design identity. Its input is an
 already acknowledged portable snapshot and a job handle. Local edits or a pairing
 change during GET prevent export. Only explicit 429 responses to GET retry, at
-most three attempts. This foundation has no preparation or discovery screen.
+most three attempts. The client never creates a preparation request.
 
-`PreparedFileBridge` accepts only exact prepared-job metadata/download GET routes,
+`PreparedFileBridge` accepts only exact prepared-job collection/metadata/download GET routes,
 current ETags and 3MF/G-code artifact identities. It keeps credentials native,
 refuses redirects, bounds streams, verifies headers/hash/length and exports exact
 verified bytes into Documents as `Imported-sliced-<sha256>.<extension>`.
@@ -360,3 +360,33 @@ cd apps/mobile
 NATIVE_PREPARED_CONTRACT=/tmp/native-prepared-evidence/fixture-contract.json \
   npm test -- --runInBand __tests__/preparedFiles.test.ts
 ```
+
+### Inspected files browser
+
+Accepted saved projects expose **Inspected files** in **Your projects**. Refresh
+synchronizes the exact portable project snapshot, then discovers handles under
+its current ETag/revision. Pages contain at most 20 handles; empty pages may
+still continue. The browser bounds retained handles at 1,000 and treats listing
+as discovery, not verified file content. Selecting a handle performs a fresh
+verified GET and matches its complete job/digest/artifact/model/plate before
+showing file inspection or enabling exact-byte export. Save file writes into
+the app’s Documents folder, accessible in Files.
+
+A stale cursor removes old handles and offers Refresh. Refresh replaces pages.
+Opening connection settings, leaving the foreground or leaving the screen
+invalidates its selection and pending results. Local project and pairing changes
+are checked again before listing, reviewing and exporting. File inspection copy
+identifies imported sliced files without claiming they derive from the accepted
+design or that a printed part will fit. There is no preparation or dispatch UI.
+
+For an isolated ordinary-app navigation fixture, start the existing loopback
+fixture with `SCAN_PREPARED_FIXTURE=1 SCAN_PREPARED_FIXTURE_COUNT=21` after building
+the companion. The optional count is bounded to 2–50 and defaults to two. Seed only
+a disposable Simulator app's saved-project store with the fixture's exact
+`prepared.json` snapshot, pair through the normal invitation screen, and navigate
+Your projects → Inspected files. Verify first/second pages, refresh, per-file
+inspection, process restart and exported bytes against `prepared/<jobId>/printable.bin`.
+Moving one fixture job directory outside `prepared` between pages exercises
+cursor-stale recovery. Keep credentials and runtime evidence outside Git.
+The native bridge harness also exercises two actual collection pages and strict
+query rejection on both process runs.

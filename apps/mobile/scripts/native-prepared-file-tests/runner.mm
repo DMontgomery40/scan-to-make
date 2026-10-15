@@ -21,7 +21,7 @@ static void Require(BOOL ok,NSString *why){if(!ok){fprintf(stderr,"FAIL %s\n",wh
   NSInteger phase=[NSUserDefaults.standardUserDefaults integerForKey:@"phase"]+1;
   [NSUserDefaults.standardUserDefaults setInteger:phase forKey:@"phase"];
   if(phase==2){[self.pair disconnectResolve:^(id r){Require([r[@"state"] isEqual:@"disconnected"],@"test credential cleanup");} reject:^(NSString*c,NSString*m,NSError*e){Require(NO,c);}];}
-  NSDictionary *receipt=@{@"phase":@(phase),@"passed":@YES,@"runId":config[@"runId"],@"preparedOnlyPairing":@YES,@"cases":self.results};
+  NSDictionary *receipt=@{@"phase":@(phase),@"passed":@YES,@"runId":config[@"runId"],@"preparedOnlyPairing":@YES,@"discoveryPagination":@YES,@"cases":self.results};
   NSURL *url=[NSFileManager.defaultManager URLsForDirectory:NSDocumentDirectory inDomains:NSUserDomainMask].firstObject;
   url=[url URLByAppendingPathComponent:[NSString stringWithFormat:@"results-%ld.json",(long)phase]];
   Require([[NSJSONSerialization dataWithJSONObject:receipt options:NSJSONWritingPrettyPrinted error:nil] writeToURL:url atomically:YES],@"receipt");printf("NATIVE_PREPARED_PASS phase=%ld\n",(long)phase);fflush(stdout);exit(0);
@@ -46,11 +46,30 @@ static void Require(BOOL ok,NSString *why){if(!ok){fprintf(stderr,"FAIL %s\n",wh
   } attempt:0];
  } attempt:0];
 }
+- (void)discoverThenNext {
+ NSDictionary *project=config[@"prepared"][@"project"],*pairing=STMReadPairing(nil);
+ NSString *path=[NSString stringWithFormat:@"/v1/saved-projects/%@/prepared-jobs?projectRevision=%@&limit=1",project[@"id"],project[@"revision"]];
+ NSMutableDictionary *o=[@{@"context":Context(pairing),@"method":@"GET",@"path":path,@"etag":config[@"prepared"][@"etag"]} mutableCopy];
+ for(NSString *suffix in @[@"&extra=1",@"&limit=1",@"&cursor=bad%2Fcursor"]){
+  NSMutableDictionary *bad=[o mutableCopy];bad[@"path"]=[path stringByAppendingString:suffix];__block BOOL rejected=NO;
+  [self.files requestOptions:bad resolve:^(id r){Require(NO,@"unexpected collection query accepted");} reject:^(NSString*c,NSString*m,NSError*e){rejected=[c isEqual:@"invalid-request"];}];Require(rejected,@"strict collection query rejection");
+ }
+ [self request:o then:^(NSDictionary*r){
+  NSDictionary *page=[NSJSONSerialization JSONObjectWithData:[r[@"body"] dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil];
+  Require([page[@"requiresVerifiedGet"] boolValue]&&[page[@"jobs"] count]==1&&[page[@"nextCursor"] isKindOfClass:NSString.class],@"bounded discovery page");
+  NSString *first=page[@"jobs"][0][@"jobId"];
+  o[@"path"]=[path stringByAppendingFormat:@"&cursor=%@",page[@"nextCursor"]];
+  [self request:o then:^(NSDictionary*second){
+   NSDictionary *next=[NSJSONSerialization JSONObjectWithData:[second[@"body"] dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil];
+   Require([next[@"jobs"] count]==1&&![first isEqual:next[@"jobs"][0][@"jobId"]]&&next[@"nextCursor"]==NSNull.null,@"actual second page advances");[self next];
+  } attempt:0];
+ } attempt:0];
+}
 - (void)start {
  self.files=[PreparedFileBridge new];self.pair=[CompanionPairing new];self.results=[NSMutableArray new];
  if([NSProcessInfo.processInfo.arguments containsObject:@"--cleanup"]){[self.pair disconnectResolve:^(id r){exit(0);} reject:^(NSString*c,NSString*m,NSError*e){exit(1);}];return;}
- if([NSUserDefaults.standardUserDefaults integerForKey:@"phase"]>0){[self.pair statusResolve:^(id r){Require([r[@"state"] isEqual:@"paired"],@"pairing survived process restart");[self next];} reject:^(NSString*c,NSString*m,NSError*e){Require(NO,c);}];return;}
- [self.pair pairURL:config[@"invitation"][@"baseUrl"] code:config[@"invitation"][@"code"] deviceName:@"Prepared native fixture" resolve:^(id r){Require(r[@"token"]==nil,@"secret-free metadata");[self next];} reject:^(NSString*c,NSString*m,NSError*e){Require(NO,c);}];
+ if([NSUserDefaults.standardUserDefaults integerForKey:@"phase"]>0){[self.pair statusResolve:^(id r){Require([r[@"state"] isEqual:@"paired"],@"pairing survived process restart");[self discoverThenNext];} reject:^(NSString*c,NSString*m,NSError*e){Require(NO,c);}];return;}
+ [self.pair pairURL:config[@"invitation"][@"baseUrl"] code:config[@"invitation"][@"code"] deviceName:@"Prepared native fixture" resolve:^(id r){Require(r[@"token"]==nil,@"secret-free metadata");[self discoverThenNext];} reject:^(NSString*c,NSString*m,NSError*e){Require(NO,c);}];
 }
 @end
 @interface SceneDelegate:UIResponder<UIWindowSceneDelegate>

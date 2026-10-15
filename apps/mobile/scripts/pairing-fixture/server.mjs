@@ -109,7 +109,11 @@ if (captureEnabled || preparedEnabled) {
       },
     );
     const jobs = [];
-    for (const mediaType of ['model/3mf', 'text/x.gcode']) {
+    const count = Number(process.env.SCAN_PREPARED_FIXTURE_COUNT ?? 2);
+    if (!Number.isInteger(count) || count < 2 || count > 50)
+      throw Error('Fixture count must be 2–50');
+    for (let index = 0; index < count; index++) {
+      const mediaType = index % 2 ? 'text/x.gcode' : 'model/3mf';
       // Protocol fixture bytes, not a slicer output or physical-print claim.
       const printable = Buffer.from(
         'isolated native protocol fixture ' + mediaType,

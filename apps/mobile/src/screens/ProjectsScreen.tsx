@@ -9,6 +9,7 @@ export function ProjectsScreen({
   error,
   onOpen,
   onCaptures,
+  onInspected,
   onBack,
   onRetry,
 }: {
@@ -16,6 +17,7 @@ export function ProjectsScreen({
   error: string | null;
   onOpen: (id: string) => void;
   onCaptures?: (id: string) => void;
+  onInspected?: (id: string) => void;
   onBack: () => void;
   onRetry: () => void;
 }) {
@@ -70,6 +72,13 @@ export function ProjectsScreen({
                     variant="secondary"
                     onPress={() => onOpen(id)}
                   />
+                  {onInspected && entry.project.acceptedArtifact ? (
+                    <Button
+                      label="Inspected files"
+                      variant="secondary"
+                      onPress={() => onInspected(id)}
+                    />
+                  ) : null}
                   {onCaptures ? (
                     <Button
                       label="Project captures"
