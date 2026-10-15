@@ -15,6 +15,38 @@ import os
 private let logger = Logger(subsystem: GuidedCaptureSampleApp.subsystem,
                             category: "AppDataModel")
 
+// State metadata only. Keep the initial observation plus the newest bounded history.
+private struct CaptureEvaluationEventBuffer {
+    static let maximumEvents = 256
+    static let maximumBytes = 64 * 1024
+    private(set) var events: [[String: Any]] = []
+    private(set) var droppedEvents = 0
+    private var lastSignature: Data?
+
+    mutating func append(_ event: [String: Any]) {
+        var identity = event
+        identity.removeValue(forKey: "elapsedSeconds")
+        guard let signature = try? JSONSerialization.data(withJSONObject: identity, options: [.sortedKeys]),
+              let encoded = try? JSONSerialization.data(withJSONObject: [event], options: [.prettyPrinted, .sortedKeys]),
+              encoded.count <= Self.maximumBytes else {
+            droppedEvents += 1
+            return
+        }
+        guard signature != lastSignature else { return }
+        lastSignature = signature
+        events.append(event)
+        while events.count > Self.maximumEvents || encodedByteCount > Self.maximumBytes {
+            events.remove(at: events.count > 1 ? 1 : 0)
+            droppedEvents += 1
+        }
+    }
+
+    var encodedByteCount: Int {
+        (try? JSONSerialization.data(withJSONObject: events, options: [.prettyPrinted, .sortedKeys]).count)
+            ?? Self.maximumBytes + 1
+    }
+}
+
 @MainActor
 @Observable
 class AppDataModel: Identifiable {
@@ -83,7 +115,9 @@ class AppDataModel: Identifiable {
     }
 
     var captureMode: CaptureMode = .object { didSet { record("capture-mode", detail: String(describing: captureMode)) } }
-    var evaluationEvents: [[String: Any]] = []
+    private var evaluationBuffer = CaptureEvaluationEventBuffer()
+    private var lastObservedTracking: String?
+    private var lastObservedPause: Bool?
     var evaluationStarted = Date()
     var evaluationWriteError: String?
     var passCount = 1
@@ -163,6 +197,28 @@ extension AppDataModel {
             fatalError("Logic error")
         }
 
+        lastObservedTracking = String(describing: model.cameraTracking)
+        lastObservedPause = model.isPaused
+        record("session-initial")
+
+        tasks.append(Task<Void, Never> { [weak self] in
+            for await tracking in model.cameraTrackingUpdates {
+                guard !Task.isCancelled, let self, self.objectCaptureSession?.id == model.id else { return }
+                let value = String(describing: tracking)
+                guard value != self.lastObservedTracking else { continue }
+                self.lastObservedTracking = value
+                self.record("camera-tracking", detail: value)
+            }
+        })
+        tasks.append(Task<Void, Never> { [weak self] in
+            for await paused in model.isPausedUpdates {
+                guard !Task.isCancelled, let self, self.objectCaptureSession?.id == model.id else { return }
+                guard paused != self.lastObservedPause else { continue }
+                self.lastObservedPause = paused
+                self.record("session-paused", detail: String(paused))
+            }
+        })
+
         tasks.append(
             Task<Void, Never> { [weak self] in
                 for await newFeedback in model.feedbackUpdates {
@@ -187,6 +243,8 @@ extension AppDataModel {
             task.cancel()
         }
         tasks.removeAll()
+        lastObservedTracking = nil
+        lastObservedPause = nil
     }
 
     @objc
@@ -205,7 +263,7 @@ extension AppDataModel {
         }
 
         captureFolderManager = try CaptureFolderManager()
-        evaluationEvents = []
+        evaluationBuffer = CaptureEvaluationEventBuffer()
         evaluationStarted = Date()
         passCount = 1
         flipCount = 0
@@ -401,10 +459,22 @@ extension AppDataModel {
 extension AppDataModel {
     func record(_ event: String, detail: String = "") {
         guard let folder = captureFolderManager?.captureFolder else { return }
-        evaluationEvents.append(["event": event, "detail": detail,
-                                 "elapsedSeconds": Date().timeIntervalSince(evaluationStarted),
-                                 "shots": objectCaptureSession?.numberOfShotsTaken ?? 0,
-                                 "completedCurrentPass": objectCaptureSession?.userCompletedScanPass ?? false])
+        var entry: [String: Any] = [
+            "event": String(event.prefix(64)), "detail": String(detail.prefix(512)),
+            "detailTruncated": detail.count > 512,
+            "elapsedSeconds": Date().timeIntervalSince(evaluationStarted),
+            "modelState": String(describing: state), "sessionAvailable": objectCaptureSession != nil,
+            "shots": objectCaptureSession?.numberOfShotsTaken ?? 0,
+            "completedCurrentPass": objectCaptureSession?.userCompletedScanPass ?? false
+        ]
+        if let session = objectCaptureSession {
+            entry["captureState"] = String(String(describing: session.state).prefix(512))
+            entry["cameraTracking"] = String(String(describing: session.cameraTracking).prefix(512))
+            entry["isPaused"] = session.isPaused
+            entry["feedback"] = session.feedback.map { String(String(describing: $0).prefix(512)) }
+                .sorted().prefix(32).map { $0 }
+        }
+        evaluationBuffer.append(entry)
         let manifest: [String: Any] = [
             "formatVersion": "0.1", "createdAt": ISO8601DateFormatter().string(from: evaluationStarted),
             "captureMode": String(describing: captureMode), "hideObjectReticle": captureMode == .area,
@@ -412,17 +482,25 @@ extension AppDataModel {
             "photogrammetrySupported": PhotogrammetrySession.isSupported,
             "sceneDepthSupported": ARWorldTrackingConfiguration.supportsFrameSemantics(.sceneDepth),
             "deviceModel": UIDevice.current.model, "hardwareIdentifier": Self.hardwareIdentifier, "os": UIDevice.current.systemVersion,
-            "shotsObserved": evaluationEvents.compactMap { $0["shots"] as? Int }.max() ?? 0,
+            "shotsObserved": evaluationBuffer.events.compactMap { $0["shots"] as? Int }.max() ?? 0,
             "reconstructionHost": "iOS", "reconstructionDetail": "reduced",
             "scaleMethod": "native-unrescaled", "metricAccuracy": "unverified",
             "depthMetadataAudit": "pending-independent-import", "missingOrGuessedRegions": "unassessed",
             "completeObjectVerified": false, "physicalFitVerified": false,
             "passCount": passCount, "flipCount": flipCount, "images": "Images", "models": "Models",
-            "events": evaluationEvents
+            "events": evaluationBuffer.events,
+            "diagnosticHistory": ["maximumEvents": CaptureEvaluationEventBuffer.maximumEvents,
+                                  "maximumEventBytes": CaptureEvaluationEventBuffer.maximumBytes,
+                                  "droppedEvents": evaluationBuffer.droppedEvents,
+                                  "initialObservationRetained": evaluationBuffer.events.first?["event"] as? String == "session-initial"]
         ]
         do {
-            try JSONSerialization.data(withJSONObject: manifest, options: [.prettyPrinted, .sortedKeys])
-                .write(to: folder.appendingPathComponent("evaluation.json"), options: .atomic)
+            let bytes = try JSONSerialization.data(withJSONObject: manifest, options: [.prettyPrinted, .sortedKeys])
+            guard bytes.count <= 128 * 1024 else {
+                throw NSError(domain: "CaptureEvaluation", code: 3,
+                              userInfo: [NSLocalizedDescriptionKey: "Evaluation metadata exceeded its byte limit."])
+            }
+            try bytes.write(to: folder.appendingPathComponent("evaluation.json"), options: .atomic)
             evaluationWriteError = nil
         } catch { evaluationWriteError = "Evaluation report could not be saved. Original images may still be available in Files." }
     }
