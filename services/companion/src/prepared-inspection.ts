@@ -62,14 +62,14 @@ function compatible(receiptInput: unknown, artifact: ArtifactRef, selection: z.i
 export function createPreparedFileInspector(configuration: PreparedInspectionConfiguration) {
   const process = structuredClone(configuration.process);
   const options = {...configuration.options};
-  return async (file: string, artifact: ArtifactRef, selection: z.infer<typeof PrintSelectionSchema>) => {
+  return async (file: string, artifact: ArtifactRef, selection: z.infer<typeof PrintSelectionSchema>, signal?: AbortSignal) => {
     const result = await inspectPreparedFile(process, {file_path: file, bambu_model: selection.model,
       plate_index: selection.plateIndex, nozzle_diameters: selection.nozzleDiameters, bed_type: selection.bedType}, receipt => {
       const checked = compatible(receipt, artifact, selection);
       return {three_mf_path: file, bambu_model: selection.model, plate_index: selection.plateIndex,
         nozzle_diameters: selection.nozzleDiameters, bed_type: selection.bedType,
         use_ams: checked.useAms, ams_mapping: checked.mapping};
-    }, options);
+    }, {...options, signal: signal && options.signal ? AbortSignal.any([signal, options.signal]) : signal ?? options.signal});
     return PreparedInspectionSchema.parse({receipt: compatible(result.receipt, artifact, selection).receipt,
       catalogSha256: createHash('sha256').update(JSON.stringify(result.catalog)).digest('hex'), server: result.catalog.server});
   };

@@ -456,7 +456,7 @@ export async function startGenerationServer(
     }
   });
   server.headersTimeout = 5000;
-  server.requestTimeout = 5000;
+  server.requestTimeout = options.capture?.preparedJobs ? 30000 : 5000;
   server.maxRequestsPerSocket = 1;
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject);

@@ -159,3 +159,65 @@ Snapshot synchronization preserves nonzero revisions, fit, preview and acceptanc
 Native clients retain the acknowledged remote ETag and snapshot separately from the portable project. Preserve local edits made while a request is in flight; never overwrite them with a delayed response. Conflicts require explicit reconciliation. Exact equal snapshots with a current ETag are idempotent; **capture POST has no automatic retry guarantee**. A lost response may follow a committed bundle, so do not automatically retry an ambiguous import.
 
 Bodies have a five-second deadline and limits of4MiB for snapshots and32MiB for captures, enforced for chunked requests too. One snapshot/capture request owns the capture slot through conversion and response cleanup; another receives429. Downloads have a30-second response deadline and hold the project edit lock through response flush. Concurrent edits can report storage unavailable while that lock is held. Disconnect/shutdown aborts active conversion and waits for cleanup. Authorization is checked again before capture publication and before download; ETag/revision are checked under the project lock. Generation retains its own single-request slot. These tests model private Serve headers locally; they do not establish a live phone/tailnet connection.
+
+
+## Authenticated inspected prepared jobs
+
+An operator can enable prepared jobs on the same authenticated listener by setting
+`SCAN_TO_MAKE_PREPARED_MCP_CONFIG=/absolute/private/inspector.json` alongside the
+remote-auth and capture directories. The JSON is a private, owner-only regular
+file (at most 64 KiB) with `command` (absolute executable path), optional `args`,
+absolute `cwd`, and `env`. It configures a trusted MCP process supporting the
+file-only `inspect_print_file` receipt and discovered `print_3mf` schema. Use a
+trusted inspector that does not contact hardware during startup or file inspection.
+No executable, local path or receipt is accepted from an HTTP caller. Jobs live
+under the capture directory's `prepared-jobs` subdirectory. Invalid configuration
+fails startup; omitting it leaves these routes disabled.
+
+Host-local `remote-auth-cli.js pair-prepared <auth-directory> <login>` explicitly
+issues `generation:health`, `projects:read`, `projects:write`,
+`prepared-jobs:read` and `prepared-jobs:prepare`. Existing `pair`, `pair-capture`
+and already issued credentials retain their original scopes. This command does
+not grant capture import or generation creation. An embedded host may explicitly
+choose a combined scope set with `RemoteAuthStore.createPairing`.
+
+All three routes require the current project `If-Match` ETag and exactly one
+`projectRevision=N` query parameter. The project must retain an accepted design.
+The client chooses and persists a UUID `jobId` **before** submitting preparation.
+
+| Route | Scope | Result |
+|---|---|---|
+| `POST /v1/saved-projects/:id/prepared-jobs/:jobId?projectRevision=N` | `prepared-jobs:prepare` | 201 new or 200 recovered `{jobId, job}` |
+| `GET /v1/saved-projects/:id/prepared-jobs/:jobId?projectRevision=N` | `prepared-jobs:read` | Verified `{jobId, job, intent}`; intent is read-only bookkeeping |
+| `GET /v1/saved-projects/:id/prepared-jobs/:jobId/artifacts/printable?projectRevision=N` | `prepared-jobs:read` | Exact retained bytes with media type, Content-Length and X-Content-SHA256 |
+
+POST accepts strict JSON `{selection, printableArtifact, printableBase64}`.
+`selection` uses `PrintSelectionSchema` (printer ID, model, plate index, nozzle
+sizes, bed, explicit project-slot/material/physical-tray mapping and slicer settings
+digest). `printableArtifact` is `{sha256, byteLength, mediaType}`; supported media
+are `model/3mf` and `text/x.gcode`. Base64 must be canonical and match that exact
+identity. File bytes are limited to 64 MiB, with 64 KiB for request metadata and a
+30-second whole-body deadline, including chunked uploads. The trusted worker is
+bounded separately. Generation, snapshot and capture body deadlines remain five
+seconds. These routes share the single project/capture slot through cleanup.
+
+Preparation inspects the exact retained bytes, seals the receipt and discovered
+catalog digest into the job, and rechecks authorization/cancellation immediately
+before atomic publication under the project edit lock. Reads verify retained
+bytes and the current accepted project, then hold that lock through response
+flush. Revocation/disconnect before publication leaves no job. Publication cannot
+be rolled back by a later disconnect or durability error.
+
+After a lost response, timeout or 5xx, **GET the persisted job ID first**: 200
+recovers the original verified job; 404 permits resubmission with the same ID and
+same request. Explicit 429 means the request did not start; back off before retry.
+A matching POST returns the original inspected job without rerunning a potentially
+changed inspector. Reusing an ID with different project, artifact or selection
+returns 409. Stale ETag/revision returns 412, missing precondition 428, invalid
+request 400, invalid inspection/retained content 422, and unavailable storage 503.
+Never silently substitute a new ID after an ambiguous result.
+
+This seam performs preparation, verified reopen and download only. There is no
+HTTP intent-claim or dispatch endpoint, printer contact, physical approval, or
+native prepared-job consumer yet. A file-only inspection does not establish
+installed material, printer state, physical fit or authorization to print.

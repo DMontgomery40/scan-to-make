@@ -46,6 +46,10 @@ const intentSchema = z.strictObject({
   approval: approvalSchema,
 });
 
+export class PreparedJobFailure extends Error {
+  constructor(readonly code: 'not-found' | 'job-conflict' | 'cancelled') {super(code);}
+}
+
 export type PreparedJob = z.infer<typeof PreparedJobSchema>;
 export type PreparedJobApproval = z.infer<typeof approvalSchema>;
 export type PreparedJobIntent = z.infer<typeof intentSchema>;
@@ -109,9 +113,16 @@ export class PreparedJobStore {
     this.clock = clock ?? Date.now;
   }
 
+  get inspectionEnabled(): boolean { return this.inspect !== undefined; }
+  get maxPrintableBytes(): number { return this.bound.maxPrintableBytes; }
+
   async prepare(input: {projectId: string; projectRevision: number; printable: Uint8Array;
-      printableArtifact: unknown; selection: unknown; expectedProjectETag?: string}):
-      Promise<{jobId: string; job: PreparedJob}> {
+      printableArtifact: unknown; selection: unknown; expectedProjectETag?: string; jobId?: string},
+      signal?: AbortSignal, authorizeCommit?: () => Promise<void>):
+      Promise<{jobId: string; job: PreparedJob; created: boolean}> {
+    const assertActive = () => { if (signal?.aborted) throw new PreparedJobFailure('cancelled'); };
+    assertActive();
+    const jobId = input.jobId === undefined ? randomUUID() : z.uuid().parse(input.jobId).toLowerCase();
     const request = z.strictObject({
       projectId, projectRevision: integer, printableArtifact: ArtifactRefSchema, selection: PrintSelectionSchema,
     }).parse({projectId: input.projectId, projectRevision: input.projectRevision,
@@ -125,19 +136,33 @@ export class PreparedJobStore {
     }
     await mkdir(this.directory, {recursive: true, mode: 0o700});
     const staging = await mkdtemp(join(this.directory, '.staging-'));
-    const jobId = randomUUID();
     try {
       await writeSynced(join(staging, 'printable.bin'), bytes);
       await chmod(join(staging, 'printable.bin'), 0o400);
       return await this.projects.withCurrentProject(request.projectId, request.projectRevision, async project => {
         if (project.id !== request.projectId) throw new Error('Project identity mismatch');
         if (!project.acceptedArtifact) throw new Error('Current design must be accepted before preparing a print job');
+        assertActive();
+        let existing: PreparedJob | undefined;
+        try { existing = await this.readJob(jobId); }
+        catch (error) { if (!(error instanceof PreparedJobFailure) || error.code !== 'not-found') throw error; }
+        if (existing) {
+          if (existing.projectId !== request.projectId || existing.projectRevision !== request.projectRevision ||
+              !sameRef(existing.designArtifact, project.acceptedArtifact.artifact) ||
+              !sameRef(existing.printableArtifact, request.printableArtifact) ||
+              JSON.stringify(existing.selection) !== JSON.stringify(request.selection)) throw new PreparedJobFailure('job-conflict');
+          await this.verifiedPrintable(existing);
+          // Never promote an older uninspected job or rerun a changed inspector on retry.
+          if (this.inspect && !existing.inspection) throw new PreparedJobFailure('job-conflict');
+          await authorizeCommit?.(); assertActive();
+          return {jobId, job: existing, created: false};
+        }
         let inspection;
         if (this.inspect) {
           const file = join(staging, `inspection.${printableFormat(request.printableArtifact)}`);
           await writeSynced(file, bytes);
           await chmod(file, 0o400);
-          try { inspection = await this.inspect(file, request.printableArtifact, request.selection); }
+          try { inspection = await this.inspect(file, request.printableArtifact, request.selection, signal); }
           finally { await rm(file, {force: true}); }
           // A worker never supplies retained bytes. Recheck the private original before publication.
           const retained = await readBounded(join(staging, 'printable.bin'), this.bound.maxPrintableBytes);
@@ -155,16 +180,22 @@ export class PreparedJobStore {
         if (jobBytes.length > this.bound.maxMetadataBytes) throw new Error('Prepared job metadata byte limit exceeded');
         await writeSynced(join(staging, 'job.json'), jobBytes);
         await syncDirectory(staging);
+        // Re-authorize after all asynchronous writes, immediately before publication.
+        assertActive(); await authorizeCommit?.(); assertActive();
         // Atomic publication is the commit point, serialized with project edits.
-        await rename(staging, join(this.directory, jobId));
+        try { await rename(staging, join(this.directory, jobId)); }
+        catch (error) {
+          if (['EEXIST', 'ENOTEMPTY'].includes((error as NodeJS.ErrnoException).code ?? '')) throw new PreparedJobFailure('job-conflict');
+          throw error;
+        }
         await syncDirectory(this.directory);
-        return {jobId, job};
+        return {jobId, job, created: true};
       }, expectedProjectETag);
     } finally { await rm(staging, {recursive: true, force: true}); }
   }
 
   async loadPreparedJob(jobId: string, expectedProjectETag?: string) {
-    const job = await this.readJob(z.uuid().parse(jobId));
+    const job = await this.readJob(z.uuid().parse(jobId).toLowerCase());
     const etagValue = expectedProjectETag === undefined ? undefined : etag.parse(expectedProjectETag);
     return this.projects.withCurrentProject(job.projectId, job.projectRevision, async project => {
       const printable = await this.verifiedPrintable(job);
@@ -178,7 +209,7 @@ export class PreparedJobStore {
    * replay after restart, always rejects. This never starts a print.
    */
   async claimIntent(jobId: string, approvalInput: unknown): Promise<PreparedJobIntent> {
-    const job = await this.readJob(z.uuid().parse(jobId));
+    const job = await this.readJob(z.uuid().parse(jobId).toLowerCase());
     const approval = approvalSchema.parse(approvalInput);
     return this.projects.withCurrentProject(job.projectId, job.projectRevision, async project => {
       const now = integer.parse(this.clock());
@@ -223,7 +254,9 @@ export class PreparedJobStore {
     }
   }
   private async readJob(jobId: string): Promise<PreparedJob> {
-    const bytes = await readBounded(join(this.directory, jobId, 'job.json'), this.bound.maxMetadataBytes);
+    let bytes: Buffer;
+    try { bytes = await readBounded(join(this.directory, jobId, 'job.json'), this.bound.maxMetadataBytes); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') throw new PreparedJobFailure('not-found'); throw error; }
     const job = PreparedJobSchema.parse(JSON.parse(new TextDecoder('utf-8', {fatal: true}).decode(bytes)));
     if (job.id !== jobId) throw new Error('Stored prepared job identity mismatch');
     return job;
