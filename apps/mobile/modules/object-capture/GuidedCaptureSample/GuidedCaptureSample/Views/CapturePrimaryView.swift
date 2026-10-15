@@ -25,10 +25,29 @@ struct CapturePrimaryView: View {
 
             CaptureOverlayView(session: session)
         }
+        .overlay(alignment: .topLeading) {
+            CaptureStopButton { appModel.stopCapture() }
+                .padding()
+                .padding(.horizontal, 15)
+        }
         .onAppear(perform: {
             UIApplication.shared.isIdleTimerDisabled = true
         })
         .id(session.id)
+    }
+}
+
+// Kept outside CaptureOverlayView so tracking, pause and missing frames cannot hide exit.
+struct CaptureStopButton: View {
+    let stop: () -> Void
+
+    var body: some View {
+        Button("Stop capture", action: stop)
+            .font(.subheadline.bold())
+            .foregroundStyle(.white)
+            .padding(16)
+            .background(.black.opacity(0.8), in: RoundedRectangle(cornerRadius: 15))
+            .accessibilityIdentifier("capture.stop")
     }
 }
 
