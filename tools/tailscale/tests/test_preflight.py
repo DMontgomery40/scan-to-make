@@ -30,10 +30,11 @@ def status_payload(**overrides):
 
 
 class FakeRunner:
-    def __init__(self, status=None, serve=None, version="1.80.0"):
+    def __init__(self, status=None, serve=None, version="1.80.0", status_returncode=0):
         self.status = status if status is not None else status_payload()
         self.serve = serve if serve is not None else {}
         self.version = version
+        self.status_returncode = status_returncode
         self.calls = []
         self.envs = []
 
@@ -43,7 +44,7 @@ class FakeRunner:
         if argv[1:] == ("version",):
             return preflight.CommandResult(tuple(argv), 0, self.version + "\n")
         if argv[1:] == ("status", "--json"):
-            return preflight.CommandResult(tuple(argv), 0, json.dumps(self.status))
+            return preflight.CommandResult(tuple(argv), self.status_returncode, json.dumps(self.status))
         if argv[1:] == ("serve", "status", "--json"):
             return preflight.CommandResult(tuple(argv), 0, json.dumps(self.serve))
         raise AssertionError(f"unexpected command: {argv}")
@@ -107,6 +108,13 @@ class PreflightTests(unittest.TestCase):
         with mock.patch.object(preflight, "find_tailscale", return_value="/fake/tailscale"):
             report = preflight.run_preflight(runner=BadRunner(), health_probe=health_ok)
         self.assertEqual(report["state"], "status-unreadable")
+
+    def test_nonzero_status_exit_fails_closed_even_with_valid_stdout(self):
+        runner = FakeRunner(status_returncode=1)
+        with mock.patch.object(preflight, "find_tailscale", return_value="/fake/tailscale"):
+            report = preflight.run_preflight(runner=runner, health_probe=health_ok)
+        self.assertEqual(report["state"], "status-unreadable")
+        self.assertFalse(report["readyForCompanionIntegration"])
 
     def test_only_read_only_tailscale_commands_are_allowlisted(self):
         forbidden = {"up", "down", "login", "logout", "funnel", "set", "file", "ssh"}

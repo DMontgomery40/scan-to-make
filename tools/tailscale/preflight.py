@@ -17,7 +17,7 @@ import subprocess
 import sys
 import urllib.error
 import urllib.request
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
@@ -226,7 +226,7 @@ def run_preflight(
         )
 
     status_result = runner((binary, "status", "--json"), run_env)
-    status = _parse_json(status_result.stdout)
+    status = _parse_json(status_result.stdout) if status_result.returncode == 0 else None
     if status is None:
         checks.append(
             Check(
