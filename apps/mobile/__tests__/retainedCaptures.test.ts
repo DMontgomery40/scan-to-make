@@ -230,3 +230,85 @@ test('replacing credentials at the same origin retains handles; another origin d
   h.native.context = async () => 'https://other.ts.net|replacement-device';
   expect((await h.client.state('one')).snapshot).toBeUndefined();
 });
+
+const nativeSource = {
+  sha256: 'a'.repeat(64),
+  byteLength: 123,
+  mediaType: 'model/vnd.usdz+zip',
+};
+test('native handoff refuses a project changed since scanning before any network request', async () => {
+  const h = harness();
+  const p = await h.create();
+  await h.repo.change('one', 0, {
+    kind: 'replace-brief',
+    brief: { ...p.brief, addition: 'Changed' },
+  });
+  await expect(
+    h.client.import('one', nativeSource, {
+      projectId: 'one',
+      revision: 0,
+      snapshot: JSON.stringify(p),
+      context: 'host/device',
+    }),
+  ).rejects.toThrow('capture destination changed');
+  expect(h.native.request).not.toHaveBeenCalled();
+  expect((await h.client.state('one')).pending).toBeUndefined();
+});
+test('native handoff refuses replacement pairing before syncing or uploading', async () => {
+  const h = harness();
+  const p = await h.create();
+  await expect(
+    h.client.import('one', nativeSource, {
+      projectId: 'one',
+      revision: 0,
+      snapshot: JSON.stringify(p),
+      context: 'previous/device',
+    }),
+  ).rejects.toThrow('capture destination changed');
+  expect(h.native.request).not.toHaveBeenCalled();
+});
+test('native handoff rechecks its originating revision after asynchronous sync', async () => {
+  const h = harness();
+  const p = await h.create();
+  h.native.request = jest.fn(async () => {
+    await h.repo.change('one', 0, {
+      kind: 'replace-brief',
+      brief: { ...p.brief, addition: 'Changed during sync' },
+    });
+    return {
+      status: 200,
+      body: JSON.stringify(p),
+      etag: '"' + 'a'.repeat(64) + '"',
+    };
+  });
+  await expect(
+    h.client.import('one', nativeSource, {
+      projectId: 'one',
+      revision: 0,
+      snapshot: JSON.stringify(p),
+      context: 'host/device',
+    }),
+  ).rejects.toThrow('capture destination changed');
+  expect(
+    (h.native.request as jest.Mock).mock.calls.some(
+      ([o]) => o.method === 'POST',
+    ),
+  ).toBe(false);
+});
+
+test('pairing changed between handoff precheck and sync cannot send project bytes to the new companion', async () => {
+  const h = harness();
+  const p = await h.create();
+  let reads = 0;
+  h.native.context = async () =>
+    ++reads <= 2 ? 'host/device' : 'other/device';
+  await expect(
+    h.client.import('one', nativeSource, {
+      projectId: 'one',
+      revision: 0,
+      snapshot: JSON.stringify(p),
+      context: 'host/device',
+    }),
+  ).rejects.toThrow('capture destination changed');
+  expect(h.native.request).not.toHaveBeenCalled();
+});
