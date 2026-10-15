@@ -163,26 +163,53 @@ def _contains_target(value: Any, port: int) -> bool:
     return False
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
 def default_health_probe(port: int) -> dict[str, Any]:
     url = f"http://127.0.0.1:{port}/healthz"
     request = urllib.request.Request(url, method="GET")
+    # Keep the read confined to this loopback endpoint, including when the
+    # environment configures an HTTP proxy or an unrelated listener redirects.
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect())
+    base = {"ok": False, "identityVerified": False}
     try:
-        with urllib.request.urlopen(request, timeout=2) as response:
+        with opener.open(request, timeout=2) as response:
             body = response.read(MAX_OUTPUT_BYTES + 1)
+            status = response.status
+    except urllib.error.HTTPError as exc:
+        status = exc.code
+        exc.close()
+        if status in (401, 403):
+            return {**base, "state": "authorization-required", "httpStatus": status,
+                    "detail": f"Loopback listener denied anonymous health (HTTP {status}). "
+                    "This is compatible with authenticated companion mode; service identity "
+                    "and remote connectivity remain unverified."}
+        return {**base, "state": "invalid-response", "httpStatus": status,
+                "detail": f"Loopback listener returned HTTP {status}; health is unverified. "
+                "Redirects are not followed."}
     except (OSError, urllib.error.URLError) as exc:
-        return {"ok": False, "detail": f"loopback health probe failed: {exc}"}
+        return {**base, "state": "unavailable", "detail": f"loopback health probe failed: {exc}"}
+    invalid = {**base, "state": "invalid-response", "httpStatus": status}
     if len(body) > MAX_OUTPUT_BYTES:
-        return {"ok": False, "detail": "companion health response exceeded bound"}
+        return {**invalid, "detail": "companion health response exceeded bound"}
     payload = _parse_json(body.decode("utf-8", errors="replace"))
-    if not payload:
-        return {"ok": False, "detail": "companion health response was not JSON"}
+    if (status != 200 or not payload or payload.get("status") != "ok"
+            or payload.get("protocolVersion") != "0.1.0"
+            or not isinstance(payload.get("templates"), list)
+            or not all(isinstance(t, str) and t for t in payload["templates"])):
+        return {**invalid, "detail": "listener did not return a supported companion health response"}
     return {
-        "ok": payload.get("status") == "ok",
+        **base,
+        "ok": True,
+        "state": "local-healthy",
+        "httpStatus": status,
         "protocolVersion": payload.get("protocolVersion"),
         "templates": payload.get("templates"),
-        "detail": "companion loopback health returned status ok"
-        if payload.get("status") == "ok"
-        else "companion health did not return status ok",
+        "detail": "Local companion health protocol responded; this does not authenticate "
+        "the service or verify private phone connectivity.",
     }
 
 
@@ -293,10 +320,10 @@ def run_preflight(
             Check(
                 "serve",
                 "warn",
-                "Serve already proxies to the companion loopback port. The "
-                "authenticated remote transport is not implemented yet, so "
-                "do not treat this as a supported phone connection.",
-                "Leave Serve unchanged until the companion pairing/auth transport lands.",
+                "Serve configuration references the companion loopback port. "
+                "This does not verify private HTTPS, forwarded identity, app pairing or phone reachability.",
+                "Verify the installed Serve forwarding contract and use the paired app's "
+                "connection check; see docs/tailscale-setup.md.",
             )
         )
     else:
@@ -310,22 +337,31 @@ def run_preflight(
         )
 
     companion_ok = False
+    health_state = None
     if probe_companion:
         health = health_probe(companion_port)
         companion_ok = bool(health.get("ok"))
+        health_state = health.get("state")
         facts["companionHealth"] = {
             key: health.get(key)
-            for key in ("ok", "protocolVersion", "templates")
+            for key in ("ok", "state", "httpStatus", "identityVerified", "protocolVersion", "templates")
             if key in health
         }
         checks.append(
             Check(
                 "companion-loopback",
-                "pass" if companion_ok else "fail",
+                "pass" if companion_ok else "warn" if health_state == "authorization-required" else "fail",
                 str(health.get("detail") or "companion health probe completed"),
                 None
                 if companion_ok
-                else "Start the companion loopback generation service, then re-run preflight.",
+                else "Confirm which service owns this port and use the paired app's connection check "
+                "through private HTTPS. Anonymous denial alone does not require restarting it."
+                if health_state == "authorization-required"
+                else "Inspect the running listener's port, configuration and diagnostics; "
+                "it did not return supported health."
+                if health_state == "invalid-response"
+                else "Check that the companion loopback generation service is running on this port, "
+                "then re-run preflight.",
             )
         )
     else:
@@ -335,6 +371,8 @@ def run_preflight(
     state = "ready-for-companion-integration" if tailnet_ready and companion_ok else "tailnet-ready"
     if not tailnet_ready:
         state = "tailnet-incomplete"
+    elif health_state == "authorization-required":
+        state = "companion-authorization-required"
     return _report(state, checks, facts)
 
 
@@ -344,12 +382,15 @@ def _report(state: str, checks: list[Check], facts: dict[str, Any]) -> dict[str,
         "readOnly": True,
         "state": state,
         "readyForCompanionIntegration": state == "ready-for-companion-integration",
+        # Legacy field describes this preflight tool, not the companion transport.
         "remotePhoneConnectivityImplemented": False,
+        "remotePhoneConnectivityVerified": False,
         "facts": facts,
         "checks": [check.as_dict() for check in checks],
         "boundaries": [
             "No install, login, Serve/Funnel, ACL, device, or printer change was made.",
-            "A ready result means the host is ready for the separate authenticated companion transport; it does not prove a phone can use the app flow today.",
+            "A ready result covers local health and host prerequisites only. Authenticated transport "
+            "is implemented separately; this anonymous probe never verifies phone connectivity.",
         ],
     }
 
@@ -361,7 +402,7 @@ def _print_human(report: Mapping[str, Any]) -> None:
         if check.get("nextStep"):
             print(f"  next: {check['nextStep']}")
     print("Read-only: no install, login, Serve/Funnel, policy, device, or printer change was made.")
-    print("Remote phone connectivity is not implemented by this preflight.")
+    print("Remote phone connectivity is not verified by this preflight.")
 
 
 def main(argv: Sequence[str] | None = None) -> int:
