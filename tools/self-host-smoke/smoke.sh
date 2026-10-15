@@ -5,6 +5,8 @@
 #   SMOKE_SKIP_INSTALL=1 ...                  # reuse an existing venv without pip
 # Exit 0 only if every step passes. The capture-import/native end-to-end gate is
 # NOT exercised here and is always reported OPEN.
+# Authenticated fixture-auth smoke is a separate command and does not replace this:
+#   tools/self-host-smoke/auth-smoke.sh
 set -u -o pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

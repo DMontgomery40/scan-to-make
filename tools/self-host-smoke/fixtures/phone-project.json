@@ -1,0 +1,13 @@
+{
+  "formatVersion": "0.2.0",
+  "id": "phone",
+  "revision": 7,
+  "brief": {
+    "object": "Bottle",
+    "context": "Drawer",
+    "addition": "Holder"
+  },
+  "fit": null,
+  "preview": null,
+  "acceptedArtifact": null
+}
