@@ -178,3 +178,25 @@ const {receipt, bytes} = await verifyGenerationResponse(
 `MAX_GENERATION_REQUEST_BYTES` is 256 KiB and `MAX_GENERATED_STL_BYTES` is 32 MiB. `MAX_GENERATION_RESPONSE_BYTES` includes base64 expansion, the request-size metadata allowance and 4 KiB overhead. A transport must enforce these limits while receiving bytes, before allocating or parsing an unbounded response. `GENERATION_TIMEOUT_MS` is 30,000 ms. Error codes are available through `GenerationErrorCodeSchema` and `{error: {code, message}}` through `GenerationErrorSchema`; HTTP mappings and cancellation behavior are documented in the [local companion](../../services/companion/README.md#local-drawer-generation).
 
 Verification binds the result to the request, not necessarily to the project's latest fit. Reload the latest saved project and call `change` with its current saved revision and `{kind: 'attach-preview', sourceFit: receipt.sourceFit, artifact: receipt.artifact}`. The repository checks full current-fit equality, so an intervening fit edit rejects the response while a brief-only edit can preserve it. Cache the verified exact bytes immutably and recheck their digest/length when reopening, accepting or exporting; share those bytes rather than serializing a viewer mesh. A missing/corrupt cache must disable review/export actions. Durable cache, native hashing, bounded transport and rendering are supplied by the consuming platform.
+
+## Retained capture provenance
+
+The `./capture` entry point adds a standalone `CaptureReceiptSchema` and
+`CaptureBindingSchema`. It reuses `ArtifactRef` for the original capture, derived
+OBJ, converter JSON report and each contributing layer. Native meters-per-unit,
+authored-unit status, up axis and composed world-coordinate policy stay explicit.
+Exact transform details are retained in the original layers and hash-bound report.
+The contract does not apply transforms, rescale geometry or infer missing surfaces.
+
+`validateCaptureBinding(receiptBinding, expected)` compares the project ID and
+revision plus independently supplied original, derived and report identities.
+Consumers must first verify retained bytes and the converter report's assertions;
+schema validation alone cannot authenticate them. Persist using an atomic current
+revision check. The standalone binding does not modify the saved-project format;
+companion ingestion/persistence must explicitly implement that storage integration.
+
+Unqualified conversions are retainable with reasons. Only qualified conversions
+with authored units are eligible for bounds/topology evaluation through
+`isCaptureEvaluationEligible`. This is not fit readiness: metric accuracy,
+surface completeness and physical fit are always `unknown` in this contract.
+Future physical evidence needs a separate, explicitly observed evidence contract.
