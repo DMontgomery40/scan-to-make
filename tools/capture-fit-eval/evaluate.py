@@ -74,34 +74,42 @@ def _mesh_from_triangles(triangles: Sequence[tuple[Vec, Vec, Vec]]) -> tuple[lis
     return vertices, indexed
 
 
-def parse_stl(data: bytes, factor: float) -> tuple[list[Vec], list[Tri]]:
-    is_ascii = data[:5].lower() == b"solid" and b"endsolid" in data[-256:].lower()
-    if is_ascii:
-        try:
-            text = data.decode("utf-8")
-        except UnicodeDecodeError as exc:
-            raise InvalidMesh("ASCII STL is not valid UTF-8") from exc
-        raw_vertices: list[Vec] = []
-        for line in text.splitlines():
-            parts = line.strip().split()
-            if len(parts) == 4 and parts[0] == "vertex":
-                try:
-                    raw_vertices.append(_vec((float(parts[1]), float(parts[2]), float(parts[3])), factor))
-                except ValueError as exc:
-                    raise InvalidMesh("ASCII STL vertex is malformed") from exc
-        if not raw_vertices or len(raw_vertices) % 3:
-            raise InvalidMesh("ASCII STL vertex count is not a positive multiple of three")
-        tris = [
-            (raw_vertices[i], raw_vertices[i + 1], raw_vertices[i + 2])
-            for i in range(0, len(raw_vertices), 3)
-        ]
-        return _mesh_from_triangles(tris)
-
+def _binary_stl_count(data: bytes) -> int | None:
     if len(data) < 84:
-        raise InvalidMesh("binary STL is shorter than its 84-byte header")
+        return None
     (count,) = struct.unpack_from("<I", data, 80)
-    if count == 0 or len(data) != 84 + count * 50:
-        raise InvalidMesh("binary STL byte length does not match its triangle count")
+    if count > 0 and len(data) == 84 + count * 50:
+        return count
+    return None
+
+
+def _parse_ascii_stl(data: bytes, factor: float) -> tuple[list[Vec], list[Tri]]:
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise InvalidMesh("ASCII STL is not valid UTF-8") from exc
+    raw_vertices: list[Vec] = []
+    saw_facet = False
+    for line in text.splitlines():
+        parts = line.strip().split()
+        if parts[:1] == ["facet"]:
+            saw_facet = True
+        if len(parts) == 4 and parts[0] == "vertex":
+            try:
+                coords = (float(parts[1]), float(parts[2]), float(parts[3]))
+            except ValueError as exc:
+                raise InvalidMesh("ASCII STL vertex is malformed") from exc
+            raw_vertices.append(_vec(coords, factor))
+    if not saw_facet or not raw_vertices or len(raw_vertices) % 3:
+        raise InvalidMesh("ASCII STL vertex count is not a positive multiple of three")
+    tris = [
+        (raw_vertices[i], raw_vertices[i + 1], raw_vertices[i + 2])
+        for i in range(0, len(raw_vertices), 3)
+    ]
+    return _mesh_from_triangles(tris)
+
+
+def _parse_binary_stl(data: bytes, factor: float, count: int) -> tuple[list[Vec], list[Tri]]:
     tris: list[tuple[Vec, Vec, Vec]] = []
     for i in range(count):
         values = struct.unpack_from("<12fH", data, 84 + i * 50)
@@ -113,6 +121,28 @@ def parse_stl(data: bytes, factor: float) -> tuple[list[Vec], list[Tri]]:
             )
         )
     return _mesh_from_triangles(tris)
+
+
+def parse_stl(data: bytes, factor: float) -> tuple[list[Vec], list[Tri]]:
+    binary_count = _binary_stl_count(data)
+    ascii_candidate = (
+        data[:5].lower() == b"solid"
+        and b"endsolid" in data[-256:].lower()
+        and b"facet" in data.lower()
+        and b"vertex" in data.lower()
+    )
+    if ascii_candidate:
+        try:
+            return _parse_ascii_stl(data, factor)
+        except InvalidMesh:
+            if binary_count is None:
+                raise
+            return _parse_binary_stl(data, factor, binary_count)
+    if binary_count is not None:
+        return _parse_binary_stl(data, factor, binary_count)
+    if data[:5].lower() == b"solid":
+        return _parse_ascii_stl(data, factor)
+    raise InvalidMesh("STL is neither structurally valid binary nor ASCII")
 
 
 def parse_obj(data: bytes, factor: float) -> tuple[list[Vec], list[Tri]]:
@@ -130,9 +160,10 @@ def parse_obj(data: bytes, factor: float) -> tuple[list[Vec], list[Tri]]:
             if len(parts) != 4:
                 raise InvalidMesh(f"OBJ vertex on line {line_number} must have three coordinates")
             try:
-                vertices.append(_vec((float(parts[1]), float(parts[2]), float(parts[3])), factor))
+                coords = (float(parts[1]), float(parts[2]), float(parts[3]))
             except ValueError as exc:
                 raise InvalidMesh(f"OBJ vertex on line {line_number} is malformed") from exc
+            vertices.append(_vec(coords, factor))
         elif parts[0] == "f":
             if len(parts) < 4:
                 raise InvalidMesh(f"OBJ face on line {line_number} has fewer than three vertices")
@@ -155,7 +186,7 @@ def parse_obj(data: bytes, factor: float) -> tuple[list[Vec], list[Tri]]:
     return vertices, triangles
 
 
-def load_mesh(path: Path, declared_format: str | None, units: str) -> tuple[str, list[Vec], list[Tri]]:
+def load_mesh(path: Path, declared_format: str | None, units: str) -> tuple[str, bytes, list[Vec], list[Tri]]:
     fmt = (declared_format or path.suffix.removeprefix(".")).lower()
     if fmt not in SUPPORTED_FORMATS:
         raise UnsupportedFormat(
@@ -171,7 +202,7 @@ def load_mesh(path: Path, declared_format: str | None, units: str) -> tuple[str,
         raise InvalidMesh("mesh file is empty")
     factor = UNIT_TO_MM[units]
     vertices, triangles = parse_stl(data, factor) if fmt == "stl" else parse_obj(data, factor)
-    return fmt, vertices, triangles
+    return fmt, data, vertices, triangles
 
 
 def _sub(a: Vec, b: Vec) -> Vec:
@@ -309,7 +340,7 @@ def evaluate(
             "excludedFromIndependentScoring": excluded_axis,
         }
 
-    fmt, vertices, triangles = load_mesh(path, declared_format, units)
+    fmt, data, vertices, triangles = load_mesh(path, declared_format, units)
     stats = mesh_stats(vertices, triangles)
     raw_extents = stats["extentsMm"]
     evaluated_extents = {axis: raw_extents[axis] * factor for axis in AXES}
@@ -330,7 +361,6 @@ def evaluate(
         and stats["absoluteVolumeMm3"] > 0
     )
     verdict = "pass-bounds-only" if evaluated_scale_pass and mesh_ok else "fail"
-    data = path.read_bytes()
     return {
         "schema": SCHEMA,
         "verdict": verdict,
@@ -403,10 +433,13 @@ def _print_human(report: Mapping) -> None:
         f"Artifact: {artifact['fileName']} ({artifact['format']}, {artifact['byteLength']} bytes, "
         f"sha256 {artifact['sha256']})"
     )
+    scale = report["scale"]
     print(
         f"Mesh: {mesh['triangleCount']} triangles, closedOriented={mesh['closedOriented']}, "
-        f"extentsMm={mesh['extentsMm']}"
+        f"evaluatedExtentsMm={scale['evaluatedExtentsMm']} (mode={scale['mode']})"
     )
+    if scale["mode"] == "assisted":
+        print(f"Raw extents before calibration: {scale['rawExtentsMm']}")
     print("Bounds-only: this does not prove complete capture or physical fit.")
 
 

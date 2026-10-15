@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
+import contextlib
 import hashlib
+import io
 import json
 import struct
 import sys
@@ -27,16 +29,22 @@ def box_faces():
     return vertices, faces
 
 
-def write_binary_stl(path, dims, *, omit_top=False):
+def write_binary_stl(path, dims, *, omit_top=False, solid_header=False, endsolid_tail=False):
     base, faces = box_faces()
     if omit_top:
         faces = [f for f in faces if f not in {(4, 5, 6), (4, 6, 7)}]
     vertices = [(x * dims[0], y * dims[1], z * dims[2]) for x, y, z in base]
     data = bytearray(b"\0" * 80)
+    if solid_header:
+        data[:18] = b"solid facet vertex"
     data.extend(struct.pack("<I", len(faces)))
     for face in faces:
         points = [vertices[i] for i in face]
         data.extend(struct.pack("<12fH", 0, 0, 0, *points[0], *points[1], *points[2], 0))
+    if endsolid_tail:
+        # Put the marker in the final record's ignored normal bytes. Vertex
+        # coordinates and the structural byte length remain valid binary STL.
+        data[-50:-42] = b"endsolid"
     path.write_bytes(data)
     return bytes(data)
 
@@ -177,6 +185,76 @@ class EvaluateTests(unittest.TestCase):
             "--held-out", "x=80", "--held-out", "y=55", "--json",
         ])
         self.assertEqual(code, 3)
+
+    def test_binary_stl_with_ascii_markers_falls_back_to_binary(self):
+        path = self.dir / "binary-markers.stl"
+        write_binary_stl(path, (80, 55, 95), solid_header=True, endsolid_tail=True)
+        report = evaluate(path, units="mm", held_out_mm={"x": 80, "y": 55, "z": 95})
+        self.assertEqual(report["verdict"], "pass-bounds-only")
+
+    def test_binary_stl_length_mismatch_and_empty_file_are_invalid(self):
+        path = self.dir / "short.stl"
+        write_binary_stl(path, (80, 55, 95))
+        path.write_bytes(path.read_bytes()[:-1])
+        with self.assertRaises(InvalidMesh):
+            evaluate(path, units="mm", held_out_mm={"x": 80, "y": 55})
+        empty = self.dir / "empty.obj"
+        empty.write_bytes(b"")
+        with self.assertRaisesRegex(InvalidMesh, "empty"):
+            evaluate(empty, units="mm", held_out_mm={"x": 80, "y": 55})
+
+    def test_degenerate_triangle_blocks_pass(self):
+        path = self.dir / "degenerate.stl"
+        write_ascii_stl(path, (80, 55, 95))
+        text = path.read_text(encoding="utf-8").replace(
+            "endsolid box",
+            " facet normal 0 0 0\n  outer loop\n   vertex 0 0 0\n   vertex 0 0 0\n   vertex 1 1 1\n  endloop\n endfacet\nendsolid box",
+        )
+        path.write_text(text, encoding="utf-8")
+        report = evaluate(path, units="mm", held_out_mm={"x": 80, "y": 55, "z": 95})
+        self.assertEqual(report["verdict"], "fail")
+        self.assertGreater(report["mesh"]["degenerateTriangleCount"], 0)
+
+    def test_obj_negative_indices_and_quad_fans(self):
+        path = self.dir / "quad.obj"
+        base, _ = box_faces()
+        dims = (80, 55, 95)
+        quads = [(0, 3, 2, 1), (4, 5, 6, 7), (0, 1, 5, 4), (3, 7, 6, 2), (0, 4, 7, 3), (1, 2, 6, 5)]
+        lines = [f"v {x * dims[0]} {y * dims[1]} {z * dims[2]}" for x, y, z in base]
+        lines += ["f " + " ".join(str(i - 8) for i in quad) for quad in quads]
+        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        report = evaluate(path, units="mm", held_out_mm={"x": 80, "y": 55, "z": 95})
+        self.assertEqual(report["verdict"], "pass-bounds-only")
+        self.assertEqual(report["mesh"]["triangleCount"], 12)
+
+    def test_single_held_out_axis_cannot_pass_scale_gate(self):
+        path = self.dir / "box.stl"
+        write_binary_stl(path, (80, 55, 95))
+        report = evaluate(path, units="mm", held_out_mm={"x": 80})
+        self.assertEqual(report["verdict"], "fail")
+        self.assertFalse(report["scale"]["evaluatedScalePass"])
+
+    def test_nonfinite_ascii_vertex_keeps_specific_error(self):
+        path = self.dir / "nan.stl"
+        write_ascii_stl(path, (80, 55, 95))
+        path.write_text(path.read_text(encoding="utf-8").replace("vertex 80", "vertex nan", 1), encoding="utf-8")
+        with self.assertRaisesRegex(InvalidMesh, "finite number"):
+            evaluate(path, units="mm", held_out_mm={"x": 80, "y": 55})
+
+    def test_assisted_human_output_shows_evaluated_extents(self):
+        path = self.dir / "box.stl"
+        write_binary_stl(path, (84, 57.75, 99.75))
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            code = main([
+                "evaluate", str(path), "--units", "mm",
+                "--held-out", "x=80", "--held-out", "y=55", "--held-out", "z=95",
+                "--scale-mode", "assisted", "--calibration-source", "distinct-reference",
+                "--calibration-reference", "reference-block-01", "--calibration-factor", str(1 / 1.05),
+            ])
+        self.assertEqual(code, 0)
+        self.assertIn("evaluatedExtentsMm", output.getvalue())
+        self.assertIn("Raw extents before calibration", output.getvalue())
 
     def test_cli_writes_deterministic_json_report(self):
         path = self.dir / "box.stl"
