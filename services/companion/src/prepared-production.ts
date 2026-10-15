@@ -92,7 +92,16 @@ def tracked_popen(*args, **kwargs):
     spawning = True
     try:
         child = original_popen(*args, **kwargs)
-        owned.append((child, kwargs.get('start_new_session', False)))
+        grouped = kwargs.get('start_new_session', False)
+        owned.append((child, grouped))
+        if grouped:
+            os.write(3, (str(child.pid) + '\n').encode('ascii'))
+            original_wait = child.wait
+            def tracked_wait(*args, **kwargs):
+                result = original_wait(*args, **kwargs)
+                os.write(3, ('-' + str(child.pid) + '\n').encode('ascii'))
+                return result
+            child.wait = tracked_wait
     finally:
         spawning = False
     if pending:
@@ -138,17 +147,41 @@ export function createPreparedProducer(configuration: PreparedProducerConfigurat
         '--expected-input-sha256', productionHash(original), '--expected-input-bytes', String(original.length),
         '--timeout', String(config.timeoutSeconds)];
       if (signal?.aborted) throw new Error('Production cancelled');
-      const child = spawn(config.python, argv, {cwd: folder, stdio: ['ignore', 'pipe', 'pipe'],
+      const child = spawn(config.python, argv, {cwd: folder, stdio: ['ignore', 'pipe', 'pipe', 'pipe'],
         env: {PATH: '/usr/bin:/bin', LANG: 'C', TMPDIR: folder}});
       let failure: string | undefined, killTimer: ReturnType<typeof setTimeout> | undefined;
+      const ownedGroups = new Set<number>();
+      const killOwnedGroups = () => {
+        for (const pid of ownedGroups) {
+          try { process.kill(-pid, 'SIGKILL'); } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== 'ESRCH') failure ??= 'Producer group cleanup failed';
+          }
+        }
+        ownedGroups.clear();
+      };
       const stop = (reason: string) => {
         if (failure) return;
         failure = reason; child.kill('SIGTERM');
-        killTimer = setTimeout(() => child.kill('SIGKILL'), 5000);
+        killTimer = setTimeout(() => {killOwnedGroups(); child.kill('SIGKILL');}, 5000);
       };
+      // A dedicated pipe carries only owned session-group IDs from the pinned
+      // wrapper. Keep ownership if Python is forcibly killed before its finally.
+      let ownershipBuffer = '', ownershipBytes = 0;
+      child.stdio[3]!.on('data', (bytes: Buffer) => {
+        ownershipBytes += bytes.length;
+        if (ownershipBytes > 4096) {stop('Producer ownership limit exceeded'); return;}
+        ownershipBuffer += bytes.toString('ascii');
+        for (let end; (end = ownershipBuffer.indexOf('\n')) >= 0;) {
+          const line = ownershipBuffer.slice(0, end); ownershipBuffer = ownershipBuffer.slice(end + 1);
+          if (!/^-?[1-9][0-9]{0,9}$/.test(line)) {stop('Invalid producer ownership record'); continue;}
+          const pid = Number(line);
+          if (Math.abs(pid) > 2147483647) {stop('Invalid producer ownership record'); continue;}
+          if (pid < 0) ownedGroups.delete(-pid); else ownedGroups.add(pid);
+        }
+      });
       let logBytes = 0;
       const drain = (bytes: Buffer) => {logBytes += bytes.length; if (logBytes > 64 * 1024) stop('Producer log limit exceeded');};
-      child.stdout.on('data', drain); child.stderr.on('data', drain);
+      child.stdout!.on('data', drain); child.stderr!.on('data', drain);
       const finished = new Promise<number | null>(resolve => {
         child.once('error', () => {failure = 'Producer launch failed';}); child.once('close', resolve);
       });
@@ -158,7 +191,7 @@ export function createPreparedProducer(configuration: PreparedProducerConfigurat
       try {
         const code = await finished;
         if (failure || code !== 0) throw new Error(failure ?? 'Producer failed');
-      } finally {clearTimeout(timer); clearTimeout(killTimer); signal?.removeEventListener('abort', abort);}
+      } finally {clearTimeout(timer); clearTimeout(killTimer); signal?.removeEventListener('abort', abort); killOwnedGroups();}
       if (signal?.aborted) throw new Error('Production cancelled');
       const result = {
         printable: await readProductionFile(join(output, 'plate_1.gcode'), 64 * 1024 * 1024),

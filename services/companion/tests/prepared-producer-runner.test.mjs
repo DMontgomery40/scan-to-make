@@ -43,3 +43,13 @@ test('deadline still holds after worker pipe EOF',mac,async t=>{
  const f=await fixture(t,'import os,time\nos.close(1);os.close(2);time.sleep(60)\n');
  const start=Date.now();await assert.rejects(f.producer.produce(Buffer.from('source')),/timed out/);assert.ok(Date.now()-start<10000);
 });
+
+test('hard-kill escalation also reaps the separately grouped slicer',mac,async t=>{
+ const f=await fixture(t,'');const pidFile=join(f.root,'wedged-child.json');
+ const program=`import subprocess,sys,time,json,os,signal\nsignal.signal(signal.SIGTERM,signal.SIG_IGN)\np=subprocess.Popen([sys.executable,'-c','import signal,time;signal.signal(signal.SIGTERM,signal.SIG_IGN);time.sleep(60)'],start_new_session=True,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)\nopen(${JSON.stringify(pidFile)},'w').write(json.dumps({'pid':p.pid,'folder':os.getcwd()}))\ntime.sleep(60)\n`;
+ await writeFile(f.script,program);const producer=createPreparedProducer({...f.config,expectedScriptSha256:sha(program)});
+ const c=new AbortController();const rejected=assert.rejects(producer.produce(Buffer.from('source'),c.signal),/cancelled/);
+ let owned;for(let i=0;i<100;i++){try{owned=JSON.parse(await readFile(pidFile));break;}catch{}await new Promise(r=>setTimeout(r,20));}
+ assert.ok(owned);t.after(()=>{try{process.kill(-owned.pid,'SIGKILL');}catch{}});c.abort();await rejected;
+ assert.throws(()=>process.kill(owned.pid,0),{code:'ESRCH'});await assert.rejects(access(owned.folder),{code:'ENOENT'});
+});
