@@ -24,7 +24,7 @@ from collections import Counter
 from pathlib import Path
 from typing import Iterable, Mapping, Sequence
 
-SCHEMA = "scan-to-make.capture-fit-eval/0.1.0"
+SCHEMA = "scan-to-make.capture-fit-eval/0.2.0"
 AXES = ("x", "y", "z")
 UNIT_TO_MM = {"mm": 1.0, "cm": 10.0, "m": 1000.0, "in": 25.4}
 SUPPORTED_FORMATS = {"stl", "obj"}
@@ -288,6 +288,33 @@ def _errors(actual: Mapping[str, float], expected: Mapping[str, float], tol_mm: 
     return result
 
 
+def _evidence(*, bounds_status: str, topology_status: str) -> dict:
+    """Separate what this tool measured from what it cannot qualify.
+
+    Bounds and topology are geometric checks over the supplied artifact.
+    Native metric accuracy, surface coverage/completeness, and mechanical
+    fit require independent physical evidence and therefore stay unknown,
+    including for a closed mesh whose bounds happen to match.
+    """
+    return {
+        "geometricChecks": {
+            "bounds": {
+                "status": bounds_status,
+                "basis": "evaluated extents versus declared held-out dimensions",
+            },
+            "topology": {
+                "status": topology_status,
+                "basis": "closed/oriented triangles, degenerate count, and signed-volume magnitude",
+            },
+        },
+        "physicalQualification": {
+            "nativeAccuracy": "unknown",
+            "coverageCompleteness": "unknown",
+            "mechanicalFit": "unknown",
+        },
+    }
+
+
 def evaluate(
     path: Path,
     *,
@@ -355,12 +382,16 @@ def evaluate(
     evaluated_scale_pass = len(independent_axes) >= 2 and all(
         evaluated_errors[axis]["withinTolerance"] for axis in independent_axes
     )
-    mesh_ok = (
+    topology_pass = (
         stats["closedOriented"]
         and stats["degenerateTriangleCount"] == 0
         and stats["absoluteVolumeMm3"] > 0
     )
-    verdict = "pass-bounds-only" if evaluated_scale_pass and mesh_ok else "fail"
+    verdict = "pass-bounds-only" if evaluated_scale_pass and topology_pass else "fail"
+    evidence = _evidence(
+        bounds_status="pass" if evaluated_scale_pass else "fail",
+        topology_status="pass" if topology_pass else "fail",
+    )
     return {
         "schema": SCHEMA,
         "verdict": verdict,
@@ -387,6 +418,7 @@ def evaluate(
         },
         "heldOutDimensionsMm": expected,
         "thresholds": {"absoluteMm": tol_mm, "relative": tol_rel},
+        "evidence": evidence,
         "provesCompleteCapture": False,
         "provesPhysicalFit": False,
         "boundaries": [
@@ -417,6 +449,7 @@ def _error_report(state: str, message: str) -> dict:
         "schema": SCHEMA,
         "verdict": state,
         "error": message,
+        "evidence": _evidence(bounds_status="not-evaluated", topology_status="not-evaluated"),
         "provesCompleteCapture": False,
         "provesPhysicalFit": False,
     }
@@ -440,6 +473,18 @@ def _print_human(report: Mapping) -> None:
     )
     if scale["mode"] == "assisted":
         print(f"Raw extents before calibration: {scale['rawExtentsMm']}")
+    checks = report["evidence"]["geometricChecks"]
+    physical = report["evidence"]["physicalQualification"]
+    print(
+        f"Geometric checks: bounds={checks['bounds']['status']}, "
+        f"topology={checks['topology']['status']}"
+    )
+    print(
+        "Physical qualification: "
+        f"nativeAccuracy={physical['nativeAccuracy']}, "
+        f"coverageCompleteness={physical['coverageCompleteness']}, "
+        f"mechanicalFit={physical['mechanicalFit']}"
+    )
     print("Bounds-only: this does not prove complete capture or physical fit.")
 
 

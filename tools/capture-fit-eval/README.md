@@ -9,6 +9,26 @@ A `pass-bounds-only` result means only that the evaluated extents are within the
 "provesPhysicalFit": false
 ```
 
+## Evidence separation
+
+Schema `0.2.0` records the two things this tool actually checks separately from the physical questions it cannot answer:
+
+```json
+"evidence": {
+  "geometricChecks": {
+    "bounds": {"status": "pass | fail | not-evaluated"},
+    "topology": {"status": "pass | fail | not-evaluated"}
+  },
+  "physicalQualification": {
+    "nativeAccuracy": "unknown",
+    "coverageCompleteness": "unknown",
+    "mechanicalFit": "unknown"
+  }
+}
+```
+
+An open cavity can therefore pass bounds while failing topology. A closed false cap can pass both geometric checks while native accuracy, coverage/completeness, and mechanical fit remain unknown. Passing geometry is never promoted into physical qualification, including in error reports.
+
 ## Supported inputs
 
 - STL: binary and ASCII

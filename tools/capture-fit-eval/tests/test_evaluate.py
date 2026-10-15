@@ -256,6 +256,72 @@ class EvaluateTests(unittest.TestCase):
         self.assertIn("evaluatedExtentsMm", output.getvalue())
         self.assertIn("Raw extents before calibration", output.getvalue())
 
+    def test_open_cavity_separates_bounds_from_topology_and_physics(self):
+        path = self.dir / "open-cavity.stl"
+        write_binary_stl(path, (80, 55, 95), omit_top=True)
+        report = evaluate(path, units="mm", held_out_mm={"x": 80, "y": 55, "z": 95})
+        self.assertEqual(report["verdict"], "fail")
+        self.assertEqual(report["evidence"]["geometricChecks"]["bounds"]["status"], "pass")
+        self.assertEqual(report["evidence"]["geometricChecks"]["topology"]["status"], "fail")
+        self.assertEqual(
+            report["evidence"]["physicalQualification"],
+            {
+                "nativeAccuracy": "unknown",
+                "coverageCompleteness": "unknown",
+                "mechanicalFit": "unknown",
+            },
+        )
+
+    def test_closed_false_cap_cannot_be_misread_as_physical_qualification(self):
+        # The same closed box could represent a solid or merely cap an unseen
+        # cavity. Geometry may pass; every physical claim stays unknown.
+        path = self.dir / "false-cap.stl"
+        write_binary_stl(path, (80, 55, 95))
+        report = evaluate(path, units="mm", held_out_mm={"x": 80, "y": 55, "z": 95})
+        self.assertEqual(report["verdict"], "pass-bounds-only")
+        self.assertEqual(report["evidence"]["geometricChecks"]["bounds"]["status"], "pass")
+        self.assertEqual(report["evidence"]["geometricChecks"]["topology"]["status"], "pass")
+        self.assertTrue(report["scale"]["nativeScalePass"])
+        self.assertEqual(
+            set(report["evidence"]["physicalQualification"].values()),
+            {"unknown"},
+        )
+        self.assertFalse(report["provesCompleteCapture"])
+        self.assertFalse(report["provesPhysicalFit"])
+
+    def test_error_report_keeps_physical_qualification_unknown(self):
+        path = self.dir / "capture.usdz"
+        path.write_bytes(b"placeholder")
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            code = main([
+                "evaluate", str(path), "--units", "mm",
+                "--held-out", "x=80", "--held-out", "y=55", "--json",
+            ])
+        self.assertEqual(code, 3)
+        report = json.loads(output.getvalue())
+        self.assertEqual(
+            report["evidence"]["geometricChecks"]["bounds"]["status"],
+            "not-evaluated",
+        )
+        self.assertEqual(
+            set(report["evidence"]["physicalQualification"].values()),
+            {"unknown"},
+        )
+
+    def test_human_output_names_separate_evidence_states(self):
+        path = self.dir / "open-cavity.stl"
+        write_binary_stl(path, (80, 55, 95), omit_top=True)
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            code = main([
+                "evaluate", str(path), "--units", "mm",
+                "--held-out", "x=80", "--held-out", "y=55", "--held-out", "z=95",
+            ])
+        self.assertEqual(code, 2)
+        self.assertIn("Geometric checks: bounds=pass, topology=fail", output.getvalue())
+        self.assertIn("mechanicalFit=unknown", output.getvalue())
+
     def test_cli_writes_deterministic_json_report(self):
         path = self.dir / "box.stl"
         write_binary_stl(path, (80, 55, 95))
@@ -267,7 +333,7 @@ class EvaluateTests(unittest.TestCase):
         ])
         self.assertEqual(code, 0)
         report = json.loads(out.read_text(encoding="utf-8"))
-        self.assertEqual(report["schema"], "scan-to-make.capture-fit-eval/0.1.0")
+        self.assertEqual(report["schema"], "scan-to-make.capture-fit-eval/0.2.0")
         self.assertEqual(report["verdict"], "pass-bounds-only")
 
 
