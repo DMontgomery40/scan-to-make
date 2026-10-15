@@ -7,6 +7,7 @@ public final class ScanCapturePreview: ARSCNView {
   // The renderer delegate must be a separate object. On iOS 27 an ARSCNView
   // that delegates to itself recurses in the view-rotation observer path.
   private let rendererDelegate = ScanCapturePreviewRendererDelegate()
+  private let probeLocator = ProbeLocatorView(frame: CGRect(x: 0, y: 0, width: 38, height: 38))
 
   @objc public override init(frame: CGRect, options: [String: Any]? = nil) {
     super.init(frame: frame, options: options)
@@ -14,7 +15,18 @@ public final class ScanCapturePreview: ARSCNView {
     automaticallyUpdatesLighting = true
     accessibilityLabel = "Live capture preview. Center a detected surface, then tap to place the stability probe."
     isAccessibilityElement = true
+    probeLocator.isHidden = true
+    addSubview(probeLocator)
     addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(placeProbe)))
+  }
+
+  func updateProbeLocator(center: CGPoint?) {
+    guard let center else {
+      probeLocator.isHidden = true
+      return
+    }
+    probeLocator.center = center
+    probeLocator.isHidden = false
   }
   required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
   public override func didMoveToWindow() {
@@ -39,13 +51,25 @@ public final class ScanCapturePreview: ARSCNView {
 }
 
 final class ScanCapturePreviewRendererDelegate: NSObject, ARSCNViewDelegate {
+  private weak var probeNode: SCNNode?
+
   func renderer(_ renderer: SCNSceneRenderer, didRenderScene scene: SCNScene, atTime time: TimeInterval) {
     guard let view = renderer as? ScanCapturePreview else { return }
     // Copy only the timestamp; never retain ARFrame buffers.
     let renderedSession = view.session
     let timestamp = renderedSession.currentFrame?.timestamp
+    var locatorCenter: CGPoint?
+    if let probeNode, probeNode.parent != nil {
+      let projected = view.projectPoint(probeNode.worldPosition)
+      let center = CGPoint(x: CGFloat(projected.x), y: CGFloat(projected.y))
+      if projected.z > 0 && projected.z < 1 && view.bounds.contains(center) {
+        locatorCenter = center
+      }
+    }
     DispatchQueue.main.async { [weak view] in
-      guard let view, let timestamp else { return }
+      guard let view else { return }
+      view.updateProbeLocator(center: locatorCenter)
+      guard let timestamp else { return }
       ScanCaptureSession.shared.didRender(view, session: renderedSession, timestamp: timestamp)
     }
   }
@@ -56,6 +80,29 @@ final class ScanCapturePreviewRendererDelegate: NSObject, ARSCNViewDelegate {
     sphere.firstMaterial?.diffuse.contents = UIColor.systemOrange
     sphere.firstMaterial?.lightingModel = .constant
     node.geometry = sphere
+    probeNode = node
     return node
   }
+}
+
+final class ProbeLocatorView: UIView {
+  override init(frame: CGRect) {
+    super.init(frame: frame)
+    backgroundColor = .clear
+    isUserInteractionEnabled = false
+    layer.borderColor = UIColor.systemOrange.cgColor
+    layer.borderWidth = 3
+    layer.cornerRadius = 19
+    layer.shadowColor = UIColor.black.cgColor
+    layer.shadowOpacity = 0.55
+    layer.shadowRadius = 2
+    layer.shadowOffset = .zero
+
+    let dot = UIView(frame: CGRect(x: 16, y: 16, width: 6, height: 6))
+    dot.backgroundColor = .systemOrange
+    dot.layer.cornerRadius = 3
+    addSubview(dot)
+  }
+
+  required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 }
