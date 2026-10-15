@@ -79,11 +79,13 @@ class ConvertTests(unittest.TestCase):
         r, out = self.run_fx("nested_multi")
         v, f = decode_obj(out)
         self.assertEqual(len(v), 16)
-        self.assertEqual(len(f), 12)
+        self.assertEqual(len(f), 24)
+        self.assertTrue(all(len(x) == 3 for x in f))
         self.assertBounds(bounds(v, range(0, 8)), [0, 20, 0], [3, 22, 2])
         self.assertBounds(bounds(v, range(8, 16)), [100, 0, 0], [101, 2, 3])
-        self.assertAlmostEqual(signed_volume(v, f[:6]), 12.0, places=5)  # 1*2*3 scaled x2
-        self.assertAlmostEqual(signed_volume(v, f[6:]), 6.0, places=5)
+        self.assertAlmostEqual(signed_volume(v, f[:12]), 12.0, places=5)  # 1*2*3 scaled x2
+        self.assertAlmostEqual(signed_volume(v, f[12:]), 6.0, places=5)
+        self.assertEqual([m["triangles"] for m in r["meshes"]], [12, 12])
         self.assertTrue(r["unitsAuthored"])
         self.assertEqual(r["metersPerUnit"], 0.01)
         self.assertEqual(r["upAxis"], "Z")
@@ -114,13 +116,13 @@ class ConvertTests(unittest.TestCase):
         self.assertFalse(r["metricQualified"])
         self.assertEqual(r["unsupportedFeatures"][0]["feature"], "subdivision")
 
-    def test_unauthored_subdivision_is_polygonal(self):
+    def test_unauthored_subdivision_is_catmull_clark_not_qualified(self):
         r, out = self.run_fx("unauthored_subdiv")
-        self.assertTrue(r["metricQualified"])
-        self.assertEqual(r["unsupportedFeatures"], [])
+        self.assertFalse(r["metricQualified"])
+        self.assertEqual([u["feature"] for u in r["unsupportedFeatures"]], ["subdivision"])
         self.assertFalse(r["meshes"][0]["subdivisionSchemeAuthored"])
         self.assertEqual(r["meshes"][0]["subdivisionScheme"], "catmullClark")
-        self.assertIn("unauthored-is-polygonal", r["subdivisionPolicy"])
+        self.assertIn("explicit-none-only", r["subdivisionPolicy"])
 
     def test_authored_subdivision_cli_exit_4(self):
         r, _ = self.run_fx("subdiv")
@@ -132,8 +134,8 @@ class ConvertTests(unittest.TestCase):
     def test_holes_flagged_and_omitted_degenerate_not_counted(self):
         r, out = self.run_fx("holes")
         v, f = decode_obj(out)
-        self.assertEqual(len(f), 6)
-        self.assertTrue(all(len(x) == 4 for x in f))
+        self.assertEqual(len(f), 12)
+        self.assertTrue(all(len(x) == 3 for x in f))
         self.assertFalse(r["metricQualified"])
         self.assertIn("holeIndices", [u["feature"] for u in r["unsupportedFeatures"]])
         m = r["meshes"][0]
@@ -166,6 +168,71 @@ class ConvertTests(unittest.TestCase):
         res = subprocess.run([sys.executable, str(HERE / "convert.py"), str(self.dir / "nope.usdz"),
                               "--out", str(self.dir / "y.obj")], capture_output=True, text=True)
         self.assertEqual(res.returncode, 2)
+
+    def assertRejected(self, name, msg):
+        out = self.dir / f"rej_{name}.obj"
+        with self.assertRaisesRegex(RuntimeError, msg):
+            convert(self.fx[name], out)
+        self.assertFalse(out.exists(), "no output may be written on rejection")
+        res = subprocess.run([sys.executable, str(HERE / "convert.py"), str(self.fx[name]), "--out", str(out)],
+                             capture_output=True, text=True)
+        self.assertEqual(res.returncode, 2)
+        self.assertFalse(out.exists())
+
+    def test_reject_nan_point(self):
+        self.assertRejected("nan_point", "non-finite point")
+
+    def test_reject_out_of_range_index(self):
+        self.assertRejected("bad_index", "index 99 out of range for 4 points")
+
+    def test_reject_zero_meters_per_unit(self):
+        self.assertRejected("zero_mpu", "invalid metersPerUnit")
+
+    def test_reject_external_reference(self):
+        self.assertRejected("external_ref", "asset boundary: dependency outside")
+
+    def test_reject_unresolved_reference(self):
+        self.assertRejected("missing_ref", "asset boundary: unresolved")
+
+    def test_contributing_layers_hashed(self):
+        r, _ = self.run_fx("reflected")
+        with zipfile.ZipFile(self.fx["reflected"]) as z:
+            data = z.read("reflected.usdc")
+        self.assertEqual(r["contributingLayers"],
+                         [{"identifier": "reflected.usdc", "sha256": hashlib.sha256(data).hexdigest(),
+                           "bytes": len(data)}])
+
+    def test_concave_triangulation_invents_no_faces(self):
+        from make_fixtures import CONCAVE
+        r, out = self.run_fx("concave")
+        v, f = decode_obj(out)
+        self.assertTrue(r["metricQualified"])
+        self.assertEqual(len(f), 4)  # n - 2
+        self.assertTrue(all(len(x) == 3 for x in f))
+        poly = [(float(x), float(y)) for x, y in CONCAVE]
+        self.assertTrue(all(p[2] == 0.0 for p in v))
+
+        def area2(a, b, c):
+            return (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
+
+        def inside(pt):
+            hit = False
+            for i in range(len(poly)):
+                (x1, y1), (x2, y2) = poly[i], poly[(i + 1) % len(poly)]
+                if (y1 > pt[1]) != (y2 > pt[1]) and pt[0] < x1 + (pt[1] - y1) * (x2 - x1) / (y2 - y1):
+                    hit = not hit
+            return hit
+
+        total = 0.0
+        for tri in f:
+            a, b, c = (v[i][:2] for i in tri)
+            self.assertGreater(area2(a, b, c), 0)  # CCW, non-degenerate
+            total += area2(a, b, c) / 2
+            for w in ((1, 1, 1), (4, 1, 1), (1, 4, 1), (1, 1, 4)):
+                s = sum(w)
+                pt = ((a[0] * w[0] + b[0] * w[1] + c[0] * w[2]) / s, (a[1] * w[0] + b[1] * w[1] + c[1] * w[2]) / s)
+                self.assertTrue(inside(pt), (tri, pt))
+        self.assertAlmostEqual(total, 3.0, places=9)
 
     def test_cli_exit_codes(self):
         cli = [sys.executable, str(HERE / "convert.py")]

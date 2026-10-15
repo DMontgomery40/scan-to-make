@@ -113,7 +113,82 @@ def build_animated_topology(stage):
     m.GetFaceVertexIndicesAttr().Set([i for f in BOX_FACES for i in f], Usd.TimeCode(1))
 
 
-FIXTURES = {"unauthored_subdiv": build_unauthored_subdiv, "holes": build_holes,
+def build_nan_point(stage):
+    _units(stage)
+    m = add_box(stage, "/Box")
+    pts = list(m.GetPointsAttr().Get())
+    pts[2] = Gf.Vec3f(float("nan"), float("nan"), float("nan"))
+    m.GetPointsAttr().Set(pts)
+
+
+def build_bad_index(stage):
+    """4 points, one quad referencing index 99."""
+    _units(stage)
+    m = UsdGeom.Mesh.Define(stage, "/Quad")
+    m.CreatePointsAttr([Gf.Vec3f(0, 0, 0), Gf.Vec3f(1, 0, 0), Gf.Vec3f(1, 1, 0), Gf.Vec3f(0, 1, 0)])
+    m.CreateFaceVertexCountsAttr([4])
+    m.CreateFaceVertexIndicesAttr([0, 1, 2, 99])
+    m.CreateSubdivisionSchemeAttr(UsdGeom.Tokens.none)
+
+
+def build_zero_mpu(stage):
+    _units(stage, mpu=0.0)
+    add_box(stage, "/Box")
+
+
+# Concave L-shaped hexagon in z=0 (area 3), CCW seen from +Z.
+CONCAVE = [(0, 0), (2, 0), (2, 1), (1, 1), (1, 2), (0, 2)]
+
+
+def build_concave(stage):
+    _units(stage)
+    m = UsdGeom.Mesh.Define(stage, "/L")
+    m.CreatePointsAttr([Gf.Vec3f(x, y, 0) for x, y in CONCAVE])
+    m.CreateFaceVertexCountsAttr([6])
+    m.CreateFaceVertexIndicesAttr(list(range(6)))
+    m.CreateSubdivisionSchemeAttr(UsdGeom.Tokens.none)
+
+
+def _package_raw(build, out_usdz):
+    """Package one root layer with Sdf.ZipFileWriter WITHOUT bundling dependencies."""
+    with tempfile.TemporaryDirectory() as d:
+        usdc = Path(d) / (Path(out_usdz).stem + ".usdc")
+        layer = Sdf.Layer.CreateNew(str(usdc), args={"format": "usdc"})
+        stage = Usd.Stage.Open(layer)
+        build(stage)
+        stage.GetRootLayer().Save()
+        w = Sdf.ZipFileWriter.CreateNew(str(out_usdz))
+        w.AddFile(str(usdc), usdc.name)
+        w.Save()
+    return Path(out_usdz)
+
+
+def make_external(out_dir):
+    """external_ref.usdz references an absolute .usdc outside the package; missing_ref references
+    a path that does not exist."""
+    ext = Path(out_dir).resolve() / "outside" / "ext.usdc"
+    ext.parent.mkdir(parents=True, exist_ok=True)
+    layer = Sdf.Layer.CreateNew(str(ext), args={"format": "usdc"})
+    st = Usd.Stage.Open(layer)
+    add_box(st, "/Ext")
+    st.SetDefaultPrim(st.GetPrimAtPath("/Ext"))
+    st.GetRootLayer().Save()
+
+    def ref(target):
+        def build(stage):
+            _units(stage)
+            p = stage.DefinePrim("/Root", "Xform")
+            p.GetReferences().AddReference(str(target))
+            stage.SetDefaultPrim(p)
+        return build
+    return {"external_ref": _package_raw(ref(ext), Path(out_dir) / "external_ref.usdz"),
+            "missing_ref": _package_raw(ref(Path(out_dir).resolve() / "nope" / "missing.usdc"),
+                                        Path(out_dir) / "missing_ref.usdz")}
+
+
+FIXTURES = {"nan_point": build_nan_point, "bad_index": build_bad_index, "zero_mpu": build_zero_mpu,
+            "concave": build_concave,
+"unauthored_subdiv": build_unauthored_subdiv, "holes": build_holes,
             "purpose": build_purpose, "animated_topology": build_animated_topology,
 "nested_multi": build_nested_multi, "reflected": build_reflected,
             "no_units": build_no_units, "subdiv": build_subdiv}
@@ -122,7 +197,9 @@ FIXTURES = {"unauthored_subdiv": build_unauthored_subdiv, "holes": build_holes,
 def make_all(out_dir):
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    return {n: _package(b, out_dir / f"{n}.usdz") for n, b in FIXTURES.items()}
+    out = {n: _package(b, out_dir / f"{n}.usdz") for n, b in FIXTURES.items()}
+    out.update(make_external(out_dir))
+    return out
 
 
 if __name__ == "__main__":
