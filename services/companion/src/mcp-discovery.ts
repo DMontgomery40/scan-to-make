@@ -28,7 +28,8 @@ export interface PrinterToolCatalog {
 }
 type DiscoveryFailure = 'invalid-configuration' | 'connection-failed' | 'discovery-timeout'
   | 'discovery-cancelled' | 'catalog-limit' | 'duplicate-tool' | 'cursor-cycle'
-  | 'missing-print-tool' | 'invalid-print-schema' | 'cleanup-failed';
+  | 'missing-print-tool' | 'invalid-print-schema' | 'cleanup-failed'
+  | 'invalid-inspection-schema' | 'inspection-failed' | 'inspection-limit' | 'incompatible-print-schema';
 export class McpDiscoveryError extends Error {
   constructor(readonly code: DiscoveryFailure) {
     // Never expose subprocess arguments, environment, stderr or remote error text.
@@ -84,6 +85,12 @@ async function closeAndVerify(client: Client, transport: DiscoveryTransport): Pr
  * printer identity, readiness, printable-byte inspection or authorization.
  */
 export async function discoverPrinterTools(config: TrustedMcpProcess, options: DiscoveryOptions = {}): Promise<PrinterToolCatalog> {
+  return withPrinterTools(config, options, async (_client, catalog) => catalog);
+}
+
+// Only this module can access the live client; public operations name their one capability.
+async function withPrinterTools<T>(config: TrustedMcpProcess, options: DiscoveryOptions,
+  operation: (client: Client, catalog: PrinterToolCatalog, requestOptions: {signal: AbortSignal; timeout: number; maxTotalTimeout: number}) => Promise<T>): Promise<T> {
   if (options.signal?.aborted) fail('discovery-cancelled');
   const timeoutMs = bounded(options.timeoutMs, 10_000, 50, 120_000);
   const maxPages = bounded(options.maxPages, 32, 1, 128);
@@ -125,7 +132,7 @@ export async function discoverPrinterTools(config: TrustedMcpProcess, options: D
       if (cursor === undefined) {
         const catalog = freeze({ server: { name: server.name, version: server.version }, tools });
         createPreparedPrintValidator(catalog);
-        return catalog;
+        return await operation(client, catalog, requestOptions);
       }
       if (cursors.has(cursor)) fail('cursor-cycle');
       cursors.add(cursor);
@@ -143,7 +150,7 @@ export async function discoverPrinterTools(config: TrustedMcpProcess, options: D
 }
 
 const PREPARED_KEYS = new Set(['three_mf_path', 'bambu_model', 'plate_index', 'nozzle_diameters',
-  'bed_type', 'use_ams', 'ams_slots', 'connection_mode']);
+  'bed_type', 'use_ams', 'ams_slots', 'ams_mapping', 'connection_mode']);
 export type PreparedArgumentValidation = Readonly<{ ok: true } | { ok: false; reason: 'unsupported-argument' | 'schema-mismatch' }>;
 
 /** Offline shape check only: does not inspect files or authorize dispatch. */
@@ -162,4 +169,33 @@ export function createPreparedPrintValidator(catalog: PrinterToolCatalog): (args
     if (Object.keys(args).some(key => !PREPARED_KEYS.has(key))) return { ok: false, reason: 'unsupported-argument' };
     return validate(args) ? { ok: true } : { ok: false, reason: 'schema-mismatch' };
   };
+}
+
+/** File-only operation. The fixed tool name cannot be replaced by callers. */
+export async function inspectPreparedFile(config: TrustedMcpProcess,
+  input: {file_path: string; bambu_model: string; plate_index: number; nozzle_diameters: number[]; bed_type: string},
+  preparedArguments: (receipt: unknown) => Record<string, unknown>, options: DiscoveryOptions = {}) {
+  return withPrinterTools(config, options, async (client, catalog, requestOptions) => {
+    const tool = catalog.tools.find(tool => tool.name === 'inspect_print_file');
+    if (!tool) fail('invalid-inspection-schema');
+    // Construct exactly the file-only argument set, ignoring any extra runtime keys.
+    const args = {file_path: input.file_path, bambu_model: input.bambu_model, plate_index: input.plate_index,
+      nozzle_diameters: [...input.nozzle_diameters], bed_type: input.bed_type};
+    try {
+      if (tool.inputSchema.type !== 'object' || !new Ajv({strict: false}).compile(structuredClone(tool.inputSchema))(args)) {
+        fail('invalid-inspection-schema');
+      }
+    } catch { fail('invalid-inspection-schema'); }
+    const result = await client.callTool({name: 'inspect_print_file', arguments: args}, undefined, requestOptions);
+    if (Buffer.byteLength(JSON.stringify(result)) > 1024 * 1024) fail('inspection-limit');
+    if (result.isError || !Array.isArray(result.content) || result.content.length !== 1 ||
+        result.content[0]?.type !== 'text' || typeof result.content[0].text !== 'string') fail('inspection-failed');
+    let receipt: unknown;
+    try { receipt = JSON.parse(result.content[0].text); } catch { fail('inspection-failed'); }
+    // Receipt validation and slot mapping occur before schema compatibility is recorded.
+    let candidate: Record<string, unknown>;
+    try { candidate = preparedArguments(receipt); } catch { fail('inspection-failed'); }
+    if (!createPreparedPrintValidator(catalog)(candidate).ok) fail('incompatible-print-schema');
+    return {receipt, catalog};
+  });
 }
