@@ -17,7 +17,9 @@ from producer import ProducerError, produce, resolve_preset, sha256_file  # noqa
 FAKE_SLICER = r'''#!{py}
 import json, os, sys, time
 MODE = {mode!r}
+PIDFILE = {pidfile!r}
 a = sys.argv[1:]
+open(PIDFILE, "w").write(str(os.getpid()))
 def opt(k): return a[a.index(k) + 1]
 out, settings = opt("--outputdir"), opt("--export-settings")
 assert "--export-3mf" not in a
@@ -25,12 +27,30 @@ if MODE == "nonzero":
     print("slicer: fatal"); sys.exit(3)
 if MODE == "sleep":
     time.sleep(30)
+if MODE == "close-ignore-term":
+    import signal
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+    os.close(1); os.close(2)
+    time.sleep(30)
+inputs = os.path.join(os.path.dirname(out), "inputs")
+if MODE == "mutate-preset":
+    p = os.path.join(inputs, "process.json"); os.chmod(p, 0o644); open(p, "a").write(" ")
+if MODE == "mutate-model":
+    p = os.path.join(inputs, "model.stl"); os.chmod(p, 0o644); open(p, "ab").write(b"x")
+if MODE == "mutate-bundle":
+    here = os.path.dirname(os.path.abspath(__file__))
+    open(os.path.join(here, "..", "Resources", "profiles", "BBL", "process", "0.20mm.json"), "a").write(" ")
+if MODE == "big-output":
+    open(os.path.join(out, "plate_1.gcode"), "w").write("G1\n" * 2000); sys.exit(0)
 if MODE != "missing-gcode":
     with open(os.path.join(out, "plate_1.gcode"), "w") as f:
         f.write("; HEADER_BLOCK_START\n; env=" + ",".join(sorted(os.environ)) + "\nG28\n")
 if MODE != "missing-settings":
     with open(settings, "w") as f:
         f.write("not json" if MODE == "bad-settings" else json.dumps({{"printer_model": "fake", "argv": a}}))
+if MODE in ("result-json", "result-bad"):
+    with open(os.path.join(out, "result.json"), "w") as f:
+        json.dump({{"return_code": 0 if MODE == "result-json" else 1, "error_string": ""}}, f)
 if MODE == "extra-3mf":
     open(os.path.join(out, "plate_1.3mf"), "w").write("x")
 print("slicer: ok")
@@ -54,12 +74,13 @@ def write_exe(path, text):
     path.chmod(0o755)
 
 
-def make_bundle(root, mode="ok", version="02.08.02.61"):
+def make_bundle(root, mode="ok", version="02.08.02.61", pidfile=None):
     b = root / "BambuStudio.app"
     c = b / "Contents"
     (c / "MacOS").mkdir(parents=True, exist_ok=True)
     (c / "Info.plist").write_bytes(plistlib.dumps({"CFBundleShortVersionString": version, "CFBundleVersion": version}))
-    write_exe(c / "MacOS" / "BambuStudio", FAKE_SLICER.format(py=sys.executable, mode=mode))
+    write_exe(c / "MacOS" / "BambuStudio", FAKE_SLICER.format(py=sys.executable, mode=mode,
+                                                                    pidfile=str(pidfile or root / "pid")))
     prof = c / "Resources" / "profiles"
     (prof / "BBL" / "machine").mkdir(parents=True, exist_ok=True)
     (prof / "BBL" / "process").mkdir(parents=True, exist_ok=True)
@@ -80,6 +101,19 @@ def stl_binary(normal=(0.0, 0.0, 1.0)):
     return b"\0" * 80 + struct.pack("<I", 1) + tri
 
 
+class FakeSandbox:
+    """Test-only double for PlatformSandbox (wraps the fake sandbox-exec script)."""
+    def __init__(self, path):
+        self.path = path
+
+    def describe(self):
+        return {"kind": "test-double", "path": "<fake>"}
+
+    def check(self):
+        if not Path(self.path).is_file():
+            raise ProducerError("sandbox", "network sandbox unavailable: fake missing")
+
+
 class Base(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -96,7 +130,7 @@ class Base(unittest.TestCase):
     def run_produce(self, mode="ok", **kw):
         bundle = kw.pop("bundle", None) or make_bundle(self.root / mode, mode)
         args = dict(machine="A1 0.4", process="0.20mm", filament="PLA", bundle=bundle,
-                    sandbox_exec=self.sandbox, scratch_parent=self.root, timeout=5)
+                    _sandbox=FakeSandbox(self.sandbox), scratch_parent=self.root, timeout=5)
         args.update(kw)
         return produce(self.model, self.out, **args)
 
@@ -136,6 +170,7 @@ class SuccessTests(Base):
         m = self.run_produce()
         argv = m["invocation"]["argv"]
         self.assertEqual(argv[:2], [str(self.sandbox), "-f"])
+        self.assertEqual(m["invocation"]["sandbox"]["kind"], "test-double")
         for flag in ("--datadir", "--load-settings", "--load-filaments", "--export-settings", "--outputdir"):
             self.assertIn(flag, argv)
         self.assertNotIn("--export-3mf", argv)
@@ -175,10 +210,10 @@ class FailClosedTests(Base):
         self.assertIn("slicer: fatal", e.evidence["logTail"])
 
     def test_missing_gcode(self):
-        self.assertFails("outputs", "expected exactly", "missing-gcode")
+        self.assertFails("outputs", "expected ['exported-settings.json', 'plate_1.gcode']", "missing-gcode")
 
     def test_missing_settings_export(self):
-        self.assertFails("outputs", "expected exactly", "missing-settings")
+        self.assertFails("outputs", "got ['plate_1.gcode']", "missing-settings")
 
     def test_invalid_settings_export(self):
         self.assertFails("outputs", "not valid JSON", "bad-settings")
@@ -190,7 +225,8 @@ class FailClosedTests(Base):
         self.assertFails("slicer", "timed out", "sleep", timeout=1)
 
     def test_network_sandbox_missing(self):
-        self.assertFails("sandbox", "network sandbox unavailable", sandbox_exec=self.root / "nope" / "sandbox-exec")
+        self.assertFails("sandbox", "network sandbox unavailable",
+                         _sandbox=FakeSandbox(self.root / "nope" / "sandbox-exec"))
 
     def test_preset_symlink_outside_bundle(self):
         b = make_bundle(self.root / "sym")
@@ -247,10 +283,123 @@ class FailClosedTests(Base):
         b = make_bundle(self.root / "cli", "nonzero")
         r = subprocess.run([sys.executable, str(Path(producer.__file__)), str(self.model), "--out", str(self.out),
                             "--machine", "A1 0.4", "--process", "0.20mm", "--filament", "PLA", "--bundle", str(b),
-                            "--sandbox-exec", str(self.sandbox), "--timeout", "5"], capture_output=True, text=True)
+                            "--timeout", "5"], capture_output=True, text=True)
         self.assertEqual(r.returncode, 2)
-        self.assertEqual(json.loads(r.stderr)["error"]["stage"], "slicer")
+        # Production CLI always uses the platform sandbox; on non-macOS it refuses before running.
+        expect = "slicer" if sys.platform == "darwin" else "sandbox"
+        self.assertEqual(json.loads(r.stderr)["error"]["stage"], expect)
         self.assertFalse(self.out.exists())
+
+
+class ReviewFixTests(Base):
+    """One focused regression per bounded-review finding."""
+
+    def fails(self, stage, msg, mode="ok", **kw):
+        with self.assertRaises(ProducerError) as cm:
+            self.run_produce(mode, **kw)
+        self.assertEqual(cm.exception.stage, stage, str(cm.exception))
+        self.assertIn(msg, cm.exception.message)
+        return cm.exception
+
+    # 1. real CLI receipt
+    def test_fix1_result_json_accepted_and_bound(self):
+        m = self.run_produce("result-json")
+        self.assertEqual(m["outputs"]["cliResult"]["sha256"], sha256_file(self.out / "result.json"))
+
+    def test_fix1_result_json_nonzero_return_code_rejected(self):
+        self.fails("outputs", "return_code 1", "result-bad")
+        self.assertFalse(self.out.exists())
+
+    # 2. no sandbox injection in production
+    def test_fix2_cli_has_no_sandbox_override(self):
+        r = subprocess.run([sys.executable, str(Path(producer.__file__)), str(self.model), "--out", str(self.out),
+                            "--machine", "m", "--process", "p", "--filament", "f",
+                            "--sandbox-exec", str(self.sandbox)], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("unrecognized arguments: --sandbox-exec", r.stderr)
+
+    @unittest.skipIf(sys.platform == "darwin", "platform refusal is checked on non-macOS hosts")
+    def test_fix2_default_sandbox_refuses_unsupported_platform(self):
+        with self.assertRaises(ProducerError) as cm:
+            produce(self.model, self.out, "A1 0.4", "0.20mm", "PLA", bundle=make_bundle(self.root / "p"))
+        self.assertEqual(cm.exception.stage, "sandbox")
+        self.assertIn("unsupported platform", cm.exception.message)
+        self.assertFalse(self.out.exists())
+
+    def test_fix2_platform_sandbox_is_fixed_trusted_path(self):
+        self.assertEqual(producer.PlatformSandbox().path, "/usr/bin/sandbox-exec")
+
+    # 3. deadline holds after pipe EOF; TERM then KILL
+    def test_fix3_deadline_after_eof_with_term_ignored(self):
+        import time
+        pid = self.root / "close-ignore-term" / "pid"
+        t0 = time.monotonic()
+        self.fails("slicer", "timed out", "close-ignore-term", timeout=0.5)
+        self.assertLess(time.monotonic() - t0, 0.5 + producer.TERM_GRACE_S + 2.5)
+        with self.assertRaises(ProcessLookupError):
+            os.kill(int(pid.read_text()), 0)
+        self.assertFalse(self.out.exists())
+
+    # 4. budgets
+    def test_fix4_input_budget_before_read(self):
+        self.fails("limits", "input model exceeds 10 bytes", limits=producer.Limits(input_bytes=10))
+
+    def test_fix4_preset_file_count_depth_budgets(self):
+        self.fails("limits", "machine preset", limits=producer.Limits(preset_file_bytes=10))
+        self.fails("limits", "more than 2 files", limits=producer.Limits(preset_files=2))
+        self.fails("limits", "deeper than 1", limits=producer.Limits(preset_depth=1))
+
+    def test_fix4_output_budget_monitored(self):
+        self.fails("limits", "outputs exceed", "big-output", limits=producer.Limits(output_bytes=1000))
+        self.assertFalse(self.out.exists())
+
+    def test_fix4_timeout_bounds(self):
+        self.fails("limits", "timeout must be", timeout=0)
+        self.fails("limits", "timeout must be", timeout=producer.MAX_TIMEOUT_S + 1)
+
+    # 5. sealed identities
+    def test_fix5_expected_input_digest_and_size(self):
+        self.fails("input", "sha256 does not match", expected_input_sha256="0" * 64)
+        self.fails("input", "expected 1", expected_input_bytes=1)
+        m = self.run_produce(expected_input_sha256=sha256_file(self.model),
+                             expected_input_bytes=self.model.stat().st_size)
+        self.assertTrue(m["input"]["expectedDigestChecked"])
+
+    def test_fix5_mutated_flattened_preset_rejected(self):
+        self.fails("seal", "flattened process preset changed", "mutate-preset")
+        self.assertFalse(self.out.exists())
+
+    def test_fix5_mutated_scratch_model_rejected(self):
+        self.fails("seal", "scratch input changed", "mutate-model")
+
+    def test_fix5_mutated_bundle_preset_source_rejected(self):
+        self.fails("seal", "bundled preset source changed", "mutate-bundle")
+
+    # 6. exclusive publish
+    def test_fix6_destination_created_during_publish_is_not_replaced(self):
+        real = producer._rename_noreplace
+
+        def racing(src, dst):
+            os.mkdir(dst)  # attacker/concurrent run creates an empty destination first
+            real(src, dst)
+
+        producer._rename_noreplace = racing
+        try:
+            self.fails("publish", "exclusive publish failed")
+        finally:
+            producer._rename_noreplace = real
+        self.assertEqual(list(self.out.iterdir()), [])  # untouched empty dir, nothing replaced
+        self.assertEqual([p for p in self.root.iterdir() if p.name.startswith(".published")], [])
+
+    def test_fix6_rename_noreplace_refuses_existing_empty_dir(self):
+        a, b = self.root / "a", self.root / "b"
+        a.mkdir()
+        b.mkdir()
+        ino = b.stat().st_ino
+        with self.assertRaises(ProducerError):
+            producer._rename_noreplace(a, b)
+        self.assertEqual(b.stat().st_ino, ino)
+        self.assertTrue(a.exists())
 
 
 if __name__ == "__main__":
