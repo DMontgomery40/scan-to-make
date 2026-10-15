@@ -281,3 +281,37 @@ mesh, then Save to Files and independently compare SHA-256 and byte length.
 The app's Documents folder is available in Files; credentials, project storage,
 private capture cache and synchronization metadata are not in that folder.
 This proves the simulator workflow only, not private-network deployment or fit.
+
+### Native capture download fault checks
+
+On an Apple Silicon Mac with full Xcode, an already booted iOS Simulator,
+compiled companion dependencies and the converter's Python environment:
+
+```sh
+SCAN_TO_MAKE_CAPTURE_PYTHON=/path/to/python-with-usd-core \
+  python3 apps/mobile/scripts/native-capture-fault-tests/test.py \
+  --simulator BOOTED_SIMULATOR_UUID --evidence /tmp/capture-fault-evidence
+```
+
+Run from the repository root with port 9078 free. The harness creates a
+separate disposable Simulator app, pairs through the real fixture route,
+synchronizes a synthetic project and converts a synthetic two-layer USDZ.
+It compiles the unchanged production `RetainedCaptureBridge.mm` into a UIKit
+host. React dispatch and pairing-record storage are test seams; URLSession,
+byte verification, cache writes and SceneKit presentation run natively.
+This check does not establish Keychain persistence, physical capture accuracy
+or private-network deployment.
+
+Five cases exercise wrong hash, wrong content type, corrupted body, oversized
+chunked body, and cancellation after receiving partial bytes. Each must reject,
+leave no verified cache, refuse presentation, then successfully retry on the
+same bridge and present the verified mesh. Only explicit 429 responses to the
+idempotent retry GET may be retried. Imports are never retried automatically.
+The native run has a 60-second bound; compilation and setup also have timeouts.
+Receipts contain hashes and outcomes, never credentials. The harness removes
+its app, temporary credentials and fixture after the run, preserving other apps.
+
+Fault controls require `SCAN_NATIVE_FAULTS=1`; the fixture writes a random
+control key in its private directory. Its test-only mode endpoint requires
+that key. Artifact corruption happens only after the real authenticated route
+returns 200. This opt-in control is confined to the loopback fixture.
