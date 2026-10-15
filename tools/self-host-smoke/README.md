@@ -33,7 +33,7 @@ The script exits 0 only if every step passes.
 
 ### Offline requirements
 
-- `python3` 3.10 or newer, with `venv`.
+- `python3` 3.10 or newer, with `venv`. On a fresh Ubuntu 24.04 machine, install the system package first (`sudo apt-get install python3.12-venv`); stock Ubuntu 24.04 lacks ensurepip/venv without it, and the smoke creates a Python virtual environment.
 - Network access to PyPI on the first run, for `usd-core`.
 - No credentials, services, or devices.
 
