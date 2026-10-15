@@ -16,8 +16,14 @@ struct GuidedCaptureSampleApp: App {
                 NavigationStack {
                     SwiftUI.Form {
                         if appModel.captureStopped {
-                            SwiftUI.Section("Capture stopped") {
-                                Text("Your capture files have been kept. Choose Begin when you want to start a new capture.")
+                            SwiftUI.Section(appModel.isStoppingCapture ? "Stopping capture" : "Capture stopped") {
+                                if appModel.isStoppingCapture {
+                                    Text(appModel.stopWaitExceeded
+                                         ? "Capture is taking longer to stop. Your files are kept. A new capture stays unavailable until stopping finishes."
+                                         : "Your capture files are kept. Please wait while capture stops.")
+                                } else {
+                                    Text("Your capture files have been kept. Choose Begin when you want to start a new capture.")
+                                }
                                 if let message = appModel.evaluationWriteError {
                                     Text(message).foregroundStyle(.red)
                                 }
@@ -37,7 +43,7 @@ struct GuidedCaptureSampleApp: App {
                                 appModel.beginCapture()
                                 started = true
                             }
-                                .disabled(!ObjectCaptureSession.isSupported || !PhotogrammetrySession.isSupported)
+                                .disabled(appModel.isStoppingCapture || !ObjectCaptureSession.isSupported || !PhotogrammetrySession.isSupported)
                             Text("Completed captures and original images remain in Files → On My iPhone → Capture Evaluation. Share the entire capture folder for independent inspection. Keep personal captures private.")
                         }
                     }.navigationTitle("Capture Evaluation")
