@@ -143,3 +143,18 @@ test('corrupt retained intent fails closed instead of looking unclaimed',async t
  await assert.rejects(f.fresh().loadPreparedJob(prepared.jobId));
  await assert.rejects(f.fresh().claimIntent(prepared.jobId,approval(prepared.job)));
 });
+
+
+test('publication guard runs after staging fsync and abort or revoked authorization leaves no job',async t=>{
+ const f=await accepted(t);
+ for(const failure of ['abort','revoke']){
+  const controller=new AbortController();let called=false;
+  await assert.rejects(f.jobs.prepare(request(),controller.signal,async()=>{
+   called=true;const files=await readdir(join(f.root,'prepared'));assert.equal(files.length,1);
+   const staged=JSON.parse(await readFile(join(f.root,'prepared',files[0],'job.json'),'utf8'));
+   assert.equal(staged.projectRevision,REVISION);
+   if(failure==='abort')controller.abort();else throw Error('revoked');
+  }),failure==='abort'?/cancelled/:/revoked/);
+  assert.equal(called,true);assert.deepEqual(await readdir(join(f.root,'prepared')),[]);
+ }
+});

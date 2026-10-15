@@ -1,3 +1,7 @@
+import {open} from 'node:fs/promises';
+import {constants} from 'node:fs';
+import {z} from 'zod';
+import {PreparedJobStore} from './prepared-jobs.js';
 import {isAbsolute,join} from 'node:path';
 import {FileSavedProjectStorage} from '@scan-to-make/project';
 import {CaptureStore} from './capture-import.js';
@@ -16,6 +20,24 @@ const storage=captureDirectory===undefined?undefined:new FileSavedProjectStorage
 const capture=storage&&captureDirectory?{storage,captures:new CaptureStore(storage,join(captureDirectory,'captures'),createCaptureConverter({
  executable:process.env.SCAN_TO_MAKE_CAPTURE_PYTHON??'python3',temporaryRoot:join(captureDirectory,'workers'),
 }))}:undefined;
+// Only a host operator chooses the executable. Remote envelopes cannot select it.
+const inspectorFile=process.env.SCAN_TO_MAKE_PREPARED_MCP_CONFIG;
+if(inspectorFile!==undefined){
+ if(!capture||!captureDirectory||!isAbsolute(inspectorFile))throw new Error('Prepared jobs require authenticated storage and an absolute private inspector configuration');
+ const file=await open(inspectorFile,constants.O_RDONLY|constants.O_NOFOLLOW);
+ let configuration;
+ try {
+  const stat=await file.stat();
+  if(!stat.isFile()||stat.size>65536||(stat.mode&0o077)!==0||stat.uid!==process.getuid?.())throw new Error('Inspector configuration must be a private regular file');
+  const bytes=Buffer.alloc(65537);let length=0;
+  while(length<bytes.length){const result=await file.read(bytes,length,bytes.length-length,null);if(!result.bytesRead)break;length+=result.bytesRead;}
+  if(length>65536)throw new Error('Inspector configuration exceeds byte limit');
+  const path=z.string().refine(isAbsolute);
+  configuration=z.strictObject({command:path,args:z.array(z.string()).max(256).optional(),cwd:path.optional(),env:z.record(z.string(),z.string()).optional()})
+   .parse(JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(bytes.subarray(0,length))));
+ } finally {await file.close();}
+ Object.assign(capture,{preparedJobs:new PreparedJobStore(capture.storage,join(captureDirectory,'prepared-jobs'),{inspection:{process:configuration}})});
+}
 const server = await startGenerationServer({
   capture,
   remoteAuth,
