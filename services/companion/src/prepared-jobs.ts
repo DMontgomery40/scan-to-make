@@ -1,6 +1,6 @@
 import {createHash, randomUUID} from 'node:crypto';
 import {constants} from 'node:fs';
-import {chmod, link, mkdir, mkdtemp, open, rename, rm, unlink} from 'node:fs/promises';
+import {chmod, link, mkdir, mkdtemp, open, opendir, rename, rm, unlink} from 'node:fs/promises';
 import {join} from 'node:path';
 import {z} from 'zod';
 import {ArtifactRefSchema, type ArtifactRef} from '@scan-to-make/contracts';
@@ -47,8 +47,13 @@ const intentSchema = z.strictObject({
 });
 
 export class PreparedJobFailure extends Error {
-  constructor(readonly code: 'not-found' | 'job-conflict' | 'cancelled') {super(code);}
+  constructor(readonly code: 'not-found' | 'job-conflict' | 'cancelled' | 'invalid-cursor' | 'cursor-stale' | 'discovery-unavailable') {super(code);}
 }
+
+const discoveryCursor = z.strictObject({version: z.literal(1), projectId, projectRevision: integer,
+  etag, catalog: digest, after: z.uuid()});
+const DISCOVERY = {directoryEntries: 4096, records: 200, metadataBytes: 8 * 1024 * 1024,
+  pageSize: 50, summaryBytes: 1024, responseBytes: 64 * 1024, timeoutMs: 5000};
 
 export type PreparedJob = z.infer<typeof PreparedJobSchema>;
 export type PreparedJobApproval = z.infer<typeof approvalSchema>;
@@ -194,6 +199,88 @@ export class PreparedJobStore {
     } finally { await rm(staging, {recursive: true, force: true}); }
   }
 
+  /** Metadata handles only. No printable or intent file is opened here.
+   * Cursor pins the observed directory-name set; additions/removals require refresh.
+   */
+  async listPreparedJobs(input: {projectId: string; projectRevision: number; expectedProjectETag: string;
+      limit?: number; cursor?: string}, signal?: AbortSignal) {
+    const request = z.strictObject({projectId, projectRevision: integer, expectedProjectETag: etag,
+      limit: z.number().int().min(1).max(DISCOVERY.pageSize).default(20), cursor: z.string().max(1024).optional()}).parse(input);
+    const deadline = AbortSignal.timeout(DISCOVERY.timeoutMs);
+    const assertActive = () => {
+      if (signal?.aborted) throw new PreparedJobFailure('cancelled');
+      if (deadline.aborted) throw new PreparedJobFailure('discovery-unavailable');
+    };
+    let cursor: z.infer<typeof discoveryCursor> | undefined;
+    if (request.cursor !== undefined) {
+      try {
+        if (!/^[A-Za-z0-9_-]+$/.test(request.cursor)) throw new Error();
+        const bytes = Buffer.from(request.cursor, 'base64url');
+        if (bytes.toString('base64url') !== request.cursor) throw new Error();
+        cursor = discoveryCursor.parse(JSON.parse(new TextDecoder('utf-8', {fatal: true}).decode(bytes)));
+        if (cursor.projectId !== request.projectId || cursor.projectRevision !== request.projectRevision ||
+            cursor.etag !== request.expectedProjectETag || cursor.after !== cursor.after.toLowerCase()) throw new Error();
+      } catch { throw new PreparedJobFailure('invalid-cursor'); }
+    }
+    return this.projects.withCurrentProject(request.projectId, request.projectRevision, async project => {
+      assertActive();
+      if (!project.acceptedArtifact) throw new Error('Current design must be accepted before discovering prepared jobs');
+      const entries: {id: string; directory: boolean}[] = [];
+      try {
+        const directory = await opendir(this.directory, {bufferSize: 32});
+        let count = 0;
+        for await (const entry of directory) {
+          assertActive();
+          if (++count > DISCOVERY.directoryEntries) throw new PreparedJobFailure('discovery-unavailable');
+          if (entry.name === entry.name.toLowerCase() && z.uuid().safeParse(entry.name).success) {
+            entries.push({id: entry.name, directory: entry.isDirectory()});
+          }
+        }
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+          if (error instanceof PreparedJobFailure) throw error;
+          throw new PreparedJobFailure('discovery-unavailable');
+        }
+      }
+      entries.sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+      const catalog = createHash('sha256').update(JSON.stringify(entries)).digest('hex');
+      if (cursor && cursor.catalog !== catalog) throw new PreparedJobFailure('cursor-stale');
+      let position = cursor ? entries.findIndex(entry => entry.id === cursor.after) + 1 : 0;
+      if (cursor && position === 0) throw new PreparedJobFailure('invalid-cursor');
+      const jobs: {jobId: string; jobSha256: string; printableArtifact: ArtifactRef; model: string; plateIndex: number}[] = [];
+      let unreadable = 0, scanned = 0, budget = DISCOVERY.metadataBytes;
+      while (position < entries.length && scanned < DISCOVERY.records && jobs.length < request.limit && budget >= this.bound.maxMetadataBytes) {
+        assertActive();
+        const entry = entries[position++]!; scanned++;
+        if (!entry.directory) {unreadable++; continue;}
+        let bytes: Buffer | undefined;
+        let job: PreparedJob;
+        try {
+          bytes = await readBounded(join(this.directory, entry.id, 'job.json'), this.bound.maxMetadataBytes);
+          job = this.parseJob(entry.id, bytes);
+        } catch {
+          unreadable++;
+          budget -= bytes?.length ?? this.bound.maxMetadataBytes;
+          continue;
+        }
+        budget -= bytes.length;
+        if (job.projectId !== request.projectId || job.projectRevision !== request.projectRevision ||
+            !sameRef(job.designArtifact, project.acceptedArtifact.artifact) || !job.inspection) continue;
+        const summary = {jobId: job.id, jobSha256: job.sha256, printableArtifact: job.printableArtifact,
+          model: job.selection.model, plateIndex: job.selection.plateIndex};
+        if (Buffer.byteLength(JSON.stringify(summary)) > DISCOVERY.summaryBytes) {unreadable++; continue;}
+        jobs.push(summary);
+      }
+      assertActive();
+      const nextCursor = position < entries.length ? Buffer.from(JSON.stringify({version: 1,
+        projectId: request.projectId, projectRevision: request.projectRevision, etag: request.expectedProjectETag,
+        catalog, after: entries[position - 1]!.id})).toString('base64url') : null;
+      const result = {jobs, nextCursor, unreadable, requiresVerifiedGet: true as const};
+      if (Buffer.byteLength(JSON.stringify(result)) > DISCOVERY.responseBytes) throw new PreparedJobFailure('discovery-unavailable');
+      return result;
+    }, request.expectedProjectETag);
+  }
+
   async loadPreparedJob(jobId: string, expectedProjectETag?: string) {
     const job = await this.readJob(z.uuid().parse(jobId).toLowerCase());
     const etagValue = expectedProjectETag === undefined ? undefined : etag.parse(expectedProjectETag);
@@ -257,6 +344,9 @@ export class PreparedJobStore {
     let bytes: Buffer;
     try { bytes = await readBounded(join(this.directory, jobId, 'job.json'), this.bound.maxMetadataBytes); }
     catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') throw new PreparedJobFailure('not-found'); throw error; }
+    return this.parseJob(jobId, bytes);
+  }
+  private parseJob(jobId: string, bytes: Buffer): PreparedJob {
     const job = PreparedJobSchema.parse(JSON.parse(new TextDecoder('utf-8', {fatal: true}).decode(bytes)));
     if (job.id !== jobId) throw new Error('Stored prepared job identity mismatch');
     return job;

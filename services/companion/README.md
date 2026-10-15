@@ -221,3 +221,41 @@ This seam performs preparation, verified reopen and download only. There is no
 HTTP intent-claim or dispatch endpoint, printer contact, physical approval, or
 native prepared-job consumer yet. A file-only inspection does not establish
 installed material, printer state, physical fit or authorization to print.
+
+### Discover inspected file handles
+
+`GET /v1/saved-projects/:id/prepared-jobs?projectRevision=N` uses the existing
+`prepared-jobs:read` permission and current project `If-Match` ETag. Optional
+`limit` is an integer from 1–50 (default 20); optional `cursor` is the opaque
+`nextCursor` from the previous page. Unknown or duplicate query parameters reject.
+Only GET is supported on this collection route.
+
+The response is `{jobs, nextCursor, unreadable, requiresVerifiedGet:true}`. Each
+summary contains `jobId`, `jobSha256`, `printableArtifact`, `model` and `plateIndex`.
+These are metadata handles for inspected jobs matching the current project,
+revision and accepted-design identity. They are **not verified printable files**.
+The client must perform the existing verified per-job GET before review/export,
+then verify downloaded bytes. Discovery never opens printable or intent files.
+An uninspected bookkeeping job is omitted. A damaged, oversized or unsafe metadata
+entry is skipped and counted in that page's `unreadable`; nothing is repaired.
+Unreadable counts describe scanned store entries, whose project may be unknown.
+
+Ordering is ascending canonical job UUID, with no timestamp inferred from disk.
+A cursor binds project/revision/ETag, the directory-name snapshot and the last
+scanned candidate. It advances over unrelated and unreadable records, so an empty
+page may still have a continuation. Continue until `nextCursor` is null. An added
+or removed job changes the snapshot; a subsequent cursor request returns 409
+`cursor-stale`. Refresh from the first page rather than silently skipping arrivals.
+A malformed or mismatched cursor returns 400; changed project state returns 412.
+The project ETag is echoed, not a new listing ETag.
+
+Each request enumerates at most 4096 directory entries, reads at most 200 candidate
+metadata records and 8 MiB of metadata, and has a five-second processing deadline.
+Reaching a per-page metadata/record budget returns a continuation. Exceeding the
+directory or processing bound returns 503 `discovery-unavailable`. The existing
+one-MiB per-record cap applies; individual summaries are capped at one KiB and the
+whole response at 64 KiB. Files are revalidated on each page; listings are not a
+transactional snapshot of metadata mutations by a local administrator. Requests
+share the project/capture slot, recheck authorization after listing, and hold the
+current project lock through response flush. No credential, write or dispatch
+permissions are added.
