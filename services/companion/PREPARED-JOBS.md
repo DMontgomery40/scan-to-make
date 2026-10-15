@@ -90,8 +90,13 @@ lock requires manual inspection before recovery.
   is claimed, learning what the printer actually did belongs to the executor
   and its journal, not to preparation.
 - Run the maintained checks with `npm test --prefix services/companion`
-  (the prepared-job cases live in `tests/prepared-jobs.test.mjs` and use
-  isolated synthetic fixtures only).
+  (the prepared-job cases live in `tests/prepared-jobs.test.mjs` and
+  `tests/prepared-produce-cli.test.mjs` and use isolated synthetic fixtures
+  only).
+- Host-only production is `src/prepared-produce-cli.ts` (`npm run prepared:produce`).
+  Private inspector and producer JSON files are read by `src/private-config.ts`
+  (owner-only, no-follow, at most 64 KiB, strict schema). Generation-cli uses
+  the same reader for inspector configuration.
 
 ## Trusted production from an accepted STL
 
@@ -102,15 +107,26 @@ the store. `createPreparedProducer` supplies the maintained macOS producer with
 fixed host configuration: Python path, producer script and SHA-256 pin, bundle,
 binary SHA-256 pin, version, and bundled machine/process/filament preset names.
 Requests cannot choose executables, paths, presets, or receipts. This method is
-not exposed by HTTP and adds no device permissions.
+not exposed by HTTP and adds no device permissions. Host operators create
+produced jobs with `npm run prepared:produce --prefix services/companion --`
+followed by the capture directory, private inspector config, private producer
+config, project id/revision/ETag, job UUID, accepted STL path, and selection
+JSON. The CLI prints `{jobId, jobSha256, created}` and is the operator-host
+entrypoint for `prepareProduced`. CLI arguments and environment variables cannot
+override the producer or inspector identities pinned in those private files.
 
-Source identity and STL structure are checked before slicing. Slicing runs
-outside the project edit lock. The final commit uses the existing lock to check
-the current ETag, revision and acceptance, inspect the exact output, and check
-authorization/cancellation after fsync. A concurrent project edit rejects the
-result. Retry the same job UUID and unchanged request after an ambiguous result:
-a persisted job is reverified and returned without slicing or inspecting again.
-A different request, producer configuration, or imported/produced identity rejects.
+Source identity and STL structure are checked before slicing: the CLI reads the
+supplied STL and `prepareProduced` rejects it unless those bytes match the
+current accepted project artifact. Slicing runs outside the project edit lock.
+The host CLI takes an exclusive same-jobId produce lock before calling
+`prepareProduced`, so a concurrent same-ID invocation fails closed with
+`job-conflict` instead of starting a second slice. The final commit uses the
+existing lock to check the current ETag, revision and acceptance, inspect the
+exact output, and check authorization/cancellation after fsync. A concurrent
+project edit rejects the result. Retry the same job UUID and unchanged request
+after an ambiguous result: a persisted job is reverified and returned without
+slicing or inspecting again. A different request, producer configuration, or
+imported/produced identity rejects.
 
 The optional `production` record is sealed in the job digest. The job retains
 `source.stl`, `settings.json`, and `production.json` alongside the printable and
