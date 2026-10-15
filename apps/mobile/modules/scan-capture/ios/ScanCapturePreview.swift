@@ -3,10 +3,14 @@ import SceneKit
 import UIKit
 
 @objc(ScanCapturePreview)
-public final class ScanCapturePreview: ARSCNView, ARSCNViewDelegate {
+public final class ScanCapturePreview: ARSCNView {
+  // The renderer delegate must be a separate object. On iOS 27 an ARSCNView
+  // that delegates to itself recurses in the view-rotation observer path.
+  private let rendererDelegate = ScanCapturePreviewRendererDelegate()
+
   @objc public override init(frame: CGRect, options: [String: Any]? = nil) {
     super.init(frame: frame, options: options)
-    delegate = self
+    delegate = rendererDelegate
     automaticallyUpdatesLighting = true
     accessibilityLabel = "Live capture preview. Center a detected surface, then tap to place the stability probe."
     isAccessibilityElement = true
@@ -32,16 +36,20 @@ public final class ScanCapturePreview: ARSCNView, ARSCNViewDelegate {
       visible.width * visible.height >= bounds.width * bounds.height * 0.95
   }
   @objc private func placeProbe() { ScanCaptureSession.shared.placeProbe(in: self) }
-  public func renderer(_ renderer: SCNSceneRenderer, didRenderScene scene: SCNScene, atTime time: TimeInterval) {
+}
+
+final class ScanCapturePreviewRendererDelegate: NSObject, ARSCNViewDelegate {
+  func renderer(_ renderer: SCNSceneRenderer, didRenderScene scene: SCNScene, atTime time: TimeInterval) {
+    guard let view = renderer as? ScanCapturePreview else { return }
     // Copy only the timestamp; never retain ARFrame buffers.
-    let renderedSession = session
+    let renderedSession = view.session
     let timestamp = renderedSession.currentFrame?.timestamp
-    DispatchQueue.main.async { [weak self] in
-      guard let self, let timestamp else { return }
-      ScanCaptureSession.shared.didRender(self, session: renderedSession, timestamp: timestamp)
+    DispatchQueue.main.async { [weak view] in
+      guard let view, let timestamp else { return }
+      ScanCaptureSession.shared.didRender(view, session: renderedSession, timestamp: timestamp)
     }
   }
-  public func renderer(_ renderer: SCNSceneRenderer, nodeFor anchor: ARAnchor) -> SCNNode? {
+  func renderer(_ renderer: SCNSceneRenderer, nodeFor anchor: ARAnchor) -> SCNNode? {
     guard anchor.name == "stability-probe" else { return nil }
     let node = SCNNode()
     let sphere = SCNSphere(radius: 0.005)
