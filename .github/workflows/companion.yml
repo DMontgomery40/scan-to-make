@@ -5,6 +5,8 @@ on:
     paths:
       - 'services/companion/**'
       - 'tools/templates/drawer-organizer/**'
+      - 'tools/capture-mesh-convert/**'
+      - 'tools/capture-pipeline/**'
       - 'services/project/**'
       - 'packages/contracts/**'
       - '.github/workflows/companion.yml'
@@ -13,6 +15,8 @@ on:
     paths:
       - 'services/companion/**'
       - 'tools/templates/drawer-organizer/**'
+      - 'tools/capture-mesh-convert/**'
+      - 'tools/capture-pipeline/**'
       - 'services/project/**'
       - 'packages/contracts/**'
       - '.github/workflows/companion.yml'
@@ -34,6 +38,14 @@ jobs:
             packages/contracts/package-lock.json
             services/project/package-lock.json
             services/companion/package-lock.json
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
+      - name: Install pinned USD runtime for capture-import tests
+        run: |
+          python -m pip install --disable-pip-version-check usd-core==26.8
+          python -c "from pxr import Gf, Sdf, Usd, UsdGeom, UsdUtils"
+          echo "CAPTURE_TEST_PYTHON=$(command -v python)" >> "$GITHUB_ENV"
       - run: npm ci --prefix packages/contracts --ignore-scripts
       - run: npm ci --prefix services/project --ignore-scripts
       - run: npm ci --prefix services/companion --ignore-scripts
