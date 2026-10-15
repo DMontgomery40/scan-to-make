@@ -19,7 +19,6 @@ struct TopOverlayButtons: View, OverlayButtons {
     var body: some View {
         VStack {
             HStack {
-                CaptureCancelButton()
                 Spacer()
                 if isCapturingStarted(state: session.state) {
                     NextButton(session: session)
@@ -33,29 +32,6 @@ struct TopOverlayButtons: View, OverlayButtons {
                 CaptureModeGuidanceView()
             }
         }
-    }
-}
-
-private struct CaptureCancelButton: View {
-    @Environment(AppDataModel.self) var appModel
-
-    var body: some View {
-        Button(action: {
-            logger.log("\(LocalizedString.cancel) button clicked!")
-            appModel.objectCaptureSession?.cancel()
-            appModel.removeCaptureFolder()
-        }, label: {
-            Text(LocalizedString.cancel)
-                .modifier(VisualEffectRoundedCorner())
-        })
-    }
-
-    struct LocalizedString {
-        static let cancel = NSLocalizedString(
-            "Cancel (Object Capture)",
-            bundle: Bundle.main,
-            value: "Cancel",
-            comment: "Title for the Cancel button on the object capture screen.")
     }
 }
 

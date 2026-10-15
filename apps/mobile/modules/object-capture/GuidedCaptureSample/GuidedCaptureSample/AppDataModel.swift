@@ -119,6 +119,7 @@ class AppDataModel: Identifiable {
     private var lastObservedTracking: String?
     private var lastObservedPause: Bool?
     var evaluationStarted = Date()
+    private(set) var captureStopped = false
     var evaluationWriteError: String?
     var passCount = 1
     var flipCount = 0
@@ -135,7 +136,6 @@ class AppDataModel: Identifiable {
 
     // Postpone creating ObjectCaptureSession and PhotogrammetrySession until necessary.
     private init() {
-        state = .ready
         NotificationCenter.default.addObserver(self,
                                                selector: #selector(handleAppTermination(notification:)),
                                                name: UIApplication.willTerminateNotification,
@@ -155,17 +155,31 @@ class AppDataModel: Identifiable {
         state = .completed
     }
 
-    func removeCaptureFolder() {
-        logger.log("Removing the capture folder...")
-        guard let url = captureFolderManager?.captureFolder else { return }
-        try? FileManager.default.removeItem(at: url)
+    // Only a deliberate Begin action may create a session after a retained stop.
+    func beginCapture() {
+        guard objectCaptureSession == nil, photogrammetrySession == nil else { return }
+        captureStopped = false
+        reset()
+    }
+
+    func stopCapture(reason: String = "Stopped by user") {
+        guard !captureStopped, let session = objectCaptureSession else { return }
+        captureStopped = true
+        record("interrupted", detail: reason + "; original files retained")
+        detachListeners()
+        session.cancel()
+        record("cancel-requested", detail: "Public cancellation requested; hardware release not verified")
+        objectCaptureSession = nil
+        showOverlaySheets = false
+        UIApplication.shared.isIdleTimerDisabled = false
+        state = .notSet
     }
 
     // Don't touch the showOverlaySheets directly, call setShowOverlaySheets() instead.
     // Since we use sheets and leave the ObjectCaptureView on screen and blur it underneath,
     // the session doesn't pause. We need to pause/resume the session by hand.
     func setShowOverlaySheets(to shown: Bool) {
-        guard shown != showOverlaySheets else { return }
+        guard !captureStopped, shown != showOverlaySheets else { return }
         if shown {
             showOverlaySheets = true
             objectCaptureSession?.pause()
@@ -223,7 +237,8 @@ extension AppDataModel {
             Task<Void, Never> { [weak self] in
                 for await newFeedback in model.feedbackUpdates {
                     logger.debug("Task got async feedback change to: \(String(describing: newFeedback))")
-                    self?.updateFeedbackMessages(for: newFeedback)
+                    guard !Task.isCancelled, let self, self.objectCaptureSession?.id == model.id else { return }
+                    self.updateFeedbackMessages(for: newFeedback)
                 }
                 logger.log("^^^ Got nil from stateUpdates iterator!  Ending observation task...")
             })
@@ -231,7 +246,8 @@ extension AppDataModel {
         tasks.append(Task<Void, Never> { [weak self] in
             for await newState in model.stateUpdates {
                 logger.debug("Task got async state change to: \(String(describing: newState))")
-                self?.onStateChanged(newState: newState)
+                guard !Task.isCancelled, let self, self.objectCaptureSession?.id == model.id else { return }
+                self.onStateChanged(newState: newState)
             }
             logger.log("^^^ Got nil from stateUpdates iterator!  Ending observation task...")
         })
@@ -343,6 +359,7 @@ extension AppDataModel {
     }
 
     private func onStateChanged(newState: ObjectCaptureSession.CaptureState) {
+        guard !captureStopped else { return }
         record("capture-state", detail: String(describing: newState))
         logger.info("OCViewModel switched to state: \(String(describing: newState))")
         if case .completed = newState {
@@ -389,6 +406,10 @@ extension AppDataModel {
     }
 
     private func performStateTransition(from fromState: ModelState, to toState: ModelState) {
+        if captureStopped, toState != .notSet {
+            state = .notSet
+            return
+        }
         if fromState == toState { return }
         if fromState == .failed { error = nil }
 
