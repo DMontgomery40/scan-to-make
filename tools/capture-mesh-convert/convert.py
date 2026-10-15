@@ -11,9 +11,23 @@ import json
 import sys
 from pathlib import Path
 
-from pxr import Gf, Usd, UsdGeom
+Gf = Usd = UsdGeom = None  # pxr is imported lazily so a missing install exits 2
 
-TOOL_VERSION = "0.1.0"
+TOOL_VERSION = "0.2.0"
+SUBDIVISION_POLICY = ("unauthored-is-polygonal: an unauthored subdivisionScheme (USD fallback catmullClark) "
+                      "is treated as a polygonal cage and recorded per mesh; an authored scheme other than "
+                      "'none' is an unsupported feature")
+SKIPPED_PURPOSES = ("guide", "proxy", "render")
+
+
+def _load_pxr():
+    global Gf, Usd, UsdGeom
+    if Usd is None:
+        try:
+            from pxr import Gf as _g, Usd as _u, UsdGeom as _ug
+        except ImportError as e:
+            raise RuntimeError(f"USD runtime unavailable (pip install usd-core): {e}") from e
+        Gf, Usd, UsdGeom = _g, _u, _ug
 
 
 def sha256_bytes(data):
@@ -25,6 +39,7 @@ def _has_time_samples(attr):
 
 
 def convert(src, out_obj):
+    _load_pxr()
     src = Path(src)
     src_bytes = src.read_bytes()
     stage = Usd.Stage.Open(str(src))
@@ -37,14 +52,25 @@ def convert(src, out_obj):
     up = UsdGeom.GetStageUpAxis(stage)
     unsupported = []
     warnings = []
+    skipped = []
     meshes = []
     lines = [f"# capture-mesh-convert {TOOL_VERSION} from {src.name}",
              f"# native stage units; metersPerUnit={mpu!r} (authored={units_authored}); upAxis={up} (authored={up_authored})"]
     v_offset = 0
     t = Usd.TimeCode.Default()
 
-    for prim in Usd.PrimRange(stage.GetPseudoRoot(), Usd.TraverseInstanceProxies()):
+    it = iter(Usd.PrimRange(stage.GetPseudoRoot(), Usd.TraverseInstanceProxies(Usd.PrimAllPrimsPredicate)))
+    for prim in it:
         path = str(prim.GetPath())
+        if prim.IsPseudoRoot():
+            continue
+        if prim.IsAbstract() or not prim.IsDefined():
+            it.PruneChildren()
+            continue
+        if not prim.IsActive():
+            skipped.append({"prim": path, "reason": "inactive"})
+            it.PruneChildren()
+            continue
         if prim.IsInstance() or prim.IsInstanceProxy():
             if prim.IsInstance():
                 unsupported.append({"feature": "nativeInstancing", "prim": path,
@@ -61,15 +87,29 @@ def convert(src, out_obj):
             continue
         mesh = UsdGeom.Mesh(prim)
         img = UsdGeom.Imageable(prim)
-        if img.ComputeVisibility(t) == UsdGeom.Tokens.invisible:
-            warnings.append(f"{path}: invisible mesh skipped")
+        purpose = str(img.ComputePurpose())
+        if purpose in SKIPPED_PURPOSES:
+            skipped.append({"prim": path, "reason": f"purpose={purpose}"})
             continue
-        scheme = mesh.GetSubdivisionSchemeAttr().Get()
-        if scheme != UsdGeom.Tokens.none:
+        if img.ComputeVisibility(t) == UsdGeom.Tokens.invisible:
+            skipped.append({"prim": path, "reason": "invisible"})
+            continue
+        scheme_attr = mesh.GetSubdivisionSchemeAttr()
+        scheme_authored = scheme_attr.HasAuthoredValue()
+        scheme = scheme_attr.Get(t)
+        if scheme_authored and scheme != UsdGeom.Tokens.none:
             unsupported.append({"feature": "subdivision", "prim": path,
                                 "detail": f"subdivisionScheme={scheme}; exported control cage only"})
-        if _has_time_samples(mesh.GetPointsAttr()):
-            unsupported.append({"feature": "animatedPoints", "prim": path, "detail": "default time used"})
+        for name, attr in (("points", mesh.GetPointsAttr()),
+                           ("faceVertexCounts", mesh.GetFaceVertexCountsAttr()),
+                           ("faceVertexIndices", mesh.GetFaceVertexIndicesAttr()),
+                           ("holeIndices", mesh.GetHoleIndicesAttr()),
+                           ("orientation", mesh.GetOrientationAttr()),
+                           ("subdivisionScheme", scheme_attr)):
+            if _has_time_samples(attr):
+                feat = "animatedPoints" if name == "points" else "timeSampledTopology"
+                unsupported.append({"feature": feat, "prim": path,
+                                    "detail": f"{name} is time-sampled; default time used"})
         anc = prim
         while anc and anc.IsValid() and not anc.IsPseudoRoot():
             xf = UsdGeom.Xformable(anc)
@@ -77,6 +117,10 @@ def convert(src, out_obj):
                 unsupported.append({"feature": "animatedTransform", "prim": str(anc.GetPath()),
                                     "detail": "default time used"})
             anc = anc.GetParent()
+        holes = set(mesh.GetHoleIndicesAttr().Get(t) or [])
+        if holes:
+            unsupported.append({"feature": "holeIndices", "prim": path,
+                                "detail": f"{len(holes)} hole face(s) omitted from OBJ"})
 
         points = mesh.GetPointsAttr().Get(t) or []
         counts = list(mesh.GetFaceVertexCountsAttr().Get(t) or [])
@@ -94,19 +138,25 @@ def convert(src, out_obj):
             w = m.Transform(Gf.Vec3d(p))
             lines.append(f"v {w[0]!r} {w[1]!r} {w[2]!r}")
         k = 0
-        for c in counts:
+        written = 0
+        for fi, c in enumerate(counts):
             face = indices[k:k + c]
             k += c
+            if fi in holes:
+                continue
             if c < 3:
                 warnings.append(f"{path}: degenerate face with {c} vertices skipped")
                 continue
             if flip:
                 face = [face[0]] + face[1:][::-1]
             lines.append("f " + " ".join(str(i + 1 + v_offset) for i in face))
+            written += 1
         v_offset += len(points)
-        meshes.append({"prim": path, "points": len(points), "faces": len(counts),
+        meshes.append({"prim": path, "points": len(points), "faces": written, "authoredFaces": len(counts),
+                       "holeFacesOmitted": len(holes), "purpose": purpose,
                        "worldDeterminant": det, "authoredOrientation": "leftHanded" if left else "rightHanded",
-                       "windingFlipped": flip, "subdivisionScheme": str(scheme)})
+                       "windingFlipped": flip, "subdivisionScheme": str(scheme),
+                       "subdivisionSchemeAuthored": scheme_authored})
 
     if not meshes:
         raise RuntimeError("no exportable meshes found")
@@ -127,6 +177,8 @@ def convert(src, out_obj):
         "metricQualified": metric_qualified,
         "metricQualifiedReason": None if metric_qualified else
             ("metersPerUnit not authored (default used)" if not units_authored else "unsupported features present"),
+        "subdivisionPolicy": SUBDIVISION_POLICY,
+        "skippedPurposes": list(SKIPPED_PURPOSES), "skippedPrims": skipped,
         "unsupportedFeatures": unsupported, "warnings": warnings, "meshes": meshes,
         "provesCompleteCapture": False, "provesPhysicalFit": False,
     }

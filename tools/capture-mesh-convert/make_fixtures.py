@@ -13,13 +13,14 @@ BOX_FACES = [(0, 3, 2, 1), (4, 5, 6, 7), (0, 1, 5, 4),
              (3, 7, 6, 2), (0, 4, 7, 3), (1, 2, 6, 5)]
 
 
-def add_box(stage, path, size=(1, 2, 3)):
+def add_box(stage, path, size=(1, 2, 3), scheme=UsdGeom.Tokens.none):
     mesh = UsdGeom.Mesh.Define(stage, path)
     mesh.CreatePointsAttr([Gf.Vec3f(x * size[0], y * size[1] / 2, z * size[2] / 3)
                            for x, y, z in BOX_POINTS])
     mesh.CreateFaceVertexCountsAttr([4] * 6)
     mesh.CreateFaceVertexIndicesAttr([i for f in BOX_FACES for i in f])
-    mesh.CreateSubdivisionSchemeAttr(UsdGeom.Tokens.none)
+    if scheme is not None:
+        mesh.CreateSubdivisionSchemeAttr(scheme)
     return mesh
 
 
@@ -78,7 +79,43 @@ def build_subdiv(stage):
     add_box(stage, "/Box").GetSubdivisionSchemeAttr().Set(UsdGeom.Tokens.catmullClark)
 
 
-FIXTURES = {"nested_multi": build_nested_multi, "reflected": build_reflected,
+def build_unauthored_subdiv(stage):
+    """subdivisionScheme not authored (USD fallback catmullClark): treated as polygonal."""
+    _units(stage)
+    add_box(stage, "/Box", scheme=None)
+
+
+def build_holes(stage):
+    """Box + one extra quad marked as a hole (face 6) + one 2-vertex degenerate face (face 7)."""
+    _units(stage)
+    m = add_box(stage, "/Box")
+    m.GetFaceVertexCountsAttr().Set([4] * 7 + [2])
+    m.GetFaceVertexIndicesAttr().Set([i for f in BOX_FACES for i in f] + [0, 1, 2, 3, 0, 1])
+    m.CreateHoleIndicesAttr([6])
+
+
+def build_purpose(stage):
+    """Default-purpose box; guide/proxy/render-purpose meshes and an inactive mesh far away."""
+    _units(stage)
+    add_box(stage, "/Box")
+    for i, p in enumerate(("guide", "proxy", "render")):
+        g = add_box(stage, f"/P_{p}")
+        g.CreatePurposeAttr(p)
+        UsdGeom.Xformable(g).AddTranslateOp().Set(Gf.Vec3d(1000 * (i + 1), 0, 0))
+    off = add_box(stage, "/Inactive")
+    UsdGeom.Xformable(off).AddTranslateOp().Set(Gf.Vec3d(-1000, 0, 0))
+    off.GetPrim().SetActive(False)
+
+
+def build_animated_topology(stage):
+    _units(stage)
+    m = add_box(stage, "/Box")
+    m.GetFaceVertexIndicesAttr().Set([i for f in BOX_FACES for i in f], Usd.TimeCode(1))
+
+
+FIXTURES = {"unauthored_subdiv": build_unauthored_subdiv, "holes": build_holes,
+            "purpose": build_purpose, "animated_topology": build_animated_topology,
+"nested_multi": build_nested_multi, "reflected": build_reflected,
             "no_units": build_no_units, "subdiv": build_subdiv}
 
 

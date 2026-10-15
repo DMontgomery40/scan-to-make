@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import hashlib
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -112,6 +113,59 @@ class ConvertTests(unittest.TestCase):
         self.assertTrue(r["unitsAuthored"])
         self.assertFalse(r["metricQualified"])
         self.assertEqual(r["unsupportedFeatures"][0]["feature"], "subdivision")
+
+    def test_unauthored_subdivision_is_polygonal(self):
+        r, out = self.run_fx("unauthored_subdiv")
+        self.assertTrue(r["metricQualified"])
+        self.assertEqual(r["unsupportedFeatures"], [])
+        self.assertFalse(r["meshes"][0]["subdivisionSchemeAuthored"])
+        self.assertEqual(r["meshes"][0]["subdivisionScheme"], "catmullClark")
+        self.assertIn("unauthored-is-polygonal", r["subdivisionPolicy"])
+
+    def test_authored_subdivision_cli_exit_4(self):
+        r, _ = self.run_fx("subdiv")
+        self.assertTrue(r["meshes"][0]["subdivisionSchemeAuthored"])
+        res = subprocess.run([sys.executable, str(HERE / "convert.py"), str(self.fx["subdiv"]),
+                              "--out", str(self.dir / "s.obj")], capture_output=True)
+        self.assertEqual(res.returncode, 4)
+
+    def test_holes_flagged_and_omitted_degenerate_not_counted(self):
+        r, out = self.run_fx("holes")
+        v, f = decode_obj(out)
+        self.assertEqual(len(f), 6)
+        self.assertTrue(all(len(x) == 4 for x in f))
+        self.assertFalse(r["metricQualified"])
+        self.assertIn("holeIndices", [u["feature"] for u in r["unsupportedFeatures"]])
+        m = r["meshes"][0]
+        self.assertEqual((m["faces"], m["authoredFaces"], m["holeFacesOmitted"]), (6, 8, 1))
+        self.assertAlmostEqual(signed_volume(v, f), 6.0, places=5)
+
+    def test_purpose_and_inactive_skipped(self):
+        r, out = self.run_fx("purpose")
+        v, _ = decode_obj(out)
+        self.assertBounds(bounds(v), [0, 0, 0], [1, 2, 3])
+        reasons = {s["prim"]: s["reason"] for s in r["skippedPrims"]}
+        self.assertEqual(reasons, {"/P_guide": "purpose=guide", "/P_proxy": "purpose=proxy",
+                                   "/P_render": "purpose=render", "/Inactive": "inactive"})
+        self.assertTrue(r["metricQualified"])
+
+    def test_time_sampled_topology_flagged(self):
+        r, _ = self.run_fx("animated_topology")
+        self.assertFalse(r["metricQualified"])
+        self.assertIn("timeSampledTopology", [u["feature"] for u in r["unsupportedFeatures"]])
+
+    def test_exit_2_missing_pxr_and_missing_input(self):
+        fake = self.dir / "nopxr" / "pxr"
+        fake.mkdir(parents=True, exist_ok=True)
+        (fake / "__init__.py").write_text("raise ImportError('simulated missing usd-core')\n")
+        env = dict(os.environ, PYTHONPATH=str(fake.parent))
+        res = subprocess.run([sys.executable, str(HERE / "convert.py"), str(self.fx["reflected"]),
+                              "--out", str(self.dir / "x.obj")], capture_output=True, text=True, env=env)
+        self.assertEqual(res.returncode, 2)
+        self.assertIn("USD runtime unavailable", res.stderr)
+        res = subprocess.run([sys.executable, str(HERE / "convert.py"), str(self.dir / "nope.usdz"),
+                              "--out", str(self.dir / "y.obj")], capture_output=True, text=True)
+        self.assertEqual(res.returncode, 2)
 
     def test_cli_exit_codes(self):
         cli = [sys.executable, str(HERE / "convert.py")]
