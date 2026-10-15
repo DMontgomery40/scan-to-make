@@ -32,3 +32,20 @@ A drawer divider edit invalidates the revision-bound preview/acceptance even if 
 ## Mobile saved-project boundary
 
 The portable `@scan-to-make/contracts/saved-project` subpath now supplies a general brief plus optional measured fit, strict revision-aware changes and a repository over a platform-provided atomic storage interface. Native clients should use that boundary rather than importing this Node filesystem implementation. Its `SavedProject` envelope is distinct from this service's `ProjectRecord` (which also tracks preview acceptance); use separate storage namespaces. There is no implicit migration, network synchronization, preview-acceptance transfer or native-storage implementation in either API. See the contracts README for exact consumer operations, conflict outcomes and adapter obligations.
+
+## Portable saved projects
+
+`FileSavedProjectStorage` implements the shared `SavedProjectStorage` byte interface for the native portable project format. It is separate from the older `ProjectStore` record format above. Pair it with the existing portable transitions:
+
+```ts
+import { FileSavedProjectStorage } from '@scan-to-make/project';
+import { createSavedProjects } from '@scan-to-make/contracts/saved-project';
+
+const projects = createSavedProjects(new FileSavedProjectStorage('/private/local/saved-projects'));
+await projects.create({ id: 'holder', brief: { object: 'Bottle', context: 'Drawer', addition: 'Holder' }, fit: null });
+const reopened = await projects.load('holder');
+```
+
+Use a dedicated trusted local directory. Reads retain exact UTF-8 text and compare-and-swap compares that exact text, including whitespace. Invalid UTF-8 and oversized records fail; corrupt/future project JSON remains available for the portable decoder to report without repair. The default limit is 4MiB per record, configurable up to64MiB. Artifact bytes belong in a separate bounded ingestion store.
+
+The exclusive directory lock covers comparison, temporary-file flush and atomic replacement across cooperating processes. A parent-directory flush follows rename. Contention fails visibly, and abandoned locks are retained for explicit recovery as described above. A storage error after rename may mean the replacement already happened: reread and reconcile instead of blindly retrying. This is a local-filesystem adapter, not a distributed database or a guarantee against every power-loss scenario. It adds no HTTP route, authentication grant, capture import or print authorization.
