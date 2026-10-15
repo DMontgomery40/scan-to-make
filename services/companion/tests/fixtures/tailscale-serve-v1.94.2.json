@@ -1,0 +1,22 @@
+{
+  "kind": "source-derived-forwarding-contract-not-live-tailnet-capture",
+  "version": "v1.94.2",
+  "commit": "2de4d317a8c2595904f1563ebd98fdcf843da275",
+  "source": "https://github.com/tailscale/tailscale/blob/2de4d317a8c2595904f1563ebd98fdcf843da275/ipn/ipnlocal/serve.go",
+  "functions": ["reverseProxy.ServeHTTP", "addProxyForwardedHeaders", "addTailscaleIdentityHeaders"],
+  "backend": "http://127.0.0.1:9077",
+  "incomingTLS": true,
+  "expected": {
+    "host": "companion.example-tail.ts.net",
+    "x-forwarded-host": "companion.example-tail.ts.net",
+    "x-forwarded-proto": "https",
+    "tailscale-user-login": "alice@example.test"
+  },
+  "rules": {
+    "tcpBackendHost": "preserve incoming Host",
+    "unixBackend": "rewrites Host; unsupported by this contract",
+    "identity": "strip client-supplied identity headers before assigning WhoIs login",
+    "taggedNode": "omit user-login; rejected",
+    "funnel": "omit user-login and set Tailscale-Funnel-Request; rejected"
+  }
+}

@@ -62,9 +62,10 @@ async function fixture(t, body, timeoutMs = 2000) {
   const script = join(root, 'fixture.mjs');
   await writeFile(
     script,
-    `import {mkdir,readFile,writeFile,copyFile,symlink} from 'node:fs/promises';
+    `import {mkdir,readFile,writeFile,copyFile,symlink,rename} from 'node:fs/promises';
 import {createHash} from 'node:crypto';
-await writeFile(${JSON.stringify(join(root, 'pid'))},String(process.pid));
+await writeFile(${JSON.stringify(join(root, 'pid.pending'))},String(process.pid));
+await rename(${JSON.stringify(join(root, 'pid.pending'))},${JSON.stringify(join(root, 'pid'))});
 const args=process.argv.slice(2);const out=args[args.indexOf('--out-dir')+1];
 const spec=JSON.parse(await readFile(args[args.indexOf('--spec')+1],'utf8'));
 const example=${JSON.stringify(example)};
@@ -147,7 +148,10 @@ test('invalid manifest source, artifact mismatch and symlink output fail closed 
 
 async function assertStopped(root, jobs) {
   assert.deepEqual(await readdir(jobs), []);
-  const pid = Number(await readFile(join(root, 'pid'), 'utf8'));
+  const pidText = await readFile(join(root, 'pid'), 'utf8');
+  assert.match(pidText, /^[1-9][0-9]*$/, 'fixture must publish a complete PID');
+  const pid = Number(pidText);
+  assert.ok(Number.isSafeInteger(pid) && pid > 1);
   assert.throws(
     () => process.kill(pid, 0),
     (e) => e.code === 'ESRCH'
