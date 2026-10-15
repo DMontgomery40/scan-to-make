@@ -20,12 +20,13 @@ public final class ScanCapturePreview: ARSCNView {
     addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(placeProbe)))
   }
 
-  func updateProbeLocator(center: CGPoint?) {
+  func updateProbeLocator(center: CGPoint?, state: ProbeLocatorView.State) {
     guard let center else {
       probeLocator.isHidden = true
       return
     }
     probeLocator.center = center
+    probeLocator.apply(state)
     probeLocator.isHidden = false
   }
   required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
@@ -59,16 +60,26 @@ final class ScanCapturePreviewRendererDelegate: NSObject, ARSCNViewDelegate {
     let renderedSession = view.session
     let timestamp = renderedSession.currentFrame?.timestamp
     var locatorCenter: CGPoint?
+    var locatorState: ProbeLocatorView.State = .inside
     if let probeNode, probeNode.parent != nil {
       let projected = view.projectPoint(probeNode.worldPosition)
       let center = CGPoint(x: CGFloat(projected.x), y: CGFloat(projected.y))
-      if projected.z > 0 && projected.z < 1 && view.bounds.contains(center) {
-        locatorCenter = center
+      if projected.z > 0 && projected.z < 1 && center.x.isFinite && center.y.isFinite {
+        if view.bounds.contains(center) {
+          locatorCenter = center
+          locatorState = view.bounds.insetBy(dx: 24, dy: 24).contains(center) ? .inside : .nearEdge
+        } else {
+          locatorCenter = CGPoint(
+            x: min(max(center.x, 19), max(19, view.bounds.width - 19)),
+            y: min(max(center.y, 19), max(19, view.bounds.height - 19))
+          )
+          locatorState = .outside
+        }
       }
     }
     DispatchQueue.main.async { [weak view] in
       guard let view else { return }
-      view.updateProbeLocator(center: locatorCenter)
+      view.updateProbeLocator(center: locatorCenter, state: locatorState)
       guard let timestamp else { return }
       ScanCaptureSession.shared.didRender(view, session: renderedSession, timestamp: timestamp)
     }
@@ -86,11 +97,19 @@ final class ScanCapturePreviewRendererDelegate: NSObject, ARSCNViewDelegate {
 }
 
 final class ProbeLocatorView: UIView {
+  enum State {
+    case inside
+    case nearEdge
+    case outside
+  }
+
+  private let dot = UIView(frame: CGRect(x: 16, y: 16, width: 6, height: 6))
+  private var appliedState: State?
+
   override init(frame: CGRect) {
     super.init(frame: frame)
     backgroundColor = .clear
     isUserInteractionEnabled = false
-    layer.borderColor = UIColor.systemOrange.cgColor
     layer.borderWidth = 3
     layer.cornerRadius = 19
     layer.shadowColor = UIColor.black.cgColor
@@ -98,10 +117,36 @@ final class ProbeLocatorView: UIView {
     layer.shadowRadius = 2
     layer.shadowOffset = .zero
 
-    let dot = UIView(frame: CGRect(x: 16, y: 16, width: 6, height: 6))
-    dot.backgroundColor = .systemOrange
     dot.layer.cornerRadius = 3
     addSubview(dot)
+    apply(.inside)
+  }
+
+  func apply(_ state: State) {
+    guard appliedState != state else { return }
+    appliedState = state
+    switch state {
+    case .inside:
+      layer.borderColor = UIColor.systemOrange.cgColor
+      layer.borderWidth = 3
+      backgroundColor = .clear
+      dot.backgroundColor = .systemOrange
+      dot.isHidden = false
+      alpha = 1
+    case .nearEdge:
+      layer.borderColor = UIColor.systemRed.cgColor
+      layer.borderWidth = 4
+      backgroundColor = UIColor.systemRed.withAlphaComponent(0.12)
+      dot.backgroundColor = .systemRed
+      dot.isHidden = false
+      alpha = 1
+    case .outside:
+      layer.borderColor = UIColor.systemRed.cgColor
+      layer.borderWidth = 3
+      backgroundColor = UIColor.systemRed.withAlphaComponent(0.12)
+      dot.isHidden = true
+      alpha = 0.75
+    }
   }
 
   required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
