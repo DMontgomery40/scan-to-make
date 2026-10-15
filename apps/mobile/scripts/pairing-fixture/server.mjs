@@ -3,7 +3,7 @@
 // private temporary directory, never stdout. Only fixed synthetic identities.
 import { createServer, request } from 'node:http';
 import { randomBytes, createHash } from 'node:crypto';
-import { mkdtemp, writeFile, readFile } from 'node:fs/promises';
+import { mkdtemp, writeFile, readFile, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { RemoteAuthStore } from '../../../../services/companion/dist/remote-auth.js';
@@ -76,7 +76,10 @@ if (captureEnabled || preparedEnabled) {
       }),
     );
     await writeFile(join(root, 'settings.json'), settings, { mode: 0o600 });
-    const design = Buffer.from('synthetic accepted design identity');
+    const producedDirectory = process.env.SCAN_PRODUCED_FIXTURE_DIR;
+    const design = producedDirectory
+      ? await readFile(join(producedDirectory, 'source.stl'))
+      : Buffer.from('synthetic accepted design identity');
     const binding = {
       sourceFit: fit,
       artifact: {
@@ -138,6 +141,38 @@ if (captureEnabled || preparedEnabled) {
         },
       });
       jobs.push({ jobId: result.jobId, job: result.job });
+    }
+    if (producedDirectory) {
+      // Replay retained operator-produced evidence through the real read APIs.
+      // This fixture does not claim to rerun slicing or inspection.
+      const record = await readFile(join(producedDirectory, 'job.json'));
+      const job = JSON.parse(record.toString('utf8'));
+      if (
+        !/^[a-f0-9-]{36}$/.test(job.id) ||
+        job.projectId !== fit.id ||
+        job.projectRevision !== 2 ||
+        !job.production ||
+        job.designArtifact?.sha256 !== binding.artifact.sha256 ||
+        job.designArtifact?.mediaType !== binding.artifact.mediaType ||
+        job.designArtifact?.byteLength !== binding.artifact.byteLength
+      )
+        throw Error('Retained produced fixture does not match its source');
+      const folder = join(root, 'prepared', job.id);
+      await mkdir(folder);
+      await writeFile(join(folder, 'job.json'), record);
+      for (const name of [
+        'source.stl',
+        'settings.json',
+        'production.json',
+        'printable.bin',
+      ])
+        await writeFile(
+          join(folder, name),
+          await readFile(join(producedDirectory, name)),
+        );
+      // Reopen verifies every retained source/settings/manifest/printable identity.
+      await capture.preparedJobs.loadPreparedJob(job.id);
+      jobs.push({ jobId: job.id, job });
     }
     const snapshot = await storage.read(fit.id);
     await writeFile(

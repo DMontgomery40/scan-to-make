@@ -333,3 +333,144 @@ test('snapshot permission errors explain project access in the inspected-files f
     'The companion returned an unreadable file record. Try refreshing.',
   );
 });
+
+async function producedFixture() {
+  const f = await fixture();
+  const job = JSON.parse(JSON.stringify(f.response.job));
+  job.printableArtifact.mediaType = 'text/x.gcode';
+  job.inspection.receipt.artifact.file_format = 'gcode';
+  delete job.inspection.receipt.inspection.plateInternalPath;
+  job.production = {
+    requestSha256: '1'.repeat(64),
+    producerIdentity: '2'.repeat(64),
+    sourceArtifact: job.designArtifact,
+    settingsArtifact: {
+      sha256: job.selection.slicerSettingsSha256,
+      mediaType: 'application/json',
+      byteLength: 42,
+    },
+    manifestArtifact: {
+      sha256: '3'.repeat(64),
+      mediaType: 'application/json',
+      byteLength: 50,
+    },
+    slicer: { version: '02.08.02.61', binarySha256: '4'.repeat(64) },
+  };
+  const body = Object.fromEntries(
+    Object.entries(job).filter(([key]) => key !== 'sha256'),
+  );
+  job.sha256 = await hash(JSON.stringify(body));
+  return { ...f, job };
+}
+test('produced metadata verifies in canonical digest order and preserves retained settings identity', async () => {
+  const f = await producedFixture();
+  expect(
+    await validatePreparedResponse(
+      { jobId: f.id, job: f.job },
+      f.project,
+      f.id,
+      hash,
+    ),
+  ).toMatchObject({ production: f.job.production });
+});
+test('self-consistent produced metadata cannot substitute source/settings or exceed bounds', async () => {
+  const f = await producedFixture();
+  const changes = [
+    (j: any) => (j.production.sourceArtifact.sha256 = '9'.repeat(64)),
+    (j: any) => (j.production.settingsArtifact.sha256 = '9'.repeat(64)),
+    (j: any) =>
+      (j.production.settingsArtifact.byteLength = 8 * 1024 * 1024 + 1),
+    (j: any) => (j.production.sourceArtifact.byteLength = 0),
+    (j: any) => (j.production.manifestArtifact.mediaType = 'text/plain'),
+    (j: any) => (j.production.slicer.version = 'x'.repeat(129)),
+    (j: any) => (j.production.extra = 'unknown'),
+    (j: any) => (j.printableArtifact.mediaType = 'model/3mf'),
+  ];
+  for (const change of changes) {
+    const job = JSON.parse(JSON.stringify(f.job));
+    change(job);
+    const body = Object.fromEntries(
+      Object.entries(job).filter(([key]) => key !== 'sha256'),
+    );
+    job.sha256 = await hash(JSON.stringify(body));
+    await expect(
+      validatePreparedResponse({ jobId: f.id, job }, f.project, f.id, hash),
+    ).rejects.toThrow();
+  }
+});
+test('discovery opts into production and falls back only once on an explicit first-page unsupported query', async () => {
+  const f = await fixture(),
+    paths: string[] = [];
+  f.native.request = async o => {
+    paths.push(o.path);
+    return o.path.includes('productionVersion=1')
+      ? { status: 400, etag: '', body: '{"error":{"code":"invalid-request"}}' }
+      : {
+          status: 200,
+          etag: f.ack.etag,
+          body: '{"jobs":[],"nextCursor":"next","unreadable":0,"requiresVerifiedGet":true}',
+        };
+  };
+  const first = await f.client.list(f.project.id, f.ack);
+  expect(paths).toHaveLength(2);
+  expect(paths[0]).toContain('&limit=20&productionVersion=1');
+  expect(paths[1]).not.toContain('productionVersion');
+  expect(first.mode).toBe('legacy');
+  await f.client.list(f.project.id, f.ack, 'page2', first.mode);
+  expect(paths[2]).toContain('&limit=20&cursor=page2');
+});
+test('discovery never downgrades auth, stale, malformed success or a pagination failure', async () => {
+  for (const response of [
+    { status: 403, etag: '', body: '{"error":{"code":"invalid-request"}}' },
+    { status: 412, etag: '', body: '{}' },
+    { status: 400, etag: '', body: '{"error":{"code":"unavailable"}}' },
+    { status: 200, etag: 'wrong', body: '{}' },
+    { status: 200, etag: 'current', body: 'not-json' },
+    {
+      status: 200,
+      etag: 'current',
+      body: '{"error":{"code":"invalid-request"}}',
+    },
+  ]) {
+    const f = await fixture();
+    let calls = 0;
+    f.native.request = async () => {
+      calls++;
+      return {
+        ...response,
+        etag: response.etag === 'current' ? f.ack.etag : response.etag,
+      };
+    };
+    await expect(f.client.list(f.project.id, f.ack)).rejects.toThrow();
+    expect(calls).toBe(1);
+  }
+  const f = await fixture();
+  let calls = 0;
+  f.native.request = async () => {
+    calls++;
+    return {
+      status: 400,
+      etag: '',
+      body: '{"error":{"code":"invalid-request"}}',
+    };
+  };
+  await expect(
+    f.client.list(f.project.id, f.ack, 'next', 'production-v1'),
+  ).rejects.toThrow();
+  expect(calls).toBe(1);
+});
+
+test('an unsupported first page never loops compatibility retries', async () => {
+  const f = await fixture();
+  let calls = 0;
+  f.native.request = async () => {
+    calls++;
+    return {
+      status: 400,
+      etag: '',
+      body: '{"error":{"code":"invalid-request"}}',
+    };
+  };
+  await expect(f.client.list(f.project.id, f.ack)).rejects.toThrow();
+  expect(calls).toBe(2);
+});

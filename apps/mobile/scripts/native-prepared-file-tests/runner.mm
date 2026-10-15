@@ -10,10 +10,13 @@ static void Require(BOOL ok,NSString *why){if(!ok){fprintf(stderr,"FAIL %s\n",wh
 @property PreparedFileBridge *files;
 @property NSUInteger index;
 @property NSMutableArray *results;
+@property NSMutableArray *discovered;
+@property BOOL producedDiscovery;
 @end
 @implementation Driver
 - (void)request:(NSDictionary*)options then:(void(^)(NSDictionary*))then attempt:(NSUInteger)n {
- [self.files requestOptions:options resolve:^(id r){if([r[@"status"] integerValue]==429&&n<5){dispatch_after(dispatch_time(DISPATCH_TIME_NOW,50*NSEC_PER_MSEC),dispatch_get_main_queue(),^{[self request:options then:then attempt:n+1];});return;}Require([r[@"status"] integerValue]==200,@"verified GET status");Require([r[@"etag"] isEqual:config[@"prepared"][@"etag"]],@"exact ETag");then(r);} reject:^(NSString*c,NSString*m,NSError*e){Require(NO,c);}];
+ [self.files requestOptions:options resolve:^(id r){if([r[@"status"] integerValue]==429&&n<5){dispatch_after(dispatch_time(DISPATCH_TIME_NOW,50*NSEC_PER_MSEC),dispatch_get_main_queue(),^{[self request:options then:then attempt:n+1];});return;}BOOL unsupported=[r[@"status"] integerValue]==400&&[options[@"path"] containsString:@"&productionVersion=1"]&&![options[@"path"] containsString:@"&cursor="];
+ Require([r[@"status"] integerValue]==200||unsupported,@"verified GET status");if(!unsupported)Require([r[@"etag"] isEqual:config[@"prepared"][@"etag"]],@"exact ETag");then(r);} reject:^(NSString*c,NSString*m,NSError*e){Require(NO,c);}];
 }
 - (void)next {
  NSArray *jobs=config[@"prepared"][@"jobs"];
@@ -21,7 +24,7 @@ static void Require(BOOL ok,NSString *why){if(!ok){fprintf(stderr,"FAIL %s\n",wh
   NSInteger phase=[NSUserDefaults.standardUserDefaults integerForKey:@"phase"]+1;
   [NSUserDefaults.standardUserDefaults setInteger:phase forKey:@"phase"];
   if(phase==2){[self.pair disconnectResolve:^(id r){Require([r[@"state"] isEqual:@"disconnected"],@"test credential cleanup");} reject:^(NSString*c,NSString*m,NSError*e){Require(NO,c);}];}
-  NSDictionary *receipt=@{@"phase":@(phase),@"passed":@YES,@"runId":config[@"runId"],@"preparedOnlyPairing":@YES,@"discoveryPagination":@YES,@"cases":self.results};
+  NSDictionary *receipt=@{@"phase":@(phase),@"passed":@YES,@"runId":config[@"runId"],@"preparedOnlyPairing":@YES,@"discoveryPagination":@YES,@"producedDiscovery":@(self.producedDiscovery),@"discovered":self.discovered,@"cases":self.results};
   NSURL *url=[NSFileManager.defaultManager URLsForDirectory:NSDocumentDirectory inDomains:NSUserDomainMask].firstObject;
   url=[url URLByAppendingPathComponent:[NSString stringWithFormat:@"results-%ld.json",(long)phase]];
   Require([[NSJSONSerialization dataWithJSONObject:receipt options:NSJSONWritingPrettyPrinted error:nil] writeToURL:url atomically:YES],@"receipt");printf("NATIVE_PREPARED_PASS phase=%ld\n",(long)phase);fflush(stdout);exit(0);
@@ -30,7 +33,7 @@ static void Require(BOOL ok,NSString *why){if(!ok){fprintf(stderr,"FAIL %s\n",wh
  NSString *path=[NSString stringWithFormat:@"/v1/saved-projects/%@/prepared-jobs/%@?projectRevision=%@",project[@"id"],expected[@"jobId"],project[@"revision"]];
  NSDictionary *pairing=STMReadPairing(nil);Require(![pairing[@"scopes"] containsObject:@"generation:create"],@"prepared-only credential");
  NSMutableDictionary *o=[@{@"context":Context(pairing),@"method":@"GET",@"path":path,@"etag":config[@"prepared"][@"etag"]} mutableCopy];
- for(NSDictionary *bad in @[@{@"method":@"POST"},@{@"path":@"/v1/generate"},@{@"path":[path stringByAppendingString:@"&extra=1"]}]){
+ for(NSDictionary *bad in @[@{@"method":@"POST"},@{@"path":@"/v1/generate"},@{@"path":[path stringByAppendingString:@"&extra=1"]},@{@"path":[path stringByAppendingString:@"&productionVersion=1"]}]){
   NSMutableDictionary *badOptions=[o mutableCopy];[badOptions addEntriesFromDictionary:bad];__block BOOL rejected=NO;
   [self.files requestOptions:badOptions resolve:^(id r){Require(NO,@"unexpected route accepted");} reject:^(NSString*c,NSString*m,NSError*e){rejected=[c isEqual:@"invalid-request"];}];Require(rejected,@"strict route rejection");
  }
@@ -46,25 +49,27 @@ static void Require(BOOL ok,NSString *why){if(!ok){fprintf(stderr,"FAIL %s\n",wh
   } attempt:0];
  } attempt:0];
 }
-- (void)discoverThenNext {
+- (void)discoverPage:(NSString*)cursor produced:(BOOL)produced {
  NSDictionary *project=config[@"prepared"][@"project"],*pairing=STMReadPairing(nil);
- NSString *path=[NSString stringWithFormat:@"/v1/saved-projects/%@/prepared-jobs?projectRevision=%@&limit=1",project[@"id"],project[@"revision"]];
+ NSString *path=[NSString stringWithFormat:@"/v1/saved-projects/%@/prepared-jobs?projectRevision=%@&limit=1%@%@",project[@"id"],project[@"revision"],produced?@"&productionVersion=1":@"",cursor?[@"&cursor=" stringByAppendingString:cursor]:@""];
  NSMutableDictionary *o=[@{@"context":Context(pairing),@"method":@"GET",@"path":path,@"etag":config[@"prepared"][@"etag"]} mutableCopy];
- for(NSString *suffix in @[@"&extra=1",@"&limit=1",@"&cursor=bad%2Fcursor"]){
+ if(!cursor)for(NSString *suffix in @[@"&extra=1",@"&limit=1",@"&productionVersion=2",@"&productionVersion=1&productionVersion=1",@"&cursor=bad%2Fcursor"]){
   NSMutableDictionary *bad=[o mutableCopy];bad[@"path"]=[path stringByAppendingString:suffix];__block BOOL rejected=NO;
   [self.files requestOptions:bad resolve:^(id r){Require(NO,@"unexpected collection query accepted");} reject:^(NSString*c,NSString*m,NSError*e){rejected=[c isEqual:@"invalid-request"];}];Require(rejected,@"strict collection query rejection");
  }
  [self request:o then:^(NSDictionary*r){
   NSDictionary *page=[NSJSONSerialization JSONObjectWithData:[r[@"body"] dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil];
-  Require([page[@"requiresVerifiedGet"] boolValue]&&[page[@"jobs"] count]==1&&[page[@"nextCursor"] isKindOfClass:NSString.class],@"bounded discovery page");
-  NSString *first=page[@"jobs"][0][@"jobId"];
-  o[@"path"]=[path stringByAppendingFormat:@"&cursor=%@",page[@"nextCursor"]];
-  [self request:o then:^(NSDictionary*second){
-   NSDictionary *next=[NSJSONSerialization JSONObjectWithData:[second[@"body"] dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil];
-   Require([next[@"jobs"] count]==1&&![first isEqual:next[@"jobs"][0][@"jobId"]]&&next[@"nextCursor"]==NSNull.null,@"actual second page advances");[self next];
-  } attempt:0];
+  if([r[@"status"] integerValue]==400){Require(!cursor&&produced&&[page[@"error"][@"code"] isEqual:@"invalid-request"],@"first-page compatibility fallback only");[self discoverPage:nil produced:NO];return;}
+  Require([page[@"requiresVerifiedGet"] boolValue]&&[page[@"jobs"] count]<=1,@"bounded discovery page");
+  for(NSDictionary *summary in page[@"jobs"]){NSString *identity=summary[@"jobId"];Require(![self.discovered containsObject:identity],@"discovery does not repeat a handle");[self.discovered addObject:identity];}
+  Require(self.discovered.count<100,@"discovery bound");
+  if([page[@"nextCursor"] isKindOfClass:NSString.class]){Require(![cursor isEqual:page[@"nextCursor"]],@"cursor advances");[self discoverPage:page[@"nextCursor"] produced:produced];return;}
+  Require(page[@"nextCursor"]==NSNull.null,@"terminal cursor");self.producedDiscovery=produced;
+  NSMutableArray *expected=[NSMutableArray new];for(NSDictionary *item in config[@"prepared"][@"jobs"]){if(produced||!item[@"job"][@"production"])[expected addObject:item[@"jobId"]];}
+  Require([self.discovered isEqual:[expected sortedArrayUsingSelector:@selector(compare:)]],@"discovery includes exactly the compatible current jobs");[self next];
  } attempt:0];
 }
+- (void)discoverThenNext { self.discovered=[NSMutableArray new];[self discoverPage:nil produced:YES]; }
 - (void)start {
  self.files=[PreparedFileBridge new];self.pair=[CompanionPairing new];self.results=[NSMutableArray new];
  if([NSProcessInfo.processInfo.arguments containsObject:@"--cleanup"]){[self.pair disconnectResolve:^(id r){exit(0);} reject:^(NSString*c,NSString*m,NSError*e){exit(1);}];return;}

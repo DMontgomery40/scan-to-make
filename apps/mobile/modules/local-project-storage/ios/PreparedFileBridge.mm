@@ -68,7 +68,7 @@ RCT_REMAP_METHOD(request,requestOptions:(NSDictionary*)o resolve:(RCTPromiseReso
   if(e||!base||![Context(p) isEqual:o[@"context"]]||[p[@"expiresAt"] doubleValue]<=NSDate.date.timeIntervalSince1970*1000){reject(@"pairing-required",@"Connect to your companion again.",e);return;}
   NSString *path=o[@"path"],*method=o[@"method"];
   NSString *pattern=@"^/v1/saved-projects/[A-Za-z0-9][A-Za-z0-9_-]{0,127}/prepared-jobs/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}(/artifacts/printable)?\\?projectRevision=(0|[1-9][0-9]*)$";
-  NSString *collectionPattern=@"^/v1/saved-projects/[A-Za-z0-9][A-Za-z0-9_-]{0,127}/prepared-jobs\\?projectRevision=(0|[1-9][0-9]*)(?:&limit=(?:[1-9]|[1-4][0-9]|50))?(?:&cursor=[A-Za-z0-9_-]{1,1024})?$";
+  NSString *collectionPattern=@"^/v1/saved-projects/[A-Za-z0-9][A-Za-z0-9_-]{0,127}/prepared-jobs\\?projectRevision=(0|[1-9][0-9]*)(?:&limit=(?:[1-9]|[1-4][0-9]|50))?(?:&productionVersion=1)?(?:&cursor=[A-Za-z0-9_-]{1,1024})?$";
   BOOL listing=[path isKindOfClass:NSString.class]&&[[NSPredicate predicateWithFormat:@"SELF MATCHES %@",collectionPattern] evaluateWithObject:path];
   BOOL download=[path isKindOfClass:NSString.class]&&[path containsString:@"/artifacts/printable?"];
   if(![path isKindOfClass:NSString.class]||(!listing&&![[NSPredicate predicateWithFormat:@"SELF MATCHES %@",pattern] evaluateWithObject:path])||![method isEqual:@"GET"]||![o[@"etag"] isKindOfClass:NSString.class]||![[NSPredicate predicateWithFormat:@"SELF MATCHES %@",@"\"[a-f0-9]{64}\""] evaluateWithObject:o[@"etag"]]||download!=(o[@"artifact"]!=nil)||o[@"body"]||o[@"source"]||o[@"create"]){reject(@"invalid-request",@"Invalid prepared file request.",nil);return;}

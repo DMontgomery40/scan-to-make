@@ -85,6 +85,23 @@ const PrintSelectionSchema = z
     { message: 'Project filament positions must be unique' },
   );
 
+const productionRef = (mediaType: string, maximum: number) =>
+  ArtifactRefSchema.refine(
+    a =>
+      a.mediaType === mediaType && a.byteLength > 0 && a.byteLength <= maximum,
+  );
+const ProductionSchema = z.strictObject({
+  requestSha256: digest,
+  producerIdentity: digest,
+  sourceArtifact: productionRef('model/stl', 32 * 1024 * 1024),
+  settingsArtifact: productionRef('application/json', 8 * 1024 * 1024),
+  manifestArtifact: productionRef('application/json', 1024 * 1024),
+  slicer: z.strictObject({
+    version: z.string().min(1).max(128),
+    binarySha256: digest,
+  }),
+});
+// Field order mirrors the sealed companion record used by its canonical digest.
 const JobSchema = z.strictObject({
   formatVersion: z.literal('0.1.0'),
   id: z.uuid(),
@@ -94,6 +111,7 @@ const JobSchema = z.strictObject({
   printableArtifact: ArtifactRefSchema,
   selection: PrintSelectionSchema,
   inspection: PreparedInspectionSchema,
+  production: ProductionSchema.optional(),
   sha256: digest,
 });
 export type PreparedJob = z.infer<typeof JobSchema>;
@@ -154,6 +172,16 @@ export async function validatePreparedResponse(
     job.printableArtifact.byteLength > 64 * 1024 * 1024
   )
     throw Error('Unsupported inspected file.');
+  if (
+    job.production &&
+    (!same(job.production.sourceArtifact, job.designArtifact) ||
+      job.production.settingsArtifact.sha256 !==
+        job.selection.slicerSettingsSha256 ||
+      job.printableArtifact.mediaType !== 'text/x.gcode')
+  )
+    throw Error(
+      'Production evidence does not match the accepted design and retained settings.',
+    );
   const r = job.inspection.receipt,
     s = job.selection,
     a = r.inspection;
@@ -228,7 +256,8 @@ const PageSchema = z.strictObject({
   unreadable: integer,
   requiresVerifiedGet: z.literal(true),
 });
-export type PreparedPage = z.infer<typeof PageSchema>;
+export type DiscoveryMode = 'production-v1' | 'legacy';
+export type PreparedPage = z.infer<typeof PageSchema> & { mode: DiscoveryMode };
 export type ProjectAcknowledgment = { etag: string; snapshot: string };
 export function preparedError(error: unknown): string {
   if (error instanceof z.ZodError || error instanceof SyntaxError)
@@ -303,7 +332,7 @@ export class PreparedFilesClient {
         }
         throw Object.assign(
           Error(`The inspected file could not be verified (${r.status}).`),
-          { code },
+          { code, status: r.status },
         );
       }
       return r;
@@ -313,23 +342,41 @@ export class PreparedFilesClient {
     projectId: string,
     ack: ProjectAcknowledgment,
     cursor?: string,
+    mode: DiscoveryMode = 'production-v1',
   ): Promise<PreparedPage> {
     safeId.parse(projectId);
     if (cursor !== undefined) CursorSchema.parse(cursor);
+    z.enum(['production-v1', 'legacy']).parse(mode);
     z.string()
       .regex(/^"[a-f0-9]{64}"$/)
       .parse(ack.etag);
     const project = await this.current(projectId, ack.snapshot),
       context = await this.native.context();
-    const path = `/v1/saved-projects/${projectId}/prepared-jobs?projectRevision=${
-      project.revision
-    }&limit=20${cursor ? '&cursor=' + cursor : ''}`;
-    const response = await this.get({
-      context,
-      method: 'GET',
-      path,
-      etag: ack.etag,
-    });
+    const path = (chosen: DiscoveryMode) =>
+      `/v1/saved-projects/${projectId}/prepared-jobs?projectRevision=${
+        project.revision
+      }&limit=20${chosen === 'production-v1' ? '&productionVersion=1' : ''}${
+        cursor ? '&cursor=' + cursor : ''
+      }`;
+    const request = (chosen: DiscoveryMode) =>
+      this.get({ context, method: 'GET', path: path(chosen), etag: ack.etag });
+    let response;
+    try {
+      response = await request(mode);
+    } catch (error) {
+      const failure = error as { status?: number; code?: string };
+      if (
+        cursor !== undefined ||
+        mode !== 'production-v1' ||
+        failure.status !== 400 ||
+        failure.code !== 'invalid-request'
+      )
+        throw error;
+      // Older companions reject this exact new query. Downgrade only this first
+      // page; the caller retains the resulting mode for every continuation.
+      mode = 'legacy';
+      response = await request(mode);
+    }
     const page = PageSchema.parse(JSON.parse(response.body));
     if (page.nextCursor !== null && page.nextCursor === cursor)
       throw Error('The file list did not advance. Refresh to try again.');
@@ -348,7 +395,7 @@ export class PreparedFilesClient {
     await this.current(projectId, ack.snapshot);
     if ((await this.native.context()) !== context)
       throw Error('Companion connection changed.');
-    return page;
+    return { ...page, mode };
   }
   async open(
     projectId: string,

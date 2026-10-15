@@ -84,6 +84,9 @@ async function mount() {
 }
 beforeEach(() => {
   jest.clearAllMocks();
+  jest
+    .spyOn(AppState, 'addEventListener')
+    .mockImplementation(() => ({ remove: jest.fn() }));
   mockSync.mockResolvedValue(ack);
   mockList.mockResolvedValue({
     jobs: [summary],
@@ -96,13 +99,14 @@ beforeEach(() => {
 test('empty page continues, verified selection precedes details and exact export', async () => {
   mockList.mockResolvedValueOnce({
     jobs: [],
+    mode: 'legacy',
     nextCursor: 'next',
     unreadable: 1,
   });
   const tree = await mount();
   expect(shown(tree)).toContain('Continue to look for files.');
   await press(tree, 'Load more files');
-  expect(mockList).toHaveBeenLastCalledWith('project', ack, 'next');
+  expect(mockList).toHaveBeenLastCalledWith('project', ack, 'next', 'legacy');
   expect(shown(tree)).not.toContain('File inspection');
   await press(tree, 'Review file 1');
   expect(mockOpen).toHaveBeenCalledWith('project', 'fixture', ack, summary);
@@ -116,6 +120,7 @@ test('stale cursor clears old handles and refresh replaces the page', async () =
   mockList
     .mockResolvedValueOnce({
       jobs: [summary],
+      mode: 'legacy',
       nextCursor: 'next',
       unreadable: 0,
     })
@@ -164,4 +169,19 @@ test('backgrounding removes verified details until a fresh lookup', async () => 
   expect(mockCancel).toHaveBeenCalled();
   await act(async () => tree.unmount());
   spy.mockRestore();
+});
+
+test('verified produced files show companion provenance without imported-file or calibration claims', async () => {
+  mockOpen.mockResolvedValue({
+    job: { ...job, production: { slicer: { version: '02.08.02.61' } } },
+  });
+  const tree = await mount();
+  await press(tree, 'Review file 1');
+  expect(shown(tree)).toContain('SLICED BY YOUR COMPANION');
+  expect(shown(tree).some(s => s.includes('02.08.02.61'))).toBe(true);
+  expect(shown(tree)).not.toContain('IMPORTED SLICED FILE');
+  expect(
+    shown(tree).some(s => s.includes('Physical fit still needs checking')),
+  ).toBe(true);
+  await act(async () => tree.unmount());
 });
