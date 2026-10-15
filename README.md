@@ -2,7 +2,7 @@
 
 An open-source consumer app for making useful things that fit the objects and spaces around you: scan objects and their surroundings, describe an addition, make something that fits, and print it. A hosted service can supply inference and compute; the same core remains self-hostable.
 
-This repository is the product. Printer adapters stay behind the companion contract and are not inlined here. The cup-holder adapter is one validation example — captured reference and confirmed dimensions, editable preview, a scoped fit coupon, and independently checked export or companion printing — not the app identity. A drawer organizer is a second measured example.
+This repository is the product. Printer adapters stay behind the companion contract and are not inlined here. The cup-holder adapter is one validation example — captured reference and confirmed dimensions, editable preview, a scoped fit coupon, and independently checked export or companion printing — not the app identity. A drawer organizer is a second dimensional template.
 
 Native review/export acceptance and physical-fit acceptance remain **OPEN**. Preview geometry is not print authorization. Software licences and distribution rights will be recorded before shipping code that depends on them.
 
