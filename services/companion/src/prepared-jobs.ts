@@ -6,6 +6,7 @@ import {z} from 'zod';
 import {ArtifactRefSchema, type ArtifactRef} from '@scan-to-make/contracts';
 import {FileSavedProjectStorage} from '@scan-to-make/project';
 import {PrintSelectionSchema} from './index.js';
+import {PreparedInspectionSchema, createPreparedFileInspector, printableFormat, type PreparedInspectionConfiguration} from './prepared-inspection.js';
 
 const digest = z.string().regex(/^[a-f0-9]{64}$/);
 const integer = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
@@ -20,6 +21,7 @@ const preparedJobBody = z.strictObject({
   designArtifact: ArtifactRefSchema,
   printableArtifact: ArtifactRefSchema,
   selection: PrintSelectionSchema,
+  inspection: PreparedInspectionSchema.optional(),
 });
 function hashPreparedJob(body: z.infer<typeof preparedJobBody>): string {
   return createHash('sha256').update(JSON.stringify(body)).digest('hex');
@@ -90,17 +92,19 @@ async function readBounded(path: string, maxBytes: number): Promise<Buffer> {
 }
 
 /** Approval-bound print preparation over portable saved projects.
- * Records one dispatch intent per prepared job; never dispatches, inspects
- * printability, or observes hardware. Intent is durable evidence of a human
+ * Records one dispatch intent per prepared job; optionally inspects retained
+ * bytes through a trusted file-only worker, but never dispatches or observes hardware. Intent is durable evidence of a human
  * approval for these exact bytes, not permission to execute: a future
  * executor must still inspect and re-verify through its own gate.
  */
 export class PreparedJobStore {
   private readonly bound: ReturnType<typeof limits>;
   private readonly clock: () => number;
+  private readonly inspect?: ReturnType<typeof createPreparedFileInspector>;
   constructor(private readonly projects: FileSavedProjectStorage, private readonly directory: string,
-    options: PreparedJobLimits & {clock?: () => number} = {}) {
-    const {clock, ...byteLimits} = options;
+    options: PreparedJobLimits & {clock?: () => number; inspection?: PreparedInspectionConfiguration} = {}) {
+    const {clock, inspection, ...byteLimits} = options;
+    this.inspect = inspection ? createPreparedFileInspector(inspection) : undefined;
     this.bound = limits(byteLimits);
     this.clock = clock ?? Date.now;
   }
@@ -128,10 +132,23 @@ export class PreparedJobStore {
       return await this.projects.withCurrentProject(request.projectId, request.projectRevision, async project => {
         if (project.id !== request.projectId) throw new Error('Project identity mismatch');
         if (!project.acceptedArtifact) throw new Error('Current design must be accepted before preparing a print job');
+        let inspection;
+        if (this.inspect) {
+          const file = join(staging, `inspection.${printableFormat(request.printableArtifact)}`);
+          await writeSynced(file, bytes);
+          await chmod(file, 0o400);
+          try { inspection = await this.inspect(file, request.printableArtifact, request.selection); }
+          finally { await rm(file, {force: true}); }
+          // A worker never supplies retained bytes. Recheck the private original before publication.
+          const retained = await readBounded(join(staging, 'printable.bin'), this.bound.maxPrintableBytes);
+          if (!sameRef(refOf(retained, request.printableArtifact.mediaType), request.printableArtifact)) {
+            throw new Error('Printable bytes changed during inspection');
+          }
+        }
         const body = preparedJobBody.parse({
           formatVersion: '0.1.0', id: jobId, projectId: request.projectId, projectRevision: project.revision,
           designArtifact: project.acceptedArtifact.artifact, printableArtifact: request.printableArtifact,
-          selection: request.selection,
+          selection: request.selection, ...(inspection ? {inspection} : {}),
         });
         const job = PreparedJobSchema.parse({...body, sha256: hashPreparedJob(body)});
         const jobBytes = Buffer.from(JSON.stringify(job) + '\n');
