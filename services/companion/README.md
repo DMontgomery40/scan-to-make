@@ -77,6 +77,47 @@ The listener accepts one active generation request, including body parsing and c
 | 502 | `invalid-output` | Manifest, artifact integrity or STL validation failed |
 | 504 | `generation-timeout` | Configured worker deadline elapsed |
 
-Errors use `{error: {code, message}}` with fixed messages, never subprocess diagnostics or filesystem paths. The listener binds IPv4 loopback only and requires its exact `127.0.0.1:<port>` Host. Requests carrying `Origin` or `Sec-Fetch-Site` reject; no CORS is enabled. This supports direct local clients, including an iOS Simulator on the same Mac, not a browser frontend or a remote phone. It does not authenticate local processes. Remote access, pairing, TLS and hosted deployment require a separate transport design.
+Errors use `{error: {code, message}}` with fixed messages, never subprocess diagnostics or filesystem paths. The listener binds IPv4 loopback only and requires its exact `127.0.0.1:<port>` Host. Requests carrying `Origin` or `Sec-Fetch-Site` reject; no CORS is enabled. This supports direct local clients, including an iOS Simulator on the same Mac, not a browser frontend or a remote phone. It does not authenticate local processes. This is the default mode. Requests with Tailscale or forwarded-proxy headers also reject, so accidentally proxying the local listener does not grant anonymous access. The explicit private Serve mode below adds authentication; it does not change this default.
 
 Tests exercise real Python generation through HTTP into saved-project acceptance, reopening, exact-byte checked export and edit invalidation. Native mesh rendering, durable artifact caching and sharing remain app responsibilities; these tests do not establish native or physical-fit evidence.
+
+
+## Authenticated private Serve transport
+
+Remote mode is opt-in and generation-only. It still binds **127.0.0.1**, behind an operator-managed **private HTTPS Tailscale Serve TCP proxy**. Use the existing client/setup guidance in [Tailscale setup](../../docs/tailscale-setup.md). This program never installs or configures Tailscale, obtains certificates, changes account/policy access, or enables Funnel. Public hosting, Unix-socket proxies, browser clients and tagged-node clients are unsupported.
+
+The forwarding fixture pins [Tailscale v1.94.2, commit 2de4d3](https://github.com/tailscale/tailscale/blob/2de4d317a8c2595904f1563ebd98fdcf843da275/ipn/ipnlocal/serve.go). Its TCP proxy preserves incoming Host, sets X-Forwarded-Host and HTTPS protocol, strips supplied identity headers, and assigns the authenticated user's login. Tagged nodes lack a login; Funnel lacks a login and sets a Funnel marker. Our tests replay this **source-derived** contract; they do not prove an installed Tailscale version or a phone connection. Before enabling an actual remote listener, verify the installed version's forwarded headers with an isolated non-sensitive backend and check that private Serve, not Funnel, is configured. See [Serve identity documentation](https://tailscale.com/docs/features/tailscale-serve#identity-headers).
+
+Every remote request must carry exactly the configured FQDN Host (without a port), matching X-Forwarded-Host, X-Forwarded-Proto: https, and one exact allowlisted ASCII Tailscale-User-Login. Missing/duplicate/wrong headers, Funnel markers, Origin and Sec-Fetch-Site reject. These headers are trusted **only because Serve forwards over loopback**. Local processes can impersonate Serve; this design assumes a trusted host and trusted local users. It is not a security boundary against local malware. Tailnet access alone is insufficient: application pairing and scoped tokens are also required. Clients must validate the normal HTTPS certificate for that exact FQDN, with no certificate-verification bypass.
+
+### Host-local administration
+
+After building, an operator uses the local CLI (paths below are examples). Use a private trusted parent on a local POSIX filesystem; do not put auth state in Git or a shared/synced folder. `init` requires a new absolute directory and will never overwrite existing state. Configuration changes require stopping the listener and intentionally initializing a fresh registry/re-pairing; corrupt state never falls back to local mode.
+
+```sh
+node services/companion/dist/remote-auth-cli.js init /absolute/private/auth companion.example-tail.ts.net alice@example.test
+node services/companion/dist/remote-auth-cli.js pair /absolute/private/auth alice@example.test
+SCAN_TO_MAKE_REMOTE_AUTH_DIR=/absolute/private/auth node services/companion/dist/generation-cli.js
+node services/companion/dist/remote-auth-cli.js devices /absolute/private/auth
+node services/companion/dist/remote-auth-cli.js revoke /absolute/private/auth DEVICE_UUID
+```
+
+`pair` returns a secret code and a `qrPayload` JSON string containing `{version:1, baseUrl:"https://<fqdn>", code, expiresAt}`. It is QR **payload data**, not a rendered QR image. The UI can encode that string as a QR. The code has 192 random bits, is bound to the selected login, expires after five minutes, and can be exchanged once. Display/share it only with the intended phone; do not put it in a query URL, logs, analytics or a ticket. If the response is lost, generate a fresh invitation rather than retrying a consumed code.
+
+State uses directory mode 0700/file mode 0600, SHA-256 hashes of high-entropy codes/tokens, atomic replacement with fsync and an exclusive mutation lock. Reads reject symlinks, malformed/oversized state, wrong ownership or nonprivate permissions. A lock conflict returns 503; an interrupted lock requires the operator to verify that no writer remains before removing it. No automatic stale-lock recovery is performed. A lost store requires re-pairing. A stolen bearer token can be copied; device IDs are credential identifiers, not hardware attestation. Revoke the compromised device, and protect tokens in the phone's Keychain/Keystore.
+
+### Phone contract
+
+All timestamps are Unix milliseconds from the host's clock. The host clock must be correct. Scopes are host-admin assigned; phone requests cannot enlarge them. Import `RemoteAuthStore` from `@scan-to-make/companion/remote-auth` for host-local administration in an embedded companion, and pass its opened instance as `remoteAuth` to `startGenerationServer`. The CLI grants `generation:health` and `generation:create`; local library callers can issue a health-only invitation. Tokens expire after 30 days and require re-pairing. No refresh or administrative endpoint is exposed.
+
+| Request | Requirement | Success |
+| --- | --- | --- |
+| POST `/v1/pair` | JSON `{code,deviceName}`; valid Serve identity | `{protocolVersion:"0.1.0",deviceId,token,expiresAt,scopes}` |
+| GET `/healthz` | `Authorization: Bearer <token>`, `X-Scan-Device: <deviceId>`, `generation:health` | Existing health response |
+| POST `/v1/generate` | Same credentials; `generation:create`; existing JSON generation request | Existing verified generation response |
+
+Pairing allows five attempts per allowlisted login per minute, persisted across restart; malformed attempts count. Pair bodies are limited to 4096 bytes and five seconds. At most 8 unexpired invitations and 64 unexpired devices are retained. Unknown fields and invalid device names reject. Auth responses use no-store and opaque fixed errors: 401 `unauthorized` for rejected code/token,403 `forbidden` for identity/scope rejection, 429 `rate-limited`, 503 `auth-unavailable` for lock/storage problems. Existing media/body/route errors retain their codes. Retry a transient 503 with a short backoff; a 401 requires a new pairing or user intervention. Never silently downgrade to unauthenticated HTTP.
+
+Each credential binds a token hash, device ID, user login, scopes and expiry. Revocation takes effect on subsequent requests and is rechecked after generation body upload. It does not cancel a generation already executing. Revoking one device does not revoke others. Print/discovery/dispatch/journal operations and local pairing/revocation administration are not HTTP routes.
+
+Tests use isolated temporary registries and actual loopback HTTP/Python generation. They prove transport behavior, not phone onboarding, certificate provisioning, tailnet reachability, native capture accuracy or printing.

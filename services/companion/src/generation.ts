@@ -17,6 +17,11 @@ import {
   type GenerationErrorCode,
 } from '@scan-to-make/contracts/generation';
 import { readVerifiedStl } from './stl-export.js';
+import {
+  RemoteAuthFailure,
+  RemoteAuthStore,
+  type RemoteScope,
+} from './remote-auth.js';
 
 const errors: Record<GenerationErrorCode, readonly [number, string]> = {
   'invalid-request': [400, 'Invalid generation request'],
@@ -234,7 +239,8 @@ export function createGenerationWorker(
 
 async function readBody(
   request: IncomingMessage,
-  signal: AbortSignal
+  signal: AbortSignal,
+  limit = MAX_GENERATION_REQUEST_BYTES
 ): Promise<unknown> {
   const bytes = await new Promise<Buffer>((resolve, reject) => {
     const chunks: Buffer[] = [];
@@ -252,8 +258,7 @@ async function readBody(
     };
     const data = (chunk: Buffer) => {
       length += chunk.length;
-      if (length > MAX_GENERATION_REQUEST_BYTES)
-        finish(new GenerationFailure('payload-too-large'));
+      if (length > limit) finish(new GenerationFailure('payload-too-large'));
       else chunks.push(chunk);
     };
     const end = () => finish();
@@ -270,20 +275,38 @@ async function readBody(
     if (signal.aborted) aborted();
   });
   try {
-    return GenerationRequestSchema.parse(JSON.parse(bytes.toString('utf8')));
+    return JSON.parse(bytes.toString('utf8'));
   } catch {
     throw new GenerationFailure('invalid-request');
   }
 }
 
-/** Loopback development transport. No remote access, project mutation or printer route. */
+function singleHeader(
+  request: IncomingMessage,
+  name: string
+): string | undefined {
+  let count = 0;
+  for (let i = 0; i < request.rawHeaders.length; i += 2)
+    if (request.rawHeaders[i]?.toLowerCase() === name) count++;
+  const value = request.headers[name];
+  if (count > 1 || Array.isArray(value))
+    throw new RemoteAuthFailure('forbidden');
+  return value;
+}
+
+/** Loopback listener; remote access requires explicit private Serve authentication. No printer routes. */
 export async function startGenerationServer(
-  options: { port?: number; worker?: GenerationWorker } = {}
+  options: {
+    port?: number;
+    worker?: GenerationWorker;
+    remoteAuth?: RemoteAuthStore;
+  } = {}
 ): Promise<{ url: string; close(): Promise<void> }> {
   const port = options.port ?? 9077;
   if (!Number.isSafeInteger(port) || port < 0 || port > 65535)
     throw new Error('Invalid local port');
   const worker = options.worker ?? createGenerationWorker();
+  const auth = options.remoteAuth;
   let authority = '';
   let active: { controller: AbortController; done: Promise<void> } | undefined;
   const server = createServer(async (request, response) => {
@@ -293,12 +316,43 @@ export async function startGenerationServer(
     let finish: (() => void) | undefined;
     try {
       if (
-        request.headers.host !== authority ||
         request.headers.origin !== undefined ||
         request.headers['sec-fetch-site'] !== undefined
       )
         throw new GenerationFailure('forbidden');
+      let login = '';
+      if (auth) {
+        login = singleHeader(request, 'tailscale-user-login') ?? '';
+        if (
+          singleHeader(request, 'host') !== auth.host ||
+          singleHeader(request, 'x-forwarded-host') !== auth.host ||
+          singleHeader(request, 'x-forwarded-proto') !== 'https' ||
+          request.headers['tailscale-funnel-request'] !== undefined ||
+          !auth.allowsLogin(login)
+        )
+          throw new RemoteAuthFailure('forbidden');
+      } else if (
+        request.headers.host !== authority ||
+        Object.keys(request.headers).some(
+          (key) =>
+            key.startsWith('x-forwarded-') || key.startsWith('tailscale-')
+        )
+      ) {
+        throw new GenerationFailure('forbidden');
+      }
+      const authorize = async (scope: RemoteScope) => {
+        if (!auth) return;
+        const authorization = singleHeader(request, 'authorization');
+        const token = authorization?.match(/^Bearer ([A-Za-z0-9_-]{43})$/)?.[1];
+        await auth.authorize(
+          login,
+          singleHeader(request, 'x-scan-device'),
+          token,
+          scope
+        );
+      };
       if (request.url === '/healthz' && request.method === 'GET') {
+        await authorize('generation:health');
         response.end(
           JSON.stringify({
             status: 'ok',
@@ -308,10 +362,13 @@ export async function startGenerationServer(
         );
         return;
       }
-      if (request.url !== '/v1/generate')
+      const pairing = auth && request.url === '/v1/pair';
+      if (request.url !== '/v1/generate' && !pairing)
         throw new GenerationFailure('not-found');
       if (request.method !== 'POST')
         throw new GenerationFailure('method-not-allowed');
+      if (pairing) await auth.reservePairAttempt(login);
+      else await authorize('generation:create');
       if (
         !/^application\/json(?:;\s*charset=utf-8)?$/i.test(
           request.headers['content-type'] ?? ''
@@ -322,9 +379,23 @@ export async function startGenerationServer(
         throw new GenerationFailure('unsupported-media-type');
       if (
         Number(request.headers['content-length'] ?? 0) >
-        MAX_GENERATION_REQUEST_BYTES
+        (pairing ? 4096 : MAX_GENERATION_REQUEST_BYTES)
       )
         throw new GenerationFailure('payload-too-large');
+      if (pairing) {
+        const controller = new AbortController();
+        const abort = () => controller.abort();
+        response.once('close', abort);
+        try {
+          const input = await readBody(request, controller.signal, 4096);
+          if (controller.signal.aborted)
+            throw new GenerationFailure('invalid-request');
+          response.end(JSON.stringify(await auth.exchange(login, input)));
+        } finally {
+          response.off('close', abort);
+        }
+        return;
+      }
       if (active) throw new GenerationFailure('busy');
       const controller = new AbortController();
       active = {
@@ -338,9 +409,13 @@ export async function startGenerationServer(
       };
       response.once('close', disconnected);
       try {
-        const input = await readBody(request, controller.signal);
+        const input = GenerationRequestSchema.safeParse(
+          await readBody(request, controller.signal)
+        );
+        if (!input.success) throw new GenerationFailure('invalid-request');
+        await authorize('generation:create');
         const result = GenerationResponseSchema.parse(
-          await worker.generate(input, controller.signal)
+          await worker.generate(input.data, controller.signal)
         );
         const body = JSON.stringify(result);
         if (Buffer.byteLength(body) > MAX_GENERATION_RESPONSE_BYTES)
@@ -355,7 +430,7 @@ export async function startGenerationServer(
       }
     } catch (error) {
       const failure =
-        error instanceof GenerationFailure
+        error instanceof GenerationFailure || error instanceof RemoteAuthFailure
           ? error
           : new GenerationFailure('generation-failed');
       if (!response.destroyed) {

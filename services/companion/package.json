@@ -19,6 +19,10 @@
     "./generation": {
       "types": "./dist/generation.d.ts",
       "import": "./dist/generation.js"
+    },
+    "./remote-auth": {
+      "types": "./dist/remote-auth.d.ts",
+      "import": "./dist/remote-auth.js"
     }
   },
   "scripts": {
