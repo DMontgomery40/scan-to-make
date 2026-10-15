@@ -121,3 +121,21 @@ Pairing allows five attempts per allowlisted login per minute, persisted across 
 Each credential binds a token hash, device ID, user login, scopes and expiry. Revocation takes effect on subsequent requests and is rechecked after generation body upload. It does not cancel a generation already executing. Revoking one device does not revoke others. Print/discovery/dispatch/journal operations and local pairing/revocation administration are not HTTP routes.
 
 Tests use isolated temporary registries and actual loopback HTTP/Python generation. They prove transport behavior, not phone onboarding, certificate provisioning, tailnet reachability, native capture accuracy or printing.
+
+## Retained capture ingestion
+
+`@scan-to-make/companion/capture-import` exports `CaptureStore`; `capture-converter` exports `createCaptureConverter`. These are host-local library APIs. The existing generation listener and credentials do not expose or authorize capture import.
+
+Use a trusted private parent on a local POSIX filesystem for project storage, retained captures and temporary worker files. Configure a Python 3.12 environment with `usd-core==26.8`; pass its executable to `createCaptureConverter`. The adapter uses this checkout's capture-pipeline input validation and capture-mesh-convert implementation. Executable, adapter and storage paths are operator configuration, never request parameters. Windows, network filesystems and hostile local writers are unsupported.
+
+Import takes `{projectId, projectRevision, source: Uint8Array}` and an optional abort signal. It snapshots the original bytes, converts in a separate bounded worker, verifies the source/output/report identities and authored coordinate basis, then publishes one immutable bundle by atomic rename under the same project lock used by edits. The default limits are 32 MiB source, 64 MiB derived output, 1 MiB report, 64 KiB combined diagnostics and a 60-second worker deadline. Python also enforces CPU/file-size limits and archive expansion bounds. The host must budget aggregate concurrency and memory when exposing this library to clients.
+
+`loadCapture(projectId, projectRevision, captureId)` reads and re-verifies retained original, mesh, report and binding bytes against the current project revision. An edit invalidates use of older attachments but preserves their historical bytes. Multiple captures can belong to one revision; import does not increment the project revision or automatically select a capture. Stale-project, corruption, worker failure and pre-commit cancellation reject. Publication is the commit point; an abort after publication cannot roll it back. A filesystem durability failure after rename can leave an immutable bundle despite a rejected call; no automatic retry/deduplication protocol is promised by this local API.
+
+Metric qualification means authored units and supported conversion, with physical accuracy, completeness and fit still unknown. A submitted receipt alone never establishes trusted conversion.
+
+The suite always includes an actual USDZ conversion/import/reopen test and malformed-input rejection. Install the Python dependency before running it; there is no fallback skip when it is missing:
+
+```sh
+CAPTURE_TEST_PYTHON=/absolute/venv/bin/python npm test --prefix services/companion
+```

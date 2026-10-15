@@ -123,3 +123,17 @@ test('case-distinct IDs and maximum-length IDs remain independent on the host fi
   const results = await Promise.all(ids.map(id => store.compareAndSwap(id, id + '-content', id + '-next')));
   assert.deepEqual(results, ids.map(() => true));
 });
+
+test('capture commit callback and project edits share the same lock and revision check', async () => {
+ const storage=new FileSavedProjectStorage(directory);const projects=createSavedProjects(storage);
+ await projects.create(draft);
+ let entered,release;const started=new Promise(r=>entered=r);const gate=new Promise(r=>release=r);
+ const operation=storage.withCurrentProject(draft.id,0,async project=>{entered();await gate;return project;});
+ await started;
+ assert.equal((await projects.change(draft.id,0,{kind:'replace-brief',brief:{...draft.brief,addition:'Changed'}})).status,'storage-error');
+ release();assert.equal((await operation).revision,0);
+ assert.equal((await projects.change(draft.id,0,{kind:'replace-brief',brief:{...draft.brief,addition:'Changed'}})).status,'ok');
+ let called=false;
+ await assert.rejects(storage.withCurrentProject(draft.id,0,async()=>{called=true;}),/revision/);
+ assert.equal(called,false);
+});
