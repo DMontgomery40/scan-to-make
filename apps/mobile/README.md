@@ -1,6 +1,6 @@
 # Scan to Make: mobile shell (UI-001)
 
-React Native 0.87 (TypeScript, Hermes, New Architecture) app with an isolated D004 capture/preview harness. The consumer UI supports a general project brief and an explicitly selected cup-holder measurement study. Custom capture/generation and printing are not implemented; the separate developer harness measures a headless AR session.
+React Native 0.87 (TypeScript, Hermes, New Architecture) app with an isolated D004 capture/preview harness. The consumer UI supports a general project brief and an explicitly selected cup-holder measurement study. Custom capture/generation and printing are not implemented; the separate developer harness provides a same-session visible ARKit probe on iOS and offscreen ARCore sampling on Android.
 
 ## Layout
 
@@ -105,7 +105,8 @@ npm ci --prefix services/companion
 npm run generate:serve --prefix services/companion
 ```
 
-Generation posts the complete immutable saved fit to `127.0.0.1:9077`. The iOS
+Generation posts the complete immutable saved fit to the paired companion. The
+legacy fresh-Simulator path uses `127.0.0.1:9077`. The iOS
 bridge limits both declared and streamed response size before JSON reaches JS,
 refuses redirects, and supports cancellation and a 40-second resource deadline.
 The portable verifier checks source equality, canonical base64, byte length and
@@ -130,9 +131,9 @@ Missing/damaged files block review/export, and stale or failed writes retain the
 saved record. Design acceptance is neither physical-fit evidence nor print
 permission. No printer action exists in this flow.
 
-The generation bridge, mesh and STL share are currently iOS-only. The fixed
-loopback endpoint is a same-Mac Simulator prototype, not real-device pairing,
-hosted transport or authentication. Android still supports local project storage;
+The generation bridge, mesh and STL share are currently iOS-only. Companion
+pairing below adds private authenticated HTTPS transport; actual physical-phone
+and tailnet connectivity remain separately qualified. Android still supports local project storage;
 its generated-preview action reports unavailable. ASCII STL rendering, cache
 management and real-device transport are separate work.
 
@@ -177,3 +178,65 @@ placement, retained-content rendering, two-minute native performance, thermal
 behavior and physical stability require a separately authorized real-device run.
 No signing changes, access grants, pairing, cloud or printer operations are
 provided by this milestone.
+
+## Companion pairing (iOS)
+
+Open **Connect your companion** on Home or **Companion connection** from the
+current drawer editor. The connection screen overlays the editor, preserving
+unsaved entries. It offers existing-Tailscale and first-time setup guidance;
+opening the official guide is explicit. The app does not install Tailscale,
+sign in, approve devices, grant network access or configure Serve/Funnel.
+
+Enter the exact private HTTPS `*.ts.net` origin and one-time code, or paste the
+companion's invitation JSON (`version`, `baseUrl`, `code`, `expiresAt`). This is
+pasted QR **payload** support, not camera QR scanning. Invitations expire after
+five minutes. The native module exchanges the code, validates the response and
+stores the origin-bound credential in iOS Keychain with
+`kSecAttrAccessibleWhenUnlockedThisDeviceOnly` and synchronization disabled.
+The token never enters JavaScript, project storage, reports or application logs.
+The native module returns only connection metadata. Pairing survives ordinary
+app termination; its 30-day expiry requires a new invitation. Keychain behavior
+after uninstall/restore is OS-controlled, so use Disconnect before removing the
+app when the credential should be erased.
+
+Health and generation requests read the exact stored origin and send both
+Bearer authentication and X-Scan-Device. URLs cannot contain userinfo, paths,
+queries, fragments or custom ports. Normal HTTPS certificate validation remains
+enabled; redirects are refused and credentials never follow artifact URLs.
+Native bounded receive limits still apply before JSON parsing. Re-pairing or
+disconnecting cancels active generation; a changed credential also rejects a
+late response. Rejected/revoked credentials never fall back to anonymous HTTP.
+Network, certificate, denial, expiry and secure-storage errors have distinct
+recovery guidance. Disconnect erases this device's Keychain item; host-side
+revocation remains a separate companion-operator action. Neither changes a
+project draft or grants printer access. Android pairing remains unavailable.
+
+### Isolated Simulator fixture
+
+After building `services/project` and `services/companion`, run from repo root:
+
+```sh
+node apps/mobile/scripts/pairing-fixture/server.mjs
+```
+
+The fixture binds only `127.0.0.1:9078`, forwards to a real isolated authenticated
+generation server, and uses a synthetic allowlisted identity. Its printed path
+points to a private temporary directory containing the invitation and test mode;
+credentials are never printed. Paste `invitation.json` into the app. `SIGUSR1`
+creates a fresh invitation; `SIGUSR2` revokes the fixture's devices. Set the
+private `mode` file to `offline`, `redirect`, `forbidden` or `ok` to exercise
+recovery. Stop the fixture after testing and remove its private directory.
+
+Only Simulator builds accept the fixed HTTP fixture origin. They also accept
+`https://127.0.0.1:9079` for an isolated untrusted-certificate failure test;
+certificate validation is never bypassed. These origins are rejected in device
+builds. The legacy same-Mac unauthenticated generation path on port9077 remains
+available only in Simulator before any explicit companion selection/disconnect;
+after selection it cannot be used as a fallback. Local fixture evidence is not
+physical-phone/Tailscale/HTTPS success evidence.
+
+Checks: `npm run typecheck`, `npm run lint`, `npm test -- --runInBand`, and
+`python3 scripts/native-pairing-tests/test.py` on macOS. Native seam tests compile
+production validation/metadata/disconnect code with a Keychain API double;
+actual secure persistence requires the Simulator restart walkthrough. No tokens
+or invitations should be included in screenshots, test output or public reports.

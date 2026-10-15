@@ -3,6 +3,8 @@
 #import <CommonCrypto/CommonDigest.h>
 #import <UIKit/UIKit.h>
 #import "ArtifactFiles.h"
+#import "CompanionPairing.h"
+#import <TargetConditionals.h>
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -42,6 +44,7 @@ NSData *STMVerifiedArtifact(NSString *digest, NSNumber *length, NSError **error)
 @property NSURLSessionDataTask *task;
 @property NSMutableData *response;
 @property NSInteger status;
+@property NSDictionary *pairingSnapshot;
 @property (copy) RCTPromiseResolveBlock resolve;
 @property (copy) RCTPromiseRejectBlock reject;
 @end
@@ -49,6 +52,9 @@ NSData *STMVerifiedArtifact(NSString *digest, NSNumber *length, NSError **error)
 RCT_EXPORT_MODULE()
 + (BOOL)requiresMainQueueSetup { return NO; }
 - (dispatch_queue_t)methodQueue { return dispatch_get_main_queue(); }
+- (instancetype)init { if ((self = [super init])) { [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(pairingChanged:) name:STMPairingChanged object:nil]; } return self; }
+- (void)pairingChanged:(NSNotification *)note { [self failNetwork:@"pairing-changed" message:@"Companion pairing changed. Your project is unchanged."]; }
+- (void)dealloc { [[NSNotificationCenter defaultCenter] removeObserver:self]; }
 - (void)failNetwork:(NSString *)code message:(NSString *)message {
   RCTPromiseRejectBlock reject = self.reject;
   self.resolve = nil; self.reject = nil; self.response = nil;
@@ -59,7 +65,21 @@ RCT_REMAP_METHOD(generate, generateBody:(NSString *)body resolve:(RCTPromiseReso
   if (self.task) { reject(@"busy", @"A generation request is already running.", nil); return; }
   NSData *request = [body dataUsingEncoding:NSUTF8StringEncoding];
   if (request.length > 256 * 1024) { reject(@"payload-too-large", @"Project request is too large.", nil); return; }
-  NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:@"http://127.0.0.1:9077/v1/generate"]];
+  NSError *pairingError = nil; NSDictionary *pairing = STMReadPairing(&pairingError);
+  if (pairingError) { reject(@"secure-storage", @"Stored pairing could not be read. Unlock the device and retry.", nil); return; }
+  NSURL *base = pairing ? STMCompanionBaseURL(pairing[@"baseUrl"]) : nil;
+  if (pairing && [pairing[@"expiresAt"] doubleValue] <= NSDate.date.timeIntervalSince1970*1000) { reject(@"pairing-required", @"Pairing expired. Connect this device again.", nil); return; }
+#if TARGET_OS_SIMULATOR
+  // Existing same-Mac developer path only; never a remote authentication fallback.
+  if (!pairing && STMLocalGenerationAllowed()) base = [NSURL URLWithString:@"http://127.0.0.1:9077"];
+#endif
+  if (!base) { reject(@"pairing-required", @"Connect to your companion before generating a design.", nil); return; }
+  self.pairingSnapshot = pairing;
+  NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:[base URLByAppendingPathComponent:@"v1/generate"]];
+  if (pairing) {
+    [req setValue:[@"Bearer " stringByAppendingString:pairing[@"token"]] forHTTPHeaderField:@"Authorization"];
+    [req setValue:pairing[@"deviceId"] forHTTPHeaderField:@"X-Scan-Device"];
+  }
   req.HTTPMethod = @"POST"; req.HTTPBody = request; [req setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
   NSURLSessionConfiguration *config = [NSURLSessionConfiguration ephemeralSessionConfiguration];
   config.timeoutIntervalForRequest = 35; config.timeoutIntervalForResource = 40;
@@ -84,7 +104,10 @@ RCT_REMAP_METHOD(cancel, cancelResolve:(RCTPromiseResolveBlock)resolve reject:(R
 }
 - (void)URLSession:(NSURLSession *)session task:(NSURLSessionTask *)task didCompleteWithError:(NSError *)error {
   if (task != self.task) return;
-  if (error) { [self failNetwork:error.code == NSURLErrorTimedOut ? @"timeout" : @"unavailable" message:@"The local design service could not complete the request."]; return; }
+  if (error) { [self failNetwork:STMTransportError(error) message:@"The companion could not complete the request."]; return; }
+  NSError *readError = nil; NSDictionary *current = STMReadPairing(&readError);
+  if (readError || (self.pairingSnapshot ? ![current isEqual:self.pairingSnapshot] : current != nil)) { [self failNetwork:@"pairing-changed" message:@"Companion pairing changed. Your project is unchanged."]; return; }
+  if (self.status == 401 || self.status == 403 || (self.status >= 300 && self.status < 400)) { [self failNetwork:self.status == 401 ? @"unauthorized" : self.status == 403 ? @"forbidden" : @"wrong-host" message:@"Companion authorization needs attention."]; return; }
   NSString *body = [[NSString alloc] initWithData:self.response encoding:NSUTF8StringEncoding];
   RCTPromiseResolveBlock resolve = self.resolve;
   self.task = nil; self.response = nil; self.resolve = nil; self.reject = nil;
