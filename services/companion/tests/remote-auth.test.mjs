@@ -609,3 +609,23 @@ test('package consumers can initialize authentication through the supported subp
   );
   assert.equal(typeof exported.RemoteAuthStore, 'function');
 });
+
+test('valid repeated init refuses an existing registry and preserves a paired device byte-for-byte', async (t) => {
+  const { store, directory } = await fixture(t);
+  const p = await exchange(store);
+  const before = await readFile(join(directory, 'auth.json'));
+  const result = await runCli(admin, [
+    'init',
+    directory,
+    'companion.example-tail.ts.net',
+    'alice@example.test',
+  ]);
+  assert.equal(result.code, 1);
+  assert.deepEqual(await readFile(join(directory, 'auth.json')), before);
+  await store.authorize(
+    'alice@example.test',
+    p.deviceId,
+    p.token,
+    'generation:create'
+  );
+});
