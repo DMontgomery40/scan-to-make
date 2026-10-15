@@ -14,6 +14,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import producer  # noqa: E402
 from producer import ProducerError, produce, resolve_preset, sha256_file  # noqa: E402
 
+REAL_RESULT = Path(__file__).resolve().parent / "fixtures" / "bambustudio-02.08.02.61-result.json"
+
 FAKE_SLICER = r'''#!{py}
 import json, os, sys, time
 MODE = {mode!r}
@@ -48,6 +50,9 @@ if MODE != "missing-gcode":
 if MODE != "missing-settings":
     with open(settings, "w") as f:
         f.write("not json" if MODE == "bad-settings" else json.dumps({{"printer_model": "fake", "argv": a}}))
+if MODE == "result-fixture":
+    import shutil
+    shutil.copyfile({fixture!r}, os.path.join(out, "result.json"))
 if MODE in ("result-json", "result-bad"):
     with open(os.path.join(out, "result.json"), "w") as f:
         json.dump({{"return_code": 0 if MODE == "result-json" else 1, "error_string": ""}}, f)
@@ -79,7 +84,7 @@ def make_bundle(root, mode="ok", version="02.08.02.61", pidfile=None):
     c = b / "Contents"
     (c / "MacOS").mkdir(parents=True, exist_ok=True)
     (c / "Info.plist").write_bytes(plistlib.dumps({"CFBundleShortVersionString": version, "CFBundleVersion": version}))
-    write_exe(c / "MacOS" / "BambuStudio", FAKE_SLICER.format(py=sys.executable, mode=mode,
+    write_exe(c / "MacOS" / "BambuStudio", FAKE_SLICER.format(py=sys.executable, mode=mode, fixture=str(REAL_RESULT),
                                                                     pidfile=str(pidfile or root / "pid")))
     prof = c / "Resources" / "profiles"
     (prof / "BBL" / "machine").mkdir(parents=True, exist_ok=True)
@@ -305,6 +310,15 @@ class ReviewFixTests(Base):
     def test_fix1_result_json_accepted_and_bound(self):
         m = self.run_produce("result-json")
         self.assertEqual(m["outputs"]["cliResult"]["sha256"], sha256_file(self.out / "result.json"))
+
+    def test_fix1_real_bambustudio_result_json_fixture_accepted(self):
+        # Unchanged result.json from an installed BambuStudio 02.08.02.61 sandboxed run.
+        raw = REAL_RESULT.read_bytes()
+        self.assertEqual(json.loads(raw)["return_code"], 0)
+        m = self.run_produce("result-fixture")
+        self.assertEqual((self.out / "result.json").read_bytes(), raw)
+        self.assertEqual(m["outputs"]["cliResult"], {"file": "result.json", "sha256": sha256_file(REAL_RESULT),
+                                                     "bytes": len(raw)})
 
     def test_fix1_result_json_nonzero_return_code_rejected(self):
         self.fails("outputs", "return_code 1", "result-bad")
