@@ -66,6 +66,10 @@ function sha256(bytes) {
   return createHash('sha256').update(bytes).digest('hex');
 }
 
+function quotedSha256(bytes) {
+  return `"${sha256(bytes)}"`;
+}
+
 function requireStatus(result, expected, label) {
   if (result.status !== expected) {
     throw new Error(
@@ -101,9 +105,10 @@ async function pairSyncImport() {
     body: projectText,
   });
   requireStatus(created, 201, 'portable-project sync');
+  const expectedEtag = quotedSha256(Buffer.from(projectText));
   const etag = created.headers.etag;
-  if (!etag || !/^"[a-f0-9]{64}"$/.test(etag)) {
-    throw new Error(`sync returned invalid ETag: ${etag}`);
+  if (etag !== expectedEtag) {
+    throw new Error(`sync ETag ${etag} !== quoted sha256 of submitted project bytes ${expectedEtag}`);
   }
   if (!deepEqual(JSON.parse(created.bytes.toString('utf8')), project)) {
     throw new Error('sync response JSON does not match the submitted snapshot');
@@ -157,14 +162,24 @@ async function reopenNegatives() {
   const base = args.base;
   const state = JSON.parse(await readFile(args.state, 'utf8'));
   const usdz = await readFile(args.usdz);
-  const { project, etag, captureId, originalSha, capturePhone, generationPhone } = state;
+  const { project, projectText, etag, captureId, originalSha, capturePhone, generationPhone } = state;
+  const expectedBytes = Buffer.from(projectText);
+  const expectedEtag = quotedSha256(expectedBytes);
 
   const reopened = await readWithBusyRetry(base, `/v1/saved-projects/${project.id}`, {
     auth: capturePhone,
   });
   requireStatus(reopened, 200, 'reopen project');
+  if (!reopened.bytes.equals(expectedBytes)) {
+    throw new Error('reopened project bytes do not match the submitted snapshot');
+  }
+  if (reopened.headers.etag !== expectedEtag) {
+    throw new Error(
+      `reopen ETag ${reopened.headers.etag} !== quoted sha256 of snapshot bytes ${expectedEtag}`
+    );
+  }
   if (reopened.headers.etag !== etag) {
-    throw new Error(`reopen ETag mismatch: ${reopened.headers.etag} !== ${etag}`);
+    throw new Error(`reopen ETag mismatch vs stored creation etag: ${reopened.headers.etag} !== ${etag}`);
   }
   if (!deepEqual(JSON.parse(reopened.bytes.toString('utf8')), project)) {
     throw new Error('reopened project JSON does not match the original snapshot');
