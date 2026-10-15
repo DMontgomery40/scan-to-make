@@ -1,12 +1,34 @@
 # Scan to Make
 
-An open-source consumer app for making useful things that fit the objects and spaces around you.
+An open-source consumer app for making useful things that fit the objects and spaces around you: scan objects and their surroundings, describe an addition, make something that fits, and print it. A hosted service can supply inference and compute; the same core remains self-hostable.
 
-This sister repository is separate from the Bambu printer MCP. The first agreed slice is a cup-holder adapter: captured reference and confirmed dimensions, editable preview, a scoped fit coupon, and independently checked export or companion printing. The shared mobile shell starts with a real React Native/native-capture spike; the result decides. Local repeatable workers precede hosted deployment.
+This repository is the product. Printer adapters stay behind the companion contract and are not inlined here. The cup-holder adapter is one validation example — captured reference and confirmed dimensions, editable preview, a scoped fit coupon, and independently checked export or companion printing — not the app identity. A drawer organizer is a second dimensional template.
 
-Team conversation uses real Slack: [build room](https://app.slack.com/client/T0C92NRJM5G/C0C8WNMEKAP), [decisions](https://app.slack.com/client/T0C92NRJM5G/C0C96L9JC76), and the append-only [scratchpad](https://app.slack.com/client/T0C92NRJM5G/C0C8MHYGZHD). Access requires membership in the team workspace.
+Native review/export acceptance and physical-fit acceptance remain **OPEN**. Preview geometry is not print authorization. Software licences and distribution rights will be recorded before shipping code that depends on them.
 
-The current repository is a project bootstrap, not an implemented application. Research and local archival mirrors remain under `docs/research/` and `shared/`; actual runtime/device evidence is recorded separately. The product remains open source; software licences and distribution rights will be recorded before shipping code that depends on them.
+## Current capabilities
+
+| Area | What exists now | Entrypoints |
+| --- | --- | --- |
+| Mobile shell | React Native app: project brief, local saved projects, cup-holder measurement study, drawer design preview, companion pairing, capture support check | [`apps/mobile/`](apps/mobile/), [`apps/mobile/README.md`](apps/mobile/README.md), [`apps/mobile/src/screens/`](apps/mobile/src/screens/) |
+| Fit contracts | Shared schemas for cup-holder and drawer-tray templates, portable saved projects, generation protocol, capture provenance | [`packages/contracts/`](packages/contracts/), [`packages/contracts/README.md`](packages/contracts/README.md) |
+| Cup-holder example | Template that turns a validated FitSpec into preview STL + manifest | [`tools/templates/cup-holder-adapter/`](tools/templates/cup-holder-adapter/), fixture [`packages/contracts/fixtures/tapered-holder.json`](packages/contracts/fixtures/tapered-holder.json) |
+| Drawer organizer | Template that turns a `DrawerFitSpec` into a tray STL + manifest; iOS generation preview | [`tools/templates/drawer-organizer/`](tools/templates/drawer-organizer/), [`apps/mobile/src/screens/DrawerScreen.tsx`](apps/mobile/src/screens/DrawerScreen.tsx), fixture [`packages/contracts/fixtures/drawer-tray.json`](packages/contracts/fixtures/drawer-tray.json) |
+| Characterization | Coupon that records achievable clearance for a printer, nozzle, material, and settings profile | [`tools/characterization/`](tools/characterization/) |
+| Capture conversion | Offline USDZ → OBJ with authored-unit provenance | [`tools/capture-mesh-convert/`](tools/capture-mesh-convert/) |
+| Capture evaluation | Bounds-only mesh evaluation against held-out dimensions | [`tools/capture-fit-eval/`](tools/capture-fit-eval/) |
+| Capture pipeline | Bounded convert → evaluate, plus exact duplicate of a qualified capture | [`tools/capture-pipeline/`](tools/capture-pipeline/) |
+| Object Capture eval | Isolated LiDAR Object Capture evaluation app (not the consumer UI) | [`apps/mobile/modules/object-capture/`](apps/mobile/modules/object-capture/), [`EVALUATION.md`](apps/mobile/modules/object-capture/EVALUATION.md) |
+| RoomPlan / depth | RoomPlan suitability notes for drawer interiors; bounded ARKit depth/mesh evidence collector | [`apps/mobile/modules/room-capture/`](apps/mobile/modules/room-capture/), [`apps/mobile/modules/depth-capture/`](apps/mobile/modules/depth-capture/) |
+| Consumer capture | Support check and manual sizes; developer AR probe is separate from consumer scan-to-mesh | [`apps/mobile/src/screens/CaptureScreen.tsx`](apps/mobile/src/screens/CaptureScreen.tsx), [`apps/mobile/modules/scan-capture/`](apps/mobile/modules/scan-capture/) |
+| Local workers | Filesystem project store; companion generation, capture import, pairing, and print-intent journal (no printer dispatch) | [`services/project/`](services/project/), [`services/companion/`](services/companion/) |
+| Private companion path | Read-only Tailscale preflight and setup notes | [`tools/tailscale/`](tools/tailscale/), [`docs/tailscale-setup.md`](docs/tailscale-setup.md) |
+
+## Still OPEN
+
+- **Native review/export.** Device capture → native UI review of a reconstructed mesh → exact export of accepted bytes is not accepted. Authenticated self-host smoke covers the HTTP path only (portable-project sync, USDZ import, restart, exact reopen/download). It does not exercise native review or export.
+- **Physical-fit acceptance.** Generated preview STLs, bounds-only mesh checks, and coupon geometry are not printed-and-measured fit. Cup-holder and drawer examples emit preview/check artifacts (`preview-geometry-not-print-authorized` / `preview-only`). Physical insertion, caliper comparison, and printer dispatch remain separate.
+- **Native capture qualification.** Object Capture, RoomPlan, and ARKit depth/mesh paths exist as isolated evaluation or evidence modules. They do not substitute for a qualified consumer capture flow or physical accuracy. RoomPlan parametric output is not the measurement authority for a fitted drawer interior.
 
 ## Self-host
 
