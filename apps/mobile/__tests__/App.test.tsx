@@ -656,3 +656,41 @@ test('brief edits after drawer attachment save at the current revision and prese
   expect(after.revision).toBe(before.revision + 1);
   expect(texts(tree)).toContain('Saved on this device');
 });
+
+test('companion overlay preserves an unsaved drawer edit across disconnect', async () => {
+  const { NativeModules } = require('react-native');
+  NativeModules.CompanionPairing = {
+    status: async () => ({
+      state: 'paired',
+      baseUrl: 'https://host.example.ts.net',
+      expiresAt: 2000000000000,
+    }),
+    disconnect: jest.fn(async () => ({ state: 'disconnected' })),
+    cancel: async () => {},
+  };
+  const store = testStore();
+  let tree!: ReactTestRenderer.ReactTestRenderer;
+  await act(async () => {
+    tree = ReactTestRenderer.create(<App repository={store} />);
+  });
+  await press(tree, 'Explore drawer organizer');
+  await act(async () =>
+    tree.root
+      .findByProps({ accessibilityLabel: 'Drawer width, millimetres' })
+      .props.onChangeText('321'),
+  );
+  await press(tree, 'Companion connection');
+  await press(tree, 'Disconnect this device');
+  await press(tree, 'Done');
+  expect(
+    tree.root.findByProps({ accessibilityLabel: 'Drawer width, millimetres' })
+      .props.value,
+  ).toBe('321');
+  await press(tree, 'Save drawer sizes');
+  const project = await onlyProject(store);
+  expect(JSON.stringify(project.fit)).toContain('321');
+  expect(JSON.stringify(project)).not.toContain('host.example.ts.net');
+  expect(NativeModules.CompanionPairing.disconnect).toHaveBeenCalledTimes(1);
+  await act(async () => tree.unmount());
+  delete NativeModules.CompanionPairing;
+});

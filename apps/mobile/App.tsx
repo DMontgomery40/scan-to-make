@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Alert, BackHandler, StatusBar, Text } from 'react-native';
+import { Alert, BackHandler, StatusBar, Text, Modal } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import {
   applyFitSpecPatch,
@@ -15,6 +15,7 @@ import type {
 import { seedSpec } from './src/fit/fitDraft';
 import { StaleRevisionError } from './src/project/fitSpecStore';
 import { localSavedProjects, newProjectId } from './src/project/savedProjects';
+import { CompanionScreen } from './src/screens/CompanionScreen';
 import { DrawerScreen } from './src/screens/DrawerScreen';
 import { CaptureScreen } from './src/screens/CaptureScreen';
 import { HomeScreen } from './src/screens/HomeScreen';
@@ -63,6 +64,7 @@ const failure = (result: WriteProjectResult) =>
 
 function App({ repository: injected }: { repository?: SavedProjects }) {
   const [repository] = useState(() => injected ?? localSavedProjects());
+  const [companionOpen, setCompanionOpen] = useState(false);
   const [route, setRoute] = useState<Route>('home');
   const [hydrated, setHydrated] = useState(false);
   const [listing, setListing] = useState<ListProjectsResult | null>(null);
@@ -146,7 +148,9 @@ function App({ repository: injected }: { repository?: SavedProjects }) {
     setDrawer(project);
     // The brief and drawer routes can display the same saved project. Keep its
     // revision and fit current without replacing an unrelated or unsaved brief.
-    setBriefProject(current => current?.id === project.id ? project : current);
+    setBriefProject(current =>
+      current?.id === project.id ? project : current,
+    );
   };
   const openProject = async (id: string) => {
     setOpening(true);
@@ -282,6 +286,7 @@ function App({ repository: injected }: { repository?: SavedProjects }) {
       case 'drawer':
         screen = (
           <DrawerScreen
+            onCompanion={() => setCompanionOpen(true)}
             initial={drawer}
             repository={repository}
             onProject={updateDrawer}
@@ -320,6 +325,7 @@ function App({ repository: injected }: { repository?: SavedProjects }) {
       case 'about':
         screen = (
           <AboutScreen
+            onCompanion={() => setCompanionOpen(true)}
             onBack={() => setRoute('home')}
             onOpenSpike={() => setRoute('spike')}
           />
@@ -355,6 +361,7 @@ function App({ repository: injected }: { repository?: SavedProjects }) {
       default:
         screen = (
           <HomeScreen
+            onCompanion={() => setCompanionOpen(true)}
             onDrawer={() => {
               setDrawer(null);
               setRoute('drawer');
@@ -391,6 +398,14 @@ function App({ repository: injected }: { repository?: SavedProjects }) {
     <SafeAreaProvider>
       <StatusBar barStyle="dark-content" />
       {screen}
+      {companionOpen ? (
+        <Modal
+          presentationStyle="fullScreen"
+          onRequestClose={() => setCompanionOpen(false)}
+        >
+          <CompanionScreen onBack={() => setCompanionOpen(false)} />
+        </Modal>
+      ) : null}
     </SafeAreaProvider>
   );
 }

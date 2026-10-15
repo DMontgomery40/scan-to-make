@@ -3,9 +3,11 @@ import { StyleSheet, Text, View } from 'react-native';
 import { Button, Card, Screen } from '../ui/components';
 import { type } from '../ui/theme';
 export function AboutScreen({
+  onCompanion,
   onBack,
   onOpenSpike,
 }: {
+  onCompanion?: () => void;
   onBack: () => void;
   onOpenSpike: () => void;
 }) {
@@ -27,6 +29,13 @@ export function AboutScreen({
           lets you plan a project and explore a measured example.
         </Text>
       </Card>
+      {onCompanion ? (
+        <Button
+          label="Your companion"
+          variant="secondary"
+          onPress={onCompanion}
+        />
+      ) : null}
       <View style={styles.tools}>
         <Text style={type.label}>DEVELOPER TOOLS</Text>
         <Text style={type.caption}>

@@ -5,6 +5,7 @@ import { colors, type } from '../ui/theme';
 import type { ProjectBrief } from '../project/projectBrief';
 
 export function HomeScreen({
+  onCompanion,
   onStartScan,
   onNewProject,
   onOpenBrief,
@@ -13,6 +14,7 @@ export function HomeScreen({
   onProjects,
   onDrawer,
 }: {
+  onCompanion?: () => void;
   onStartScan: () => void;
   onNewProject: () => void;
   onOpenBrief: () => void;
@@ -86,6 +88,13 @@ export function HomeScreen({
         variant="secondary"
         onPress={onDrawer}
       />
+      {onCompanion ? (
+        <Button
+          label="Connect your companion"
+          variant="secondary"
+          onPress={onCompanion}
+        />
+      ) : null}
       <View style={styles.workflow}>
         <Text style={type.label}>FROM REAL LIFE TO SOMETHING USEFUL</Text>
         <View style={styles.steps}>
