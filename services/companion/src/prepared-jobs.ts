@@ -2,6 +2,9 @@ import {createHash, randomUUID} from 'node:crypto';
 import {constants} from 'node:fs';
 import {chmod, link, mkdir, mkdtemp, open, opendir, rename, rm, unlink} from 'node:fs/promises';
 import {join} from 'node:path';
+import {tmpdir} from 'node:os';
+import {readVerifiedStl} from './stl-export.js';
+import {PreparedProductionSchema, PRODUCTION_LIMITS, productionHash, productionRef, verifyProductionBytes, type PreparedProducer, type PreparedProduction, type ProductionBytes} from './prepared-production.js';
 import {z} from 'zod';
 import {ArtifactRefSchema, type ArtifactRef} from '@scan-to-make/contracts';
 import {FileSavedProjectStorage} from '@scan-to-make/project';
@@ -13,6 +16,11 @@ const integer = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
 const projectId = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/);
 const etag = z.string().regex(/^"[a-f0-9]{64}"$/);
 
+const {slicerSettingsSha256: _settingsDigest, ...producedSelectionFields} = PrintSelectionSchema.shape;
+const producedSelectionSchema = z.strictObject(producedSelectionFields).refine(selection =>
+  new Set(selection.materials.map(material => material.projectSlot)).size === selection.materials.length,
+  {message: 'Project filament positions must be unique'});
+
 const preparedJobBody = z.strictObject({
   formatVersion: z.literal('0.1.0'),
   id: z.uuid(),
@@ -22,6 +30,7 @@ const preparedJobBody = z.strictObject({
   printableArtifact: ArtifactRefSchema,
   selection: PrintSelectionSchema,
   inspection: PreparedInspectionSchema.optional(),
+  production: PreparedProductionSchema.optional(),
 });
 function hashPreparedJob(body: z.infer<typeof preparedJobBody>): string {
   return createHash('sha256').update(JSON.stringify(body)).digest('hex');
@@ -109,10 +118,12 @@ async function readBounded(path: string, maxBytes: number): Promise<Buffer> {
 export class PreparedJobStore {
   private readonly bound: ReturnType<typeof limits>;
   private readonly clock: () => number;
+  private readonly production?: PreparedProducer;
   private readonly inspect?: ReturnType<typeof createPreparedFileInspector>;
   constructor(private readonly projects: FileSavedProjectStorage, private readonly directory: string,
-    options: PreparedJobLimits & {clock?: () => number; inspection?: PreparedInspectionConfiguration} = {}) {
-    const {clock, inspection, ...byteLimits} = options;
+    options: PreparedJobLimits & {clock?: () => number; inspection?: PreparedInspectionConfiguration; production?: PreparedProducer} = {}) {
+    const {clock, inspection, production, ...byteLimits} = options;
+    if(production){digest.parse(production.identity);this.production={identity:production.identity,produce:production.produce.bind(production)};}
     this.inspect = inspection ? createPreparedFileInspector(inspection) : undefined;
     this.bound = limits(byteLimits);
     this.clock = clock ?? Date.now;
@@ -121,9 +132,52 @@ export class PreparedJobStore {
   get inspectionEnabled(): boolean { return this.inspect !== undefined; }
   get maxPrintableBytes(): number { return this.bound.maxPrintableBytes; }
 
+  /** Host-only production. Long slicing happens outside the project edit lock. */
+  async prepareProduced(input:{projectId:string;projectRevision:number;expectedProjectETag:string;jobId:string;source:Uint8Array;selection:unknown},
+    signal?:AbortSignal,authorizeCommit?:()=>Promise<void>){
+    const active=()=>{if(signal?.aborted)throw new PreparedJobFailure('cancelled');};active();
+    if(!this.production||!this.inspect)throw new Error('Trusted production and inspection must be configured');
+    const producer=this.production;
+    const request=z.strictObject({projectId,projectRevision:integer,expectedProjectETag:etag,jobId:z.uuid().transform(value => value.toLowerCase()),
+      selection:producedSelectionSchema}).parse({projectId:input.projectId,projectRevision:input.projectRevision,
+      expectedProjectETag:input.expectedProjectETag,jobId:input.jobId,selection:input.selection});
+    if(!(input.source instanceof Uint8Array)||!input.source.length||input.source.length>PRODUCTION_LIMITS.sourceBytes)throw new Error('Produced source byte limit exceeded');
+    const source=Buffer.from(input.source),sourceArtifact=productionRef(source,'model/stl');
+    const requestSha256=productionHash(JSON.stringify({...request,sourceArtifact,producerIdentity:producer.identity}));
+    await this.projects.withCurrentProject(request.projectId,request.projectRevision,async project=>{
+      if(!project.acceptedArtifact||!sameRef(project.acceptedArtifact.artifact,sourceArtifact))throw new Error('Produced source does not match accepted artifact');
+    },request.expectedProjectETag);active();
+    let existing:PreparedJob|undefined;
+    try{existing=await this.readJob(request.jobId.toLowerCase());}catch(error){if(!(error instanceof PreparedJobFailure)||error.code!=='not-found')throw error;}
+    if(existing){
+      if(existing.production?.requestSha256!==requestSha256)throw new PreparedJobFailure('job-conflict');
+      const loaded=await this.loadPreparedJob(existing.id,request.expectedProjectETag);await authorizeCommit?.();active();
+      return {jobId:existing.id,job:loaded.job,created:false};
+    }
+    const temp=await mkdtemp(join(tmpdir(),'prepared-source-'));
+    try{
+      const path=join(temp,'source.stl');await writeSynced(path,source);await chmod(path,0o400);await readVerifiedStl(path,sourceArtifact);active();
+      const result=await producer.produce(Buffer.from(source),signal);active();
+      for(const [bytes,max] of [[result.printable,this.bound.maxPrintableBytes],[result.settings,PRODUCTION_LIMITS.settingsBytes],[result.manifest,PRODUCTION_LIMITS.manifestBytes]] as const){
+        if(!Buffer.isBuffer(bytes)||!bytes.length||bytes.length>max)throw new Error('Produced output byte limit exceeded');
+      }
+      const produced={printable:Buffer.from(result.printable),settings:Buffer.from(result.settings),manifest:Buffer.from(result.manifest)};
+      const production=PreparedProductionSchema.parse({...verifyProductionBytes(source,produced,this.bound.maxPrintableBytes),requestSha256,producerIdentity:producer.identity});
+      return await this.prepareInternal({...request,printable:produced.printable,printableArtifact:productionRef(produced.printable,'text/x.gcode'),
+        selection:{...request.selection,slicerSettingsSha256:production.settingsArtifact.sha256}},signal,authorizeCommit,{metadata:production,source,...produced});
+    }finally{await rm(temp,{recursive:true,force:true});}
+  }
+
   async prepare(input: {projectId: string; projectRevision: number; printable: Uint8Array;
       printableArtifact: unknown; selection: unknown; expectedProjectETag?: string; jobId?: string},
       signal?: AbortSignal, authorizeCommit?: () => Promise<void>):
+      Promise<{jobId: string; job: PreparedJob; created: boolean}> {
+    return this.prepareInternal(input,signal,authorizeCommit);
+  }
+
+  private async prepareInternal(input: {projectId: string; projectRevision: number; printable: Uint8Array;
+      printableArtifact: unknown; selection: unknown; expectedProjectETag?: string; jobId?: string},
+      signal?: AbortSignal, authorizeCommit?: () => Promise<void>, produced?: ProductionBytes & {source:Buffer;metadata:PreparedProduction}):
       Promise<{jobId: string; job: PreparedJob; created: boolean}> {
     const assertActive = () => { if (signal?.aborted) throw new PreparedJobFailure('cancelled'); };
     assertActive();
@@ -152,7 +206,7 @@ export class PreparedJobStore {
         try { existing = await this.readJob(jobId); }
         catch (error) { if (!(error instanceof PreparedJobFailure) || error.code !== 'not-found') throw error; }
         if (existing) {
-          if (existing.projectId !== request.projectId || existing.projectRevision !== request.projectRevision ||
+          if (JSON.stringify(existing.production)!==JSON.stringify(produced?.metadata)||existing.projectId !== request.projectId || existing.projectRevision !== request.projectRevision ||
               !sameRef(existing.designArtifact, project.acceptedArtifact.artifact) ||
               !sameRef(existing.printableArtifact, request.printableArtifact) ||
               JSON.stringify(existing.selection) !== JSON.stringify(request.selection)) throw new PreparedJobFailure('job-conflict');
@@ -178,9 +232,15 @@ export class PreparedJobStore {
         const body = preparedJobBody.parse({
           formatVersion: '0.1.0', id: jobId, projectId: request.projectId, projectRevision: project.revision,
           designArtifact: project.acceptedArtifact.artifact, printableArtifact: request.printableArtifact,
-          selection: request.selection, ...(inspection ? {inspection} : {}),
+          selection: request.selection, ...(inspection ? {inspection} : {}), ...(produced?{production:produced.metadata}:{}),
         });
         const job = PreparedJobSchema.parse({...body, sha256: hashPreparedJob(body)});
+        if(produced){
+          if(!sameRef(produced.metadata.sourceArtifact,project.acceptedArtifact.artifact))throw new Error('Produced accepted source changed');
+          for(const [name,bytes] of [['source.stl',produced.source],['settings.json',produced.settings],['production.json',produced.manifest]] as const){
+            await writeSynced(join(staging,name),bytes);await chmod(join(staging,name),0o400);
+          }
+        }
         const jobBytes = Buffer.from(JSON.stringify(job) + '\n');
         if (jobBytes.length > this.bound.maxMetadataBytes) throw new Error('Prepared job metadata byte limit exceeded');
         await writeSynced(join(staging, 'job.json'), jobBytes);
@@ -266,7 +326,7 @@ export class PreparedJobStore {
         }
         budget -= bytes.length;
         if (job.projectId !== request.projectId || job.projectRevision !== request.projectRevision ||
-            !sameRef(job.designArtifact, project.acceptedArtifact.artifact) || !job.inspection) continue;
+            !sameRef(job.designArtifact, project.acceptedArtifact.artifact) || !job.inspection || job.production) continue;
         const summary = {jobId: job.id, jobSha256: job.sha256, printableArtifact: job.printableArtifact,
           model: job.selection.model, plateIndex: job.selection.plateIndex};
         if (Buffer.byteLength(JSON.stringify(summary)) > DISCOVERY.summaryBytes) {unreadable++; continue;}
@@ -357,6 +417,17 @@ export class PreparedJobStore {
     if (!sameRef(refOf(bytes, job.printableArtifact.mediaType), job.printableArtifact)) {
       throw new Error('Printable artifact digest or byte length mismatch');
     }
+    if(job.production){
+      const folder=join(this.directory,job.id);
+      const source=await readBounded(join(folder,'source.stl'),PRODUCTION_LIMITS.sourceBytes);
+      const settings=await readBounded(join(folder,'settings.json'),PRODUCTION_LIMITS.settingsBytes);
+      const manifest=await readBounded(join(folder,'production.json'),PRODUCTION_LIMITS.manifestBytes);
+      const checked=verifyProductionBytes(source,{printable:bytes,settings,manifest},this.bound.maxPrintableBytes);
+      if(!sameRef(checked.sourceArtifact,job.designArtifact)||job.selection.slicerSettingsSha256!==checked.settingsArtifact.sha256||
+        !sameRef(checked.sourceArtifact,job.production.sourceArtifact)||!sameRef(checked.settingsArtifact,job.production.settingsArtifact)||
+        !sameRef(checked.manifestArtifact,job.production.manifestArtifact)||checked.slicer.version!==job.production.slicer.version||checked.slicer.binarySha256!==job.production.slicer.binarySha256)
+        throw new Error('Retained production evidence identity mismatch');
+    }
     return bytes;
   }
   private async readIntent(job: PreparedJob): Promise<PreparedJobIntent | null> {
@@ -374,3 +445,6 @@ export class PreparedJobStore {
     return intent;
   }
 }
+
+export {createPreparedProducer} from './prepared-production.js';
+export type {PreparedProducerConfiguration, PreparedProducer, PreparedProduction} from './prepared-production.js';
