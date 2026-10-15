@@ -57,6 +57,32 @@ This builds the converter's `make_fixtures` packages and runs eight cases:
 
 It prints one line per case and writes each report to `OUT_DIR`. It exits 0 only if every case matches.
 
+## Bounded duplicate
+
+`duplicate.py` makes an exact copy of a qualified capture for printing, or rejects it. It runs `pipeline.py` first and then gates the converted mesh:
+
+1. **Pipeline gate.** Only `pass-bounds-only` is eligible. Every other pipeline verdict is passed through with its exit code, and nothing is written.
+2. **Strict reader.** The converter OBJ may contain only `v x y z`, triangular `f a b c`, `o` and comments. N-gons, texture or normal indices, other directives, non-finite coordinates and out-of-range indices give `rejected-topology` (exit 7). Faces are never re-triangulated or dropped.
+3. **Closed solid, checked here.** The mesh must have zero boundary edges, zero non-manifold edges, consistent orientation, zero degenerate triangles and positive signed volume. An open or broken surface gives `rejected-topology` with the counts as evidence. **No surface is invented to close it**: no capping, hole filling or repair.
+4. **Bounds.** `--max-vertices` (default 1,000,000), `--max-triangles` (2,000,000) and `--build-volume XxYxZ` in mm (default 256x256x256). Native extents are converted to mm only for the comparison, with the exact map mm=1, cm=10, in=25.4, m=1000. A violation gives `rejected-bounds` (exit 6). The mesh is never scaled, rotated or moved to fit.
+5. **Exact copy.** `duplicate.obj` is the converter OBJ copied byte for byte. It is re-read and checked against the converter's SHA-256 before the verdict is `duplicate-ready` (exit 0). Units stay as authored and are recorded in the manifest (`units`, `metersPerUnit`, `mmPerUnit`); `scaleApplied`, `geometryModified` and `surfacesInvented` are always `false`. A stale `duplicate.obj` in the output directory is removed at the start of every run, so a rejection never leaves an old copy behind.
+
+The manifest is deterministic JSON in the same style as the pipeline report, with paths normalized to `<out>`, `<work>`, `<repo>` or `<input-dir>`. It embeds the full pipeline report. `provesCompleteCapture` and `provesPhysicalFit` stay `false`: a ready duplicate is a closed, bounded, exact copy of what was captured, not proof that the capture is complete or that the print will fit.
+
+```sh
+/workspace/usdz-venv/bin/python tools/capture-pipeline/duplicate.py capture.usdz \
+  --held-out x=80 --held-out y=55 --held-out z=95 \
+  --work-dir /tmp/capture-work --out-dir /tmp/capture-duplicate --report capture-duplicate.json
+```
+
+Exit codes: 0 duplicate-ready, 2 evaluation-failed, 3 rejected-input, 4 rejected-conversion, 5 rejected-units, 6 rejected-bounds, 7 rejected-topology.
+
+One-command synthetic repro (six cases: ready, wrong held-out, holes, no units, over build volume, over triangle limit):
+
+```sh
+/workspace/usdz-venv/bin/python tools/capture-pipeline/duplicate_repro.py [OUT_DIR]
+```
+
 ## Tests (local-only; no CI)
 
 ```sh
