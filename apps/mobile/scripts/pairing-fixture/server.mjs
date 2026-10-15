@@ -2,6 +2,7 @@
 // Run after npm ci/build in services/companion. Invitations are written to a
 // private temporary directory, never stdout. Only fixed synthetic identities.
 import { createServer, request } from 'node:http';
+import { randomBytes } from 'node:crypto';
 import { mkdtemp, writeFile, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -12,6 +13,10 @@ const auth = await RemoteAuthStore.create(join(root, 'auth'), {
   host: 'fixture.example.ts.net',
   allowedLogins: ['fixture@example.test'],
 });
+const nativeFaults = process.env.SCAN_NATIVE_FAULTS === '1';
+const faultKey = nativeFaults ? randomBytes(32).toString('hex') : null;
+if (faultKey)
+  await writeFile(join(root, 'fault-key'), faultKey, { mode: 0o600 });
 const captureEnabled = process.env.SCAN_CAPTURE_FIXTURE === '1';
 let capture;
 if (captureEnabled) {
@@ -75,6 +80,28 @@ process.on('SIGUSR2', () =>
     .catch(() => {}),
 );
 const proxy = createServer(async (req, res) => {
+  if (nativeFaults && req.url?.startsWith('/__fixture/mode/')) {
+    const selected = req.url.slice('/__fixture/mode/'.length);
+    const allowed = [
+      'ok',
+      'wrong-hash',
+      'wrong-type',
+      'wrong-bytes',
+      'oversized',
+      'delayed',
+    ];
+    if (
+      req.method !== 'POST' ||
+      req.headers['x-fixture-key'] !== faultKey ||
+      !allowed.includes(selected)
+    ) {
+      res.writeHead(403).end();
+      return;
+    }
+    await writeFile(join(root, 'mode'), selected, { mode: 0o600 });
+    res.writeHead(204).end();
+    return;
+  }
   const mode = (await readFile(join(root, 'mode'), 'utf8')).trim();
   if (mode === 'offline') {
     req.socket.destroy();
@@ -103,8 +130,40 @@ const proxy = createServer(async (req, res) => {
       },
     },
     response => {
-      res.writeHead(response.statusCode, response.headers);
-      response.pipe(res);
+      // Fault injection only after the real authenticated artifact route succeeds.
+      const fault =
+        nativeFaults &&
+        response.statusCode === 200 &&
+        req.url?.includes('/artifacts/') &&
+        mode !== 'ok';
+      if (!fault) {
+        res.writeHead(response.statusCode, response.headers);
+        response.pipe(res);
+        return;
+      }
+      const chunks = [];
+      response.on('data', chunk => chunks.push(chunk));
+      response.on('end', () => {
+        let bytes = Buffer.concat(chunks);
+        const headers = { ...response.headers };
+        if (mode === 'wrong-hash') headers['x-content-sha256'] = '0'.repeat(64);
+        if (mode === 'wrong-type') headers['content-type'] = 'text/plain';
+        if (mode === 'wrong-bytes') {
+          bytes = Buffer.from(bytes);
+          bytes[0] ^= 1;
+        }
+        if (mode === 'oversized') {
+          delete headers['content-length'];
+          bytes = Buffer.concat([bytes, Buffer.from('x')]);
+        }
+        res.writeHead(200, headers);
+        if (mode === 'delayed') {
+          res.write(bytes.subarray(0, 1));
+          const timer = setTimeout(() => res.end(bytes.subarray(1)), 2000);
+          res.on('close', () => clearTimeout(timer));
+        } else res.end(bytes);
+      });
+      response.on('error', () => res.destroy());
     },
   );
   upstream.on('error', () => {
