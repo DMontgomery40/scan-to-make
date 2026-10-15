@@ -15,11 +15,12 @@
   },
   "dependencies": {
     "@scan-to-make/contracts": "file:../../packages/contracts",
+    "@scan-to-make/local-project-storage": "file:./modules/local-project-storage",
     "@scan-to-make/scan-capture": "file:./modules/scan-capture",
     "react": "19.2.3",
     "react-native": "0.87.1",
     "react-native-safe-area-context": "^5.5.2",
-    "@scan-to-make/local-project-storage": "file:./modules/local-project-storage"
+    "zod": "4.6.7"
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",
