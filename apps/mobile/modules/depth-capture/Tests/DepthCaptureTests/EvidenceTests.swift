@@ -138,3 +138,13 @@ extension EvidenceTests {
         XCTAssertEqual(capture.frames.count, 0)
     }
 }
+
+extension EvidenceTests {
+    func testSlicedConfidenceDataUsesRelativeOffsets() throws {
+        let confidence = Data([99, 2]).dropFirst()
+        XCTAssertEqual(confidence.startIndex, 1)
+        let plane = try DepthPlane(bytes: floats([1]), width: 1, height: 1, rowBytes: 4,
+                                   confidence: confidence, confidenceRowBytes: 1)
+        XCTAssertEqual(plane.confidence, Data([2]))
+    }
+}

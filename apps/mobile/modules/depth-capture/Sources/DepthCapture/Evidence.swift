@@ -53,7 +53,7 @@ public struct DepthPlane {
         if let confidence {
             guard let stride = confidenceRowBytes else { throw CaptureError.invalid("confidence stride") }
             try require(stride >= width && confidence.count == product(stride, height), "confidence length")
-            for y in 0..<height { for x in 0..<width { try require(confidence[y * stride + x] <= 2, "confidence value") } }
+            for y in 0..<height { for x in 0..<width { try require(confidence[confidence.startIndex + y * stride + x] <= 2, "confidence value") } }
         } else { try require(confidenceRowBytes == nil, "confidence absent") }
         self.bytes = bytes.withUnsafeBytes { Data($0) }; self.width = width; self.height = height; self.rowBytes = rowBytes
         self.confidence = confidence.map { value in value.withUnsafeBytes { Data($0) } }; self.confidenceRowBytes = confidenceRowBytes
