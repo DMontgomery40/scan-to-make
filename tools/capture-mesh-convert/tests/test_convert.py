@@ -234,6 +234,34 @@ class ConvertTests(unittest.TestCase):
                 self.assertTrue(inside(pt), (tri, pt))
         self.assertAlmostEqual(total, 3.0, places=9)
 
+    def test_two_layer_package_converts_and_hashes_both(self):
+        r, out = self.run_fx("two_layer")
+        with zipfile.ZipFile(self.fx["two_layer"]) as z:
+            names = [i.filename for i in z.infolist()]
+            blobs = {n: z.read(n) for n in names}
+        self.assertEqual(sorted(names), ["mesh.usdc", "root.usdc"])
+        self.assertTrue(all(b[:8] == b"PXR-USDC" for b in blobs.values()))
+        self.assertEqual(r["contributingLayers"],
+                         [{"identifier": n, "sha256": hashlib.sha256(blobs[n]).hexdigest(), "bytes": len(blobs[n])}
+                          for n in sorted(names)])
+        self.assertTrue(r["metricQualified"])
+        self.assertBounds(bounds(decode_obj(out)[0]), [5, 0, 0], [6, 2, 3])
+
+    def assertInvalidFace(self, name, reason):
+        r, out = self.run_fx(name)
+        self.assertFalse(r["metricQualified"])
+        feats = [u for u in r["unsupportedFeatures"] if u["feature"] == "untriangulatablePolygon"]
+        self.assertEqual(len(feats), 1)
+        self.assertIn(reason, feats[0]["detail"])
+        self.assertEqual(decode_obj(out)[1], [])
+        self.assertEqual(r["meshes"][0]["rejectedFaces"], 1)
+
+    def test_nonplanar_quad_rejected(self):
+        self.assertInvalidFace("nonplanar_quad", "nonplanar")
+
+    def test_collinear_triangle_rejected(self):
+        self.assertInvalidFace("collinear_tri", "degenerate")
+
     def test_cli_exit_codes(self):
         cli = [sys.executable, str(HERE / "convert.py")]
         ok = subprocess.run(cli + [str(self.fx["reflected"]), "--out", str(self.dir / "c.obj"),

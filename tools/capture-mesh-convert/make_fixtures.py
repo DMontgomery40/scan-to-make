@@ -163,6 +163,44 @@ def _package_raw(build, out_usdz):
     return Path(out_usdz)
 
 
+def _single_face(path, pts):
+    def build(stage):
+        _units(stage)
+        m = UsdGeom.Mesh.Define(stage, path)
+        m.CreatePointsAttr([Gf.Vec3f(*p) for p in pts])
+        m.CreateFaceVertexCountsAttr([len(pts)])
+        m.CreateFaceVertexIndicesAttr(list(range(len(pts))))
+        m.CreateSubdivisionSchemeAttr(UsdGeom.Tokens.none)
+    return build
+
+
+NONPLANAR_QUAD = [(0, 0, 0), (1, 0, 0), (1, 1, 1), (0, 1, 0)]
+COLLINEAR_TRI = [(0, 0, 0), (1, 0, 0), (2, 0, 0)]
+
+
+def make_two_layer(out_dir):
+    """root.usdc references ./mesh.usdc; both binary, both packaged (dependency bundling)."""
+    with tempfile.TemporaryDirectory() as d:
+        mesh = Path(d) / "mesh.usdc"
+        st = Usd.Stage.Open(Sdf.Layer.CreateNew(str(mesh), args={"format": "usdc"}))
+        _units(st)
+        add_box(st, "/Mesh")
+        st.SetDefaultPrim(st.GetPrimAtPath("/Mesh"))
+        st.GetRootLayer().Save()
+        root = Path(d) / "root.usdc"
+        st = Usd.Stage.Open(Sdf.Layer.CreateNew(str(root), args={"format": "usdc"}))
+        _units(st)
+        p = st.DefinePrim("/Root")  # typeless: composed type (Mesh) comes from mesh.usdc
+        p.GetReferences().AddReference("./mesh.usdc")
+        UsdGeom.Xformable(p).AddTranslateOp().Set(Gf.Vec3d(5, 0, 0))
+        st.SetDefaultPrim(p)
+        st.GetRootLayer().Save()
+        out = Path(out_dir) / "two_layer.usdz"
+        if not UsdUtils.CreateNewUsdzPackage(Sdf.AssetPath(str(root)), str(out)):
+            raise RuntimeError("two_layer packaging failed")
+    return out
+
+
 def make_external(out_dir):
     """external_ref.usdz references an absolute .usdc outside the package; missing_ref references
     a path that does not exist."""
@@ -186,7 +224,8 @@ def make_external(out_dir):
                                         Path(out_dir) / "missing_ref.usdz")}
 
 
-FIXTURES = {"nan_point": build_nan_point, "bad_index": build_bad_index, "zero_mpu": build_zero_mpu,
+FIXTURES = {"nonplanar_quad": _single_face("/Q", NONPLANAR_QUAD),
+            "collinear_tri": _single_face("/T", COLLINEAR_TRI), "nan_point": build_nan_point, "bad_index": build_bad_index, "zero_mpu": build_zero_mpu,
             "concave": build_concave,
 "unauthored_subdiv": build_unauthored_subdiv, "holes": build_holes,
             "purpose": build_purpose, "animated_topology": build_animated_topology,
@@ -199,6 +238,7 @@ def make_all(out_dir):
     out_dir.mkdir(parents=True, exist_ok=True)
     out = {n: _package(b, out_dir / f"{n}.usdz") for n, b in FIXTURES.items()}
     out.update(make_external(out_dir))
+    out["two_layer"] = make_two_layer(out_dir)
     return out
 
 

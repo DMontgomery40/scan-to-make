@@ -13,7 +13,7 @@ import zipfile
 import sys
 from pathlib import Path
 
-Gf = Sdf = Usd = UsdGeom = UsdUtils = None  # pxr is imported lazily so a missing install exits 2
+Ar = Gf = Sdf = Usd = UsdGeom = UsdUtils = None  # pxr is imported lazily so a missing install exits 2
 
 TOOL_VERSION = "0.3.0"
 SUBDIVISION_POLICY = ("explicit-none-only: per OpenUSD an unauthored subdivisionScheme means catmullClark "
@@ -23,13 +23,13 @@ SKIPPED_PURPOSES = ("guide", "proxy", "render")
 
 
 def _load_pxr():
-    global Gf, Sdf, Usd, UsdGeom, UsdUtils
+    global Ar, Gf, Sdf, Usd, UsdGeom, UsdUtils
     if Usd is None:
         try:
-            from pxr import Gf as _g, Sdf as _s, Usd as _u, UsdGeom as _ug, UsdUtils as _uu
+            from pxr import Ar as _a, Gf as _g, Sdf as _s, Usd as _u, UsdGeom as _ug, UsdUtils as _uu
         except ImportError as e:
             raise RuntimeError(f"USD runtime unavailable (pip install usd-core): {e}") from e
-        Gf, Sdf, Usd, UsdGeom, UsdUtils = _g, _s, _u, _ug, _uu
+        Ar, Gf, Sdf, Usd, UsdGeom, UsdUtils = _a, _g, _s, _u, _ug, _uu
 
 
 def _finite(*vals):
@@ -39,7 +39,8 @@ def _finite(*vals):
 def _layer_bytes(src, ident):
     """Return (relative name, bytes) for a layer/asset identifier inside src, or raise."""
     src_abs = str(src.resolve())
-    outer, inner = Sdf.Layer.SplitPackageRelativePathOuter(ident) if "[" in ident else (ident, "")
+    # Ar (not Sdf.Layer) owns the package-relative path API in pxr 26.x: "/a/x.usdz[mesh.usdc]".
+    outer, inner = Ar.SplitPackageRelativePathOuter(ident) if Ar.IsPackageRelativePath(ident) else (ident, "")
     if inner:
         if str(Path(outer).resolve()) != src_abs:
             raise RuntimeError(f"asset boundary: dependency outside package: {ident}")
@@ -81,16 +82,39 @@ def _newell(pts):
     return nx, ny, nz
 
 
-def triangulate(pts):
-    """Ear-clip a planar polygon (list of xyz) on its face plane.
-    Returns triangles as index triples into pts, preserving winding, or None if not triangulable."""
-    n = len(pts)
-    if n == 3:
-        return [(0, 1, 2)]
+PLANAR_TOL = 1e-6      # max out-of-plane distance, relative to the face's largest extent
+DEGENERATE_TOL = 1e-9  # min |Newell normal| (2x area), relative to extent^2
+
+
+def face_validity(pts):
+    """Return None if the face is a valid planar, non-degenerate polygon, else a reason string.
+    Applies to every face size, including triangles."""
+    if len(pts) < 3:
+        return "fewer than 3 vertices"
+    ext = max(max(p[k] for p in pts) - min(p[k] for p in pts) for k in range(3))
+    if not (ext > 0 and math.isfinite(ext)):
+        return "zero extent"
     nrm = _newell(pts)
     mag = math.sqrt(sum(c * c for c in nrm))
-    if mag == 0 or not math.isfinite(mag):
+    if mag <= DEGENERATE_TOL * ext * ext:
+        return "degenerate (zero area / collinear)"
+    nh = [c / mag for c in nrm]
+    cen = [sum(p[k] for p in pts) / len(pts) for k in range(3)]
+    dev = max(abs(sum((p[k] - cen[k]) * nh[k] for k in range(3))) for p in pts)
+    if dev > PLANAR_TOL * ext:
+        return f"nonplanar (max out-of-plane {dev:.3g})"
+    return None
+
+
+def triangulate(pts):
+    """Ear-clip a planar polygon (list of xyz) on its face plane.
+    Returns triangles as index triples into pts, preserving winding, or None if the face is
+    invalid (see face_validity) or cannot be ear-clipped (e.g. self-intersecting)."""
+    if face_validity(pts) is not None:
         return None
+    n = len(pts)
+    nrm = _newell(pts)
+    mag = math.sqrt(sum(c * c for c in nrm))
     ax = max(range(3), key=lambda i: abs(nrm[i]))
     u, v = [i for i in range(3) if i != ax]
     # (u, v) is right-handed about +axis for x and z; for y, (x, z) is left-handed.
@@ -251,6 +275,7 @@ def convert(src, out_obj):
             world.append((w[0], w[1], w[2]))
             lines.append(f"v {w[0]!r} {w[1]!r} {w[2]!r}")
         rejected = 0
+        reasons = []
         triangles = 0
         k = 0
         written = 0
@@ -262,9 +287,12 @@ def convert(src, out_obj):
             if c < 3:
                 warnings.append(f"{path}: degenerate face with {c} vertices skipped")
                 continue
-            tris = triangulate([world[i] for i in face])
+            fpts = [world[i] for i in face]
+            reason = face_validity(fpts)
+            tris = None if reason else triangulate(fpts)
             if tris is None:
                 rejected += 1
+                reasons.append(f"face {fi}: {reason or 'not ear-clippable (self-intersecting?)'}")
                 continue
             for tri in tris:
                 tri = [face[j] for j in tri]
@@ -275,7 +303,7 @@ def convert(src, out_obj):
             written += 1
         if rejected:
             unsupported.append({"feature": "untriangulatablePolygon", "prim": path,
-                                "detail": f"{rejected} degenerate or self-intersecting face(s) rejected (not emitted)"})
+                                "detail": f"{rejected} invalid face(s) not emitted: " + "; ".join(reasons[:10])})
         v_offset += len(points)
         meshes.append({"prim": path, "points": len(points), "faces": written, "triangles": triangles,
                        "rejectedFaces": rejected, "authoredFaces": len(counts),
