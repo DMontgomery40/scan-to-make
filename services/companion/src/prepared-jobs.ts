@@ -59,8 +59,10 @@ export class PreparedJobFailure extends Error {
   constructor(readonly code: 'not-found' | 'job-conflict' | 'cancelled' | 'invalid-cursor' | 'cursor-stale' | 'discovery-unavailable') {super(code);}
 }
 
-const discoveryCursor = z.strictObject({version: z.literal(1), projectId, projectRevision: integer,
-  etag, catalog: digest, after: z.uuid()});
+const discoveryCursorFields = {version: z.literal(1), projectId, projectRevision: integer,
+  etag, catalog: digest, after: z.uuid()} as const;
+const discoveryCursor = z.strictObject(discoveryCursorFields);
+const producedDiscoveryCursor = z.strictObject({...discoveryCursorFields, productionVersion: z.literal(1)});
 const DISCOVERY = {directoryEntries: 4096, records: 200, metadataBytes: 8 * 1024 * 1024,
   pageSize: 50, summaryBytes: 1024, responseBytes: 64 * 1024, timeoutMs: 5000};
 
@@ -263,9 +265,10 @@ export class PreparedJobStore {
    * Cursor pins the observed directory-name set; additions/removals require refresh.
    */
   async listPreparedJobs(input: {projectId: string; projectRevision: number; expectedProjectETag: string;
-      limit?: number; cursor?: string}, signal?: AbortSignal) {
+      limit?: number; cursor?: string; productionVersion?: 1}, signal?: AbortSignal) {
     const request = z.strictObject({projectId, projectRevision: integer, expectedProjectETag: etag,
-      limit: z.number().int().min(1).max(DISCOVERY.pageSize).default(20), cursor: z.string().max(1024).optional()}).parse(input);
+      limit: z.number().int().min(1).max(DISCOVERY.pageSize).default(20), cursor: z.string().max(1024).optional(),
+      productionVersion: z.literal(1).optional()}).parse(input);
     const deadline = AbortSignal.timeout(DISCOVERY.timeoutMs);
     const assertActive = () => {
       if (signal?.aborted) throw new PreparedJobFailure('cancelled');
@@ -277,7 +280,8 @@ export class PreparedJobStore {
         if (!/^[A-Za-z0-9_-]+$/.test(request.cursor)) throw new Error();
         const bytes = Buffer.from(request.cursor, 'base64url');
         if (bytes.toString('base64url') !== request.cursor) throw new Error();
-        cursor = discoveryCursor.parse(JSON.parse(new TextDecoder('utf-8', {fatal: true}).decode(bytes)));
+        cursor = (request.productionVersion === 1 ? producedDiscoveryCursor : discoveryCursor)
+          .parse(JSON.parse(new TextDecoder('utf-8', {fatal: true}).decode(bytes)));
         if (cursor.projectId !== request.projectId || cursor.projectRevision !== request.projectRevision ||
             cursor.etag !== request.expectedProjectETag || cursor.after !== cursor.after.toLowerCase()) throw new Error();
       } catch { throw new PreparedJobFailure('invalid-cursor'); }
@@ -326,7 +330,8 @@ export class PreparedJobStore {
         }
         budget -= bytes.length;
         if (job.projectId !== request.projectId || job.projectRevision !== request.projectRevision ||
-            !sameRef(job.designArtifact, project.acceptedArtifact.artifact) || !job.inspection || job.production) continue;
+            !sameRef(job.designArtifact, project.acceptedArtifact.artifact) || !job.inspection ||
+            (job.production && request.productionVersion !== 1)) continue;
         const summary = {jobId: job.id, jobSha256: job.sha256, printableArtifact: job.printableArtifact,
           model: job.selection.model, plateIndex: job.selection.plateIndex};
         if (Buffer.byteLength(JSON.stringify(summary)) > DISCOVERY.summaryBytes) {unreadable++; continue;}
@@ -335,7 +340,8 @@ export class PreparedJobStore {
       assertActive();
       const nextCursor = position < entries.length ? Buffer.from(JSON.stringify({version: 1,
         projectId: request.projectId, projectRevision: request.projectRevision, etag: request.expectedProjectETag,
-        catalog, after: entries[position - 1]!.id})).toString('base64url') : null;
+        catalog, after: entries[position - 1]!.id,
+        ...(request.productionVersion === 1 ? {productionVersion: 1} : {})})).toString('base64url') : null;
       const result = {jobs, nextCursor, unreadable, requiresVerifiedGet: true as const};
       if (Buffer.byteLength(JSON.stringify(result)) > DISCOVERY.responseBytes) throw new PreparedJobFailure('discovery-unavailable');
       return result;

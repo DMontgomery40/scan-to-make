@@ -128,7 +128,15 @@ jobs keep their caller-declared meaning. This is not proof of complete internal
 settings equivalence, calibration, physical fit, or observed printer/tray state.
 No `CalibrationScope` is created or modified.
 
-Produced jobs are temporarily excluded from existing discovery because older
-native clients reject the new optional record. Direct verified GET can return
-them to compatible consumers. Restoring discovery requires an explicit native
-parser and compatibility negotiation update; it is not an implicit rollout.
+Collection GET discovery stays imported-only unless the client opts in with
+exact query `productionVersion=1`. That opt-in returns inspected imported and
+produced summaries in catalog order, using the same compact handle shape
+(`jobId`, `jobSha256`, `printableArtifact`, `model`, `plateIndex`). Omitting
+the parameter keeps the existing imported-only list and response shape, so
+legacy clients never see produced jobs. Unknown or duplicate
+`productionVersion` values are rejected as `invalid-request`. Discovery
+cursors bind the selected mode; a cursor from one mode cannot be reused on
+the other (`invalid-cursor`). Existing project scope, ETag, revision, page
+limits, and discovery budgets are unchanged. Direct verified GET of a
+produced job by id already returns the sealed record to compatible consumers
+and is not part of this negotiation. `requiresVerifiedGet` remains true.
