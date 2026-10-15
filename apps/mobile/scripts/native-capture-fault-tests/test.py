@@ -21,6 +21,7 @@ HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[3]
 BUNDLE = 'com.scantomake.capturefaulttests'
 parser = argparse.ArgumentParser()
+parser.add_argument('--adoption-only', action='store_true')
 parser.add_argument('--simulator', required=True, help='Already booted Simulator UUID')
 parser.add_argument('--evidence', type=Path, required=True)
 args = parser.parse_args()
@@ -34,6 +35,31 @@ def run(command, **kwargs):
 simulators = json.loads(subprocess.check_output(['xcrun', 'simctl', 'list', 'devices', '-j'], env=env))
 assert any(d['udid'] == args.simulator and d['state'] == 'Booted'
            for group in simulators['devices'].values() for d in group), 'Target must already be booted'
+
+if args.adoption_only:
+    with tempfile.TemporaryDirectory(prefix='native-adoption-') as temp_name:
+        temp = Path(temp_name)
+        app = temp / 'CaptureFaults.app'; app.mkdir()
+        (app / 'config.json').write_text(json.dumps({'adoptionOnly': True}))
+        with (app / 'Info.plist').open('wb') as f:
+            plistlib.dump({'CFBundleIdentifier':BUNDLE,'CFBundleExecutable':'CaptureFaults','CFBundleName':'Capture Fault Tests','CFBundlePackageType':'APPL','CFBundleVersion':'1','CFBundleShortVersionString':'1.0','MinimumOSVersion':'18.0','UIApplicationSceneManifest':{'UIApplicationSupportsMultipleScenes':False,'UISceneConfigurations':{'UIWindowSceneSessionRoleApplication':[{'UISceneConfigurationName':'Default','UISceneDelegateClassName':'SceneDelegate'}]}},'UIDeviceFamily':[1,2],'LSRequiresIPhoneOS':True}, f)
+        sdk = subprocess.check_output(['xcrun','--sdk','iphonesimulator','--show-sdk-path'],env=env,text=True).strip()
+        with (args.evidence / 'compile.log').open('w') as log:
+            run(['xcrun','clang++','-fobjc-arc','-fblocks','-target','arm64-apple-ios18.0-simulator','-isysroot',sdk,'-I',str(HERE),str(HERE / 'runner.mm'),'-o',str(app / 'CaptureFaults'),'-framework','CoreGraphics','-framework','UIKit','-framework','Foundation','-framework','QuickLook','-framework','SceneKit','-framework','UniformTypeIdentifiers'],stdout=log,stderr=subprocess.STDOUT)
+        run(['codesign','--force','--sign','-',str(app)],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+        run(['xcrun','simctl','install',args.simulator,str(app)])
+        try:
+            with (args.evidence / 'runtime.log').open('w') as log:
+                run(['xcrun','simctl','launch','--console',args.simulator,BUNDLE],stdout=log,stderr=subprocess.STDOUT)
+            container = Path(subprocess.check_output(['xcrun','simctl','get_app_container',args.simulator,BUNDLE,'data'],env=env,text=True).strip())
+            result = json.loads((container / 'Documents/results.json').read_text())
+            assert result['passed'] and len(result['cases']) == 11
+            result['bridgeSha256'] = hashlib.sha256((REPO / 'apps/mobile/modules/local-project-storage/ios/RetainedCaptureBridge.mm').read_bytes()).hexdigest()
+            (args.evidence / 'results.json').write_text(json.dumps(result, indent=2)+'\n')
+        finally:
+            subprocess.run(['xcrun','simctl','terminate',args.simulator,BUNDLE],env=env,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+            subprocess.run(['xcrun','simctl','uninstall',args.simulator,BUNDLE],env=env,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+    raise SystemExit(0)
 
 with tempfile.TemporaryDirectory(prefix='native-capture-faults-') as temp:
     temp = Path(temp)
@@ -104,7 +130,7 @@ with tempfile.TemporaryDirectory(prefix='native-capture-faults-') as temp:
         result['simulator'] = args.simulator
         result['source'] = 'synthetic two_layer.usdz through authenticated companion conversion'
         (args.evidence / 'results.json').write_text(json.dumps(result, indent=2) + '\n')
-        print(json.dumps({'passed':True,'cases':5,'evidence':str(args.evidence.resolve()),'productBridgeChanged':False}))
+        print(json.dumps({'passed':True,'cases':5,'evidence':str(args.evidence.resolve()),'fixturePatchesBridge':False}))
     finally:
         if installed:
             subprocess.run(['xcrun','simctl','terminate',args.simulator,BUNDLE],env=env,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)

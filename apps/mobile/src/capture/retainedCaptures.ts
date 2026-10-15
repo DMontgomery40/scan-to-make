@@ -12,6 +12,12 @@ export type CaptureFile = {
   byteLength: number;
   mediaType: string;
 };
+export type CaptureDestination = {
+  projectId: string;
+  revision: number;
+  snapshot: string;
+  context: string | null;
+};
 export type RetainedCapture = { captureId: string; binding: CaptureBinding };
 export type CaptureState = {
   etag?: string;
@@ -41,6 +47,7 @@ export interface CaptureNative {
   write(key: string, body: string): Promise<void>;
   request(options: Request): Promise<Response>;
   pick(): Promise<CaptureFile>;
+  adoptNativeOutput?(runID: string): Promise<CaptureFile>;
   present(file: CaptureFile, share: boolean): Promise<unknown>;
   cancel(): Promise<void>;
 }
@@ -124,10 +131,15 @@ export class CaptureClient {
       await this.wait(150 * (n + 1));
     }
   }
-  async sync(id: string) {
+  async sync(id: string, expected?: CaptureDestination) {
     const context = await this.native.context();
     const project = await this.load(id);
     const snapshot = JSON.stringify(project);
+    if (expected)
+      this.assertDestination(
+        { projectId: id, revision: project.revision, snapshot, context },
+        expected,
+      );
     const state = await this.read(context, id);
     const path = `/v1/saved-projects/${encodeURIComponent(id)}`;
     if (!state.etag) {
@@ -158,13 +170,49 @@ export class CaptureClient {
     await this.save(context, id, state);
     return state;
   }
-  async import(id: string, source: CaptureFile) {
+  async destination(
+    id: string,
+    allowUnpaired = false,
+  ): Promise<CaptureDestination> {
+    const project = await this.load(id);
+    const context = await this.native.context().catch(error => {
+      if (allowUnpaired) return null;
+      throw error;
+    });
+    return {
+      projectId: id,
+      revision: project.revision,
+      snapshot: JSON.stringify(project),
+      context,
+    };
+  }
+  private async checkDestination(id: string, expected: CaptureDestination) {
+    this.assertDestination(await this.destination(id), expected);
+  }
+  private assertDestination(
+    current: CaptureDestination,
+    expected: CaptureDestination,
+  ) {
+    if (
+      current.projectId !== expected.projectId ||
+      current.revision !== expected.revision ||
+      current.snapshot !== expected.snapshot ||
+      current.context !== expected.context
+    ) {
+      throw Error(
+        'The capture destination changed. Your local scan is kept. Choose the current destination explicitly before adding it.',
+      );
+    }
+  }
+  async import(id: string, source: CaptureFile, expected?: CaptureDestination) {
+    if (expected) await this.checkDestination(id, expected);
     const context = await this.native.context();
     if ((await this.read(context, id)).pending)
       throw Error(
         'An earlier import is unconfirmed. Review it before starting another.',
       );
-    const state = await this.sync(id);
+    const state = await this.sync(id, expected);
+    if (expected) await this.checkDestination(id, expected);
     const project = await this.load(id);
     if (state.snapshot !== JSON.stringify(project))
       throw Error(
@@ -172,6 +220,16 @@ export class CaptureClient {
       );
     state.pending = { revision: project.revision, source };
     await this.save(context, id, state);
+    if (expected) {
+      try {
+        await this.checkDestination(id, expected);
+      } catch (error) {
+        // No POST has started. Clear only against the same pairing; otherwise retain uncertainty.
+        delete state.pending;
+        await this.save(context, id, state).catch(() => {});
+        throw error;
+      }
+    }
     let response: Response;
     try {
       response = await this.request({

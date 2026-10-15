@@ -41,8 +41,8 @@ class CaptureFolderManager {
 
     static let imagesFolderName = "Images/"
 
-    init() throws {
-        guard let newFolder = CaptureFolderManager.createNewCaptureDirectory() else {
+    init(captureDirectory: URL? = nil) throws {
+        guard let newFolder = captureDirectory ?? CaptureFolderManager.createNewCaptureDirectory() else {
             throw Error.creationFailed
         }
         captureFolder = newFolder
