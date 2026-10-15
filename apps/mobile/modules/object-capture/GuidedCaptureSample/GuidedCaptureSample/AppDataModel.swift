@@ -120,6 +120,10 @@ class AppDataModel: Identifiable {
     private var lastObservedPause: Bool?
     var evaluationStarted = Date()
     private(set) var captureStopped = false
+    private(set) var isStoppingCapture = false
+    private(set) var stopWaitExceeded = false
+    private var stopStateTask: Task<Void, Never>?
+    private var stopWaitTask: Task<Void, Never>?
     var evaluationWriteError: String?
     var passCount = 1
     var flipCount = 0
@@ -145,6 +149,8 @@ class AppDataModel: Identifiable {
     isolated deinit {
         NotificationCenter.default.removeObserver(self)
         for task in tasks { task.cancel() }
+        stopStateTask?.cancel()
+        stopWaitTask?.cancel()
     }
 
     /// Once reconstruction and viewing are complete, this should be called to let the app know it can go back to the new capture
@@ -157,7 +163,7 @@ class AppDataModel: Identifiable {
 
     // Only a deliberate Begin action may create a session after a retained stop.
     func beginCapture() {
-        guard objectCaptureSession == nil, photogrammetrySession == nil else { return }
+        guard !isStoppingCapture, objectCaptureSession == nil, photogrammetrySession == nil else { return }
         captureStopped = false
         reset()
     }
@@ -165,14 +171,60 @@ class AppDataModel: Identifiable {
     func stopCapture(reason: String = "Stopped by user") {
         guard !captureStopped, let session = objectCaptureSession else { return }
         captureStopped = true
+        isStoppingCapture = true
+        stopWaitExceeded = false
         record("interrupted", detail: reason + "; original files retained")
         detachListeners()
+        // cancel() is a request. Keep ownership until the SDK reaches a terminal state.
+        stopStateTask = Task { [weak self, session] in
+            guard !Task.isCancelled, let self else { return }
+            if self.finishStopIfTerminal(session.state, session: session) { return }
+            for await newState in session.stateUpdates {
+                guard !Task.isCancelled else { return }
+                if self.finishStopIfTerminal(newState, session: session) { return }
+            }
+        }
         session.cancel()
         record("cancel-requested", detail: "Public cancellation requested; hardware release not verified")
-        objectCaptureSession = nil
         showOverlaySheets = false
         UIApplication.shared.isIdleTimerDisabled = false
         state = .notSet
+        if finishStopIfTerminal(session.state, session: session) { return }
+        stopWaitTask = Task { [weak self, session] in
+            do { try await Task.sleep(for: .seconds(10)) } catch { return }
+            guard !Task.isCancelled else { return }
+            self?.markStopStillPending(session: session)
+        }
+    }
+
+    private func finishStopIfTerminal(_ newState: ObjectCaptureSession.CaptureState,
+                                      session: ObjectCaptureSession) -> Bool {
+        guard captureStopped, isStoppingCapture, objectCaptureSession?.id == session.id else { return false }
+        // These are the SDK's two terminal states. Finishing is still in progress.
+        switch newState {
+        case .completed, .failed:
+            break
+        case .initializing, .ready, .detecting, .capturing, .finishing:
+            return false
+        @unknown default:
+            return false
+        }
+        record("cancel-terminal", detail: String(describing: newState) + "; hardware release not verified")
+        isStoppingCapture = false
+        stopWaitExceeded = false
+        stopStateTask?.cancel()
+        stopStateTask = nil
+        stopWaitTask?.cancel()
+        stopWaitTask = nil
+        objectCaptureSession = nil
+        return true
+    }
+
+    private func markStopStillPending(session: ObjectCaptureSession) {
+        guard captureStopped, isStoppingCapture, !stopWaitExceeded,
+              objectCaptureSession?.id == session.id else { return }
+        stopWaitExceeded = true
+        record("cancel-still-pending", detail: "No terminal state after 10 seconds; session retained and new capture blocked")
     }
 
     // Don't touch the showOverlaySheets directly, call setShowOverlaySheets() instead.
