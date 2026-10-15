@@ -139,3 +139,23 @@ The suite always includes an actual USDZ conversion/import/reopen test and malfo
 ```sh
 CAPTURE_TEST_PYTHON=/absolute/venv/bin/python npm test --prefix services/companion
 ```
+
+## Authenticated project and capture routes
+
+The same private Serve listener can opt into project/capture storage with `SCAN_TO_MAKE_CAPTURE_DIR=/absolute/private/capture-data`; `SCAN_TO_MAKE_REMOTE_AUTH_DIR` is required. The capture directory contains portable projects, immutable capture bundles and temporary workers. Set `SCAN_TO_MAKE_CAPTURE_PYTHON` to the Python environment with usd-core26.8. Invalid or empty capture configuration fails startup. Existing generation-only startup and pairings stay unchanged.
+
+Host-local `remote-auth-cli.js pair-capture <auth-directory> <login>` explicitly creates an invitation with generation plus `projects:read`, `projects:write`, `captures:read`, and `captures:import` authority. Ordinary `pair` still grants only generation permissions. Existing devices do not gain capture access; an operator must intentionally pair a new scoped device. All routes retain the exact Host, private Serve forwarding, login, token, revocation and browser-origin checks described above. No service configures tailnet access or provisions credentials automatically.
+
+| Route | Permission and input | Result |
+|---|---|---|
+| `GET /v1/saved-projects/:id` | `projects:read` | Exact portable 0.2 JSON and strong `ETag` |
+| `PUT /v1/saved-projects/:id` | `projects:write`, JSON snapshot, create-only `If-None-Match: *` or current `If-Match` | 201 created or 200 replaced, exact JSON and new ETag |
+| `POST /v1/saved-projects/:id/captures?projectRevision=N` | `captures:import`, raw `model/vnd.usdz+zip`, current `If-Match` | 201 `{captureId, binding}` |
+| `GET /v1/saved-projects/:id/captures/:captureId?projectRevision=N` | `captures:read`, current `If-Match` | Verified `{captureId, binding}` |
+| `GET /v1/saved-projects/:id/captures/:captureId/artifacts/:kind?projectRevision=N` | `captures:read`, current `If-Match`; kind `original`, `derived` or `report` | Exact bytes, media type, Content-Length and X-Content-SHA256 |
+
+Snapshot synchronization preserves nonzero revisions, fit, preview and acceptance metadata. It does not verify generated-preview bytes or grant print approval. Updates require exact-byte ETags; backward revision or same-revision/different-content returns409, stale ETag412, missing precondition428. Missing projects return404; corrupt/unavailable project storage503. Invalid capture data or retained capture corruption returns422. Existing native change rules remain authoritative: fit edits invalidate preview/acceptance, and clients verify artifact bytes before use.
+
+Native clients retain the acknowledged remote ETag and snapshot separately from the portable project. Preserve local edits made while a request is in flight; never overwrite them with a delayed response. Conflicts require explicit reconciliation. Exact equal snapshots with a current ETag are idempotent; **capture POST has no automatic retry guarantee**. A lost response may follow a committed bundle, so do not automatically retry an ambiguous import.
+
+Bodies have a five-second deadline and limits of4MiB for snapshots and32MiB for captures, enforced for chunked requests too. One snapshot/capture request owns the capture slot through conversion and response cleanup; another receives429. Downloads have a30-second response deadline and hold the project edit lock through response flush. Concurrent edits can report storage unavailable while that lock is held. Disconnect/shutdown aborts active conversion and waits for cleanup. Authorization is checked again before capture publication and before download; ETag/revision are checked under the project lock. Generation retains its own single-request slot. These tests model private Serve headers locally; they do not establish a live phone/tailnet connection.

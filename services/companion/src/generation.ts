@@ -1,3 +1,4 @@
+import {createCaptureRoutes,type CaptureServices} from './capture-http.js';
 import { spawn } from 'node:child_process';
 import { constants } from 'node:fs';
 import { lstat, open, mkdtemp, writeFile, rm } from 'node:fs/promises';
@@ -300,6 +301,7 @@ export async function startGenerationServer(
     port?: number;
     worker?: GenerationWorker;
     remoteAuth?: RemoteAuthStore;
+    capture?: CaptureServices;
   } = {}
 ): Promise<{ url: string; close(): Promise<void> }> {
   const port = options.port ?? 9077;
@@ -307,6 +309,8 @@ export async function startGenerationServer(
     throw new Error('Invalid local port');
   const worker = options.worker ?? createGenerationWorker();
   const auth = options.remoteAuth;
+  if(options.capture&&!auth)throw new Error('Capture routes require explicit authentication');
+  const captureRoutes=options.capture?createCaptureRoutes(options.capture):undefined;
   let authority = '';
   let active: { controller: AbortController; done: Promise<void> } | undefined;
   const server = createServer(async (request, response) => {
@@ -361,6 +365,9 @@ export async function startGenerationServer(
           })
         );
         return;
+      }
+      if(captureRoutes&&request.url?.startsWith('/v1/saved-projects/')){
+        await captureRoutes.handle(request,response,authorize,name=>singleHeader(request,name));return;
       }
       const pairing = auth && request.url === '/v1/pair';
       if (request.url !== '/v1/generate' && !pairing)
@@ -473,9 +480,11 @@ export async function startGenerationServer(
             server.close((error) => (error ? reject(error) : resolve()))
           );
           active?.controller.abort();
+          const capturesStopped=captureRoutes?.close();
           server.closeAllConnections();
           await stopped;
           await pending;
+          await capturesStopped;
         })();
       return closing;
     },

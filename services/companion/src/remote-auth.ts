@@ -12,12 +12,12 @@ import { z } from 'zod';
 const FIVE_MINUTES = 300_000;
 const TOKEN_LIFETIME = 30 * 24 * 60 * 60 * 1000;
 const MAX_STORE_BYTES = 128 * 1024;
-const scopeSchema = z.enum(['generation:health', 'generation:create']);
+const scopeSchema = z.enum(['generation:health', 'generation:create', 'projects:read', 'projects:write', 'captures:read', 'captures:import']);
 export type RemoteScope = z.infer<typeof scopeSchema>;
 const scopesSchema = z
   .array(scopeSchema)
   .min(1)
-  .max(2)
+  .max(6)
   .refine((x) => new Set(x).size === x.length);
 const loginSchema = z
   .string()

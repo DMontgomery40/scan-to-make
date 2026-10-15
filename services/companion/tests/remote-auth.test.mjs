@@ -629,3 +629,17 @@ test('valid repeated init refuses an existing registry and preserves a paired de
     'generation:create'
   );
 });
+
+test('existing generation pairing never acquires project/capture authority and explicit scopes remain revocable',async t=>{
+ const {store,directory,clock}=await fixture(t);
+ const old=await exchange(store);
+ const reopened=await authModule.RemoteAuthStore.open(directory,clock);
+ const added=['projects:read','projects:write','captures:read','captures:import'];
+ for(const scope of added)await denied(()=>reopened.authorize('alice@example.test',old.deviceId,old.token,scope),'forbidden');
+ const capture=await exchange(reopened,'alice@example.test',added);
+ assert.deepEqual(capture.scopes,added);
+ for(const scope of added)await reopened.authorize('alice@example.test',capture.deviceId,capture.token,scope);
+ await denied(()=>reopened.authorize('alice@example.test',capture.deviceId,capture.token,'generation:create'),'forbidden');
+ await reopened.revoke(capture.deviceId);
+ await denied(()=>reopened.authorize('alice@example.test',capture.deviceId,capture.token,'captures:read'));
+});
