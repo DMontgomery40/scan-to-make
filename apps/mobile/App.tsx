@@ -22,6 +22,7 @@ import { HomeScreen } from './src/screens/HomeScreen';
 import { PreviewScreen } from './src/screens/PreviewScreen';
 import { AboutScreen } from './src/screens/AboutScreen';
 import { BriefScreen, BriefReviewScreen } from './src/screens/BriefScreen';
+import { RetainedCapturesScreen } from './src/screens/RetainedCapturesScreen';
 import { ProjectsScreen } from './src/screens/ProjectsScreen';
 import {
   briefComplete,
@@ -40,6 +41,7 @@ type Route =
   | 'preview'
   | 'about'
   | 'spike'
+  | 'retainedCaptures'
   | 'projects'
   | 'drawer';
 const PARENT: Record<Route, Route | null> = {
@@ -51,6 +53,7 @@ const PARENT: Record<Route, Route | null> = {
   preview: 'capture',
   spike: 'about',
   projects: 'home',
+  retainedCaptures: 'projects',
   drawer: 'home',
 };
 const failure = (result: WriteProjectResult) =>
@@ -72,6 +75,7 @@ function App({ repository: injected }: { repository?: SavedProjects }) {
   const [brief, setBrief] = useState<ProjectBrief>(emptyBrief);
   const [measured, setMeasured] = useState<SavedProject | null>(null);
   const [drawer, setDrawer] = useState<SavedProject | null>(null);
+  const [captureProjectId, setCaptureProjectId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState('Not saved yet');
   const [saveFailed, setSaveFailed] = useState(false);
@@ -311,12 +315,29 @@ function App({ repository: injected }: { repository?: SavedProjects }) {
           />
         );
         break;
+      case 'retainedCaptures':
+        screen = captureProjectId ? (
+          <RetainedCapturesScreen
+            id={captureProjectId}
+            repository={repository}
+            onBack={() => {
+              refresh();
+              setRoute('projects');
+            }}
+            onCompanion={() => setCompanionOpen(true)}
+          />
+        ) : null;
+        break;
       case 'projects':
         screen = (
           <ProjectsScreen
             result={listing}
             error={openError}
             onOpen={openProject}
+            onCaptures={id => {
+              setCaptureProjectId(id);
+              setRoute('retainedCaptures');
+            }}
             onBack={() => setRoute('home')}
             onRetry={refresh}
           />

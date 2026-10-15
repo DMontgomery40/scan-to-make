@@ -8,12 +8,14 @@ export function ProjectsScreen({
   result,
   error,
   onOpen,
+  onCaptures,
   onBack,
   onRetry,
 }: {
   result: ListProjectsResult | null;
   error: string | null;
   onOpen: (id: string) => void;
+  onCaptures?: (id: string) => void;
   onBack: () => void;
   onRetry: () => void;
 }) {
@@ -50,7 +52,9 @@ export function ProjectsScreen({
                   <Text style={type.label}>
                     {entry.project.fit?.template === 'drawer-tray'
                       ? 'DRAWER DESIGN STUDY'
-                      : entry.project.fit ? 'MEASURED PROJECT' : 'PROJECT BRIEF'}
+                      : entry.project.fit
+                      ? 'MEASURED PROJECT'
+                      : 'PROJECT BRIEF'}
                   </Text>
                   <Text style={type.heading}>
                     {entry.project.brief.object.trim() || 'Untitled project'}
@@ -66,6 +70,13 @@ export function ProjectsScreen({
                     variant="secondary"
                     onPress={() => onOpen(id)}
                   />
+                  {onCaptures ? (
+                    <Button
+                      label="Project captures"
+                      variant="secondary"
+                      onPress={() => onCaptures(id)}
+                    />
+                  ) : null}
                 </>
               ) : (
                 <>

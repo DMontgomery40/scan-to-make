@@ -240,3 +240,44 @@ Checks: `npm run typecheck`, `npm run lint`, `npm test -- --runInBand`, and
 production validation/metadata/disconnect code with a Keychain API double;
 actual secure persistence requires the Simulator restart walkthrough. No tokens
 or invitations should be included in screenshots, test output or public reports.
+
+### Retained project captures on iOS
+
+Open **Your saved projects → Project captures**. Connect with a capture-scoped
+companion invitation, synchronize the saved project, then choose a USDZ file
+(up to 32 MiB) from Files. Import retains the original, converted OBJ and
+conversion report. Reopen verifies the current project revision and retained
+bundle before review. **Review converted mesh** renders the verified OBJ with
+native camera controls. Quick Look opens the original USDZ where the platform
+supports it; Simulator may display file metadata only. Export uses the native
+share sheet and exact verified bytes, without converting formats.
+
+Full portable SavedProject 0.2 snapshots preserve fit, preview and acceptance
+metadata. Companion acknowledgments and capture handles live separately in
+Application Support/CaptureSync, namespaced by companion origin and project.
+A replacement pairing at the same origin keeps those handles; every request
+is pinned to the exact current pairing. Credentials remain in Keychain and
+never cross into JavaScript. Local edits made during a request are preserved.
+Conflicts stop synchronization and leave the local project available to review.
+Editing a project makes prior captures unavailable for current-version use;
+historical bytes remain retained. Captures do not accept a printable design or
+establish dimensional accuracy, completeness or physical fit.
+
+Only explicit busy responses to GET are retried (three attempts, bounded
+backoff). Import POST is never retried automatically. Before POST, an
+unconfirmed-import marker is flushed to local storage. A lost response leaves
+that marker across restarts; an explicit confirmation permits a separate import
+and explains that the earlier capture may exist. No server-side listing or
+idempotency recovery is currently promised. Capture permissions denied or
+revoked require an appropriate new invitation through **Connect companion**.
+
+For isolated Simulator execution, build the companion and its dependencies,
+then run the existing pairing fixture with `SCAN_CAPTURE_FIXTURE=1` and
+`SCAN_TO_MAKE_CAPTURE_PYTHON` pointing to a Python 3.12 environment containing
+usd-core 26.8. It creates private temporary projects/captures and explicitly
+scoped fixture invitations. Use the ordinary UI to pair and import a public or
+synthetic USDZ; terminate and relaunch the app, reopen the capture, review its
+mesh, then Save to Files and independently compare SHA-256 and byte length.
+The app's Documents folder is available in Files; credentials, project storage,
+private capture cache and synchronization metadata are not in that folder.
+This proves the simulator workflow only, not private-network deployment or fit.
