@@ -2,6 +2,7 @@ import { mkdir, open, readdir, rename, rmdir, unlink } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import {savedProjectETag,SavedProjectSyncFailure} from './saved-project-sync.js';
 import { decodeSavedProject, type SavedProjectStorage, type SavedProject } from '@scan-to-make/contracts/saved-project';
 
 const validId = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
@@ -85,7 +86,7 @@ export class FileSavedProjectStorage implements SavedProjectStorage {
     } finally { await file.close(); }
   }
 
-  async compareAndSwap(id: string, expected: string | null, next: string): Promise<boolean> {
+  async compareAndSwap(id: string, expected: string | null, next: string, beforeCommit?: () => Promise<void>): Promise<boolean> {
     checkId(id);
     if (Buffer.byteLength(next, 'utf8') > this.maxBytes) throw new Error('Saved project exceeds byte limit');
     if (Buffer.from(next, 'utf8').toString('utf8') !== next) throw new Error('Saved project must contain valid Unicode');
@@ -97,6 +98,7 @@ export class FileSavedProjectStorage implements SavedProjectStorage {
       try {
         try { await file.writeFile(next, 'utf8'); await file.sync(); }
         finally { await file.close(); }
+        await beforeCommit?.();
         await rename(temporary, join(this.directory, `${key}.json`));
         const parent = await open(this.directory, constants.O_RDONLY);
         try { await parent.sync(); } finally { await parent.close(); }
@@ -112,13 +114,14 @@ export class FileSavedProjectStorage implements SavedProjectStorage {
    * Historical attachment bytes remain separate from the portable project format.
    */
   async withCurrentProject<T>(id: string, expectedRevision: number,
-    operation: (project: SavedProject) => Promise<T>): Promise<T> {
+    operation: (project: SavedProject) => Promise<T>, expectedETag?: string): Promise<T> {
     if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) throw new Error('Invalid project revision');
     return this.withLock(id, async () => {
       const bytes = await this.read(id);
       const loaded = bytes === null ? { status: 'missing' as const } : decodeSavedProject(bytes, id);
       if (loaded.status !== 'ok') throw new Error(`Current project unavailable: ${loaded.status}`);
-      if (loaded.project.revision !== expectedRevision) throw new Error('Stale project revision');
+      if (loaded.project.revision !== expectedRevision) throw new SavedProjectSyncFailure('precondition-failed','Stale project revision');
+      if (expectedETag !== undefined && savedProjectETag(bytes!) !== expectedETag) throw new SavedProjectSyncFailure('precondition-failed','Stale project snapshot');
       return operation(loaded.project);
     });
   }

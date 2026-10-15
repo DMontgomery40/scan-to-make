@@ -93,3 +93,17 @@ test('input is copied before asynchronous work and invalid paths/limits reject e
  const bounded=new CaptureStore(f.storage,join(f.root,'captures'),f.converter,{maxSourceBytes:4});
  await assert.rejects(bounded.importCapture(request()),/limit/);
 });
+
+test('snapshot ETag pins commit and reopen even if a trusted local writer changes content at the same revision',async t=>{
+ const {savedProjectETag}=await import('@scan-to-make/project');
+ let started,finish;const entered=new Promise(r=>started=r);const gate=new Promise(r=>finish=r);
+ const f=await fixture(t,{convert:async bytes=>{started();await gate;return output(bytes);}});
+ const old=await f.storage.read('test');const expectedProjectETag=savedProjectETag(old);
+ const pending=f.captures.importCapture({...request(),expectedProjectETag});await entered;
+ const replacement=JSON.stringify({...JSON.parse(old),brief:{...brief,addition:'Changed without revision'}});
+ await f.storage.compareAndSwap('test',old,replacement);finish();
+ await assert.rejects(pending,/snapshot/);assert.deepEqual(await readdir(join(f.root,'captures')),[]);
+ const saved=await f.captures.importCapture({...request(),expectedProjectETag:savedProjectETag(replacement)});
+ await assert.rejects(f.captures.loadCapture('test',0,saved.captureId,expectedProjectETag),/snapshot/);
+ assert.equal((await f.captures.loadCapture('test',0,saved.captureId,savedProjectETag(replacement))).captureId,saved.captureId);
+});

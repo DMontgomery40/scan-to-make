@@ -73,11 +73,13 @@ export class CaptureStore {
  constructor(private readonly projects:FileSavedProjectStorage,private readonly directory:string,
  private readonly converter:CaptureConverter,options:CaptureLimits={}){this.bound=limits(options);}
 
- async importCapture(input:{projectId:string;projectRevision:number;source:Uint8Array},signal?:AbortSignal):Promise<{captureId:string;binding:CaptureBinding}> {
+ async importCapture(input:{projectId:string;projectRevision:number;source:Uint8Array;expectedProjectETag?:string},signal?:AbortSignal,authorizeCommit?:()=>Promise<void>):Promise<{captureId:string;binding:CaptureBinding}> {
   const {projectId,projectRevision}=requestSchema.parse(input);abort(signal);
+  const expectedProjectETag=input.expectedProjectETag;
+  if(expectedProjectETag!==undefined&&!/^"[a-f0-9]{64}"$/.test(expectedProjectETag))throw new Error('Invalid project snapshot ETag');
   if(!(input.source instanceof Uint8Array)||!input.source.byteLength||input.source.byteLength>this.bound.maxSourceBytes)throw new Error('Capture source byte limit exceeded');
   const original=Buffer.from(input.source); // Snapshot before any asynchronous operation.
-  await this.projects.withCurrentProject(projectId,projectRevision,async()=>undefined);
+  await this.projects.withCurrentProject(projectId,projectRevision,async()=>undefined,expectedProjectETag);
   await mkdir(this.directory,{recursive:true,mode:0o700});
   const staging=await mkdtemp(join(this.directory,'.staging-'));
   try {
@@ -92,16 +94,16 @@ export class CaptureStore {
    await syncDirectory(staging);
    const captureId=randomUUID();
    return await this.projects.withCurrentProject(projectId,projectRevision,async()=>{
-    abort(signal);
+    await authorizeCommit?.();abort(signal);
     // Atomic publication is the commit point. A later abort cannot undo a commit.
     await rename(staging,join(this.directory,captureId));
     await syncDirectory(this.directory);
     return {captureId,binding};
-   });
+   },expectedProjectETag);
   } finally {await rm(staging,{recursive:true,force:true});}
  }
 
- async loadCapture(projectId:string,projectRevision:number,captureId:string) {
+ async loadCapture(projectId:string,projectRevision:number,captureId:string,expectedProjectETag?:string) {
   requestSchema.parse({projectId,projectRevision});captureIdSchema.parse(captureId);
   return this.projects.withCurrentProject(projectId,projectRevision,async project=>{
    const folder=join(this.directory,captureId);
@@ -113,6 +115,6 @@ export class CaptureStore {
    const binding=validateCaptureBinding(JSON.parse(bindingBytes.toString('utf8')),{projectId,projectRevision,original:capture.original,derived:capture.derived,conversionReport:capture.conversionReport});
    if(!isDeepStrictEqual(capture,binding.capture))throw new Error('Capture provenance does not match retained report');
    return {captureId,project,binding,original,derived,report};
-  });
+  },expectedProjectETag);
  }
 }

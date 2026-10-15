@@ -1,3 +1,7 @@
+import {isAbsolute,join} from 'node:path';
+import {FileSavedProjectStorage} from '@scan-to-make/project';
+import {CaptureStore} from './capture-import.js';
+import {createCaptureConverter} from './capture-converter.js';
 import { startGenerationServer } from './generation.js';
 import { RemoteAuthStore } from './remote-auth.js';
 
@@ -6,7 +10,14 @@ const directory = process.env.SCAN_TO_MAKE_REMOTE_AUTH_DIR;
 const remoteAuth =
   directory === undefined ? undefined : await RemoteAuthStore.open(directory);
 
+const captureDirectory=process.env.SCAN_TO_MAKE_CAPTURE_DIR;
+if(captureDirectory!==undefined&&(!remoteAuth||!isAbsolute(captureDirectory)))throw new Error('Capture requires authentication and an absolute private directory');
+const storage=captureDirectory===undefined?undefined:new FileSavedProjectStorage(join(captureDirectory,'projects'));
+const capture=storage&&captureDirectory?{storage,captures:new CaptureStore(storage,join(captureDirectory,'captures'),createCaptureConverter({
+ executable:process.env.SCAN_TO_MAKE_CAPTURE_PYTHON??'python3',temporaryRoot:join(captureDirectory,'workers'),
+}))}:undefined;
 const server = await startGenerationServer({
+  capture,
   remoteAuth,
   port:
     process.env.SCAN_TO_MAKE_GENERATION_PORT === undefined
