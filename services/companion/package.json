@@ -23,6 +23,14 @@
     "./remote-auth": {
       "types": "./dist/remote-auth.d.ts",
       "import": "./dist/remote-auth.js"
+    },
+    "./capture-import": {
+      "types": "./dist/capture-import.d.ts",
+      "import": "./dist/capture-import.js"
+    },
+    "./capture-converter": {
+      "types": "./dist/capture-converter.d.ts",
+      "import": "./dist/capture-converter.js"
     }
   },
   "scripts": {

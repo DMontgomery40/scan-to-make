@@ -2,7 +2,7 @@ import { mkdir, open, readdir, rename, rmdir, unlink } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import type { SavedProjectStorage } from '@scan-to-make/contracts/saved-project';
+import { decodeSavedProject, type SavedProjectStorage, type SavedProject } from '@scan-to-make/contracts/saved-project';
 
 const validId = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
 function checkId(id: string): void {
@@ -89,17 +89,8 @@ export class FileSavedProjectStorage implements SavedProjectStorage {
     checkId(id);
     if (Buffer.byteLength(next, 'utf8') > this.maxBytes) throw new Error('Saved project exceeds byte limit');
     if (Buffer.from(next, 'utf8').toString('utf8') !== next) throw new Error('Saved project must contain valid Unicode');
-    await mkdir(this.directory, { recursive: true, mode: 0o700 });
-    const key = fileKey(id);
-    const lock = join(this.directory, `${key}.lock`);
-    try { await mkdir(lock, { mode: 0o700 }); }
-    catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
-        throw new Error('Saved project is busy or has an interrupted write; inspect lock before recovery');
-      }
-      throw error;
-    }
-    try {
+    return this.withLock(id, async () => {
+      const key = fileKey(id);
       if (await this.read(id) !== expected) return false;
       const temporary = join(this.directory, `${key}.${randomUUID()}.tmp`);
       const file = await open(temporary, 'wx', 0o600);
@@ -111,9 +102,40 @@ export class FileSavedProjectStorage implements SavedProjectStorage {
         try { await parent.sync(); } finally { await parent.close(); }
         return true;
       } finally {
-        // Never remove another writer's temporary data or an abandoned lock.
         await unlink(temporary).catch(error => { if (!isMissing(error)) throw error; });
       }
-    } finally { await rmdir(lock); }
+    });
+  }
+
+  /** Serialize a trusted attachment commit/read with all project edits.
+   * The callback must not call another locking operation on this same project.
+   * Historical attachment bytes remain separate from the portable project format.
+   */
+  async withCurrentProject<T>(id: string, expectedRevision: number,
+    operation: (project: SavedProject) => Promise<T>): Promise<T> {
+    if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) throw new Error('Invalid project revision');
+    return this.withLock(id, async () => {
+      const bytes = await this.read(id);
+      const loaded = bytes === null ? { status: 'missing' as const } : decodeSavedProject(bytes, id);
+      if (loaded.status !== 'ok') throw new Error(`Current project unavailable: ${loaded.status}`);
+      if (loaded.project.revision !== expectedRevision) throw new Error('Stale project revision');
+      return operation(loaded.project);
+    });
+  }
+
+  private async withLock<T>(id: string, operation: () => Promise<T>): Promise<T> {
+    checkId(id);
+    await mkdir(this.directory, { recursive: true, mode: 0o700 });
+    const key = fileKey(id);
+    const lock = join(this.directory, `${key}.lock`);
+    try { await mkdir(lock, { mode: 0o700 }); }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
+        throw new Error('Saved project is busy or has an interrupted write; inspect lock before recovery');
+      }
+      throw error;
+    }
+    try { return await operation(); }
+    finally { await rmdir(lock); }
   }
 }
