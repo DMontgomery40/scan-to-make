@@ -23,6 +23,7 @@ import { PreviewScreen } from './src/screens/PreviewScreen';
 import { AboutScreen } from './src/screens/AboutScreen';
 import { BriefScreen, BriefReviewScreen } from './src/screens/BriefScreen';
 import { RetainedCapturesScreen } from './src/screens/RetainedCapturesScreen';
+import { InspectedFilesScreen } from './src/screens/InspectedFilesScreen';
 import { ProjectsScreen } from './src/screens/ProjectsScreen';
 import {
   briefComplete,
@@ -41,6 +42,7 @@ type Route =
   | 'preview'
   | 'about'
   | 'spike'
+  | 'inspectedFiles'
   | 'retainedCaptures'
   | 'projects'
   | 'drawer';
@@ -54,6 +56,7 @@ const PARENT: Record<Route, Route | null> = {
   spike: 'about',
   projects: 'home',
   retainedCaptures: 'projects',
+  inspectedFiles: 'projects',
   drawer: 'home',
 };
 const failure = (result: WriteProjectResult) =>
@@ -315,6 +318,20 @@ function App({ repository: injected }: { repository?: SavedProjects }) {
           />
         );
         break;
+      case 'inspectedFiles':
+        screen = captureProjectId ? (
+          <InspectedFilesScreen
+            id={captureProjectId}
+            repository={repository}
+            paused={companionOpen}
+            onBack={() => {
+              refresh();
+              setRoute('projects');
+            }}
+            onCompanion={() => setCompanionOpen(true)}
+          />
+        ) : null;
+        break;
       case 'retainedCaptures':
         screen = captureProjectId ? (
           <RetainedCapturesScreen
@@ -334,6 +351,10 @@ function App({ repository: injected }: { repository?: SavedProjects }) {
             result={listing}
             error={openError}
             onOpen={openProject}
+            onInspected={id => {
+              setCaptureProjectId(id);
+              setRoute('inspectedFiles');
+            }}
             onCaptures={id => {
               setCaptureProjectId(id);
               setRoute('retainedCaptures');

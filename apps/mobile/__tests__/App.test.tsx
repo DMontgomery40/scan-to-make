@@ -694,3 +694,19 @@ test('companion overlay preserves an unsaved drawer edit across disconnect', asy
   await act(async () => tree.unmount());
   delete NativeModules.CompanionPairing;
 });
+
+test('only accepted saved projects expose the inspected files browser', async () => {
+  const store=testStore();
+  const fit=require('../../../packages/contracts/fixtures/tapered-holder.json');
+  await store.create({id:fit.id,fit,brief:{object:'Accepted fixture',context:'Synthetic',addition:'Holder'}});
+  let tree!:ReactTestRenderer.ReactTestRenderer;
+  await act(async()=>{tree=ReactTestRenderer.create(<App repository={store}/>);});
+  await press(tree,'Your saved projects');expect(texts(tree)).not.toContain('Inspected files');
+  const artifact={sha256:'a'.repeat(64),byteLength:9,mediaType:'model/stl'};
+  await store.change(fit.id,0,{kind:'attach-preview',sourceFit:fit,artifact});
+  await store.change(fit.id,1,{kind:'accept-preview',sourceFit:fit,artifact});
+  await press(tree,'Refresh projects');await press(tree,'Inspected files');
+  expect(texts(tree)).toContain('Imported sliced files for this saved project.');
+  await press(tree,'Back');expect(texts(tree)).toContain('Your projects');
+  await act(async()=>tree.unmount());
+});

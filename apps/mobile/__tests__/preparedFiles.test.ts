@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { createSavedProjects } from '@scan-to-make/contracts/saved-project';
 import {
   PreparedFilesClient,
+  preparedError,
   validatePreparedResponse,
   type PreparedNative,
 } from '../src/prepared/preparedFiles';
@@ -238,3 +239,97 @@ const runtimeFixture = process.env.NATIVE_PREPARED_CONTRACT;
     }
   },
 );
+
+test('discovery accepts an empty page with continuation and rejects unverified semantics', async () => {
+  const f = await fixture();
+  f.native.request = jest.fn(async () => ({
+    status: 200,
+    etag: f.ack.etag,
+    body: JSON.stringify({
+      jobs: [],
+      nextCursor: 'opaque_next',
+      unreadable: 2,
+      requiresVerifiedGet: true,
+    }),
+  }));
+  expect(await f.client.list(f.project.id, f.ack)).toMatchObject({
+    jobs: [],
+    nextCursor: 'opaque_next',
+    unreadable: 2,
+  });
+  f.native.request = jest.fn(async () => ({
+    status: 200,
+    etag: f.ack.etag,
+    body: JSON.stringify({
+      jobs: [],
+      nextCursor: null,
+      unreadable: 0,
+      requiresVerifiedGet: false,
+    }),
+  }));
+  await expect(f.client.list(f.project.id, f.ack)).rejects.toThrow();
+});
+test('discovery preserves cursor-stale and rejects changed local state', async () => {
+  const f = await fixture();
+  f.native.request = jest.fn(async () => ({
+    status: 409,
+    etag: '',
+    body: JSON.stringify({
+      error: { code: 'cursor-stale', message: 'cursor-stale' },
+    }),
+  }));
+  await expect(
+    f.client.list(f.project.id, f.ack, 'opaque'),
+  ).rejects.toMatchObject({ code: 'cursor-stale' });
+  f.native.request = jest.fn(async () => {
+    await f.repo.change(f.project.id, f.project.revision, {
+      kind: 'replace-brief',
+      brief: { object: 'New', context: 'Kept', addition: 'Local' },
+    });
+    return {
+      status: 200,
+      etag: f.ack.etag,
+      body: JSON.stringify({
+        jobs: [],
+        nextCursor: null,
+        unreadable: 0,
+        requiresVerifiedGet: true,
+      }),
+    };
+  });
+  await expect(f.client.list(f.project.id, f.ack)).rejects.toThrow(
+    'Project changed',
+  );
+});
+test('verified detail and export must match the selected discovery handle', async () => {
+  const f = await fixture();
+  const summary = {
+    jobId: f.id,
+    jobSha256: '0'.repeat(64),
+    printableArtifact: f.response.job.printableArtifact,
+    model: 'p1s',
+    plateIndex: 0,
+  };
+  await expect(
+    f.client.open(f.project.id, f.id, f.ack, summary),
+  ).rejects.toThrow('Refresh');
+  await expect(
+    f.client.export(f.project.id, f.id, f.ack, summary),
+  ).rejects.toThrow('Refresh');
+  expect(f.native.export).not.toHaveBeenCalled();
+});
+
+test('snapshot permission errors explain project access in the inspected-files flow', () => {
+  expect(
+    preparedError(
+      Error(
+        'This connection does not have capture permission. Connect with a capture invitation.',
+      ),
+    ),
+  ).toBe(
+    'This connection cannot synchronize saved projects. Connect with project access, then refresh.',
+  );
+  expect(preparedError(new SyntaxError('private response bytes'))).toBe(
+    'The companion returned an unreadable file record. Try refreshing.',
+  );
+});

@@ -213,6 +213,54 @@ export async function validatePreparedResponse(
     throw Error('Inspection material feed mismatch.');
   return job;
 }
+export const PreparedSummarySchema = z.strictObject({
+  jobId: z.uuid(),
+  jobSha256: digest,
+  printableArtifact: ArtifactRefSchema,
+  model: z.string().min(1).max(1024),
+  plateIndex: integer,
+});
+export type PreparedSummary = z.infer<typeof PreparedSummarySchema>;
+const CursorSchema = z.string().regex(/^[A-Za-z0-9_-]{1,1024}$/);
+const PageSchema = z.strictObject({
+  jobs: z.array(PreparedSummarySchema).max(20),
+  nextCursor: CursorSchema.nullable(),
+  unreadable: integer,
+  requiresVerifiedGet: z.literal(true),
+});
+export type PreparedPage = z.infer<typeof PageSchema>;
+export type ProjectAcknowledgment = { etag: string; snapshot: string };
+export function preparedError(error: unknown): string {
+  if (error instanceof z.ZodError || error instanceof SyntaxError)
+    return 'The companion returned an unreadable file record. Try refreshing.';
+  // The shared snapshot client predates prepared-file capabilities. Its 403
+  // message is capture-specific, although this screen only synchronizes projects.
+  if (
+    error instanceof Error &&
+    error.message ===
+      'This connection does not have capture permission. Connect with a capture invitation.'
+  )
+    return 'This connection cannot synchronize saved projects. Connect with project access, then refresh.';
+  const code = (error as { code?: string })?.code;
+  if (code === 'cursor-stale')
+    return 'The file list changed. Refresh to see the current files.';
+  if (
+    code === 'pairing-required' ||
+    code === 'pairing-changed' ||
+    code === 'scope-denied' ||
+    code === 'unauthorized' ||
+    code === 'forbidden'
+  )
+    return 'Connect to your companion with permission to read inspected files, then refresh.';
+  if (code === 'precondition-failed')
+    return 'This project changed. Return to your saved projects and reopen it.';
+  if (code === 'busy') return 'Your companion is busy. Try again shortly.';
+  if (code === 'discovery-unavailable')
+    return 'The companion could not load the file list. Try refreshing shortly.';
+  return error instanceof Error
+    ? error.message
+    : 'The files could not be loaded. Try refreshing.';
+}
 export class PreparedFilesClient {
   constructor(
     private repo: SavedProjects,
@@ -236,15 +284,77 @@ export class PreparedFilesClient {
         await this.wait(150 * (n + 1));
         continue;
       }
-      if (r.status !== 200 || r.etag !== options.etag)
-        throw Error(`Inspected file unavailable (${r.status}).`);
+      if (r.status !== 200 || r.etag !== options.etag) {
+        let code =
+          r.status === 401
+            ? 'unauthorized'
+            : r.status === 403
+            ? 'forbidden'
+            : r.status === 412
+            ? 'precondition-failed'
+            : r.status === 429
+            ? 'busy'
+            : 'unavailable';
+        try {
+          const parsed = JSON.parse(r.body);
+          if (typeof parsed?.error?.code === 'string') code = parsed.error.code;
+        } catch {
+          /* Opaque response still fails closed. */
+        }
+        throw Object.assign(
+          Error(`The inspected file could not be verified (${r.status}).`),
+          { code },
+        );
+      }
       return r;
     }
+  }
+  async list(
+    projectId: string,
+    ack: ProjectAcknowledgment,
+    cursor?: string,
+  ): Promise<PreparedPage> {
+    safeId.parse(projectId);
+    if (cursor !== undefined) CursorSchema.parse(cursor);
+    z.string()
+      .regex(/^"[a-f0-9]{64}"$/)
+      .parse(ack.etag);
+    const project = await this.current(projectId, ack.snapshot),
+      context = await this.native.context();
+    const path = `/v1/saved-projects/${projectId}/prepared-jobs?projectRevision=${
+      project.revision
+    }&limit=20${cursor ? '&cursor=' + cursor : ''}`;
+    const response = await this.get({
+      context,
+      method: 'GET',
+      path,
+      etag: ack.etag,
+    });
+    const page = PageSchema.parse(JSON.parse(response.body));
+    if (page.nextCursor !== null && page.nextCursor === cursor)
+      throw Error('The file list did not advance. Refresh to try again.');
+    for (let i = 0; i < page.jobs.length; i++) {
+      const item = page.jobs[i];
+      if (
+        item.jobId !== item.jobId.toLowerCase() ||
+        (i > 0 && page.jobs[i - 1].jobId >= item.jobId) ||
+        !['model/3mf', 'text/x.gcode'].includes(
+          item.printableArtifact.mediaType,
+        ) ||
+        item.printableArtifact.byteLength > 64 * 1024 * 1024
+      )
+        throw Error('The companion returned an invalid file list.');
+    }
+    await this.current(projectId, ack.snapshot);
+    if ((await this.native.context()) !== context)
+      throw Error('Companion connection changed.');
+    return page;
   }
   async open(
     projectId: string,
     jobId: string,
-    ack: { etag: string; snapshot: string },
+    ack: ProjectAcknowledgment,
+    expected?: PreparedSummary,
   ) {
     safeId.parse(projectId);
     z.uuid().parse(jobId);
@@ -266,6 +376,15 @@ export class PreparedFilesClient {
       jobId,
       text => this.native.hash(text),
     );
+    if (
+      expected &&
+      (expected.jobId !== job.id ||
+        expected.jobSha256 !== job.sha256 ||
+        !same(expected.printableArtifact, job.printableArtifact) ||
+        expected.model !== job.selection.model ||
+        expected.plateIndex !== job.selection.plateIndex)
+    )
+      throw Error('This file changed. Refresh the list and choose it again.');
     await this.current(projectId, ack.snapshot);
     if ((await this.native.context()) !== context)
       throw Error('Companion connection changed.');
@@ -274,9 +393,10 @@ export class PreparedFilesClient {
   async export(
     projectId: string,
     jobId: string,
-    ack: { etag: string; snapshot: string },
+    ack: ProjectAcknowledgment,
+    expected?: PreparedSummary,
   ) {
-    const opened = await this.open(projectId, jobId, ack);
+    const opened = await this.open(projectId, jobId, ack, expected);
     const result = await this.get({
       context: opened.context,
       method: 'GET',
