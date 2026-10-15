@@ -121,7 +121,7 @@ test('disconnect aborts active conversion; busy slot and server shutdown retain 
 
 test('chunked oversized source is rejected by observed bytes without invoking conversion',async t=>{
  let conversions=0;const f=await fixture(t,()=>({convert:async()=>{conversions++;throw new Error('must not run');}}));const etag=await sync(f);
- const result=await wire(f,route,{...importOptions(etag,Buffer.alloc(33*1024*1024)),headers:{...importOptions(etag).headers,'transfer-encoding':'chunked'}});
+ const result=await wire(f,route,{...importOptions(etag,Buffer.alloc(32*1024*1024+1)),headers:{...importOptions(etag).headers,'transfer-encoding':'chunked'}});
  assert.equal(result.status,413);assert.equal(conversions,0);
 });
 

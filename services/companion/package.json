@@ -31,6 +31,10 @@
     "./capture-converter": {
       "types": "./dist/capture-converter.d.ts",
       "import": "./dist/capture-converter.js"
+    },
+    "./prepared-jobs": {
+      "types": "./dist/prepared-jobs.d.ts",
+      "import": "./dist/prepared-jobs.js"
     }
   },
   "scripts": {
