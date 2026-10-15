@@ -218,9 +218,50 @@ request 400, invalid inspection/retained content 422, and unavailable storage 50
 Never silently substitute a new ID after an ambiguous result.
 
 This seam performs preparation, verified reopen and download only. There is no
-HTTP intent-claim or dispatch endpoint, printer contact, physical approval, or
-native prepared-job consumer yet. A file-only inspection does not establish
-installed material, printer state, physical fit or authorization to print.
+HTTP intent-claim or dispatch endpoint, printer contact, or physical approval.
+A file-only inspection does not establish installed material, printer state,
+physical fit or authorization to print. Native clients can browse inspected
+handles, including produced jobs when collection GET uses exact
+`productionVersion=1`. Produced jobs are created on the host with the operator
+CLI below, not by an HTTP produce route.
+
+### Host-only produced jobs
+
+Trusted production is host-operator only. After building companion:
+
+```sh
+npm run prepared:produce --prefix services/companion -- \
+  --capture-dir /absolute/private/capture \
+  --inspector-config /absolute/private/inspector.json \
+  --producer-config /absolute/private/producer.json \
+  --project-id <id> \
+  --project-revision <n> \
+  --etag '"<project-sha256>"' \
+  --job-id <uuid> \
+  --stl /absolute/accepted.stl \
+  --selection /absolute/selection.json
+```
+
+The capture directory is the same private tree the listener uses (`projects/` and
+`prepared-jobs/`). Inspector JSON is the same owner-only file as
+`SCAN_TO_MAKE_PREPARED_MCP_CONFIG`. Producer JSON is a second owner-only,
+no-follow, ≤64 KiB strict file pinning `python`, `script`,
+`expectedScriptSha256`, `bundle`, `expectedVersion`, `expectedBinarySha256`,
+`machine`, `process`, `filament`, and optional `timeoutSeconds`. No CLI flag or
+environment variable can replace those pinned producer or inspector identities.
+Unknown keys, world-readable files, symlinks, relative paths, and oversized
+files fail closed before the job store opens. Failures print
+`Prepared produce failed` without secrets, paths from the config, or subprocess
+detail.
+
+The CLI reads the STL, verifies it against the current accepted artifact, then
+calls `PreparedJobStore.prepareProduced`. It prints `{jobId, jobSha256, created}`.
+A matching retry returns `created: false` and does not slice again. A different
+selection for the same job id exits nonzero with `job-conflict`. Concurrent
+same-id produce attempts fail closed on a host lock; they do not start a second
+slice. The live producer still requires macOS enforced isolation
+(`Enforced slicer isolation requires macOS` / pinned `sandbox-exec`). Fixture
+tests inject a fake producer so CLI plumbing is portable.
 
 ### Discover inspected file handles
 
