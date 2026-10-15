@@ -4,7 +4,7 @@ An open-source consumer app for making useful things that fit the objects and sp
 
 This repository is the product. Printer adapters stay behind the companion contract and are not inlined here. The cup-holder adapter is one validation example — captured reference and confirmed dimensions, editable preview, a scoped fit coupon, and independently checked export or companion printing — not the app identity. A drawer organizer is a second dimensional template.
 
-Native review/export acceptance and physical-fit acceptance remain **OPEN**. Preview geometry is not print authorization. Software licences and distribution rights will be recorded before shipping code that depends on them.
+Native review/export is demonstrated on an isolated iOS Simulator only. Physical-fit acceptance remains **OPEN**. Preview geometry is not print authorization. Software licences and distribution rights will be recorded before shipping code that depends on them.
 
 ## Current capabilities
 
@@ -26,13 +26,13 @@ Native review/export acceptance and physical-fit acceptance remain **OPEN**. Pre
 
 ## Still OPEN
 
-- **Native review/export.** Device capture → native UI review of a reconstructed mesh → exact export of accepted bytes is not accepted. Authenticated self-host smoke covers the HTTP path only (portable-project sync, USDZ import, restart, exact reopen/download). It does not exercise native review or export.
+- **Native review/export.** Demonstrated (isolated iOS Simulator only, separate app bundle, against a disposable loopback authenticated companion fixture; independently reviewed in [PR #46](https://github.com/DMontgomery40/scan-to-make/pull/46), merged as `1c194c5`, [public review](https://github.com/DMontgomery40/scan-to-make/pull/46#issuecomment-6190152023)): native Files-picker import of a public sample USDZ photogrammetry reconstruction, companion conversion to OBJ, app restart with the saved project and retained capture surviving and reopening verified, native rendering of the converted hash-checked OBJ, share-sheet export of the original USDZ, derived OBJ and JSON conversion report with exact-byte identity verified, and explicit capture-permission denial, credential revocation, and re-pair/reopen recovery. Quick Look on Simulator showed metadata only, not a geometry render. Still OPEN / not established: capture on a physical iPhone/device, live private HTTPS/tailnet (private-network) reachability, metric accuracy, surface completeness and physical fit, print approval or dispatch, and Android capture import (Android reports it unavailable).
 - **Physical-fit acceptance.** Generated preview STLs, bounds-only mesh checks, and coupon geometry are not printed-and-measured fit. Cup-holder and drawer examples emit preview/check artifacts (`preview-geometry-not-print-authorized` / `preview-only`). Physical insertion, caliper comparison, and printer dispatch remain separate.
 - **Native capture qualification.** Object Capture, RoomPlan, and ARKit depth/mesh paths exist as isolated evaluation or evidence modules. They do not substitute for a qualified consumer capture flow or physical accuracy. RoomPlan parametric output is not the measurement authority for a fitted drawer interior.
 
 ## Self-host
 
-From a clean clone, two commands cover the offline tools and the authenticated portable-project/capture HTTP path. Both reuse a `usd-core` 26.8 venv (prefer `PYTHON=python3.12` when available). Native review/export acceptance stays **OPEN** in both summaries.
+From a clean clone, two commands cover the offline tools and the authenticated portable-project/capture HTTP path. Both reuse a `usd-core` 26.8 venv (prefer `PYTHON=python3.12` when available). Both summaries still print native review/export as `OPEN`; they do not exercise the isolated Simulator path.
 
 ```sh
 git clone https://github.com/DMontgomery40/scan-to-make && cd scan-to-make
