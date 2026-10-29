@@ -20,13 +20,27 @@ public final class ScanCapturePreview: ARSCNView {
     addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(placeProbe)))
   }
 
-  func updateProbeLocator(center: CGPoint?, state: ProbeLocatorView.State) {
-    guard let center else {
+  // Classify on the main thread, where UIKit view geometry may be read.
+  func updateProbeLocator(projected: SCNVector3?) {
+    guard let projected, projected.z > 0, projected.z < 1 else {
       probeLocator.isHidden = true
       return
     }
-    probeLocator.center = center
-    probeLocator.apply(state)
+    let center = CGPoint(x: CGFloat(projected.x), y: CGFloat(projected.y))
+    guard center.x.isFinite, center.y.isFinite else {
+      probeLocator.isHidden = true
+      return
+    }
+    if bounds.contains(center) {
+      probeLocator.center = center
+      probeLocator.apply(bounds.insetBy(dx: 24, dy: 24).contains(center) ? .inside : .nearEdge)
+    } else {
+      probeLocator.center = CGPoint(
+        x: min(max(center.x, 19), max(19, bounds.width - 19)),
+        y: min(max(center.y, 19), max(19, bounds.height - 19))
+      )
+      probeLocator.apply(.outside)
+    }
     probeLocator.isHidden = false
   }
   required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
@@ -59,27 +73,12 @@ final class ScanCapturePreviewRendererDelegate: NSObject, ARSCNViewDelegate {
     // Copy only the timestamp; never retain ARFrame buffers.
     let renderedSession = view.session
     let timestamp = renderedSession.currentFrame?.timestamp
-    var locatorCenter: CGPoint?
-    var locatorState: ProbeLocatorView.State = .inside
-    if let probeNode, probeNode.parent != nil {
-      let projected = view.projectPoint(probeNode.worldPosition)
-      let center = CGPoint(x: CGFloat(projected.x), y: CGFloat(projected.y))
-      if projected.z > 0 && projected.z < 1 && center.x.isFinite && center.y.isFinite {
-        if view.bounds.contains(center) {
-          locatorCenter = center
-          locatorState = view.bounds.insetBy(dx: 24, dy: 24).contains(center) ? .inside : .nearEdge
-        } else {
-          locatorCenter = CGPoint(
-            x: min(max(center.x, 19), max(19, view.bounds.width - 19)),
-            y: min(max(center.y, 19), max(19, view.bounds.height - 19))
-          )
-          locatorState = .outside
-        }
-      }
+    let projectedProbe: SCNVector3? = probeNode.flatMap { node in
+      node.parent == nil ? nil : view.projectPoint(node.worldPosition)
     }
     DispatchQueue.main.async { [weak view] in
       guard let view else { return }
-      view.updateProbeLocator(center: locatorCenter, state: locatorState)
+      view.updateProbeLocator(projected: projectedProbe)
       guard let timestamp else { return }
       ScanCaptureSession.shared.didRender(view, session: renderedSession, timestamp: timestamp)
     }
