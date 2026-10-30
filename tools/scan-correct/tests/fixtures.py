@@ -27,7 +27,7 @@ def textured_box(directory):
     return path
 
 
-def rounded_lumpy(directory, blender):
+def rounded_lumpy(directory, blender, missing_back=False):
     directory = Path(directory)
     script = directory/'make_fixture.py'
     output = directory/'lumpy.obj'
@@ -36,7 +36,7 @@ bpy.ops.object.select_all(action='SELECT')
 bpy.ops.object.delete(use_global=False)
 bpy.ops.mesh.primitive_cube_add(size=2)
 obj=bpy.context.object
-obj.scale=(31,23,11)
+obj.scale=(30.3,22.6,10.85) if '--missing-back' in sys.argv else (31,23,11)
 bpy.ops.object.transform_apply(location=False,rotation=False,scale=True)
 bevel=obj.modifiers.new('round','BEVEL')
 bevel.width=4
@@ -44,11 +44,16 @@ bevel.segments=5
 bpy.ops.object.modifier_apply(modifier=bevel.name)
 for v in obj.data.vertices:
     v.co += v.normal * (.35*math.sin(v.co.x*.8)*math.cos(v.co.y*.7))
+if '--missing-back' in sys.argv:
+    import bmesh
+    bm=bmesh.new(); bm.from_mesh(obj.data); bm.normal_update()
+    bmesh.ops.delete(bm,geom=[f for f in bm.faces if f.normal.z>.6],context='FACES')
+    bm.to_mesh(obj.data);bm.free()
 bpy.ops.wm.obj_export(filepath=sys.argv[-1],export_selected_objects=True,
                      forward_axis='Y',up_axis='Z',export_materials=False)
 """)
     result = subprocess.run([sys.executable,'-I',str(Path(__file__).resolve().parents[1]/'sandbox.py'),blender,'--background','--factory-startup','--python-exit-code','1',
-                             '--python',str(script),'--',str(output)],capture_output=True,text=True)
+                             '--python',str(script),'--',*(['--missing-back'] if missing_back else []),str(output)],capture_output=True,text=True)
     if result.returncode:
         raise AssertionError(result.stdout+result.stderr)
     return output
