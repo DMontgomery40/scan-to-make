@@ -23,9 +23,11 @@ the XY bounds are centred, and the source bottom sits at Z = 0. No unit guessing
 
 1. **Pocket.** On an integer XY grid (cell `i` spans `[i*g, (i+1)*g]`), a cell is pocket
    if its square, grown by the clearance in L-infinity, meets the XY projection of
-   any source triangle that starts below the part's highest material. A separating-axis
-   test does this exactly per triangle. Every cell left solid is more than the clearance from the object
-   horizontally. The pocket floor sits at `Z = -clearance`. The pocket is a vertical prism, so
+   any source triangle that starts below the part's highest material plus the clearance.
+   A separating-axis test does this exactly per triangle. Every cell left solid is more
+   than the clearance from those triangles horizontally, and every other triangle is at
+   least the clearance above all material, so a shoulder overhanging just above the rim
+   still gets the clearance. The pocket floor sits at `Z = -clearance`. The pocket is a vertical prism, so
    the object lifts straight out along +Z.
 2. **Walls.** Either a Euclidean cell-square offset (sleeve: every cell within the wall
    distance of the pocket, so the outer face is at least `wall` away) or a rectangle
@@ -40,9 +42,15 @@ the XY bounds are centred, and the source bottom sits at Z = 0. No unit guessing
 The manifest's `fit` block reports the design clearance and the sampled minimum distance
 from every source vertex and triangle centroid to the output mesh. It also reports the
 blocked +Z lift rays (must be 0), the exact minimum side wall between pocket and outside
-cells, floor thickness, pocket opening and the output bounding box. Acceptance fails if the
-sampled clearance falls short of the requested value (1e-4 mm), any lift ray is blocked,
-or a wall is thinner than requested. Tests then run `inspect_fit.py` on the STL, which
+cells, floor thickness, pocket opening and the output bounding box.
+
+Vertex and centroid samples can miss a gap under the interior of a large face. So
+`cellClearanceViolations` also counts source triangle and solid cell pairs that
+overlap once the cell is grown by the clearance (less 1e-5 mm) in L-infinity. That is an
+exact separating-axis test on the solid itself, and zero violations means every
+triangle is at least the clearance from the material. Acceptance fails if the sampled
+clearance falls short of the requested value (1e-4 mm), if any cell pair violates,
+if any lift ray is blocked, or if a wall is thinner than requested. Tests then run `inspect_fit.py` on the STL, which
 casts rays to measure wall and floor thickness and template-specific probes
 (screw holes, clamp slot).
 

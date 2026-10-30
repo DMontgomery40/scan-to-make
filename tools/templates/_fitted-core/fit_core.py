@@ -70,10 +70,11 @@ def fill_diagonals(mask):
 def silhouette(bm, g, c, zmax, pad):
     """Cells of an integer XY grid (cell i spans [i*g,(i+1)*g]) whose square,
     grown by clearance c in L-infinity, meets the XY projection of any
-    triangle that starts below zmax. Uncovered cells are therefore more than
-    c from the projection in every direction. Returns (i0, j0, mask)."""
+    triangle that starts below zmax + c, where zmax is the top of all
+    material. Uncovered cells are more than c from those projections; every
+    other triangle is at least c above the material. Returns (i0, j0, mask)."""
     tris = [np.array([tuple(v.co) for v in f.verts]) for f in bm.faces]
-    tris = [t[:,:2] for t in tris if t[:,2].min() < zmax]
+    tris = [t[:,:2] for t in tris if t[:,2].min() < zmax+c]
     pts = np.concatenate(tris)
     i0 = int(math.floor((pts[:,0].min()-c)/g))-1-pad
     j0 = int(math.floor((pts[:,1].min()-c)/g))-1-pad
@@ -203,10 +204,51 @@ def samples(bm):
     return [v.co.copy() for v in bm.verts]+[sum((v.co for v in f.verts),Vector())/3 for f in bm.faces]
 
 
-def finish(a, template, stl_name, source, ext, shift, part, fit, method, limitations):
+def triangle_meets_boxes(tri, lo, hi):
+    """Separating-axis test of one triangle (3x3) against N axis-aligned boxes."""
+    centre,half = (lo+hi)/2,(hi-lo)/2
+    v = tri[None,:,:]-centre[:,None,:]
+    edges = [tri[1]-tri[0],tri[2]-tri[1],tri[0]-tri[2]]
+    axes = [np.eye(3)[k] for k in range(3)]+[np.cross(edges[0],edges[1])]
+    axes += [np.cross(np.eye(3)[k],e) for k in range(3) for e in edges]
+    hit = np.ones(len(lo),bool)
+    for axis in axes:
+        if not np.any(axis):
+            continue
+        p = v@axis
+        r = half@np.abs(axis)
+        hit &= (p.min(axis=1) <= r)&(p.max(axis=1) >= -r)
+    return hit
+
+
+def cell_clearance(source, cells, c):
+    """Exact check on the solid (the union of occupied cells): count source
+    triangle / cell pairs closer than c in L-infinity, hence possibly in
+    Euclidean distance. Catches gaps that vertex and centroid samples miss."""
+    occ,xs,ys,zs = cells
+    reach = c-1e-5
+    tested = violations = 0
+    for face in source.faces:
+        tri = np.array([tuple(v.co) for v in face.verts])
+        lo,hi = tri.min(axis=0)-reach,tri.max(axis=0)+reach
+        rng = [(int(np.searchsorted(lines[1:],lo[k],'left')),int(np.searchsorted(lines[:-1],hi[k],'right')))
+               for k,lines in enumerate((xs,ys,zs))]
+        idx = np.argwhere(occ[rng[0][0]:rng[0][1],rng[1][0]:rng[1][1],rng[2][0]:rng[2][1]])
+        if not len(idx):
+            continue
+        idx += [r[0] for r in rng]
+        box_lo = np.stack([xs[idx[:,0]],ys[idx[:,1]],zs[idx[:,2]]],axis=1)-reach
+        box_hi = np.stack([xs[idx[:,0]+1],ys[idx[:,1]+1],zs[idx[:,2]+1]],axis=1)+reach
+        tested += len(idx)
+        violations += int(triangle_meets_boxes(tri,box_lo,box_hi).sum())
+    return tested,violations
+
+
+def finish(a, template, stl_name, source, ext, shift, part, cells, fit, method, limitations):
     """Write STL and manifest with mesh-measured fit evidence; enforce acceptance."""
     out = Path(a['out'])
     write_stl(out/stl_name,part,template)
+    tested,violations = cell_clearance(source,cells,a['clearance_mm'])
     tree = BVHTree.FromBMesh(part)
     points = samples(source)
     distances = [tree.find_nearest(p)[3] for p in points]
@@ -217,6 +259,7 @@ def finish(a, template, stl_name, source, ext, shift, part, fit, method, limitat
     fit = dict(fit)
     fit.update({'designClearanceMm':a['clearance_mm'],'sampledMinimumClearanceMm':min(distances),
                 'clearanceSamples':len(points),'liftOutRaysBlocked':blocked,
+                'cellClearancePairsTested':tested,'cellClearanceViolations':violations,
                 'boundingBoxMm':{'min':lo.tolist(),'max':hi.tolist(),'extents':(hi-lo).tolist()}})
     result = {'schemaVersion':1,'template':template,'previewOnly':True,'provesPhysicalAccuracy':False,
               'blenderVersion':bpy.app.version_string,'units':'mm',
@@ -227,6 +270,8 @@ def finish(a, template, stl_name, source, ext, shift, part, fit, method, limitat
               'fit':fit,'method':method,'limitations':limitations}
     if min(distances) < a['clearance_mm']-1e-4 or blocked:
         raise ValueError('sampled clearance or lift-out acceptance failed')
+    if violations:
+        raise ValueError(f'{violations} source triangle / solid cell pairs are closer than the clearance')
     if fit['minimumSideWallMm'] < a['wall_mm']-1e-6:
         raise ValueError('wall acceptance failed')
     repair.write_json(out/'manifest.json',result)

@@ -65,6 +65,7 @@ class FittedTemplateCase(unittest.TestCase):
         self.assertGreaterEqual(fit['sampledMinimumClearanceMm'],c-1e-4)
         self.assertGreaterEqual(fit['minimumSideWallMm'],manifest['parameters']['wall_mm']-1e-9)
         self.assertEqual(fit['liftOutRaysBlocked'],0)
+        self.assertEqual(fit['cellClearanceViolations'],0)
         return out,manifest
 
     def inspect(self, name, out, manifest, wall_top, probes=(), check_probes=None):

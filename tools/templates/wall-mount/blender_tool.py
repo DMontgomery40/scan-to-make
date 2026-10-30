@@ -63,7 +63,7 @@ def generate(a):
            'backWallTotalMm':(m+p)*g,
            'screwHoles':{'requestedDiameterMm':2*radius,'centresXZMm':[[-spacing/2,zc],[spacing/2,zc]],
                          'openingSpansXZMm':spans,'containsRequestedDisc':True}}
-    core.finish(a,'wall-mount','mount.stl',source,ext,shift,part,fit,
+    core.finish(a,'wall-mount','mount.stl',source,ext,shift,part,(occ,xs,ys,zs),fit,
                 'XY silhouette of triangles below the plate top, grown by clearance in L-infinity on exact cell squares; '
                 'rectangular cup with grid-rounded walls fused to a -Y back plate; screw holes cover the requested discs',
                 ['The wall is the plane y = plateBackYMm; the object drops in along +Z from above.',

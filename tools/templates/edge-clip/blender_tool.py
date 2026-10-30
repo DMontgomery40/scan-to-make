@@ -41,7 +41,7 @@ def generate(a):
            'slotHeightMm':slot,'slotZMm':[float(zs[1]),float(zs[2])],'slotOpenAtYMm':float(ys[back]),
            'spineInnerYMm':float(ys[front-s]),'gripDepthMm':q*g,'spineThicknessMm':s*g,
            'jawThicknessMm':jaw,'clipWidthMm':(xb-xa)*g}
-    core.finish(a,'edge-clip','clip.stl',source,ext,shift,part,fit,
+    core.finish(a,'edge-clip','clip.stl',source,ext,shift,part,(occ,xs,ys,zs),fit,
                 'XY silhouette of triangles below the cup top, grown by clearance in L-infinity on exact cell squares; '
                 'rectangular cup whose floor is the upper jaw of a C-clamp; slot open toward -Y, spine at +Y',
                 ['The edge enters the slot from -Y; the cup sits above the desk or shelf surface.',

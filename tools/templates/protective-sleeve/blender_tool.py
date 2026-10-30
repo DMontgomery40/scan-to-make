@@ -19,12 +19,13 @@ def generate(a):
     outer = core.dilate(pocket,g,w)
     occ = np.stack([outer,outer&~pocket],axis=2)
     nx,ny = pocket.shape
-    part = core.solid(occ,core.grid_lines(i0,nx,g),core.grid_lines(j0,ny,g),np.array([-c-f,-c,top]),'sleeve')
+    cells = (occ,core.grid_lines(i0,nx,g),core.grid_lines(j0,ny,g),np.array([-c-f,-c,top]))
+    part = core.solid(*cells,'sleeve')
     pi0,pi1,pj0,pj1 = core.bbox_cells(pocket)
     fit = {'minimumSideWallMm':core.min_gap(pocket,~outer,g),'floorThicknessMm':f,
            'pocketOpeningMm':[(pi1-pi0)*g,(pj1-pj0)*g],'pocketDepthMm':top+c,
            'sleeveTopZMm':top,'objectExposedAboveSleeveMm':float(ext[2])-top}
-    core.finish(a,'protective-sleeve','sleeve.stl',source,ext,shift,part,fit,
+    core.finish(a,'protective-sleeve','sleeve.stl',source,ext,shift,part,cells,fit,
                 'XY silhouette of triangles below the sleeve top, grown by clearance in L-infinity on exact cell squares; '
                 'Euclidean cell-square wall offset; extruded open-top prism on a solid floor',
                 ['Prismatic pocket follows the widest silhouette below the sleeve top; it is loose around narrower sections.',
