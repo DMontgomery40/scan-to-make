@@ -213,8 +213,9 @@ def repair(obj,bm,a):
             # Signed tetrahedron sum; reject volume ranking of open components.
             if any(not e.is_manifold for v in group for e in v.link_edges):
                 raise ValueError("volume floater metric requires closed components; use area")
+            keep = {v.index for v in group}
             part = bm.copy()
-            bmesh.ops.delete(part,geom=[v for v in part.verts if v.index not in {v.index for v in group}],context="VERTS")
+            bmesh.ops.delete(part,geom=[v for v in part.verts if v.index not in keep],context="VERTS")
             normals(part)
             score = abs(part.calc_volume(signed=True))
             part.free()
