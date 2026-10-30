@@ -60,7 +60,8 @@ export function drawerPatch(
       dimensions[key] = {
         ...old,
         nominalMm: value,
-        lowerMm: value - low,
+        // Sizes are nonnegative; a small clearance keeps a zero lower bound.
+        lowerMm: Math.max(0, value - low),
         upperMm: value + high,
         source: old.source === 'reference' ? 'reference' : 'design',
         sourceId: `drawer-design-${key}-r${fit.revision + 1}`,

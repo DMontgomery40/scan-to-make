@@ -1,6 +1,6 @@
 # Scan to Make: mobile shell (UI-001)
 
-React Native 0.87 (TypeScript, Hermes, New Architecture) app with an isolated D004 capture/preview harness. The consumer UI supports a general project brief and an explicitly selected cup-holder measurement study. Custom capture/generation and printing are not implemented; the separate developer harness measures a headless AR session.
+React Native 0.87 (TypeScript, Hermes, New Architecture) app with an isolated D004 capture/preview harness. The consumer UI supports a general project brief and an explicitly selected cup-holder measurement study. Saved projects support guided Object Capture on supported iOS hardware and USDZ import through the companion. General custom generation and printing are not implemented; the separate developer harness provides a same-session visible ARKit probe on iOS and offscreen ARCore sampling on Android.
 
 ## Layout
 
@@ -29,6 +29,44 @@ HERMES=/path/to/hermes npm run hermes:probes   # core probes on a Hermes VM (not
 `@scan-to-make/contracts` is linked with a `file:` dependency. Metro watches `packages/contracts` and resolves Babel helpers from this app's `node_modules`. Jest maps the package to its built `dist/`. Babel adds `@babel/plugin-transform-export-namespace-from` for zod 4's ESM build.
 
 `hermes:probes` needs a `hermes` CLI built from the tag matching `node_modules/hermes-compiler`. For RN 0.87.1 that is `hermes-v250829098.0.17`.
+
+## Android local build and persistence check
+
+Use an already provisioned Android SDK and JDK 17 (the React Native Gradle
+plugin requests a Java 17 toolchain). The repository does not pin a JDK 21
+runtime. The current scaffold requests
+SDK platform 37, Build Tools 37.0.0 and NDK 27.1.12297006. Set `ANDROID_HOME` to
+that SDK directory; keep local SDK paths and license state outside Git. The
+Gradle wrapper pins Gradle 9.4.1. SDK installation and license acceptance are
+separate environment setup, not something the build instructions automate.
+
+From this directory, after installing dependencies:
+
+```sh
+cd android
+./gradlew :app:assembleRelease -PreactNativeArchitectures=arm64-v8a
+```
+
+Use the ABI matching the selected emulator (`arm64-v8a` on an Apple Silicon
+emulator, or `x86_64` for an x86 emulator). The APK is
+`android/app/build/outputs/apk/release/app-release.apk`, relative to this mobile
+app directory. This local Release variant bundles JavaScript and uses the
+repository's development signing key; it is not a production distribution.
+
+With an explicitly selected, already running emulator, install the APK and
+launch `com.scantomake/.MainActivity`. Record the emulator serial, Android API
+and ABI with the build head and APK hash. In the app, create a synthetic general
+project with distinctive object, surroundings and addition text, then Save
+draft. Force-stop `com.scantomake`, launch it again, and reopen the saved project.
+Verify every value, edit and save the text, then repeat force-stop/relaunch and
+verify the edited values. Do not clear app data or uninstall between restarts.
+Also save an explicitly labelled drawer study with distinctive dimensions and
+verify it reopens after restart. This proves local synthetic-project retention;
+it does not prove camera capture or physical fit.
+
+Android generated-artifact transport, mesh viewing and STL export remain
+unavailable. The Android ARCore harness is offscreen and cannot qualify visible
+anchored preview. Do not grant camera access for the persistence walkthrough.
 
 ## D004 device run (needs the Mac and real phones)
 
@@ -67,14 +105,13 @@ Mock sources (simulator, emulator without ARCore, tests) always score "Not yet k
 ## Known gaps
 
 - The iOS developer harness has a same-session visible ARKit preview and known anchor probe; physical-device performance and stability remain unqualified. Android ARCore still runs on an offscreen GL context and cannot satisfy the visible-preview report gates. Depth and mesh are configured only where supported, with observed workload reported separately.
-- Native capture start/stop is available in the developer spike harness only;
-  the consumer capture screen currently checks support and accepts manual sizes.
+- Saved projects support guided object capture on supported iOS hardware. The separate measured-example screen accepts manual sizes; scans do not automatically supply fit measurements.
 - The design dimensions (support height, wall, clearance) are seeded from the contracts fixture until FIT-001 supplies template defaults.
 - Local projects are device-local and unencrypted; uninstalling the app removes them. No cloud sync, account, import/export backup or cross-device recovery is implemented.
 
 ## Consumer flow
 
-Home starts with a general project idea: object, surroundings/constraints, and the addition to make. The brief remains editable across navigation and can be shared as text. Save draft preserves incomplete text locally. Review also saves before continuing. No scan data, generated geometry or verified fit is claimed. Empty or whitespace-only fields block review. Incomplete drafts reopen in the editor.
+Home starts with a general project idea: object, surroundings/constraints, and the addition to make. The brief remains editable across navigation and can be shared as text. Save draft preserves incomplete text locally. Review also saves before continuing. The brief alone does not establish scan data, generated geometry or verified fit. Empty or whitespace-only fields block review. Incomplete drafts reopen in the editor.
 
 The cup-holder example is a separate, explicitly selected measurement study. It preserves all four contract measurements, tool uncertainty and expected-revision edits. Its proportional sketch is input evidence, not a printable part. Measurement summaries can be shared; no print action is exposed.
 
@@ -105,7 +142,8 @@ npm ci --prefix services/companion
 npm run generate:serve --prefix services/companion
 ```
 
-Generation posts the complete immutable saved fit to `127.0.0.1:9077`. The iOS
+Generation posts the complete immutable saved fit to the paired companion. The
+legacy fresh-Simulator path uses `127.0.0.1:9077`. The iOS
 bridge limits both declared and streamed response size before JSON reaches JS,
 refuses redirects, and supports cancellation and a 40-second resource deadline.
 The portable verifier checks source equality, canonical base64, byte length and
@@ -130,9 +168,9 @@ Missing/damaged files block review/export, and stale or failed writes retain the
 saved record. Design acceptance is neither physical-fit evidence nor print
 permission. No printer action exists in this flow.
 
-The generation bridge, mesh and STL share are currently iOS-only. The fixed
-loopback endpoint is a same-Mac Simulator prototype, not real-device pairing,
-hosted transport or authentication. Android still supports local project storage;
+The generation bridge, mesh and STL share are currently iOS-only. Companion
+pairing below adds private authenticated HTTPS transport; actual physical-phone
+and tailnet connectivity remain separately qualified. Android still supports local project storage;
 its generated-preview action reports unavailable. ASCII STL rendering, cache
 management and real-device transport are separate work.
 
@@ -177,3 +215,294 @@ placement, retained-content rendering, two-minute native performance, thermal
 behavior and physical stability require a separately authorized real-device run.
 No signing changes, access grants, pairing, cloud or printer operations are
 provided by this milestone.
+
+## Companion pairing (iOS)
+
+Open **Connect your companion** on Home or **Companion connection** from the
+current drawer editor. The connection screen overlays the editor, preserving
+unsaved entries. It offers existing-Tailscale and first-time setup guidance;
+opening the official guide is explicit. The app does not install Tailscale,
+sign in, approve devices, grant network access or configure Serve/Funnel.
+
+Enter the exact private HTTPS `*.ts.net` origin and one-time code, or paste the
+companion's invitation JSON (`version`, `baseUrl`, `code`, `expiresAt`). This is
+pasted QR **payload** support, not camera QR scanning. Invitations expire after
+five minutes. The native module exchanges the code, validates the response and
+stores the origin-bound credential in iOS Keychain with
+`kSecAttrAccessibleWhenUnlockedThisDeviceOnly` and synchronization disabled.
+The token never enters JavaScript, project storage, reports or application logs.
+The native module returns only connection metadata. Pairing survives ordinary
+app termination; its 30-day expiry requires a new invitation. Keychain behavior
+after uninstall/restore is OS-controlled, so use Disconnect before removing the
+app when the credential should be erased.
+
+Health and generation requests read the exact stored origin and send both
+Bearer authentication and X-Scan-Device. URLs cannot contain userinfo, paths,
+queries, fragments or custom ports. Normal HTTPS certificate validation remains
+enabled; redirects are refused and credentials never follow artifact URLs.
+Native bounded receive limits still apply before JSON parsing. Re-pairing or
+disconnecting cancels active generation; a changed credential also rejects a
+late response. Rejected/revoked credentials never fall back to anonymous HTTP.
+Network, certificate, denial, expiry and secure-storage errors have distinct
+recovery guidance. Disconnect erases this device's Keychain item; host-side
+revocation remains a separate companion-operator action. Neither changes a
+project draft or grants printer access. Android pairing remains unavailable.
+
+### Isolated Simulator fixture
+
+After building `services/project` and `services/companion`, run from repo root:
+
+```sh
+node apps/mobile/scripts/pairing-fixture/server.mjs
+```
+
+The fixture binds only `127.0.0.1:9078`, forwards to a real isolated authenticated
+generation server, and uses a synthetic allowlisted identity. Its printed path
+points to a private temporary directory containing the invitation and test mode;
+credentials are never printed. Paste `invitation.json` into the app. `SIGUSR1`
+creates a fresh invitation; `SIGUSR2` revokes the fixture's devices. Set the
+private `mode` file to `offline`, `redirect`, `forbidden` or `ok` to exercise
+recovery. Stop the fixture after testing and remove its private directory.
+
+Only Simulator builds accept the fixed HTTP fixture origin. They also accept
+`https://127.0.0.1:9079` for an isolated untrusted-certificate failure test;
+certificate validation is never bypassed. These origins are rejected in device
+builds. The legacy same-Mac unauthenticated generation path on port9077 remains
+available only in Simulator before any explicit companion selection/disconnect;
+after selection it cannot be used as a fallback. Local fixture evidence is not
+physical-phone/Tailscale/HTTPS success evidence.
+
+Checks: `npm run typecheck`, `npm run lint`, `npm test -- --runInBand`, and
+`python3 scripts/native-pairing-tests/test.py` on macOS. Native seam tests compile
+production validation/metadata/disconnect code with a Keychain API double;
+actual secure persistence requires the Simulator restart walkthrough. No tokens
+or invitations should be included in screenshots, test output or public reports.
+
+### Retained project captures on iOS
+
+Open **Your saved projects → Project captures**. Connect with a capture-scoped
+companion invitation, synchronize the saved project, then choose a USDZ file
+(up to 32 MiB) from Files. Import retains the original, converted OBJ and
+conversion report. Reopen verifies the current project revision and retained
+bundle before review. **Review converted mesh** renders the verified OBJ with
+native camera controls. Quick Look opens the original USDZ where the platform
+supports it; Simulator may display file metadata only. Export uses the native
+share sheet and exact verified bytes, without converting formats.
+
+Full portable SavedProject 0.2 snapshots preserve fit, preview and acceptance
+metadata. Companion acknowledgments and capture handles live separately in
+Application Support/CaptureSync, namespaced by companion origin and project.
+A replacement pairing at the same origin keeps those handles; every request
+is pinned to the exact current pairing. Credentials remain in Keychain and
+never cross into JavaScript. Local edits made during a request are preserved.
+Conflicts stop synchronization and leave the local project available to review.
+Editing a project makes prior captures unavailable for current-version use;
+historical bytes remain retained. Captures do not accept a printable design or
+establish dimensional accuracy, completeness or physical fit.
+
+Only explicit busy responses to GET are retried (three attempts, bounded
+backoff). Import POST is never retried automatically. Before POST, an
+unconfirmed-import marker is flushed to local storage. A lost response leaves
+that marker across restarts; an explicit confirmation permits a separate import
+and explains that the earlier capture may exist. No server-side listing or
+idempotency recovery is currently promised. Capture permissions denied or
+revoked require an appropriate new invitation through **Connect companion**.
+
+For isolated Simulator execution, build the companion and its dependencies,
+then run the existing pairing fixture with `SCAN_CAPTURE_FIXTURE=1` and
+`SCAN_TO_MAKE_CAPTURE_PYTHON` pointing to a Python 3.12 environment containing
+usd-core 26.8. It creates private temporary projects/captures and explicitly
+scoped fixture invitations. Use the ordinary UI to pair and import a public or
+synthetic USDZ; terminate and relaunch the app, reopen the capture, review its
+mesh, then Save to Files and independently compare SHA-256 and byte length.
+The app's Documents folder is available in Files; credentials, project storage,
+private capture cache and synchronization metadata are not in that folder.
+This proves the simulator workflow only, not private-network deployment or fit.
+
+### Native capture download fault checks
+
+On an Apple Silicon Mac with full Xcode, an already booted iOS Simulator,
+compiled companion dependencies and the converter's Python environment:
+
+```sh
+SCAN_TO_MAKE_CAPTURE_PYTHON=/path/to/python-with-usd-core \
+  python3 apps/mobile/scripts/native-capture-fault-tests/test.py \
+  --simulator BOOTED_SIMULATOR_UUID --evidence /tmp/capture-fault-evidence
+```
+
+Run from the repository root with port 9078 free. The harness creates a
+separate disposable Simulator app, pairs through the real fixture route,
+synchronizes a synthetic project and converts a synthetic two-layer USDZ.
+It compiles the unchanged production `RetainedCaptureBridge.mm` into a UIKit
+host. React dispatch and pairing-record storage are test seams; URLSession,
+byte verification, cache writes and SceneKit presentation run natively.
+This check does not establish Keychain persistence, physical capture accuracy
+or private-network deployment.
+
+Five cases exercise wrong hash, wrong content type, corrupted body, oversized
+chunked body, and cancellation after receiving partial bytes. Each must reject,
+leave no verified cache, refuse presentation, then successfully retry on the
+same bridge and present the verified mesh. Only explicit 429 responses to the
+idempotent retry GET may be retried. Imports are never retried automatically.
+The native run has a 60-second bound; compilation and setup also have timeouts.
+Receipts contain hashes and outcomes, never credentials. The harness removes
+its app, temporary credentials and fixture after the run, preserving other apps.
+
+Fault controls require `SCAN_NATIVE_FAULTS=1`; the fixture writes a random
+control key in its private directory. Its test-only mode endpoint requires
+that key. Artifact corruption happens only after the real authenticated route
+returns 200. This opt-in control is confined to the loopback fixture.
+
+### Prepared-file native foundation
+
+`PreparedFilesClient` validates an inspected job's complete structured record and
+digest, current project/revision and accepted design identity. Its input is an
+already acknowledged portable snapshot and a job handle. Local edits or a pairing
+change during GET prevent export. Only explicit 429 responses to GET retry, at
+most three attempts. The client never creates a preparation request.
+
+`PreparedFileBridge` accepts only exact prepared-job collection/metadata/download GET routes,
+current ETags and 3MF/G-code artifact identities. It keeps credentials native,
+refuses redirects, bounds streams, verifies headers/hash/length and exports exact
+verified bytes into Documents as `Imported-sliced-<sha256>.<extension>`.
+Capture routes and their existing bridge are unchanged. Native pairing accepts
+known explicit capability sets, including prepared-only invitations, without
+adding generation permission. Run CocoaPods installation when rebuilding the app
+so its existing native-source glob includes the new bridge.
+
+From repository root, after building companion dependencies:
+
+```sh
+python3 apps/mobile/scripts/native-prepared-file-tests/test.py \
+  --simulator BOOTED_SIMULATOR_UUID --evidence /tmp/native-prepared-evidence
+```
+
+The separate disposable Simulator host compiles the production pairing and
+prepared-file bridges. It uses real scoped pairing and Simulator Keychain,
+checks GET/download route restrictions, exits, relaunches, reopens and exports
+both supported media types. The Python harness independently compares exported
+bytes with retained server bytes. Runtime is bounded and the test disconnects,
+removes its app and deletes fixture credentials. React dispatch is a harness
+seam; this is native foundation proof, not an integrated consumer screen.
+
+The fixture uses synthetic bytes and a protocol inspector, not genuine sliced
+geometry. Its settings digest hashes an actual synthetic settings JSON file;
+it does not prove slicer provenance, derivation from the accepted design, physical
+compatibility or print authorization. The client never creates a preparation
+request or dispatch intent. Native structured validation can also consume the
+actual fixture responses during Jest:
+
+```sh
+cd apps/mobile
+NATIVE_PREPARED_CONTRACT=/tmp/native-prepared-evidence/fixture-contract.json \
+  npm test -- --runInBand __tests__/preparedFiles.test.ts
+```
+
+### Inspected files browser
+
+Accepted saved projects expose **Inspected files** in **Your projects**. Refresh
+synchronizes the exact portable project snapshot, then discovers handles under
+its current ETag/revision. Pages contain at most 20 handles; empty pages may
+still continue. The browser bounds retained handles at 1,000 and treats listing
+as discovery, not verified file content. Selecting a handle performs a fresh
+verified GET and matches its complete job/digest/artifact/model/plate before
+showing file inspection or enabling exact-byte export. Save file writes into
+the app’s Documents folder, accessible in Files.
+
+A stale cursor removes old handles and offers Refresh. Refresh replaces pages.
+Opening connection settings, leaving the foreground or leaving the screen
+invalidates its selection and pending results. Local project and pairing changes
+are checked again before listing, reviewing and exporting. Imported-file copy does not claim derivation from the accepted design. A verified
+optional production record identifies companion slicing, the exact accepted STL,
+retained exported-settings bytes, manifest and slicer identity. Its canonical job
+digest includes these fields. The client bounds and validates every reference and
+requires the settings digest to match the selected settings. Settings identity is
+not calibration or physical-fit proof. There is no preparation or dispatch UI.
+
+Discovery explicitly sends `productionVersion=1`. Older companions remain usable:
+only an explicit first-page HTTP 400 `invalid-request` permits one retry without
+that query. Continuation pages preserve the resulting mode; refresh tries the
+current capability again. Authentication, stale state, malformed success responses
+and pagination failures never trigger a downgrade. Metadata and download routes
+never accept the discovery query.
+
+For an isolated ordinary-app navigation fixture, start the existing loopback
+fixture with `SCAN_PREPARED_FIXTURE=1 SCAN_PREPARED_FIXTURE_COUNT=21` after building
+the companion. The optional count is bounded to 2–50 and defaults to two. Seed only
+a disposable Simulator app's saved-project store with the fixture's exact
+`prepared.json` snapshot, pair through the normal invitation screen, and navigate
+Your projects → Inspected files. Verify first/second pages, refresh, per-file
+inspection, process restart and exported bytes against `prepared/<jobId>/printable.bin`.
+Moving one fixture job directory outside `prepared` between pages exercises
+cursor-stale recovery. Keep credentials and runtime evidence outside Git.
+The native bridge harness also exercises two actual collection pages and strict
+query rejection on both process runs.
+
+To replay a retained operator-produced bundle alongside the synthetic imported
+files, set `SCAN_PRODUCED_FIXTURE_DIR` to a private directory containing `job.json`,
+`source.stl`, `settings.json`, `production.json` and `printable.bin`. The fixture
+checks the accepted source identity and reopens the exact bundle through the real
+store; it does not rerun slicing or inspection. The native harness accepts the same
+directory with `--produced-fixture /private/retained-job`, exercises compatible
+collection pagination, reopens every file after process restart and independently
+compares exports. Keep those artifacts and credentials outside Git. This replay
+proves native consumption of retained evidence, not physical fit or print safety.
+
+### Native scan from a saved project
+
+On iOS, **Project captures → Scan object** starts the existing guided Object
+Capture flow. Scanning does not require pairing. After reconstruction, **Add to
+this project** explicitly imports the verified USDZ through the existing capture
+importer and reopens its retained record. **Keep for later** leaves a local draft;
+Project captures lists these drafts after an app relaunch. Files import remains
+available on supported iOS versions when the hardware cannot run Object Capture.
+
+The whole iOS app currently requires **iOS 18 or later**, including Files-import
+users. This is a pre-release compatibility decision to reuse the sample's
+`hideObjectReticle` and `showShotLocations` affordances. Basic Object Capture and
+cancellation alone do not require iOS 18. Revisit the whole-app minimum before a
+public release; iOS 15–17 are currently excluded.
+
+A native owner retains capture and reconstruction sessions independently of the
+React bridge and presentation. Closing, backgrounding, or bridge invalidation
+requests cancellation once. New scans remain blocked until a terminal SDK event;
+a ten-second diagnostic reports a pending stop without forcing release. Terminal
+state is not proof that the physical camera is available to another application.
+The standalone sample keeps its original entrypoint and remains separately
+buildable. The app compiles its shared engine once, copies the existing tutorial
+videos/localization, and generates an asset catalog excluding only the standalone
+sample AppIcon to avoid colliding with the app's icon.
+
+Private drafts live in `Documents/NativeCaptures/<UUID>/`: original images,
+checkpoints, reconstruction output, diagnostics, and an atomic manifest. The
+manifest retains the originating project, exact revision/snapshot, pairing
+context (or no pairing), outcome, and completed model identity. JavaScript receives
+an opaque run ID and descriptor, not filesystem paths or photographs. A narrow
+native adoption method opens every mutable directory without following symlinks,
+verifies the ready manifest and fixed USDZ output, and copies verified bytes into
+the existing cache. Import remains limited to 32 MiB; larger models stay local.
+No original capture files are deleted by stopping, keeping, or importing a scan.
+
+A changed project or pairing refuses the original handoff. **Choose destination**
+requires explicit confirmation of the current project version/connection. The
+importer rechecks that selected destination across asynchronous work and retains
+its existing ETag, identity, and ambiguous-POST safeguards. There is no automatic
+upload, destination rebinding, or retry of an uncertain import. Local app storage
+is not an encrypted backup; Files access and uninstall behavior are unchanged.
+Capturing, conversion, and reopening do not establish dimensional accuracy,
+surface completeness, or physical fit.
+
+Focused verification (all generated evidence and fixtures should remain private):
+
+```sh
+python3 scripts/native-object-capture-tests/test.py --evidence /private/output/native-lifecycle
+python3 scripts/native-capture-fault-tests/test.py --adoption-only \
+  --simulator OWNED_SIMULATOR_UUID --evidence /private/output/native-adoption
+```
+
+The lifecycle harness compiles production owner/store code and extracts unchanged
+model lifecycle method bodies against controllable SDK streams. The adoption
+harness compiles the production Objective-C bridge inside a disposable Simulator
+app. Neither establishes physical camera behavior. Native capture on a physical
+device, actual reconstruction, import/reopen, and camera recovery require a
+separate attended acceptance run.

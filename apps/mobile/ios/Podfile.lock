@@ -11,6 +11,28 @@ PODS:
     - ReactNativeDependencies
   - glog (0.3.5):
     - ReactNativeDependencies
+  - GuidedObjectCapture (0.0.1):
+    - hermes-engine
+    - RCTRequired
+    - RCTTypeSafety
+    - React-bridging
+    - React-Core
+    - React-Core-prebuilt
+    - React-debug
+    - React-Fabric
+    - React-featureflags
+    - React-graphics
+    - React-ImageManager
+    - React-jsi
+    - React-NativeModulesApple
+    - React-RCTFabric
+    - React-renderercss
+    - React-rendererdebug
+    - React-utils
+    - ReactCodegen
+    - ReactCommon/turbomodule/core
+    - ReactNativeDependencies
+    - Yoga
   - hermes-engine (250829098.0.17):
     - hermes-engine/Pre-built (= 250829098.0.17)
   - hermes-engine/Pre-built (250829098.0.17)
@@ -1729,6 +1751,7 @@ DEPENDENCIES:
   - FBLazyVector (from `build/rncore-facades/FBLazyVector`)
   - fmt (from `build/rndeps-facades/fmt`)
   - glog (from `build/rndeps-facades/glog`)
+  - "GuidedObjectCapture (from `../node_modules/@scan-to-make/object-capture`)"
   - hermes-engine (from `../node_modules/react-native/sdks/hermes-engine/hermes-engine.podspec`)
   - "LocalProjectStorage (from `../node_modules/@scan-to-make/local-project-storage`)"
   - RCT-Folly (from `build/rndeps-facades/RCT-Folly`)
@@ -1826,6 +1849,8 @@ EXTERNAL SOURCES:
     :path: build/rndeps-facades/fmt
   glog:
     :path: build/rndeps-facades/glog
+  GuidedObjectCapture:
+    :path: "../node_modules/@scan-to-make/object-capture"
   hermes-engine:
     :podspec: "../node_modules/react-native/sdks/hermes-engine/hermes-engine.podspec"
     :tag: hermes-v250829098.0.17
@@ -1999,8 +2024,9 @@ SPEC CHECKSUMS:
   FBLazyVector: e08a27053b503eeb756ea4bd75d570d2f2522a1b
   fmt: ba0886e864ebb21d14c98b2e12e164b8002f5b93
   glog: 3cf7cb46f743c4bc758ae3e6d9c15bd1b4cfd6d4
+  GuidedObjectCapture: 380d6a0cc680046b21cb01226ac8af6f4d03e4c8
   hermes-engine: 63c5db7d529c36335fada6582fd293ae2a105d77
-  LocalProjectStorage: 3d4e177dce521f266cc9b48205ea408d6c64862a
+  LocalProjectStorage: 355fd748453316420f4fc313282481fe312bdae9
   RCT-Folly: 82921e585c0400eda46fac1068297aa9dfb035e4
   RCTDeprecation: 5cc865306ce4974b7a57ddbc575fd1f3fef41957
   RCTRequired: ea6f2c41f2670961ce9a48a4bf17a190dd53e493
@@ -2082,6 +2108,6 @@ SPEC CHECKSUMS:
   SocketRocket: 37aec555668fb852ec12e3c0de59a86ca58f0871
   Yoga: d1c536142c5ff8ec8cd856ab2a7c227a1d875c8e
 
-PODFILE CHECKSUM: 140e2967e0f26c9b3304f6a8f6b05b1cd093464f
+PODFILE CHECKSUM: 5663cc391251c743cac881297b4b1da0af9d4b6f
 
 COCOAPODS: 1.15.2

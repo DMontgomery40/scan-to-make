@@ -1,0 +1,46 @@
+name: Object Capture evaluation checks
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'apps/mobile/modules/object-capture/**'
+      - 'apps/mobile/scripts/native-object-capture-tests/**'
+      - '.github/workflows/object-capture.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'apps/mobile/modules/object-capture/**'
+      - 'apps/mobile/scripts/native-object-capture-tests/**'
+      - '.github/workflows/object-capture.yml'
+permissions:
+  contents: read
+jobs:
+  object-capture:
+    name: Unsigned build and policy checks
+    runs-on: macos-latest
+    timeout-minutes: 30
+    env:
+      DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
+    defaults:
+      run:
+        working-directory: apps/mobile/modules/object-capture
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Show Xcode and Swift versions
+        run: |
+          xcodebuild -version
+          swift --version
+      - name: Run capture watchdog policy checks
+        run: ./tests/watchdog/run_watchdog_checks.sh
+      - name: Run exporter tests
+        run: python3 -m unittest discover -s tests -v
+      - name: Run native lifecycle checks
+        run: python3 ../../scripts/native-object-capture-tests/test.py --evidence "${{ runner.temp }}/native-object-capture"
+      - name: Build unsigned iPhoneOS Release
+        run: |
+          xcodebuild -project GuidedCaptureSample/GuidedCaptureSample.xcodeproj \
+            -scheme GuidedCaptureSample -configuration Release \
+            -destination 'generic/platform=iOS' -derivedDataPath "${{ runner.temp }}/capture-evaluation" \
+            -jobs 2 CODE_SIGNING_ALLOWED=NO build

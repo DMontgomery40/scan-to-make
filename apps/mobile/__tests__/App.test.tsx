@@ -656,3 +656,57 @@ test('brief edits after drawer attachment save at the current revision and prese
   expect(after.revision).toBe(before.revision + 1);
   expect(texts(tree)).toContain('Saved on this device');
 });
+
+test('companion overlay preserves an unsaved drawer edit across disconnect', async () => {
+  const { NativeModules } = require('react-native');
+  NativeModules.CompanionPairing = {
+    status: async () => ({
+      state: 'paired',
+      baseUrl: 'https://host.example.ts.net',
+      expiresAt: 2000000000000,
+    }),
+    disconnect: jest.fn(async () => ({ state: 'disconnected' })),
+    cancel: async () => {},
+  };
+  const store = testStore();
+  let tree!: ReactTestRenderer.ReactTestRenderer;
+  await act(async () => {
+    tree = ReactTestRenderer.create(<App repository={store} />);
+  });
+  await press(tree, 'Explore drawer organizer');
+  await act(async () =>
+    tree.root
+      .findByProps({ accessibilityLabel: 'Drawer width, millimetres' })
+      .props.onChangeText('321'),
+  );
+  await press(tree, 'Companion connection');
+  await press(tree, 'Disconnect this device');
+  await press(tree, 'Done');
+  expect(
+    tree.root.findByProps({ accessibilityLabel: 'Drawer width, millimetres' })
+      .props.value,
+  ).toBe('321');
+  await press(tree, 'Save drawer sizes');
+  const project = await onlyProject(store);
+  expect(JSON.stringify(project.fit)).toContain('321');
+  expect(JSON.stringify(project)).not.toContain('host.example.ts.net');
+  expect(NativeModules.CompanionPairing.disconnect).toHaveBeenCalledTimes(1);
+  await act(async () => tree.unmount());
+  delete NativeModules.CompanionPairing;
+});
+
+test('only accepted saved projects expose the inspected files browser', async () => {
+  const store=testStore();
+  const fit=require('../../../packages/contracts/fixtures/tapered-holder.json');
+  await store.create({id:fit.id,fit,brief:{object:'Accepted fixture',context:'Synthetic',addition:'Holder'}});
+  let tree!:ReactTestRenderer.ReactTestRenderer;
+  await act(async()=>{tree=ReactTestRenderer.create(<App repository={store}/>);});
+  await press(tree,'Your saved projects');expect(texts(tree)).not.toContain('Inspected files');
+  const artifact={sha256:'a'.repeat(64),byteLength:9,mediaType:'model/stl'};
+  await store.change(fit.id,0,{kind:'attach-preview',sourceFit:fit,artifact});
+  await store.change(fit.id,1,{kind:'accept-preview',sourceFit:fit,artifact});
+  await press(tree,'Refresh projects');await press(tree,'Inspected files');
+  expect(texts(tree)).toContain('Inspected print files for this saved project.');
+  await press(tree,'Back');expect(texts(tree)).toContain('Your projects');
+  await act(async()=>tree.unmount());
+});

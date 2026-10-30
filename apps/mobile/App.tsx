@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Alert, BackHandler, StatusBar, Text } from 'react-native';
+import { Alert, BackHandler, StatusBar, Text, Modal } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import {
   applyFitSpecPatch,
@@ -15,12 +15,15 @@ import type {
 import { seedSpec } from './src/fit/fitDraft';
 import { StaleRevisionError } from './src/project/fitSpecStore';
 import { localSavedProjects, newProjectId } from './src/project/savedProjects';
+import { CompanionScreen } from './src/screens/CompanionScreen';
 import { DrawerScreen } from './src/screens/DrawerScreen';
 import { CaptureScreen } from './src/screens/CaptureScreen';
 import { HomeScreen } from './src/screens/HomeScreen';
 import { PreviewScreen } from './src/screens/PreviewScreen';
 import { AboutScreen } from './src/screens/AboutScreen';
 import { BriefScreen, BriefReviewScreen } from './src/screens/BriefScreen';
+import { RetainedCapturesScreen } from './src/screens/RetainedCapturesScreen';
+import { InspectedFilesScreen } from './src/screens/InspectedFilesScreen';
 import { ProjectsScreen } from './src/screens/ProjectsScreen';
 import {
   briefComplete,
@@ -39,6 +42,8 @@ type Route =
   | 'preview'
   | 'about'
   | 'spike'
+  | 'inspectedFiles'
+  | 'retainedCaptures'
   | 'projects'
   | 'drawer';
 const PARENT: Record<Route, Route | null> = {
@@ -50,6 +55,8 @@ const PARENT: Record<Route, Route | null> = {
   preview: 'capture',
   spike: 'about',
   projects: 'home',
+  retainedCaptures: 'projects',
+  inspectedFiles: 'projects',
   drawer: 'home',
 };
 const failure = (result: WriteProjectResult) =>
@@ -63,6 +70,7 @@ const failure = (result: WriteProjectResult) =>
 
 function App({ repository: injected }: { repository?: SavedProjects }) {
   const [repository] = useState(() => injected ?? localSavedProjects());
+  const [companionOpen, setCompanionOpen] = useState(false);
   const [route, setRoute] = useState<Route>('home');
   const [hydrated, setHydrated] = useState(false);
   const [listing, setListing] = useState<ListProjectsResult | null>(null);
@@ -70,6 +78,7 @@ function App({ repository: injected }: { repository?: SavedProjects }) {
   const [brief, setBrief] = useState<ProjectBrief>(emptyBrief);
   const [measured, setMeasured] = useState<SavedProject | null>(null);
   const [drawer, setDrawer] = useState<SavedProject | null>(null);
+  const [captureProjectId, setCaptureProjectId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState('Not saved yet');
   const [saveFailed, setSaveFailed] = useState(false);
@@ -146,7 +155,9 @@ function App({ repository: injected }: { repository?: SavedProjects }) {
     setDrawer(project);
     // The brief and drawer routes can display the same saved project. Keep its
     // revision and fit current without replacing an unrelated or unsaved brief.
-    setBriefProject(current => current?.id === project.id ? project : current);
+    setBriefProject(current =>
+      current?.id === project.id ? project : current,
+    );
   };
   const openProject = async (id: string) => {
     setOpening(true);
@@ -282,6 +293,7 @@ function App({ repository: injected }: { repository?: SavedProjects }) {
       case 'drawer':
         screen = (
           <DrawerScreen
+            onCompanion={() => setCompanionOpen(true)}
             initial={drawer}
             repository={repository}
             onProject={updateDrawer}
@@ -306,12 +318,47 @@ function App({ repository: injected }: { repository?: SavedProjects }) {
           />
         );
         break;
+      case 'inspectedFiles':
+        screen = captureProjectId ? (
+          <InspectedFilesScreen
+            id={captureProjectId}
+            repository={repository}
+            paused={companionOpen}
+            onBack={() => {
+              refresh();
+              setRoute('projects');
+            }}
+            onCompanion={() => setCompanionOpen(true)}
+          />
+        ) : null;
+        break;
+      case 'retainedCaptures':
+        screen = captureProjectId ? (
+          <RetainedCapturesScreen
+            id={captureProjectId}
+            repository={repository}
+            onBack={() => {
+              refresh();
+              setRoute('projects');
+            }}
+            onCompanion={() => setCompanionOpen(true)}
+          />
+        ) : null;
+        break;
       case 'projects':
         screen = (
           <ProjectsScreen
             result={listing}
             error={openError}
             onOpen={openProject}
+            onInspected={id => {
+              setCaptureProjectId(id);
+              setRoute('inspectedFiles');
+            }}
+            onCaptures={id => {
+              setCaptureProjectId(id);
+              setRoute('retainedCaptures');
+            }}
             onBack={() => setRoute('home')}
             onRetry={refresh}
           />
@@ -320,6 +367,7 @@ function App({ repository: injected }: { repository?: SavedProjects }) {
       case 'about':
         screen = (
           <AboutScreen
+            onCompanion={() => setCompanionOpen(true)}
             onBack={() => setRoute('home')}
             onOpenSpike={() => setRoute('spike')}
           />
@@ -355,6 +403,7 @@ function App({ repository: injected }: { repository?: SavedProjects }) {
       default:
         screen = (
           <HomeScreen
+            onCompanion={() => setCompanionOpen(true)}
             onDrawer={() => {
               setDrawer(null);
               setRoute('drawer');
@@ -391,6 +440,14 @@ function App({ repository: injected }: { repository?: SavedProjects }) {
     <SafeAreaProvider>
       <StatusBar barStyle="dark-content" />
       {screen}
+      {companionOpen ? (
+        <Modal
+          presentationStyle="fullScreen"
+          onRequestClose={() => setCompanionOpen(false)}
+        >
+          <CompanionScreen onBack={() => setCompanionOpen(false)} />
+        </Modal>
+      ) : null}
     </SafeAreaProvider>
   );
 }

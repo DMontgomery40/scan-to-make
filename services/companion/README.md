@@ -121,3 +121,182 @@ Pairing allows five attempts per allowlisted login per minute, persisted across 
 Each credential binds a token hash, device ID, user login, scopes and expiry. Revocation takes effect on subsequent requests and is rechecked after generation body upload. It does not cancel a generation already executing. Revoking one device does not revoke others. Print/discovery/dispatch/journal operations and local pairing/revocation administration are not HTTP routes.
 
 Tests use isolated temporary registries and actual loopback HTTP/Python generation. They prove transport behavior, not phone onboarding, certificate provisioning, tailnet reachability, native capture accuracy or printing.
+
+## Retained capture ingestion
+
+`@scan-to-make/companion/capture-import` exports `CaptureStore`; `capture-converter` exports `createCaptureConverter`. These are host-local library APIs. The existing generation listener and credentials do not expose or authorize capture import.
+
+Use a trusted private parent on a local POSIX filesystem for project storage, retained captures and temporary worker files. Configure a Python 3.12 environment with `usd-core==26.8`; pass its executable to `createCaptureConverter`. The adapter uses this checkout's capture-pipeline input validation and capture-mesh-convert implementation. Executable, adapter and storage paths are operator configuration, never request parameters. Windows, network filesystems and hostile local writers are unsupported.
+
+Import takes `{projectId, projectRevision, source: Uint8Array}` and an optional abort signal. It snapshots the original bytes, converts in a separate bounded worker, verifies the source/output/report identities and authored coordinate basis, then publishes one immutable bundle by atomic rename under the same project lock used by edits. The default limits are 32 MiB source, 64 MiB derived output, 1 MiB report, 64 KiB combined diagnostics and a 60-second worker deadline. Python also enforces CPU/file-size limits and archive expansion bounds. The host must budget aggregate concurrency and memory when exposing this library to clients.
+
+`loadCapture(projectId, projectRevision, captureId)` reads and re-verifies retained original, mesh, report and binding bytes against the current project revision. An edit invalidates use of older attachments but preserves their historical bytes. Multiple captures can belong to one revision; import does not increment the project revision or automatically select a capture. Stale-project, corruption, worker failure and pre-commit cancellation reject. Publication is the commit point; an abort after publication cannot roll it back. A filesystem durability failure after rename can leave an immutable bundle despite a rejected call; no automatic retry/deduplication protocol is promised by this local API.
+
+Metric qualification means authored units and supported conversion, with physical accuracy, completeness and fit still unknown. A submitted receipt alone never establishes trusted conversion.
+
+The suite always includes an actual USDZ conversion/import/reopen test and malformed-input rejection. Install the Python dependency before running it; there is no fallback skip when it is missing:
+
+```sh
+CAPTURE_TEST_PYTHON=/absolute/venv/bin/python npm test --prefix services/companion
+```
+
+## Authenticated project and capture routes
+
+The same private Serve listener can opt into project/capture storage with `SCAN_TO_MAKE_CAPTURE_DIR=/absolute/private/capture-data`; `SCAN_TO_MAKE_REMOTE_AUTH_DIR` is required. The capture directory contains portable projects, immutable capture bundles and temporary workers. Set `SCAN_TO_MAKE_CAPTURE_PYTHON` to the Python environment with usd-core26.8. Invalid or empty capture configuration fails startup. Existing generation-only startup and pairings stay unchanged.
+
+Host-local `remote-auth-cli.js pair-capture <auth-directory> <login>` explicitly creates an invitation with generation plus `projects:read`, `projects:write`, `captures:read`, and `captures:import` authority. Ordinary `pair` still grants only generation permissions. Existing devices do not gain capture access; an operator must intentionally pair a new scoped device. All routes retain the exact Host, private Serve forwarding, login, token, revocation and browser-origin checks described above. No service configures tailnet access or provisions credentials automatically.
+
+| Route | Permission and input | Result |
+|---|---|---|
+| `GET /v1/saved-projects/:id` | `projects:read` | Exact portable 0.2 JSON and strong `ETag` |
+| `PUT /v1/saved-projects/:id` | `projects:write`, JSON snapshot, create-only `If-None-Match: *` or current `If-Match` | 201 created or 200 replaced, exact JSON and new ETag |
+| `POST /v1/saved-projects/:id/captures?projectRevision=N` | `captures:import`, raw `model/vnd.usdz+zip`, current `If-Match` | 201 `{captureId, binding}` |
+| `GET /v1/saved-projects/:id/captures/:captureId?projectRevision=N` | `captures:read`, current `If-Match` | Verified `{captureId, binding}` |
+| `GET /v1/saved-projects/:id/captures/:captureId/artifacts/:kind?projectRevision=N` | `captures:read`, current `If-Match`; kind `original`, `derived` or `report` | Exact bytes, media type, Content-Length and X-Content-SHA256 |
+
+Snapshot synchronization preserves nonzero revisions, fit, preview and acceptance metadata. It does not verify generated-preview bytes or grant print approval. Updates require exact-byte ETags; backward revision or same-revision/different-content returns409, stale ETag412, missing precondition428. Missing projects return404; corrupt/unavailable project storage503. Invalid capture data or retained capture corruption returns422. Existing native change rules remain authoritative: fit edits invalidate preview/acceptance, and clients verify artifact bytes before use.
+
+Native clients retain the acknowledged remote ETag and snapshot separately from the portable project. Preserve local edits made while a request is in flight; never overwrite them with a delayed response. Conflicts require explicit reconciliation. Exact equal snapshots with a current ETag are idempotent; **capture POST has no automatic retry guarantee**. A lost response may follow a committed bundle, so do not automatically retry an ambiguous import.
+
+Bodies have a five-second deadline and limits of4MiB for snapshots and32MiB for captures, enforced for chunked requests too. One snapshot/capture request owns the capture slot through conversion and response cleanup; another receives429. Downloads have a30-second response deadline and hold the project edit lock through response flush. Concurrent edits can report storage unavailable while that lock is held. Disconnect/shutdown aborts active conversion and waits for cleanup. Authorization is checked again before capture publication and before download; ETag/revision are checked under the project lock. Generation retains its own single-request slot. These tests model private Serve headers locally; they do not establish a live phone/tailnet connection.
+
+
+## Authenticated inspected prepared jobs
+
+An operator can enable prepared jobs on the same authenticated listener by setting
+`SCAN_TO_MAKE_PREPARED_MCP_CONFIG=/absolute/private/inspector.json` alongside the
+remote-auth and capture directories. The JSON is a private, owner-only regular
+file (at most 64 KiB) with `command` (absolute executable path), optional `args`,
+absolute `cwd`, and `env`. It configures a trusted MCP process supporting the
+file-only `inspect_print_file` receipt and discovered `print_3mf` schema. Use a
+trusted inspector that does not contact hardware during startup or file inspection.
+No executable, local path or receipt is accepted from an HTTP caller. Jobs live
+under the capture directory's `prepared-jobs` subdirectory. Invalid configuration
+fails startup; omitting it leaves these routes disabled.
+
+Host-local `remote-auth-cli.js pair-prepared <auth-directory> <login>` explicitly
+issues `generation:health`, `projects:read`, `projects:write`,
+`prepared-jobs:read` and `prepared-jobs:prepare`. Existing `pair`, `pair-capture`
+and already issued credentials retain their original scopes. This command does
+not grant capture import or generation creation. An embedded host may explicitly
+choose a combined scope set with `RemoteAuthStore.createPairing`.
+
+All three routes require the current project `If-Match` ETag and exactly one
+`projectRevision=N` query parameter. The project must retain an accepted design.
+The client chooses and persists a UUID `jobId` **before** submitting preparation.
+
+| Route | Scope | Result |
+|---|---|---|
+| `POST /v1/saved-projects/:id/prepared-jobs/:jobId?projectRevision=N` | `prepared-jobs:prepare` | 201 new or 200 recovered `{jobId, job}` |
+| `GET /v1/saved-projects/:id/prepared-jobs/:jobId?projectRevision=N` | `prepared-jobs:read` | Verified `{jobId, job, intent}`; intent is read-only bookkeeping |
+| `GET /v1/saved-projects/:id/prepared-jobs/:jobId/artifacts/printable?projectRevision=N` | `prepared-jobs:read` | Exact retained bytes with media type, Content-Length and X-Content-SHA256 |
+
+POST accepts strict JSON `{selection, printableArtifact, printableBase64}`.
+`selection` uses `PrintSelectionSchema` (printer ID, model, plate index, nozzle
+sizes, bed, explicit project-slot/material/physical-tray mapping and slicer settings
+digest). `printableArtifact` is `{sha256, byteLength, mediaType}`; supported media
+are `model/3mf` and `text/x.gcode`. Base64 must be canonical and match that exact
+identity. File bytes are limited to 64 MiB, with 64 KiB for request metadata and a
+30-second whole-body deadline, including chunked uploads. The trusted worker is
+bounded separately. Generation, snapshot and capture body deadlines remain five
+seconds. These routes share the single project/capture slot through cleanup.
+
+Preparation inspects the exact retained bytes, seals the receipt and discovered
+catalog digest into the job, and rechecks authorization/cancellation immediately
+before atomic publication under the project edit lock. Reads verify retained
+bytes and the current accepted project, then hold that lock through response
+flush. Revocation/disconnect before publication leaves no job. Publication cannot
+be rolled back by a later disconnect or durability error.
+
+After a lost response, timeout or 5xx, **GET the persisted job ID first**: 200
+recovers the original verified job; 404 permits resubmission with the same ID and
+same request. Explicit 429 means the request did not start; back off before retry.
+A matching POST returns the original inspected job without rerunning a potentially
+changed inspector. Reusing an ID with different project, artifact or selection
+returns 409. Stale ETag/revision returns 412, missing precondition 428, invalid
+request 400, invalid inspection/retained content 422, and unavailable storage 503.
+Never silently substitute a new ID after an ambiguous result.
+
+This seam performs preparation, verified reopen and download only. There is no
+HTTP intent-claim or dispatch endpoint, printer contact, or physical approval.
+A file-only inspection does not establish installed material, printer state,
+physical fit or authorization to print. Native clients can browse inspected
+handles, including produced jobs when collection GET uses exact
+`productionVersion=1`. Produced jobs are created on the host with the operator
+CLI below, not by an HTTP produce route.
+
+### Host-only produced jobs
+
+Trusted production is host-operator only. After building companion:
+
+```sh
+npm run prepared:produce --prefix services/companion -- \
+  --capture-dir /absolute/private/capture \
+  --inspector-config /absolute/private/inspector.json \
+  --producer-config /absolute/private/producer.json \
+  --project-id <id> \
+  --project-revision <n> \
+  --etag '"<project-sha256>"' \
+  --job-id <uuid> \
+  --stl /absolute/accepted.stl \
+  --selection /absolute/selection.json
+```
+
+The capture directory is the same private tree the listener uses (`projects/` and
+`prepared-jobs/`). Inspector JSON is the same owner-only file as
+`SCAN_TO_MAKE_PREPARED_MCP_CONFIG`. Producer JSON is a second owner-only,
+no-follow, ≤64 KiB strict file pinning `python`, `script`,
+`expectedScriptSha256`, `bundle`, `expectedVersion`, `expectedBinarySha256`,
+`machine`, `process`, `filament`, and optional `timeoutSeconds`. No CLI flag or
+environment variable can replace those pinned producer or inspector identities.
+Unknown keys, world-readable files, symlinks, relative paths, and oversized
+files fail closed before the job store opens. Failures print
+`Prepared produce failed` without secrets, paths from the config, or subprocess
+detail.
+
+The CLI reads the STL, verifies it against the current accepted artifact, then
+calls `PreparedJobStore.prepareProduced`. It prints `{jobId, jobSha256, created}`.
+A matching retry returns `created: false` and does not slice again. A different
+selection for the same job id exits nonzero with `job-conflict`. Concurrent
+same-id produce attempts fail closed on a host lock; they do not start a second
+slice. The live producer still requires macOS enforced isolation
+(`Enforced slicer isolation requires macOS` / pinned `sandbox-exec`). Fixture
+tests inject a fake producer so CLI plumbing is portable.
+
+### Discover inspected file handles
+
+`GET /v1/saved-projects/:id/prepared-jobs?projectRevision=N` uses the existing
+`prepared-jobs:read` permission and current project `If-Match` ETag. Optional
+`limit` is an integer from 1–50 (default 20); optional `cursor` is the opaque
+`nextCursor` from the previous page. Unknown or duplicate query parameters reject.
+Only GET is supported on this collection route.
+
+The response is `{jobs, nextCursor, unreadable, requiresVerifiedGet:true}`. Each
+summary contains `jobId`, `jobSha256`, `printableArtifact`, `model` and `plateIndex`.
+These are metadata handles for inspected jobs matching the current project,
+revision and accepted-design identity. They are **not verified printable files**.
+The client must perform the existing verified per-job GET before review/export,
+then verify downloaded bytes. Discovery never opens printable or intent files.
+An uninspected bookkeeping job is omitted. A damaged, oversized or unsafe metadata
+entry is skipped and counted in that page's `unreadable`; nothing is repaired.
+Unreadable counts describe scanned store entries, whose project may be unknown.
+
+Ordering is ascending canonical job UUID, with no timestamp inferred from disk.
+A cursor binds project/revision/ETag, the directory-name snapshot and the last
+scanned candidate. It advances over unrelated and unreadable records, so an empty
+page may still have a continuation. Continue until `nextCursor` is null. An added
+or removed job changes the snapshot; a subsequent cursor request returns 409
+`cursor-stale`. Refresh from the first page rather than silently skipping arrivals.
+A malformed or mismatched cursor returns 400; changed project state returns 412.
+The project ETag is echoed, not a new listing ETag.
+
+Each request enumerates at most 4096 directory entries, reads at most 200 candidate
+metadata records and 8 MiB of metadata, and has a five-second processing deadline.
+Reaching a per-page metadata/record budget returns a continuation. Exceeding the
+directory or processing bound returns 503 `discovery-unavailable`. The existing
+one-MiB per-record cap applies; individual summaries are capped at one KiB and the
+whole response at 64 KiB. Files are revalidated on each page; listings are not a
+transactional snapshot of metadata mutations by a local administrator. Requests
+share the project/capture slot, recheck authorization after listing, and hold the
+current project lock through response flush. No credential, write or dispatch
+permissions are added.

@@ -6,7 +6,8 @@
   "exports": {
     ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" },
     "./saved-project": { "types": "./dist/saved-project.d.ts", "import": "./dist/saved-project.js" },
-    "./generation": { "types": "./dist/generation.d.ts", "import": "./dist/generation.js" }
+    "./generation": { "types": "./dist/generation.d.ts", "import": "./dist/generation.js" },
+    "./capture": { "types": "./dist/capture.d.ts", "import": "./dist/capture.js" }
   },
   "files": ["dist", "fixtures", "README.md"],
   "scripts": {

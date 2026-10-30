@@ -39,8 +39,10 @@ export function DrawerScreen({
   initial,
   repository,
   onProject,
+  onCompanion,
   onBack,
 }: {
+  onCompanion?: () => void;
   initial: SavedProject | null;
   repository: SavedProjects;
   onProject: (project: SavedProject) => void;
@@ -269,6 +271,14 @@ export function DrawerScreen({
       }}
       footer={
         <>
+          {onCompanion ? (
+            <Button
+              label="Companion connection"
+              variant="secondary"
+              disabled={!!busy}
+              onPress={onCompanion}
+            />
+          ) : null}
           {message ? (
             <Text accessibilityLiveRegion="polite" style={styles.message}>
               {message}
@@ -473,8 +483,8 @@ export function DrawerScreen({
             ) : null}
           </Card>
           <Text style={type.caption}>
-            The local design service runs on this Mac. This connection is for
-            the iOS Simulator.
+            Your connected companion creates the design. Manage its connection
+            below if it needs attention.
           </Text>
         </>
       )}

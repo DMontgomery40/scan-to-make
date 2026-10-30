@@ -23,12 +23,25 @@
     "./remote-auth": {
       "types": "./dist/remote-auth.d.ts",
       "import": "./dist/remote-auth.js"
+    },
+    "./capture-import": {
+      "types": "./dist/capture-import.d.ts",
+      "import": "./dist/capture-import.js"
+    },
+    "./capture-converter": {
+      "types": "./dist/capture-converter.d.ts",
+      "import": "./dist/capture-converter.js"
+    },
+    "./prepared-jobs": {
+      "types": "./dist/prepared-jobs.d.ts",
+      "import": "./dist/prepared-jobs.js"
     }
   },
   "scripts": {
     "build": "npm run build --prefix ../project && tsc -p tsconfig.json",
     "test": "npm run build && node --test tests/*.test.mjs",
-    "generate:serve": "npm run build && node dist/generation-cli.js"
+    "generate:serve": "npm run build && node dist/generation-cli.js",
+    "prepared:produce": "npm run build && node dist/prepared-produce-cli.js"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.32.1",

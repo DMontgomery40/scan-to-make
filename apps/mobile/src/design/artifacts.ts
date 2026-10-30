@@ -1,4 +1,5 @@
 import { NativeModules } from 'react-native';
+import { pairingError } from '../companion/pairing';
 import {
   ProjectFitSpecSchema,
   type ArtifactRef,
@@ -80,6 +81,7 @@ const ERROR_COPY: Record<string, string> = {
 export function artifactError(error: unknown): string {
   const code = (error as { code?: string })?.code;
   return (
+    pairingError(error) ||
     (code && ERROR_COPY[code]) ||
     (error instanceof Error
       ? error.message
