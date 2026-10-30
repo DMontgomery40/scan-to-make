@@ -1,0 +1,119 @@
+name: Licence audit
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '**/package-lock.json'
+      - '**/package.json'
+      - '**/Podfile'
+      - '**/Podfile.lock'
+      - '**/*.podspec'
+      - '**/requirements*.txt'
+      - '**/pyproject.toml'
+      - '**/uv.lock'
+      - '**/Pipfile.lock'
+      - '**/pylock.toml'
+      - 'apps/**'
+      - 'tools/**'
+      - 'tools/licence-audit/policy.json'
+      - '.github/workflows/licence-audit.yml'
+  push:
+    branches: [main]
+    paths:
+      - '**/package-lock.json'
+      - '**/package.json'
+      - '**/Podfile'
+      - '**/Podfile.lock'
+      - '**/*.podspec'
+      - '**/requirements*.txt'
+      - '**/pyproject.toml'
+      - '**/uv.lock'
+      - '**/Pipfile.lock'
+      - '**/pylock.toml'
+      - 'apps/**'
+      - 'tools/**'
+      - 'tools/licence-audit/policy.json'
+      - '.github/workflows/licence-audit.yml'
+permissions:
+  contents: read
+jobs:
+  unit-tests-and-notices:
+    name: Fixture tests and mobile notices freshness
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            packages/contracts/package-lock.json
+            services/project/package-lock.json
+            services/companion/package-lock.json
+            apps/mobile/package-lock.json
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
+      - name: Compile licence-audit modules
+        run: python -m py_compile tools/licence-audit/*.py tools/licence-audit/tests/*.py
+      - name: Run synthetic fixture unit tests
+        run: python -m unittest discover -s tools/licence-audit/tests -v
+      - name: Install mobile lockfile packages for podspec and licence text resolution
+        run: |
+          npm ci --prefix packages/contracts --ignore-scripts
+          npm ci --prefix apps/mobile --ignore-scripts
+      - name: Check apps/mobile/THIRD_PARTY_NOTICES.md freshness
+        run: python tools/licence-audit/audit.py notices --check
+
+  repo-audit:
+    name: Repository licence allowlist audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            packages/contracts/package-lock.json
+            services/project/package-lock.json
+            services/companion/package-lock.json
+            apps/mobile/package-lock.json
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
+      - name: Install workspace npm lockfiles (--ignore-scripts)
+        run: |
+          npm ci --prefix packages/contracts --ignore-scripts
+          npm ci --prefix services/project --ignore-scripts
+          npm ci --prefix services/companion --ignore-scripts
+          npm ci --prefix apps/mobile --ignore-scripts
+      - name: Install declared tool Python requirements and pinned USD runtime
+        run: |
+          python -m pip install --disable-pip-version-check usd-core==26.8
+          for req in tools/*/requirements*.txt tools/*/*/requirements*.txt; do
+            if [ -f "$req" ]; then
+              python -m pip install --disable-pip-version-check -r "$req"
+            fi
+          done
+      - name: Run repository licence allowlist audit
+        run: |
+          set -o pipefail
+          python tools/licence-audit/audit.py audit --out "${{ runner.temp }}/licence-audit-report.json"
+        continue-on-error: false
+      - name: Print violations summary on failure
+        if: failure()
+        run: |
+          python - "${{ runner.temp }}/licence-audit-report.json" <<'PY'
+          import json, pathlib, sys
+          p = pathlib.Path(sys.argv[1])
+          if p.is_file():
+              r = json.loads(p.read_text())
+              print(json.dumps({"summary": r["summary"], "violations": r["violations"]}, indent=2))
+          PY

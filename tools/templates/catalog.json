@@ -1,0 +1,178 @@
+{
+  "schemaVersion": 1,
+  "units": "mm",
+  "supportFolders": {
+    "_catalog": "Catalog validator and its tests; not a template.",
+    "_fitted-core": "Shared Blender core, wrapper, synthetic fixtures and STL inspector for the fitted templates; not a template."
+  },
+  "parameterFields": {
+    "name": "Parameter key as the template consumes it (argparse dest or FitSpec key).",
+    "type": "number | integer | enum | interval (FitSpec {nominalMm, lowerMm, upperMm}).",
+    "units": "mm, fraction (of object height), count, or null.",
+    "default": "CLI default, or the contract fixture value for FitSpec templates.",
+    "min": "Lower bound or null; inclusive unless exclusiveMin is true.",
+    "max": "Upper bound or null; inclusive unless exclusiveMax is true."
+  },
+  "templates": [
+    {
+      "id": "cup-holder-adapter",
+      "name": "Cup-holder adapter",
+      "summary": "Tapered insert for a car cup holder with a cradle ring for a wider cup; surface of revolution.",
+      "folder": "tools/templates/cup-holder-adapter",
+      "entrypoint": "adapter.py",
+      "runtime": "python3-stdlib",
+      "licence": null,
+      "workflow": null,
+      "input": {
+        "kind": "fitspec",
+        "template": "cup-holder-adapter",
+        "schemaVersion": "0.1.0",
+        "exampleSpec": "packages/contracts/fixtures/tapered-holder.json"
+      },
+      "outputs": ["cup-holder-adapter.stl", "cup-holder-adapter.manifest.json"],
+      "previewOnly": true,
+      "parameterSource": "fitspec",
+      "parameters": [
+        {"name": "holderInnerBottomDiameter", "type": "interval", "units": "mm", "default": {"nominalMm": 58, "lowerMm": 57.8, "upperMm": 58.2}, "min": 0, "exclusiveMin": true, "max": null, "description": "Holder inside diameter at its floor; the lower bound caps the insert outside."},
+        {"name": "holderInnerTopDiameter", "type": "interval", "units": "mm", "default": {"nominalMm": 62, "lowerMm": 61.8, "upperMm": 62.2}, "min": 0, "exclusiveMin": true, "max": null, "description": "Holder inside diameter at its rim; the lower bound sets the insert top and the rim opening."},
+        {"name": "insertionDepth", "type": "interval", "units": "mm", "default": {"nominalMm": 35, "lowerMm": 34.8, "upperMm": 35.2}, "min": 0, "exclusiveMin": true, "max": null, "description": "Holder depth; the insert length is the lower bound."},
+        {"name": "cupOuterDiameter", "type": "interval", "units": "mm", "default": {"nominalMm": 86, "lowerMm": 85.8, "upperMm": 86.2}, "min": 0, "exclusiveMin": true, "max": null, "description": "Cup outside diameter; the cradle inside uses the upper bound plus clearance."},
+        {"name": "cupSupportHeight", "type": "interval", "units": "mm", "default": {"nominalMm": 45, "lowerMm": 45, "upperMm": 45}, "min": 0, "exclusiveMin": true, "max": null, "description": "Cradle height above the holder rim, nominal; must exceed wallThickness."},
+        {"name": "wallThickness", "type": "interval", "units": "mm", "default": {"nominalMm": 2.4, "lowerMm": 2.4, "upperMm": 2.4}, "min": 0, "exclusiveMin": true, "max": null, "description": "Insert, floor and cradle wall thickness, nominal."},
+        {"name": "radialClearance", "type": "interval", "units": "mm", "default": {"nominalMm": 0.3, "lowerMm": 0.3, "upperMm": 0.3}, "min": 0, "exclusiveMin": false, "max": null, "description": "Radial clearance, consumed at its upper bound on insert and cradle."}
+      ]
+    },
+    {
+      "id": "drawer-organizer",
+      "name": "Drawer organizer tray",
+      "summary": "Open rectangular tray with perimeter walls and a uniform divider grid sized to a drawer.",
+      "folder": "tools/templates/drawer-organizer",
+      "entrypoint": "drawer.py",
+      "runtime": "python3-stdlib",
+      "licence": null,
+      "workflow": ".github/workflows/drawer-geometry.yml",
+      "input": {
+        "kind": "fitspec",
+        "template": "drawer-tray",
+        "schemaVersion": "0.2.0",
+        "exampleSpec": "packages/contracts/fixtures/drawer-tray.json"
+      },
+      "outputs": ["drawer-tray.stl", "drawer-tray.manifest.json"],
+      "previewOnly": true,
+      "parameterSource": "fitspec",
+      "parameters": [
+        {"name": "drawerInnerWidth", "type": "interval", "units": "mm", "default": {"nominalMm": 300, "lowerMm": 299, "upperMm": 301}, "min": 0, "exclusiveMin": true, "max": null, "description": "Drawer inside width (X); tray outside uses the lower bound minus clearance."},
+        {"name": "drawerInnerDepth", "type": "interval", "units": "mm", "default": {"nominalMm": 400, "lowerMm": 399, "upperMm": 401}, "min": 0, "exclusiveMin": true, "max": null, "description": "Drawer inside depth (Y); tray outside uses the lower bound minus clearance."},
+        {"name": "drawerInnerHeight", "type": "interval", "units": "mm", "default": {"nominalMm": 60, "lowerMm": 59, "upperMm": 61}, "min": 0, "exclusiveMin": true, "max": null, "description": "Lowest drawer obstruction; trayHeight upper bound must fit below its lower bound."},
+        {"name": "wallThickness", "type": "interval", "units": "mm", "default": {"nominalMm": 2, "lowerMm": 2, "upperMm": 2}, "min": 0, "exclusiveMin": true, "max": null, "description": "Perimeter wall and divider thickness, nominal."},
+        {"name": "floorThickness", "type": "interval", "units": "mm", "default": {"nominalMm": 2, "lowerMm": 2, "upperMm": 2}, "min": 0, "exclusiveMin": true, "max": null, "description": "Tray floor thickness, nominal."},
+        {"name": "peripheralClearance", "type": "interval", "units": "mm", "default": {"nominalMm": 0.5, "lowerMm": 0.4, "upperMm": 0.6}, "min": 0, "exclusiveMin": false, "max": null, "description": "Gap to the drawer on each side, consumed at its upper bound."},
+        {"name": "trayHeight", "type": "interval", "units": "mm", "default": {"nominalMm": 40, "lowerMm": 40, "upperMm": 40}, "min": 0, "exclusiveMin": true, "max": null, "description": "Tray outside height, nominal; dividers stop 2 mm below it."},
+        {"name": "dividersAcross", "type": "integer", "units": "count", "default": 2, "min": 0, "max": 8, "description": "Dividers splitting the width; every cell keeps at least 10 mm clear span."},
+        {"name": "dividersAlong", "type": "integer", "units": "count", "default": 1, "min": 0, "max": 8, "description": "Dividers splitting the depth; every cell keeps at least 10 mm clear span."}
+      ]
+    },
+    {
+      "id": "scan-cradle",
+      "name": "Scan cradle",
+      "summary": "Open stand with an object-derived pocket and a straight +Z lift-out path.",
+      "folder": "tools/templates/scan-cradle",
+      "entrypoint": "cradle.py",
+      "runtime": "blender-5.0.1",
+      "licence": "GPL-3.0-or-later",
+      "workflow": ".github/workflows/scan-cradle.yml",
+      "input": {"kind": "repaired-scan-mesh", "formats": ["obj", "stl"], "units": "mm"},
+      "outputs": ["cradle.stl", "manifest.json"],
+      "previewOnly": true,
+      "parameterSource": "cli",
+      "nonDesignArguments": ["input", "--out", "--render"],
+      "parameters": [
+        {"name": "clearance_mm", "flag": "--clearance-mm", "type": "number", "units": "mm", "default": 0.3, "min": 0, "exclusiveMin": true, "max": null, "description": "Minimum geometric offset between object and pocket."},
+        {"name": "wall_mm", "flag": "--wall-mm", "type": "number", "units": "mm", "default": 2.0, "min": 0, "exclusiveMin": true, "max": null, "description": "Floor and side wall minimum."},
+        {"name": "seat_depth", "flag": "--seat-depth", "type": "number", "units": "fraction", "default": 0.4, "min": 0, "exclusiveMin": true, "max": 1, "exclusiveMax": true, "description": "Seat line as a fraction of object height."},
+        {"name": "margin_mm", "flag": "--margin-mm", "type": "number", "units": "mm", "default": 3.0, "min": null, "max": null, "description": "Base beyond object bounds plus clearance, each side; must be at least wall_mm + 2 * grid_mm."},
+        {"name": "up", "flag": "--up", "type": "enum", "units": null, "default": "Z", "choices": ["X", "Y", "Z", "-X", "-Y", "-Z"], "min": null, "max": null, "description": "Source axis that becomes output +Z."},
+        {"name": "grid_mm", "flag": "--grid-mm", "type": "number", "units": "mm", "default": 0.4, "min": 0, "exclusiveMin": true, "max": null, "description": "XY voxel-column step; at most 512 cells per axis and 200000 in total."},
+        {"name": "notch_side", "flag": "--notch-side", "type": "enum", "units": null, "default": null, "choices": ["+X", "-X", "+Y", "-Y"], "min": null, "max": null, "description": "Optional cable trench through one side, down to floor level."},
+        {"name": "notch_position_mm", "flag": "--notch-position-mm", "type": "number", "units": "mm", "default": 0.0, "min": null, "max": null, "description": "Notch centre along its side; must not remove corner walls."},
+        {"name": "notch_width_mm", "flag": "--notch-width-mm", "type": "number", "units": "mm", "default": 4.0, "min": 0, "exclusiveMin": true, "max": null, "description": "Requested notch width; grid conservatism enlarges it."}
+      ]
+    },
+    {
+      "id": "wall-mount",
+      "name": "Wall mount holder",
+      "summary": "Open-top pocket fused to a screw-on back plate; the object drops in from above.",
+      "folder": "tools/templates/wall-mount",
+      "entrypoint": "mount.py",
+      "runtime": "blender-5.0.1",
+      "licence": "GPL-3.0-or-later",
+      "workflow": ".github/workflows/wall-mount.yml",
+      "input": {"kind": "repaired-scan-mesh", "formats": ["obj", "stl"], "units": "mm"},
+      "outputs": ["mount.stl", "manifest.json"],
+      "previewOnly": true,
+      "parameterSource": "cli",
+      "nonDesignArguments": ["input", "--out"],
+      "parameters": [
+        {"name": "clearance_mm", "flag": "--clearance-mm", "type": "number", "units": "mm", "default": 0.5, "min": 0.05, "max": 5.0, "description": "Minimum gap between object and every pocket surface."},
+        {"name": "wall_mm", "flag": "--wall-mm", "type": "number", "units": "mm", "default": 2.0, "min": 0.8, "max": 10.0, "description": "Minimum pocket side wall; at least 2 * grid_mm; rounded up to the grid."},
+        {"name": "floor_mm", "flag": "--floor-mm", "type": "number", "units": "mm", "default": 2.0, "min": 0.8, "max": 10.0, "description": "Pocket floor thickness, exact."},
+        {"name": "hold_depth", "flag": "--hold-depth", "type": "number", "units": "fraction", "default": 0.6, "min": 0.1, "max": 1.0, "description": "Cup wall top as a fraction of object height."},
+        {"name": "plate_mm", "flag": "--plate-mm", "type": "number", "units": "mm", "default": 3.0, "min": 2.0, "max": 10.0, "description": "Back plate thickness; rounded up to the grid."},
+        {"name": "plate_extension_mm", "flag": "--plate-extension-mm", "type": "number", "units": "mm", "default": 16.0, "min": 8.0, "max": 80.0, "description": "Plate height above the cup top, holding the screw holes; at least screw_hole_mm + 2 * wall_mm."},
+        {"name": "screw_hole_mm", "flag": "--screw-hole-mm", "type": "number", "units": "mm", "default": 4.5, "min": 2.0, "max": 8.0, "description": "Screw clearance diameter; holes contain this disc."},
+        {"name": "screw_spacing_mm", "flag": "--screw-spacing-mm", "type": "number", "units": "mm", "default": 30.0, "min": 4.0, "max": 200.0, "description": "Centre-to-centre spacing of the two holes along X; at least screw_hole_mm + 2 * wall_mm; the plate widens to fit."},
+        {"name": "up", "flag": "--up", "type": "enum", "units": null, "default": "Z", "choices": ["X", "Y", "Z", "-X", "-Y", "-Z"], "min": null, "max": null, "description": "Source axis that becomes output +Z (insertion axis)."},
+        {"name": "grid_mm", "flag": "--grid-mm", "type": "number", "units": "mm", "default": 0.4, "min": 0.1, "max": 2.0, "description": "XY cell size; at most 1024 cells per axis and 400000 in total."}
+      ]
+    },
+    {
+      "id": "protective-sleeve",
+      "name": "Protective sleeve",
+      "summary": "Open-top conformal bumper with a configurable clearance and solid floor.",
+      "folder": "tools/templates/protective-sleeve",
+      "entrypoint": "sleeve.py",
+      "runtime": "blender-5.0.1",
+      "licence": "GPL-3.0-or-later",
+      "workflow": ".github/workflows/protective-sleeve.yml",
+      "input": {"kind": "repaired-scan-mesh", "formats": ["obj", "stl"], "units": "mm"},
+      "outputs": ["sleeve.stl", "manifest.json"],
+      "previewOnly": true,
+      "parameterSource": "cli",
+      "nonDesignArguments": ["input", "--out"],
+      "parameters": [
+        {"name": "clearance_mm", "flag": "--clearance-mm", "type": "number", "units": "mm", "default": 0.5, "min": 0.05, "max": 5.0, "description": "Minimum gap between object and every sleeve surface."},
+        {"name": "wall_mm", "flag": "--wall-mm", "type": "number", "units": "mm", "default": 1.6, "min": 0.8, "max": 10.0, "description": "Minimum conformal wall thickness; at least 2 * grid_mm; up to one grid cell thicker."},
+        {"name": "floor_mm", "flag": "--floor-mm", "type": "number", "units": "mm", "default": 1.6, "min": 0.8, "max": 10.0, "description": "Sleeve floor thickness, exact."},
+        {"name": "coverage", "flag": "--coverage", "type": "number", "units": "fraction", "default": 0.7, "min": 0.1, "max": 1.0, "description": "Sleeve top as a fraction of object height."},
+        {"name": "up", "flag": "--up", "type": "enum", "units": null, "default": "Z", "choices": ["X", "Y", "Z", "-X", "-Y", "-Z"], "min": null, "max": null, "description": "Source axis that becomes output +Z (insertion axis)."},
+        {"name": "grid_mm", "flag": "--grid-mm", "type": "number", "units": "mm", "default": 0.4, "min": 0.1, "max": 2.0, "description": "XY cell size; at most 1024 cells per axis and 400000 in total."}
+      ]
+    },
+    {
+      "id": "edge-clip",
+      "name": "Desk or shelf edge clip holder",
+      "summary": "Open-top pocket on a C-clamp that slides onto a desk or shelf edge of configurable thickness.",
+      "folder": "tools/templates/edge-clip",
+      "entrypoint": "clip.py",
+      "runtime": "blender-5.0.1",
+      "licence": "GPL-3.0-or-later",
+      "workflow": ".github/workflows/edge-clip.yml",
+      "input": {"kind": "repaired-scan-mesh", "formats": ["obj", "stl"], "units": "mm"},
+      "outputs": ["clip.stl", "manifest.json"],
+      "previewOnly": true,
+      "parameterSource": "cli",
+      "nonDesignArguments": ["input", "--out"],
+      "parameters": [
+        {"name": "clearance_mm", "flag": "--clearance-mm", "type": "number", "units": "mm", "default": 0.5, "min": 0.05, "max": 5.0, "description": "Minimum gap between object and every pocket surface."},
+        {"name": "wall_mm", "flag": "--wall-mm", "type": "number", "units": "mm", "default": 2.0, "min": 0.8, "max": 10.0, "description": "Minimum pocket side wall; at least 2 * grid_mm; rounded up to the grid."},
+        {"name": "hold_depth", "flag": "--hold-depth", "type": "number", "units": "fraction", "default": 0.6, "min": 0.1, "max": 1.0, "description": "Cup wall top as a fraction of object height."},
+        {"name": "edge_thickness_mm", "flag": "--edge-thickness-mm", "type": "number", "units": "mm", "default": 18.0, "min": 1.0, "max": 60.0, "description": "Thickness of the desk or shelf edge."},
+        {"name": "edge_clearance_mm", "flag": "--edge-clearance-mm", "type": "number", "units": "mm", "default": 0.3, "min": 0.0, "max": 3.0, "description": "Added to edge thickness to give the exact slot height."},
+        {"name": "grip_depth_mm", "flag": "--grip-depth-mm", "type": "number", "units": "mm", "default": 25.0, "min": 5.0, "max": 80.0, "description": "How far the jaws reach over the edge; rounded up to the grid."},
+        {"name": "jaw_mm", "flag": "--jaw-mm", "type": "number", "units": "mm", "default": 3.0, "min": 2.0, "max": 10.0, "description": "Jaw thickness (exact; the upper jaw is the pocket floor) and spine thickness (rounded up to the grid)."},
+        {"name": "up", "flag": "--up", "type": "enum", "units": null, "default": "Z", "choices": ["X", "Y", "Z", "-X", "-Y", "-Z"], "min": null, "max": null, "description": "Source axis that becomes output +Z (insertion axis)."},
+        {"name": "grid_mm", "flag": "--grid-mm", "type": "number", "units": "mm", "default": 0.4, "min": 0.1, "max": 2.0, "description": "XY cell size; at most 1024 cells per axis and 400000 in total."}
+      ]
+    }
+  ]
+}
