@@ -5,6 +5,7 @@
 #import <QuickLook/QuickLook.h>
 #import <SceneKit/SceneKit.h>
 #import <ModelIO/ModelIO.h>
+#import <SceneKit/ModelIO.h>
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 #import "CompanionPairing.h"
 #import "ArtifactFiles.h"
