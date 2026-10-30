@@ -163,8 +163,13 @@ BLENDER=$HOME/opt/blender-5.0.1/blender LIBGL_ALWAYS_SOFTWARE=1 \
 
 The converter bridge test additionally needs the existing capture converter's
 requirements (usd-core/Pillow). Other tests need no pip packages. Tests skip
-explicitly if Blender or that optional bridge runtime is absent. No workflow
-is added: this ticket's scope is this tool directory only.
+explicitly if Blender or that optional bridge runtime is absent. The dedicated `scan-correct` GitHub Actions workflow installs pinned Blender,
+libseccomp and exactly the converter bridge's pinned Python dependencies, then
+runs the full suite under Xvfb; any skip fails CI. It also probes real IPv4/IPv6
+denial as the ordinary runner user. libseccomp installs a `no_new_privs` filter,
+so no root capability or user/network namespace is needed. If the runner forbids
+filter installation, production fails closed and CI fails explicitly; there is
+no test-only sandbox fallback or blanket skip.
 
 For an offline CLI run, `--adapter scripted --script sequence.json` replaces
 API access. The JSON file is a list of `{ "name": "measure", "arguments": {} }`
