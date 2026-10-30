@@ -87,6 +87,76 @@ def axes(bm):
     return coords, centre, basis
 
 
+def box_frame(coords, centre, pca):
+    """Bounded minimum-volume box search; hull preserves every support plane."""
+    hull = bmesh.new()
+    try:
+        for co in coords:
+            hull.verts.new(co)
+        result = bmesh.ops.convex_hull(hull, input=list(hull.verts), use_existing_faces=False)
+        points = np.array([tuple(v.co) for v in result["geom"]
+                           if isinstance(v, bmesh.types.BMVert)]) - centre
+    finally:
+        hull.free()
+    # Planar inputs can have zero volume; area then span break objective ties.
+    def score(frame):
+        ext = np.ptp(points @ frame, axis=0)
+        return (float(np.prod(ext)), float(ext[0]*ext[1]+ext[1]*ext[2]+ext[0]*ext[2]),
+                float(ext.sum()))
+
+    def turn(axis, degrees):
+        angle = math.radians(degrees)
+        c, s = math.cos(angle), math.sin(angle)
+        r = np.eye(3)
+        i, j = (axis+1)%3, (axis+2)%3
+        r[i,i] = r[j,j] = c
+        r[i,j], r[j,i] = -s, s
+        return r
+
+    candidates = [(score(pca), pca), (score(np.eye(3)), np.eye(3))]
+    # Coarse Euler sweep explores rotations away from the PCA basin.
+    for x in range(0, 180, 30):
+        for y in range(-90, 91, 30):
+            for z in range(0, 180, 30):
+                frame = pca @ turn(0,x) @ turn(1,y) @ turn(2,z)
+                candidates.append((score(frame), frame))
+    candidates.sort(key=lambda item: item[0])
+    seeds = []
+    for candidate in candidates:
+        # Signed axis permutations are the same box; spend refinement on distinct seeds.
+        if all(not np.all(np.max(np.abs(candidate[1].T @ other[1]),axis=0) > .999)
+               for other in seeds):
+            seeds.append(candidate)
+        if len(seeds) == 4:
+            break
+    refined = []
+    for value, frame in seeds:
+        for step in (10, 2, .5, .1, .02, .005):
+            for _ in range(40):
+                trials = [(value, frame)]
+                for axis in range(3):
+                    for sign in (-1, 1):
+                        rotated = frame @ turn(axis, step*sign)
+                        trials.append((score(rotated), rotated))
+                best_value, best_frame = min(trials, key=lambda item: item[0])
+                if best_value >= value:
+                    break
+                value, frame = best_value, best_frame
+        refined.append((value, frame))
+    _, frame = min(refined, key=lambda item: item[0])
+    # Stable output convention: long to short; deterministic signs; right handed.
+    ext = np.ptp(points @ frame, axis=0)
+    frame = frame[:,np.argsort(-ext, kind="stable")]
+    for i in range(3):
+        if frame[np.argmax(np.abs(frame[:,i])),i] < 0:
+            frame[:,i] *= -1
+    if np.linalg.det(frame) < 0:
+        frame[:,2] *= -1
+    return {"boxExtentsMm":np.ptp((coords-centre) @ frame,axis=0).tolist(),
+            "boxRotation":frame.T.tolist(), "boxInputCentreMm":centre.tolist(),
+            "boxMethod":"convex hull; PCA seed; 30deg rotation sweep; four seeds refined to 0.005deg"}
+
+
 def stats(bm):
     coords, centre, basis = axes(bm)
     principal = (coords-centre) @ basis
@@ -101,7 +171,8 @@ def stats(bm):
             "max":coords.max(axis=0).tolist(),"extents":np.ptp(coords,axis=0).tolist()},
             "principalExtentsMm":np.ptp(principal,axis=0).tolist(),
             "volumeMm3":abs(bm.calc_volume(signed=True)) if closed else None,
-            "surfaceAreaMm2":sum(f.calc_area() for f in bm.faces)}
+            "surfaceAreaMm2":sum(f.calc_area() for f in bm.faces),
+            **box_frame(coords, centre, basis)}
 
 
 def normals(bm):
@@ -290,7 +361,8 @@ def strip_png_metadata(path):
 
 
 def render(obj,bm,a):
-    orient(bm)
+    keep = a.get("keep_orientation", True)
+    transform = None if keep else orient(bm)
     bm.to_mesh(obj.data)
     scene = bpy.context.scene
     scene.render.engine = "BLENDER_WORKBENCH"
@@ -329,7 +401,8 @@ def render(obj,bm,a):
         scene.render.filepath = str(out/(name+".png"))
         bpy.ops.render.render(write_still=True)
         strip_png_metadata(scene.render.filepath)
-    return {"views":views,"resolution":a["resolution"],"provesPhysicalAccuracy":False}
+    return {"views":views,"resolution":a["resolution"],"provesPhysicalAccuracy":False,
+            "orientation":"input" if keep else "pca", "transform":transform}
 
 
 def main():

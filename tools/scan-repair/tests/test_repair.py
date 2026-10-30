@@ -128,6 +128,65 @@ class RepairTests(unittest.TestCase):
                      ("--weld-mm","nan"),("--target-faces","0")]:
             self.run_cli("repair",p,"--units","mm","--out",self.base/"invalid",*args,ok=False)
 
+    def test_refined_box_rotated_five_degrees(self):
+        # Uneven face tessellation tilts PCA even though the surface is a box.
+        vertices = [(x*30.3,y*22.6,z*10.85) for x,y,z in CUBE]
+        faces = list(FACES)
+        face = faces.pop(1)
+        centre = len(vertices)
+        vertices.append((18, 10, 10.85))
+        faces += [(face[i],face[(i+1)%4],centre) for i in range(4)]
+        c, sn = math.cos(math.radians(5)), math.sin(math.radians(5))
+        for axis in range(3):
+            i,j = (axis+1)%3,(axis+2)%3
+            turned = []
+            for v in vertices:
+                v = list(v)
+                v[i],v[j] = c*v[i]-sn*v[j],sn*v[i]+c*v[j]
+                turned.append(v)
+            vertices = turned
+        p = self.mesh("rotated.obj",vertices,faces)
+        result = self.run_cli("measure",p,"--units","mm")
+        self.assertGreater(max(abs(a-b) for a,b in zip(result["principalExtentsMm"],
+                                                       (60.6,45.2,21.7))), .1)
+        for actual,expected in zip(result["boxExtentsMm"],(60.6,45.2,21.7)):
+            self.assertAlmostEqual(actual,expected,delta=.05)
+        # Independently project input vertices using the returned world-to-box rotation.
+        rotation,origin = result["boxRotation"],result["boxInputCentreMm"]
+        projected = [[sum(row[i]*(v[i]-origin[i]) for i in range(3)) for row in rotation]
+                     for v in vertices]
+        for axis,span in enumerate(result["boxExtentsMm"]):
+            self.assertAlmostEqual(max(v[axis] for v in projected)-min(v[axis] for v in projected),
+                                   span,delta=1e-4)
+        self.assertEqual(result,self.run_cli("measure",p,"--units","mm"))
+
+    def test_planar_measure(self):
+        p = self.mesh("plane.obj",[(0,0,0),(4,0,0),(4,2,0),(0,2,0)],[(0,1,2,3)])
+        result = self.run_cli("measure",p,"--units","mm")
+        self.assertEqual(result["boxExtentsMm"],[4,2,0])
+        self.assertIsNone(result["volumeMm3"])
+
+    def test_render_preserves_asymmetric_input_frame(self):
+        # An off-centre raised block represents a pocket-up part with a visual datum.
+        vertices = [(x*8,y*5,z) for x,y,z in CUBE]
+        vertices += [(x+5,y+2,z+3) for x,y,z in CUBE]
+        faces = FACES+[tuple(i+8 for i in face) for face in FACES]
+        p = self.mesh("oriented.obj",vertices,faces)
+        before = p.read_bytes()
+        outputs = []
+        for name,args in (("default",()),("keep",("--keep-orientation",)),
+                          ("pca",("--pca-orientation",))):
+            out = self.base/name
+            result = self.run_cli("render",p,"--units","mm","--out",out,
+                                  "--resolution",32,*args)
+            self.assertEqual(result["orientation"],"pca" if name=="pca" else "input")
+            self.assertEqual(result["transform"] is None,name!="pca")
+            outputs.append([hashlib.sha256(f.read_bytes()).hexdigest()
+                            for f in sorted(out.glob("*.png"))])
+        self.assertEqual(outputs[0],outputs[1])
+        self.assertNotEqual(outputs[0],outputs[2])
+        self.assertEqual(before,p.read_bytes())
+
     def test_render_and_decimate(self):
         p = self.mesh("box.obj", CUBE, FACES)
         self.repair(p, "--target-faces", 8)

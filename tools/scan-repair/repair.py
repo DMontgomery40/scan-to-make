@@ -41,6 +41,11 @@ def parser():
             s.add_argument("--out", type=Path, required=True)
         if command == "render":
             s.add_argument("--resolution", type=int, default=512)
+            frame = s.add_mutually_exclusive_group()
+            frame.add_argument("--keep-orientation", dest="keep_orientation", action="store_true",
+                               default=True, help="preserve input axes (default)")
+            frame.add_argument("--pca-orientation", dest="keep_orientation", action="store_false",
+                               help="reorient with PCA and ground Z=0")
         if command == "repair":
             s.add_argument("--weld-mm", type=float, default=.01)
             s.add_argument("--component-fraction", type=float, default=.01)
