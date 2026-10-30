@@ -18,6 +18,7 @@ python3 tools/slicer-producer/producer.py part.stl \
 - **Sandbox:** fixed to the platform primitive `/usr/bin/sandbox-exec`, which must be root-owned and not group- or world-writable. There is no option to substitute another sandbox. On any platform other than macOS the run is refused.
 - **Input pins:** `--expected-input-sha256` and `--expected-input-bytes` reject the model unless its bytes match.
 - **Preset names** are file stems under `BambuStudio.app/Contents/Resources/profiles/BBL/{machine,process,filament}/`. List them with `ls` and pass the stem without `.json`.
+- **Optional validated overrides:** `--bed-type {cool_plate,engineering_plate,hot_plate,textured_plate}` (sets `curr_bed_type` in the flattened process preset; `supertack_plate` is refused in CLI mode), `--nozzle-type {stainless_steel,hardened_steel,tungsten_carbide,brass}` (sets `nozzle_type` in the flattened machine preset so non-stock hotends match `inspect_print_file` and printer preflight), and `--enable-support {0,1}` (explicitly disables or enables support generation in the flattened process preset). All overrides are applied before hashing and post-run sealing, and are recorded under `manifest.overrides`.
 - **Binary pin:** `--expected-binary-sha256` is optional but recommended. Get the value from `shasum -a 256 /Applications/BambuStudio.app/Contents/MacOS/BambuStudio`.
 - **Exit codes:**
   - `0`: the output directory was published.

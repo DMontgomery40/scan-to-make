@@ -34,6 +34,13 @@ TIMEOUT_S = 45
 MAX_TIMEOUT_S = 600
 TERM_GRACE_S = 2.0
 TRUSTED_SANDBOX_EXEC = "/usr/bin/sandbox-exec"
+BED_TYPE_LABELS = {
+    "textured_plate": "Textured PEI Plate",
+    "cool_plate": "Cool Plate",
+    "engineering_plate": "Engineering Plate",
+    "hot_plate": "High Temp Plate",
+}
+VALID_NOZZLE_TYPES = ("stainless_steel", "hardened_steel", "tungsten_carbide", "brass")
 
 
 class Limits:
@@ -327,15 +334,139 @@ def _rename_noreplace(src, dst):
         raise ProducerError("publish", f"exclusive publish failed: {os.strerror(err)}")
 
 
+def _parse_duration_seconds(text):
+    import re
+    if not text:
+        return None
+    total = 0
+    matched = False
+    for pat, mult in ((r"(\d+)\s*d", 86400), (r"(\d+)\s*h", 3600), (r"(\d+)\s*m", 60), (r"(\d+)\s*s", 1)):
+        m = re.search(pat, text)
+        if m:
+            total += int(m.group(1)) * mult
+            matched = True
+    return total if matched else None
+
+
+def parse_gcode_summary(gcode_bytes):
+    """Extract deterministic header/config metrics from BambuStudio G-code comments."""
+    import math
+    text = gcode_bytes[:512 * 1024].decode("utf-8", "replace")
+    header = {}
+    config = {}
+    in_header = in_config = False
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line.startswith(";"):
+            continue
+        body = line[1:].strip()
+        if body == "HEADER_BLOCK_START":
+            in_header = True
+            continue
+        if body == "HEADER_BLOCK_END":
+            in_header = False
+            continue
+        if body == "CONFIG_BLOCK_START":
+            in_config = True
+            continue
+        if body == "CONFIG_BLOCK_END" or body == "EXECUTABLE_BLOCK_START":
+            break
+        if in_header:
+            for part in body.split(";"):
+                if ":" in part:
+                    k, v = part.split(":", 1)
+                    header[k.strip().lower()] = v.strip()
+        elif in_config and "=" in body:
+            k, v = body.split("=", 1)
+            config[k.strip()] = v.strip()
+
+    def _float(val):
+        if val is None or val == "":
+            return None
+        try:
+            f = float(val.split(",")[0].strip())
+            return round(f, 6) if math.isfinite(f) else None
+        except ValueError:
+            return None
+
+    def _int(val):
+        if val is None or val == "":
+            return None
+        try:
+            return int(val.strip())
+        except ValueError:
+            return None
+
+    model_time = header.get("model printing time")
+    est_time = header.get("total estimated time")
+    length_mm = _float(header.get("total filament length [mm]"))
+    weight_g = _float(header.get("total filament weight [g]"))
+    raw_vol = _float(header.get("total filament volume [cm^3]"))
+    diam_mm = _float(header.get("filament_diameter")) or 1.75
+    vol_mm3 = vol_cm3 = None
+    if raw_vol is not None:
+        # BambuStudio labels mm^3 as [cm^3] in HEADER_BLOCK; disambiguate using filament length & diameter.
+        if length_mm is not None and length_mm > 0:
+            expected_mm3 = length_mm * math.pi * (diam_mm * 0.5) ** 2
+            if abs(raw_vol - expected_mm3) < abs(raw_vol * 1000.0 - expected_mm3):
+                vol_mm3 = round(raw_vol, 4)
+                vol_cm3 = round(raw_vol / 1000.0, 6)
+            else:
+                vol_cm3 = round(raw_vol, 6)
+                vol_mm3 = round(raw_vol * 1000.0, 4)
+        else:
+            vol_cm3 = round(raw_vol, 6)
+            vol_mm3 = round(raw_vol * 1000.0, 4)
+    support_raw = config.get("enable_support")
+    support_enabled = (support_raw in ("1", "true", "True")) if support_raw is not None else None
+    return {
+        "modelPrintTime": model_time,
+        "modelPrintSeconds": _parse_duration_seconds(model_time),
+        "estimatedPrintTime": est_time,
+        "estimatedPrintSeconds": _parse_duration_seconds(est_time),
+        "layerCount": _int(header.get("total layer number")),
+        "filamentLengthMm": length_mm,
+        "filamentWeightG": weight_g,
+        "filamentVolumeMm3": vol_mm3,
+        "filamentVolumeCm3": vol_cm3,
+        "maxZHeightMm": _float(header.get("max_z_height")),
+        "bedType": config.get("curr_bed_type") or None,
+        "nozzleType": config.get("nozzle_type") or None,
+        "enableSupport": support_enabled,
+    }
+
+
+def _validate_overrides(bed_type, nozzle_type, enable_support):
+    bed_label = None
+    if bed_type is not None:
+        if not isinstance(bed_type, str) or bed_type not in BED_TYPE_LABELS:
+            raise ProducerError("preset", f"unsupported bed_type {bed_type!r}; choose from {sorted(BED_TYPE_LABELS)}")
+        bed_label = BED_TYPE_LABELS[bed_type]
+    if nozzle_type is not None:
+        if not isinstance(nozzle_type, str) or nozzle_type not in VALID_NOZZLE_TYPES:
+            raise ProducerError("preset", f"unsupported nozzle_type {nozzle_type!r}; choose from {list(VALID_NOZZLE_TYPES)}")
+    support_flag = None
+    if enable_support is not None:
+        if isinstance(enable_support, bool):
+            support_flag = enable_support
+        elif isinstance(enable_support, int) and enable_support in (0, 1):
+            support_flag = bool(enable_support)
+        else:
+            raise ProducerError("preset", f"enable_support must be a boolean or 0/1, got {enable_support!r}")
+    return bed_label, support_flag
+
+
 # ---------------------------------------------------------------- produce
 def produce(model, out_dir, machine, process, filament, bundle=DEFAULT_BUNDLE,
             expected_version=EXPECTED_VERSION, expected_binary_sha256=None, timeout=TIMEOUT_S, scratch_parent=None,
-            expected_input_sha256=None, expected_input_bytes=None, limits=None, _sandbox=None):
+            expected_input_sha256=None, expected_input_bytes=None, bed_type=None, nozzle_type=None,
+            enable_support=None, limits=None, _sandbox=None):
     """`_sandbox` is a test-only seam; the CLI never sets it, so production always uses PlatformSandbox."""
     limits = limits or Limits()
     sandbox = _sandbox or PlatformSandbox()
     if not (isinstance(timeout, (int, float)) and 0 < timeout <= MAX_TIMEOUT_S):
         raise ProducerError("limits", f"timeout must be in (0, {MAX_TIMEOUT_S}] seconds")
+    bed_label, support_flag = _validate_overrides(bed_type, nozzle_type, enable_support)
     out_dir = Path(out_dir)
     if out_dir.exists():
         raise ProducerError("publish", f"output directory already exists: {out_dir}")
@@ -366,6 +497,14 @@ def produce(model, out_dir, machine, process, filament, bundle=DEFAULT_BUNDLE,
         presets, preset_paths = {}, {}
         for k, n in (("machine", machine), ("process", process), ("filament", filament)):
             flat, sources = resolve_preset(bundle, k, n, limits)
+            if k == "machine" and nozzle_type is not None:
+                cur = flat.get("nozzle_type")
+                flat["nozzle_type"] = [nozzle_type] * (len(cur) if isinstance(cur, list) and cur else 1)
+            if k == "process":
+                if bed_label is not None:
+                    flat["curr_bed_type"] = bed_label
+                if support_flag is not None:
+                    flat["enable_support"] = "1" if support_flag else "0"
             blob = (json.dumps(flat, indent=2, sort_keys=True) + "\n").encode()
             p = inputs / f"{k}.json"
             p.write_bytes(blob)
@@ -448,11 +587,18 @@ def produce(model, out_dir, machine, process, filament, bundle=DEFAULT_BUNDLE,
             "input": {"fileName": model.name, "format": kind, "sha256": sha256_bytes(data), "bytes": len(data),
                       "expectedDigestChecked": expected_input_sha256 is not None},
             "presets": presets,
+            "overrides": {
+                "bedType": bed_type,
+                "bedTypeLabel": bed_label,
+                "nozzleType": nozzle_type,
+                "enableSupport": support_flag,
+            },
             "invocation": {"argv": [norm(a) for a in argv], "environmentKeys": sorted(env),
                            "sandboxProfileSha256": profile_sha,
                            "sandbox": sandbox.describe(), "timeoutSeconds": timeout,
                            "freshDatadir": True},
             "outputs": {"gcode": {"file": GCODE_NAME, "sha256": sha256_bytes(gcode), "bytes": len(gcode)},
+                        "gcodeSummary": parse_gcode_summary(gcode),
                         "exportedSettings": {"file": SETTINGS_NAME, "sha256": sha256_bytes(settings),
                                              "bytes": len(settings),
                                              "note": "observed slicer export artifact, hashed as bytes only"},
@@ -496,11 +642,18 @@ def main(argv=None):
     ap.add_argument("--timeout", type=int, default=TIMEOUT_S)
     ap.add_argument("--expected-input-sha256", help="reject unless the model bytes have this SHA-256")
     ap.add_argument("--expected-input-bytes", type=int, help="reject unless the model has this byte length")
+    ap.add_argument("--bed-type", choices=sorted(BED_TYPE_LABELS),
+                    help="explicit Bambu bed plate override written to flattened process preset")
+    ap.add_argument("--nozzle-type", choices=list(VALID_NOZZLE_TYPES),
+                    help="explicit hotend material override written to flattened machine preset")
+    ap.add_argument("--enable-support", type=int, choices=(0, 1),
+                    help="explicitly disable (0) or enable (1) support generation in flattened process preset")
     a = ap.parse_args(argv)
     try:
         m = produce(a.model, a.out, a.machine, a.process, a.filament, a.bundle,
                     a.expected_version, a.expected_binary_sha256, a.timeout,
-                    expected_input_sha256=a.expected_input_sha256, expected_input_bytes=a.expected_input_bytes)
+                    expected_input_sha256=a.expected_input_sha256, expected_input_bytes=a.expected_input_bytes,
+                    bed_type=a.bed_type, nozzle_type=a.nozzle_type, enable_support=a.enable_support)
     except ProducerError as e:
         sys.stderr.write(json.dumps({"error": {"stage": e.stage, "message": e.message, "evidence": e.evidence}},
                                     indent=2, sort_keys=True) + "\n")
