@@ -629,3 +629,19 @@ class DryRunIntegrationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CliContractTests(unittest.TestCase):
+    """Review follow-ups on PR #79: explicit profiles, strict exit code, companion-aligned caps."""
+
+    def test_check_requires_explicit_profile_and_strict_failure_exits_2(self):
+        import printability
+        import analyzer
+        self.assertEqual(analyzer.MAX_INPUT_BYTES, 32 << 20)
+        self.assertEqual(analyzer.MAX_FACETS, 500_000)
+        with tempfile.TemporaryDirectory() as tmp:
+            stl = Path(tmp) / "open.stl"
+            stl.write_text("solid open\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 1 0 0\nvertex 0 1 0\nendloop\nendfacet\nendsolid open\n")
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(printability.main(["check", str(stl)]), 2)
+                self.assertEqual(printability.main(["check", str(stl), "--profile", "p1s-0.4-hardened", "--strict"]), 2)

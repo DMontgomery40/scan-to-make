@@ -59,7 +59,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     chk = sub.add_parser("check", help="evaluate STL printability against a printer profile")
     chk.add_argument("stl", type=Path, help="input binary or ASCII STL (millimetres)")
-    chk.add_argument("--profile", help="bundled printer profile ID or alias (default: operator baseline p1s-0.4-hardened)")
+    chk.add_argument("--profile", help="explicit bundled printer profile ID or alias, e.g. p1s-0.4-hardened")
     chk.add_argument("--profile-file", type=Path, help="custom printer profile JSON file")
     chk.add_argument("--material", help="material family override, e.g. PLA, PETG, TPU")
     chk.add_argument("--overhang-deg", type=float, default=DEFAULT_OVERHANG_THRESHOLD_DEG,
@@ -108,6 +108,8 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         if args.command == "check":
+            if args.profile is None and args.profile_file is None:
+                raise ProfileError("check requires an explicit --profile or --profile-file; profiles are never guessed")
             profile, material_spec = resolve_profile(
                 args.profile,
                 profile_file=args.profile_file,
@@ -124,9 +126,9 @@ def main(argv: list[str] | None = None) -> int:
             sys.stdout.write(json.dumps(report, indent=2, sort_keys=True, allow_nan=False) + "\n")
             if args.strict:
                 if report["verdict"] == "not-printable":
-                    return 1
+                    return 2
                 if report["verdict"] == "printable-with-supports" and not args.allow_supports:
-                    return 1
+                    return 2
             return 0
 
         if args.command == "dry-run":

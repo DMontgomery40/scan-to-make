@@ -44,15 +44,17 @@ Exit codes:
 
 ## Geometric checks and deterministic verdict
 
+Inputs are capped at 32 MiB and 500,000 facets, matching the companion's `readVerifiedStl` intake, so anything that passes here can also be prepared there. `check` and `dry-run` both require an explicit `--profile` or `--profile-file`.
+
 Given an ASCII or binary STL in millimetres and an explicit profile, [analyzer.py](analyzer.py) emits `schema: "scan-to-make.printability/0.1.0"` with `verdict` in `{"printable", "printable-with-supports", "not-printable"}`:
 
 | Check | Method | Gate |
 | --- | --- | --- |
 | Topology & normals | Directed half-edge manifold audit (quantised `1e-5 mm`), non-degenerate triangle check, positive signed volume, and declared STL normal check | Open, non-manifold, degenerate, inside-out, or corrupt-normal meshes → `not-printable` |
-| Bed fit | Axis-aligned extents against `bedMm` (`x`, `y`, `z`), optional 90° Z rotation, and placement search avoiding `excludeZonesMm` (e.g. P1S `[0, 18] × [0, 28] mm` cutter keep-out) | Exceeds X/Y footprint, Z height, or unavoidable exclude zone → `not-printable` |
-| Flat base & stability | Downward facets (`nz <= -0.999`) within `0.05 mm` of `zMin`, 2D convex support hull, exact tetrahedral solid centre of mass `(cx, cy, cz)` projection, and minimum static tipping angle `atan2(margin, cz - zMin)` | Flat base `< 25 mm²` (`< 2%` of footprint unless `>= 100 mm²`), CoM outside support hull, or tipping angle `< 10°` → `not-printable` |
-| Minimum wall vs nozzle | Deterministic 2-point centroid-blended sampling across non-horizontal facets (`<= 1200` strided samples) + 3D uniform-grid DDA ray casting along inward 3D surface normal and XY slice plane | Opposing wall `< nozzleDiameterMm` across `>= 2` samples and `>= 0.5%` of wall samples → `not-printable`; `< 2 × nozzleDiameterMm` emits `thin-wall-below-two-perimeters` warning |
-| Overhangs (`> 45°`) | Downward tilt angle `asin(-nz) > 45°` above the base layer (`zMax > zMin + 0.30 mm`), reporting percentage of total surface area and connected spatial region bounding boxes/centroids | Overhang area `>= max(25 mm², 1% surface)` → `printable-with-supports` (assuming printable otherwise); smaller local overhangs stay `printable` with `minor-overhangs-bridging` warning |
+| Bed fit | Axis-aligned extents against `bedMm` (`x`, `y`, `z`), optional 90° Z rotation, and placement search avoiding `excludeZonesMm` (e.g. P1S `[0, 18] × [0, 28] mm` cutter keep-out). Absolute STL coordinates are deliberately ignored: the slicer step always runs BambuStudio with `--arrange 1`, which re-places the part on the plate and drops it to the bed. | Exceeds X/Y footprint, Z height, or unavoidable exclude zone → `not-printable` |
+| Flat base & stability | Downward facets within 5° of straight down (`nz <= -cos 5°`) and within `0.05 mm` of `zMin`, 2D convex support hull, exact tetrahedral solid centre of mass `(cx, cy, cz)` projection, and minimum static tipping angle `atan2(margin, cz - zMin)` | Flat base `< 9 mm²` or `< 2%` of the footprint, CoM outside support hull, or tipping angle `< 10°` → `not-printable` |
+| Minimum wall vs nozzle | Deterministic 2-point centroid-blended sampling across non-horizontal facets (up to `8000` strided samples by default) + 3D uniform-grid DDA ray casting along inward 3D surface normal and XY slice plane; if no opposing wall is hit, `minWallMm` falls back to the smallest extent (`minWallMode: bounds-fallback`) | Global minimum wall `< nozzleDiameterMm` → `not-printable`; `< 2 × nozzleDiameterMm` emits a `single-perimeter-thin-wall` warning |
+| Overhangs (`> 45°`) | Downward tilt angle `asin(-nz) > 45°` above the base layer (`zMax > zMin + 0.30 mm`), reporting percentage of total surface area and connected spatial region bounding boxes/centroids | Overhang area `>= 10 mm²`, or `>= 1%` of the surface, or any region `>= 4 mm²` steeper than `55°` → `printable-with-supports` (assuming printable otherwise); smaller local overhangs stay `printable` with a `minor-localized-overhang` warning |
 | Volume & filament | Exact mesh solid volume (`mm³`/`cm³`), solid 100%-infill filament upper bound (`mm`, `m`, `g`), and pre-slice 2-wall + 15%-infill FFF estimate for `PLA` (`1.26 g/cm³` Bambu PLA Basic default), `PETG`, `TPU`, `ABS`, or `ASA` | Informational pre-slice estimate; actual sliced extrusion comes from `slice/manifest.json` (`gcodeSummary`) |
 
 ## Dry-run slice bundle (`dry_run.py`)
@@ -65,7 +67,7 @@ If printability returns `not-printable` — or `printable-with-supports` when `-
 
 - `source.stl` and `template-manifest.json`
 - `printability.json`
-- `slice/plate_1.gcode`, `slice/exported-settings.json`, `slice/manifest.json`, `slice/stdout.log`, `slice/stderr.log`
+- `slice/plate_1.gcode`, `slice/exported-settings.json`, `slice/manifest.json`, `slice/slicer.log`
 - `dry-run-manifest.json` (`schema: "scan-to-make.print-path-dry-run/0.1.0"`), binding `source.stl`, `template-manifest.json`, `printability.json`, `slice/plate_1.gcode`, `slice/exported-settings.json`, `slicerSettingsSha256` (`sha256(exported-settings.json)`), and a `companionPreparedSelectionCandidate` descriptor ready for companion intake.
 
 ## Tests

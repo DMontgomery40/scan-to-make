@@ -25,8 +25,9 @@ except ImportError:  # pragma: no cover - exercised on stdlib-only hosts
     HAS_NUMPY = False
 
 PRINTABILITY_SCHEMA = "scan-to-make.printability/0.1.0"
-MAX_INPUT_BYTES = 64 << 20
-MAX_FACETS = 2_000_000
+# Match the companion's readVerifiedStl intake (services/companion/src/stl-export.ts).
+MAX_INPUT_BYTES = 32 << 20
+MAX_FACETS = 500_000
 DEFAULT_OVERHANG_THRESHOLD_DEG = 45.0
 BASE_PLANE_TOLERANCE_MM = 0.05
 MIN_BASE_AREA_MM2 = 9.0
