@@ -5,9 +5,11 @@ import {PrintSelectionSchema} from './index.js';
 import {PreparedJobStore,PreparedJobFailure} from './prepared-jobs.js';
 import {SavedProjectSync,SavedProjectSyncFailure,MAX_SAVED_PROJECT_SYNC_BYTES,type FileSavedProjectStorage} from '@scan-to-make/project';
 import {CaptureStore,DEFAULT_CAPTURE_LIMITS} from './capture-import.js';
+import {DetailStillStore,DetailStillFailure,sniffDetailStillMediaType} from './detail-stills.js';
+import {MAX_DETAIL_STILL_BYTES} from '@scan-to-make/contracts/detail-still';
 import {RemoteAuthFailure,type RemoteScope} from './remote-auth.js';
 
-export interface CaptureServices {storage:FileSavedProjectStorage;captures?:CaptureStore;preparedJobs?:PreparedJobStore}
+export interface CaptureServices {storage:FileSavedProjectStorage;captures?:CaptureStore;preparedJobs?:PreparedJobStore;detailStills?:DetailStillStore}
 class Failure extends Error {
  constructor(readonly status:number,readonly code:string){super(code);}
 }
@@ -65,26 +67,33 @@ export function createCaptureRoutes(services:CaptureServices){
     const url=new URL(request.url!,'http://localhost');
     const match=/^\/v1\/saved-projects\/([A-Za-z0-9][A-Za-z0-9_-]{0,127})(?:\/captures(?:\/([a-fA-F0-9-]{36})(?:\/artifacts\/(original|derived|report))?)?)?$/.exec(url.pathname);
     const prepared=/^\/v1\/saved-projects\/([A-Za-z0-9][A-Za-z0-9_-]{0,127})\/prepared-jobs(?:\/([a-fA-F0-9-]{36})(?:\/artifacts\/(printable))?)?$/.exec(url.pathname);
-    if(!match&&!prepared)throw new Failure(404,'not-found');
-    const id=(prepared??match)![1]!,captureId=match?.[2],kind=match?.[3] as 'original'|'derived'|'report'|undefined;
+    const stills=/^\/v1\/saved-projects\/([A-Za-z0-9][A-Za-z0-9_-]{0,127})\/captures\/([a-fA-F0-9-]{36})\/detail-stills(?:\/([a-fA-F0-9-]{36}))?$/.exec(url.pathname);
+    if(!match&&!prepared&&!stills)throw new Failure(404,'not-found');
+    const id=(prepared??stills??match)![1]!,captureId=match?.[2],kind=match?.[3] as 'original'|'derived'|'report'|undefined;
     const jobId=prepared?.[2]?.toLowerCase(),listing=!!prepared&&!prepared[2];
     if(jobId&&!z.uuid().safeParse(jobId).success)throw new Failure(400,'invalid-request');
     if(prepared&&!services.preparedJobs)throw new Failure(404,'not-found');
+    const stillCaptureId=stills?.[2]?.toLowerCase(),stillId=stills?.[3]?.toLowerCase();
+    if(stillCaptureId&&!z.uuid().safeParse(stillCaptureId).success)throw new Failure(400,'invalid-request');
+    if(stillId&&!z.uuid().safeParse(stillId).success)throw new Failure(400,'invalid-request');
+    if(stills&&!services.detailStills)throw new Failure(404,'not-found');
+    const stillPost=!!stills&&!stillId&&request.method==='POST';
     const captureRoute=!!match&&match[0]!==`/v1/saved-projects/${id}`;
     if(captureRoute&&!services.captures)throw new Failure(404,'not-found');
     const writing=request.method==='PUT'||request.method==='POST';
-    const scope:RemoteScope=prepared?(writing?'prepared-jobs:prepare':'prepared-jobs:read'):captureRoute?(writing?'captures:import':'captures:read'):(writing?'projects:write':'projects:read');
+    const scope:RemoteScope=stills?(writing||request.method==='DELETE'?'captures:import':'captures:read'):prepared?(writing?'prepared-jobs:prepare':'prepared-jobs:read'):captureRoute?(writing?'captures:import':'captures:read'):(writing?'projects:write':'projects:read');
     await authorize(scope);
-    if(prepared?(listing||prepared[3]?request.method!=='GET':!['GET','POST'].includes(request.method??'')):captureRoute?(captureId?request.method!=='GET':request.method!=='POST'):!['GET','PUT'].includes(request.method??''))throw new Failure(405,'method-not-allowed');
+    if(stills?(stillId?!['GET','DELETE'].includes(request.method??''):!['GET','POST'].includes(request.method??'')):prepared?(listing||prepared[3]?request.method!=='GET':!['GET','POST'].includes(request.method??'')):captureRoute?(captureId?request.method!=='GET':request.method!=='POST'):!['GET','PUT'].includes(request.method??''))throw new Failure(405,'method-not-allowed');
     if(active)throw new Failure(429,'busy');
     const controller=new AbortController();active={controller,done:new Promise<void>(resolve=>finish=resolve)};
     disconnected=()=>{if(!response.writableEnded)controller.abort();};response.once('close',disconnected);
     const assertActive=()=>{if(controller.signal.aborted)throw new Failure(499,'cancelled');};
     const ifMatch=header('if-match'),ifNoneMatch=header('if-none-match');
-    let revision=0,listLimit:number|undefined,listCursor:string|undefined,productionVersion:1|undefined;
-    if(captureRoute||prepared){
+    let revision=0,listLimit:number|undefined,listCursor:string|undefined,productionVersion:1|undefined,stillLabel:string|undefined;
+    if(captureRoute||prepared||stills){
      const keys=[...url.searchParams.keys()];const raw=url.searchParams.get('projectRevision');
-     if((listing?(new Set(keys).size!==keys.length||keys.some(key=>!['projectRevision','limit','cursor','productionVersion'].includes(key))):keys.length!==1||keys[0]!=='projectRevision')||raw===null||! /^(0|[1-9][0-9]*)$/.test(raw)||!Number.isSafeInteger(Number(raw)))throw new Failure(400,'invalid-request');
+     if((listing?(new Set(keys).size!==keys.length||keys.some(key=>!['projectRevision','limit','cursor','productionVersion'].includes(key))):stillPost?(new Set(keys).size!==keys.length||keys.some(key=>!['projectRevision','label'].includes(key))):keys.length!==1||keys[0]!=='projectRevision')||raw===null||! /^(0|[1-9][0-9]*)$/.test(raw)||!Number.isSafeInteger(Number(raw)))throw new Failure(400,'invalid-request');
+     if(stillPost)stillLabel=url.searchParams.get('label')??undefined;
      if(listing){
       const limit=url.searchParams.get('limit');listCursor=url.searchParams.get('cursor')??undefined;
       const version=url.searchParams.get('productionVersion');
@@ -100,11 +109,15 @@ export function createCaptureRoutes(services:CaptureServices){
     }else if(url.search)throw new Failure(400,'invalid-request');
     if(writing){
      const contentType=header('content-type')??'';
-     if(!(captureRoute?contentType==='model/vnd.usdz+zip':/^application\/json(?:;\s*charset=utf-8)?$/i.test(contentType))||!['identity',undefined].includes(header('content-encoding')))throw new Failure(415,'unsupported-media-type');
-     const limit=prepared?Math.ceil(services.preparedJobs!.maxPrintableBytes/3)*4+PREPARED_METADATA_BYTES:captureRoute?DEFAULT_CAPTURE_LIMITS.maxSourceBytes:MAX_SAVED_PROJECT_SYNC_BYTES;
+     if(!(stillPost?['image/jpeg','image/heic','image/png'].includes(contentType):captureRoute?contentType==='model/vnd.usdz+zip':/^application\/json(?:;\s*charset=utf-8)?$/i.test(contentType))||!['identity',undefined].includes(header('content-encoding')))throw new Failure(415,'unsupported-media-type');
+     const limit=stillPost?MAX_DETAIL_STILL_BYTES:prepared?Math.ceil(services.preparedJobs!.maxPrintableBytes/3)*4+PREPARED_METADATA_BYTES:captureRoute?DEFAULT_CAPTURE_LIMITS.maxSourceBytes:MAX_SAVED_PROJECT_SYNC_BYTES;
      if(Number(header('content-length')??0)>limit)throw new Failure(413,'payload-too-large');
      const bytes=await body(request,controller.signal,limit,prepared?30000:5000);assertActive();await authorize(scope);assertActive();
-     if(prepared){
+     if(stillPost){
+      if(sniffDetailStillMediaType(bytes)!==contentType)throw new Failure(415,'unsupported-media-type');
+      const result=await services.detailStills!.addDetailStill({projectId:id,projectRevision:revision,captureId:stillCaptureId!,label:stillLabel,source:bytes,expectedProjectETag:ifMatch},controller.signal,()=>authorize(scope));
+      assertActive();response.statusCode=201;response.setHeader('ETag',ifMatch!);await send(response,JSON.stringify(result));
+     }else if(prepared){
       const input=preparedEnvelope(bytes,services.preparedJobs!.maxPrintableBytes);
       const result=await services.preparedJobs!.prepare({...input,jobId:jobId!,projectId:id,projectRevision:revision,expectedProjectETag:ifMatch},controller.signal,()=>authorize(scope));
       assertActive();response.statusCode=result.created?201:200;response.setHeader('ETag',ifMatch!);
@@ -115,6 +128,25 @@ export function createCaptureRoutes(services:CaptureServices){
      }else{
       let text:string;try{text=new TextDecoder('utf-8',{fatal:true,ignoreBOM:true}).decode(bytes);}catch{throw new Failure(400,'invalid-snapshot');}
       const result=await projects.put(id,text,{ifMatch,ifNoneMatch},async()=>{assertActive();await authorize(scope);assertActive();});response.statusCode=ifNoneMatch==='*'?201:200;response.setHeader('ETag',result.etag);await send(response,result.bytes);
+     }
+    }else if(stills){
+     if(request.method==='DELETE'){
+      const result=await services.detailStills!.deleteDetailStill(id,revision,stillCaptureId!,stillId!,ifMatch,controller.signal,()=>authorize(scope));
+      await authorize(scope);assertActive();response.setHeader('ETag',ifMatch!);
+      await send(response,JSON.stringify({captureId:stillCaptureId,stillId:result.still.id,deleted:true}));
+     }else if(stillId){
+      const result=await services.detailStills!.loadDetailStill(id,revision,stillCaptureId!,stillId,ifMatch);
+      await authorize(scope);assertActive();
+      await services.storage.withCurrentProject(id,revision,async()=>{
+       assertActive();response.setHeader('ETag',ifMatch!);
+       response.setHeader('Content-Type',result.still.mediaType);response.setHeader('X-Content-SHA256',result.still.sha256);await send(response,result.bytes);
+      },ifMatch);
+     }else{
+      const result=await services.detailStills!.listDetailStills(id,revision,stillCaptureId!,ifMatch);
+      await authorize(scope);assertActive();
+      await services.storage.withCurrentProject(id,revision,async()=>{
+       assertActive();response.setHeader('ETag',ifMatch!);await send(response,JSON.stringify(result));
+      },ifMatch);
      }
     }else if(listing){
      const result=await services.preparedJobs!.listPreparedJobs({projectId:id,projectRevision:revision,expectedProjectETag:ifMatch!,limit:listLimit,cursor:listCursor,...(productionVersion===1?{productionVersion}:{})},controller.signal);
@@ -147,7 +179,7 @@ export function createCaptureRoutes(services:CaptureServices){
      const result=await projects.get(id);await authorize(scope);assertActive();response.setHeader('ETag',result.etag);await send(response,result.bytes);
     }
    }catch(error){
-    const failure=error instanceof Failure||error instanceof RemoteAuthFailure?error:error instanceof SavedProjectSyncFailure?new Failure(snapshotStatus[error.code],error.code):error instanceof PreparedJobFailure?new Failure({'not-found':404,'job-conflict':409,cancelled:499,'invalid-cursor':400,'cursor-stale':409,'discovery-unavailable':503}[error.code],error.code):['EACCES','EIO','ENOSPC','EROFS'].includes((error as NodeJS.ErrnoException)?.code??'')?new Failure(503,'storage-unavailable'):new Failure(422,'capture-unavailable');
+    const failure=error instanceof Failure||error instanceof RemoteAuthFailure?error:error instanceof SavedProjectSyncFailure?new Failure(snapshotStatus[error.code],error.code):error instanceof PreparedJobFailure?new Failure({'not-found':404,'job-conflict':409,cancelled:499,'invalid-cursor':400,'cursor-stale':409,'discovery-unavailable':503}[error.code],error.code):error instanceof DetailStillFailure?new Failure({'not-found':404,'still-limit':409,'unsupported-media-type':415,'invalid-still':400,'payload-too-large':413,'still-unavailable':422}[error.code],error.code):['EACCES','EIO','ENOSPC','EROFS'].includes((error as NodeJS.ErrnoException)?.code??'')?new Failure(503,'storage-unavailable'):new Failure(422,'capture-unavailable');
     if(!response.destroyed&&!response.headersSent){response.statusCode=failure.status;await send(response,JSON.stringify({error:{code:failure.code,message:failure.code}}));}
    }finally{
     if(disconnected)response.off('close',disconnected);

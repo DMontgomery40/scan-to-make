@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+export * from './detail-still.js';
+
 const id = z.string().trim().min(1);
 const positiveMm = z.number().finite().positive();
 const revision = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
