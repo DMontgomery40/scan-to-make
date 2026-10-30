@@ -1,0 +1,48 @@
+name: Design planner checks
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'tools/design-planner/**'
+      - 'tools/templates/**'
+      - 'tools/scan-repair/**'
+      - 'packages/contracts/fixtures/**'
+      - '.github/workflows/design-planner.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'tools/design-planner/**'
+      - 'tools/templates/**'
+      - 'tools/scan-repair/**'
+      - 'packages/contracts/fixtures/**'
+      - '.github/workflows/design-planner.yml'
+permissions:
+  contents: read
+jobs:
+  design-planner:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.10', '3.12']
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Compile
+        run: python -m py_compile tools/design-planner/*.py tools/design-planner/tests/*.py
+      - name: Run planner tests with the scripted model (no API keys, no skips)
+        run: |
+          python - <<'PY'
+          import sys
+          import unittest
+          suite = unittest.defaultTestLoader.discover('tools/design-planner/tests')
+          result = unittest.TextTestRunner(verbosity=2).run(suite)
+          if result.skipped:
+              print('Unexpected CI skips: the planner tests need no optional runtime.', file=sys.stderr)
+          sys.exit(0 if result.wasSuccessful() and not result.skipped else 1)
+          PY
