@@ -26,7 +26,7 @@ export const VERDICTS: Record<
     label: 'Can’t print yet',
     tone: 'fail',
     title: 'This design can’t print as it is',
-    body: 'Fix these first, then check again.',
+    body: 'Change the design to fix these, then check it again.',
   },
 };
 
