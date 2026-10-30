@@ -86,7 +86,7 @@ export function createCaptureRoutes(services:CaptureServices){
     const writing=request.method==='PUT'||request.method==='POST';
     const scope:RemoteScope=processing?(writing||request.method==='DELETE'?'captures:import':'captures:read'):stills?(writing||request.method==='DELETE'?'captures:import':'captures:read'):prepared?(writing?'prepared-jobs:prepare':'prepared-jobs:read'):captureRoute?(writing?'captures:import':'captures:read'):(writing?'projects:write':'projects:read');
     await authorize(scope);
-    if(processing?(processing[3]?(processing[4]?request.method!=='GET':!['GET','DELETE'].includes(request.method??'')):request.method!=='POST'):stills?(stillId?!['GET','DELETE'].includes(request.method??''):!['GET','POST'].includes(request.method??'')):prepared?(listing||prepared[3]?request.method!=='GET':!['GET','POST'].includes(request.method??'')):captureRoute?(captureId?request.method!=='GET':request.method!=='POST'):!['GET','PUT'].includes(request.method??''))throw new Failure(405,'method-not-allowed');
+    if(processing?(processing[3]?(processing[4]?request.method!=='GET':!['GET','DELETE'].includes(request.method??'')):!['GET','POST'].includes(request.method??'')):stills?(stillId?!['GET','DELETE'].includes(request.method??''):!['GET','POST'].includes(request.method??'')):prepared?(listing||prepared[3]?request.method!=='GET':!['GET','POST'].includes(request.method??'')):captureRoute?(captureId?request.method!=='GET':request.method!=='POST'):!['GET','PUT'].includes(request.method??''))throw new Failure(405,'method-not-allowed');
     if(active)throw new Failure(429,'busy');
     const controller=new AbortController();active={controller,done:new Promise<void>(resolve=>finish=resolve)};
     disconnected=()=>{if(!response.writableEnded)controller.abort();};response.once('close',disconnected);
@@ -127,7 +127,8 @@ export function createCaptureRoutes(services:CaptureServices){
      }else if(processing[4]){
       const name=ScanArtifactNameSchema.safeParse(processing[4]);if(!name.success)throw new Failure(404,'not-found');
       artifact=await services.scanProcessing.artifact(input,jid!,name.data);result={job:artifact.job};
-     }else result=await services.scanProcessing.load(input,jid!);
+     }else if(jid)result=await services.scanProcessing.load(input,jid);
+     else result=await services.scanProcessing.list(input);
      await services.storage.withCurrentProject(id,revision,async()=>{
       await authorize(scope);assertActive();response.setHeader('ETag',ifMatch!);
       if(artifact){response.setHeader('Content-Type',artifact.ref.mediaType);response.setHeader('X-Content-SHA256',artifact.ref.sha256);await send(response,artifact.bytes);}

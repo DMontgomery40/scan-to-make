@@ -9,6 +9,6 @@ Pod::Spec.new do |s|
   s.platforms = { :ios => min_ios_version_supported }
   s.source_files = "ios/*.{h,m,mm}"
   s.libraries = "sqlite3"
-  s.frameworks = "SceneKit", "UIKit", "Security", "QuickLook", "UniformTypeIdentifiers"
+  s.frameworks = "SceneKit", "ModelIO", "PhotosUI", "UIKit", "Security", "QuickLook", "UniformTypeIdentifiers"
   install_modules_dependencies(s)
 end

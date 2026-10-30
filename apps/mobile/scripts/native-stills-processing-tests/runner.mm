@@ -31,6 +31,13 @@ static void Require(BOOL ok,NSString *why){if(!ok){fprintf(stderr,"FAIL %s\n",wh
   Require([r[@"etag"] isEqual:config[@"media"][@"etag"]],@"exact ETag echo");then(r);
  } reject:^(NSString*c,NSString*m,NSError*e){Require(NO,c);}];
 }
+- (void)requireImageUri:(NSDictionary*)file then:(void(^)(void))then {
+ [self.bridge imageUriFile:file resolve:^(id uri){
+  Require([uri isKindOfClass:NSString.class]&&[uri isEqual:FileURL(file).absoluteString],@"verified image uri");
+  NSData *bytes=[NSData dataWithContentsOfURL:[NSURL URLWithString:uri]];
+  Require(bytes&&[STMHash(bytes) isEqual:file[@"sha256"]],@"image uri exact bytes");then();
+ } reject:^(NSString*c,NSString*m,NSError*e){Require(NO,c);}];
+}
 - (void)rejects:(NSDictionary*)options code:(NSString*)code {
  __block BOOL rejected=NO;
  [self.bridge requestOptions:options resolve:^(id r){Require(NO,@"unexpected request accepted");} reject:^(NSString*c,NSString*m,NSError*e){rejected=[c isEqual:code];}];
@@ -79,6 +86,7 @@ static void Require(BOOL ok,NSString *why){if(!ok){fprintf(stderr,"FAIL %s\n",wh
  [self request:o status:200 then:^(NSDictionary*r){
   Require([r[@"file"] isEqual:pngRef],@"png download identity");
   Require(Verified(pngRef).length==[pngRef[@"byteLength"] unsignedIntegerValue],@"verified retained png bytes");
+  [self requireImageUri:pngRef then:^{}];
   NSMutableDictionary *report=[self options:@"GET" path:[self path:[NSString stringWithFormat:@"/scan-processing/%@/artifacts/report.json?",jobId]]];report[@"artifact"]=self.job[@"artifacts"][@"report.json"];
   [self request:report status:200 then:^(NSDictionary*rr){
    Require([rr[@"file"] isEqual:self.job[@"artifacts"][@"report.json"]],@"report download identity");[self deleteStill];
@@ -111,6 +119,7 @@ static void Require(BOOL ok,NSString *why){if(!ok){fprintf(stderr,"FAIL %s\n",wh
    download[@"artifact"]=@{@"sha256":still[@"sha256"],@"byteLength":still[@"byteLength"],@"mediaType":still[@"mediaType"]};
    [self request:download status:200 then:^(NSDictionary*rrr){
     Require([rrr[@"file"] isEqual:download[@"artifact"]]&&[Verified(download[@"artifact"]) isEqual:self.jpeg],@"exact downloaded still bytes");
+    [self requireImageUri:download[@"artifact"] then:^{}];
     NSMutableDictionary *start=[self options:@"POST" path:[self path:@"/scan-processing?"]];
     start[@"body"]=@"{\"reference\":{\"dimensionsMm\":[60.6,45.2,21.7]}}";
     [self request:start status:202 then:^(NSDictionary*rrrr){
@@ -124,6 +133,10 @@ static void Require(BOOL ok,NSString *why){if(!ok){fprintf(stderr,"FAIL %s\n",wh
 }
 - (void)phaseTwo {
  NSString *jobId=[NSUserDefaults.standardUserDefaults stringForKey:@"jobId"];Require(jobId.length>0,@"persisted job id");
+ [self request:[self options:@"GET" path:[self path:@"/scan-processing?"]] status:200 then:^(NSDictionary*listed){
+  NSArray *jobs=[NSJSONSerialization JSONObjectWithData:[listed[@"body"] dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil][@"jobs"];
+  BOOL found=NO;for(NSDictionary *item in jobs)if([item[@"jobId"] isEqual:jobId]&&[item[@"status"] isEqual:@"succeeded"])found=YES;
+  Require(found,@"finished job listed after restart");
  [self request:[self options:@"GET" path:[self path:[NSString stringWithFormat:@"/scan-processing/%@?",jobId]]] status:200 then:^(NSDictionary*r){
   NSDictionary *job=[NSJSONSerialization JSONObjectWithData:[r[@"body"] dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil][@"job"];
   Require([job[@"status"] isEqual:@"succeeded"]&&[job[@"artifacts"] count]==13,@"succeeded job survives restart");
@@ -132,6 +145,7 @@ static void Require(BOOL ok,NSString *why){if(!ok){fprintf(stderr,"FAIL %s\n",wh
    Require([list[@"stills"] count]==0,@"deletion survives restart");
    [self.pair disconnectResolve:^(id done){Require([done[@"state"] isEqual:@"disconnected"],@"test credential cleanup");[self finish];} reject:^(NSString*c,NSString*m,NSError*e){Require(NO,c);}];
   } attempt:0];
+ } attempt:0];
  } attempt:0];
 }
 - (void)withContext:(void(^)(void))then {

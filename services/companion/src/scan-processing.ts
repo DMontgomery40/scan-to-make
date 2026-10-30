@@ -1,5 +1,5 @@
 import {createHash,randomUUID} from 'node:crypto';
-import {mkdir,mkdtemp,open,rename,rm,stat} from 'node:fs/promises';
+import {mkdir,mkdtemp,open,readdir,rename,rm,stat} from 'node:fs/promises';
 import {join} from 'node:path';
 import {z} from 'zod';
 import type {FileSavedProjectStorage} from '@scan-to-make/project';
@@ -166,25 +166,46 @@ export class ScanProcessingStore {
    await this.persist(r,job);
   }finally{clearTimeout(timer);if(staging)await rm(staging,{recursive:true,force:true});}
  }
+ private async readRecord(r:Request,jobId:string):Promise<ScanProcessingJob>{
+  let job:ScanProcessingJob;
+  try{job=ScanProcessingJobSchema.parse(JSON.parse((await readBoundedCaptureFile(join(this.folder(r),`${jobId}.json`),65536)).toString('utf8')));}catch(e){if((e as NodeJS.ErrnoException).code==='ENOENT')throw new ScanProcessingFailure('not-found');throw new ScanProcessingFailure('processing-unavailable');}
+  if(job.jobId!==jobId||job.projectId!==r.projectId||job.captureId!==r.captureId||job.projectRevision!==r.projectRevision)throw new ScanProcessingFailure('not-found');
+  return job;
+ }
+ // A dead owner is an interrupted attempt, never an automatic rerun.
+ private async interruptedIfDead(r:Request,job:ScanProcessingJob){
+  if(job.status!=='queued'&&job.status!=='running')return job;
+  const owner=await readLockOwner(join(this.directory,'.scan-processing-lock'));
+  let alive=false;
+  if(owner?.jobId===job.jobId){try{process.kill(owner.pid,0);alive=true;}catch{ /* dead owner */ }}
+  if(!alive){
+   // Reap this job's orphaned worker group promptly; lock recovery retries on the next start.
+   if(owner?.jobId===job.jobId)await terminateProcessGroup(owner.pgid).catch(()=>false);
+   job.status='failed';job.failure='interrupted';for(const stage of job.stages)if(stage.status==='running')stage.status='failed';await this.persist(r,job);
+  }
+  return job;
+ }
  async load(input:Request,jobId:string){
   const r=requestSchema.parse(input);z.uuid().parse(jobId);
   await this.captures.loadCapture(r.projectId,r.projectRevision,r.captureId,r.expectedProjectETag);
   return this.projects.withCurrentProject(r.projectId,r.projectRevision,async()=>{
-   let job:ScanProcessingJob;
-   try{job=ScanProcessingJobSchema.parse(JSON.parse((await readBoundedCaptureFile(join(this.folder(r),`${jobId}.json`),65536)).toString('utf8')));}catch(e){if((e as NodeJS.ErrnoException).code==='ENOENT')throw new ScanProcessingFailure('not-found');throw new ScanProcessingFailure('processing-unavailable');}
-   if(job.jobId!==jobId||job.projectId!==r.projectId||job.captureId!==r.captureId||job.projectRevision!==r.projectRevision)throw new ScanProcessingFailure('not-found');
-   // A dead owner is an interrupted attempt, never an automatic rerun.
-   if(job.status==='queued'||job.status==='running'){
-    const owner=await readLockOwner(join(this.directory,'.scan-processing-lock'));
-    let alive=false;
-    if(owner?.jobId===jobId){try{process.kill(owner.pid,0);alive=true;}catch{ /* dead owner */ }}
-    if(!alive){
-     // Reap this job's orphaned worker group promptly; lock recovery retries on the next start.
-     if(owner?.jobId===jobId)await terminateProcessGroup(owner.pgid).catch(()=>false);
-     job.status='failed';job.failure='interrupted';for(const stage of job.stages)if(stage.status==='running')stage.status='failed';await this.persist(r,job);
-    }
+   return {job:await this.interruptedIfDead(r,await this.readRecord(r,jobId))};
+  },r.expectedProjectETag);
+ }
+ /** Every retained job for one capture at the current revision, ascending job id. */
+ async list(input:Request){
+  const r=requestSchema.parse(input);
+  await this.captures.loadCapture(r.projectId,r.projectRevision,r.captureId,r.expectedProjectETag);
+  return this.projects.withCurrentProject(r.projectId,r.projectRevision,async()=>{
+   let entries:string[];
+   try{entries=await readdir(this.folder(r));}catch(e){if((e as NodeJS.ErrnoException).code==='ENOENT')return {jobs:[]};throw new ScanProcessingFailure('processing-unavailable');}
+   const ids=entries.filter(name=>name.endsWith('.json')).map(name=>name.slice(0,-5).toLowerCase()).filter(id=>z.uuid().safeParse(id).success).sort();
+   const jobs:ScanProcessingJob[]=[];
+   for(const jobId of ids){
+    try{jobs.push(await this.interruptedIfDead(r,await this.readRecord(r,jobId)));}
+    catch(e){if(e instanceof ScanProcessingFailure&&e.code==='not-found')continue;throw e;}
    }
-   return {job};
+   return {jobs};
   },r.expectedProjectETag);
  }
  async artifact(input:Request,jobId:string,name:ScanArtifactName){

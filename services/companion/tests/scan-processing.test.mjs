@@ -92,3 +92,14 @@ test('a same-process start paused before launch keeps its lock against a second 
  await assert.rejects(f.store.start(f.input,async()=>{throw Error('revoked');}));
  const next=await other.start(f.input);await other.wait();assert.equal((await other.load(f.input,next.job.jobId)).job.status,'succeeded');
 });
+test('list returns every retained job for the capture so a finished check can reopen after relaunch',async t=>{
+ const f=await fixture(t);
+ assert.deepEqual((await f.store.list(f.input)).jobs,[]);
+ const first=await f.store.start(f.input);await f.store.wait();
+ const second=await f.store.start(f.input);await f.store.wait();
+ const fresh=new ScanProcessingStore(f.storage,f.captures,join(f.root,'captures'),fakeRunner);
+ const {jobs}=await fresh.list(f.input);
+ assert.deepEqual(jobs.map(job=>job.jobId),[first.job.jobId,second.job.jobId].sort());
+ assert(jobs.every(job=>job.status==='succeeded'));
+ await assert.rejects(fresh.list({...f.input,projectRevision:1}));
+});

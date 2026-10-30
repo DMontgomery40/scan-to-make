@@ -47,6 +47,11 @@ export interface ScanProcessingNative {
   request(options: ProcessingRequest): Promise<ProcessingResponse>;
   present(file: CaptureFile, share: boolean): Promise<unknown>;
   cancel(): Promise<void>;
+  /**
+   * Optional display seam: resolves a verified, app-private cached file URI
+   * for already-downloaded image bytes, or null when unavailable.
+   */
+  imageUri?(file: CaptureFile): Promise<string | null>;
 }
 
 function failure(status: number, code?: string): never {
@@ -131,6 +136,22 @@ export class ScanProcessingClient {
     if ((await this.native.context()) !== context)
       throw Error('Companion connection changed.');
   }
+  private validate(
+    job: ScanProcessingJob,
+    projectId: string,
+    captureId: string,
+    revision: number,
+    jobId?: string,
+  ): ScanProcessingJob {
+    if (
+      job.projectId !== projectId ||
+      job.captureId !== captureId.toLowerCase() ||
+      job.projectRevision !== revision ||
+      (jobId !== undefined && job.jobId !== jobId.toLowerCase())
+    )
+      throw Error('Scan job belongs to a different project version.');
+    return job;
+  }
   private job(
     body: string,
     projectId: string,
@@ -141,20 +162,14 @@ export class ScanProcessingClient {
     const job = z
       .strictObject({ job: ScanProcessingJobSchema })
       .parse(JSON.parse(body)).job;
-    if (
-      job.projectId !== projectId ||
-      job.captureId !== captureId.toLowerCase() ||
-      job.projectRevision !== revision ||
-      (jobId !== undefined && job.jobId !== jobId.toLowerCase())
-    )
-      throw Error('Scan job belongs to a different project version.');
-    return job;
+    return this.validate(job, projectId, captureId, revision, jobId);
   }
   /**
    * Starts one preview-only repair/measure/render job, optionally with
    * known-product reference dimensions. The POST is not idempotent and is
    * never auto-retried: a lost or 5xx reply is reported as ambiguous.
-   * Persist the returned `jobId` immediately; there is no list endpoint.
+   * Persist the returned `jobId` immediately so polling can resume; after a
+   * relaunch, `listJobs` recovers every retained job for the capture.
    */
   async start(
     projectId: string,
@@ -192,6 +207,52 @@ export class ScanProcessingClient {
       throw Error('Scan job reference mismatch.');
     await this.settle(projectId, ack, context);
     return job;
+  }
+  /**
+   * Every retained job for this capture at the current revision, in
+   * ascending job-id order. This is the relaunch recovery path: a finished
+   * check can be reopened without the app having kept its job id.
+   * Older companions without the listing route fail with
+   * `code: 'not-available'` so callers can fall back to a kept id.
+   */
+  async listJobs(
+    projectId: string,
+    captureId: string,
+    ack: ProjectAcknowledgment,
+  ): Promise<ScanProcessingJob[]> {
+    this.checkIds(projectId, captureId, ack);
+    const project = await this.current(projectId, ack);
+    const context = await this.native.context();
+    let r: ProcessingResponse;
+    try {
+      r = await this.get({
+        context,
+        method: 'GET',
+        path: this.base(projectId, captureId, project.revision),
+        etag: ack.etag,
+      });
+    } catch (error) {
+      if ((error as { status?: number })?.status === 405)
+        throw Object.assign(
+          Error('This companion cannot list earlier scan checks.'),
+          { code: 'not-available', status: 405 },
+        );
+      throw error;
+    }
+    const jobs = z
+      .strictObject({ jobs: z.array(ScanProcessingJobSchema) })
+      .parse(JSON.parse(r.body)).jobs;
+    for (let i = 0; i < jobs.length; i++) {
+      const job = jobs[i]!;
+      this.validate(job, projectId, captureId, project.revision);
+      if (
+        job.jobId !== job.jobId.toLowerCase() ||
+        (i > 0 && jobs[i - 1]!.jobId >= job.jobId)
+      )
+        throw Error('The companion returned an invalid scan job list.');
+    }
+    await this.settle(projectId, ack, context);
+    return jobs;
   }
   /** One status read. Callers poll on their own timer while non-terminal. */
   async status(
@@ -308,5 +369,17 @@ export class ScanProcessingClient {
       name,
     );
     return this.native.present(file, share);
+  }
+  /**
+   * Displayable URI for an already-downloaded PNG view, verified natively
+   * against the file identity. Null when the transport cannot provide one
+   * or the file is not a PNG view.
+   */
+  async imageUri(file: CaptureFile): Promise<string | null> {
+    if (file.mediaType !== 'image/png' || !this.native.imageUri) return null;
+    const uri = await this.native.imageUri(file);
+    if (uri !== null && (typeof uri !== 'string' || !uri.startsWith('file://')))
+      throw Error('Scan view display path is invalid.');
+    return uri;
   }
 }

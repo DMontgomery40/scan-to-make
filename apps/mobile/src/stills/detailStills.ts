@@ -12,6 +12,16 @@ import type { ProjectAcknowledgment } from '../prepared/preparedFiles';
 export type { DetailStill, ProjectAcknowledgment };
 export { MAX_DETAIL_STILL_BYTES };
 export type DetailStillFile = CaptureFile;
+/** A photo chosen in the system picker, kept locally by exact-byte identity. */
+export type PickedStillPhoto = CaptureFile & { uri: string };
+export type RejectedStillPhoto = {
+  reason: 'too-large' | 'unsupported' | 'unreadable';
+  byteLength?: number;
+};
+export type StillPickResult = {
+  photos: PickedStillPhoto[];
+  rejected: RejectedStillPhoto[];
+};
 
 const safeId = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/);
 const uuid = z.uuid();
@@ -50,6 +60,17 @@ export interface DetailStillNative {
    * retained local file identity to pass to `upload` as `source`.
    */
   pickImage?(): Promise<CaptureFile>;
+  /**
+   * Optional multi-select system photo picker. Chosen photos are retained
+   * locally by identity for `upload`; each carries a displayable file URI.
+   * Resolves with empty lists when the user cancels.
+   */
+  pickImages?(limit: number): Promise<StillPickResult>;
+  /**
+   * Optional display seam: resolves a verified, app-private cached file URI
+   * for already-downloaded still bytes, or null when unavailable.
+   */
+  imageUri?(file: CaptureFile): Promise<string | null>;
 }
 
 function failure(status: number, code?: string): never {
@@ -274,6 +295,22 @@ export class DetailStillsClient {
   ) {
     const file = await this.download(projectId, captureId, ack, still);
     return this.native.present(file, share);
+  }
+  /**
+   * Displayable URI for an already-downloaded still, verified natively
+   * against the still's exact-byte identity. Null when the transport
+   * cannot provide one. Download the still first.
+   */
+  async imageUri(still: DetailStill): Promise<string | null> {
+    if (!this.native.imageUri) return null;
+    const uri = await this.native.imageUri({
+      sha256: still.sha256,
+      byteLength: still.byteLength,
+      mediaType: still.mediaType,
+    });
+    if (uri !== null && (typeof uri !== 'string' || !uri.startsWith('file://')))
+      throw Error('Detail photo display path is invalid.');
+    return uri;
   }
   /**
    * Deletes one still. Like upload this is never auto-retried; a lost reply

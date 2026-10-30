@@ -38,6 +38,7 @@ All routes use the existing private Serve boundary, exactly one
 | Method and path under `/v1/saved-projects/:projectId/captures/:captureId` | Scope | Result |
 | --- | --- | --- |
 | `POST /scan-processing?projectRevision=N` | `captures:import` | 202 `{job}` with a generated `jobId` and queued status |
+| `GET /scan-processing?projectRevision=N` | `captures:read` | `{jobs}` with every retained job for the capture at this revision, ascending job id |
 | `GET /scan-processing/:jobId?projectRevision=N` | `captures:read` | `{job}` with current stage statuses and retained output identities |
 | `GET /scan-processing/:jobId/artifacts/:name?projectRevision=N` | `captures:read` | Hash-verified exact bytes, Content-Length, Content-Type and X-Content-SHA256 |
 | `DELETE /scan-processing/:jobId?projectRevision=N` | `captures:import` | Cancel active job, await process cleanup, return `{job}` |
@@ -77,7 +78,10 @@ publication; no result is rebound to a later revision.
 
 POST is not idempotent. Save the returned job ID for status and cancellation.
 An ambiguous POST response can leave a queued job; do not automatically retry.
-No listing or automatic job replay is provided in this increment.
+The collection GET lists retained jobs so a finished check can be reopened
+after an app relaunch, but it never replays or resumes a job. Older
+companions answer the listing GET with 405; clients map that to
+`not-available` and fall back to a job ID they kept.
 
 ## Retention and bounds
 

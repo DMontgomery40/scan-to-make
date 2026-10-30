@@ -1,7 +1,10 @@
 #import <React/RCTBridgeModule.h>
 #import <React/RCTUtils.h>
 #import <UIKit/UIKit.h>
+#import <PhotosUI/PhotosUI.h>
 #import <QuickLook/QuickLook.h>
+#import <SceneKit/SceneKit.h>
+#import <ModelIO/ModelIO.h>
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 #import "CompanionPairing.h"
 #import "ArtifactFiles.h"
@@ -56,7 +59,38 @@ static BOOL Matches(NSString *value,NSString *pattern) { return [value isKindOfC
 static BOOL FileIdentity(NSDictionary *f,NSUInteger limit) {
   return [f isKindOfClass:NSDictionary.class]&&f.count==3&&FileURL(f)!=nil&&[f[@"byteLength"] isKindOfClass:NSNumber.class]&&[f[@"byteLength"] doubleValue]==[f[@"byteLength"] unsignedIntegerValue]&&[f[@"byteLength"] unsignedIntegerValue]>=1&&[f[@"byteLength"] unsignedIntegerValue]<=limit;
 }
-@interface StillsProcessingBridge : NSObject<RCTBridgeModule,NSURLSessionDataDelegate,UIDocumentPickerDelegate,QLPreviewControllerDataSource>
+// Mirrors the companion's magic-byte sniffing (services/companion/src/detail-stills.ts).
+static NSString *SniffMediaType(NSData *data) {
+  const uint8_t *b=(const uint8_t*)data.bytes;NSUInteger n=data.length;
+  if(n>=3&&b[0]==0xff&&b[1]==0xd8&&b[2]==0xff)return @"image/jpeg";
+  static const uint8_t png[8]={0x89,0x50,0x4e,0x47,0x0d,0x0a,0x1a,0x0a};
+  if(n>=8&&memcmp(b,png,8)==0)return @"image/png";
+  if(n>=12&&memcmp(b+4,"ftyp",4)==0){
+    NSString *brand=[[NSString alloc] initWithBytes:b+8 length:4 encoding:NSASCIIStringEncoding];
+    if(brand&&[@[@"heic",@"heix",@"heim",@"heis",@"hevc",@"hevm",@"hevs",@"mif1",@"mif2"] containsObject:brand])return @"image/heic";
+  }
+  return nil;
+}
+/** Reads one regular file without following links; reports its size even when oversized. */
+static NSData *PickRead(NSURL *url,unsigned long long *size) {
+  int fd=open(url.fileSystemRepresentation,O_RDONLY|O_NOFOLLOW);if(fd<0)return nil;
+  struct stat st;if(fstat(fd,&st)!=0||!S_ISREG(st.st_mode)){close(fd);return nil;}
+  *size=(unsigned long long)st.st_size;
+  if(*size==0||*size>STILL_LIMIT){close(fd);return nil;}
+  NSMutableData *data=[NSMutableData dataWithLength:(NSUInteger)*size];NSUInteger offset=0;
+  while(offset<data.length){ssize_t got=read(fd,(char*)data.mutableBytes+offset,data.length-offset);if(got<=0){close(fd);return nil;}offset+=(NSUInteger)got;}
+  char extra;ssize_t tail=read(fd,&extra,1);close(fd);return tail==0?data:nil;
+}
+static NSString *PickTypeIdentifier(NSItemProvider *provider) {
+  NSArray<UTType*> *accepted=@[UTTypeHEIC,UTTypeJPEG,UTTypePNG];
+  for(NSString *identifier in provider.registeredTypeIdentifiers){
+    UTType *type=[UTType typeWithIdentifier:identifier];
+    for(UTType *candidate in accepted)if(type&&[type conformsToType:candidate])return identifier;
+  }
+  // Other formats can often be delivered as JPEG by the system.
+  return [provider hasItemConformingToTypeIdentifier:UTTypeJPEG.identifier]?UTTypeJPEG.identifier:nil;
+}
+@interface StillsProcessingBridge : NSObject<RCTBridgeModule,NSURLSessionDataDelegate,PHPickerViewControllerDelegate,UIAdaptivePresentationControllerDelegate,QLPreviewControllerDataSource>
 @property NSURLSession *session;
 @property NSURLSessionDataTask *task;
 @property NSMutableData *received;
@@ -68,6 +102,8 @@ static BOOL FileIdentity(NSDictionary *f,NSUInteger limit) {
 @property(copy) RCTPromiseRejectBlock reject;
 @property(copy) RCTPromiseResolveBlock pickResolve;
 @property(copy) RCTPromiseRejectBlock pickReject;
+@property(copy) RCTPromiseResolveBlock pickImagesResolve;
+@property BOOL pickSingle;
 @property NSURL *previewURL;
 @end
 @implementation StillsProcessingBridge
@@ -99,6 +135,7 @@ RCT_REMAP_METHOD(request,requestOptions:(NSDictionary*)o resolve:(RCTPromiseReso
     (stillsCollection&&[method isEqual:@"POST"]&&o[@"source"]!=nil&&!o[@"artifact"]&&!o[@"body"])||
     (stillItem&&[method isEqual:@"GET"]&&o[@"artifact"]!=nil&&!o[@"source"]&&!o[@"body"])||
     (stillItem&&[method isEqual:@"DELETE"]&&!o[@"source"]&&!o[@"artifact"]&&!o[@"body"])||
+    (processingCollection&&[method isEqual:@"GET"]&&!o[@"source"]&&!o[@"artifact"]&&!o[@"body"])||
     (processingCollection&&[method isEqual:@"POST"]&&[o[@"body"] isKindOfClass:NSString.class]&&!o[@"source"]&&!o[@"artifact"])||
     (processingJob&&([method isEqual:@"GET"]||[method isEqual:@"DELETE"])&&!o[@"source"]&&!o[@"artifact"]&&!o[@"body"])||
     (processingArtifact&&[method isEqual:@"GET"]&&o[@"artifact"]!=nil&&!o[@"source"]&&!o[@"body"]));
@@ -111,7 +148,7 @@ RCT_REMAP_METHOD(request,requestOptions:(NSDictionary*)o resolve:(RCTPromiseReso
     body=Verified(o[@"source"]);if(!body){reject(@"invalid-source",@"Choose a valid JPEG, HEIC or PNG photo under 25 MB.",nil);return;}
     contentType=o[@"source"][@"mediaType"];
   }
-  if(processingCollection){
+  if(processingCollection&&[method isEqual:@"POST"]){
     body=[o[@"body"] dataUsingEncoding:NSUTF8StringEncoding];if(!body||body.length<1||body.length>4096){reject(@"payload-too-large",@"Scan request is too large.",nil);return;}
     contentType=@"application/json";
   }
@@ -143,25 +180,83 @@ RCT_REMAP_METHOD(request,requestOptions:(NSDictionary*)o resolve:(RCTPromiseReso
   RCTPromiseResolveBlock resolve=self.resolve;self.resolve=nil;self.reject=nil;self.task=nil;self.received=nil;[self.session finishTasksAndInvalidate];self.session=nil;resolve(result);
 }
 RCT_REMAP_METHOD(cancel,cancelResolve:(RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject){[self fail:@"cancelled" message:@"Scan request cancelled."];resolve(nil);}
-RCT_REMAP_METHOD(pickImage,pickImageResolve:(RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject){
-  UIViewController *presenter=RCTPresentedViewController();if(self.pickResolve||!presenter||presenter.presentedViewController){reject(@"busy",@"Close the current sheet first.",nil);return;}
-  self.pickResolve=resolve;self.pickReject=reject;UIDocumentPickerViewController *picker=[[UIDocumentPickerViewController alloc] initForOpeningContentTypes:@[UTTypeJPEG,UTTypePNG,UTTypeHEIC] asCopy:YES];picker.delegate=self;picker.allowsMultipleSelection=NO;[presenter presentViewController:picker animated:YES completion:nil];
+// The system photo picker runs out of process: the app sees only the chosen
+// items and needs no photo library permission. Chosen bytes are sniffed like
+// the companion does, copied byte for byte into this bridge's cache where an
+// upload reads them by identity, and reported with a displayable file URI.
+- (void)showPicker:(NSInteger)limit presenter:(UIViewController*)presenter{
+  PHPickerConfiguration *configuration=[[PHPickerConfiguration alloc] init];
+  configuration.filter=[PHPickerFilter imagesFilter];
+  configuration.selectionLimit=limit;
+  configuration.preferredAssetRepresentationMode=PHPickerConfigurationAssetRepresentationModeCurrent;
+  if(@available(iOS 15.0,*))configuration.selection=PHPickerConfigurationSelectionOrdered;
+  PHPickerViewController *picker=[[PHPickerViewController alloc] initWithConfiguration:configuration];
+  picker.delegate=self;picker.presentationController.delegate=self;
+  [presenter presentViewController:picker animated:YES completion:nil];
 }
-- (void)documentPickerWasCancelled:(UIDocumentPickerViewController*)controller{if(self.pickReject)self.pickReject(@"cancelled",@"Photo selection cancelled.",nil);self.pickResolve=nil;self.pickReject=nil;}
-- (void)documentPicker:(UIDocumentPickerViewController*)controller didPickDocumentsAtURLs:(NSArray<NSURL*>*)urls{
-  NSURL *u=urls.firstObject;BOOL scoped=[u startAccessingSecurityScopedResource];NSError *e=nil;NSDictionary *a=[NSFileManager.defaultManager attributesOfItemAtPath:u.path error:&e];NSData *d=nil;
-  NSString *ext=u.pathExtension.lowercaseString;
-  NSString *mediaType=[ext isEqual:@"jpg"]||[ext isEqual:@"jpeg"]?@"image/jpeg":[ext isEqual:@"png"]?@"image/png":([ext isEqual:@"heic"]||[ext isEqual:@"heif"])?@"image/heic":nil;
-  if(mediaType&&[a[NSFileType] isEqual:NSFileTypeRegular]&&[a[NSFileSize] unsignedIntegerValue]>0&&[a[NSFileSize] unsignedIntegerValue]<=STILL_LIMIT){
-    int fd=open(u.fileSystemRepresentation,O_RDONLY|O_NOFOLLOW);struct stat st;
-    if(fd>=0&&fstat(fd,&st)==0&&S_ISREG(st.st_mode)&&st.st_size>0&&st.st_size<=STILL_LIMIT){
-      NSMutableData *copy=[NSMutableData dataWithLength:(NSUInteger)st.st_size];NSUInteger off=0;BOOL ok=YES;
-      while(off<copy.length){ssize_t got=read(fd,(char*)copy.mutableBytes+off,copy.length-off);if(got<=0){ok=NO;break;}off+=got;}
-      char extra;if(ok&&read(fd,&extra,1)==0)d=copy;
-    }if(fd>=0)close(fd);
+- (BOOL)pickerBusy:(UIViewController*)presenter{
+  return self.pickResolve||self.pickImagesResolve||!presenter||presenter.presentedViewController;
+}
+RCT_REMAP_METHOD(pickImage,pickImageResolve:(RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject){
+  UIViewController *presenter=RCTPresentedViewController();if([self pickerBusy:presenter]){reject(@"busy",@"Close the current sheet first.",nil);return;}
+  self.pickSingle=YES;self.pickResolve=resolve;self.pickReject=reject;[self showPicker:1 presenter:presenter];
+}
+RCT_REMAP_METHOD(pickImages,pickImagesLimit:(double)limit resolve:(RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject){
+  NSInteger count=(NSInteger)limit;
+  if(count<1||count>24||(double)count!=limit){reject(@"invalid-limit",@"Choose between 1 and 24 photos.",nil);return;}
+  UIViewController *presenter=RCTPresentedViewController();if([self pickerBusy:presenter]){reject(@"busy",@"Close the current sheet first.",nil);return;}
+  self.pickSingle=NO;self.pickImagesResolve=resolve;self.pickReject=reject;[self showPicker:count presenter:presenter];
+}
+- (void)finishPhotos:(NSArray*)photos rejected:(NSArray*)rejected{
+  if(self.pickSingle){
+    RCTPromiseResolveBlock resolve=self.pickResolve;RCTPromiseRejectBlock reject=self.pickReject;
+    self.pickResolve=nil;self.pickReject=nil;self.pickSingle=NO;
+    if(photos.count&&resolve)resolve(photos.firstObject);
+    else if(reject)reject(rejected.count?@"invalid-source":@"cancelled",rejected.count?@"Choose a readable JPEG, HEIC or PNG photo under 25 MB.":@"Photo selection cancelled.",nil);
+  }else{
+    RCTPromiseResolveBlock resolve=self.pickImagesResolve;self.pickImagesResolve=nil;self.pickReject=nil;
+    if(resolve)resolve(@{@"photos":photos,@"rejected":rejected});
   }
-  if(scoped)[u stopAccessingSecurityScopedResource];NSDictionary *f=d?@{@"sha256":STMHash(d),@"byteLength":@(d.length),@"mediaType":mediaType}:nil;
-  if(f&&Cache(d,f)){if(self.pickResolve)self.pickResolve(f);}else if(self.pickReject)self.pickReject(@"invalid-source",@"Choose a readable JPEG, HEIC or PNG photo under 25 MB.",e);self.pickResolve=nil;self.pickReject=nil;
+}
+- (void)presentationControllerDidDismiss:(UIPresentationController*)controller{[self finishPhotos:@[] rejected:@[]];}
+- (void)picker:(PHPickerViewController*)picker didFinishPicking:(NSArray<PHPickerResult*>*)results{
+  [picker dismissViewControllerAnimated:YES completion:nil];
+  if(!self.pickResolve&&!self.pickImagesResolve)return;
+  if(results.count==0){[self finishPhotos:@[] rejected:@[]];return;}
+  NSMutableArray *outcomes=[NSMutableArray arrayWithCapacity:results.count];
+  for(NSUInteger i=0;i<results.count;i++)[outcomes addObject:NSNull.null];
+  dispatch_group_t group=dispatch_group_create();
+  dispatch_queue_t files=dispatch_queue_create("com.scantomake.stills-picker",DISPATCH_QUEUE_SERIAL);
+  [results enumerateObjectsUsingBlock:^(PHPickerResult *result,NSUInteger index,BOOL *stop){
+    NSString *identifier=PickTypeIdentifier(result.itemProvider);
+    if(!identifier){outcomes[index]=@{@"reason":@"unsupported"};return;}
+    dispatch_group_enter(group);
+    [result.itemProvider loadFileRepresentationForTypeIdentifier:identifier completionHandler:^(NSURL *url,NSError *error){
+      // The system removes this file when the handler returns: copy it now.
+      NSDictionary *outcome=@{@"reason":@"unreadable"};
+      unsigned long long size=0;NSData *data=url?PickRead(url,&size):nil;
+      if(!data&&size>STILL_LIMIT){outcome=@{@"reason":@"too-large",@"byteLength":@(size)};}
+      else if(data){
+        NSString *mediaType=SniffMediaType(data);
+        if(!mediaType){outcome=@{@"reason":@"unsupported"};}
+        else{
+          NSDictionary *f=@{@"sha256":STMHash(data),@"byteLength":@(data.length),@"mediaType":mediaType};
+          __block BOOL written=NO;dispatch_sync(files,^{written=Cache(data,f);});
+          if(written)outcome=@{@"sha256":f[@"sha256"],@"byteLength":f[@"byteLength"],@"mediaType":mediaType,@"uri":FileURL(f).absoluteString};
+        }
+      }
+      dispatch_async(dispatch_get_main_queue(),^{outcomes[index]=outcome;dispatch_group_leave(group);});
+    }];
+  }];
+  dispatch_group_notify(group,dispatch_get_main_queue(),^{
+    NSMutableArray *photos=[NSMutableArray array];NSMutableArray *rejected=[NSMutableArray array];
+    for(NSDictionary *outcome in outcomes){if(outcome[@"sha256"])[photos addObject:outcome];else[rejected addObject:outcome];}
+    [self finishPhotos:photos rejected:rejected];
+  });
+}
+RCT_REMAP_METHOD(imageUri,imageUriFile:(NSDictionary*)f resolve:(RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject){
+  if(![f isKindOfClass:NSDictionary.class]||!IsStillMedia(f[@"mediaType"])||![f[@"byteLength"] isKindOfClass:NSNumber.class]||[f[@"byteLength"] unsignedIntegerValue]>STILL_LIMIT||!Verified(f)){reject(@"verification-failed",@"The image could not be verified.",nil);return;}
+  resolve(FileURL(f).absoluteString);
 }
 RCT_REMAP_METHOD(present,presentFile:(NSDictionary*)f share:(BOOL)share resolve:(RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject){
   NSData *d=Verified(f);UIViewController *presenter=RCTPresentedViewController();if(!d||!presenter||presenter.presentedViewController){reject(@"verification-failed",@"The scan file could not be opened.",nil);return;}
@@ -170,8 +265,34 @@ RCT_REMAP_METHOD(present,presentFile:(NSDictionary*)f share:(BOOL)share resolve:
     if(![d writeToURL:u options:NSDataWritingWithoutOverwriting error:&e]){reject(@"export-error",@"Scan export could not be saved.",e);return;}
     UIActivityViewController *sheet=[[UIActivityViewController alloc] initWithActivityItems:@[u] applicationActivities:nil];sheet.popoverPresentationController.sourceView=presenter.view;sheet.popoverPresentationController.sourceRect=CGRectMake(CGRectGetMidX(presenter.view.bounds),CGRectGetMidY(presenter.view.bounds),1,1);
     sheet.completionWithItemsHandler=^(UIActivityType type,BOOL completed,NSArray *items,NSError *error){if(error)reject(@"export-error",@"Scan sharing failed.",error);else resolve(@{@"completed":@(completed),@"sha256":f[@"sha256"],@"byteLength":f[@"byteLength"]});};[presenter presentViewController:sheet animated:YES completion:nil];
+  }else if([f[@"mediaType"] isEqual:@"model/obj"]||[f[@"mediaType"] isEqual:@"model/stl"]){
+    // Mesh viewer mirroring RetainedCaptureBridge: Quick Look cannot show OBJ/STL.
+    NSError *sceneError=nil;SCNScene *scene=nil;
+    if([f[@"mediaType"] isEqual:@"model/stl"]){
+      MDLAsset *asset=[[MDLAsset alloc] initWithURL:FileURL(f)];
+      if(asset)scene=[SCNScene sceneWithMDLAsset:asset];
+    }else{
+      scene=[SCNScene sceneWithURL:FileURL(f) options:@{SCNSceneSourceCheckConsistencyKey:@YES} error:&sceneError];
+    }
+    if(!scene){reject(@"preview-error",@"This mesh could not be displayed.",sceneError);return;}
+    SCNVector3 low,high;
+    if([scene.rootNode getBoundingBoxMin:&low max:&high]){
+      float width=high.x-low.x,height=high.y-low.y,depth=high.z-low.z;
+      float span=fmaxf(fmaxf(width,height),depth);float aspect=presenter.view.bounds.size.width/presenter.view.bounds.size.height;
+      if(!isfinite(span)||span<=0){reject(@"preview-error",@"This mesh has no displayable bounds.",nil);return;}
+      SCNNode *camera=[SCNNode node];camera.camera=[SCNCamera camera];camera.camera.usesOrthographicProjection=YES;
+      camera.camera.orthographicScale=fmaxf(height,width/fmaxf(aspect,0.1f))*0.7;camera.camera.zNear=span*0.001;camera.camera.zFar=span*10;
+      camera.position=SCNVector3Make((low.x+high.x)/2,(low.y+high.y)/2,high.z+span*3);[scene.rootNode addChildNode:camera];
+    }
+    [scene.rootNode enumerateChildNodesUsingBlock:^(SCNNode *node,BOOL *stop){if(node.geometry){SCNMaterial *material=[SCNMaterial material];material.diffuse.contents=[UIColor colorWithRed:0.55 green:0.61 blue:0.57 alpha:1];material.roughness.contents=@0.8;node.geometry.materials=@[material];}}];
+    UIViewController *viewer=[UIViewController new];viewer.title=@"Scan model";
+    SCNView *view=[[SCNView alloc] initWithFrame:presenter.view.bounds];view.autoresizingMask=UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;view.scene=scene;view.allowsCameraControl=YES;view.autoenablesDefaultLighting=YES;view.backgroundColor=[UIColor colorWithRed:0.94 green:0.95 blue:0.92 alpha:1];viewer.view=view;
+    viewer.navigationItem.rightBarButtonItem=[[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone target:self action:@selector(closeMesh)];
+    UINavigationController *navigation=[[UINavigationController alloc] initWithRootViewController:viewer];navigation.modalPresentationStyle=UIModalPresentationFullScreen;
+    [presenter presentViewController:navigation animated:YES completion:^{resolve(nil);}];
   }else{self.previewURL=FileURL(f);QLPreviewController *preview=[QLPreviewController new];preview.dataSource=self;[presenter presentViewController:preview animated:YES completion:^{resolve(nil);}];}
 }
+- (void)closeMesh{[RCTPresentedViewController() dismissViewControllerAnimated:YES completion:nil];}
 - (NSInteger)numberOfPreviewItemsInPreviewController:(QLPreviewController*)controller{return self.previewURL?1:0;}
 - (id<QLPreviewItem>)previewController:(QLPreviewController*)controller previewItemAtIndex:(NSInteger)index{return self.previewURL;}
 - (void)invalidate{dispatch_async(dispatch_get_main_queue(),^{[self fail:@"cancelled" message:@"Scan request stopped."];});}
