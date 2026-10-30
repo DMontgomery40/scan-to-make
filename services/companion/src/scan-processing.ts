@@ -23,13 +23,32 @@ async function retryProjectBusy<T>(signal:AbortSignal,operation:()=>Promise<T>):
   signal.throwIfAborted();await new Promise(resolve=>setTimeout(resolve,25+attempt*25));
  }
 }
-const OwnerSchema=z.object({pid:z.number().int().positive(),jobId:z.uuid()});
+const OwnerSchema=z.object({pid:z.number().int().positive(),jobId:z.uuid(),pgid:z.number().int().positive().optional()});
+type LockOwner=z.infer<typeof OwnerSchema>;
 // Jobs running in this process, across every store instance that shares a capture directory.
-const activeJobs=new Set<string>();
+// Cancellation routes through this registry, so any same-process instance can cancel the owner.
+const activeJobs=new Map<string,{controller:AbortController;done?:Promise<void>}>();
+async function readLockOwner(lock:string):Promise<LockOwner|undefined>{
+ try{return OwnerSchema.parse(JSON.parse((await readBoundedCaptureFile(join(lock,'owner.json'),1024)).toString('utf8')));}catch{return undefined;}
+}
+/**
+ * Kill a recorded detached worker group and verify it is gone. Fails closed
+ * (false) for implausible ids or a group that cannot be signalled or verified
+ * dead, so callers keep the lock instead of reclaiming over live workers.
+ */
+async function terminateProcessGroup(pgid:number|undefined):Promise<boolean>{
+ if(pgid===undefined)return true;
+ if(!Number.isSafeInteger(pgid)||pgid<=1||pgid===process.pid)return false;
+ const exists=()=>{try{process.kill(-pgid,0);return true;}catch(e){return (e as NodeJS.ErrnoException).code==='EPERM';}};
+ if(!exists())return true;
+ try{process.kill(-pgid,'SIGKILL');}catch(e){if((e as NodeJS.ErrnoException).code!=='ESRCH')return false;}
+ for(let attempt=0;attempt<80;attempt++){if(!exists())return true;await new Promise(r=>setTimeout(r,25));}
+ return !exists();
+}
 /** Local trusted API. No executable, path or repair parameter is taken from a request. */
 export class ScanProcessingStore {
  private active?:{id:string;controller:AbortController;done:Promise<void>};
- constructor(private projects:FileSavedProjectStorage,private captures:CaptureStore,private directory:string,private runner:ScanRunner,private timeoutMs=600000){if(!Number.isSafeInteger(timeoutMs)||timeoutMs<1||timeoutMs>600000)throw new Error('Invalid job timeout');}
+ constructor(private projects:FileSavedProjectStorage,private captures:CaptureStore,readonly directory:string,private runner:ScanRunner,private timeoutMs=600000){if(!Number.isSafeInteger(timeoutMs)||timeoutMs<1||timeoutMs>600000)throw new Error('Invalid job timeout');}
  private folder(r:Request){return join(this.directory,r.captureId,'scan-processing');}
  /** Inspect, remove and re-create under one guard so concurrent recoverers cannot delete a fresh owner's lock. */
  private async recoverStaleLock(lock:string){
@@ -43,20 +62,22 @@ export class ScanProcessingStore {
    try{await mkdir(guard,{mode:0o700});}catch(again){if((again as NodeJS.ErrnoException).code==='EEXIST')throw new ScanProcessingFailure('busy');throw again;}
   }
   try{
-   if(!(await this.staleLock(lock)))throw new ScanProcessingFailure('busy');
+   const owner=await readLockOwner(lock);
+   if(!(await this.staleLock(lock,owner)))throw new ScanProcessingFailure('busy');
+   // The owner process is gone, but its detached worker group can outlive it.
+   // Terminate and verify the recorded group before reclaiming the lock.
+   if(owner&&!(await terminateProcessGroup(owner.pgid)))throw new ScanProcessingFailure('busy');
    await rm(lock,{recursive:true,force:true});
    try{await mkdir(lock,{mode:0o700});}catch(again){if((again as NodeJS.ErrnoException).code==='EEXIST')throw new ScanProcessingFailure('busy');throw again;}
   }finally{await rm(guard,{recursive:true,force:true});}
  }
- private async staleLock(lock:string){
-  try{
-   const owner=OwnerSchema.parse(JSON.parse((await readBoundedCaptureFile(join(lock,'owner.json'),1024)).toString('utf8')));
+ private async staleLock(lock:string,owner:LockOwner|undefined){
+  if(owner){
    if(owner.pid===process.pid)return !activeJobs.has(owner.jobId);
    try{process.kill(owner.pid,0);return false;}catch(e){return (e as NodeJS.ErrnoException).code==='ESRCH';}
-  }catch{
-   // No readable owner yet: only stale once it is clearly not a lock being created right now.
-   try{return Date.now()-(await stat(lock)).mtimeMs>60000;}catch{return false;}
   }
+  // No readable owner yet: only stale once it is clearly not a lock being created right now.
+  try{return Date.now()-(await stat(lock)).mtimeMs>60000;}catch{return false;}
  }
  private async persist(r:Request,job:ScanProcessingJob){
   const folder=this.folder(r);await mkdir(folder,{recursive:true,mode:0o700});const temp=join(folder,`.tmp-${randomUUID()}`);
@@ -79,15 +100,21 @@ export class ScanProcessingStore {
    const job:ScanProcessingJob=ScanProcessingJobSchema.parse({schema:SCAN_PROCESSING_SCHEMA_ID,jobId:randomUUID(),projectId:r.projectId,projectRevision:r.projectRevision,captureId:r.captureId,status:'queued',previewOnly:true,...params,
     stages:[{kind:'repair',status:'queued',params:{weldMm:.01,componentFraction:.01,componentMetric:'area',holeMaxEdges:0,voxelSizeMm:.3,forceVoxel:false,denoiseIterations:1,denoiseFactor:.1,denoiseMaxMm:.05,sharpAngleDeg:30,deviationSamples:10000}},{kind:'measure',status:'queued',params:{units:'mm'}},{kind:'render',status:'queued',params:{units:'mm',resolution:512}}]});
    // Register before owner.json is visible so a same-process recoverer never sees a live start as abandoned.
-   startingId=job.jobId;activeJobs.add(job.jobId);
+   startingId=job.jobId;const controller=new AbortController();const entry:{controller:AbortController;done?:Promise<void>}={controller};activeJobs.set(job.jobId,entry);
    await write(join(lock,'owner.json'),Buffer.from(JSON.stringify({pid:process.pid,jobId:job.jobId})));
    await this.projects.withCurrentProject(r.projectId,r.projectRevision,async()=>{await authorize?.();signal?.throwIfAborted();await this.persist(r,job);},r.expectedProjectETag);
-   const controller=new AbortController();const snapshot=structuredClone(job);
+   const snapshot=structuredClone(job);
    const done=Promise.resolve().then(()=>this.execute(r,job,capture.derived,capture.binding.capture.provenance.metersPerUnit,controller,authorize)).finally(async()=>{await rm(lock,{recursive:true,force:true});this.active=undefined;activeJobs.delete(job.jobId);});
-   this.active={id:job.jobId,controller,done};launched=true;
+   entry.done=done;this.active={id:job.jobId,controller,done};launched=true;
    // All worker errors are converted to durable generic failure records; storage errors remain fail closed.
    void done.catch(()=>undefined);return {job:snapshot};
   }finally{if(!launched){if(startingId)activeJobs.delete(startingId);await rm(lock,{recursive:true,force:true});}}
+ }
+ /** Record the live worker group in the job lock so a later starter can reap orphans after a crash. */
+ private async recordProcessGroup(jobId:string,pgid:number){
+  if(!Number.isSafeInteger(pgid)||pgid<=1||!activeJobs.has(jobId))return;
+  const lock=join(this.directory,'.scan-processing-lock'),temp=join(lock,`.owner-${randomUUID()}`);
+  try{await write(temp,Buffer.from(JSON.stringify({pid:process.pid,jobId,pgid})));await rename(temp,join(lock,'owner.json'));}finally{await rm(temp,{force:true});}
  }
  private async execute(r:Request,job:ScanProcessingJob,mesh:Buffer,metersPerUnit:number,controller:AbortController,authorize?:()=>Promise<void>){
   const timer=setTimeout(()=>controller.abort(),this.timeoutMs);let staging:string|undefined;
@@ -100,7 +127,7 @@ export class ScanProcessingStore {
    for(const stage of job.stages){
     controller.signal.throwIfAborted();stage.status='running';await this.persist(r,job);
     const stageOutput=stage.kind==='render'?join(staging,'views'):output;
-    const result=await this.runner.run(stage.kind,stage.kind==='repair'?source:join(output,'repaired.obj'),stageOutput,sidecar,controller.signal);
+    const result=await this.runner.run(stage.kind,stage.kind==='repair'?source:join(output,'repaired.obj'),stageOutput,sidecar,controller.signal,pgid=>{void this.recordProcessGroup(job.jobId,pgid).catch(()=>undefined);});
     if(stage.kind==='render')for(const name of SCAN_VIEW_NAMES)await rename(join(stageOutput,name),join(output,name));
     if(stage.kind==='measure')measured=result;
     stage.status='succeeded';await this.persist(r,job);
@@ -141,12 +168,14 @@ export class ScanProcessingStore {
    if(job.jobId!==jobId||job.projectId!==r.projectId||job.captureId!==r.captureId||job.projectRevision!==r.projectRevision)throw new ScanProcessingFailure('not-found');
    // A dead owner is an interrupted attempt, never an automatic rerun.
    if(job.status==='queued'||job.status==='running'){
+    const owner=await readLockOwner(join(this.directory,'.scan-processing-lock'));
     let alive=false;
-    try{
-     const owner=OwnerSchema.parse(JSON.parse((await readBoundedCaptureFile(join(this.directory,'.scan-processing-lock','owner.json'),1024)).toString('utf8')));
-     if(owner.jobId===jobId){process.kill(owner.pid,0);alive=true;}
-    }catch{ /* absent or dead owner */ }
-    if(!alive){job.status='failed';job.failure='interrupted';for(const stage of job.stages)if(stage.status==='running')stage.status='failed';await this.persist(r,job);}
+    if(owner?.jobId===jobId){try{process.kill(owner.pid,0);alive=true;}catch{ /* dead owner */ }}
+    if(!alive){
+     // Reap this job's orphaned worker group promptly; lock recovery retries on the next start.
+     if(owner?.jobId===jobId)await terminateProcessGroup(owner.pgid).catch(()=>false);
+     job.status='failed';job.failure='interrupted';for(const stage of job.stages)if(stage.status==='running')stage.status='failed';await this.persist(r,job);
+    }
    }
    return {job};
   },r.expectedProjectETag);
@@ -157,7 +186,9 @@ export class ScanProcessingStore {
   const bytes=await readBoundedCaptureFile(join(this.folder(request),jobId,name),Math.min(ref.byteLength,64*1024*1024));
   if(bytes.length!==ref.byteLength||sha(bytes)!==ref.sha256)throw new ScanProcessingFailure('processing-unavailable');return {job,ref,bytes};
  }
- async cancel(input:Request,jobId:string){await this.load(input,jobId);if(this.active?.id===jobId){this.active.controller.abort();await this.active.done;}return this.load(input,jobId);}
+ // Routes through the process-wide registry: any same-process instance cancels the owning one.
+ // Cross-process ownership is excluded by the listener instance lock (one companion per directory).
+ async cancel(input:Request,jobId:string){await this.load(input,jobId);const entry=activeJobs.get(jobId);if(entry){entry.controller.abort();await entry.done;}return this.load(input,jobId);}
  async wait(){await this.active?.done;}
  async close(){const active=this.active;active?.controller.abort();await active?.done;}
 }

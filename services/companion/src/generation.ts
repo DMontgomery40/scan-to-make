@@ -1,4 +1,5 @@
 import {createCaptureRoutes,type CaptureServices} from './capture-http.js';
+import {acquireInstanceLock} from './instance-lock.js';
 import { spawn } from 'node:child_process';
 import { constants } from 'node:fs';
 import { lstat, open, mkdtemp, writeFile, rm } from 'node:fs/promises';
@@ -310,6 +311,9 @@ export async function startGenerationServer(
   const worker = options.worker ?? createGenerationWorker();
   const auth = options.remoteAuth;
   if(options.capture&&!auth)throw new Error('Capture routes require explicit authentication');
+  // One companion process per capture directory: scan processing assumes its
+  // jobs, workers and cancellation all live in this process.
+  const instanceLock=options.capture?.scanProcessing?await acquireInstanceLock(options.capture.scanProcessing.directory):undefined;
   const captureRoutes=options.capture?createCaptureRoutes(options.capture):undefined;
   let authority = '';
   let active: { controller: AbortController; done: Promise<void> } | undefined;
@@ -458,16 +462,23 @@ export async function startGenerationServer(
   server.headersTimeout = 5000;
   server.requestTimeout = options.capture?.preparedJobs ? 30000 : 5000;
   server.maxRequestsPerSocket = 1;
-  await new Promise<void>((resolve, reject) => {
-    server.once('error', reject);
-    server.listen(port, '127.0.0.1', () => {
-      server.off('error', reject);
-      resolve();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(port, '127.0.0.1', () => {
+        server.off('error', reject);
+        resolve();
+      });
     });
-  });
+  } catch (error) {
+    await instanceLock?.release();
+    throw error;
+  }
   const address = server.address();
-  if (!address || typeof address === 'string')
+  if (!address || typeof address === 'string') {
+    await instanceLock?.release();
     throw new Error('Local listener has no address');
+  }
   authority = `127.0.0.1:${address.port}`;
   let closing: Promise<void> | undefined;
   return {
@@ -485,6 +496,7 @@ export async function startGenerationServer(
           await stopped;
           await pending;
           await capturesStopped;
+          await instanceLock?.release();
         })();
       return closing;
     },

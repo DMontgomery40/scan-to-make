@@ -96,18 +96,34 @@ the job binding. Downloads rehash exact regular, no-follow files. Publication
 and response flush use the same project edit lock as existing capture routes.
 
 One worker at a time is enforced in memory and with an exclusive host lock at
-`<captures>/.scan-processing-lock`. Whole-job deadline: ten minutes; subprocess
-deadline: five minutes per stage. Cancellation/deadline sends SIGKILL to the
-whole detached process group and awaits close before cleanup. Logs are drained,
-limited to one MiB per stage and never returned to remote callers. Each mesh is
-at most 64 MiB, report two MiB, each PNG eight MiB, total retained outputs 160 MiB.
-A 100 ms disk-size watchdog also kills a subprocess exceeding 160 MiB; this is a
-sampled bound, not a filesystem quota. Configure private storage on a bounded
-volume when a strict disk quota is needed. Retention has no automatic expiry.
+`<captures>/.scan-processing-lock`. The lock owner record also carries the live
+worker's detached process-group id, updated as each stage spawns. Whole-job
+deadline: ten minutes; subprocess deadline: five minutes per stage.
+Cancellation/deadline sends SIGKILL to the whole detached process group and
+awaits close before cleanup. Logs are drained, limited to one MiB per stage and
+never returned to remote callers. Each mesh is at most 64 MiB, report two MiB,
+each PNG eight MiB, total retained outputs 160 MiB. A 100 ms disk-size watchdog
+also kills a subprocess exceeding 160 MiB; this is a sampled bound, not a
+filesystem quota. Configure private storage on a bounded volume when a strict
+disk quota is needed. Retention has no automatic expiry.
+
+One companion process owns a capture directory at a time. Starting the
+listener with scan processing configured claims
+`<captures>/.companion-instance-lock`; a second listener on the same directory
+fails startup with `instance-busy` until the first closes or its owner process
+is gone. Cancellation therefore always lands in the owning process, where a
+process-wide registry routes it to the store instance that started the job.
+Direct library use of `ScanProcessingStore` outside the listener must uphold
+the same one-process rule itself.
 
 Records and outputs survive restart. A nonterminal record whose recorded owner
-PID is absent becomes `failed/interrupted` on read; it is never resumed. A hard
-crash can leave the host lock and hidden staging/orphan files. After verifying
+PID is absent becomes `failed/interrupted` on read; it is never resumed. When a
+dead owner's job lock is recovered (on read, and again before the next start
+reclaims the lock), the recorded worker process group is terminated with
+SIGKILL and verified gone first; if the group cannot be signalled or verified
+dead, the lock is kept and the start reports busy instead of running a second
+worker beside an orphan. A hard crash can still leave hidden staging files and,
+if the owner record itself is unreadable, an unrecorded worker: after verifying
 no worker or descendant is alive, the operator may remove the stale lock and
 unreferenced staging files. There is no automatic lock expiry. A reused live
 PID can delay interruption detection; investigate the recorded owner manually.
