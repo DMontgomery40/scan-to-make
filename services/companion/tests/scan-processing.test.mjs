@@ -1,6 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {writeFile,readFile} from 'node:fs/promises';
+import {writeFile,readFile,mkdir} from 'node:fs/promises';
+import {spawn} from 'node:child_process';
 import {join} from 'node:path';
 import {ScanProcessingStore} from '../dist/scan-processing.js';
 import {fixture,fakeRunner,png} from './fixtures/scan-processing.mjs';
@@ -41,4 +42,24 @@ test('interrupted nonterminal record reopens failed and is never rerun',async t=
  const record=JSON.parse(await readFile(path,'utf8'));record.status='running';record.stages[2].status='running';delete record.artifacts;await writeFile(path,JSON.stringify(record));
  const fresh=new ScanProcessingStore(f.storage,f.captures,join(f.root,'captures'),{run(){throw Error('must not rerun');}});
  const saved=(await fresh.load(f.input,job.jobId)).job;assert.equal(saved.status,'failed');assert.equal(saved.failure,'interrupted');
+});
+test('a status poll holding the project lock during publication does not fail the job',async t=>{
+ let f;
+ const runner={async run(stage,input,output,sidecar,signal){
+  const result=await fakeRunner.run(stage,input,output,sidecar,signal);
+  // Hold the project lock across the moment publication starts, as a concurrent GET would.
+  if(stage==='render')void f.storage.withCurrentProject('test',0,()=>new Promise(r=>setTimeout(r,300)));
+  return result;
+ }};
+ f=await fixture(t,runner);const {job}=await f.store.start(f.input);await f.store.wait();
+ assert.equal((await f.store.load(f.input,job.jobId)).job.status,'succeeded');
+});
+test('a lock left by a dead owner is recovered; a live owner keeps processing busy',async t=>{
+ const f=await fixture(t);const lock=join(f.root,'captures','.scan-processing-lock');
+ const child=spawn(process.execPath,['-e','']);const deadPid=await new Promise(r=>child.once('exit',()=>r(child.pid)));
+ await mkdir(lock);await writeFile(join(lock,'owner.json'),JSON.stringify({pid:deadPid,jobId:'00000000-0000-4000-8000-000000000000'}));
+ const {job}=await f.store.start(f.input);await f.store.wait();
+ assert.equal((await f.store.load(f.input,job.jobId)).job.status,'succeeded');
+ await mkdir(lock);await writeFile(join(lock,'owner.json'),JSON.stringify({pid:process.ppid,jobId:'00000000-0000-4000-8000-000000000000'}));
+ await assert.rejects(f.store.start(f.input),e=>e.code==='busy');
 });

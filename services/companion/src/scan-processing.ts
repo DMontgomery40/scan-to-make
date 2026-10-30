@@ -1,5 +1,5 @@
 import {createHash,randomUUID} from 'node:crypto';
-import {mkdir,mkdtemp,open,rename,rm} from 'node:fs/promises';
+import {mkdir,mkdtemp,open,rename,rm,stat} from 'node:fs/promises';
 import {join} from 'node:path';
 import {z} from 'zod';
 import type {FileSavedProjectStorage} from '@scan-to-make/project';
@@ -14,11 +14,31 @@ type Request=z.infer<typeof requestSchema>;
 export class ScanProcessingFailure extends Error {constructor(readonly code:'busy'|'not-found'|'processing-unavailable'|'invalid-request'){super(code);}}
 async function write(path:string,bytes:Buffer){const f=await open(path,'wx',0o600);try{await f.writeFile(bytes);await f.sync();}finally{await f.close();}}
 async function sync(path:string){const f=await open(path,'r');try{await f.sync();}finally{await f.close();}}
+// FileSavedProjectStorage fails fast when its lock exists; a status poll can hold it briefly.
+const projectBusy=(e:unknown)=>e instanceof Error&&e.message.startsWith('Saved project is busy');
+async function retryProjectBusy<T>(signal:AbortSignal,operation:()=>Promise<T>):Promise<T>{
+ for(let attempt=0;;attempt++){
+  try{return await operation();}
+  catch(e){if(!projectBusy(e)||attempt>=40)throw e;}
+  signal.throwIfAborted();await new Promise(resolve=>setTimeout(resolve,25+attempt*25));
+ }
+}
+const OwnerSchema=z.object({pid:z.number().int().positive(),jobId:z.uuid()});
 /** Local trusted API. No executable, path or repair parameter is taken from a request. */
 export class ScanProcessingStore {
  private active?:{id:string;controller:AbortController;done:Promise<void>};
  constructor(private projects:FileSavedProjectStorage,private captures:CaptureStore,private directory:string,private runner:ScanRunner,private timeoutMs=600000){if(!Number.isSafeInteger(timeoutMs)||timeoutMs<1||timeoutMs>600000)throw new Error('Invalid job timeout');}
  private folder(r:Request){return join(this.directory,r.captureId,'scan-processing');}
+ private async staleLock(lock:string){
+  try{
+   const owner=OwnerSchema.parse(JSON.parse((await readBoundedCaptureFile(join(lock,'owner.json'),1024)).toString('utf8')));
+   if(owner.pid===process.pid)return !this.active;
+   try{process.kill(owner.pid,0);return false;}catch(e){return (e as NodeJS.ErrnoException).code==='ESRCH';}
+  }catch{
+   // No readable owner yet: only stale once it is clearly not a lock being created right now.
+   try{return Date.now()-(await stat(lock)).mtimeMs>60000;}catch{return false;}
+  }
+ }
  private async persist(r:Request,job:ScanProcessingJob){
   const folder=this.folder(r);await mkdir(folder,{recursive:true,mode:0o700});const temp=join(folder,`.tmp-${randomUUID()}`);
   try{await write(temp,Buffer.from(JSON.stringify(ScanProcessingJobSchema.parse(job))+'\n'));await rename(temp,join(folder,`${job.jobId}.json`));await sync(folder);}finally{await rm(temp,{force:true});}
@@ -29,7 +49,13 @@ export class ScanProcessingStore {
   if(this.active)throw new ScanProcessingFailure('busy');
   // A filesystem lock serializes separate host instances as well as this instance.
   await mkdir(this.directory,{recursive:true,mode:0o700});const lock=join(this.directory,'.scan-processing-lock');
-  try{await mkdir(lock,{mode:0o700});}catch(e){if((e as NodeJS.ErrnoException).code==='EEXIST')throw new ScanProcessingFailure('busy');throw e;}
+  try{await mkdir(lock,{mode:0o700});}catch(e){
+   if((e as NodeJS.ErrnoException).code!=='EEXIST')throw e;
+   // A crashed owner must not leave processing busy forever; a live owner keeps it.
+   if(!(await this.staleLock(lock)))throw new ScanProcessingFailure('busy');
+   await rm(lock,{recursive:true,force:true});
+   try{await mkdir(lock,{mode:0o700});}catch(again){if((again as NodeJS.ErrnoException).code==='EEXIST')throw new ScanProcessingFailure('busy');throw again;}
+  }
   let launched=false;
   try{
    const capture=await this.captures.loadCapture(r.projectId,r.projectRevision,r.captureId,r.expectedProjectETag);
@@ -76,11 +102,11 @@ export class ScanProcessingStore {
     artifacts[name]={sha256:sha(bytes),byteLength:bytes.length,mediaType:name.endsWith('.png')?'image/png':name.endsWith('.stl')?'model/stl':name.endsWith('.obj')?'model/obj':'application/json'};
    }
    await sync(output);
-   await this.projects.withCurrentProject(r.projectId,r.projectRevision,async()=>{
+   await retryProjectBusy(controller.signal,()=>this.projects.withCurrentProject(r.projectId,r.projectRevision,async()=>{
     await authorize?.();controller.signal.throwIfAborted();
     await rename(output,join(this.folder(r),job.jobId));await sync(this.folder(r));
     job.artifacts=artifacts;job.status='succeeded';await this.persist(r,job);
-   },r.expectedProjectETag);
+   },r.expectedProjectETag));
   }catch{
    job.status='failed';job.failure=controller.signal.aborted?'cancelled':'processing-failed';delete job.artifacts;
    for(const stage of job.stages)if(stage.status==='running')stage.status='failed';
@@ -98,7 +124,7 @@ export class ScanProcessingStore {
    if(job.status==='queued'||job.status==='running'){
     let alive=false;
     try{
-     const owner=z.object({pid:z.number().int().positive(),jobId:z.uuid()}).parse(JSON.parse((await readBoundedCaptureFile(join(this.directory,'.scan-processing-lock','owner.json'),1024)).toString('utf8')));
+     const owner=OwnerSchema.parse(JSON.parse((await readBoundedCaptureFile(join(this.directory,'.scan-processing-lock','owner.json'),1024)).toString('utf8')));
      if(owner.jobId===jobId){process.kill(owner.pid,0);alive=true;}
     }catch{ /* absent or dead owner */ }
     if(!alive){job.status='failed';job.failure='interrupted';for(const stage of job.stages)if(stage.status==='running')stage.status='failed';await this.persist(r,job);}
