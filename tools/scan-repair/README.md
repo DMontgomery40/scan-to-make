@@ -89,13 +89,29 @@ contribute to the distances.
 ### Measure and render reuse
 
 `measure` emits the same topology and geometry metrics as the repair report,
-including extents projected along vertex PCA axes. Surface area and volume
+including the existing `principalExtentsMm` projected along vertex PCA axes.
+`boxExtentsMm` instead uses a minimum-volume oriented-box search: convex-hull
+support vertices, PCA seed plus a deterministic 30° rotation sweep, and four
+lowest-volume seeds refined by axis rotations down to 0.005°. All original
+vertices are enclosed; no outlier trimming or dimension fitting occurs. The
+search is bounded (40 descent moves per angular step) and approximate: it does
+not certify the global minimum for arbitrary shapes. Extents are ordered long
+to short. `boxRotation` is a right-handed world-to-box rotation matrix:
+`boxPoint = boxRotation @ (inputPoint - boxInputCentreMm)`. Axis signs follow
+the PCA sign convention; symmetric shapes may have equivalent frames.
+PCA metrics and repair orientation remain unchanged for compatibility.
+Surface area and volume
 describe the mesh only. Closed components with opposing winding can cancel
 signed volumes; intersecting solids can overcount. No semantic upright or
 physical dimensions are inferred.
 
 `render` produces `pos_x/y/z.png`, `neg_x/y/z.png` and four upper isometric
-views (`iso_pp/np/nn/pn.png`). It uses the same PCA/ground frame, orthographic
+views (`iso_pp/np/nn/pn.png`). By default it preserves input coordinates and
+axes, also explicitly selectable with `--keep-orientation`. Use this for already
+oriented parts, including pocket-up cradles. `--pca-orientation` opts into the
+previous PCA/ground frame. No semantic upright detection is attempted. The
+JSON result records `orientation` and the applied `transform` (null when kept).
+Both modes use orthographic
 cameras, neutral studio Workbench shading, no shadows/specular highlights and
 fixed **512×512** resolution (`--resolution 16..4096` for explicit overrides).
 PNG timestamp/render-duration metadata is removed losslessly. Renders use
@@ -114,7 +130,10 @@ frames, not raw axis bounds before versus after orientation.
 
 Only synthetic fixtures are generated in temporary directories: cube with a
 floater, sphere with open poles, noisy sharp box, non-manifold join, and
-metres/mm versions. Tests exercise actual Blender, hashes/repeatability,
+metres/mm versions, a 5°-rotated box with uneven tessellation, and an
+asymmetric oriented part. The box test checks true extents within 0.05 mm and
+independently projects its vertices using the reported rotation; render tests
+compare default/explicit preservation against PCA. Tests exercise actual Blender, hashes/repeatability,
 topology, volume, unit declarations/sidecars, STL framing, decimation and all
 ten PNGs. CI downloads Blender 5.0.1 from download.blender.org and verifies the
 archive against Blender's published `blender-5.0.1.sha256` file before caching.
