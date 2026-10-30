@@ -73,7 +73,7 @@ with tempfile.TemporaryDirectory(prefix='native-stills-processing-') as temp:
         with open(entitlements,'wb') as f:
             plistlib.dump({'application-identifier':'TESTTEAM.'+BUNDLE,'keychain-access-groups':['TESTTEAM.'+BUNDLE],'get-task-allow':True},f)
         with open(args.evidence / 'compile.log','w') as log:
-            run(['xcrun','clang++','-fobjc-arc','-fblocks','-target','arm64-apple-ios16.0-simulator','-isysroot',sdk,'-Xlinker','-sectcreate','-Xlinker','__TEXT','-Xlinker','__entitlements','-Xlinker',str(entitlements),'-I',str(HERE),str(HERE / 'runner.mm'),'-o',str(app / 'StillsProcessing'),'-framework','CoreGraphics','-framework','UIKit','-framework','Foundation','-framework','Security','-framework','QuickLook','-framework','UniformTypeIdentifiers'],stdout=log,stderr=subprocess.STDOUT)
+            run(['xcrun','clang++','-fobjc-arc','-fblocks','-target','arm64-apple-ios16.0-simulator','-isysroot',sdk,'-Xlinker','-sectcreate','-Xlinker','__TEXT','-Xlinker','__entitlements','-Xlinker',str(entitlements),'-I',str(HERE),str(HERE / 'runner.mm'),'-o',str(app / 'StillsProcessing'),'-framework','CoreGraphics','-framework','UIKit','-framework','Foundation','-framework','Security','-framework','QuickLook','-framework','UniformTypeIdentifiers','-framework','PhotosUI','-framework','SceneKit','-framework','ModelIO'],stdout=log,stderr=subprocess.STDOUT)
         run(['codesign','--force','--sign','-',str(app)],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
         run(['xcrun','simctl','install',args.simulator,str(app)])
         installed = True

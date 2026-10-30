@@ -12,6 +12,16 @@ import type { ProjectAcknowledgment } from '../prepared/preparedFiles';
 export type { DetailStill, ProjectAcknowledgment };
 export { MAX_DETAIL_STILL_BYTES };
 export type DetailStillFile = CaptureFile;
+/** A photo chosen in the system picker, kept locally by exact-byte identity. */
+export type PickedStillPhoto = CaptureFile & { uri: string };
+export type RejectedStillPhoto = {
+  reason: 'too-large' | 'unsupported' | 'unreadable';
+  byteLength?: number;
+};
+export type StillPickResult = {
+  photos: PickedStillPhoto[];
+  rejected: RejectedStillPhoto[];
+};
 
 const safeId = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/);
 const uuid = z.uuid();
@@ -50,6 +60,17 @@ export interface DetailStillNative {
    * retained local file identity to pass to `upload` as `source`.
    */
   pickImage?(): Promise<CaptureFile>;
+  /**
+   * Optional multi-select system photo picker. Chosen photos are retained
+   * locally by identity for `upload`; each carries a displayable file URI.
+   * Resolves with empty lists when the user cancels.
+   */
+  pickImages?(limit: number): Promise<StillPickResult>;
+  /**
+   * Optional display seam: resolves a verified, app-private cached file URI
+   * for already-downloaded still bytes, or null when unavailable.
+   */
+  imageUri?(file: CaptureFile): Promise<string | null>;
 }
 
 function failure(status: number, code?: string): never {
@@ -182,12 +203,19 @@ export class DetailStillsClient {
     projectId: string,
     captureId: string,
     ack: ProjectAcknowledgment,
-    source: CaptureFile,
+    source: CaptureFile | PickedStillPhoto,
     label?: string,
   ): Promise<DetailStill> {
     this.checkIds(projectId, captureId, ack);
-    if (!stillMedia.includes(source.mediaType)) failure(415);
-    if (source.byteLength <= 0 || source.byteLength > MAX_DETAIL_STILL_BYTES)
+    // Picked photos may carry a display `uri`; the native upload transport
+    // accepts exactly the 3-field exact-byte identity, nothing more.
+    const identity: CaptureFile = {
+      sha256: source.sha256,
+      byteLength: source.byteLength,
+      mediaType: source.mediaType,
+    };
+    if (!stillMedia.includes(identity.mediaType)) failure(415);
+    if (identity.byteLength <= 0 || identity.byteLength > MAX_DETAIL_STILL_BYTES)
       failure(413);
     if (label !== undefined)
       DetailStillSchema.shape.label.parse(label);
@@ -203,7 +231,7 @@ export class DetailStillsClient {
         method: 'POST',
         path,
         etag: ack.etag,
-        source,
+        source: identity,
       });
     } catch {
       throw Object.assign(Error(AMBIGUOUS_UPLOAD), {
@@ -222,9 +250,9 @@ export class DetailStillsClient {
       .parse(JSON.parse(r.body)).still;
     this.binding(still, projectId, captureId, project.revision);
     if (
-      still.sha256 !== source.sha256 ||
-      still.byteLength !== source.byteLength ||
-      still.mediaType !== source.mediaType
+      still.sha256 !== identity.sha256 ||
+      still.byteLength !== identity.byteLength ||
+      still.mediaType !== identity.mediaType
     )
       throw Error('Uploaded photo identity mismatch.');
     await this.settle(projectId, ack, context);
@@ -274,6 +302,22 @@ export class DetailStillsClient {
   ) {
     const file = await this.download(projectId, captureId, ack, still);
     return this.native.present(file, share);
+  }
+  /**
+   * Displayable URI for an already-downloaded still, verified natively
+   * against the still's exact-byte identity. Null when the transport
+   * cannot provide one. Download the still first.
+   */
+  async imageUri(still: DetailStill): Promise<string | null> {
+    if (!this.native.imageUri) return null;
+    const uri = await this.native.imageUri({
+      sha256: still.sha256,
+      byteLength: still.byteLength,
+      mediaType: still.mediaType,
+    });
+    if (uri !== null && (typeof uri !== 'string' || !uri.startsWith('file://')))
+      throw Error('Detail photo display path is invalid.');
+    return uri;
   }
   /**
    * Deletes one still. Like upload this is never auto-retried; a lost reply

@@ -105,6 +105,9 @@ test('authenticated scan jobs: scopes, ETag, strict body, status, artifacts and 
  // Recover the returned ID from a second POST; no retry/idempotency promise on collection POST.
  const created=await wire(f,base+'?projectRevision=7',post({}));assert.equal(created.status,202);const {job}=JSON.parse(created.bytes);
  await f.scanProcessing.wait();await waitReady(f);
+ const listing=await wire(f,base+'?projectRevision=7',{headers:{'if-match':etag}});assert.equal(listing.status,200);assert.equal(listing.headers.etag,etag);
+ const listed=JSON.parse(listing.bytes).jobs;assert.equal(listed.length,2);assert(listed.some(item=>item.jobId===job.jobId&&item.status==='succeeded'));
+ assert.deepEqual(listed.map(item=>item.jobId),listed.map(item=>item.jobId).sort());await waitReady(f);
  const path=base+'/'+job.jobId+'?projectRevision=7';
  const get=await wire(f,path,{headers:{'if-match':etag}});assert.equal(get.status,200);assert.equal(JSON.parse(get.bytes).job.status,'succeeded');await waitReady(f);
  const artifact=base+'/'+job.jobId+'/artifacts/pos_x.png?projectRevision=7';
@@ -114,6 +117,8 @@ test('authenticated scan jobs: scopes, ETag, strict body, status, artifacts and 
   [base+'?projectRevision=7',post({},'"'+'0'.repeat(64)+'"'),412],
   [base+'?projectRevision=7&projectRevision=7',post({}),400],
   [path,{headers:{}},428],
+  [base+'?projectRevision=7',{headers:{}},428],
+  [base+'?projectRevision=7',{headers:{'if-match':'"'+'0'.repeat(64)+'"'}},412],
   [artifact.replace('pos_x.png','binding.json'),{headers:{'if-match':etag}},404],
  ]){assert.equal((await wire(f,urlPath,options)).status,status);await waitReady(f);}
  await writeFile(join(f.root,'captures',captureId,'scan-processing',job.jobId,'pos_x.png'),'tampered');

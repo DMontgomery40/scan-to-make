@@ -85,6 +85,20 @@ test('upload posts the exact source with If-Match ack and validates the returned
   ]);
 });
 
+test('upload sends only the 3-field identity for a picked photo that carries a display uri', async () => {
+  const h = harness();
+  const ack = await h.create();
+  h.native.request = jest.fn(async () => ({
+    status: 201,
+    body: JSON.stringify({ still: still() }),
+    etag,
+  }));
+  const picked = { ...source, uri: 'file:///private/picked.jpg' };
+  await h.client.upload('one', captureId, ack, picked);
+  expect(calls(h)[0].source).toEqual(source);
+  expect(Object.keys(calls(h)[0].source)).toHaveLength(3);
+});
+
 test('lost upload reply is ambiguous and never retried', async () => {
   const h = harness();
   const ack = await h.create();
@@ -178,6 +192,22 @@ test('list rejects stills from another capture', async () => {
     etag,
   }));
   await expect(h.client.list('one', captureId, ack)).rejects.toThrow();
+});
+
+test('imageUri resolves a downloaded still only through a verifying transport', async () => {
+  const h = harness();
+  await h.create();
+  const record = still() as never;
+  expect(await h.client.imageUri(record)).toBeNull();
+  h.native.imageUri = jest.fn(
+    async (f: typeof source) => `file:///private/${f.sha256}.jpg`,
+  );
+  expect(await h.client.imageUri(record)).toBe(
+    `file:///private/${'b'.repeat(64)}.jpg`,
+  );
+  expect(h.native.imageUri).toHaveBeenCalledWith(source);
+  h.native.imageUri = jest.fn(async () => 'content://media/1');
+  await expect(h.client.imageUri(record)).rejects.toThrow('display path');
 });
 
 test('download verifies exact bytes before presentation; mismatch never presents', async () => {

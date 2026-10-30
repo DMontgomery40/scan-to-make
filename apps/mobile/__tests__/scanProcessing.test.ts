@@ -184,6 +184,72 @@ test('lost or 5xx start reply is ambiguous and never retried; busy is explicit',
   expect(h.native.request).toHaveBeenCalledTimes(1);
 });
 
+test('listJobs recovers retained jobs after a relaunch and validates bindings', async () => {
+  const h = harness();
+  const ack = await h.create();
+  const earlier = job({ jobId: '33333333-3333-4333-8333-333333333333' });
+  h.native.request = jest.fn(async () => ({
+    status: 200,
+    body: JSON.stringify({ jobs: [earlier, succeededJob()] }),
+    etag,
+  }));
+  const jobs = await h.client.listJobs('one', captureId, ack);
+  expect(jobs.map(j => j.jobId)).toEqual([earlier.jobId, jobId]);
+  expect(calls(h)[0].path).toBe(
+    `/v1/saved-projects/one/captures/${captureId}/scan-processing?projectRevision=0`,
+  );
+  h.native.request = jest.fn(async () => ({
+    status: 200,
+    body: JSON.stringify({
+      jobs: [job({ captureId: '55555555-5555-4555-8555-555555555555' })],
+    }),
+    etag,
+  }));
+  await expect(h.client.listJobs('one', captureId, ack)).rejects.toThrow(
+    'different project version',
+  );
+  h.native.request = jest.fn(async () => ({
+    status: 200,
+    body: JSON.stringify({ jobs: [succeededJob(), earlier] }),
+    etag,
+  }));
+  await expect(h.client.listJobs('one', captureId, ack)).rejects.toThrow(
+    'invalid scan job list',
+  );
+});
+
+test('listJobs maps an older companion without the listing route to not-available', async () => {
+  const h = harness();
+  const ack = await h.create();
+  h.native.request = jest.fn(async () => ({ status: 405, body: '', etag }));
+  await expect(h.client.listJobs('one', captureId, ack)).rejects.toMatchObject(
+    { code: 'not-available', status: 405 },
+  );
+});
+
+test('imageUri resolves only verified PNG views through the transport', async () => {
+  const h = harness();
+  await h.create();
+  const png = {
+    sha256: 'c'.repeat(64),
+    byteLength: 100,
+    mediaType: 'image/png',
+  };
+  expect(await h.client.imageUri(png)).toBeNull();
+  h.native.imageUri = jest.fn(
+    async (f: typeof png) => `file:///private/${f.sha256}.png`,
+  );
+  expect(await h.client.imageUri(png)).toBe(
+    `file:///private/${'c'.repeat(64)}.png`,
+  );
+  expect(
+    await h.client.imageUri({ ...png, mediaType: 'model/stl' }),
+  ).toBeNull();
+  expect(h.native.imageUri).toHaveBeenCalledTimes(1);
+  h.native.imageUri = jest.fn(async () => 'https://example.test/view.png');
+  await expect(h.client.imageUri(png)).rejects.toThrow('display path');
+});
+
 test('status reads one job and rejects a job for another capture', async () => {
   const h = harness();
   const ack = await h.create();
