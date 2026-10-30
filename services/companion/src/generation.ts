@@ -314,7 +314,13 @@ export async function startGenerationServer(
   // One companion process per capture directory: scan processing assumes its
   // jobs, workers and cancellation all live in this process.
   const instanceLock=options.capture?.scanProcessing?await acquireInstanceLock(options.capture.scanProcessing.directory):undefined;
-  const captureRoutes=options.capture?createCaptureRoutes(options.capture):undefined;
+  let captureRoutes:ReturnType<typeof createCaptureRoutes>|undefined;
+  try {
+    captureRoutes=options.capture?createCaptureRoutes(options.capture):undefined;
+  } catch (error) {
+    await instanceLock?.release();
+    throw error;
+  }
   let authority = '';
   let active: { controller: AbortController; done: Promise<void> } | undefined;
   const server = createServer(async (request, response) => {

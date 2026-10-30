@@ -1,7 +1,7 @@
 import {spawn} from 'node:child_process';
 import {mkdir,stat} from 'node:fs/promises';
 import {isAbsolute,join} from 'node:path';
-export interface ScanRunner {run(stage:'repair'|'measure'|'render',input:string,output:string,sidecar:string,signal:AbortSignal,onProcessGroup?:(pgid:number)=>void):Promise<Buffer>}
+export interface ScanRunner {run(stage:'repair'|'measure'|'render',input:string,output:string,sidecar:string,signal:AbortSignal,onProcessGroup?:(pgid:number)=>void|Promise<void>):Promise<Buffer>}
 /** Only trusted host configuration may construct this runner. The entire job has a separate deadline. */
 export function createScanRunner(options:{blender:string;toolPath:string;python?:string;timeoutMs?:number}):ScanRunner {
  const {blender,toolPath}=options,timeout=options.timeoutMs??300000;
@@ -10,9 +10,6 @@ export function createScanRunner(options:{blender:string;toolPath:string;python?
   signal.throwIfAborted();await mkdir(output,{recursive:true,mode:0o700});
   const args=[toolPath,stage,input,...(stage==='repair'?['--units-sidecar',sidecar]:['--units','mm']),...(stage==='measure'?[]:['--out',output]),...(stage==='repair'?['--weld-mm','.01','--component-fraction','.01','--component-metric','area','--hole-max-edges','0','--voxel-size-mm','.3','--denoise-iterations','1','--denoise-factor','.1','--denoise-max-mm','.05','--sharp-angle-deg','30','--deviation-samples','10000']:stage==='render'?['--resolution','512']:[])];
   const child=spawn(options.python??'python3',args,{detached:true,stdio:['ignore','pipe','pipe'],env:{...process.env,BLENDER:blender},windowsHide:true});
-  // Detached spawn makes the child its own process-group leader; report it so
-  // the store can record it for orphan reaping after a companion crash.
-  if(child.pid)onProcessGroup?.(child.pid);
   let failed=false,size=0;const chunks:Buffer[]=[];
   const kill=()=>{if(child.pid)try{process.kill(-child.pid,'SIGKILL');}catch{ /* already gone */ }};
   const timer=setTimeout(()=>{failed=true;kill();},timeout);
@@ -30,7 +27,15 @@ export function createScanRunner(options:{blender:string;toolPath:string;python?
   child.stdout.on('data',b=>drain(b,true));child.stderr.on('data',b=>drain(b,false));
   const done=new Promise<number|null>(resolve=>{child.once('error',()=>{failed=true;});child.once('close',resolve);});
   signal.addEventListener('abort',kill,{once:true});if(signal.aborted)kill();
-  try {const code=await done;signal.throwIfAborted();if(failed||code!==0)throw new Error('Scan subprocess failed');return Buffer.concat(chunks);}
+  try {
+   // Detached spawn makes the child its own process-group leader. Registration
+   // must be acknowledged before the worker is allowed to continue; if the
+   // store cannot record the group, terminate it so crash recovery is not
+   // left with an unrecorded orphan.
+   let registrationFailed=false;
+   try{if(child.pid)await onProcessGroup?.(child.pid);}catch{registrationFailed=true;failed=true;kill();}
+   const code=await done;signal.throwIfAborted();if(registrationFailed||failed||code!==0)throw new Error('Scan subprocess failed');return Buffer.concat(chunks);
+  }
   finally {clearTimeout(timer);clearInterval(diskTimer);signal.removeEventListener('abort',kill);kill();}
  }};
 }

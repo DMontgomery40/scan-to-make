@@ -60,6 +60,21 @@ test('a second listener on the same capture directory fails to start until the f
  await second.close();
 });
 
+test('failed capture route initialization releases the instance lock for a corrected retry',async t=>{
+ const root=await mkdtemp(join(tmpdir(),'instance-route-init-'));t.after(()=>rm(root,{recursive:true,force:true}));
+ const remoteAuth=await RemoteAuthStore.create(join(root,'auth'),{host:'companion.example-tail.ts.net',allowedLogins:['alice@example.test']});
+ const storage=new FileSavedProjectStorage(join(root,'projects'));
+ const converter={convert:async()=>{throw new Error('unused');}};
+ const captures=new CaptureStore(storage,join(root,'captures'),converter);
+ const scanProcessing=new ScanProcessingStore(storage,captures,join(root,'captures'),fakeRunner);
+ await assert.rejects(
+  startGenerationServer({port:0,remoteAuth,capture:{storage,captures,scanProcessing,preparedJobs:{inspectionEnabled:false}}}),
+  /Prepared HTTP requires a configured file inspector/,
+ );
+ const corrected=await startGenerationServer({port:0,remoteAuth,capture:{storage,captures,scanProcessing}});
+ await corrected.close();
+});
+
 test('cancellation from another same-process instance reaches the owning instance',async t=>{
  let entered;const started=new Promise(r=>entered=r);let cleaned=false;
  const runner={async run(stage,input,output,sidecar,signal){
@@ -90,6 +105,22 @@ test('the worker process group reported by the runner is recorded in the job loc
   },'pgid recorded in lock owner');
  }finally{release();}
  await f.store.wait();
+});
+
+test('a failed worker-group registration fails the job instead of leaving the worker unrecorded',async t=>{
+ let f;
+ const runner={async run(stage,input,output,sidecar,signal,onProcessGroup){
+  if(stage==='repair'){
+   const owner=join(f.root,'captures','.scan-processing-lock','owner.json');
+   await rm(owner);await mkdir(owner);
+   await onProcessGroup?.(424242);
+  }
+  return fakeRunner.run(stage,input,output,sidecar,signal);
+ }};
+ f=await fixture(t,runner);
+ const {job}=await f.store.start(f.input);await f.store.wait();
+ const saved=(await f.store.load(f.input,job.jobId)).job;
+ assert.equal(saved.status,'failed');assert.equal(saved.failure,'processing-failed');
 });
 
 test('recovering a dead owner lock terminates its recorded orphaned worker group first',async t=>{

@@ -112,12 +112,12 @@ export class ScanProcessingStore {
  }
  /** Record the live worker group in the job lock so a later starter can reap orphans after a crash. */
  private async recordProcessGroup(jobId:string,pgid:number){
-  if(!Number.isSafeInteger(pgid)||pgid<=1||!activeJobs.has(jobId))return;
+  if(!Number.isSafeInteger(pgid)||pgid<=1||!activeJobs.has(jobId))throw new Error('Invalid scan worker process group');
   const lock=join(this.directory,'.scan-processing-lock'),temp=join(lock,`.owner-${randomUUID()}`);
   try{await write(temp,Buffer.from(JSON.stringify({pid:process.pid,jobId,pgid})));await rename(temp,join(lock,'owner.json'));}finally{await rm(temp,{force:true});}
  }
  private async execute(r:Request,job:ScanProcessingJob,mesh:Buffer,metersPerUnit:number,controller:AbortController,authorize?:()=>Promise<void>){
-  const timer=setTimeout(()=>controller.abort(),this.timeoutMs);let staging:string|undefined;
+  const timer=setTimeout(()=>controller.abort(),this.timeoutMs);let staging:string|undefined,registrationFailed=false;
   try{
    staging=await mkdtemp(join(this.folder(r),'.work-'));
    const source=join(staging,'input.obj'),sidecar=join(staging,'units.json'),output=join(staging,'output');
@@ -127,7 +127,14 @@ export class ScanProcessingStore {
    for(const stage of job.stages){
     controller.signal.throwIfAborted();stage.status='running';await this.persist(r,job);
     const stageOutput=stage.kind==='render'?join(staging,'views'):output;
-    const result=await this.runner.run(stage.kind,stage.kind==='repair'?source:join(output,'repaired.obj'),stageOutput,sidecar,controller.signal,pgid=>{void this.recordProcessGroup(job.jobId,pgid).catch(()=>undefined);});
+    const registrations:Promise<void>[]=[];
+    const result=await this.runner.run(stage.kind,stage.kind==='repair'?source:join(output,'repaired.obj'),stageOutput,sidecar,controller.signal,pgid=>{
+     const registration=this.recordProcessGroup(job.jobId,pgid);registrations.push(registration);
+     // Abort immediately on failure even if a runner does not await the acknowledgement.
+     void registration.catch(()=>{registrationFailed=true;controller.abort();});
+     return registration;
+    });
+    await Promise.all(registrations);
     if(stage.kind==='render')for(const name of SCAN_VIEW_NAMES)await rename(join(stageOutput,name),join(output,name));
     if(stage.kind==='measure')measured=result;
     stage.status='succeeded';await this.persist(r,job);
@@ -154,7 +161,7 @@ export class ScanProcessingStore {
     job.artifacts=artifacts;job.status='succeeded';await this.persist(r,job);
    },r.expectedProjectETag));
   }catch{
-   job.status='failed';job.failure=controller.signal.aborted?'cancelled':'processing-failed';delete job.artifacts;
+   job.status='failed';job.failure=registrationFailed?'processing-failed':controller.signal.aborted?'cancelled':'processing-failed';delete job.artifacts;
    for(const stage of job.stages)if(stage.status==='running')stage.status='failed';
    await this.persist(r,job);
   }finally{clearTimeout(timer);if(staging)await rm(staging,{recursive:true,force:true});}
