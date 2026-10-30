@@ -398,7 +398,8 @@ test('large text stacks the comparison so numbers stay readable', async () => {
 test('the app default reports that scan checks are not available yet', async () => {
   const { tree } = await render(unavailableScanServices());
   const shown = texts(tree);
-  expect(shown).toContain('Couldn’t open scan results');
-  expect(shown).toContain('arrive with the next companion update');
+  expect(shown).toContain('Not available here');
+  expect(shown).toContain('available in the iPhone app');
+  expect(hasButton(tree, 'Connect companion')).toBe(false);
   await act(async () => tree.unmount());
 });

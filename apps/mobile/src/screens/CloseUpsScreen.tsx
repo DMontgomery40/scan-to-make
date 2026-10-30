@@ -18,6 +18,7 @@ import { colors, radius, space, type } from '../ui/theme';
 import {
   failureOf,
   needsConnection,
+  notAvailable,
   type PickedPhoto,
   type ProjectAcknowledgment,
   type RejectedPhoto,
@@ -43,7 +44,11 @@ type Draft = {
 const uploadable = (d: Draft) => d.state === 'ready' || d.state === 'failed';
 type Phase =
   | { kind: 'loading' }
-  | { kind: 'blocked'; reason: 'connect' | 'error'; message: string }
+  | {
+      kind: 'blocked';
+      reason: 'connect' | 'unavailable' | 'error';
+      message: string;
+    }
   | { kind: 'ready' };
 
 const same = (a: CaptureFile, b: CaptureFile) =>
@@ -104,7 +109,11 @@ export function CloseUpsScreen({
     const failure = failureOf(error);
     setPhase({
       kind: 'blocked',
-      reason: needsConnection(failure) ? 'connect' : 'error',
+      reason: needsConnection(failure)
+        ? 'connect'
+        : notAvailable(failure)
+        ? 'unavailable'
+        : 'error',
       message: failure.message,
     });
   };
@@ -364,6 +373,9 @@ export function CloseUpsScreen({
           Close-ups are kept with your scan on your companion computer. Connect
           to it, then try again.
         </Notice>
+      ) : null}
+      {phase.kind === 'blocked' && phase.reason === 'unavailable' ? (
+        <Notice title="Not available here">{phase.message}</Notice>
       ) : null}
       {phase.kind === 'blocked' && phase.reason === 'error' ? (
         <Notice

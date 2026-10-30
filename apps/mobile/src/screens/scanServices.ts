@@ -143,6 +143,10 @@ const CONNECTION_CODES = new Set([
   'forbidden',
   'not-paired',
 ]);
+/** This build has no companion transport for the feature. */
+export const notAvailable = (failure: Failure) =>
+  failure.code === 'not-available';
+
 /** The companion connection is missing, expired or lacks permission. */
 export function needsConnection(failure: Failure) {
   return (
@@ -170,7 +174,7 @@ export function sessionJobMemory(): ScanJobMemory {
 function unavailable(): never {
   throw Object.assign(
     Error(
-      'Scan checks and close-up uploads arrive with the next companion update. Your scan is kept with this project.',
+      'Scan checks and close-ups are available in the iPhone app. Your scan is kept with this project.',
     ),
     { code: 'not-available' },
   );

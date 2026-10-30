@@ -2,6 +2,7 @@ import React from 'react';
 import Renderer, { act } from 'react-test-renderer';
 import { Alert, Image, Text, TextInput } from 'react-native';
 import { CloseUpsScreen } from '../src/screens/CloseUpsScreen';
+import { unavailableScanServices } from '../src/screens/scanServices';
 import {
   fakeScanServices,
   stillFrom,
@@ -283,5 +284,12 @@ test('a list failure is shown with a way to try again', async () => {
   services.stills.list = list;
   await press(tree, 'Try again');
   expect(texts(tree)).toContain('No close-ups yet');
+  await act(async () => tree.unmount());
+});
+
+test('without the companion transport close-ups say they are unavailable', async () => {
+  const { tree } = await render(unavailableScanServices());
+  expect(texts(tree)).toContain('Not available here');
+  expect(buttons(tree, 'Choose a photo')).toHaveLength(0);
   await act(async () => tree.unmount());
 });

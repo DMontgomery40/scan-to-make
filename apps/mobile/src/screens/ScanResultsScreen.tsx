@@ -17,6 +17,7 @@ import { colors, radius, space, type } from '../ui/theme';
 import {
   failureOf,
   needsConnection,
+  notAvailable,
   type ProjectAcknowledgment,
   type ScanServices,
   type ScanTarget,
@@ -47,7 +48,7 @@ type Phase =
   | { kind: 'loading' }
   | {
       kind: 'blocked';
-      reason: 'connect' | 'earlier-version' | 'error';
+      reason: 'connect' | 'earlier-version' | 'unavailable' | 'error';
       message: string;
     }
   | { kind: 'ready' }
@@ -137,7 +138,11 @@ export function ScanResultsScreen({
       const failure = failureOf(error);
       setPhase({
         kind: 'blocked',
-        reason: needsConnection(failure) ? 'connect' : 'error',
+        reason: needsConnection(failure)
+          ? 'connect'
+          : notAvailable(failure)
+          ? 'unavailable'
+          : 'error',
         message: failure.message,
       });
     }
@@ -402,6 +407,9 @@ export function ScanResultsScreen({
           You’ve changed this project since this scan was added, so it can’t be
           checked. Add it again from Project captures, or take a new scan.
         </Notice>
+      ) : null}
+      {phase.kind === 'blocked' && phase.reason === 'unavailable' ? (
+        <Notice title="Not available here">{phase.message}</Notice>
       ) : null}
       {phase.kind === 'blocked' && phase.reason === 'error' ? (
         <Notice
