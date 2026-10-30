@@ -73,20 +73,21 @@ export class ScanProcessingStore {
    // A crashed owner must not leave processing busy forever; a live owner keeps it.
    await this.recoverStaleLock(lock);
   }
-  let launched=false;
+  let launched=false,startingId:string|undefined;
   try{
    const capture=await this.captures.loadCapture(r.projectId,r.projectRevision,r.captureId,r.expectedProjectETag);
    const job:ScanProcessingJob=ScanProcessingJobSchema.parse({schema:SCAN_PROCESSING_SCHEMA_ID,jobId:randomUUID(),projectId:r.projectId,projectRevision:r.projectRevision,captureId:r.captureId,status:'queued',previewOnly:true,...params,
     stages:[{kind:'repair',status:'queued',params:{weldMm:.01,componentFraction:.01,componentMetric:'area',holeMaxEdges:0,voxelSizeMm:.3,forceVoxel:false,denoiseIterations:1,denoiseFactor:.1,denoiseMaxMm:.05,sharpAngleDeg:30,deviationSamples:10000}},{kind:'measure',status:'queued',params:{units:'mm'}},{kind:'render',status:'queued',params:{units:'mm',resolution:512}}]});
+   // Register before owner.json is visible so a same-process recoverer never sees a live start as abandoned.
+   startingId=job.jobId;activeJobs.add(job.jobId);
    await write(join(lock,'owner.json'),Buffer.from(JSON.stringify({pid:process.pid,jobId:job.jobId})));
    await this.projects.withCurrentProject(r.projectId,r.projectRevision,async()=>{await authorize?.();signal?.throwIfAborted();await this.persist(r,job);},r.expectedProjectETag);
    const controller=new AbortController();const snapshot=structuredClone(job);
-   activeJobs.add(job.jobId);
    const done=Promise.resolve().then(()=>this.execute(r,job,capture.derived,capture.binding.capture.provenance.metersPerUnit,controller,authorize)).finally(async()=>{await rm(lock,{recursive:true,force:true});this.active=undefined;activeJobs.delete(job.jobId);});
    this.active={id:job.jobId,controller,done};launched=true;
    // All worker errors are converted to durable generic failure records; storage errors remain fail closed.
    void done.catch(()=>undefined);return {job:snapshot};
-  }finally{if(!launched)await rm(lock,{recursive:true,force:true});}
+  }finally{if(!launched){if(startingId)activeJobs.delete(startingId);await rm(lock,{recursive:true,force:true});}}
  }
  private async execute(r:Request,job:ScanProcessingJob,mesh:Buffer,metersPerUnit:number,controller:AbortController,authorize?:()=>Promise<void>){
   const timer=setTimeout(()=>controller.abort(),this.timeoutMs);let staging:string|undefined;

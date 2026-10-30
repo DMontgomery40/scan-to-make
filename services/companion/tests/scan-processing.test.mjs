@@ -80,3 +80,15 @@ test('concurrent recoverers of one dead-owner lock start exactly one worker; a s
  }finally{release();}
  await f.store.wait();await other.wait();assert.equal(runs,1);
 });
+test('a same-process start paused before launch keeps its lock against a second instance',async t=>{
+ const f=await fixture(t);let release,entered;const gate=new Promise(r=>release=r);const paused=new Promise(r=>entered=r);
+ const first=f.store.start(f.input,async()=>{entered();await gate;});
+ await paused;
+ const other=new ScanProcessingStore(f.storage,f.captures,join(f.root,'captures'),fakeRunner);t.after(()=>other.close());
+ try{await assert.rejects(other.start(f.input),e=>e.code==='busy');}finally{release();}
+ const {job}=await first;await f.store.wait();
+ assert.equal((await f.store.load(f.input,job.jobId)).job.status,'succeeded');
+ // A failed start releases its registration and lock for the next caller.
+ await assert.rejects(f.store.start(f.input,async()=>{throw Error('revoked');}));
+ const next=await other.start(f.input);await other.wait();assert.equal((await other.load(f.input,next.job.jobId)).job.status,'succeeded');
+});
