@@ -43,6 +43,10 @@
     "./scan-processing": {
       "types": "./dist/scan-processing.d.ts",
       "import": "./dist/scan-processing.js"
+    },
+    "./instance-lock": {
+      "types": "./dist/instance-lock.d.ts",
+      "import": "./dist/instance-lock.js"
     }
   },
   "scripts": {
