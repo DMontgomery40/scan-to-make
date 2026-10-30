@@ -19,8 +19,10 @@ if (faultKey)
   await writeFile(join(root, 'fault-key'), faultKey, { mode: 0o600 });
 const preparedEnabled = process.env.SCAN_PREPARED_FIXTURE === '1';
 const captureEnabled = process.env.SCAN_CAPTURE_FIXTURE === '1';
+const stillsProcessingEnabled =
+  process.env.SCAN_STILLS_PROCESSING_FIXTURE === '1';
 let capture;
-if (captureEnabled || preparedEnabled) {
+if (captureEnabled || preparedEnabled || stillsProcessingEnabled) {
   const { FileSavedProjectStorage } = await import(
     '../../../../services/project/dist/index.js'
   );
@@ -31,15 +33,140 @@ if (captureEnabled || preparedEnabled) {
     '../../../../services/companion/dist/capture-converter.js'
   );
   const storage = new FileSavedProjectStorage(join(root, 'projects'));
+  // The stills/processing fixture seeds its capture with the same synthetic
+  // converter as the companion scan-processing tests, so it needs no USD
+  // toolchain. Other modes keep the real converter.
+  const fixtureHash = bytes =>
+    createHash('sha256').update(bytes).digest('hex');
+  const fixtureCube = Buffer.from(
+    'v 0 0 0\nv .06 0 0\nv .06 .04 0\nv 0 .04 0\nv 0 0 .02\nv .06 0 .02\nv .06 .04 .02\nv 0 .04 .02\nf 1 4 3 2\nf 5 6 7 8\nf 1 2 6 5\nf 2 3 7 6\nf 3 4 8 7\nf 4 1 5 8\n',
+  );
+  const fixtureConverter = {
+    async convert(original) {
+      return {
+        derived: fixtureCube,
+        report: Buffer.from(
+          JSON.stringify({
+            tool: 'capture-mesh-convert',
+            toolVersion: '0.3.0',
+            source: { sha256: fixtureHash(original), bytes: original.length },
+            output: {
+              sha256: fixtureHash(fixtureCube),
+              bytes: fixtureCube.length,
+              format: 'obj',
+            },
+            metersPerUnit: 1,
+            unitsAuthored: true,
+            upAxis: 'Y',
+            metricQualified: true,
+            metricQualifiedReason: null,
+            outputBasis: {
+              coordinates: 'world',
+              units: 'native stage units (unrescaled)',
+              metersPerUnit: 1,
+              upAxis: 'Y',
+            },
+            contributingLayers: [
+              {
+                identifier: 'synthetic.usdc',
+                sha256: 'a'.repeat(64),
+                bytes: 30,
+              },
+            ],
+            unsupportedFeatures: [],
+            provesCompleteCapture: false,
+            provesPhysicalFit: false,
+          }),
+        ),
+      };
+    },
+  };
   const captures = new CaptureStore(
     storage,
     join(root, 'captures'),
-    createCaptureConverter({
-      executable: process.env.SCAN_TO_MAKE_CAPTURE_PYTHON || 'python3',
-      temporaryRoot: join(root, 'workers'),
-    }),
+    stillsProcessingEnabled
+      ? fixtureConverter
+      : createCaptureConverter({
+          executable: process.env.SCAN_TO_MAKE_CAPTURE_PYTHON || 'python3',
+          temporaryRoot: join(root, 'workers'),
+        }),
   );
-  capture = { storage, ...(captureEnabled ? { captures } : {}) };
+  capture = {
+    storage,
+    ...(captureEnabled || stillsProcessingEnabled ? { captures } : {}),
+  };
+  if (stillsProcessingEnabled) {
+    const { DetailStillStore } = await import(
+      '../../../../services/companion/dist/detail-stills.js'
+    );
+    const { ScanProcessingStore } = await import(
+      '../../../../services/companion/dist/scan-processing.js'
+    );
+    const { SCAN_VIEW_NAMES } = await import(
+      '../../../../packages/contracts/dist/scan-processing.js'
+    );
+    const { createSavedProjects } = await import(
+      '../../../../packages/contracts/dist/saved-project.js'
+    );
+    const fixturePng = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 0]);
+    const fakeRunner = {
+      async run(stage, input, output) {
+        await mkdir(output, { recursive: true });
+        if (stage === 'repair') {
+          await writeFile(join(output, 'repaired.obj'), fixtureCube);
+          await writeFile(join(output, 'repaired.stl'), 'synthetic stl');
+          await writeFile(join(output, 'report.json'), '{}');
+        }
+        if (stage === 'render')
+          for (const name of SCAN_VIEW_NAMES)
+            await writeFile(join(output, name), fixturePng);
+        return Buffer.from(
+          JSON.stringify({ principalExtentsMm: [62.9, 48.7, 21.7] }),
+        );
+      },
+    };
+    capture.detailStills = new DetailStillStore(
+      storage,
+      join(root, 'captures'),
+    );
+    capture.scanProcessing = new ScanProcessingStore(
+      storage,
+      captures,
+      join(root, 'captures'),
+      fakeRunner,
+    );
+    const projects = createSavedProjects(storage);
+    await projects.create({
+      id: 'scan-fixture',
+      brief: {
+        object: 'Synthetic box',
+        context: 'Protocol fixture',
+        addition: 'Cradle',
+      },
+      fit: null,
+    });
+    const { captureId } = await captures.importCapture({
+      projectId: 'scan-fixture',
+      projectRevision: 0,
+      source: Buffer.from('synthetic source'),
+    });
+    const snapshot = await storage.read('scan-fixture');
+    await writeFile(
+      join(root, 'stills-processing.json'),
+      JSON.stringify({
+        project: JSON.parse(snapshot),
+        snapshot,
+        etag: '"' + fixtureHash(snapshot) + '"',
+        captureId,
+        png: {
+          sha256: fixtureHash(fixturePng),
+          byteLength: fixturePng.length,
+          mediaType: 'image/png',
+        },
+      }),
+      { mode: 0o600 },
+    );
+  }
   if (preparedEnabled) {
     const { PreparedJobStore } = await import(
       '../../../../services/companion/dist/prepared-jobs.js'
@@ -204,7 +331,7 @@ async function invite() {
           'prepared-jobs:read',
           'prepared-jobs:prepare',
         ]
-      : captureEnabled
+      : captureEnabled || stillsProcessingEnabled
       ? [
           'generation:health',
           'generation:create',
