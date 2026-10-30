@@ -90,6 +90,24 @@ async function fileSize(path: string): Promise<number> {
   }
 }
 
+const HIGH_WATER_FILE = '.ordinal-high-water';
+
+/** Highest ordinal ever assigned for a capture, or -1. Persisted so deletions never rewind attachment order. */
+async function readHighWater(folder: string): Promise<number> {
+  let bytes: Buffer;
+  try {
+    bytes = await readBoundedCaptureFile(join(folder, HIGH_WATER_FILE), 64);
+  } catch (error) {
+    if (isMissing(error)) return -1;
+    throw new DetailStillFailure('still-unavailable');
+  }
+  const text = bytes.toString('utf8').trim();
+  if (!/^(0|[1-9][0-9]*)$/.test(text) || !Number.isSafeInteger(Number(text))) {
+    throw new DetailStillFailure('still-unavailable');
+  }
+  return Number(text);
+}
+
 interface StillRequest {
   projectId: string;
   projectRevision: number;
@@ -244,6 +262,7 @@ export class DetailStillStore {
           if (name.startsWith('.tmp-')) await rm(join(folder, name), { force: true }).catch(() => undefined);
         }
         if (existing.length >= MAX_DETAIL_STILLS_PER_CAPTURE) throw new DetailStillFailure('still-limit');
+        const highWater = await readHighWater(folder);
         const still: DetailStill = DetailStillSchema.parse({
           schema: DETAIL_STILL_SCHEMA_ID,
           id: randomUUID(),
@@ -254,12 +273,13 @@ export class DetailStillStore {
           byteLength: bytes.length,
           sha256: digest,
           ...(label !== undefined ? { label } : {}),
-          ordinal: existing.length === 0 ? 0 : Math.max(...existing.map((entry) => entry.ordinal)) + 1,
+          ordinal: Math.max(highWater, ...existing.map((entry) => entry.ordinal)) + 1,
         });
         const imagePath = join(folder, `${still.id}.img`);
         const recordPath = join(folder, `${still.id}.json`);
         const imageTemp = join(folder, `.tmp-${randomUUID()}`);
         const recordTemp = join(folder, `.tmp-${randomUUID()}`);
+        const highWaterTemp = join(folder, `.tmp-${randomUUID()}`);
         let committed = false;
         try {
           abort(signal);
@@ -268,6 +288,8 @@ export class DetailStillStore {
           await authorizeCommit?.();
           abort(signal);
           await rename(imageTemp, imagePath);
+          await writeSynced(highWaterTemp, Buffer.from(`${still.ordinal}\n`));
+          await rename(highWaterTemp, join(folder, HIGH_WATER_FILE));
           // The record rename is the commit point. A later abort cannot undo it.
           await rename(recordTemp, recordPath);
           committed = true;
@@ -276,6 +298,7 @@ export class DetailStillStore {
         } finally {
           await rm(imageTemp, { force: true }).catch(() => undefined);
           await rm(recordTemp, { force: true }).catch(() => undefined);
+          await rm(highWaterTemp, { force: true }).catch(() => undefined);
           if (!committed) await unlink(imagePath).catch(() => undefined);
         }
       },

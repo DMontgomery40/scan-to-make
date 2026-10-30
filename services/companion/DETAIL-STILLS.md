@@ -54,7 +54,9 @@ five-second deadline as capture import and share the single project/capture
 request slot; a concurrent request receives 429. Authorization is rechecked
 after upload and immediately before commit or download. Deleting a still
 removes its record and bytes; remaining ordinals are unchanged, so gaps are
-normal, and the next upload takes `max ordinal + 1`.
+normal. The next upload takes one more than the highest ordinal ever assigned
+for that capture. A per-capture high-water mark persists across deletions, so
+deleting the newest still or every still never rewinds attachment order.
 
 Errors keep the `{error: {code, message}}` shape:
 

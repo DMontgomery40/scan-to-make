@@ -139,6 +139,29 @@ test('delete removes one still and preserves the remaining order', async (t) => 
   assert.equal(third.still.ordinal, 2);
 });
 
+test('deleting the newest or every still never rewinds attachment order', async (t) => {
+  const f = await fixture(t);
+  const first = await add(f, jpegBytes());
+  const second = await add(f, pngBytes());
+  await f.stills.deleteDetailStill('test', 0, f.captureId, second.still.id);
+  const third = await add(f, heicBytes());
+  assert.equal(third.still.ordinal, 2);
+  await f.stills.deleteDetailStill('test', 0, f.captureId, first.still.id);
+  await f.stills.deleteDetailStill('test', 0, f.captureId, third.still.id);
+  assert.deepEqual((await f.stills.listDetailStills('test', 0, f.captureId)).stills, []);
+  // A fresh store instance reads the persisted high-water mark.
+  const reopened = new DetailStillStore(f.storage, join(f.root, 'captures'));
+  const fourth = await reopened.addDetailStill({ projectId: 'test', projectRevision: 0, captureId: f.captureId, source: jpegBytes() });
+  assert.equal(fourth.still.ordinal, 3);
+});
+
+test('a corrupted ordinal high-water mark fails closed', async (t) => {
+  const f = await fixture(t);
+  await add(f, jpegBytes());
+  await writeFile(join(f.root, 'captures', f.captureId, 'detail-stills', '.ordinal-high-water'), 'not a number');
+  await assert.rejects(add(f, jpegBytes()), (e) => e.code === 'still-unavailable');
+});
+
 test('revoked commit authorization leaves no still behind', async (t) => {
   const f = await fixture(t);
   await add(f, jpegBytes());
