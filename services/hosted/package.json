@@ -14,7 +14,8 @@
     }
   },
   "scripts": {
-    "build": "npm run build --prefix ../../packages/contracts && tsc -p tsconfig.json",
+    "contracts:build": "npm ci --prefix ../../packages/contracts --ignore-scripts --no-audit --no-fund && npm run build --prefix ../../packages/contracts",
+    "build": "npm run contracts:build && tsc -p tsconfig.json",
     "test": "npm run build && node --test tests/*.test.mjs",
     "serve": "npm run build && node dist/hosted-cli.js"
   },

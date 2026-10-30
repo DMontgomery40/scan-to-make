@@ -31,6 +31,12 @@ test('unknown routes, wrong methods and browser-origin requests fail closed',asy
  assert.equal((await wire(server,'/v1/scan-processing')).status,404);
  assert.equal((await wire(server,'/healthz',{method:'POST'})).status,405);
  assert.equal((await wire(server,'/healthz',{headers:{origin:'https://example.test'}})).status,403);
+ for(const headers of [
+  {'x-forwarded-host':'companion.example-tail.ts.net'},
+  {'x-forwarded-proto':'https'},
+  {'tailscale-user-login':'alice@example.test'},
+  {'tailscale-funnel-request':'1'},
+ ])assert.equal((await wire(server,'/healthz',{headers})).status,403);
  const failure=JSON.parse((await wire(server,'/nope')).body);
  assert.deepEqual(Object.keys(failure),['error']);
  assert.equal(failure.error.code,'not-found');

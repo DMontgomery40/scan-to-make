@@ -41,8 +41,13 @@ export async function startHostedServer(options:{port?:number}={}):Promise<{url:
   response.setHeader('Cache-Control','no-store');
   response.setHeader('Connection','close');
   // Same local boundary posture as the companion listener: exact loopback
-  // Host, no browser-origin requests, no CORS.
-  if(request.headers.host!==authority||request.headers.origin!==undefined||request.headers['sec-fetch-site']!==undefined){fail(response,403,'forbidden');return;}
+  // Host, no browser-origin requests, no CORS, and no forwarded/proxy headers.
+  if(
+   request.headers.host!==authority||
+   request.headers.origin!==undefined||
+   request.headers['sec-fetch-site']!==undefined||
+   Object.keys(request.headers).some(key=>key.startsWith('x-forwarded-')||key.startsWith('tailscale-'))
+  ){fail(response,403,'forbidden');return;}
   if(request.url!=='/healthz'){fail(response,404,'not-found');return;}
   if(request.method!=='GET'){fail(response,405,'method-not-allowed');return;}
   response.end(JSON.stringify(hostedHealth()));
