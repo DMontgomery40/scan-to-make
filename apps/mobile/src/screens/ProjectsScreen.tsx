@@ -1,6 +1,9 @@
 import React from 'react';
 import { Text } from 'react-native';
-import type { ListProjectsResult } from '@scan-to-make/contracts/saved-project';
+import type {
+  ListProjectsResult,
+  SavedProject,
+} from '@scan-to-make/contracts/saved-project';
 import { Button, Card, Screen } from '../ui/components';
 import { type } from '../ui/theme';
 
@@ -10,6 +13,7 @@ export function ProjectsScreen({
   onOpen,
   onCaptures,
   onInspected,
+  onPrint,
   onBack,
   onRetry,
 }: {
@@ -18,6 +22,7 @@ export function ProjectsScreen({
   onOpen: (id: string) => void;
   onCaptures?: (id: string) => void;
   onInspected?: (id: string) => void;
+  onPrint?: (project: SavedProject) => void;
   onBack: () => void;
   onRetry: () => void;
 }) {
@@ -72,6 +77,15 @@ export function ProjectsScreen({
                     variant="secondary"
                     onPress={() => onOpen(id)}
                   />
+                  {onPrint && entry.project.acceptedArtifact ? (
+                    <Button
+                      label="Review print"
+                      accessibilityLabel={`Review print for ${
+                        entry.project.brief.object.trim() || 'Untitled project'
+                      }`}
+                      onPress={() => onPrint(entry.project)}
+                    />
+                  ) : null}
                   {onInspected && entry.project.acceptedArtifact ? (
                     <Button
                       label="Inspected files"
