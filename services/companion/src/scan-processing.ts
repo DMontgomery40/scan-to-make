@@ -24,15 +24,34 @@ async function retryProjectBusy<T>(signal:AbortSignal,operation:()=>Promise<T>):
  }
 }
 const OwnerSchema=z.object({pid:z.number().int().positive(),jobId:z.uuid()});
+// Jobs running in this process, across every store instance that shares a capture directory.
+const activeJobs=new Set<string>();
 /** Local trusted API. No executable, path or repair parameter is taken from a request. */
 export class ScanProcessingStore {
  private active?:{id:string;controller:AbortController;done:Promise<void>};
  constructor(private projects:FileSavedProjectStorage,private captures:CaptureStore,private directory:string,private runner:ScanRunner,private timeoutMs=600000){if(!Number.isSafeInteger(timeoutMs)||timeoutMs<1||timeoutMs>600000)throw new Error('Invalid job timeout');}
  private folder(r:Request){return join(this.directory,r.captureId,'scan-processing');}
+ /** Inspect, remove and re-create under one guard so concurrent recoverers cannot delete a fresh owner's lock. */
+ private async recoverStaleLock(lock:string){
+  const guard=`${lock}.recover`;
+  try{await mkdir(guard,{mode:0o700});}catch(e){
+   if((e as NodeJS.ErrnoException).code!=='EEXIST')throw e;
+   // Recovery holds the guard for milliseconds; an old guard means its holder died mid-recovery.
+   let abandoned=false;try{abandoned=Date.now()-(await stat(guard)).mtimeMs>60000;}catch{ /* vanished */ }
+   if(!abandoned)throw new ScanProcessingFailure('busy');
+   await rm(guard,{recursive:true,force:true});
+   try{await mkdir(guard,{mode:0o700});}catch(again){if((again as NodeJS.ErrnoException).code==='EEXIST')throw new ScanProcessingFailure('busy');throw again;}
+  }
+  try{
+   if(!(await this.staleLock(lock)))throw new ScanProcessingFailure('busy');
+   await rm(lock,{recursive:true,force:true});
+   try{await mkdir(lock,{mode:0o700});}catch(again){if((again as NodeJS.ErrnoException).code==='EEXIST')throw new ScanProcessingFailure('busy');throw again;}
+  }finally{await rm(guard,{recursive:true,force:true});}
+ }
  private async staleLock(lock:string){
   try{
    const owner=OwnerSchema.parse(JSON.parse((await readBoundedCaptureFile(join(lock,'owner.json'),1024)).toString('utf8')));
-   if(owner.pid===process.pid)return !this.active;
+   if(owner.pid===process.pid)return !activeJobs.has(owner.jobId);
    try{process.kill(owner.pid,0);return false;}catch(e){return (e as NodeJS.ErrnoException).code==='ESRCH';}
   }catch{
    // No readable owner yet: only stale once it is clearly not a lock being created right now.
@@ -52,9 +71,7 @@ export class ScanProcessingStore {
   try{await mkdir(lock,{mode:0o700});}catch(e){
    if((e as NodeJS.ErrnoException).code!=='EEXIST')throw e;
    // A crashed owner must not leave processing busy forever; a live owner keeps it.
-   if(!(await this.staleLock(lock)))throw new ScanProcessingFailure('busy');
-   await rm(lock,{recursive:true,force:true});
-   try{await mkdir(lock,{mode:0o700});}catch(again){if((again as NodeJS.ErrnoException).code==='EEXIST')throw new ScanProcessingFailure('busy');throw again;}
+   await this.recoverStaleLock(lock);
   }
   let launched=false;
   try{
@@ -64,7 +81,8 @@ export class ScanProcessingStore {
    await write(join(lock,'owner.json'),Buffer.from(JSON.stringify({pid:process.pid,jobId:job.jobId})));
    await this.projects.withCurrentProject(r.projectId,r.projectRevision,async()=>{await authorize?.();signal?.throwIfAborted();await this.persist(r,job);},r.expectedProjectETag);
    const controller=new AbortController();const snapshot=structuredClone(job);
-   const done=Promise.resolve().then(()=>this.execute(r,job,capture.derived,capture.binding.capture.provenance.metersPerUnit,controller,authorize)).finally(async()=>{await rm(lock,{recursive:true,force:true});this.active=undefined;});
+   activeJobs.add(job.jobId);
+   const done=Promise.resolve().then(()=>this.execute(r,job,capture.derived,capture.binding.capture.provenance.metersPerUnit,controller,authorize)).finally(async()=>{await rm(lock,{recursive:true,force:true});this.active=undefined;activeJobs.delete(job.jobId);});
    this.active={id:job.jobId,controller,done};launched=true;
    // All worker errors are converted to durable generic failure records; storage errors remain fail closed.
    void done.catch(()=>undefined);return {job:snapshot};

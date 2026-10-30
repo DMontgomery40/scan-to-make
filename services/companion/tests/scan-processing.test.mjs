@@ -63,3 +63,20 @@ test('a lock left by a dead owner is recovered; a live owner keeps processing bu
  await mkdir(lock);await writeFile(join(lock,'owner.json'),JSON.stringify({pid:process.ppid,jobId:'00000000-0000-4000-8000-000000000000'}));
  await assert.rejects(f.store.start(f.input),e=>e.code==='busy');
 });
+test('concurrent recoverers of one dead-owner lock start exactly one worker; a second instance never steals a live lock',async t=>{
+ let release;const gate=new Promise(r=>release=r);let runs=0;
+ const runner={async run(stage,input,output,sidecar,signal){if(stage==='repair'){runs++;await gate;}return fakeRunner.run(stage,input,output,sidecar,signal);}};
+ const f=await fixture(t,runner);const lock=join(f.root,'captures','.scan-processing-lock');
+ const child=spawn(process.execPath,['-e','']);const deadPid=await new Promise(r=>child.once('exit',()=>r(child.pid)));
+ await mkdir(lock);await writeFile(join(lock,'owner.json'),JSON.stringify({pid:deadPid,jobId:'00000000-0000-4000-8000-000000000000'}));
+ const other=new ScanProcessingStore(f.storage,f.captures,join(f.root,'captures'),runner);t.after(()=>other.close());
+ try{
+  const results=await Promise.allSettled([f.store.start(f.input),other.start(f.input)]);
+  assert.equal(results.filter(r=>r.status==='fulfilled').length,1);
+  assert.equal(results.find(r=>r.status==='rejected').reason.code,'busy');
+  // While the winner runs, a fresh instance in the same process must see its lock as live.
+  const third=new ScanProcessingStore(f.storage,f.captures,join(f.root,'captures'),runner);
+  await assert.rejects(third.start(f.input),e=>e.code==='busy');
+ }finally{release();}
+ await f.store.wait();await other.wait();assert.equal(runs,1);
+});
