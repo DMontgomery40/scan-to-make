@@ -20,6 +20,7 @@
       "BSL-1.0",
       "ISC",
       "MIT",
+      "MIT-CMU",
       "MPL-2.0",
       "PSF-2.0",
       "Python-2.0",
@@ -57,15 +58,117 @@
       "UNKNOWN"
     ]
   },
-  "exemptions": [],
+  "exemptions": [
+    {
+      "ecosystem": "npm",
+      "licence": "CC-BY-4.0",
+      "name": "caniuse-lite",
+      "reason": "Build-time browserslist data reached only through react-native -> @react-native/codegen -> @babel/core. It is not bundled into the iOS app binary, and CC-BY-4.0 attribution is satisfied through THIRD_PARTY_NOTICES.",
+      "scope": "app",
+      "version": "*"
+    },
+    {
+      "ecosystem": "python",
+      "licence": "LicenseRef-TOST-1.0",
+      "name": "usd-core",
+      "reason": "Pixar OpenUSD runtime (Tomorrow Open Source Technology License 1.0, a modified Apache-2.0). Used only by server-side capture conversion tools, never shipped in the app.",
+      "scope": "server",
+      "version": "26.8"
+    },
+    {
+      "ecosystem": "tool",
+      "licence": "UNKNOWN",
+      "name": "tools/capture-fit-eval",
+      "reason": "Pending the repository licence decision (KAN-105). This folder contains no GPL code and will carry or inherit the chosen root licence once it is added.",
+      "scope": "server",
+      "version": "workspace"
+    },
+    {
+      "ecosystem": "tool",
+      "licence": "UNKNOWN",
+      "name": "tools/capture-mesh-convert",
+      "reason": "Pending the repository licence decision (KAN-105). This folder contains no GPL code and will carry or inherit the chosen root licence once it is added.",
+      "scope": "server",
+      "version": "workspace"
+    },
+    {
+      "ecosystem": "tool",
+      "licence": "UNKNOWN",
+      "name": "tools/capture-pipeline",
+      "reason": "Pending the repository licence decision (KAN-105). This folder contains no GPL code and will carry or inherit the chosen root licence once it is added.",
+      "scope": "server",
+      "version": "workspace"
+    },
+    {
+      "ecosystem": "tool",
+      "licence": "UNKNOWN",
+      "name": "tools/characterization",
+      "reason": "Pending the repository licence decision (KAN-105). This folder contains no GPL code and will carry or inherit the chosen root licence once it is added.",
+      "scope": "server",
+      "version": "workspace"
+    },
+    {
+      "ecosystem": "tool",
+      "licence": "UNKNOWN",
+      "name": "tools/self-host-smoke",
+      "reason": "Pending the repository licence decision (KAN-105). This folder contains no GPL code and will carry or inherit the chosen root licence once it is added.",
+      "scope": "server",
+      "version": "workspace"
+    },
+    {
+      "ecosystem": "tool",
+      "licence": "UNKNOWN",
+      "name": "tools/slicer-producer",
+      "reason": "Pending the repository licence decision (KAN-105). This folder contains no GPL code and will carry or inherit the chosen root licence once it is added.",
+      "scope": "server",
+      "version": "workspace"
+    },
+    {
+      "ecosystem": "tool",
+      "licence": "UNKNOWN",
+      "name": "tools/tailscale",
+      "reason": "Pending the repository licence decision (KAN-105). This folder contains no GPL code and will carry or inherit the chosen root licence once it is added.",
+      "scope": "server",
+      "version": "workspace"
+    },
+    {
+      "ecosystem": "tool",
+      "licence": "UNKNOWN",
+      "name": "tools/templates/cup-holder-adapter",
+      "reason": "Pending the repository licence decision (KAN-105). This folder contains no GPL code and will carry or inherit the chosen root licence once it is added.",
+      "scope": "server",
+      "version": "workspace"
+    },
+    {
+      "ecosystem": "tool",
+      "licence": "UNKNOWN",
+      "name": "tools/templates/drawer-organizer",
+      "reason": "Pending the repository licence decision (KAN-105). This folder contains no GPL code and will carry or inherit the chosen root licence once it is added.",
+      "scope": "server",
+      "version": "workspace"
+    },
+    {
+      "ecosystem": "tool",
+      "licence": "UNKNOWN",
+      "name": "tools/templates/_catalog",
+      "reason": "Pending the repository licence decision (KAN-105). This folder contains no GPL code and will carry or inherit the chosen root licence once it is added.",
+      "scope": "server",
+      "version": "workspace"
+    }
+  ],
   "isolatedGplTools": {
     "allowedLicences": [
       "GPL-3.0-only",
       "GPL-3.0-or-later"
     ],
     "folders": [
+      "tools/scan-correct",
       "tools/scan-repair",
-      "tools/templates/scan-cradle"
+      "tools/templates/_fitted-core",
+      "tools/templates/edge-clip",
+      "tools/templates/protective-sleeve",
+      "tools/templates/scan-cradle",
+      "tools/templates/wall-mount"
     ]
   },
   "schemaVersion": 1,
