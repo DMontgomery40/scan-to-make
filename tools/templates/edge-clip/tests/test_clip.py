@@ -61,6 +61,9 @@ class EdgeClipTests(fit_testing.FittedTemplateCase):
     def test_cylinder_alternate_up_thin_edge(self):
         self.check('cylinder','--up=-Y','--edge-thickness-mm','4','--edge-clearance-mm','0',suffix='-thin')
 
+    def test_shoulder_just_above_rim_keeps_clearance(self):
+        self.assert_shoulder_above_rim_clears('--hold-depth')
+
     def test_invalid_parameters(self):
         for args in (['--edge-thickness-mm','0.5'],['--edge-thickness-mm','61'],['--edge-clearance-mm','-0.1'],
                      ['--grip-depth-mm','4'],['--jaw-mm','1'],['--clearance-mm','nan'],['--hold-depth','1.5']):

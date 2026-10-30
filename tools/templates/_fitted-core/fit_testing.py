@@ -3,6 +3,7 @@
 Blender runs and the independent STL inspector."""
 import hashlib
 import json
+import math
 from pathlib import Path
 import subprocess
 import sys
@@ -66,7 +67,7 @@ class FittedTemplateCase(unittest.TestCase):
         self.assertEqual(fit['liftOutRaysBlocked'],0)
         return out,manifest
 
-    def inspect(self, name, out, manifest, wall_top, probes=()):
+    def inspect(self, name, out, manifest, wall_top, probes=(), check_probes=None):
         request = out/'inspect-request.json'
         request.write_text(json.dumps({'source':str(self.dir/'fixtures'/(name+'.obj')),'stl':str(out/self.STL),
                                        'up':manifest['frame']['up'],
@@ -74,6 +75,8 @@ class FittedTemplateCase(unittest.TestCase):
                                        'wallTop':wall_top,'probes':list(probes)}))
         stdout = self.blender(CORE/'inspect_fit.py',request)
         result = json.loads(next(l for l in stdout.splitlines() if l.startswith('INSPECT '))[8:])
+        if check_probes:
+            check_probes(result['probesMm'])
         params = manifest['parameters']
         self.assertTrue(result['watertight'])
         self.assertEqual(result['raysWithoutWall'],0)
@@ -98,6 +101,24 @@ class FittedTemplateCase(unittest.TestCase):
             self.assertGreaterEqual(opening,size+2*c-1e-6)
             self.assertLessEqual(opening,size+2*c+2*g+1e-6)
         print('\n'+self.id()+' fit '+json.dumps(fit,sort_keys=True))
+
+    def assert_shoulder_above_rim_clears(self, rim_fraction_flag):
+        """Rim 0.1 mm below a broad overhanging shoulder (within clearance).
+        Rays straight down from the shoulder underside measure the true gap,
+        which source vertex/centroid samples cannot see."""
+        shoulder,height,rim = 10.0,14.0,9.9
+        out,m = self.generate('stem-shoulder',f'{rim_fraction_flag}={rim/height!r}',suffix='-shoulder-rim')
+        c = m['parameters']['clearance_mm']
+        probes = [{'origin':[r*math.cos(a),r*math.sin(a),shoulder],'direction':[0,0,-1]}
+                  for r in [10.05+.1*k for k in range(200)] for a in (.0123,1.3,2.9,4.4)]
+
+        def check(gaps):
+            # None: no material below that point of the shoulder at all.
+            gap = min(g for g in gaps if g is not None)
+            self.assertGreaterEqual(gap,c-1e-3,f'gap under shoulder {gap:.4f} mm < clearance {c} mm')
+
+        self.inspect('stem-shoulder',out,m,rim,probes,check)
+        return m
 
     def assert_rejected(self, *args):
         run = self.run_cli('cylinder',*args)

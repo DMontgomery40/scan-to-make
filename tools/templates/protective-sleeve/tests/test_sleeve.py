@@ -55,6 +55,9 @@ class SleeveTests(fit_testing.FittedTemplateCase):
         for opening in m['fit']['pocketOpeningMm']:
             self.assertGreaterEqual(opening,32+2*.5-1e-6)
 
+    def test_shoulder_just_above_rim_keeps_clearance(self):
+        self.assert_shoulder_above_rim_clears('--coverage')
+
     def test_invalid_parameters(self):
         for args in (['--clearance-mm','nan'],['--clearance-mm','0'],['--wall-mm','0.5'],['--coverage','0'],
                      ['--coverage','1.01'],['--floor-mm','11'],['--grid-mm','1','--wall-mm','1.5'],['--up','W']):

@@ -64,6 +64,9 @@ class WallMountTests(fit_testing.FittedTemplateCase):
     def test_wide_shoulder_clears_plate(self):
         self.check('overhang','--hold-depth','.3',suffix='-shoulder')
 
+    def test_shoulder_just_above_rim_keeps_clearance(self):
+        self.assert_shoulder_above_rim_clears('--hold-depth')
+
     def test_invalid_parameters(self):
         for args in (['--clearance-mm','inf'],['--hold-depth','0'],['--plate-mm','1'],['--screw-hole-mm','9'],
                      ['--plate-extension-mm','8'],['--screw-spacing-mm','8'],['--wall-mm','0.7']):
