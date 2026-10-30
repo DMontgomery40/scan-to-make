@@ -13,9 +13,11 @@ import zipfile
 import sys
 from pathlib import Path
 
+from textures import UnsupportedTexture, base_colour, uv_coordinates, safe_stem
+
 Ar = Gf = Sdf = Usd = UsdGeom = UsdUtils = None  # pxr is imported lazily so a missing install exits 2
 
-TOOL_VERSION = "0.3.0"
+TOOL_VERSION = "0.4.0"
 SUBDIVISION_POLICY = ("explicit-none-only: per OpenUSD an unauthored subdivisionScheme means catmullClark "
                       "(a subdivision surface, not a polygon mesh); only an explicitly authored 'none' is polygonal. "
                       "Any other scheme exports the control cage and is not metric-qualified")
@@ -162,6 +164,9 @@ def _has_time_samples(attr):
 def convert(src, out_obj):
     _load_pxr()
     src = Path(src)
+    out_obj = Path(out_obj)
+    if src.resolve() == out_obj.resolve():
+        raise RuntimeError("output must not overwrite source")
     src_bytes = src.read_bytes()
     stage = Usd.Stage.Open(str(src))
     if stage is None:
@@ -181,6 +186,11 @@ def convert(src, out_obj):
     lines = [f"# capture-mesh-convert {TOOL_VERSION} from {src.name}",
              f"# native stage units; metersPerUnit={mpu!r} (authored={units_authored}); upAxis={up} (authored={up_authored})"]
     v_offset = 0
+    vt_offset = 0
+    materials = []
+    artifacts = {}
+    stem = safe_stem(out_obj)
+    mtl_name = stem + ".mtl"
     t = Usd.TimeCode.Default()
 
     it = iter(Usd.PrimRange(stage.GetPseudoRoot(), Usd.TraverseInstanceProxies(Usd.PrimAllPrimsPredicate)))
@@ -256,6 +266,28 @@ def convert(src, out_obj):
         bad = [i for i in indices if i < 0 or i >= len(points)]
         if bad:
             raise RuntimeError(f"{path}: invalid topology: index {bad[0]} out of range for {len(points)} points")
+        material = None
+        uv_name = "st"
+        try:
+            material = base_colour(prim, src, _layer_bytes)
+            if material:
+                uv_name = material.get("uvPrimvar", "st")
+            uvs = uv_coordinates(prim, uv_name, counts, indices, len(points))
+            if material and "png" in material and uvs is None:
+                raise RuntimeError(f"{path}: textured mesh missing UV primvar {uv_name}")
+        except UnsupportedTexture as exc:
+            unsupported.append({"feature":"baseColour", "prim":path, "detail":str(exc)})
+            material, uvs = None, None
+        material_name = None
+        if material:
+            material_name = "material_%d" % len(materials)
+            mtl = ["newmtl " + material_name, "Kd " + " ".join(map(str,material["colour"]))]
+            if "png" in material:
+                png_name = stem + "_basecolor_%d.png" % len(materials)
+                artifacts[png_name] = material.pop("png")
+                mtl.append("map_Kd -clamp %s %s" % ("on" if material["clamp"] else "off",png_name))
+                material["textureOutput"] = png_name
+            materials.append((mtl, material))
         # Composed exactly once: full local-to-world (includes the prim's own ops).
         m = img.ComputeLocalToWorldTransform(t)
         if not _finite(*(m[r][c] for r in range(4) for c in range(4))):
@@ -274,6 +306,11 @@ def convert(src, out_obj):
                 raise RuntimeError(f"{path}: non-finite transformed point")
             world.append((w[0], w[1], w[2]))
             lines.append(f"v {w[0]!r} {w[1]!r} {w[2]!r}")
+        if uvs is not None:
+            lines += [f"vt {u!r} {v!r}" for u,v in uvs]
+        # Explicit reset avoids a preceding mesh's material leaking to an unbound mesh.
+        if material_name or materials:
+            lines.append("usemtl " + (material_name or "unbound"))
         rejected = 0
         reasons = []
         triangles = 0
@@ -281,6 +318,7 @@ def convert(src, out_obj):
         written = 0
         for fi, c in enumerate(counts):
             face = indices[k:k + c]
+            corner = k
             k += c
             if fi in holes:
                 continue
@@ -295,32 +333,50 @@ def convert(src, out_obj):
                 reasons.append(f"face {fi}: {reason or 'not ear-clippable (self-intersecting?)'}")
                 continue
             for tri in tris:
-                tri = [face[j] for j in tri]
                 if flip:
                     tri = tri[::-1]
-                lines.append("f " + " ".join(str(i + 1 + v_offset) for i in tri))
+                lines.append("f " + " ".join(
+                    str(face[j] + 1 + v_offset) +
+                    ("/" + str(corner+j+1+vt_offset) if uvs is not None else "") for j in tri))
                 triangles += 1
             written += 1
         if rejected:
             unsupported.append({"feature": "untriangulatablePolygon", "prim": path,
                                 "detail": f"{rejected} invalid face(s) not emitted: " + "; ".join(reasons[:10])})
         v_offset += len(points)
+        if uvs is not None:
+            vt_offset += len(uvs)
         meshes.append({"prim": path, "points": len(points), "faces": written, "triangles": triangles,
                        "rejectedFaces": rejected, "authoredFaces": len(counts),
                        "holeFacesOmitted": len(holes), "purpose": purpose,
                        "worldDeterminant": det, "authoredOrientation": "leftHanded" if left else "rightHanded",
                        "windingFlipped": flip, "subdivisionScheme": str(scheme),
-                       "subdivisionSchemeAuthored": scheme_authored})
+                       "subdivisionSchemeAuthored": scheme_authored,
+                       "uvPrimvar":uv_name if uvs is not None else None,
+                       "uvCorners":len(uvs) if uvs is not None else 0,
+                       "material":material_name})
 
     if not meshes:
         raise RuntimeError("no exportable meshes found")
+    if materials:
+        lines.insert(2, "mtllib " + mtl_name)
+        artifacts[mtl_name] = ("newmtl unbound\nKd 0.18 0.18 0.18\n\n" +
+                               "\n\n".join("\n".join(mtl) for mtl,_ in materials)+"\n").encode()
     obj_bytes = ("\n".join(lines) + "\n").encode()
-    Path(out_obj).write_bytes(obj_bytes)
+    if out_obj.name in artifacts or any((out_obj.parent/name).resolve() == src.resolve() for name in artifacts):
+        raise RuntimeError("output artifact collision")
+    artifacts[out_obj.name] = obj_bytes
+    # All validation, texture decoding and hashing precede the first output write.
+    outputs = [{"path":name, "sha256":sha256_bytes(data), "bytes":len(data)}
+               for name,data in sorted(artifacts.items())]
+    for name,data in artifacts.items():
+        (out_obj.parent/name).write_bytes(data)
     metric_qualified = bool(units_authored and not unsupported)
     return {
         "tool": "capture-mesh-convert", "toolVersion": TOOL_VERSION,
         "usdVersion": ".".join(map(str, Usd.GetVersion())),
         "contributingLayers": layer_hashes,
+        "outputs":outputs, "materials":[desc for _,desc in materials],
         "source": {"path": src.name, "sha256": sha256_bytes(src_bytes), "bytes": len(src_bytes)},
         "output": {"path": Path(out_obj).name, "format": "obj", "sha256": sha256_bytes(obj_bytes),
                    "bytes": len(obj_bytes)},
@@ -347,6 +403,15 @@ def main(argv=None):
     ap.add_argument("--report", help="output JSON report path (default: stdout)")
     a = ap.parse_args(argv)
     try:
+        if a.report:
+            report_path = Path(a.report).resolve()
+            out = Path(a.out)
+            stem = safe_stem(out)
+            if report_path in (Path(a.source).resolve(), out.resolve()) or (
+                report_path.parent == out.resolve().parent and
+                (report_path.name == stem+".mtl" or
+                 (report_path.name.startswith(stem+"_basecolor_") and report_path.suffix == ".png"))):
+                raise RuntimeError("report must not overwrite source or output artifacts")
         report = convert(a.source, a.out)
     except Exception as e:  # noqa: BLE001
         print(f"error: {e}", file=sys.stderr)

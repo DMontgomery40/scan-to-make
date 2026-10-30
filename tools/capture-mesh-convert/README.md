@@ -1,11 +1,13 @@
 # Capture mesh convert (offline USDZ -> OBJ)
 
-`convert.py` converts a `.usdz` / `.usdc` / `.usda` stage into a single OBJ plus a JSON report, so captures can enter `tools/capture-fit-eval` (FIT006). It uses the real USD runtime (`usd-core`, `pxr`), which reads packaged binary USDC; no USDC parsing is hand-rolled.
+`convert.py` converts a `.usdz` / `.usdc` / `.usda` stage into a single OBJ plus a JSON report (and MTL/PNG assets when a base-colour material is present), so captures can enter `tools/capture-fit-eval` (FIT006). It uses the real USD runtime (`usd-core`, `pxr`), which reads packaged binary USDC; no USDC parsing is hand-rolled.
 
 ## Setup
 
 ```sh
-python3 -m venv .venv && .venv/bin/pip install usd-core   # tested with usd-core 26.8
+python3 -m venv .venv
+.venv/bin/pip install -r tools/capture-mesh-convert/requirements.txt
+# tested with usd-core 26.8 and Pillow 13.0.0
 ```
 
 ## Usage
@@ -34,7 +36,10 @@ python3 tools/capture-fit-eval/evaluate.py evaluate capture.obj --units cm --hel
   - invalid topology (counts don't sum to the index length, or an index is out of range)
   - asset-boundary violations: any unresolved dependency, or any reference, sublayer, payload or asset outside the source package
 - Every contributing layer is hashed in `contributingLayers`. For a `.usdz`, that means each packaged entry, resolved with `Ar.SplitPackageRelativePathOuter`. A multi-layer package (for example root.usdc referencing ./mesh.usdc) gets a hash for each layer.
-- Multiple meshes are written as separate `o` groups into one OBJ.
+- Multiple meshes are written as separate `o` groups into one OBJ. UVs use separate `vt` indices per authored face corner, so UV seams survive ear clipping and winding reversal. Indexed/unindexed `faceVarying`, `vertex`, `varying`, `uniform` and `constant` float2 UVs are expanded through the USD runtime. Inherited primvars and materials are supported. No V flip is applied: USD and OBJ UVs both use the lower-left image origin.
+- Base colour follows the bound `UsdPreviewSurface.diffuseColor` → `UsdUVTexture.rgb` → `UsdPrimvarReader_float2.result` graph (including a literal material interface supplying the UV name). Constant diffuse colours become MTL `Kd`. Textures become `map_Kd` and sibling `<stem>_basecolor_N.png`; the OBJ references `<stem>.mtl`. Auxiliary stems are sanitized to ASCII letters/digits/underscore/hyphen. Each mesh has its own material assignment, with an explicit reset for unbound meshes.
+- Texture reads reuse the existing source-package boundary check. PNGs are decoded for validation, then copied byte-for-byte; other Pillow-readable images (including JPEG) become PNG without rotating image pixels or changing UVs. Pillow is imported only for textured materials; untextured conversion still requires only `usd-core`.
+- `outputs` hashes every emitted geometry/material/image asset (SHA-256 and byte size). Existing singular `output` remains the OBJ receipt for compatibility. `materials` records material prim, source asset, image dimensions/format and texture output. The JSON report does not hash itself. Packaged texture dependencies are included in `contributingLayers`, alongside all existing layer hashes. All validation and texture decoding finish before any asset is written.
 - Report: `metersPerUnit`, `unitsAuthored`, `upAxis`, `upAxisAuthored`, `outputBasis`, SHA-256 + byte size of source and output, per-mesh determinant/winding, `unsupportedFeatures`, `warnings`, `metricQualified`, and `provesCompleteCapture: false`, `provesPhysicalFit: false`.
 
 ## Limits (explicit, never silent)
@@ -48,7 +53,8 @@ python3 tools/capture-fit-eval/evaluate.py evaluate capture.obj --units cm --hel
 - Animated transforms: default time used, flagged unsupported.
 - Faces with <3 vertices are skipped with a warning; `meshes[].faces` counts only faces written (`authoredFaces` is the source count).
 - A missing `usd-core` / `pxr` exits `2` with `error: USD runtime unavailable ...`.
-- Normals, UVs, materials, and primvars are not exported.
+- Invalid/non-finite UVs, invalid UV indices/cardinality, missing required UVs, or corrupt images exit `2` before writing assets. Report/source/asset path collisions are rejected. Use a fresh output directory: validation failures do not remove files from earlier runs, and filesystem write failures can leave partial outputs.
+- Unsupported material/UV features are listed as `baseColour` in `unsupportedFeatures` (exit `4`, geometry exported without that material/UV set): per-face material subsets, arbitrary shader graphs/UV transforms, non-identity texture scale/bias, time-sampled base-colour/UV inputs, raw/linear texture colour space, UDIMs and wrapping other than repeat/repeat or clamp/clamp. Unresolved UDIM dependencies may instead fail the existing asset-boundary check (exit `2`). This exports base colour only: normals, opacity shader connections, normal/roughness/metalness maps and other primvars are not exported. PNG alpha bytes survive but are not wired to MTL opacity.
 - No hole filling, size fitting, or claims about capture completeness or physical fit.
 
 ## Tests (local-only)
@@ -58,5 +64,15 @@ Fixtures are generated programmatically with `pxr` (`make_fixtures.py`) as `.usd
 ```sh
 .venv/bin/python -m unittest discover -s tools/capture-mesh-convert/tests -v
 ```
+
+Additional synthetic textured USDC packages test indexed seams, all five UV interpolation modes, inherited material/UV data, connected UV-name interfaces, reflected winding, concave triangulation, omitted-hole corner offsets, multiple meshes/material resets, PNG byte identity, JPEG pixel identity, all output/dependency hashes and repeatability. Invalid UV/image/asset inputs and failures on later meshes write no new assets. No private captures are used.
+
+An optional Blender 5.0.1 integration check imports the serialized OBJ/MTL/PNG and verifies the UV loop count and linked 2×2 texture:
+
+```sh
+BLENDER=$HOME/opt/blender-5.0.1/blender .venv/bin/python -m unittest discover -s tools/capture-mesh-convert/tests -v
+```
+
+The supported graph and UV conventions follow the [OpenUSD Preview Surface specification](https://openusd.org/dev/spec_usdpreviewsurface.html) and [primvar interpolation rules](https://openusd.org/dev/user_guides/primvars.html).
 
 CI: not wired, so these tests are local-only. Adding a workflow under `.github/` is outside this ticket's `tools/capture-mesh-convert/**` scope; run the command above (requires `usd-core`).
