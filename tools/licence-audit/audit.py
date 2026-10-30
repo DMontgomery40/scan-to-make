@@ -146,6 +146,7 @@ def run_audit(
     repo_root: Path,
     policy_path: Path,
     python_paths: list[Path] | None = None,
+    marker_env: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Execute the full repository licence audit and return a deterministic JSON-serializable report."""
     policy = json.loads(policy_path.read_text(encoding="utf-8"))
@@ -166,7 +167,11 @@ def run_audit(
     mobile_npm = inventory_mobile_npm(repo_root)
     cocoapods = inventory_cocoapods(repo_root, policy)
     workspace_npm = inventory_workspace_npm(repo_root)
-    tool_folders, tool_python = inventory_tools(repo_root, python_paths=python_paths)
+    tool_folders, tool_python = inventory_tools(
+        repo_root,
+        python_paths=python_paths,
+        marker_env=marker_env,
+    )
     app_gpl_imports = detect_app_gpl_tool_imports(repo_root, tool_folders)
 
     def _audit_standard_item(item: dict[str, Any]) -> None:

@@ -660,6 +660,7 @@ COCOAPODS: 1.15.2
             rendered = notices_path.read_text(encoding="utf-8")
             self.assertIn("`SafeArea`", rendered)
             self.assertIn("`react`", rendered)
+            self.assertIn("`zod`", rendered)
             self.assertNotIn("dev-only-gpl-linter", rendered)
 
             rc_fresh = audit.main(
@@ -679,6 +680,336 @@ COCOAPODS: 1.15.2
                 )
             self.assertEqual(rc_stale, 1)
 
+    def test_mobile_peer_dependencies_traversed_and_absent_optional_peers_ignored(self) -> None:
+        # 1. Production package with a resolved GPL-3.0-only peer fails app allowlist
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            repo = base / "repo"
+            site = base / "site-packages"
+            site.mkdir()
+            policy_path = _create_allowed_repo_fixture(repo, site)
+
+            lock_path = repo / "apps" / "mobile" / "package-lock.json"
+            lock_data = json.loads(lock_path.read_text(encoding="utf-8"))
+            lock_data["packages"]["node_modules/react"]["peerDependencies"] = {"gpl-peer-runtime": "^1.0.0"}
+            lock_data["packages"]["node_modules/gpl-peer-runtime"] = {
+                "version": "1.2.0",
+                "resolved": "https://registry.npmjs.org/gpl-peer-runtime/-/gpl-peer-runtime-1.2.0.tgz",
+                "license": "GPL-3.0-only",
+            }
+            _write_json(lock_path, lock_data)
+
+            report = audit.run_audit(repo, policy_path, python_paths=[site])
+            self.assertFalse(report["ok"])
+            codes = [(v["code"], v["name"], v["scope"]) for v in report["violations"]]
+            self.assertIn(("copyleft-in-app", "gpl-peer-runtime", "app"), codes)
+
+        # 2. Resolved permissive peer is included in closure & notices, while absent or dev-only optional peers are excluded
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            repo = base / "repo"
+            site = base / "site-packages"
+            site.mkdir()
+            policy_path = _create_allowed_repo_fixture(repo, site)
+
+            lock_path = repo / "apps" / "mobile" / "package-lock.json"
+            lock_data = json.loads(lock_path.read_text(encoding="utf-8"))
+            lock_data["packages"]["node_modules/react"]["peerDependencies"] = {
+                "absent-opt-peer": "^1.0.0",
+                "dev-opt-gpl-peer": "^1.0.0",
+                "resolved-mit-peer": "^2.0.0",
+            }
+            lock_data["packages"]["node_modules/react"]["peerDependenciesMeta"] = {
+                "absent-opt-peer": {"optional": True},
+                "dev-opt-gpl-peer": {"optional": True},
+            }
+            lock_data["packages"]["node_modules/resolved-mit-peer"] = {
+                "version": "2.0.0",
+                "resolved": "https://registry.npmjs.org/resolved-mit-peer/-/resolved-mit-peer-2.0.0.tgz",
+                "license": "MIT",
+            }
+            lock_data["packages"]["node_modules/dev-opt-gpl-peer"] = {
+                "version": "1.0.0",
+                "resolved": "https://registry.npmjs.org/dev-opt-gpl-peer/-/dev-opt-gpl-peer-1.0.0.tgz",
+                "dev": True,
+                "license": "GPL-3.0-only",
+            }
+            _write_json(lock_path, lock_data)
+
+            report = audit.run_audit(repo, policy_path, python_paths=[site])
+            self.assertTrue(report["ok"])
+            mobile_names = {item["name"] for item in report["inventory"]["mobileNpm"]}
+            self.assertIn("resolved-mit-peer", mobile_names)
+            self.assertNotIn("absent-opt-peer", mobile_names)
+            self.assertNotIn("dev-opt-gpl-peer", mobile_names)
+
+            notices_path = repo / "apps" / "mobile" / "THIRD_PARTY_NOTICES.md"
+            rc = audit.main(["notices", "--repo-root", str(repo), "--policy", str(policy_path), "--write"])
+            self.assertEqual(rc, 0)
+            rendered = notices_path.read_text(encoding="utf-8")
+            self.assertIn("`resolved-mit-peer`", rendered)
+            self.assertNotIn("absent-opt-peer", rendered)
+            self.assertNotIn("dev-opt-gpl-peer", rendered)
+
+    def test_linked_local_module_hoisted_dependencies_resolved(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            repo = base / "repo"
+            site = base / "site-packages"
+            site.mkdir()
+            policy_path = _create_allowed_repo_fixture(repo, site)
+
+            _write_json(
+                repo / "apps" / "mobile" / "modules" / "local" / "package.json",
+                {
+                    "name": "@synthetic/local",
+                    "version": "0.1.0",
+                    "private": True,
+                    "dependencies": {"hoisted-gpl-dep": "1.0.0"},
+                },
+            )
+            lock_path = repo / "apps" / "mobile" / "package-lock.json"
+            lock_data = json.loads(lock_path.read_text(encoding="utf-8"))
+            lock_data["packages"][""]["dependencies"]["@synthetic/local"] = "file:./modules/local"
+            lock_data["packages"]["modules/local"] = {
+                "version": "0.1.0",
+                "dependencies": {"hoisted-gpl-dep": "1.0.0"},
+            }
+            lock_data["packages"]["node_modules/@synthetic/local"] = {
+                "resolved": "modules/local",
+                "link": True,
+            }
+            lock_data["packages"]["node_modules/hoisted-gpl-dep"] = {
+                "version": "1.0.0",
+                "resolved": "https://registry.npmjs.org/hoisted-gpl-dep/-/hoisted-gpl-dep-1.0.0.tgz",
+                "license": "GPL-3.0-only",
+            }
+            _write_json(lock_path, lock_data)
+
+            report_fail = audit.run_audit(repo, policy_path, python_paths=[site])
+            self.assertFalse(report_fail["ok"])
+            self.assertIn(
+                ("copyleft-in-app", "hoisted-gpl-dep", "app"),
+                [(v["code"], v["name"], v["scope"]) for v in report_fail["violations"]],
+            )
+
+            # Switch hoisted dep to permissive Apache-2.0 -> passes audit and appears in notices
+            lock_data["packages"]["node_modules/hoisted-gpl-dep"]["license"] = "Apache-2.0"
+            _write_json(lock_path, lock_data)
+            report_ok = audit.run_audit(repo, policy_path, python_paths=[site])
+            self.assertTrue(report_ok["ok"])
+
+            notices_path = repo / "apps" / "mobile" / "THIRD_PARTY_NOTICES.md"
+            self.assertEqual(
+                audit.main(["notices", "--repo-root", str(repo), "--policy", str(policy_path), "--write"]),
+                0,
+            )
+            self.assertIn("`hoisted-gpl-dep`", notices_path.read_text(encoding="utf-8"))
+
+    def test_linked_workspace_production_dependencies_included_in_notices_and_deduplicated(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            repo = base / "repo"
+            site = base / "site-packages"
+            site.mkdir()
+            policy_path = _create_allowed_repo_fixture(repo, site)
+
+            zod_lic = MIT_TEXT.replace(
+                "2026 Synthetic Fixture Contributors",
+                "2026 Synthetic Zod Workspace Contributors",
+            )
+            _write_text(repo / "packages" / "contracts" / "node_modules" / "zod" / "LICENSE", zod_lic)
+
+            # Add both a duplicate mobile package (react@19.0.0) and a dev-only workspace package
+            contracts_lock = repo / "packages" / "contracts" / "package-lock.json"
+            cdata = json.loads(contracts_lock.read_text(encoding="utf-8"))
+            cdata["packages"][""]["dependencies"]["react"] = "19.0.0"
+            cdata["packages"][""]["devDependencies"] = {"contracts-dev-linter": "1.0.0"}
+            cdata["packages"]["node_modules/react"] = {
+                "version": "19.0.0",
+                "resolved": "https://registry.npmjs.org/react/-/react-19.0.0.tgz",
+                "license": "MIT",
+            }
+            cdata["packages"]["node_modules/contracts-dev-linter"] = {
+                "version": "1.0.0",
+                "resolved": "https://registry.npmjs.org/contracts-dev-linter/-/contracts-dev-linter-1.0.0.tgz",
+                "dev": True,
+                "license": "GPL-3.0-only",
+            }
+            _write_json(contracts_lock, cdata)
+
+            notices_path = repo / "apps" / "mobile" / "THIRD_PARTY_NOTICES.md"
+            self.assertEqual(
+                audit.main(["notices", "--repo-root", str(repo), "--policy", str(policy_path), "--write"]),
+                0,
+            )
+            rendered = notices_path.read_text(encoding="utf-8")
+            self.assertIn("| `zod` | `4.0.0` | `MIT` |", rendered)
+            self.assertIn("2026 Synthetic Zod Workspace Contributors", rendered)
+            self.assertNotIn("contracts-dev-linter", rendered)
+            self.assertNotIn("`ajv`", rendered)  # server-only companion workspace dep stays excluded
+            self.assertEqual(rendered.count("| `react` | `19.0.0` |"), 1)
+
+    def test_python_revisits_distributions_when_additional_extras_accumulate(self) -> None:
+        # Subcase A: Direct `geom-kernel` followed by `geom-kernel[mesh]`
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            repo = base / "repo"
+            site = base / "site-packages"
+            site.mkdir()
+            policy_path = _create_allowed_repo_fixture(repo, site)
+
+            _write_text(
+                repo / "tools" / "mesh-helper" / "requirements.txt",
+                "geom-kernel==1.4.0\ngeom-kernel[mesh]==1.4.0\n",
+            )
+            _make_dist_info(
+                site,
+                dist_name="geom-kernel",
+                version="1.4.0",
+                licence_header="Apache-2.0",
+                requires_dist=['nc-mesh-addon (>=1.0.0) ; extra == "mesh"'],
+                top_level="geom_kernel",
+            )
+            _make_dist_info(
+                site,
+                dist_name="nc-mesh-addon",
+                version="1.0.0",
+                licence_header="CC-BY-NC-4.0",
+                top_level="nc_mesh_addon",
+            )
+
+            report = audit.run_audit(repo, policy_path, python_paths=[site])
+            self.assertFalse(report["ok"])
+            self.assertIn(
+                ("non-commercial-licence", "nc-mesh-addon", "NON-COMMERCIAL"),
+                [(v["code"], v["name"], v["licence"]) for v in report["violations"]],
+            )
+            geom_rows = [
+                r
+                for r in report["inventory"]["toolPythonRequirements"]
+                if r["toolFolder"] == "tools/mesh-helper" and r["name"] == "geom-kernel"
+            ]
+            self.assertEqual(len(geom_rows), 1)
+
+        # Subcase B: Separate transitive branches requesting distinct extras on the same shared distribution
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            repo = base / "repo"
+            site = base / "site-packages"
+            site.mkdir()
+            policy_path = _create_allowed_repo_fixture(repo, site)
+
+            _write_text(
+                repo / "tools" / "mesh-helper" / "requirements.txt",
+                "branch-alpha==1.0.0\nbranch-beta==1.0.0\ngeom-kernel==1.4.0\n",
+            )
+            _make_dist_info(
+                site,
+                dist_name="branch-alpha",
+                version="1.0.0",
+                licence_header="MIT",
+                requires_dist=["shared-hub[io] (>=1.0.0)"],
+            )
+            _make_dist_info(
+                site,
+                dist_name="branch-beta",
+                version="1.0.0",
+                licence_header="MIT",
+                requires_dist=["shared-hub[gpu] (>=1.0.0)"],
+            )
+            _make_dist_info(
+                site,
+                dist_name="shared-hub",
+                version="1.0.0",
+                licence_header="MIT",
+                requires_dist=[
+                    'io-codec (>=1.0.0) ; extra == "io"',
+                    'gpu-nc-kernel (>=1.0.0) ; extra == "gpu"',
+                ],
+            )
+            _make_dist_info(site, dist_name="io-codec", version="1.0.0", licence_header="MIT")
+            _make_dist_info(site, dist_name="gpu-nc-kernel", version="1.0.0", licence_header="CC-BY-NC-4.0")
+
+            report = audit.run_audit(repo, policy_path, python_paths=[site])
+            self.assertFalse(report["ok"])
+            self.assertIn(
+                ("non-commercial-licence", "gpu-nc-kernel", "NON-COMMERCIAL"),
+                [(v["code"], v["name"], v["licence"]) for v in report["violations"]],
+            )
+            hub_rows = [
+                r
+                for r in report["inventory"]["toolPythonRequirements"]
+                if r["toolFolder"] == "tools/mesh-helper" and r["name"] == "shared-hub"
+            ]
+            self.assertEqual(len(hub_rows), 1)
+
+    def test_pep508_environment_markers_evaluated_completely(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            repo = base / "repo"
+            site = base / "site-packages"
+            site.mkdir()
+            policy_path = _create_allowed_repo_fixture(repo, site)
+
+            _make_dist_info(
+                site,
+                dist_name="geom-kernel",
+                version="1.4.0",
+                licence_header="Apache-2.0",
+                requires_dist=[
+                    'windows-only-uninstalled (>=1.0) ; sys_platform == "win32"',
+                    'legacy-py37-uninstalled (>=1.0) ; python_version < "3.8"',
+                    'compound-or-dep (>=1.0) ; sys_platform == "linux" or extra == "mesh"',
+                    'modern-py-dep (>=1.0) ; python_version >= "3.8" and sys_platform != "win32"',
+                ],
+                top_level="geom_kernel",
+            )
+            _make_dist_info(site, dist_name="compound-or-dep", version="1.0.0", licence_header="MIT")
+            _make_dist_info(site, dist_name="modern-py-dep", version="1.0.0", licence_header="BSD-3-Clause")
+
+            linux_env = {
+                "os_name": "posix",
+                "platform_machine": "x86_64",
+                "platform_system": "Linux",
+                "python_full_version": "3.12.4",
+                "python_version": "3.12",
+                "sys_platform": "linux",
+            }
+            report_ok = audit.run_audit(repo, policy_path, python_paths=[site], marker_env=linux_env)
+            self.assertTrue(report_ok["ok"], msg=json.dumps(report_ok["violations"], indent=2))
+            py_names = {
+                r["name"]
+                for r in report_ok["inventory"]["toolPythonRequirements"]
+                if r["toolFolder"] == "tools/mesh-helper"
+            }
+            self.assertIn("compound-or-dep", py_names)
+            self.assertIn("modern-py-dep", py_names)
+            self.assertNotIn("windows-only-uninstalled", py_names)
+            self.assertNotIn("legacy-py37-uninstalled", py_names)
+
+            # On win32, the uninstalled Windows-only dependency IS active and raises unknown-licence
+            win_env = dict(linux_env, os_name="nt", platform_system="Windows", sys_platform="win32")
+            report_win = audit.run_audit(repo, policy_path, python_paths=[site], marker_env=win_env)
+            self.assertFalse(report_win["ok"])
+            self.assertIn(
+                ("unknown-licence", "windows-only-uninstalled", "UNKNOWN"),
+                [(v["code"], v["name"], v["licence"]) for v in report_win["violations"]],
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ExtraMarkerNormalisationTests(unittest.TestCase):
+    """Connector review on PR #90: membership operators must compare normalised extra names."""
+
+    def test_membership_and_arbitrary_equality_normalise_extra_names(self):
+        from inventory import _marker_allows
+        active = {"mesh-io"}  # active extras arrive PEP 503-normalised
+        self.assertTrue(_marker_allows('extra != "" and extra in "mesh_io"', active))
+        self.assertTrue(_marker_allows('extra in "Mesh.IO"', active))
+        self.assertFalse(_marker_allows('extra not in "mesh_io"', active))
+        self.assertTrue(_marker_allows('extra === "mesh_io"', active))
+        self.assertFalse(_marker_allows('extra != "" and extra in "other"', active))
