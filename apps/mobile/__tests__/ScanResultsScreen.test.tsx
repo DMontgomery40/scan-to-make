@@ -1,6 +1,7 @@
 import React from 'react';
 import Renderer, { act } from 'react-test-renderer';
 import { Alert, Image, Text, TextInput } from 'react-native';
+import type { ScanProcessingJob } from '@scan-to-make/contracts';
 import { ScanResultsScreen } from '../src/screens/ScanResultsScreen';
 import { unavailableScanServices } from '../src/screens/scanServices';
 import {
@@ -400,5 +401,79 @@ test('the app default reports that scan checks are not available yet', async () 
   expect(shown).toContain('Not available here');
   expect(shown).toContain('available in the iPhone app');
   expect(hasButton(tree, 'Connect companion')).toBe(false);
+  await act(async () => tree.unmount());
+});
+
+test('stopping waits for an in-flight progress check, then cancels once', async () => {
+  jest.useFakeTimers();
+  const { services, calls } = fakeScanServices();
+  await services.jobs.save(PROJECT_ID, CAPTURE_ID, JOB_ID);
+  let reads = 0;
+  let inFlight = false;
+  let release!: (job: ScanProcessingJob) => void;
+  services.processing.status = async () => {
+    reads++;
+    if (reads === 1) return syntheticJob('running');
+    inFlight = true;
+    return new Promise<ScanProcessingJob>(resolve => {
+      release = job => {
+        inFlight = false;
+        resolve(job);
+      };
+    });
+  };
+  // Like the native bridge: one request at a time, so an overlapping
+  // cancel comes back unconfirmed.
+  services.processing.cancel = async () => {
+    calls.push(inFlight ? 'cancel during read' : 'cancel');
+    if (inFlight) {
+      throw Object.assign(Error('busy'), { code: 'ambiguous-cancel' });
+    }
+    return syntheticJob('failed', { failure: 'cancelled' });
+  };
+  const alert = jest.spyOn(Alert, 'alert');
+  const { tree } = await render(services);
+  await advance(1000);
+  expect(inFlight).toBe(true);
+  await press(tree, 'Stop checking');
+  await act(async () => {
+    alert.mock.calls[0][2]!.find(b => b.text === 'Stop')!.onPress!();
+  });
+  expect(calls.filter(c => c.startsWith('cancel'))).toEqual([]);
+  expect(texts(tree)).toContain('Stopping…');
+  // The earlier read still says running; it must not win over the stop.
+  await act(async () => {
+    release(syntheticJob('running'));
+  });
+  expect(calls.filter(c => c.startsWith('cancel'))).toEqual(['cancel']);
+  let shown = texts(tree);
+  expect(shown).toContain('You stopped this check');
+  expect(shown).not.toContain('We couldn’t confirm the check stopped');
+  await advance(10000);
+  expect(reads).toBe(2);
+  shown = texts(tree);
+  expect(shown).toContain('You stopped this check');
+  expect(hasButton(tree, 'Stop checking')).toBe(false);
+  await act(async () => tree.unmount());
+});
+
+test('an unconfirmed stop keeps following the check', async () => {
+  jest.useFakeTimers();
+  const { services } = fakeScanServices({
+    jobs: [syntheticJob('running'), syntheticJob('succeeded')],
+  });
+  await services.jobs.save(PROJECT_ID, CAPTURE_ID, JOB_ID);
+  services.processing.cancel = async () => {
+    throw Object.assign(Error('lost'), { code: 'ambiguous-cancel' });
+  };
+  const alert = jest.spyOn(Alert, 'alert');
+  const { tree } = await render(services);
+  await press(tree, 'Stop checking');
+  await act(async () => {
+    alert.mock.calls[0][2]!.find(b => b.text === 'Stop')!.onPress!();
+  });
+  expect(texts(tree)).toContain('We couldn’t confirm the check stopped.');
+  await advance(1000);
+  expect(texts(tree)).toContain('Ready');
   await act(async () => tree.unmount());
 });

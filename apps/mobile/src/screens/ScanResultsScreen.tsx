@@ -176,6 +176,13 @@ export function ScanResultsScreen({
   const activeJobId =
     phase.kind === 'job' && isActive(phase.job) ? phase.job.jobId : null;
   const [pollRound, setPollRound] = useState(0);
+  // Status reads and cancellation share the companion's single request slot.
+  // A cancel pauses polling and waits for any read in flight, and reads that
+  // began before a cancel never replace what the cancel returned.
+  const inflight = useRef<Promise<unknown> | null>(null);
+  const pollGate = useRef(0);
+  const stopping = useRef(false);
+  const [stoppingShown, setStoppingShown] = useState(false);
   useEffect(() => {
     if (!activeJobId || pollStalled || !ack.current) return;
     const token = epoch.current;
@@ -183,20 +190,27 @@ export function ScanResultsScreen({
     let timer: ReturnType<typeof setTimeout>;
     let stopped = false;
     const tick = async () => {
+      // A cancel in progress restarts polling itself once it settles.
+      if (stopping.current) return;
+      const gate = pollGate.current;
+      const stale = () =>
+        stopped || token !== epoch.current || gate !== pollGate.current;
+      const request = services.processing.status(
+        projectId,
+        captureId,
+        ack.current!,
+        activeJobId,
+      );
+      inflight.current = request;
       try {
-        const job = await services.processing.status(
-          projectId,
-          captureId,
-          ack.current!,
-          activeJobId,
-        );
-        if (stopped || token !== epoch.current) return;
+        const job = await request;
+        if (stale()) return;
         failures = 0;
         setNotice(null);
         setPhase({ kind: 'job', job });
         if (isActive(job)) timer = setTimeout(tick, pollMs);
       } catch (error) {
-        if (stopped || token !== epoch.current) return;
+        if (stale()) return;
         failures++;
         if (failures >= MAX_POLL_FAILURES) {
           setPollStalled(true);
@@ -208,6 +222,8 @@ export function ScanResultsScreen({
         } else {
           timer = setTimeout(tick, pollMs * (failures + 1));
         }
+      } finally {
+        if (inflight.current === request) inflight.current = null;
       }
     };
     timer = setTimeout(tick, pollMs);
@@ -296,13 +312,18 @@ export function ScanResultsScreen({
           onPress: async () => {
             if (busy.current || !ack.current) return;
             busy.current = true;
+            stopping.current = true;
+            pollGate.current++;
+            setStoppingShown(true);
             try {
+              await inflight.current?.catch(() => undefined);
               const next = await services.processing.cancel(
                 projectId,
                 captureId,
                 ack.current,
                 job.jobId,
               );
+              setNotice(null);
               setPhase({ kind: 'job', job: next });
             } catch (error) {
               const failure = failureOf(error);
@@ -312,9 +333,12 @@ export function ScanResultsScreen({
                   : failure.message,
               );
               setPollStalled(false);
-              setPollRound(n => n + 1);
             } finally {
               busy.current = false;
+              stopping.current = false;
+              setStoppingShown(false);
+              // Resumes progress if the job is still active; a no-op otherwise.
+              setPollRound(n => n + 1);
             }
           },
         },
@@ -379,8 +403,9 @@ export function ScanResultsScreen({
   } else if (job && isActive(job)) {
     footer = (
       <Button
-        label="Stop checking"
+        label={stoppingShown ? 'Stopping…' : 'Stop checking'}
         variant="secondary"
+        disabled={stoppingShown}
         onPress={() => stop(job)}
       />
     );
