@@ -180,7 +180,7 @@ test('a lost upload reply is checked against the list before any retry', async (
   });
   const upload = services.stills.upload;
   services.stills.upload = async (_p, _c, _a, source) => {
-    if (source === landed) {
+    if (source.sha256 === landed.sha256) {
       stills.push(stillFrom(landed, 99));
     }
     calls.push('upload unconfirmed');
@@ -231,7 +231,10 @@ test('removing a close-up asks first and updates the list', async () => {
   const { tree } = await render(services);
   expect(texts(tree)).toContain('Power button');
   await press(tree, 'View close-up 1');
-  expect(calls.some(c => c.startsWith('view'))).toBe(true);
+  // A verified thumbnail opens inline; Quick Look stays the fallback.
+  expect(texts(tree)).toContain('Done');
+  expect(calls.some(c => c.startsWith('view'))).toBe(false);
+  await press(tree, 'Done');
   await press(tree, 'Remove close-up 1');
   expect(calls.some(c => c.startsWith('remove'))).toBe(false);
   await act(async () => {
@@ -329,5 +332,68 @@ test('a failed list check keeps an unconfirmed upload from being retried', async
   await press(tree, 'Add 1 photo to scan');
   expect(texts(tree)).toContain('1 of 24');
   expect(calls.filter(c => c.startsWith('upload'))).toHaveLength(1);
+  await act(async () => tree.unmount());
+});
+
+test('stored close-ups get verified thumbnails, downloading only uncached ones', async () => {
+  const onDevice = stillFrom(syntheticPhoto(), 0, 'USB-C port');
+  const remote = stillFrom(syntheticPhoto(), 1);
+  const { services, calls } = fakeScanServices({
+    stills: [onDevice, remote],
+    cachedStills: [onDevice.sha256],
+  });
+  const { tree } = await render(services);
+  expect(calls).toContain('still uri 0');
+  expect(calls).not.toContain('download still 0');
+  expect(calls).toEqual(
+    expect.arrayContaining(['still uri 1', 'download still 1']),
+  );
+  expect(tree.root.findAllByType(Image)).toHaveLength(2);
+  await act(async () => {
+    tree.root
+      .find(
+        n =>
+          n.props.accessibilityRole === 'imagebutton' &&
+          n.props.accessibilityLabel === 'Close-up 2' &&
+          typeof n.props.onPress === 'function',
+      )
+      .props.onPress();
+  });
+  expect(texts(tree)).toContain('Close-up 2 · 2 of 2');
+  await act(async () => tree.unmount());
+});
+
+test('a close-up without a display copy opens in Quick Look', async () => {
+  const { services, calls } = fakeScanServices({
+    stills: [stillFrom(syntheticPhoto(), 0)],
+  });
+  delete services.stills.imageUri;
+  const { tree } = await render(services);
+  expect(tree.root.findAllByType(Image)).toHaveLength(0);
+  await press(tree, 'View close-up 1');
+  expect(calls.some(c => c.startsWith('view'))).toBe(true);
+  await act(async () => tree.unmount());
+});
+
+test('choosing photos waits for a thumbnail request already in flight', async () => {
+  const { services, calls } = fakeScanServices({
+    stills: [stillFrom(syntheticPhoto(), 0)],
+    picks: [{ photos: [syntheticPhoto()], rejected: [] }],
+  });
+  let finish!: () => void;
+  const download = services.stills.download!;
+  services.stills.download = (...args) =>
+    new Promise(resolve => {
+      finish = () => resolve(download(...args));
+    });
+  const { tree } = await render(services);
+  await act(async () => {
+    buttons(tree, 'Choose a photo')[0].props.onPress();
+  });
+  // The companion serves one request at a time.
+  expect(calls.some(c => c.startsWith('pick'))).toBe(false);
+  await act(async () => finish());
+  expect(calls.some(c => c.startsWith('pick'))).toBe(true);
+  expect(texts(tree)).toContain('READY TO ADD');
   await act(async () => tree.unmount());
 });

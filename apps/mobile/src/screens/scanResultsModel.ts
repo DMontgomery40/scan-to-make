@@ -241,3 +241,58 @@ export function snapshotRevision(snapshot: string): number | null {
     return null;
   }
 }
+
+/**
+ * Which listed job to show. Job IDs are random, so the listing has no start
+ * order: prefer an active job, then the one this session started, then a
+ * finished check. The rest stay available as other checks.
+ */
+export function chooseJob(
+  jobs: ScanProcessingJob[],
+  rememberedId: string | null,
+): ScanProcessingJob | null {
+  return (
+    jobs.find(isActive) ??
+    jobs.find(job => job.jobId === rememberedId) ??
+    jobs.find(job => job.status === 'succeeded') ??
+    jobs[0] ??
+    null
+  );
+}
+
+export function jobLabel(job: ScanProcessingJob): {
+  title: string;
+  detail: string;
+  badge: string;
+  tone: Tone;
+} {
+  const id = `Check ${job.jobId.slice(0, 8)}`;
+  if (isActive(job)) {
+    return {
+      title: 'Check in progress',
+      detail: id,
+      badge: 'Working',
+      tone: 'accent',
+    };
+  }
+  if (job.status === 'succeeded') {
+    const compared = job.reference?.productName
+      ? `Compared with ${job.reference.productName}`
+      : job.reference
+      ? 'Compared with a real size'
+      : 'No real size';
+    return {
+      title: 'Finished check',
+      detail: `${compared} · ${id}`,
+      badge: 'Ready',
+      tone: 'pass',
+    };
+  }
+  const title =
+    job.failure === 'cancelled'
+      ? 'Stopped check'
+      : job.failure === 'interrupted'
+      ? 'Interrupted check'
+      : 'Check that didn’t finish';
+  return { title, detail: id, badge: 'Not finished', tone: 'fail' };
+}

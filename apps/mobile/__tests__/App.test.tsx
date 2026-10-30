@@ -837,8 +837,23 @@ test('production wiring drives the real clients through the native bridges', asy
       etag: string;
       body?: string;
       source?: typeof photo;
+      artifact?: object;
     }) => {
       const kind = o.path.includes('/detail-stills') ? 'still' : 'scan';
+      // The collection route lists kept checks; none exist yet.
+      if (kind === 'scan' && o.artifact) {
+        // Verified render downloads for the gallery.
+        requests.push('GET artifact');
+        return { status: 200, etag, body: '', file: o.artifact };
+      }
+      if (
+        kind === 'scan' &&
+        o.method === 'GET' &&
+        /\/scan-processing\?/.test(o.path)
+      ) {
+        requests.push('LIST scan');
+        return { status: 200, etag, body: JSON.stringify({ jobs: [] }) };
+      }
       requests.push(`${o.method} ${kind}`);
       expect(o.path).toContain('projectRevision=0');
       expect(o.etag).toBe(etag);
@@ -887,7 +902,7 @@ test('production wiring drives the real clients through the native bridges', asy
     await press(tree, 'Your saved projects');
     await press(tree, 'Project captures');
     await press(tree, 'See scan results for capture 1');
-    expect(requests).toEqual(['GET project', 'PUT project']);
+    expect(requests).toEqual(['GET project', 'PUT project', 'LIST scan']);
     await act(async () => {
       tree.root
         .find(
@@ -1043,4 +1058,126 @@ test('an accepted design opens print review from projects and returns', async ()
   await press(tree, 'Back');
   expect(texts(tree)).toContain('Your projects');
   await act(async () => tree.unmount());
+});
+
+test('real clients reopen a kept check and upload camera-roll photos by identity', async () => {
+  const { NativeModules } = require('react-native');
+  const store = testStore();
+  await store.create({
+    id: PROJECT_ID,
+    brief: { object: 'Synthetic case', context: 'Desk', addition: 'Stand' },
+    fit: null,
+  });
+  const capture = syntheticTarget().capture;
+  const etag = `"${'f'.repeat(64)}"`;
+  const history = new Map<string, string>([
+    [
+      JSON.stringify(['host', PROJECT_ID]),
+      JSON.stringify({ captures: [capture] }),
+    ],
+  ]);
+  NativeModules.RetainedCaptureBridge = {
+    context: async () => 'host|device',
+    read: async (key: string) => history.get(key) ?? null,
+    write: async (key: string, value: string) => {
+      history.set(key, value);
+    },
+    cancel: async () => {},
+    request: async (o: { method: string; body?: string }) =>
+      o.method === 'GET'
+        ? { status: 404, body: '{}', etag: '' }
+        : { status: 201, body: o.body!, etag },
+  };
+  const photo = {
+    sha256: 'c'.repeat(64),
+    byteLength: 2048,
+    mediaType: 'image/heic',
+    uri: 'file:///app/ScanMediaFiles/picked.heic',
+  };
+  const sources: object[] = [];
+  const stills: unknown[] = [];
+  const kept = syntheticJob('succeeded');
+  NativeModules.StillsProcessingBridge = {
+    context: async () => 'host|device',
+    cancel: async () => {},
+    present: async () => {},
+    imageUri: async (file: { sha256: string }) =>
+      `file:///app/ScanMediaFiles/${file.sha256.slice(0, 8)}`,
+    pickImages: async (limit: number) => {
+      expect(limit).toBe(24);
+      return {
+        photos: [photo],
+        rejected: [{ reason: 'too-large', byteLength: 30_000_000 }],
+      };
+    },
+    request: async (o: {
+      method: string;
+      path: string;
+      etag: string;
+      source?: object;
+      artifact?: object;
+    }) => {
+      expect(o.etag).toBe(etag);
+      if (o.path.includes('/detail-stills')) {
+        if (o.method === 'POST') {
+          sources.push(o.source!);
+          const still = stillFrom(photo, 0);
+          stills.push(still);
+          return { status: 201, etag, body: JSON.stringify({ still }) };
+        }
+        return {
+          status: 200,
+          etag,
+          body: JSON.stringify({ captureId: capture.captureId, stills }),
+        };
+      }
+      if (o.artifact) {
+        return { status: 200, etag, body: '', file: o.artifact };
+      }
+      // The collection route lists every kept check after a relaunch.
+      return {
+        status: 200,
+        etag,
+        body: JSON.stringify({ jobs: [kept] }),
+      };
+    },
+  };
+  let tree!: ReactTestRenderer.ReactTestRenderer;
+  try {
+    await act(async () => {
+      tree = ReactTestRenderer.create(<App repository={store} />);
+    });
+    await press(tree, 'Your saved projects');
+    await press(tree, 'Project captures');
+    await press(tree, 'See scan results for capture 1');
+    expect(texts(tree)).toContain('Ready');
+    expect(
+      tree.root.findAll(
+        n =>
+          n.props.source?.uri ===
+          `file:///app/ScanMediaFiles/${'09'.repeat(4)}`,
+      ).length,
+    ).toBeGreaterThan(0);
+
+    await press(tree, 'Add close-up photos');
+    await press(tree, 'Choose a photo');
+    expect(
+      texts(tree).some(t => t.includes('1 photo wasn’t added: 1 is over 25 MB')),
+    ).toBe(true);
+    await press(tree, 'Add 1 photo to scan');
+    // The display path stays on the phone; only the identity is sent.
+    expect(sources).toEqual([
+      { sha256: photo.sha256, byteLength: 2048, mediaType: 'image/heic' },
+    ]);
+    expect(Object.keys(sources[0]).sort()).toEqual([
+      'byteLength',
+      'mediaType',
+      'sha256',
+    ]);
+    expect(texts(tree)).toContain('1 of 24');
+  } finally {
+    if (tree) await act(async () => tree.unmount());
+    delete NativeModules.RetainedCaptureBridge;
+    delete NativeModules.StillsProcessingBridge;
+  }
 });

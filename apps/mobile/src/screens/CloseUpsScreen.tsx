@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Alert,
   Image,
+  Pressable,
   StyleSheet,
   Text,
   View,
@@ -14,6 +15,7 @@ import {
 } from '@scan-to-make/contracts';
 import type { CaptureFile } from '../capture/retainedCaptures';
 import { Badge, Button, Card, Field, Notice, Screen } from '../ui/components';
+import { ImageViewer } from '../ui/ImageViewer';
 import { colors, radius, space, type } from '../ui/theme';
 import {
   failureOf,
@@ -99,11 +101,17 @@ export function CloseUpsScreen({
   const [stills, setStills] = useState<DetailStill[]>([]);
   const [drafts, setDrafts] = useState<Draft[]>([]);
   const [previews, setPreviews] = useState<Record<string, string>>({});
+  const [viewing, setViewing] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const ack = useRef<ProjectAcknowledgment | null>(null);
   const staged = useRef<CaptureFile[]>([]);
   const running = useRef(false);
+  // Thumbnail work shares the companion's single request slot with actions.
+  const media = useRef<Promise<unknown> | null>(null);
+  const tried = useRef(new Set<string>());
+  const previewsRef = useRef(previews);
+  previewsRef.current = previews;
 
   const block = (error: unknown) => {
     const failure = failureOf(error);
@@ -147,6 +155,50 @@ export function CloseUpsScreen({
     [services],
   );
 
+  // Verified thumbnails for stored close-ups, one at a time, pausing for
+  // anything the user starts. Photos picked here already have a preview.
+  useEffect(() => {
+    const resolve = services.stills.imageUri;
+    if (phase.kind !== 'ready' || !resolve || busy) return;
+    let cancelled = false;
+    (async () => {
+      for (const still of stills) {
+        if (cancelled || running.current) return;
+        if (previewsRef.current[still.sha256] || tried.current.has(still.id)) {
+          continue;
+        }
+        tried.current.add(still.id);
+        const step = (async () => {
+          let uri = await resolve(still);
+          if (!uri && services.stills.download && ack.current) {
+            await services.stills.download(
+              projectId,
+              captureId,
+              ack.current,
+              still,
+            );
+            uri = await resolve(still);
+          }
+          return uri;
+        })();
+        media.current = step;
+        try {
+          const uri = await step;
+          if (!cancelled && uri) {
+            setPreviews(current => ({ ...current, [still.sha256]: uri }));
+          }
+        } catch {
+          // Keeps the numbered placeholder; View still opens the photo.
+        } finally {
+          if (media.current === step) media.current = null;
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [phase.kind, stills, busy, services, projectId, captureId]);
+
   const room = LIMIT - stills.length - drafts.length;
   const full = stills.length >= LIMIT;
 
@@ -155,6 +207,7 @@ export function CloseUpsScreen({
     running.current = true;
     setBusy(true);
     try {
+      await media.current?.catch(() => undefined);
       await action();
     } finally {
       running.current = false;
@@ -227,11 +280,13 @@ export function CloseUpsScreen({
         update(sha, { state: 'uploading', message: undefined });
         try {
           const label = draft.label.trim();
+          // Only the exact-byte identity goes to the companion.
+          const { sha256, byteLength, mediaType } = draft.photo;
           const still = await services.stills.upload(
             projectId,
             captureId,
             ack.current,
-            draft.photo,
+            { sha256, byteLength, mediaType },
             label ? label : undefined,
           );
           setStills(current => [...current, still]);
@@ -556,11 +611,17 @@ export function CloseUpsScreen({
                 <Card key={still.id} style={styles.photoCard}>
                   <View style={styles.photoRow}>
                     {previews[still.sha256] ? (
-                      <Image
-                        source={{ uri: previews[still.sha256] }}
-                        style={styles.photo}
+                      <Pressable
+                        accessibilityRole="imagebutton"
                         accessibilityLabel={`Close-up ${index + 1}`}
-                      />
+                        accessibilityHint="Opens it full screen"
+                        onPress={() => setViewing(still.sha256)}
+                      >
+                        <Image
+                          source={{ uri: previews[still.sha256] }}
+                          style={styles.photo}
+                        />
+                      </Pressable>
                     ) : (
                       <View style={[styles.photo, styles.placeholder]}>
                         <Text style={styles.placeholderText}>{index + 1}</Text>
@@ -584,7 +645,11 @@ export function CloseUpsScreen({
                         accessibilityLabel={`View close-up ${index + 1}`}
                         variant="secondary"
                         disabled={busy}
-                        onPress={() => view(still)}
+                        onPress={() =>
+                          previews[still.sha256]
+                            ? setViewing(still.sha256)
+                            : view(still)
+                        }
                       />
                     </View>
                     <View style={styles.action}>
@@ -604,6 +669,24 @@ export function CloseUpsScreen({
           <Text style={type.caption}>
             Close-ups are only sent to your companion.
           </Text>
+          {viewing && previews[viewing] ? (
+            <ImageViewer
+              images={stills
+                .map((still, index) => ({
+                  sha256: still.sha256,
+                  uri: previews[still.sha256],
+                  label: still.label ?? `Close-up ${index + 1}`,
+                }))
+                .filter(image => !!image.uri)}
+              index={Math.max(
+                0,
+                stills
+                  .filter(still => previews[still.sha256])
+                  .findIndex(still => still.sha256 === viewing),
+              )}
+              onClose={() => setViewing(null)}
+            />
+          ) : null}
         </>
       ) : null}
     </Screen>

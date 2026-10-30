@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import type { ScanProcessingJob } from '@scan-to-make/contracts';
 import { Badge, Button, Card, Field, Notice, Screen } from '../ui/components';
+import { ImageViewer } from '../ui/ImageViewer';
 import { colors, radius, space, type } from '../ui/theme';
 import {
   failureOf,
@@ -28,6 +29,7 @@ import {
   STAGE_LABELS,
   VIEW_LABELS,
   VIEW_ORDER,
+  chooseJob,
   closeness,
   compare,
   describeDifference,
@@ -35,6 +37,7 @@ import {
   failureCopy,
   formatMm,
   isActive,
+  jobLabel,
   parseReference,
   referenceDraft,
   snapshotRevision,
@@ -96,6 +99,8 @@ export function ScanResultsScreen({
     onReferenceChange?.(value);
   };
   const [showErrors, setShowErrors] = useState(false);
+  // Other retained checks of this scan, shown without any implied order.
+  const [history, setHistory] = useState<ScanProcessingJob[]>([]);
   const ack = useRef<ProjectAcknowledgment | null>(null);
   const epoch = useRef(0);
   const busy = useRef(false);
@@ -124,6 +129,40 @@ export function ScanResultsScreen({
       }
       const jobId = await services.jobs.load(projectId, captureId);
       if (!live()) return;
+      // The companion keeps every check, so a relaunch can reopen them.
+      let listed: ScanProcessingJob[] | null = null;
+      if (services.processing.listJobs) {
+        try {
+          listed = await services.processing.listJobs(
+            projectId,
+            captureId,
+            current,
+          );
+        } catch (error) {
+          if (!notAvailable(failureOf(error))) throw error;
+        }
+        if (!live()) return;
+      }
+      if (listed) {
+        const chosen = chooseJob(listed, jobId);
+        setHistory(listed.filter(j => j.jobId !== chosen?.jobId));
+        if (jobId && !listed.some(j => j.jobId === jobId)) {
+          setNotice(
+            'Your last check is no longer on your companion. Start a new one when you’re ready.',
+          );
+        }
+        await services.jobs.save(projectId, captureId, chosen?.jobId ?? null);
+        if (!live()) return;
+        if (!chosen) {
+          setPhase({ kind: 'ready' });
+          return;
+        }
+        if (chosen.reference && !userDraft.current) {
+          setLocalDraft(referenceDraft(chosen.reference));
+        }
+        setPhase({ kind: 'job', job: chosen });
+        return;
+      }
       if (!jobId) {
         setPhase({ kind: 'ready' });
         return;
@@ -256,6 +295,7 @@ export function ScanResultsScreen({
       setShowErrors(true);
       return;
     }
+    const previousJob = phase.kind === 'job' ? phase.job : null;
     busy.current = true;
     setNotice(null);
     setPhase({ kind: 'starting' });
@@ -267,6 +307,12 @@ export function ScanResultsScreen({
         reference ?? undefined,
       );
       await services.jobs.save(projectId, captureId, job.jobId);
+      if (previousJob) {
+        setHistory(current => [
+          ...current.filter(j => j.jobId !== previousJob.jobId),
+          previousJob,
+        ]);
+      }
       setPollStalled(false);
       setPhase({ kind: 'job', job });
     } catch (error) {
@@ -344,9 +390,9 @@ export function ScanResultsScreen({
         },
       ],
     );
-  // The stills bridge previews files with Quick Look, which has no OBJ/STL
-  // viewer, so the model is offered as a shared file only.
-  const shareModel = async (job: ScanProcessingJob) => {
+  // Viewing opens the repaired OBJ in the native 3D viewer; sharing hands the
+  // STL to the share sheet for the user's own slicer.
+  const modelAction = async (job: ScanProcessingJob, share: boolean) => {
     if (busy.current || !ack.current) return;
     busy.current = true;
     setNotice(null);
@@ -356,14 +402,30 @@ export function ScanResultsScreen({
         captureId,
         ack.current,
         job,
-        'repaired.stl',
-        true,
+        share ? 'repaired.stl' : 'repaired.obj',
+        share,
       );
     } catch (error) {
       setNotice(failureOf(error).message);
     } finally {
       busy.current = false;
     }
+  };
+  /** Shows another retained check of this scan; the current one stays listed. */
+  const openEarlier = async (earlier: ScanProcessingJob) => {
+    if (busy.current) return;
+    const previous = phase.kind === 'job' ? phase.job : null;
+    setHistory(current => [
+      ...current.filter(j => j.jobId !== earlier.jobId),
+      ...(previous ? [previous] : []),
+    ]);
+    await services.jobs.save(projectId, captureId, earlier.jobId);
+    if (earlier.reference && !userDraft.current) {
+      setLocalDraft(referenceDraft(earlier.reference));
+    }
+    setNotice(null);
+    setPollStalled(false);
+    setPhase({ kind: 'job', job: earlier });
   };
 
   const job = phase.kind === 'job' ? phase.job : null;
@@ -570,13 +632,48 @@ export function ScanResultsScreen({
         <Card>
           <Text style={type.heading}>The cleaned-up model</Text>
           <Text style={type.caption}>
-            Share the STL file to open it in your own slicer or 3D viewer.
+            Turn it around in 3D, or share the STL file with your own slicer.
           </Text>
+          <Button
+            label="View 3D model"
+            variant="secondary"
+            onPress={() => modelAction(succeeded, false)}
+          />
           <Button
             label="Share STL file"
             variant="secondary"
-            onPress={() => shareModel(succeeded)}
+            onPress={() => modelAction(succeeded, true)}
           />
+        </Card>
+      ) : null}
+
+      {history.length && (phase.kind === 'ready' || (job && !isActive(job))) ? (
+        <Card>
+          <Text style={type.heading}>Other checks of this scan</Text>
+          <Text style={type.caption}>
+            Your companion keeps every check. Open one to see its results.
+          </Text>
+          {history.map(earlier => {
+            const label = jobLabel(earlier);
+            return (
+              <Pressable
+                key={earlier.jobId}
+                accessibilityRole="button"
+                accessibilityLabel={`Open ${label.title}, ${label.detail}`}
+                onPress={() => openEarlier(earlier)}
+                style={({ pressed }) => [
+                  styles.earlier,
+                  pressed && styles.pressed,
+                ]}
+              >
+                <View style={styles.flex}>
+                  <Text style={type.body}>{label.title}</Text>
+                  <Text style={type.caption}>{label.detail}</Text>
+                </View>
+                <Badge label={label.badge} tone={label.tone} />
+              </Pressable>
+            );
+          })}
         </Card>
       ) : null}
 
@@ -674,6 +771,7 @@ function Gallery({
   const [uris, setUris] = useState<Partial<Record<ViewName, string>>>({});
   const [failed, setFailed] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [viewing, setViewing] = useState<number | null>(null);
   const resolve = services.imageUri;
   useEffect(() => {
     if (!resolve || !ack) return;
@@ -692,6 +790,8 @@ function Gallery({
           const uri = await resolve(file);
           if (cancelled) return;
           if (uri) setUris(current => ({ ...current, [name]: uri }));
+          // No displayable copy: fall back to opening views one at a time.
+          else setFailed(true);
         } catch {
           if (cancelled) return;
           setFailed(true);
@@ -720,16 +820,23 @@ function Gallery({
   };
   const hero = uris[selected];
   const size = Math.min(width - space.xl * 2, 520);
+  const shown = VIEW_ORDER.filter(name => uris[name]);
+  const images = shown.map(name => ({
+    uri: uris[name]!,
+    label: `${VIEW_LABELS[name]} view`,
+  }));
   return (
     <View style={styles.gallery}>
       <Text style={type.heading}>Your scan from every side</Text>
       {resolve ? (
         <>
-          <View
+          <Pressable
             style={[styles.hero, { width: size, height: size }]}
-            accessible
-            accessibilityRole="image"
+            accessibilityRole="button"
             accessibilityLabel={`Cleaned-up scan, ${VIEW_LABELS[selected]} view`}
+            accessibilityHint="Opens it full screen"
+            disabled={!hero}
+            onPress={() => setViewing(shown.indexOf(selected))}
           >
             {hero ? (
               <Image
@@ -740,7 +847,7 @@ function Gallery({
             ) : (
               <ActivityIndicator color={colors.muted} />
             )}
-          </View>
+          </Pressable>
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
@@ -794,6 +901,13 @@ function Gallery({
         <Text accessibilityLiveRegion="polite" style={styles.error}>
           {message}
         </Text>
+      ) : null}
+      {viewing !== null && images.length ? (
+        <ImageViewer
+          images={images}
+          index={Math.max(0, viewing)}
+          onClose={() => setViewing(null)}
+        />
       ) : null}
     </View>
   );
@@ -1083,6 +1197,15 @@ const styles = StyleSheet.create({
   num: { ...type.body, fontVariant: ['tabular-nums'] },
   numOff: { color: colors.fail, fontWeight: '600' },
   links: { gap: space.sm, marginTop: space.sm },
+  earlier: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.md,
+    minHeight: 56,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.line,
+    paddingTop: space.sm,
+  },
   presets: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm },
   preset: {
     flexGrow: 1,
