@@ -34,6 +34,7 @@ import { RetainedCapturesScreen } from './src/screens/RetainedCapturesScreen';
 import { InspectedFilesScreen } from './src/screens/InspectedFilesScreen';
 import { ProjectsScreen } from './src/screens/ProjectsScreen';
 import { ScanResultsScreen } from './src/screens/ScanResultsScreen';
+import type { ReferenceDraft } from './src/screens/scanResultsModel';
 import { CloseUpsScreen } from './src/screens/CloseUpsScreen';
 import { MakeScreen, type MakeIdea } from './src/screens/MakeScreen';
 import { liveScanServices } from './src/screens/liveScanServices';
@@ -103,6 +104,13 @@ function App({
   const [scanTarget, setScanTarget] = useState<ScanTarget | null>(null);
   // Kept for this app session; design planning has no endpoint yet.
   const [makeIdeas, setMakeIdeas] = useState<Record<string, MakeIdea>>({});
+  // Real-size drafts per scan, so moving to close-ups or Make keeps them.
+  const [referenceDrafts, setReferenceDrafts] = useState<
+    Record<string, ReferenceDraft>
+  >({});
+  const scanKey = scanTarget
+    ? JSON.stringify([scanTarget.projectId, scanTarget.capture.captureId])
+    : '';
   const [companionOpen, setCompanionOpen] = useState(false);
   const [route, setRoute] = useState<Route>('home');
   const [hydrated, setHydrated] = useState(false);
@@ -391,6 +399,10 @@ function App({
             onCompanion={() => setCompanionOpen(true)}
             onCloseUps={() => setRoute('closeUps')}
             onMake={() => setRoute('make')}
+            reference={referenceDrafts[scanKey] ?? null}
+            onReferenceChange={draft =>
+              setReferenceDrafts(current => ({ ...current, [scanKey]: draft }))
+            }
           />
         ) : null;
         break;

@@ -66,6 +66,8 @@ export function ScanResultsScreen({
   onCompanion,
   onCloseUps,
   onMake,
+  reference: keptReference = null,
+  onReferenceChange,
 }: {
   target: ScanTarget;
   services: ScanServices;
@@ -74,13 +76,25 @@ export function ScanResultsScreen({
   onCompanion: () => void;
   onCloseUps: () => void;
   onMake: () => void;
+  /** The user's real-size draft for this scan, kept while they navigate. */
+  reference?: ReferenceDraft | null;
+  onReferenceChange?: (draft: ReferenceDraft) => void;
 }) {
   const { projectId } = target;
   const captureId = target.capture.captureId;
   const [phase, setPhase] = useState<Phase>({ kind: 'loading' });
   const [notice, setNotice] = useState<string | null>(null);
   const [pollStalled, setPollStalled] = useState(false);
-  const [draft, setDraft] = useState<ReferenceDraft>(emptyReference);
+  const [draft, setLocalDraft] = useState<ReferenceDraft>(
+    () => keptReference ?? emptyReference(),
+  );
+  // Once the user has a draft, the job's original reference never replaces it.
+  const userDraft = useRef(!!keptReference);
+  const setDraft = (value: ReferenceDraft) => {
+    userDraft.current = true;
+    setLocalDraft(value);
+    onReferenceChange?.(value);
+  };
   const [showErrors, setShowErrors] = useState(false);
   const ack = useRef<ProjectAcknowledgment | null>(null);
   const epoch = useRef(0);
@@ -122,7 +136,9 @@ export function ScanResultsScreen({
           jobId,
         );
         if (!live()) return;
-        if (job.reference) setDraft(referenceDraft(job.reference));
+        if (job.reference && !userDraft.current) {
+          setLocalDraft(referenceDraft(job.reference));
+        }
         setPhase({ kind: 'job', job });
       } catch (error) {
         if (failureOf(error).status !== 404) throw error;

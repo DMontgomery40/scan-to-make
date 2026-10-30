@@ -35,6 +35,7 @@ async function onlyProject(store: ReturnType<typeof testStore>) {
 }
 import { SpikeScreen } from '../src/screens/SpikeScreen';
 import {
+  JOB_ID,
   PROJECT_ID,
   fakeScanServices,
   stillFrom,
@@ -927,5 +928,72 @@ test('production wiring drives the real clients through the native bridges', asy
     if (tree) await act(async () => tree.unmount());
     delete NativeModules.RetainedCaptureBridge;
     delete NativeModules.StillsProcessingBridge;
+  }
+});
+
+test('real-size edits survive moving to close-ups and make and back', async () => {
+  const { NativeModules, TextInput } = require('react-native');
+  const store = testStore();
+  await store.create({
+    id: PROJECT_ID,
+    brief: { object: 'Synthetic case', context: 'Desk', addition: 'Stand' },
+    fit: null,
+  });
+  NativeModules.RetainedCaptureBridge = {
+    context: async () => 'host|device',
+    read: async () =>
+      JSON.stringify({ captures: [syntheticTarget().capture] }),
+    cancel: async () => {},
+  };
+  const { services } = fakeScanServices({
+    jobs: [
+      syntheticJob('succeeded', {
+        reference: { dimensionsMm: [60.6, 45.2, 21.7] },
+      }),
+    ],
+  });
+  await services.jobs.save(PROJECT_ID, syntheticTarget().capture.captureId, JOB_ID);
+  const field = (label: string) =>
+    tree.root.find(
+      n => n.type === TextInput && n.props.accessibilityLabel === label,
+    );
+  let tree!: ReactTestRenderer.ReactTestRenderer;
+  try {
+    await act(async () => {
+      tree = ReactTestRenderer.create(
+        <App repository={store} scanServices={services} />,
+      );
+    });
+    await press(tree, 'Your saved projects');
+    await press(tree, 'Project captures');
+    await press(tree, 'See scan results for capture 1');
+    // The job's own reference fills the form until the user edits it.
+    expect(field('Height').props.value).toBe('21.7');
+    await act(async () => {
+      field('Height').props.onChangeText('20');
+    });
+    expect(texts(tree)).toContain('Somewhat off');
+
+    await press(tree, 'Add close-up photos');
+    await press(tree, 'Back');
+    expect(field('Height').props.value).toBe('20');
+    expect(texts(tree)).toContain('Somewhat off');
+
+    await press(tree, 'Choose what to make');
+    await press(tree, 'Back');
+    expect(field('Length').props.value).toBe('60.6');
+    expect(field('Height').props.value).toBe('20');
+
+    // Clearing is an edit too: reopening does not bring the old sizes back.
+    await press(tree, 'Clear real size');
+    await press(tree, 'Back');
+    await press(tree, 'See scan results for capture 1');
+    expect(field('Height').props.value).toBe('');
+    expect(texts(tree)).toContain(
+      'Add the real size below to see how close your scan is.',
+    );
+  } finally {
+    if (tree) await act(async () => tree.unmount());
+    delete NativeModules.RetainedCaptureBridge;
   }
 });
