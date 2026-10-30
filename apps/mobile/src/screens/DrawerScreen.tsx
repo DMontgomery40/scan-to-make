@@ -501,7 +501,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  notice: { gap: 8, backgroundColor: '#E9E3D5' },
+  notice: { gap: 8, backgroundColor: colors.sand },
   row: { flexDirection: 'row', alignItems: 'center', gap: 16 },
   fieldLabel: { ...type.body, flex: 1 },
   input: {

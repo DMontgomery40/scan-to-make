@@ -34,6 +34,14 @@ async function onlyProject(store: ReturnType<typeof testStore>) {
   return listed.entries[0].result.project;
 }
 import { SpikeScreen } from '../src/screens/SpikeScreen';
+import {
+  JOB_ID,
+  PROJECT_ID,
+  fakeScanServices,
+  stillFrom,
+  syntheticJob,
+  syntheticTarget,
+} from '../src/screens/testing/fakeScanServices';
 import { RUN_TARGET_MS, SAMPLE_INTERVAL_MS } from '../src/spike/useSpikeRun';
 
 function texts(tree: ReactTestRenderer.ReactTestRenderer): string[] {
@@ -709,4 +717,283 @@ test('only accepted saved projects expose the inspected files browser', async ()
   expect(texts(tree)).toContain('Inspected print files for this saved project.');
   await press(tree,'Back');expect(texts(tree)).toContain('Your projects');
   await act(async()=>tree.unmount());
+});
+
+test('a retained capture leads to scan results, close-ups and make, and back', async () => {
+  const { NativeModules } = require('react-native');
+  const store = testStore();
+  await store.create({
+    id: PROJECT_ID,
+    brief: { object: 'Synthetic case', context: 'Desk', addition: 'Stand' },
+    fit: null,
+  });
+  const capture = syntheticTarget().capture;
+  NativeModules.RetainedCaptureBridge = {
+    context: async () => 'host|device',
+    read: async () => JSON.stringify({ captures: [capture] }),
+    cancel: async () => {},
+  };
+  const { services, calls } = fakeScanServices({
+    jobs: [syntheticJob('succeeded')],
+  });
+  let tree!: ReactTestRenderer.ReactTestRenderer;
+  try {
+    await act(async () => {
+      tree = ReactTestRenderer.create(
+        <App repository={store} scanServices={services} />,
+      );
+    });
+    await press(tree, 'Your saved projects');
+    await press(tree, 'Project captures');
+    expect(texts(tree)).toContain('Capture 1');
+    await press(tree, 'See scan results for capture 1');
+    expect(texts(tree)).toContain('Scan results');
+    await press(tree, 'Check my scan');
+    expect(calls).toContain('start');
+    expect(texts(tree)).toContain('Ready');
+
+    await press(tree, 'Add close-up photos');
+    expect(texts(tree)).toContain('Close-ups');
+    await press(tree, 'Back');
+    // Results reopen from the remembered job, without a second start.
+    expect(texts(tree)).toContain('Ready');
+    expect(calls.filter(c => c === 'start')).toHaveLength(1);
+
+    await press(tree, 'Choose what to make');
+    expect(texts(tree)).toContain('What should we make?');
+    await act(async () => {
+      tree.root
+        .find(
+          n =>
+            n.props.accessibilityRole === 'radio' &&
+            n.props.accessibilityLabel === 'Drawer tray' &&
+            typeof n.props.onPress === 'function',
+        )
+        .props.onPress();
+    });
+    await press(tree, 'Back');
+    await press(tree, 'Choose what to make');
+    expect(
+      tree.root.find(
+        n =>
+          n.props.accessibilityRole === 'radio' &&
+          n.props.accessibilityLabel === 'Drawer tray' &&
+          typeof n.props.onPress === 'function',
+      ).props.accessibilityState,
+    ).toEqual({ checked: true });
+    await press(tree, 'Back');
+    await press(tree, 'Back');
+    expect(texts(tree)).toContain('Project captures');
+  } finally {
+    if (tree) await act(async () => tree.unmount());
+    delete NativeModules.RetainedCaptureBridge;
+  }
+});
+
+test('production wiring drives the real clients through the native bridges', async () => {
+  const { NativeModules } = require('react-native');
+  const store = testStore();
+  await store.create({
+    id: PROJECT_ID,
+    brief: { object: 'Synthetic case', context: 'Desk', addition: 'Stand' },
+    fit: null,
+  });
+  const capture = syntheticTarget().capture;
+  const etag = `"${'f'.repeat(64)}"`;
+  const history = new Map<string, string>([
+    [JSON.stringify(['host', PROJECT_ID]), JSON.stringify({ captures: [capture] })],
+  ]);
+  const requests: string[] = [];
+  NativeModules.RetainedCaptureBridge = {
+    context: async () => 'host|device',
+    read: async (key: string) => history.get(key) ?? null,
+    write: async (key: string, value: string) => {
+      history.set(key, value);
+    },
+    cancel: async () => {},
+    request: async (o: { method: string; path: string; body?: string }) => {
+      requests.push(`${o.method} project`);
+      return o.method === 'GET'
+        ? { status: 404, body: '{}', etag: '' }
+        : { status: 201, body: o.body!, etag };
+    },
+  };
+  const photo = {
+    sha256: 'c'.repeat(64),
+    byteLength: 2048,
+    mediaType: 'image/jpeg',
+  };
+  const stills: unknown[] = [];
+  const statuses = [syntheticJob('running'), syntheticJob('succeeded')];
+  NativeModules.StillsProcessingBridge = {
+    context: async () => 'host|device',
+    cancel: async () => {},
+    present: async () => {},
+    pickImage: async () => photo,
+    request: async (o: {
+      method: string;
+      path: string;
+      etag: string;
+      body?: string;
+      source?: typeof photo;
+    }) => {
+      const kind = o.path.includes('/detail-stills') ? 'still' : 'scan';
+      requests.push(`${o.method} ${kind}`);
+      expect(o.path).toContain('projectRevision=0');
+      expect(o.etag).toBe(etag);
+      if (kind === 'scan' && o.method === 'POST') {
+        const { reference } = JSON.parse(o.body!);
+        return {
+          status: 202,
+          etag,
+          body: JSON.stringify({ job: syntheticJob('queued', { reference }) }),
+        };
+      }
+      if (kind === 'scan') {
+        return {
+          status: 200,
+          etag,
+          body: JSON.stringify({ job: statuses.shift() }),
+        };
+      }
+      if (o.method === 'POST') {
+        const still = stillFrom(o.source!, 0, 'USB-C port');
+        stills.push(still);
+        return { status: 201, etag, body: JSON.stringify({ still }) };
+      }
+      return {
+        status: 200,
+        etag,
+        body: JSON.stringify({ captureId: capture.captureId, stills }),
+      };
+    },
+  };
+  // Fake only the clock the screen polls with; the clients' promise chains
+  // must keep running on real microtasks (Node 22 stalls otherwise).
+  jest.useFakeTimers({
+    doNotFake: [
+      'nextTick',
+      'setImmediate',
+      'clearImmediate',
+      'queueMicrotask',
+    ],
+  });
+  let tree!: ReactTestRenderer.ReactTestRenderer;
+  try {
+    await act(async () => {
+      tree = ReactTestRenderer.create(<App repository={store} />);
+    });
+    await press(tree, 'Your saved projects');
+    await press(tree, 'Project captures');
+    await press(tree, 'See scan results for capture 1');
+    expect(requests).toEqual(['GET project', 'PUT project']);
+    await act(async () => {
+      tree.root
+        .find(
+          n =>
+            n.props.accessibilityRole === 'button' &&
+            n.props.accessibilityLabel?.startsWith('Use AirPods Pro 2 case') &&
+            typeof n.props.onPress === 'function',
+        )
+        .props.onPress();
+    });
+    await press(tree, 'Check my scan');
+    expect(texts(tree)).toContain('Waiting for your companion');
+    for (let i = 0; i < 2; i++) {
+      await act(async () => {
+        jest.advanceTimersByTime(2000);
+      });
+    }
+    expect(texts(tree)).toContain('HOW CLOSE IS IT?');
+    expect(texts(tree)).toContain('Close');
+    expect(requests.filter(r => r === 'GET scan')).toHaveLength(2);
+
+    await press(tree, 'Add close-up photos');
+    await press(tree, 'Choose a photo');
+    await act(async () => {
+      tree.root
+        .find(
+          n =>
+            n.props.accessibilityLabel === 'What does photo 1 show?' &&
+            typeof n.props.onChangeText === 'function',
+        )
+        .props.onChangeText('USB-C port');
+    });
+    await press(tree, 'Add 1 photo to scan');
+    expect(texts(tree)).toContain('1 of 24');
+    expect(texts(tree)).toContain('USB-C port');
+    expect(requests.slice(-3)).toEqual(['PUT project', 'GET still', 'POST still']);
+  } finally {
+    jest.useRealTimers();
+    if (tree) await act(async () => tree.unmount());
+    delete NativeModules.RetainedCaptureBridge;
+    delete NativeModules.StillsProcessingBridge;
+  }
+});
+
+test('real-size edits survive moving to close-ups and make and back', async () => {
+  const { NativeModules, TextInput } = require('react-native');
+  const store = testStore();
+  await store.create({
+    id: PROJECT_ID,
+    brief: { object: 'Synthetic case', context: 'Desk', addition: 'Stand' },
+    fit: null,
+  });
+  NativeModules.RetainedCaptureBridge = {
+    context: async () => 'host|device',
+    read: async () =>
+      JSON.stringify({ captures: [syntheticTarget().capture] }),
+    cancel: async () => {},
+  };
+  const { services } = fakeScanServices({
+    jobs: [
+      syntheticJob('succeeded', {
+        reference: { dimensionsMm: [60.6, 45.2, 21.7] },
+      }),
+    ],
+  });
+  await services.jobs.save(PROJECT_ID, syntheticTarget().capture.captureId, JOB_ID);
+  const field = (label: string) =>
+    tree.root.find(
+      n => n.type === TextInput && n.props.accessibilityLabel === label,
+    );
+  let tree!: ReactTestRenderer.ReactTestRenderer;
+  try {
+    await act(async () => {
+      tree = ReactTestRenderer.create(
+        <App repository={store} scanServices={services} />,
+      );
+    });
+    await press(tree, 'Your saved projects');
+    await press(tree, 'Project captures');
+    await press(tree, 'See scan results for capture 1');
+    // The job's own reference fills the form until the user edits it.
+    expect(field('Height').props.value).toBe('21.7');
+    await act(async () => {
+      field('Height').props.onChangeText('20');
+    });
+    expect(texts(tree)).toContain('Somewhat off');
+
+    await press(tree, 'Add close-up photos');
+    await press(tree, 'Back');
+    expect(field('Height').props.value).toBe('20');
+    expect(texts(tree)).toContain('Somewhat off');
+
+    await press(tree, 'Choose what to make');
+    await press(tree, 'Back');
+    expect(field('Length').props.value).toBe('60.6');
+    expect(field('Height').props.value).toBe('20');
+
+    // Clearing is an edit too: reopening does not bring the old sizes back.
+    await press(tree, 'Clear real size');
+    await press(tree, 'Back');
+    await press(tree, 'See scan results for capture 1');
+    expect(field('Height').props.value).toBe('');
+    expect(texts(tree)).toContain(
+      'Add the real size below to see how close your scan is.',
+    );
+  } finally {
+    if (tree) await act(async () => tree.unmount());
+    delete NativeModules.RetainedCaptureBridge;
+  }
 });

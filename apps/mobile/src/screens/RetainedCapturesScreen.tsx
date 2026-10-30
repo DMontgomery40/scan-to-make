@@ -20,11 +20,13 @@ export function RetainedCapturesScreen({
   repository,
   onBack,
   onCompanion,
+  onResults,
 }: {
   id: string;
   repository: SavedProjects;
   onBack: () => void;
   onCompanion: () => void;
+  onResults?: (capture: RetainedCapture) => void;
 }) {
   const [client] = useState(() => {
     try {
@@ -287,6 +289,16 @@ export function RetainedCapturesScreen({
                 ).toFixed(1)}{' '}
                 MB
               </Text>
+              {onResults ? (
+                <Button
+                  label="See scan results"
+                  accessibilityLabel={`See scan results for capture ${
+                    index + 1
+                  }`}
+                  disabled={busy}
+                  onPress={() => onResults(capture)}
+                />
+              ) : null}
               <Button
                 label={`Reopen capture ${index + 1}`}
                 variant="secondary"
