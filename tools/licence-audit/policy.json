@@ -1,0 +1,92 @@
+{
+  "allowlists": {
+    "app": [
+      "0BSD",
+      "Apache-2.0",
+      "BSD-2-Clause",
+      "BSD-3-Clause",
+      "BSL-1.0",
+      "ISC",
+      "MIT",
+      "MPL-2.0",
+      "Unlicense",
+      "Zlib"
+    ],
+    "server": [
+      "0BSD",
+      "Apache-2.0",
+      "BSD-2-Clause",
+      "BSD-3-Clause",
+      "BSL-1.0",
+      "ISC",
+      "MIT",
+      "MPL-2.0",
+      "PSF-2.0",
+      "Python-2.0",
+      "Unlicense",
+      "Zlib"
+    ]
+  },
+  "denied": {
+    "app": [
+      "AGPL-1.0-only",
+      "AGPL-1.0-or-later",
+      "AGPL-3.0-only",
+      "AGPL-3.0-or-later",
+      "GPL-1.0-only",
+      "GPL-1.0-or-later",
+      "GPL-2.0-only",
+      "GPL-2.0-or-later",
+      "GPL-3.0-only",
+      "GPL-3.0-or-later",
+      "LGPL-2.0-only",
+      "LGPL-2.0-or-later",
+      "LGPL-2.1-only",
+      "LGPL-2.1-or-later",
+      "LGPL-3.0-only",
+      "LGPL-3.0-or-later",
+      "NON-COMMERCIAL",
+      "UNKNOWN"
+    ],
+    "server": [
+      "AGPL-1.0-only",
+      "AGPL-1.0-or-later",
+      "AGPL-3.0-only",
+      "AGPL-3.0-or-later",
+      "NON-COMMERCIAL",
+      "UNKNOWN"
+    ]
+  },
+  "exemptions": [],
+  "isolatedGplTools": {
+    "allowedLicences": [
+      "GPL-3.0-only",
+      "GPL-3.0-or-later"
+    ],
+    "folders": [
+      "tools/scan-repair",
+      "tools/templates/scan-cradle"
+    ]
+  },
+  "schemaVersion": 1,
+  "verifiedCocoaPodsSpecs": [
+    {
+      "homepage": "https://github.com/google/glog",
+      "licence": "BSD-3-Clause",
+      "licenceUrl": "https://github.com/google/glog/blob/v0.3.5/COPYING",
+      "name": "glog",
+      "reason": "ReactNativeDependencies prebuilt C++ library; glog.podspec sets :type => 'Google', :file => 'COPYING' whose header and archive text is BSD-3-Clause.",
+      "specChecksum": "3cf7cb46f743c4bc758ae3e6d9c15bd1b4cfd6d4",
+      "version": "0.3.5"
+    },
+    {
+      "homepage": "https://github.com/facebookincubator/SocketRocket",
+      "licence": "BSD-3-Clause",
+      "licenceUrl": "https://github.com/facebookincubator/SocketRocket/blob/0.7.1/LICENSE",
+      "name": "SocketRocket",
+      "reason": "ReactNativeDependencies synthesized prebuilt pod in React Native 0.87; installed SocketRocket headers carry the Square/Facebook BSD-3-Clause notice.",
+      "specChecksum": "37aec555668fb852ec12e3c0de59a86ca58f0871",
+      "version": "0.7.1"
+    }
+  ]
+}
