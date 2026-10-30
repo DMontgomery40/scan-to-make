@@ -34,6 +34,12 @@ async function onlyProject(store: ReturnType<typeof testStore>) {
   return listed.entries[0].result.project;
 }
 import { SpikeScreen } from '../src/screens/SpikeScreen';
+import {
+  PROJECT_ID,
+  fakeScanServices,
+  syntheticJob,
+  syntheticTarget,
+} from '../src/screens/testing/fakeScanServices';
 import { RUN_TARGET_MS, SAMPLE_INTERVAL_MS } from '../src/spike/useSpikeRun';
 
 function texts(tree: ReactTestRenderer.ReactTestRenderer): string[] {
@@ -709,4 +715,75 @@ test('only accepted saved projects expose the inspected files browser', async ()
   expect(texts(tree)).toContain('Inspected print files for this saved project.');
   await press(tree,'Back');expect(texts(tree)).toContain('Your projects');
   await act(async()=>tree.unmount());
+});
+
+test('a retained capture leads to scan results, close-ups and make, and back', async () => {
+  const { NativeModules } = require('react-native');
+  const store = testStore();
+  await store.create({
+    id: PROJECT_ID,
+    brief: { object: 'Synthetic case', context: 'Desk', addition: 'Stand' },
+    fit: null,
+  });
+  const capture = syntheticTarget().capture;
+  NativeModules.RetainedCaptureBridge = {
+    context: async () => 'host|device',
+    read: async () => JSON.stringify({ captures: [capture] }),
+    cancel: async () => {},
+  };
+  const { services, calls } = fakeScanServices({
+    jobs: [syntheticJob('succeeded')],
+  });
+  let tree!: ReactTestRenderer.ReactTestRenderer;
+  try {
+    await act(async () => {
+      tree = ReactTestRenderer.create(
+        <App repository={store} scanServices={services} />,
+      );
+    });
+    await press(tree, 'Your saved projects');
+    await press(tree, 'Project captures');
+    expect(texts(tree)).toContain('Capture 1');
+    await press(tree, 'See scan results for capture 1');
+    expect(texts(tree)).toContain('Scan results');
+    await press(tree, 'Check my scan');
+    expect(calls).toContain('start');
+    expect(texts(tree)).toContain('Ready');
+
+    await press(tree, 'Add close-up photos');
+    expect(texts(tree)).toContain('Close-ups');
+    await press(tree, 'Back');
+    // Results reopen from the remembered job, without a second start.
+    expect(texts(tree)).toContain('Ready');
+    expect(calls.filter(c => c === 'start')).toHaveLength(1);
+
+    await press(tree, 'Choose what to make');
+    expect(texts(tree)).toContain('What should we make?');
+    await act(async () => {
+      tree.root
+        .find(
+          n =>
+            n.props.accessibilityRole === 'radio' &&
+            n.props.accessibilityLabel === 'Drawer tray' &&
+            typeof n.props.onPress === 'function',
+        )
+        .props.onPress();
+    });
+    await press(tree, 'Back');
+    await press(tree, 'Choose what to make');
+    expect(
+      tree.root.find(
+        n =>
+          n.props.accessibilityRole === 'radio' &&
+          n.props.accessibilityLabel === 'Drawer tray' &&
+          typeof n.props.onPress === 'function',
+      ).props.accessibilityState,
+    ).toEqual({ checked: true });
+    await press(tree, 'Back');
+    await press(tree, 'Back');
+    expect(texts(tree)).toContain('Project captures');
+  } finally {
+    if (tree) await act(async () => tree.unmount());
+    delete NativeModules.RetainedCaptureBridge;
+  }
 });

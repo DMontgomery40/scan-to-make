@@ -1,0 +1,404 @@
+import React from 'react';
+import Renderer, { act } from 'react-test-renderer';
+import { Alert, Image, Text, TextInput } from 'react-native';
+import { ScanResultsScreen } from '../src/screens/ScanResultsScreen';
+import { unavailableScanServices } from '../src/screens/scanServices';
+import {
+  CAPTURE_ID,
+  JOB_ID,
+  PROJECT_ID,
+  fakeScanServices,
+  syntheticJob,
+  syntheticTarget,
+} from '../src/screens/testing/fakeScanServices';
+
+type Tree = Renderer.ReactTestRenderer;
+function texts(tree: Tree) {
+  return [
+    ...tree.root
+      .findAllByType(Text)
+      .map(t => [t.props.children].flat().join('')),
+    ...tree.root
+      .findAll(n => String(n.type) === 'STMActionButton')
+      .map(n => n.props.buttonTitle),
+  ].join('\n');
+}
+function button(tree: Tree, name: string) {
+  return tree.root.find(
+    n =>
+      n.props.accessibilityRole === 'button' &&
+      n.props.accessibilityLabel === name &&
+      typeof n.props.onPress === 'function',
+  );
+}
+const hasButton = (tree: Tree, name: string) =>
+  tree.root.findAll(
+    n =>
+      n.props.accessibilityRole === 'button' &&
+      n.props.accessibilityLabel === name &&
+      typeof n.props.onPress === 'function',
+    { deep: false },
+  ).length > 0;
+async function press(tree: Tree, name: string) {
+  await act(async () => {
+    button(tree, name).props.onPress();
+  });
+}
+async function type(tree: Tree, label: string, value: string) {
+  await act(async () => {
+    tree.root
+      .find(n => n.type === TextInput && n.props.accessibilityLabel === label)
+      .props.onChangeText(value);
+  });
+}
+async function render(
+  services: ReturnType<typeof fakeScanServices>['services'],
+  props: Partial<React.ComponentProps<typeof ScanResultsScreen>> = {},
+) {
+  const handlers = {
+    onBack: jest.fn(),
+    onCompanion: jest.fn(),
+    onCloseUps: jest.fn(),
+    onMake: jest.fn(),
+  };
+  let tree!: Tree;
+  await act(async () => {
+    tree = Renderer.create(
+      <ScanResultsScreen
+        target={syntheticTarget()}
+        services={services}
+        pollMs={1000}
+        {...handlers}
+        {...props}
+      />,
+    );
+  });
+  return { tree, ...handlers };
+}
+async function advance(ms: number) {
+  await act(async () => {
+    jest.advanceTimersByTime(ms);
+  });
+}
+afterEach(() => {
+  jest.useRealTimers();
+  jest.restoreAllMocks();
+});
+
+test('a scan with no check yet offers to start one and shows the steps', async () => {
+  const { services, calls } = fakeScanServices();
+  const { tree } = await render(services);
+  expect(calls).toEqual(['acknowledge']);
+  const shown = texts(tree);
+  expect(shown).toContain('Check your scan');
+  expect(shown).toContain('Clean up the scan');
+  expect(shown).toContain('Render 10 views');
+  expect(button(tree, 'Check my scan').props.disabled).toBe(false);
+  expect(hasButton(tree, 'Add close-up photos')).toBe(true);
+  await act(async () => tree.unmount());
+});
+
+test('loading is announced while the companion is reached', async () => {
+  const { services } = fakeScanServices();
+  services.acknowledge = () => new Promise(() => {});
+  const { tree } = await render(services);
+  expect(texts(tree)).toContain('Connecting to your companion…');
+  expect(hasButton(tree, 'Check my scan')).toBe(false);
+  await act(async () => tree.unmount());
+});
+
+test('starting follows queued and running progress to results, then stops polling', async () => {
+  jest.useFakeTimers();
+  const { services, calls } = fakeScanServices({
+    jobs: [
+      syntheticJob('queued'),
+      syntheticJob('running'),
+      syntheticJob('succeeded'),
+    ],
+  });
+  const { tree, onMake, onCloseUps } = await render(services);
+  await press(tree, 'Check my scan');
+  expect(texts(tree)).toContain('Waiting for your companion');
+  expect(await services.jobs.load(PROJECT_ID, CAPTURE_ID)).toBe(JOB_ID);
+  await advance(1000);
+  expect(texts(tree)).toContain('Step 2 of 3: measure it');
+  expect(hasButton(tree, 'Stop checking')).toBe(true);
+  await advance(1000);
+  const shown = texts(tree);
+  expect(shown).toContain('Ready');
+  expect(shown).toContain('Preview only.');
+  expect(shown).toContain('61.4 × 46.0 × 21.7 mm');
+  expect(shown).toContain('Add the real size below');
+  await advance(10000);
+  expect(calls.filter(c => c.startsWith('status'))).toHaveLength(2);
+  await press(tree, 'Choose what to make');
+  await press(tree, 'Add close-up photos');
+  expect(onMake).toHaveBeenCalled();
+  expect(onCloseUps).toHaveBeenCalled();
+  await act(async () => tree.unmount());
+});
+
+test('a known product reference is sent with the check and compared per side', async () => {
+  const { services, calls } = fakeScanServices({
+    jobs: [syntheticJob('succeeded')],
+  });
+  const { tree } = await render(services);
+  await press(tree, 'Use AirPods Pro 2 case, 60.6 by 45.2 by 21.7 millimetres');
+  await press(tree, 'Check my scan');
+  expect(calls).toContain('start with reference');
+  const shown = texts(tree);
+  expect(shown).toContain('HOW CLOSE IS IT?');
+  expect(shown).toContain('Close');
+  expect(shown).toContain('Every side is within 1.5 mm of the real size.');
+  expect(shown).toContain('+0.8 mm');
+  expect(
+    tree.root.findAll(
+      n =>
+        n.props.accessibilityLabel ===
+        'Longest side: scan 61.4 mm, real 60.6 mm, 0.8 mm larger',
+    ).length,
+  ).toBeGreaterThan(0);
+  await act(async () => tree.unmount());
+});
+
+test('changing the real size after results compares again without a new check', async () => {
+  const { services, calls } = fakeScanServices({
+    jobs: [syntheticJob('succeeded', { measured: [62.9, 48.7, 21.7] })],
+  });
+  await services.jobs.save(PROJECT_ID, CAPTURE_ID, JOB_ID);
+  const { tree } = await render(services);
+  expect(calls).not.toContain('start');
+  await type(tree, 'Length', '45,2');
+  await type(tree, 'Width', '60.6');
+  await type(tree, 'Height', '21.7');
+  let shown = texts(tree);
+  expect(shown).toContain('Noticeably off');
+  expect(shown).toContain(
+    'The middle side is 3.5 mm larger than the real size.',
+  );
+  await type(tree, 'Height', 'abc');
+  shown = texts(tree);
+  expect(shown).toContain('Use a number of millimetres, like 45.2');
+  expect(shown).not.toContain('HOW CLOSE IS IT?');
+  await act(async () => tree.unmount());
+});
+
+test('an incomplete reference blocks starting until it is fixed or cleared', async () => {
+  const { services, calls } = fakeScanServices({
+    jobs: [syntheticJob('queued')],
+  });
+  const { tree } = await render(services);
+  await type(tree, 'Length', '60');
+  await press(tree, 'Check my scan');
+  expect(calls).not.toContain('start');
+  expect(texts(tree)).toContain('Enter a size');
+  await press(tree, 'Clear real size');
+  await press(tree, 'Check my scan');
+  expect(calls).toContain('start');
+  await act(async () => tree.unmount());
+});
+
+test('a failed check explains what happened and can be started again', async () => {
+  const { services, calls } = fakeScanServices({
+    jobs: [syntheticJob('failed'), syntheticJob('queued')],
+  });
+  await services.jobs.save(PROJECT_ID, CAPTURE_ID, JOB_ID);
+  const { tree } = await render(services);
+  expect(texts(tree)).toContain('This scan couldn’t be checked');
+  await press(tree, 'Check again');
+  expect(calls).toContain('start');
+  expect(texts(tree)).toContain('Waiting for your companion');
+  await act(async () => tree.unmount());
+});
+
+test.each([
+  ['cancelled', 'You stopped this check'],
+  ['interrupted', 'Your companion restarted'],
+] as const)(
+  'a %s job has its own plain explanation',
+  async (failure, title) => {
+    const { services } = fakeScanServices({
+      jobs: [syntheticJob('failed', { failure })],
+    });
+    await services.jobs.save(PROJECT_ID, CAPTURE_ID, JOB_ID);
+    const { tree } = await render(services);
+    expect(texts(tree)).toContain(title);
+    await act(async () => tree.unmount());
+  },
+);
+
+test('an unconfirmed start is never retried without explicit confirmation', async () => {
+  const { services, calls } = fakeScanServices({
+    jobs: [syntheticJob('queued')],
+  });
+  const start = services.processing.start;
+  services.processing.start = async () => {
+    services.processing.start = start;
+    throw Object.assign(Error('lost'), { code: 'ambiguous-start' });
+  };
+  const alert = jest.spyOn(Alert, 'alert');
+  const { tree } = await render(services);
+  await press(tree, 'Check my scan');
+  expect(texts(tree)).toContain('We couldn’t confirm the check started');
+  expect(calls).not.toContain('start');
+  await press(tree, 'Start a new check');
+  expect(calls).not.toContain('start');
+  const buttons = alert.mock.calls[0][2]!;
+  await act(async () => {
+    buttons.find(b => b.text === 'Start a new check')!.onPress!();
+  });
+  expect(calls).toContain('start');
+  await act(async () => tree.unmount());
+});
+
+test('a busy companion leaves the user ready to try again', async () => {
+  const { services } = fakeScanServices();
+  services.processing.start = async () => {
+    throw Object.assign(Error('busy'), { status: 429, code: 'busy' });
+  };
+  const { tree } = await render(services);
+  await press(tree, 'Check my scan');
+  expect(texts(tree)).toContain('Your companion is busy with another scan.');
+  expect(button(tree, 'Check my scan').props.disabled).toBe(false);
+  await act(async () => tree.unmount());
+});
+
+test('a missing or revoked connection asks to connect the companion', async () => {
+  const { services } = fakeScanServices();
+  services.acknowledge = async () => {
+    throw Object.assign(Error('expired'), { status: 401 });
+  };
+  const { tree, onCompanion } = await render(services);
+  expect(texts(tree)).toContain('Connect your companion');
+  await press(tree, 'Connect companion');
+  expect(onCompanion).toHaveBeenCalled();
+  expect(hasButton(tree, 'Check my scan')).toBe(false);
+  await act(async () => tree.unmount());
+});
+
+test('a scan from an earlier project version is not checked', async () => {
+  const { services, calls } = fakeScanServices({ revision: 3 });
+  await services.jobs.save(PROJECT_ID, CAPTURE_ID, JOB_ID);
+  const { tree } = await render(services);
+  expect(texts(tree)).toContain('This scan is from an earlier version');
+  expect(calls).toEqual(['acknowledge']);
+  await act(async () => tree.unmount());
+});
+
+test('a remembered job the companion no longer has is forgotten', async () => {
+  const { services } = fakeScanServices();
+  await services.jobs.save(PROJECT_ID, CAPTURE_ID, JOB_ID);
+  const { tree } = await render(services);
+  expect(texts(tree)).toContain(
+    'Your last check is no longer on your companion.',
+  );
+  expect(await services.jobs.load(PROJECT_ID, CAPTURE_ID)).toBeNull();
+  expect(hasButton(tree, 'Check my scan')).toBe(true);
+  await act(async () => tree.unmount());
+});
+
+test('repeated status failures pause polling until the user checks again', async () => {
+  jest.useFakeTimers();
+  const { services, calls } = fakeScanServices({
+    jobs: [syntheticJob('running'), syntheticJob('succeeded')],
+  });
+  await services.jobs.save(PROJECT_ID, CAPTURE_ID, JOB_ID);
+  const { tree } = await render(services);
+  const status = services.processing.status;
+  services.processing.status = async () => {
+    calls.push('status failed');
+    throw Error('Couldn’t reach your companion.');
+  };
+  await advance(1000);
+  await advance(2000);
+  await advance(3000);
+  expect(texts(tree)).toContain('We lost touch with your companion.');
+  await advance(60000);
+  expect(calls.filter(c => c === 'status failed')).toHaveLength(3);
+  services.processing.status = status;
+  await press(tree, 'Check progress again');
+  await advance(1000);
+  expect(texts(tree)).toContain('Ready');
+  await act(async () => tree.unmount());
+});
+
+test('stopping a running check asks first, then shows it was stopped', async () => {
+  const { services, calls } = fakeScanServices({
+    jobs: [syntheticJob('running')],
+  });
+  await services.jobs.save(PROJECT_ID, CAPTURE_ID, JOB_ID);
+  const alert = jest.spyOn(Alert, 'alert');
+  const { tree } = await render(services, { pollMs: 60000 });
+  await press(tree, 'Stop checking');
+  expect(calls).not.toContain('cancel');
+  await act(async () => {
+    alert.mock.calls[0][2]!.find(b => b.text === 'Stop')!.onPress!();
+  });
+  expect(calls).toContain('cancel');
+  expect(texts(tree)).toContain('You stopped this check');
+  await act(async () => tree.unmount());
+});
+
+test('the view gallery shows each render and opens the model', async () => {
+  const { services, calls } = fakeScanServices({
+    jobs: [syntheticJob('succeeded')],
+  });
+  await services.jobs.save(PROJECT_ID, CAPTURE_ID, JOB_ID);
+  const { tree } = await render(services);
+  expect(calls.filter(c => c.startsWith('download'))).toHaveLength(10);
+  const hero = () => tree.root.findAllByType(Image)[0].props.source.uri;
+  const angle = hero();
+  expect(angle).toMatch(/^file:\/\/\/synthetic\//);
+  await press(tree, 'Show Top view');
+  expect(hero()).not.toBe(angle);
+  await press(tree, 'View 3D model');
+  await press(tree, 'Share STL file');
+  expect(calls).toContain('open repaired.obj');
+  expect(calls).toContain('share repaired.stl');
+  await act(async () => tree.unmount());
+});
+
+test('without displayable images each view opens on its own', async () => {
+  const { services, calls } = fakeScanServices({
+    jobs: [syntheticJob('succeeded')],
+  });
+  delete services.imageUri;
+  await services.jobs.save(PROJECT_ID, CAPTURE_ID, JOB_ID);
+  const { tree } = await render(services);
+  expect(tree.root.findAllByType(Image)).toHaveLength(0);
+  await press(tree, 'Open Bottom view');
+  expect(calls).toContain('open neg_z.png');
+  await act(async () => tree.unmount());
+});
+
+test('large text stacks the comparison so numbers stay readable', async () => {
+  const native = require('react-native');
+  jest.spyOn(native, 'useWindowDimensions').mockReturnValue({
+    width: 393,
+    height: 852,
+    scale: 3,
+    fontScale: 2,
+  });
+  const { services } = fakeScanServices({
+    jobs: [
+      syntheticJob('succeeded', {
+        reference: { dimensionsMm: [60.6, 45.2, 21.7] },
+      }),
+    ],
+  });
+  await services.jobs.save(PROJECT_ID, CAPTURE_ID, JOB_ID);
+  const { tree } = await render(services);
+  const shown = texts(tree);
+  expect(shown).toContain('Scan 61.4 mm');
+  expect(shown).toContain('Real 60.6 mm');
+  expect(shown).not.toContain('DIFF');
+  await act(async () => tree.unmount());
+});
+
+test('the app default reports that scan checks are not available yet', async () => {
+  const { tree } = await render(unavailableScanServices());
+  const shown = texts(tree);
+  expect(shown).toContain('Couldn’t open scan results');
+  expect(shown).toContain('arrive with the next companion update');
+  await act(async () => tree.unmount());
+});
