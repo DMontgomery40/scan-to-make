@@ -582,7 +582,9 @@ function Stages({ job }: { job?: ScanProcessingJob }) {
               stage?.status === 'running' ? (
                 <ActivityIndicator color={colors.accent} />
               ) : (
-                <Badge label={state.label} tone={state.tone} />
+                <View style={styles.stageBadge}>
+                  <Badge label={state.label} tone={state.tone} />
+                </View>
               )
             ) : null}
           </View>
@@ -981,6 +983,7 @@ const styles = StyleSheet.create({
     borderTopColor: colors.line,
     paddingTop: space.sm,
   },
+  stageBadge: { justifyContent: 'center' },
   stageNumber: {
     ...type.caption,
     color: colors.accent,

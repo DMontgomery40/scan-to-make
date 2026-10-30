@@ -210,7 +210,7 @@ export function Stat({ label, value }: { label: string; value: string }) {
 
 export type Tone = 'neutral' | 'pass' | 'fail' | 'pending' | 'accent';
 const TONES: Record<Tone, { fg: ColorValue; bg: ColorValue }> = {
-  neutral: { fg: colors.muted, bg: colors.surface },
+  neutral: { fg: colors.muted, bg: colors.background },
   pass: { fg: colors.pass, bg: colors.passSoft },
   fail: { fg: colors.fail, bg: colors.failSoft },
   pending: { fg: colors.pending, bg: colors.pendingSoft },
