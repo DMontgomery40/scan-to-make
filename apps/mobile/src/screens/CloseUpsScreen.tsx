@@ -25,7 +25,6 @@ import {
   type ScanTarget,
 } from './scanServices';
 
-const LIMIT = MAX_DETAIL_STILLS_PER_CAPTURE;
 const MEDIA_TYPES = ['image/jpeg', 'image/heic', 'image/png'];
 const MEDIA_NAMES: Record<string, string> = {
   'image/jpeg': 'JPEG',
@@ -85,6 +84,10 @@ export function CloseUpsScreen({
 }) {
   const { projectId } = target;
   const captureId = target.capture.captureId;
+  // Read contract values here, not at module scope: Metro's release inline
+  // requires would otherwise resolve the contracts package as CommonJS, which
+  // its exports map does not provide.
+  const LIMIT = MAX_DETAIL_STILLS_PER_CAPTURE;
   const [phase, setPhase] = useState<Phase>({ kind: 'loading' });
   const [stills, setStills] = useState<DetailStill[]>([]);
   const [drafts, setDrafts] = useState<Draft[]>([]);
