@@ -45,7 +45,7 @@ const dark: Palette = {
   accentSoft: '#3B241A',
   accentPressed: '#C9603C',
   pressedOverlay: '#2A2F29',
-  viewport: '#22302A',
+  viewport: '#3A4A40',
   viewportInk: '#E4E9DB',
   pass: '#7DC89C',
   passSoft: '#1B3226',
