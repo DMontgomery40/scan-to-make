@@ -20,7 +20,7 @@ export const VERDICTS: Record<
     label: 'Needs supports',
     tone: 'pending',
     title: 'This design needs supports',
-    body: 'Some parts hang out at a steep angle. Supports hold them up while printing, and you snap them off afterwards.',
+    body: 'Supports hold those parts up while printing, and you snap them off afterwards.',
   },
   'not-printable': {
     label: 'Can’t print yet',
