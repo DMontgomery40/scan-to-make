@@ -6,10 +6,11 @@ HTTP runs in a killable subprocess so a stalled response cannot outlive its time
 budget; transient failures get a bounded number of retries inside the same budget.
 """
 import json
-import multiprocessing
 import os
 from pathlib import Path
 import re
+import subprocess
+import sys
 import time
 from urllib.error import HTTPError
 from urllib.parse import urlsplit
@@ -46,55 +47,48 @@ class _NoRedirect(HTTPRedirectHandler):
         raise _RedirectRefused()
 
 
-def _http_child(pipe, url, headers, body, timeout):
+def _http_child(job):
+    """Runs in the child process; returns a JSON-safe result without provider details."""
     try:
-        request = Request(url,body,headers=headers,method='POST')
-        with build_opener(_NoRedirect).open(request,timeout=timeout) as response:
+        request = Request(job['url'],json.dumps(job['payload'],allow_nan=False).encode(),
+                          headers=job['headers'],method='POST')
+        with build_opener(_NoRedirect).open(request,timeout=job['timeout']) as response:
             raw = response.read(MAX_RESPONSE_BYTES+1)
         if len(raw) > MAX_RESPONSE_BYTES:
-            pipe.send({'ok':False,'retryable':False,'reason':'response too large'})
-        else:
-            pipe.send({'ok':True,'value':json.loads(raw)})
+            return {'ok':False,'retryable':False,'reason':'response too large'}
+        return {'ok':True,'value':json.loads(raw)}
     except _RedirectRefused:
-        pipe.send({'ok':False,'retryable':False,'reason':'redirect refused'})
+        return {'ok':False,'retryable':False,'reason':'redirect refused'}
     except HTTPError as exc:
         # Status code only: provider bodies and headers can echo request details.
-        pipe.send({'ok':False,'retryable':exc.code in RETRYABLE_STATUS,'reason':f'HTTP {exc.code}'})
+        return {'ok':False,'retryable':exc.code in RETRYABLE_STATUS,'reason':f'HTTP {exc.code}'}
     except OSError:
-        pipe.send({'ok':False,'retryable':True,'reason':'network error'})
+        return {'ok':False,'retryable':True,'reason':'network error'}
     except Exception:
-        pipe.send({'ok':False,'retryable':False,'reason':'invalid response'})
-    finally:
-        pipe.close()
+        return {'ok':False,'retryable':False,'reason':'invalid response'}
 
 
 def request_json(url, headers, payload, seconds):
-    """POST JSON with a hard wall-clock bound; raise ModelError without provider details."""
-    body = json.dumps(payload,allow_nan=False).encode()
-    context = multiprocessing.get_context('spawn')
-    parent,child = context.Pipe(duplex=False)
-    process = context.Process(target=_http_child,args=(child,url,headers,body,seconds))
-    process.start()
-    child.close()
+    """POST JSON with a hard wall-clock bound; raise ModelError without provider details.
+
+    The request (including the key header) travels on the child's stdin, never argv or
+    environment. On timeout the child is killed, so a stalled stream cannot outlive the budget.
+    """
+    job = json.dumps({'url':url,'headers':headers,'payload':payload,'timeout':seconds},allow_nan=False)
     try:
-        if not parent.poll(seconds):
-            raise ModelError('model request timed out',retryable=True)
-        try:
-            result = parent.recv()
-        except EOFError:
-            raise ModelError('model request process exited',retryable=True) from None
-        if not result['ok']:
-            raise ModelError(f'model API request failed ({result["reason"]}; provider details withheld)',
-                             retryable=result['retryable'])
-        return result['value']
-    finally:
-        parent.close()
-        if process.is_alive():
-            process.terminate()
-        process.join(timeout=1)
-        if process.is_alive():
-            process.kill()
-            process.join()
+        completed = subprocess.run([sys.executable,'-I',str(Path(__file__).resolve()),'--http-child'],
+                                   input=job,capture_output=True,text=True,timeout=seconds)
+    except subprocess.TimeoutExpired:
+        raise ModelError('model request timed out',retryable=True) from None
+    try:
+        result = json.loads(completed.stdout)
+        ok, retryable = result['ok'], result.get('retryable',False)
+    except (ValueError,TypeError,KeyError):
+        raise ModelError('model request process failed') from None
+    if not ok:
+        raise ModelError(f'model API request failed ({result["reason"]}; provider details withheld)',
+                         retryable=retryable)
+    return result['value']
 
 
 def endpoint(base, suffix):
@@ -202,3 +196,7 @@ class ScriptedModel:
         if isinstance(reply,dict) and set(reply) == {tool['name']} and isinstance(reply[tool['name']],dict):
             return reply[tool['name']]
         raise ReplyError(f'model reply did not contain exactly one {tool["name"]} call')
+
+
+if __name__ == '__main__' and sys.argv[1:] == ['--http-child']:
+    sys.stdout.write(json.dumps(_http_child(json.loads(sys.stdin.read()))))

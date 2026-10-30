@@ -145,8 +145,10 @@ a separate MIT implementation:
 Keys come only from the named environment variable. They are never written to
 plans, logs or errors, and no key is provisioned. Endpoints must be HTTPS (HTTP
 only on loopback), with no credentials or query in the URL, and redirects are
-refused. Each HTTP request runs in a killable subprocess capped at 120 s and the
-remaining `--max-seconds` budget (default 180), with a 4 MiB response cap.
+refused. Each HTTP request runs in a separate `python -I` process, which receives
+the request (key header included) on stdin, never in argv or its environment.
+That process is killed at 120 s or when the remaining `--max-seconds` budget
+(default 180) runs out, and responses are capped at 4 MiB.
 Transient failures (network errors, timeouts, HTTP 408/409/425/429/5xx/529)
 retry up to `--retries` times (default 2, maximum 5) with 1 s, 2 s, ... backoff,
 only while the budget allows. Other HTTP errors fail at once. Errors report the

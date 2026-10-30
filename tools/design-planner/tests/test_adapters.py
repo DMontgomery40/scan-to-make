@@ -3,6 +3,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
 import threading
+import time
 import unittest
 from unittest.mock import patch
 
@@ -149,8 +150,12 @@ class LoopbackHandler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         body = self.rfile.read(int(self.headers['Content-Length']))
-        LoopbackHandler.received.append((self.path,dict(self.headers),json.loads(body)))
+        headers = {key.lower():value for key,value in self.headers.items()}
+        LoopbackHandler.received.append((self.path,headers,json.loads(body)))
         status,payload,extra = LoopbackHandler.responses.pop(0)
+        if status == 'stall':
+            time.sleep(payload)
+            return
         self.send_response(status)
         for key,value in extra.items():
             self.send_header(key,value)
@@ -196,6 +201,24 @@ class LoopbackTransportTests(unittest.TestCase):
             request_json(self.base+'/messages',{'Content-Type':'application/json'},{'k':1},10)
         self.assertFalse(raised.exception.retryable)
         self.assertEqual(len(LoopbackHandler.received),2)
+
+    def test_stalled_response_is_cut_off_at_the_budget(self):
+        LoopbackHandler.responses = [('stall',3,{})]
+        started = time.monotonic()
+        with self.assertRaisesRegex(ModelError,'timed out') as raised:
+            request_json(self.base+'/messages',{'Content-Type':'application/json'},{'k':1},1)
+        self.assertLess(time.monotonic()-started,3)
+        self.assertTrue(raised.exception.retryable)
+
+    def test_key_header_reaches_the_server_but_not_errors(self):
+        LoopbackHandler.responses = [(401,{'error':'bad key '+KEY},{})]
+        with patch.dict(os.environ,{'ANTHROPIC_API_KEY':KEY}):
+            adapter = ProviderAdapter('anthropic',base_url=self.base,retries=2,sleep=lambda s: None)
+        with self.assertRaises(ModelError) as raised:
+            adapter.propose('s','c',plan_tool(Catalog()),30)
+        self.assertEqual(LoopbackHandler.received[0][1]['x-api-key'],KEY)
+        self.assertNotIn(KEY,str(raised.exception))
+        self.assertEqual(len(LoopbackHandler.received),1)
 
 
 if __name__ == '__main__':
