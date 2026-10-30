@@ -293,3 +293,41 @@ test('without the companion transport close-ups say they are unavailable', async
   expect(buttons(tree, 'Choose a photo')).toHaveLength(0);
   await act(async () => tree.unmount());
 });
+
+test('a failed list check keeps an unconfirmed upload from being retried', async () => {
+  const photo = syntheticPhoto();
+  const { services, calls } = fakeScanServices({
+    picks: [{ photos: [photo], rejected: [] }],
+  });
+  const list = services.stills.list;
+  const upload = services.stills.upload;
+  services.stills.upload = async () => {
+    throw Object.assign(Error('lost'), { code: 'ambiguous-upload' });
+  };
+  const { tree } = await render(services);
+  await press(tree, 'Choose a photo');
+  services.stills.list = async () => {
+    throw Error('Couldn’t reach your companion.');
+  };
+  await press(tree, 'Add 1 photo to scan');
+  expect(texts(tree)).toContain('the list couldn’t be checked');
+  expect(buttons(tree, 'Add 0 photos to scan')[0].props.disabled).toBe(true);
+
+  // Checking again while the list still fails must not offer a retry.
+  await press(tree, 'Check the list again');
+  let shown = texts(tree);
+  expect(shown).toContain('Not confirmed');
+  expect(shown).not.toContain('Not in the list');
+  expect(buttons(tree, 'Add 0 photos to scan')[0].props.disabled).toBe(true);
+
+  // Only a successful list without the photo allows adding it again.
+  services.stills.list = list;
+  services.stills.upload = upload;
+  await press(tree, 'Check the list again');
+  shown = texts(tree);
+  expect(shown).toContain('Not in the list. You can add it again.');
+  await press(tree, 'Add 1 photo to scan');
+  expect(texts(tree)).toContain('1 of 24');
+  expect(calls.filter(c => c.startsWith('upload'))).toHaveLength(1);
+  await act(async () => tree.unmount());
+});

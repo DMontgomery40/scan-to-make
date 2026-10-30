@@ -244,17 +244,9 @@ export function CloseUpsScreen({
             return;
           }
           if (failure.code === 'ambiguous-upload') {
-            // The photo may have landed: look before offering a retry.
-            const list = await refresh().catch(() => null);
-            if (list?.some(s => same(s, draft.photo))) {
-              setDrafts(current => current.filter(d => d.photo.sha256 !== sha));
-            } else {
-              update(sha, {
-                state: 'uncertain',
-                message:
-                  'We couldn’t confirm this photo was added, and it isn’t in the list yet. Check again before retrying.',
-              });
-            }
+            // The photo may have landed: look before offering a retry. Even
+            // when the list doesn't show it yet, ask for one more check.
+            await settleUncertain(draft.photo, false);
             continue;
           }
           if (failure.code === 'still-limit') {
@@ -269,6 +261,41 @@ export function CloseUpsScreen({
         }
       }
     });
+
+  /**
+   * After an unconfirmed upload only a successful list may decide: present
+   * means it was added; absent allows a retry only when `allowRetry` is set.
+   * A failed list keeps the photo unconfirmed, since a retry could duplicate it.
+   */
+  const settleUncertain = async (photo: PickedPhoto, allowRetry: boolean) => {
+    let list: DetailStill[];
+    try {
+      list = await refresh();
+    } catch {
+      update(photo.sha256, {
+        state: 'uncertain',
+        message:
+          'We couldn’t confirm this photo was added, and the list couldn’t be checked. It may already be on your companion. Check again before adding it.',
+      });
+      return;
+    }
+    if (list.some(s => same(s, photo))) {
+      setDrafts(current =>
+        current.filter(d => d.photo.sha256 !== photo.sha256),
+      );
+    } else if (allowRetry) {
+      update(photo.sha256, {
+        state: 'ready',
+        message: 'Not in the list. You can add it again.',
+      });
+    } else {
+      update(photo.sha256, {
+        state: 'uncertain',
+        message:
+          'We couldn’t confirm this photo was added, and it isn’t in the list yet. Check again before retrying.',
+      });
+    }
+  };
 
   const removeDraft = (draft: Draft, discard = false) => {
     setDrafts(current =>
@@ -506,17 +533,7 @@ export function CloseUpsScreen({
                       variant="secondary"
                       disabled={busy}
                       onPress={() =>
-                        exclusive(async () => {
-                          const list = await refresh().catch(() => null);
-                          if (list?.some(s => same(s, draft.photo))) {
-                            removeDraft(draft);
-                          } else {
-                            update(draft.photo.sha256, {
-                              state: 'ready',
-                              message: 'Not in the list. You can add it again.',
-                            });
-                          }
-                        })
+                        exclusive(() => settleUncertain(draft.photo, true))
                       }
                     />
                   ) : null}
