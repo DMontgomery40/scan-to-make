@@ -275,6 +275,13 @@ def convert(src, out_obj):
             uvs = uv_coordinates(prim, uv_name, counts, indices, len(points))
             if material and "png" in material and uvs is None:
                 raise RuntimeError(f"{path}: textured mesh missing UV primvar {uv_name}")
+            if material and material.get("textureWarnings"):
+                warnings.extend(f"{path}: {warning}" for warning in material["textureWarnings"])
+                if any(mode == "black" and any(uv[axis] < 0 or uv[axis] > 1 for uv in uvs)
+                       for axis,mode in enumerate(material["wrapModes"])):
+                    unsupported.append({"feature":"textureWrapping", "prim":path,
+                                        "detail":"out-of-range UVs affected by " +
+                                                 "; ".join(material["textureWarnings"])})
         except UnsupportedTexture as exc:
             unsupported.append({"feature":"baseColour", "prim":path, "detail":str(exc)})
             material, uvs = None, None

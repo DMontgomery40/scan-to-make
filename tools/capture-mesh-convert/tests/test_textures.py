@@ -31,11 +31,18 @@ class TextureTests(unittest.TestCase):
         self.output.mkdir()
 
     def fixture(self, mode='faceVarying', indexed=True, reflected=False,
-                kind='PNG', bad=None, multiple=False, inherited=False, concave=False):
+                kind='PNG', bad=None, multiple=False, inherited=False, concave=False, wraps=None, outside=False, wrap_metadata=None):
         texture = self.source/('colour.png' if kind == 'PNG' else 'colour.jpg')
         image = Image.new('RGB',(2,2))
         image.putdata([(255,0,0),(0,255,0),(0,0,255),(255,255,0)])
-        image.save(texture,format=kind)
+        if wrap_metadata:
+            from PIL.PngImagePlugin import PngInfo
+            info = PngInfo()
+            for name,value in wrap_metadata.items():
+                info.add_text(name,value)
+            image.save(texture,format=kind,pnginfo=info)
+        else:
+            image.save(texture,format=kind)
         stage = Usd.Stage.CreateNew(str(self.source/'root.usdc'))
         UsdGeom.SetStageMetersPerUnit(stage,.01)
         UsdGeom.SetStageUpAxis(stage,UsdGeom.Tokens.z)
@@ -50,6 +57,8 @@ class TextureTests(unittest.TestCase):
         if concave:
             count = 6
         values = [(i/(count+1),1-i/(count+1)) for i in range(count)]
+        if outside:
+            values[0] = (-.25,1.25)
         pv = UsdGeom.PrimvarsAPI(mesh).CreatePrimvar('uvCapture',Sdf.ValueTypeNames.TexCoord2fArray,mode)
         pv.Set([Gf.Vec2f(*v) for v in (values[::-1] if indexed else values)])
         if indexed:
@@ -69,6 +78,8 @@ class TextureTests(unittest.TestCase):
         surface.CreateIdAttr('UsdPreviewSurface')
         tex = UsdShade.Shader.Define(stage,'/Material/Texture')
         tex.CreateIdAttr('UsdUVTexture')
+        for name,value in (wraps or {}).items():
+            tex.CreateInput(name,Sdf.ValueTypeNames.Token).Set(value)
         tex.CreateInput('file',Sdf.ValueTypeNames.Asset).Set(Sdf.AssetPath('./'+texture.name))
         reader = UsdShade.Shader.Define(stage,'/Material/UV')
         reader.CreateIdAttr('UsdPrimvarReader_float2')
@@ -159,6 +170,31 @@ class TextureTests(unittest.TestCase):
             for layer in report['contributingLayers']:
                 self.assertEqual(layer['sha256'],hashlib.sha256(z.read(layer['identifier'])).hexdigest())
         self.assertEqual(report,convert(package,out))
+
+    def test_missing_wrap_outside_unit_square_is_not_silently_qualified(self):
+        package,_,_ = self.fixture(outside=True)
+        report = convert(package,self.output/'capture.obj')
+        self.assertFalse(report['metricQualified'])
+        self.assertTrue(any('wrapping' in u['detail'] and 'black' in u['detail']
+                            for u in report['unsupportedFeatures']))
+        self.assertTrue(any('wrap' in w and 'repeat' in w for w in report['warnings']))
+        self.assertTrue((self.output/'capture_basecolor_0.png').exists())
+
+    def test_explicit_repeat_accepts_outside_uvs(self):
+        package,_,_ = self.fixture(outside=True,wraps={'wrapS':'repeat','wrapT':'repeat'})
+        report = convert(package,self.output/'capture.obj')
+        self.assertTrue(report['metricQualified'])
+        self.assertEqual(report['warnings'],[])
+
+    def test_use_metadata_black_border_and_repeat_metadata(self):
+        for metadata in (None, {'wrapS':'repeat','wrapT':'repeat'}):
+            with self.subTest(metadata=metadata):
+                package,_,_ = self.fixture(outside=True,wraps={'wrapS':'useMetadata','wrapT':'useMetadata'},
+                                           wrap_metadata=metadata)
+                report = convert(package,self.output/'capture.obj')
+                self.assertEqual(report['metricQualified'],metadata is not None)
+                self.assertEqual(report['materials'][0]['wrapModes'],
+                                 ['repeat','repeat'] if metadata else ['black','black'])
 
     def test_all_uv_interpolations(self):
         for mode in ('constant','uniform','vertex','varying','faceVarying'):

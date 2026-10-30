@@ -79,6 +79,7 @@ def base_colour(prim, src, read_asset):
     with Image.open(io.BytesIO(data)) as image:
         image.load()  # Validate even a PNG before preserving its exact bytes.
         size, image_format = image.size, image.format
+        wrap_metadata = {name:image.info.get(name, "black") for name in ("wrapS", "wrapT")}
         if image_format != "PNG":
             buffer = io.BytesIO()
             image.convert("RGBA" if "A" in image.getbands() else "RGB").save(buffer, format="PNG")
@@ -89,8 +90,19 @@ def base_colour(prim, src, read_asset):
         value = inp.Get() if inp else None
         if inp and inp.HasConnectedSource():
             raise UnsupportedTexture("connected texture wrapping")
-        wrap.append(value or "repeat")
-    if wrap not in (["repeat", "repeat"], ["clamp", "clamp"]):
+        # Preview Surface defaults to useMetadata, then black when absent.
+        value = "useMetadata" if value is None else value
+        if value == "useMetadata":
+            value = wrap_metadata[name]
+        if value not in ("black", "repeat", "clamp", "mirror"):
+            raise UnsupportedTexture(f"invalid texture wrapping {name}={value!r}")
+        wrap.append(value)
+    texture_warnings = []
+    if "black" in wrap and all(value in ("black", "repeat") for value in wrap):
+        texture_warnings.append(
+            f"texture wrapping {wrap}: MTL exports repeat instead of black border; "
+            "sampling/filtering at or outside the unit square may differ")
+    elif wrap not in (["repeat", "repeat"], ["clamp", "clamp"]):
         raise UnsupportedTexture(f"unsupported texture wrapping {wrap}")
     for shader in (surface, texture, reader):
         if any(i.GetAttr().GetNumTimeSamples() for i in shader.GetInputs()):
@@ -98,7 +110,7 @@ def base_colour(prim, src, read_asset):
     return {"colour":(1,1,1), "materialPrim":str(material.GetPath()),
             "uvPrimvar":str(uv_name), "png":data, "sourceAsset":asset_name,
             "imageSize":list(size), "sourceFormat":image_format,
-            "clamp":wrap[0] == "clamp"}
+            "clamp":wrap[0] == "clamp", "wrapModes":wrap, "textureWarnings":texture_warnings}
 
 
 def uv_coordinates(prim, name, counts, indices, point_count):
