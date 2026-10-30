@@ -36,11 +36,8 @@ import { ProjectsScreen } from './src/screens/ProjectsScreen';
 import { ScanResultsScreen } from './src/screens/ScanResultsScreen';
 import { CloseUpsScreen } from './src/screens/CloseUpsScreen';
 import { MakeScreen, type MakeIdea } from './src/screens/MakeScreen';
-import {
-  unavailableScanServices,
-  type ScanServices,
-  type ScanTarget,
-} from './src/screens/scanServices';
+import { liveScanServices } from './src/screens/liveScanServices';
+import type { ScanServices, ScanTarget } from './src/screens/scanServices';
 import {
   briefComplete,
   emptyBrief,
@@ -98,10 +95,9 @@ function App({
   scanServices?: ScanServices;
 }) {
   const [repository] = useState(() => injected ?? localSavedProjects());
-  // Until the processing and close-up transports ship, these report that the
-  // feature is unavailable rather than pretending to work.
+  // Real companion clients on iOS; elsewhere the screens say it's unavailable.
   const [scanServices] = useState(
-    () => injectedScan ?? unavailableScanServices(),
+    () => injectedScan ?? liveScanServices(repository),
   );
   const scheme = useColorScheme();
   const [scanTarget, setScanTarget] = useState<ScanTarget | null>(null);

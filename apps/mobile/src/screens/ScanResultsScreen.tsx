@@ -408,7 +408,14 @@ export function ScanResultsScreen({
           tone="fail"
           title="Couldn’t open scan results"
           action={
-            <Button label="Try again" variant="secondary" onPress={load} />
+            <>
+              <Button label="Try again" variant="secondary" onPress={load} />
+              <Button
+                label="Connect companion"
+                variant="secondary"
+                onPress={onCompanion}
+              />
+            </>
           }
         >
           {phase.message}

@@ -78,8 +78,8 @@ export interface DetailStills {
   ): Promise<void>;
 }
 
-/** A library photo copied into the app, identified by its exact bytes. */
-export type PickedPhoto = CaptureFile & { uri: string };
+/** A chosen photo kept by the app, identified by its exact bytes. */
+export type PickedPhoto = CaptureFile & { uri?: string };
 export type RejectedPhoto = {
   reason: 'too-large' | 'unsupported' | 'unreadable';
   byteLength?: number;

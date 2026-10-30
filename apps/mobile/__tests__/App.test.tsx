@@ -37,6 +37,7 @@ import { SpikeScreen } from '../src/screens/SpikeScreen';
 import {
   PROJECT_ID,
   fakeScanServices,
+  stillFrom,
   syntheticJob,
   syntheticTarget,
 } from '../src/screens/testing/fakeScanServices';
@@ -785,5 +786,137 @@ test('a retained capture leads to scan results, close-ups and make, and back', a
   } finally {
     if (tree) await act(async () => tree.unmount());
     delete NativeModules.RetainedCaptureBridge;
+  }
+});
+
+test('production wiring drives the real clients through the native bridges', async () => {
+  const { NativeModules } = require('react-native');
+  const store = testStore();
+  await store.create({
+    id: PROJECT_ID,
+    brief: { object: 'Synthetic case', context: 'Desk', addition: 'Stand' },
+    fit: null,
+  });
+  const capture = syntheticTarget().capture;
+  const etag = `"${'f'.repeat(64)}"`;
+  const history = new Map<string, string>([
+    [JSON.stringify(['host', PROJECT_ID]), JSON.stringify({ captures: [capture] })],
+  ]);
+  const requests: string[] = [];
+  NativeModules.RetainedCaptureBridge = {
+    context: async () => 'host|device',
+    read: async (key: string) => history.get(key) ?? null,
+    write: async (key: string, value: string) => {
+      history.set(key, value);
+    },
+    cancel: async () => {},
+    request: async (o: { method: string; path: string; body?: string }) => {
+      requests.push(`${o.method} project`);
+      return o.method === 'GET'
+        ? { status: 404, body: '{}', etag: '' }
+        : { status: 201, body: o.body!, etag };
+    },
+  };
+  const photo = {
+    sha256: 'c'.repeat(64),
+    byteLength: 2048,
+    mediaType: 'image/jpeg',
+  };
+  const stills: unknown[] = [];
+  const statuses = [syntheticJob('running'), syntheticJob('succeeded')];
+  NativeModules.StillsProcessingBridge = {
+    context: async () => 'host|device',
+    cancel: async () => {},
+    present: async () => {},
+    pickImage: async () => photo,
+    request: async (o: {
+      method: string;
+      path: string;
+      etag: string;
+      body?: string;
+      source?: typeof photo;
+    }) => {
+      const kind = o.path.includes('/detail-stills') ? 'still' : 'scan';
+      requests.push(`${o.method} ${kind}`);
+      expect(o.path).toContain('projectRevision=0');
+      expect(o.etag).toBe(etag);
+      if (kind === 'scan' && o.method === 'POST') {
+        const { reference } = JSON.parse(o.body!);
+        return {
+          status: 202,
+          etag,
+          body: JSON.stringify({ job: syntheticJob('queued', { reference }) }),
+        };
+      }
+      if (kind === 'scan') {
+        return {
+          status: 200,
+          etag,
+          body: JSON.stringify({ job: statuses.shift() }),
+        };
+      }
+      if (o.method === 'POST') {
+        const still = stillFrom(o.source!, 0, 'USB-C port');
+        stills.push(still);
+        return { status: 201, etag, body: JSON.stringify({ still }) };
+      }
+      return {
+        status: 200,
+        etag,
+        body: JSON.stringify({ captureId: capture.captureId, stills }),
+      };
+    },
+  };
+  jest.useFakeTimers();
+  let tree!: ReactTestRenderer.ReactTestRenderer;
+  try {
+    await act(async () => {
+      tree = ReactTestRenderer.create(<App repository={store} />);
+    });
+    await press(tree, 'Your saved projects');
+    await press(tree, 'Project captures');
+    await press(tree, 'See scan results for capture 1');
+    expect(requests).toEqual(['GET project', 'PUT project']);
+    await act(async () => {
+      tree.root
+        .find(
+          n =>
+            n.props.accessibilityRole === 'button' &&
+            n.props.accessibilityLabel?.startsWith('Use AirPods Pro 2 case') &&
+            typeof n.props.onPress === 'function',
+        )
+        .props.onPress();
+    });
+    await press(tree, 'Check my scan');
+    expect(texts(tree)).toContain('Waiting for your companion');
+    for (let i = 0; i < 2; i++) {
+      await act(async () => {
+        jest.advanceTimersByTime(2000);
+      });
+    }
+    expect(texts(tree)).toContain('HOW CLOSE IS IT?');
+    expect(texts(tree)).toContain('Close');
+    expect(requests.filter(r => r === 'GET scan')).toHaveLength(2);
+
+    await press(tree, 'Add close-up photos');
+    await press(tree, 'Choose a photo');
+    await act(async () => {
+      tree.root
+        .find(
+          n =>
+            n.props.accessibilityLabel === 'What does photo 1 show?' &&
+            typeof n.props.onChangeText === 'function',
+        )
+        .props.onChangeText('USB-C port');
+    });
+    await press(tree, 'Add 1 photo to scan');
+    expect(texts(tree)).toContain('1 of 24');
+    expect(texts(tree)).toContain('USB-C port');
+    expect(requests.slice(-3)).toEqual(['PUT project', 'GET still', 'POST still']);
+  } finally {
+    jest.useRealTimers();
+    if (tree) await act(async () => tree.unmount());
+    delete NativeModules.RetainedCaptureBridge;
+    delete NativeModules.StillsProcessingBridge;
   }
 });

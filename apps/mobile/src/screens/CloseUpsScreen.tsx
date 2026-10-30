@@ -64,7 +64,9 @@ function rejectedSummary(rejected: RejectedPhoto[]) {
           kind === 1 ? ' photo' : ' photos'
         }`
       : '',
-    unreadable ? `${unreadable} couldn’t be read from your library` : '',
+    unreadable
+      ? `${unreadable} couldn’t be used. Choose a JPEG, HEIC or PNG under 25 MB`
+      : '',
   ].filter(Boolean);
   return `${rejected.length} ${
     rejected.length === 1 ? 'photo wasn’t' : 'photos weren’t'
@@ -180,7 +182,9 @@ export function CloseUpsScreen({
         setDrafts(current => [...current, ...kept]);
         setPreviews(current => {
           const next = { ...current };
-          for (const draft of kept) next[draft.photo.sha256] = draft.photo.uri;
+          for (const draft of kept) {
+            if (draft.photo.uri) next[draft.photo.sha256] = draft.photo.uri;
+          }
           return next;
         });
         const notes = [
@@ -366,7 +370,14 @@ export function CloseUpsScreen({
           tone="fail"
           title="Couldn’t load close-ups"
           action={
-            <Button label="Try again" variant="secondary" onPress={load} />
+            <>
+              <Button label="Try again" variant="secondary" onPress={load} />
+              <Button
+                label="Connect companion"
+                variant="secondary"
+                onPress={onCompanion}
+              />
+            </>
           }
         >
           {phase.message}
@@ -392,13 +403,13 @@ export function CloseUpsScreen({
             </Notice>
           ) : (
             <Button
-              label="Choose photos"
+              label={drafts.length ? 'Choose another photo' : 'Choose a photo'}
               variant={drafts.length ? 'secondary' : 'primary'}
               disabled={busy || room <= 0}
               accessibilityHint={
                 room <= 0
                   ? 'Add or remove the photos you’ve chosen first'
-                  : 'Opens your photo library'
+                  : 'JPEG, HEIC or PNG, up to 25 MB'
               }
               onPress={add}
             />
@@ -431,11 +442,17 @@ export function CloseUpsScreen({
               {drafts.map((draft, index) => (
                 <Card key={draft.photo.sha256} style={styles.photoCard}>
                   <View style={styles.photoRow}>
-                    <Image
-                      source={{ uri: draft.photo.uri }}
-                      style={styles.photo}
-                      accessibilityLabel={`Chosen photo ${index + 1}`}
-                    />
+                    {draft.photo.uri ? (
+                      <Image
+                        source={{ uri: draft.photo.uri }}
+                        style={styles.photo}
+                        accessibilityLabel={`Chosen photo ${index + 1}`}
+                      />
+                    ) : (
+                      <View style={[styles.photo, styles.placeholder]}>
+                        <Text style={styles.placeholderText}>{index + 1}</Text>
+                      </View>
+                    )}
                     <View style={styles.photoInfo}>
                       <Text style={type.body}>Photo {index + 1}</Text>
                       <Text style={type.caption}>
@@ -556,7 +573,7 @@ export function CloseUpsScreen({
             </View>
           ) : null}
           <Text style={type.caption}>
-            Photos come from your library and are only sent to your companion.
+            Close-ups are only sent to your companion.
           </Text>
         </>
       ) : null}

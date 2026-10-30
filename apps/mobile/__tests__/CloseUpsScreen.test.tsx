@@ -79,7 +79,7 @@ test('loading is shown until the list arrives', async () => {
   services.stills.list = () => new Promise(() => {});
   const { tree } = await render(services);
   expect(texts(tree)).toContain('Loading your close-ups…');
-  expect(buttons(tree, 'Choose photos')).toHaveLength(0);
+  expect(buttons(tree, 'Choose a photo')).toHaveLength(0);
   await act(async () => tree.unmount());
 });
 
@@ -90,7 +90,7 @@ test('chosen photos get optional labels and are added one by one', async () => {
     picks: [{ photos: [port, button], rejected: [] }],
   });
   const { tree } = await render(services);
-  await press(tree, 'Choose photos');
+  await press(tree, 'Choose a photo');
   expect(calls).toContain('pick 24');
   expect(texts(tree)).toContain('READY TO ADD');
   expect(tree.root.findAllByType(Image).map(i => i.props.source.uri)).toEqual([
@@ -121,13 +121,13 @@ test('only the remaining room is offered, and a full scan stops picking', async 
     picks: [{ photos: [syntheticPhoto()], rejected: [] }],
   });
   const { tree } = await render(services);
-  await press(tree, 'Choose photos');
+  await press(tree, 'Choose a photo');
   expect(calls).toContain('pick 1');
-  expect(buttons(tree, 'Choose photos')[0].props.disabled).toBe(true);
+  expect(buttons(tree, 'Choose another photo')[0].props.disabled).toBe(true);
   await press(tree, 'Add 1 photo to scan');
   expect(texts(tree)).toContain('That’s the limit');
   expect(texts(tree)).toContain('24 of 24');
-  expect(buttons(tree, 'Choose photos')).toHaveLength(0);
+  expect(buttons(tree, 'Choose another photo')).toHaveLength(0);
   await act(async () => tree.unmount());
 });
 
@@ -139,7 +139,7 @@ test('the companion limit is explained if it is reached during upload', async ()
     throw Object.assign(Error('limit'), { code: 'still-limit', status: 409 });
   };
   const { tree } = await render(services);
-  await press(tree, 'Choose photos');
+  await press(tree, 'Choose a photo');
   await press(tree, 'Add 1 photo to scan');
   expect(texts(tree)).toContain('This scan already has 24 close-ups.');
   await act(async () => tree.unmount());
@@ -161,7 +161,7 @@ test('photos over 25 MB or in other formats are explained and not added', async 
     ],
   });
   const { tree } = await render(services);
-  await press(tree, 'Choose photos');
+  await press(tree, 'Choose a photo');
   const shown = texts(tree);
   expect(shown).toContain(
     '3 photos weren’t added: 2 are over 25 MB, 1 isn’t a JPEG, HEIC or PNG photo.',
@@ -186,7 +186,7 @@ test('a lost upload reply is checked against the list before any retry', async (
     throw Object.assign(Error('lost'), { code: 'ambiguous-upload' });
   };
   const { tree } = await render(services);
-  await press(tree, 'Choose photos');
+  await press(tree, 'Choose a photo');
   await press(tree, 'Add 2 photos to scan');
   let shown = texts(tree);
   // The first upload did land, so it is listed; the second stays unconfirmed.
@@ -214,7 +214,7 @@ test('a rejected upload stays ready to retry with the reason', async () => {
     );
   };
   const { tree } = await render(services);
-  await press(tree, 'Choose photos');
+  await press(tree, 'Choose a photo');
   await press(tree, 'Add 1 photo to scan');
   expect(texts(tree)).toContain('Not added');
   expect(texts(tree)).toContain('Only JPEG, HEIC or PNG');
@@ -246,7 +246,7 @@ test('discarding a chosen photo removes its local copy', async () => {
     picks: [{ photos: [syntheticPhoto()], rejected: [] }],
   });
   const { tree } = await render(services);
-  await press(tree, 'Choose photos');
+  await press(tree, 'Choose a photo');
   await press(tree, 'Don’t add photo 1');
   expect(calls).toContain('discard 1');
   expect(texts(tree)).toContain('No close-ups yet');
@@ -258,7 +258,7 @@ test('a revoked connection asks to connect, keeping chosen photos', async () => 
     picks: [{ photos: [syntheticPhoto()], rejected: [] }],
   });
   const { tree, onCompanion } = await render(services);
-  await press(tree, 'Choose photos');
+  await press(tree, 'Choose a photo');
   services.stills.upload = async () => {
     throw Object.assign(Error('revoked'), { status: 401 });
   };
