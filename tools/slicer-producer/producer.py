@@ -1,22 +1,27 @@
 #!/usr/bin/env python3
-"""Operator-only offline G-code producer around the BambuStudio CLI (macOS).
+"""Operator-only offline G-code and sliced-3MF producer around the BambuStudio CLI (macOS).
 
-Fail-closed: every run is sandboxed (network and Mach lookup denied); presets come only
-from the app bundle (containment-checked, hashed, inheritance flattened into a scratch
-dir); outputs are published atomically and only after the slicer exits 0 with exactly
-the expected files. There is no degraded or unsandboxed mode.
+Fail-closed: every run is sandboxed (network denied; Mach lookup default-denied except the
+narrow WindowServer/LaunchServices/MTLCompilerService trio required by headless 3MF plate
+thumbnail rendering); presets come only from the app bundle (containment-checked, hashed,
+inheritance flattened into a scratch dir); outputs are published atomically and only after
+the slicer exits 0 with verified G-code, settings, and a sliced `.3mf` holding the plate.
+There is no degraded or unsandboxed mode.
 """
 import argparse
 import hashlib
+import io
 import json
 import os
 import plistlib
+import re
 import shutil
 import signal
 import struct
 import subprocess
 import sys
 import tempfile
+import zipfile
 from pathlib import Path
 
 SCHEMA = "scan-to-make.slicer-producer/0.1.0"
@@ -27,7 +32,16 @@ KINDS = ("machine", "process", "filament")
 # Bundle resources the CLI reads on its own (cli_config.json applies machine limits).
 BOUND_RESOURCES = ("Contents/Resources/profiles/BBL.json", "Contents/Resources/profiles/BBL/cli_config.json")
 GCODE_NAME, SETTINGS_NAME, RESULT_NAME = "plate_1.gcode", "exported-settings.json", "result.json"
-REQUIRED_OUTPUTS = {GCODE_NAME, SETTINGS_NAME}
+THREE_MF_NAME = "sliced-plate.3mf"
+PLATE_GCODE_INTERNAL_PATH = "Metadata/plate_1.gcode"
+REQUIRED_THREE_MF_ENTRIES = (
+    PLATE_GCODE_INTERNAL_PATH,
+    "Metadata/plate_1.json",
+    "Metadata/slice_info.config",
+    "[Content_Types].xml",
+)
+MAX_THREE_MF_ENTRIES = 1024
+REQUIRED_OUTPUTS = {GCODE_NAME, SETTINGS_NAME, THREE_MF_NAME}
 OPTIONAL_OUTPUTS = {RESULT_NAME}  # CLI receipt; validated when present
 ENV_KEYS = ("PATH", "LANG", "TMPDIR", "HOME")
 TIMEOUT_S = 45
@@ -54,7 +68,7 @@ class Limits:
                 raise ProducerError("limits", f"{k} must be a positive integer")
 NOT_CLAIMED = ["effective slicer settings digest or equivalence", "determinism across runs",
                "zero attempted network calls (denial is enforced, attempts are not observed)",
-               "3MF export", "printability, physical fit, or permission to print"]
+               "printability, physical fit, or permission to print"]
 
 
 class ProducerError(Exception):
@@ -195,11 +209,21 @@ def check_stl(data):
 
 
 # ---------------------------------------------------------------- sandbox
+ALLOWED_MACH_LOOKUPS = (
+    '(global-name "com.apple.windowserver.active")',
+    '(global-name "com.apple.coreservices.launchservicesd")',
+    '(xpc-service-name-prefix "com.apple.MTLCompilerService")',
+)
+
+
 def sandbox_profile(scratch):
     s = str(Path(scratch).resolve())
     home = str(Path.home())
     return "\n".join([
         "(version 1)", "(allow default)", "(deny network*)", "(deny mach-lookup)",
+        "(allow mach-lookup",
+        *[f"  {entry}" for entry in ALLOWED_MACH_LOOKUPS[:-1]],
+        f"  {ALLOWED_MACH_LOOKUPS[-1]})",
         f'(deny file-write* (require-not (subpath "{s}")))',
         f'(deny file-read* (subpath "{home}/Library"))',
         f'(deny file-read* (subpath "{home}/.ssh"))',
@@ -235,6 +259,8 @@ def sandbox_argv(sandbox, profile_path, cmd):
     missing = [r for r in REQUIRED_PROFILE_RULES if r not in text]
     if missing:
         raise ProducerError("sandbox", f"sandbox profile missing rules {missing}")
+    if re.search(r"\(\s*allow\s+mach-lookup\s*\)", text):
+        raise ProducerError("sandbox", "sandbox profile must not allow unrestricted mach-lookup")
     return [str(sandbox.path), "-f", str(profile_path)] + list(cmd)
 
 
@@ -456,16 +482,117 @@ def _validate_overrides(bed_type, nozzle_type, enable_support):
     return bed_label, support_flag
 
 
+def validate_three_mf_name(name):
+    """Enforce a safe single-basename `*.3mf` project filename that never ends in `*.gcode.3mf`."""
+    if not isinstance(name, str) or not (4 < len(name) <= 128):
+        raise ProducerError("input", f"invalid 3MF output name {name!r}")
+    if "/" in name or "\\" in name or "\0" in name or name.startswith("."):
+        raise ProducerError("input", f"invalid 3MF output name {name!r}")
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", name):
+        raise ProducerError("input", f"invalid 3MF output name {name!r}")
+    if name.lower().endswith(".gcode.3mf"):
+        raise ProducerError(
+            "input",
+            f"3MF output name {name!r} must not end in '.gcode.3mf' (P1S legacy route refuses AMS)",
+        )
+    if not name.endswith(".3mf"):
+        raise ProducerError("input", f"3MF output name {name!r} must end in '.3mf'")
+    if name in {GCODE_NAME, SETTINGS_NAME, RESULT_NAME, "manifest.json", "slicer.log"}:
+        raise ProducerError("input", f"3MF output name {name!r} collides with a reserved producer filename")
+    return name
+
+
+def verify_sliced_three_mf(path, expected_gcode_sha256, limits, evidence=None):
+    """Verify that the exported `.3mf` is a valid bounded archive holding the exact sliced plate."""
+    raw = read_bounded(path, limits.output_bytes, "exported 3MF")
+    try:
+        zf = zipfile.ZipFile(io.BytesIO(raw), "r")
+    except (zipfile.BadZipFile, zipfile.LargeZipFile, OSError):
+        raise ProducerError("outputs", "exported 3MF is not a valid ZIP archive", evidence) from None
+    with zf:
+        infos = zf.infolist()
+        if len(infos) == 0 or len(infos) > MAX_THREE_MF_ENTRIES:
+            raise ProducerError(
+                "outputs",
+                f"exported 3MF entry count {len(infos)} out of range (1..{MAX_THREE_MF_ENTRIES})",
+                evidence,
+            )
+        total_uncompressed = 0
+        by_name = {}
+        for info in infos:
+            fname = info.filename
+            if fname.startswith("/") or "\\" in fname or ".." in Path(fname).parts:
+                raise ProducerError("outputs", f"exported 3MF contains unsafe member path {fname!r}", evidence)
+            if info.file_size < 0:
+                raise ProducerError("outputs", f"exported 3MF member {fname!r} has negative size", evidence)
+            total_uncompressed += info.file_size
+            if total_uncompressed > limits.output_bytes:
+                raise ProducerError(
+                    "limits",
+                    f"exported 3MF uncompressed contents exceed {limits.output_bytes} bytes",
+                    evidence,
+                )
+            if not info.is_dir():
+                by_name[fname] = info
+
+        missing = [req for req in REQUIRED_THREE_MF_ENTRIES if req not in by_name or by_name[req].file_size == 0]
+        if missing:
+            raise ProducerError(
+                "outputs",
+                f"exported 3MF is missing sliced-plate entries {missing}",
+                evidence,
+            )
+        has_model = any(
+            name.startswith("3D/") and name.endswith(".model") and info.file_size > 0
+            for name, info in by_name.items()
+        )
+        if not has_model:
+            raise ProducerError("outputs", "exported 3MF has no non-empty 3D/*.model entry", evidence)
+
+        try:
+            plate_json_raw = zf.read("Metadata/plate_1.json")
+            plate_meta = json.loads(plate_json_raw)
+        except (KeyError, ValueError, zipfile.BadZipFile, RuntimeError):
+            raise ProducerError("outputs", "exported 3MF Metadata/plate_1.json is not valid JSON", evidence) from None
+        if not isinstance(plate_meta, dict):
+            raise ProducerError("outputs", "exported 3MF Metadata/plate_1.json must be a JSON object", evidence)
+
+        try:
+            plate_gcode = zf.read(PLATE_GCODE_INTERNAL_PATH)
+        except (KeyError, zipfile.BadZipFile, RuntimeError):
+            raise ProducerError("outputs", f"cannot read {PLATE_GCODE_INTERNAL_PATH} from exported 3MF", evidence) from None
+        if not plate_gcode:
+            raise ProducerError("outputs", f"exported 3MF {PLATE_GCODE_INTERNAL_PATH} is empty", evidence)
+        plate_sha = sha256_bytes(plate_gcode)
+        if plate_sha != expected_gcode_sha256:
+            raise ProducerError(
+                "outputs",
+                f"exported 3MF {PLATE_GCODE_INTERNAL_PATH} sha256 {plate_sha} != standalone {GCODE_NAME} sha256 {expected_gcode_sha256}",
+                evidence,
+            )
+
+    return raw, {
+        "file": Path(path).name,
+        "mediaType": "model/3mf",
+        "sha256": sha256_bytes(raw),
+        "bytes": len(raw),
+        "plateGcodeInternalPath": PLATE_GCODE_INTERNAL_PATH,
+        "plateGcodeSha256": plate_sha,
+        "plateGcodeBytes": len(plate_gcode),
+    }
+
+
 # ---------------------------------------------------------------- produce
 def produce(model, out_dir, machine, process, filament, bundle=DEFAULT_BUNDLE,
             expected_version=EXPECTED_VERSION, expected_binary_sha256=None, timeout=TIMEOUT_S, scratch_parent=None,
             expected_input_sha256=None, expected_input_bytes=None, bed_type=None, nozzle_type=None,
-            enable_support=None, limits=None, _sandbox=None):
+            enable_support=None, three_mf_name=THREE_MF_NAME, limits=None, _sandbox=None):
     """`_sandbox` is a test-only seam; the CLI never sets it, so production always uses PlatformSandbox."""
     limits = limits or Limits()
     sandbox = _sandbox or PlatformSandbox()
     if not (isinstance(timeout, (int, float)) and 0 < timeout <= MAX_TIMEOUT_S):
         raise ProducerError("limits", f"timeout must be in (0, {MAX_TIMEOUT_S}] seconds")
+    three_mf_name = validate_three_mf_name(three_mf_name)
     bed_label, support_flag = _validate_overrides(bed_type, nozzle_type, enable_support)
     out_dir = Path(out_dir)
     if out_dir.exists():
@@ -522,6 +649,7 @@ def produce(model, out_dir, machine, process, filament, bundle=DEFAULT_BUNDLE,
                "--load-filaments", str(preset_paths["filament"]),
                "--arrange", "1", "--orient", "0", "--slice", "0",
                "--outputdir", str(outputs), "--export-settings", str(outputs / SETTINGS_NAME),
+               "--export-3mf", three_mf_name,
                str(src)]
         argv = sandbox_argv(sandbox, profile, cmd)
         env = {"PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "LANG": "en_US.UTF-8", "TMPDIR": str(tmp), "HOME": str(home)}
@@ -538,10 +666,11 @@ def produce(model, out_dir, machine, process, filament, bundle=DEFAULT_BUNDLE,
             raise ProducerError("slicer", f"timed out after {timeout}s", evidence)
         if code != 0:
             raise ProducerError("slicer", f"exit code {code}", evidence)
+        expected_required = {GCODE_NAME, SETTINGS_NAME, three_mf_name}
         produced = {p.name for p in outputs.iterdir()}
-        extra = produced - REQUIRED_OUTPUTS - OPTIONAL_OUTPUTS
-        if not REQUIRED_OUTPUTS <= produced or extra:
-            raise ProducerError("outputs", f"expected {sorted(REQUIRED_OUTPUTS)} (+ optional "
+        extra = produced - expected_required - OPTIONAL_OUTPUTS
+        if not expected_required <= produced or extra:
+            raise ProducerError("outputs", f"expected {sorted(expected_required)} (+ optional "
                                 f"{sorted(OPTIONAL_OUTPUTS)}), got {sorted(produced)}", evidence)
         for name in produced:
             p = outputs / name
@@ -566,6 +695,11 @@ def produce(model, out_dir, machine, process, filament, bundle=DEFAULT_BUNDLE,
             if rc != 0:
                 raise ProducerError("outputs", f"result.json reports return_code {rc!r}", evidence)
             result_meta = {"file": RESULT_NAME, "sha256": sha256_bytes(rb), "bytes": len(rb)}
+        gcode = read_bounded(outputs / GCODE_NAME, limits.output_bytes, "sliced G-code")
+        gcode_sha = sha256_bytes(gcode)
+        _three_mf_bytes, three_mf_meta = verify_sliced_three_mf(
+            outputs / three_mf_name, gcode_sha, limits, evidence
+        )
         # Seal: everything the run used must still have the identity recorded before launch.
         if bundle_identity(bundle, expected_version, expected_binary_sha256, limits) != ident:
             raise ProducerError("seal", "bundle identity changed during the run")
@@ -580,7 +714,7 @@ def produce(model, out_dir, machine, process, filament, bundle=DEFAULT_BUNDLE,
         if sha256_file(profile) != profile_sha:
             raise ProducerError("seal", "sandbox profile changed during the run")
 
-        gcode, settings = (outputs / GCODE_NAME).read_bytes(), (outputs / SETTINGS_NAME).read_bytes()
+        settings = read_bounded(outputs / SETTINGS_NAME, limits.settings_bytes, "exported settings")
         manifest = {
             "schema": SCHEMA, "operatorOnly": True, "exitCode": 0,
             "slicer": ident,
@@ -597,7 +731,8 @@ def produce(model, out_dir, machine, process, filament, bundle=DEFAULT_BUNDLE,
                            "sandboxProfileSha256": profile_sha,
                            "sandbox": sandbox.describe(), "timeoutSeconds": timeout,
                            "freshDatadir": True},
-            "outputs": {"gcode": {"file": GCODE_NAME, "sha256": sha256_bytes(gcode), "bytes": len(gcode)},
+            "outputs": {"gcode": {"file": GCODE_NAME, "sha256": gcode_sha, "bytes": len(gcode)},
+                        "threeMf": three_mf_meta,
                         "gcodeSummary": parse_gcode_summary(gcode),
                         "exportedSettings": {"file": SETTINGS_NAME, "sha256": sha256_bytes(settings),
                                              "bytes": len(settings),
@@ -611,12 +746,14 @@ def produce(model, out_dir, machine, process, filament, bundle=DEFAULT_BUNDLE,
         stage = Path(tempfile.mkdtemp(prefix=f".{out_dir.name}.staging-", dir=out_dir.parent))
         try:
             shutil.copyfile(outputs / GCODE_NAME, stage / GCODE_NAME)
+            shutil.copyfile(outputs / three_mf_name, stage / three_mf_name)
             shutil.copyfile(outputs / SETTINGS_NAME, stage / SETTINGS_NAME)
             shutil.copyfile(log, stage / "slicer.log")
             if result_meta:
                 shutil.copyfile(outputs / RESULT_NAME, stage / RESULT_NAME)
             (stage / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
             for name, meta in (("gcode", manifest["outputs"]["gcode"]),
+                               ("threeMf", manifest["outputs"]["threeMf"]),
                                ("exportedSettings", manifest["outputs"]["exportedSettings"])):
                 if sha256_file(stage / meta["file"]) != meta["sha256"]:
                     raise ProducerError("publish", f"staged {name} hash mismatch")
@@ -648,18 +785,30 @@ def main(argv=None):
                     help="explicit hotend material override written to flattened machine preset")
     ap.add_argument("--enable-support", type=int, choices=(0, 1),
                     help="explicitly disable (0) or enable (1) support generation in flattened process preset")
+    ap.add_argument("--three-mf-name", default=THREE_MF_NAME,
+                    help="sliced 3MF filename inside --out (must end in .3mf and never .gcode.3mf)")
     a = ap.parse_args(argv)
     try:
         m = produce(a.model, a.out, a.machine, a.process, a.filament, a.bundle,
                     a.expected_version, a.expected_binary_sha256, a.timeout,
                     expected_input_sha256=a.expected_input_sha256, expected_input_bytes=a.expected_input_bytes,
-                    bed_type=a.bed_type, nozzle_type=a.nozzle_type, enable_support=a.enable_support)
+                    bed_type=a.bed_type, nozzle_type=a.nozzle_type, enable_support=a.enable_support,
+                    three_mf_name=a.three_mf_name)
     except ProducerError as e:
         sys.stderr.write(json.dumps({"error": {"stage": e.stage, "message": e.message, "evidence": e.evidence}},
                                     indent=2, sort_keys=True) + "\n")
         return 2
-    sys.stdout.write(json.dumps({"published": str(a.out), "gcodeSha256": m["outputs"]["gcode"]["sha256"]},
-                                sort_keys=True) + "\n")
+    sys.stdout.write(
+        json.dumps(
+            {
+                "published": str(a.out),
+                "gcodeSha256": m["outputs"]["gcode"]["sha256"],
+                "threeMf": m["outputs"]["threeMf"]["file"],
+                "threeMfSha256": m["outputs"]["threeMf"]["sha256"],
+            },
+            sort_keys=True,
+        ) + "\n"
+    )
     return 0
 
 

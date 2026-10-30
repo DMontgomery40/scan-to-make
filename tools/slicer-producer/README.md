@@ -1,6 +1,6 @@
 # Offline slicer producer (operator-only, macOS)
 
-`producer.py` wraps the BambuStudio CLI (tested target: **02.08.02.61**). It turns one source STL into G-code and binds the model, presets, bundle resources, binary and outputs by SHA-256. It fails closed. It is operator-only: there is no job queue, HTTP, UI or printer integration, and it never prints or dispatches anything.
+`producer.py` wraps the BambuStudio CLI (tested target: **02.08.02.61**). It turns one source STL into standalone G-code (`plate_1.gcode`) **and** a sliced `.3mf` project (`sliced-plate.3mf` by default, never `*.gcode.3mf`), binding the model, presets, bundle resources, binary and outputs by SHA-256. It fails closed. It is operator-only: there is no job queue, HTTP, UI or printer integration, and it never prints or dispatches anything.
 
 ## Operator command (macOS)
 
@@ -14,7 +14,8 @@ python3 tools/slicer-producer/producer.py part.stl \
   --expected-input-sha256 <sha256 of part.stl> --expected-input-bytes <size of part.stl>
 ```
 
-- **Defaults:** `--bundle /Applications/BambuStudio.app`, `--expected-version 02.08.02.61`, `--timeout 45`. The timeout must be in (0, 600] seconds.
+- **Defaults:** `--bundle /Applications/BambuStudio.app`, `--expected-version 02.08.02.61`, `--timeout 45`, `--three-mf-name sliced-plate.3mf`. The timeout must be in (0, 600] seconds.
+- **3MF naming rule:** `--three-mf-name` must be a single safe basename ending in `.3mf` and **never** `.gcode.3mf` (on P1S, `*.gcode.3mf` triggers `bambu-printer-mcp`'s legacy `gcode_file` route, which refuses AMS jobs).
 - **Sandbox:** fixed to the platform primitive `/usr/bin/sandbox-exec`, which must be root-owned and not group- or world-writable. There is no option to substitute another sandbox. On any platform other than macOS the run is refused.
 - **Input pins:** `--expected-input-sha256` and `--expected-input-bytes` reject the model unless its bytes match.
 - **Preset names** are file stems under `BambuStudio.app/Contents/Resources/profiles/BBL/{machine,process,filament}/`. List them with `ls` and pass the stem without `.json`.
@@ -36,7 +37,7 @@ python3 tools/slicer-producer/producer.py part.stl \
    - The flattened, complete files are written only to a temp scratch directory. No preset copies are kept in Git or in the output.
 3. **Input.** The STL bytes are copied into scratch and hashed. A binary STL must have unit-length facet normals, because zero normals are rejected by the slicer. An ASCII STL must be well-formed. Anything else is rejected.
 4. **Sandboxed slice.** The command always runs under the trusted `/usr/bin/sandbox-exec`. If it is missing or untrusted, or the platform isn't macOS, the run fails; there is no unsandboxed, degraded or injected-sandbox mode. The generated profile:
-   - denies `network*`, `mach-lookup` and `signal`
+   - denies `network*`, `mach-lookup` (default-deny) and `signal`, allowing only the narrow 3-service Mach-lookup set (`com.apple.windowserver.active`, `com.apple.coreservices.launchservicesd`, `com.apple.MTLCompilerService`) required by BambuStudio's plate-thumbnail renderer during `--export-3mf`
    - denies writes outside scratch
    - denies reads of `~/Library`, `~/.ssh` and `~/.config`
 
@@ -45,16 +46,17 @@ python3 tools/slicer-producer/producer.py part.stl \
    - passes only `PATH`, `LANG`, `TMPDIR` and `HOME` (scratch), with no inherited credentials
    - runs in its own process group under a hard deadline, which still applies after the child closes its pipes. The group gets SIGTERM, then SIGKILL after a 2 s grace, and is always reaped.
    - bounds the log at 5 MiB
-   - produces G-code only, plus `--export-settings`. 3MF export is never requested, because thumbnail rendering needs OpenGL/IPC, which the sandbox denies.
+   - exports standalone `plate_1.gcode`, `exported-settings.json` (`--export-settings`), and the sliced 3MF project (`--export-3mf <name>.3mf`, never `*.gcode.3mf`).
 5. **Acceptance.**
    - The run must exit 0.
-   - The output directory must contain `plate_1.gcode` and `exported-settings.json`, plus optionally the CLI receipt `result.json`. Any other file is rejected. Every file must be regular and non-empty.
+   - The output directory must contain `plate_1.gcode`, `<three-mf-name>` (`sliced-plate.3mf` by default), and `exported-settings.json`, plus optionally the CLI receipt `result.json`. Any other file is rejected. Every file must be regular and non-empty.
+   - The exported `.3mf` archive is opened and verified under bounded read/decompression budgets: it must contain non-empty `Metadata/plate_1.gcode`, valid JSON `Metadata/plate_1.json`, `Metadata/slice_info.config`, `[Content_Types].xml`, and a `3D/*.model` entry, and the SHA-256 of embedded `Metadata/plate_1.gcode` must match standalone `plate_1.gcode`.
    - The settings must be valid JSON. `result.json`, when present, must be a JSON object whose `return_code` (if given) is 0. It is hashed and published.
 6. **Budgets.** Every read is bounded before allocation: a stat check, then reading at most limit+1 bytes. The limits cover:
    - input model: 64 MiB
    - each preset file: 1 MiB, with at most 64 preset files and nesting depth 16
    - bound resources and Info.plist
-   - total outputs: 512 MiB, monitored during the run
+   - total outputs (and `.3mf` uncompressed archive contents): 512 MiB, monitored during the run
    - exported settings and `result.json`
    - log: 5 MiB
 
@@ -67,7 +69,7 @@ python3 tools/slicer-producer/producer.py part.stl \
    - the sandbox profile
 
    Any mutation fails the run. The scratch inputs are also made read-only.
-8. **Atomic, exclusive publish.** The files are staged next to `--out`, verified, then published with an exclusive rename: `renamex_np(RENAME_EXCL)` on macOS, `renameat2(RENAME_NOREPLACE)` on Linux. That never replaces a destination that appears during publication, even an empty directory. `--out` must not already exist. On any failure, nothing is published and scratch is removed.
+8. **Atomic, exclusive publish.** The files are staged next to `--out`, verified (including staged `threeMf` SHA-256), then published with an exclusive rename: `renamex_np(RENAME_EXCL)` on macOS, `renameat2(RENAME_NOREPLACE)` on Linux. That never replaces a destination that appears during publication, even an empty directory. `--out` must not already exist. On any failure, nothing is published and scratch is removed.
 
 ## Manifest (`manifest.json`)
 
@@ -83,7 +85,7 @@ python3 tools/slicer-producer/producer.py part.stl \
 Other fields:
 - `input`: file name, format, SHA-256, size
 - `invocation`: argv with scratch paths normalized to `<scratch>`, environment keys, sandbox profile SHA-256, timeout
-- `outputs`: G-code and exported-settings SHA-256 and size
+- `outputs`: `gcode`, `threeMf` (including `sha256`, `bytes`, `plateGcodeInternalPath`, `plateGcodeSha256`, `plateGcodeBytes`), `gcodeSummary`, `exportedSettings`, and optional `cliResult`
 
 The manifest deliberately does **not** claim a slicer-settings digest. `exported-settings.json` is hashed as an observed artifact only.
 
@@ -91,7 +93,6 @@ The manifest deliberately does **not** claim a slicer-settings digest. `exported
 - effective-settings equivalence
 - determinism
 - zero attempted network calls (denial is enforced; attempts aren't observed)
-- 3MF export
 - printability, fit, or permission to print
 
 ## Tests (Linux or macOS; no slicer needed)

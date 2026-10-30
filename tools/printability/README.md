@@ -63,12 +63,12 @@ Given an ASCII or binary STL in millimetres and an explicit profile, [analyzer.p
 - FitSpec parametric templates (`drawer-organizer`, `schemaVersion: 1`, `artifact.sha256` / `byteLength`, `provenance.syntheticOnly`);
 - Scan-derived preview templates (`scan-cradle`, `outputSha256`, `units: "mm"`, `previewOnly: true`, `provesPhysicalAccuracy: false`).
 
-If printability returns `not-printable` — or `printable-with-supports` when `--allow-supports` is not passed — `dry-run` aborts before invoking BambuStudio and leaves `--out` untouched. Otherwise it runs [tools/slicer-producer/producer.py](../slicer-producer/producer.py) inside its `/usr/bin/sandbox-exec` profile (`(deny network*)`, `(deny mach-lookup)`) with the profile's explicit presets, `--bed-type`, `--nozzle-type`, and `--enable-support`, then atomically publishes:
+If printability returns `not-printable` — or `printable-with-supports` when `--allow-supports` is not passed — `dry-run` aborts before invoking BambuStudio and leaves `--out` untouched. Otherwise it runs [tools/slicer-producer/producer.py](../slicer-producer/producer.py) inside its `/usr/bin/sandbox-exec` profile (`(deny network*)`, default-deny `(deny mach-lookup)` with only the three Mach services needed for headless 3MF thumbnail rendering) with the profile's explicit presets, `--bed-type`, `--nozzle-type`, `--enable-support`, and `--export-3mf`, then atomically publishes:
 
 - `source.stl` and `template-manifest.json`
 - `printability.json`
-- `slice/plate_1.gcode`, `slice/exported-settings.json`, `slice/manifest.json`, `slice/slicer.log`
-- `dry-run-manifest.json` (`schema: "scan-to-make.print-path-dry-run/0.1.0"`), binding `source.stl`, `template-manifest.json`, `printability.json`, `slice/plate_1.gcode`, `slice/exported-settings.json`, `slicerSettingsSha256` (`sha256(exported-settings.json)`), and a `companionPreparedSelectionCandidate` descriptor ready for companion intake.
+- `slice/sliced-plate.3mf` (or `--three-mf-name <name>.3mf`, never `*.gcode.3mf`), `slice/plate_1.gcode`, `slice/exported-settings.json`, `slice/manifest.json`, `slice/slicer.log`
+- `dry-run-manifest.json` (`schema: "scan-to-make.print-path-dry-run/0.1.0"`), binding `source.stl`, `template-manifest.json`, `printability.json`, `slice/sliced-plate.3mf` (`slice.printableArtifact`, `slice.threeMfArtifact`), `slice/plate_1.gcode` (`slice.gcodeArtifact`, verified byte-identical to `Metadata/plate_1.gcode` inside the `.3mf`), `slice/exported-settings.json`, `slicerSettingsSha256` (`sha256(exported-settings.json)`), `dispatchCandidate` (recording the `.3mf` SHA-256 and `print_3mf` route template for AMS dispatch), and `companionPreparedSelectionCandidate`.
 
 ## Tests
 
