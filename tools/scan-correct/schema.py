@@ -30,6 +30,14 @@ SPECS = {
                          {'saturation_min':number(0,1)}),
     'symmetrize': ('Average both sides against mirrored surfaces, then copy one side for exact symmetry.',
                    {'axis':AXIS,'direction':enum('NEGATIVE','POSITIVE'),'iterations':number(1,4,True)}),
+    'rigid_frame': ('Apply an explicitly measured proper rotation and translation to geometry and source evidence.',
+                    {'rotation':{'type':'array','items':number(-1,1),'minItems':9,'maxItems':9},
+                     'translation_mm':vector()}),
+    'mirror': ('Copy one side across the origin without averaging captured and missing sides.',
+               {'axis':AXIS,'direction':enum('NEGATIVE','POSITIVE')}),
+    'laplacian_smooth': ('Blender normalized volume-preserving Laplacian modifier; distinct from uniform smoothing.',
+                         {'iterations':number(1,30,True),'lambda_factor':number(.01,1)}),
+    'subdivide': ('Bounded Catmull-Clark subdivision under the output face cap.',{'levels':number(1,2,True)}),
     'convex_hull': ('Convex product prior: removes concavities and feature detail.', {}),
     'remesh': ('Voxel remesh under grid and polygon caps; destroys detail.', {'voxel_mm':number(.05,10)}),
     'smooth': ('Uniform Laplacian smoothing followed by measured volume restoration.',
@@ -43,7 +51,9 @@ SPECS = {
     'deviation': ('Two-sided sampled BVH deviation split by retained source captured/filled mask.',
                   {'count':number(100,20000,True),'seed':number(0,1000000,True)}),
 }
-TOOLS = [{'name':name,'description':description,'input_schema':{'type':'object','properties':props,
+SPECS['cut_oriented_feature']=('Cut with an explicit transverse length axis; same volume/topology guards.',
+                               {**SPECS['cut_feature'][1],'length_axis':AXIS})
+TOOLS = [{'name':name,'description':description,'input_schema':{'type':'object','properties':{**props,'evidence_still_ids':{'type':'array','items':enum('still-1','still-2','still-3','still-4'),'minItems':0,'maxItems':4}},
           'required':list(props),'additionalProperties':False}} for name,(description,props) in SPECS.items()]
 
 
@@ -75,4 +85,13 @@ def validate(name, args):
         check_value(value,props[key])
     if name == 'scale_to_reference' and args['target_mm'] != sorted(args['target_mm'],reverse=True):
         raise ValueError('target_mm must be long to short')
+    if name=='cut_oriented_feature' and args['length_axis']==args['axis']:
+        raise ValueError('feature length axis must be transverse to its cutting axis')
+    if name=='rigid_frame':
+        r=[args['rotation'][i:i+3] for i in (0,3,6)]
+        if any(abs(sum(a*b for a,b in zip(r[i],r[j]))-(1 if i==j else 0))>1e-4 for i in range(3) for j in range(3)):
+            raise ValueError('rotation must be orthonormal')
+        det=r[0][0]*(r[1][1]*r[2][2]-r[1][2]*r[2][1])-r[0][1]*(r[1][0]*r[2][2]-r[1][2]*r[2][0])+r[0][2]*(r[1][0]*r[2][1]-r[1][1]*r[2][0])
+        if abs(det-1)>1e-4:
+            raise ValueError('rotation must be proper, without reflection')
     return args

@@ -19,6 +19,7 @@ Use feature-derived datums, then explicit product priors, symmetry, fairing and 
 Every spec comparison uses boxExtentsMm, never PCA. Scaling to spec is by construction, not evidence of physical accuracy.
 Classify fill heuristically before split deviation. Cuts must pass their own volume/topology checks. No printing.
 You may call only named JSON tools, never code or external paths. Tool errors are observations: adapt or stop.
+For edits informed by attached stills, include evidence_still_ids in tool arguments. Attribute only images actually used; IDs are model-declared evidence, not independently verified causation.
 Finish with no tool calls only when the measured result is satisfactory; mention remaining assumptions.
 '''
 
@@ -44,6 +45,16 @@ def run_job(args):
     if any(output.iterdir()):
         raise ValueError('output directory must be empty')
     output.chmod(0o700)
+    stills=[]
+    if images:
+        (output/'stills').mkdir()
+    for index,(path,image) in enumerate(zip(args.still,images),1):
+        identity='still-'+str(index)
+        relative='stills/'+identity+Path(path).suffix.lower()
+        raw=base64.b64decode(image[1])
+        (output/relative).write_bytes(raw)
+        stills.append({'id':identity,'name':Path(path).name,'sha256':hashlib.sha256(raw).hexdigest(),'artifact':relative})
+    still_by_id={item['id']:item for item in stills}
     worker = Worker(output/'work',seconds=args.max_seconds,max_faces=args.max_faces)
     log_path = output/'tool-calls.jsonl'
     events = []
@@ -53,7 +64,8 @@ def run_job(args):
               'inputUnitsDeclared':args.units,'outputUnits':'mm',
               'referenceDimensionsMm':args.reference_mm,'specComparisonMetric':'boxExtentsMm',
               'limits':{'steps':args.max_steps,'seconds':args.max_seconds,'faces':args.max_faces},
-              'assumptions':['reference match is by construction','fill classification is heuristic']}
+              'toolFailures':[], 'detailStills':stills,
+              'assumptions':['reference match is by construction','fill classification is heuristic','still attribution is model-declared']}
     def log(item):
         with log_path.open('a') as stream:
             stream.write(json.dumps(item,sort_keys=True,allow_nan=False)+'\n')
@@ -62,11 +74,9 @@ def run_job(args):
         report['initial'] = initial['after']
         report['runtime'] = initial['runtime']
         report['inputs'] = json.loads((worker.directory/'inputs.json').read_text())
-        report['detailStills'] = [{'name':Path(p).name,'sha256':hashlib.sha256(base64.b64decode(image[1])).hexdigest()}
-                                 for p,image in zip(args.still,images)]
         log({'type':'initialize','result':initial})
         context = SYSTEM+'\nProduct: '+args.product+'\nReference long-to-short mm: '+json.dumps(args.reference_mm)+\
-                  '\nInitial measurements: '+json.dumps(initial['after'])
+                  '\nInitial measurements: '+json.dumps(initial['after'])+'\nDetail still evidence IDs (images follow this order): '+json.dumps(stills)
         while True:
             reply = adapter.next(events,context,images,min(worker.remaining(),120))
             worker.remaining()
@@ -84,12 +94,22 @@ def run_job(args):
             results = []
             for call in reply['calls']:
                 calls += 1
+                evidence=[]
                 try:
-                    result = worker.apply(call['name'],call['arguments'])
+                    parameters=dict(call['arguments'])
+                    identifiers=parameters.pop('evidence_still_ids',[])
+                    if (not isinstance(identifiers,list) or len(identifiers)>4 or
+                        any(not isinstance(i,str) or i not in still_by_id for i in identifiers) or
+                        len(set(identifiers))!=len(identifiers)):
+                        raise ValueError('unknown, duplicate or invalid evidence still IDs')
+                    evidence=[still_by_id[i] for i in identifiers]
+                    result = worker.apply(call['name'],parameters)
                     error = False
                 except (ValueError,OSError,KeyError,TypeError) as exc:
                     result,error = {'ok':False,'error':str(exc)},True
-                log({'type':'tool','step':calls,'call':call,'result':result})
+                    report['toolFailures'].append({'step':calls,'name':call.get('name'),'error':str(exc)})
+                log({'type':'tool','step':calls,'call':call,'result':result,'evidenceStills':evidence,
+                     'evidenceAttribution':'model-declared' if evidence else 'not supplied'})
                 rendered = []
                 if not error and call['name']=='render':
                     for relative in result['data']['artifacts']:

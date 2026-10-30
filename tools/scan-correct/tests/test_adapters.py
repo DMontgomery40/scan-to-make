@@ -25,6 +25,7 @@ class AdapterTests(unittest.TestCase):
                       {'type':'results','items':[{'id':'call_1','result':{'ok':False},'error':True,'images':[('image/png','AAAA')]}]}],
                       'context',[],1)
         self.assertEqual(requests[0][2]['model'],'claude-opus-5-5')
+        self.assertIn('evidence_still_ids',requests[0][2]['tools'][0]['input_schema']['properties'])
         block=requests[1][2]['messages'][-1]['content'][0]
         self.assertEqual(block['tool_use_id'],'call_1')
         self.assertTrue(block['is_error'])
@@ -47,6 +48,7 @@ class AdapterTests(unittest.TestCase):
         self.assertEqual(requests[1]['messages'][1]['reasoning_content'],'synthetic reasoning')
         self.assertEqual(requests[1]['messages'][2]['tool_call_id'],'m')
         self.assertEqual(requests[0]['tools'][0]['type'],'function')
+        self.assertIn('evidence_still_ids',requests[0]['tools'][0]['function']['parameters']['properties'])
         self.assertEqual(requests[1]['messages'][3]['content'][0]['type'],'image_url')
 
     def test_malformed_provider_reply_is_a_sanitized_error(self):

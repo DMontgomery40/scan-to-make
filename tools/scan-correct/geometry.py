@@ -91,7 +91,9 @@ def boolean(obj, cutter, operation='DIFFERENCE'):
 
 def cut(obj, bm, args, core):
     axis = 'XYZ'.index(args['axis'])
-    u,v = (axis+1)%3,(axis+2)%3
+    u = 'XYZ'.index(args['length_axis']) if 'length_axis' in args else (axis+1)%3
+    v = next(i for i in range(3) if i not in (axis,u))
+    transverse_sign = 1 if (u-axis)%3==1 else -1
     side = args['side']
     centre = Vector(args['centre_mm'])
     coords = np.array([tuple(vertex.co) for vertex in bm.verts])
@@ -149,7 +151,7 @@ def cut(obj, bm, args, core):
         for height in (lower,upper):
             for x,y in outline:
                 point = centre.copy()
-                point[axis],point[u],point[v] = height,centre[u]+x,centre[v]+y
+                point[axis],point[u],point[v] = height,centre[u]+x,centre[v]+y*transverse_sign
                 points.append(point)
         n = len(outline)
         faces = [list(reversed(range(n))),list(range(n,n*2))]
@@ -170,7 +172,7 @@ def cut(obj, bm, args, core):
             removed <= max(1e-5,before['volumeMm3']*1e-7) or removed > before['volumeMm3']*.5):
             result.free()
             raise ValueError('cut failed measured volume/topology checks; no checkpoint committed')
-        return result,{'surfaceMm':list(hit),'removedVolumeMm3':removed}
+        return result,{'surfaceMm':list(hit),'removedVolumeMm3':removed,'lengthAxis':'XYZ'[u]}
     finally:
         for tool in tools:
             bpy.data.objects.remove(tool,do_unlink=True)

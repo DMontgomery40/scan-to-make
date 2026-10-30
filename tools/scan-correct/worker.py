@@ -82,7 +82,28 @@ def execute(config):
         bm = bm_from(obj)
     try:
         before = checked(bm,cap)
-        if operation=='symmetrize':
+        if operation=='rigid_frame':
+            rotation=Matrix([args['rotation'][i:i+3] for i in (0,3,6)])
+            translation=Vector(args['translation_mm'])
+            for vertex in bm.verts:
+                vertex.co=rotation@vertex.co+translation
+            transform_evidence(source,directory,rotation,-(rotation.transposed()@translation))
+            data={'rotation':args['rotation'],'translationMm':args['translation_mm'],'datumProvenance':'caller-supplied measured frame'}
+        elif operation=='mirror':
+            bmesh.ops.symmetrize(bm,input=list(bm.verts)+list(bm.edges)+list(bm.faces),
+                                direction=('-' if args['direction']=='NEGATIVE' else '')+args['axis'],dist=1e-4)
+            bmesh.ops.recalc_face_normals(bm,faces=list(bm.faces))
+        elif operation=='laplacian_smooth':
+            if not before['watertight'] or len(bm.verts)*args['iterations']>8000000:
+                raise ValueError('modifier smoothing requires closed geometry within work cap')
+            bm=core.apply_modifier(obj,bm,'LAPLACIANSMOOTH',iterations=args['iterations'],
+                                   lambda_factor=args['lambda_factor'],lambda_border=0,
+                                   use_volume_preserve=True,use_normalized=True,use_x=True,use_y=True,use_z=True)
+        elif operation=='subdivide':
+            if len(bm.faces)*4**args['levels']>cap:
+                raise ValueError('subdivision predicted face cap exceeded')
+            bm=core.apply_modifier(obj,bm,'SUBSURF',levels=args['levels'],render_levels=args['levels'],subdivision_type='CATMULL_CLARK')
+        elif operation=='symmetrize':
             geometry.symmetry(bm,args['axis'],args['direction'],args['iterations'])
         elif operation=='convex_hull':
             new = geometry.hull(bm)
@@ -110,7 +131,7 @@ def execute(config):
             transform_evidence(source,directory,rotation,centre)
             data = {'scaleFactors':factors,'matchByConstruction':True,
                     'rotation':list(map(list,rotation)),'originMm':list(centre)}
-        elif operation=='cut_feature':
+        elif operation in ('cut_feature','cut_oriented_feature'):
             new,data = geometry.cut(obj,bm,args,core)
             bm.free()
             bm = new

@@ -80,12 +80,19 @@ minimum-volume box; it is not a certified global optimum or semantic frame.
 | `feature_frame` | `origin_feature`, `x_feature`, `plane_feature` IDs from measured clusters; right-handed orthonormal frame from three non-collinear centres. Transforms current and source meshes/evidence together. It is a geometric datum, not automatic pose recognition. |
 | `classify_regions` | `saturation_min`; sample-majority saturation labels source faces as filled/captured, with unobserved faces unknown. A table-colour heuristic, not proof a region was uncaptured. |
 | `symmetrize` | `axis` X/Y/Z, `direction` NEGATIVE/POSITIVE, `iterations` 1–4; average both sides against a mirrored BVH, then copy the selected side across the origin. This assumes product symmetry and may erase asymmetric features. |
+| `rigid_frame` | `rotation` (nine row-major numbers, proper orthonormal matrix), `translation_mm`; explicit measured datums applied to current/source evidence together. No arbitrary affine scaling or reflection. |
+| `mirror` | `axis`, `direction`; copy-only symmetry, preserving the chosen captured side when the other side is missing. |
+| `laplacian_smooth` | `iterations` 1–30, `lambda_factor` .01–1; Blender normalized, volume-preserving modifier, with an 8M vertex-iteration cap. Distinct from uniform `smooth`. |
+| `subdivide` | `levels` 1–2; Catmull–Clark, rejecting predicted output beyond the face cap. |
 | `convex_hull` | No parameters; replaces geometry with a hull. A deliberate convex-product prior that erases concavities. |
 | `remesh` | `voxel_mm` .05–10; voxel remesh with grid/polygon caps. |
 | `smooth` | `iterations` 1–30, `factor` .01–.5; simultaneous uniform Laplacian smoothing followed by measured volume restoration. This restores total volume, not local detail or silhouette accuracy. |
 | `scale_to_reference` | `target_mm` long-to-short; align to the measured box and scale per axis, restricted to .5–2×. Retained source evidence follows only the rigid frame, preserving intentional shrink in deviation. The resulting dimension match is **by construction**. |
 | `cut_feature` | `kind` slot/pocket/hole/groove; `axis`, `side` -1/+1, `centre_mm`, `length_mm`, `width_mm`, `depth_mm`. Surface rays, exact boolean, measurable volume loss and topology checks; failure commits no geometry checkpoint. |
+| `cut_oriented_feature` | All `cut_feature` parameters plus `length_axis` transverse to `axis`; selects the slot/pocket's long direction explicitly. Legacy cuts keep their cyclic tangent-axis convention. |
 | `deviation` | `count`, `seed`; two-sided sampled source↔corrected BVH distances, split captured/filled/unknown. Requires classification. Counts, mean/p95/max are geometric change, not Hausdorff bounds or physical accuracy. |
+
+Use `cut_oriented_feature` for measured slot orientation; axis alone does not determine the long direction.
 
 Cuts: axis is the inward cutting direction from the selected side; transverse
 centre coordinates choose the ray and the axial coordinate is surface-located.
@@ -99,6 +106,30 @@ surfaces can fail on arbitrary concave geometry. Cuts require watertight input
 and output, may not add components, must remove more than a numerical threshold
 and at most half the input volume. An unchanged boolean fails loudly. These
 checks do not establish exact feature dimensions, collision freedom or printability.
+
+## Detail-still provenance
+
+`--still` accepts local paths from companion detail-still storage; it does not
+access companion accounts or download images. The runner snapshots supplied
+image bytes under `stills/still-N.ext`, records stable `still-1`…`still-4` IDs
+and SHA-256 receipts in `detailStills`, and identifies those images in the model
+context. Both adapters forward the images as before.
+
+Tool schemas expose optional `evidence_still_ids`, consumed by the runner before
+geometry dispatch (not a Blender/Worker parameter). Scripted and real models can
+attribute a call with, for example:
+
+```json
+{"name":"scale_to_reference","arguments":{"target_mm":[60,45,22],"evidence_still_ids":["still-1"]}}
+```
+
+Each tool log entry records the referenced still IDs, hashes and private snapshot
+artifacts in `evidenceStills`. This is **model-declared association**, not proof
+that a still caused or validates the edit. Empty attribution is explicitly
+`not supplied`; do not infer that all attached images informed every operation.
+Unknown, duplicate or excessive still IDs fail before the edit. `toolFailures`
+in the final report lists failed calls even if later geometry meets completion
+requirements; a successful dimension fit alone is not a faithful script replay.
 
 ## Bounds and persistence
 
@@ -189,7 +220,13 @@ reference fit → measure, and require convergence to the target dimensions.
 They also verify every tool's measured effect, actual merged converter texture
 import, renderer/image forwarding, retained-frame deviation, missed/unchanged
 booleans, polygon/grid/step/time limits, network denial and provider payloads
-with an injected offline transport. No real API run has been performed.
+with an injected offline transport. No real API run has been performed. Additional synthetic tests remove a rounded
+box's back face, inject lumps, and replay copy-only symmetry, hull, remesh,
+normalized modifier smoothing, subdivision and reference fitting within 0.3 mm.
+An explicit slot-axis regression checks its serialized pocket-floor extents;
+synthetic stills exercise image forwarding, edit attribution and invalid-ID
+rejection. Personal replay sequences, datums, captures and gap reports remain
+outside Git.
 
 Before the first real-model run: select a provider/model with image/tool
 support, supply its key outside Git through the caller's environment, choose
