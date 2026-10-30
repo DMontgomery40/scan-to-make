@@ -41,7 +41,6 @@ import {
   type ScanServices,
   type ScanTarget,
 } from './src/screens/scanServices';
-import { nativePhotoPicker } from './src/ui/photoPicker';
 import {
   briefComplete,
   emptyBrief,
@@ -101,14 +100,9 @@ function App({
   const [repository] = useState(() => injected ?? localSavedProjects());
   // Until the processing and close-up transports ship, these report that the
   // feature is unavailable rather than pretending to work.
-  const [scanServices] = useState(() => {
-    if (injectedScan) return injectedScan;
-    const unavailable = unavailableScanServices();
-    return {
-      ...unavailable,
-      picker: nativePhotoPicker() ?? unavailable.picker,
-    };
-  });
+  const [scanServices] = useState(
+    () => injectedScan ?? unavailableScanServices(),
+  );
   const scheme = useColorScheme();
   const [scanTarget, setScanTarget] = useState<ScanTarget | null>(null);
   // Kept for this app session; design planning has no endpoint yet.
