@@ -20,12 +20,27 @@ public final class ScanCapturePreview: ARSCNView {
     addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(placeProbe)))
   }
 
-  func updateProbeLocator(center: CGPoint?) {
-    guard let center else {
+  // Classify on the main thread, where UIKit view geometry may be read.
+  func updateProbeLocator(projected: SCNVector3?) {
+    guard let projected, projected.z > 0, projected.z < 1 else {
       probeLocator.isHidden = true
       return
     }
-    probeLocator.center = center
+    let center = CGPoint(x: CGFloat(projected.x), y: CGFloat(projected.y))
+    guard center.x.isFinite, center.y.isFinite else {
+      probeLocator.isHidden = true
+      return
+    }
+    if bounds.contains(center) {
+      probeLocator.center = center
+      probeLocator.apply(bounds.insetBy(dx: 24, dy: 24).contains(center) ? .inside : .nearEdge)
+    } else {
+      probeLocator.center = CGPoint(
+        x: min(max(center.x, 19), max(19, bounds.width - 19)),
+        y: min(max(center.y, 19), max(19, bounds.height - 19))
+      )
+      probeLocator.apply(.outside)
+    }
     probeLocator.isHidden = false
   }
   required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
@@ -58,17 +73,12 @@ final class ScanCapturePreviewRendererDelegate: NSObject, ARSCNViewDelegate {
     // Copy only the timestamp; never retain ARFrame buffers.
     let renderedSession = view.session
     let timestamp = renderedSession.currentFrame?.timestamp
-    var locatorCenter: CGPoint?
-    if let probeNode, probeNode.parent != nil {
-      let projected = view.projectPoint(probeNode.worldPosition)
-      let center = CGPoint(x: CGFloat(projected.x), y: CGFloat(projected.y))
-      if projected.z > 0 && projected.z < 1 && view.bounds.contains(center) {
-        locatorCenter = center
-      }
+    let projectedProbe: SCNVector3? = probeNode.flatMap { node in
+      node.parent == nil ? nil : view.projectPoint(node.worldPosition)
     }
     DispatchQueue.main.async { [weak view] in
       guard let view else { return }
-      view.updateProbeLocator(center: locatorCenter)
+      view.updateProbeLocator(projected: projectedProbe)
       guard let timestamp else { return }
       ScanCaptureSession.shared.didRender(view, session: renderedSession, timestamp: timestamp)
     }
@@ -86,11 +96,19 @@ final class ScanCapturePreviewRendererDelegate: NSObject, ARSCNViewDelegate {
 }
 
 final class ProbeLocatorView: UIView {
+  enum State {
+    case inside
+    case nearEdge
+    case outside
+  }
+
+  private let dot = UIView(frame: CGRect(x: 16, y: 16, width: 6, height: 6))
+  private var appliedState: State?
+
   override init(frame: CGRect) {
     super.init(frame: frame)
     backgroundColor = .clear
     isUserInteractionEnabled = false
-    layer.borderColor = UIColor.systemOrange.cgColor
     layer.borderWidth = 3
     layer.cornerRadius = 19
     layer.shadowColor = UIColor.black.cgColor
@@ -98,10 +116,36 @@ final class ProbeLocatorView: UIView {
     layer.shadowRadius = 2
     layer.shadowOffset = .zero
 
-    let dot = UIView(frame: CGRect(x: 16, y: 16, width: 6, height: 6))
-    dot.backgroundColor = .systemOrange
     dot.layer.cornerRadius = 3
     addSubview(dot)
+    apply(.inside)
+  }
+
+  func apply(_ state: State) {
+    guard appliedState != state else { return }
+    appliedState = state
+    switch state {
+    case .inside:
+      layer.borderColor = UIColor.systemOrange.cgColor
+      layer.borderWidth = 3
+      backgroundColor = .clear
+      dot.backgroundColor = .systemOrange
+      dot.isHidden = false
+      alpha = 1
+    case .nearEdge:
+      layer.borderColor = UIColor.systemRed.cgColor
+      layer.borderWidth = 4
+      backgroundColor = UIColor.systemRed.withAlphaComponent(0.12)
+      dot.backgroundColor = .systemRed
+      dot.isHidden = false
+      alpha = 1
+    case .outside:
+      layer.borderColor = UIColor.systemRed.cgColor
+      layer.borderWidth = 3
+      backgroundColor = UIColor.systemRed.withAlphaComponent(0.12)
+      dot.isHidden = true
+      alpha = 0.75
+    }
   }
 
   required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
