@@ -1,0 +1,78 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+"""Closed tool vocabulary shared by runner and trusted Blender worker."""
+import math
+
+
+def number(lo, hi, integer=False):
+    return {'type':'integer' if integer else 'number','minimum':lo,'maximum':hi}
+
+
+def vector(lo=-10000,hi=10000):
+    return {'type':'array','items':number(lo,hi),'minItems':3,'maxItems':3}
+
+
+def enum(*values):
+    return {'type':'string','enum':list(values)}
+
+
+AXIS = enum('X','Y','Z')
+SPECS = {
+    'measure': ('Measure topology, volume and oriented box; does not prove accuracy.', {}),
+    'render': ('Render ten neutral views in the stored input frame.', {'resolution':number(16,1024,True)}),
+    'sample_texture': ('Sample retained textured source by surface area, returns evidence and cache.',
+                       {'count':number(100,20000,True),'seed':number(0,1000000,True)}),
+    'find_features': ('Cluster dark texture samples by distance; inspect clusters before interpreting them.',
+                      {'threshold':number(0,1),'link_mm':number(.1,10),'min_samples':number(3,1000,True)}),
+    'feature_frame': ('Frame from three measured feature cluster IDs: origin, X direction and XY plane.',
+                      {'origin_feature':number(0,127,True),'x_feature':number(0,127,True),
+                       'plane_feature':number(0,127,True)}),
+    'classify_regions': ('Heuristic filled-face mask on retained source using texture saturation, not capture truth.',
+                         {'saturation_min':number(0,1)}),
+    'symmetrize': ('Average both sides against mirrored surfaces, then copy one side for exact symmetry.',
+                   {'axis':AXIS,'direction':enum('NEGATIVE','POSITIVE'),'iterations':number(1,4,True)}),
+    'convex_hull': ('Convex product prior: removes concavities and feature detail.', {}),
+    'remesh': ('Voxel remesh under grid and polygon caps; destroys detail.', {'voxel_mm':number(.05,10)}),
+    'smooth': ('Uniform Laplacian smoothing followed by measured volume restoration.',
+               {'iterations':number(1,30,True),'factor':number(.01,.5)}),
+    'scale_to_reference': ('Fit long-to-short box extents to declared reference; match is by construction.',
+                           {'target_mm':vector(.1,2000)}),
+    'cut_feature': ('Ray-located blind slot/pocket/hole or perimeter groove; fails if volume/topology checks fail.',
+                    {'kind':enum('slot','pocket','hole','groove'),'axis':AXIS,
+                     'side':{'type':'integer','enum':[-1,1]},'centre_mm':vector(),
+                     'length_mm':number(.1,100),'width_mm':number(.1,100),'depth_mm':number(.05,50)}),
+    'deviation': ('Two-sided sampled BVH deviation split by retained source captured/filled mask.',
+                  {'count':number(100,20000,True),'seed':number(0,1000000,True)}),
+}
+TOOLS = [{'name':name,'description':description,'input_schema':{'type':'object','properties':props,
+          'required':list(props),'additionalProperties':False}} for name,(description,props) in SPECS.items()]
+
+
+def check_value(value, spec):
+    kind = spec['type']
+    if kind in ('number','integer'):
+        valid = type(value) in ((int,) if kind=='integer' else (int,float))
+        valid = valid and math.isfinite(value) and spec.get('minimum',-math.inf) <= value <= spec.get('maximum',math.inf)
+    elif kind == 'string':
+        valid = isinstance(value,str)
+    elif kind == 'array':
+        valid = isinstance(value,list) and len(value)==spec['minItems']
+        if valid:
+            for item in value:
+                check_value(item,spec['items'])
+    else:
+        valid = False
+    if not valid or ('enum' in spec and value not in spec['enum']):
+        raise ValueError('parameter outside tool schema')
+
+
+def validate(name, args):
+    if name not in SPECS or not isinstance(args,dict):
+        raise ValueError('unknown tool or non-object arguments')
+    props = SPECS[name][1]
+    if set(args) != set(props):
+        raise ValueError('missing or unexpected tool parameters')
+    for key,value in args.items():
+        check_value(value,props[key])
+    if name == 'scale_to_reference' and args['target_mm'] != sorted(args['target_mm'],reverse=True):
+        raise ValueError('target_mm must be long to short')
+    return args
