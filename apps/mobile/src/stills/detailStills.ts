@@ -45,6 +45,11 @@ export interface DetailStillNative {
   request(options: StillRequest): Promise<StillResponse>;
   present(file: CaptureFile, share: boolean): Promise<unknown>;
   cancel(): Promise<void>;
+  /**
+   * Optional local photo picker mirroring the capture bridge: resolves the
+   * retained local file identity to pass to `upload` as `source`.
+   */
+  pickImage?(): Promise<CaptureFile>;
 }
 
 function failure(status: number, code?: string): never {
