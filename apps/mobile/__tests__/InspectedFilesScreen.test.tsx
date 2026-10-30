@@ -171,6 +171,49 @@ test('backgrounding removes verified details until a fresh lookup', async () => 
   spy.mockRestore();
 });
 
+test('reloads the list on the hourly auto-refresh without a manual tap', async () => {
+  jest.useFakeTimers();
+  try {
+    const tree = await mount();
+    expect(mockList).toHaveBeenCalledTimes(1);
+    mockSync.mockClear();
+    mockList.mockClear();
+    await act(async () => {
+      jest.advanceTimersByTime(60 * 60 * 1000);
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(mockSync).toHaveBeenCalledTimes(1);
+    expect(mockList).toHaveBeenCalledTimes(1);
+    await act(async () => tree.unmount());
+  } finally {
+    jest.useRealTimers();
+  }
+});
+test('auto-refresh leaves an open file inspection in place', async () => {
+  jest.useFakeTimers();
+  try {
+    const tree = await mount();
+    await press(tree, 'Review file 1');
+    expect(shown(tree)).toContain('File inspection');
+    mockSync.mockClear();
+    mockList.mockClear();
+    await act(async () => {
+      jest.advanceTimersByTime(60 * 60 * 1000);
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    // A verified detail is open, so the periodic reload is skipped.
+    expect(mockSync).not.toHaveBeenCalled();
+    expect(mockList).not.toHaveBeenCalled();
+    expect(shown(tree)).toContain('File inspection');
+    await act(async () => tree.unmount());
+  } finally {
+    jest.useRealTimers();
+  }
+});
 test('verified produced files show companion provenance without imported-file or calibration claims', async () => {
   mockOpen.mockResolvedValue({
     job: { ...job, production: { slicer: { version: '02.08.02.61' } } },

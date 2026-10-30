@@ -14,6 +14,19 @@ import {
 import { Button, Card, Screen } from '../ui/components';
 import { type } from '../ui/theme';
 
+// Reload the inspected-file list on a slow cadence so a saved project opened for
+// a long time does not quietly go stale between manual taps. The companion's
+// prepared-jobs endpoint is a personal, self-hosted service reached over the
+// owner's private network: it serializes requests (replying HTTP 429 "busy"
+// while another request is in flight) and keeps no standing request quota, so
+// the only real cost is contending with a user-initiated reload or waking an
+// idle companion. An hourly interval sits far below any contention threshold
+// while keeping the list reasonably fresh. The periodic reload reuses the same
+// single-flight `run` guard as the button, so a tick that would overlap an
+// active request is dropped rather than queued, and the timer is cleared on
+// unmount so no duplicate or orphaned timers can accumulate.
+const AUTO_REFRESH_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
+
 export function InspectedFilesScreen({
   id,
   repository,
@@ -130,6 +143,16 @@ export function InspectedFilesScreen({
   useEffect(() => {
     if (paused) invalidate();
   }, [paused]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!clients) return;
+    const timer = setInterval(() => {
+      // Skip the periodic reload while the companion overlay is up or a verified
+      // detail is open so it never discards what the person is looking at. The
+      // list view resumes its own fresh lookup via `run`'s single-flight guard.
+      if (!paused && !selected) refresh();
+    }, AUTO_REFRESH_INTERVAL_MS);
+    return () => clearInterval(timer);
+  }, [clients, paused, selected]); // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <Screen
       title={selected ? 'File inspection' : 'Inspected files'}
