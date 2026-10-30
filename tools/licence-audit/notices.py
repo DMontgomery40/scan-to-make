@@ -13,7 +13,7 @@ import re
 import sys
 from typing import Any
 
-from inventory import inventory_cocoapods, inventory_mobile_npm
+from inventory import inventory_cocoapods, inventory_mobile_npm, inventory_workspace_npm
 from spdx import FIRST_PARTY, UNKNOWN
 
 _SPDX_URL_SAFE_RE = re.compile(r"^[A-Za-z0-9.\-+]+$")
@@ -65,6 +65,11 @@ def _escape_md_cell(value: str) -> str:
 def generate_third_party_notices(repo_root: Path, policy: dict[str, Any]) -> str:
     """Render deterministic Markdown notices for all third-party dependencies in apps/mobile."""
     mobile_npm = inventory_mobile_npm(repo_root)
+    app_workspace_npm = [
+        item
+        for item in inventory_workspace_npm(repo_root)
+        if item.get("scope") == "app" and item.get("production")
+    ]
     cocoapods = inventory_cocoapods(repo_root, policy)
 
     # Register verbatim licence texts keyed by normalized SHA-256 prefix
@@ -89,14 +94,19 @@ def generate_third_party_notices(repo_root: Path, policy: dict[str, Any]) -> str
 
     # 1. Embedded third-party local modules (e.g., Apple GuidedCaptureSample in modules/object-capture)
     embedded_rows: list[dict[str, str]] = []
+    seen_embedded: set[tuple[str, str, str]] = set()
     # 2. External production npm dependencies deduplicated by (name, version)
     npm_by_key: dict[tuple[str, str], dict[str, Any]] = {}
 
-    for item in mobile_npm:
+    for item in mobile_npm + app_workspace_npm:
         if item.get("firstParty"):
             continue
         pkg_path = str(item.get("packagePath") or "")
         if not pkg_path.startswith("node_modules/"):
+            emb_key = (item["name"], item["version"], pkg_path)
+            if emb_key in seen_embedded:
+                continue
+            seen_embedded.add(emb_key)
             digest = _register_licence_file(item.get("licenceFile"), f"{item['name']}@{item['version']} (embedded module)")
             embedded_rows.append(
                 {
@@ -110,7 +120,14 @@ def generate_third_party_notices(repo_root: Path, policy: dict[str, Any]) -> str
             continue
         key = (item["name"], item["version"])
         if key not in npm_by_key:
-            npm_by_key[key] = item
+            npm_by_key[key] = dict(item)
+        else:
+            existing = npm_by_key[key]
+            for field in ("licenceFile", "repositoryUrl", "homepage", "resolvedUrl"):
+                if not existing.get(field) and item.get(field):
+                    existing[field] = item[field]
+            if existing.get("licence") == UNKNOWN and item.get("licence") not in (None, UNKNOWN):
+                existing["licence"] = item["licence"]
 
     # 3. Third-party CocoaPods from Podfile.lock
     pod_rows: list[dict[str, str]] = []
@@ -170,8 +187,8 @@ def generate_third_party_notices(repo_root: Path, policy: dict[str, Any]) -> str
         "# Third-Party Notices (`apps/mobile`)",
         "",
         "This file lists third-party software packages and native pods resolved from",
-        "`apps/mobile/package-lock.json` (production dependency closure) and",
-        "`apps/mobile/ios/Podfile.lock`.",
+        "`apps/mobile/package-lock.json` (production dependency closure), linked workspace",
+        "package lockfiles, and `apps/mobile/ios/Podfile.lock`.",
         "",
         "- Regenerate: `python3 tools/licence-audit/audit.py notices --write`",
         "- Verify freshness: `python3 tools/licence-audit/audit.py notices --check`",

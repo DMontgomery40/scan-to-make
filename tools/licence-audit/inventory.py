@@ -7,7 +7,9 @@ import ast
 from collections import deque
 import importlib.metadata
 import json
+import os
 from pathlib import Path
+import platform
 import re
 import sys
 import tomllib
@@ -170,15 +172,30 @@ def _extract_legacy_npm_licence(pkg_data: dict[str, Any]) -> str | None:
     return None
 
 
+def _lockfile_lookup_candidates(parent_key: str, dep_name: str) -> list[str]:
+    """Return lockfile package key candidates walking ancestor directories up to root node_modules."""
+    segments = [seg for seg in parent_key.split("/") if seg] if parent_key else []
+    candidates: list[str] = []
+    for length in range(len(segments), -1, -1):
+        if length == 0:
+            candidates.append(f"node_modules/{dep_name}")
+            continue
+        last = segments[length - 1]
+        if last == "node_modules":
+            continue
+        if last.startswith("@") and length >= 2 and segments[length - 2] == "node_modules":
+            continue
+        prefix = "/".join(segments[:length])
+        candidates.append(f"{prefix}/node_modules/{dep_name}")
+    return candidates
+
+
 def _resolve_lockfile_dep_key(
     packages: dict[str, dict[str, Any]],
     parent_key: str,
     dep_name: str,
 ) -> str | None:
-    parts = (parent_key + "/").split("node_modules/") if parent_key else [""]
-    for idx in range(len(parts), 0, -1):
-        prefix = "node_modules/".join(parts[:idx])
-        candidate = f"{prefix}node_modules/{dep_name}".rstrip("/")
+    for candidate in _lockfile_lookup_candidates(parent_key, dep_name):
         if candidate in packages:
             entry = packages[candidate]
             if entry.get("link") and isinstance(entry.get("resolved"), str):
@@ -189,26 +206,63 @@ def _resolve_lockfile_dep_key(
     return None
 
 
-def _collect_npm_prod_keys(packages: dict[str, dict[str, Any]]) -> set[str]:
+def _read_local_pkg_json(workspace_dir: Path | None, key: str) -> dict[str, Any]:
+    if workspace_dir is None or key.startswith("node_modules/"):
+        return {}
+    pkg_json_path = (workspace_dir / key) / "package.json"
+    if not pkg_json_path.is_file():
+        return {}
+    try:
+        data = json.loads(pkg_json_path.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _collect_npm_prod_keys(
+    packages: dict[str, dict[str, Any]],
+    workspace_dir: Path | None = None,
+) -> set[str]:
     root_entry = packages.get("", {})
-    root_deps = list((root_entry.get("dependencies") or {}).keys()) + list(
-        (root_entry.get("optionalDependencies") or {}).keys()
-    )
-    if root_deps:
+    root_pkg_json = _read_local_pkg_json(workspace_dir, "")
+    queue: deque[tuple[str, str, bool]] = deque()
+
+    def _enqueue_edges(
+        parent_key: str,
+        entry: dict[str, Any],
+        fallback_pkg: dict[str, Any],
+    ) -> None:
+        deps = dict(fallback_pkg.get("dependencies") or {}) | dict(entry.get("dependencies") or {})
+        opt_deps = dict(fallback_pkg.get("optionalDependencies") or {}) | dict(
+            entry.get("optionalDependencies") or {}
+        )
+        peer_deps = dict(fallback_pkg.get("peerDependencies") or {}) | dict(
+            entry.get("peerDependencies") or {}
+        )
+        peer_meta = dict(fallback_pkg.get("peerDependenciesMeta") or {}) | dict(
+            entry.get("peerDependenciesMeta") or {}
+        )
+        for dep in sorted(set(deps.keys()) | set(opt_deps.keys())):
+            queue.append((parent_key, dep, False))
+        for peer in sorted(peer_deps.keys()):
+            meta_entry = peer_meta.get(peer)
+            is_opt_peer = isinstance(meta_entry, dict) and bool(meta_entry.get("optional"))
+            queue.append((parent_key, peer, is_opt_peer))
+
+    _enqueue_edges("", root_entry, root_pkg_json)
+    if queue:
         visited: set[str] = set()
-        queue: deque[tuple[str, str]] = deque(("", dep) for dep in sorted(root_deps))
         while queue:
-            parent_key, dep_name = queue.popleft()
+            parent_key, dep_name, is_opt_peer = queue.popleft()
             resolved_key = _resolve_lockfile_dep_key(packages, parent_key, dep_name)
             if not resolved_key or resolved_key in visited:
                 continue
-            visited.add(resolved_key)
             entry = packages.get(resolved_key, {})
-            children = list((entry.get("dependencies") or {}).keys()) + list(
-                (entry.get("optionalDependencies") or {}).keys()
-            )
-            for child in sorted(children):
-                queue.append((resolved_key, child))
+            if is_opt_peer and (entry.get("dev") is True or entry.get("devOptional") is True):
+                continue
+            visited.add(resolved_key)
+            local_pkg = _read_local_pkg_json(workspace_dir, resolved_key)
+            _enqueue_edges(resolved_key, entry, local_pkg)
         return visited
 
     return {
@@ -359,9 +413,9 @@ def inventory_mobile_npm(repo_root: Path) -> list[dict[str, Any]]:
         return []
     data = json.loads(lockfile.read_text(encoding="utf-8"))
     packages: dict[str, dict[str, Any]] = data.get("packages") or {}
-    prod_keys = _collect_npm_prod_keys(packages)
-    lockfile_rel = _rel_posix(lockfile, repo_root)
     workspace_dir = lockfile.parent
+    prod_keys = _collect_npm_prod_keys(packages, workspace_dir=workspace_dir)
+    lockfile_rel = _rel_posix(lockfile, repo_root)
 
     items: list[dict[str, Any]] = []
     for key in sorted(prod_keys):
@@ -382,6 +436,65 @@ def inventory_mobile_npm(repo_root: Path) -> list[dict[str, Any]]:
     return sorted(items, key=lambda x: (x["name"], x["version"], x["packagePath"]))
 
 
+def _collect_mobile_linked_workspace_dirs(repo_root: Path) -> set[Path]:
+    """Return resolved directories of workspace packages linked into apps/mobile's production closure."""
+    linked_dirs: set[Path] = set()
+    dir_queue: deque[Path] = deque()
+    mobile_dir = repo_root / "apps" / "mobile"
+    if mobile_dir.is_dir():
+        dir_queue.append(mobile_dir.resolve())
+
+    mobile_lock = mobile_dir / "package-lock.json"
+    if mobile_lock.is_file():
+        try:
+            ldata = json.loads(mobile_lock.read_text(encoding="utf-8"))
+            pkgs = ldata.get("packages") or {}
+            for key in _collect_npm_prod_keys(pkgs, workspace_dir=mobile_dir):
+                if not key.startswith("node_modules/"):
+                    cand = (mobile_dir / key).resolve()
+                    if cand.is_dir() and _is_within(cand, repo_root) and cand != mobile_dir.resolve():
+                        if cand not in linked_dirs:
+                            linked_dirs.add(cand)
+                            dir_queue.append(cand)
+        except (OSError, json.JSONDecodeError):
+            pass
+
+    visited_pkg_dirs: set[Path] = set()
+    while dir_queue:
+        cur_dir = dir_queue.popleft()
+        if cur_dir in visited_pkg_dirs:
+            continue
+        visited_pkg_dirs.add(cur_dir)
+        pkg_json = cur_dir / "package.json"
+        if not pkg_json.is_file():
+            continue
+        try:
+            pdata = json.loads(pkg_json.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        peer_meta = pdata.get("peerDependenciesMeta") or {}
+        specs: list[str] = []
+        for section in ("dependencies", "optionalDependencies"):
+            for spec in (pdata.get(section) or {}).values():
+                if isinstance(spec, str):
+                    specs.append(spec)
+        for peer_name, spec in (pdata.get("peerDependencies") or {}).items():
+            meta_entry = peer_meta.get(peer_name)
+            if isinstance(meta_entry, dict) and bool(meta_entry.get("optional")):
+                continue
+            if isinstance(spec, str):
+                specs.append(spec)
+        for spec in specs:
+            if spec.startswith("file:"):
+                target = (cur_dir / spec[5:]).resolve()
+                if target.is_dir() and _is_within(target, repo_root) and target != mobile_dir.resolve():
+                    if target not in linked_dirs:
+                        linked_dirs.add(target)
+                        dir_queue.append(target)
+
+    return linked_dirs
+
+
 def inventory_workspace_npm(repo_root: Path) -> list[dict[str, Any]]:
     """Inventory npm dependencies across services/** and packages/**."""
     lockfiles: list[Path] = []
@@ -394,26 +507,17 @@ def inventory_workspace_npm(repo_root: Path) -> list[dict[str, Any]]:
                 continue
             lockfiles.append(candidate)
 
-    # Identify workspace packages directly depended on by apps/mobile so their
-    # production dependencies are also checked against the app allowlist.
-    mobile_linked_dirs: set[Path] = set()
-    mobile_pkg_json = repo_root / "apps" / "mobile" / "package.json"
-    if mobile_pkg_json.is_file():
-        try:
-            mpkg = json.loads(mobile_pkg_json.read_text(encoding="utf-8"))
-            for spec in (mpkg.get("dependencies") or {}).values():
-                if isinstance(spec, str) and spec.startswith("file:"):
-                    mobile_linked_dirs.add((mobile_pkg_json.parent / spec[5:]).resolve())
-        except (OSError, json.JSONDecodeError):
-            pass
+    # Identify workspace packages depended on by apps/mobile so their
+    # production dependencies are also checked against the app allowlist and notices.
+    mobile_linked_dirs = _collect_mobile_linked_workspace_dirs(repo_root)
 
     items: list[dict[str, Any]] = []
     for lockfile in sorted(lockfiles):
         data = json.loads(lockfile.read_text(encoding="utf-8"))
         packages: dict[str, dict[str, Any]] = data.get("packages") or {}
-        prod_keys = _collect_npm_prod_keys(packages)
-        lockfile_rel = _rel_posix(lockfile, repo_root)
         workspace_dir = lockfile.parent.resolve()
+        prod_keys = _collect_npm_prod_keys(packages, workspace_dir=workspace_dir)
+        lockfile_rel = _rel_posix(lockfile, repo_root)
         ships_in_app = workspace_dir in mobile_linked_dirs
 
         for key in sorted(packages.keys()):
@@ -422,7 +526,7 @@ def inventory_workspace_npm(repo_root: Path) -> list[dict[str, Any]]:
             entry = packages[key]
             if entry.get("link"):
                 continue
-            is_prod = key in prod_keys or (not entry.get("dev") and not entry.get("devOptional"))
+            is_prod = key in prod_keys
             target_scope = "app" if (ships_in_app and is_prod) else "server"
             items.append(
                 _resolve_npm_entry(
@@ -817,17 +921,364 @@ def _parse_req_spec(line: str) -> tuple[str, set[str], str | None] | None:
     return name, extras, marker
 
 
-def _marker_allows(marker: str | None, active_extras: set[str]) -> bool:
-    if not marker:
+_PEP440_RE = re.compile(
+    r"^v?"
+    r"(?:(?P<epoch>\d+)!)?"
+    r"(?P<release>\d+(?:\.\d+)*)"
+    r"(?P<pre>[-_.]?(?P<pre_l>a|b|c|rc|alpha|beta|pre|preview)[-_.]?(?P<pre_n>\d*))?"
+    r"(?P<post>(?:-(?P<post_n1>\d+))|(?:[-_.]?(?P<post_l>post|rev|r)[-_.]?(?P<post_n2>\d*)))?"
+    r"(?P<dev>[-_.]?dev[-_.]?(?P<dev_n>\d*))?"
+    r"(?:\+(?P<local>[a-z0-9]+(?:[-_.][a-z0-9]+)*))?$",
+    re.IGNORECASE,
+)
+
+_PRE_PHASE_RANK = {
+    "a": 0,
+    "alpha": 0,
+    "b": 1,
+    "beta": 1,
+    "c": 2,
+    "pre": 2,
+    "preview": 2,
+    "rc": 2,
+}
+
+_MARKER_TOKEN_RE = re.compile(
+    r"""
+    (?P<WS>\s+)
+    | (?P<PAREN>[()])
+    | (?P<NOT_IN>\bnot\s+in\b)
+    | (?P<CMP>===|==|!=|<=|>=|~=|<>|<|>)
+    | (?P<IN>\bin\b)
+    | (?P<BOOL>\b(?:and|or|not)\b)
+    | '(?P<SQ>[^']*)'
+    | "(?P<DQ>[^"]*)"
+    | (?P<IDENT>[A-Za-z_][A-Za-z0-9_.]*)
+    """,
+    re.VERBOSE,
+)
+
+_LEGACY_MARKER_ALIASES = {
+    "os.name": "os_name",
+    "platform.machine": "platform_machine",
+    "platform.python_implementation": "platform_python_implementation",
+    "platform.version": "platform_version",
+    "python_implementation": "platform_python_implementation",
+    "sys.platform": "sys_platform",
+}
+
+
+class _MarkerParseError(ValueError):
+    """Raised when a PEP 508 environment marker cannot be parsed or resolved."""
+
+
+def _format_full_version(info: Any) -> str:
+    version = f"{info.major}.{info.minor}.{info.micro}"
+    kind = getattr(info, "releaselevel", "final")
+    if kind != "final":
+        version += f"{kind[0]}{getattr(info, 'serial', 0)}"
+    return version
+
+
+def default_marker_environment() -> dict[str, str]:
+    """Return the standard PEP 508 marker evaluation environment for the active runtime."""
+    return {
+        "implementation_name": sys.implementation.name,
+        "implementation_version": _format_full_version(sys.implementation.version),
+        "os_name": os.name,
+        "platform_machine": platform.machine(),
+        "platform_python_implementation": platform.python_implementation(),
+        "platform_release": platform.release(),
+        "platform_system": platform.system(),
+        "platform_version": platform.version(),
+        "python_full_version": platform.python_version(),
+        "python_version": ".".join(platform.python_version_tuple()[:2]),
+        "sys_platform": sys.platform,
+    }
+
+
+def _parse_pep440(raw: str) -> dict[str, Any] | None:
+    m = _PEP440_RE.match(raw.strip())
+    if not m:
+        return None
+    epoch = int(m.group("epoch") or 0)
+    release_raw = tuple(int(p) for p in m.group("release").split("."))
+    trimmed = list(release_raw)
+    while len(trimmed) > 1 and trimmed[-1] == 0:
+        trimmed.pop()
+    release_norm = tuple(trimmed)
+
+    has_pre = m.group("pre") is not None
+    pre_rank = _PRE_PHASE_RANK[m.group("pre_l").lower()] if has_pre else 0
+    pre_num = int(m.group("pre_n") or 0) if has_pre else 0
+
+    has_post = m.group("post") is not None
+    post_raw = m.group("post_n1") if m.group("post_n1") is not None else m.group("post_n2")
+    post_num = int(post_raw or 0) if has_post else 0
+
+    has_dev = m.group("dev") is not None
+    dev_num = int(m.group("dev_n") or 0) if has_dev else 0
+
+    local_raw = m.group("local")
+    local_key: tuple[tuple[int, int | str], ...] = ()
+    if local_raw:
+        parts = re.split(r"[-_.]", local_raw.lower())
+        local_key = tuple((1, int(p)) if p.isdigit() else (0, p) for p in parts)
+
+    if not has_pre and not has_post and has_dev:
+        phase = 0
+        detail: tuple[int, ...] = (dev_num,)
+    elif has_pre:
+        phase = 1
+        post_flag = 1 if has_post else (-1 if has_dev else 0)
+        dev_after_post = -1 if (has_post and has_dev) else 0
+        detail = (
+            pre_rank,
+            pre_num,
+            post_flag,
+            post_num if has_post else (dev_num if has_dev else 0),
+            dev_after_post,
+            dev_num if (has_post and has_dev) else 0,
+        )
+    elif not has_post:
+        phase = 2
+        detail = ()
+    else:
+        phase = 3
+        detail = (post_num, -1 if has_dev else 0, dev_num if has_dev else 0)
+
+    return {
+        "dev": has_dev,
+        "epoch": epoch,
+        "key": (epoch, release_norm, phase, detail, (1, local_key) if local_key else (0, ())),
+        "local": bool(local_raw),
+        "post": has_post,
+        "pre": has_pre,
+        "release_raw": release_raw,
+    }
+
+
+def _pep440_compare(lhs_str: str, op: str, rhs_str: str) -> bool | None:
+    if op in ("==", "!=") and rhs_str.strip().endswith(".*") and "+" not in rhs_str:
+        lhs = _parse_pep440(lhs_str)
+        rhs = _parse_pep440(rhs_str.strip()[:-2])
+        if lhs is not None and rhs is not None and not rhs["pre"] and not rhs["post"] and not rhs["dev"]:
+            prefix = rhs["release_raw"]
+            padded = lhs["release_raw"] + (0,) * max(0, len(prefix) - len(lhs["release_raw"]))
+            matched = lhs["epoch"] == rhs["epoch"] and padded[: len(prefix)] == prefix
+            return matched if op == "==" else not matched
+
+    lhs = _parse_pep440(lhs_str)
+    rhs = _parse_pep440(rhs_str)
+    if lhs is None or rhs is None:
+        return None
+
+    if op == "~=":
+        if len(rhs["release_raw"]) < 2:
+            return None
+        prefix = rhs["release_raw"][:-1]
+        padded = lhs["release_raw"] + (0,) * max(0, len(prefix) - len(lhs["release_raw"]))
+        return lhs["key"] >= rhs["key"] and lhs["epoch"] == rhs["epoch"] and padded[: len(prefix)] == prefix
+
+    lk, rk = lhs["key"], rhs["key"]
+    if op == "==":
+        return lk == rk
+    if op == "!=":
+        return lk != rk
+    if op == "<":
+        return lk < rk
+    if op == "<=":
+        return lk <= rk
+    if op == ">":
+        return lk > rk
+    if op == ">=":
+        return lk >= rk
+    return None
+
+
+def _tokenize_marker(marker: str) -> list[tuple[str, str]]:
+    tokens: list[tuple[str, str]] = []
+    pos = 0
+    while pos < len(marker):
+        m = _MARKER_TOKEN_RE.match(marker, pos)
+        if not m:
+            raise _MarkerParseError(f"Unexpected marker syntax at {pos}: {marker!r}")
+        pos = m.end()
+        kind = m.lastgroup
+        if kind == "WS":
+            continue
+        if kind == "PAREN":
+            tokens.append(("PAREN", m.group("PAREN")))
+        elif kind == "NOT_IN":
+            tokens.append(("OP", "not in"))
+        elif kind == "CMP":
+            op = m.group("CMP")
+            tokens.append(("OP", "!=" if op == "<>" else op))
+        elif kind == "IN":
+            tokens.append(("OP", "in"))
+        elif kind == "BOOL":
+            tokens.append(("BOOL", m.group("BOOL")))
+        elif kind == "SQ":
+            tokens.append(("STR", m.group("SQ")))
+        elif kind == "DQ":
+            tokens.append(("STR", m.group("DQ")))
+        elif kind == "IDENT":
+            ident = m.group("IDENT")
+            tokens.append(("IDENT", _LEGACY_MARKER_ALIASES.get(ident, ident)))
+    return tokens
+
+
+def _eval_marker_comparison(
+    lhs_tok: tuple[str, str],
+    op: str,
+    rhs_tok: tuple[str, str],
+    env: dict[str, str],
+) -> bool:
+    def _resolve(tok: tuple[str, str]) -> str:
+        kind, val = tok
+        if kind == "STR":
+            return val
+        if val in env:
+            return env[val]
+        raise _MarkerParseError(f"Unknown marker variable: {val}")
+
+    lhs_val = _resolve(lhs_tok)
+    rhs_val = _resolve(rhs_tok)
+
+    if op == "===":
+        return lhs_val == rhs_val
+    if op == "in":
+        return lhs_val in rhs_val
+    if op == "not in":
+        return lhs_val not in rhs_val
+
+    uses_extra = (lhs_tok == ("IDENT", "extra")) or (rhs_tok == ("IDENT", "extra"))
+    if uses_extra:
+        lhs_norm = _pep503_normalize(lhs_val) if lhs_val.strip() else ""
+        rhs_norm = _pep503_normalize(rhs_val) if rhs_val.strip() else ""
+        if op == "==":
+            return lhs_norm == rhs_norm
+        if op == "!=":
+            return lhs_norm != rhs_norm
+        if op == "<":
+            return lhs_norm < rhs_norm
+        if op == "<=":
+            return lhs_norm <= rhs_norm
+        if op == ">":
+            return lhs_norm > rhs_norm
+        if op == ">=":
+            return lhs_norm >= rhs_norm
+        raise _MarkerParseError(f"Unsupported extra operator: {op}")
+
+    pep440_res = _pep440_compare(lhs_val, op, rhs_val)
+    if pep440_res is not None:
+        return pep440_res
+
+    if op == "==":
+        return lhs_val == rhs_val
+    if op == "!=":
+        return lhs_val != rhs_val
+    if op == "<":
+        return lhs_val < rhs_val
+    if op == "<=":
+        return lhs_val <= rhs_val
+    if op == ">":
+        return lhs_val > rhs_val
+    if op == ">=":
+        return lhs_val >= rhs_val
+    raise _MarkerParseError(f"Unsupported marker operator: {op}")
+
+
+def _eval_marker_tokens(tokens: list[tuple[str, str]], env: dict[str, str]) -> bool:
+    idx = 0
+
+    def _parse_or() -> bool:
+        nonlocal idx
+        left = _parse_and()
+        while idx < len(tokens) and tokens[idx] == ("BOOL", "or"):
+            idx += 1
+            right = _parse_and()
+            left = left or right
+        return left
+
+    def _parse_and() -> bool:
+        nonlocal idx
+        left = _parse_not()
+        while idx < len(tokens) and tokens[idx] == ("BOOL", "and"):
+            idx += 1
+            right = _parse_not()
+            left = left and right
+        return left
+
+    def _parse_not() -> bool:
+        nonlocal idx
+        if idx < len(tokens) and tokens[idx] == ("BOOL", "not"):
+            idx += 1
+            return not _parse_not()
+        return _parse_atom()
+
+    def _parse_atom() -> bool:
+        nonlocal idx
+        if idx >= len(tokens):
+            raise _MarkerParseError("Unexpected end of marker expression")
+        if tokens[idx] == ("PAREN", "("):
+            idx += 1
+            val = _parse_or()
+            if idx >= len(tokens) or tokens[idx] != ("PAREN", ")"):
+                raise _MarkerParseError("Unclosed '(' in marker expression")
+            idx += 1
+            return val
+        lhs = tokens[idx]
+        if lhs[0] not in ("IDENT", "STR"):
+            raise _MarkerParseError(f"Expected marker operand, got {lhs!r}")
+        idx += 1
+        if idx >= len(tokens) or tokens[idx][0] != "OP":
+            raise _MarkerParseError("Expected comparison operator in marker expression")
+        op = tokens[idx][1]
+        idx += 1
+        if idx >= len(tokens) or tokens[idx][0] not in ("IDENT", "STR"):
+            raise _MarkerParseError("Expected right-hand marker operand")
+        rhs = tokens[idx]
+        idx += 1
+        return _eval_marker_comparison(lhs, op, rhs, env)
+
+    result = _parse_or()
+    if idx != len(tokens):
+        raise _MarkerParseError(f"Trailing tokens in marker expression: {tokens[idx:]!r}")
+    return result
+
+
+def _marker_allows(
+    marker: str | None,
+    active_extras: set[str],
+    marker_env: dict[str, str] | None = None,
+) -> bool:
+    if not marker or not marker.strip():
         return True
-    # Skip inactive optional extra branches (e.g. `extra == 'dev'` or `extra == "test"`)
-    extra_matches = re.findall(r"""extra\s*==\s*['"]([^'"]+)['"]""", marker)
-    if extra_matches:
-        return any(_pep503_normalize(ex) in active_extras for ex in extra_matches)
-    return True
+    base_env = default_marker_environment()
+    if marker_env:
+        base_env.update(marker_env)
+    try:
+        tokens = _tokenize_marker(marker)
+        if not tokens:
+            return True
+        contexts = [""] + sorted({_pep503_normalize(e) for e in active_extras if e and e.strip()})
+        for extra_val in contexts:
+            env = dict(base_env)
+            env["extra"] = extra_val
+            if _eval_marker_tokens(tokens, env):
+                return True
+        return False
+    except _MarkerParseError:
+        # Fail closed on malformed markers so disallowed dependencies cannot hide behind syntax quirks.
+        return True
 
 
-def _parse_requirements_txt(req_file: Path, visited: set[Path] | None = None) -> list[tuple[str, set[str], str]]:
+def _parse_requirements_txt(
+    req_file: Path,
+    visited: set[Path] | None = None,
+    marker_env: dict[str, str] | None = None,
+) -> list[tuple[str, set[str], str]]:
     if visited is None:
         visited = set()
     resolved_file = req_file.resolve()
@@ -856,23 +1307,26 @@ def _parse_requirements_txt(req_file: Path, visited: set[Path] | None = None) ->
             continue
         if tokens[0] in ("-r", "--requirement") and len(tokens) >= 2:
             nested = req_file.parent / tokens[1]
-            results.extend(_parse_requirements_txt(nested, visited))
+            results.extend(_parse_requirements_txt(nested, visited, marker_env=marker_env))
             continue
         if tokens[0].startswith("-"):
             continue
         cleaned = re.sub(r"--hash=\S+", "", entry).strip()
         parsed = _parse_req_spec(cleaned)
-        if parsed and _marker_allows(parsed[2], set()):
+        if parsed and _marker_allows(parsed[2], set(), marker_env=marker_env):
             results.append((parsed[0], parsed[1], req_file.name))
     return results
 
 
-def _collect_declared_tool_requirements(tool_dir: Path) -> list[tuple[str, set[str], str]]:
+def _collect_declared_tool_requirements(
+    tool_dir: Path,
+    marker_env: dict[str, str] | None = None,
+) -> list[tuple[str, set[str], str]]:
     """Collect declared Python requirements from requirements*.txt, pyproject.toml, uv.lock, pylock.toml, Pipfile.lock."""
     declared: list[tuple[str, set[str], str]] = []
 
     for req_file in sorted(tool_dir.glob("requirements*.txt")):
-        declared.extend(_parse_requirements_txt(req_file))
+        declared.extend(_parse_requirements_txt(req_file, marker_env=marker_env))
 
     pyproject = tool_dir / "pyproject.toml"
     if pyproject.is_file():
@@ -882,7 +1336,7 @@ def _collect_declared_tool_requirements(tool_dir: Path) -> list[tuple[str, set[s
             for spec in project.get("dependencies") or []:
                 if isinstance(spec, str):
                     parsed = _parse_req_spec(spec)
-                    if parsed and _marker_allows(parsed[2], set()):
+                    if parsed and _marker_allows(parsed[2], set(), marker_env=marker_env):
                         declared.append((parsed[0], parsed[1], "pyproject.toml"))
         except (OSError, tomllib.TOMLDecodeError):
             pass
@@ -905,8 +1359,17 @@ def _collect_declared_tool_requirements(tool_dir: Path) -> list[tuple[str, set[s
         try:
             pdata = json.loads(pipfile_lock.read_text(encoding="utf-8"))
             for section in ("default",):
-                for pkg_name in (pdata.get(section) or {}).keys():
-                    declared.append((_pep503_normalize(pkg_name), set(), "Pipfile.lock"))
+                for pkg_name, pkg_meta in (pdata.get(section) or {}).items():
+                    extras: set[str] = set()
+                    markers: str | None = None
+                    if isinstance(pkg_meta, dict):
+                        raw_extras = pkg_meta.get("extras") or []
+                        if isinstance(raw_extras, list):
+                            extras = {_pep503_normalize(str(e)) for e in raw_extras if str(e).strip()}
+                        if isinstance(pkg_meta.get("markers"), str):
+                            markers = pkg_meta["markers"]
+                    if _marker_allows(markers, set(), marker_env=marker_env):
+                        declared.append((_pep503_normalize(pkg_name), extras, "Pipfile.lock"))
         except (OSError, json.JSONDecodeError):
             pass
 
@@ -1057,6 +1520,12 @@ def _has_non_ignored_files(directory: Path) -> bool:
     return False
 
 
+_TOOL_ROOT_CODE_SUFFIXES = frozenset({".py", ".swift", ".sh", ".mjs", ".js", ".ts"})
+_TOOL_ROOT_MANIFEST_NAMES = frozenset(
+    {"Package.swift", "pyproject.toml", "package.json", "Pipfile.lock", "uv.lock", "pylock.toml"}
+)
+
+
 def discover_tool_folders(repo_root: Path) -> list[Path]:
     """Discover concrete tool folders under tools/ (including nested category folders like tools/templates/*)."""
     tools_root = repo_root / "tools"
@@ -1076,8 +1545,18 @@ def discover_tool_folders(repo_root: Path) -> list[Path]:
             for d in folder.iterdir()
             if d.is_dir() and not d.name.startswith(".") and d.name not in _IGNORED_TOOL_SUBDIRS
         )
-        # Grouping folder (like tools/templates): no direct files, only child tool folders
-        if not direct_files and child_dirs:
+        has_tool_root_file = any(
+            f.suffix in _TOOL_ROOT_CODE_SUFFIXES
+            or f.name in _TOOL_ROOT_MANIFEST_NAMES
+            or f.name.startswith("requirements")
+            or bool(_LICENCE_FILENAMES_RE.match(f.name))
+            for f in direct_files
+        )
+        non_empty_children = [d for d in child_dirs if _has_non_ignored_files(d)]
+        # Category/grouping folder (like tools/templates): has child tool folders and no root code/manifest/licence
+        if not has_tool_root_file and non_empty_children:
+            if direct_files:
+                found.append(folder)
             for child in child_dirs:
                 _walk(child)
             return
@@ -1106,6 +1585,7 @@ def _collect_local_tool_module_names(tools_root: Path) -> set[str]:
 def inventory_tools(
     repo_root: Path,
     python_paths: list[Path] | None = None,
+    marker_env: dict[str, str] | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Return (tool_folder_records, tool_python_requirement_records)."""
     tool_folders = discover_tool_folders(repo_root)
@@ -1118,11 +1598,16 @@ def inventory_tools(
 
     for folder in tool_folders:
         rel_folder = _rel_posix(folder, repo_root)
+        descendant_tool_folders = [
+            other for other in tool_folders if other != folder and _is_within(other, folder)
+        ]
 
         # Gather source texts for SPDX header hints
         source_texts: list[str] = []
         py_files: list[Path] = []
         for f in sorted(folder.rglob("*")):
+            if any(_is_within(f, desc) for desc in descendant_tool_folders):
+                continue
             rel_parts = f.relative_to(folder).parts
             if any(part in ("__pycache__", ".build", "node_modules", ".venv", "venv") or part.startswith(".") for part in rel_parts):
                 continue
@@ -1164,100 +1649,126 @@ def inventory_tools(
             }
         )
 
-        # Declared Python requirements + transitive Requires-Dist closure
-        declared = _collect_declared_tool_requirements(folder)
-        visited_dists: set[str] = set()
+        # Declared Python requirements + transitive Requires-Dist closure,
+        # revisiting distributions whenever new extras are accumulated.
+        declared = _collect_declared_tool_requirements(folder, marker_env=marker_env)
+        evaluated_extras: dict[str, set[str]] = {}
+        recorded_by_norm: dict[str, dict[str, Any]] = {}
         queue: deque[tuple[str, set[str], str, bool]] = deque(
             (norm_name, extras, f"{rel_folder}/{src}", True)
             for norm_name, extras, src in declared
         )
 
-        while queue:
-            req_norm, req_extras, declared_in, is_direct = queue.popleft()
-            if req_norm in visited_dists:
-                continue
-            visited_dists.add(req_norm)
-
-            dist_info = dist_index.get(req_norm)
-            if dist_info is None:
-                python_records.append(
-                    {
-                        "declared": True,
-                        "declaredIn": declared_in,
-                        "direct": is_direct,
-                        "ecosystem": "python",
-                        "evidence": f"{declared_in} (package '{req_norm}' not installed in Python metadata)",
-                        "firstParty": False,
-                        "licence": UNKNOWN,
-                        "name": req_norm,
-                        "scope": "server",
-                        "toolFolder": rel_folder,
-                        "version": "uninstalled",
-                    }
-                )
-                continue
-
-            python_records.append(
-                {
-                    "declared": True,
-                    "declaredIn": declared_in,
-                    "direct": is_direct,
-                    "ecosystem": "python",
-                    "evidence": dist_info["evidence"],
-                    "firstParty": False,
-                    "licence": dist_info["licence"],
-                    "name": dist_info["name"],
-                    "scope": "server",
-                    "toolFolder": rel_folder,
-                    "version": dist_info["version"],
-                }
-            )
-
-            for child_norm, child_extras, child_marker in dist_info["requiresDist"]:
-                if _marker_allows(child_marker, req_extras) and child_norm not in visited_dists:
+        def _enqueue_requires_dist(
+            dist_meta: dict[str, Any],
+            active_extras: set[str],
+            via_label: str,
+        ) -> None:
+            for child_norm, child_extras, child_marker in dist_meta["requiresDist"]:
+                if not _marker_allows(child_marker, active_extras, marker_env=marker_env):
+                    continue
+                norm_child_extras = {_pep503_normalize(e) for e in child_extras if e and e.strip()}
+                if child_norm not in evaluated_extras or not norm_child_extras.issubset(
+                    evaluated_extras[child_norm]
+                ):
                     queue.append(
                         (
                             child_norm,
-                            child_extras,
-                            f"{declared_in} -> {dist_info['name']}@{dist_info['version']}",
+                            norm_child_extras,
+                            f"{via_label} -> {dist_meta['name']}@{dist_meta['version']}",
                             False,
                         )
                     )
 
+        while queue:
+            req_norm, req_extras, declared_in, is_direct = queue.popleft()
+            norm_extras = {_pep503_normalize(e) for e in req_extras if e and e.strip()}
+
+            if req_norm in evaluated_extras:
+                if is_direct and req_norm in recorded_by_norm and not recorded_by_norm[req_norm]["direct"]:
+                    recorded_by_norm[req_norm]["direct"] = True
+                    recorded_by_norm[req_norm]["declaredIn"] = declared_in
+                added_extras = norm_extras - evaluated_extras[req_norm]
+                if not added_extras:
+                    continue
+                evaluated_extras[req_norm] |= added_extras
+                dist_info = dist_index.get(req_norm)
+                if dist_info is not None:
+                    _enqueue_requires_dist(dist_info, evaluated_extras[req_norm], declared_in)
+                continue
+
+            evaluated_extras[req_norm] = set(norm_extras)
+            dist_info = dist_index.get(req_norm)
+            if dist_info is None:
+                rec = {
+                    "declared": True,
+                    "declaredIn": declared_in,
+                    "direct": is_direct,
+                    "ecosystem": "python",
+                    "evidence": f"{declared_in} (package '{req_norm}' not installed in Python metadata)",
+                    "firstParty": False,
+                    "licence": UNKNOWN,
+                    "name": req_norm,
+                    "scope": "server",
+                    "toolFolder": rel_folder,
+                    "version": "uninstalled",
+                }
+                python_records.append(rec)
+                recorded_by_norm[req_norm] = rec
+                continue
+
+            rec = {
+                "declared": True,
+                "declaredIn": declared_in,
+                "direct": is_direct,
+                "ecosystem": "python",
+                "evidence": dist_info["evidence"],
+                "firstParty": False,
+                "licence": dist_info["licence"],
+                "name": dist_info["name"],
+                "scope": "server",
+                "toolFolder": rel_folder,
+                "version": dist_info["version"],
+            }
+            python_records.append(rec)
+            recorded_by_norm[req_norm] = rec
+            _enqueue_requires_dist(dist_info, evaluated_extras[req_norm], declared_in)
+
         # AST import check on non-test .py files to detect undeclared third-party imports
         imported_modules: dict[str, str] = {}
-        uses_blender_runtime = False
         for py_file in py_files:
             try:
                 tree = ast.parse(py_file.read_text(encoding="utf-8", errors="replace"))
             except SyntaxError:
                 continue
             py_rel = _rel_posix(py_file, repo_root)
+            file_mods: set[str] = set()
             for node in ast.walk(tree):
                 if isinstance(node, ast.Import):
                     for alias in node.names:
-                        top_mod = alias.name.split(".", 1)[0]
-                        imported_modules.setdefault(top_mod, py_rel)
-                        if top_mod in _BLENDER_EMBEDDED_MODULES:
-                            uses_blender_runtime = True
+                        file_mods.add(alias.name.split(".", 1)[0])
                 elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
-                    top_mod = node.module.split(".", 1)[0]
-                    imported_modules.setdefault(top_mod, py_rel)
-                    if top_mod in _BLENDER_EMBEDDED_MODULES:
-                        uses_blender_runtime = True
+                    file_mods.add(node.module.split(".", 1)[0])
+
+            file_uses_blender = bool(file_mods & _BLENDER_EMBEDDED_MODULES) or (
+                py_file.name == "blender_tool.py" and is_gpl_family(folder_lic)
+            )
+            for top_mod in sorted(file_mods):
+                # Headless Blender scripts receive numpy bundled inside the isolated Blender runtime
+                if top_mod == "numpy" and file_uses_blender:
+                    continue
+                imported_modules.setdefault(top_mod, py_rel)
 
         for mod_name, py_rel in sorted(imported_modules.items()):
             if mod_name in stdlib_names or mod_name in local_module_names:
                 continue
             if mod_name in _BLENDER_EMBEDDED_MODULES:
                 continue
-            # Headless Blender scripts receive numpy bundled inside the isolated Blender runtime
-            if mod_name == "numpy" and uses_blender_runtime:
-                continue
 
             mapped_dist = module_to_dist.get(mod_name) or _pep503_normalize(mod_name)
-            if mapped_dist in visited_dists:
+            if mapped_dist in evaluated_extras:
                 continue
+            evaluated_extras.setdefault(mapped_dist, set())
 
             dist_info = dist_index.get(mapped_dist)
             if dist_info is not None:

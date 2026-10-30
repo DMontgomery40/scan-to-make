@@ -1,8 +1,8 @@
 # Third-Party Notices (`apps/mobile`)
 
 This file lists third-party software packages and native pods resolved from
-`apps/mobile/package-lock.json` (production dependency closure) and
-`apps/mobile/ios/Podfile.lock`.
+`apps/mobile/package-lock.json` (production dependency closure), linked workspace
+package lockfiles, and `apps/mobile/ios/Podfile.lock`.
 
 - Regenerate: `python3 tools/licence-audit/audit.py notices --write`
 - Verify freshness: `python3 tools/licence-audit/audit.py notices --check`
