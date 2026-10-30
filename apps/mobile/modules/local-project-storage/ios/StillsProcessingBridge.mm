@@ -212,7 +212,10 @@ RCT_REMAP_METHOD(pickImages,pickImagesLimit:(double)limit resolve:(RCTPromiseRes
   if(self.pickSingle){
     RCTPromiseResolveBlock resolve=self.pickResolve;RCTPromiseRejectBlock reject=self.pickReject;
     self.pickResolve=nil;self.pickReject=nil;self.pickSingle=NO;
-    if(photos.count&&resolve)resolve(photos.firstObject);
+    // pickImage() predates display URIs: its callers pass the result straight
+    // to an upload, whose identity check accepts exactly three fields.
+    NSDictionary *first=photos.firstObject;
+    if(first&&resolve)resolve(@{@"sha256":first[@"sha256"],@"byteLength":first[@"byteLength"],@"mediaType":first[@"mediaType"]});
     else if(reject)reject(rejected.count?@"invalid-source":@"cancelled",rejected.count?@"Choose a readable JPEG, HEIC or PNG photo under 25 MB.":@"Photo selection cancelled.",nil);
   }else{
     RCTPromiseResolveBlock resolve=self.pickImagesResolve;self.pickImagesResolve=nil;self.pickReject=nil;

@@ -203,12 +203,19 @@ export class DetailStillsClient {
     projectId: string,
     captureId: string,
     ack: ProjectAcknowledgment,
-    source: CaptureFile,
+    source: CaptureFile | PickedStillPhoto,
     label?: string,
   ): Promise<DetailStill> {
     this.checkIds(projectId, captureId, ack);
-    if (!stillMedia.includes(source.mediaType)) failure(415);
-    if (source.byteLength <= 0 || source.byteLength > MAX_DETAIL_STILL_BYTES)
+    // Picked photos may carry a display `uri`; the native upload transport
+    // accepts exactly the 3-field exact-byte identity, nothing more.
+    const identity: CaptureFile = {
+      sha256: source.sha256,
+      byteLength: source.byteLength,
+      mediaType: source.mediaType,
+    };
+    if (!stillMedia.includes(identity.mediaType)) failure(415);
+    if (identity.byteLength <= 0 || identity.byteLength > MAX_DETAIL_STILL_BYTES)
       failure(413);
     if (label !== undefined)
       DetailStillSchema.shape.label.parse(label);
@@ -224,7 +231,7 @@ export class DetailStillsClient {
         method: 'POST',
         path,
         etag: ack.etag,
-        source,
+        source: identity,
       });
     } catch {
       throw Object.assign(Error(AMBIGUOUS_UPLOAD), {
@@ -243,9 +250,9 @@ export class DetailStillsClient {
       .parse(JSON.parse(r.body)).still;
     this.binding(still, projectId, captureId, project.revision);
     if (
-      still.sha256 !== source.sha256 ||
-      still.byteLength !== source.byteLength ||
-      still.mediaType !== source.mediaType
+      still.sha256 !== identity.sha256 ||
+      still.byteLength !== identity.byteLength ||
+      still.mediaType !== identity.mediaType
     )
       throw Error('Uploaded photo identity mismatch.');
     await this.settle(projectId, ack, context);

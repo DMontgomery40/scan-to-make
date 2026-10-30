@@ -85,6 +85,20 @@ test('upload posts the exact source with If-Match ack and validates the returned
   ]);
 });
 
+test('upload sends only the 3-field identity for a picked photo that carries a display uri', async () => {
+  const h = harness();
+  const ack = await h.create();
+  h.native.request = jest.fn(async () => ({
+    status: 201,
+    body: JSON.stringify({ still: still() }),
+    etag,
+  }));
+  const picked = { ...source, uri: 'file:///private/picked.jpg' };
+  await h.client.upload('one', captureId, ack, picked);
+  expect(calls(h)[0].source).toEqual(source);
+  expect(Object.keys(calls(h)[0].source)).toHaveLength(3);
+});
+
 test('lost upload reply is ambiguous and never retried', async () => {
   const h = harness();
   const ack = await h.create();
