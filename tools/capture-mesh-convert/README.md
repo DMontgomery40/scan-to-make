@@ -75,4 +75,4 @@ BLENDER=$HOME/opt/blender-5.0.1/blender .venv/bin/python -m unittest discover -s
 
 The supported graph and UV conventions follow the [OpenUSD Preview Surface specification](https://openusd.org/dev/spec_usdpreviewsurface.html) and [primvar interpolation rules](https://openusd.org/dev/user_guides/primvars.html).
 
-CI: not wired, so these tests are local-only. Adding a workflow under `.github/` is outside this ticket's `tools/capture-mesh-convert/**` scope; run the command above (requires `usd-core`).
+CI: the existing capture-tools workflow runs the converter and downstream suites but installs only `usd-core`. Texture tests skip explicitly if Pillow is absent; the Blender import test skips explicitly if `BLENDER` is unset. To exercise the full texture suite in CI, install this directory's requirements (and pinned Blender for the import check). Workflow edits are outside this ticket's `tools/capture-mesh-convert/**` scope. Run the full command above locally.

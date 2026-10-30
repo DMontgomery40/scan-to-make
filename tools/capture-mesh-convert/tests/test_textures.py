@@ -12,10 +12,14 @@ HERE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(HERE))
 from convert import convert
 from make_fixtures import add_box, BOX_FACES
-from PIL import Image
+try:
+    from PIL import Image
+except ImportError:
+    Image = None
 from pxr import Gf, Sdf, Usd, UsdGeom, UsdShade, UsdUtils
 
 
+@unittest.skipUnless(Image is not None, "Pillow absent; install converter requirements for texture tests")
 class TextureTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
