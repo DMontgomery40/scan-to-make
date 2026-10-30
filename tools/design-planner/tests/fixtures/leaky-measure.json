@@ -1,0 +1,7 @@
+{
+  "watertight": false,
+  "bboxMm": {"min": [-40.0, -12.5, 0], "max": [40.0, 12.5, 18.0], "extents": [80.0, 25.0, 18.0]},
+  "volumeMm3": null,
+  "surfaceAreaMm2": 7300.0,
+  "boxExtentsMm": [80.0, 25.0, 18.0]
+}

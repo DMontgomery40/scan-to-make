@@ -1,0 +1,27 @@
+{
+  "status": "complete",
+  "previewOnly": true,
+  "provesPhysicalAccuracy": false,
+  "inputUnitsDeclared": "mm",
+  "outputUnits": "mm",
+  "specComparisonMetric": "boxExtentsMm",
+  "referenceDimensionsMm": [60.6, 45.2, 21.7],
+  "initial": {"watertight": false, "bboxMm": {"min": [0, 0, 0], "max": [61.0, 45.9, 22.4], "extents": [61.0, 45.9, 22.4]}, "boxExtentsMm": [61.0, 45.9, 22.4]},
+  "final": {
+    "vertices": 3120,
+    "faces": 6236,
+    "edges": 9354,
+    "components": 1,
+    "boundaryEdges": 0,
+    "nonManifoldEdges": 0,
+    "inconsistentWindingEdges": 0,
+    "watertight": true,
+    "bboxMm": {"min": [-30.3, -22.6, 0], "max": [30.3, 22.6, 21.7], "extents": [60.6, 45.2, 21.7]},
+    "principalExtentsMm": [60.6, 45.2, 21.7],
+    "volumeMm3": 49870.2,
+    "surfaceAreaMm2": 9480.6,
+    "boxExtentsMm": [60.6, 45.2, 21.7],
+    "boxRotation": [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+    "boxInputCentreMm": [0, 0, 10.85]
+  }
+}

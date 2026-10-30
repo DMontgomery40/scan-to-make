@@ -1,0 +1,222 @@
+[
+  {
+    "name": "upright stand",
+    "request": "a stand that holds it upright",
+    "scan": "phone-repair-report.json",
+    "replies": [
+      {"submit_plan": {"outcome": "plan", "templateId": "scan-cradle",
+        "params": {"up": "X", "seat_depth": 0.3, "clearance_mm": 0.4},
+        "rationale": "A cradle with the long X axis vertical holds the phone upright; a 30% seat keeps the screen clear.",
+        "confidence": 0.85, "questions": [], "unsupported": []}}
+    ],
+    "expect": {"status": "ready", "templateId": "scan-cradle", "attempts": 1,
+      "params": {"up": "X", "seat_depth": 0.3, "clearance_mm": 0.4, "wall_mm": 2.0, "notch_side": null},
+      "paramSources": {"up": "planner", "wall_mm": "default"}}
+  },
+  {
+    "name": "wall hook",
+    "request": "a wall hook for it",
+    "scan": "case-correct-report.json",
+    "replies": [
+      {"submit_plan": {"outcome": "plan", "templateId": "wall-mount",
+        "params": {"screw_spacing_mm": 40.0, "hold_depth": 0.6},
+        "rationale": "A screw-on wall pocket the case drops into from above is the catalog's wall hook.",
+        "confidence": 0.8, "questions": [], "unsupported": []}}
+    ],
+    "expect": {"status": "ready", "templateId": "wall-mount", "attempts": 1,
+      "params": {"screw_spacing_mm": 40.0, "hold_depth": 0.6, "up": "Z", "screw_hole_mm": 4.5}}
+  },
+  {
+    "name": "bumper with lanyard hole is a partial fit",
+    "request": "a bumper with a lanyard hole",
+    "scan": "case-correct-report.json",
+    "replies": [
+      {"submit_plan": {"outcome": "plan", "templateId": "protective-sleeve",
+        "params": {"coverage": 0.85, "wall_mm": 2.0},
+        "rationale": "The protective sleeve is a conformal bumper, but it has no option for a lanyard hole.",
+        "confidence": 0.7, "questions": [], "unsupported": ["lanyard hole"]}}
+    ],
+    "expect": {"status": "needs-input", "templateId": "protective-sleeve", "unsupported": ["lanyard hole"],
+      "questionsContain": ["cannot make: lanyard hole"]}
+  },
+  {
+    "name": "desk edge clip",
+    "request": "clip it to the edge of my desk, the top is 25 mm thick",
+    "scan": "phone-repair-report.json",
+    "replies": [
+      {"submit_plan": {"outcome": "plan", "templateId": "edge-clip",
+        "params": {"edge_thickness_mm": 25.0, "up": "X", "hold_depth": 0.5},
+        "rationale": "An edge clip with a 25 mm slot holds the phone upright beside the desk.",
+        "confidence": 0.75, "questions": [], "unsupported": []}}
+    ],
+    "expect": {"status": "ready", "templateId": "edge-clip", "params": {"edge_thickness_mm": 25.0, "edge_clearance_mm": 0.3}}
+  },
+  {
+    "name": "ambiguous holder asks questions",
+    "request": "something to hold it",
+    "scan": "case-correct-report.json",
+    "replies": [
+      {"submit_plan": {"outcome": "plan", "templateId": "scan-cradle",
+        "params": {},
+        "rationale": "A desk cradle is the most general holder, but a wall mount or edge clip could also fit.",
+        "confidence": 0.4,
+        "questions": ["Should it sit on a desk, screw to a wall, or clip onto a shelf edge?"], "unsupported": []}}
+    ],
+    "expect": {"status": "needs-input", "templateId": "scan-cradle",
+      "questionsContain": ["desk, screw to a wall"], "questionCount": 1}
+  },
+  {
+    "name": "low confidence without questions gets a confirmation question",
+    "request": "make it nicer to use",
+    "scan": "case-correct-report.json",
+    "replies": [
+      {"submit_plan": {"outcome": "plan", "templateId": "protective-sleeve",
+        "params": {}, "rationale": "A sleeve is a plausible improvement, but the request is vague.",
+        "confidence": 0.3, "questions": [], "unsupported": []}}
+    ],
+    "expect": {"status": "needs-input", "templateId": "protective-sleeve", "questionsContain": ["protective sleeve what you want"]}
+  },
+  {
+    "name": "impossible hinge is an honest no fit",
+    "request": "a replacement hinge for my laptop lid",
+    "scan": "phone-repair-report.json",
+    "replies": [
+      {"submit_plan": {"outcome": "no_fit", "templateId": null, "params": {},
+        "rationale": "No catalog template makes a load-bearing hinge; they are holders, sleeves, trays and adapters.",
+        "confidence": 0.95, "questions": [], "unsupported": ["hinge"]}}
+    ],
+    "expect": {"status": "no-fit", "templateId": null, "params": {}}
+  },
+  {
+    "name": "impossible bookshelf is an honest no fit",
+    "request": "a two metre bookshelf to keep it on",
+    "scan": null,
+    "replies": [
+      {"submit_plan": {"outcome": "no_fit", "templateId": null, "params": {},
+        "rationale": "Furniture-scale shelving is outside every template.",
+        "confidence": 0.9, "questions": [], "unsupported": ["bookshelf"]}}
+    ],
+    "expect": {"status": "no-fit", "templateId": null}
+  },
+  {
+    "name": "drawer tray with stated sizes",
+    "request": "a tray for my 300 by 400 mm drawer, 60 mm deep inside, split into three across",
+    "scan": null,
+    "replies": [
+      {"submit_plan": {"outcome": "plan", "templateId": "drawer-organizer",
+        "params": {"drawerInnerWidth": {"nominalMm": 300, "lowerMm": 299.5, "upperMm": 300.5},
+                   "drawerInnerDepth": {"nominalMm": 400, "lowerMm": 399.5, "upperMm": 400.5},
+                   "drawerInnerHeight": {"nominalMm": 60, "lowerMm": 59.5, "upperMm": 60.5},
+                   "dividersAcross": 2, "dividersAlong": 0},
+        "rationale": "The drawer tray template takes the stated inside size; two dividers make three compartments.",
+        "confidence": 0.9, "questions": [], "unsupported": []}}
+    ],
+    "expect": {"status": "ready", "templateId": "drawer-organizer", "missingMeasurements": [],
+      "params": {"dividersAcross": 2, "trayHeight": {"nominalMm": 40, "lowerMm": 40, "upperMm": 40}}}
+  },
+  {
+    "name": "drawer tray without sizes asks for measurements",
+    "request": "an organiser for my kitchen drawer",
+    "scan": null,
+    "replies": [
+      {"submit_plan": {"outcome": "plan", "templateId": "drawer-organizer",
+        "params": {"dividersAcross": 3},
+        "rationale": "A drawer tray fits, but the drawer size is unknown.",
+        "confidence": 0.7, "questions": [], "unsupported": []}}
+    ],
+    "expect": {"status": "needs-input", "templateId": "drawer-organizer",
+      "missingMeasurements": ["drawerInnerWidth", "drawerInnerDepth", "drawerInnerHeight"],
+      "questionsContain": ["drawerInnerWidth", "drawerInnerDepth", "drawerInnerHeight"]}
+  },
+  {
+    "name": "cup holder adapter uses the scan for the mug but asks for the holder",
+    "request": "an adapter so this mug fits my car's cup holder",
+    "scan": "mug-measure.json",
+    "replies": [
+      {"submit_plan": {"outcome": "plan", "templateId": "cup-holder-adapter",
+        "params": {"cupOuterDiameter": {"nominalMm": 86, "lowerMm": 85.8, "upperMm": 86.2}},
+        "rationale": "The cup-holder adapter fits a wide mug; its 86 mm body comes from the scan.",
+        "confidence": 0.8, "questions": ["What are your cup holder's inside diameters and depth?"], "unsupported": []}}
+    ],
+    "expect": {"status": "needs-input", "templateId": "cup-holder-adapter",
+      "missingMeasurements": ["holderInnerBottomDiameter", "holderInnerTopDiameter", "insertionDepth"]}
+  },
+  {
+    "name": "out-of-bounds screw spacing is rejected",
+    "request": "a wall mount with the screw holes 300 mm apart",
+    "scan": "case-correct-report.json",
+    "replies": [
+      {"submit_plan": {"outcome": "plan", "templateId": "wall-mount", "params": {"screw_spacing_mm": 300},
+        "rationale": "Wall mount with the requested screw spacing.", "confidence": 0.8, "questions": [], "unsupported": []}},
+      {"submit_plan": {"outcome": "plan", "templateId": "wall-mount", "params": {"screw_spacing_mm": 300},
+        "rationale": "Wall mount with the requested screw spacing.", "confidence": 0.8, "questions": [], "unsupported": []}}
+    ],
+    "expect": {"status": "rejected", "attempts": 2,
+      "errorsContain": ["params.screw_spacing_mm = 300 is out of bounds: maximum is 200.0"]}
+  },
+  {
+    "name": "bounds feedback lets the model correct itself",
+    "request": "a stand with almost no gap around it",
+    "scan": "phone-repair-report.json",
+    "replies": [
+      {"submit_plan": {"outcome": "plan", "templateId": "scan-cradle", "params": {"clearance_mm": 0},
+        "rationale": "Zero clearance for a snug fit.", "confidence": 0.8, "questions": [], "unsupported": []}},
+      {"submit_plan": {"outcome": "plan", "templateId": "scan-cradle", "params": {"clearance_mm": 0.15},
+        "rationale": "Smallest practical clearance for a snug fit.", "confidence": 0.8, "questions": [], "unsupported": []}}
+    ],
+    "expect": {"status": "ready", "templateId": "scan-cradle", "attempts": 2, "params": {"clearance_mm": 0.15},
+      "feedbackContains": "params.clearance_mm = 0 is out of bounds: must be greater than 0"}
+  },
+  {
+    "name": "wrong parameter types are rejected",
+    "request": "a drawer tray with two dividers",
+    "scan": null,
+    "maxAttempts": 1,
+    "replies": [
+      {"submit_plan": {"outcome": "plan", "templateId": "drawer-organizer",
+        "params": {"dividersAcross": 2.0, "drawerInnerWidth": 300, "up": "Z"},
+        "rationale": "Drawer tray.", "confidence": 0.8, "questions": [], "unsupported": []}}
+    ],
+    "expect": {"status": "rejected", "attempts": 1,
+      "errorsContain": ["params.dividersAcross must be an integer",
+                        "params.drawerInnerWidth must be an object with exactly nominalMm, lowerMm and upperMm",
+                        "params.up is not a parameter of drawer-organizer"]}
+  },
+  {
+    "name": "invented template then no tool call is rejected",
+    "request": "a phone stand",
+    "scan": "phone-repair-report.json",
+    "replies": [
+      {"submit_plan": {"outcome": "plan", "templateId": "phone-stand", "params": {},
+        "rationale": "Phone stand.", "confidence": 0.9, "questions": [], "unsupported": []}},
+      {"text": "Here is a phone stand plan in prose."}
+    ],
+    "expect": {"status": "rejected", "attempts": 2,
+      "errorsContain": ["model reply did not contain exactly one submit_plan call"],
+      "feedbackContains": "templateId 'phone-stand' is not in the catalog"}
+  },
+  {
+    "name": "no fit must not name a template",
+    "request": "a gear to replace a broken one",
+    "scan": null,
+    "replies": [
+      {"submit_plan": {"outcome": "no_fit", "templateId": "scan-cradle", "params": {"wall_mm": 2.0},
+        "rationale": "No gear template.", "confidence": 0.9, "questions": [], "unsupported": ["gear"]}},
+      {"submit_plan": {"outcome": "no_fit", "templateId": null, "params": {},
+        "rationale": "The catalog has no gear or mechanical part template.", "confidence": 0.9, "questions": [], "unsupported": ["gear"]}}
+    ],
+    "expect": {"status": "no-fit", "attempts": 2,
+      "feedbackContains": "a no_fit outcome must have templateId null and empty params"}
+  },
+  {
+    "name": "leaky scan is planned with a warning",
+    "request": "a sleeve to protect it",
+    "scan": "leaky-measure.json",
+    "replies": [
+      {"submit_plan": {"outcome": "plan", "templateId": "protective-sleeve", "params": {"coverage": 0.6},
+        "rationale": "A protective sleeve covers the lower 60%.", "confidence": 0.8, "questions": [], "unsupported": []}}
+    ],
+    "expect": {"status": "ready", "templateId": "protective-sleeve",
+      "warningsContain": ["not watertight"]}
+  }
+]

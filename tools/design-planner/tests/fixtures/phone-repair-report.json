@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "previewOnly": true,
+  "provesPhysicalAccuracy": false,
+  "outputUnits": "mm",
+  "before": {"watertight": false, "bboxMm": {"min": [0, 0, 0], "max": [0.1502, 0.0721, 0.0084], "extents": [0.1502, 0.0721, 0.0084]}},
+  "after": {
+    "vertices": 4802,
+    "faces": 9600,
+    "edges": 14400,
+    "components": 1,
+    "boundaryEdges": 0,
+    "nonManifoldEdges": 0,
+    "inconsistentWindingEdges": 0,
+    "watertight": true,
+    "bboxMm": {"min": [-75.1, -36.05, 0], "max": [75.1, 36.05, 8.4], "extents": [150.2, 72.1, 8.4]},
+    "principalExtentsMm": [150.2, 72.1, 8.4],
+    "volumeMm3": 88214.5,
+    "surfaceAreaMm2": 24392.8,
+    "boxExtentsMm": [150.1, 72.0, 8.3],
+    "boxRotation": [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+    "boxInputCentreMm": [0, 0, 4.2],
+    "boxMethod": "convex hull; PCA seed; 30deg rotation sweep; four seeds refined to 0.005deg"
+  }
+}

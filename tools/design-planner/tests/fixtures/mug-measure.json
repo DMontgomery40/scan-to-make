@@ -1,0 +1,15 @@
+{
+  "vertices": 6010,
+  "faces": 12016,
+  "edges": 18024,
+  "components": 1,
+  "boundaryEdges": 0,
+  "nonManifoldEdges": 0,
+  "inconsistentWindingEdges": 0,
+  "watertight": true,
+  "bboxMm": {"min": [-60.0, -43.0, 0], "max": [60.0, 43.0, 95.0], "extents": [120.0, 86.0, 95.0]},
+  "principalExtentsMm": [120.0, 95.0, 86.0],
+  "volumeMm3": 210400.0,
+  "surfaceAreaMm2": 61200.0,
+  "boxExtentsMm": [120.0, 95.0, 86.0]
+}
