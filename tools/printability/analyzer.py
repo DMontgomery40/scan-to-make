@@ -464,6 +464,34 @@ def _signed_margin_inside_ccw_hull(pt: tuple[float, float], hull: list[tuple[flo
     return min_dist
 
 
+
+def count_solids(mesh: dict[str, Any]) -> int:
+    """Connected solids: facets sharing a quantised vertex belong to one solid.
+
+    Base stability combines contact and centre of mass across the whole file,
+    so multiple disconnected solids could let a stable part mask an unstable
+    one. Callers reject multi-solid inputs instead of evaluating them jointly.
+    """
+    parent = list(range(len(mesh["facets"])))
+
+    def find(i: int) -> int:
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    owner: dict[tuple[int, int, int], int] = {}
+    for idx, f in enumerate(mesh["facets"]):
+        ax, ay, az, ux, uy, uz, vx, vy, vz = f[:9]
+        for x, y, z in ((ax, ay, az), (ax + ux, ay + uy, az + uz), (ax + vx, ay + vy, az + vz)):
+            key = (round(x * 1e5), round(y * 1e5), round(z * 1e5))
+            other = owner.setdefault(key, idx)
+            if other != idx:
+                ra, rb = find(other), find(idx)
+                if ra != rb:
+                    parent[rb] = ra
+    return len({find(i) for i in range(len(parent))})
+
 def evaluate_base_stability(mesh: dict[str, Any]) -> dict[str, Any]:
     z_min = mesh["boundsMm"]["min"][2]
     dx, dy, _ = mesh["extentsMm"]
@@ -916,6 +944,12 @@ def analyze_stl(
             "invalid-stl-normals",
             "Binary STL contains non-unit facet normals; BambuStudio CLI rejects zero/non-unit normals.",
         ))
+    solid_count = count_solids(mesh)
+    if solid_count > 1:
+        blocker_reasons.append((
+            "multiple-disconnected-solids",
+            f"File contains {solid_count} disconnected solids; stability cannot be judged jointly, so print each part from its own file.",
+        ))
     if not mesh["watertight"]:
         blocker_reasons.append((
             "mesh-not-watertight",
@@ -1036,6 +1070,7 @@ def analyze_stl(
         },
         "topology": {
             "watertight": mesh["watertight"],
+            "solidCount": solid_count,
             "declaredUnitNormals": mesh["declaredUnitNormals"],
             "rawFacetCount": mesh["rawFacetCount"],
             "validFacetCount": mesh["validFacetCount"],

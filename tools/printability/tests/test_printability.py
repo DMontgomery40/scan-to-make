@@ -348,6 +348,20 @@ class PrintabilityGeometryTests(unittest.TestCase):
         self.assertEqual(rep_tip["verdict"], "not-printable")
         self.assertIn("unstable-base-contact", rep_tip["reasonCodes"])
 
+    def test_disconnected_solids_cannot_mask_an_unstable_part(self) -> None:
+        # A 4 x 4 x 100 mm tower plus a separate 40 x 40 x 5 mm block: the block must
+        # not lend the tower its stability (connector review on PR #79).
+        xs, ys, zs = [0.0, 4.0, 10.0, 50.0], [0.0, 4.0, 40.0], [0.0, 5.0, 100.0]
+        both = self.write_stl(
+            "tower_and_block.stl",
+            build_rectilinear_solid(xs, ys, zs, lambda i, j, k: (i == 0 and j == 0) or (i == 2 and k == 0)),
+        )
+        rep = analyzer.analyze_stl(both, self.p1s, self.pla)
+        self.assertEqual(rep["verdict"], "not-printable")
+        self.assertIn("multiple-disconnected-solids", rep["reasonCodes"])
+        cube = self.write_stl("single_cube.stl", synthetic_cube_stl())
+        self.assertEqual(analyzer.analyze_stl(cube, self.p1s, self.pla)["topology"]["solidCount"], 1)
+
     def test_duplicated_facets_are_not_manifold(self) -> None:
         cube = synthetic_cube_stl()
         count = struct.unpack_from("<I", cube, 80)[0]
