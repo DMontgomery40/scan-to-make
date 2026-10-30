@@ -91,6 +91,8 @@ def build_parser() -> argparse.ArgumentParser:
                     help="permit slicing designs with verdict printable-with-supports (enables supports)")
     dr.add_argument("--overhang-deg", type=float, default=DEFAULT_OVERHANG_THRESHOLD_DEG)
     dr.add_argument("--timeout", type=int, default=DEFAULT_DRY_RUN_TIMEOUT_S)
+    dr.add_argument("--three-mf-name", default=producer.THREE_MF_NAME,
+                    help="sliced 3MF filename inside slice/ (must end in .3mf and never .gcode.3mf)")
     return ap
 
 
@@ -152,6 +154,7 @@ def main(argv: list[str] | None = None) -> int:
                 allow_supports=args.allow_supports,
                 overhang_threshold_deg=args.overhang_deg,
                 timeout=args.timeout,
+                three_mf_name=args.three_mf_name,
             )
             sys.stdout.write(json.dumps(result, indent=2, sort_keys=True, allow_nan=False) + "\n")
             return 0

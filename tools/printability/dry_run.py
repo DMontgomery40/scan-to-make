@@ -177,11 +177,17 @@ def run_dry_run(
     allow_supports: bool = False,
     overhang_threshold_deg: float = 45.0,
     timeout: int = DEFAULT_DRY_RUN_TIMEOUT_S,
+    three_mf_name: str = producer.THREE_MF_NAME,
     _sandbox: Any = None,
 ) -> dict[str, Any]:
     """Validate template output, check printability, slice offline, and publish sealed dry-run artifacts."""
     if profile_id is None and profile_file is None:
         raise DryRunError("profile", "an explicit --profile or --profile-file is required for slicing dry-runs")
+
+    try:
+        three_mf_name = producer.validate_three_mf_name(three_mf_name)
+    except producer.ProducerError as exc:
+        raise DryRunError("input", exc.message, exc.evidence) from exc
 
     if template_dir is not None:
         if stl_path is not None or manifest_path is not None:
@@ -295,26 +301,36 @@ def run_dry_run(
                 bed_type=profile["bedType"],
                 nozzle_type=profile["nozzleType"],
                 enable_support=need_supports,
+                three_mf_name=three_mf_name,
                 _sandbox=_sandbox,
             )
         except producer.ProducerError as exc:
             raise DryRunError(f"slicer.{exc.stage}", exc.message, exc.evidence) from exc
 
         gcode_meta = slice_manifest["outputs"]["gcode"]
+        three_mf_meta = slice_manifest["outputs"]["threeMf"]
         settings_meta = slice_manifest["outputs"]["exportedSettings"]
         producer_manifest_path = slice_dir / "manifest.json"
         producer_manifest_bytes = producer_manifest_path.read_bytes()
         producer_manifest_sha = hashlib.sha256(producer_manifest_bytes).hexdigest()
+
+        if not three_mf_meta["file"].endswith(".3mf") or three_mf_meta["file"].lower().endswith(".gcode.3mf"):
+            raise DryRunError("seal", f"invalid sliced 3MF dispatch filename {three_mf_meta['file']!r}")
 
         # Re-verify staged artifacts before sealing dry-run-manifest.json
         if producer.sha256_file(staged_stl) != verified["stlSha256"]:
             raise DryRunError("seal", "source.stl mutated during dry-run")
         if producer.sha256_file(slice_dir / gcode_meta["file"]) != gcode_meta["sha256"]:
             raise DryRunError("seal", "sliced G-code digest mismatch")
+        if producer.sha256_file(slice_dir / three_mf_meta["file"]) != three_mf_meta["sha256"]:
+            raise DryRunError("seal", "sliced 3MF digest mismatch")
+        if three_mf_meta["plateGcodeSha256"] != gcode_meta["sha256"]:
+            raise DryRunError("seal", "sliced 3MF embedded plate G-code digest mismatch")
         if producer.sha256_file(slice_dir / settings_meta["file"]) != settings_meta["sha256"]:
             raise DryRunError("seal", "exported-settings.json digest mismatch")
 
         settings_digest = settings_meta["sha256"]
+        three_mf_rel = f"slice/{three_mf_meta['file']}"
         dry_run_manifest = {
             "schema": DRY_RUN_SCHEMA,
             "dispatchAuthorized": False,
@@ -353,6 +369,21 @@ def run_dry_run(
             },
             "slice": {
                 "printableArtifact": {
+                    "file": three_mf_rel,
+                    "mediaType": "model/3mf",
+                    "sha256": three_mf_meta["sha256"],
+                    "byteLength": three_mf_meta["bytes"],
+                },
+                "threeMfArtifact": {
+                    "file": three_mf_rel,
+                    "mediaType": "model/3mf",
+                    "sha256": three_mf_meta["sha256"],
+                    "byteLength": three_mf_meta["bytes"],
+                    "plateGcodeInternalPath": three_mf_meta["plateGcodeInternalPath"],
+                    "plateGcodeSha256": three_mf_meta["plateGcodeSha256"],
+                    "plateGcodeBytes": three_mf_meta["plateGcodeBytes"],
+                },
+                "gcodeArtifact": {
                     "file": f"slice/{gcode_meta['file']}",
                     "mediaType": "text/x.gcode",
                     "sha256": gcode_meta["sha256"],
@@ -385,6 +416,27 @@ def run_dry_run(
                 },
                 "overrides": slice_manifest["overrides"],
                 "summary": slice_manifest["outputs"]["gcodeSummary"],
+            },
+            "dispatchCandidate": {
+                "artifact": {
+                    "file": three_mf_rel,
+                    "mediaType": "model/3mf",
+                    "sha256": three_mf_meta["sha256"],
+                    "byteLength": three_mf_meta["bytes"],
+                },
+                "plateGcodeInternalPath": three_mf_meta["plateGcodeInternalPath"],
+                "plateGcodeSha256": three_mf_meta["plateGcodeSha256"],
+                "tool": "print_3mf",
+                "argumentsTemplate": {
+                    "three_mf_path": three_mf_rel,
+                    "bambu_model": profile["bambuModel"],
+                    "bed_type": profile["bedType"],
+                    "plate_index": 0,
+                    "use_ams": True,
+                    "ams_slots": None,
+                },
+                "amsSlotMappingRule": "tray_index = ams_unit * 4 + slot (taken from a fresh get_printer_status; 254 for external spool with use_ams=false)",
+                "note": "Bind ams_slots=[tray_index] from a fresh get_printer_status at dispatch time; physical dispatch remains human-authorized.",
             },
             "companionPreparedSelectionCandidate": {
                 "printerId": None,

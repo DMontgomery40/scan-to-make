@@ -304,7 +304,8 @@ def _parse_and_build_facets(
         com_z = 0.5 * (z_min + z_max)
 
     watertight = (
-        unbalanced_edges == 0
+        degenerate_count == 0
+        and unbalanced_edges == 0
         and non_manifold_shared_edges == 0
         and len(facets) >= 4
         and signed_vol > 1e-6
@@ -943,6 +944,12 @@ def analyze_stl(
         blocker_reasons.append((
             "invalid-stl-normals",
             "Binary STL contains non-unit facet normals; BambuStudio CLI rejects zero/non-unit normals.",
+        ))
+    if mesh["degenerateFacetCount"] > 0:
+        blocker_reasons.append((
+            "degenerate-facets",
+            f"STL contains {mesh['degenerateFacetCount']} zero-area or collapsed degenerate facet(s); "
+            "printability refuses to analyze a silently cleaned subset.",
         ))
     solid_count = count_solids(mesh)
     if solid_count > 1:

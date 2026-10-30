@@ -15,6 +15,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import zipfile
 from unittest import mock
 from pathlib import Path
 
@@ -129,10 +130,10 @@ def synthetic_overhang_cantilever_stl() -> bytes:
 
 
 FAKE_SLICER_SCRIPT = r"""#!{py}
-import json, os, sys
+import json, os, sys, zipfile
 a = sys.argv[1:]
 def opt(k): return a[a.index(k) + 1]
-out, settings_out = opt("--outputdir"), opt("--export-settings")
+out, settings_out, three_mf_name = opt("--outputdir"), opt("--export-settings"), opt("--export-3mf")
 mp, pp = opt("--load-settings").split(";")
 merged = dict(json.load(open(mp)))
 merged.update(json.load(open(pp)))
@@ -158,19 +159,27 @@ gcode = (
     f"; nozzle_type = {nozzle_t}\n"
     f"; enable_support = {sup}\n"
     "; CONFIG_BLOCK_END\n"
+    "M620 S0A\n"
     "G28\n"
 )
 with open(os.path.join(out, "plate_1.gcode"), "w") as f:
     f.write(gcode)
+with zipfile.ZipFile(os.path.join(out, three_mf_name), "w", compression=zipfile.ZIP_DEFLATED) as zf:
+    zf.writestr("[Content_Types].xml", '<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"/>')
+    zf.writestr("3D/3dmodel.model", '<?xml version="1.0" encoding="UTF-8"?><model unit="millimeter"/>')
+    zf.writestr("Metadata/plate_1.gcode", gcode)
+    zf.writestr("Metadata/plate_1.json", json.dumps({"plate_index": 0, "bed_type": bed}))
+    zf.writestr("Metadata/slice_info.config", '<?xml version="1.0" encoding="UTF-8"?><config><plate><metadata key="index" value="1"/></plate></config>')
 with open(settings_out, "w") as f:
     json.dump(merged, f, sort_keys=True)
 """
 
 FAKE_SANDBOX_SCRIPT = r"""#!{py}
-import os, sys
+import os, re, sys
 assert sys.argv[1] == "-f"
 prof = open(sys.argv[2]).read()
-assert "(deny network*)" in prof and "(deny mach-lookup)" in prof
+assert "(deny network*)" in prof and "(deny mach-lookup)" in prof and "(deny signal)" in prof
+assert not re.search(r"\(\s*allow\s+mach-lookup\s*\)", prof)
 os.execv(sys.argv[3], sys.argv[3:])
 """
 
@@ -375,6 +384,60 @@ class PrintabilityGeometryTests(unittest.TestCase):
                 self.assertEqual(rep["topology"]["nonManifoldSharedEdgeCount"], 18)
                 self.assertIn("mesh-not-watertight", rep["reasonCodes"])
 
+    def test_degenerate_facets_rejected_in_check_and_dry_run(self) -> None:
+        # Regression test for PR #79 review comment 4429096115: appending a zero-area
+        # facet with a unit normal to an otherwise watertight 20 mm cube must block
+        # printability and dry-run rather than silently analyzing a cleaned subset.
+        cube = synthetic_cube_stl(20.0)
+        count = struct.unpack_from("<I", cube, 80)[0]
+        degen_facet = struct.pack(
+            "<12fH",
+            0.0, 0.0, 1.0,
+            0.0, 0.0, 0.0,
+            10.0, 0.0, 0.0,
+            20.0, 0.0, 0.0,
+            0,
+        )
+        cube_with_degen = cube[:80] + struct.pack("<I", count + 1) + cube[84:] + degen_facet
+        stl = self.write_stl("cube_with_degen.stl", cube_with_degen)
+        for use_numpy in (False, True):
+            with self.subTest(use_numpy=use_numpy):
+                rep = analyzer.analyze_stl(stl, self.p1s, self.pla, use_numpy=use_numpy)
+                self.assertEqual(rep["verdict"], "not-printable")
+                self.assertFalse(rep["topology"]["watertight"])
+                self.assertEqual(rep["topology"]["degenerateFacetCount"], 1)
+                self.assertIn("degenerate-facets", rep["reasonCodes"])
+
+        # Dry-run must also refuse to slice before invoking BambuStudio
+        fake_bundle, fake_sandbox = make_fake_bambu_bundle(self.root / "degen-bundle")
+        tpl = self.root / "degen-tpl"
+        tpl.mkdir()
+        (tpl / "cradle.stl").write_bytes(cube_with_degen)
+        (tpl / "manifest.json").write_text(
+            json.dumps({
+                "schemaVersion": 1,
+                "units": "mm",
+                "previewOnly": True,
+                "provesPhysicalAccuracy": False,
+                "watertight": True,
+                "outputSha256": {"cradle.stl": hashlib.sha256(cube_with_degen).hexdigest()},
+            }) + "\n"
+        )
+        out_degen = self.root / "out-degen"
+        with mock.patch.object(dry_run.producer, "produce") as mocked_produce:
+            with self.assertRaises(dry_run.DryRunError) as cm:
+                dry_run.run_dry_run(
+                    template_dir=tpl,
+                    profile_id="p1s-0.4-hardened",
+                    out_dir=out_degen,
+                    bundle=str(fake_bundle),
+                    _sandbox=fake_sandbox,
+                )
+            mocked_produce.assert_not_called()
+        self.assertEqual(cm.exception.stage, "printability")
+        self.assertIn("degenerate-facets", cm.exception.evidence["reasonCodes"])
+        self.assertFalse(out_degen.exists())
+
     def test_open_mesh_and_zero_normals_rejected(self) -> None:
         # Open box (missing +Z face)
         open_tris = [
@@ -570,7 +633,40 @@ class DryRunIntegrationTests(unittest.TestCase):
         self.assertEqual(res["slice"]["summary"]["estimatedPrintSeconds"], 1470)
         self.assertEqual(res["slice"]["summary"]["filamentWeightG"], 9.46)
 
-        # FitSpec drawer template output
+        three_mf_path = out_cradle / "slice" / "sliced-plate.3mf"
+        gcode_path = out_cradle / "slice" / "plate_1.gcode"
+        self.assertTrue(three_mf_path.is_file())
+        self.assertFalse(three_mf_path.name.lower().endswith(".gcode.3mf"))
+        three_mf_sha = hashlib.sha256(three_mf_path.read_bytes()).hexdigest()
+        gcode_sha = hashlib.sha256(gcode_path.read_bytes()).hexdigest()
+        self.assertEqual(res["slice"]["printableArtifact"]["file"], "slice/sliced-plate.3mf")
+        self.assertEqual(res["slice"]["printableArtifact"]["mediaType"], "model/3mf")
+        self.assertEqual(res["slice"]["printableArtifact"]["sha256"], three_mf_sha)
+        self.assertEqual(res["slice"]["threeMfArtifact"]["sha256"], three_mf_sha)
+        self.assertEqual(res["slice"]["threeMfArtifact"]["plateGcodeSha256"], gcode_sha)
+        self.assertEqual(res["slice"]["gcodeArtifact"]["sha256"], gcode_sha)
+        self.assertEqual(res["dispatchCandidate"]["artifact"]["file"], "slice/sliced-plate.3mf")
+        self.assertEqual(res["dispatchCandidate"]["artifact"]["mediaType"], "model/3mf")
+        self.assertEqual(res["dispatchCandidate"]["artifact"]["sha256"], three_mf_sha)
+        self.assertEqual(res["dispatchCandidate"]["plateGcodeSha256"], gcode_sha)
+        self.assertEqual(res["dispatchCandidate"]["tool"], "print_3mf")
+        self.assertEqual(
+            res["dispatchCandidate"]["argumentsTemplate"],
+            {
+                "three_mf_path": "slice/sliced-plate.3mf",
+                "bambu_model": "p1s",
+                "bed_type": "textured_plate",
+                "plate_index": 0,
+                "use_ams": True,
+                "ams_slots": None,
+            },
+        )
+        with zipfile.ZipFile(three_mf_path, "r") as zf:
+            self.assertEqual(hashlib.sha256(zf.read("Metadata/plate_1.gcode")).hexdigest(), gcode_sha)
+            self.assertIn("Metadata/plate_1.json", zf.namelist())
+            self.assertIn("Metadata/slice_info.config", zf.namelist())
+
+        # FitSpec drawer template output with custom non-.gcode.3mf project name
         drawer_stl = synthetic_pocketed_cradle_stl(width=140.0, depth=100.0, height=30.0, wall=2.0, floor=2.0)
         drawer_dir = self.make_drawer_dir("drawer-tpl", drawer_stl)
         out_drawer = self.root / "out-drawer"
@@ -579,10 +675,30 @@ class DryRunIntegrationTests(unittest.TestCase):
             profile_id="p1s",
             out_dir=out_drawer,
             bundle=str(self.fake_bundle),
+            three_mf_name="drawer-tray-p1s.3mf",
             _sandbox=self.fake_sandbox,
         )
         self.assertEqual(res_d["template"]["kind"], "drawer-tray")
         self.assertEqual(res_d["printability"]["verdict"], "printable")
+        self.assertEqual(res_d["dispatchCandidate"]["artifact"]["file"], "slice/drawer-tray-p1s.3mf")
+        self.assertTrue((out_drawer / "slice" / "drawer-tray-p1s.3mf").is_file())
+
+        # Any *.gcode.3mf suffix is rejected fail-closed before slicing
+        for bad_name in ("plate_1.gcode.3mf", "STAND.GCODE.3MF"):
+            bad_out = self.root / f"out-bad-{bad_name}"
+            with mock.patch.object(dry_run.producer, "produce") as mocked_produce:
+                with self.assertRaises(dry_run.DryRunError) as bad_cm:
+                    dry_run.run_dry_run(
+                        template_dir=drawer_dir,
+                        profile_id="p1s",
+                        out_dir=bad_out,
+                        bundle=str(self.fake_bundle),
+                        three_mf_name=bad_name,
+                        _sandbox=self.fake_sandbox,
+                    )
+                mocked_produce.assert_not_called()
+            self.assertEqual(bad_cm.exception.stage, "input")
+            self.assertFalse(bad_out.exists())
 
     def test_dry_run_gates_unprintable_supports_and_tampered_manifests(self) -> None:
         # 1. Oversized drawer refused before slicing
@@ -695,8 +811,22 @@ class DryRunIntegrationTests(unittest.TestCase):
         res = json.loads(proc.stdout)
         self.assertEqual(res["printability"]["verdict"], "printable")
         gcode_path = out_cradle / "slice" / "plate_1.gcode"
+        three_mf_path = out_cradle / "slice" / "sliced-plate.3mf"
         settings_path = out_cradle / "slice" / "exported-settings.json"
         self.assertTrue(gcode_path.is_file() and gcode_path.stat().st_size > 1000)
+        self.assertTrue(three_mf_path.is_file() and three_mf_path.stat().st_size > 1000)
+        self.assertFalse(three_mf_path.name.lower().endswith(".gcode.3mf"))
+        gcode_sha = hashlib.sha256(gcode_path.read_bytes()).hexdigest()
+        three_mf_sha = hashlib.sha256(three_mf_path.read_bytes()).hexdigest()
+        self.assertEqual(res["dispatchCandidate"]["artifact"]["file"], "slice/sliced-plate.3mf")
+        self.assertEqual(res["dispatchCandidate"]["artifact"]["sha256"], three_mf_sha)
+        self.assertEqual(res["dispatchCandidate"]["plateGcodeSha256"], gcode_sha)
+        with zipfile.ZipFile(three_mf_path, "r") as zf:
+            names = set(zf.namelist())
+            self.assertIn("Metadata/plate_1.gcode", names)
+            self.assertIn("Metadata/plate_1.json", names)
+            self.assertIn("Metadata/slice_info.config", names)
+            self.assertEqual(hashlib.sha256(zf.read("Metadata/plate_1.gcode")).hexdigest(), gcode_sha)
         self.assertEqual(res["slice"]["slicerSettingsSha256"], hashlib.sha256(settings_path.read_bytes()).hexdigest())
         summary = res["slice"]["summary"]
         self.assertGreater(summary["estimatedPrintSeconds"], 0)
@@ -728,6 +858,7 @@ class DryRunIntegrationTests(unittest.TestCase):
         res_oh = json.loads(proc_oh.stdout)
         self.assertEqual(res_oh["printability"]["verdict"], "printable-with-supports")
         self.assertIs(res_oh["slice"]["summary"]["enableSupport"], True)
+        self.assertTrue((out_oh / "slice" / "sliced-plate.3mf").is_file())
 
 
 if __name__ == "__main__":

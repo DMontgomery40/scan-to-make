@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests use a fake BambuStudio bundle and a fake sandbox-exec; no real slicer runs here."""
+"""Tests use a fake BambuStudio bundle and a fake sandbox-exec, plus a real BambuStudio run on macOS."""
 import json
 import os
 import plistlib
@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -17,14 +18,14 @@ from producer import ProducerError, produce, resolve_preset, sha256_file  # noqa
 REAL_RESULT = Path(__file__).resolve().parent / "fixtures" / "bambustudio-02.08.02.61-result.json"
 
 FAKE_SLICER = r'''#!{py}
-import json, os, sys, time
+import json, os, sys, time, zipfile
 MODE = {mode!r}
 PIDFILE = {pidfile!r}
 a = sys.argv[1:]
 open(PIDFILE, "w").write(str(os.getpid()))
 def opt(k): return a[a.index(k) + 1]
-out, settings = opt("--outputdir"), opt("--export-settings")
-assert "--export-3mf" not in a
+out, settings, three_mf = opt("--outputdir"), opt("--export-settings"), opt("--export-3mf")
+assert three_mf.endswith(".3mf") and not three_mf.lower().endswith(".gcode.3mf")
 if MODE == "nonzero":
     print("slicer: fatal"); sys.exit(3)
 if MODE == "sleep":
@@ -44,9 +45,25 @@ if MODE == "mutate-bundle":
     open(os.path.join(here, "..", "Resources", "profiles", "BBL", "process", "0.20mm.json"), "a").write(" ")
 if MODE == "big-output":
     open(os.path.join(out, "plate_1.gcode"), "w").write("G1\n" * 2000); sys.exit(0)
+gcode_text = "; HEADER_BLOCK_START\n; env=" + ",".join(sorted(os.environ)) + "\nG28\n"
 if MODE != "missing-gcode":
     with open(os.path.join(out, "plate_1.gcode"), "w") as f:
-        f.write("; HEADER_BLOCK_START\n; env=" + ",".join(sorted(os.environ)) + "\nG28\n")
+        f.write(gcode_text)
+if MODE != "missing-3mf":
+    tmf_path = os.path.join(out, three_mf)
+    if MODE == "corrupt-3mf":
+        open(tmf_path, "wb").write(b"not-a-zip")
+    else:
+        with zipfile.ZipFile(tmf_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr("[Content_Types].xml", "<Types/>")
+            if MODE != "missing-3d-model":
+                zf.writestr("3D/3dmodel.model", "<model unit='millimeter'/>")
+            if MODE != "unsliced-3mf":
+                zf.writestr("Metadata/plate_1.gcode", "G28 ; tampered\n" if MODE == "tampered-plate-gcode" else gcode_text)
+                zf.writestr("Metadata/plate_1.json", "not-json" if MODE == "bad-plate-json" else '{{"plate_index": 1}}')
+                zf.writestr("Metadata/slice_info.config", "<config><plate/></config>")
+            if MODE == "unsafe-3mf-member":
+                zf.writestr("../escape.txt", "nope")
 if MODE != "missing-settings":
     if MODE == "echo-presets":
         mp, pp = opt("--load-settings").split(";")
@@ -64,17 +81,19 @@ if MODE in ("result-json", "result-bad"):
     with open(os.path.join(out, "result.json"), "w") as f:
         json.dump({{"return_code": 0 if MODE == "result-json" else 1, "error_string": ""}}, f)
 if MODE == "extra-3mf":
-    open(os.path.join(out, "plate_1.3mf"), "w").write("x")
+    open(os.path.join(out, "plate_1.gcode.3mf"), "w").write("x")
 print("slicer: ok")
 '''
 
 FAKE_SANDBOX = r'''#!{py}
-import os, sys
+import os, re, sys
 assert sys.argv[1] == "-f"
 prof = open(sys.argv[2]).read()
-for rule in ("(deny network*)", "(deny mach-lookup)"):
+for rule in ("(deny network*)", "(deny mach-lookup)", "(deny signal)"):
     if rule not in prof:
         sys.exit(97)
+if re.search(r"\(\s*allow\s+mach-lookup\s*\)", prof):
+    sys.exit(98)
 open(os.path.join(os.path.dirname(sys.argv[2]), "sandbox-used"), "w").write("1")
 os.execv(sys.argv[3], sys.argv[3:])
 '''
@@ -152,13 +171,23 @@ class Base(unittest.TestCase):
 
 
 class SuccessTests(Base):
-    def test_publishes_with_bound_digests(self):
+    def test_publishes_with_bound_digests_and_sliced_3mf(self):
         m = self.run_produce()
         self.assertEqual(sorted(p.name for p in self.out.iterdir()),
-                         ["exported-settings.json", "manifest.json", "plate_1.gcode", "slicer.log"])
+                         ["exported-settings.json", "manifest.json", "plate_1.gcode", "sliced-plate.3mf", "slicer.log"])
         on_disk = json.loads((self.out / "manifest.json").read_text())
         self.assertEqual(on_disk, m)
         self.assertEqual(m["outputs"]["gcode"]["sha256"], sha256_file(self.out / "plate_1.gcode"))
+        self.assertEqual(m["outputs"]["threeMf"]["file"], "sliced-plate.3mf")
+        self.assertFalse(m["outputs"]["threeMf"]["file"].endswith(".gcode.3mf"))
+        self.assertEqual(m["outputs"]["threeMf"]["mediaType"], "model/3mf")
+        self.assertEqual(m["outputs"]["threeMf"]["sha256"], sha256_file(self.out / "sliced-plate.3mf"))
+        self.assertEqual(m["outputs"]["threeMf"]["plateGcodeInternalPath"], "Metadata/plate_1.gcode")
+        self.assertEqual(m["outputs"]["threeMf"]["plateGcodeSha256"], m["outputs"]["gcode"]["sha256"])
+        with zipfile.ZipFile(self.out / "sliced-plate.3mf") as zf:
+            self.assertEqual(zf.read("Metadata/plate_1.gcode"), (self.out / "plate_1.gcode").read_bytes())
+            self.assertIn("Metadata/plate_1.json", zf.namelist())
+            self.assertIn("Metadata/slice_info.config", zf.namelist())
         self.assertEqual(m["outputs"]["exportedSettings"]["sha256"], sha256_file(self.out / "exported-settings.json"))
         self.assertEqual(m["input"]["sha256"], sha256_file(self.model))
         bundle = self.root / "ok" / "BambuStudio.app"
@@ -183,9 +212,9 @@ class SuccessTests(Base):
         argv = m["invocation"]["argv"]
         self.assertEqual(argv[:2], [str(self.sandbox), "-f"])
         self.assertEqual(m["invocation"]["sandbox"]["kind"], "test-double")
-        for flag in ("--datadir", "--load-settings", "--load-filaments", "--export-settings", "--outputdir"):
+        for flag in ("--datadir", "--load-settings", "--load-filaments", "--export-settings", "--export-3mf", "--outputdir"):
             self.assertIn(flag, argv)
-        self.assertNotIn("--export-3mf", argv)
+        self.assertEqual(argv[argv.index("--export-3mf") + 1], "sliced-plate.3mf")
         env_line = (self.out / "plate_1.gcode").read_text().splitlines()[1]
         env = set(env_line.split("=", 1)[1].split(",")) - {"PWD", "SHLVL", "_", "__CF_USER_TEXT_ENCODING", "LC_CTYPE"}
         self.assertEqual(env, {"HOME", "LANG", "PATH", "TMPDIR"})
@@ -222,16 +251,16 @@ class FailClosedTests(Base):
         self.assertIn("slicer: fatal", e.evidence["logTail"])
 
     def test_missing_gcode(self):
-        self.assertFails("outputs", "expected ['exported-settings.json', 'plate_1.gcode']", "missing-gcode")
+        self.assertFails("outputs", "expected ['exported-settings.json', 'plate_1.gcode', 'sliced-plate.3mf']", "missing-gcode")
 
     def test_missing_settings_export(self):
-        self.assertFails("outputs", "got ['plate_1.gcode']", "missing-settings")
+        self.assertFails("outputs", "got ['plate_1.gcode', 'sliced-plate.3mf']", "missing-settings")
 
     def test_invalid_settings_export(self):
         self.assertFails("outputs", "not valid JSON", "bad-settings")
 
     def test_unexpected_extra_output(self):
-        self.assertFails("outputs", "plate_1.3mf", "extra-3mf")
+        self.assertFails("outputs", "plate_1.gcode.3mf", "extra-3mf")
 
     def test_timeout(self):
         self.assertFails("slicer", "timed out", "sleep", timeout=1)
@@ -474,6 +503,93 @@ class ReviewFixTests(Base):
         self.assertEqual(s["bedType"], "Textured PEI Plate")
         self.assertEqual(s["nozzleType"], "hardened_steel,hardened_steel")
         self.assertIs(s["enableSupport"], False)
+
+
+def watertight_box_stl(size=12.0):
+    v = [
+        (0.0, 0.0, 0.0), (size, 0.0, 0.0), (size, size, 0.0), (0.0, size, 0.0),
+        (0.0, 0.0, size), (size, 0.0, size), (size, size, size), (0.0, size, size),
+    ]
+    faces = [
+        ((0.0, 0.0, -1.0), 0, 2, 1), ((0.0, 0.0, -1.0), 0, 3, 2),
+        ((0.0, 0.0, 1.0), 4, 5, 6), ((0.0, 0.0, 1.0), 4, 6, 7),
+        ((0.0, -1.0, 0.0), 0, 1, 5), ((0.0, -1.0, 0.0), 0, 5, 4),
+        ((0.0, 1.0, 0.0), 3, 6, 2), ((0.0, 1.0, 0.0), 3, 7, 6),
+        ((-1.0, 0.0, 0.0), 0, 4, 7), ((-1.0, 0.0, 0.0), 0, 7, 3),
+        ((1.0, 0.0, 0.0), 1, 2, 6), ((1.0, 0.0, 0.0), 1, 6, 5),
+    ]
+    return b"\0" * 80 + struct.pack("<I", len(faces)) + b"".join(
+        struct.pack("<12fH", *n, *v[a], *v[b], *v[c], 0) for n, a, b, c in faces
+    )
+
+
+class ThreeMfVerificationTests(Base):
+    """KAN-101: sliced `.3mf` project export, `.gcode.3mf` refusal, and plate-holding verification."""
+
+    def assertFails(self, stage, msg, mode="ok", **kw):
+        with self.assertRaises(ProducerError) as cm:
+            self.run_produce(mode, **kw)
+        self.assertEqual(cm.exception.stage, stage, str(cm.exception))
+        self.assertIn(msg, cm.exception.message)
+        self.assertNothingPublished()
+
+    def test_custom_valid_three_mf_name_published_and_sealed(self):
+        m = self.run_produce(three_mf_name="part-project.3mf")
+        self.assertTrue((self.out / "part-project.3mf").is_file())
+        self.assertEqual(m["outputs"]["threeMf"]["file"], "part-project.3mf")
+        self.assertEqual(m["outputs"]["threeMf"]["sha256"], sha256_file(self.out / "part-project.3mf"))
+
+    def test_gcode_3mf_and_unsafe_names_rejected_before_slicing(self):
+        for bad in ("plate_1.gcode.3mf", "Stand.GCODE.3MF", "a.gcode.3mf"):
+            with self.subTest(bad=bad):
+                self.assertFails("input", ".gcode.3mf", three_mf_name=bad)
+        for bad in ("", "part.zip", "part.3MF", ".hidden.3mf", "../escape.3mf", "sub/part.3mf", "manifest.json"):
+            with self.subTest(bad=bad):
+                self.assertFails("input", "3MF output name", three_mf_name=bad)
+
+    def test_missing_corrupt_unsliced_or_tampered_3mf_rejected(self):
+        self.assertFails("outputs", "sliced-plate.3mf", "missing-3mf")
+        self.assertFails("outputs", "not a valid ZIP archive", "corrupt-3mf")
+        self.assertFails("outputs", "missing sliced-plate entries", "unsliced-3mf")
+        self.assertFails("outputs", "3D/*.model", "missing-3d-model")
+        self.assertFails("outputs", "Metadata/plate_1.json is not valid JSON", "bad-plate-json")
+        self.assertFails("outputs", "Metadata/plate_1.gcode sha256", "tampered-plate-gcode")
+        self.assertFails("outputs", "unsafe member path", "unsafe-3mf-member")
+
+    @unittest.skipUnless(
+        sys.platform == "darwin" and Path("/Applications/BambuStudio.app/Contents/MacOS/BambuStudio").is_file(),
+        "Real sandboxed BambuStudio 3MF export runs on macOS hosts with /Applications/BambuStudio.app installed",
+    )
+    def test_real_bambustudio_exports_sliced_3mf_holding_plate(self):
+        box = self.root / "synthetic-box.stl"
+        box.write_bytes(watertight_box_stl(16.0))
+        out = self.root / "real-3mf-out"
+        m = produce(
+            box,
+            out,
+            machine="Bambu Lab P1S 0.4 nozzle",
+            process="0.20mm Standard @BBL X1C",
+            filament="Bambu PLA Basic @BBL P1S 0.4 nozzle",
+            bed_type="textured_plate",
+            nozzle_type="hardened_steel",
+            enable_support=False,
+            expected_input_sha256=sha256_file(box),
+            expected_input_bytes=box.stat().st_size,
+            timeout=60,
+        )
+        tmf = out / "sliced-plate.3mf"
+        gcode_path = out / "plate_1.gcode"
+        self.assertTrue(tmf.is_file() and not tmf.name.endswith(".gcode.3mf"))
+        self.assertEqual(m["outputs"]["threeMf"]["sha256"], sha256_file(tmf))
+        self.assertEqual(m["outputs"]["threeMf"]["plateGcodeSha256"], sha256_file(gcode_path))
+        with zipfile.ZipFile(tmf) as zf:
+            names = set(zf.namelist())
+            self.assertIn("Metadata/plate_1.gcode", names)
+            self.assertIn("Metadata/plate_1.json", names)
+            self.assertIn("Metadata/slice_info.config", names)
+            embedded_gcode = zf.read("Metadata/plate_1.gcode")
+            self.assertEqual(embedded_gcode, gcode_path.read_bytes())
+            self.assertIn(b"M620", embedded_gcode)
 
 
 if __name__ == "__main__":
