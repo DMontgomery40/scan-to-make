@@ -160,6 +160,13 @@ Native clients retain the acknowledged remote ETag and snapshot separately from 
 
 Bodies have a five-second deadline and limits of4MiB for snapshots and32MiB for captures, enforced for chunked requests too. One snapshot/capture request owns the capture slot through conversion and response cleanup; another receives429. Downloads have a30-second response deadline and hold the project edit lock through response flush. Concurrent edits can report storage unavailable while that lock is held. Disconnect/shutdown aborts active conversion and waits for cleanup. Authorization is checked again before capture publication and before download; ETag/revision are checked under the project lock. Generation retains its own single-request slot. These tests model private Serve headers locally; they do not establish a live phone/tailnet connection.
 
+## Detail stills
+
+Close-up photos attached to a retained capture use the same storage,
+scopes and ETag conventions. See [DETAIL-STILLS.md](DETAIL-STILLS.md) for
+the storage layout, the four routes (`POST`/`GET` collection, `GET`/`DELETE`
+one still), the 25 MiB and 24-per-capture limits, and error codes.
+
 
 ## Authenticated inspected prepared jobs
 

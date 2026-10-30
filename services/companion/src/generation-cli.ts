@@ -2,6 +2,7 @@ import {PreparedJobStore} from './prepared-jobs.js';
 import {isAbsolute,join} from 'node:path';
 import {FileSavedProjectStorage} from '@scan-to-make/project';
 import {CaptureStore} from './capture-import.js';
+import {DetailStillStore} from './detail-stills.js';
 import {createCaptureConverter} from './capture-converter.js';
 import { startGenerationServer } from './generation.js';
 import { RemoteAuthStore } from './remote-auth.js';
@@ -17,7 +18,7 @@ if(captureDirectory!==undefined&&(!remoteAuth||!isAbsolute(captureDirectory)))th
 const storage=captureDirectory===undefined?undefined:new FileSavedProjectStorage(join(captureDirectory,'projects'));
 const capture=storage&&captureDirectory?{storage,captures:new CaptureStore(storage,join(captureDirectory,'captures'),createCaptureConverter({
  executable:process.env.SCAN_TO_MAKE_CAPTURE_PYTHON??'python3',temporaryRoot:join(captureDirectory,'workers'),
-}))}:undefined;
+})),detailStills:new DetailStillStore(storage,join(captureDirectory,'captures'))}:undefined;
 // Only a host operator chooses the executable. Remote envelopes cannot select it.
 const inspectorFile=process.env.SCAN_TO_MAKE_PREPARED_MCP_CONFIG;
 if(inspectorFile!==undefined){

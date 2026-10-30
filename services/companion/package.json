@@ -35,6 +35,10 @@
     "./prepared-jobs": {
       "types": "./dist/prepared-jobs.d.ts",
       "import": "./dist/prepared-jobs.js"
+    },
+    "./detail-stills": {
+      "types": "./dist/detail-stills.d.ts",
+      "import": "./dist/detail-stills.js"
     }
   },
   "scripts": {

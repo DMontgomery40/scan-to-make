@@ -28,7 +28,9 @@ export const DetailStillSchema = z.strictObject({
     .max(200)
     .regex(/^[^\x00-\x1f\x7f]+$/)
     .optional(),
-  ordinal: z.number().int().min(0).max(MAX_DETAIL_STILLS_PER_CAPTURE - 1),
+  // Attachment order is monotonic; deletions leave gaps, so an ordinal may
+  // exceed the live per-capture count. The count cap is on the list length.
+  ordinal: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
 });
 
 export type DetailStill = z.infer<typeof DetailStillSchema>;

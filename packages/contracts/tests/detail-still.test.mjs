@@ -40,7 +40,6 @@ test('rejects wrong schema, media type, identity and unknown fields', () => {
     (s) => (s.byteLength = 1.5),
     (s) => (s.projectRevision = -1),
     (s) => (s.ordinal = -1),
-    (s) => (s.ordinal = 24),
     (s) => (s.ordinal = 0.5),
     (s) => (s.id = 'not a uuid'),
     (s) => (s.captureId = 'not-a-uuid'),
@@ -54,6 +53,8 @@ test('rejects wrong schema, media type, identity and unknown fields', () => {
   for (const mediaType of ['image/jpeg', 'image/heic', 'image/png']) {
     assert.equal(api.DetailStillSchema.safeParse(still({ mediaType })).success, true);
   }
+  // Ordinals stay monotonic across deletions, so they may pass the live count cap.
+  assert.equal(api.DetailStillSchema.safeParse(still({ ordinal: 40 })).success, true);
 });
 
 test('list validator enforces one capture, unique ids/ordinals and ordinal order', () => {
