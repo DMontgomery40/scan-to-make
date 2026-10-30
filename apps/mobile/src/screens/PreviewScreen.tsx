@@ -278,7 +278,7 @@ const styles = StyleSheet.create({
   previewCard: {
     alignItems: 'center',
     paddingVertical: 28,
-    backgroundColor: '#E5E9DC',
+    backgroundColor: colors.sage,
   },
   sketch: { alignItems: 'center', gap: space.xs },
   bar: { height: 6, borderRadius: radius.pill },

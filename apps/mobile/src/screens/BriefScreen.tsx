@@ -113,7 +113,7 @@ export function BriefScreen({
             onChangeText={value => onChange({ ...brief, [field.key]: value })}
             onBlur={() => setTouched(t => ({ ...t, [field.key]: true }))}
             placeholder={field.placeholder}
-            placeholderTextColor="#697064"
+            placeholderTextColor={colors.placeholder}
             editable={!saving}
             multiline
             maxLength={1200}

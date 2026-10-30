@@ -6,9 +6,12 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
   useWindowDimensions,
+  type ColorValue,
   type StyleProp,
+  type TextInputProps,
   type ViewStyle,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -106,12 +109,15 @@ export function Button({
   variant = 'primary',
   disabled,
   accessibilityHint,
+  accessibilityLabel,
 }: {
   label: string;
   onPress: () => void;
   variant?: 'primary' | 'secondary';
   disabled?: boolean;
   accessibilityHint?: string;
+  /** Spoken name when the visible label repeats across a list. */
+  accessibilityLabel?: string;
 }) {
   const primary = variant === 'primary';
   if (Platform.OS === 'ios') {
@@ -122,6 +128,7 @@ export function Button({
         primary={primary}
         disabled={disabled}
         accessibilityHint={accessibilityHint}
+        accessibilityLabel={accessibilityLabel}
       />
     );
   }
@@ -130,6 +137,7 @@ export function Button({
       accessibilityRole="button"
       accessibilityState={{ disabled: !!disabled }}
       accessibilityHint={accessibilityHint}
+      accessibilityLabel={accessibilityLabel}
       disabled={disabled}
       onPress={onPress}
       style={({ pressed }) => [
@@ -165,16 +173,18 @@ export function Card({
   return <View style={[styles.card, style]}>{children}</View>;
 }
 
-const VERDICT_STYLE: Record<Verdict, { fg: string; bg: string; text: string }> =
-  {
-    pass: { fg: colors.pass, bg: colors.passSoft, text: 'Pass' },
-    fail: { fg: colors.fail, bg: colors.failSoft, text: 'Fail' },
-    inconclusive: {
-      fg: colors.pending,
-      bg: colors.pendingSoft,
-      text: 'Not yet known',
-    },
-  };
+const VERDICT_STYLE: Record<
+  Verdict,
+  { fg: ColorValue; bg: ColorValue; text: string }
+> = {
+  pass: { fg: colors.pass, bg: colors.passSoft, text: 'Pass' },
+  fail: { fg: colors.fail, bg: colors.failSoft, text: 'Fail' },
+  inconclusive: {
+    fg: colors.pending,
+    bg: colors.pendingSoft,
+    text: 'Not yet known',
+  },
+};
 
 export function VerdictPill({ verdict }: { verdict: Verdict }) {
   const v = VERDICT_STYLE[verdict];
@@ -194,6 +204,105 @@ export function Stat({ label, value }: { label: string; value: string }) {
     >
       <Text style={type.label}>{label.toUpperCase()}</Text>
       <Text style={type.stat}>{value}</Text>
+    </View>
+  );
+}
+
+export type Tone = 'neutral' | 'pass' | 'fail' | 'pending' | 'accent';
+const TONES: Record<Tone, { fg: ColorValue; bg: ColorValue }> = {
+  neutral: { fg: colors.muted, bg: colors.surface },
+  pass: { fg: colors.pass, bg: colors.passSoft },
+  fail: { fg: colors.fail, bg: colors.failSoft },
+  pending: { fg: colors.pending, bg: colors.pendingSoft },
+  accent: { fg: colors.accent, bg: colors.accentSoft },
+};
+
+/** A short status label. Pair it with text that explains the state. */
+export function Badge({
+  label,
+  tone = 'neutral',
+}: {
+  label: string;
+  tone?: Tone;
+}) {
+  return (
+    <View style={[styles.pill, { backgroundColor: TONES[tone].bg }]}>
+      <Text style={[styles.pillText, { color: TONES[tone].fg }]}>{label}</Text>
+    </View>
+  );
+}
+
+/** An inline message that screen readers announce when it changes. */
+export function Notice({
+  title,
+  children,
+  tone = 'neutral',
+  action,
+}: {
+  title?: string;
+  children?: ReactNode;
+  tone?: Tone;
+  action?: ReactNode;
+}) {
+  return (
+    <View
+      accessibilityLiveRegion="polite"
+      style={[styles.notice, { backgroundColor: TONES[tone].bg }]}
+    >
+      {title ? (
+        <Text style={[styles.noticeTitle, { color: TONES[tone].fg }]}>
+          {title}
+        </Text>
+      ) : null}
+      {typeof children === 'string' ? (
+        <Text style={type.body}>{children}</Text>
+      ) : (
+        children
+      )}
+      {action}
+    </View>
+  );
+}
+
+/** A labelled text input. The label is also its accessibility name. */
+export function Field({
+  label,
+  hint,
+  error,
+  suffix,
+  style,
+  containerStyle,
+  ...input
+}: TextInputProps & {
+  label: string;
+  hint?: string;
+  error?: string | null;
+  suffix?: string;
+  containerStyle?: StyleProp<ViewStyle>;
+}) {
+  return (
+    <View style={[styles.field, containerStyle]}>
+      <Text style={styles.fieldLabel}>{label}</Text>
+      {hint ? <Text style={type.caption}>{hint}</Text> : null}
+      <View style={[styles.inputRow, error ? styles.inputError : null]}>
+        <TextInput
+          accessibilityLabel={label}
+          accessibilityHint={hint}
+          placeholderTextColor={colors.placeholder}
+          {...input}
+          style={[styles.input, style]}
+        />
+        {suffix ? (
+          <Text style={styles.suffix} importantForAccessibility="no">
+            {suffix}
+          </Text>
+        ) : null}
+      </View>
+      {error ? (
+        <Text accessibilityLiveRegion="polite" style={styles.fieldError}>
+          {error}
+        </Text>
+      ) : null}
     </View>
   );
 }
@@ -271,4 +380,28 @@ const styles = StyleSheet.create({
   },
   pillText: { fontSize: 13, fontWeight: '700' },
   stat: { flexBasis: '45%', flexGrow: 1, gap: space.xs },
+  notice: { borderRadius: radius.md, padding: space.lg, gap: space.sm },
+  noticeTitle: { fontSize: 15, lineHeight: 21, fontWeight: '700' },
+  field: { gap: 6 },
+  fieldLabel: { ...type.body, fontWeight: '600' },
+  inputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    minHeight: 52,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: 14,
+    backgroundColor: colors.surface,
+    paddingHorizontal: space.md,
+  },
+  inputError: { borderColor: colors.fail },
+  input: {
+    flex: 1,
+    minHeight: 50,
+    paddingVertical: 12,
+    fontSize: 17,
+    color: colors.ink,
+  },
+  suffix: { ...type.body, color: colors.muted, marginLeft: space.xs },
+  fieldError: { ...type.caption, color: colors.fail },
 });

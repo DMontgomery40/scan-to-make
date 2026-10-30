@@ -1,5 +1,13 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Alert, BackHandler, StatusBar, Text, Modal } from 'react-native';
+import {
+  Alert,
+  BackHandler,
+  Modal,
+  Platform,
+  StatusBar,
+  Text,
+  useColorScheme,
+} from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import {
   applyFitSpecPatch,
@@ -25,6 +33,14 @@ import { BriefScreen, BriefReviewScreen } from './src/screens/BriefScreen';
 import { RetainedCapturesScreen } from './src/screens/RetainedCapturesScreen';
 import { InspectedFilesScreen } from './src/screens/InspectedFilesScreen';
 import { ProjectsScreen } from './src/screens/ProjectsScreen';
+import { ScanResultsScreen } from './src/screens/ScanResultsScreen';
+import { CloseUpsScreen } from './src/screens/CloseUpsScreen';
+import { MakeScreen, type MakeIdea } from './src/screens/MakeScreen';
+import {
+  unavailableScanServices,
+  type ScanServices,
+  type ScanTarget,
+} from './src/screens/scanServices';
 import {
   briefComplete,
   emptyBrief,
@@ -45,7 +61,10 @@ type Route =
   | 'inspectedFiles'
   | 'retainedCaptures'
   | 'projects'
-  | 'drawer';
+  | 'drawer'
+  | 'scanResults'
+  | 'closeUps'
+  | 'make';
 const PARENT: Record<Route, Route | null> = {
   home: null,
   brief: 'home',
@@ -58,6 +77,9 @@ const PARENT: Record<Route, Route | null> = {
   retainedCaptures: 'projects',
   inspectedFiles: 'projects',
   drawer: 'home',
+  scanResults: 'retainedCaptures',
+  closeUps: 'scanResults',
+  make: 'scanResults',
 };
 const failure = (result: WriteProjectResult) =>
   result.status === 'stale' || result.status === 'exists'
@@ -68,8 +90,23 @@ const failure = (result: WriteProjectResult) =>
     ? 'The saved project couldn’t be read. Your draft and stored data are unchanged.'
     : 'Couldn’t confirm the save. Your draft is still here. Check saved projects before trying again.';
 
-function App({ repository: injected }: { repository?: SavedProjects }) {
+function App({
+  repository: injected,
+  scanServices: injectedScan,
+}: {
+  repository?: SavedProjects;
+  scanServices?: ScanServices;
+}) {
   const [repository] = useState(() => injected ?? localSavedProjects());
+  // Until the processing and close-up transports ship, these report that the
+  // feature is unavailable rather than pretending to work.
+  const [scanServices] = useState(
+    () => injectedScan ?? unavailableScanServices(),
+  );
+  const scheme = useColorScheme();
+  const [scanTarget, setScanTarget] = useState<ScanTarget | null>(null);
+  // Kept for this app session; design planning has no endpoint yet.
+  const [makeIdeas, setMakeIdeas] = useState<Record<string, MakeIdea>>({});
   const [companionOpen, setCompanionOpen] = useState(false);
   const [route, setRoute] = useState<Route>('home');
   const [hydrated, setHydrated] = useState(false);
@@ -342,6 +379,46 @@ function App({ repository: injected }: { repository?: SavedProjects }) {
               setRoute('projects');
             }}
             onCompanion={() => setCompanionOpen(true)}
+            onResults={capture => {
+              setScanTarget({ projectId: captureProjectId, capture });
+              setRoute('scanResults');
+            }}
+          />
+        ) : null;
+        break;
+      case 'scanResults':
+        screen = scanTarget ? (
+          <ScanResultsScreen
+            target={scanTarget}
+            services={scanServices}
+            onBack={() => setRoute('retainedCaptures')}
+            onCompanion={() => setCompanionOpen(true)}
+            onCloseUps={() => setRoute('closeUps')}
+            onMake={() => setRoute('make')}
+          />
+        ) : null;
+        break;
+      case 'closeUps':
+        screen = scanTarget ? (
+          <CloseUpsScreen
+            target={scanTarget}
+            services={scanServices}
+            onBack={() => setRoute('scanResults')}
+            onCompanion={() => setCompanionOpen(true)}
+          />
+        ) : null;
+        break;
+      case 'make':
+        screen = scanTarget ? (
+          <MakeScreen
+            idea={makeIdeas[scanTarget.capture.captureId] ?? null}
+            onChange={idea =>
+              setMakeIdeas(current => ({
+                ...current,
+                [scanTarget.capture.captureId]: idea,
+              }))
+            }
+            onBack={() => setRoute('scanResults')}
           />
         ) : null;
         break;
@@ -438,7 +515,13 @@ function App({ repository: injected }: { repository?: SavedProjects }) {
     }
   return (
     <SafeAreaProvider>
-      <StatusBar barStyle="dark-content" />
+      <StatusBar
+        barStyle={
+          Platform.OS === 'ios' && scheme === 'dark'
+            ? 'light-content'
+            : 'dark-content'
+        }
+      />
       {screen}
       {companionOpen ? (
         <Modal
