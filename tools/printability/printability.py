@@ -66,7 +66,7 @@ def build_parser() -> argparse.ArgumentParser:
                      help="overhang angle threshold from vertical in degrees (default: 45)")
     chk.add_argument("--out", type=Path, help="optional path to write JSON verdict (must not exist)")
     chk.add_argument("--strict", action="store_true",
-                     help="exit 1 when verdict is not-printable (or printable-with-supports without --allow-supports)")
+                     help="exit 2 when verdict is not-printable (or printable-with-supports without --allow-supports)")
     chk.add_argument("--allow-supports", action="store_true",
                      help="with --strict, accept printable-with-supports")
 
