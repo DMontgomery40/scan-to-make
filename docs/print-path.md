@@ -26,11 +26,31 @@ Before or outside companion project storage, operators and CI/local verification
 python3 tools/printability/printability.py dry-run \
   --template-dir /path/to/template-output \
   --profile p1s-0.4-hardened \
+  --auto-orient \
   --expected-binary-sha256 <64-hex-sha256> \
   --out /path/to/dry-run-output
 ```
 
-`dry-run` verifies the template manifest's STL digest, analyzes the retained verified bytes against the named Bambu profile, checks the report digest before accepting its verdict, gates slicing on the verdict, invokes [`tools/slicer-producer/producer.py`](../tools/slicer-producer/producer.py) inside `/usr/bin/sandbox-exec`, and atomically writes `source.stl`, `template-manifest.json`, `printability.json`, `slice/sliced-plate.3mf` (or `--three-mf-name <name>.3mf`, never `*.gcode.3mf`), `slice/plate_1.gcode`, `slice/exported-settings.json`, `slice/manifest.json`, and `dry-run-manifest.json` (`schema: "scan-to-make.print-path-dry-run/0.1.0"`).
+`dry-run` verifies the template manifest's STL digest, optionally rotates the verified watertight mesh to its highest-scoring print orientation when `--auto-orient` is passed (leaving behaviour and output schema unchanged when `--auto-orient` is omitted), analyzes the effective STL bytes against the named Bambu profile, checks the report digest before accepting its verdict, gates slicing on the verdict, invokes [`tools/slicer-producer/producer.py`](../tools/slicer-producer/producer.py) inside `/usr/bin/sandbox-exec`, and atomically writes `source.stl` (always the original template STL), `template-manifest.json`, `printability.json`, `slice/sliced-plate.3mf` (or `--three-mf-name <name>.3mf`, never `*.gcode.3mf`), `slice/plate_1.gcode`, `slice/exported-settings.json`, `slice/manifest.json`, and `dry-run-manifest.json` (`schema: "scan-to-make.print-path-dry-run/0.1.0"`).
+
+### Deterministic Auto-Orientation (`printability orient` & `dry-run --auto-orient`)
+
+[`tools/printability/orient.py`](../tools/printability/orient.py) (MIT, Python stdlib with byte-identical optional NumPy acceleration) evaluates candidate build-plate orientations for a single closed, non-degenerate watertight STL against an explicit printer profile:
+
+```sh
+python3 tools/printability/printability.py orient /path/to/part.stl \
+  --profile p1s-0.4-hardened \
+  --write-stl /path/to/oriented.stl \
+  --out /path/to/orientation.json
+```
+
+1. **Candidate generation:** Collects and deterministically deduplicates downward-pointing outward normals from three geometric sources:
+   - the **6 axis-aligned faces** (`-Z`, `+Z`, `-X`, `+X`, `-Y`, `+Y`, with identity `-Z` first for tie-breaking),
+   - the outward normals of the **largest edge-connected coplanar flat facet clusters**, and
+   - the outward normals of the **3D convex-hull faces** (pure-Python Quickhull, capturing multi-pad / multi-rail resting planes whose individual pads are small).
+   - When a candidate's footprint fits the build plate and avoids hardware exclusion zones only under a 90° Z yaw (`requiresZRotation90`), the 90° Z rotation is folded directly into the candidate's `3 × 3` `SO(3)` `rotationMatrix`.
+2. **Deterministic scoring (`schema: "scan-to-make.print-orientation/0.1.0"`):** Ranks candidates across non-overlapping feasibility tiers (`printable` `[70, 100]` > `printable-with-supports` `[40, 70)` > `unstable-or-missing-flat-base` `[10, 40)` > `exceeds-bed` `[0, 10)`) and continuous quality components combining **bed fit**, **flat base contact area & CoM tipping stability** (matching `analyzer.py`'s gates), **overhang support area**, and **Z height** (print time). Equivalent scores break ties deterministically in favour of the identity orientation (`[0, 0, -1]`, `applied: false`) and canonical axis order.
+3. **`dry-run --auto-orient`:** Runs `orient` on the verified `source.stl` bytes **before** the printability gate. When a non-identity rotation wins (`applied: true`), `dry-run` stages `oriented.stl` alongside the untouched `source.stl`, runs `analyze_stl` and BambuStudio slicing against `oriented.stl`, stages the full ranked report at `orientation.json`, and records `orientation` (`applied`, `rotationMatrix`, `axis`, `angleDeg`, `downNormal`, `zYawDeg`, `score`, `baselineScore`, `slicedStlArtifact`, and `reportArtifact`) in `dry-run-manifest.json`. Without `--auto-orient`, `dry-run` neither rotates the STL nor adds `orientation` to `dry-run-manifest.json`.
 
 `dry-run-manifest.json` records `slice/sliced-plate.3mf` (`mediaType: "model/3mf"`) as `slice.printableArtifact` and top-level `dispatchCandidate` (`dispatchCandidate.artifact.sha256`), alongside `slice/plate_1.gcode` (`slice.gcodeArtifact`), after verifying that `Metadata/plate_1.gcode` inside the `.3mf` archive matches `slice/plate_1.gcode` byte-for-byte.
 
@@ -45,7 +65,7 @@ Every stage validates the previous stage's cryptographic digest rather than trus
 | Stage | Module / Boundary | Safety Gates Enforced | Failure Behaviour |
 | --- | --- | --- | --- |
 | **1. Template & Project Acceptance** | `tools/templates/**`, `packages/contracts`, `services/project`, `services/companion/src/stl-export.ts` | • Template manifests mark outputs `previewOnly: true` / `provesPhysicalAccuracy: false` and bind `sha256` + `byteLength` in millimetres.<br>• `FileSavedProjectStorage` requires an explicit human-promoted `acceptedArtifact` at a locked `projectRevision` and strong `ETag`.<br>• `readVerifiedStl` reads with `O_RDONLY \| O_NOFOLLOW`, enforces a 32 MiB source cap, rejects non-finite coordinates, zero-area triangles, trailing ASCII payloads, and byte/digest mismatches. | Rejects before any printability or slicer subprocess starts; leaves project state unchanged. |
-| **2. Printability Analysis** | `tools/printability/analyzer.py`, `profiles.py`, `profiles.json` | • Requires an explicit printer profile ID (e.g. `p1s-0.4-hardened`); never guesses bed size or nozzle width.<br>• Audits closed 2-manifold directed edges, positive volume, and finite normals.<br>• Verifies bed X/Y/Z fit and placement outside hardware keep-out zones (such as the P1S/X1C `[0, 18] × [0, 28] mm` front-left filament cutter lever).<br>• Verifies flat base contact area at `zMin`, 2D support convex hull, solid CoM projection inside the hull, and `>= 10°` static tipping angle.<br>• Casts 3D Amanatides–Woo DDA rays along inward 3D normals and XY slice planes to verify opposing wall thickness `>= nozzleDiameterMm` (warning below `2 × nozzleDiameterMm`).<br>• Computes `> 45°` overhang area share and spatial region bounds.<br>• Emits `printerContacted: false`, `dispatchAuthorized: false`, `provesPhysicalFit: false`. | `not-printable` blocks slicing unconditionally. `printable-with-supports` blocks slicing unless `--allow-supports` (or explicit companion support opt-in) is set. Bed fit is checked from the part's extents plus a placement search, because the slicer step arranges the part on the plate (`--arrange 1`); absolute STL coordinates don't matter. |
+| **2. Orientation & Printability Analysis** | `tools/printability/orient.py`, `analyzer.py`, `profiles.py`, `profiles.json` | • Requires an explicit printer profile ID (e.g. `p1s-0.4-hardened`); never guesses bed size or nozzle width.<br>• Audits closed 2-manifold directed edges, single connected solid, zero degenerate facets, positive volume, and unit binary-STL normals.<br>• Optional `orient` / `--auto-orient` deterministically scores 6 axis-aligned, flat-cluster, and 3D convex-hull orientations before gating.<br>• Verifies bed X/Y/Z fit and placement outside hardware keep-out zones (such as the P1S/X1C `[0, 18] × [0, 28] mm` front-left filament cutter lever).<br>• Verifies flat base contact area at `zMin`, 2D support convex hull, solid CoM projection inside the hull, and `>= 10°` static tipping angle.<br>• Casts 3D Amanatides–Woo DDA rays along inward 3D normals and XY slice planes to verify opposing wall thickness `>= nozzleDiameterMm` (warning below `2 × nozzleDiameterMm`).<br>• Computes `> 45°` overhang area share and spatial region bounds.<br>• Emits `printerContacted: false`, `dispatchAuthorized: false`, `provesPhysicalFit: false`. | `not-printable` blocks slicing unconditionally. `printable-with-supports` blocks slicing unless `--allow-supports` (or explicit companion support opt-in) is set. Bed fit is checked from the part's extents plus a placement search, because the slicer step arranges the part on the plate (`--arrange 1`); absolute STL coordinates don't matter. |
 | **3. Sandboxed Slicing** | `tools/slicer-producer/producer.py`, `services/companion/src/prepared-production.ts` | • `createPreparedProducer` pins `python`, `producer.py` `expectedScriptSha256`, BambuStudio `bundle`, `expectedVersion`, and `expectedBinarySha256`; requests supply STL bytes only.<br>• `producer.py` re-verifies `--expected-input-sha256` and `--expected-input-bytes`, rejects `*.gcode.3mf` output names, resolves bundled preset `inherits` chains into sealed scratch JSON, and applies validated `--bed-type`, `--nozzle-type`, and `--enable-support` overrides before launch.<br>• Launches BambuStudio under `/usr/bin/sandbox-exec` (`(deny network*)`, default-deny `(deny mach-lookup)` with only the three Mach services needed for headless 3MF thumbnail rendering, read-only bundle/input, `~/Library`/`~/.ssh`/`~/.config` denied, `(deny signal)`, writes restricted to private scratch) with a stripped environment (`PATH=/usr/bin:/bin:/usr/sbin:/sbin`, `HOME=<scratch>/home`).<br>• Exports both `plate_1.gcode` and `sliced-plate.3mf` (`--export-3mf`), verifies the `.3mf` archive contains `Metadata/plate_1.gcode` byte-identical to `plate_1.gcode` plus `Metadata/plate_1.json`, `Metadata/slice_info.config`, `[Content_Types].xml`, and `3D/*.model`, and seals all hashes into `slice/manifest.json`. | Non-zero exit, timeout, cancellation, missing/corrupt `.3mf`, G-code mismatch, or digest mismatch reaps the entire slicer process group (`SIGKILL`) and deletes temporary outputs. |
 | **4. File-Only Inspection & Job Sealing** | `services/companion/src/prepared-inspection.ts`, `mcp-discovery.ts`, `prepared-jobs.ts` | • Spawns operator-configured `TrustedMcpProcess` in bounded file-only mode, discovers `inspect_print_file` and `print_3mf` schemas, and invokes **only** `inspect_print_file` (`evidence: "file-only"`, `dispatch_authorized: false`).<br>• `compatible()` checks exact `sha256`, `byte_length`, `file_format` (`3mf` vs `gcode`), `plateInternalPath` (`Metadata/plate_1.gcode` for plate `0`), `bambu_model`, `plate_index`, `nozzle_diameters`, `bedType` (`textured_plate` → `"textured pei plate"`, etc.), canonical `materials` at `usedFilamentPositions`, and AMS vs external spool (`254`) consistency.<br>• Validates constructed dispatch arguments against the discovered `print_3mf` schema without calling it.<br>• Re-hashes retained bytes and atomically renames the staging directory into `<jobId>/` (`printable.bin` `0400`, `job.json` `0600`) while holding `projects.withCurrentProject` at the bound revision and `ETag`. | Any project edit during slicing/inspection, schema mismatch, or incompatible 3MF/G-code metadata aborts publication and removes `.staging-*`. |
 | **5. Human Approval & Intent Recording** | `PreparedJobStore.claimIntent` (`prepared-jobs.ts`), `CompanionJournal` (`src/index.ts`) | • Requires `confirmed: true`, non-empty human `actorId`, exact `jobSha256` / `planSha256`, and `expiresAtMs` strictly inside `(now, now + 300_000]` (5 minutes), checked **both before and after** re-verifying disk bytes and project state.<br>• Commits `intent.json` via atomic write-then-`link` (`EEXIST` rejects replays across restarts or concurrent processes; torn intents fail closed).<br>• `CompanionJournal` enforces a per-printer filesystem lock (`<printerId>.lock`), single-use `plan.sha256` non-replay, and **unreconciled-attempt blocking**: if a printer has an open `intent` without a human `reconciled` event (`finished`, `cancelled`, or `rejected`), no further attempt can begin. | Expired approval, modified project/artifact, replay attempt, or unreconciled prior job fails closed before any executor is called. |
@@ -152,30 +172,33 @@ export interface PreparedPrintabilityConfiguration {
   script: string;                  // absolute path to tools/printability/printability.py
   expectedScriptSha256: string;    // 64-hex SHA-256 of printability.py
   expectedAnalyzerSha256: string;  // 64-hex SHA-256 of analyzer.py
+  expectedOrientSha256: string;    // 64-hex SHA-256 of orient.py
   expectedProfilesSha256: string;  // 64-hex SHA-256 of profiles.json
   profileId: string;               // e.g. "p1s-0.4-hardened"
   material?: 'PLA' | 'PETG' | 'TPU' | 'ABS' | 'ASA';
+  autoOrient?: boolean;            // default false
   timeoutSeconds?: number;         // default 15, max 60
 }
 ```
 
-The CLI explicitly loads sibling modules from its resolved script directory, so both `python -I -B tools/printability/printability.py profiles` and the isolated `check` invocation below work without relying on the working directory or `PYTHONPATH`.
+The CLI explicitly loads sibling modules from its resolved script directory, so `python -I -B tools/printability/printability.py profiles`, `orient`, and `check` work without relying on the working directory or `PYTHONPATH`.
 
 Invocation contract inside `PreparedJobStore.prepareProduced` (after `readVerifiedStl(path, sourceArtifact)` and **before** `producer.produce(...)`):
 
-1. Verify `script`, sibling `analyzer.py`, and sibling `profiles.json` digests (`O_RDONLY | O_NOFOLLOW`).
-2. Spawn `python -I -B <script> check <source.stl> --profile <profileId> --material <material> --out <temp/printability.json>` with `env: { PATH: '/usr/bin:/bin', LANG: 'C', TMPDIR: temp }` and `stdio: ['ignore', 'pipe', 'pipe']`.
-3. Parse `<temp/printability.json>` against a strict Zod schema matching `schema: "scan-to-make.printability/0.1.0"`, verifying:
-   - `report.input.sha256 === sourceArtifact.sha256` and `report.input.byteLength === sourceArtifact.byteLength`;
+1. Verify `script`, sibling `analyzer.py`, sibling `orient.py`, and sibling `profiles.json` digests (`O_RDONLY | O_NOFOLLOW`).
+2. When `autoOrient` is `true`, spawn `python -I -B <script> orient <source.stl> --profile <profileId> --out <temp/orientation.json> --write-stl <temp/oriented.stl>` first, verify `orientation.input.sha256 === sourceArtifact.sha256`, and feed `<temp/oriented.stl>` (when `orientation.selected.applied === true`) as the effective STL into `check` and `producer.produce(...)`.
+3. Spawn `python -I -B <script> check <effective.stl> --profile <profileId> --material <material> --out <temp/printability.json>` with `env: { PATH: '/usr/bin:/bin', LANG: 'C', TMPDIR: temp }` and `stdio: ['ignore', 'pipe', 'pipe']`.
+4. Parse `<temp/printability.json>` against a strict Zod schema matching `schema: "scan-to-make.printability/0.1.0"`, verifying:
+   - `report.input.sha256` and `report.input.byteLength` match the effective STL (`oriented.stl` when rotated, otherwise `sourceArtifact`);
    - `report.profile.bambuModel === selection.model`;
    - `report.profile.bedType === selection.bedType`;
    - `selection.nozzleDiameters.length === 1 && report.profile.nozzleDiameterMm === selection.nozzleDiameters[0]`;
    - `report.printerContacted === false && report.dispatchAuthorized === false`.
-4. Gate on `report.verdict`:
+5. Gate on `report.verdict`:
    - `'not-printable'` → throw `PreparedPrintabilityFailure` (surfaces `report.reasonCodes` and `report.reasons`); do **not** invoke BambuStudio and publish no job.
-   - `'printable-with-supports'` → reject unless the caller explicitly passed `allowSupports: true` in `prepareProduced` input (`--allow-supports` in `prepared-produce-cli.ts`). When `allowSupports === true`, pass `enableSupport: true` into `producer.produce(source, { enableSupport: true }, signal)`.
+   - `'printable-with-supports'` → reject unless the caller explicitly passed `allowSupports: true` in `prepareProduced` input (`--allow-supports` in `prepared-produce-cli.ts`). When `allowSupports === true`, pass `enableSupport: true` into `producer.produce(effectiveSource, { enableSupport: true }, signal)`.
    - `'printable'` → proceed with `enableSupport: false` (unless overridden).
-5. Retain `printability.json` (`0400`) inside `<jobId>/printability.json` and extend `PreparedProductionSchema` (`services/companion/src/prepared-production.ts`) with:
+6. Retain `printability.json` (`0400`, plus `orientation.json` / `oriented.stl` when `autoOrient` is enabled) inside `<jobId>/` and extend `PreparedProductionSchema` (`services/companion/src/prepared-production.ts`) with:
 
 ```ts
 printability: z.strictObject({

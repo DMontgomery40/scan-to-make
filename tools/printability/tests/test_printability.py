@@ -24,6 +24,7 @@ sys.path.insert(0, str(ROOT_DIR))
 
 import analyzer  # noqa: E402
 import dry_run  # noqa: E402
+import orient  # noqa: E402
 import printability  # noqa: E402
 import profiles  # noqa: E402
 
@@ -861,10 +862,6 @@ class DryRunIntegrationTests(unittest.TestCase):
         self.assertTrue((out_oh / "slice" / "sliced-plate.3mf").is_file())
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class CliContractTests(unittest.TestCase):
     """Review follow-ups on PR #79: explicit profiles, strict exit code, companion-aligned caps."""
 
@@ -887,8 +884,6 @@ class CliContractTests(unittest.TestCase):
                         self.assertEqual(report["schema"], profiles.PROFILES_SCHEMA)
 
     def test_check_requires_explicit_profile_and_strict_failure_exits_2(self):
-        import printability
-        import analyzer
         self.assertEqual(analyzer.MAX_INPUT_BYTES, 32 << 20)
         self.assertEqual(analyzer.MAX_FACETS, 500_000)
         with tempfile.TemporaryDirectory() as tmp:
@@ -897,3 +892,464 @@ class CliContractTests(unittest.TestCase):
             with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
                 self.assertEqual(printability.main(["check", str(stl)]), 2)
                 self.assertEqual(printability.main(["check", str(stl), "--profile", "p1s-0.4-hardened", "--strict"]), 2)
+
+
+def _rotate_binary_stl_arbitrary(stl_bytes: bytes, rx_deg: float, ry_deg: float, rz_deg: float = 0.0) -> bytes:
+    """Apply an arbitrary Euler rotation to a synthetic binary STL for off-axis test fixtures."""
+    ax, ay, az = math.radians(rx_deg), math.radians(ry_deg), math.radians(rz_deg)
+    cx, sx = math.cos(ax), math.sin(ax)
+    cy, sy = math.cos(ay), math.sin(ay)
+    cz, sz = math.cos(az), math.sin(az)
+    rx = ((1.0, 0.0, 0.0), (0.0, cx, -sx), (0.0, sx, cx))
+    ry = ((cy, 0.0, sy), (0.0, 1.0, 0.0), (-sy, 0.0, cy))
+    rz = ((cz, -sz, 0.0), (sz, cz, 0.0), (0.0, 0.0, 1.0))
+    rot = orient._matmul3(rz, orient._matmul3(ry, rx))
+    return orient.rotate_stl_bytes(stl_bytes, rot, use_numpy=False)
+
+
+def synthetic_l_bracket_stl(
+    leg_x: float = 50.0,
+    leg_z: float = 50.0,
+    width_y: float = 20.0,
+    wall: float = 6.0,
+    *,
+    inverted: bool = False,
+) -> bytes:
+    xs = [0.0, wall, leg_x]
+    ys = [0.0, width_y]
+    zs = [0.0, leg_z - wall, leg_z] if inverted else [0.0, wall, leg_z]
+    if inverted:
+        return build_rectilinear_solid(xs, ys, zs, lambda i, _j, k: i == 0 or k == 1)
+    return build_rectilinear_solid(xs, ys, zs, lambda i, _j, k: i == 0 or k == 0)
+
+
+def synthetic_three_foot_tripod_stl() -> bytes:
+    """Closed 24-triangle vaulted pyramid on three disconnected ~3.8 mm^2 foot pads.
+
+    All outer and inner-vault walls slope steeply (< 40 deg from vertical, zero
+    overhangs), and each foot triangle has area ~3.8 mm^2 (< 4.5 mm^2 flat-cluster
+    threshold) while all three together supply ~11.4 mm^2 (>= 9.0 mm^2 base gate)
+    on the resting plane discovered exclusively by the 3D convex hull.
+    """
+    r_out = 12.0
+    r_foot_in = 8.4
+    half_ang = math.radians(7.2)
+    r_arch = 6.5
+    z_arch = 2.5
+    top_apex = (0.0, 0.0, 18.0)
+    vault_apex = (0.0, 0.0, 11.0)
+
+    outer_ring: list[tuple[float, float, float]] = []
+    inner_ring: list[tuple[float, float, float]] = []
+    foot_tris: list[tuple[tuple[float, float, float], tuple[float, float, float], tuple[float, float, float]]] = []
+
+    for i in range(3):
+        th = math.radians(120.0 * i)
+        th_mid = math.radians(120.0 * i + 60.0)
+        l_pt = (r_foot_in * math.cos(th - half_ang), r_foot_in * math.sin(th - half_ang), 0.0)
+        o_pt = (r_out * math.cos(th), r_out * math.sin(th), 0.0)
+        r_pt = (r_foot_in * math.cos(th + half_ang), r_foot_in * math.sin(th + half_ang), 0.0)
+        m_pt = (r_arch * math.cos(th_mid), r_arch * math.sin(th_mid), z_arch)
+
+        outer_ring.extend((l_pt, o_pt, r_pt, m_pt))
+        inner_ring.extend((l_pt, r_pt, m_pt))
+        # CW when viewed from +Z -> exact (0, 0, -1) outward normal
+        foot_tris.append((r_pt, o_pt, l_pt))
+
+    tris: list[tuple[tuple[float, float, float], tuple[float, float, float], tuple[float, float, float]]] = []
+    n_out = len(outer_ring)
+    for k in range(n_out):
+        tris.append((outer_ring[k], outer_ring[(k + 1) % n_out], top_apex))
+    tris.extend(foot_tris)
+    n_in = len(inner_ring)
+    for k in range(n_in):
+        tris.append((inner_ring[(k + 1) % n_in], inner_ring[k], vault_apex))
+    return pack_binary_stl(tris)
+
+
+class OrientationTests(unittest.TestCase):
+    """KAN-101 follow-up: deterministic auto-orientation candidate generation, scoring, and backend parity."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory(prefix="stm-orient-test-")
+        self.root = Path(self.tmp.name)
+        self.p1s, self.pla = profiles.resolve_profile("p1s-0.4-hardened")
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def write_stl(self, name: str, data: bytes) -> Path:
+        p = self.root / name
+        p.write_bytes(data)
+        return p
+
+    def test_l_bracket_lays_flat_on_side(self) -> None:
+        for label, inverted in (("upright", False), ("inverted", True)):
+            with self.subTest(label=label):
+                stl = self.write_stl(f"l_{label}.stl", synthetic_l_bracket_stl(inverted=inverted))
+                rep, rot_bytes = orient.orient_and_rotate_stl(stl, self.p1s)
+                sel = rep["selected"]
+                self.assertTrue(sel["applied"])
+                # Extrusion axis is Y, so laying the L-bracket flat puts -Y (by tie-break over +Y) on the bed
+                self.assertEqual(sel["downNormal"], [0.0, -1.0, 0.0])
+                self.assertEqual(sel["metrics"]["heightMm"], 20.0)
+                self.assertEqual(sel["metrics"]["overhangAreaMm2"], 0.0)
+                self.assertFalse(sel["metrics"]["requiresSupports"])
+                self.assertTrue(sel["metrics"]["isStable"])
+                self.assertGreater(sel["score"], rep["baseline"]["score"])
+
+                oriented_path = self.write_stl(f"l_{label}_oriented.stl", rot_bytes)
+                verdict_rep = analyzer.analyze_stl(oriented_path, self.p1s, self.pla)
+                self.assertEqual(verdict_rep["verdict"], "printable")
+                self.assertEqual(verdict_rep["checks"]["overhangs"]["overhangAreaMm2"], 0.0)
+                self.assertEqual(verdict_rep["checks"]["bedFit"]["partExtentsMm"][2], 20.0)
+
+    def test_tall_thin_box_uses_large_face_unless_unstable(self) -> None:
+        # 1. Tall thin slab (4 x 40 x 80 mm): standing on 4x40 or 4x80 is unstable; large 40x80 face wins
+        thin_stl = self.write_stl(
+            "tall_thin.stl",
+            build_rectilinear_solid([0.0, 4.0], [0.0, 40.0], [0.0, 80.0], lambda *_: True),
+        )
+        rep_thin = orient.orient_stl(thin_stl, self.p1s)
+        self.assertFalse(rep_thin["baseline"]["metrics"]["isStable"])
+        self.assertEqual(rep_thin["selected"]["downNormal"], [-1.0, 0.0, 0.0])
+        self.assertEqual(rep_thin["selected"]["metrics"]["flatBaseAreaMm2"], 3200.0)
+        self.assertEqual(rep_thin["selected"]["metrics"]["heightMm"], 4.0)
+        self.assertTrue(rep_thin["selected"]["metrics"]["isStable"])
+
+        # 2. 20 x 40 x 80 mm upright box (where upright IS stable): still selects largest 40x80 face
+        box_stl = self.write_stl(
+            "tall_box_stable.stl",
+            build_rectilinear_solid([0.0, 20.0], [0.0, 40.0], [0.0, 80.0], lambda *_: True),
+        )
+        rep_box = orient.orient_stl(box_stl, self.p1s)
+        self.assertTrue(rep_box["baseline"]["metrics"]["isStable"])
+        self.assertEqual(rep_box["selected"]["downNormal"], [-1.0, 0.0, 0.0])
+        self.assertEqual(rep_box["selected"]["metrics"]["flatBaseAreaMm2"], 3200.0)
+        self.assertEqual(rep_box["selected"]["metrics"]["heightMm"], 20.0)
+
+        # 3. Counterfactual where the largest flat face (-X: 50 x 40 = 2000 mm^2) is UNSTABLE because a
+        # heavy offset base block at y in [40, 90] pulls CoM outside x=0's [0, 50] support hull:
+        # orient must reject the unstable 2000 mm^2 face and pick the stable -Z face (1800 mm^2).
+        xs, ys, zs = [0.0, 6.0, 36.0], [0.0, 40.0, 50.0, 90.0], [0.0, 25.0, 40.0]
+        skewed_bytes = build_rectilinear_solid(
+            xs,
+            ys,
+            zs,
+            lambda i, j, k: (i == 0 and j in (0, 1)) or (i == 1 and j in (1, 2) and k == 0),
+        )
+        skewed_stl = self.write_stl("skewed_large_face_unstable.stl", skewed_bytes)
+        rep_skewed = orient.orient_stl(skewed_stl, self.p1s)
+        by_id = {c["candidateId"]: c for c in rep_skewed["candidates"]}
+        self.assertEqual(by_id["axis:-x"]["metrics"]["flatBaseAreaMm2"], 2000.0)
+        self.assertFalse(by_id["axis:-x"]["metrics"]["isStable"])
+        self.assertEqual(rep_skewed["selected"]["candidateId"], "axis:-z")
+        self.assertTrue(rep_skewed["selected"]["metrics"]["isStable"])
+        self.assertFalse(rep_skewed["selected"]["metrics"]["requiresSupports"])
+        self.assertGreater(rep_skewed["selected"]["score"], by_id["axis:-x"]["score"])
+
+    def test_cantilever_overhang_orients_to_drop_supports(self) -> None:
+        stl = self.write_stl("cantilever.stl", synthetic_overhang_cantilever_stl())
+        before = analyzer.analyze_stl(stl, self.p1s, self.pla)
+        self.assertEqual(before["verdict"], "printable-with-supports")
+        self.assertAlmostEqual(before["checks"]["overhangs"]["overhangAreaMm2"], 660.0, places=3)
+
+        rep, rot_bytes = orient.orient_and_rotate_stl(stl, self.p1s)
+        self.assertTrue(rep["selected"]["applied"])
+        self.assertEqual(rep["selected"]["downNormal"], [0.0, -1.0, 0.0])
+        self.assertEqual(rep["selected"]["metrics"]["overhangAreaMm2"], 0.0)
+        self.assertFalse(rep["selected"]["metrics"]["requiresSupports"])
+
+        oriented_stl = self.write_stl("cantilever_oriented.stl", rot_bytes)
+        after = analyzer.analyze_stl(oriented_stl, self.p1s, self.pla)
+        self.assertEqual(after["verdict"], "printable")
+        self.assertEqual(after["checks"]["overhangs"]["overhangAreaMm2"], 0.0)
+
+    def test_cube_equivalent_scores_and_deterministic_identity_tie_break(self) -> None:
+        stl = self.write_stl("cube.stl", synthetic_cube_stl(20.0))
+        rep, rot_bytes = orient.orient_and_rotate_stl(stl, self.p1s)
+        self.assertEqual(rep["candidateCount"], 6)
+        scores = [c["score"] for c in rep["candidates"]]
+        self.assertEqual(len(set(scores)), 1)
+        self.assertEqual(rep["selected"]["candidateId"], "axis:-z")
+        self.assertEqual(rep["selected"]["downNormal"], [0.0, 0.0, -1.0])
+        self.assertFalse(rep["selected"]["applied"])
+        self.assertTrue(rep["selected"]["isIdentity"])
+        self.assertEqual(rep["selected"]["angleDeg"], 0.0)
+        self.assertEqual(rot_bytes, stl.read_bytes())
+        # Canonical deterministic rank order for all 6 tied faces
+        self.assertEqual(
+            [c["candidateId"] for c in rep["candidates"]],
+            ["axis:-z", "axis:+z", "axis:-x", "axis:+x", "axis:-y", "axis:+y"],
+        )
+
+    def test_off_axis_flat_cluster_and_convex_hull_rescue_tilted_parts(self) -> None:
+        # 1. Tilted pocketed cradle: none of the 6 axis-aligned normals has a flat base
+        tilted_cradle_bytes = _rotate_binary_stl_arbitrary(synthetic_pocketed_cradle_stl(), 31.0, 19.0)
+        tilted_cradle = self.write_stl("tilted_cradle.stl", tilted_cradle_bytes)
+        raw_check = analyzer.analyze_stl(tilted_cradle, self.p1s, self.pla)
+        self.assertEqual(raw_check["verdict"], "not-printable")
+        self.assertIn("missing-flat-base", raw_check["reasonCodes"])
+
+        rep_cradle, oriented_cradle_bytes = orient.orient_and_rotate_stl(tilted_cradle, self.p1s)
+        axis_cands = [c for c in rep_cradle["candidates"] if "axis-aligned" in c["sources"]]
+        self.assertEqual(len(axis_cands), 6)
+        self.assertTrue(all(not c["metrics"]["hasFlatBase"] for c in axis_cands))
+        self.assertTrue(rep_cradle["selected"]["applied"])
+        self.assertTrue(
+            "flat-facet-cluster" in rep_cradle["selected"]["sources"]
+            or "convex-hull" in rep_cradle["selected"]["sources"]
+        )
+        rescued_check = analyzer.analyze_stl(
+            self.write_stl("rescued_cradle.stl", oriented_cradle_bytes),
+            self.p1s,
+            self.pla,
+        )
+        self.assertEqual(rescued_check["verdict"], "printable")
+
+        # 2. Tilted 3-foot tripod: individual foot pads are 3.6 mm^2 (< flat-cluster threshold),
+        # so ONLY the 3D convex-hull face spanning all 3 feet discovers the resting plane!
+        tilted_tripod_bytes = _rotate_binary_stl_arbitrary(synthetic_three_foot_tripod_stl(), 27.0, -16.0)
+        tilted_tripod = self.write_stl("tilted_tripod.stl", tilted_tripod_bytes)
+        rep_tripod, oriented_tripod_bytes = orient.orient_and_rotate_stl(tilted_tripod, self.p1s)
+        self.assertIn("convex-hull", rep_tripod["selected"]["sources"])
+        self.assertNotIn("axis-aligned", rep_tripod["selected"]["sources"])
+        self.assertNotIn("flat-facet-cluster", rep_tripod["selected"]["sources"])
+        self.assertTrue(rep_tripod["selected"]["metrics"]["isStable"])
+        self.assertGreaterEqual(rep_tripod["selected"]["metrics"]["flatBaseAreaMm2"], 10.5)
+        tripod_check = analyzer.analyze_stl(
+            self.write_stl("rescued_tripod.stl", oriented_tripod_bytes),
+            self.p1s,
+            self.pla,
+        )
+        self.assertEqual(tripod_check["verdict"], "printable")
+
+    def test_rectangular_bed_folds_90_deg_z_yaw_into_rotation(self) -> None:
+        rect_profile = dict(self.p1s)
+        rect_profile["bedMm"] = {"x": 180.0, "y": 120.0, "z": 180.0}
+        rect_profile["excludeZonesMm"] = []
+        # 100 x 160 x 12 mm tray: fits 180 x 120 bed only when rotated 90 deg around Z
+        tray = self.write_stl(
+            "rect_tray.stl",
+            build_rectilinear_solid([0.0, 100.0], [0.0, 160.0], [0.0, 12.0], lambda *_: True),
+        )
+        rep, rot_bytes = orient.orient_and_rotate_stl(tray, rect_profile)
+        self.assertTrue(rep["selected"]["applied"])
+        self.assertEqual(rep["selected"]["zYawDeg"], 90)
+        self.assertEqual(rep["selected"]["candidateId"], "axis:-z+z90")
+        after = analyzer.analyze_stl(self.write_stl("rect_tray_oriented.stl", rot_bytes), rect_profile, self.pla)
+        self.assertEqual(after["verdict"], "printable")
+        self.assertFalse(after["checks"]["bedFit"]["requiresZRotation90"])
+        self.assertEqual(after["warnings"], [])
+
+    @unittest.skipUnless(analyzer.HAS_NUMPY, "NumPy parity test requires NumPy installed")
+    def test_stdlib_and_numpy_byte_identical_parity(self) -> None:
+        fixtures = {
+            "cube": synthetic_cube_stl(20.0),
+            "l_bracket": synthetic_l_bracket_stl(inverted=True),
+            "cantilever": synthetic_overhang_cantilever_stl(),
+            "tall_thin": build_rectilinear_solid([0.0, 4.0], [0.0, 40.0], [0.0, 80.0], lambda *_: True),
+            "tilted_cradle": _rotate_binary_stl_arbitrary(synthetic_pocketed_cradle_stl(), 31.0, 19.0),
+            "tilted_tripod": _rotate_binary_stl_arbitrary(synthetic_three_foot_tripod_stl(), 27.0, -16.0),
+        }
+        for name, raw_stl in fixtures.items():
+            with self.subTest(fixture=name):
+                path = self.write_stl(f"{name}.stl", raw_stl)
+                rep_std, bytes_std = orient.orient_and_rotate_stl(path, self.p1s, use_numpy=False)
+                rep_np, bytes_np = orient.orient_and_rotate_stl(path, self.p1s, use_numpy=True)
+                json_std = json.dumps(rep_std, sort_keys=True, indent=2).encode("utf-8")
+                json_np = json.dumps(rep_np, sort_keys=True, indent=2).encode("utf-8")
+                self.assertEqual(json_std, json_np)
+                self.assertEqual(bytes_std, bytes_np)
+
+    def test_orient_rejects_non_watertight_degenerate_and_multi_solid_meshes(self) -> None:
+        # Open mesh
+        open_stl = self.write_stl(
+            "open.stl",
+            (
+                "solid open\n"
+                "facet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 10 0 0\nvertex 0 10 0\nendloop\nendfacet\n"
+                "endsolid open\n"
+            ).encode("utf-8"),
+        )
+        with self.assertRaises(analyzer.PrintabilityError) as cm_open:
+            orient.orient_stl(open_stl, self.p1s)
+        self.assertEqual(cm_open.exception.stage, "topology")
+
+        # Degenerate facet appended to watertight cube
+        cube = synthetic_cube_stl(20.0)
+        count = struct.unpack_from("<I", cube, 80)[0]
+        degen = struct.pack("<12fH", 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 5.0, 0.0, 0.0, 10.0, 0.0, 0.0, 0)
+        degen_stl = self.write_stl("degen.stl", cube[:80] + struct.pack("<I", count + 1) + cube[84:] + degen)
+        with self.assertRaises(analyzer.PrintabilityError) as cm_deg:
+            orient.orient_stl(degen_stl, self.p1s)
+        self.assertEqual(cm_deg.exception.stage, "topology")
+
+        # CLI orient requires explicit --profile and writes --out / --write-stl atomically
+        cantilever = self.write_stl("cli_cantilever.stl", synthetic_overhang_cantilever_stl())
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(printability.main(["orient", str(cantilever)]), 2)
+
+        out_json = self.root / "orient_report.json"
+        out_stl = self.root / "oriented_out.stl"
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = printability.main([
+                "orient",
+                str(cantilever),
+                "--profile",
+                "p1s-0.4-hardened",
+                "--out",
+                str(out_json),
+                "--write-stl",
+                str(out_stl),
+            ])
+        self.assertEqual(rc, 0)
+        self.assertEqual(buf.getvalue(), out_json.read_text())
+        self.assertTrue(out_stl.is_file())
+        self.assertEqual(analyzer.analyze_stl(out_stl, self.p1s, self.pla)["verdict"], "printable")
+
+
+class DryRunAutoOrientTests(unittest.TestCase):
+    """KAN-101 follow-up: dry-run --auto-orient rotates before printability gate and seals orientation in manifest."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory(prefix="stm-autoorient-dryrun-")
+        self.root = Path(self.tmp.name)
+        self.fake_bundle, self.fake_sandbox = make_fake_bambu_bundle(self.root)
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def make_template_dir(self, name: str, stl_bytes: bytes) -> Path:
+        d = self.root / name
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "cradle.stl").write_bytes(stl_bytes)
+        manifest = {
+            "schemaVersion": 1,
+            "units": "mm",
+            "previewOnly": True,
+            "provesPhysicalAccuracy": False,
+            "watertight": True,
+            "outputSha256": {"cradle.stl": hashlib.sha256(stl_bytes).hexdigest()},
+        }
+        (d / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+        return d
+
+    def test_auto_orient_rotates_cantilever_to_slice_without_supports_and_leaves_default_unchanged(self) -> None:
+        oh_bytes = synthetic_overhang_cantilever_stl()
+        oh_dir = self.make_template_dir("cantilever-tpl", oh_bytes)
+
+        # Without --auto-orient, behaviour is unchanged: refuses cantilever without --allow-supports
+        with self.assertRaises(dry_run.DryRunError) as cm:
+            dry_run.run_dry_run(
+                template_dir=oh_dir,
+                profile_id="p1s-0.4-hardened",
+                out_dir=self.root / "out-no-orient",
+                bundle=str(self.fake_bundle),
+                _sandbox=self.fake_sandbox,
+            )
+        self.assertEqual(cm.exception.stage, "printability")
+
+        # Also verify a printable cradle WITHOUT --auto-orient does not emit an "orientation" key
+        cradle_dir = self.make_template_dir("cradle-tpl", synthetic_pocketed_cradle_stl())
+        res_plain = dry_run.run_dry_run(
+            template_dir=cradle_dir,
+            profile_id="p1s-0.4-hardened",
+            out_dir=self.root / "out-plain",
+            bundle=str(self.fake_bundle),
+            _sandbox=self.fake_sandbox,
+        )
+        self.assertNotIn("orientation", res_plain)
+        self.assertFalse((self.root / "out-plain" / "oriented.stl").exists())
+        self.assertFalse((self.root / "out-plain" / "orientation.json").exists())
+
+        # With --auto-orient (and WITHOUT --allow-supports!), cantilever rotates onto its side,
+        # passes printability with verdict "printable", and slices with enableSupport=False
+        out_oriented = self.root / "out-oriented"
+        res_ori = dry_run.run_dry_run(
+            template_dir=oh_dir,
+            profile_id="p1s-0.4-hardened",
+            out_dir=out_oriented,
+            bundle=str(self.fake_bundle),
+            auto_orient=True,
+            _sandbox=self.fake_sandbox,
+        )
+        self.assertEqual(res_ori["printability"]["verdict"], "printable")
+        self.assertIs(res_ori["slice"]["overrides"]["enableSupport"], False)
+        ori_meta = res_ori["orientation"]
+        self.assertTrue(ori_meta["autoOrient"])
+        self.assertTrue(ori_meta["applied"])
+        self.assertEqual(ori_meta["downNormal"], [0.0, -1.0, 0.0])
+        self.assertGreater(ori_meta["score"], ori_meta["baselineScore"])
+        self.assertEqual(ori_meta["slicedStlArtifact"]["file"], "oriented.stl")
+
+        # Original source.stl is preserved untouched while slice/manifest.json binds oriented.stl
+        self.assertEqual((out_oriented / "source.stl").read_bytes(), oh_bytes)
+        oriented_disk = (out_oriented / "oriented.stl").read_bytes()
+        oriented_sha = hashlib.sha256(oriented_disk).hexdigest()
+        self.assertEqual(ori_meta["slicedStlArtifact"]["sha256"], oriented_sha)
+        slice_manifest = json.loads((out_oriented / "slice" / "manifest.json").read_text())
+        self.assertEqual(slice_manifest["input"]["sha256"], oriented_sha)
+        printability_disk = json.loads((out_oriented / "printability.json").read_text())
+        self.assertEqual(printability_disk["input"]["sha256"], oriented_sha)
+        orientation_disk = json.loads((out_oriented / "orientation.json").read_text())
+        self.assertEqual(
+            ori_meta["reportArtifact"]["sha256"],
+            hashlib.sha256((out_oriented / "orientation.json").read_bytes()).hexdigest(),
+        )
+        self.assertEqual(orientation_disk["selected"]["score"], ori_meta["score"])
+
+    def test_auto_orient_on_cube_keeps_identity_bytes_and_records_unrotated_score(self) -> None:
+        cube_bytes = synthetic_cube_stl(20.0)
+        cube_dir = self.make_template_dir("cube-tpl", cube_bytes)
+        out_cube = self.root / "out-cube-sandbox"
+        res_cube = dry_run.run_dry_run(
+            template_dir=cube_dir,
+            profile_id="p1s-0.4-hardened",
+            out_dir=out_cube,
+            bundle=str(self.fake_bundle),
+            auto_orient=True,
+            _sandbox=self.fake_sandbox,
+        )
+        self.assertFalse(res_cube["orientation"]["applied"])
+        self.assertEqual(res_cube["orientation"]["angleDeg"], 0.0)
+        self.assertEqual(res_cube["orientation"]["slicedStlArtifact"]["file"], "source.stl")
+        self.assertEqual(res_cube["orientation"]["slicedStlArtifact"]["sha256"], hashlib.sha256(cube_bytes).hexdigest())
+        self.assertFalse((out_cube / "oriented.stl").exists())
+        self.assertTrue((out_cube / "orientation.json").is_file())
+
+    @unittest.skipUnless(
+        sys.platform == "darwin" and Path("/Applications/BambuStudio.app/Contents/MacOS/BambuStudio").is_file(),
+        "Real sandboxed BambuStudio auto-orient slice runs on macOS hosts with /Applications/BambuStudio.app installed",
+    )
+    def test_real_bambustudio_dry_run_auto_orient_drops_supports_on_cantilever(self) -> None:
+        oh_dir = self.make_template_dir("real-cantilever", synthetic_overhang_cantilever_stl())
+        out_dir = self.root / "real-out-cantilever-oriented"
+        proc = subprocess.run(
+            [
+                sys.executable,
+                str(ROOT_DIR / "printability.py"),
+                "dry-run",
+                "--template-dir",
+                str(oh_dir),
+                "--profile",
+                "p1s-0.4-hardened",
+                "--auto-orient",
+                "--out",
+                str(out_dir),
+            ],
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(proc.returncode, 0, msg=proc.stderr)
+        res = json.loads(proc.stdout)
+        self.assertTrue(res["orientation"]["applied"])
+        self.assertEqual(res["printability"]["verdict"], "printable")
+        self.assertIs(res["slice"]["summary"]["enableSupport"], False)
+        self.assertTrue((out_dir / "oriented.stl").is_file())
+        self.assertTrue((out_dir / "slice" / "sliced-plate.3mf").is_file())
+
+
+if __name__ == "__main__":
+    unittest.main()

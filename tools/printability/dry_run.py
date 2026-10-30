@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from analyzer import PrintabilityError, analyze_stl, read_stl_bounded
+from orient import orient_and_rotate_stl
 from profiles import ProfileError, resolve_profile
 
 DRY_RUN_SCHEMA = "scan-to-make.print-path-dry-run/0.1.0"
@@ -175,12 +176,13 @@ def run_dry_run(
     expected_version: str = producer.EXPECTED_VERSION,
     expected_binary_sha256: str | None = None,
     allow_supports: bool = False,
+    auto_orient: bool = False,
     overhang_threshold_deg: float = 45.0,
     timeout: int = DEFAULT_DRY_RUN_TIMEOUT_S,
     three_mf_name: str = producer.THREE_MF_NAME,
     _sandbox: Any = None,
 ) -> dict[str, Any]:
-    """Validate template output, check printability, slice offline, and publish sealed dry-run artifacts."""
+    """Validate template output, optionally auto-orient, check printability, slice offline, and publish sealed dry-run artifacts."""
     if profile_id is None and profile_file is None:
         raise DryRunError("profile", "an explicit --profile or --profile-file is required for slicing dry-runs")
 
@@ -211,18 +213,40 @@ def run_dry_run(
 
     verified = verify_template_output(resolved_stl, resolved_manifest)
 
+    orientation_report: dict[str, Any] | None = None
+    effective_stl_label: Path = resolved_stl
+    effective_stl_bytes: bytes = verified["stlBytes"]
+    effective_stl_sha256: str = verified["stlSha256"]
+
+    if auto_orient:
+        try:
+            orientation_report, oriented_bytes = orient_and_rotate_stl(
+                resolved_stl,
+                profile,
+                overhang_threshold_deg=overhang_threshold_deg,
+                stl_bytes=verified["stlBytes"],
+            )
+        except PrintabilityError as exc:
+            raise DryRunError(exc.stage, exc.detail) from exc
+        if orientation_report["input"]["sha256"] != verified["stlSha256"]:
+            raise DryRunError("orient", "verified STL / orientation input digest mismatch")
+        if orientation_report["selected"]["applied"]:
+            effective_stl_label = Path("oriented.stl")
+            effective_stl_bytes = oriented_bytes
+            effective_stl_sha256 = hashlib.sha256(oriented_bytes).hexdigest()
+
     try:
         printability = analyze_stl(
-            resolved_stl,
+            effective_stl_label,
             profile,
             material_spec,
             overhang_threshold_deg=overhang_threshold_deg,
-            stl_bytes=verified["stlBytes"],
+            stl_bytes=effective_stl_bytes,
         )
     except PrintabilityError as exc:
         raise DryRunError(exc.stage, exc.detail) from exc
 
-    if printability["input"]["sha256"] != verified["stlSha256"]:
+    if printability["input"]["sha256"] != effective_stl_sha256:
         raise DryRunError("printability", "verified STL / printability input digest mismatch")
 
     verdict = printability["verdict"]
@@ -275,6 +299,24 @@ def run_dry_run(
         if producer.sha256_file(staged_stl) != verified["stlSha256"]:
             raise DryRunError("seal", "staged source.stl digest mismatch")
 
+        staged_slice_input = staged_stl
+        staged_oriented_stl: Path | None = None
+        orientation_bytes: bytes | None = None
+        if orientation_report is not None:
+            orientation_bytes = (
+                json.dumps(orientation_report, indent=2, sort_keys=True, allow_nan=False) + "\n"
+            ).encode("utf-8")
+            staged_orientation = stage / "orientation.json"
+            staged_orientation.write_bytes(orientation_bytes)
+            staged_orientation.chmod(0o444)
+            if orientation_report["selected"]["applied"]:
+                staged_oriented_stl = stage / "oriented.stl"
+                staged_oriented_stl.write_bytes(effective_stl_bytes)
+                staged_oriented_stl.chmod(0o444)
+                if producer.sha256_file(staged_oriented_stl) != effective_stl_sha256:
+                    raise DryRunError("seal", "staged oriented.stl digest mismatch")
+                staged_slice_input = staged_oriented_stl
+
         staged_tmanifest = stage / "template-manifest.json"
         staged_tmanifest.write_bytes(verified["manifestBytes"])
         staged_tmanifest.chmod(0o444)
@@ -287,7 +329,7 @@ def run_dry_run(
         slice_dir = stage / "slice"
         try:
             slice_manifest = producer.produce(
-                staged_stl,
+                staged_slice_input,
                 slice_dir,
                 chosen_machine,
                 chosen_process,
@@ -296,8 +338,8 @@ def run_dry_run(
                 expected_version=expected_version,
                 expected_binary_sha256=expected_binary_sha256,
                 timeout=timeout,
-                expected_input_sha256=verified["stlSha256"],
-                expected_input_bytes=len(verified["stlBytes"]),
+                expected_input_sha256=effective_stl_sha256,
+                expected_input_bytes=len(effective_stl_bytes),
                 bed_type=profile["bedType"],
                 nozzle_type=profile["nozzleType"],
                 enable_support=need_supports,
@@ -320,6 +362,8 @@ def run_dry_run(
         # Re-verify staged artifacts before sealing dry-run-manifest.json
         if producer.sha256_file(staged_stl) != verified["stlSha256"]:
             raise DryRunError("seal", "source.stl mutated during dry-run")
+        if staged_oriented_stl is not None and producer.sha256_file(staged_oriented_stl) != effective_stl_sha256:
+            raise DryRunError("seal", "oriented.stl mutated during dry-run")
         if producer.sha256_file(slice_dir / gcode_meta["file"]) != gcode_meta["sha256"]:
             raise DryRunError("seal", "sliced G-code digest mismatch")
         if producer.sha256_file(slice_dir / three_mf_meta["file"]) != three_mf_meta["sha256"]:
@@ -331,7 +375,7 @@ def run_dry_run(
 
         settings_digest = settings_meta["sha256"]
         three_mf_rel = f"slice/{three_mf_meta['file']}"
-        dry_run_manifest = {
+        dry_run_manifest: dict[str, Any] = {
             "schema": DRY_RUN_SCHEMA,
             "dispatchAuthorized": False,
             "printerContacted": False,
@@ -455,6 +499,37 @@ def run_dry_run(
                 "note": "Bind concrete printerId and physicalTray (0..15 AMS slot or 254 external spool) at PreparedJob preparation time; physical dispatch remains a separate human-authorized step.",
             },
         }
+        if orientation_report is not None and orientation_bytes is not None:
+            sel = orientation_report["selected"]
+            sliced_stl_file = "oriented.stl" if sel["applied"] else "source.stl"
+            dry_run_manifest["orientation"] = {
+                "autoOrient": True,
+                "applied": sel["applied"],
+                "candidateId": sel["candidateId"],
+                "sources": sel["sources"],
+                "downNormal": sel["downNormal"],
+                "zYawDeg": sel["zYawDeg"],
+                "rotationMatrix": sel["rotationMatrix"],
+                "axis": sel["axis"],
+                "angleDeg": sel["angleDeg"],
+                "score": sel["score"],
+                "scoreBreakdown": sel["scoreBreakdown"],
+                "baselineScore": orientation_report["baseline"]["score"],
+                "candidateCount": orientation_report["candidateCount"],
+                "metrics": sel["metrics"],
+                "slicedStlArtifact": {
+                    "file": sliced_stl_file,
+                    "mediaType": "model/stl",
+                    "sha256": effective_stl_sha256,
+                    "byteLength": len(effective_stl_bytes),
+                },
+                "reportArtifact": {
+                    "file": "orientation.json",
+                    "mediaType": "application/json",
+                    "sha256": hashlib.sha256(orientation_bytes).hexdigest(),
+                    "byteLength": len(orientation_bytes),
+                },
+            }
         dry_bytes = (json.dumps(dry_run_manifest, indent=2, sort_keys=True, allow_nan=False) + "\n").encode("utf-8")
         dry_path = stage / "dry-run-manifest.json"
         dry_path.write_bytes(dry_bytes)
