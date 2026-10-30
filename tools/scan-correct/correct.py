@@ -27,10 +27,24 @@ def main():
     run.add_argument('--max-steps',type=int,default=24)
     run.add_argument('--max-seconds',type=int,default=600)
     run.add_argument('--max-faces',type=int,default=200000)
+    advice=commands.add_parser('advise',help='deterministic close-up targets; no model calls')
+    advice.add_argument('mesh')
+    advice.add_argument('--units',choices=('mm','cm','m'),required=True)
+    advice.add_argument('--out',required=True)
+    advice.add_argument('--texture')
+    advice.add_argument('--reference-mm',nargs=3,type=float)
+    advice.add_argument('--axis-labels',help='JSON map of input-axis side codes to caller-provided labels')
+    advice.add_argument('--max-targets',type=int,default=3)
+    advice.add_argument('--resolution',type=int,default=256)
+    advice.add_argument('--max-seconds',type=int,default=300)
+    advice.add_argument('--max-faces',type=int,default=200000)
     args = parser.parse_args()
     try:
         if args.command=='tools':
             print(json.dumps(TOOLS,indent=2))
+        elif args.command=='advise':
+            from advice import advise_job
+            print(json.dumps(advise_job(args),indent=2,sort_keys=True,allow_nan=False))
         else:
             from runner import run_job
             print(json.dumps(run_job(args),indent=2))

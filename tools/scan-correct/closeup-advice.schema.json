@@ -1,0 +1,329 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:scan-to-make:closeupAdvice:1",
+  "$comment": "SPDX-License-Identifier: GPL-3.0-or-later",
+  "type": "object",
+  "properties": {
+    "closeupAdvice": {
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "coordinateFrame": {
+          "type": "string"
+        },
+        "targets": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "rank": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 6
+              },
+              "label": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 80
+              },
+              "side": {
+                "enum": [
+                  "pos_x",
+                  "neg_x",
+                  "pos_y",
+                  "neg_y",
+                  "pos_z",
+                  "neg_z"
+                ]
+              },
+              "reasonCode": {
+                "enum": [
+                  "inferred_fill",
+                  "surface_lumpy",
+                  "fine_feature",
+                  "dark_texture",
+                  "size_check"
+                ]
+              },
+              "reason": {
+                "type": "string"
+              },
+              "viewDirection": {
+                "type": "array",
+                "items": {
+                  "type": "number"
+                },
+                "minItems": 3,
+                "maxItems": 3
+              },
+              "targetMm": {
+                "type": "array",
+                "items": {
+                  "type": "number"
+                },
+                "minItems": 3,
+                "maxItems": 3
+              },
+              "distanceMm": {
+                "type": "number",
+                "exclusiveMinimum": 0
+              },
+              "expectedBenefitScore": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 100
+              },
+              "regionBoundsMm": {
+                "type": "object",
+                "properties": {
+                  "min": {
+                    "type": "array",
+                    "items": {
+                      "type": "number"
+                    },
+                    "minItems": 3,
+                    "maxItems": 3
+                  },
+                  "max": {
+                    "type": "array",
+                    "items": {
+                      "type": "number"
+                    },
+                    "minItems": 3,
+                    "maxItems": 3
+                  }
+                },
+                "required": [
+                  "min",
+                  "max"
+                ],
+                "additionalProperties": false
+              },
+              "evidence": {
+                "type": "object",
+                "properties": {
+                  "method": {
+                    "type": "string"
+                  },
+                  "faces": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "heuristic": {
+                    "const": true
+                  },
+                  "coarseAreaMm2": {
+                    "type": "number"
+                  },
+                  "textureFilledFraction": {
+                    "type": "number"
+                  },
+                  "normalResidualMm": {
+                    "type": "number"
+                  },
+                  "curvaturePerMm": {
+                    "type": "number"
+                  },
+                  "concaveEdges": {
+                    "type": "integer"
+                  },
+                  "samples": {
+                    "type": "integer"
+                  },
+                  "coarseCoverageFraction": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  }
+                },
+                "required": [
+                  "method",
+                  "faces",
+                  "heuristic"
+                ],
+                "additionalProperties": false
+              },
+              "render": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string",
+                    "pattern": "^renders/target-0[1-6]\\.png$"
+                  },
+                  "sha256": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  },
+                  "containsTexture": {
+                    "const": false
+                  }
+                },
+                "required": [
+                  "path",
+                  "sha256",
+                  "containsTexture"
+                ],
+                "additionalProperties": false
+              },
+              "labelSource": {
+                "enum": [
+                  "caller",
+                  "input-axis-default"
+                ]
+              }
+            },
+            "required": [
+              "rank",
+              "label",
+              "side",
+              "reasonCode",
+              "reason",
+              "viewDirection",
+              "targetMm",
+              "distanceMm",
+              "expectedBenefitScore",
+              "regionBoundsMm",
+              "evidence",
+              "render",
+              "labelSource"
+            ],
+            "additionalProperties": false
+          },
+          "maxItems": 6
+        },
+        "specComparison": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "properties": {
+                "referenceMm": {
+                  "type": "array",
+                  "items": {
+                    "type": "number"
+                  },
+                  "minItems": 3,
+                  "maxItems": 3
+                },
+                "boxExtentsMm": {
+                  "type": "array",
+                  "items": {
+                    "type": "number"
+                  },
+                  "minItems": 3,
+                  "maxItems": 3
+                },
+                "errorMm": {
+                  "type": "array",
+                  "items": {
+                    "type": "number"
+                  },
+                  "minItems": 3,
+                  "maxItems": 3
+                }
+              },
+              "required": [
+                "referenceMm",
+                "boxExtentsMm",
+                "errorMm"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        },
+        "regionClassification": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "properties": {
+                "filledFaces": {
+                  "type": "integer"
+                },
+                "totalFaces": {
+                  "type": "integer"
+                },
+                "unobservedFaces": {
+                  "type": "integer"
+                },
+                "method": {
+                  "type": "string"
+                },
+                "provesCaptureCoverage": {
+                  "const": false
+                }
+              },
+              "required": [
+                "filledFaces",
+                "totalFaces",
+                "unobservedFaces",
+                "method",
+                "provesCaptureCoverage"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 16
+        },
+        "limitations": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 16
+        },
+        "previewOnly": {
+          "const": true
+        },
+        "provesPhysicalAccuracy": {
+          "const": false
+        },
+        "inputs": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        },
+        "boxExtentsMm": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          },
+          "minItems": 3,
+          "maxItems": 3
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "coordinateFrame",
+        "targets",
+        "specComparison",
+        "regionClassification",
+        "warnings",
+        "limitations",
+        "previewOnly",
+        "provesPhysicalAccuracy",
+        "inputs",
+        "boxExtentsMm"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "closeupAdvice"
+  ],
+  "additionalProperties": false
+}

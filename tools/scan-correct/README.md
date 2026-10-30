@@ -237,3 +237,54 @@ and smooth surfaces still require independent physical measurements to assess fi
 
 Provider formats follow the [Anthropic tool lifecycle](https://platform.claude.com/docs/en/agents-and-tools/tool-use/handle-tool-calls)
 and [OpenAI Chat Completions reference](https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create).
+
+## Close-up advice without a model
+
+```sh
+BLENDER=$HOME/opt/blender-5.0.1/blender LIBGL_ALWAYS_SOFTWARE=1 \
+  xvfb-run -a python3 tools/scan-correct/correct.py advise repaired.obj \
+  --units mm --reference-mm 60 45 22 --out /private/job/closeups
+```
+
+`advise` works before AI correction and requires no provider credentials. It
+uses the same validated OBJ/MTL/PNG staging and network-denied Blender worker.
+It writes deterministic `advice.json` with a `closeupAdvice` object conforming
+to [closeup-advice.schema.json](closeup-advice.schema.json), and prints that same
+object wrapper to stdout. Input hashes and each render's SHA-256 are included;
+paths are relative to the fresh, private output directory. Repeatability means
+the same bytes under the same pinned Blender/runtime, not across render engines.
+
+The ranked targets combine inferred missing/reconstructed regions (open
+boundaries or unusually coarse, near-axis faces, with texture saturation as
+support), local normal residual and curvature variation, small connected
+concavities, and dark texture clusters. A reference, when provided long-to-short,
+is compared with **boxExtentsMm**, never PCA extents. Large discrepancies suggest
+a view with a ruler. Geometry still works without textures; unavailable texture
+or capped clustering produces an explicit warning. A repaired mesh that lost UVs
+cannot recover texture evidence through this command.
+
+Each target includes a reason, a heuristic expected-benefit score from 0 to 100,
+a region bounding box and centre, an outward target-to-camera `viewDirection`
+in the input frame, and `distanceMm`. Distance is a geometry-based starting point,
+not phone-camera calibration. One target per input-axis side is returned, up to
+`--max-targets` (default 3, range 1–6). Side names default to plain axis-relative
+labels. Optional `--axis-labels labels.json` supplies known semantic labels, for
+example `{"pos_z":"Back (hinge side)"}`; `labelSource` distinguishes caller labels
+from defaults. These labels do not affect ranking or assert anatomy detection.
+
+Each target's `render` is a small PNG of the current mesh, neutral grey with
+orange highlighted faces. Source geometry is hidden, source materials are
+removed from the displayed mesh, and the renderer uses material colours rather
+than texture pixels. No images or requests go to a model. Keep the complete job
+private because `work/` still contains the staged source texture and geometry.
+`--resolution` is bounded to 64–512 pixels (default 256); wall time and face caps
+use `--max-seconds` and `--max-faces` with the existing hard worker limits.
+
+This is a priority heuristic, not proof that a face was uncaptured or a marking
+is a feature. Sparse intentional topology can resemble a fill; smooth intentional
+curvature can resemble a lump; shadows/markings can resemble ports. Scores are
+not calibrated probabilities. A clean mesh may yield no targets. The command
+does not modify the supplied mesh or perform correction. Synthetic tests cover
+a filled face competing with a smaller patch, an injected lump, a small blind
+cut, byte-repeatable advice/renders, texture-independent highlight pixels and
+rejection of out-of-bounds options before Blender staging.
