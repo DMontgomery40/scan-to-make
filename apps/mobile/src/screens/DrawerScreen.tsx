@@ -41,8 +41,11 @@ export function DrawerScreen({
   onProject,
   onCompanion,
   onBack,
+  onPrintReview,
 }: {
   onCompanion?: () => void;
+  /** Opens print review for the accepted design. */
+  onPrintReview?: (project: SavedProject) => void;
   initial: SavedProject | null;
   repository: SavedProjects;
   onProject: (project: SavedProject) => void;
@@ -309,7 +312,21 @@ export function DrawerScreen({
           ) : (
             <>
               {project?.acceptedArtifact && verified && mesh && !dirty ? (
-                <Button label="Export STL" disabled={!!busy} onPress={share} />
+                <>
+                  {onPrintReview ? (
+                    <Button
+                      label="Review print"
+                      disabled={!!busy}
+                      onPress={() => onPrintReview(project)}
+                    />
+                  ) : null}
+                  <Button
+                    label="Export STL"
+                    variant={onPrintReview ? 'secondary' : 'primary'}
+                    disabled={!!busy}
+                    onPress={share}
+                  />
+                </>
               ) : binding && verified && mesh && !dirty ? (
                 <Button
                   label="Accept this design"

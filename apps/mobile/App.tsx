@@ -38,6 +38,11 @@ import type { ReferenceDraft } from './src/screens/scanResultsModel';
 import { CloseUpsScreen } from './src/screens/CloseUpsScreen';
 import { MakeScreen, type MakeIdea } from './src/screens/MakeScreen';
 import { liveScanServices } from './src/screens/liveScanServices';
+import { PrintReviewScreen } from './src/screens/PrintReviewScreen';
+import {
+  unavailablePrintReviewServices,
+  type PrintReviewServices,
+} from './src/screens/printReviewServices';
 import type { ScanServices, ScanTarget } from './src/screens/scanServices';
 import {
   briefComplete,
@@ -62,7 +67,8 @@ type Route =
   | 'drawer'
   | 'scanResults'
   | 'closeUps'
-  | 'make';
+  | 'make'
+  | 'printReview';
 const PARENT: Record<Route, Route | null> = {
   home: null,
   brief: 'home',
@@ -78,6 +84,7 @@ const PARENT: Record<Route, Route | null> = {
   scanResults: 'retainedCaptures',
   closeUps: 'scanResults',
   make: 'scanResults',
+  printReview: 'projects',
 };
 const failure = (result: WriteProjectResult) =>
   result.status === 'stale' || result.status === 'exists'
@@ -91,15 +98,29 @@ const failure = (result: WriteProjectResult) =>
 function App({
   repository: injected,
   scanServices: injectedScan,
+  printServices: injectedPrint,
 }: {
   repository?: SavedProjects;
   scanServices?: ScanServices;
+  printServices?: PrintReviewServices;
 }) {
   const [repository] = useState(() => injected ?? localSavedProjects());
   // Real companion clients on iOS; elsewhere the screens say it's unavailable.
   const [scanServices] = useState(
     () => injectedScan ?? liveScanServices(repository),
   );
+  // Shows "not available" until the companion's print routes ship (KAN-102).
+  const [printServices] = useState(
+    () => injectedPrint ?? unavailablePrintReviewServices(),
+  );
+  const [printTarget, setPrintTarget] = useState<{
+    project: SavedProject;
+    returnTo: Route;
+  } | null>(null);
+  const reviewPrint = (project: SavedProject, returnTo: Route) => {
+    setPrintTarget({ project, returnTo });
+    setRoute('printReview');
+  };
   const scheme = useColorScheme();
   const [scanTarget, setScanTarget] = useState<ScanTarget | null>(null);
   // Kept for this app session; design planning has no endpoint yet.
@@ -141,7 +162,10 @@ function App({
       if (saving || opening) {
         return true;
       }
-      const parent = PARENT[route];
+      const parent =
+        route === 'printReview' && printTarget
+          ? printTarget.returnTo
+          : PARENT[route];
       if (parent) {
         setRoute(parent);
         return true;
@@ -149,7 +173,7 @@ function App({
       return false;
     });
     return () => sub.remove();
-  }, [route, saving, opening]);
+  }, [route, saving, opening, printTarget]);
   const saveBrief = async (asNew = false) => {
     setSaving(true);
     setStatus('Saving…');
@@ -339,8 +363,26 @@ function App({
             repository={repository}
             onProject={updateDrawer}
             onBack={() => setRoute('home')}
+            onPrintReview={project => reviewPrint(project, 'drawer')}
           />
         );
+        break;
+      case 'printReview':
+        screen = printTarget?.project.acceptedArtifact ? (
+          <PrintReviewScreen
+            projectId={printTarget.project.id}
+            design={printTarget.project.acceptedArtifact.artifact}
+            designName={
+              printTarget.project.brief.object.trim() || 'Untitled design'
+            }
+            services={printServices}
+            onBack={() => {
+              if (printTarget.returnTo === 'projects') refresh();
+              setRoute(printTarget.returnTo);
+            }}
+            onCompanion={() => setCompanionOpen(true)}
+          />
+        ) : null;
         break;
       case 'briefReview':
         screen = (
@@ -436,6 +478,7 @@ function App({
             result={listing}
             error={openError}
             onOpen={openProject}
+            onPrint={project => reviewPrint(project, 'projects')}
             onInspected={id => {
               setCaptureProjectId(id);
               setRoute('inspectedFiles');

@@ -42,6 +42,7 @@ import {
   syntheticJob,
   syntheticTarget,
 } from '../src/screens/testing/fakeScanServices';
+import { fakePrintServices } from '../src/screens/testing/fakePrintReviewServices';
 import { RUN_TARGET_MS, SAMPLE_INTERVAL_MS } from '../src/spike/useSpikeRun';
 
 function texts(tree: ReactTestRenderer.ReactTestRenderer): string[] {
@@ -996,4 +997,50 @@ test('real-size edits survive moving to close-ups and make and back', async () =
     if (tree) await act(async () => tree.unmount());
     delete NativeModules.RetainedCaptureBridge;
   }
+});
+
+test('an accepted design opens print review from projects and returns', async () => {
+  const store = testStore();
+  const fit = require('../../../packages/contracts/fixtures/tapered-holder.json');
+  await store.create({
+    id: fit.id,
+    fit,
+    brief: {
+      object: 'Accepted fixture',
+      context: 'Synthetic',
+      addition: 'Holder',
+    },
+  });
+  const artifact = {
+    sha256: 'a'.repeat(64),
+    byteLength: 9,
+    mediaType: 'model/stl',
+  };
+  await store.change(fit.id, 0, {
+    kind: 'attach-preview',
+    sourceFit: fit,
+    artifact,
+  });
+  await store.change(fit.id, 1, {
+    kind: 'accept-preview',
+    sourceFit: fit,
+    artifact,
+  });
+  const { services, calls } = fakePrintServices();
+  let tree!: ReactTestRenderer.ReactTestRenderer;
+  await act(async () => {
+    tree = ReactTestRenderer.create(
+      <App repository={store} printServices={services} />,
+    );
+  });
+  await press(tree, 'Your saved projects');
+  await press(tree, 'Review print for Accepted fixture');
+  expect(texts(tree)).toContain('Print review');
+  expect(texts(tree)).toContain('Accepted fixture');
+  await press(tree, 'Check printability');
+  expect(texts(tree)).toContain('This design can print');
+  expect(calls.some(c => c.startsWith('prepare plain'))).toBe(true);
+  await press(tree, 'Back');
+  expect(texts(tree)).toContain('Your projects');
+  await act(async () => tree.unmount());
 });
