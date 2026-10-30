@@ -110,6 +110,8 @@ export function PrintReviewScreen({
     null,
   );
   const [checked, setChecked] = useState<Record<string, boolean>>({});
+  // The supports choice of the request a retry from "ready" repeats.
+  const [retrySupports, setRetrySupports] = useState(false);
   const ack = useRef<ProjectAcknowledgment | null>(null);
   const busy = useRef(false);
   const mounted = useRef(true);
@@ -122,7 +124,19 @@ export function PrintReviewScreen({
   };
 
   async function prepare(allowSupports: boolean) {
-    if (!ack.current) return;
+    // Claimed before any await, so a second press can't start its own job.
+    if (busy.current || !ack.current) return;
+    busy.current = true;
+    try {
+      await prepareOnce(allowSupports, ack.current);
+    } finally {
+      busy.current = false;
+    }
+  }
+  async function prepareOnce(
+    allowSupports: boolean,
+    current: ProjectAcknowledgment,
+  ) {
     setNotice(null);
     // The job ID names this exact request: the same request reuses it, so a
     // retry returns the job already prepared instead of slicing twice.
@@ -136,7 +150,7 @@ export function PrintReviewScreen({
     });
     show({ kind: 'preparing' });
     try {
-      const print = await services.prepare(projectId, ack.current, {
+      const print = await services.prepare(projectId, current, {
         jobId,
         design,
         allowSupports,
@@ -168,6 +182,8 @@ export function PrintReviewScreen({
             ? 'Your companion didn’t answer. Check it’s running, then try again. Trying again won’t prepare the print twice.'
             : f.message,
         });
+        // Retry this exact request, supports and job ID included.
+        if (mounted.current) setRetrySupports(allowSupports);
         show({ kind: 'ready' });
       }
     }
@@ -258,6 +274,7 @@ export function PrintReviewScreen({
       );
       if (attempt.intent) return show({ kind: 'sent', attempt });
       if (kept.prepared) return prepare(kept.allowSupports);
+      setRetrySupports(kept.allowSupports);
       show({ kind: 'ready' });
     } catch (error) {
       block(error);
@@ -298,9 +315,15 @@ export function PrintReviewScreen({
   if (phase.kind === 'ready' || phase.kind === 'preparing') {
     footer = (
       <Button
-        label={phase.kind === 'preparing' ? 'Checking…' : 'Check printability'}
+        label={
+          phase.kind === 'preparing'
+            ? 'Checking…'
+            : retrySupports
+            ? 'Prepare with supports'
+            : 'Check printability'
+        }
         disabled={phase.kind === 'preparing'}
-        onPress={() => prepare(false)}
+        onPress={() => prepare(retrySupports)}
       />
     );
   } else if (phase.kind === 'needs-supports') {

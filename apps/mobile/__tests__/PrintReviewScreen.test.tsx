@@ -397,3 +397,45 @@ test('a design edited since opening asks to reopen it', async () => {
   expect(buttons(tree, 'Send to printer')).toHaveLength(0);
   await act(async () => tree.unmount());
 });
+
+test('a lost reply while preparing with supports retries that same request', async () => {
+  const { services, calls } = fakePrintServices({
+    prepared: [
+      failure('supports-required', {
+        report: syntheticReport('printable-with-supports', [
+          'overhangs-require-supports',
+        ]),
+      }),
+      failure('network'),
+      syntheticPrint({ verdict: 'printable-with-supports' }),
+    ],
+  });
+  const { tree } = await prepared(services);
+  await press(tree, 'Prepare with supports');
+  expect(texts(tree)).toContain('Trying again won’t prepare the print twice.');
+  // Whatever the retry button says, it must repeat the supports request.
+  const retry = buttons(tree, 'Prepare with supports').length
+    ? 'Prepare with supports'
+    : 'Check printability';
+  await press(tree, retry);
+  const prepares = calls.filter(c => c.startsWith('prepare'));
+  expect(prepares).toHaveLength(3);
+  expect(prepares[2]).toBe(prepares[1]);
+  expect(prepares[2]).toMatch(/^prepare supports /);
+  expect(retry).toBe('Prepare with supports');
+  expect(texts(tree)).toContain('Supports are included.');
+  await act(async () => tree.unmount());
+});
+
+test('two fast presses prepare a single job', async () => {
+  const { services, calls } = fakePrintServices();
+  const { tree } = await render(services);
+  const [check] = buttons(tree, 'Check printability');
+  await act(async () => {
+    check.props.onPress();
+    check.props.onPress();
+  });
+  expect(calls.filter(c => c.startsWith('prepare'))).toHaveLength(1);
+  expect(texts(tree)).toContain('This design can print');
+  await act(async () => tree.unmount());
+});
