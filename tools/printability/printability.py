@@ -19,6 +19,10 @@ import sys
 import tempfile
 from pathlib import Path
 
+# -I implies -P: deliberately admit only this entry point's trusted sibling
+# directory, never the caller's working directory or PYTHONPATH.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
 from analyzer import DEFAULT_OVERHANG_THRESHOLD_DEG, PrintabilityError, analyze_stl
 from dry_run import DEFAULT_DRY_RUN_TIMEOUT_S, DryRunError, producer, run_dry_run
 from profiles import ProfileError, load_catalog, resolve_profile

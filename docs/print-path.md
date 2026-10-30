@@ -30,7 +30,9 @@ python3 tools/printability/printability.py dry-run \
   --out /path/to/dry-run-output
 ```
 
-`dry-run` verifies the template manifest's STL digest, runs the deterministic printability check against the named Bambu profile, gates slicing on the verdict, invokes [`tools/slicer-producer/producer.py`](../tools/slicer-producer/producer.py) inside `/usr/bin/sandbox-exec`, and atomically writes `source.stl`, `template-manifest.json`, `printability.json`, `slice/plate_1.gcode`, `slice/exported-settings.json`, `slice/manifest.json`, and `dry-run-manifest.json` (`schema: "scan-to-make.print-path-dry-run/0.1.0"`).
+`dry-run` verifies the template manifest's STL digest, analyzes the retained verified bytes against the named Bambu profile, checks the report digest before accepting its verdict, gates slicing on the verdict, invokes [`tools/slicer-producer/producer.py`](../tools/slicer-producer/producer.py) inside `/usr/bin/sandbox-exec`, and atomically writes `source.stl`, `template-manifest.json`, `printability.json`, `slice/plate_1.gcode`, `slice/exported-settings.json`, `slice/manifest.json`, and `dry-run-manifest.json` (`schema: "scan-to-make.print-path-dry-run/0.1.0"`).
+
+The selected material must match the resolved filament preset’s `filament_type`. A material override such as `--material PETG` also requires a matching `--filament` preset; mismatches fail before slicing. Estimates and the selection descriptor use that same material.
 
 ---
 
@@ -119,6 +121,8 @@ export interface PreparedPrintabilityConfiguration {
   timeoutSeconds?: number;         // default 15, max 60
 }
 ```
+
+The CLI explicitly loads sibling modules from its resolved script directory, so both `python -I -B tools/printability/printability.py profiles` and the isolated `check` invocation below work without relying on the working directory or `PYTHONPATH`.
 
 Invocation contract inside `PreparedJobStore.prepareProduced` (after `readVerifiedStl(path, sourceArtifact)` and **before** `producer.produce(...)`):
 

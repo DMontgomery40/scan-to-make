@@ -15,6 +15,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
@@ -135,9 +136,11 @@ out, settings_out = opt("--outputdir"), opt("--export-settings")
 mp, pp = opt("--load-settings").split(";")
 merged = dict(json.load(open(mp)))
 merged.update(json.load(open(pp)))
+merged.update(json.load(open(opt("--load-filaments"))))
 bed = merged.get("curr_bed_type", "Cool Plate")
 nozzle_t = ",".join(merged.get("nozzle_type", ["stainless_steel"]))
 sup = merged.get("enable_support", "0")
+density = {"PLA": 1.26, "PETG": 1.27}[merged["filament_type"][0]]
 gcode = (
     "; HEADER_BLOCK_START\n"
     "; BambuStudio 02.08.02.61\n"
@@ -145,8 +148,8 @@ gcode = (
     "; total layer number: 100\n"
     "; total filament length [mm] : 3120.50\n"
     "; total filament volume [cm^3] : 7505.68\n"
-    "; total filament weight [g] : 9.46\n"
-    "; filament_density: 1.26\n"
+    f"; total filament weight [g] : {9.46 * density / 1.26:.2f}\n"
+    f"; filament_density: {density}\n"
     "; filament_diameter: 1.75\n"
     "; max_z_height: 20.00\n"
     "; HEADER_BLOCK_END\n"
@@ -345,6 +348,19 @@ class PrintabilityGeometryTests(unittest.TestCase):
         self.assertEqual(rep_tip["verdict"], "not-printable")
         self.assertIn("unstable-base-contact", rep_tip["reasonCodes"])
 
+    def test_duplicated_facets_are_not_manifold(self) -> None:
+        cube = synthetic_cube_stl()
+        count = struct.unpack_from("<I", cube, 80)[0]
+        duplicated = cube[:80] + struct.pack("<I", count * 2) + cube[84:] * 2
+        stl = self.write_stl("duplicated.stl", duplicated)
+        for use_numpy in (False, True):
+            with self.subTest(use_numpy=use_numpy):
+                rep = analyzer.analyze_stl(stl, self.p1s, self.pla, use_numpy=use_numpy)
+                self.assertEqual(rep["verdict"], "not-printable")
+                self.assertFalse(rep["topology"]["watertight"])
+                self.assertEqual(rep["topology"]["nonManifoldSharedEdgeCount"], 18)
+                self.assertIn("mesh-not-watertight", rep["reasonCodes"])
+
     def test_open_mesh_and_zero_normals_rejected(self) -> None:
         # Open box (missing +Z face)
         open_tris = [
@@ -444,6 +460,79 @@ class DryRunIntegrationTests(unittest.TestCase):
         }
         (d / "drawer-tray.manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
         return d
+
+    def test_source_swap_cannot_bypass_verified_unprintable_snapshot(self) -> None:
+        tpl = self.make_scan_cradle_dir("swap", synthetic_cube_stl(300.0))
+        original_verify = dry_run.verify_template_output
+
+        def swap_source(stl, manifest):
+            verified = original_verify(stl, manifest)
+            stl.write_bytes(synthetic_cube_stl())
+            return verified
+
+        out = self.root / "out-swap"
+        with mock.patch.object(dry_run, "verify_template_output", side_effect=swap_source), \
+                mock.patch.object(dry_run.producer, "produce") as produce:
+            with self.assertRaisesRegex(dry_run.DryRunError, "unprintable"):
+                dry_run.run_dry_run(template_dir=tpl, profile_id="p1s", out_dir=out,
+                                    bundle=str(self.fake_bundle), _sandbox=self.fake_sandbox)
+            produce.assert_not_called()
+        self.assertFalse(out.exists())
+
+    def test_printability_digest_mismatch_blocks_slicing(self) -> None:
+        tpl = self.make_scan_cradle_dir("digest", synthetic_cube_stl())
+        original_analyze = dry_run.analyze_stl
+
+        def wrong_digest(*args, **kwargs):
+            report = original_analyze(*args, **kwargs)
+            report["input"]["sha256"] = "0" * 64
+            return report
+
+        out = self.root / "out-digest"
+        with mock.patch.object(dry_run, "analyze_stl", side_effect=wrong_digest), \
+                mock.patch.object(dry_run.producer, "produce") as produce:
+            with self.assertRaisesRegex(dry_run.DryRunError, "digest mismatch"):
+                dry_run.run_dry_run(template_dir=tpl, profile_id="p1s", out_dir=out,
+                                    bundle=str(self.fake_bundle), _sandbox=self.fake_sandbox)
+            produce.assert_not_called()
+        self.assertFalse(out.exists())
+
+    def test_material_and_resolved_filament_must_agree(self) -> None:
+        tpl = self.make_scan_cradle_dir("material", synthetic_cube_stl())
+        petg = "Synthetic PETG"
+        preset = self.fake_bundle / "Contents/Resources/profiles/BBL/filament" / (petg + ".json")
+        preset.write_text(json.dumps({"filament_type": ["PETG"]}))
+        for label, options in (
+            ("petg-with-default-pla", {"material": "PETG"}),
+            ("pla-with-petg-override", {"material": "PLA", "filament_preset": petg}),
+            ("default-pla-with-petg-override", {"filament_preset": petg}),
+        ):
+            with self.subTest(label=label):
+                out = self.root / label
+                with mock.patch.object(dry_run.producer, "produce") as produce:
+                    with self.assertRaisesRegex(dry_run.DryRunError, "filament.*material"):
+                        dry_run.run_dry_run(template_dir=tpl, profile_id="p1s", out_dir=out,
+                                            bundle=str(self.fake_bundle), **options)
+                    produce.assert_not_called()
+                self.assertFalse(out.exists())
+
+    def test_matching_petg_override_binds_estimate_selection_and_preset(self) -> None:
+        tpl = self.make_scan_cradle_dir("matching-material", synthetic_cube_stl())
+        filament_dir = self.fake_bundle / "Contents/Resources/profiles/BBL/filament"
+        (filament_dir / "Synthetic PETG base.json").write_text(json.dumps({"filament_type": ["PETG"]}))
+        (filament_dir / "Synthetic PETG.json").write_text(json.dumps({"inherits": "Synthetic PETG base"}))
+        out = self.root / "out-matching-material"
+        result = dry_run.run_dry_run(
+            template_dir=tpl, profile_id="p1s", out_dir=out,
+            material="PETG", filament_preset="Synthetic PETG",
+            bundle=str(self.fake_bundle), _sandbox=self.fake_sandbox,
+        )
+        report = json.loads((out / "printability.json").read_text())
+        self.assertEqual(report["estimates"]["material"], "PETG")
+        self.assertEqual(report["estimates"]["densityGPerCm3"], 1.27)
+        self.assertEqual(result["companionPreparedSelectionCandidate"]["materials"][0]["material"], "PETG")
+        settings = json.loads((out / "slice/exported-settings.json").read_text())
+        self.assertEqual(settings["filament_type"], ["PETG"])
 
     def test_fake_bundle_dry_run_for_cradle_and_drawer_templates(self) -> None:
         cradle_dir = self.make_scan_cradle_dir("cradle-tpl", synthetic_pocketed_cradle_stl())
@@ -633,6 +722,24 @@ if __name__ == "__main__":
 
 class CliContractTests(unittest.TestCase):
     """Review follow-ups on PR #79: explicit profiles, strict exit code, companion-aligned caps."""
+
+    def test_isolated_cli_profiles_and_check(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            stl = Path(tmp) / "cube.stl"
+            stl.write_bytes(synthetic_cube_stl())
+            for args in (["profiles"], ["check", str(stl), "--profile", "p1s", "--strict"]):
+                with self.subTest(args=args):
+                    result = subprocess.run(
+                        [sys.executable, "-I", "-B", str(ROOT_DIR / "printability.py"), *args],
+                        cwd=tmp, capture_output=True, text=True,
+                    )
+                    self.assertEqual(result.returncode, 0, msg=result.stderr)
+                    report = json.loads(result.stdout)
+                    if args[0] == "check":
+                        self.assertEqual(report["verdict"], "printable")
+                        self.assertEqual(report["input"]["sha256"], hashlib.sha256(stl.read_bytes()).hexdigest())
+                    else:
+                        self.assertEqual(report["schema"], profiles.PROFILES_SCHEMA)
 
     def test_check_requires_explicit_profile_and_strict_failure_exits_2(self):
         import printability

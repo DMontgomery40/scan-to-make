@@ -211,9 +211,13 @@ def run_dry_run(
             profile,
             material_spec,
             overhang_threshold_deg=overhang_threshold_deg,
+            stl_bytes=verified["stlBytes"],
         )
     except PrintabilityError as exc:
         raise DryRunError(exc.stage, exc.detail) from exc
+
+    if printability["input"]["sha256"] != verified["stlSha256"]:
+        raise DryRunError("printability", "verified STL / printability input digest mismatch")
 
     verdict = printability["verdict"]
     if verdict == "not-printable":
@@ -243,6 +247,19 @@ def run_dry_run(
     chosen_machine = profile["slicerPresets"]["machine"]
     chosen_process = process_preset or profile["slicerPresets"]["process"]
     chosen_filament = filament_preset or profile["slicerPresets"]["filament"]
+    try:
+        filament_settings, _ = producer.resolve_preset(bundle, "filament", chosen_filament)
+    except producer.ProducerError as exc:
+        raise DryRunError(f"slicer.{exc.stage}", exc.message, exc.evidence) from exc
+    # Resolve inheritance rather than inferring a family from the preset's name.
+    # A material override alone must never silently slice with the profile's PLA.
+    if filament_settings.get("filament_type") != [material_spec["family"]]:
+        raise DryRunError(
+            "profile",
+            f"filament preset {chosen_filament!r} has filament_type "
+            f"{filament_settings.get('filament_type')!r}; selected material is {material_spec['family']!r}. "
+            "Pass --filament and --material with matching material families.",
+        )
 
     stage = Path(tempfile.mkdtemp(prefix=f".{out.name}.dryrun-staging-", dir=out.parent))
     try:

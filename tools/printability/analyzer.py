@@ -303,7 +303,12 @@ def _parse_and_build_facets(
         com_y = 0.5 * (y_min + y_max)
         com_z = 0.5 * (z_min + z_max)
 
-    watertight = (unbalanced_edges == 0) and (len(facets) >= 4) and (signed_vol > 1e-6)
+    watertight = (
+        unbalanced_edges == 0
+        and non_manifold_shared_edges == 0
+        and len(facets) >= 4
+        and signed_vol > 1e-6
+    )
     return {
         "format": stl_format,
         "declaredUnitNormals": unit_normals,
@@ -877,11 +882,18 @@ def analyze_stl(
     overhang_threshold_deg: float = DEFAULT_OVERHANG_THRESHOLD_DEG,
     max_wall_samples: int = DEFAULT_MAX_WALL_SAMPLES,
     max_input_bytes: int = MAX_INPUT_BYTES,
+    stl_bytes: bytes | None = None,
     use_numpy: bool | None = None,
 ) -> dict[str, Any]:
     """Analyze an STL against a printer profile and emit a deterministic printability report."""
     path = Path(stl_path)
-    data = read_stl_bounded(path, max_input_bytes)
+    # Retained verified bytes let callers bind analysis and slicing to one snapshot.
+    # In this mode the path is only a report label and is never reopened.
+    data = read_stl_bounded(path, max_input_bytes) if stl_bytes is None else stl_bytes
+    if not data:
+        raise PrintabilityError("input", "STL file is empty")
+    if len(data) > max_input_bytes:
+        raise PrintabilityError("limits", f"STL exceeds {max_input_bytes} byte limit")
     sha256 = hashlib.sha256(data).hexdigest()
     mesh = _parse_and_build_facets(data, use_numpy=use_numpy)
 
@@ -908,7 +920,9 @@ def analyze_stl(
         blocker_reasons.append((
             "mesh-not-watertight",
             f"Mesh is not a closed outward-wound solid (unbalancedEdges={mesh['unbalancedEdgeCount']}, "
-            f"boundaryEdges={mesh['boundaryEdgeCount']}, signedVolumeMm3={_r(mesh['signedVolumeMm3'])}).",
+            f"boundaryEdges={mesh['boundaryEdgeCount']}, "
+            f"nonManifoldSharedEdges={mesh['nonManifoldSharedEdgeCount']}, "
+            f"signedVolumeMm3={_r(mesh['signedVolumeMm3'])}).",
         ))
     if not bed_fit["fits"]:
         px, py, pz = bed_fit["partExtentsMm"]
