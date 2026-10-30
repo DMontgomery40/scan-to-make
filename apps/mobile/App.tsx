@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, BackHandler, StatusBar, Text, Modal } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import {
@@ -67,6 +67,8 @@ const failure = (result: WriteProjectResult) =>
     : result.status === 'corrupt'
     ? 'The saved project couldn’t be read. Your draft and stored data are unchanged.'
     : 'Couldn’t confirm the save. Your draft is still here. Check saved projects before trying again.';
+// hourly; projects list is local-only (no network/rate limit) so this is conservative
+const AUTO_REFRESH_INTERVAL_MS = 60 * 60 * 1000;
 
 function App({ repository: injected }: { repository?: SavedProjects }) {
   const [repository] = useState(() => injected ?? localSavedProjects());
@@ -84,16 +86,40 @@ function App({ repository: injected }: { repository?: SavedProjects }) {
   const [saveFailed, setSaveFailed] = useState(false);
   const [openError, setOpenError] = useState<string | null>(null);
   const [opening, setOpening] = useState(false);
+  const [refreshingProjects, setRefreshingProjects] = useState(false);
+  const refreshing = useRef(false);
+  const refreshEpoch = useRef(0);
   const spec =
     measured?.fit?.template === 'cup-holder-adapter' ? measured.fit : null;
   const refresh = useCallback(async () => {
-    setListing(null);
-    const result = await repository.list();
-    setListing(result);
-    setHydrated(true);
+    // Drop concurrent refreshes: rapid taps and navigations must not stack
+    // list() calls where the last to resolve could overwrite a newer result.
+    if (refreshing.current) {
+      return;
+    }
+    refreshing.current = true;
+    setRefreshingProjects(true);
+    const token = ++refreshEpoch.current;
+    try {
+      const result = await repository.list();
+      // Belt-and-suspenders: only the latest refresh may apply its result.
+      if (token === refreshEpoch.current) {
+        setListing(result);
+        setHydrated(true);
+      }
+    } finally {
+      refreshing.current = false;
+      setRefreshingProjects(false);
+    }
   }, [repository]);
   useEffect(() => {
     refresh();
+  }, [refresh]);
+  useEffect(() => {
+    const interval = setInterval(() => {
+      refresh();
+    }, AUTO_REFRESH_INTERVAL_MS);
+    return () => clearInterval(interval);
   }, [refresh]);
   useEffect(() => {
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
@@ -350,6 +376,7 @@ function App({ repository: injected }: { repository?: SavedProjects }) {
           <ProjectsScreen
             result={listing}
             error={openError}
+            busy={refreshingProjects}
             onOpen={openProject}
             onInspected={id => {
               setCaptureProjectId(id);

@@ -63,6 +63,51 @@ function press(tree: ReactTestRenderer.ReactTestRenderer, label: string) {
   });
 }
 
+// App schedules a background auto-refresh interval that react-test-renderer
+// does not tear down on its own. Track every renderer and unmount it after
+// each test so the interval cannot keep Jest alive once the suite finishes.
+const mounted = new Set<ReactTestRenderer.ReactTestRenderer>();
+const createRenderer = ReactTestRenderer.create;
+const createSpy = jest
+  .spyOn(ReactTestRenderer, 'create')
+  .mockImplementation((element, options) => {
+    const renderer = createRenderer(element, options);
+    mounted.add(renderer);
+    return renderer;
+  });
+afterEach(() => {
+  for (const renderer of mounted) {
+    try {
+      act(() => {
+        renderer.unmount();
+      });
+    } catch {
+      // The test already unmounted this renderer.
+    }
+  }
+  mounted.clear();
+});
+afterAll(() => {
+  // Restore create so later test files in the same run use the real renderer.
+  createSpy.mockRestore();
+});
+
+// A repository whose list() never settles on its own, so a test can observe
+// the in-flight refresh state and resolve pending loads one at a time.
+function deferredListStore() {
+  const base = testStore();
+  const resolvers: Array<
+    (result: Awaited<ReturnType<typeof base.list>>) => void
+  > = [];
+  const list = jest.fn(
+    () =>
+      new Promise<Awaited<ReturnType<typeof base.list>>>(resolve => {
+        resolvers.push(resolve);
+      }),
+  );
+  return { store: { ...base, list }, list, resolvers };
+}
+
 test('home renders and navigates to capture', async () => {
   let tree!: ReactTestRenderer.ReactTestRenderer;
   await act(async () => {
@@ -709,4 +754,80 @@ test('only accepted saved projects expose the inspected files browser', async ()
   expect(texts(tree)).toContain('Inspected print files for this saved project.');
   await press(tree,'Back');expect(texts(tree)).toContain('Your projects');
   await act(async()=>tree.unmount());
+});
+
+test('rapid taps while a projects refresh is in flight make only one extra list() call', async () => {
+  const { store, list, resolvers } = deferredListStore();
+  let tree!: ReactTestRenderer.ReactTestRenderer;
+  await act(async () => {
+    tree = ReactTestRenderer.create(<App repository={store} />);
+  });
+  // Mount triggers the first load; resolve it to reach the home screen.
+  await act(async () => resolvers.shift()!({ status: 'ok', entries: [] }));
+  // Opening the projects list issues its own refresh; settle that as well.
+  await press(tree, 'Your saved projects');
+  await act(async () => resolvers.shift()!({ status: 'ok', entries: [] }));
+  list.mockClear();
+  const refresh = tree.root.find(
+    n =>
+      n.props.accessibilityRole === 'button' &&
+      typeof n.props.onPress === 'function' &&
+      n.props.accessibilityLabel === 'Refresh projects',
+  );
+  await act(async () => {
+    refresh.props.onPress();
+    refresh.props.onPress();
+  });
+  // The second tap is dropped by the re-entrancy guard.
+  expect(list).toHaveBeenCalledTimes(1);
+  await act(async () => resolvers.shift()!({ status: 'ok', entries: [] }));
+});
+
+test('the projects refresh control shows a disabled Refreshing… state in flight', async () => {
+  const { store, resolvers } = deferredListStore();
+  let tree!: ReactTestRenderer.ReactTestRenderer;
+  await act(async () => {
+    tree = ReactTestRenderer.create(<App repository={store} />);
+  });
+  await act(async () => resolvers.shift()!({ status: 'ok', entries: [] }));
+  // The refresh issued when opening the projects list is still in flight.
+  await press(tree, 'Your saved projects');
+  expect(texts(tree)).toContain('Refreshing…');
+  expect(texts(tree)).not.toContain('Refresh projects');
+  const refreshing = tree.root.find(
+    n =>
+      typeof n.type === 'string' &&
+      String(n.type) === 'STMActionButton' &&
+      n.props.buttonTitle === 'Refreshing…',
+  );
+  expect(refreshing.props.disabled).toBe(true);
+  // The existing list stays visible instead of being blanked to "Loading…".
+  expect(texts(tree)).not.toContain('Loading projects…');
+  await act(async () => resolvers.shift()!({ status: 'ok', entries: [] }));
+  expect(texts(tree)).toContain('Refresh projects');
+});
+
+test('the projects list auto-refreshes about once an hour', async () => {
+  jest.useFakeTimers();
+  let tree!: ReactTestRenderer.ReactTestRenderer;
+  try {
+    const base = testStore();
+    const list = jest.fn(() => base.list());
+    await act(async () => {
+      tree = ReactTestRenderer.create(<App repository={{ ...base, list }} />);
+    });
+    expect(list).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      jest.advanceTimersByTime(60 * 60 * 1000);
+    });
+    expect(list).toHaveBeenCalledTimes(2);
+  } finally {
+    // Tear the interval down while fake timers are still installed so no
+    // pending timer survives useRealTimers and leaks into later test files.
+    await act(async () => {
+      tree.unmount();
+    });
+    jest.clearAllTimers();
+    jest.useRealTimers();
+  }
 });

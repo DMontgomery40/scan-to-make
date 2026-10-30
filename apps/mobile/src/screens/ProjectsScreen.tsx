@@ -7,6 +7,7 @@ import { type } from '../ui/theme';
 export function ProjectsScreen({
   result,
   error,
+  busy,
   onOpen,
   onCaptures,
   onInspected,
@@ -15,6 +16,7 @@ export function ProjectsScreen({
 }: {
   result: ListProjectsResult | null;
   error: string | null;
+  busy?: boolean;
   onOpen: (id: string) => void;
   onCaptures?: (id: string) => void;
   onInspected?: (id: string) => void;
@@ -38,7 +40,11 @@ export function ProjectsScreen({
         <Card>
           <Text style={type.heading}>Projects couldn’t be loaded.</Text>
           <Text style={type.body}>Your saved data hasn’t been changed.</Text>
-          <Button label="Try loading again" onPress={onRetry} />
+          <Button
+            label="Try loading again"
+            disabled={busy}
+            onPress={onRetry}
+          />
         </Card>
       ) : (
         <>
@@ -108,8 +114,9 @@ export function ProjectsScreen({
             </Card>
           ))}
           <Button
-            label="Refresh projects"
+            label={busy ? 'Refreshing…' : 'Refresh projects'}
             variant="secondary"
+            disabled={busy}
             onPress={onRetry}
           />
         </>
