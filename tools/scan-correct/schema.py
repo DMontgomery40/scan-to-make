@@ -44,7 +44,7 @@ SPECS = {
                {'iterations':number(1,30,True),'factor':number(.01,.5)}),
     'scale_to_reference': ('Fit long-to-short box extents to declared reference; match is by construction.',
                            {'target_mm':vector(.1,2000)}),
-    'cut_feature': ('Ray-located blind slot/pocket/hole or perimeter groove; fails if volume/topology checks fail.',
+    'cut_feature': ('Legacy cyclic tangent axes X->Y, Y->Z, Z->X. Prefer cut_oriented_feature for measured slot/pocket direction. Same ray/volume/topology guards.',
                     {'kind':enum('slot','pocket','hole','groove'),'axis':AXIS,
                      'side':{'type':'integer','enum':[-1,1]},'centre_mm':vector(),
                      'length_mm':number(.1,100),'width_mm':number(.1,100),'depth_mm':number(.05,50)}),
