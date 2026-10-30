@@ -10,8 +10,12 @@ module.exports = {
       '<rootDir>/../../packages/contracts/dist/capture.js',
     '^@scan-to-make/contracts/generation$':
       '<rootDir>/../../packages/contracts/dist/generation.js',
+    '^@scan-to-make/contracts/detail-still$':
+      '<rootDir>/../../packages/contracts/dist/detail-still.js',
     '^@scan-to-make/contracts/saved-project$':
       '<rootDir>/../../packages/contracts/dist/saved-project.js',
+    '^@scan-to-make/contracts/scan-processing$':
+      '<rootDir>/../../packages/contracts/dist/scan-processing.js',
     '^@scan-to-make/contracts$':
       '<rootDir>/../../packages/contracts/dist/index.js',
   },
