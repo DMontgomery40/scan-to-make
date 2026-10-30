@@ -1,6 +1,6 @@
 # Native Object Capture evaluation
 
-This isolated iOS 18+ application starts from Apple's public GuidedCaptureSample. See PROVENANCE.md and LICENSE.txt. It does not change the Scan to Make application, projects, pairing or diagnostic capture. Source target identity is `org.scantomake.capture-evaluation`; select an already-authorized development identity locally when deploying. Never commit team, profile, signing or device data.
+This isolated iOS 18+ application starts from Apple's public GuidedCaptureSample. See PROVENANCE.md and LICENSE.txt. The shared capture model is also compiled into Scan to Make saved-project capture; its watchdog applies there too. Source target identity is `org.scantomake.capture-evaluation`; select an already-authorized development identity locally when deploying. Never commit team, profile, signing or device data.
 
 ## Build and start
 
@@ -17,7 +17,9 @@ Apple's sample requires physical LiDAR hardware with A14 or later. This target d
 
 ## Camera release
 
-A capture never holds the camera waiting for someone to tap Stop. `CaptureWatchdog` stops the session, retaining its files, when tracking is unavailable for 15 s (no camera images), not normal for 90 s, the session stays paused for 5 minutes, no new shot arrives for 5 minutes, or the thermal state is critical. Paused time does not count toward the tracking and progress limits. Stopping keeps the session until it reports a terminal state; `evaluation.json` records `cancel-confirmed`, or `cancel-unconfirmed` after 5 s, and the landing screen shows the same result. Begin stays disabled until one of the two is recorded. A confirmed cancellation is the session's own report, not an independent hardware check.
+`CaptureWatchdog` requests cancellation when tracking is unavailable for 15 s, not normal for 90 s, the session stays paused for 5 minutes, no new shot arrives during active capture for 5 minutes, or the thermal state is critical. Tracking availability is a proxy, not a direct camera-frame measurement. Paused time does not count toward tracking and progress limits; background observations reset those budgets. Detection and bounding-box setup do not consume the shot-progress budget. Finishing is never interrupted.
+
+Stopping retains the session until a terminal SDK state. `evaluation.json` records `cancel-terminal`, or `cancel-still-pending` after 10 s. Begin remains blocked while cancellation is pending, including after that timeout. A terminal state does not verify hardware release. In embedded saved-project capture, automatic stop reasons are delivered through the existing completion error path after cancellation finishes.
 
 ## Capture matrix and recovery
 

@@ -54,10 +54,17 @@ struct CaptureWatchdog {
     private var pausedSince: TimeInterval?
     private var progressSince: TimeInterval?
     private var lastShots: Int?
+    private var lastObservation: TimeInterval?
 
     // Paused time never counts toward the tracking or progress limits; resuming restarts them.
-    mutating func observe(tracking: Tracking, paused: Bool, shots: Int, thermalCritical: Bool,
+    mutating func observe(tracking: Tracking, paused: Bool, capturing: Bool = true, shots: Int, thermalCritical: Bool,
                           at now: TimeInterval) -> StopReason? {
+        // The 1 Hz observer can be suspended without receiving an inactive tick.
+        // A scheduling gap starts fresh budgets instead of charging background time.
+        if let previous = lastObservation, now - previous > 5 {
+            self = CaptureWatchdog()
+        }
+        lastObservation = now
         if thermalCritical { return .deviceTooHot }
 
         if paused {
@@ -70,7 +77,8 @@ struct CaptureWatchdog {
         }
         pausedSince = nil
 
-        if progressSince == nil || shots != lastShots {
+        if !capturing { progressSince = nil; lastShots = nil }
+        if capturing && (progressSince == nil || shots != lastShots) {
             progressSince = now
             lastShots = shots
         }

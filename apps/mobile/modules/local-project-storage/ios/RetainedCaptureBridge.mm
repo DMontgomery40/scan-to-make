@@ -45,6 +45,35 @@ static BOOL Cache(NSData *d,NSDictionary *f) {
   if(!DurableWrite(d,u))return NO;
   int fd=open(u.fileSystemRepresentation,O_RDONLY|O_NOFOLLOW);BOOL ok=fd>=0&&fsync(fd)==0;if(fd>=0)close(fd);return ok;
 }
+// Read a fixed child through an already-open, non-symlink parent. No caller paths.
+static NSData *NativeReadAt(int parent, const char *name, NSUInteger limit) {
+  int fd=openat(parent,name,O_RDONLY|O_NOFOLLOW|O_NONBLOCK);if(fd<0)return nil;
+  struct stat st;
+  if(fstat(fd,&st)!=0||!S_ISREG(st.st_mode)||st.st_size<1||(unsigned long long)st.st_size>limit){close(fd);return nil;}
+  NSMutableData *bytes=[NSMutableData dataWithLength:(NSUInteger)st.st_size];NSUInteger offset=0;
+  while(offset<bytes.length){ssize_t n=read(fd,(char*)bytes.mutableBytes+offset,bytes.length-offset);if(n<=0){close(fd);return nil;}offset+=n;}
+  char extra;BOOL exact=read(fd,&extra,1)==0;close(fd);return exact?bytes:nil;
+}
+static NSDictionary *AdoptNativeCapture(NSString *runID) {
+  if(![runID isKindOfClass:NSString.class]||![[NSPredicate predicateWithFormat:@"SELF MATCHES %@",@"[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}"] evaluateWithObject:runID])return nil;
+  NSURL *documents=[NSFileManager.defaultManager URLsForDirectory:NSDocumentDirectory inDomains:NSUserDomainMask].firstObject;
+  int documentsFD=open(documents.fileSystemRepresentation,O_RDONLY|O_DIRECTORY|O_NOFOLLOW);if(documentsFD<0)return nil;
+  int root=openat(documentsFD,"NativeCaptures",O_RDONLY|O_DIRECTORY|O_NOFOLLOW);close(documentsFD);if(root<0)return nil;
+  int run=openat(root,runID.UTF8String,O_RDONLY|O_DIRECTORY|O_NOFOLLOW);close(root);if(run<0)return nil;
+  NSData *manifest=NativeReadAt(run,"manifest.json",5*1024*1024);
+  id decoded=manifest?[NSJSONSerialization JSONObjectWithData:manifest options:0 error:nil]:nil;
+  NSDictionary *draft=[decoded isKindOfClass:NSDictionary.class]?decoded:nil;
+  id file=draft[@"file"];NSNumber *size=[file isKindOfClass:NSDictionary.class]?file[@"byteLength"]:nil;
+  BOOL valid=[draft[@"formatVersion"] isEqual:@1]&&[draft[@"runID"] isEqual:runID]&&[draft[@"status"] isEqual:@"ready"]&&
+    [file isKindOfClass:NSDictionary.class]&&[file[@"mediaType"] isEqual:@"model/vnd.usdz+zip"]&&FileURL(file)!=nil&&
+    [size isKindOfClass:NSNumber.class]&&CFGetTypeID((__bridge CFTypeRef)size)!=CFBooleanGetTypeID()&&
+    isfinite(size.doubleValue)&&size.doubleValue>=1&&size.doubleValue<=32*1024*1024&&size.doubleValue==size.unsignedIntegerValue;
+  if(!valid){close(run);return nil;}
+  int models=openat(run,"Models",O_RDONLY|O_DIRECTORY|O_NOFOLLOW);close(run);if(models<0)return nil;
+  NSData *bytes=NativeReadAt(models,"model-mobile.usdz",32*1024*1024);close(models);
+  if(!bytes||!Cache(bytes,file))return nil;
+  return @{@"sha256":file[@"sha256"],@"byteLength":size,@"mediaType":@"model/vnd.usdz+zip"};
+}
 @interface RetainedCaptureBridge : NSObject<RCTBridgeModule,NSURLSessionDataDelegate,UIDocumentPickerDelegate,QLPreviewControllerDataSource>
 @property NSURLSession *session;
 @property NSURLSessionDataTask *task;
@@ -115,6 +144,10 @@ RCT_REMAP_METHOD(request,requestOptions:(NSDictionary*)o resolve:(RCTPromiseReso
   RCTPromiseResolveBlock resolve=self.resolve;self.resolve=nil;self.reject=nil;self.task=nil;self.received=nil;[self.session finishTasksAndInvalidate];self.session=nil;resolve(result);
 }
 RCT_REMAP_METHOD(cancel,cancelResolve:(RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject){[self fail:@"cancelled" message:@"Capture request cancelled."];resolve(nil);}
+RCT_REMAP_METHOD(adoptNativeOutput,adoptNativeOutput:(NSString*)runID resolve:(RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject){
+  NSDictionary *file=AdoptNativeCapture(runID);
+  if(file)resolve(file);else reject(@"invalid-source",@"This local model could not be verified for import. Its files are kept on this device; models must be no larger than 32 MB.",nil);
+}
 RCT_REMAP_METHOD(pick,pickResolve:(RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject){
   UIViewController *presenter=RCTPresentedViewController();if(self.pickResolve||!presenter||presenter.presentedViewController){reject(@"busy",@"Close the current sheet first.",nil);return;}
   self.pickResolve=resolve;self.pickReject=reject;UIDocumentPickerViewController *picker=[[UIDocumentPickerViewController alloc] initForOpeningContentTypes:@[[UTType typeWithFilenameExtension:@"usdz"]] asCopy:YES];picker.delegate=self;picker.allowsMultipleSelection=NO;[presenter presentViewController:picker animated:YES completion:nil];

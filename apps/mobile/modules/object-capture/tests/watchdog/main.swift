@@ -62,6 +62,18 @@ let reasons: [CaptureWatchdog.StopReason] = [.noCameraImages, .trackingNotRecove
 check("every stop reason has a message and diagnostic detail",
       reasons.allSatisfy { !$0.message.isEmpty && $0.detail.hasPrefix("Watchdog: ") })
 
+var detecting = CaptureWatchdog()
+var detectionStopped = false
+for second in 0...600 {
+    detectionStopped = detectionStopped || detecting.observe(tracking: .normal, paused: false, capturing: false, shots: 0, thermalCritical: false, at: Double(second)) != nil
+}
+check("bounding box setup does not consume shot progress budget", !detectionStopped)
+var pausedHot = CaptureWatchdog()
+check("critical thermal state stops even while paused", pausedHot.observe(tracking: .normal, paused: true, shots: 0, thermalCritical: true, at: 0) == .deviceTooHot)
+var resumed = CaptureWatchdog()
+_ = resumed.observe(tracking: .notAvailable, paused: false, shots: 0, thermalCritical: false, at: 0)
+check("background reset gives fresh tracking budget", resumed.observe(tracking: .notAvailable, paused: false, shots: 0, thermalCritical: false, at: 600) == nil)
+
 if failures > 0 {
     print("\(failures) watchdog check(s) failed")
     exit(1)

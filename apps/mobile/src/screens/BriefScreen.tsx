@@ -192,9 +192,9 @@ export function BriefReviewScreen({
         <Text style={styles.number}>WHAT’S NEXT</Text>
         <Text style={type.heading}>From an idea to a fitted part.</Text>
         <Text style={type.body}>
-          Custom scanning is not available yet. Explore a drawer tray using
-          synthetic reference sizes, or see how measurements shape a cup-holder
-          study.
+          Open Project captures from your saved project to scan an object or
+          import a USDZ file. You can also explore a drawer tray using synthetic
+          reference sizes, or see how measurements shape a cup-holder study.
         </Text>
         <Button
           label="Try a drawer design study"

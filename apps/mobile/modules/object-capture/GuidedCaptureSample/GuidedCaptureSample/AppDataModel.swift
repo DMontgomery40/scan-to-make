@@ -51,6 +51,31 @@ private struct CaptureEvaluationEventBuffer {
 @Observable
 class AppDataModel: Identifiable {
     static let instance = AppDataModel()
+    let captureDirectory: URL?
+    var isEmbedded: Bool { captureDirectory != nil }
+    var onEmbeddedCompletion: ((URL?, String?) -> Void)?
+    private var embeddedCompletionSent = false
+    private var reconstructionTask: Task<Void, Never>?
+    private var reconstructionWaitTask: Task<Void, Never>?
+    private(set) var reconstructionProgress: Float = 0
+    private(set) var reconstructionRemainingTime: TimeInterval?
+    private(set) var reconstructionStage: String?
+    private(set) var reconstructionFailure: Swift.Error?
+    private(set) var isStoppingReconstruction = false
+    private(set) var reconstructionStopWaitExceeded = false
+
+    private func finishEmbedded(output: URL? = nil, error: String? = nil) {
+        guard isEmbedded, !embeddedCompletionSent else { return }
+        embeddedCompletionSent = true
+        UIApplication.shared.isIdleTimerDisabled = false
+        onEmbeddedCompletion?(output, error)
+    }
+
+    func stopEmbeddedCapture() {
+        if photogrammetrySession != nil { cancelReconstruction() }
+        else if objectCaptureSession != nil { stopCapture(reason: "Capture closed or interrupted") }
+        else { finishEmbedded() }
+    }
 
     /// When we start the capture phase, this will be set to the correct locations in the captureFolderManager.
     var objectCaptureSession: ObjectCaptureSession? {
@@ -119,23 +144,13 @@ class AppDataModel: Identifiable {
     private var lastObservedTracking: String?
     private var lastObservedPause: Bool?
     var evaluationStarted = Date()
-    private(set) var captureStopped = false
     private(set) var stopMessage: String?
+    private(set) var captureStopped = false
+    private(set) var isStoppingCapture = false
+    private(set) var stopWaitExceeded = false
+    private var stopStateTask: Task<Void, Never>?
+    private var stopWaitTask: Task<Void, Never>?
     var evaluationWriteError: String?
-
-    enum CameraRelease: Equatable {
-        case notRequested
-        case pending
-        case confirmed
-        case unconfirmed
-    }
-
-    static let cancellationConfirmationLimit: TimeInterval = 5
-
-    // Held until the session reports a terminal state so teardown finishes before it is released.
-    private(set) var cameraRelease: CameraRelease = .notRequested
-    private var cancellingSession: ObjectCaptureSession?
-    private var cancellationTasks: [Task<Void, Never>] = []
     var passCount = 1
     var flipCount = 0
 
@@ -150,7 +165,8 @@ class AppDataModel: Identifiable {
     var tutorialPlayedOnce = false
 
     // Postpone creating ObjectCaptureSession and PhotogrammetrySession until necessary.
-    private init() {
+    init(captureDirectory: URL? = nil) {
+        self.captureDirectory = captureDirectory
         NotificationCenter.default.addObserver(self,
                                                selector: #selector(handleAppTermination(notification:)),
                                                name: UIApplication.willTerminateNotification,
@@ -160,7 +176,10 @@ class AppDataModel: Identifiable {
     isolated deinit {
         NotificationCenter.default.removeObserver(self)
         for task in tasks { task.cancel() }
-        for task in cancellationTasks { task.cancel() }
+        stopStateTask?.cancel()
+        stopWaitTask?.cancel()
+        reconstructionTask?.cancel()
+        reconstructionWaitTask?.cancel()
     }
 
     /// Once reconstruction and viewing are complete, this should be called to let the app know it can go back to the new capture
@@ -173,10 +192,9 @@ class AppDataModel: Identifiable {
 
     // Only a deliberate Begin action may create a session after a retained stop.
     func beginCapture() {
-        guard objectCaptureSession == nil, photogrammetrySession == nil, cameraRelease != .pending else { return }
+        guard !isStoppingCapture, objectCaptureSession == nil, photogrammetrySession == nil else { return }
         captureStopped = false
         stopMessage = nil
-        cameraRelease = .notRequested
         reset()
     }
 
@@ -184,59 +202,61 @@ class AppDataModel: Identifiable {
         guard !captureStopped, let session = objectCaptureSession else { return }
         captureStopped = true
         stopMessage = message
+        isStoppingCapture = true
+        stopWaitExceeded = false
         record("interrupted", detail: reason + "; original files retained")
         detachListeners()
-        awaitCancellation(of: session)
+        // cancel() is a request. Keep ownership until the SDK reaches a terminal state.
+        stopStateTask = Task { [weak self, session] in
+            guard !Task.isCancelled, let self else { return }
+            if self.finishStopIfTerminal(session.state, session: session) { return }
+            for await newState in session.stateUpdates {
+                guard !Task.isCancelled else { return }
+                if self.finishStopIfTerminal(newState, session: session) { return }
+            }
+        }
         session.cancel()
-        record("cancel-requested", detail: "Public cancellation requested; awaiting session confirmation")
-        objectCaptureSession = nil
+        record("cancel-requested", detail: "Public cancellation requested; hardware release not verified")
         showOverlaySheets = false
         UIApplication.shared.isIdleTimerDisabled = false
         state = .notSet
-    }
-
-    private func awaitCancellation(of session: ObjectCaptureSession) {
-        cancellingSession = session
-        cameraRelease = .pending
-        cancellationTasks = [
-            Task<Void, Never> { [weak self] in
-                var terminal = AppDataModel.isTerminal(session.state)
-                if !terminal {
-                    for await newState in session.stateUpdates where AppDataModel.isTerminal(newState) {
-                        terminal = true
-                        break
-                    }
-                }
-                guard terminal, !Task.isCancelled else { return }
-                self?.finishCancellation(of: session, confirmed: true)
-            },
-            Task<Void, Never> { [weak self] in
-                try? await Task.sleep(for: .seconds(AppDataModel.cancellationConfirmationLimit))
-                guard !Task.isCancelled else { return }
-                self?.finishCancellation(of: session, confirmed: false)
-            }
-        ]
-    }
-
-    private func finishCancellation(of session: ObjectCaptureSession, confirmed: Bool) {
-        guard let cancellingSession, cancellingSession.id == session.id else { return }
-        for task in cancellationTasks { task.cancel() }
-        cancellationTasks.removeAll()
-        cameraRelease = confirmed ? .confirmed : .unconfirmed
-        if confirmed {
-            record("cancel-confirmed", detail: "Session reported \(String(describing: session.state))")
-        } else {
-            record("cancel-unconfirmed",
-                   detail: "No terminal session state within \(Int(Self.cancellationConfirmationLimit))s")
+        if finishStopIfTerminal(session.state, session: session) { return }
+        stopWaitTask = Task { [weak self, session] in
+            do { try await Task.sleep(for: .seconds(10)) } catch { return }
+            guard !Task.isCancelled else { return }
+            self?.markStopStillPending(session: session)
         }
-        self.cancellingSession = nil
     }
 
-    private static func isTerminal(_ state: ObjectCaptureSession.CaptureState) -> Bool {
-        switch state {
-            case .completed, .failed: return true
-            default: return false
+    private func finishStopIfTerminal(_ newState: ObjectCaptureSession.CaptureState,
+                                      session: ObjectCaptureSession) -> Bool {
+        guard captureStopped, isStoppingCapture, objectCaptureSession?.id == session.id else { return false }
+        // These are the SDK's two terminal states. Finishing is still in progress.
+        switch newState {
+        case .completed, .failed:
+            break
+        case .initializing, .ready, .detecting, .capturing, .finishing:
+            return false
+        @unknown default:
+            return false
         }
+        record("cancel-terminal", detail: String(describing: newState) + "; hardware release not verified")
+        isStoppingCapture = false
+        stopWaitExceeded = false
+        stopStateTask?.cancel()
+        stopStateTask = nil
+        stopWaitTask?.cancel()
+        stopWaitTask = nil
+        objectCaptureSession = nil
+        finishEmbedded(error: stopMessage)
+        return true
+    }
+
+    private func markStopStillPending(session: ObjectCaptureSession) {
+        guard captureStopped, isStoppingCapture, !stopWaitExceeded,
+              objectCaptureSession?.id == session.id else { return }
+        stopWaitExceeded = true
+        record("cancel-still-pending", detail: "No terminal state after 10 seconds; session retained and new capture blocked")
     }
 
     // Don't touch the showOverlaySheets directly, call setShowOverlaySheets() instead.
@@ -315,7 +335,6 @@ extension AppDataModel {
             }
             logger.log("^^^ Got nil from stateUpdates iterator!  Ending observation task...")
         })
-
         tasks.append(Task<Void, Never> { [weak self] in
             var watchdog = CaptureWatchdog()
             while !Task.isCancelled {
@@ -327,8 +346,14 @@ extension AppDataModel {
                     case .finishing, .completed, .failed: return
                     default: break
                 }
+                // Background time must not consume foreground tracking/progress budgets.
+                guard UIApplication.shared.applicationState == .active else {
+                    watchdog = CaptureWatchdog()
+                    continue
+                }
                 let reason = watchdog.observe(tracking: AppDataModel.watchdogTracking(model.cameraTracking),
                                               paused: model.isPaused,
+                                              capturing: model.state == .capturing,
                                               shots: model.numberOfShotsTaken,
                                               thermalCritical: ProcessInfo.processInfo.thermalState == .critical,
                                               at: ProcessInfo.processInfo.systemUptime)
@@ -373,7 +398,7 @@ extension AppDataModel {
             throw NSError(domain: "CaptureEvaluation", code: 1, userInfo: [NSLocalizedDescriptionKey: "Object Capture is unavailable on this device."])
         }
 
-        captureFolderManager = try CaptureFolderManager()
+        captureFolderManager = try CaptureFolderManager(captureDirectory: captureDirectory)
         evaluationBuffer = CaptureEvaluationEventBuffer()
         evaluationStarted = Date()
         passCount = 1
@@ -397,6 +422,7 @@ extension AppDataModel {
                       configuration: configuration)
 
         if case let .failed(error) = session.state {
+            if isEmbedded { objectCaptureSession = nil }
             logger.error("Got error starting session! \(String(describing: error))")
             switchToErrorState(error: error)
         } else {
@@ -435,6 +461,90 @@ extension AppDataModel {
             configuration: configuration)
 
         state = .reconstructing
+        beginReconstruction(outputFile: captureFolderManager.modelsFolder.appendingPathComponent("model-mobile.usdz"))
+    }
+
+    func cancelReconstruction() {
+        guard let session = photogrammetrySession, !isStoppingReconstruction else { return }
+        isStoppingReconstruction = true
+        record("reconstruction-cancel-requested", detail: "Session retained until terminal output")
+        session.cancel()
+        reconstructionWaitTask = Task { [weak self, session] in
+            do { try await Task.sleep(for: .seconds(10)) } catch { return }
+            guard let self, self.photogrammetrySession === session, self.isStoppingReconstruction else { return }
+            self.reconstructionStopWaitExceeded = true
+            self.record("reconstruction-cancel-still-pending", detail: "No terminal output after 10 seconds; session retained")
+        }
+    }
+
+    private func beginReconstruction(outputFile: URL) {
+        guard let session = photogrammetrySession, reconstructionTask == nil else { return }
+        reconstructionProgress = 0
+        reconstructionFailure = nil
+        isStoppingReconstruction = false
+        reconstructionStopWaitExceeded = false
+        reconstructionTask = Task { [weak self, session] in
+            guard let self else { return }
+            do {
+                try session.process(requests: [.modelFile(url: outputFile, detail: .reduced)])
+            } catch {
+                // process threw before accepting a request. No processing operation was started.
+                self.finishReconstruction(session: session, outputFile: outputFile, failure: error)
+                return
+            }
+            for await output in UntilProcessingCompleteFilter(input: session.outputs) {
+                guard !Task.isCancelled, self.photogrammetrySession === session else { return }
+                switch output {
+                case .requestProgress(_, let fraction): self.reconstructionProgress = Float(fraction)
+                case .requestProgressInfo(_, let info):
+                    self.reconstructionRemainingTime = info.estimatedRemainingTime
+                    self.reconstructionStage = info.processingStage?.processingStageString
+                case .requestError(_, let error):
+                    self.reconstructionFailure = error
+                    self.record("reconstruction-request-error", detail: String(describing: error))
+                case .processingComplete:
+                    let missing = !FileManager.default.fileExists(atPath: outputFile.path)
+                    let error = self.reconstructionFailure ?? (missing ? NSError(domain: "CaptureEvaluation", code: 3,
+                        userInfo: [NSLocalizedDescriptionKey: "Reconstruction returned no model file."]) : nil)
+                    self.finishReconstruction(session: session, outputFile: outputFile, failure: error)
+                    return
+                case .processingCancelled:
+                    self.isStoppingReconstruction = true
+                    self.finishReconstruction(session: session, outputFile: outputFile, failure: nil)
+                    return
+                case .invalidSample, .skippedSample, .automaticDownsampling, .stitchingIncomplete:
+                    self.record("reconstruction-warning", detail: String(describing: output))
+                default: break
+                }
+            }
+            // An unexpectedly ended stream is not a terminal output: keep ownership blocked.
+            if self.photogrammetrySession === session {
+                self.reconstructionStopWaitExceeded = true
+                self.record("reconstruction-observation-ended", detail: "No terminal output; session retained")
+            }
+        }
+    }
+
+    private func finishReconstruction(session: PhotogrammetrySession, outputFile: URL, failure: Swift.Error?) {
+        guard photogrammetrySession === session else { return }
+        let stopped = isStoppingReconstruction
+        reconstructionWaitTask?.cancel(); reconstructionWaitTask = nil
+        reconstructionTask = nil
+        photogrammetrySession = nil
+        isStoppingReconstruction = false
+        reconstructionStopWaitExceeded = false
+        UIApplication.shared.isIdleTimerDisabled = false
+        if stopped {
+            record("reconstruction-cancel-terminal", detail: "Original files retained")
+            if isEmbedded { state = .notSet; finishEmbedded() } else { state = .restart }
+        } else if let failure {
+            reconstructionFailure = failure
+            switchToErrorState(error: failure)
+        } else {
+            record("reconstruction-complete", detail: "Models/model-mobile.usdz; accuracy unverified")
+            state = .viewing
+            finishEmbedded(output: outputFile)
+        }
     }
 
     private func reset() {
@@ -461,14 +571,22 @@ extension AppDataModel {
             logger.log("ObjectCaptureSession moved in .completed state.")
             if isSaveDraftEnabled {
                 logger.log("The data is stored. Closing the session...")
-                reset()
+                if isEmbedded {
+                    objectCaptureSession = nil
+                    state = .completed
+                    finishEmbedded()
+                } else { reset() }
             } else {
                 logger.log("Switch app model to reconstruction...")
                 state = .prepareToReconstruct
             }
         } else if case let .failed(error) = newState {
             logger.error("OCS moved to error state \(String(describing: error))...")
-            if case ObjectCaptureSession.Error.cancelled = error {
+            if isEmbedded {
+                objectCaptureSession = nil
+                switchToErrorState(error: error)
+                finishEmbedded(error: error.localizedDescription)
+            } else if case ObjectCaptureSession.Error.cancelled = error {
                 state = .restart
             } else {
                 switchToErrorState(error: error)
@@ -525,14 +643,16 @@ extension AppDataModel {
                     switchToErrorState(error: error)
                 }
             case .restart, .completed:
-                reset()
+                if isEmbedded { stopEmbeddedCapture() } else { reset() }
             case .viewing:
                 photogrammetrySession = nil
 
-                removeCheckpointFolder()
+                if !isEmbedded { removeCheckpointFolder() }
             case .failed:
                 logger.error("App failed state error=\(String(describing: self.error!))")
-                // We will show error screen here
+                if isEmbedded, objectCaptureSession == nil, photogrammetrySession == nil {
+                    finishEmbedded(error: error?.localizedDescription)
+                }
             default:
                 break
         }
@@ -580,7 +700,6 @@ extension AppDataModel {
             "detailTruncated": detail.count > 512,
             "elapsedSeconds": Date().timeIntervalSince(evaluationStarted),
             "modelState": String(describing: state), "sessionAvailable": objectCaptureSession != nil,
-            "thermalState": Self.thermalStateName, "cameraRelease": String(describing: cameraRelease),
             "shots": objectCaptureSession?.numberOfShotsTaken ?? 0,
             "completedCurrentPass": objectCaptureSession?.userCompletedScanPass ?? false
         ]
@@ -620,15 +739,6 @@ extension AppDataModel {
             try bytes.write(to: folder.appendingPathComponent("evaluation.json"), options: .atomic)
             evaluationWriteError = nil
         } catch { evaluationWriteError = "Evaluation report could not be saved. Original images may still be available in Files." }
-    }
-    private static var thermalStateName: String {
-        switch ProcessInfo.processInfo.thermalState {
-            case .nominal: return "nominal"
-            case .fair: return "fair"
-            case .serious: return "serious"
-            case .critical: return "critical"
-            @unknown default: return "unknown"
-        }
     }
     private static var hardwareIdentifier: String {
         var size = 0

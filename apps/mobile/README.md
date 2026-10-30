@@ -1,6 +1,6 @@
 # Scan to Make: mobile shell (UI-001)
 
-React Native 0.87 (TypeScript, Hermes, New Architecture) app with an isolated D004 capture/preview harness. The consumer UI supports a general project brief and an explicitly selected cup-holder measurement study. Custom capture/generation and printing are not implemented; the separate developer harness provides a same-session visible ARKit probe on iOS and offscreen ARCore sampling on Android.
+React Native 0.87 (TypeScript, Hermes, New Architecture) app with an isolated D004 capture/preview harness. The consumer UI supports a general project brief and an explicitly selected cup-holder measurement study. Saved projects support guided Object Capture on supported iOS hardware and USDZ import through the companion. General custom generation and printing are not implemented; the separate developer harness provides a same-session visible ARKit probe on iOS and offscreen ARCore sampling on Android.
 
 ## Layout
 
@@ -67,14 +67,13 @@ Mock sources (simulator, emulator without ARCore, tests) always score "Not yet k
 ## Known gaps
 
 - The iOS developer harness has a same-session visible ARKit preview and known anchor probe; physical-device performance and stability remain unqualified. Android ARCore still runs on an offscreen GL context and cannot satisfy the visible-preview report gates. Depth and mesh are configured only where supported, with observed workload reported separately.
-- Native capture start/stop is available in the developer spike harness only;
-  the consumer capture screen currently checks support and accepts manual sizes.
+- Saved projects support guided object capture on supported iOS hardware. The separate measured-example screen accepts manual sizes; scans do not automatically supply fit measurements.
 - The design dimensions (support height, wall, clearance) are seeded from the contracts fixture until FIT-001 supplies template defaults.
 - Local projects are device-local and unencrypted; uninstalling the app removes them. No cloud sync, account, import/export backup or cross-device recovery is implemented.
 
 ## Consumer flow
 
-Home starts with a general project idea: object, surroundings/constraints, and the addition to make. The brief remains editable across navigation and can be shared as text. Save draft preserves incomplete text locally. Review also saves before continuing. No scan data, generated geometry or verified fit is claimed. Empty or whitespace-only fields block review. Incomplete drafts reopen in the editor.
+Home starts with a general project idea: object, surroundings/constraints, and the addition to make. The brief remains editable across navigation and can be shared as text. Save draft preserves incomplete text locally. Review also saves before continuing. The brief alone does not establish scan data, generated geometry or verified fit. Empty or whitespace-only fields block review. Incomplete drafts reopen in the editor.
 
 The cup-holder example is a separate, explicitly selected measurement study. It preserves all four contract measurements, tool uncertainty and expected-revision edits. Its proportional sketch is input evidence, not a printable part. Measurement summaries can be shared; no print action is exposed.
 
@@ -410,3 +409,62 @@ directory with `--produced-fixture /private/retained-job`, exercises compatible
 collection pagination, reopens every file after process restart and independently
 compares exports. Keep those artifacts and credentials outside Git. This replay
 proves native consumption of retained evidence, not physical fit or print safety.
+
+### Native scan from a saved project
+
+On iOS, **Project captures → Scan object** starts the existing guided Object
+Capture flow. Scanning does not require pairing. After reconstruction, **Add to
+this project** explicitly imports the verified USDZ through the existing capture
+importer and reopens its retained record. **Keep for later** leaves a local draft;
+Project captures lists these drafts after an app relaunch. Files import remains
+available on supported iOS versions when the hardware cannot run Object Capture.
+
+The whole iOS app currently requires **iOS 18 or later**, including Files-import
+users. This is a pre-release compatibility decision to reuse the sample's
+`hideObjectReticle` and `showShotLocations` affordances. Basic Object Capture and
+cancellation alone do not require iOS 18. Revisit the whole-app minimum before a
+public release; iOS 15–17 are currently excluded.
+
+A native owner retains capture and reconstruction sessions independently of the
+React bridge and presentation. Closing, backgrounding, or bridge invalidation
+requests cancellation once. New scans remain blocked until a terminal SDK event;
+a ten-second diagnostic reports a pending stop without forcing release. Terminal
+state is not proof that the physical camera is available to another application.
+The standalone sample keeps its original entrypoint and remains separately
+buildable. The app compiles its shared engine once, copies the existing tutorial
+videos/localization, and generates an asset catalog excluding only the standalone
+sample AppIcon to avoid colliding with the app's icon.
+
+Private drafts live in `Documents/NativeCaptures/<UUID>/`: original images,
+checkpoints, reconstruction output, diagnostics, and an atomic manifest. The
+manifest retains the originating project, exact revision/snapshot, pairing
+context (or no pairing), outcome, and completed model identity. JavaScript receives
+an opaque run ID and descriptor, not filesystem paths or photographs. A narrow
+native adoption method opens every mutable directory without following symlinks,
+verifies the ready manifest and fixed USDZ output, and copies verified bytes into
+the existing cache. Import remains limited to 32 MiB; larger models stay local.
+No original capture files are deleted by stopping, keeping, or importing a scan.
+
+A changed project or pairing refuses the original handoff. **Choose destination**
+requires explicit confirmation of the current project version/connection. The
+importer rechecks that selected destination across asynchronous work and retains
+its existing ETag, identity, and ambiguous-POST safeguards. There is no automatic
+upload, destination rebinding, or retry of an uncertain import. Local app storage
+is not an encrypted backup; Files access and uninstall behavior are unchanged.
+Capturing, conversion, and reopening do not establish dimensional accuracy,
+surface completeness, or physical fit.
+
+Focused verification (all generated evidence and fixtures should remain private):
+
+```sh
+python3 scripts/native-object-capture-tests/test.py --evidence /private/output/native-lifecycle
+python3 scripts/native-capture-fault-tests/test.py --adoption-only \
+  --simulator OWNED_SIMULATOR_UUID --evidence /private/output/native-adoption
+```
+
+The lifecycle harness compiles production owner/store code and extracts unchanged
+model lifecycle method bodies against controllable SDK streams. The adoption
+harness compiles the production Objective-C bridge inside a disposable Simulator
+app. Neither establishes physical camera behavior. Native capture on a physical
+device, actual reconstruction, import/reopen, and camera recovery require a
+separate attended acceptance run.

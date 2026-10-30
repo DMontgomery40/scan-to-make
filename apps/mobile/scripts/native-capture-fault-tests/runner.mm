@@ -19,6 +19,42 @@ UIViewController *RCTPresentedViewController(void) { return rootController; }
 static void Require(BOOL condition, NSString *message) {
   if (!condition) { fprintf(stderr,"FAIL: %s\n",message.UTF8String); exit(1); }
 }
+// Contract declaration lets the pre-implementation regression reach the missing selector.
+@interface RetainedCaptureBridge (NativeAdoptionContract)
+- (void)adoptNativeOutput:(NSString *)runID resolve:(RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject;
+@end
+static NSArray *AdoptionCases(void) {
+  NSURL *root=[[[NSFileManager.defaultManager URLsForDirectory:NSDocumentDirectory inDomains:NSUserDomainMask] firstObject] URLByAppendingPathComponent:@"NativeCaptures"];
+  NSMutableArray *results=[NSMutableArray new];
+  for(NSString *mode in @[@"valid",@"traversal",@"hash",@"size",@"type",@"oversized",@"manifest-link",@"run-link",@"models-link",@"output-link",@"not-ready"]){
+    NSString *runID=NSUUID.UUID.UUIDString.lowercaseString;
+    NSURL *run=[root URLByAppendingPathComponent:runID],*models=[run URLByAppendingPathComponent:@"Models"],*output=[models URLByAppendingPathComponent:@"model-mobile.usdz"],*manifest=[run URLByAppendingPathComponent:@"manifest.json"];
+    Require([NSFileManager.defaultManager createDirectoryAtURL:models withIntermediateDirectories:YES attributes:nil error:nil],@"fixture directories");
+    NSData *bytes=[@"abc" dataUsingEncoding:NSUTF8StringEncoding];Require([bytes writeToURL:output atomically:YES],@"fixture model");
+    NSMutableDictionary *file=[@{@"sha256":STMHash(bytes),@"byteLength":@3,@"mediaType":@"model/vnd.usdz+zip"} mutableCopy];
+    if([mode isEqual:@"hash"])file[@"sha256"]=[@"f" stringByPaddingToLength:64 withString:@"f" startingAtIndex:0];
+    if([mode isEqual:@"size"])file[@"byteLength"]=@2;
+    if([mode isEqual:@"type"])file[@"mediaType"]=@"model/obj";
+    if([mode isEqual:@"oversized"])file[@"byteLength"]=@(32*1024*1024+1);
+    NSDictionary *draft=@{@"formatVersion":@1,@"runID":runID,@"status":[mode isEqual:@"not-ready"]?@"stopping":@"ready",@"file":file};
+    Require([[NSJSONSerialization dataWithJSONObject:draft options:0 error:nil] writeToURL:manifest atomically:YES],@"fixture manifest");
+    NSURL *link=nil;
+    if([mode isEqual:@"manifest-link"])link=manifest;
+    if([mode isEqual:@"run-link"])link=run;
+    if([mode isEqual:@"models-link"])link=models;
+    if([mode isEqual:@"output-link"])link=output;
+    if(link){NSURL *outside=[root URLByAppendingPathComponent:[NSUUID.UUID.UUIDString stringByAppendingString:@"-outside"]];Require([NSFileManager.defaultManager moveItemAtURL:link toURL:outside error:nil],@"move fixture target");Require([NSFileManager.defaultManager createSymbolicLinkAtURL:link withDestinationURL:outside error:nil],@"fixture symlink");}
+    [NSFileManager.defaultManager removeItemAtURL:FileURL(file) error:nil];
+    __block BOOL resolved=NO,rejected=NO;
+    RetainedCaptureBridge *bridge=[RetainedCaptureBridge new];
+    [bridge adoptNativeOutput:[mode isEqual:@"traversal"]?@"../outside":runID resolve:^(id value){resolved=YES;Require([value isEqual:file],@"adopted descriptor identity");} reject:^(NSString*c,NSString*m,NSError*e){rejected=YES;}];
+    BOOL valid=[mode isEqual:@"valid"];
+    Require(valid?(resolved&&!rejected&&Verified(file)!=nil):(!resolved&&rejected&&Verified(file)==nil),[@"adoption result " stringByAppendingString:mode]);
+    if(valid)Require([[NSData dataWithContentsOfURL:output] isEqual:bytes],@"adoption preserves original");
+    [results addObject:@{@"mode":mode,@"passed":@YES}];
+  }
+  return results;
+}
 @interface Driver : NSObject
 @property RetainedCaptureBridge *bridge;
 @property NSMutableArray *results;
@@ -89,6 +125,12 @@ static void Require(BOOL condition, NSString *message) {
 - (void)scene:(UIScene*)scene willConnectToSession:(UISceneSession*)session options:(UISceneConnectionOptions*)options {
   NSData *data=[NSData dataWithContentsOfURL:[NSBundle.mainBundle URLForResource:@"config" withExtension:@"json"]];config=[NSJSONSerialization JSONObjectWithData:data options:0 error:nil];Require(config!=nil,@"private fixture config");
   self.window=[[UIWindow alloc] initWithWindowScene:(UIWindowScene*)scene];rootController=[UIViewController new];rootController.view.backgroundColor=UIColor.whiteColor;self.window.rootViewController=rootController;[self.window makeKeyAndVisible];
+  if([config[@"adoptionOnly"] boolValue]){
+    NSArray *cases=AdoptionCases();
+    NSURL *out=[[[NSFileManager defaultManager] URLsForDirectory:NSDocumentDirectory inDomains:NSUserDomainMask].firstObject URLByAppendingPathComponent:@"results.json"];
+    Require([[NSJSONSerialization dataWithJSONObject:@{@"passed":@YES,@"cases":cases} options:NSJSONWritingPrettyPrinted error:nil] writeToURL:out atomically:YES],@"write adoption receipts");
+    printf("NATIVE_ADOPTION_PASS %lu\n",(unsigned long)cases.count);fflush(stdout);exit(0);
+  }
   self.driver=[Driver new];self.driver.bridge=[RetainedCaptureBridge new];self.driver.results=[NSMutableArray new];self.driver.modes=@[@"wrong-hash",@"wrong-type",@"wrong-bytes",@"oversized",@"delayed"];
   dispatch_after(dispatch_time(DISPATCH_TIME_NOW,NSEC_PER_SEC),dispatch_get_main_queue(),^{[self.driver next];});
   dispatch_after(dispatch_time(DISPATCH_TIME_NOW,60*NSEC_PER_SEC),dispatch_get_main_queue(),^{Require(NO,@"60-second test bound exceeded");});

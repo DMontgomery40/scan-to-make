@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Alert, Text } from 'react-native';
+import { Alert, AppState, Text } from 'react-native';
 import type { SavedProjects } from '@scan-to-make/contracts/saved-project';
 import {
   CaptureClient,
@@ -7,6 +7,11 @@ import {
   type CaptureState,
   type RetainedCapture,
 } from '../capture/retainedCaptures';
+import {
+  NativeObjectCaptureClient,
+  objectCaptureNative,
+  type NativeCaptureDraft,
+} from '../capture/nativeObjectCapture';
 import { Button, Card, Screen } from '../ui/components';
 import { type } from '../ui/theme';
 
@@ -28,21 +33,63 @@ export function RetainedCapturesScreen({
       return null;
     }
   });
+  const [scanner] = useState(() => {
+    const native = objectCaptureNative();
+    return client && native
+      ? new NativeObjectCaptureClient(client, native)
+      : null;
+  });
+  const [supported, setSupported] = useState(false);
+  const [activeRunID, setActiveRunID] = useState<string | null>(null);
+  const [drafts, setDrafts] = useState<NativeCaptureDraft[]>([]);
   const [state, setState] = useState<CaptureState>({ captures: [] });
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState(
-    'Choose a saved USDZ scan to keep with this project.',
+    'Scan an object or choose a saved USDZ scan to keep with this project.',
   );
   const [selected, setSelected] = useState<RetainedCapture | null>(null);
   const refresh = async () => {
+    // Local scans remain available even when there is no companion connection.
+    if (scanner) {
+      const status = await scanner.native.status();
+      setSupported(status.supported);
+      setActiveRunID(status.activeRunID);
+      setDrafts(await scanner.drafts(id));
+    }
     if (client) setState(await client.state(id));
   };
   useEffect(() => {
     refresh().catch(e => setMessage(e.message));
+    const subscription = AppState.addEventListener('change', value => {
+      if (value === 'active') refresh().catch(e => setMessage(e.message));
+    });
     return () => {
-      client?.native.cancel();
+      subscription.remove();
+      client?.native.cancel().catch(() => {});
+      scanner?.native.stop().catch(() => {});
     };
-  }, [id, client]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [id, client, scanner]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!scanner || !activeRunID) return;
+    let cancelled = false;
+    const timer = setInterval(() => {
+      scanner.native
+        .status()
+        .then(status => {
+          if (!cancelled && !status.activeRunID) {
+            setActiveRunID(null);
+            refresh().catch(e => {
+              if (!cancelled) setMessage(e.message);
+            });
+          }
+        })
+        .catch(() => {});
+    }, 1000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [scanner, activeRunID]); // eslint-disable-line react-hooks/exhaustive-deps
   async function run(action: () => Promise<unknown>, success: string) {
     if (busy || !client) return;
     setBusy(true);
@@ -83,6 +130,100 @@ export function RetainedCapturesScreen({
         </Text>
       ) : (
         <>
+          <Button
+            label="Scan object"
+            disabled={busy || !supported || !!activeRunID}
+            onPress={() =>
+              run(async () => {
+                if (!scanner) return;
+                const draft = await scanner.start(id);
+                if (draft.addRequested)
+                  setSelected(await scanner.add(id, draft));
+              }, 'Your scan is kept on this device. Add a ready scan when you want to review it with this project.')
+            }
+          />
+          {!supported ? (
+            <Text style={type.body}>
+              Scanning is unavailable on this device. Choose a USDZ file to keep
+              a scan with this project.
+            </Text>
+          ) : null}
+          {activeRunID ? (
+            <Text accessibilityLiveRegion="polite" style={type.body}>
+              A scan is still active or stopping. Your files are kept. A new
+              scan becomes available after it finishes.
+            </Text>
+          ) : null}
+          {scanner ? (
+            <Button
+              label="Refresh local scans"
+              variant="secondary"
+              disabled={busy}
+              onPress={() => run(refresh, 'Local scans refreshed.')}
+            />
+          ) : null}
+          {drafts.map((draft, index) => (
+            <Card key={draft.runID}>
+              <Text style={type.heading}>Local scan {index + 1}</Text>
+              <Text style={type.body}>
+                {draft.status === 'ready'
+                  ? 'Ready to add'
+                  : draft.status === 'stopping'
+                  ? 'Stopping scan'
+                  : draft.status === 'capturing'
+                  ? 'Scan in progress'
+                  : 'Original files kept on this device'}
+              </Text>
+              {draft.message ? (
+                <Text style={type.body}>{draft.message}</Text>
+              ) : null}
+              {draft.file ? (
+                <Text style={type.caption}>
+                  {(draft.file.byteLength / 1048576).toFixed(1)} MB · Project
+                  version {draft.origin.revision}
+                </Text>
+              ) : null}
+              {draft.status === 'ready' && scanner ? (
+                <>
+                  <Button
+                    label={`Add scan ${index + 1} to this project`}
+                    disabled={busy || !!state.pending}
+                    onPress={() =>
+                      run(async () => {
+                        setSelected(await scanner.add(id, draft));
+                      }, 'Capture imported and verified. Open it to review the original scan.')
+                    }
+                  />
+                  <Button
+                    label={`Choose destination for scan ${index + 1}`}
+                    variant="secondary"
+                    disabled={busy || !!state.pending}
+                    onPress={() =>
+                      run(async () => {
+                        const destination = await client.destination(id);
+                        Alert.alert(
+                          'Use the current project version?',
+                          `Add this retained scan to project version ${destination.revision} on your connected companion? Its original files stay on this device.`,
+                          [
+                            { text: 'Keep for later', style: 'cancel' },
+                            {
+                              text: 'Add to this version',
+                              onPress: () =>
+                                run(async () => {
+                                  setSelected(
+                                    await scanner.add(id, draft, destination),
+                                  );
+                                }, 'Capture imported and verified.'),
+                            },
+                          ],
+                        );
+                      }, 'Choose whether to add the scan to the current destination.')
+                    }
+                  />
+                </>
+              ) : null}
+            </Card>
+          ))}
           <Button
             label={busy ? 'Working…' : 'Sync saved project'}
             disabled={busy}
