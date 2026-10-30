@@ -1,0 +1,12 @@
+{
+  "schema": "scan-to-make.detail-still/0.1",
+  "id": "3f9c2a44-7c5b-4b1e-9a2d-0e8f7a6b5c4d",
+  "projectId": "drawer-1",
+  "captureId": "8a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d",
+  "projectRevision": 3,
+  "mediaType": "image/jpeg",
+  "byteLength": 2048,
+  "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "label": "USB-C port",
+  "ordinal": 0
+}

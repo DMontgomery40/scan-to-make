@@ -200,3 +200,23 @@ with authored units are eligible for bounds/topology evaluation through
 `isCaptureEvaluationEligible`. This is not fit readiness: metric accuracy,
 surface completeness and physical fit are always `unknown` in this contract.
 Future physical evidence needs a separate, explicitly observed evidence contract.
+
+## Detail stills
+
+`./detail-still` (also re-exported from the package root) defines a `DetailStill`
+record for one close-up photo attached to an existing retained capture. The schema
+id is `scan-to-make.detail-still/0.1`; `fixtures/detail-still.json` is a synthetic
+example. The record binds `id`, `projectId`, `captureId` and `projectRevision` to
+the exact image bytes (`mediaType` `image/jpeg`, `image/heic` or `image/png`,
+`byteLength`, `sha256`, capped at `MAX_DETAIL_STILL_BYTES` = 25 MiB). An optional
+`label` is the user's own free text (at most 200 characters), and `ordinal` is the
+attachment order within the capture, at most `MAX_DETAIL_STILLS_PER_CAPTURE` (24)
+stills per capture.
+
+There are deliberately no region coordinates, masks or detail taxonomy: a later
+model step works out what each photo shows. `validateDetailStill(input)` returns a
+detached validated record and rejects unknown fields. `DetailStillListSchema` /
+`validateDetailStills(input)` validate one capture's stills as a set: shared
+project, capture and revision, unique ids, strictly increasing ordinals. As with
+artifact references, the digest does not prove bytes match it; every consumer must
+hash the exact received bytes and compare length before use.
