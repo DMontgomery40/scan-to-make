@@ -307,3 +307,10 @@ transactional snapshot of metadata mutations by a local administrator. Requests
 share the project/capture slot, recheck authorization after listing, and hold the
 current project lock through response flush. No credential, write or dispatch
 permissions are added.
+
+## Retained scan processing
+
+Host-configured Blender repair, measurement, ten canonical views and optional
+reference-dimension errors are available as preview-only capture jobs. See
+[SCAN-PROCESSING.md](SCAN-PROCESSING.md) for configuration, routes, retention,
+resource bounds and tests.

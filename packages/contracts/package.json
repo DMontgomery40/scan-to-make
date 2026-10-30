@@ -8,7 +8,8 @@
     "./saved-project": { "types": "./dist/saved-project.d.ts", "import": "./dist/saved-project.js" },
     "./generation": { "types": "./dist/generation.d.ts", "import": "./dist/generation.js" },
     "./capture": { "types": "./dist/capture.d.ts", "import": "./dist/capture.js" },
-    "./detail-still": { "types": "./dist/detail-still.d.ts", "import": "./dist/detail-still.js" }
+    "./detail-still": { "types": "./dist/detail-still.d.ts", "import": "./dist/detail-still.js" },
+    "./scan-processing": { "types": "./dist/scan-processing.d.ts", "import": "./dist/scan-processing.js" }
   },
   "files": ["dist", "fixtures", "README.md"],
   "scripts": {
