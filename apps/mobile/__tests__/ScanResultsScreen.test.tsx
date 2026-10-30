@@ -339,7 +339,7 @@ test('stopping a running check asks first, then shows it was stopped', async () 
   await act(async () => tree.unmount());
 });
 
-test('the view gallery shows each render and opens the model', async () => {
+test('the view gallery shows each render and shares the model', async () => {
   const { services, calls } = fakeScanServices({
     jobs: [syntheticJob('succeeded')],
   });
@@ -351,10 +351,9 @@ test('the view gallery shows each render and opens the model', async () => {
   expect(angle).toMatch(/^file:\/\/\/synthetic\//);
   await press(tree, 'Show Top view');
   expect(hero()).not.toBe(angle);
-  await press(tree, 'View 3D model');
   await press(tree, 'Share STL file');
-  expect(calls).toContain('open repaired.obj');
   expect(calls).toContain('share repaired.stl');
+  expect(hasButton(tree, 'View 3D model')).toBe(false);
   await act(async () => tree.unmount());
 });
 

@@ -304,7 +304,9 @@ export function ScanResultsScreen({
         },
       ],
     );
-  const openModel = async (job: ScanProcessingJob, share: boolean) => {
+  // The stills bridge previews files with Quick Look, which has no OBJ/STL
+  // viewer, so the model is offered as a shared file only.
+  const shareModel = async (job: ScanProcessingJob) => {
     if (busy.current || !ack.current) return;
     busy.current = true;
     setNotice(null);
@@ -314,8 +316,8 @@ export function ScanResultsScreen({
         captureId,
         ack.current,
         job,
-        share ? 'repaired.stl' : 'repaired.obj',
-        share,
+        'repaired.stl',
+        true,
       );
     } catch (error) {
       setNotice(failureOf(error).message);
@@ -527,17 +529,12 @@ export function ScanResultsScreen({
         <Card>
           <Text style={type.heading}>The cleaned-up model</Text>
           <Text style={type.caption}>
-            Open it in 3D, or share the STL file with your own slicer.
+            Share the STL file to open it in your own slicer or 3D viewer.
           </Text>
-          <Button
-            label="View 3D model"
-            variant="secondary"
-            onPress={() => openModel(succeeded, false)}
-          />
           <Button
             label="Share STL file"
             variant="secondary"
-            onPress={() => openModel(succeeded, true)}
+            onPress={() => shareModel(succeeded)}
           />
         </Card>
       ) : null}
