@@ -48,8 +48,15 @@ if MODE != "missing-gcode":
     with open(os.path.join(out, "plate_1.gcode"), "w") as f:
         f.write("; HEADER_BLOCK_START\n; env=" + ",".join(sorted(os.environ)) + "\nG28\n")
 if MODE != "missing-settings":
-    with open(settings, "w") as f:
-        f.write("not json" if MODE == "bad-settings" else json.dumps({{"printer_model": "fake", "argv": a}}))
+    if MODE == "echo-presets":
+        mp, pp = opt("--load-settings").split(";")
+        merged = dict(json.load(open(mp)))
+        merged.update(json.load(open(pp)))
+        with open(settings, "w") as f:
+            json.dump(merged, f)
+    else:
+        with open(settings, "w") as f:
+            f.write("not json" if MODE == "bad-settings" else json.dumps({{"printer_model": "fake", "argv": a}}))
 if MODE == "result-fixture":
     import shutil
     shutil.copyfile({fixture!r}, os.path.join(out, "result.json"))
@@ -414,6 +421,59 @@ class ReviewFixTests(Base):
             producer._rename_noreplace(a, b)
         self.assertEqual(b.stat().st_ino, ino)
         self.assertTrue(a.exists())
+
+    # 7. explicit preset overrides and G-code header summary
+    def test_fix7_overrides_written_sealed_and_recorded(self):
+        m = self.run_produce("echo-presets", bed_type="textured_plate", nozzle_type="hardened_steel",
+                             enable_support=True)
+        self.assertEqual(m["overrides"], {
+            "bedType": "textured_plate",
+            "bedTypeLabel": "Textured PEI Plate",
+            "nozzleType": "hardened_steel",
+            "enableSupport": True,
+        })
+        exported = json.loads((self.out / "exported-settings.json").read_text())
+        self.assertEqual(exported["curr_bed_type"], "Textured PEI Plate")
+        self.assertEqual(exported["nozzle_type"], ["hardened_steel"])
+        self.assertEqual(exported["enable_support"], "1")
+
+    def test_fix7_invalid_overrides_rejected(self):
+        self.fails("preset", "unsupported bed_type", bed_type="supertack_plate")
+        self.fails("preset", "unsupported nozzle_type", nozzle_type="diamond")
+        self.fails("preset", "enable_support", enable_support="yes")
+
+    def test_fix7_gcode_summary_parses_bambustudio_header(self):
+        sample = (
+            "; HEADER_BLOCK_START\n"
+            "; BambuStudio 02.08.02.61\n"
+            "; model printing time: 1h 2m 3s; total estimated time: 1h 8m 15s\n"
+            "; total layer number: 102\n"
+            "; total filament length [mm] : 1237.75\n"
+            "; total filament volume [cm^3] : 2977.14\n"
+            "; total filament weight [g] : 3.75\n"
+            "; filament_density: 1.26\n"
+            "; filament_diameter: 1.75\n"
+            "; max_z_height: 20.40\n"
+            "; HEADER_BLOCK_END\n"
+            "; CONFIG_BLOCK_START\n"
+            "; curr_bed_type = Textured PEI Plate\n"
+            "; nozzle_type = hardened_steel,hardened_steel\n"
+            "; enable_support = 0\n"
+            "; CONFIG_BLOCK_END\n"
+            "G28\n"
+        ).encode()
+        s = producer.parse_gcode_summary(sample)
+        self.assertEqual(s["modelPrintTime"], "1h 2m 3s")
+        self.assertEqual(s["modelPrintSeconds"], 3723)
+        self.assertEqual(s["estimatedPrintTime"], "1h 8m 15s")
+        self.assertEqual(s["estimatedPrintSeconds"], 4095)
+        self.assertEqual(s["layerCount"], 102)
+        self.assertEqual(s["filamentLengthMm"], 1237.75)
+        self.assertEqual(s["filamentWeightG"], 3.75)
+        self.assertAlmostEqual(s["filamentVolumeCm3"], 2.97714, places=5)
+        self.assertEqual(s["bedType"], "Textured PEI Plate")
+        self.assertEqual(s["nozzleType"], "hardened_steel,hardened_steel")
+        self.assertIs(s["enableSupport"], False)
 
 
 if __name__ == "__main__":
