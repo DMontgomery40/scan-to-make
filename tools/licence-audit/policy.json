@@ -154,6 +154,14 @@
       "reason": "Pending the repository licence decision (KAN-105). This folder contains no GPL code and will carry or inherit the chosen root licence once it is added.",
       "scope": "server",
       "version": "workspace"
+    },
+    {
+      "ecosystem": "tool",
+      "licence": "UNKNOWN",
+      "name": "tools/templates",
+      "reason": "Holds only catalog.json, the template catalog data. Pending the repository licence decision (KAN-105). This folder contains no GPL code and will carry or inherit the chosen root licence once it is added.",
+      "scope": "server",
+      "version": "workspace"
     }
   ],
   "isolatedGplTools": {
