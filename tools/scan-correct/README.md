@@ -124,8 +124,18 @@ by children and fails closed if unavailable. The worker environment excludes
 provider credentials; auto-execution is disabled. This is network syscall
 isolation, not a filesystem/container sandbox. Only trusted fixed Python
 implementations run: no model-written Python, shell, arbitrary executables or
-operation paths. Inputs may reference sibling/subdirectory MTL/base-colour
-assets only, never escape their source directory.
+operation paths. Every `mtllib` target must have a `.mtl` suffix; nonstandard
+suffixes are rejected before import. Material and base-colour dependencies must resolve inside the
+source directory: absolute/parent paths and escaping symlinks are rejected.
+References use plain converter-style portable paths (letters/digits/underscore,
+hyphen, period and slash), with no quoting, escaping or expansion. The entire
+dependency graph is validated and snapshotted before any assets are staged;
+Blender receives those validated bytes. An explicit caller-selected `--texture`
+override is snapshotted into the staged input directory separately from MTL
+references. A future filesystem sandbox would add defence in depth against
+importer behaviour; it is not implemented here. The socket filter does not
+restrict filesystem reads, and callers must keep source/job directories private
+and unmodified during staging.
 
 Each successful operation saves `pending.blend`, then the host commits it as
 `state.blend`. A failed geometry operation leaves the last committed state
