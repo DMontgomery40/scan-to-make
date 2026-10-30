@@ -1000,3 +1000,16 @@ COCOAPODS: 1.15.2
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ExtraMarkerNormalisationTests(unittest.TestCase):
+    """Connector review on PR #90: membership operators must compare normalised extra names."""
+
+    def test_membership_and_arbitrary_equality_normalise_extra_names(self):
+        from inventory import _marker_allows
+        active = {"mesh-io"}  # active extras arrive PEP 503-normalised
+        self.assertTrue(_marker_allows('extra != "" and extra in "mesh_io"', active))
+        self.assertTrue(_marker_allows('extra in "Mesh.IO"', active))
+        self.assertFalse(_marker_allows('extra not in "mesh_io"', active))
+        self.assertTrue(_marker_allows('extra === "mesh_io"', active))
+        self.assertFalse(_marker_allows('extra != "" and extra in "other"', active))

@@ -1145,17 +1145,18 @@ def _eval_marker_comparison(
     lhs_val = _resolve(lhs_tok)
     rhs_val = _resolve(rhs_tok)
 
-    if op == "===":
-        return lhs_val == rhs_val
-    if op == "in":
-        return lhs_val in rhs_val
-    if op == "not in":
-        return lhs_val not in rhs_val
-
     uses_extra = (lhs_tok == ("IDENT", "extra")) or (rhs_tok == ("IDENT", "extra"))
     if uses_extra:
+        # Extra names compare in normalised form for every operator, including
+        # membership and arbitrary equality (active extras are already normalised).
         lhs_norm = _pep503_normalize(lhs_val) if lhs_val.strip() else ""
         rhs_norm = _pep503_normalize(rhs_val) if rhs_val.strip() else ""
+        if op == "===":
+            return lhs_norm == rhs_norm
+        if op == "in":
+            return lhs_norm in rhs_norm
+        if op == "not in":
+            return lhs_norm not in rhs_norm
         if op == "==":
             return lhs_norm == rhs_norm
         if op == "!=":
@@ -1169,6 +1170,13 @@ def _eval_marker_comparison(
         if op == ">=":
             return lhs_norm >= rhs_norm
         raise _MarkerParseError(f"Unsupported extra operator: {op}")
+
+    if op == "===":
+        return lhs_val == rhs_val
+    if op == "in":
+        return lhs_val in rhs_val
+    if op == "not in":
+        return lhs_val not in rhs_val
 
     pep440_res = _pep440_compare(lhs_val, op, rhs_val)
     if pep440_res is not None:
