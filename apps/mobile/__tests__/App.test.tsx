@@ -867,7 +867,16 @@ test('production wiring drives the real clients through the native bridges', asy
       };
     },
   };
-  jest.useFakeTimers();
+  // Fake only the clock the screen polls with; the clients' promise chains
+  // must keep running on real microtasks (Node 22 stalls otherwise).
+  jest.useFakeTimers({
+    doNotFake: [
+      'nextTick',
+      'setImmediate',
+      'clearImmediate',
+      'queueMicrotask',
+    ],
+  });
   let tree!: ReactTestRenderer.ReactTestRenderer;
   try {
     await act(async () => {
