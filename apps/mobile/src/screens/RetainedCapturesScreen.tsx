@@ -159,7 +159,9 @@ export function RetainedCapturesScreen({
               label="Refresh local scans"
               variant="secondary"
               disabled={busy}
-              onPress={() => run(refresh, 'Local scans refreshed.')}
+              // `run` already re-syncs local state in its finally, so a trivial
+              // action refreshes exactly once per tap under the busy guard.
+              onPress={() => run(() => Promise.resolve(), 'Local scans refreshed.')}
             />
           ) : null}
           {drafts.map((draft, index) => (
