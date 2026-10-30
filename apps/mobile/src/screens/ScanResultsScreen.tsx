@@ -670,7 +670,9 @@ export function ScanResultsScreen({
                   <Text style={type.body}>{label.title}</Text>
                   <Text style={type.caption}>{label.detail}</Text>
                 </View>
-                <Badge label={label.badge} tone={label.tone} />
+                <View style={styles.stageBadge}>
+                  <Badge label={label.badge} tone={label.tone} />
+                </View>
               </Pressable>
             );
           })}
