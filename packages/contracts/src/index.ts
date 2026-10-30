@@ -247,3 +247,5 @@ export function applyProjectFitSpecPatch(current: ProjectFitSpec, input: unknown
     interfaces: changesEnvelope ? { 'drawer-cavity': { fitEvidence: [] } } : spec.interfaces,
   });
 }
+
+export * from './scan-processing.js';

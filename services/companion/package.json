@@ -39,6 +39,10 @@
     "./detail-stills": {
       "types": "./dist/detail-stills.d.ts",
       "import": "./dist/detail-stills.js"
+    },
+    "./scan-processing": {
+      "types": "./dist/scan-processing.d.ts",
+      "import": "./dist/scan-processing.js"
     }
   },
   "scripts": {

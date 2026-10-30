@@ -1,3 +1,4 @@
+import {ScanProcessingStore,createScanRunner} from './scan-processing.js';
 import {PreparedJobStore} from './prepared-jobs.js';
 import {isAbsolute,join} from 'node:path';
 import {FileSavedProjectStorage} from '@scan-to-make/project';
@@ -19,6 +20,12 @@ const storage=captureDirectory===undefined?undefined:new FileSavedProjectStorage
 const capture=storage&&captureDirectory?{storage,captures:new CaptureStore(storage,join(captureDirectory,'captures'),createCaptureConverter({
  executable:process.env.SCAN_TO_MAKE_CAPTURE_PYTHON??'python3',temporaryRoot:join(captureDirectory,'workers'),
 })),detailStills:new DetailStillStore(storage,join(captureDirectory,'captures'))}:undefined;
+const scanTool=process.env.SCAN_TO_MAKE_SCAN_REPAIR_TOOL;
+const scanBlender=process.env.SCAN_TO_MAKE_SCAN_BLENDER;
+if(scanTool!==undefined||scanBlender!==undefined){
+ if(!capture||!captureDirectory||!scanTool||!scanBlender)throw new Error('Scan processing requires authenticated capture storage, tool and Blender paths');
+ Object.assign(capture,{scanProcessing:new ScanProcessingStore(capture.storage,capture.captures,join(captureDirectory,'captures'),createScanRunner({toolPath:scanTool,blender:scanBlender,python:process.env.SCAN_TO_MAKE_CAPTURE_PYTHON??'python3'}))});
+}
 // Only a host operator chooses the executable. Remote envelopes cannot select it.
 const inspectorFile=process.env.SCAN_TO_MAKE_PREPARED_MCP_CONFIG;
 if(inspectorFile!==undefined){
