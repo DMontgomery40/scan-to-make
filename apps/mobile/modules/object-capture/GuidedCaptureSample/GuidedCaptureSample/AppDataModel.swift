@@ -144,6 +144,7 @@ class AppDataModel: Identifiable {
     private var lastObservedTracking: String?
     private var lastObservedPause: Bool?
     var evaluationStarted = Date()
+    private(set) var stopMessage: String?
     private(set) var captureStopped = false
     private(set) var isStoppingCapture = false
     private(set) var stopWaitExceeded = false
@@ -193,12 +194,14 @@ class AppDataModel: Identifiable {
     func beginCapture() {
         guard !isStoppingCapture, objectCaptureSession == nil, photogrammetrySession == nil else { return }
         captureStopped = false
+        stopMessage = nil
         reset()
     }
 
-    func stopCapture(reason: String = "Stopped by user") {
+    func stopCapture(reason: String = "Stopped by user", message: String? = nil) {
         guard !captureStopped, let session = objectCaptureSession else { return }
         captureStopped = true
+        stopMessage = message
         isStoppingCapture = true
         stopWaitExceeded = false
         record("interrupted", detail: reason + "; original files retained")
@@ -245,7 +248,7 @@ class AppDataModel: Identifiable {
         stopWaitTask?.cancel()
         stopWaitTask = nil
         objectCaptureSession = nil
-        finishEmbedded()
+        finishEmbedded(error: stopMessage)
         return true
     }
 
@@ -332,6 +335,42 @@ extension AppDataModel {
             }
             logger.log("^^^ Got nil from stateUpdates iterator!  Ending observation task...")
         })
+        tasks.append(Task<Void, Never> { [weak self] in
+            var watchdog = CaptureWatchdog()
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(1))
+                guard !Task.isCancelled, let self, !self.captureStopped,
+                      self.objectCaptureSession?.id == model.id else { return }
+                // Finishing writes the retained images; interrupting it would lose them.
+                switch model.state {
+                    case .finishing, .completed, .failed: return
+                    default: break
+                }
+                // Background time must not consume foreground tracking/progress budgets.
+                guard UIApplication.shared.applicationState == .active else {
+                    watchdog = CaptureWatchdog()
+                    continue
+                }
+                let reason = watchdog.observe(tracking: AppDataModel.watchdogTracking(model.cameraTracking),
+                                              paused: model.isPaused,
+                                              capturing: model.state == .capturing,
+                                              shots: model.numberOfShotsTaken,
+                                              thermalCritical: ProcessInfo.processInfo.thermalState == .critical,
+                                              at: ProcessInfo.processInfo.systemUptime)
+                if let reason {
+                    self.stopCapture(reason: reason.detail, message: reason.message)
+                    return
+                }
+            }
+        })
+    }
+
+    private static func watchdogTracking(_ tracking: Tracking) -> CaptureWatchdog.Tracking {
+        switch tracking {
+            case .normal: return .normal
+            case .notAvailable: return .notAvailable
+            default: return .limited
+        }
     }
 
     private func detachListeners() {

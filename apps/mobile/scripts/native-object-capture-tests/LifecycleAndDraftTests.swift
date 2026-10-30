@@ -124,6 +124,7 @@ struct FixtureMessages { mutating func removeAll() {} }
     var reconstructionFailure: Swift.Error?
     var isStoppingReconstruction = false
     var reconstructionStopWaitExceeded = false
+    var stopMessage: String?
     var captureStopped = false; var isStoppingCapture = false; var stopWaitExceeded = false
     var stopStateTask: Task<Void, Never>?; var stopWaitTask: Task<Void, Never>?
     var objectCaptureSession: ObjectCaptureSession?
@@ -177,6 +178,15 @@ struct FixtureMessages { mutating func removeAll() {} }
         for state in [ObjectCaptureSession.CaptureState.initializing,.ready,.detecting,.capturing,.finishing] {
             first.emit(state); await flush(); check(capture.objectCaptureSession === first, "nonterminal capture state retained")
         }
+        let automatic = AppDataModel(); automatic.fixtureRoot = root
+        var automaticError: String?; var automaticCompletions = 0
+        automatic.onEmbeddedCompletion = { _, error in automaticError = error; automaticCompletions += 1 }
+        automatic.beginCapture(); let automaticSession = automatic.objectCaptureSession!
+        automatic.stopCapture(reason: "Watchdog: thermal state critical", message: "Thermal stop")
+        automatic.beginCapture(); await flush()
+        check(automatic.starts == 1 && automaticCompletions == 0, "automatic stop blocks Begin and waits for terminal")
+        automaticSession.emit(.completed); await flush()
+        check(automaticError == "Thermal stop" && automaticCompletions == 1, "automatic stop delivers embedded reason exactly once")
         let reconstruction = AppDataModel(); reconstruction.fixtureRoot = root
         var reconstructionCompletions = 0
         reconstruction.onEmbeddedCompletion = { _,_ in reconstructionCompletions += 1 }
