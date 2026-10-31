@@ -127,6 +127,21 @@ class RepairTests(unittest.TestCase):
         self.assertEqual((denoise["iterations"], denoise["factor"], denoise["mu"], denoise["maxDisplacementMm"]),
                          (15, .5, -.53, .35))
 
+    def test_rejects_amplifying_taubin_pair(self):
+        # Lambda .1 with the default mu has pass-band 8.1: every frequency grows, so noise is amplified.
+        p = self.mesh("pair.obj", CUBE, FACES)
+        r = self.run_cli("repair", p, "--units", "mm", "--out", self.base/"pair",
+                         "--denoise-iterations", "1", "--denoise-factor", ".1", ok=False)
+        self.assertIn("pass-band", r.stderr)
+        self.assertFalse((self.base/"pair").exists())
+        # A different smoothing pair inside the pass-band bound is accepted and smooths.
+        vertices, faces = icosphere(20, 3, noise=.05, seed=3)
+        self.repair(self.mesh("pair-sphere.obj", vertices, faces), "--denoise-factor", ".33",
+                    "--denoise-mu=-.34", name="pair-ok")
+        repaired = [tuple(map(float, line.split()[1:])) for line in
+                    (self.base/"pair-ok"/"repaired.obj").read_text().splitlines() if line.startswith("v ")]
+        self.assertLess(radial_roughness(repaired), radial_roughness(vertices)*.7)
+
     def test_nonmanifold_join_uses_fallback(self):
         p = self.mesh("join.obj", CUBE+[(0,0,2)], FACES+[(4,5,8)])
         r = self.repair(p, "--voxel-size-mm", ".15")
@@ -169,7 +184,7 @@ class RepairTests(unittest.TestCase):
 
     def test_reject_invalid_parameters(self):
         p = self.mesh("invalid.obj", CUBE,FACES)
-        for args in [("--voxel-size-mm","0"),("--denoise-iterations","51"),("--denoise-mu","-.4"),
+        for args in [("--voxel-size-mm","0"),("--denoise-iterations","51"),("--denoise-mu","-.4"),("--denoise-mu","-.6"),
                      ("--denoise-mu","nan"),("--denoise-factor","0"),
                      ("--weld-mm","nan"),("--target-faces","0")]:
             self.run_cli("repair",p,"--units","mm","--out",self.base/"invalid",*args,ok=False)

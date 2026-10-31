@@ -59,8 +59,10 @@ All distances below are in mm, independent of input units.
 | Decimate | optional `--target-faces N` | Triangulate, then collapse toward a target triangle count; Blender may not achieve the exact target |
 | Orient | always | Vertex-covariance PCA, descending eigenvalues, sign convention and right-handed frame; centre XY bounds and rest lowest vertex at Z=0 |
 
-Denoise cycles are bounded to 0–50, λ to (0, 0.5], μ to [−1, −λ) so cycles
-do not shrink the mesh, and sharp angle to 0–90 degrees. Inverse edge-length
+Denoise cycles are bounded to 0–50, λ to (0, 0.5], μ to [−1, 0), and sharp
+angle to 0–90 degrees. The Taubin pass-band 1/λ + 1/μ must lie in (0, 0.2]:
+at or below 0 the cycles shrink the mesh, and above 0.2 they amplify noise
+(λ .1 with μ −.53 gives 8.1, so every frequency grows). The defaults give 0.113. Inverse edge-length
 weights stop long Object Capture fill edges from pulling their vertices, and
 clamping whole cycles stops a clipped λ step leaving the μ step to inflate
 the vertex. `--denoise-iterations 0` disables denoising. The voxel fallback is bounded to 512 cells along the longest

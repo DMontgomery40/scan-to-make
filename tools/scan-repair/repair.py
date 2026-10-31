@@ -55,7 +55,7 @@ def parser():
             s.add_argument("--force-voxel", action="store_true")
             s.add_argument("--denoise-iterations", type=int, default=15, help="Taubin cycles")
             s.add_argument("--denoise-factor", type=float, default=.5, help="Taubin lambda")
-            s.add_argument("--denoise-mu", type=float, default=-.53, help="Taubin mu; negative, |mu| > lambda")
+            s.add_argument("--denoise-mu", type=float, default=-.53, help="Taubin mu; pass-band 1/lambda+1/mu in (0,.2]")
             s.add_argument("--denoise-max-mm", type=float, default=.35)
             s.add_argument("--sharp-angle-deg", type=float, default=30)
             s.add_argument("--target-faces", type=int)
@@ -86,8 +86,10 @@ def main():
         if a.command == "repair":
             if not 0 <= a.component_fraction < 1 or not 0 < a.denoise_factor <= .5:
                 raise ValueError("component fraction must be [0,1); denoise factor (0,.5]")
-            if not -1 <= a.denoise_mu < -a.denoise_factor:
-                raise ValueError("denoise mu must be [-1,-factor) so Taubin cycles do not shrink")
+            # Taubin pass-band 1/lambda+1/mu: at or below 0 cycles shrink; above .2 they amplify noise.
+            if not -1 <= a.denoise_mu < 0 or not 0 < 1/a.denoise_factor+1/a.denoise_mu <= .2:
+                raise ValueError("denoise mu must be [-1,0) with pass-band 1/factor+1/mu in (0,.2]; "
+                                 "factor .5 with mu -.53 gives .113")
             if not 0 <= a.denoise_iterations <= 50 or not 0 <= a.sharp_angle_deg <= 90:
                 raise ValueError("denoise iterations must be [0,50]; sharp angle [0,90]")
             if a.voxel_size_mm <= 0 or a.deviation_samples < 1 or a.hole_max_edges < 0:
