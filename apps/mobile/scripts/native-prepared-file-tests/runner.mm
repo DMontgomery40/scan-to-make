@@ -47,14 +47,14 @@ static void Require(BOOL ok,NSString *why){if(!ok){fprintf(stderr,"FAIL %s\n",wh
   NSDictionary *body=[NSJSONSerialization JSONObjectWithData:[r[@"body"] dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil];
   Require([r[@"status"] integerValue]==404&&[body[@"error"][@"code"] isEqual:@"not-available"],@"disabled app production fails closed");
   NSDictionary *intent=@{@"context":ctx,@"method":@"POST",@"path":sub(@"intent"),@"etag":etag,@"body":[NSString stringWithFormat:@"{\"jobSha256\":\"%@\",\"confirmed\":true}",sha]};
-  [self.files requestOptions:intent resolve:^(id ri){
-   NSDictionary *ib=[NSJSONSerialization JSONObjectWithData:[ri[@"body"] dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil];
-   Require([ri[@"status"] integerValue]==403&&[ib[@"error"][@"code"] isEqual:@"scope-denied"],@"prints:approve scope enforced");
-   NSDictionary *attempt=@{@"context":ctx,@"method":@"GET",@"path":sub(@"attempt"),@"etag":etag};
-   [self.files requestOptions:attempt resolve:^(id ra){
-    NSDictionary *ab=[NSJSONSerialization JSONObjectWithData:[ra[@"body"] dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil];
-    Require([ra[@"status"] integerValue]==200&&ab[@"intent"]==NSNull.null&&ab[@"linkedAttempt"]==NSNull.null,@"attempt status before approval");done();
-   } reject:^(NSString*c,NSString*m,NSError*e){Require(NO,c);}];
+  // The bridge enforces pairing scopes locally, before any network request.
+  __block BOOL scopeDenied=NO;
+  [self.files requestOptions:intent resolve:^(id ri){Require(NO,@"ungranted prints:approve scope was accepted");} reject:^(NSString*c,NSString*m,NSError*e){scopeDenied=[c isEqual:@"scope-denied"];}];
+  Require(scopeDenied,@"prints:approve scope enforced");
+  NSDictionary *attempt=@{@"context":ctx,@"method":@"GET",@"path":sub(@"attempt"),@"etag":etag};
+  [self.files requestOptions:attempt resolve:^(id ra){
+   NSDictionary *ab=[NSJSONSerialization JSONObjectWithData:[ra[@"body"] dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil][@"attempt"];
+   Require([ra[@"status"] integerValue]==200&&ab[@"intent"]==NSNull.null&&ab[@"linkedAttempt"]==NSNull.null,@"attempt status before approval");done();
   } reject:^(NSString*c,NSString*m,NSError*e){Require(NO,c);}];
  } reject:^(NSString*c,NSString*m,NSError*e){Require(NO,c);}];
 }

@@ -44,8 +44,9 @@ function compatible(receiptInput: unknown, artifact: ArtifactRef, selection: z.i
     throw new Error('File inspection does not match the retained bytes and selection');
   }
   // Declared hotend metallurgy must match the sliced file now, not at live preflight.
-  if (expectedNozzleType !== undefined && actual.nozzleTypes?.[0] !== expectedNozzleType) {
-    throw new Error('Inspected nozzle type does not match the configured producer nozzle type');
+  if (expectedNozzleType !== undefined &&
+      (!actual.nozzleTypes?.length || actual.nozzleTypes.some(type => type !== expectedNozzleType))) {
+    throw new Error('Inspected nozzle type does not match the selected nozzle type');
   }
   if (receipt.artifact.file_format === '3mf' ? actual.plateInternalPath !== `Metadata/plate_${selection.plateIndex + 1}.gcode` :
       selection.plateIndex !== 0 || actual.plateInternalPath !== undefined) throw new Error('Inspected plate mismatch');
@@ -68,14 +69,15 @@ export function createPreparedFileInspector(configuration: PreparedInspectionCon
   const process = structuredClone(configuration.process);
   const options = {...configuration.options};
   return async (file: string, artifact: ArtifactRef, selection: z.infer<typeof PrintSelectionSchema>, signal?: AbortSignal) => {
+    const expectedNozzleType = configuration.expectedNozzleType ?? selection.nozzleType;
     const result = await inspectPreparedFile(process, {file_path: file, bambu_model: selection.model,
       plate_index: selection.plateIndex, nozzle_diameters: selection.nozzleDiameters, bed_type: selection.bedType}, receipt => {
-      const checked = compatible(receipt, artifact, selection, configuration.expectedNozzleType);
+      const checked = compatible(receipt, artifact, selection, expectedNozzleType);
       return {three_mf_path: file, bambu_model: selection.model, plate_index: selection.plateIndex,
         nozzle_diameters: selection.nozzleDiameters, bed_type: selection.bedType,
         use_ams: checked.useAms, ams_mapping: checked.mapping};
     }, {...options, signal: signal && options.signal ? AbortSignal.any([signal, options.signal]) : signal ?? options.signal});
-    return PreparedInspectionSchema.parse({receipt: compatible(result.receipt, artifact, selection, configuration.expectedNozzleType).receipt,
+    return PreparedInspectionSchema.parse({receipt: compatible(result.receipt, artifact, selection, expectedNozzleType).receipt,
       catalogSha256: createHash('sha256').update(JSON.stringify(result.catalog)).digest('hex'), server: result.catalog.server});
   };
 }

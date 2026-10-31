@@ -400,6 +400,63 @@ test('gated production records validate with the sealed printability verdict', a
     production: { printability: f.job.production.printability },
   });
 });
+test('MCP produced metadata validates as a sliced 3MF with the selected nozzle type', async () => {
+  const base = await fixture();
+  const f = {
+    ...base,
+    job: JSON.parse(JSON.stringify(base.response.job)),
+  };
+  f.job.printableArtifact.mediaType = 'model/3mf';
+  f.job.selection = {
+    printerId: f.job.selection.printerId,
+    model: f.job.selection.model,
+    plateIndex: f.job.selection.plateIndex,
+    nozzleDiameters: f.job.selection.nozzleDiameters,
+    nozzleType: 'hardened_steel',
+    bedType: f.job.selection.bedType,
+    materials: f.job.selection.materials,
+    slicerSettingsSha256: f.job.selection.slicerSettingsSha256,
+  };
+  f.job.inspection.receipt.artifact.file_format = '3mf';
+  f.job.inspection.receipt.inspection.plateInternalPath =
+    'Metadata/plate_1.gcode';
+  f.job.inspection.receipt.inspection.nozzleTypes = ['hardened_steel'];
+  f.job.production = {
+    producerKind: 'bambu-printer-mcp',
+    requestSha256: '1'.repeat(64),
+    producerIdentity: '2'.repeat(64),
+    sourceArtifact: f.job.designArtifact,
+    settingsArtifact: {
+      sha256: f.job.selection.slicerSettingsSha256,
+      mediaType: 'application/json',
+      byteLength: 42,
+    },
+    manifestArtifact: {
+      sha256: '3'.repeat(64),
+      mediaType: 'application/json',
+      byteLength: 50,
+    },
+    mcpServer: { name: 'bambu-printer-mcp', version: '1.1.41' },
+    catalogSha256: '4'.repeat(64),
+    tool: 'slice_stl',
+    slicerType: 'bambustudio',
+  };
+  const body = Object.fromEntries(
+    Object.entries(f.job).filter(([key]) => key !== 'sha256'),
+  );
+  f.job.sha256 = await hash(JSON.stringify(body));
+  expect(
+    await validatePreparedResponse(
+      { jobId: f.id, job: f.job },
+      f.project,
+      f.id,
+      hash,
+    ),
+  ).toMatchObject({
+    production: { producerKind: 'bambu-printer-mcp', tool: 'slice_stl' },
+    printableArtifact: { mediaType: 'model/3mf' },
+  });
+});
 test('self-consistent produced metadata cannot substitute source/settings or exceed bounds', async () => {
   const f = await producedFixture();
   const changes = [

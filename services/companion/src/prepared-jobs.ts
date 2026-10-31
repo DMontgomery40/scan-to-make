@@ -19,7 +19,10 @@ const projectId = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/);
 const etag = z.string().regex(/^"[a-f0-9]{64}"$/);
 
 const {slicerSettingsSha256: _settingsDigest, ...producedSelectionFields} = PrintSelectionSchema.shape;
-const producedSelectionSchema = z.strictObject(producedSelectionFields).refine(selection =>
+const producedSelectionSchema = z.strictObject({
+  ...producedSelectionFields,
+  nozzleType: z.enum(['stainless_steel', 'hardened_steel', 'tungsten_carbide', 'brass']),
+}).refine(selection =>
   new Set(selection.materials.map(material => material.projectSlot)).size === selection.materials.length,
   {message: 'Project filament positions must be unique'});
 
@@ -180,11 +183,8 @@ export class PreparedJobStore {
       this.appProduction = {selection: producedSelectionSchema.parse(appProduction.selection),
         displayName: z.string().trim().min(1).max(256).parse(appProduction.displayName)};
     }
-    if(production){digest.parse(production.identity);this.production={identity:production.identity,nozzleType:production.nozzleType,produce:production.produce.bind(production)};}
-    // A declared producer nozzle type becomes an inspection expectation unless the operator pinned one explicitly.
-    const inspection = inspectionOptions && inspectionOptions.expectedNozzleType === undefined && production?.nozzleType !== undefined
-      ? {...inspectionOptions, expectedNozzleType: production.nozzleType} : inspectionOptions;
-    this.inspect = inspection ? createPreparedFileInspector(inspection) : undefined;
+    if(production){digest.parse(production.identity);this.production={identity:production.identity,produce:production.produce.bind(production)};}
+    this.inspect = inspectionOptions ? createPreparedFileInspector(inspectionOptions) : undefined;
     this.printability = printability ? createPreparedPrintabilityGate(printability) : undefined;
     this.bound = limits(byteLimits);
     this.clock = clock ?? Date.now;
@@ -231,14 +231,15 @@ export class PreparedJobStore {
       const path=join(temp,'source.stl');await writeSynced(path,source);await chmod(path,0o400);await readVerifiedStl(path,sourceArtifact);active();
       // Printability gate: after source verification, before any slicing.
       const gated=this.printability?await this.printability.check(path,sourceArtifact,request.selection,allowSupports,signal):undefined;active();
-      const result=await producer.produce(Buffer.from(source),gated?.enableSupport?{enableSupport:true}:undefined,signal);active();
+      const result=await producer.produce(Buffer.from(source),{selection:request.selection,allowSupports},signal);active();
       for(const [bytes,max] of [[result.printable,this.bound.maxPrintableBytes],[result.settings,PRODUCTION_LIMITS.settingsBytes],[result.manifest,PRODUCTION_LIMITS.manifestBytes]] as const){
         if(!Buffer.isBuffer(bytes)||!bytes.length||bytes.length>max)throw new Error('Produced output byte limit exceeded');
       }
       const produced={printable:Buffer.from(result.printable),settings:Buffer.from(result.settings),manifest:Buffer.from(result.manifest)};
-      const production=PreparedProductionSchema.parse({...verifyProductionBytes(source,produced,this.bound.maxPrintableBytes),requestSha256,producerIdentity:producer.identity,
+      const {printableMediaType,...verifiedProduction}=verifyProductionBytes(source,produced,this.bound.maxPrintableBytes);
+      const production=PreparedProductionSchema.parse({...verifiedProduction,requestSha256,producerIdentity:producer.identity,
         ...(gated?{printability:{profileId:gated.report.profile.id,verdict:gated.report.verdict,allowSupports,reportArtifact:productionRef(gated.reportBytes,'application/json')}}:{})});
-      return await this.prepareInternal({...request,printable:produced.printable,printableArtifact:productionRef(produced.printable,'text/x.gcode'),
+      return await this.prepareInternal({...request,printable:produced.printable,printableArtifact:productionRef(produced.printable,printableMediaType),
         selection:{...request.selection,slicerSettingsSha256:production.settingsArtifact.sha256}},signal,authorizeCommit,{metadata:production,source,...produced,...(gated?{printabilityReport:gated.reportBytes}:{})});
     }finally{await rm(temp,{recursive:true,force:true});}
   }
@@ -273,10 +274,10 @@ export class PreparedJobStore {
     try { await rename(temporary, finalPath); } finally { await unlink(temporary).catch(() => undefined); }
     await syncDirectory(join(this.directory, '.production-operations'));
   }
-  private profileView(selection: {model: string; bedType: string; nozzleDiameters: readonly number[]}): PreparedProductionView['profile'] {
+  private profileView(selection: {model: string; bedType: string; nozzleDiameters: readonly number[]; nozzleType?: string}): PreparedProductionView['profile'] {
     return {displayName: this.appProduction?.displayName ?? selection.model,
       nozzleDiameterMm: selection.nozzleDiameters[0]!, bedType: selection.bedType,
-      ...(this.production?.nozzleType ? {nozzleType: this.production.nozzleType} : {})};
+      ...(selection.nozzleType ? {nozzleType: selection.nozzleType} : {})};
   }
   private async productionView(request: {projectId: string; projectRevision: number}, operation: ProductionOperation | undefined, job: PreparedJob | undefined): Promise<PreparedProductionView> {
     const selection = job?.selection ?? this.appProduction?.selection;
@@ -680,9 +681,15 @@ export class PreparedJobStore {
       const settings=await readBounded(join(folder,'settings.json'),PRODUCTION_LIMITS.settingsBytes);
       const manifest=await readBounded(join(folder,'production.json'),PRODUCTION_LIMITS.manifestBytes);
       const checked=verifyProductionBytes(source,{printable:bytes,settings,manifest},this.bound.maxPrintableBytes);
+      const evidenceMatches=checked.printableMediaType===job.printableArtifact.mediaType&&(
+        'producerKind' in checked
+          ? 'producerKind' in job.production&&checked.producerKind===job.production.producerKind&&
+            checked.mcpServer.name===job.production.mcpServer.name&&checked.mcpServer.version===job.production.mcpServer.version&&
+            checked.catalogSha256===job.production.catalogSha256&&checked.tool===job.production.tool&&checked.slicerType===job.production.slicerType
+          : !('producerKind' in job.production)&&checked.slicer.version===job.production.slicer.version&&checked.slicer.binarySha256===job.production.slicer.binarySha256);
       if(!sameRef(checked.sourceArtifact,job.designArtifact)||job.selection.slicerSettingsSha256!==checked.settingsArtifact.sha256||
         !sameRef(checked.sourceArtifact,job.production.sourceArtifact)||!sameRef(checked.settingsArtifact,job.production.settingsArtifact)||
-        !sameRef(checked.manifestArtifact,job.production.manifestArtifact)||checked.slicer.version!==job.production.slicer.version||checked.slicer.binarySha256!==job.production.slicer.binarySha256)
+        !sameRef(checked.manifestArtifact,job.production.manifestArtifact)||!evidenceMatches)
         throw new Error('Retained production evidence identity mismatch');
       if(job.production.printability){
         const report=await readBounded(join(folder,'printability.json'),1024*1024);

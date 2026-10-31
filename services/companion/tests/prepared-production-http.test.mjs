@@ -12,14 +12,13 @@ import {createSavedProjects} from '@scan-to-make/contracts/saved-project';
 import {PreparedJobStore} from '../dist/prepared-jobs.js';
 import {RemoteAuthStore} from '../dist/remote-auth.js';
 import {startGenerationServer} from '../dist/generation.js';
+import {fakeProductionResult} from './fixtures/prepared-production-result.mjs';
 
 const forwarded=JSON.parse(await readFile(new URL('./fixtures/tailscale-serve-v1.94.2.json',import.meta.url))).expected;
 const fit=JSON.parse(await readFile(new URL('../../../packages/contracts/fixtures/tapered-holder.json',import.meta.url)));
 const sha=b=>createHash('sha256').update(b).digest('hex');
 const ref=(b,mediaType)=>({sha256:sha(b),byteLength:b.length,mediaType});
-const selection={printerId:'fixture',model:'p1s',plateIndex:0,nozzleDiameters:[0.4],bedType:'textured_plate',materials:[{projectSlot:0,material:'PLA',physicalTray:254}]};
-const output=Buffer.from('; isolated production fixture\nG28\n');
-const settings=Buffer.from('{"printer_model":"P1S","layer_height":"0.2"}');
+const selection={printerId:'fixture',model:'p1s',plateIndex:0,nozzleDiameters:[0.4],nozzleType:'hardened_steel',bedType:'textured_plate',materials:[{projectSlot:0,material:'PLA',physicalTray:254}]};
 
 function packStl(tris){
  const buffer=Buffer.alloc(84+tris.length*50);buffer.writeUInt32LE(tris.length,80);let offset=84;
@@ -47,7 +46,7 @@ function rectilinear(xs,ys,zs,occ){
 const cube=rectilinear([0,20],[0,20],[0,20],()=>true);
 const twoCubes=rectilinear([0,10,20,30],[0,10],[0,10],i=>i!==1);
 
-function result(input){return {printable:Buffer.from(output),settings:Buffer.from(settings),manifest:Buffer.from(JSON.stringify({schema:'scan-to-make.slicer-producer/0.1.0',operatorOnly:true,exitCode:0,slicer:{version:'02.08.02.61',binary:{sha256:'b'.repeat(64)}},input:{sha256:sha(input),bytes:input.length,expectedDigestChecked:true},invocation:{sandbox:{kind:'macos-sandbox-exec',path:'/usr/bin/sandbox-exec'}},outputs:{gcode:{file:'plate_1.gcode',sha256:sha(output),bytes:output.length},exportedSettings:{file:'exported-settings.json',sha256:sha(settings),bytes:settings.length},gcodeSummary:{sourceComment:'Bambu',layerCount:3,pathCount:9,durationSeconds:12,estimatedFilamentMm:34}}}))};}
+function result(input,request){return fakeProductionResult(input,request);}
 
 const toolDirectory=fileURLToPath(new URL('../../../tools/printability/',import.meta.url));
 async function fixture(t,source=cube){
@@ -61,15 +60,15 @@ async function fixture(t,source=cube){
  await projects.create({id:fit.id,brief:{object:'Cup',context:'Desk',addition:'Holder'},fit});
  const binding={sourceFit:fit,artifact:ref(source,'model/stl')};
  await projects.change(fit.id,0,{kind:'attach-preview',...binding});await projects.change(fit.id,1,{kind:'accept-preview',...binding});
- let calls=0;const overrides=[];
- const production={identity:'c'.repeat(64),nozzleType:'stainless_steel',async produce(input,options){calls++;overrides.push(options);return result(input);}};
- const inspection={process:{command:process.execPath,args:[fileURLToPath(new URL('./fixtures/inspection-server.mjs',import.meta.url)),'nozzle-type',join(root,'calls.jsonl')]},options:{timeoutMs:5000}};
+ let calls=0;const requests=[];
+ const production={identity:'c'.repeat(64),async produce(input,request){calls++;requests.push(request);return result(input,request);}};
+ const inspection={process:{command:process.execPath,args:[fileURLToPath(new URL('./fixtures/inspection-server.mjs',import.meta.url)),'nozzle-hardened',join(root,'calls.jsonl')]},options:{timeoutMs:5000}};
  const read=async name=>readFile(join(toolDirectory,name));
  const printability={python:execFileSync('which',['python3'],{encoding:'utf8'}).trim(),script:join(toolDirectory,'printability.py'),
   expectedScriptSha256:sha(await read('printability.py')),expectedAnalyzerSha256:sha(await read('analyzer.py')),
   expectedProfilesSha256:sha(await read('profiles.json')),profileId:'p1s-0.4-hardened'};
  const jobs=new PreparedJobStore(storage,join(root,'jobs'),{production,inspection,printability,appProduction:{selection,displayName:'P1S · PLA basic'}});
- const f={root,auth,phone,reader,storage,jobs,source,calls:()=>calls,overrides,headers:{authorization:`Bearer ${phone.token}`,'x-scan-device':phone.deviceId}};
+ const f={root,auth,phone,reader,storage,jobs,source,calls:()=>calls,requests,headers:{authorization:`Bearer ${phone.token}`,'x-scan-device':phone.deviceId}};
  f.server=await startGenerationServer({port:0,remoteAuth:auth,capture:{storage,preparedJobs:jobs}});t.after(()=>f.server.close());
  const snapshot=await wire(f,`/v1/saved-projects/${fit.id}`);assert.equal(snapshot.status,200);f.etag=snapshot.headers.etag;
  return f;
@@ -104,8 +103,10 @@ test('app production runs gated slicing asynchronously, then approval and attemp
  assert.equal(started.status,202,started.bytes.toString());assert.equal(JSON.parse(started.bytes).production.status,'running');
  const view=await poll(f,id);
  assert.equal(view.status,'succeeded',JSON.stringify(view));assert.equal(view.job.jobId,id);assert.match(view.job.jobSha256,/^[a-f0-9]{64}$/);
- assert.equal(view.printability.verdict,'printable');assert.equal(view.gcodeSummary.layerCount,3);
- assert.deepEqual(view.profile,{displayName:'P1S · PLA basic',nozzleDiameterMm:0.4,nozzleType:'stainless_steel',bedType:'textured_plate'});
+ assert.equal(view.printability.verdict,'printable');assert.equal(view.gcodeSummary,undefined);
+ assert.equal(view.job.printableArtifact.mediaType,'model/3mf');
+ assert.deepEqual(view.profile,{displayName:'P1S · PLA basic',nozzleDiameterMm:0.4,nozzleType:'hardened_steel',bedType:'textured_plate'});
+ assert.equal(f.requests[0].selection.nozzleType,'hardened_steel');
  const replay=await wire(f,route(id),{method:'POST',headers:{'if-match':f.etag,'content-type':'model/stl'},body:f.source});
  assert.equal(replay.status,200);assert.equal(f.calls(),1);
  const attempt=JSON.parse((await wire(f,route(id,'attempt'),{headers:{'if-match':f.etag}})).bytes).attempt;

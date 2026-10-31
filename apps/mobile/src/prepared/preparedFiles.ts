@@ -61,6 +61,9 @@ const PrintSelectionSchema = z
       .array(z.literal([0.2, 0.4, 0.6, 0.8]))
       .min(1)
       .max(2),
+    nozzleType: z
+      .enum(['stainless_steel', 'hardened_steel', 'tungsten_carbide', 'brass'])
+      .optional(),
     bedType: z.enum([
       'textured_plate',
       'cool_plate',
@@ -90,7 +93,13 @@ const productionRef = (mediaType: string, maximum: number) =>
     a =>
       a.mediaType === mediaType && a.byteLength > 0 && a.byteLength <= maximum,
   );
-const ProductionSchema = z.strictObject({
+const printabilityRecord = z.strictObject({
+  profileId: z.string().min(1).max(128),
+  verdict: z.enum(['printable', 'printable-with-supports']),
+  allowSupports: z.boolean(),
+  reportArtifact: productionRef('application/json', 1024 * 1024),
+});
+const LegacyProductionSchema = z.strictObject({
   requestSha256: digest,
   producerIdentity: digest,
   sourceArtifact: productionRef('model/stl', 32 * 1024 * 1024),
@@ -100,16 +109,31 @@ const ProductionSchema = z.strictObject({
     version: z.string().min(1).max(128),
     binarySha256: digest,
   }),
-  // Present only on jobs produced through a configured printability gate.
-  printability: z
-    .strictObject({
-      profileId: z.string().min(1).max(128),
-      verdict: z.enum(['printable', 'printable-with-supports']),
-      allowSupports: z.boolean(),
-      reportArtifact: productionRef('application/json', 1024 * 1024),
-    })
-    .optional(),
+  printability: printabilityRecord.optional(),
 });
+const McpProductionSchema = z.strictObject({
+  producerKind: z.literal('bambu-printer-mcp'),
+  requestSha256: digest,
+  producerIdentity: digest,
+  sourceArtifact: productionRef('model/stl', 32 * 1024 * 1024),
+  settingsArtifact: productionRef('application/json', 8 * 1024 * 1024),
+  manifestArtifact: productionRef('application/json', 1024 * 1024),
+  mcpServer: z.strictObject({
+    name: z.string().min(1).max(512),
+    version: z.string().min(1).max(512),
+  }),
+  catalogSha256: digest,
+  tool: z.literal('slice_stl'),
+  slicerType: z.enum([
+    'bambustudio',
+    'orcaslicer',
+    'orcaslicer-bambulab',
+    'fulu-orca',
+    'orca-studio',
+  ]),
+  printability: printabilityRecord.optional(),
+});
+const ProductionSchema = z.union([McpProductionSchema, LegacyProductionSchema]);
 // Field order mirrors the sealed companion record used by its canonical digest.
 const JobSchema = z.strictObject({
   formatVersion: z.literal('0.1.0'),
@@ -188,7 +212,8 @@ export async function validatePreparedResponse(
     (!same(job.production.sourceArtifact, job.designArtifact) ||
       job.production.settingsArtifact.sha256 !==
         job.selection.slicerSettingsSha256 ||
-      job.printableArtifact.mediaType !== 'text/x.gcode')
+      job.printableArtifact.mediaType !==
+        ('producerKind' in job.production ? 'model/3mf' : 'text/x.gcode'))
   )
     throw Error(
       'Production evidence does not match the accepted design and retained settings.',
@@ -220,7 +245,10 @@ export async function validatePreparedResponse(
     a.bedType !== beds[s.bedType] ||
     (s.nozzleDiameters.length === 1
       ? a.nozzleDiameters.some(n => n !== s.nozzleDiameters[0])
-      : !same(a.nozzleDiameters, s.nozzleDiameters))
+      : !same(a.nozzleDiameters, s.nozzleDiameters)) ||
+    (s.nozzleType !== undefined &&
+      (!a.nozzleTypes?.length ||
+        a.nozzleTypes.some(type => type !== s.nozzleType)))
   )
     throw Error('Inspection does not match the file selection.');
   if (

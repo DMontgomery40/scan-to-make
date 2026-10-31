@@ -8,7 +8,7 @@ import {readBoundedCaptureFile} from './capture-import.js';
 import type {ArtifactRef} from '@scan-to-make/contracts';
 
 /** The selection fields the gate cross-checks against the report profile. */
-export interface PrintabilitySelection {model:string; bedType:string; nozzleDiameters:readonly number[]}
+export interface PrintabilitySelection {model:string; bedType:string; nozzleDiameters:readonly number[]; nozzleType?:string}
 
 const digest=z.string().regex(/^[a-f0-9]{64}$/);
 const text=(max:number)=>z.string().min(1).max(max);
@@ -111,6 +111,7 @@ export function createPreparedPrintabilityGate(configuration:PreparedPrintabilit
    try{report=PrintabilityReportSchema.parse(JSON.parse(reportBytes.toString('utf8')));}catch{throw new PreparedPrintabilityFailure('printability-unavailable');}
    if(report.input.sha256!==sourceArtifact.sha256||report.input.byteLength!==sourceArtifact.byteLength||
       report.profile.bambuModel!==selection.model||report.profile.bedType!==selection.bedType||
+      (selection.nozzleType!==undefined&&report.profile.nozzleType!==selection.nozzleType)||
       selection.nozzleDiameters.length!==1||report.profile.nozzleDiameterMm!==selection.nozzleDiameters[0]){
     throw new PreparedPrintabilityFailure('printability-unavailable');
    }
