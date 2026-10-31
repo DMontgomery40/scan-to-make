@@ -257,10 +257,12 @@ test('time limit and normal exit both stop every descendant, including detached 
 
 test('attempts run in separate sealed folders and leave no workspace behind',async t=>{
  const f=await fixture(t),claudePath=await fakeCli(f,'claude','new-folder'),out=join(f.root,'out');
- const before=new Set(await readdir(tmpdir()));
+ // A temp root of its own: other test files run in parallel and make stm-ai-* folders in the shared one.
+ const own=join(f.root,'tmp');await mkdir(own);const saved=process.env.TMPDIR;process.env.TMPDIR=own;
+ t.after(()=>{if(saved===undefined)delete process.env.TMPDIR;else process.env.TMPDIR=saved;});
  const manifest=await runAiTweak({mesh:f.mesh,stills:[]},out,base(f,{access:{kind:'claude-code'},claudePath,attempts:3}));
  assert.deepEqual(manifest.attempts.map(a=>[a.index,a.outcome]),[[1,'changed'],[2,'changed'],[3,'changed']]);
- const leftovers=(await readdir(tmpdir())).filter(name=>name.startsWith('stm-ai')&&!before.has(name));assert.deepEqual(leftovers,[]);
+ assert.deepEqual(await readdir(own),[]);
  await assert.rejects(runAiTweak({mesh:f.mesh,stills:[]},out,base(f,{access:{kind:'claude-code'},claudePath})),/EEXIST/);
 });
 

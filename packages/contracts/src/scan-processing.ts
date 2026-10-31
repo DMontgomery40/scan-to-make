@@ -5,6 +5,13 @@ export const SCAN_PROCESSING_SCHEMA_ID='scan-to-make.scan-processing/0.1';
 export const SCAN_VIEW_NAMES=['pos_x.png','pos_y.png','pos_z.png','neg_x.png','neg_y.png','neg_z.png','iso_pp.png','iso_np.png','iso_nn.png','iso_pn.png'] as const;
 export const SCAN_ADVICE_NAMES=['advice.json','advice-01.png','advice-02.png','advice-03.png','advice-04.png'] as const;
 export const SCAN_CLEANUP_STAGES=['import','repair','advise','correct','measure','render'] as const;
+/** Phone wording for each pipeline stage (journey §3.5). The correct label is
+ * hidden when AI is off, even though the scripted stage still runs.
+ */
+export const SCAN_CLEANUP_STAGE_LABELS={
+ import:'Getting your scan',repair:'Filling holes',advise:'Looking for weak spots',
+ correct:'Fixing details from your close-ups',measure:'Measuring',render:'Almost done',
+} as const satisfies Record<(typeof SCAN_CLEANUP_STAGES)[number],string>;
 export const ScanArtifactNameSchema=z.enum(['repaired.stl','repaired.obj','report.json','corrected.stl','corrected.obj','correction.json','correction-calls.jsonl',...SCAN_ADVICE_NAMES,...SCAN_VIEW_NAMES]);
 export const DimensionsMmSchema=z.tuple([z.number().finite().positive(),z.number().finite().positive(),z.number().finite().positive()]);
 export const ScanReferenceSchema=z.strictObject({dimensionsMm:DimensionsMmSchema,source:z.string().min(1).max(500).optional(),productName:z.string().min(1).max(200).optional()});
@@ -16,14 +23,23 @@ const repairParams=z.union([
  z.strictObject({weldMm:z.literal(.01),componentFraction:z.literal(.01),componentMetric:z.literal('area'),holeMaxEdges:z.literal(0),voxelSizeMm:z.literal(.3),forceVoxel:z.literal(false),denoiseIterations:z.literal(1),denoiseFactor:z.literal(.1),denoiseMaxMm:z.literal(.05),sharpAngleDeg:z.literal(30),deviationSamples:z.literal(10000)}),
 ]);
 const artifact=z.strictObject({sha256:z.string().regex(/^[a-f0-9]{64}$/),byteLength:z.number().int().positive().max(64*1024*1024),mediaType:z.enum(['model/stl','model/obj','application/json','application/x-ndjson','image/png'])});
+// Optional on every stage and on the job so records retained before BE-2 still load.
+const stageTimes={startedAt:z.iso.datetime().optional(),finishedAt:z.iso.datetime().optional()};
 export const ScanProcessingJobSchema=z.strictObject({
  schema:z.literal(SCAN_PROCESSING_SCHEMA_ID),jobId:z.uuid(),projectId:z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/),captureId:z.uuid(),projectRevision:z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),status,previewOnly:z.literal(true),
+ // The retained capture's original-byte identity; the server queue dedupes on it.
+ captureSha256:z.string().regex(/^[a-f0-9]{64}$/).optional(),
+ // Epoch milliseconds at enqueue: job ids are random, so this is how clients
+ // order jobs (newest finished wins). Same instant as enqueuedAt.
+ createdAtMs:z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional(),
+ trigger:z.enum(['request','capture-import','detail-still']).optional(),
+ enqueuedAt:z.iso.datetime().optional(),startedAt:z.iso.datetime().optional(),finishedAt:z.iso.datetime().optional(),
  stages:z.tuple([
-  z.strictObject({kind:z.literal('repair'),status,params:repairParams}),
-  z.strictObject({kind:z.literal('measure'),status,params:z.strictObject({units:z.literal('mm')})}),
-  z.strictObject({kind:z.literal('render'),status,params:z.strictObject({units:z.literal('mm'),resolution:z.literal(512)})})
+  z.strictObject({kind:z.literal('repair'),status,params:repairParams,...stageTimes}),
+  z.strictObject({kind:z.literal('measure'),status,params:z.strictObject({units:z.literal('mm')}),...stageTimes}),
+  z.strictObject({kind:z.literal('render'),status,params:z.strictObject({units:z.literal('mm'),resolution:z.literal(512)}),...stageTimes})
  ]),reference:ScanReferenceSchema.optional(),measuredPrincipalExtentsMm:DimensionsMmSchema.optional(),measuredBoxExtentsMm:DimensionsMmSchema.optional(),
- pipelineStages:z.array(z.strictObject({kind:z.enum(SCAN_CLEANUP_STAGES),status})).length(6).refine(stages=>stages.every((s,i)=>s.kind===SCAN_CLEANUP_STAGES[i]),'Invalid cleanup stage order').optional(),
+ pipelineStages:z.array(z.strictObject({kind:z.enum(SCAN_CLEANUP_STAGES),status,...stageTimes})).length(6).refine(stages=>stages.every((s,i)=>s.kind===SCAN_CLEANUP_STAGES[i]),'Invalid cleanup stage order').optional(),
  wallClockLimitMs:z.number().int().positive().max(1800000).optional(),
  failureStage:z.enum([...SCAN_CLEANUP_STAGES,'publish']).optional(),
  correctionAdapter:z.enum(['scripted','anthropic','openai']).optional(),detailStills:z.array(DetailStillSchema).max(4).optional(),

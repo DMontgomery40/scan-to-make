@@ -1,4 +1,5 @@
 import {
+  chooseJob,
   closeness,
   compare,
   describeDifference,
@@ -75,6 +76,34 @@ test('real sizes accept commas and any order, and reject other text', () => {
   expect(result.reference).toEqual([60.6, 45.2, 21.7]);
   expect(result.measured).toEqual([62.9, 48.7, 21.7]);
   expect(result.errors.map(e => Number(e.toFixed(1)))).toEqual([2.3, 3.5, 0]);
+});
+
+test('chooseJob shows the newest job by createdAtMs, so follow-ups win', () => {
+  const ORIGINAL = '22222222-2222-4222-8222-222222222222';
+  const FOLLOW_UP = '11111111-1111-4111-8111-111111111111';
+  const at = (
+    status: Parameters<typeof syntheticJob>[0],
+    jobId: string,
+    createdAtMs?: number,
+  ) => ({ ...syntheticJob(status, { jobId }), createdAtMs });
+  const original = at('succeeded', ORIGINAL, 1000);
+  const followUp = at('succeeded', FOLLOW_UP, 2000);
+  // The list is in ascending job-id order; listing order is not start order.
+  const listed = [followUp, original].sort((a, b) =>
+    a.jobId.localeCompare(b.jobId),
+  );
+  // A newer finished follow-up beats the remembered original on reopen.
+  expect(chooseJob(listed, ORIGINAL)).toBe(followUp);
+  // The newest active job wins while work is still running.
+  const queuedFollowUp = at('queued', FOLLOW_UP, 2000);
+  expect(chooseJob([original, queuedFollowUp], ORIGINAL)).toBe(
+    queuedFollowUp,
+  );
+  // Without timestamps, the remembered job keeps its old preference.
+  const legacyA = at('succeeded', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
+  const legacyB = at('succeeded', 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb');
+  expect(chooseJob([legacyB, legacyA], legacyA.jobId)).toBe(legacyA);
+  expect(chooseJob([], null)).toBeNull();
 });
 
 test('snapshot revisions are read safely', () => {

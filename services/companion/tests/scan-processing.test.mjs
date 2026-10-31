@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {writeFile,readFile,mkdir} from 'node:fs/promises';
+import {writeFile,readFile,mkdir,rm} from 'node:fs/promises';
 import {spawn} from 'node:child_process';
 import {join} from 'node:path';
 import {ScanProcessingStore} from '../dist/scan-processing.js';
@@ -15,7 +15,8 @@ test('queued → all three stages → retained outputs and sorted reference erro
  assert.deepEqual((await fresh.artifact(f.input,job.jobId,'pos_x.png')).bytes,png);
  await writeFile(join(f.root,'captures',f.input.captureId,'scan-processing',job.jobId,'pos_x.png'),'corrupt');
  await assert.rejects(fresh.artifact(f.input,job.jobId,'pos_x.png'));
- await assert.rejects(fresh.load({...f.input,projectRevision:1},job.jobId));
+ // BE-2: the job pins the revision resolved at enqueue; reads do not re-check it.
+ assert.equal((await fresh.load({...f.input,projectRevision:1},job.jobId)).job.status,'succeeded');
  await assert.rejects(fresh.load({...f.input,captureId:'bad'},job.jobId));
 });
 test('worker failure persists, incomplete artifacts never download',async t=>{
@@ -26,7 +27,9 @@ test('worker failure persists, incomplete artifacts never download',async t=>{
 test('single job, cancellation, deadline and shutdown await worker cleanup',async t=>{
  for(const mode of ['cancel','timeout','close']){
   let cleaned=false,entered;const started=new Promise(r=>entered=r);const f=await fixture(t,{async run(stage,input,output,sidecar,signal){entered();await new Promise((resolve,reject)=>{signal.addEventListener('abort',()=>{cleaned=true;reject(Error('abort'));},{once:true});if(signal.aborted){cleaned=true;reject(Error('abort'));}});}},mode==='timeout'?1000:600000);
-  const {job}=await f.store.start(f.input);await started;await assert.rejects(f.store.start(f.input),e=>e.code==='busy');
+  const {job}=await f.store.start(f.input);await started;
+  // BE-2: an identical retry dedupes onto the running job instead of failing busy.
+  assert.equal((await f.store.start(f.input)).job.jobId,job.jobId);
   if(mode==='cancel')await f.store.cancel(f.input,job.jobId);else if(mode==='close')await f.store.close();else await f.store.wait();
   assert.equal((await f.store.load(f.input,job.jobId)).job.status,'failed');if(mode!=='close')assert(cleaned);
  }
@@ -44,26 +47,32 @@ test('interrupted nonterminal record reopens failed and is never rerun',async t=
  const saved=(await fresh.load(f.input,job.jobId)).job;assert.equal(saved.status,'failed');assert.equal(saved.failure,'interrupted');
 });
 test('a status poll holding the project lock during publication does not fail the job',async t=>{
- let f;
+ let f,held;
  const runner={async run(stage,input,output,sidecar,signal){
   const result=await fakeRunner.run(stage,input,output,sidecar,signal);
   // Hold the project lock across the moment publication starts, as a concurrent GET would.
-  if(stage==='render')void f.storage.withCurrentProject('test',0,()=>new Promise(r=>setTimeout(r,300)));
+  if(stage==='render')held=f.storage.withCurrentProject('test',0,()=>new Promise(r=>setTimeout(r,300)));
   return result;
  }};
  f=await fixture(t,runner);const {job}=await f.store.start(f.input);await f.store.wait();
  assert.equal((await f.store.load(f.input,job.jobId)).job.status,'succeeded');
+ await held;
 });
-test('a lock left by a dead owner is recovered; a live owner keeps processing busy',async t=>{
+test('a lock left by a dead owner is recovered; a live foreign owner leaves the job queued',async t=>{
  const f=await fixture(t);const lock=join(f.root,'captures','.scan-processing-lock');
  const child=spawn(process.execPath,['-e','']);const deadPid=await new Promise(r=>child.once('exit',()=>r(child.pid)));
  await mkdir(lock);await writeFile(join(lock,'owner.json'),JSON.stringify({pid:deadPid,jobId:'00000000-0000-4000-8000-000000000000'}));
  const {job}=await f.store.start(f.input);await f.store.wait();
  assert.equal((await f.store.load(f.input,job.jobId)).job.status,'succeeded');
  await mkdir(lock);await writeFile(join(lock,'owner.json'),JSON.stringify({pid:process.ppid,jobId:'00000000-0000-4000-8000-000000000000'}));
- await assert.rejects(f.store.start(f.input),e=>e.code==='busy');
+ // BE-2: the job queues behind the foreign owner instead of failing busy.
+ const waiting=await f.store.start({...f.input,request:{reference:{dimensionsMm:[9,9,9]}}});
+ await new Promise(r=>setTimeout(r,250));
+ assert.equal((await f.store.load(f.input,waiting.job.jobId)).job.status,'queued');
+ await rm(lock,{recursive:true,force:true});await f.store.wait();
+ assert.equal((await f.store.load(f.input,waiting.job.jobId)).job.status,'succeeded');
 });
-test('concurrent recoverers of one dead-owner lock start exactly one worker; a second instance never steals a live lock',async t=>{
+test('concurrent identical starts across instances dedupe to exactly one worker',async t=>{
  let release;const gate=new Promise(r=>release=r);let runs=0;
  const runner={async run(stage,input,output,sidecar,signal){if(stage==='repair'){runs++;await gate;}return fakeRunner.run(stage,input,output,sidecar,signal);}};
  const f=await fixture(t,runner);const lock=join(f.root,'captures','.scan-processing-lock');
@@ -71,35 +80,43 @@ test('concurrent recoverers of one dead-owner lock start exactly one worker; a s
  await mkdir(lock);await writeFile(join(lock,'owner.json'),JSON.stringify({pid:deadPid,jobId:'00000000-0000-4000-8000-000000000000'}));
  const other=new ScanProcessingStore(f.storage,f.captures,join(f.root,'captures'),runner);t.after(()=>other.close());
  try{
-  const results=await Promise.allSettled([f.store.start(f.input),other.start(f.input)]);
-  assert.equal(results.filter(r=>r.status==='fulfilled').length,1);
-  assert.equal(results.find(r=>r.status==='rejected').reason.code,'busy');
-  // While the winner runs, a fresh instance in the same process must see its lock as live.
+  const [a,b]=await Promise.all([f.store.start(f.input),other.start(f.input)]);
+  assert.equal(a.job.jobId,b.job.jobId);
+  // While it runs, a fresh instance dedupes onto the same live job.
   const third=new ScanProcessingStore(f.storage,f.captures,join(f.root,'captures'),runner);
-  await assert.rejects(third.start(f.input),e=>e.code==='busy');
+  assert.equal((await third.start(f.input)).job.jobId,a.job.jobId);
  }finally{release();}
  await f.store.wait();await other.wait();assert.equal(runs,1);
 });
-test('a same-process start paused before launch keeps its lock against a second instance',async t=>{
+test('a same-process start paused before launch serializes a second instance onto the same job',async t=>{
  const f=await fixture(t);let release,entered;const gate=new Promise(r=>release=r);const paused=new Promise(r=>entered=r);
  const first=f.store.start(f.input,async()=>{entered();await gate;});
  await paused;
  const other=new ScanProcessingStore(f.storage,f.captures,join(f.root,'captures'),fakeRunner);t.after(()=>other.close());
- try{await assert.rejects(other.start(f.input),e=>e.code==='busy');}finally{release();}
- const {job}=await first;await f.store.wait();
+ // The second enqueue waits for the first, then dedupes onto its job.
+ let settled=false;const second=other.start(f.input).then(result=>{settled=true;return result;});
+ await new Promise(r=>setTimeout(r,100));assert.equal(settled,false);
+ release();
+ const {job}=await first;assert.equal((await second).job.jobId,job.jobId);await f.store.wait();
  assert.equal((await f.store.load(f.input,job.jobId)).job.status,'succeeded');
- // A failed start releases its registration and lock for the next caller.
- await assert.rejects(f.store.start(f.input,async()=>{throw Error('revoked');}));
- const next=await other.start(f.input);await other.wait();assert.equal((await other.load(f.input,next.job.jobId)).job.status,'succeeded');
+ // A failed start releases its registration for the next caller.
+ await assert.rejects(f.store.start({...f.input,request:{reference:{dimensionsMm:[8,8,8]}}},async()=>{throw Error('revoked');}));
+ const next=await other.start({...f.input,request:{reference:{dimensionsMm:[8,8,8]}}});await other.wait();assert.equal((await other.load(f.input,next.job.jobId)).job.status,'succeeded');
 });
 test('list returns every retained job for the capture so a finished check can reopen after relaunch',async t=>{
  const f=await fixture(t);
  assert.deepEqual((await f.store.list(f.input)).jobs,[]);
  const first=await f.store.start(f.input);await f.store.wait();
+ // BE-2: an automatic re-enqueue dedupes onto the finished job; an explicit
+ // re-check after success runs fresh, and a different reference is a third job.
+ assert.equal((await f.store.enqueueForCapture('test',f.input.captureId)).job.jobId,first.job.jobId);
  const second=await f.store.start(f.input);await f.store.wait();
+ assert.notEqual(second.job.jobId,first.job.jobId);
+ const third=await f.store.start({...f.input,request:{reference:{dimensionsMm:[60,40,20]}}});await f.store.wait();
  const fresh=new ScanProcessingStore(f.storage,f.captures,join(f.root,'captures'),fakeRunner);
  const {jobs}=await fresh.list(f.input);
- assert.deepEqual(jobs.map(job=>job.jobId),[first.job.jobId,second.job.jobId].sort());
+ assert.deepEqual(jobs.map(job=>job.jobId),[first.job.jobId,second.job.jobId,third.job.jobId].sort());
  assert(jobs.every(job=>job.status==='succeeded'));
- await assert.rejects(fresh.list({...f.input,projectRevision:1}));
+ // Reads keep working with a stale caller revision after later edits.
+ assert.equal((await fresh.list({...f.input,projectRevision:1})).jobs.length,3);
 });

@@ -118,9 +118,15 @@ export function createCaptureRoutes(services:CaptureServices){
      if(stillPost){
       if(sniffDetailStillMediaType(bytes)!==contentType)throw new Failure(415,'unsupported-media-type');
       const result=await services.detailStills!.addDetailStill({projectId:id,projectRevision:revision,captureId:stillCaptureId!,label:stillLabel,source:bytes,expectedProjectETag:ifMatch},controller.signal,()=>authorize(scope));
+      // A close-up that arrives after correction started queues a follow-up.
+      // The still is already committed, so a queue failure never fails this POST.
+      if(services.scanProcessing)await services.scanProcessing.enqueueFollowUp(id,stillCaptureId!,()=>authorize(scope)).catch(error=>{process.stderr.write(`scan-processing follow-up enqueue failed for capture ${stillCaptureId}: ${error instanceof Error?error.message:'unknown'}\n`);});
       assertActive();response.statusCode=201;response.setHeader('ETag',ifMatch!);await send(response,JSON.stringify(result));
      }else if(captureRoute){
       const result=await services.captures!.importCapture({projectId:id,projectRevision:revision,source:bytes,expectedProjectETag:ifMatch},controller.signal,()=>authorize(scope));
+      // Cleanup starts on arrival; reference dimensions are not needed to begin.
+      // The capture is already committed, so a queue failure never fails this POST.
+      if(services.scanProcessing)await services.scanProcessing.enqueueForCapture(id,result.captureId,{authorize:()=>authorize(scope)}).catch(error=>{process.stderr.write(`scan-processing import enqueue failed for capture ${result.captureId}: ${error instanceof Error?error.message:'unknown'}\n`);});
       response.statusCode=201;response.setHeader('ETag',ifMatch!);await send(response,JSON.stringify(result));
      }else{
       let text:string;try{text=new TextDecoder('utf-8',{fatal:true,ignoreBOM:true}).decode(bytes);}catch{throw new Failure(400,'invalid-snapshot');}

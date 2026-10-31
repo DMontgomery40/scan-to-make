@@ -7,8 +7,9 @@ import { request as httpRequest } from 'node:http';
 import { createHash } from 'node:crypto';
 import { FileSavedProjectStorage } from '@scan-to-make/project';
 import { CaptureStore } from '../dist/capture-import.js';
+import { DetailStillStore } from '../dist/detail-stills.js';
 import {ScanProcessingStore} from '../dist/scan-processing.js';
-import {fakeRunner} from './fixtures/scan-processing.mjs';
+import {fakeRunner,cleanupRunner} from './fixtures/scan-processing.mjs';
 import { RemoteAuthStore } from '../dist/remote-auth.js';
 import { startCompanionServer } from '../dist/server.js';
 
@@ -41,7 +42,7 @@ const converter = {
 const jpeg = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(64, 0x11), Buffer.from([0xff, 0xd9])]);
 const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(64, 0x22)]);
 
-async function fixture(t, scopes = ['projects:read', 'projects:write', 'captures:read', 'captures:import'],runner=fakeRunner) {
+async function fixture(t, scopes = ['projects:read', 'projects:write', 'captures:read', 'captures:import'], runner = fakeRunner) {
   const root = await mkdtemp(join(tmpdir(), 'detail-stills-http-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const remoteAuth = await RemoteAuthStore.create(join(root, 'auth'), {
@@ -51,8 +52,9 @@ async function fixture(t, scopes = ['projects:read', 'projects:write', 'captures
   const phone = await remoteAuth.exchange('alice@example.test', { code: invitation.code, deviceName: 'Fixture' });
   const storage = new FileSavedProjectStorage(join(root, 'projects'));
   const captures = new CaptureStore(storage, join(root, 'captures'), converter);
+  const detailStills = new DetailStillStore(storage, join(root, 'captures'));
   const scanProcessing = new ScanProcessingStore(storage,captures,join(root,'captures'),runner);
-  const server = await startCompanionServer({ port: 0, remoteAuth, capture: { storage, captures, scanProcessing } });
+  const server = await startCompanionServer({ port: 0, remoteAuth, capture: { storage, captures, detailStills, scanProcessing } });
   t.after(() => server.close());
   return {
     root, remoteAuth, phone, storage, captures, server, scanProcessing,
@@ -80,8 +82,8 @@ async function waitReady(f) {
   }
   throw new Error('slot stayed busy');
 }
-async function setup(t,runner) {
-  const f = await fixture(t,undefined,runner);
+async function setup(t, runner) {
+  const f = await fixture(t, undefined, runner);
   const sync = await wire(f, '/v1/saved-projects/phone', {
     method: 'PUT', headers: { 'content-type': 'application/json', 'if-none-match': '*' }, body: JSON.stringify(project),
   });
@@ -100,13 +102,24 @@ async function setup(t,runner) {
 test('authenticated scan jobs: scopes, ETag, strict body, status, artifacts and tampering',async t=>{
  const {f,etag,base,captureId}=await setup(t);
  const post=(body,tag=etag)=>({method:'POST',headers:{'content-type':'application/json','if-match':tag},body:JSON.stringify(body)});
+ // BE-2: importing the capture already started cleanup; no phone POST needed.
+ await f.scanProcessing.wait();await waitReady(f);
+ const autoListing=await wire(f,base+'?projectRevision=7',{headers:{'if-match':etag}});
+ const autoJobs=JSON.parse(autoListing.bytes).jobs;
+ assert.equal(autoJobs.length,1);assert.equal(autoJobs[0].trigger,'capture-import');assert.equal(autoJobs[0].status,'succeeded');
+ assert.equal(autoJobs[0].captureSha256,sha(Buffer.from('synthetic usdz stand-in')));
+ await waitReady(f);
+ // The phone-triggered POST stays working; an explicit re-check after the
+ // auto job finished is a fresh run (in-flight retries dedupe, covered by
+ // the store-level queue tests).
+ const created=await wire(f,base+'?projectRevision=7',post({}));assert.equal(created.status,202);const {job}=JSON.parse(created.bytes);
+ assert.notEqual(job.jobId,autoJobs[0].jobId);
+ await f.scanProcessing.wait();await waitReady(f);
+ // A reference the earlier jobs did not have is a different request: a third job.
  assert.equal((await wire(f,base+'?projectRevision=7',post({reference:{dimensionsMm:[60.6,45.2,21.7]}}))).status,202);
  await f.scanProcessing.wait();await waitReady(f);
- // Recover the returned ID from a second POST; no retry/idempotency promise on collection POST.
- const created=await wire(f,base+'?projectRevision=7',post({}));assert.equal(created.status,202);const {job}=JSON.parse(created.bytes);
- await f.scanProcessing.wait();await waitReady(f);
  const listing=await wire(f,base+'?projectRevision=7',{headers:{'if-match':etag}});assert.equal(listing.status,200);assert.equal(listing.headers.etag,etag);
- const listed=JSON.parse(listing.bytes).jobs;assert.equal(listed.length,2);assert(listed.some(item=>item.jobId===job.jobId&&item.status==='succeeded'));
+ const listed=JSON.parse(listing.bytes).jobs;assert.equal(listed.length,3);assert(listed.some(item=>item.jobId===job.jobId&&item.status==='succeeded'));
  assert.deepEqual(listed.map(item=>item.jobId),listed.map(item=>item.jobId).sort());await waitReady(f);
  const path=base+'/'+job.jobId+'?projectRevision=7';
  const get=await wire(f,path,{headers:{'if-match':etag}});assert.equal(get.status,200);assert.equal(JSON.parse(get.bytes).job.status,'succeeded');await waitReady(f);
@@ -127,6 +140,31 @@ test('authenticated scan jobs: scopes, ETag, strict body, status, artifacts and 
  assert.equal((await wire(f,base+'?projectRevision=7',{...post({}),headers:{...post({}).headers,authorization:`Bearer ${reader.token}`,'x-scan-device':reader.deviceId}})).status,403);
 });
 
+test('a close-up posted after cleanup queues a follow-up correction over HTTP',async t=>{
+ const {f,etag,base,captureId}=await setup(t,cleanupRunner());
+ await f.scanProcessing.wait();await waitReady(f);
+ const listJobs=async()=>JSON.parse((await wire(f,base+'?projectRevision=7',{headers:{'if-match':etag}})).bytes).jobs;
+ const before=await listJobs();await waitReady(f);
+ assert.equal(before.length,1);assert.equal(before[0].status,'succeeded');assert.deepEqual(before[0].detailStills,[]);
+ const still=await wire(f,`/v1/saved-projects/phone/captures/${captureId}/detail-stills?projectRevision=7&label=Late%20close-up`,{
+  method:'POST',headers:{'content-type':'image/jpeg','if-match':etag},body:jpeg});
+ assert.equal(still.status,201);
+ const stillId=JSON.parse(still.bytes).still.id;
+ await f.scanProcessing.wait();await waitReady(f);
+ const after=await listJobs();await waitReady(f);
+ assert.equal(after.length,2);
+ const followUp=after.find(job=>job.jobId!==before[0].jobId);
+ assert.equal(followUp.trigger,'detail-still');assert.equal(followUp.status,'succeeded');
+ assert.deepEqual(followUp.detailStills.map(s=>s.id),[stillId]);
+ assert(before[0].finishedAt<followUp.finishedAt);
+ // An explicit phone re-check after completion runs fresh; newest finished
+ // is a listing-order concern (createdAtMs), not a dedupe shortcut.
+ const again=await wire(f,base+'?projectRevision=7',{method:'POST',headers:{'content-type':'application/json','if-match':etag},body:'{}'});
+ const recheck=JSON.parse(again.bytes).job;
+ assert.notEqual(recheck.jobId,followUp.jobId);assert(recheck.createdAtMs>followUp.createdAtMs);
+ // The re-check is a real job: let it finish before teardown removes its folder.
+ await f.scanProcessing.wait();await waitReady(f);
+});
 
 test('textured model bundle downloads under capture auth and rejects stale or altered dependencies',async t=>{
  const obj=Buffer.from('mtllib mesh.mtl\n'+derived.toString().replace('f 1 2 3','vt 0 0\nvt 1 0\nvt 0 1\nusemtl captured\nf 1/1 2/2 3/3'));
