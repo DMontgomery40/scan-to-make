@@ -159,29 +159,7 @@ def box_frame(coords, centre, pca):
             "boxMethod":"convex hull; PCA seed; 30deg rotation sweep; four seeds refined to 0.005deg"}
 
 
-def support_extents(coords, up):
-    """Extents with one axis on the authored up axis: the support the capture rested on.
-
-    Across the support, the minimum-area rectangle (1 degree sweep refined to .01 degree);
-    then the height along up. A tilted resting pose makes the height exceed the part's own
-    thickness, so this complements boxExtentsMm rather than replacing it."""
-    up = np.array(up,dtype=np.float64)
-    up /= np.linalg.norm(up)
-    u = np.eye(3)[np.argmin(np.abs(up))]
-    u -= u.dot(up)*up
-    u /= np.linalg.norm(u)
-    flat = coords @ np.array([u,np.cross(up,u)]).T
-    def extents(degrees):
-        t = math.radians(degrees)
-        return np.ptp(flat @ np.array([[math.cos(t),-math.sin(t)],[math.sin(t),math.cos(t)]]),axis=0)
-    best = min(np.arange(0,90,1.0), key=lambda t: float(np.prod(extents(t))))
-    for step in (.1,.01):
-        best = min(np.arange(best-10*step,best+10*step+step/2,step), key=lambda t: float(np.prod(extents(t))))
-    across = sorted(extents(best).tolist(),reverse=True)
-    return {"supportAlignedExtentsMm":across+[float(np.ptp(coords @ up))],"supportUp":up.tolist()}
-
-
-def stats(bm, up=None):
+def stats(bm):
     coords, centre, basis = axes(bm)
     principal = (coords-centre) @ basis
     boundary = sum(e.is_boundary for e in bm.edges)
@@ -200,8 +178,7 @@ def stats(bm, up=None):
             "volumeMm3":abs(bm.calc_volume(signed=True)) if closed else None,
             "surfaceAreaMm2":sum(f.calc_area() for f in bm.faces),
             "coarseFillFaces":int(coarse.sum()),"coarseFillAreaMm2":float(areas[coarse].sum()),
-            **box_frame(coords, centre, basis),
-            **(support_extents(coords, up) if up is not None else {"supportAlignedExtentsMm":None,"supportUp":None})}
+            **box_frame(coords, centre, basis)}
 
 
 def normals(bm):
@@ -222,39 +199,18 @@ def apply_modifier(obj,bm,kind, **params):
     return bm
 
 
-FOLDOVER_DEG = 115
-FOLDOVER_PASSES = 4
-
-
 def denoise(bm,a):
-    """Taubin lambda|mu cycles: the negative mu pass undoes the shrinkage of each lambda pass.
-
-    Locks only crease vertices: two or more sharp edges whose other ends are crease vertices too,
-    so creases and corners hold while isolated spike tips (sharp edges to a smooth ring) move.
-    Foldover fins (an edge above FOLDOVER_DEG) are never locked and are relaxed before the cycles."""
+    # Taubin lambda|mu cycles: the negative mu pass undoes the shrinkage of each lambda pass.
     bm.verts.index_update()
     co = np.array([tuple(v.co) for v in bm.verts]).reshape(-1,3)
     original = co.copy()
-    sharp, fold = math.radians(a["sharp_angle_deg"]), math.radians(FOLDOVER_DEG)
+    sharp = math.radians(a["sharp_angle_deg"])
     pairs = np.array([[v.index for v in e.verts] for e in bm.edges],dtype=np.int64).reshape(-1,2)
-    angle = np.array([e.calc_face_angle(0) if e.is_manifold else math.inf for e in bm.edges]).reshape(-1)
-    crease = pairs[(angle > sharp) & (angle <= fold)]
-    sharp_count = np.bincount(crease.ravel(),minlength=len(co))
-    supported = crease[(sharp_count[crease[:,0]] >= 2) & (sharp_count[crease[:,1]] >= 2)]
-    folded = np.zeros(len(co),dtype=bool)
-    folded[pairs[np.isfinite(angle) & (angle > fold)].ravel()] = True
-    # A fin vertex can also touch two side creases; it still must not lock.
-    locked = (np.bincount(supported.ravel(),minlength=len(co)) >= 2) & ~folded
-    locked[pairs[np.isinf(angle)].ravel()] = True
+    locked = np.zeros(len(co),dtype=bool)
+    locked[np.array([v.index for e in bm.edges if not e.is_manifold or e.calc_face_angle(0)>sharp
+                     for v in e.verts],dtype=np.int64)] = True
     i, j = np.concatenate([pairs[:,0],pairs[:,1]]), np.concatenate([pairs[:,1],pairs[:,0]])
     free = ~locked & (np.bincount(i,minlength=len(co)) > 0)
-    folded = free & (folded | (np.bincount(i,folded[j],len(co)) > 0))
-    if a["denoise_iterations"]:
-        # Umbrella relaxation flattens fins first; the cycle clamp below also bounds these moves.
-        for _ in range(FOLDOVER_PASSES):
-            weight = 1/np.maximum(np.linalg.norm(co[j]-co[i],axis=1),1e-9)
-            mean = np.stack([np.bincount(i,weight*co[j,k],len(co)) for k in range(3)],axis=1)
-            co[folded] += .5*(mean/np.maximum(np.bincount(i,weight,len(co)),1e-300)[:,None]-co)[folded]
     for _ in range(a["denoise_iterations"]):
         moved = co.copy()
         for step in (a["denoise_factor"],a["denoise_mu"]):
@@ -271,7 +227,6 @@ def denoise(bm,a):
         if free[v.index]:
             v.co = Vector(co[v.index])
     normals(bm)
-    return {"lockedVertices":int(locked.sum()),"foldoverVertices":int(folded.sum()) if a["denoise_iterations"] else 0}
 
 
 INFERRED = "stm_inferred"
@@ -438,19 +393,19 @@ def patch_edges(patch, layer):
             e.link_faces[0][layer] == e.link_faces[1][layer]]
 
 
-def fair(bm, layer, crease, curved=()):
+def fair(bm, layer, crease):
     """Fair patch vertices with rim and captured neighbours fixed.
 
-    Minimises the inverse-length weighted umbrella over patch vertices (harmonic). For patch
-    ids in curved, rim rows join (bi-Laplacian): the patch continues the captured curvature
-    across two fixed rings, except at rim creases above the crease angle."""
+    Minimises the inverse-length weighted umbrella over patch vertices (harmonic). With a
+    crease angle, rim rows join (bi-Laplacian): the patch continues the captured curvature
+    across two fixed rings, except at rim creases above the angle."""
     patch = [f for f in bm.faces if f[layer] > 0]
     edges = list(dict.fromkeys(e for f in patch for e in f.edges))
     inner = set(patch_edges(patch,layer))
     rim = [e for e in edges if e not in inner]
     rim_verts = list(dict.fromkeys(v for e in rim for v in e.verts))
-    released = {v for e in rim if len(e.link_faces) != 2 or e.calc_face_angle(0) > crease for v in e.verts} | {
-        v for v in rim_verts if not any(f[layer] in curved for f in v.link_faces)}
+    released = set(rim_verts) if crease is None else {
+        v for e in rim if len(e.link_faces) != 2 or e.calc_face_angle(0) > crease for v in e.verts}
     fixed = set(rim_verts)
     unknown = [v for v in dict.fromkeys(v for f in patch for v in f.verts) if v not in fixed]
     if not unknown:
@@ -493,41 +448,6 @@ def fair(bm, layer, crease, curved=()):
     return steps, residual
 
 
-CURVED_RIM_RATIO = .04
-
-
-def rim_deviation(region):
-    """RMS distance of the rim (per unit length) from its best-fit plane over the square root of the region area.
-
-    A flat opening (a box face, a case resting on its back) scores near 0; a rim that climbs a
-    rounded body scores high. None when the region is not a disk."""
-    loop = rim_loop(region)
-    if loop is None:
-        return None
-    start = np.array([tuple(v.co) for v in loop],dtype=np.float64)
-    segment = np.roll(start,-1,axis=0)-start
-    # Arc-length weights: the moments of the rim as a curve, so dense stretches of rim
-    # vertices count no more than sparse ones of the same length.
-    weight = np.linalg.norm(segment,axis=1)/np.linalg.norm(segment,axis=1).sum()
-    middle = start+segment/2
-    centre = weight @ middle
-    middle -= centre
-    covariance = (middle*weight[:,None]).T @ middle+(segment*weight[:,None]).T @ segment/12
-    eigenvalues = np.linalg.eigh(covariance)[0]
-    return float(math.sqrt(max(eigenvalues[0],0))/math.sqrt(sum(f.calc_area() for f in region)))
-
-
-def patch_fairing(requested, deviation):
-    """Fairing for one refilled region and, when auto cannot judge the rim, why not.
-
-    Auto needs a measured rim; without one it keeps the harmonic fill, which stays within the rim."""
-    if requested != "auto":
-        return requested, None
-    if deviation is None:
-        return "harmonic", "auto: rim deviation not measurable; kept harmonic"
-    return ("biharmonic" if deviation > CURVED_RIM_RATIO else "harmonic"), None
-
-
 def refill_coarse(bm, a):
     crease = math.radians(a["fill_crease_deg"])
     # Adding a layer invalidates element references, so it precedes region collection.
@@ -539,7 +459,7 @@ def refill_coarse(bm, a):
     faces = {f for r in coarse_regions(bm,crease,limit,layer) for f in r}
     # Captured vertices touch a face outside every coarse region; none may move.
     captured = [(v,v.co.copy()) for v in bm.verts if any(g not in faces for g in v.link_faces)]
-    regions, removed, removed_area, skipped, surface, patches = 0, 0, 0.0, [], [], []
+    regions, removed, removed_area, skipped, surface = 0, 0, 0.0, [], []
     # Each patch gets its own id, so crease edges between neighbouring patches stay rim.
     # Regions are collected again after every swap because rebuilding edits the mesh.
     while True:
@@ -549,7 +469,6 @@ def refill_coarse(bm, a):
         region, regions = pending[0], regions+1
         area = sum(f.calc_area() for f in region)
         coarse = [[tuple(v.co) for v in f.verts] for f in region]
-        deviation = rim_deviation(region)
         reason = rebuild(bm,region,layer,target,regions)
         if reason:
             for f in region:
@@ -558,16 +477,12 @@ def refill_coarse(bm, a):
         else:
             removed, removed_area = removed+len(coarse), removed_area+area
             surface += coarse
-            mode, note = patch_fairing(a["fill_fairing"],deviation)
-            patches.append({"id":regions,"faces":len(region),"areaMm2":area,"rimDeviation":deviation,
-                            "fairing":mode,"fairingNote":note})
     for f in bm.faces:
         if f[layer] < 0:
             f[layer] = 0
     # New faces need normals before fair() measures rim creases.
     normals(bm)
-    curved = {p["id"] for p in patches if p["fairing"] == "biharmonic"}
-    steps, residual = fair(bm,layer,crease,curved) if removed else (0, 0.0)
+    steps, residual = fair(bm,layer,crease if a["fill_fairing"] == "biharmonic" else None) if removed else (0, 0.0)
     normals(bm)
     patch = [f for f in bm.faces if f[layer] > 0]
     # How far the faired surface departs from the coarse fill it replaced.
@@ -576,13 +491,11 @@ def refill_coarse(bm, a):
                                  zip(np.cumsum([0]+[len(f) for f in surface[:-1]]).tolist(),surface)]) if surface else None
     offset = max((tree.find_nearest(v.co)[3] for v in dict.fromkeys(v for f in patch for v in f.verts)),default=0.0) if tree else 0.0
     return {"name":"refillCoarse","rule":"faces > 10x median area; edge-connected; split at creases",
-            "creaseDeg":a["fill_crease_deg"],"fairing":a["fill_fairing"],"curvedRimRatio":CURVED_RIM_RATIO,
-            "patches":patches,"regions":regions,"refilled":regions-len(skipped),
+            "creaseDeg":a["fill_crease_deg"],"fairing":a["fill_fairing"],"regions":regions,"refilled":regions-len(skipped),
             "skipped":skipped,"removedFaces":removed,"removedAreaMm2":removed_area,
             "inferredFaces":len(patch),"inferredAreaMm2":sum(f.calc_area() for f in patch),"targetEdgeMm":target,
             "method":"constrained-Delaunay lattice on the region plane; inverse-length weighted least-squares "
-                     "fairing, rim fixed (biharmonic: captured ring fixed, crease rim rows released; auto: biharmonic "
-                     "where rimDeviation exceeds curvedRimRatio)",
+                     "fairing, rim fixed (biharmonic: captured ring fixed, crease rim rows released)",
             "solverIterations":steps,"solverRelativeResidual":residual,"solverConverged":residual <= 1e-13,
             "patchMaxOffsetMm":offset,
             "capturedMaxMoveMm":max(((v.co-co).length for v,co in captured),default=0.0)}
@@ -691,12 +604,8 @@ def export(bm,out,uv=False,libraries=(),materials=()):
     return ranges
 
 
-UP_AXES = {"X":(1.0,0.0,0.0),"Y":(0.0,1.0,0.0),"Z":(0.0,0.0,1.0)}
-
-
 def repair(obj,bm,a):
-    up = UP_AXES.get(a.get("up_axis"))
-    before = stats(bm,up)
+    before = stats(bm)
     original = bm.copy()
     ops = []
     bmesh.ops.remove_doubles(bm,verts=list(bm.verts),dist=a["weld_mm"])
@@ -747,12 +656,10 @@ def repair(obj,bm,a):
         bm.from_mesh(obj.data)
         normals(bm)
     ops.append({"name":"voxelRemesh","applied":fallback,"forced":a["force_voxel"],"voxelSizeMm":a["voxel_size_mm"],"adaptivity":0})
-    smoothed = denoise(bm,a)
+    denoise(bm,a)
     ops.append({"name":"denoise","method":"Taubin lambda|mu cycles; inverse edge-length weights",
                 "iterations":a["denoise_iterations"],"factor":a["denoise_factor"],"mu":a["denoise_mu"],
-                "maxDisplacementMm":a["denoise_max_mm"],"sharpAngleDeg":a["sharp_angle_deg"],
-                "lock":"vertices with two or more sharp edges to other crease vertices; non-manifold",
-                "foldoverDeg":FOLDOVER_DEG,"foldoverPasses":FOLDOVER_PASSES,**smoothed})
+                "maxDisplacementMm":a["denoise_max_mm"],"sharpAngleDeg":a["sharp_angle_deg"]})
     bmesh.ops.triangulate(bm,faces=list(bm.faces))
     ops.append({"name":"triangulate","quadMethod":"BEAUTY","ngonMethod":"BEAUTY"})
     target = a["target_faces"]
@@ -793,8 +700,7 @@ def repair(obj,bm,a):
     return {"schemaVersion":1,"blenderVersion":bpy.app.version_string,"provesPhysicalAccuracy":False,
             "previewOnly":True,"inputSha256":sha(a.get("import_path",a["input"])),"inputScaleMm":a["scale_mm"],
             "outputUnits":"mm","outputSha256":{n:sha(out/n) for n in ("repaired.obj","repaired.stl",*files)},
-            "before":before,"after":stats(bm,None if up is None else (np.array(transform["rotation"]) @ up).tolist()),
-            "operations":ops,"deviation":dev,
+            "before":before,"after":stats(bm),"operations":ops,"deviation":dev,
             "limitations":["Topological watertightness does not detect self intersections or certify a valid solid.",
                            "Box and PCA frames are ambiguous for symmetric objects; neither infers semantic upright or print-bed placement.",
                            "One-sided sampled deviation can miss added geometry and unsampled defects.",
@@ -867,7 +773,7 @@ def main():
         result = repair(obj,bm,a)
         write_json(Path(a["out"])/"report.json",result)
     elif a["command"]=="measure":
-        result = stats(bm,UP_AXES.get(a.get("up_axis")))
+        result = stats(bm)
         result["provesPhysicalAccuracy"] = False
     else:
         result = render(obj,bm,a)

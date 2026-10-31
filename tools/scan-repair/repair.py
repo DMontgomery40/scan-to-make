@@ -119,7 +119,7 @@ def parser():
             s.add_argument("--denoise-factor", type=float, default=.5, help="Taubin lambda")
             s.add_argument("--denoise-mu", type=float, default=-.53, help="Taubin mu; pass-band 1/lambda+1/mu in (0,.2]")
             s.add_argument("--denoise-max-mm", type=float, default=.35)
-            s.add_argument("--sharp-angle-deg", type=float, default=55)
+            s.add_argument("--sharp-angle-deg", type=float, default=30)
             s.add_argument("--target-faces", type=int)
             s.add_argument("--deviation-samples", type=int, default=10000)
             s.add_argument("--orient", choices=("box","pca","keep"), default="box",
@@ -128,9 +128,8 @@ def parser():
                            help="re-fill faces over 10x the median area with faired, densified patches")
             s.add_argument("--fill-crease-deg", type=float, default=60,
                            help="coarse regions split, and biharmonic patches stop following curvature, at creases above this")
-            s.add_argument("--fill-fairing", choices=("auto","harmonic","biharmonic"), default="auto",
-                           help="harmonic stays within the rim; biharmonic continues rim curvature and can overshoot; "
-                                "auto picks biharmonic only where the rim itself is curved")
+            s.add_argument("--fill-fairing", choices=("harmonic","biharmonic"), default="harmonic",
+                           help="harmonic stays within the rim; biharmonic continues rim curvature and can overshoot")
     return p
 
 
@@ -146,11 +145,6 @@ def main():
             if sidecar.get("unitsAuthored") is not True:
                 raise ValueError("sidecar requires unitsAuthored: true")
             scale = float(sidecar["metersPerUnit"])*1000
-            # The capture converter's report also authors the up axis: the support the scan rested on.
-            if sidecar.get("upAxisAuthored") is True:
-                if sidecar.get("upAxis") not in ("X","Y","Z"):
-                    raise ValueError("sidecar upAxis must be X, Y or Z")
-                config["up_axis"] = sidecar["upAxis"]
         else:
             scale = {"m":1000, "cm":10,"mm":1}[a.units]
         if not math.isfinite(scale) or scale <= 0:
