@@ -38,6 +38,9 @@ public struct LocalNetworkProbeGate {
         do {
             let endpoint = NWEndpoint.hostPort(host:"239.255.255.250",port:2021)
             let group = NWConnectionGroup(with:try NWMulticastGroup(for:[endpoint]),using:.udp)
+            // Network.framework refuses to start a group without a receive or
+            // new-connection handler. We only send discovery; discard replies.
+            group.setReceiveHandler(maximumMessageSize:4096,rejectOversizedMessages:true) { _, _, _ in }
             self.group = group
             group.stateUpdateHandler = { [weak self] state in
                 guard case .ready = state else { return }
