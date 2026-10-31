@@ -7,22 +7,18 @@ import {ScanProcessingJobSchema,AI_ATTEMPT_PREVIEW_NAMES} from '@scan-to-make/co
 import {aiTweakRecord,exportMeshBundle,exportPicked,publicReason,writeAiCorrection} from '../dist/ai-tweak-export.js';
 import {aiStageBudget,checkCleanupDisk,AI_AFTER_MS,AI_CLEANUP_JOB_MS} from '../dist/scan-cleanup-runner.js';
 import {open} from 'node:fs/promises';
-import {snapshotCaptureMaterials} from '../dist/capture-import.js';
+import {readScanMaterials} from '../dist/scan-model-assets.js';
 
 const PNG=[137,80,78,71,13,10,26,10];
 const png=n=>Buffer.from([...PNG,n,n,n]);
 
 async function dir(t){const root=await mkdtemp(join(tmpdir(),'ai-export-test-'));t.after(()=>rm(root,{recursive:true,force:true}));return root;}
-/** Run the exported bundle through the same check the /model-assets publisher (KAN-141) applies. */
+/** Run the exported bundle through the check the /model-assets publisher (KAN-141) and make-printable (KAN-185) apply. */
 async function publisherCheck(out,outputs){
- const assets={},manifest=[];
- for(const [name,sha256] of Object.entries(outputs))if(/^mesh(?:\.mtl|_basecolor_[0-9]+\.png)$/.test(name)){
-  const bytes=await readFile(join(out,name));assets[name]=bytes;manifest.push({path:name,bytes:bytes.length,sha256});
- }
- return snapshotCaptureMaterials(await readFile(join(out,'corrected.obj')),Buffer.from(JSON.stringify({outputs:manifest})),assets);
+ return readScanMaterials(out,await readFile(join(out,'corrected.obj')),outputs);
 }
 
-test('an attempt bundle exports in mm with base-colour materials only, UVs and image bytes unchanged',async t=>{
+test('an attempt bundle exports in mm with its own values, base colour and normal map; UVs and image bytes unchanged',async t=>{
  const root=await dir(t),bundle=join(root,'attempt'),out=join(root,'out');await mkdir(join(bundle,'tex'),{recursive:true});
  // Two libraries (one by absolute path), a normal map, a clamp option, an untextured material, vertex colours, quads and negative indices.
  const uv=['vt 0.125 0.25','vt 0.5 0.75','vt 1 0','vt 0.0001 0.9999'];
@@ -33,8 +29,10 @@ test('an attempt bundle exports in mm with base-colour materials only, UVs and i
  await writeFile(join(bundle,'eyes.mtl'),'newmtl eye\nKd 0.05 0.05 0.05\nd 1\nnewmtl body\nKd 1 0 0\n');
  await writeFile(join(bundle,'tex','body color.png'),png(1));await writeFile(join(bundle,'tex','normal.png'),png(2));await writeFile(join(bundle,'rough.png'),png(3));
  const outputs=await exportMeshBundle(join(bundle,'mesh.obj'),1000,out);
- assert.deepEqual(Object.keys(outputs).sort(),['corrected.obj','corrected.stl','mesh.mtl','mesh_basecolor_0.png']);
- assert.equal(await readFile(join(out,'mesh.mtl'),'utf8'),'newmtl body\nKd 0.8 0.7 0.6\nmap_Kd -clamp on mesh_basecolor_0.png\nnewmtl eye\nKd 0.05 0.05 0.05\n');
+ assert.deepEqual(Object.keys(outputs).sort(),['corrected.obj','corrected.stl','mesh.mtl','mesh_basecolor_0.png','mesh_normal_0.png']);
+ // The attempt's own values and normal map survive in order; the roughness map has no place in the grammar.
+ assert.equal(await readFile(join(out,'mesh.mtl'),'utf8'),'newmtl body\nNs 250\nKa 1 1 1\nKd 0.8 0.7 0.6\nmap_Kd -clamp on mesh_basecolor_0.png\nbump -bm 1.0 mesh_normal_0.png\nnewmtl eye\nKd 0.05 0.05 0.05\nd 1\n');
+ assert.deepEqual(await readFile(join(out,'mesh_normal_0.png')),png(2));
  assert.deepEqual(await readFile(join(out,'mesh_basecolor_0.png')),png(1));
  const obj=(await readFile(join(out,'corrected.obj'),'utf8')).split('\n');
  assert.equal(obj.filter(l=>l.startsWith('mtllib')).join(),'mtllib mesh.mtl');
@@ -148,4 +146,33 @@ test('close-ups count against their own allowance, not the worker output budget'
  const root=await dir(t),big=await open(join(root,'still.img'),'w');await big.truncate(513*1024*1024);await big.close();
  await assert.rejects(checkCleanupDisk(root),/budget/);
  await checkCleanupDisk(root,2*1024*1024);
+});
+
+test('normal maps are kept only when the grammar can carry them, and never cost the attempt its colour',async t=>{
+ const root=await dir(t),bundle=join(root,'b'),out=join(root,'out');await mkdir(bundle);
+ await writeFile(join(bundle,'mesh.obj'),'mtllib m.mtl\nv 0 0 0\nv 1 0 0\nv 0 1 0\nvt 0 0\nusemtl a\nf 1/1 2/1 3/1\nusemtl b\nf 1/1 2/1 3/1\nusemtl c\nf 1/1 2/1 3/1\n');
+ await writeFile(join(bundle,'m.mtl'),[
+  'newmtl a','Kd 1 1 1','map_Kd c.png','bump n.png','Ke spectral glow.spd','Pr 0.4','Pm nope',
+  'newmtl b','map_Kd c.png','norm -bm 0.5 n.png','map_Bump second.png',
+  'newmtl c','map_Kd c.png','map_Bump -o 0.5 0.5 n.png','map_bump n.jpg',''].join('\n'));
+ await writeFile(join(bundle,'c.png'),png(1));await writeFile(join(bundle,'n.png'),png(2));await writeFile(join(bundle,'second.png'),png(3));await writeFile(join(bundle,'n.jpg'),Buffer.from([0xff,0xd8]));
+ const outputs=await exportMeshBundle(join(bundle,'mesh.obj'),1000,out);
+ assert.equal(await readFile(join(out,'mesh.mtl'),'utf8'),[
+  'newmtl a','Kd 1 1 1','map_Kd mesh_basecolor_0.png','bump mesh_normal_0.png','Pr 0.4',
+  'newmtl b','map_Kd mesh_basecolor_0.png','bump mesh_normal_1.png',
+  'newmtl c','map_Kd mesh_basecolor_0.png',''].join('\n'));
+ assert.deepEqual(Object.keys(outputs).filter(n=>n.endsWith('.png')).sort(),['mesh_basecolor_0.png','mesh_normal_0.png','mesh_normal_1.png']);
+ assert.deepEqual(await readFile(join(out,'mesh_normal_1.png')),png(3),'the later normal map of b wins');
+ assert.ok(await publisherCheck(out,outputs));
+});
+
+test('within a material the last statement wins, and an overridden image is not shipped',async t=>{
+ const root=await dir(t),bundle=join(root,'b'),out=join(root,'out');await mkdir(bundle);
+ await writeFile(join(bundle,'mesh.obj'),'mtllib m.mtl\nv 0 0 0\nv 1 0 0\nv 0 1 0\nvt 0 0\nusemtl a\nf 1/1 2/1 3/1\n');
+ await writeFile(join(bundle,'m.mtl'),'newmtl a\nKd 1 0 0\nmap_Kd red.png\nKd 0 0 1\nmap_Kd blue.jpg\nmap_Kd blue.png\n');
+ await writeFile(join(bundle,'red.png'),png(1));await writeFile(join(bundle,'blue.png'),png(2));await writeFile(join(bundle,'blue.jpg'),Buffer.from([0xff,0xd8]));
+ const outputs=await exportMeshBundle(join(bundle,'mesh.obj'),1000,out);
+ assert.equal(await readFile(join(out,'mesh.mtl'),'utf8'),'newmtl a\nKd 0 0 1\nmap_Kd mesh_basecolor_0.png\n');
+ assert.deepEqual(await readFile(join(out,'mesh_basecolor_0.png')),png(2));
+ assert.deepEqual(Object.keys(outputs).filter(n=>n.endsWith('.png')),['mesh_basecolor_0.png']);
 });

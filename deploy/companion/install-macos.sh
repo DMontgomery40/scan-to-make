@@ -45,13 +45,13 @@ app=$(mktemp -d "$state/releases/install-XXXXXXXX")
 # Install the committed snapshot only, never local credentials, captures or node_modules.
 git -C "$source_root" archive HEAD packages/contracts services/project services/printer-handoff services/companion \
   tools/capture-mesh-convert tools/capture-pipeline tools/capture-fit-eval \
-  tools/scan-repair tools/scan-correct deploy/companion | tar -xf - -C "$app"
+  tools/scan-repair tools/scan-correct tools/ai-tweak-judge deploy/companion | tar -xf - -C "$app"
 git -C "$source_root" rev-parse HEAD > "$app/REVISION"
 for package in packages/contracts services/project services/printer-handoff services/companion; do npm ci --prefix "$app/$package"; done
 npm run build --prefix "$app/services/companion"
 for package in packages/contracts services/project services/printer-handoff services/companion; do npm prune --omit=dev --prefix "$app/$package"; done
 "$python" -m venv "$app/.venv"
-"$app/.venv/bin/pip" install -r "$app/tools/capture-mesh-convert/requirements.txt" -r "$app/tools/scan-correct/requirements.txt"
+"$app/.venv/bin/pip" install -r "$app/tools/capture-mesh-convert/requirements.txt" -r "$app/tools/scan-correct/requirements.txt" -r "$app/tools/ai-tweak-judge/requirements.txt"
 npm install --global --prefix "$app/printers/bambu" bambu-printer-mcp@1.1.42
 npm install --global --prefix "$app/printers/generic" mcp-3d-printer-server@1.2.20
 blender=${BLENDER:-/Applications/Blender.app/Contents/MacOS/Blender}
