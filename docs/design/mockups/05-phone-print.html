@@ -1,0 +1,566 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Scan to Make · iPhone · Print</title>
+<style>
+/* Scan to Make design kit v1 (2026-10-31). Inline this block into every mockup. */
+:root{
+  --paper:#F4F1EB; --card:#FFFFFF; --card-2:#FAF8F4; --ink:#1B1D1B; --ink-2:#5D615C; --ink-3:#646862;
+  --line:rgba(27,29,27,.09); --line-2:rgba(27,29,27,.14);
+  --clay:#C4512B; --clay-press:#A8421F; --clay-soft:#F7E5DB; --clay-ink:#8A3519;
+  --stage:#191E1C; --stage-2:#232A27; --stage-ink:#E9EEE6; --stage-ink-2:#9AA59D;
+  --ok:#2E7A55; --ok-soft:#E1EFE6; --amber:#A4650C; --amber-soft:#F6EBD4; --red:#B3261E; --red-soft:#F8E1DE;
+  --glass:rgba(255,255,255,.72); --glass-line:rgba(255,255,255,.6);
+  --r-card:22px; --r-btn:999px; --r-sheet:34px;
+  --shadow-1:0 1px 2px rgba(20,22,20,.05),0 4px 14px rgba(20,22,20,.06);
+  --shadow-2:0 2px 6px rgba(20,22,20,.08),0 18px 40px rgba(20,22,20,.14);
+  --font:-apple-system,BlinkMacSystemFont,"SF Pro Text","SF Pro Display","Helvetica Neue",Inter,system-ui,sans-serif;
+  --mono:"SF Mono",ui-monospace,Menlo,monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:#E7E3DB;font-family:var(--font);color:var(--ink);-webkit-font-smoothing:antialiased}
+body{min-height:100vh;padding:48px 32px 64px}
+.page-head{max-width:1100px;margin:0 0 28px;display:flex;align-items:flex-end;justify-content:space-between;gap:24px}
+.page-head h1{font-size:28px;letter-spacing:-.6px;font-weight:700}
+.page-head p{color:var(--ink-2);font-size:15px;max-width:640px;line-height:1.45;margin-top:6px}
+.page-head .tag{font:600 11px/1 var(--font);letter-spacing:1.4px;text-transform:uppercase;color:var(--clay)}
+.row{display:flex;gap:44px;justify-content:flex-start;align-items:flex-start;flex-wrap:wrap;margin:0}
+.caption{max-width:402px;margin-top:16px;font-size:13px;line-height:1.5;color:var(--ink-2)}
+.caption b{color:var(--ink)}
+
+/* ---------- iPhone frame (iPhone 18 Pro, 402x874 pt) ---------- */
+.phone{width:426px;height:898px;border-radius:68px;background:#0D0E0D;padding:12px;box-shadow:0 0 0 2px #3a3d3a inset,0 30px 60px rgba(0,0,0,.25),0 8px 18px rgba(0,0,0,.18);position:relative;flex:none}
+.screen{width:402px;height:874px;border-radius:56px;overflow:hidden;position:relative;background:var(--paper);display:flex;flex-direction:column}
+.island{position:absolute;top:11px;left:50%;transform:translateX(-50%);width:124px;height:36px;border-radius:20px;background:#000;z-index:50}
+.status{height:54px;flex:none;display:flex;align-items:center;justify-content:space-between;padding:6px 34px 0 46px;font:600 17px/1 var(--font);z-index:40;position:relative}
+.status .icons{display:flex;gap:7px;align-items:center}
+.status.dark{color:#fff}
+.home-ind{position:absolute;bottom:8px;left:50%;transform:translateX(-50%);width:140px;height:5px;border-radius:3px;background:#111;z-index:60}
+.home-ind.light{background:#fff}
+.content{flex:1;overflow:hidden;padding:0 20px;position:relative}
+
+/* nav */
+.nav{display:flex;align-items:center;justify-content:space-between;padding:6px 16px 4px;height:48px}
+.nav .circle-btn{width:40px;height:40px;border-radius:20px;background:var(--glass);border:1px solid var(--line);display:grid;place-items:center;backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);box-shadow:var(--shadow-1)}
+.large-title{font:700 34px/1.12 var(--font);letter-spacing:-.9px;padding:4px 20px 2px}
+.subtitle{font-size:15px;color:var(--ink-2);padding:0 20px;line-height:1.4}
+
+/* type */
+.t-title2{font:700 22px/1.2 var(--font);letter-spacing:-.4px}
+.t-headline{font:600 17px/1.3 var(--font);letter-spacing:-.2px}
+.t-body{font:400 17px/1.4 var(--font);letter-spacing:-.2px}
+.t-sub{font:400 15px/1.4 var(--font);color:var(--ink-2)}
+.t-foot{font:400 13px/1.38 var(--font);color:var(--ink-2)}
+.t-cap{font:600 11px/1 var(--font);letter-spacing:1.2px;text-transform:uppercase;color:var(--ink-3)}
+.num{font-variant-numeric:tabular-nums}
+
+/* cards, lists */
+.card{background:var(--card);border-radius:var(--r-card);box-shadow:var(--shadow-1)}
+.list{background:var(--card);border-radius:18px;overflow:hidden;box-shadow:var(--shadow-1)}
+.list .item{display:flex;align-items:center;gap:12px;padding:13px 16px;min-height:52px;border-bottom:1px solid var(--line)}
+.list .item:last-child{border-bottom:none}
+.chev{color:var(--ink-3);font-size:18px;margin-left:auto}
+
+/* buttons */
+.btn{display:flex;align-items:center;justify-content:center;gap:8px;height:54px;border-radius:var(--r-btn);font:600 17px/1 var(--font);letter-spacing:-.2px;border:none;width:100%}
+.btn.primary{background:var(--clay);color:#fff;box-shadow:0 6px 16px rgba(196,81,43,.28)}
+.btn.secondary{background:var(--card);color:var(--ink);box-shadow:var(--shadow-1);border:1px solid var(--line)}
+.btn.tinted{background:var(--clay-soft);color:var(--clay-ink)}
+.btn.plain{background:transparent;color:var(--clay);height:44px}
+.btn.dark{background:var(--ink);color:#fff}
+.btn.sm{height:36px;font-size:15px;width:auto;padding:0 16px}
+
+/* chips */
+.chip{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 10px 0 9px;border-radius:13px;font:600 12px/1 var(--font);letter-spacing:-.1px;white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis;align-self:flex-start}
+.chip svg{flex:none}
+.chip.ok{background:var(--ok-soft);color:var(--ok)}
+.chip.work{background:var(--amber-soft);color:var(--amber)}
+.chip.clay{background:var(--clay-soft);color:var(--clay-ink)}
+.chip.grey{background:#EEEBE5;color:var(--ink-2)}
+.chip.dark{background:rgba(255,255,255,.12);color:var(--stage-ink)}
+.dot{width:7px;height:7px;min-width:7px;border-radius:50%;background:currentColor;display:inline-block;flex:none}
+.dot.pulse{outline:3px solid rgba(0,0,0,.06);outline-offset:0}
+
+/* 3D stage */
+.stage{background:radial-gradient(120% 90% at 50% 30%,#2C3531 0%,#1A1F1D 60%,#141816 100%);color:var(--stage-ink);position:relative;overflow:hidden}
+.stage .floor{position:absolute;left:-10%;right:-10%;bottom:-30%;height:70%;background:repeating-linear-gradient(90deg,rgba(255,255,255,.05) 0 1px,transparent 1px 28px),repeating-linear-gradient(0deg,rgba(255,255,255,.05) 0 1px,transparent 1px 28px);transform:perspective(380px) rotateX(62deg);transform-origin:50% 0;mask-image:linear-gradient(to bottom,rgba(0,0,0,.9),transparent)}
+
+/* tab bar / bottom glass */
+.glassbar{position:absolute;left:12px;right:12px;bottom:26px;height:64px;border-radius:32px;background:var(--glass);backdrop-filter:blur(24px) saturate(1.4);-webkit-backdrop-filter:blur(24px) saturate(1.4);border:1px solid rgba(255,255,255,.7);box-shadow:var(--shadow-2);display:flex;align-items:center;padding:0 8px;gap:8px;z-index:30}
+
+/* sheet */
+.scrim{position:absolute;inset:0;background:rgba(10,12,10,.32);z-index:20}
+.sheet{position:absolute;left:0;right:0;bottom:0;background:var(--paper);border-radius:var(--r-sheet) var(--r-sheet) 0 0;z-index:25;padding:10px 20px 40px;box-shadow:0 -10px 40px rgba(0,0,0,.18)}
+.grabber{width:38px;height:5px;border-radius:3px;background:rgba(0,0,0,.18);margin:0 auto 14px}
+
+/* ---------- Mac ---------- */
+.desk{width:1280px;height:800px;border-radius:14px;overflow:hidden;position:relative;background:linear-gradient(160deg,#6F7F79 0%,#A89A86 45%,#D8B79A 100%);box-shadow:0 30px 70px rgba(0,0,0,.28);margin:0}
+.menubar{height:30px;background:rgba(246,244,240,.55);backdrop-filter:blur(30px) saturate(1.6);-webkit-backdrop-filter:blur(30px) saturate(1.6);display:flex;align-items:center;justify-content:space-between;padding:0 14px;font:500 13.5px/1 var(--font);color:#1b1d1b}
+.menubar .left,.menubar .right{display:flex;gap:18px;align-items:center}
+.menubar .app{font-weight:700}
+.mb-icon{width:26px;height:22px;border-radius:5px;display:grid;place-items:center}
+.mb-icon.active{background:rgba(0,0,0,.14)}
+.popover{position:absolute;top:38px;width:372px;border-radius:16px;background:rgba(250,249,246,.86);backdrop-filter:blur(40px) saturate(1.8);-webkit-backdrop-filter:blur(40px) saturate(1.8);box-shadow:0 0 0 .5px rgba(0,0,0,.18),0 22px 60px rgba(0,0,0,.28);overflow:hidden;font-size:13px}
+.mac-window{position:absolute;border-radius:12px;background:#F7F5F1;box-shadow:0 0 0 .5px rgba(0,0,0,.25),0 30px 80px rgba(0,0,0,.35);overflow:hidden}
+.traffic{display:flex;gap:8px;padding:14px 16px}
+.traffic i{width:12px;height:12px;border-radius:6px;display:block}
+.traffic i:nth-child(1){background:#FF5F57}.traffic i:nth-child(2){background:#FEBC2E}.traffic i:nth-child(3){background:#28C840}
+.mac-btn{height:30px;padding:0 14px;border-radius:8px;font:500 13px/30px var(--font);border:none;display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+.mac-btn.primary{background:var(--clay);color:#fff;box-shadow:0 1px 2px rgba(0,0,0,.15)}
+.mac-btn.secondary{background:#fff;color:var(--ink);box-shadow:0 0 0 .5px rgba(0,0,0,.18),0 1px 2px rgba(0,0,0,.06)}
+.mac-btn.lg{height:38px;line-height:38px;padding:0 20px;font-size:14px;border-radius:10px}
+
+.row{max-width:none}
+.ic{width:22px;height:22px;display:inline-block;vertical-align:middle}
+.glass-dark{background:rgba(20,22,20,.42);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border:1px solid rgba(255,255,255,.14);color:#fff}
+.top-ctl{position:absolute;top:58px;left:16px;right:16px;display:flex;justify-content:space-between;align-items:center;z-index:10}
+.x{width:40px;height:40px;border-radius:20px;display:grid;place-items:center;font:500 20px/1 var(--font)}
+.pill-dark{height:36px;border-radius:18px;padding:0 14px;display:flex;align-items:center;gap:8px;font:600 14px/1 var(--font)}
+.sheet-light{position:absolute;left:0;right:0;bottom:0;background:var(--paper);border-radius:34px 34px 0 0;padding:12px 20px 40px;z-index:20}
+.prog{height:8px;border-radius:4px;background:#E6E1D8;overflow:hidden}
+.prog i{display:block;height:100%;background:var(--clay);border-radius:4px}
+
+/* camera photo */
+.p5-photo{position:relative;border-radius:24px;overflow:hidden;background:#111;box-shadow:var(--shadow-2)}
+.p5-photo svg.scene{position:absolute;inset:0;width:100%;height:100%;display:block}
+.p5-stamp{position:absolute;top:12px;left:12px;height:30px;border-radius:15px;padding:0 12px 0 10px;display:flex;align-items:center;gap:7px;font:600 13px/1 var(--font);z-index:3}
+.p5-stamp svg{width:16px;height:16px}
+.p5-refresh{position:absolute;right:12px;bottom:12px;height:30px;border-radius:15px;padding:0 12px 0 10px;display:flex;align-items:center;gap:6px;font:600 13px/1 var(--font);z-index:3}
+.p5-refresh svg{width:15px;height:15px}
+
+/* phone 1: print sheet */
+.p5-behind{position:absolute;left:0;right:0;top:0;height:420px}
+.p5-behind svg{position:absolute;left:50%;top:150px;width:230px;height:230px;transform:translateX(-50%);z-index:1}
+.p5-sheet{top:84px;padding:10px 20px 36px;display:flex;flex-direction:column}
+.p5-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:14px}
+.p5-head .t-cap{color:var(--clay);margin-bottom:6px}
+.p5-close{width:34px;height:34px;border-radius:17px;background:#E9E5DE;display:grid;place-items:center;color:var(--ink-2);font:600 15px/1 var(--font);flex:none}
+.p5-preview{height:190px;border-radius:22px;box-shadow:var(--shadow-1)}
+.p5-preview svg{position:absolute;inset:0;width:100%;height:100%}
+.p5-rows{margin-top:14px}
+.p5-rows .item{align-items:center;padding:10px 16px;min-height:56px}
+.p5-ico{width:30px;height:30px;border-radius:9px;background:#F1EEE8;color:var(--ink-2);display:grid;place-items:center;flex:none}
+.p5-ico svg{width:18px;height:18px}
+.p5-kv{display:flex;flex-direction:column;gap:3px;min-width:0;flex:1}
+.p5-k{font:400 13px/1.2 var(--font);color:var(--ink-3)}
+.p5-v{font:600 16px/1.25 var(--font);letter-spacing:-.2px;display:flex;align-items:center;gap:7px;white-space:nowrap}
+.p5-v .dot{color:#2FA36B;width:8px;height:8px;min-width:8px;box-shadow:0 0 0 3px rgba(47,163,107,.16)}
+.p5-colour{flex-direction:column;align-items:stretch!important;gap:10px}
+.p5-colour .top{display:flex;align-items:center;gap:12px}
+.p5-slots{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.p5-slot{position:relative;border-radius:14px;background:var(--card-2);border:1px solid var(--line-2);padding:9px 10px 9px;display:flex;flex-direction:column;gap:5px}
+.p5-slot.on{background:#FCF1EB;border:2px solid var(--clay);padding:8px 9px 8px}
+.p5-sw{width:18px;height:18px;border-radius:9px;box-shadow:inset 0 -3px 5px rgba(0,0,0,.18),inset 0 2px 3px rgba(255,255,255,.35),0 0 0 1px rgba(0,0,0,.08)}
+.p5-slot .n{font:600 13.5px/1.15 var(--font);letter-spacing:-.2px;white-space:nowrap}
+.p5-slot .s{font:500 12px/1 var(--font);color:var(--ink-3)}
+.p5-slot .tick{position:absolute;top:8px;right:8px;width:18px;height:18px;border-radius:9px;background:var(--clay);color:#fff;display:grid;place-items:center}
+.p5-slot .tick svg{width:12px;height:12px}
+.p5-change{color:var(--clay);font:600 14px/1 var(--font)}
+.p5-k.split{display:flex;justify-content:space-between;align-items:center}
+.p5-note{text-align:center;margin-top:10px;padding:0 6px;text-wrap:balance}
+
+/* phone 2: confirmation */
+.p5-conf{padding:0 20px;display:flex;flex-direction:column;flex:1;padding-bottom:30px}
+.p5-conf .large-title{padding:10px 0 16px}
+.p5-checks{margin-top:16px}
+.p5-checks .item{gap:11px;min-height:52px;padding:12px 14px}
+.p5-cb{width:26px;height:26px;border-radius:13px;display:grid;place-items:center;flex:none}
+.p5-cb svg{width:15px;height:15px}
+.p5-cb.ok{background:var(--ok-soft);color:var(--ok)}
+.p5-cb.look{background:var(--clay-soft);color:var(--clay-ink)}
+.p5-checks .txt{font:500 15px/1.3 var(--font);letter-spacing:-.3px;white-space:nowrap}
+.p5-wait{display:flex;gap:10px;align-items:flex-start;justify-content:center;text-align:left;margin-top:8px;padding:0 8px}
+.p5-ring{width:18px;height:18px;flex:none;margin-top:1px}
+
+/* phone 3: printing */
+.p5-live-cam{position:absolute;left:0;right:0;top:0;height:600px;overflow:hidden}
+.p5-live-cam svg{position:absolute;inset:0;width:100%;height:100%}
+.p5-rec{color:#FF6B5E}
+.p5-live .hdr{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.p5-big{font:700 72px/1 var(--font);letter-spacing:-3px;margin:14px 0 6px}
+.p5-big small{font-size:34px;letter-spacing:-1px;margin-left:2px}
+.p5-stop{background:transparent;border:2px solid var(--red);color:var(--red);margin-top:20px}
+.p5-stop svg{width:18px;height:18px}
+
+/* phone 4: done */
+.p5-done{padding:0 20px 30px;display:flex;flex-direction:column;flex:1}
+.p5-done .large-title{padding:8px 0 6px}
+.p5-badge{display:inline-flex;align-items:center;gap:6px}
+.p5-rate{margin-top:auto;padding:16px 16px 16px}
+.p5-rate .t-headline{text-align:center;margin-bottom:14px}
+.p5-thumbs{display:flex;gap:12px}
+.p5-thumbs .btn{height:64px;background:var(--card-2);border:1px solid var(--line-2);box-shadow:none;flex:1}
+.emo{font-family:"Apple Color Emoji","Noto Color Emoji",sans-serif;font-size:30px;line-height:1}
+</style></head>
+<body>
+<!-- Shared line icons (SF Symbols-like). Use: <svg class="ic"><use href="#i-scan"/></svg> -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-scan" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2"/><path d="M12 7.5l4 2.3v4.4l-4 2.3-4-2.3V9.8z"/><path d="M8 9.8l4 2.3 4-2.3M12 12.1v4.4"/></symbol>
+    <symbol id="i-printer" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="3.5" width="17" height="17" rx="2.5"/><path d="M3.5 8.5h17M8 13h8M10 13v4h4v-4"/></symbol>
+    <symbol id="i-mac" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M9 20h6M12 16v4"/></symbol>
+    <symbol id="i-gear" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></symbol>
+    <symbol id="i-camera" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l1.5-2.5h7L17 8h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="13" r="3.6"/></symbol>
+    <symbol id="i-ruler" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 16.5l13-13 4 4-13 13z"/><path d="M7 13l2 2M10 10l1.5 1.5M13 7l2 2"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></symbol>
+    <symbol id="i-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></symbol>
+    <symbol id="i-back" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></symbol>
+    <symbol id="i-more" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.9"/><circle cx="12" cy="12" r="1.9"/><circle cx="19" cy="12" r="1.9"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-sparkle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/></symbol>
+    <symbol id="i-wifi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2.5 9a14 14 0 0 1 19 0M5.5 12.5a9.5 9.5 0 0 1 13 0M8.6 16a5 5 0 0 1 6.8 0"/><circle cx="12" cy="19.2" r="1.2" fill="currentColor"/></symbol>
+    <symbol id="i-lock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></symbol>
+    <symbol id="i-qr" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"><rect x="3.5" y="3.5" width="6.5" height="6.5" rx="1"/><rect x="14" y="3.5" width="6.5" height="6.5" rx="1"/><rect x="3.5" y="14" width="6.5" height="6.5" rx="1"/><path d="M14 14h3v3h-3zM17.5 17.5h3v3h-3z"/></symbol>
+    <symbol id="i-blender" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="14" cy="13.5" r="6"/><circle cx="14" cy="13.5" r="2.2"/><path d="M3 9.5h8M6 6h7"/></symbol>
+    <symbol id="i-layers" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"><path d="M12 3.5l8.5 4.5-8.5 4.5L3.5 8z"/><path d="M3.5 12.5L12 17l8.5-4.5M3.5 16.5L12 21l8.5-4.5"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"><path d="M3.5 6.5a1 1 0 0 1 1-1h5l2 2.5h8a1 1 0 0 1 1 1v9.5a1 1 0 0 1-1 1h-15a1 1 0 0 1-1-1z"/></symbol>
+    <symbol id="i-warn" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4l9 16H3z"/><path d="M12 10v4.5M12 17.5v.2"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.5v13l11-6.5z"/></symbol>
+    <symbol id="i-stop" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></symbol>
+    <symbol id="i-pause" viewBox="0 0 24 24" fill="currentColor"><rect x="6.5" y="5.5" width="4" height="13" rx="1.2"/><rect x="13.5" y="5.5" width="4" height="13" rx="1.2"/></symbol>
+    <symbol id="i-key" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="15" r="4"/><path d="M11 12l8.5-8.5M16 7l2.5 2.5M14 9l2 2"/></symbol>
+    <symbol id="i-globe" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.6 2.6 2.6 14.4 0 17M12 3.5c-2.6 2.6-2.6 14.4 0 17"/></symbol>
+    <symbol id="i-cube" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M4 7.5l8 4.5 8-4.5M12 12v9"/></symbol>
+    <symbol id="i-battery" viewBox="0 0 28 13"><rect x=".5" y=".5" width="24" height="12" rx="3.5" fill="none" stroke="currentColor" opacity=".4"/><rect x="2.5" y="2.5" width="18" height="8" rx="2" fill="currentColor"/><path d="M26 4.5v4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" opacity=".45"/></symbol>
+    <symbol id="i-signal" viewBox="0 0 18 12" fill="currentColor"><rect x="0" y="8" width="3" height="4" rx="1"/><rect x="5" y="5.5" width="3" height="6.5" rx="1"/><rect x="10" y="3" width="3" height="9" rx="1"/><rect x="15" y="0" width="3" height="12" rx="1"/></symbol>
+    <symbol id="logo" viewBox="0 0 24 24" fill="none"><path d="M12 2.8l8 4.6v9.2L12 21.2l-8-4.6V7.4z" fill="#C4512B"/><path d="M4 7.4l8 4.6 8-4.6M12 12v9.2" stroke="#fff" stroke-width="1.5" stroke-linejoin="round"/><path d="M7.5 5.4l8 4.6" stroke="#fff" stroke-opacity=".55" stroke-width="1.1"/></symbol>
+    <symbol id="logo-mono" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M12 3l8 4.6v8.8L12 21l-8-4.6V7.6z"/><path d="M4 7.6l8 4.6 8-4.6M12 12.2V21"/></symbol>
+  </defs>
+</svg>
+<!-- Shared object art: inline these <symbol>s once per file inside a hidden <svg>, then <svg viewBox="0 0 200 200"><use href="#obj-airpods"/></svg> -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <pattern id="mesh" width="14" height="12" patternUnits="userSpaceOnUse" patternTransform="rotate(8)">
+      <path d="M0 12 L7 0 L14 12 M0 0 H14" fill="none" stroke="rgba(255,255,255,.10)" stroke-width=".6"/>
+    </pattern>
+    <radialGradient id="shadow" cx="50%" cy="50%" r="50%"><stop offset="0" stop-color="#000" stop-opacity=".55"/><stop offset="1" stop-color="#000" stop-opacity="0"/></radialGradient>
+    <linearGradient id="white-body" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FBFBF8"/><stop offset=".55" stop-color="#E4E5E0"/><stop offset="1" stop-color="#B9BCB5"/></linearGradient>
+    <linearGradient id="white-lid" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#E7E8E3"/></linearGradient>
+    <linearGradient id="clay-body" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#E9805C"/><stop offset=".6" stop-color="#C4512B"/><stop offset="1" stop-color="#8E3418"/></linearGradient>
+    <linearGradient id="brass" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#F1D9A0"/><stop offset=".5" stop-color="#C9A25A"/><stop offset="1" stop-color="#7E6127"/></linearGradient>
+    <linearGradient id="slate" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#8FA3A8"/><stop offset=".6" stop-color="#5B6E74"/><stop offset="1" stop-color="#34454A"/></linearGradient>
+    <linearGradient id="sage" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#C9D8C0"/><stop offset=".6" stop-color="#93A98A"/><stop offset="1" stop-color="#5E7357"/></linearGradient>
+    <symbol id="obj-airpods" viewBox="0 0 200 200">
+      <ellipse cx="100" cy="158" rx="70" ry="12" fill="url(#shadow)"/>
+      <rect x="38" y="62" width="124" height="92" rx="34" fill="url(#white-body)"/>
+      <rect x="38" y="62" width="124" height="92" rx="34" fill="url(#mesh)"/>
+      <path d="M40 92 Q100 98 160 92" stroke="#A9ADA6" stroke-width="1.6" fill="none"/>
+      <rect x="38" y="62" width="124" height="32" rx="30" fill="url(#white-lid)" opacity=".85"/>
+      <circle cx="100" cy="122" r="3.2" fill="#9BA098"/>
+      <rect x="92" y="150" width="16" height="3" rx="1.5" fill="#8C9089"/>
+    </symbol>
+    <symbol id="obj-knob" viewBox="0 0 200 200">
+      <ellipse cx="100" cy="160" rx="54" ry="10" fill="url(#shadow)"/>
+      <path d="M86 156 L90 112 H110 L114 156 Z" fill="url(#brass)"/>
+      <ellipse cx="100" cy="156" rx="16" ry="5" fill="#7E6127"/>
+      <ellipse cx="100" cy="92" rx="52" ry="30" fill="url(#brass)"/>
+      <ellipse cx="100" cy="92" rx="52" ry="30" fill="url(#mesh)"/>
+      <ellipse cx="100" cy="82" rx="40" ry="16" fill="#F6E3B4" opacity=".55"/>
+    </symbol>
+    <symbol id="obj-mug" viewBox="0 0 200 200">
+      <ellipse cx="96" cy="162" rx="62" ry="11" fill="url(#shadow)"/>
+      <path d="M140 84 C176 84 176 136 140 134" stroke="#7E8F78" stroke-width="13" fill="none" stroke-linecap="round"/>
+      <path d="M48 62 H144 L138 150 Q96 166 54 150 Z" fill="url(#sage)"/>
+      <path d="M48 62 H144 L138 150 Q96 166 54 150 Z" fill="url(#mesh)"/>
+      <ellipse cx="96" cy="62" rx="48" ry="12" fill="#B4C6AB"/>
+      <ellipse cx="96" cy="63" rx="40" ry="8" fill="#4A5C45"/>
+    </symbol>
+    <symbol id="obj-mount" viewBox="0 0 200 200">
+      <ellipse cx="100" cy="160" rx="66" ry="10" fill="url(#shadow)"/>
+      <path d="M44 150 H156 V132 Q156 120 144 120 H56 Q44 120 44 132 Z" fill="url(#slate)"/>
+      <rect x="72" y="58" width="16" height="66" rx="5" fill="url(#slate)"/>
+      <rect x="92" y="58" width="16" height="66" rx="5" fill="url(#slate)"/>
+      <rect x="112" y="58" width="16" height="66" rx="5" fill="url(#slate)"/>
+      <circle cx="100" cy="78" r="9" fill="#283539"/>
+      <path d="M44 150 H156 V132 Q156 120 144 120 H56 Q44 120 44 132 Z" fill="url(#mesh)"/>
+    </symbol>
+    <symbol id="obj-clip" viewBox="0 0 200 200">
+      <ellipse cx="100" cy="160" rx="60" ry="10" fill="url(#shadow)"/>
+      <path d="M50 150 V90 Q50 56 84 56 H120 Q150 56 150 86 V100 H130 V88 Q130 76 118 76 H86 Q70 76 70 92 V150 Z" fill="url(#clay-body)"/>
+      <path d="M50 150 V90 Q50 56 84 56 H120 Q150 56 150 86 V100 H130 V88 Q130 76 118 76 H86 Q70 76 70 92 V150 Z" fill="url(#mesh)"/>
+    </symbol>
+  </defs>
+</svg>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <!-- extra icons -->
+    <symbol id="p5-clock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></symbol>
+    <symbol id="p5-drop" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="3"/><path d="M12 3.5v5M12 15.5v5"/></symbol>
+    <symbol id="p5-eye" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 12s3.5-6.5 9.5-6.5S21.5 12 21.5 12s-3.5 6.5-9.5 6.5S2.5 12 2.5 12z"/><circle cx="12" cy="12" r="2.8"/></symbol>
+
+    <symbol id="p5-refresh" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 1 1-8-8c2.24 0 4.38.9 5.99 2.44L20 8.4"/><path d="M20 3.6v4.8h-4.8"/></symbol>
+
+    <!-- materials -->
+    <filter id="p5-speck" x="0" y="0" width="100%" height="100%" color-interpolation-filters="sRGB">
+      <feTurbulence type="fractalNoise" baseFrequency="2.1" numOctaves="1" seed="4" result="n"/>
+      <feColorMatrix in="n" type="matrix" values="0 0 0 0 0.24  0 0 0 0 0.16  0 0 0 0 0.05  1.9 0 0 0 -0.92" result="d"/>
+      <feColorMatrix in="n" type="matrix" values="0 0 0 0 1  0 0 0 0 0.94  0 0 0 0 0.76  0 -1.9 0 0 0.78" result="l"/>
+      <feMerge><feMergeNode in="d"/><feMergeNode in="l"/></feMerge>
+    </filter>
+    <filter id="p5-grainf" x="0" y="0" width="100%" height="100%" color-interpolation-filters="sRGB">
+      <feTurbulence type="fractalNoise" baseFrequency=".95" numOctaves="1" seed="9"/>
+      <feColorMatrix type="matrix" values="0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 1.6 -.55"/>
+    </filter>
+    <linearGradient id="p5-gold" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#7A6136"/><stop offset=".45" stop-color="#A3844E"/><stop offset="1" stop-color="#BB9A60"/></linearGradient>
+    <linearGradient id="p5-gold-top" x1="0" y1="0" x2=".35" y2="1"><stop offset="0" stop-color="#D7B472"/><stop offset=".55" stop-color="#B38F4E"/><stop offset="1" stop-color="#94733A"/></linearGradient>
+    <linearGradient id="p5-plate-shade" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#000" stop-opacity=".42"/><stop offset=".5" stop-color="#000" stop-opacity=".08"/><stop offset="1" stop-color="#000" stop-opacity="0"/></linearGradient>
+    <linearGradient id="p5-wall" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3A3D3B"/><stop offset="1" stop-color="#1C1E1D"/></linearGradient>
+    <linearGradient id="p5-side-l" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#0E0F0F"/><stop offset="1" stop-color="#202322"/></linearGradient>
+    <linearGradient id="p5-side-r" x1="1" y1="0" x2="0" y2="0"><stop offset="0" stop-color="#0E0F0F"/><stop offset="1" stop-color="#202322"/></linearGradient>
+    <radialGradient id="p5-led" cx=".5" cy="0" r=".75"><stop offset="0" stop-color="#FFF1DA" stop-opacity=".42"/><stop offset=".6" stop-color="#FFF1DA" stop-opacity=".08"/><stop offset="1" stop-color="#FFF1DA" stop-opacity="0"/></radialGradient>
+    <radialGradient id="p5-vig" cx=".5" cy=".5" r=".72"><stop offset=".5" stop-color="#000" stop-opacity="0"/><stop offset=".82" stop-color="#000" stop-opacity=".32"/><stop offset="1" stop-color="#000" stop-opacity=".82"/></radialGradient>
+    <linearGradient id="p5-g-top" x1="0" y1="0" x2=".45" y2="1"><stop offset="0" stop-color="#C3C7C4"/><stop offset=".6" stop-color="#A2A6A3"/><stop offset="1" stop-color="#8A8E8B"/></linearGradient>
+    <linearGradient id="p5-g-side" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#7B7F7C"/><stop offset="1" stop-color="#4F5351"/></linearGradient>
+    <linearGradient id="p5-head-g" x1="0" y1="0" x2=".3" y2="1"><stop offset="0" stop-color="#4A4E4D"/><stop offset="1" stop-color="#1A1C1C"/></linearGradient>
+    <radialGradient id="p5-hot" cx=".5" cy=".5" r=".5"><stop offset="0" stop-color="#FFB46E" stop-opacity=".55"/><stop offset="1" stop-color="#FFB46E" stop-opacity="0"/></radialGradient>
+    <pattern id="p5-layers" width="6" height="1.5" patternUnits="userSpaceOnUse"><rect width="6" height=".55" fill="rgba(0,0,0,.2)"/></pattern>
+    <pattern id="p5-infill" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><path d="M0 0V5M0 0H5" stroke="rgba(214,218,215,.55)" stroke-width=".8" fill="none"/></pattern>
+    <clipPath id="p5-clipA"><path d="M74 156 Q200 151 326 156 L440 345 Q200 352 -40 345 Z"/></clipPath>
+    <clipPath id="p5-clipB"><path d="M66 24 Q180 21 294 24 L352 178 Q180 182 8 178 Z"/></clipPath>
+
+    <!-- the AirPods case laid flat, Grey PLA: finished and half printed -->
+    <symbol id="p5-case-full" viewBox="0 0 120 80">
+      <ellipse cx="60" cy="62" rx="62" ry="15" fill="url(#shadow)"/>
+      <rect x="6" y="24" width="108" height="40" rx="26" ry="16" fill="url(#p5-g-side)"/>
+      <rect x="6" y="24" width="108" height="40" rx="26" ry="16" fill="url(#p5-layers)"/>
+      <rect x="6" y="8" width="108" height="40" rx="26" ry="16" fill="url(#p5-g-top)"/>
+      <path d="M12 20.5 Q60 25 108 20.5" stroke="#767A77" stroke-width="1.1" fill="none"/>
+      <ellipse cx="44" cy="15" rx="28" ry="4.5" fill="#fff" opacity=".22"/>
+      <circle cx="60" cy="35" r="1.6" fill="#6C706D"/>
+    </symbol>
+    <symbol id="p5-case-half" viewBox="0 0 120 80">
+      <ellipse cx="60" cy="62" rx="60" ry="13" fill="url(#shadow)" opacity=".8"/>
+      <rect x="6" y="24" width="108" height="40" rx="26" ry="16" fill="url(#p5-g-side)"/>
+      <rect x="6" y="24" width="108" height="40" rx="26" ry="16" fill="url(#p5-layers)"/>
+      <rect x="6" y="13" width="108" height="40" rx="26" ry="16" fill="#686C69"/>
+      <rect x="6" y="13" width="108" height="40" rx="26" ry="16" fill="url(#p5-infill)" opacity=".55"/>
+      <rect x="8" y="15" width="104" height="36" rx="24" ry="14" fill="none" stroke="#B3B7B4" stroke-width="3.2"/>
+      <rect x="11.5" y="18.5" width="97" height="29" rx="21" ry="11" fill="none" stroke="#9A9E9B" stroke-width="1.6"/>
+    </symbol>
+
+    <!-- P1S toolhead -->
+    <symbol id="p5-head" viewBox="0 0 120 120">
+      <path d="M72 -2 C72 8 66 12 66 20" stroke="rgba(236,236,228,.55)" stroke-width="5" fill="none"/>
+      <rect x="20" y="18" width="80" height="64" rx="10" fill="url(#p5-head-g)"/>
+      <rect x="26" y="24" width="68" height="52" rx="7" fill="#262928" stroke="rgba(255,255,255,.06)"/>
+      <path d="M24 19.5 H96" stroke="rgba(255,255,255,.22)" stroke-width="1.2"/>
+      <circle cx="48" cy="50" r="17" fill="#181A1A" stroke="#3B3F3E" stroke-width="1.5"/>
+      <circle cx="48" cy="50" r="12" fill="none" stroke="#303433" stroke-width="1.2"/>
+      <circle cx="48" cy="50" r="7" fill="none" stroke="#303433" stroke-width="1.2"/>
+      <circle cx="48" cy="50" r="3" fill="#454948"/>
+      <path d="M76 36 V64 M81 36 V64 M86 36 V64" stroke="#1A1C1C" stroke-width="2.4" stroke-linecap="round"/>
+      <path d="M34 82 H86 L80 94 H40 Z" fill="#121414"/>
+      <path d="M55 94 H65 L63 102 H57 Z" fill="#B8874A"/>
+      <path d="M58 102 H62 L60.6 106 H59.4 Z" fill="#8A5F2C"/>
+    </symbol>
+
+    <!-- P1S chamber with an empty textured plate, from the chamber camera -->
+    <symbol id="p5-chamber" viewBox="0 0 400 330" style="overflow:visible">
+      <rect width="400" height="330" fill="#151716"/>
+      <path d="M58 0 H342 V152 H58 Z" fill="url(#p5-wall)"/>
+      <path d="M130 0 V152 M200 0 V152 M270 0 V152" stroke="rgba(255,255,255,.035)" stroke-width="1.5"/>
+      <path d="M0 0 H58 V152 L0 252 Z" fill="url(#p5-side-l)"/>
+      <path d="M342 0 H400 V252 L342 152 Z" fill="url(#p5-side-r)"/>
+      <path d="M58 0 V152 M342 0 V152" stroke="rgba(255,255,255,.08)"/>
+      <ellipse cx="200" cy="-20" rx="280" ry="190" fill="url(#p5-led)"/>
+      <rect x="298" y="120" width="28" height="30" rx="3" fill="#0B0C0C"/>
+      <rect x="302" y="124" width="20" height="6" rx="2" fill="#2A2D2C"/>
+      <path d="M64 150 Q200 145 336 150 L452 345 L-52 345 Z" fill="#0A0B0B"/>
+      <path d="M74 156 Q200 151 326 156 L440 345 Q200 352 -40 345 Z" fill="url(#p5-gold)"/>
+      <g clip-path="url(#p5-clipA)"><rect x="-44" y="148" width="488" height="205" fill="#000" filter="url(#p5-speck)"/></g>
+      <path d="M74 156 Q200 151 326 156 L440 345 Q200 352 -40 345 Z" fill="url(#p5-plate-shade)"/>
+      <path d="M90 164 Q200 159.5 310 164 M90 164 L-12 340 M310 164 L412 340" stroke="rgba(52,34,8,.38)" stroke-width="1" fill="none"/>
+      <path d="M104 155 a9 5 0 0 0 18 0 Z M278 155 a9 5 0 0 0 18 0 Z" fill="#0A0B0B"/>
+      <ellipse cx="200" cy="200" rx="160" ry="28" fill="#FFF0D6" opacity=".09"/>
+    </symbol>
+    <symbol id="p5-lens" viewBox="0 0 400 330" preserveAspectRatio="none">
+      <rect width="400" height="330" fill="#000" filter="url(#p5-grainf)" opacity=".07"/>
+      <rect width="400" height="330" fill="url(#p5-vig)"/>
+    </symbol>
+
+    <!-- slicer-style plate preview, from above at an angle -->
+    <symbol id="p5-plate-view" viewBox="0 0 360 200">
+      <ellipse cx="180" cy="186" rx="190" ry="20" fill="url(#shadow)" opacity=".7"/>
+      <path d="M8 178 Q180 182 352 178 L350 186 Q180 190 10 186 Z" fill="#5E4720"/>
+      <path d="M160 182 H200 L199 192 H161 Z" fill="#5E4720"/>
+      <path d="M66 24 Q180 21 294 24 L352 178 Q180 182 8 178 Z" fill="url(#p5-gold-top)"/>
+      <g clip-path="url(#p5-clipB)"><rect x="4" y="18" width="352" height="168" fill="#000" filter="url(#p5-speck)"/></g>
+      <path d="M66 24 Q180 21 294 24 L352 178 Q180 182 8 178 Z" fill="url(#p5-plate-shade)" opacity=".7"/>
+      <path d="M78 31 Q180 28.5 282 31 L334 171 Q180 175 26 171 Z" stroke="rgba(60,40,10,.32)" stroke-width="1" fill="none"/>
+      <path d="M96 23.5 a9 4.5 0 0 0 18 0 Z M246 23.5 a9 4.5 0 0 0 18 0 Z" fill="#1A1E1C"/>
+      <use href="#p5-case-full" x="120" y="66" width="120" height="80"/>
+    </symbol>
+  </defs>
+</svg>
+
+<div class="page-head"><div><div class="tag">iPhone · Print</div><h1>Print: one sheet, one look at the bed, then watch it</h1>
+<p><b>Print</b> opens one sheet showing what your Mac got back: how the model sits on the plate, which printer, which colour is loaded, how long it takes and how much plastic it uses. Before anything moves, the printer’s own camera shows you the bed, and one button both answers the printer’s safety question and starts the print. Then you watch it from your phone and say how it came out.</p></div></div>
+<div class="row">
+
+<!-- 1: print sheet -->
+<div>
+<div class="phone"><div class="screen" style="background:#141816">
+  <div class="p5-behind stage"><div class="floor"></div><svg viewBox="0 0 200 200"><use href="#obj-airpods"/></svg></div>
+  <div class="island"></div>
+  <div class="status dark"><span class="num">10:16</span><span class="icons"><svg width="18" height="12" style="color:#fff"><use href="#i-signal"/></svg><svg class="ic" style="width:17px;height:17px;color:#fff"><use href="#i-wifi"/></svg><svg width="28" height="13" style="color:#fff"><use href="#i-battery"/></svg></span></div>
+  <div class="scrim"></div>
+  <div class="sheet p5-sheet">
+    <div class="grabber"></div>
+    <div class="p5-head">
+      <div><div class="t-cap">Print</div><div class="t-title2">AirPods Pro 2 case</div></div>
+      <div class="p5-close">✕</div>
+    </div>
+    <div class="p5-preview stage"><svg viewBox="0 0 360 200" preserveAspectRatio="xMidYMid meet"><use href="#p5-plate-view"/></svg></div>
+    <div class="list p5-rows">
+      <div class="item">
+        <div class="p5-ico"><svg><use href="#i-printer"/></svg></div>
+        <div class="p5-kv"><div class="p5-k">Printer</div><div class="p5-v"><span class="dot"></span>Workshop P1S · Ready</div></div>
+        <svg class="ic" style="width:16px;height:16px;color:var(--ink-3)"><use href="#i-chev"/></svg>
+      </div>
+      <div class="item p5-colour">
+        <div class="top"><div class="p5-ico"><svg><use href="#p5-drop"/></svg></div><div class="p5-k" style="font-size:13px">Colour</div></div>
+        <div class="p5-slots">
+          <div class="p5-slot on"><span class="p5-sw" style="background:#8E9290"></span><span class="n">Grey PLA</span><span class="s">Slot 3</span><span class="tick"><svg><use href="#i-check"/></svg></span></div>
+          <div class="p5-slot"><span class="p5-sw" style="background:#222423"></span><span class="n">Black PLA</span><span class="s">Slot 1</span></div>
+          <div class="p5-slot"><span class="p5-sw" style="background:#F3F2EE"></span><span class="n">White PLA</span><span class="s">Slot 2</span></div>
+        </div>
+      </div>
+      <div class="item">
+        <div class="p5-ico"><svg><use href="#p5-clock"/></svg></div>
+        <div class="p5-kv"><div class="p5-k">Time and material</div><div class="p5-v num">1 h 12 min · 18 g</div></div>
+      </div>
+      <div class="item">
+        <div class="p5-ico"><svg><use href="#i-ruler"/></svg></div>
+        <div class="p5-kv"><div class="p5-k split">Size<span class="p5-change">Change</span></div><div class="p5-v num">100% · 60.6 × 45.2 × 21.7 mm</div></div>
+      </div>
+    </div>
+    <div class="btn primary" style="margin-top:16px"><svg class="ic"><use href="#i-printer"/></svg>Print</div>
+    <div class="t-foot p5-note">Your Mac checks the bed, then prints it.</div>
+  </div>
+  <div class="home-ind"></div>
+</div></div>
+<p class="caption"><b>Print sheet.</b> Everything here is what your Mac got back: the model laid flat on the plate, the colours loaded in the printer, time, plastic and size. No route or slicer choices. While it’s preparing, the sheet shows “Getting it ready to print…”; with no AMS the colour row reads “External spool · PLA”.</p>
+</div>
+
+<!-- 2: confirmation -->
+<div>
+<div class="phone"><div class="screen">
+  <div class="island"></div>
+  <div class="status"><span class="num">10:17</span><span class="icons"><svg width="18" height="12"><use href="#i-signal"/></svg><svg class="ic" style="width:17px;height:17px"><use href="#i-wifi"/></svg><svg width="28" height="13"><use href="#i-battery"/></svg></span></div>
+  <div class="p5-conf">
+    <div class="large-title">Is the bed clear?</div>
+    <div class="p5-photo" style="height:384px">
+      <svg class="scene" viewBox="0 0 400 330" preserveAspectRatio="xMidYMid slice">
+        <use href="#p5-chamber" width="400" height="330"/>
+        <path d="M-10 60 Q200 51 410 60" stroke="#0B0C0C" stroke-width="6" fill="none"/>
+        <path d="M-10 58 Q200 49 410 58" stroke="rgba(255,255,255,.13)" stroke-width="1" fill="none"/>
+        <path d="M-10 73 Q200 64 410 73" stroke="#0B0C0C" stroke-width="6" fill="none"/>
+        <path d="M-10 71 Q200 62 410 71" stroke="rgba(255,255,255,.1)" stroke-width="1" fill="none"/>
+        <rect x="-6" y="48" width="36" height="34" rx="5" fill="#131414"/>
+        <rect x="370" y="48" width="36" height="34" rx="5" fill="#131414"/>
+        <use href="#p5-head" x="256" y="18" width="80" height="80"/>
+        <use href="#p5-lens" width="400" height="330"/>
+      </svg>
+      <div class="p5-stamp glass-dark"><svg><use href="#i-camera"/></svg><span class="num">Updated 3 s ago</span></div>
+      <div class="p5-refresh glass-dark"><svg><use href="#p5-refresh"/></svg>Refresh</div>
+    </div>
+    <div class="list p5-checks">
+      <div class="item"><span class="p5-cb ok"><svg><use href="#i-check"/></svg></span><span class="txt">Workshop P1S · 0.4 mm hardened nozzle</span></div>
+      <div class="item"><span class="p5-cb ok"><svg><use href="#i-check"/></svg></span><span class="txt">Grey PLA in slot 3</span></div>
+      <div class="item"><span class="p5-cb look"><svg><use href="#p5-eye"/></svg></span><span class="txt">Nothing left on the plate</span></div>
+    </div>
+    <div style="margin-top:auto">
+      <div class="btn primary">The bed is clear — Start print</div>
+      <div class="btn plain" style="margin-top:2px">Not now</div>
+      <div class="p5-wait t-foot">
+        <svg class="p5-ring" viewBox="0 0 20 20"><circle cx="10" cy="10" r="8" fill="none" stroke="#E2DDD4" stroke-width="2.4"/><circle cx="10" cy="10" r="8" fill="none" stroke="var(--clay)" stroke-width="2.4" stroke-linecap="round" stroke-dasharray="45.2 50.3" transform="rotate(-90 10 10)"/></svg>
+        <span><b style="display:block;color:var(--ink);font-weight:600">Waiting for you · 9 min left.</b> If you don't answer, nothing prints.</span>
+      </div>
+    </div>
+  </div>
+  <div class="home-ind"></div>
+</div></div>
+<p class="caption"><b>Is the bed clear?</b> The printer’s own safety question: a camera photo that keeps refreshing while this screen is open, then the printer’s own message, line by line. No fresh photo, no Start button; only a printer with no camera says “No camera on this printer. Check the bed yourself.” instead. The one button is the answer: no extra checkbox, no second approval. After an earlier print, a bold line comes first: “Take the last print and any bits off the plate first.”</p>
+</div>
+
+<!-- 3: printing -->
+<div>
+<div class="phone"><div class="screen" style="background:#000">
+  <div class="p5-live-cam">
+    <svg viewBox="44 -119 312 465" preserveAspectRatio="xMidYMax slice">
+      <defs><linearGradient id="p5-wall-up" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1E2120"/><stop offset="1" stop-color="#3A3D3B"/></linearGradient></defs>
+      <rect x="40" y="-125" width="320" height="480" fill="#151716"/>
+      <path d="M58 -120 H342 V2 H58 Z" fill="url(#p5-wall-up)"/>
+      <path d="M130 -120 V0 M200 -120 V0 M270 -120 V0" stroke="rgba(255,255,255,.035)" stroke-width="1.5"/>
+      <path d="M-10 -120 H58 V2 H-10 Z" fill="url(#p5-side-l)"/>
+      <path d="M342 -120 H410 V2 H342 Z" fill="url(#p5-side-r)"/>
+      <path d="M58 -120 V0 M342 -120 V0" stroke="rgba(255,255,255,.08)"/>
+      <use href="#p5-chamber" width="400" height="330"/>
+      <path d="M44 0 H356" stroke="rgba(0,0,0,.3)" stroke-width="1.2"/>
+      <path d="M58 1.3 H342" stroke="rgba(255,255,255,.045)" stroke-width="1.2"/>
+      <path d="M-10 185 Q200 176 410 185" stroke="#0B0C0C" stroke-width="6" fill="none"/>
+      <path d="M-10 183 Q200 174 410 183" stroke="rgba(255,255,255,.13)" stroke-width="1" fill="none"/>
+      <path d="M-10 198 Q200 189 410 198" stroke="#0B0C0C" stroke-width="6" fill="none"/>
+      <path d="M-10 196 Q200 187 410 196" stroke="rgba(255,255,255,.1)" stroke-width="1" fill="none"/>
+      <rect x="-6" y="173" width="36" height="34" rx="5" fill="#131414"/>
+      <rect x="370" y="173" width="36" height="34" rx="5" fill="#131414"/>
+      <use href="#p5-case-half" x="140" y="186" width="120" height="80"/>
+      <ellipse cx="222" cy="215" rx="15" ry="6.5" fill="url(#p5-hot)"/>
+      <use href="#p5-head" x="182" y="143" width="80" height="80"/>
+      <use href="#p5-lens" x="44" y="-119" width="312" height="465"/>
+    </svg>
+  </div>
+  <div class="island"></div>
+  <div class="status dark"><span class="num">10:47</span><span class="icons"><svg width="18" height="12" style="color:#fff"><use href="#i-signal"/></svg><svg class="ic" style="width:17px;height:17px;color:#fff"><use href="#i-wifi"/></svg><svg width="28" height="13" style="color:#fff"><use href="#i-battery"/></svg></span></div>
+  <div class="top-ctl"><div class="x glass-dark"><svg class="ic" style="width:20px;height:20px"><use href="#i-back"/></svg></div><div class="pill-dark glass-dark"><span class="dot p5-rec"></span>Live</div><div style="width:40px"></div></div>
+  <div class="sheet-light p5-live" style="padding-bottom:44px">
+    <div class="grabber"></div>
+    <div class="hdr"><div class="t-headline">AirPods Pro 2 case</div><span class="chip clay"><svg class="ic" style="width:13px;height:13px"><use href="#i-printer"/></svg>Printing</span></div>
+    <div class="p5-big num">42<small>%</small></div>
+    <div class="t-sub num" style="margin-bottom:14px">42 min left · layer 61 of 144</div>
+    <div class="prog"><i style="width:42%"></i></div>
+    <div class="btn p5-stop"><svg><use href="#i-stop"/></svg>Stop</div>
+  </div>
+  <div class="home-ind"></div>
+</div></div>
+<p class="caption"><b>Printing.</b> The camera refreshes every few seconds and the numbers come straight from the printer. Stop is always there and asks once: “Stop this print? The printer will stop and cool down.” On the Bambu Connect route this screen says “Finish on your Mac: press Print in Bambu Connect.” instead.</p>
+</div>
+
+<!-- 4: done -->
+<div>
+<div class="phone"><div class="screen">
+  <div class="island"></div>
+  <div class="status"><span class="num">11:29</span><span class="icons"><svg width="18" height="12"><use href="#i-signal"/></svg><svg class="ic" style="width:17px;height:17px"><use href="#i-wifi"/></svg><svg width="28" height="13"><use href="#i-battery"/></svg></span></div>
+  <div class="nav"><div class="circle-btn"><svg class="ic" style="width:20px;height:20px"><use href="#i-back"/></svg></div></div>
+  <div class="p5-done">
+    <div class="large-title">Done.<br>Take it off the bed.</div>
+    <div class="t-sub num" style="margin-bottom:16px">AirPods Pro 2 case · Grey PLA · 1 h 12 min</div>
+    <div class="p5-photo" style="height:440px">
+      <svg class="scene" viewBox="58 0 284 330" preserveAspectRatio="xMidYMid slice">
+        <use href="#p5-chamber" width="400" height="330"/>
+        <path d="M-10 60 Q200 51 410 60" stroke="#0B0C0C" stroke-width="6" fill="none"/>
+        <path d="M-10 58 Q200 49 410 58" stroke="rgba(255,255,255,.13)" stroke-width="1" fill="none"/>
+        <path d="M-10 73 Q200 64 410 73" stroke="#0B0C0C" stroke-width="6" fill="none"/>
+        <path d="M-10 71 Q200 62 410 71" stroke="rgba(255,255,255,.1)" stroke-width="1" fill="none"/>
+        <rect x="-6" y="48" width="36" height="34" rx="5" fill="#131414"/>
+        <rect x="370" y="48" width="36" height="34" rx="5" fill="#131414"/>
+        <use href="#p5-head" x="92" y="18" width="80" height="80"/>
+        <use href="#p5-case-full" x="140" y="186" width="120" height="80"/>
+        <use href="#p5-lens" x="58" y="0" width="284" height="330"/>
+      </svg>
+      <div class="p5-stamp glass-dark"><svg><use href="#i-camera"/></svg>Just now</div>
+    </div>
+    <div class="card p5-rate">
+      <div class="t-headline">How did it come out?</div>
+      <div class="p5-thumbs">
+        <div class="btn secondary"><span class="emo">👍</span></div>
+        <div class="btn secondary"><span class="emo">👎</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="home-ind"></div>
+</div></div>
+<p class="caption"><b>Done.</b> The last camera photo shows the part still on the plate, which is the cue to clear it before the next print. The thumbs answer is saved to the project’s Prints, so a bad result is easy to find later.</p>
+</div>
+
+</div>
+</body></html>

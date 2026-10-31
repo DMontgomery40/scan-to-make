@@ -1,0 +1,481 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Scan to Make · iPhone · Project and Size</title>
+<style>
+/* Scan to Make design kit v1 (2026-10-31). Inline this block into every mockup. */
+:root{
+  --paper:#F4F1EB; --card:#FFFFFF; --card-2:#FAF8F4; --ink:#1B1D1B; --ink-2:#5D615C; --ink-3:#646862;
+  --line:rgba(27,29,27,.09); --line-2:rgba(27,29,27,.14);
+  --clay:#C4512B; --clay-press:#A8421F; --clay-soft:#F7E5DB; --clay-ink:#8A3519;
+  --stage:#191E1C; --stage-2:#232A27; --stage-ink:#E9EEE6; --stage-ink-2:#9AA59D;
+  --ok:#2E7A55; --ok-soft:#E1EFE6; --amber:#A4650C; --amber-soft:#F6EBD4; --red:#B3261E; --red-soft:#F8E1DE;
+  --glass:rgba(255,255,255,.72); --glass-line:rgba(255,255,255,.6);
+  --r-card:22px; --r-btn:999px; --r-sheet:34px;
+  --shadow-1:0 1px 2px rgba(20,22,20,.05),0 4px 14px rgba(20,22,20,.06);
+  --shadow-2:0 2px 6px rgba(20,22,20,.08),0 18px 40px rgba(20,22,20,.14);
+  --font:-apple-system,BlinkMacSystemFont,"SF Pro Text","SF Pro Display","Helvetica Neue",Inter,system-ui,sans-serif;
+  --mono:"SF Mono",ui-monospace,Menlo,monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:#E7E3DB;font-family:var(--font);color:var(--ink);-webkit-font-smoothing:antialiased}
+body{min-height:100vh;padding:48px 32px 64px}
+.page-head{max-width:1100px;margin:0 0 28px;display:flex;align-items:flex-end;justify-content:space-between;gap:24px}
+.page-head h1{font-size:28px;letter-spacing:-.6px;font-weight:700}
+.page-head p{color:var(--ink-2);font-size:15px;max-width:640px;line-height:1.45;margin-top:6px}
+.page-head .tag{font:600 11px/1 var(--font);letter-spacing:1.4px;text-transform:uppercase;color:var(--clay)}
+.row{display:flex;gap:44px;justify-content:flex-start;align-items:flex-start;flex-wrap:wrap;margin:0}
+.caption{max-width:402px;margin-top:16px;font-size:13px;line-height:1.5;color:var(--ink-2)}
+.caption b{color:var(--ink)}
+
+/* ---------- iPhone frame (iPhone 18 Pro, 402x874 pt) ---------- */
+.phone{width:426px;height:898px;border-radius:68px;background:#0D0E0D;padding:12px;box-shadow:0 0 0 2px #3a3d3a inset,0 30px 60px rgba(0,0,0,.25),0 8px 18px rgba(0,0,0,.18);position:relative;flex:none}
+.screen{width:402px;height:874px;border-radius:56px;overflow:hidden;position:relative;background:var(--paper);display:flex;flex-direction:column}
+.island{position:absolute;top:11px;left:50%;transform:translateX(-50%);width:124px;height:36px;border-radius:20px;background:#000;z-index:50}
+.status{height:54px;flex:none;display:flex;align-items:center;justify-content:space-between;padding:6px 34px 0 46px;font:600 17px/1 var(--font);z-index:40;position:relative}
+.status .icons{display:flex;gap:7px;align-items:center}
+.status.dark{color:#fff}
+.home-ind{position:absolute;bottom:8px;left:50%;transform:translateX(-50%);width:140px;height:5px;border-radius:3px;background:#111;z-index:60}
+.home-ind.light{background:#fff}
+.content{flex:1;overflow:hidden;padding:0 20px;position:relative}
+
+/* nav */
+.nav{display:flex;align-items:center;justify-content:space-between;padding:6px 16px 4px;height:48px}
+.nav .circle-btn{width:40px;height:40px;border-radius:20px;background:var(--glass);border:1px solid var(--line);display:grid;place-items:center;backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);box-shadow:var(--shadow-1)}
+.large-title{font:700 34px/1.12 var(--font);letter-spacing:-.9px;padding:4px 20px 2px}
+.subtitle{font-size:15px;color:var(--ink-2);padding:0 20px;line-height:1.4}
+
+/* type */
+.t-title2{font:700 22px/1.2 var(--font);letter-spacing:-.4px}
+.t-headline{font:600 17px/1.3 var(--font);letter-spacing:-.2px}
+.t-body{font:400 17px/1.4 var(--font);letter-spacing:-.2px}
+.t-sub{font:400 15px/1.4 var(--font);color:var(--ink-2)}
+.t-foot{font:400 13px/1.38 var(--font);color:var(--ink-2)}
+.t-cap{font:600 11px/1 var(--font);letter-spacing:1.2px;text-transform:uppercase;color:var(--ink-3)}
+.num{font-variant-numeric:tabular-nums}
+
+/* cards, lists */
+.card{background:var(--card);border-radius:var(--r-card);box-shadow:var(--shadow-1)}
+.list{background:var(--card);border-radius:18px;overflow:hidden;box-shadow:var(--shadow-1)}
+.list .item{display:flex;align-items:center;gap:12px;padding:13px 16px;min-height:52px;border-bottom:1px solid var(--line)}
+.list .item:last-child{border-bottom:none}
+.chev{color:var(--ink-3);font-size:18px;margin-left:auto}
+
+/* buttons */
+.btn{display:flex;align-items:center;justify-content:center;gap:8px;height:54px;border-radius:var(--r-btn);font:600 17px/1 var(--font);letter-spacing:-.2px;border:none;width:100%}
+.btn.primary{background:var(--clay);color:#fff;box-shadow:0 6px 16px rgba(196,81,43,.28)}
+.btn.secondary{background:var(--card);color:var(--ink);box-shadow:var(--shadow-1);border:1px solid var(--line)}
+.btn.tinted{background:var(--clay-soft);color:var(--clay-ink)}
+.btn.plain{background:transparent;color:var(--clay);height:44px}
+.btn.dark{background:var(--ink);color:#fff}
+.btn.sm{height:36px;font-size:15px;width:auto;padding:0 16px}
+
+/* chips */
+.chip{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 10px 0 9px;border-radius:13px;font:600 12px/1 var(--font);letter-spacing:-.1px;white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis;align-self:flex-start}
+.chip svg{flex:none}
+.chip.ok{background:var(--ok-soft);color:var(--ok)}
+.chip.work{background:var(--amber-soft);color:var(--amber)}
+.chip.clay{background:var(--clay-soft);color:var(--clay-ink)}
+.chip.grey{background:#EEEBE5;color:var(--ink-2)}
+.chip.dark{background:rgba(255,255,255,.12);color:var(--stage-ink)}
+.dot{width:7px;height:7px;min-width:7px;border-radius:50%;background:currentColor;display:inline-block;flex:none}
+.dot.pulse{outline:3px solid rgba(0,0,0,.06);outline-offset:0}
+
+/* 3D stage */
+.stage{background:radial-gradient(120% 90% at 50% 30%,#2C3531 0%,#1A1F1D 60%,#141816 100%);color:var(--stage-ink);position:relative;overflow:hidden}
+.stage .floor{position:absolute;left:-10%;right:-10%;bottom:-30%;height:70%;background:repeating-linear-gradient(90deg,rgba(255,255,255,.05) 0 1px,transparent 1px 28px),repeating-linear-gradient(0deg,rgba(255,255,255,.05) 0 1px,transparent 1px 28px);transform:perspective(380px) rotateX(62deg);transform-origin:50% 0;mask-image:linear-gradient(to bottom,rgba(0,0,0,.9),transparent)}
+
+/* tab bar / bottom glass */
+.glassbar{position:absolute;left:12px;right:12px;bottom:26px;height:64px;border-radius:32px;background:var(--glass);backdrop-filter:blur(24px) saturate(1.4);-webkit-backdrop-filter:blur(24px) saturate(1.4);border:1px solid rgba(255,255,255,.7);box-shadow:var(--shadow-2);display:flex;align-items:center;padding:0 8px;gap:8px;z-index:30}
+
+/* sheet */
+.scrim{position:absolute;inset:0;background:rgba(10,12,10,.32);z-index:20}
+.sheet{position:absolute;left:0;right:0;bottom:0;background:var(--paper);border-radius:var(--r-sheet) var(--r-sheet) 0 0;z-index:25;padding:10px 20px 40px;box-shadow:0 -10px 40px rgba(0,0,0,.18)}
+.grabber{width:38px;height:5px;border-radius:3px;background:rgba(0,0,0,.18);margin:0 auto 14px}
+
+/* ---------- Mac ---------- */
+.desk{width:1280px;height:800px;border-radius:14px;overflow:hidden;position:relative;background:linear-gradient(160deg,#6F7F79 0%,#A89A86 45%,#D8B79A 100%);box-shadow:0 30px 70px rgba(0,0,0,.28);margin:0}
+.menubar{height:30px;background:rgba(246,244,240,.55);backdrop-filter:blur(30px) saturate(1.6);-webkit-backdrop-filter:blur(30px) saturate(1.6);display:flex;align-items:center;justify-content:space-between;padding:0 14px;font:500 13.5px/1 var(--font);color:#1b1d1b}
+.menubar .left,.menubar .right{display:flex;gap:18px;align-items:center}
+.menubar .app{font-weight:700}
+.mb-icon{width:26px;height:22px;border-radius:5px;display:grid;place-items:center}
+.mb-icon.active{background:rgba(0,0,0,.14)}
+.popover{position:absolute;top:38px;width:372px;border-radius:16px;background:rgba(250,249,246,.86);backdrop-filter:blur(40px) saturate(1.8);-webkit-backdrop-filter:blur(40px) saturate(1.8);box-shadow:0 0 0 .5px rgba(0,0,0,.18),0 22px 60px rgba(0,0,0,.28);overflow:hidden;font-size:13px}
+.mac-window{position:absolute;border-radius:12px;background:#F7F5F1;box-shadow:0 0 0 .5px rgba(0,0,0,.25),0 30px 80px rgba(0,0,0,.35);overflow:hidden}
+.traffic{display:flex;gap:8px;padding:14px 16px}
+.traffic i{width:12px;height:12px;border-radius:6px;display:block}
+.traffic i:nth-child(1){background:#FF5F57}.traffic i:nth-child(2){background:#FEBC2E}.traffic i:nth-child(3){background:#28C840}
+.mac-btn{height:30px;padding:0 14px;border-radius:8px;font:500 13px/30px var(--font);border:none;display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+.mac-btn.primary{background:var(--clay);color:#fff;box-shadow:0 1px 2px rgba(0,0,0,.15)}
+.mac-btn.secondary{background:#fff;color:var(--ink);box-shadow:0 0 0 .5px rgba(0,0,0,.18),0 1px 2px rgba(0,0,0,.06)}
+.mac-btn.lg{height:38px;line-height:38px;padding:0 20px;font-size:14px;border-radius:10px}
+
+.ic{width:22px;height:22px;display:inline-block;vertical-align:middle}
+/* hero */
+.hero{position:absolute;left:0;right:0;top:0;height:264px;z-index:0;background:radial-gradient(90% 85% at 50% 64%,#313C37 0%,#1B211E 60%,#121614 100%)}
+.hero .floor{bottom:-34%}
+.hero .model{position:absolute;left:50%;top:70px;width:184px;height:184px;transform:translateX(-50%);z-index:2}
+.hero .orbit{position:absolute;left:50%;top:186px;width:250px;height:52px;transform:translateX(-50%);z-index:1}
+.hero .chip3d{position:absolute;right:16px;top:200px;z-index:3;height:28px;padding:0 11px;border-radius:14px;background:rgba(20,24,22,.5);border:1px solid rgba(255,255,255,.16);color:var(--stage-ink);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);font:600 13px/1 var(--font);display:flex;align-items:center;gap:6px}
+.nav.on-dark{position:relative;z-index:40}
+.nav.on-dark .circle-btn{background:rgba(24,28,26,.42);border:1px solid rgba(255,255,255,.16);color:#fff;box-shadow:0 4px 14px rgba(0,0,0,.25)}
+.status .icons svg{color:inherit}
+/* body panel */
+.body{position:absolute;left:0;right:0;top:240px;bottom:0;background:var(--paper);border-radius:28px 28px 0 0;padding:22px 20px 0;z-index:5;box-shadow:0 -10px 30px rgba(0,0,0,.22)}
+.p-title{font:700 28px/1.15 var(--font);letter-spacing:-.7px}
+.p-status{display:flex;align-items:center;gap:7px;margin-top:7px;font:600 15px/1.2 var(--font);letter-spacing:-.1px}
+.p-status.ok{color:var(--ok)}
+.okdot{width:18px;height:18px;border-radius:9px;background:var(--ok);color:#fff;display:grid;place-items:center;flex:none}
+.card.pad{padding:16px;margin-top:14px}
+.card-h{display:flex;align-items:center;justify-content:space-between;gap:10px}
+/* cleaning card */
+.spin{width:20px;height:20px;border-radius:50%;border:2.5px solid var(--amber-soft);border-top-color:var(--amber);border-right-color:var(--amber);flex:none}
+.cl-head{display:flex;align-items:center;gap:10px}
+.cl-head .t{font:600 16px/1.2 var(--font);letter-spacing:-.2px;flex:1;white-space:nowrap}
+.cl-head .up{color:var(--ink-3);transform:rotate(-90deg)}
+.pbar{height:5px;border-radius:3px;background:var(--amber-soft);margin:12px 0 8px;overflow:hidden}
+.pbar i{display:block;height:100%;width:46%;background:var(--amber);border-radius:3px}
+.stages{position:relative;margin-top:4px}
+.stages .rail{position:absolute;left:10px;top:18px;width:2px;height:144px;background:#E7E3DB;border-radius:1px}
+.stages .rail-done{position:absolute;left:10px;top:18px;width:2px;height:72px;background:linear-gradient(var(--ok) 0 50%,var(--amber) 100%);border-radius:1px}
+.st{display:flex;align-items:center;gap:12px;height:36px;font:400 15px/1.2 var(--font);letter-spacing:-.15px;position:relative}
+.st .mk{width:22px;height:22px;border-radius:11px;display:grid;place-items:center;flex:none;position:relative;z-index:1}
+.st.done{color:var(--ink-2)}
+.st.done .mk{background:var(--ok);color:#fff}
+.st.now{color:var(--ink);font-weight:600}
+.st.now .mk{background:var(--amber-soft);box-shadow:inset 0 0 0 2px var(--amber),0 0 0 4px rgba(164,101,12,.10)}
+.st.now .mk i{width:8px;height:8px;border-radius:4px;background:var(--amber);display:block}
+.st.todo{color:var(--ink-3)}
+.st.todo .mk{background:var(--card);box-shadow:inset 0 0 0 2px #DCD8D0}
+.st .when{margin-left:auto;font:500 13px/1 var(--font);color:var(--amber)}
+/* size card */
+.size-val{font:700 22px/1.2 var(--font);letter-spacing:-.4px;margin-top:6px}
+.divider{height:1px;background:var(--line);margin:14px 0}
+.ask{display:flex;gap:10px;align-items:flex-start}
+.ask .q{font:400 15px/1.42 var(--font);letter-spacing:-.15px;color:var(--ink)}
+.ask .spark{color:var(--clay);flex:none;margin-top:1px}
+.src{display:flex;align-items:center;gap:5px;margin:6px 0 0 28px;font:500 13px/1 var(--font);color:var(--clay-ink)}
+.ask-btns{display:flex;gap:10px;margin:14px 0 0 28px}
+.ask-btns .btn{height:40px;font-size:15px;width:auto;padding:0 18px}
+.link{display:flex;align-items:center;gap:7px;margin:12px 0 0 28px;font:600 15px/1.2 var(--font);color:var(--clay)}
+.nowrap{white-space:nowrap}
+/* close-ups */
+.thumbs{display:flex;gap:10px;margin-top:12px}
+.th{width:64px;height:64px;border-radius:14px;overflow:hidden;flex:none;position:relative;background:radial-gradient(120% 110% at 28% 18%,#B2977A 0%,#7A6250 55%,#4E3F33 100%);box-shadow:inset 0 0 0 .5px rgba(0,0,0,.12)}
+.th.b{background:radial-gradient(120% 110% at 70% 20%,#C2AA8E 0%,#8A705A 55%,#5A493B 100%)}
+.th.c{background:radial-gradient(120% 110% at 40% 80%,#A88D72 0%,#6C5646 60%,#433629 100%)}
+.th > svg.crop{position:absolute;inset:0;width:100%;height:100%}
+.th.add{background:var(--card-2);box-shadow:inset 0 0 0 1.5px var(--line-2);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;color:var(--clay);font:600 12.5px/1 var(--font)}
+.foot-line{margin-top:12px}
+/* sticky CTA */
+.cta{flex:1;height:50px;border-radius:25px;background:var(--clay);color:#fff;display:flex;align-items:center;justify-content:center;gap:10px;font:600 17px/1 var(--font);letter-spacing:-.2px;box-shadow:0 6px 16px rgba(196,81,43,.32)}
+/* size sheet */
+.behind{position:absolute;top:46px;left:12px;right:12px;height:80px;border-radius:16px 16px 0 0;background:radial-gradient(90% 120% at 50% 100%,#3A4540 0%,#232A27 70%);opacity:.75;z-index:1}
+.sheet.size{top:60px;bottom:0;padding:10px 20px 0;box-shadow:0 -6px 30px rgba(0,0,0,.35)}
+.sheet .grabber{margin-bottom:12px}
+.sh-title{font:700 24px/1.2 var(--font);letter-spacing:-.5px}
+.sh-sub{margin-top:4px;text-wrap:balance}
+.iso{margin-top:12px;border-radius:22px;height:198px;overflow:hidden;position:relative;background:radial-gradient(100% 110% at 45% 40%,#2F3A35 0%,#1B211E 65%,#151917 100%)}
+.iso svg{position:absolute;inset:0;width:100%;height:100%}
+.iso .pill{font:600 13px/1 var(--font)}
+.field{margin-top:12px;height:58px;border-radius:16px;background:var(--card);box-shadow:0 0 0 2px var(--clay),var(--shadow-1);display:flex;align-items:center;padding:0 18px;gap:10px}
+.field .lbl{font:600 15px/1 var(--font);color:var(--clay-ink);display:flex;align-items:center;gap:8px}
+.field .lbl i{width:8px;height:8px;border-radius:4px;background:var(--clay);display:block}
+.field .val{margin-left:auto;display:flex;align-items:baseline;gap:2px}
+.field .val b{font:700 30px/1 var(--font);letter-spacing:-.6px}
+.field .caret{width:2px;height:30px;background:var(--clay);border-radius:1px;align-self:center;margin:0 6px 0 2px}
+.field .val span{font:500 19px/1 var(--font);color:var(--ink-3)}
+.live{margin-top:9px;display:flex;align-items:center;gap:7px;font:400 14px/1.3 var(--font);letter-spacing:-.15px;color:var(--ink-2);padding-left:4px;white-space:nowrap}
+.live b{color:var(--ink);font-weight:600}
+.sheet .btn.primary{margin-top:12px}
+/* iOS decimal pad */
+.kb{position:absolute;left:0;right:0;bottom:0;height:266px;z-index:35;background:rgba(206,209,216,.94);backdrop-filter:blur(30px) saturate(1.6);-webkit-backdrop-filter:blur(30px) saturate(1.6);border-radius:30px 30px 0 0;padding:8px 6px 0;box-shadow:0 -1px 0 rgba(0,0,0,.06)}
+.kb .keys{display:grid;grid-template-columns:repeat(3,1fr);gap:7px 6px}
+.kb .k{height:46px;border-radius:10px;background:#fff;box-shadow:0 1px 0 rgba(0,0,0,.25);display:flex;flex-direction:column;align-items:center;justify-content:center;font:400 25px/1 var(--font);color:#000}
+.kb .k small{font:700 9.5px/1 var(--font);letter-spacing:2.2px;margin-top:1px;padding-left:2px}
+.kb .k.bare{background:transparent;box-shadow:none}
+</style></head>
+<body>
+<!-- Shared line icons (SF Symbols-like). Use: <svg class="ic"><use href="#i-scan"/></svg> -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-scan" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2"/><path d="M12 7.5l4 2.3v4.4l-4 2.3-4-2.3V9.8z"/><path d="M8 9.8l4 2.3 4-2.3M12 12.1v4.4"/></symbol>
+    <symbol id="i-printer" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="3.5" width="17" height="17" rx="2.5"/><path d="M3.5 8.5h17M8 13h8M10 13v4h4v-4"/></symbol>
+    <symbol id="i-mac" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M9 20h6M12 16v4"/></symbol>
+    <symbol id="i-gear" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></symbol>
+    <symbol id="i-camera" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l1.5-2.5h7L17 8h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="13" r="3.6"/></symbol>
+    <symbol id="i-ruler" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 16.5l13-13 4 4-13 13z"/><path d="M7 13l2 2M10 10l1.5 1.5M13 7l2 2"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></symbol>
+    <symbol id="i-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></symbol>
+    <symbol id="i-back" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></symbol>
+    <symbol id="i-more" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.9"/><circle cx="12" cy="12" r="1.9"/><circle cx="19" cy="12" r="1.9"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-sparkle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/></symbol>
+    <symbol id="i-wifi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2.5 9a14 14 0 0 1 19 0M5.5 12.5a9.5 9.5 0 0 1 13 0M8.6 16a5 5 0 0 1 6.8 0"/><circle cx="12" cy="19.2" r="1.2" fill="currentColor"/></symbol>
+    <symbol id="i-lock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></symbol>
+    <symbol id="i-qr" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"><rect x="3.5" y="3.5" width="6.5" height="6.5" rx="1"/><rect x="14" y="3.5" width="6.5" height="6.5" rx="1"/><rect x="3.5" y="14" width="6.5" height="6.5" rx="1"/><path d="M14 14h3v3h-3zM17.5 17.5h3v3h-3z"/></symbol>
+    <symbol id="i-blender" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="14" cy="13.5" r="6"/><circle cx="14" cy="13.5" r="2.2"/><path d="M3 9.5h8M6 6h7"/></symbol>
+    <symbol id="i-layers" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"><path d="M12 3.5l8.5 4.5-8.5 4.5L3.5 8z"/><path d="M3.5 12.5L12 17l8.5-4.5M3.5 16.5L12 21l8.5-4.5"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"><path d="M3.5 6.5a1 1 0 0 1 1-1h5l2 2.5h8a1 1 0 0 1 1 1v9.5a1 1 0 0 1-1 1h-15a1 1 0 0 1-1-1z"/></symbol>
+    <symbol id="i-warn" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4l9 16H3z"/><path d="M12 10v4.5M12 17.5v.2"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.5v13l11-6.5z"/></symbol>
+    <symbol id="i-stop" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></symbol>
+    <symbol id="i-pause" viewBox="0 0 24 24" fill="currentColor"><rect x="6.5" y="5.5" width="4" height="13" rx="1.2"/><rect x="13.5" y="5.5" width="4" height="13" rx="1.2"/></symbol>
+    <symbol id="i-key" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="15" r="4"/><path d="M11 12l8.5-8.5M16 7l2.5 2.5M14 9l2 2"/></symbol>
+    <symbol id="i-globe" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.6 2.6 2.6 14.4 0 17M12 3.5c-2.6 2.6-2.6 14.4 0 17"/></symbol>
+    <symbol id="i-cube" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M4 7.5l8 4.5 8-4.5M12 12v9"/></symbol>
+    <symbol id="i-battery" viewBox="0 0 28 13"><rect x=".5" y=".5" width="24" height="12" rx="3.5" fill="none" stroke="currentColor" opacity=".4"/><rect x="2.5" y="2.5" width="18" height="8" rx="2" fill="currentColor"/><path d="M26 4.5v4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" opacity=".45"/></symbol>
+    <symbol id="i-signal" viewBox="0 0 18 12" fill="currentColor"><rect x="0" y="8" width="3" height="4" rx="1"/><rect x="5" y="5.5" width="3" height="6.5" rx="1"/><rect x="10" y="3" width="3" height="9" rx="1"/><rect x="15" y="0" width="3" height="12" rx="1"/></symbol>
+    <symbol id="logo" viewBox="0 0 24 24" fill="none"><path d="M12 2.8l8 4.6v9.2L12 21.2l-8-4.6V7.4z" fill="#C4512B"/><path d="M4 7.4l8 4.6 8-4.6M12 12v9.2" stroke="#fff" stroke-width="1.5" stroke-linejoin="round"/><path d="M7.5 5.4l8 4.6" stroke="#fff" stroke-opacity=".55" stroke-width="1.1"/></symbol>
+    <symbol id="logo-mono" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M12 3l8 4.6v8.8L12 21l-8-4.6V7.6z"/><path d="M4 7.6l8 4.6 8-4.6M12 12.2V21"/></symbol>
+  </defs>
+</svg>
+<!-- Shared object art: inline these <symbol>s once per file inside a hidden <svg>, then <svg viewBox="0 0 200 200"><use href="#obj-airpods"/></svg> -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <pattern id="mesh" width="14" height="12" patternUnits="userSpaceOnUse" patternTransform="rotate(8)">
+      <path d="M0 12 L7 0 L14 12 M0 0 H14" fill="none" stroke="rgba(255,255,255,.10)" stroke-width=".6"/>
+    </pattern>
+    <radialGradient id="shadow" cx="50%" cy="50%" r="50%"><stop offset="0" stop-color="#000" stop-opacity=".55"/><stop offset="1" stop-color="#000" stop-opacity="0"/></radialGradient>
+    <linearGradient id="white-body" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FBFBF8"/><stop offset=".55" stop-color="#E4E5E0"/><stop offset="1" stop-color="#B9BCB5"/></linearGradient>
+    <linearGradient id="white-lid" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#E7E8E3"/></linearGradient>
+    <linearGradient id="clay-body" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#E9805C"/><stop offset=".6" stop-color="#C4512B"/><stop offset="1" stop-color="#8E3418"/></linearGradient>
+    <linearGradient id="brass" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#F1D9A0"/><stop offset=".5" stop-color="#C9A25A"/><stop offset="1" stop-color="#7E6127"/></linearGradient>
+    <linearGradient id="slate" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#8FA3A8"/><stop offset=".6" stop-color="#5B6E74"/><stop offset="1" stop-color="#34454A"/></linearGradient>
+    <linearGradient id="sage" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#C9D8C0"/><stop offset=".6" stop-color="#93A98A"/><stop offset="1" stop-color="#5E7357"/></linearGradient>
+    <symbol id="obj-airpods" viewBox="0 0 200 200">
+      <ellipse cx="100" cy="158" rx="70" ry="12" fill="url(#shadow)"/>
+      <rect x="38" y="62" width="124" height="92" rx="34" fill="url(#white-body)"/>
+      <rect x="38" y="62" width="124" height="92" rx="34" fill="url(#mesh)"/>
+      <path d="M40 92 Q100 98 160 92" stroke="#A9ADA6" stroke-width="1.6" fill="none"/>
+      <rect x="38" y="62" width="124" height="32" rx="30" fill="url(#white-lid)" opacity=".85"/>
+      <circle cx="100" cy="122" r="3.2" fill="#9BA098"/>
+      <rect x="92" y="150" width="16" height="3" rx="1.5" fill="#8C9089"/>
+    </symbol>
+    <symbol id="obj-knob" viewBox="0 0 200 200">
+      <ellipse cx="100" cy="160" rx="54" ry="10" fill="url(#shadow)"/>
+      <path d="M86 156 L90 112 H110 L114 156 Z" fill="url(#brass)"/>
+      <ellipse cx="100" cy="156" rx="16" ry="5" fill="#7E6127"/>
+      <ellipse cx="100" cy="92" rx="52" ry="30" fill="url(#brass)"/>
+      <ellipse cx="100" cy="92" rx="52" ry="30" fill="url(#mesh)"/>
+      <ellipse cx="100" cy="82" rx="40" ry="16" fill="#F6E3B4" opacity=".55"/>
+    </symbol>
+    <symbol id="obj-mug" viewBox="0 0 200 200">
+      <ellipse cx="96" cy="162" rx="62" ry="11" fill="url(#shadow)"/>
+      <path d="M140 84 C176 84 176 136 140 134" stroke="#7E8F78" stroke-width="13" fill="none" stroke-linecap="round"/>
+      <path d="M48 62 H144 L138 150 Q96 166 54 150 Z" fill="url(#sage)"/>
+      <path d="M48 62 H144 L138 150 Q96 166 54 150 Z" fill="url(#mesh)"/>
+      <ellipse cx="96" cy="62" rx="48" ry="12" fill="#B4C6AB"/>
+      <ellipse cx="96" cy="63" rx="40" ry="8" fill="#4A5C45"/>
+    </symbol>
+    <symbol id="obj-mount" viewBox="0 0 200 200">
+      <ellipse cx="100" cy="160" rx="66" ry="10" fill="url(#shadow)"/>
+      <path d="M44 150 H156 V132 Q156 120 144 120 H56 Q44 120 44 132 Z" fill="url(#slate)"/>
+      <rect x="72" y="58" width="16" height="66" rx="5" fill="url(#slate)"/>
+      <rect x="92" y="58" width="16" height="66" rx="5" fill="url(#slate)"/>
+      <rect x="112" y="58" width="16" height="66" rx="5" fill="url(#slate)"/>
+      <circle cx="100" cy="78" r="9" fill="#283539"/>
+      <path d="M44 150 H156 V132 Q156 120 144 120 H56 Q44 120 44 132 Z" fill="url(#mesh)"/>
+    </symbol>
+    <symbol id="obj-clip" viewBox="0 0 200 200">
+      <ellipse cx="100" cy="160" rx="60" ry="10" fill="url(#shadow)"/>
+      <path d="M50 150 V90 Q50 56 84 56 H120 Q150 56 150 86 V100 H130 V88 Q130 76 118 76 H86 Q70 76 70 92 V150 Z" fill="url(#clay-body)"/>
+      <path d="M50 150 V90 Q50 56 84 56 H120 Q150 56 150 86 V100 H130 V88 Q130 76 118 76 H86 Q70 76 70 92 V150 Z" fill="url(#mesh)"/>
+    </symbol>
+  </defs>
+</svg>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <linearGradient id="p4-top" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FFFFFF"/><stop offset=".6" stop-color="#EEEFEA"/><stop offset="1" stop-color="#D6D8D2"/></linearGradient>
+    <filter id="p4-blur" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="7"/></filter>
+    <symbol id="p4-shrink" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 4l-6 6M14 5.5V10h4.5M4 20l6-6M10 18.5V14H5.5"/></symbol>
+    <rect id="p4-slab" x="0" y="0" width="61.9" height="46.7" rx="15" transform="matrix(1.6689 0.6743 -1.4184 1.1082 116 60)"/>
+  </defs>
+</svg>
+
+<div class="page-head"><div><div class="tag">iPhone · Project</div><h1>Project: the object, its size, one Print button</h1>
+<p>A project page holds everything about one object: the model you can turn with a finger, its size, your close-ups, and one Print button that stays at the bottom. While your Mac cleans up, the page lists what it’s doing in plain steps. Once the model is ready, we ask about size one time, and only when we can actually help.</p></div></div>
+<div class="row">
+
+<!-- 1: cleaning up -->
+<div>
+<div class="phone"><div class="screen">
+  <div class="hero stage"><div class="floor"></div>
+    <svg class="orbit" viewBox="0 0 250 52"><ellipse cx="125" cy="24" rx="112" ry="17" fill="none" stroke="rgba(255,255,255,.16)" stroke-width="1.4" stroke-dasharray="2 5"/><path d="M200 37.5 l9 -2.2 -5.6 -7" fill="none" stroke="rgba(255,255,255,.4)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    <svg class="model" viewBox="0 0 200 200"><use href="#obj-knob"/></svg>
+    <span class="chip3d"><svg class="ic" style="width:15px;height:15px"><use href="#i-cube"/></svg>3D</span>
+  </div>
+  <div class="island"></div>
+  <div class="status dark"><span class="num">10:02</span><span class="icons"><svg width="18" height="12"><use href="#i-signal"/></svg><svg class="ic" style="width:17px;height:17px"><use href="#i-wifi"/></svg><svg width="28" height="13"><use href="#i-battery"/></svg></span></div>
+  <div class="nav on-dark">
+    <div class="circle-btn"><svg class="ic" style="width:20px;height:20px"><use href="#i-back"/></svg></div>
+    <div class="circle-btn"><svg class="ic" style="width:20px;height:20px"><use href="#i-more"/></svg></div>
+  </div>
+  <div class="body">
+    <div class="p-title">Cabinet knob</div>
+    <div class="card pad">
+      <div class="cl-head"><span class="spin"></span><span class="t">Cleaning up · about 3 min</span><svg class="ic up" style="width:18px;height:18px"><use href="#i-chev"/></svg></div>
+      <div class="pbar"><i></i></div>
+      <div class="stages">
+        <div class="rail"></div><div class="rail-done"></div>
+        <div class="st done"><span class="mk"><svg class="ic" style="width:13px;height:13px"><use href="#i-check"/></svg></span>Getting your scan</div>
+        <div class="st done"><span class="mk"><svg class="ic" style="width:13px;height:13px"><use href="#i-check"/></svg></span>Filling holes</div>
+        <div class="st now"><span class="mk"><i></i></span>Looking for weak spots</div>
+        <div class="st todo"><span class="mk"></span>Fixing details from your close-ups</div>
+        <div class="st todo"><span class="mk"></span>Measuring</div>
+      </div>
+    </div>
+    <div class="card pad">
+      <div class="card-h"><span class="t-headline">Close-ups</span><span class="t-foot">2 photos</span></div>
+      <div class="thumbs">
+        <div class="th"><svg class="crop" viewBox="40 50 120 120" preserveAspectRatio="xMidYMid slice"><use href="#obj-knob" width="200" height="200"/></svg></div>
+        <div class="th b"><svg class="crop" viewBox="62 98 76 76" preserveAspectRatio="xMidYMid slice"><use href="#obj-knob" width="200" height="200"/></svg></div>
+        <div class="th add"><svg class="ic" style="width:20px;height:20px"><use href="#i-plus"/></svg>Add</div>
+      </div>
+      <div class="t-foot foot-line">Your Mac will use these to sharpen the details.</div>
+    </div>
+  </div>
+  <div class="glassbar">
+    <div class="cta"><svg class="ic"><use href="#i-printer"/></svg>Print when it’s ready</div>
+  </div>
+  <div class="home-ind"></div>
+</div></div>
+<p class="caption"><b>Cleaning up.</b> Cleanup starts by itself when the scan reaches the Mac. The status line opens into the Mac’s real steps, and the button already works: tap it now and the print waits for the cleanup to finish.</p>
+</div>
+
+<!-- 2: ready, size question -->
+<div>
+<div class="phone"><div class="screen">
+  <div class="hero stage"><div class="floor"></div>
+    <svg class="orbit" viewBox="0 0 250 52"><ellipse cx="125" cy="24" rx="112" ry="17" fill="none" stroke="rgba(255,255,255,.16)" stroke-width="1.4" stroke-dasharray="2 5"/><path d="M200 37.5 l9 -2.2 -5.6 -7" fill="none" stroke="rgba(255,255,255,.4)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    <svg class="model" viewBox="0 0 200 200"><use href="#obj-airpods"/></svg>
+    <span class="chip3d"><svg class="ic" style="width:15px;height:15px"><use href="#i-cube"/></svg>3D</span>
+  </div>
+  <div class="island"></div>
+  <div class="status dark"><span class="num">10:14</span><span class="icons"><svg width="18" height="12"><use href="#i-signal"/></svg><svg class="ic" style="width:17px;height:17px"><use href="#i-wifi"/></svg><svg width="28" height="13"><use href="#i-battery"/></svg></span></div>
+  <div class="nav on-dark">
+    <div class="circle-btn"><svg class="ic" style="width:20px;height:20px"><use href="#i-back"/></svg></div>
+    <div class="circle-btn"><svg class="ic" style="width:20px;height:20px"><use href="#i-more"/></svg></div>
+  </div>
+  <div class="body">
+    <div class="p-title">AirPods Pro 2 case</div>
+    <div class="p-status ok"><span class="okdot"><svg class="ic" style="width:11px;height:11px"><use href="#i-check"/></svg></span>Ready to print</div>
+    <div class="card pad">
+      <div class="card-h"><span class="t-headline">Size</span><span class="chip grey"><svg class="ic" style="width:13px;height:13px"><use href="#i-scan"/></svg>Scanned · ± about 2 mm</span></div>
+      <div class="size-val num">61.9 × 46.7 × 21.7 mm</div>
+      <div class="divider"></div>
+      <div class="ask"><svg class="ic spark" style="width:18px;height:18px"><use href="#i-sparkle"/></svg>
+        <div class="q">Is this an <b>AirPods Pro 2 case</b>? Apple lists it as <span class="nowrap num">60.6 × 45.2 × 21.7 mm.</span></div></div>
+      <div class="src"><svg class="ic" style="width:13px;height:13px"><use href="#i-globe"/></svg>apple.com · Tech specs</div>
+      <div class="ask-btns"><div class="btn tinted">Use Apple’s size</div><div class="btn secondary">No</div></div>
+      <div class="link"><svg class="ic" style="width:17px;height:17px"><use href="#i-ruler"/></svg>I measured it myself</div>
+    </div>
+    <div class="card pad">
+      <div class="card-h"><span class="t-headline">Close-ups</span><span class="t-foot">3 photos</span></div>
+      <div class="thumbs">
+        <div class="th"><svg class="crop" viewBox="26 50 96 96" preserveAspectRatio="xMidYMid slice"><use href="#obj-airpods" width="200" height="200"/></svg></div>
+        <div class="th b"><svg class="crop" viewBox="68 92 64 64" preserveAspectRatio="xMidYMid slice"><use href="#obj-airpods" width="200" height="200"/></svg></div>
+        <div class="th c"><svg class="crop" viewBox="66 112 68 68" preserveAspectRatio="xMidYMid slice"><use href="#obj-airpods" width="200" height="200"/></svg></div>
+        <div class="th add"><svg class="ic" style="width:20px;height:20px"><use href="#i-plus"/></svg>Add</div>
+      </div>
+    </div>
+  </div>
+  <div class="glassbar">
+    <div class="cta"><svg class="ic"><use href="#i-printer"/></svg>Print</div>
+  </div>
+  <div class="home-ind"></div>
+</div></div>
+<p class="caption"><b>Ready to print.</b> Size is asked once, here, after the first cleanup, and the scanned size stays the default with how sure we are. Because we recognised the product, the question takes one tap: use the maker’s published size, or say no. The maker’s size corrects each side a little (at most 5%), so the result matches Apple’s numbers exactly.</p>
+</div>
+
+<!-- 3: size sheet -->
+<div>
+<div class="phone"><div class="screen" style="background:#000">
+  <div class="island"></div>
+  <div class="status dark"><span class="num">10:15</span><span class="icons"><svg width="18" height="12"><use href="#i-signal"/></svg><svg class="ic" style="width:17px;height:17px"><use href="#i-wifi"/></svg><svg width="28" height="13"><use href="#i-battery"/></svg></span></div>
+  <div class="behind"></div>
+  <div class="sheet size">
+    <div class="grabber"></div>
+    <div class="sh-title">Measured it yourself?</div>
+    <div class="t-sub sh-sub">Enter one side. We’ll size the whole model to match.</div>
+    <div class="iso">
+      <svg viewBox="15 7 338 186">
+        <!-- floor shadow -->
+        <use href="#p4-slab" fill="#000" opacity=".55" filter="url(#p4-blur)" y="4"/>
+        <!-- hidden box edges -->
+        <g stroke="rgba(255,255,255,.24)" stroke-width="1" stroke-dasharray="3 3" fill="none">
+          <path d="M116 60 L219.3 101.7 M116 60 L49.8 111.8 M116 60 L116 20.9"/>
+        </g>
+        <!-- model: stacked slab -->
+        <g>
+          <use href="#p4-slab" fill="#7F837C"/>
+          <use href="#p4-slab" fill="#8C9089" y="-1.5"/>
+          <use href="#p4-slab" fill="#999D96" y="-3"/>
+          <use href="#p4-slab" fill="#A4A8A1" y="-4.5"/>
+          <use href="#p4-slab" fill="#AEB1AA" y="-6"/>
+          <use href="#p4-slab" fill="#B5B8B1" y="-7.5"/>
+          <use href="#p4-slab" fill="#BABDB6" y="-9"/>
+          <use href="#p4-slab" fill="#BEC1BA" y="-10.5"/>
+          <use href="#p4-slab" fill="#C1C4BD" y="-12"/>
+          <use href="#p4-slab" fill="#C4C7C0" y="-13.5"/>
+          <use href="#p4-slab" fill="#C6C9C2" y="-15"/>
+          <use href="#p4-slab" fill="#C8CBC4" y="-16.5"/>
+          <use href="#p4-slab" fill="#CACDC6" y="-18"/>
+          <use href="#p4-slab" fill="#CCCFC8" y="-19.5"/>
+          <use href="#p4-slab" fill="#CED1CA" y="-21"/>
+          <use href="#p4-slab" fill="#D0D3CC" y="-22.5"/>
+          <use href="#p4-slab" fill="#D2D5CE" y="-24"/>
+          <use href="#p4-slab" fill="#D3D6CF" y="-25.5"/>
+          <use href="#p4-slab" fill="none" stroke="#7E827B" stroke-width="1.1" vector-effect="non-scaling-stroke" y="-25.5"/>
+          <use href="#p4-slab" fill="#DDDFD9" y="-27"/>
+          <use href="#p4-slab" fill="#E0E2DC" y="-28.5"/>
+          <use href="#p4-slab" fill="#E2E4DE" y="-30"/>
+          <use href="#p4-slab" fill="#E4E6E0" y="-31.5"/>
+          <use href="#p4-slab" fill="#E6E8E2" y="-33"/>
+          <use href="#p4-slab" fill="#E8EAE4" y="-34.5"/>
+          <use href="#p4-slab" fill="#EAECE6" y="-36"/>
+          <use href="#p4-slab" fill="#ECEEE8" y="-37.5"/>
+          <use href="#p4-slab" fill="url(#p4-top)" y="-39.06"/>
+        </g>
+        <!-- visible box edges -->
+        <g stroke="rgba(255,255,255,.55)" stroke-width="1.2" fill="none" stroke-linejoin="round">
+          <path d="M116 20.9 L219.3 62.6 L153.1 114.4 L49.8 72.7 Z"/>
+          <path d="M219.3 62.6 L219.3 101.7 L153.1 153.5 L49.8 111.8 L49.8 72.7 M153.1 114.4 L153.1 153.5"/>
+        </g>
+        <!-- selected edge: length -->
+        <path d="M49.8 111.8 L153.1 153.5" stroke="#EE7A50" stroke-width="3.2" stroke-linecap="round"/>
+        <circle cx="49.8" cy="111.8" r="4" fill="#EE7A50"/><circle cx="153.1" cy="153.5" r="4" fill="#EE7A50"/>
+        <!-- edge labels -->
+        <g class="pill">
+          <!-- each chip sits at its edge's midpoint, offset outward: Length below the clay edge, Width right of the bottom-side edge, Height right of the vertical edge -->
+          <rect x="32.6" y="153" width="110" height="28" rx="14" fill="#C4512B"/>
+          <text x="87.6" y="171.5" text-anchor="middle" fill="#fff"><tspan font-weight="500" fill-opacity=".85">Length</tspan> <tspan font-weight="700">61.9</tspan></text>
+          <rect x="210" y="113.6" width="102" height="28" rx="14" fill="rgba(255,255,255,.12)" stroke="rgba(255,255,255,.26)"/>
+          <text x="261" y="132.1" text-anchor="middle" fill="#E9EEE6"><tspan font-weight="500" fill-opacity=".75">Width</tspan> <tspan font-weight="700">46.7</tspan></text>
+          <rect x="228" y="68.15" width="108" height="28" rx="14" fill="rgba(255,255,255,.12)" stroke="rgba(255,255,255,.26)"/>
+          <text x="282" y="86.65" text-anchor="middle" fill="#E9EEE6"><tspan font-weight="500" fill-opacity=".75">Height</tspan> <tspan font-weight="700">21.7</tspan></text>
+        </g>
+      </svg>
+    </div>
+    <div class="field">
+      <span class="lbl"><i></i>Length</span>
+      <span class="val num"><b>60.6</b><span class="caret"></span><span>mm</span></span>
+    </div>
+    <div class="live"><svg class="ic" style="width:17px;height:17px;color:var(--clay)"><use href="#p4-shrink"/></svg><span>Makes it <b>2.1% smaller</b> · <span class="nowrap num">60.6 × 45.7 × 21.2 mm</span></span></div>
+    <div class="btn primary">Use this size</div>
+    <div class="btn plain">Keep the scanned size</div>
+  </div>
+  <div class="kb">
+    <div class="keys">
+      <div class="k">1<small>&nbsp;</small></div><div class="k">2<small>ABC</small></div><div class="k">3<small>DEF</small></div>
+      <div class="k">4<small>GHI</small></div><div class="k">5<small>JKL</small></div><div class="k">6<small>MNO</small></div>
+      <div class="k">7<small>PQRS</small></div><div class="k">8<small>TUV</small></div><div class="k">9<small>WXYZ</small></div>
+      <div class="k bare">.</div><div class="k">0</div><div class="k bare"><svg width="27" height="20" viewBox="0 0 27 20" fill="none" stroke="#000" stroke-width="1.7" stroke-linejoin="round" stroke-linecap="round"><path d="M8.5 1.5H24a1.5 1.5 0 0 1 1.5 1.5v14a1.5 1.5 0 0 1-1.5 1.5H8.5L1.5 10z"/><path d="M12 6.5l7 7M19 6.5l-7 7"/></svg></div>
+    </div>
+  </div>
+  <div class="home-ind"></div>
+</div></div>
+<p class="caption"><b>Measured it yourself.</b> This sheet opens from <i>I measured it myself</i> on the project page: tap the edge you measured and type one number. The whole model scales evenly. Only the size changes; cleanup never runs again.</p>
+</div>
+
+</div>
+</body></html>
