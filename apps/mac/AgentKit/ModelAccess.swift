@@ -111,7 +111,7 @@ public enum ModelWorkerEnvironment {
             selected = saved.choice; secret = saved.secret
             env = try trustedEnvironment()
         } else {
-            let allowed = Set(["HOME", "PATH", "TMPDIR", "LANG", "SCAN_TO_MAKE_CLAUDE_PATH", "SCAN_TO_MAKE_CODEX_PATH", "SCAN_TO_MAKE_SCAN_BLENDER", "SCAN_TO_MAKE_CAPTURE_PYTHON"])
+            let allowed = Set(["HOME", "PATH", "TMPDIR", "LANG", "SCAN_TO_MAKE_CLAUDE_PATH", "SCAN_TO_MAKE_CODEX_PATH", "SCAN_TO_MAKE_SCAN_BLENDER", "SCAN_TO_MAKE_CAPTURE_PYTHON", "SCAN_TO_MAKE_AI_JUDGE_TOOL"])
             env = base.filter { allowed.contains($0.key) }
             if choice == .claudeCode || choice == .codexCLI {
                 for key in ["CODEX_HOME", "CLAUDE_CONFIG_DIR"] { env[key] = base[key] }
@@ -133,6 +133,55 @@ public enum ModelWorkerEnvironment {
             env["SCAN_TO_MAKE_MODEL_KEY"] = secret
         }
         return env
+    }
+    /// The visual pick's installed scripts (the ai-tweak-judge folder beside the repair tool's), for keyed workers,
+    /// which accept no caller environment. Read from the app's own state with agent.mjs's precedence:
+    /// companion.env, then the migrated launcher's worker environment.
+    public static func judgeTool(state: URL) -> String? {
+        let env = envFile(state.appendingPathComponent("companion.env"))
+        var worker: [String: Any] = [:]
+        if let data = try? Data(contentsOf: state.appendingPathComponent("app-migration.json")),
+           let value = try? JSONSerialization.jsonObject(with: data) as? [String: Any] { worker = value["workerEnvironment"] as? [String: Any] ?? [:] }
+        // An empty value counts as unset, as agent.mjs's `!env[key]` and the companion's `||` treat it.
+        let set = { (value: String?) in value.flatMap { $0.isEmpty ? nil : $0 } }
+        let judge: String
+        if let explicit = set(env["SCAN_TO_MAKE_AI_JUDGE_TOOL"]) { judge = explicit }
+        else if let repair = set(env["SCAN_TO_MAKE_SCAN_REPAIR_TOOL"]) ?? set(worker["SCAN_TO_MAKE_SCAN_REPAIR_TOOL"] as? String), repair.hasPrefix("/") {
+            judge = URL(fileURLWithPath: repair).deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("ai-tweak-judge").path
+        } else { return nil }
+        var directory: ObjCBool = false
+        guard judge.hasPrefix("/"), FileManager.default.fileExists(atPath: judge, isDirectory: &directory), directory.boolValue else { return nil }
+        return judge
+    }
+    /// `KEY=value` lines as Node's loadEnvFile reads them (agent.mjs loads this file the same way).
+    static func envFile(_ url: URL) -> [String: String] {
+        guard let text = try? String(contentsOf: url, encoding: .utf8) else { return [:] }
+        var values: [String: String] = [:]
+        let lines = text.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline).map(String.init)
+        var index = 0
+        while index < lines.count {
+            var line = lines[index].trimmingCharacters(in: .whitespaces)
+            index += 1
+            if line.hasPrefix("export ") { line = String(line.dropFirst(7)).trimmingCharacters(in: .whitespaces) }
+            guard !line.hasPrefix("#"), let equals = line.firstIndex(of: "=") else { continue }
+            let key = line[..<equals].trimmingCharacters(in: .whitespaces)
+            let value = line[line.index(after: equals)...].trimmingCharacters(in: .whitespaces)
+            // Node's rules: a quoted value ends at its closing quote (a trailing comment is ignored, an
+            // unterminated quote stays literal); an unquoted value ends at the first `#`.
+            if let quote = value.first, "\"'`".contains(quote), let close = value.dropFirst().firstIndex(of: quote) {
+                values[key] = String(value[value.index(after: value.startIndex)..<close])
+            } else if value.first == "\"", let end = lines[index...].firstIndex(where: { $0.contains("\"") }) {
+                // Node lets a double-quoted value run on to the line holding its closing quote.
+                let last = lines[end]
+                values[key] = ([String(value.dropFirst())] + lines[index..<end] + [String(last[..<last.firstIndex(of: "\"")!])]).joined(separator: "\n")
+                index = end + 1
+            } else if let quote = value.first, "\"'`".contains(quote) {
+                values[key] = value
+            } else {
+                values[key] = String(value.prefix { $0 != "#" }).trimmingCharacters(in: .whitespaces)
+            }
+        }
+        return values
     }
     static func validateSecret(_ secret: String) throws {
         guard !secret.isEmpty, secret.utf8.count <= 16384,

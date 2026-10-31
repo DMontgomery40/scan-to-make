@@ -105,6 +105,8 @@ func launchModelWorker(_ installation: Installation) -> Never {
             environment["SCAN_TO_MAKE_CAPTURE_PYTHON"] = installation.resources.appendingPathComponent("Payload/python/bin/python3").path
             let blender = "/Applications/Blender.app/Contents/MacOS/Blender"
             if FileManager.default.isExecutableFile(atPath: blender) { environment["SCAN_TO_MAKE_SCAN_BLENDER"] = blender }
+            // Without it the attempts run but the visual pick can't, so every job keeps the captured scan (KAN-198).
+            if let judge = ModelWorkerEnvironment.judgeTool(state: installation.state) { environment["SCAN_TO_MAKE_AI_JUDGE_TOOL"] = judge }
         }
         let arguments = [installation.node.path, installation.resources.appendingPathComponent("Payload/source/services/companion/dist/ai-tweak-cli.js").path] + args
         let null = open("/dev/null", O_RDWR)
