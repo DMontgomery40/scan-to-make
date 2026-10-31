@@ -19,13 +19,6 @@ BOOL STMFixtureURL(NSURL *url) {
   return NO;
 #endif
 }
-BOOL STMLocalGenerationAllowed(void) {
-#if TARGET_OS_SIMULATOR
-  return ![NSUserDefaults.standardUserDefaults boolForKey:@"STMCompanionSelected"];
-#else
-  return NO;
-#endif
-}
 NSURL *STMCompanionBaseURL(NSString *value) {
   if (![value isKindOfClass:NSString.class] || value.length > 300) return nil;
   NSURLComponents *c = [NSURLComponents componentsWithString:value];
@@ -101,7 +94,6 @@ RCT_REMAP_METHOD(status, statusResolve:(RCTPromiseResolveBlock)resolve reject:(R
 RCT_REMAP_METHOD(cancel, cancelResolve:(RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject) { [self fail:@"cancelled"]; resolve(nil); }
 RCT_REMAP_METHOD(disconnect, disconnectResolve:(RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject) {
   [self fail:@"cancelled"];
-  [NSUserDefaults.standardUserDefaults setBool:YES forKey:@"STMCompanionSelected"];
   OSStatus status = SecItemDelete((__bridge CFDictionaryRef)Query());
   if (status != errSecSuccess && status != errSecItemNotFound) { reject(@"secure-storage", @"Pairing could not be removed. Unlock this device and retry.", nil); return; }
   [[NSNotificationCenter defaultCenter] postNotificationName:STMPairingChanged object:nil];
@@ -165,8 +157,7 @@ RCT_REMAP_METHOD(check, checkResolve:(RCTPromiseResolveBlock)resolve reject:(RCT
     OSStatus status = SecItemUpdate((__bridge CFDictionaryRef)Query(), (__bridge CFDictionaryRef)attrs);
     if (status == errSecItemNotFound) { NSMutableDictionary *q = [Query() mutableCopy]; [q addEntriesFromDictionary:attrs]; status = SecItemAdd((__bridge CFDictionaryRef)q, NULL); }
     if (status != errSecSuccess) { [self fail:@"secure-storage"]; return; }
-    [NSUserDefaults.standardUserDefaults setBool:YES forKey:@"STMCompanionSelected"];
-    [[NSNotificationCenter defaultCenter] postNotificationName:STMPairingChanged object:nil];
+      [[NSNotificationCenter defaultCenter] postNotificationName:STMPairingChanged object:nil];
     result = STMPairingMetadata(r);
   } else {
     NSError *readError = nil; NSDictionary *current = STMReadPairing(&readError);

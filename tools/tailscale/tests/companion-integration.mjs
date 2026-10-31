@@ -8,7 +8,7 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {RemoteAuthStore} from '../../../services/companion/dist/remote-auth.js';
-import {startGenerationServer} from '../../../services/companion/dist/generation.js';
+import {startCompanionServer} from '../../../services/companion/dist/server.js';
 
 const exec = promisify(execFile);
 const root = fileURLToPath(new URL('../../../', import.meta.url));
@@ -34,7 +34,7 @@ try {
   const store = await RemoteAuthStore.create(join(temporary, 'registry'), {host, allowedLogins: [login]});
   const invitation = await store.createPairing(login);
   const credential = await store.exchange(login, {code: invitation.code, deviceName: 'Integration fixture'});
-  const remote = await startGenerationServer({port: 0, remoteAuth: store});
+  const remote = await startCompanionServer({port: 0, remoteAuth: store});
   servers.push(remote);
   assert.equal(await health(remote.url, {
     host, 'x-forwarded-host': host, 'x-forwarded-proto': 'https',
@@ -47,7 +47,7 @@ try {
   assert.equal(protectedProbe.httpStatus, 403);
   assert.equal(protectedProbe.ok, false);
   assert.equal(protectedProbe.identityVerified, false);
-  const local = await startGenerationServer({port: 0});
+  const local = await startCompanionServer({port: 0});
   servers.push(local);
   const localProbe = await probe(local.url);
   assert.equal(localProbe.state, 'local-healthy');

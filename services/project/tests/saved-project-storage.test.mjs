@@ -12,7 +12,7 @@ let directory;
 beforeEach(async () => { directory = await mkdtemp(join(tmpdir(), 'saved-project-store-')); });
 afterEach(async () => { await rm(directory, { recursive: true, force: true }); });
 const recordFile = async () => (await readdir(directory)).find(name => name.endsWith('.json'));
-const draft = { id: 'retained-capture', brief: { object: 'Bottle', context: 'Drawer', addition: 'A fitted holder' }, fit: null };
+const draft = { id: 'retained-capture', brief: { object: 'Bottle', context: 'Drawer', addition: 'A fitted holder' } };
 
 test('portable project survives a fresh store and retains its exact draft and revision', async () => {
   const projects = createSavedProjects(new FileSavedProjectStorage(directory));

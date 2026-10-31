@@ -1,32 +1,30 @@
 import React from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Text } from 'react-native';
 import { Button, Card, Screen } from '../ui/components';
 import { type } from '../ui/theme';
 export function AboutScreen({
   onCompanion,
   onBack,
-  onOpenSpike,
 }: {
   onCompanion?: () => void;
   onBack: () => void;
-  onOpenSpike: () => void;
 }) {
   return (
     <Screen
-      title="Built around real life."
+      title="Built around real objects."
       eyebrow="ABOUT SCAN TO MAKE"
       onBack={onBack}
     >
       <Text style={type.body}>
-        Scan objects and their surroundings, describe an addition, and make
-        something that fits. The goal is a useful part you can print, made for
-        your space.
+        Scan an object with your iPhone’s LiDAR, add close-up photos of the
+        details, and let your computer clean up the scan’s defects. The result
+        is a mesh you can measure and take to your printer tools.
       </Text>
       <Card>
         <Text style={type.heading}>An open foundation</Text>
         <Text style={type.body}>
-          Scan to Make is open source, with a self-hostable core. This early app
-          lets you plan a project and explore a measured example.
+          Scan to Make is open source. Cleanup runs on your own computer, so
+          your scans stay with you.
         </Text>
       </Card>
       {onCompanion ? (
@@ -36,20 +34,6 @@ export function AboutScreen({
           onPress={onCompanion}
         />
       ) : null}
-      <View style={styles.tools}>
-        <Text style={type.label}>DEVELOPER TOOLS</Text>
-        <Text style={type.caption}>
-          Inspect capture performance and runtime checks. These tools do not
-          create a scan or verify physical fit.
-        </Text>
-        <Button
-          label="Open spike harness"
-          variant="secondary"
-          onPress={onOpenSpike}
-        />
-      </View>
     </Screen>
   );
 }
-
-const styles = StyleSheet.create({ tools: { gap: 12 } });

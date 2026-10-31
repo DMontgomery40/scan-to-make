@@ -18,7 +18,6 @@ async function fixture(supported = true) {
   const created = await repo.create({
     id: 'one',
     brief: { object: 'Box', context: 'Desk', addition: 'Lid' },
-    fit: null,
   });
   if (created.status !== 'ok') throw Error();
   const requests: string[] = [];

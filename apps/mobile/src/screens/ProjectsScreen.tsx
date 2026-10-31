@@ -1,37 +1,53 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Text } from 'react-native';
-import type {
-  ListProjectsResult,
-  SavedProject,
-} from '@scan-to-make/contracts/saved-project';
-import { Button, Card, Screen } from '../ui/components';
+import type { ListProjectsResult } from '@scan-to-make/contracts/saved-project';
+import { Button, Card, Field, Screen } from '../ui/components';
 import { type } from '../ui/theme';
 
 export function ProjectsScreen({
   result,
   error,
+  creating,
+  onCreate,
   onOpen,
-  onCaptures,
-  onInspected,
-  onPrint,
   onBack,
   onRetry,
 }: {
   result: ListProjectsResult | null;
   error: string | null;
+  creating: boolean;
+  onCreate: (name: string) => Promise<boolean>;
   onOpen: (id: string) => void;
-  onCaptures?: (id: string) => void;
-  onInspected?: (id: string) => void;
-  onPrint?: (project: SavedProject) => void;
   onBack: () => void;
   onRetry: () => void;
 }) {
+  const [name, setName] = useState('');
+  const trimmed = name.trim();
   return (
     <Screen
       title="Your projects"
-      subtitle="Saved on this device."
-      onBack={onBack}
+      subtitle="One project for each object you scan. Saved on this device."
+      onBack={creating ? undefined : onBack}
     >
+      <Card>
+        <Text style={type.heading}>New project</Text>
+        <Field
+          label="What are you scanning?"
+          hint="For example, a phone case or a desk lamp."
+          value={name}
+          onChangeText={setName}
+          editable={!creating}
+          maxLength={200}
+          returnKeyType="done"
+        />
+        <Button
+          label={creating ? 'Creating…' : 'Create and scan'}
+          disabled={creating || !trimmed}
+          onPress={async () => {
+            if (await onCreate(trimmed)) setName('');
+          }}
+        />
+      </Card>
       {error ? (
         <Text accessibilityLiveRegion="polite" style={type.body}>
           {error}
@@ -48,58 +64,23 @@ export function ProjectsScreen({
       ) : (
         <>
           {result.entries.length === 0 ? (
-            <Text style={type.body}>
-              Your saved ideas and measurements will appear here.
-            </Text>
+            <Text style={type.body}>Your scan projects will appear here.</Text>
           ) : null}
           {result.entries.map(({ id, result: entry }) => (
             <Card key={id}>
               {entry.status === 'ok' ? (
                 <>
-                  <Text style={type.label}>
-                    {entry.project.fit?.template === 'drawer-tray'
-                      ? 'DRAWER DESIGN STUDY'
-                      : entry.project.fit
-                      ? 'MEASURED PROJECT'
-                      : 'PROJECT BRIEF'}
-                  </Text>
                   <Text style={type.heading}>
                     {entry.project.brief.object.trim() || 'Untitled project'}
                   </Text>
-                  <Text style={type.caption}>
-                    {entry.project.brief.addition.trim() ||
-                      'An idea in progress.'}
-                  </Text>
                   <Button
-                    label={`Open ${
+                    label="Open scans"
+                    accessibilityLabel={`Open scans for ${
                       entry.project.brief.object.trim() || 'Untitled project'
                     }`}
                     variant="secondary"
                     onPress={() => onOpen(id)}
                   />
-                  {onPrint && entry.project.acceptedArtifact ? (
-                    <Button
-                      label="Review print"
-                      accessibilityLabel={`Review print for ${
-                        entry.project.brief.object.trim() || 'Untitled project'
-                      }`}
-                      onPress={() => onPrint(entry.project)}
-                    />
-                  ) : null}
-                  {onInspected && entry.project.acceptedArtifact ? (
-                    <Button
-                      label="Inspected files"
-                      variant="secondary"
-                      onPress={() => onInspected(id)}
-                    />
-                  ) : null}
-                  {onCaptures ? (
-                    <Button
-                      label="Project captures"
-                      variant="secondary"
-                      onPress={() => onCaptures(id)}
-                    />
-                  ) : null}
                 </>
               ) : (
                 <>

@@ -36,7 +36,7 @@ struct GuidedCaptureSampleApp: App {
                         SwiftUI.Section("This device") {
                             LabeledContent("Object Capture", value: ObjectCaptureSession.isSupported ? "Supported" : "Unavailable")
                             LabeledContent("Reconstruction", value: PhotogrammetrySession.isSupported ? "Supported" : "Unavailable")
-                            Text("Requires a physical LiDAR device, A14 or later, iOS 18 or later. No camera starts until you choose Begin.")
+                            Text("Requires a physical LiDAR device, A14 or later, iOS 27 or later. No camera starts until you choose Begin.")
                         }
                         SwiftUI.Section {
                             Button("Begin guided capture") {

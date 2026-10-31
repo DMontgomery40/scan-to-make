@@ -48,7 +48,6 @@ function harness() {
     const r = await repo.create({
       id: 'one',
       brief: { object: 'Mug', context: 'Desk', addition: 'Handle' },
-      fit: null,
     });
     if (r.status !== 'ok') throw Error();
     return { etag, snapshot: JSON.stringify(r.project) };

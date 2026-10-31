@@ -29,7 +29,6 @@ async function harness() {
   const result = await repo.create({
     id: 'one',
     brief: { object: 'Box', context: 'Desk', addition: 'Lid' },
-    fit: null,
   });
   if (result.status !== 'ok') throw Error();
   const origin = {

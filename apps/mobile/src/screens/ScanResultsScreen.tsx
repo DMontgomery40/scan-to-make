@@ -69,7 +69,6 @@ export function ScanResultsScreen({
   onBack,
   onCompanion,
   onCloseUps,
-  onMake,
   reference: keptReference = null,
   onReferenceChange,
 }: {
@@ -79,7 +78,6 @@ export function ScanResultsScreen({
   onBack: () => void;
   onCompanion: () => void;
   onCloseUps: () => void;
-  onMake: () => void;
   /** The user's real-size draft for this scan, kept while they navigate. */
   reference?: ReferenceDraft | null;
   onReferenceChange?: (draft: ReferenceDraft) => void;
@@ -449,16 +447,7 @@ export function ScanResultsScreen({
 
   let footer: React.ReactNode;
   if (succeeded) {
-    footer = (
-      <>
-        <Button label="Choose what to make" onPress={onMake} />
-        <Button
-          label="Add close-up photos"
-          variant="secondary"
-          onPress={onCloseUps}
-        />
-      </>
-    );
+    footer = <Button label="Add close-up photos" onPress={onCloseUps} />;
   } else if (canStart) {
     footer = (
       <Button
@@ -699,11 +688,6 @@ export function ScanResultsScreen({
             label="Add close-up photos"
             variant="secondary"
             onPress={onCloseUps}
-          />
-          <Button
-            label="Choose what to make"
-            variant="secondary"
-            onPress={onMake}
           />
         </View>
       ) : null}

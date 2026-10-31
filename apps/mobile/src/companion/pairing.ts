@@ -28,7 +28,7 @@ const errors: Record<string, string> = {
   unauthorized:
     'This code or device pairing was rejected or revoked. Get a new invitation from your companion and connect again.',
   forbidden:
-    'Access was denied. Check that both devices use the intended Tailscale account and that the companion allows generation for this device.',
+    'Access was denied. Check that both devices use the intended Tailscale account and that the companion allows this device.',
   'rate-limited':
     'Too many pairing attempts. Wait a minute, then use a fresh invitation.',
   certificate:
@@ -48,7 +48,7 @@ const errors: Record<string, string> = {
   'pairing-changed':
     'The companion connection changed. Your draft is still here; retry with the current connection.',
   'invalid-response':
-    'This companion returned an incompatible response. Check its version and generation permissions before pairing again.',
+    'This companion returned an incompatible response. Check its version and this device’s permissions before pairing again.',
   cancelled: 'Connection cancelled. Your projects are unchanged.',
   busy: 'A connection request is already running. Wait for it to finish.',
 };

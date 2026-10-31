@@ -9,7 +9,7 @@ import {createSavedProjects} from '@scan-to-make/contracts/saved-project';
 async function fixture(t){
  const root=await mkdtemp(join(tmpdir(),'project-sync-'));t.after(()=>rm(root,{recursive:true,force:true}));
  const local=new FileSavedProjectStorage(join(root,'local'));const repository=createSavedProjects(local);
- await repository.create({id:'phone',brief:{object:'Bottle',context:'Drawer',addition:'Holder'},fit:null});
+ await repository.create({id:'phone',brief:{object:'Bottle',context:'Drawer',addition:'Holder'}});
  await repository.change('phone',0,{kind:'replace-brief',brief:{object:'Bottle',context:'Drawer',addition:'Open holder'}});
  const remote=new FileSavedProjectStorage(join(root,'remote'));
  return {local,repository,remote,sync:new SavedProjectSync(remote),bytes:await local.read('phone')};
@@ -61,13 +61,11 @@ test('wrong identity, invalid format, oversize input and corrupt retained projec
  await assert.rejects(f.sync.put('phone',f.bytes,{ifNoneMatch:'*'}),errorCode('storage-unavailable'));
 });
 
-test('full native fit, preview and acceptance metadata replicate without granting artifact verification',async t=>{
- const {readFile}=await import('node:fs/promises');const f=await fixture(t);
- const fit=JSON.parse(await readFile(new URL('../../../packages/contracts/fixtures/drawer-tray.json',import.meta.url),'utf8'));fit.id='phone';
- let result=await f.repository.change('phone',1,{kind:'attach-fit',fit});assert.equal(result.status,'ok');
- const binding={sourceFit:result.project.fit,artifact:{sha256:'a'.repeat(64),mediaType:'model/stl',byteLength:1234}};
- result=await f.repository.change('phone',2,{kind:'attach-preview',...binding});assert.equal(result.status,'ok');
- result=await f.repository.change('phone',3,{kind:'accept-preview',...binding});assert.equal(result.status,'ok');
- const bytes=await f.local.read('phone');const synced=await f.sync.put('phone',bytes,{ifNoneMatch:'*'});
- assert.deepEqual(synced.project,result.project);assert.deepEqual(synced.project.acceptedArtifact,binding);assert.equal(synced.bytes,bytes);
+test('fit-template data saved by earlier app versions replicates unchanged without granting artifact verification',async t=>{
+ const f=await fixture(t);const fit={schemaVersion:'0.2.0',template:'drawer-tray',id:'phone',revision:0,parameters:{dividersAcross:2}};
+ const binding={sourceFit:fit,artifact:{sha256:'a'.repeat(64),mediaType:'model/stl',byteLength:1234}};
+ const bytes=JSON.stringify({...JSON.parse(f.bytes),revision:3,fit,preview:binding,acceptedArtifact:binding});
+ await f.local.compareAndSwap('phone',f.bytes,bytes);
+ const synced=await f.sync.put('phone',bytes,{ifNoneMatch:'*'});
+ assert.deepEqual(synced.project.acceptedArtifact,binding);assert.deepEqual(synced.project.fit,fit);assert.equal(synced.bytes,bytes);
 });

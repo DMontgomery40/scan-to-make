@@ -6,8 +6,10 @@ import {
   type DetailStill,
 } from '@scan-to-make/contracts/detail-still';
 import type { SavedProjects } from '@scan-to-make/contracts/saved-project';
-import type { CaptureFile } from '../capture/retainedCaptures';
-import type { ProjectAcknowledgment } from '../prepared/preparedFiles';
+import type {
+  CaptureFile,
+  ProjectAcknowledgment,
+} from '../capture/retainedCaptures';
 
 export type { DetailStill, ProjectAcknowledgment };
 export { MAX_DETAIL_STILL_BYTES };

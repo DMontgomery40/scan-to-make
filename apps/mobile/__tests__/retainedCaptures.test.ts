@@ -32,7 +32,6 @@ function harness() {
     const r = await repo.create({
       id: 'one',
       brief: { object: 'Drawer', context: 'Kitchen', addition: 'Tray' },
-      fit: null,
     });
     if (r.status !== 'ok') throw Error();
     return r.project;

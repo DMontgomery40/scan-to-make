@@ -28,12 +28,7 @@ public final class STMActionButton: UIView {
   required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
   private func configure() {
-    var config: UIButton.Configuration
-    if #available(iOS 26.0, *) {
-      config = primary ? .prominentGlass() : .glass()
-    } else {
-      config = primary ? .filled() : .tinted()
-    }
+    var config: UIButton.Configuration = primary ? .prominentGlass() : .glass()
     let font = UIFont.preferredFont(forTextStyle: .headline, compatibleWith: traitCollection)
     config.title = buttonTitle
     config.titleAlignment = .center

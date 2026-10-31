@@ -10,7 +10,7 @@ import { CaptureStore } from '../dist/capture-import.js';
 import {ScanProcessingStore} from '../dist/scan-processing.js';
 import {fakeRunner} from './fixtures/scan-processing.mjs';
 import { RemoteAuthStore } from '../dist/remote-auth.js';
-import { startGenerationServer } from '../dist/generation.js';
+import { startCompanionServer } from '../dist/server.js';
 
 const forwarded = JSON.parse(
   await readFile(new URL('./fixtures/tailscale-serve-v1.94.2.json', import.meta.url), 'utf8'),
@@ -52,7 +52,7 @@ async function fixture(t, scopes = ['projects:read', 'projects:write', 'captures
   const storage = new FileSavedProjectStorage(join(root, 'projects'));
   const captures = new CaptureStore(storage, join(root, 'captures'), converter);
   const scanProcessing = new ScanProcessingStore(storage,captures,join(root,'captures'),fakeRunner);
-  const server = await startGenerationServer({ port: 0, remoteAuth, capture: { storage, captures, scanProcessing } });
+  const server = await startCompanionServer({ port: 0, remoteAuth, capture: { storage, captures, scanProcessing } });
   t.after(() => server.close());
   return {
     root, remoteAuth, phone, storage, captures, server, scanProcessing,

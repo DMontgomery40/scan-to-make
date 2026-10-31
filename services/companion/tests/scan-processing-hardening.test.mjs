@@ -10,7 +10,7 @@ import {ScanProcessingStore} from '../dist/scan-processing.js';
 import {acquireInstanceLock} from '../dist/instance-lock.js';
 import {CaptureStore} from '../dist/capture-import.js';
 import {RemoteAuthStore} from '../dist/remote-auth.js';
-import {startGenerationServer} from '../dist/generation.js';
+import {startCompanionServer} from '../dist/server.js';
 import {fixture,fakeRunner} from './fixtures/scan-processing.mjs';
 
 const deadOwnerPid=async()=>{const child=spawn(process.execPath,['-e','']);return new Promise(r=>child.once('exit',()=>r(child.pid)));};
@@ -52,27 +52,12 @@ test('a second listener on the same capture directory fails to start until the f
  const converter={convert:async()=>{throw new Error('unused');}};
  const captures=new CaptureStore(storage,join(root,'captures'),converter);
  const services=()=>({storage,captures,scanProcessing:new ScanProcessingStore(storage,captures,join(root,'captures'),fakeRunner)});
- const first=await startGenerationServer({port:0,remoteAuth,capture:services()});
+ const first=await startCompanionServer({port:0,remoteAuth,capture:services()});
  try{
-  await assert.rejects(startGenerationServer({port:0,remoteAuth,capture:services()}),e=>e.code==='instance-busy');
+  await assert.rejects(startCompanionServer({port:0,remoteAuth,capture:services()}),e=>e.code==='instance-busy');
  }finally{await first.close();}
- const second=await startGenerationServer({port:0,remoteAuth,capture:services()});
+ const second=await startCompanionServer({port:0,remoteAuth,capture:services()});
  await second.close();
-});
-
-test('failed capture route initialization releases the instance lock for a corrected retry',async t=>{
- const root=await mkdtemp(join(tmpdir(),'instance-route-init-'));t.after(()=>rm(root,{recursive:true,force:true}));
- const remoteAuth=await RemoteAuthStore.create(join(root,'auth'),{host:'companion.example-tail.ts.net',allowedLogins:['alice@example.test']});
- const storage=new FileSavedProjectStorage(join(root,'projects'));
- const converter={convert:async()=>{throw new Error('unused');}};
- const captures=new CaptureStore(storage,join(root,'captures'),converter);
- const scanProcessing=new ScanProcessingStore(storage,captures,join(root,'captures'),fakeRunner);
- await assert.rejects(
-  startGenerationServer({port:0,remoteAuth,capture:{storage,captures,scanProcessing,preparedJobs:{inspectionEnabled:false}}}),
-  /Prepared HTTP requires a configured file inspector/,
- );
- const corrected=await startGenerationServer({port:0,remoteAuth,capture:{storage,captures,scanProcessing}});
- await corrected.close();
 });
 
 test('cancellation from another same-process instance reaches the owning instance',async t=>{

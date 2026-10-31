@@ -5,20 +5,8 @@
   "type": "module",
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
-    },
-    "./mcp-discovery": {
-      "types": "./dist/mcp-discovery.d.ts",
-      "import": "./dist/mcp-discovery.js"
-    },
-    "./stl-export": {
-      "types": "./dist/stl-export.d.ts",
-      "import": "./dist/stl-export.js"
-    },
-    "./generation": {
-      "types": "./dist/generation.d.ts",
-      "import": "./dist/generation.js"
+      "types": "./dist/server.d.ts",
+      "import": "./dist/server.js"
     },
     "./remote-auth": {
       "types": "./dist/remote-auth.d.ts",
@@ -31,10 +19,6 @@
     "./capture-converter": {
       "types": "./dist/capture-converter.d.ts",
       "import": "./dist/capture-converter.js"
-    },
-    "./prepared-jobs": {
-      "types": "./dist/prepared-jobs.d.ts",
-      "import": "./dist/prepared-jobs.js"
     },
     "./detail-stills": {
       "types": "./dist/detail-stills.d.ts",
@@ -52,14 +36,11 @@
   "scripts": {
     "build": "npm run build --prefix ../project && tsc -p tsconfig.json",
     "test": "npm run build && node --test tests/*.test.mjs",
-    "generate:serve": "npm run build && node dist/generation-cli.js",
-    "prepared:produce": "npm run build && node dist/prepared-produce-cli.js"
+    "serve": "npm run build && node dist/server-cli.js"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "1.32.1",
     "@scan-to-make/contracts": "file:../../packages/contracts",
     "@scan-to-make/project": "file:../project",
-    "ajv": "8.20.0",
     "zod": "4.6.7"
   },
   "devDependencies": {

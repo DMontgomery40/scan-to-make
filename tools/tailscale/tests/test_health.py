@@ -14,7 +14,7 @@ import preflight
 @contextlib.contextmanager
 def listener(status=200, body=None, headers=None):
     body = body if body is not None else json.dumps({
-        "status": "ok", "protocolVersion": "0.1.0", "templates": ["drawer-tray"]
+        "status": "ok", "protocolVersion": "0.1.0"
     }).encode()
     requests = []
 
@@ -71,7 +71,7 @@ class HealthTests(unittest.TestCase):
 
     def test_wrong_protocol_or_payload_is_not_a_healthy_companion(self):
         for body in (b"not json", b'{"status":"ok"}',
-                     b'{"status":"ok","protocolVersion":"99","templates":[]}',
+                     b'{"status":"ok","protocolVersion":"99"}',
                      b"x" * (preflight.MAX_OUTPUT_BYTES + 1)):
             with self.subTest(body=body[:100]), listener(body=body) as (port, _):
                 health = preflight.default_health_probe(port)

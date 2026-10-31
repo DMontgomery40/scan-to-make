@@ -110,15 +110,15 @@ export function RetainedCapturesScreen({
   return (
     <Screen
       title="Project captures"
-      subtitle="Keep the scan that informed your design."
+      subtitle="Scan the object with LiDAR. Each scan stays with this project."
       onBack={busy ? undefined : onBack}
     >
       <Text accessibilityLiveRegion="polite" style={type.body}>
         {message}
       </Text>
       <Text style={type.caption}>
-        A capture is reference material. It does not accept a design or confirm
-        that a printed part will fit.
+        A scan is reference material. Check its size against the real object
+        before you rely on it.
       </Text>
       <Button
         label="Connect companion"

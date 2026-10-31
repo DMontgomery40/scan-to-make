@@ -1,6 +1,8 @@
 # Scan to Make
 
-Build an open-source consumer app: scan objects and their surroundings, describe an addition, make something that fits, and print it. The hosted service supplies inference and compute; the same core remains self-hostable.
+Build an open-source iPhone app that scans a real object with LiDAR and cleans up the scan's defects. David, 2026-10-31: "this app is so you can scan an object USING LIDAR on iphone. and then smooth out defects and such. but really anything after that is already built and downloaded by 10k people a month and it's my bambu mcp. later we may add mcp 3d printer. actually, may as well just have that be an option from the get go."
+
+The app covers capture (LiDAR Object Capture plus close-up stills) and cleanup (`tools/scan-repair`, `tools/scan-correct`, `tools/capture-mesh-convert`, run by the companion). The clean mesh then goes to [bambu-printer-mcp](https://github.com/DMontgomery40/bambu-printer-mcp) or [mcp-3D-printer-server](https://github.com/DMontgomery40/mcp-3D-printer-server) (`/Users/davidmontgomery/mcp-3D-printer-server` on the Mac). That handoff isn't built yet.
 
 Use real Slack for conversation. Add informal findings to the append-only scratchpad channel; preserve linked dated/topic archives. `shared/SCRATCHPAD.md` is a local archival mirror.
 

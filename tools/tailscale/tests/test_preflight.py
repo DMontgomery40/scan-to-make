@@ -51,7 +51,7 @@ class FakeRunner:
 
 
 def health_ok(port):
-    return {"ok": True, "protocolVersion": "0.1.0", "templates": ["drawer-tray"], "detail": "ok"}
+    return {"ok": True, "protocolVersion": "0.1.0", "detail": "ok"}
 
 
 class PreflightTests(unittest.TestCase):

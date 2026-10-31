@@ -8,14 +8,14 @@
 #import <SceneKit/ModelIO.h>
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 #import "CompanionPairing.h"
-#import "ArtifactFiles.h"
+#import "ContentHash.h"
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/stat.h>
 #include <math.h>
 
 // Native transport for the detail-still and scan-processing routes. Mirrors
-// RetainedCaptureBridge and PreparedFileBridge: pairing credentials stay
+// RetainedCaptureBridge: pairing credentials stay
 // native, paths/methods/bodies are allowlisted, uploads send exact verified
 // local bytes, and downloads are hash-verified before resolving.
 static NSUInteger const CAP_LIMIT = 64 * 1024 * 1024;
@@ -190,7 +190,7 @@ RCT_REMAP_METHOD(cancel,cancelResolve:(RCTPromiseResolveBlock)resolve reject:(RC
   configuration.filter=[PHPickerFilter imagesFilter];
   configuration.selectionLimit=limit;
   configuration.preferredAssetRepresentationMode=PHPickerConfigurationAssetRepresentationModeCurrent;
-  if(@available(iOS 15.0,*))configuration.selection=PHPickerConfigurationSelectionOrdered;
+  configuration.selection=PHPickerConfigurationSelectionOrdered;
   PHPickerViewController *picker=[[PHPickerViewController alloc] initWithConfiguration:configuration];
   picker.delegate=self;picker.presentationController.delegate=self;
   [presenter presentViewController:picker animated:YES completion:nil];
