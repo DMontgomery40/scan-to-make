@@ -1,10 +1,10 @@
 # Hosted scan cleanup worker (design)
 
-**Status:** design only. **Nothing in this document is deployed.** No Modal app, R2 bucket, or paid cloud account exists for Scan to Make yet. Turning any of this on spends David's money and needs his explicit approval first (team rule, 2026-10-31).
+**Status:** design only. **Nothing in this document is deployed.** No Modal app, R2 bucket, or paid cloud account exists for Scan to Make yet. Turning any of this on **requires owner approval before any spend**.
 
 **Tracking:** **KAN-134** (hosted cleanup worker design — docs only).
 
-**Decision:** [D003](https://app.slack.com/client/T0C92NRJM5G/C0C96L9JC76) — after local, repeatable workers and isolation proof, the lean hosted prototype uses **Modal** for compute and **Cloudflare R2** for bytes. David's D003 addendum: **the same cleanup job contract** must run locally and on Modal; hosted is a configuration change, not a second pipeline.
+**Architecture:** After local, repeatable workers and isolation proof, the lean hosted prototype uses **Modal** for compute and **Cloudflare R2** for bytes. **The same cleanup job contract** must run locally and on Modal; hosted is a configuration change, not a second pipeline.
 
 This document covers only the **hosted cleanup worker**: headless [`tools/scan-repair`](../tools/scan-repair) plus [`tools/scan-correct`](../tools/scan-correct) (including deterministic `advise`), using **project-owned model API keys** for users who cannot run Linux + Blender 5.0.1 + libseccomp on their own machine. Capture conversion, companion pairing, project sync, billing, and printer MCPs stay on the self-host path documented elsewhere ([`deploy/companion/README.md`](../deploy/companion/README.md), [`services/companion/`](../services/companion/)).
 
@@ -41,7 +41,7 @@ Printer MCP packages in the image are unused by the hosted cleanup worker; they 
 
 ## Job pipeline (what actually runs)
 
-Align with companion scan processing today ([`services/companion/SCAN-PROCESSING.md`](../services/companion/SCAN-PROCESSING.md)) and the in-flight full cleanup shape (Codex KAN-119): re-import retained textured geometry, then:
+Align with companion scan processing today ([`services/companion/SCAN-PROCESSING.md`](../services/companion/SCAN-PROCESSING.md)): re-import retained textured geometry, then:
 
 | Stage | Tool | Notes |
 | --- | --- | --- |
@@ -72,7 +72,7 @@ Hosted jobs should expose the same stage list and artifact names the app already
 | **Timeout** | Function timeout ≥ **20 minutes** to cover companion 10 min cap + 600 s correction + staging; cancel via Modal cancellation → SIGKILL process groups (mirror companion scan-processing). |
 | **Concurrency** | Modal `max_containers` per app for burst; application-side **one active cleanup job per capture** (contract rule) and fair per-account caps when the API exists. |
 | **Secrets** | Modal Secret: `ANTHROPIC_API_KEY` (and optional OpenAI-compatible keys if product config adds `--adapter openai`). Never in job JSON, logs, or client responses. |
-| **Cold start** | Accept 1–2 s container spin-up; optional `keep_warm` only after David approves spend. |
+| **Cold start** | Accept 1–2 s container spin-up; optional `keep_warm` only after owner approval of ongoing spend. |
 | **Idle billing** | Modal may bill ~60 s after last input while a container winds down; size batches accordingly. |
 
 ---
@@ -101,7 +101,6 @@ Prices below were checked on **2026-10-31** from the cited official pages. Runti
 | Component | Value | Basis |
 | --- | --- | --- |
 | Synthetic full path (convert + repair + measure + render + advise + **scripted** correct, one tool step) | **~12 s** | **Measured:** GitHub Actions `e2e-pipeline` run [41168182649](https://github.com/DMontgomery40/scan-to-make/actions/runs/41168182649) on `main`, test `synthetic USDZ → … → scripted scan-correct`, `duration_ms ≈ 11960`. |
-| `scan-repair` only on a real AirPods scan (UV-preserving path) | **~0.7 s** | **Measured (team-reported):** review notes for PR #117 in #build-room (2026-10-30): repair **0.71 s**, deterministic. |
 | Typical phone capture (repair → measure → render, no voxel catastrophe) | **~30 s – 3 min** | **Estimated:** synthetic box is far smaller than LiDAR meshes; companion allows up to **5 min/subprocess** and **10 min/job** ([`SCAN-PROCESSING.md`](../services/companion/SCAN-PROCESSING.md)). |
 | `scan-correct` with **real** Anthropic adapter | **~1 – 10 min** typical, **up to 600 s** default cap | **Estimated:** default `--max-seconds 600` and up to **24** API rounds ([`tools/scan-correct/README.md`](../tools/scan-correct/README.md)). **No real-provider run is qualified in-repo yet.** |
 | **Planning figure for Modal billing** | **2 min – 8 min** active CPU | Uses mid-range of repair+advise+partial correction through full cap. |
@@ -207,7 +206,6 @@ When implementation starts, the first code PR should name this document, the KAN
 
 ## References
 
-- D003 thread: [#decisions](https://app.slack.com/client/T0C92NRJM5G/C0C96L9JC76) (Cloudflare R2 + Modal after local proof).
 - Companion packaging: [`deploy/companion/README.md`](../deploy/companion/README.md) (KAN-130 / PR #110).
 - Scan processing HTTP contract: [`services/companion/SCAN-PROCESSING.md`](../services/companion/SCAN-PROCESSING.md).
 - Tool licensing and bounds: [`tools/scan-repair/README.md`](../tools/scan-repair/README.md), [`tools/scan-correct/README.md`](../tools/scan-correct/README.md).
