@@ -97,6 +97,13 @@ const errors: Record<string, string> = {
   'pairing-changed': 'Your Mac changed while this was running. Try again.',
   'invalid-response':
     'Your Mac answered in a way this app doesn’t understand. Update Scan to Make on both, then pair again.',
+  // Nearby pairing (MAC-5).
+  'nearby-denied':
+    'Your Mac said no to this phone. If that was a mistake, try again and click Allow on your Mac.',
+  'nearby-expired':
+    'That took too long, so nothing was paired. Try again, then click Allow on your Mac.',
+  'local-network':
+    'Scan to Make can’t look on your Wi-Fi. Turn on Local Network for Scan to Make in Settings.',
   cancelled: 'Cancelled. Nothing changed.',
   busy: 'Still working on the last request. Try again in a moment.',
 };

@@ -19,5 +19,7 @@ with tempfile.TemporaryDirectory(prefix='pairing-native-tests-') as directory:
         spki = subprocess.run(['openssl', 'pkey', '-pubin', '-outform', 'der'], input=key, check=True, capture_output=True).stdout
         return hashlib.sha256(spki).hexdigest()
     hashing = str(root.parent.parent / 'modules/local-project-storage/ios/ContentHash.mm')
-    subprocess.run(['xcrun', 'clang++', '-fobjc-arc', '-fblocks', '-framework', 'Foundation', '-framework', 'Security', '-I', str(root.parent / 'native-storage-tests'), str(root / 'runner.mm'), hashing, '-o', binary], check=True)
-    subprocess.run([binary, der, spki_sha256(pem), ec_der, spki_sha256(ec_pem)], check=True)
+    subprocess.run(['xcrun', 'clang++', '-fobjc-arc', '-fblocks', '-framework', 'Foundation', '-framework', 'Security', '-framework', 'Network', '-I', str(root.parent / 'native-storage-tests'), str(root / 'runner.mm'), hashing, '-o', binary], check=True)
+    # The nearby pairing test vector both the TypeScript contract and this native code must reproduce.
+    vector = str(root.parent.parent.parent.parent / 'packages/contracts/fixtures/nearby-pairing-v1.json')
+    subprocess.run([binary, der, spki_sha256(pem), ec_der, spki_sha256(ec_pem), vector], check=True)

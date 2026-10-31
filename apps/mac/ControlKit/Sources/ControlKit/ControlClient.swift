@@ -52,6 +52,17 @@ public struct ControlClient: Sendable {
         struct Result: Decodable { let active: Bool }
         let result: Result = try await call("pairing.isActive", ["code": .string(code)]); return result.active
     }
+    public func nearbyRequests() async throws -> [ControlNearbyRequest] {
+        struct Result: Decodable { let items: [ControlNearbyRequest] }
+        let result: Result = try await call("nearby.list"); return result.items
+    }
+    /// Allow or deny one nearby request; Allow pairs only that phone. A request that is gone throws
+    /// `not-found`. Like every mutation, a deadline after sending has an unknown outcome: list again, never resend.
+    public func answerNearby(_ id: String, allow: Bool) async throws {
+        struct Result: Decodable { let answered: Bool }
+        let result: Result = try await call("nearby.answer", ["id": .string(id), "allow": .bool(allow)])
+        guard result.answered else { throw ControlClientError.invalidResponse }
+    }
     public func pendingConfirmations() async throws -> [ControlConfirmation] {
         struct Result: Decodable { let items: [ControlConfirmation] }
         let result: Result = try await call("confirmations.list"); return result.items
