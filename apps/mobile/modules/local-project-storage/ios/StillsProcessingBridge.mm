@@ -24,7 +24,7 @@ static NSUInteger const CAP_LIMIT = 64 * 1024 * 1024;
 static NSUInteger const STILL_LIMIT = 25 * 1024 * 1024;
 static NSString *Context(NSDictionary *p) { return p ? [NSString stringWithFormat:@"%@|%@",p[@"baseUrl"],p[@"deviceId"]] : nil; }
 static NSURL *Root(NSString *name) { NSURL *u=[[[NSFileManager defaultManager] URLsForDirectory:NSApplicationSupportDirectory inDomains:NSUserDomainMask] firstObject];return [u URLByAppendingPathComponent:name isDirectory:YES]; }
-static NSString *Extension(NSString *type) { return [@{@"image/jpeg":@"jpg",@"image/heic":@"heic",@"image/png":@"png",@"model/stl":@"stl",@"model/obj":@"obj",@"application/json":@"json",@"application/x-ndjson":@"jsonl"} objectForKey:type]; }
+static NSString *Extension(NSString *type) { return [@{@"image/jpeg":@"jpg",@"image/heic":@"heic",@"image/png":@"png",@"model/stl":@"stl",@"model/obj":@"obj",@"text/plain":@"mtl",@"application/json":@"json",@"application/x-ndjson":@"jsonl"} objectForKey:type]; }
 static BOOL IsStillMedia(NSString *type) { return [@[@"image/jpeg",@"image/heic",@"image/png"] containsObject:type]; }
 static NSURL *FileURL(NSDictionary *f) {
   if(![f isKindOfClass:NSDictionary.class])return nil;
@@ -157,7 +157,11 @@ RCT_REMAP_METHOD(request,requestOptions:(NSDictionary*)o resolve:(RCTPromiseReso
   BOOL processingCollection=Matches(path,[NSString stringWithFormat:@"%@/scan-processing%@",prefix,revision]);
   BOOL processingJob=Matches(path,[NSString stringWithFormat:@"%@/scan-processing/%@%@",prefix,uuid,revision]);
   BOOL processingArtifact=Matches(path,[NSString stringWithFormat:@"%@/scan-processing/%@/artifacts/(repaired\\.stl|repaired\\.obj|report\\.json|corrected\\.stl|corrected\\.obj|correction\\.json|correction-calls\\.jsonl|advice\\.json|advice-0[1-4]\\.png|pos_x\\.png|pos_y\\.png|pos_z\\.png|neg_x\\.png|neg_y\\.png|neg_z\\.png|iso_pp\\.png|iso_np\\.png|iso_nn\\.png|iso_pn\\.png)%@",prefix,uuid,revision]);
-  BOOL download=stillItem||processingArtifact;
+  // The cleaned-up model's whole bundle (KAN-141): its manifest, and each
+  // file by its declared name.
+  BOOL processingModelAssets=Matches(path,[NSString stringWithFormat:@"%@/scan-processing/%@/model-assets%@",prefix,uuid,revision]);
+  BOOL processingModelAsset=Matches(path,[NSString stringWithFormat:@"%@/scan-processing/%@/model-assets/(repaired\\.obj|mesh\\.mtl|mesh_(basecolor|normal)_[0-9]+\\.png)%@",prefix,uuid,revision]);
+  BOOL download=stillItem||processingArtifact||processingModelAsset;
   BOOL validMethod=[method isKindOfClass:NSString.class]&&[@[@"GET",@"POST",@"DELETE"] containsObject:method];
   BOOL shape=validMethod&&[o[@"etag"] isKindOfClass:NSString.class]&&Matches(o[@"etag"],@"\"[a-f0-9]{64}\"")&&!o[@"create"]&&(
     (stillsCollection&&[method isEqual:@"GET"]&&![path containsString:@"&label="]&&!o[@"source"]&&!o[@"artifact"]&&!o[@"body"])||
@@ -167,7 +171,9 @@ RCT_REMAP_METHOD(request,requestOptions:(NSDictionary*)o resolve:(RCTPromiseReso
     (processingCollection&&[method isEqual:@"GET"]&&!o[@"source"]&&!o[@"artifact"]&&!o[@"body"])||
     (processingCollection&&[method isEqual:@"POST"]&&[o[@"body"] isKindOfClass:NSString.class]&&!o[@"source"]&&!o[@"artifact"])||
     (processingJob&&([method isEqual:@"GET"]||[method isEqual:@"DELETE"])&&!o[@"source"]&&!o[@"artifact"]&&!o[@"body"])||
-    (processingArtifact&&[method isEqual:@"GET"]&&o[@"artifact"]!=nil&&!o[@"source"]&&!o[@"body"]));
+    (processingArtifact&&[method isEqual:@"GET"]&&o[@"artifact"]!=nil&&!o[@"source"]&&!o[@"body"])||
+    (processingModelAssets&&[method isEqual:@"GET"]&&!o[@"source"]&&!o[@"artifact"]&&!o[@"body"])||
+    (processingModelAsset&&[method isEqual:@"GET"]&&o[@"artifact"]!=nil&&!o[@"source"]&&!o[@"body"]));
   if(!shape){reject(@"invalid-request",@"Invalid scan request.",nil);return;}
   NSString *scope=[method isEqual:@"GET"]?@"captures:read":@"captures:import";
   if(![p[@"scopes"] containsObject:scope]){reject(@"scope-denied",@"Connect to your companion with a capture invitation.",nil);return;}
@@ -186,7 +192,8 @@ RCT_REMAP_METHOD(request,requestOptions:(NSDictionary*)o resolve:(RCTPromiseReso
   [req setValue:o[@"etag"] forHTTPHeaderField:@"If-Match"];
   if(body)[req setValue:contentType forHTTPHeaderField:@"Content-Type"];
   self.artifact=download?o[@"artifact"]:nil;
-  if(self.artifact){NSUInteger cap=IsStillMedia(self.artifact[@"mediaType"])?STILL_LIMIT:CAP_LIMIT;if(!FileIdentity(self.artifact,cap)){self.artifact=nil;reject(@"invalid-artifact",@"Invalid scan file identity.",nil);return;}self.limit=[self.artifact[@"byteLength"] unsignedIntegerValue];}
+  // Close-up photos are capped at 25 MB; a model's textures share the model's 64 MB.
+  if(self.artifact){NSUInteger cap=IsStillMedia(self.artifact[@"mediaType"])&&!processingModelAsset?STILL_LIMIT:CAP_LIMIT;if(!FileIdentity(self.artifact,cap)){self.artifact=nil;reject(@"invalid-artifact",@"Invalid scan file identity.",nil);return;}self.limit=[self.artifact[@"byteLength"] unsignedIntegerValue];}
   else self.limit=1024*1024;
   NSURLSessionConfiguration *config=NSURLSessionConfiguration.ephemeralSessionConfiguration;config.URLCache=nil;config.HTTPShouldSetCookies=NO;config.timeoutIntervalForRequest=90;config.timeoutIntervalForResource=95;
   self.pairing=p;self.pinRejected=NO;self.resolve=resolve;self.reject=reject;self.received=[NSMutableData new];self.response=nil;
@@ -323,22 +330,60 @@ RCT_REMAP_METHOD(present,presentFile:(NSDictionary*)f share:(BOOL)share resolve:
       scene=[SCNScene sceneWithURL:FileURL(f) options:@{SCNSceneSourceCheckConsistencyKey:@YES} error:&sceneError];
     }
     if(!scene){reject(@"preview-error",@"This mesh could not be displayed.",sceneError);return;}
-    SCNVector3 low,high;
-    if([scene.rootNode getBoundingBoxMin:&low max:&high]){
-      float width=high.x-low.x,height=high.y-low.y,depth=high.z-low.z;
-      float span=fmaxf(fmaxf(width,height),depth);float aspect=presenter.view.bounds.size.width/presenter.view.bounds.size.height;
-      if(!isfinite(span)||span<=0){reject(@"preview-error",@"This mesh has no displayable bounds.",nil);return;}
-      SCNNode *camera=[SCNNode node];camera.camera=[SCNCamera camera];camera.camera.usesOrthographicProjection=YES;
-      camera.camera.orthographicScale=fmaxf(height,width/fmaxf(aspect,0.1f))*0.7;camera.camera.zNear=span*0.001;camera.camera.zFar=span*10;
-      camera.position=SCNVector3Make((low.x+high.x)/2,(low.y+high.y)/2,high.z+span*3);[scene.rootNode addChildNode:camera];
-    }
-    [scene.rootNode enumerateChildNodesUsingBlock:^(SCNNode *node,BOOL *stop){if(node.geometry){SCNMaterial *material=[SCNMaterial material];material.diffuse.contents=[UIColor colorWithRed:0.55 green:0.61 blue:0.57 alpha:1];material.roughness.contents=@0.8;node.geometry.materials=@[material];}}];
-    UIViewController *viewer=[UIViewController new];viewer.title=@"Scan model";
-    SCNView *view=[[SCNView alloc] initWithFrame:presenter.view.bounds];view.autoresizingMask=UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;view.scene=scene;view.allowsCameraControl=YES;view.autoenablesDefaultLighting=YES;view.backgroundColor=[UIColor colorWithRed:0.94 green:0.95 blue:0.92 alpha:1];viewer.view=view;
-    viewer.navigationItem.rightBarButtonItem=[[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone target:self action:@selector(closeMesh)];
-    UINavigationController *navigation=[[UINavigationController alloc] initWithRootViewController:viewer];navigation.modalPresentationStyle=UIModalPresentationFullScreen;
-    [presenter presentViewController:navigation animated:YES completion:^{resolve(nil);}];
+    [self showMesh:scene keepMaterials:NO presenter:presenter resolve:resolve reject:reject];
   }else{self.previewURL=FileURL(f);QLPreviewController *preview=[QLPreviewController new];preview.dataSource=self;[presenter presentViewController:preview animated:YES completion:^{resolve(nil);}];}
+}
+- (void)showMesh:(SCNScene*)scene keepMaterials:(BOOL)keep presenter:(UIViewController*)presenter resolve:(RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject{
+  SCNVector3 low,high;
+  if([scene.rootNode getBoundingBoxMin:&low max:&high]){
+    float width=high.x-low.x,height=high.y-low.y,depth=high.z-low.z;
+    float span=fmaxf(fmaxf(width,height),depth);float aspect=presenter.view.bounds.size.width/presenter.view.bounds.size.height;
+    if(!isfinite(span)||span<=0){reject(@"preview-error",@"This mesh has no displayable bounds.",nil);return;}
+    SCNNode *camera=[SCNNode node];camera.camera=[SCNCamera camera];camera.camera.usesOrthographicProjection=YES;
+    camera.camera.orthographicScale=fmaxf(height,width/fmaxf(aspect,0.1f))*0.7;camera.camera.zNear=span*0.001;camera.camera.zFar=span*10;
+    camera.position=SCNVector3Make((low.x+high.x)/2,(low.y+high.y)/2,high.z+span*3);[scene.rootNode addChildNode:camera];
+  }
+  // A bundle with a material keeps its own colours and textures; a bare
+  // mesh gets the neutral clay finish.
+  if(!keep)[scene.rootNode enumerateChildNodesUsingBlock:^(SCNNode *node,BOOL *stop){if(node.geometry){SCNMaterial *material=[SCNMaterial material];material.diffuse.contents=[UIColor colorWithRed:0.55 green:0.61 blue:0.57 alpha:1];material.roughness.contents=@0.8;node.geometry.materials=@[material];}}];
+  UIViewController *viewer=[UIViewController new];viewer.title=@"Scan model";
+  SCNView *view=[[SCNView alloc] initWithFrame:presenter.view.bounds];view.autoresizingMask=UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;view.scene=scene;view.allowsCameraControl=YES;view.autoenablesDefaultLighting=YES;view.backgroundColor=[UIColor colorWithRed:0.94 green:0.95 blue:0.92 alpha:1];viewer.view=view;
+  viewer.navigationItem.rightBarButtonItem=[[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone target:self action:@selector(closeMesh)];
+  UINavigationController *navigation=[[UINavigationController alloc] initWithRootViewController:viewer];navigation.modalPresentationStyle=UIModalPresentationFullScreen;
+  [presenter presentViewController:navigation animated:YES completion:^{resolve(nil);}];
+}
+// A cleaned-up model with its material and textures (KAN-141). Every file is
+// verified by identity and written under its declared name into one folder
+// for the job, so the OBJ's mtllib and the MTL's texture names resolve. It is
+// shown only when every file verifies.
+RCT_REMAP_METHOD(presentModel,presentModelJob:(NSString*)jobId files:(NSArray*)files share:(BOOL)share resolve:(RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject){
+  UIViewController *presenter=RCTPresentedViewController();
+  if(!Matches(jobId,@"[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}")||![files isKindOfClass:NSArray.class]||files.count<1||files.count>256||!presenter||presenter.presentedViewController){reject(@"verification-failed",@"The scan model could not be opened.",nil);return;}
+  NSFileManager *fm=NSFileManager.defaultManager;NSURL *folder=[Root(@"ScanModelBundles") URLByAppendingPathComponent:jobId isDirectory:YES];NSError *e=nil;
+  [fm removeItemAtURL:folder error:nil];
+  if(![fm createDirectoryAtURL:folder withIntermediateDirectories:YES attributes:nil error:&e]){reject(@"export-error",@"The scan model could not be prepared.",e);return;}
+  NSMutableSet *names=[NSMutableSet set];NSMutableArray *urls=[NSMutableArray array];NSURL *entry=nil;BOOL material=NO;NSUInteger total=0;
+  for(NSDictionary *f in files){
+    // Checked before any use, so a malformed entry can't raise.
+    NSString *name=[f isKindOfClass:NSDictionary.class]&&[f[@"name"] isKindOfClass:NSString.class]?f[@"name"]:nil;
+    NSString *type=[name hasSuffix:@".obj"]?@"model/obj":[name hasSuffix:@".mtl"]?@"text/plain":@"image/png";
+    NSData *d=nil;
+    if(!Matches(name,@"repaired\\.obj|mesh\\.mtl|mesh_(basecolor|normal)_[0-9]+\\.png")||[names containsObject:name]||![f[@"mediaType"] isEqual:type]||!(d=Verified(f))||(total+=d.length)>CAP_LIMIT){[fm removeItemAtURL:folder error:nil];reject(@"verification-failed",@"The scan model could not be verified.",nil);return;}
+    NSURL *u=[folder URLByAppendingPathComponent:name];
+    if(![d writeToURL:u options:NSDataWritingAtomic error:&e]){[fm removeItemAtURL:folder error:nil];reject(@"export-error",@"The scan model could not be prepared.",e);return;}
+    [names addObject:name];[urls addObject:u];
+    if([name isEqual:@"repaired.obj"])entry=u;
+    if([name isEqual:@"mesh.mtl"])material=YES;
+  }
+  if(!entry){[fm removeItemAtURL:folder error:nil];reject(@"verification-failed",@"The scan model could not be verified.",nil);return;}
+  if(share){
+    UIActivityViewController *sheet=[[UIActivityViewController alloc] initWithActivityItems:urls applicationActivities:nil];sheet.popoverPresentationController.sourceView=presenter.view;sheet.popoverPresentationController.sourceRect=CGRectMake(CGRectGetMidX(presenter.view.bounds),CGRectGetMidY(presenter.view.bounds),1,1);
+    sheet.completionWithItemsHandler=^(UIActivityType type,BOOL completed,NSArray *items,NSError *error){if(error)reject(@"export-error",@"Scan sharing failed.",error);else resolve(@{@"completed":@(completed)});};
+    [presenter presentViewController:sheet animated:YES completion:nil];return;
+  }
+  NSError *sceneError=nil;SCNScene *scene=[SCNScene sceneWithURL:entry options:@{SCNSceneSourceCheckConsistencyKey:@YES} error:&sceneError];
+  if(!scene){reject(@"preview-error",@"This mesh could not be displayed.",sceneError);return;}
+  [self showMesh:scene keepMaterials:material presenter:presenter resolve:resolve reject:reject];
 }
 - (void)closeMesh{[RCTPresentedViewController() dismissViewControllerAnimated:YES completion:nil];}
 - (NSInteger)numberOfPreviewItemsInPreviewController:(QLPreviewController*)controller{return self.previewURL?1:0;}

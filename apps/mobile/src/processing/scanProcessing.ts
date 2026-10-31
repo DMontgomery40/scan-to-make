@@ -3,7 +3,9 @@ import {
   ScanProcessingJobSchema,
   ScanProcessingRequestSchema,
   ScanArtifactNameSchema,
+  ScanModelAssetsSchema,
   SCAN_VIEW_NAMES,
+  type ScanModelAssets,
   type ScanProcessingJob,
   type ScanReference,
   type ScanArtifactName,
@@ -61,7 +63,20 @@ export interface ScanProcessingNative {
   imageUri?(file: CaptureFile): Promise<string | null>;
   /** Text of a verified, already-downloaded JSON artifact. */
   readJson?(file: CaptureFile): Promise<string>;
+  /**
+   * Shows a cleaned-up model from its whole bundle (KAN-141): each verified
+   * file is written under its declared name into one folder for the job, so
+   * the OBJ finds its material and textures. Absent before KAN-141.
+   */
+  presentModel?(
+    jobId: string,
+    files: ModelFile[],
+    share: boolean,
+  ): Promise<unknown>;
 }
+
+/** A downloaded, verified file of a model bundle, under its declared name. */
+export type ModelFile = CaptureFile & { name: string };
 
 function failure(status: number, code?: string): never {
   const message =
@@ -90,6 +105,8 @@ function serverCode(body: string): string | undefined {
     return undefined;
   }
 }
+const UNVERIFIED_MODEL =
+  'The scan model could not be verified. Your project is unchanged.';
 const AMBIGUOUS_START =
   'The scan job may have started, but its reply was lost. It will not be retried automatically; wait for the companion to finish before starting another.';
 const AMBIGUOUS_CANCEL =
@@ -370,6 +387,90 @@ export class ScanProcessingClient {
     await this.settle(projectId, ack, context);
     return artifact;
   }
+  /**
+   * The cleaned-up model's whole bundle (KAN-141): the job's sealed OBJ and
+   * the material and texture files it names, each downloaded and checked
+   * against the manifest under its declared name, all with one pairing.
+   * Null when the companion predates the bundle route. Any mismatch stops
+   * the whole model: never a partly coloured one.
+   */
+  private async downloadModel(
+    projectId: string,
+    captureId: string,
+    ack: ProjectAcknowledgment,
+    job: ScanProcessingJob,
+  ): Promise<ModelFile[] | null> {
+    this.checkIds(projectId, captureId, ack);
+    const project = await this.current(projectId, ack);
+    if (
+      job.projectId !== projectId ||
+      job.captureId !== captureId.toLowerCase() ||
+      job.projectRevision !== project.revision
+    )
+      throw Error('Scan job belongs to a different project version.');
+    // The bundle's OBJ is the job's sealed one: no sealed OBJ, no model yet.
+    const sealed = job.artifacts?.['repaired.obj'];
+    if (!sealed) throw Error('That scan output is not available yet.');
+    const context = await this.native.context();
+    const path = (rest: string) =>
+      this.base(projectId, captureId, project.revision, job.jobId).replace(
+        '?',
+        `/model-assets${rest}?`,
+      );
+    let r: ProcessingResponse;
+    try {
+      r = await this.get({
+        context,
+        method: 'GET',
+        path: path(''),
+        etag: ack.etag,
+      });
+    } catch (error) {
+      // An older companion has no bundle route; anything else is an error.
+      if ((error as { status?: number })?.status === 404) return null;
+      throw error;
+    }
+    let model: ScanModelAssets;
+    try {
+      model = ScanModelAssetsSchema.parse(JSON.parse(r.body).model);
+    } catch {
+      throw Error(UNVERIFIED_MODEL);
+    }
+    const entry = model.files.find(file => file.name === model.entrypoint);
+    if (
+      model.jobId !== job.jobId ||
+      !entry ||
+      entry.sha256 !== sealed.sha256 ||
+      entry.byteLength !== sealed.byteLength ||
+      entry.mediaType !== sealed.mediaType
+    )
+      throw Error(UNVERIFIED_MODEL);
+    const files: ModelFile[] = [];
+    for (const asset of model.files) {
+      const artifact: CaptureFile = {
+        sha256: asset.sha256,
+        byteLength: asset.byteLength,
+        mediaType: asset.mediaType,
+      };
+      const got = await this.get({
+        context,
+        method: 'GET',
+        path: path(`/${asset.name}`),
+        etag: ack.etag,
+        artifact,
+      });
+      if (
+        !got.file ||
+        got.file.sha256 !== artifact.sha256 ||
+        got.file.byteLength !== artifact.byteLength ||
+        got.file.mediaType !== artifact.mediaType
+      )
+        throw Error('Scan output verification failed.');
+      files.push({ ...artifact, name: asset.name });
+    }
+    await this.settle(projectId, ack, context);
+    return files;
+  }
   async openArtifact(
     projectId: string,
     captureId: string,
@@ -378,6 +479,11 @@ export class ScanProcessingClient {
     name: ScanArtifactName,
     share: boolean,
   ) {
+    // The model is shown from its whole bundle, so it keeps its colours.
+    if (name === 'repaired.obj' && !share && this.native.presentModel) {
+      const files = await this.downloadModel(projectId, captureId, ack, job);
+      if (files) return this.native.presentModel(job.jobId, files, share);
+    }
     const file = await this.downloadArtifact(
       projectId,
       captureId,

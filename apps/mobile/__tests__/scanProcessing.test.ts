@@ -137,7 +137,10 @@ test('start sends reference dimensions and requires the job to echo them', async
     body: JSON.stringify({ job: job({ reference }) }),
     etag,
   }));
-  await h.client.start('one', captureId, ack, { ...reference, dimensionsMm: [60.6, 45.2, 21.7] });
+  await h.client.start('one', captureId, ack, {
+    ...reference,
+    dimensionsMm: [60.6, 45.2, 21.7],
+  });
   expect(JSON.parse(calls(h)[0].body)).toEqual({ reference });
   h.native.request = jest.fn(async () => ({
     status: 202,
@@ -221,9 +224,10 @@ test('listJobs maps an older companion without the listing route to not-availabl
   const h = harness();
   const ack = await h.create();
   h.native.request = jest.fn(async () => ({ status: 405, body: '', etag }));
-  await expect(h.client.listJobs('one', captureId, ack)).rejects.toMatchObject(
-    { code: 'not-available', status: 405 },
-  );
+  await expect(h.client.listJobs('one', captureId, ack)).rejects.toMatchObject({
+    code: 'not-available',
+    status: 405,
+  });
 });
 
 test('imageUri resolves only verified PNG views through the transport', async () => {
@@ -272,13 +276,13 @@ test('status reads one job and rejects a job for another capture', async () => {
     }),
     etag,
   }));
-  await expect(
-    h.client.status('one', captureId, ack, jobId),
-  ).rejects.toThrow('different project version');
+  await expect(h.client.status('one', captureId, ack, jobId)).rejects.toThrow(
+    'different project version',
+  );
   h.native.request = jest.fn(async () => ({ status: 404, body: '', etag }));
-  await expect(
-    h.client.status('one', captureId, ack, jobId),
-  ).rejects.toThrow('no longer available');
+  await expect(h.client.status('one', captureId, ack, jobId)).rejects.toThrow(
+    'no longer available',
+  );
 });
 
 test('cancel returns the terminal job; a lost reply is ambiguous', async () => {
@@ -328,7 +332,14 @@ test('artifact download verifies the sealed identity, including PNG views', asyn
   expect(calls(h)[0].path).toBe(
     `/v1/saved-projects/one/captures/${captureId}/scan-processing/${jobId}/artifacts/iso_pp.png?projectRevision=0`,
   );
-  await h.client.openArtifact('one', captureId, ack, done, 'repaired.stl', false);
+  await h.client.openArtifact(
+    'one',
+    captureId,
+    ack,
+    done,
+    'repaired.stl',
+    false,
+  );
   expect(h.native.present).toHaveBeenCalledWith(
     expect.objectContaining({ mediaType: 'model/stl' }),
     false,
@@ -374,4 +385,250 @@ test('a changed local project stops requests before they start', async () => {
     'Project changed',
   );
   expect(h.native.request).not.toHaveBeenCalled();
+});
+
+describe('the cleaned-up model with its colours (KAN-141)', () => {
+  const model = {
+    schema: 'scan-to-make.scan-model/0.1',
+    jobId,
+    entrypoint: 'repaired.obj',
+    files: [
+      // The job's own sealed OBJ (see succeededJob).
+      {
+        name: 'repaired.obj',
+        sha256: 'c'.repeat(64),
+        byteLength: 100,
+        mediaType: 'model/obj',
+      },
+      {
+        name: 'mesh.mtl',
+        sha256: 'e'.repeat(64),
+        byteLength: 40,
+        mediaType: 'text/plain',
+      },
+      {
+        name: 'mesh_basecolor_0.png',
+        sha256: 'f'.repeat(64),
+        byteLength: 500,
+        mediaType: 'image/png',
+      },
+      {
+        name: 'mesh_normal_0.png',
+        sha256: 'b'.repeat(64),
+        byteLength: 400,
+        mediaType: 'image/png',
+      },
+    ],
+  };
+  const base = `/v1/saved-projects/one/captures/${captureId}/scan-processing/${jobId}`;
+  // A Mac with the bundle route; `tamper` alters one reply.
+  function withBundle(
+    tamper: (o: {
+      path: string;
+      artifact?: { sha256: string; byteLength: number; mediaType: string };
+    }) => Record<string, unknown> | undefined = () => undefined,
+  ) {
+    const h = harness();
+    h.native.presentModel = jest.fn(async () => undefined);
+    h.native.request = jest.fn(async o => {
+      const changed = tamper(o);
+      if (changed) return { status: 200, body: '', etag, ...changed };
+      if (o.path === `${base}/model-assets?projectRevision=0`)
+        return { status: 200, body: JSON.stringify({ model }), etag };
+      return { status: 200, body: '', etag, file: o.artifact };
+    });
+    return h;
+  }
+  const done = () => succeededJob() as unknown as ScanProcessingJob;
+
+  test('View model downloads every file of the bundle by name, then shows it whole', async () => {
+    const h = withBundle();
+    const ack = await h.create();
+    await h.client.openArtifact(
+      'one',
+      captureId,
+      ack,
+      done(),
+      'repaired.obj',
+      false,
+    );
+    expect(calls(h).map(o => o.path)).toEqual([
+      `${base}/model-assets?projectRevision=0`,
+      `${base}/model-assets/repaired.obj?projectRevision=0`,
+      `${base}/model-assets/mesh.mtl?projectRevision=0`,
+      `${base}/model-assets/mesh_basecolor_0.png?projectRevision=0`,
+      `${base}/model-assets/mesh_normal_0.png?projectRevision=0`,
+    ]);
+    // Each file is fetched against its manifest identity.
+    expect(
+      calls(h)
+        .slice(1)
+        .map(o => o.artifact),
+    ).toEqual(model.files.map(({ name: _name, ...identity }) => identity));
+    expect(h.native.presentModel).toHaveBeenCalledWith(
+      jobId,
+      model.files,
+      false,
+    );
+    expect(h.native.present).not.toHaveBeenCalled();
+  });
+
+  test('a file that does not match, a refused bundle or a bad manifest shows nothing, never a partly coloured model', async () => {
+    const texture = withBundle(o =>
+      o.path.includes('/model-assets/mesh_basecolor_0.png')
+        ? { file: { ...o.artifact, sha256: '0'.repeat(64) } }
+        : undefined,
+    );
+    const ack = await texture.create();
+    await expect(
+      texture.client.openArtifact(
+        'one',
+        captureId,
+        ack,
+        done(),
+        'repaired.obj',
+        false,
+      ),
+    ).rejects.toThrow('Scan output verification failed.');
+    expect(texture.native.presentModel).not.toHaveBeenCalled();
+
+    const refused = withBundle(o =>
+      o.path.endsWith('/model-assets?projectRevision=0')
+        ? {
+            status: 422,
+            body: JSON.stringify({ error: { code: 'invalid-model' } }),
+          }
+        : undefined,
+    );
+    const ack2 = await refused.create();
+    await expect(
+      refused.client.openArtifact(
+        'one',
+        captureId,
+        ack2,
+        done(),
+        'repaired.obj',
+        false,
+      ),
+    ).rejects.toMatchObject({ status: 422 });
+    expect(refused.native.presentModel).not.toHaveBeenCalled();
+    expect(refused.native.present).not.toHaveBeenCalled();
+
+    for (const bad of [
+      { ...model, jobId: '55555555-5555-4555-8555-555555555555' },
+      // An OBJ that isn't the job's sealed one.
+      {
+        ...model,
+        files: [
+          { ...model.files[0], sha256: 'd'.repeat(64) },
+          ...model.files.slice(1),
+        ],
+      },
+      {
+        ...model,
+        files: [...model.files, { ...model.files[1], name: '../escape.mtl' }],
+      },
+    ]) {
+      const h = withBundle(o =>
+        o.path.endsWith('/model-assets?projectRevision=0')
+          ? { body: JSON.stringify({ model: bad }) }
+          : undefined,
+      );
+      const a = await h.create();
+      await expect(
+        h.client.openArtifact(
+          'one',
+          captureId,
+          a,
+          done(),
+          'repaired.obj',
+          false,
+        ),
+      ).rejects.toThrow();
+      expect(h.native.presentModel).not.toHaveBeenCalled();
+      expect(calls(h)).toHaveLength(1);
+    }
+  });
+
+  test('an older Mac without the bundle, or an older app, still opens the model as before', async () => {
+    const older = withBundle(o =>
+      o.path.endsWith('/model-assets?projectRevision=0')
+        ? {
+            status: 404,
+            body: JSON.stringify({ error: { code: 'not-found' } }),
+          }
+        : undefined,
+    );
+    const ack = await older.create();
+    await older.client.openArtifact(
+      'one',
+      captureId,
+      ack,
+      done(),
+      'repaired.obj',
+      false,
+    );
+    expect(calls(older).map(o => o.path)[1]).toBe(
+      `${base}/artifacts/repaired.obj?projectRevision=0`,
+    );
+    expect(older.native.present).toHaveBeenCalledWith(
+      expect.objectContaining({ mediaType: 'model/obj' }),
+      false,
+    );
+    expect(older.native.presentModel).not.toHaveBeenCalled();
+
+    const app = withBundle();
+    delete app.native.presentModel;
+    const ack2 = await app.create();
+    await app.client.openArtifact(
+      'one',
+      captureId,
+      ack2,
+      done(),
+      'repaired.obj',
+      false,
+    );
+    expect(calls(app).map(o => o.path)).toEqual([
+      `${base}/artifacts/repaired.obj?projectRevision=0`,
+    ]);
+    expect(app.native.present).toHaveBeenCalled();
+  });
+
+  test('an unfinished job, or a pairing that changes mid-download, shows nothing', async () => {
+    const early = withBundle();
+    const ack = await early.create();
+    const unfinished = job() as unknown as ScanProcessingJob;
+    await expect(
+      early.client.openArtifact(
+        'one',
+        captureId,
+        ack,
+        unfinished,
+        'repaired.obj',
+        false,
+      ),
+    ).rejects.toThrow('That scan output is not available yet.');
+    expect(early.native.request).not.toHaveBeenCalled();
+
+    const moved = withBundle();
+    let reads = 0;
+    moved.native.context = async () =>
+      reads++ < 1 ? 'host/device' : 'host/other';
+    const ack2 = await moved.create();
+    await expect(
+      moved.client.openArtifact(
+        'one',
+        captureId,
+        ack2,
+        done(),
+        'repaired.obj',
+        false,
+      ),
+    ).rejects.toThrow('Companion connection changed.');
+    // Every file went with the pairing the download started with.
+    expect(new Set(calls(moved).map(o => o.context))).toEqual(
+      new Set(['host/device']),
+    );
+    expect(moved.native.presentModel).not.toHaveBeenCalled();
+  });
 });
