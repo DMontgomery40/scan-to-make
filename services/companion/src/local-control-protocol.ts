@@ -32,6 +32,8 @@ export const parameters = {
   'devices.remove': z.strictObject({deviceId: z.uuid()}),
   'pairing.create': z.strictObject({login: z.string().min(1).max(256).optional()}),
   'pairing.isActive': z.strictObject({code: z.string().regex(/^[A-Za-z0-9_-]{32}$/)}),
+  'nearby.list': empty,
+  'nearby.answer': z.strictObject({id: z.uuid(), allow: z.boolean()}),
   'confirmations.list': empty,
   'confirmations.answer': z.strictObject({id: z.uuid(), answer}),
   'doors.prepare': z.strictObject({projectId: projectId.optional(), handoffId: z.uuid().optional(), door: z.enum(['finder', 'blender', 'bambu-studio', 'orca'])})

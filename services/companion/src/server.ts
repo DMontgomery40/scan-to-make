@@ -5,6 +5,9 @@ import { createServer, type IncomingMessage, type RequestListener } from 'node:h
 import {createServer as createHttpsServer} from 'node:https';
 import {certificatePublicKeySha256, checkLanCertificate} from './lan-transport.js';
 import {authority as hostAuthority, bindable, pairingOrigins, type LanAddresses} from './lan-addresses.js';
+import {advertise, instanceName, type Advert} from './bonjour.js';
+import {NearbyInputError, NearbyPairing} from './nearby-pairing.js';
+import type {NearbyRequest} from '@scan-to-make/contracts/nearby-pairing';
 import {
   RemoteAuthFailure,
   RemoteAuthStore,
@@ -109,6 +112,11 @@ export async function startCompanionServer(
     /** The Mac's `.local` name, accepted as a Host and listed in v2 links. */
     localName?: string;
     rediscoverMs?: number;
+    /**
+     * Nearby pairing (MAC-5): the `/v1/pair/nearby` routes and, on macOS, the Bonjour
+     * `_scantomake._tcp` advert under `name` (the Mac's name, also the v2 link's `n=`).
+     */
+    nearby?: {name: string; advertise?: typeof advertise};
   } = {}
 ): Promise<{
   url: string;
@@ -117,6 +125,8 @@ export async function startCompanionServer(
   addresses(): string[];
   /** The SHA-256 of the TLS public key (v2 `k=`), in LAN mode. */
   publicKeySha256?: string;
+  /** Nearby requests waiting for Allow on the Mac, and the answer (control socket). */
+  nearby?: {pending(): NearbyRequest[]; answer(id: string, allow: boolean): Promise<boolean>};
 }> {
   const auth = options.remoteAuth;
   const lan = auth?.transport === 'lan';
@@ -128,8 +138,20 @@ export async function startCompanionServer(
     checkLanCertificate(options.lanTls.cert, lanUrl!.hostname, auth!.certificateSha256!);
   } else if (options.lanTls) throw new Error('TLS requires explicit LAN pairing configuration');
   if (options.lanAddresses && !lan) throw new Error('Extra addresses require LAN pairing');
+  if (options.nearby && !lan) throw new Error('Nearby pairing requires LAN pairing');
   // Extra listeners by address, and the Host values this server answers to.
   const extras = new Map<string, ReturnType<typeof createHttpsServer>>();
+  let found: LanAddresses = { lan: [], tailscale: [] };
+  const publicKeySha256 = lan ? certificatePublicKeySha256(options.lanTls!.cert) : undefined;
+  const addresses = () => {
+    if (!lan) return [];
+    const live = (list: string[]) => list.filter(a => extras.has(a));
+    return pairingOrigins(lanUrl!.hostname, port, { lan: live(found.lan), tailscale: live(found.tailscale) }, options.localName);
+  };
+  const macName = options.nearby ? instanceName(options.nearby.name) : undefined;
+  const nearby = options.nearby ? new NearbyPairing({
+    auth: auth!, login: 'lan', publicKeySha256: publicKeySha256!, link: () => ({ addresses: addresses(), name: macName }),
+  }) : undefined;
   // Hosts as clients send them: on port 443 the port is left off.
   const hosts = () => new Set([
     auth?.host?.toLowerCase(),
@@ -213,32 +235,57 @@ export async function startCompanionServer(
         response.end(JSON.stringify(await auth.refresh(login, deviceId, token)));
         return;
       }
+      const pairBody = async () => {
+        if (
+          !/^application\/json(?:;\s*charset=utf-8)?$/i.test(
+            request.headers['content-type'] ?? ''
+          ) ||
+          (request.headers['content-encoding'] !== undefined &&
+            request.headers['content-encoding'] !== 'identity')
+        )
+          throw new ServerFailure('unsupported-media-type');
+        if (Number(request.headers['content-length'] ?? 0) > MAX_PAIR_REQUEST_BYTES)
+          throw new ServerFailure('payload-too-large');
+        const controller = new AbortController();
+        const abort = () => controller.abort();
+        response.once('close', abort);
+        try {
+          const input = await readBody(request, controller.signal, MAX_PAIR_REQUEST_BYTES);
+          if (controller.signal.aborted)
+            throw new ServerFailure('invalid-request');
+          return input;
+        } finally {
+          response.off('close', abort);
+        }
+      };
+      if (nearby && request.url?.startsWith('/v1/pair/nearby')) {
+        // Nearby pairing, unauthenticated like /v1/pair: starting one is a pairing attempt.
+        const step = ({ '/v1/pair/nearby': 'start', '/v1/pair/nearby/reveal': 'reveal', '/v1/pair/nearby/result': 'result' } as const)[request.url];
+        if (!step) throw new ServerFailure('not-found');
+        if (request.method !== 'POST') throw new ServerFailure('method-not-allowed');
+        if (step === 'start') await auth!.reservePairAttempt(login);
+        const input = await pairBody();
+        const gone = new AbortController();
+        const hangUp = () => gone.abort();
+        response.once('close', hangUp);
+        try {
+          const reply = step === 'start' ? nearby.start(input)
+            : step === 'reveal' ? nearby.reveal(input)
+            : await nearby.result(input, gone.signal);
+          if (!response.destroyed) response.end(JSON.stringify(reply));
+        } catch (error) {
+          throw error instanceof NearbyInputError ? new ServerFailure('invalid-request') : error;
+        } finally {
+          response.off('close', hangUp);
+        }
+        return;
+      }
       if (!auth || request.url !== '/v1/pair')
         throw new ServerFailure('not-found');
       if (request.method !== 'POST')
         throw new ServerFailure('method-not-allowed');
       await auth.reservePairAttempt(login);
-      if (
-        !/^application\/json(?:;\s*charset=utf-8)?$/i.test(
-          request.headers['content-type'] ?? ''
-        ) ||
-        (request.headers['content-encoding'] !== undefined &&
-          request.headers['content-encoding'] !== 'identity')
-      )
-        throw new ServerFailure('unsupported-media-type');
-      if (Number(request.headers['content-length'] ?? 0) > MAX_PAIR_REQUEST_BYTES)
-        throw new ServerFailure('payload-too-large');
-      const controller = new AbortController();
-      const abort = () => controller.abort();
-      response.once('close', abort);
-      try {
-        const input = await readBody(request, controller.signal, MAX_PAIR_REQUEST_BYTES);
-        if (controller.signal.aborted)
-          throw new ServerFailure('invalid-request');
-        response.end(JSON.stringify(await auth.exchange(login, input)));
-      } finally {
-        response.off('close', abort);
-      }
+      response.end(JSON.stringify(await auth.exchange(login, await pairBody())));
     } catch (error) {
       const failure =
         error instanceof ServerFailure || error instanceof RemoteAuthFailure
@@ -287,7 +334,6 @@ export async function startCompanionServer(
   let closing: Promise<void> | undefined;
   // Extra addresses are best effort: a bind that fails is retried at the next look,
   // and an address that disappears loses its listener.
-  let found: LanAddresses = { lan: [], tailscale: [] };
   let stopping = false;
   let syncing: Promise<void> | undefined;
   const closeExtra = (extra: ReturnType<typeof createHttpsServer>) => new Promise<void>(resolve => {
@@ -332,19 +378,22 @@ export async function startCompanionServer(
   await sync();
   const timer = options.lanAddresses ? setInterval(() => void sync(), options.rediscoverMs ?? 30_000) : undefined;
   timer?.unref();
+  // Advertised only once every listener is up, and withdrawn first on close.
+  const advert: Advert | undefined = options.nearby
+    ? (options.nearby.advertise ?? advertise)({ name: macName!, port, txt: { v: '1', k: publicKeySha256! } })
+    : undefined;
   return {
     url: lan ? auth!.baseUrl : `http://${authority}`,
-    ...(lan ? { publicKeySha256: certificatePublicKeySha256(options.lanTls!.cert) } : {}),
-    addresses() {
-      if (!lan) return [];
-      const live = (list: string[]) => list.filter(a => extras.has(a));
-      return pairingOrigins(lanUrl!.hostname, port, { lan: live(found.lan), tailscale: live(found.tailscale) }, options.localName);
-    },
+    ...(lan ? { publicKeySha256 } : {}),
+    addresses,
+    ...(nearby ? { nearby: { pending: () => nearby.pending(), answer: (id: string, allow: boolean) => nearby.answer(id, allow) } } : {}),
     close() {
       if (!closing)
         closing = (async () => {
           stopping = true;
           if (timer) clearInterval(timer);
+          nearby?.close();
+          await advert?.close();
           // No listener outlives close(): a look in progress finishes first, then every extra closes.
           await syncing;
           await Promise.all([...extras.values()].map(closeExtra));
