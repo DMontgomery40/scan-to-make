@@ -19,11 +19,46 @@ npm run serve --prefix services/companion
 
 | Variable | Enables |
 | --- | --- |
-| `SCAN_TO_MAKE_REMOTE_AUTH_DIR` | Private Serve authentication and pairing (below) |
+| `SCAN_TO_MAKE_REMOTE_AUTH_DIR` | Paired LAN TLS or private Serve authentication (below) |
 | `SCAN_TO_MAKE_CAPTURE_DIR` | Saved-project sync, capture import and detail stills; requires authentication |
 | `SCAN_TO_MAKE_CAPTURE_PYTHON` | The Python 3.12 environment with `usd-core==26.8` used for conversion and cleanup |
 | `SCAN_TO_MAKE_SCAN_REPAIR_TOOL`, `SCAN_TO_MAKE_SCAN_BLENDER` | Scan processing (see [SCAN-PROCESSING.md](SCAN-PROCESSING.md)) |
 | `SCAN_TO_MAKE_PRINTER_HANDOFF_CONFIG`, `SCAN_TO_MAKE_PRINTER_HANDOFF_DIR` | Printer handoff bundles and elicitation relay (below); both required together, and authentication |
+
+## Existing LAN or VPN transport
+
+Phones that already reach the companion LAN through a VPN can pair directly,
+without Tailscale. Host administration is explicit:
+
+```sh
+python3 deploy/companion/generate-lan-tls.py /absolute/private/tls 192.168.1.10
+node services/companion/dist/remote-auth-cli.js init-lan /absolute/private/auth \
+  https://192.168.1.10:9077 /absolute/private/tls/cert.pem
+export SCAN_TO_MAKE_REMOTE_AUTH_DIR=/absolute/private/auth
+export SCAN_TO_MAKE_LAN_TLS_CERT=/absolute/private/tls/cert.pem
+export SCAN_TO_MAKE_LAN_TLS_KEY=/absolute/private/tls/key.pem
+node services/companion/dist/server-cli.js
+# Separately, on the same host:
+node services/companion/dist/remote-auth-cli.js pair-capture /absolute/private/auth
+```
+
+The listener binds the configured private IPv4 address. It requires TLS with the
+exact certificate recorded at initialization, rejects proxy identity headers,
+and requires a paired device token for every API except the one-time pairing
+exchange. There is no silent fallback from Serve and no anonymous capture mode.
+The synthetic `lan` identity binds invitations/devices to this local registry;
+it is not an identity-provider login. Tailscale mode still checks Serve identity.
+
+LAN invitations include `certificateSha256`, the lowercase SHA-256 of the DER
+leaf certificate, and add `f` with that value to the deep-link query. The phone
+must verify that certificate before transmitting the code, store the pin with
+the credential, and check it for all subsequent requests. A LAN URL without the
+pin is not a complete invitation. Tailscale invitations omit it and use normal
+platform trust. The same five-minute expiry, single use, scopes, revocation and
+rate limits apply. In LAN mode the five pairing attempts per minute are shared
+by every client, rather than allocated per device; an already paired phone can
+still use its token when that pairing limit is reached. IPv6 and DNS-named LAN certificates are not supplied by this
+installer. See the [installer](../../deploy/companion/README.md#macos).
 
 ## Authenticated private Serve transport
 
@@ -45,7 +80,28 @@ node services/companion/dist/remote-auth-cli.js devices /absolute/private/auth
 node services/companion/dist/remote-auth-cli.js revoke /absolute/private/auth DEVICE_UUID
 ```
 
-`pair-capture` returns a secret code and a `qrPayload` JSON string containing `{version:1, baseUrl:"https://<fqdn>", code, expiresAt}`. It is QR **payload data**, not a rendered QR image. The UI can encode that string as a QR. The code has 192 random bits, is bound to the selected login, expires after five minutes, and can be exchanged once. Display/share it only with the intended phone; do not put it in a query URL, logs, analytics or a ticket. If the response is lost, generate a fresh invitation rather than retrying a consumed code.
+`pair-capture` and `pair-capture-and-printer-handoff` render a QR in the terminal
+(stderr) and start a short-lived page
+at the printed `http://127.0.0.1:<port>/pair` address. Scan either QR with the iPhone
+Camera app to open Scan to Make. The app must support the `scantomake` deep link.
+The page stays on loopback, is never forwarded through Serve, and removes the QR
+on its next refresh after use or expiry. It sends no-store, rejects foreign Host,
+Origin and proxy headers, and closes no later than ten seconds after expiry.
+
+Stdout remains one invitation JSON object containing `version`, `baseUrl`, `code`
+and `expiresAt`, plus `qrPayload` and (when the page starts) `pairingPageUrl`.
+Existing JSON-paste clients continue to work. `qrPayload` is now the deep link
+`scantomake://pair?v=1&u=<encoded-HTTPS-base-URL>&c=<code>&e=<expiry-ms>`;
+parameters use `URLSearchParams` encoding. This replaces the former JSON string
+in that field. Terminal/page generation uses pinned MIT-licensed `qrcode`; its
+licence is included in the installed npm package and checked by the repository audit.
+
+The code has 192 random bits, is bound to the selected login, expires after five
+minutes, and can be exchanged once. The QR and invitation are credentials: keep
+them out of logs, analytics and tickets. The display child receives the invitation
+through private IPC, not process arguments, environment or a disk file. If QR
+startup fails, the CLI still returns the JSON invitation. If the response is lost,
+generate a fresh invitation rather than retrying a consumed code.
 
 State uses directory mode 0700/file mode 0600, SHA-256 hashes of high-entropy codes/tokens, atomic replacement with fsync and an exclusive mutation lock. Reads reject symlinks, malformed/oversized state, wrong ownership or nonprivate permissions. A lock conflict returns 503; an interrupted lock requires the operator to verify that no writer remains before removing it. No automatic stale-lock recovery is performed. A lost store requires re-pairing. A stolen bearer token can be copied; device IDs are credential identifiers, not hardware attestation. Revoke the compromised device, and protect tokens in the phone's Keychain/Keystore.
 

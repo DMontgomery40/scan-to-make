@@ -1,3 +1,4 @@
+import {readFile} from 'node:fs/promises';
 import {ScanProcessingStore,createScanCleanupRunner} from './scan-processing.js';
 import {dirname,isAbsolute,join} from 'node:path';
 import {FileSavedProjectStorage} from '@scan-to-make/project';
@@ -32,17 +33,25 @@ if((handoffConfigPath===undefined)!==(handoffDirectory===undefined))throw new Er
 if(handoffConfigPath!==undefined&&(!remoteAuth||!isAbsolute(handoffConfigPath)||!isAbsolute(handoffDirectory!)))throw new Error('Printer handoff requires authentication and absolute config and directory paths');
 const printHandoff=handoffConfigPath===undefined?undefined:createPrintHandoffServices(await readPrinterHandoffConfig(handoffConfigPath),handoffDirectory!);
 // The port variable keeps its original name so existing operator setups still start.
+let lanTls;
+const certPath = process.env.SCAN_TO_MAKE_LAN_TLS_CERT;
+const keyPath = process.env.SCAN_TO_MAKE_LAN_TLS_KEY;
+if (certPath !== undefined || keyPath !== undefined) {
+  if (!certPath || !keyPath || !isAbsolute(certPath) || !isAbsolute(keyPath)) throw new Error('Absolute LAN TLS certificate and key paths required');
+  lanTls = {cert: await readFile(certPath), key: await readFile(keyPath)};
+}
 const server = await startCompanionServer({
+  lanTls,
   capture,
   printHandoff,
   remoteAuth,
   port:
     process.env.SCAN_TO_MAKE_GENERATION_PORT === undefined
-      ? 9077
+      ? undefined
       : Number(process.env.SCAN_TO_MAKE_GENERATION_PORT),
 });
 process.stdout.write(
-  `${remoteAuth ? 'Private Serve companion' : 'Local companion'} ready at ${
+  `${remoteAuth?.transport === 'lan' ? 'Paired LAN companion' : remoteAuth ? 'Private Serve companion' : 'Local companion'} ready at ${
     server.url
   }\n`
 );

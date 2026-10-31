@@ -4,6 +4,8 @@ on:
     branches: [main]
     paths:
       - 'services/companion/**'
+      - 'apps/mobile/src/companion/pairing.ts'
+      - 'apps/mobile/src/companion/pairingLink.ts'
       - 'tools/capture-mesh-convert/**'
       - 'tools/capture-pipeline/**'
       - 'tools/scan-repair/**'
@@ -16,6 +18,8 @@ on:
     branches: [main]
     paths:
       - 'services/companion/**'
+      - 'apps/mobile/src/companion/pairing.ts'
+      - 'apps/mobile/src/companion/pairingLink.ts'
       - 'tools/capture-mesh-convert/**'
       - 'tools/capture-pipeline/**'
       - 'tools/scan-repair/**'

@@ -8,6 +8,7 @@ import { constants } from 'node:fs';
 import { lstat, mkdir, open, rename, rm } from 'node:fs/promises';
 import { isAbsolute, join } from 'node:path';
 import { z } from 'zod';
+import {isLanAuthority} from './lan-transport.js';
 
 const FIVE_MINUTES = 300_000;
 const TOKEN_LIFETIME = 30 * 24 * 60 * 60 * 1000;
@@ -28,7 +29,7 @@ const hostSchema = z
   .string()
   .max(253)
   .regex(/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+ts\.net$/);
-const configurationSchema = z.strictObject({
+const serveConfigurationSchema = z.strictObject({
   host: hostSchema,
   allowedLogins: z
     .array(loginSchema)
@@ -36,6 +37,14 @@ const configurationSchema = z.strictObject({
     .max(16)
     .refine((x) => new Set(x).size === x.length),
 });
+const configurationSchema = z.union([
+  serveConfigurationSchema,
+  z.strictObject({
+    transport: z.literal('lan'), host: z.string().refine(isLanAuthority),
+    allowedLogins: z.tuple([z.literal('lan')]),
+    certificateSha256: z.string().regex(/^[a-f0-9]{64}$/),
+  }),
+]);
 export type RemoteConfiguration = z.infer<typeof configurationSchema>;
 const timeSchema = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 const digestSchema = z.string().regex(/^[a-f0-9]{64}$/);
@@ -192,8 +201,15 @@ export class RemoteAuthStore {
   get host() {
     return this.configuration.host;
   }
+  get transport(): 'lan' | 'tailscale' {
+    return 'transport' in this.configuration ? 'lan' : 'tailscale';
+  }
+  get certificateSha256(): string | undefined {
+    return 'certificateSha256' in this.configuration ? this.configuration.certificateSha256 : undefined;
+  }
+  get baseUrl() { return `https://${this.host}`; }
   allowsLogin(login: string) {
-    return this.configuration.allowedLogins.includes(login);
+    return this.configuration.allowedLogins.some(value => value === login);
   }
   static async create(
     directory: string,
@@ -277,12 +293,27 @@ export class RemoteAuthStore {
       });
       const payload = {
         version: 1,
-        baseUrl: `https://${this.host}`,
+        baseUrl: this.baseUrl,
         code,
         expiresAt,
+        ...(this.certificateSha256 ? {certificateSha256: this.certificateSha256} : {}),
       };
-      return { ...payload, qrPayload: JSON.stringify(payload) };
+      const query = new URLSearchParams({
+        v: '1', u: payload.baseUrl, c: code, e: String(expiresAt),
+      });
+      if (this.certificateSha256) query.set('f', this.certificateSha256);
+      return { ...payload, qrPayload: `scantomake://pair?${query}` };
     });
+  }
+  /** Host-local display check only; never grants a device credential. */
+  async isPairingActive(code: string): Promise<boolean> {
+    if (!/^[A-Za-z0-9_-]{32}$/.test(code)) return false;
+    try {
+      const state = await this.read();
+      return state.codes.some(x => x.expiresAt > this.now() && matches(code, x.codeHash));
+    } catch {
+      return false;
+    }
   }
   async reservePairAttempt(login: string) {
     if (!this.allowsLogin(login)) throw new RemoteAuthFailure('forbidden');
