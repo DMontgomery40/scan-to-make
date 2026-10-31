@@ -11,6 +11,7 @@ import sys
 import bpy
 import bmesh
 import numpy as np
+import mathutils
 from mathutils import Matrix, Vector
 from mathutils.bvhtree import BVHTree
 
@@ -228,6 +229,278 @@ def denoise(bm,a):
     normals(bm)
 
 
+INFERRED = "stm_inferred"
+
+
+def coarse_regions(bm, crease, limit, layer):
+    """Edge-connected untouched faces larger than limit, split at creases."""
+    coarse = {f for f in bm.faces if not f[layer] and f.calc_area() > limit}
+    regions, seen = [], set()
+    for seed in bm.faces:
+        if seed not in coarse or seed in seen:
+            continue
+        region, stack = [], [seed]
+        seen.add(seed)
+        while stack:
+            face = stack.pop()
+            region.append(face)
+            for e in face.edges:
+                if len(e.link_faces) == 2 and e.calc_face_angle(0) <= crease:
+                    for other in e.link_faces:
+                        if other in coarse and other not in seen:
+                            seen.add(other)
+                            stack.append(other)
+        regions.append(region)
+    return regions
+
+
+def rim_loop(region):
+    """Ordered rim vertices of a disk-shaped region, or None for any other topology."""
+    inside = set(region)
+    edges = list(dict.fromkeys(e for f in region for e in f.edges))
+    rim = [e for e in edges if sum(g in inside for g in e.link_faces) == 1]
+    verts = list(dict.fromkeys(v for f in region for v in f.verts))
+    links = {}
+    for e in rim:
+        for v in e.verts:
+            links.setdefault(v,[]).append(e)
+    # Manifold, Euler characteristic 1 and simple rim vertices: a disk with one rim loop.
+    if (not rim or any(len(e.link_faces) > 2 for e in edges) or len(verts)-len(edges)+len(region) != 1
+            or any(len(x) != 2 for x in links.values())):
+        return None
+    loop, edge = [rim[0].verts[0]], rim[0]
+    while True:
+        v = edge.other_vert(loop[-1])
+        if v == loop[0]:
+            break
+        loop.append(v)
+        edge = links[v][0] if links[v][1] == edge else links[v][1]
+    return loop if len(loop) == len(rim) else None
+
+
+def simple_polygon(poly):
+    """True when no two non-adjacent edges of the closed 2D polygon cross or touch."""
+    a, b, n = poly, np.roll(poly,-1,axis=0), len(poly)
+    eps = 1e-12*float(np.ptp(poly,axis=0).max())**2
+    def side(p, q, r):
+        value = (q[...,0]-p[...,0])*(r[...,1]-p[...,1])-(q[...,1]-p[...,1])*(r[...,0]-p[...,0])
+        return np.where(np.abs(value) <= eps,0,np.sign(value))
+    def within(p, q, r):
+        return ((np.minimum(p[...,0],q[...,0]) <= r[...,0]) & (r[...,0] <= np.maximum(p[...,0],q[...,0])) &
+                (np.minimum(p[...,1],q[...,1]) <= r[...,1]) & (r[...,1] <= np.maximum(p[...,1],q[...,1])))
+    for i in range(n):
+        j = np.array([k for k in range(n) if k not in (i,(i-1)%n,(i+1)%n)],dtype=np.int64)
+        if not len(j):
+            continue
+        ai, bi = np.broadcast_to(a[i],(len(j),2)), np.broadcast_to(b[i],(len(j),2))
+        d1, d2 = side(a[j],b[j],ai), side(a[j],b[j],bi)
+        d3, d4 = side(ai,bi,a[j]), side(ai,bi,b[j])
+        touch = ((d1*d2 < 0) & (d3*d4 < 0)) | ((d1 == 0) & within(a[j],b[j],ai)) | (
+            (d2 == 0) & within(a[j],b[j],bi)) | ((d3 == 0) & within(ai,bi,a[j])) | ((d4 == 0) & within(ai,bi,b[j]))
+        if np.any(touch):
+            return False
+    return True
+
+
+def inside(points, poly):
+    """Even-odd point-in-polygon test, vectorised over points."""
+    a, b = poly, np.roll(poly,-1,axis=0)
+    span = np.where(b[None,:,1] == a[None,:,1],1e-300,b[None,:,1]-a[None,:,1])
+    crossing = ((a[None,:,1] > points[:,None,1]) != (b[None,:,1] > points[:,None,1])) & (
+        points[:,None,0] < a[None,:,0]+(points[:,None,1]-a[None,:,1])*(b[None,:,0]-a[None,:,0])/span)
+    return crossing.sum(axis=1)%2 == 1
+
+
+def lattice(poly, target):
+    """Triangular lattice at the target spacing inside the polygon, half a spacing from its rim."""
+    lo, hi = poly.min(axis=0), poly.max(axis=0)
+    rows = np.arange(lo[1],hi[1]+target,target*math.sqrt(3)/2)
+    grid = np.array([(x+(k%2)*target/2,y) for k,y in enumerate(rows)
+                     for x in np.arange(lo[0],hi[0]+target,target)]).reshape(-1,2)
+    a, b = poly, np.roll(poly,-1,axis=0)
+    d = b-a
+    keep = []
+    for chunk in np.array_split(grid,max(1,len(grid)*len(poly)//2000000)):
+        t = np.clip(((chunk[:,None,:]-a[None])*d[None]).sum(2)/np.maximum((d*d).sum(1),1e-300)[None],0,1)
+        gap = np.linalg.norm(chunk[:,None,:]-(a[None]+t[...,None]*d[None]),axis=2).min(axis=1)
+        keep.append(chunk[inside(chunk,poly) & (gap > target/2)])
+    return np.concatenate(keep)
+
+
+def rebuild(bm, region, layer, target, ident):
+    """Replace a disk region with a constrained-Delaunay lattice patch on its best-fit plane.
+
+    Rim vertices and edges belong to captured faces and are reused unchanged. Returns a
+    reason when the region is skipped."""
+    loop = rim_loop(region)
+    if loop is None:
+        return "not a disk"
+    # Delete only the region's own faces, interior edges and interior vertices: rim
+    # vertices on an open boundary belong to no other face but must survive.
+    owned, rim = set(region), set(loop)
+    edges = [e for e in dict.fromkeys(e for f in region for e in f.edges)
+             if sum(g in owned for g in e.link_faces) == 2]
+    verts = [v for v in dict.fromkeys(v for f in region for v in f.verts) if v not in rim]
+    if any(g not in owned for v in verts for g in v.link_faces) or any(
+            not e.link_faces for v in verts for e in v.link_edges):
+        return "interior vertex touches captured geometry"
+    normal = np.sum([np.array(f.normal)*f.calc_area() for f in region],axis=0)
+    if not np.linalg.norm(normal):
+        return "no dominant normal"
+    # Float64 projection keeps collinear rim points exactly collinear (no rim slivers).
+    normal /= np.linalg.norm(normal)
+    axis = np.eye(3)[np.argmin(np.abs(normal))]
+    u = axis-axis.dot(normal)*normal
+    u /= np.linalg.norm(u)
+    w = np.cross(normal,u)
+    rim = np.array([tuple(v.co) for v in loop],dtype=np.float64)
+    centre = rim.mean(axis=0)
+    poly = (rim-centre) @ np.array([u,w]).T
+    if not simple_polygon(poly):
+        return "rim does not project to a simple polygon"
+    plane = np.concatenate([poly,lattice(poly,target)])
+    # Rim edges are constraints, so every hull triangle lies wholly inside or outside the rim.
+    _, _, triangles, origin, _, _ = mathutils.geometry.delaunay_2d_cdt(
+        [Vector(p) for p in plane],[(i,(i+1)%len(loop)) for i in range(len(loop))],[],0,target*1e-6,True)
+    if sorted(o[0] for o in origin if len(o) == 1) != list(range(len(plane))):
+        return "constrained triangulation changed the rim"
+    ids = [[origin[k][0] for k in tri] for tri in triangles]
+    ids = [t for t,keep in zip(ids,inside(np.array([plane[t].mean(axis=0) for t in ids]).reshape(-1,2),poly)) if keep]
+    uses = {}
+    for tri in ids:
+        for k in range(3):
+            key = (min(tri[k],tri[k-1]),max(tri[k],tri[k-1]))
+            uses[key] = uses.get(key,0)+1
+    rim_keys = {(min(i,(i+1)%len(loop)),max(i,(i+1)%len(loop))) for i in range(len(loop))}
+    flat = [abs(np.cross(plane[b]-plane[a],plane[c]-plane[a])) <= 1e-12*target*target for a,b,c in ids]
+    if any(flat) or any(uses.get(k) != 1 for k in rim_keys) or any(
+            n != 2 for k,n in uses.items() if k not in rim_keys):
+        return "constrained triangulation is not a manifold disk"
+    bmesh.ops.delete(bm,geom=region,context="FACES_ONLY")
+    bmesh.ops.delete(bm,geom=edges,context="EDGES_FACES")
+    bmesh.ops.delete(bm,geom=[v for v in verts if v.is_valid],context="VERTS")
+    made = [loop[o] if o < len(loop) else bm.verts.new(Vector(centre+u*plane[o][0]+w*plane[o][1]))
+            for o in range(len(plane))]
+    for tri in ids:
+        bm.faces.new([made[k] for k in tri])[layer] = ident
+    return None
+
+
+def patch_edges(patch, layer):
+    """Edges inside one patch. Rims, including creases between patches, stay fixed."""
+    return [e for e in dict.fromkeys(e for f in patch for e in f.edges)
+            if len(e.link_faces) == 2 and e.link_faces[0][layer] > 0 and
+            e.link_faces[0][layer] == e.link_faces[1][layer]]
+
+
+def fair(bm, layer, crease):
+    """Fair patch vertices with rim and captured neighbours fixed.
+
+    Minimises the inverse-length weighted umbrella over patch vertices (harmonic). With a
+    crease angle, rim rows join (bi-Laplacian): the patch continues the captured curvature
+    across two fixed rings, except at rim creases above the angle."""
+    patch = [f for f in bm.faces if f[layer] > 0]
+    edges = list(dict.fromkeys(e for f in patch for e in f.edges))
+    inner = set(patch_edges(patch,layer))
+    rim = [e for e in edges if e not in inner]
+    rim_verts = list(dict.fromkeys(v for e in rim for v in e.verts))
+    released = set(rim_verts) if crease is None else {
+        v for e in rim if len(e.link_faces) != 2 or e.calc_face_angle(0) > crease for v in e.verts}
+    fixed = set(rim_verts)
+    unknown = [v for v in dict.fromkeys(v for f in patch for v in f.verts) if v not in fixed]
+    if not unknown:
+        return 0, 0.0
+    column = {v:i for i,v in enumerate(unknown)}
+    rows = unknown+[v for v in rim_verts if v not in released]
+    row, col, val, known = [], [], [], np.zeros((len(rows),3))
+    for r,v in enumerate(rows):
+        others = [e.other_vert(v) for e in v.link_edges]
+        weight = np.array([1/max((u.co-v.co).length,1e-9) for u in others])
+        for u,w in [(v,-1.0),*zip(others,weight/weight.sum())]:
+            if u in column:
+                row.append(r); col.append(column[u]); val.append(w)
+            else:
+                known[r] += w*np.array(u.co)
+    row, col, val = np.array(row), np.array(col), np.array(val)
+    def forward(x):
+        return np.stack([np.bincount(row,val*x[col,k],len(rows)) for k in range(3)],axis=1)
+    def back(y):
+        return np.stack([np.bincount(col,val*y[row,k],len(unknown)) for k in range(3)],axis=1)
+    # Jacobi-preconditioned conjugate gradients on A^T A x = -A^T c, per coordinate.
+    inverse = 1/np.maximum(np.bincount(col,val*val,len(unknown)),1e-300)[:,None]
+    x = np.array([tuple(v.co) for v in unknown])
+    b = -back(known)
+    residual = b-back(forward(x))
+    z = inverse*residual
+    direction, rz, steps = z.copy(), (residual*z).sum(0), 0
+    while steps < 20000 and np.any(np.linalg.norm(residual,axis=0) > 1e-13*np.maximum(np.linalg.norm(b,axis=0),1e-300)):
+        product = back(forward(direction))
+        alpha = rz/np.maximum((direction*product).sum(0),1e-300)
+        x += alpha*direction
+        residual -= alpha*product
+        z = inverse*residual
+        new = (residual*z).sum(0)
+        direction = z+(new/np.maximum(rz,1e-300))*direction
+        rz, steps = new, steps+1
+    for v,p in zip(unknown,x):
+        v.co = Vector(p)
+    residual = float(np.max(np.linalg.norm(residual,axis=0)/np.maximum(np.linalg.norm(b,axis=0),1e-300)))
+    return steps, residual
+
+
+def refill_coarse(bm, a):
+    crease = math.radians(a["fill_crease_deg"])
+    # Adding a layer invalidates element references, so it precedes region collection.
+    layer = bm.faces.layers.int.get(INFERRED) or bm.faces.layers.int.new(INFERRED)
+    areas = [f.calc_area() for f in bm.faces]
+    # One threshold for the whole pass; area-matched equilateral triangles for the patch.
+    limit = 10*float(np.median(areas))
+    target = math.sqrt(4*float(np.median(areas))/math.sqrt(3))
+    faces = {f for r in coarse_regions(bm,crease,limit,layer) for f in r}
+    # Captured vertices touch a face outside every coarse region; none may move.
+    captured = [(v,v.co.copy()) for v in bm.verts if any(g not in faces for g in v.link_faces)]
+    regions, removed, removed_area, skipped, surface = 0, 0, 0.0, [], []
+    # Each patch gets its own id, so crease edges between neighbouring patches stay rim.
+    # Regions are collected again after every swap because rebuilding edits the mesh.
+    while True:
+        pending = coarse_regions(bm,crease,limit,layer)
+        if not pending:
+            break
+        region, regions = pending[0], regions+1
+        area = sum(f.calc_area() for f in region)
+        coarse = [[tuple(v.co) for v in f.verts] for f in region]
+        reason = rebuild(bm,region,layer,target,regions)
+        if reason:
+            for f in region:
+                f[layer] = -1
+            skipped.append({"faces":len(region),"areaMm2":area,"reason":reason})
+        else:
+            removed, removed_area = removed+len(coarse), removed_area+area
+            surface += coarse
+    for f in bm.faces:
+        if f[layer] < 0:
+            f[layer] = 0
+    # New faces need normals before fair() measures rim creases.
+    normals(bm)
+    steps, residual = fair(bm,layer,crease if a["fill_fairing"] == "biharmonic" else None) if removed else (0, 0.0)
+    normals(bm)
+    patch = [f for f in bm.faces if f[layer] > 0]
+    # How far the faired surface departs from the coarse fill it replaced.
+    tree = BVHTree.FromPolygons([p for f in surface for p in f],
+                                [list(range(i,i+len(f))) for i,f in
+                                 zip(np.cumsum([0]+[len(f) for f in surface[:-1]]).tolist(),surface)]) if surface else None
+    offset = max((tree.find_nearest(v.co)[3] for v in dict.fromkeys(v for f in patch for v in f.verts)),default=0.0) if tree else 0.0
+    return {"name":"refillCoarse","rule":"faces > 10x median area; edge-connected; split at creases",
+            "creaseDeg":a["fill_crease_deg"],"fairing":a["fill_fairing"],"regions":regions,"refilled":regions-len(skipped),
+            "skipped":skipped,"removedFaces":removed,"removedAreaMm2":removed_area,
+            "inferredFaces":len(patch),"inferredAreaMm2":sum(f.calc_area() for f in patch),"targetEdgeMm":target,
+            "method":"constrained-Delaunay lattice on the region plane; inverse-length weighted least-squares "
+                     "fairing, rim fixed (biharmonic: captured ring fixed, crease rim rows released)",
+            "solverIterations":steps,"solverRelativeResidual":residual,"solverConverged":residual <= 1e-13,
+            "patchMaxOffsetMm":offset,
+            "capturedMaxMoveMm":max(((v.co-co).length for v,co in captured),default=0.0)}
+
+
 def deviation(original, repaired, count):
     # Area-stratified triangle samples with a fixed low-discrepancy barycentric sequence.
     tri = original.copy()
@@ -283,6 +556,8 @@ def export(bm,out,uv=False,libraries=(),materials=()):
     """Write mm OBJ/STL; with uv, one vt per face corner keeps authored seams."""
     bm.verts.index_update()
     layer = bm.loops.layers.uv.active if uv else None
+    inferred = bm.faces.layers.int.get(INFERRED)
+    ranges = []
     with (out/"repaired.obj").open("w") as f:
         f.write("# units: mm\n")
         if libraries:
@@ -294,8 +569,18 @@ def export(bm,out,uv=False,libraries=(),materials=()):
                 for loop in face.loops:
                     f.write("vt "+" ".join(format(c,".9g") for c in loop[layer].uv)+"\n")
         current, corner = None, 1
-        for face in bm.faces:
+        for number,face in enumerate(bm.faces,1):
+            guess = inferred is not None and face[inferred] > 0
+            if guess:
+                # 1-based OBJ face ranges of inferred (re-filled) surface.
+                if ranges and ranges[-1][1] == number-1:
+                    ranges[-1][1] = number
+                else:
+                    ranges.append([number,number])
             name = materials[face.material_index] if face.material_index < len(materials) else None
+            # Inferred faces carry no captured texture, even before any captured face.
+            if guess and materials:
+                name = "unbound"
             # A face without a material after an assigned run needs an explicit reset,
             # as capture-mesh-convert writes; otherwise it inherits the previous texture.
             name = name or (current and "unbound")
@@ -316,6 +601,7 @@ def export(bm,out,uv=False,libraries=(),materials=()):
         for face in tri.faces:
             f.write(struct.pack("<12fH",*face.normal,*(c for v in face.verts for c in v.co),0))
     tri.free()
+    return ranges
 
 
 def repair(obj,bm,a):
@@ -352,6 +638,10 @@ def repair(obj,bm,a):
     filled = bmesh.ops.holes_fill(bm,edges=[e for e in bm.edges if e.is_boundary],sides=a["hole_max_edges"])
     normals(bm)
     ops.append({"name":"fillHoles","maxEdges":a["hole_max_edges"],"facesAdded":len(filled["faces"])})
+    if a["coarse_fill"] == "refill":
+        ops.append(refill_coarse(bm,a))
+    else:
+        ops.append({"name":"refillCoarse","applied":False})
     fallback = a["force_voxel"] or not stats(bm)["watertight"]
     if fallback:
         extent = max(stats(bm)["bboxMm"]["extents"])
@@ -398,19 +688,23 @@ def repair(obj,bm,a):
              for m in obj.data.materials] if files else []
     out = Path(a["out"])
     out.mkdir(parents=True,exist_ok=True)
-    export(bm,out,uv=uv_note is None,libraries=material.get("libraries",[]) if files else [],materials=names)
+    ranges = export(bm,out,uv=uv_note is None,libraries=material.get("libraries",[]) if files else [],materials=names)
     for name in files:
         shutil.copyfile(Path(material["stage"])/name,out/name)
     ops.append({"name":"export","uvRetained":uv_note is None,"uvNote":uv_note,
                 "uvCorners":sum(len(f.loops) for f in bm.faces) if uv_note is None else 0,"materialFiles":files,
-                "materialNote":"UVs not retained" if uv_note else material.get("note")})
+                "materialNote":"UVs not retained" if uv_note else material.get("note"),
+                "inferredFaceRanges":ranges,
+                "inferredNote":"voxel remesh rebuilt the surface; Blender carried the inferred marking over, approximately"
+                if fallback and any(o.get("inferredFaces") for o in ops) else None})
     return {"schemaVersion":1,"blenderVersion":bpy.app.version_string,"provesPhysicalAccuracy":False,
             "previewOnly":True,"inputSha256":sha(a.get("import_path",a["input"])),"inputScaleMm":a["scale_mm"],
             "outputUnits":"mm","outputSha256":{n:sha(out/n) for n in ("repaired.obj","repaired.stl",*files)},
             "before":before,"after":stats(bm),"operations":ops,"deviation":dev,
             "limitations":["Topological watertightness does not detect self intersections or certify a valid solid.",
                            "Box and PCA frames are ambiguous for symmetric objects; neither infers semantic upright or print-bed placement.",
-                           "One-sided sampled deviation can miss added geometry and unsampled defects."]}
+                           "One-sided sampled deviation can miss added geometry and unsampled defects.",
+                           "Re-filled coarse regions (inferredFaceRanges) are inferred surface, not measured."]}
 
 
 def strip_png_metadata(path):

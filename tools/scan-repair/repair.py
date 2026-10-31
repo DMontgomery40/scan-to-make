@@ -124,6 +124,12 @@ def parser():
             s.add_argument("--deviation-samples", type=int, default=10000)
             s.add_argument("--orient", choices=("box","pca","keep"), default="box",
                            help="output frame: minimum-volume box (default), vertex PCA, or input axes")
+            s.add_argument("--coarse-fill", choices=("refill","keep"), default="refill",
+                           help="re-fill faces over 10x the median area with faired, densified patches")
+            s.add_argument("--fill-crease-deg", type=float, default=60,
+                           help="coarse regions split, and biharmonic patches stop following curvature, at creases above this")
+            s.add_argument("--fill-fairing", choices=("harmonic","biharmonic"), default="harmonic",
+                           help="harmonic stays within the rim; biharmonic continues rim curvature and can overshoot")
     return p
 
 
@@ -158,6 +164,8 @@ def main():
                 raise ValueError("denoise iterations must be [0,50]; sharp angle [0,90]")
             if a.voxel_size_mm <= 0 or a.deviation_samples < 1 or a.hole_max_edges < 0:
                 raise ValueError("invalid voxel size, sample count or hole limit")
+            if not 0 <= a.fill_crease_deg <= 180:
+                raise ValueError("fill crease angle must be [0,180]")
             if a.target_faces is not None and a.target_faces < 4:
                 raise ValueError("target faces must be at least 4")
         if a.command == "render" and not 16 <= a.resolution <= 4096:
