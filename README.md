@@ -21,7 +21,7 @@ Native review/export is demonstrated on an isolated iOS Simulator only. Physical
 | Object Capture eval | Isolated LiDAR Object Capture evaluation app (not the consumer UI) | [`apps/mobile/modules/object-capture/`](apps/mobile/modules/object-capture/), [`EVALUATION.md`](apps/mobile/modules/object-capture/EVALUATION.md) |
 | RoomPlan / depth | RoomPlan suitability notes for drawer interiors; bounded ARKit depth/mesh evidence collector | [`apps/mobile/modules/room-capture/`](apps/mobile/modules/room-capture/), [`apps/mobile/modules/depth-capture/`](apps/mobile/modules/depth-capture/) |
 | Consumer capture | Support check and manual sizes; developer AR probe is separate from consumer scan-to-mesh | [`apps/mobile/src/screens/CaptureScreen.tsx`](apps/mobile/src/screens/CaptureScreen.tsx), [`apps/mobile/modules/scan-capture/`](apps/mobile/modules/scan-capture/) |
-| Local workers | Filesystem project store; companion generation, capture import, pairing, and print-intent journal (no printer dispatch) | [`services/project/`](services/project/), [`services/companion/`](services/companion/) |
+| Local workers | Filesystem project store; companion generation, capture import, pairing, and print-intent journal | [`services/project/`](services/project/), [`services/companion/`](services/companion/) |
 | Private companion path | Read-only Tailscale preflight and setup notes | [`tools/tailscale/`](tools/tailscale/), [`docs/tailscale-setup.md`](docs/tailscale-setup.md) |
 
 ## Still OPEN
@@ -42,6 +42,6 @@ tools/self-host-smoke/auth-smoke.sh
 
 `smoke.sh` bootstraps the venv and runs the tests and synthetic repros for `tools/capture-mesh-convert`, `tools/capture-fit-eval` and `tools/capture-pipeline` (pipeline and duplicate). It does not start the companion listener.
 
-`auth-smoke.sh` installs the checkout's companion/project/contracts packages, starts the authenticated generation/capture listener with isolated fixture auth only (no live tailnet or device changes), then exercises portable-project sync → real USDZ import → listener restart against the same storage → verified reopen and exact original download. Wrong-scope and stale `If-Match` requests must fail closed. The checkout is left clean (`git status --porcelain` empty).
+`auth-smoke.sh` installs the checkout's companion/project/contracts packages, starts the authenticated generation/capture listener with isolated fixture auth only (no live tailnet or device changes), then exercises portable-project sync → real USDZ import → listener restart against the same storage → verified reopen and exact original download. Wrong-scope and stale `If-Match` requests are rejected. The checkout is left clean (`git status --porcelain` empty).
 
 Each command prints a PASS/FAIL summary and exits nonzero on any failure. A passing authenticated run is the HTTP path only; it does not claim native review, export, or physical-fit validation. See [`tools/self-host-smoke/README.md`](tools/self-host-smoke/README.md).

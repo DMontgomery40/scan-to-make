@@ -18,12 +18,12 @@ Claim a task and its file scope before editing. One owner per active scope. Pres
 - print-file inspection, the print safety core and AMS mapping (`inspect_print_file`, `src/safety/`, `resolve_3mf_ams_slots`);
 - mesh edits (`lay_flat`, `rotate_stl`, `scale_stl`, `center_model`, `extend_stl_base`, `merge_vertices`, `get_stl_info`) and Blender MCP (`blender_mcp_edit_model`);
 - every print route: direct LAN, the FULU `bambu_network` bridge (signed commands, no Developer Mode), X2D `bambu_native` and the Bambu Connect hand-off;
-- the product plan: the Made to Fit PRD and cost model in `docs/prd/`, covering pricing, licensing, hosting, print routes and the design runtime.
+- the Made to Fit PRD and cost model in `docs/prd/`, covering pricing, licensing, hosting, print routes and the design runtime. It is one of three source plans (with Codex's `docs/research/PRD.md` and Muse's `shared/plans/muse.md`, both private on the Mac; index in `shared/PLANS.md`). What the team accepted is in Slack #decisions (D001–D004 and later) and `shared/team/DECISIONS.md`; where a plan and an accepted decision differ, the decision wins.
 
 Rules:
 
-- Before you build, plan, delegate or ask David about anything that touches printing, slicing, orientation, mesh editing, print safety, pricing, hosting or licensing, read the matching part of that repo: README, `docs/`, `docs/prd/scan-to-print-PRD.md`, its AGENTS.md, and its agent memory on the Mac (`~/.claude/projects/-Users-davidmontgomery-bambu-printer-mcp/memory/`). Search its session logs there too. Restore missing logs from Time Machine (SSH lacks Full Disk Access; run a `.command` script with `open -a Terminal`).
-- If it has the capability, call it through MCP. Don't reimplement it here. Preparation runs it as a separate process with no printer credentials (`PRINTER_HOST`, `BAMBU_SERIAL`, `BAMBU_TOKEN` absent) and an allowlist of file-only tools. Only the human-approved dispatch step uses a credentialed process.
+- Before you build, plan, delegate or ask David about anything that touches printing, slicing, orientation, mesh editing, print safety, pricing, hosting or licensing, read the matching part of that repo (README, `docs/`, `docs/prd/scan-to-print-PRD.md`, its AGENTS.md) and the accepted decisions, plus its agent memory on the Mac (`~/.claude/projects/-Users-davidmontgomery-bambu-printer-mcp/memory/`). Search its session logs there too. Restore missing logs from Time Machine (SSH lacks Full Disk Access; run a `.command` script with `open -a Terminal`).
+- If it has the capability, call it through MCP. Don't reimplement it here. bambu-printer-mcp is the slicing and printing back end, and agents may call any of its tools, including the ones that talk to the printer (status, camera, upload, `print_3mf`). Starting a physical print keeps bambu-printer-mcp's own human confirmation.
 - Every PR here that touches those areas names the bambu-printer-mcp capability it uses, or says why none fits. Reviewers reject a PR that duplicates one.
 - Never record that something is missing, wiped or needs a rebuild until you have checked that repo's memory, its session logs and the backups.
 - Treat "separate" as "don't edit it casually". It never means "don't read it". Changes to it follow its own AGENTS.md safety and release rules. Additional printer adapters belong behind the product contract, never inside the Bambu-only fork.
@@ -37,6 +37,8 @@ Why this rule exists: on 2026-10-30 this repo's lead treated bambu-printer-mcp a
 
 `slice_stl`, `lay_flat` and the harness were all documented beforehand. The owner had to find every one of these mistakes himself. The duplicates are being removed. Don't repeat this.
 
-Physical dispatch, hardware purchases and paid cloud deployments need the appropriate concrete user authorization. Use isolated fixtures for routine development. Printer operations retain exact artifact inspection, fresh observed identity/state, model/nozzle/material/plate checks, human approval and once-only dispatch.
+Hardware purchases and paid cloud deployments spend David's money: ask him first (kept pending his confirmation, 2026-10-31). Agents may use David's printer and phone for development and testing; bambu-printer-mcp keeps its own print confirmation.
+
+Don't add restrictions David never gave. Before writing a rule into AGENTS.md, a brief, memory or docs, point to where he said it. If you can't, it isn't a rule.
 
 Keep credentials, personal captures, private coordination and provider usage details out of Git. Never put agent attribution or session links in Git/GitHub commits, PRs or release notes. Shared local team records are private coordination, not public product documentation.

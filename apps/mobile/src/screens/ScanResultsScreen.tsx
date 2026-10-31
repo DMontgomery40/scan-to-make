@@ -14,6 +14,7 @@ import {
 import type { ScanProcessingJob } from '@scan-to-make/contracts';
 import { Badge, Button, Card, Field, Notice, Screen } from '../ui/components';
 import { ImageViewer } from '../ui/ImageViewer';
+import { useRequestGate } from './requestGate';
 import { colors, radius, space, type } from '../ui/theme';
 import {
   failureOf,
@@ -105,14 +106,8 @@ export function ScanResultsScreen({
   const epoch = useRef(0);
   const busy = useRef(false);
   const mounted = useRef(true);
-  // The companion bridge serves one request at a time, so gallery downloads
-  // and model actions queue through a single gate instead of colliding.
-  const queue = useRef<Promise<unknown>>(Promise.resolve());
-  const gate = useCallback(<T,>(task: () => Promise<T>): Promise<T> => {
-    const run = queue.current.then(task);
-    queue.current = run.catch(() => undefined);
-    return run;
-  }, []);
+  // Every companion call queues through the app's shared request gate.
+  const gate = useRequestGate();
 
   const load = useCallback(async () => {
     const token = ++epoch.current;
@@ -121,7 +116,7 @@ export function ScanResultsScreen({
     setNotice(null);
     setPollStalled(false);
     try {
-      const current = await services.acknowledge(projectId);
+      const current = await gate(() => services.acknowledge(projectId));
       if (!live()) return;
       ack.current = current;
       if (
@@ -141,11 +136,8 @@ export function ScanResultsScreen({
       let listed: ScanProcessingJob[] | null = null;
       if (services.processing.listJobs) {
         try {
-          listed = await services.processing.listJobs(
-            projectId,
-            captureId,
-            current,
-          );
+          const list = services.processing.listJobs.bind(services.processing);
+          listed = await gate(() => list(projectId, captureId, current));
         } catch (error) {
           if (!notAvailable(failureOf(error))) throw error;
         }
@@ -176,11 +168,8 @@ export function ScanResultsScreen({
         return;
       }
       try {
-        const job = await services.processing.status(
-          projectId,
-          captureId,
-          current,
-          jobId,
+        const job = await gate(() =>
+          services.processing.status(projectId, captureId, current, jobId),
         );
         if (!live()) return;
         if (job.reference && !userDraft.current) {
@@ -209,7 +198,13 @@ export function ScanResultsScreen({
         message: failure.message,
       });
     }
-  }, [services, projectId, captureId, target.capture.binding.projectRevision]);
+  }, [
+    services,
+    projectId,
+    captureId,
+    target.capture.binding.projectRevision,
+    gate,
+  ]);
 
   useEffect(() => {
     mounted.current = true;
@@ -242,11 +237,9 @@ export function ScanResultsScreen({
       const generation = pollGate.current;
       const stale = () =>
         stopped || token !== epoch.current || generation !== pollGate.current;
-      const request = services.processing.status(
-        projectId,
-        captureId,
-        ack.current!,
-        activeJobId,
+      const current = ack.current!;
+      const request = gate(() =>
+        services.processing.status(projectId, captureId, current, activeJobId),
       );
       inflight.current = request;
       try {
@@ -286,6 +279,7 @@ export function ScanResultsScreen({
     projectId,
     captureId,
     pollMs,
+    gate,
   ]);
   useEffect(() => {
     const subscription = AppState.addEventListener('change', state => {
@@ -308,11 +302,14 @@ export function ScanResultsScreen({
     setNotice(null);
     setPhase({ kind: 'starting' });
     try {
-      const job = await services.processing.start(
-        projectId,
-        captureId,
-        ack.current,
-        reference ?? undefined,
+      const acked = ack.current;
+      const job = await gate(() =>
+        services.processing.start(
+          projectId,
+          captureId,
+          acked,
+          reference ?? undefined,
+        ),
       );
       await services.jobs.save(projectId, captureId, job.jobId);
       if (previousJob) {
@@ -371,11 +368,14 @@ export function ScanResultsScreen({
             setStoppingShown(true);
             try {
               await inflight.current?.catch(() => undefined);
-              const next = await services.processing.cancel(
-                projectId,
-                captureId,
-                ack.current,
-                job.jobId,
+              const current = ack.current;
+              const next = await gate(() =>
+                services.processing.cancel(
+                  projectId,
+                  captureId,
+                  current,
+                  job.jobId,
+                ),
               );
               setNotice(null);
               setPhase({ kind: 'job', job: next });

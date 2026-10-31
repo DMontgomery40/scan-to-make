@@ -39,6 +39,7 @@ import { CloseUpsScreen } from './src/screens/CloseUpsScreen';
 import { MakeScreen, type MakeIdea } from './src/screens/MakeScreen';
 import { liveScanServices } from './src/screens/liveScanServices';
 import { PrintReviewScreen } from './src/screens/PrintReviewScreen';
+import { RequestGateProvider } from './src/screens/requestGate';
 import {
   unavailablePrintReviewServices,
   type PrintReviewServices,
@@ -566,22 +567,25 @@ function App({
     }
   return (
     <SafeAreaProvider>
-      <StatusBar
-        barStyle={
-          Platform.OS === 'ios' && scheme === 'dark'
-            ? 'light-content'
-            : 'dark-content'
-        }
-      />
-      {screen}
-      {companionOpen ? (
-        <Modal
-          presentationStyle="fullScreen"
-          onRequestClose={() => setCompanionOpen(false)}
-        >
-          <CompanionScreen onBack={() => setCompanionOpen(false)} />
-        </Modal>
-      ) : null}
+      {/* One queue for every companion call, across screens. */}
+      <RequestGateProvider>
+        <StatusBar
+          barStyle={
+            Platform.OS === 'ios' && scheme === 'dark'
+              ? 'light-content'
+              : 'dark-content'
+          }
+        />
+        {screen}
+        {companionOpen ? (
+          <Modal
+            presentationStyle="fullScreen"
+            onRequestClose={() => setCompanionOpen(false)}
+          >
+            <CompanionScreen onBack={() => setCompanionOpen(false)} />
+          </Modal>
+        ) : null}
+      </RequestGateProvider>
     </SafeAreaProvider>
   );
 }

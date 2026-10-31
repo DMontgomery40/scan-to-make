@@ -42,7 +42,7 @@
       "family": "TPU"
     }
   },
-  "operatorBaselineNote": "Discovered read-only from bambu-printer-mcp configuration and field notes: Bambu Lab P1S with 0.4 mm hardened_steel standard-flow nozzle and Textured PEI Plate (textured_plate). Zero printer contact.",
+  "operatorBaselineNote": "Discovered read-only from bambu-printer-mcp configuration and field notes: Bambu Lab P1S with 0.4 mm hardened_steel standard-flow nozzle and Textured PEI Plate (textured_plate).",
   "profiles": [
     {
       "bambuModel": "p1s",

@@ -23,6 +23,7 @@ import {
   type Failure,
   type ProjectAcknowledgment,
 } from './scanServices';
+import { useRequestGate } from './requestGate';
 import {
   newJobId,
   type PreparedPrint,
@@ -115,6 +116,8 @@ export function PrintReviewScreen({
   const ack = useRef<ProjectAcknowledgment | null>(null);
   const busy = useRef(false);
   const mounted = useRef(true);
+  // Every companion call queues through the app's shared request gate.
+  const gate = useRequestGate();
   const show = (next: Phase) => {
     if (mounted.current) setPhase(next);
   };
@@ -150,11 +153,9 @@ export function PrintReviewScreen({
     });
     show({ kind: 'preparing' });
     try {
-      const print = await services.prepare(projectId, current, {
-        jobId,
-        design,
-        allowSupports,
-      });
+      const print = await gate(() =>
+        services.prepare(projectId, current, { jobId, design, allowSupports }),
+      );
       await services.jobs.save(projectId, design.sha256, {
         jobId,
         allowSupports,
@@ -194,10 +195,9 @@ export function PrintReviewScreen({
     if (!ack.current) return;
     show({ kind: 'checking', print });
     try {
-      const attempt = await services.attempt(
-        projectId,
-        ack.current,
-        print.jobId,
+      const acked = ack.current;
+      const attempt = await gate(() =>
+        services.attempt(projectId, acked, print.jobId),
       );
       if (attempt.intent) {
         show({ kind: 'sent', attempt });
@@ -219,11 +219,12 @@ export function PrintReviewScreen({
     setNotice(null);
     show({ kind: 'sending', print });
     try {
-      const intent = await services.claimIntent(
-        projectId,
-        ack.current,
-        print.jobId,
-        { jobSha256: print.jobSha256, confirmed: true },
+      const acked = ack.current;
+      const intent = await gate(() =>
+        services.claimIntent(projectId, acked, print.jobId, {
+          jobSha256: print.jobSha256,
+          confirmed: true,
+        }),
       );
       show({ kind: 'sent', attempt: { intent } });
     } catch (error) {
@@ -264,13 +265,12 @@ export function PrintReviewScreen({
     show({ kind: 'loading' });
     setNotice(null);
     try {
-      ack.current = await services.acknowledge(projectId);
+      const acked = await gate(() => services.acknowledge(projectId));
+      ack.current = acked;
       const kept = await services.jobs.load(projectId, design.sha256);
       if (!kept) return show({ kind: 'ready' });
-      const attempt = await services.attempt(
-        projectId,
-        ack.current,
-        kept.jobId,
+      const attempt = await gate(() =>
+        services.attempt(projectId, acked, kept.jobId),
       );
       if (attempt.intent) return show({ kind: 'sent', attempt });
       if (kept.prepared) return prepare(kept.allowSupports);
@@ -356,10 +356,10 @@ export function PrintReviewScreen({
         onPress={async () => {
           if (!ack.current || !phase.attempt.intent) return;
           try {
-            const attempt = await services.attempt(
-              projectId,
-              ack.current,
-              phase.attempt.intent.jobId,
+            const acked = ack.current;
+            const jobId = phase.attempt.intent.jobId;
+            const attempt = await gate(() =>
+              services.attempt(projectId, acked, jobId),
             );
             if (attempt.intent) show({ kind: 'sent', attempt });
             setNotice(null);

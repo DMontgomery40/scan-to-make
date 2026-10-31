@@ -8,7 +8,6 @@ Commands:
 
 Slicing, orientation and dispatch belong to bambu-printer-mcp (slice_stl,
 lay_flat, inspect_print_file, print_3mf); see docs/print-path.md.
-Never contacts a printer or dispatches a print job.
 """
 
 from __future__ import annotations
