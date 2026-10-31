@@ -68,7 +68,7 @@ test('authenticated HTTP sync imports real USDZ then reopens metadata and exact 
 
 test('generation-only, revoked, browser and wrong-snapshot requests fail before capture import',async t=>{
  const f=await fixture(t),etag=await sync(f);
- const invite=await f.remoteAuth.createPairing('alice@example.test');const old=await f.remoteAuth.exchange('alice@example.test',{code:invite.code,deviceName:'Old generation'});
+ const invite=await f.remoteAuth.createPairing('alice@example.test',['generation:health','generation:create']);const old=await f.remoteAuth.exchange('alice@example.test',{code:invite.code,deviceName:'Old generation'});
  const headers={authorization:`Bearer ${old.token}`,'x-scan-device':old.deviceId};
  assert.equal((await wire(f,'/v1/saved-projects/phone',{headers})).status,403);
  assert.equal((await wire(f,route,{...importOptions(etag,Buffer.from('x')),headers:{...importOptions(etag).headers,...headers}})).status,403);

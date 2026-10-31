@@ -152,16 +152,14 @@ export async function startCompanionServer(
       ) {
         throw new ServerFailure('forbidden');
       }
+      const credential = () => ({
+        deviceId: singleHeader(request, 'x-scan-device'),
+        token: singleHeader(request, 'authorization')?.match(/^Bearer ([A-Za-z0-9_-]{43})$/)?.[1],
+      });
       const authorize = async (scope: RemoteScope) => {
         if (!auth) return;
-        const authorization = singleHeader(request, 'authorization');
-        const token = authorization?.match(/^Bearer ([A-Za-z0-9_-]{43})$/)?.[1];
-        await auth.authorize(
-          login,
-          singleHeader(request, 'x-scan-device'),
-          token,
-          scope
-        );
+        const { deviceId, token } = credential();
+        await auth.authorize(login, deviceId, token, scope);
       };
       if (request.url === '/healthz' && request.method === 'GET') {
         // Scope name kept from the first protocol so existing pairings still parse.
@@ -174,6 +172,16 @@ export async function startCompanionServer(
       }
       if(printHandoffRoutes&&request.url?.startsWith('/v1/printer-handoff/')){
         await printHandoffRoutes.handle(request,response,authorize,name=>singleHeader(request,name));return;
+      }
+      if (auth && request.url === '/v1/auth/refresh') {
+        // Rolling refresh: the same credential, valid for another full lifetime. No body.
+        if (request.method !== 'POST')
+          throw new ServerFailure('method-not-allowed');
+        if (Number(request.headers['content-length'] ?? 0) !== 0 || request.headers['transfer-encoding'] !== undefined)
+          throw new ServerFailure('invalid-request');
+        const { deviceId, token } = credential();
+        response.end(JSON.stringify(await auth.refresh(login, deviceId, token)));
+        return;
       }
       if (!auth || request.url !== '/v1/pair')
         throw new ServerFailure('not-found');

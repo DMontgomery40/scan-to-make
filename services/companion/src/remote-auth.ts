@@ -5,20 +5,30 @@ import {
   timingSafeEqual,
 } from 'node:crypto';
 import { constants } from 'node:fs';
-import { lstat, mkdir, open, rename, rm } from 'node:fs/promises';
+import { link, lstat, mkdir, open, rename, rm } from 'node:fs/promises';
 import { isAbsolute, join } from 'node:path';
 import { z } from 'zod';
+import {
+  DEVICE_AUTH_PROTOCOL_VERSION,
+  DEVICE_CREDENTIAL_LIFETIME_MS,
+  DeviceCredentialSchema,
+  PHONE_SCOPES,
+  RemoteScopeSchema,
+  type DeviceCredential,
+  type RemoteScope,
+} from '@scan-to-make/contracts/device-auth';
 import {isLanAuthority} from './lan-transport.js';
 
+export { PHONE_SCOPES, type RemoteScope };
 const FIVE_MINUTES = 300_000;
-const TOKEN_LIFETIME = 30 * 24 * 60 * 60 * 1000;
+const TOKEN_LIFETIME = DEVICE_CREDENTIAL_LIFETIME_MS;
+/** Refreshing again within this window returns the current expiry without a write. */
+const REFRESH_INTERVAL = 60 * 60 * 1000;
 const MAX_STORE_BYTES = 128 * 1024;
-const scopeSchema = z.enum(['generation:health', 'generation:create', 'projects:read', 'projects:write', 'captures:read', 'captures:import', 'prepared-jobs:read', 'prepared-jobs:prepare', 'prints:approve', 'printer-handoff:use']);
-export type RemoteScope = z.infer<typeof scopeSchema>;
 const scopesSchema = z
-  .array(scopeSchema)
+  .array(RemoteScopeSchema)
   .min(1)
-  .max(9)
+  .max(10)
   .refine((x) => new Set(x).size === x.length);
 const loginSchema = z
   .string()
@@ -48,39 +58,94 @@ const configurationSchema = z.union([
 export type RemoteConfiguration = z.infer<typeof configurationSchema>;
 const timeSchema = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 const digestSchema = z.string().regex(/^[a-f0-9]{64}$/);
-const deviceSchema = z.strictObject({
-  deviceId: z.uuid(),
-  deviceName: z.string().min(1).max(80),
-  login: loginSchema,
-  tokenHash: digestSchema,
-  scopes: scopesSchema,
-  expiresAt: timeSchema,
-});
-const stateSchema = z.strictObject({
+const codesSchema = z
+  .array(
+    z.strictObject({
+      codeHash: digestSchema,
+      login: loginSchema,
+      scopes: scopesSchema,
+      expiresAt: timeSchema,
+    })
+  )
+  .max(8);
+const attemptsSchema = z
+  .array(
+    z.strictObject({
+      login: loginSchema,
+      startedAt: timeSchema,
+      count: z.number().int().min(1).max(5),
+    })
+  )
+  .max(16);
+/** Version 1: a device was bound to the login (Tailscale user or `lan`) that paired it. */
+const v1StateSchema = z.strictObject({
   version: z.literal(1),
   configuration: configurationSchema,
-  codes: z
+  codes: codesSchema,
+  devices: z
     .array(
       z.strictObject({
-        codeHash: digestSchema,
+        deviceId: z.uuid(),
+        deviceName: z.string().min(1).max(80),
         login: loginSchema,
+        tokenHash: digestSchema,
         scopes: scopesSchema,
         expiresAt: timeSchema,
       })
     )
-    .max(8),
+    .max(64),
+  attempts: attemptsSchema,
+});
+/**
+ * Version 2: a device is its id and token, whatever network path carries it.
+ * `pairedVia` records how it paired, for the device list; it is not checked.
+ */
+const deviceSchema = z.strictObject({
+  deviceId: z.uuid(),
+  deviceName: z.string().min(1).max(80),
+  tokenHash: digestSchema,
+  scopes: scopesSchema,
+  pairedAt: timeSchema,
+  lastRefreshedAt: timeSchema,
+  expiresAt: timeSchema,
+  pairedVia: z.strictObject({
+    transport: z.enum(['lan', 'tailscale']),
+    login: loginSchema,
+  }),
+});
+const stateSchema = z.strictObject({
+  version: z.literal(2),
+  configuration: configurationSchema,
+  codes: codesSchema,
   devices: z.array(deviceSchema).max(64),
-  attempts: z
-    .array(
-      z.strictObject({
-        login: loginSchema,
-        startedAt: timeSchema,
-        count: z.number().int().min(1).max(5),
-      })
-    )
-    .max(16),
+  attempts: attemptsSchema,
 });
 type State = z.infer<typeof stateSchema>;
+const transportOf = (configuration: RemoteConfiguration) =>
+  'transport' in configuration ? 'lan' as const : 'tailscale' as const;
+/** Keeps every v1 device, token hash, scope and expiry; v1 always paired at expiresAt - lifetime. */
+function migrateV1(state: z.infer<typeof v1StateSchema>): State {
+  const transport = transportOf(state.configuration);
+  return {
+    version: 2,
+    configuration: state.configuration,
+    codes: state.codes,
+    devices: state.devices.map(({ login, ...device }) => {
+      const pairedAt = Math.max(0, device.expiresAt - TOKEN_LIFETIME);
+      return {
+        deviceId: device.deviceId,
+        deviceName: device.deviceName,
+        tokenHash: device.tokenHash,
+        scopes: device.scopes,
+        pairedAt,
+        lastRefreshedAt: pairedAt,
+        expiresAt: device.expiresAt,
+        pairedVia: { transport, login },
+      };
+    }),
+    attempts: state.attempts,
+  };
+}
 const exchangeSchema = z.strictObject({
   code: z.string().regex(/^[A-Za-z0-9_-]{32}$/),
   deviceName: z
@@ -131,12 +196,9 @@ async function checkDirectory(directory: string) {
   )
     throw new Error('Private owned directory required');
 }
-async function readState(directory: string): Promise<State> {
-  await checkDirectory(directory);
-  const file = await open(
-    join(directory, 'auth.json'),
-    constants.O_RDONLY | constants.O_NOFOLLOW
-  );
+type Stored = { state: State; v1Bytes?: Buffer };
+async function readPrivate(path: string): Promise<Buffer> {
+  const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
   try {
     const info = await file.stat();
     if (
@@ -159,11 +221,54 @@ async function readState(directory: string): Promise<State> {
       length += result.bytesRead;
     }
     if (length > MAX_STORE_BYTES) throw new Error('State limit exceeded');
-    return stateSchema.parse(
-      JSON.parse(bytes.subarray(0, length).toString('utf8'))
-    );
+    return Buffer.from(bytes.subarray(0, length));
   } finally {
     await file.close();
+  }
+}
+async function readState(directory: string): Promise<Stored> {
+  await checkDirectory(directory);
+  const raw = await readPrivate(join(directory, 'auth.json'));
+  const value: unknown = JSON.parse(raw.toString('utf8'));
+  // Any other version, including a future one, fails closed.
+  const v1 = v1StateSchema.safeParse(value);
+  return v1.success
+    ? { state: migrateV1(v1.data), v1Bytes: raw }
+    : { state: stateSchema.parse(value) };
+}
+/**
+ * The first write after migration keeps the exact version 1 bytes, for a rollback by hand:
+ * `auth.v1.json`, or `auth.v1-<sha256 prefix>.json` when an older, different backup exists.
+ * The file appears complete or not at all (fsynced temp file, then a hard link).
+ */
+async function backupV1(directory: string, bytes: Buffer) {
+  const temp = join(directory, `.${randomUUID()}.tmp`);
+  const file = await open(temp, 'wx', 0o600);
+  try {
+    await file.writeFile(bytes);
+    await file.sync();
+  } finally {
+    await file.close();
+  }
+  try {
+    for (const name of ['auth.v1.json', `auth.v1-${createHash('sha256').update(bytes).digest('hex').slice(0, 12)}.json`]) {
+      try {
+        await link(temp, join(directory, name));
+        break;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+        if ((await readPrivate(join(directory, name))).equals(bytes)) break;
+        if (name !== 'auth.v1.json') throw new Error('Conflicting version 1 backup');
+      }
+    }
+    const dir = await open(directory, constants.O_RDONLY);
+    try {
+      await dir.sync();
+    } finally {
+      await dir.close();
+    }
+  } finally {
+    await rm(temp, { force: true });
   }
 }
 async function writeState(directory: string, state: State) {
@@ -222,7 +327,7 @@ export class RemoteAuthStore {
     await mkdir(directory, { mode: 0o700 }); // Existing state is never replaced by init.
     await checkDirectory(directory);
     await writeState(directory, {
-      version: 1,
+      version: 2,
       configuration: checked,
       codes: [],
       devices: [],
@@ -230,24 +335,33 @@ export class RemoteAuthStore {
     });
     return new RemoteAuthStore(directory, checked, clock);
   }
+  /**
+   * Opening a version 1 store migrates it to version 2 in place, keeping the v1 bytes.
+   * If the lock is busy, the next successful write migrates instead; reads work either way.
+   */
   static async open(directory: string, clock = Date.now) {
+    let store;
     try {
-      const state = await readState(directory);
-      return new RemoteAuthStore(directory, state.configuration, clock);
+      const { state, v1Bytes } = await readState(directory);
+      store = new RemoteAuthStore(directory, state.configuration, clock);
+      if (!v1Bytes) return store;
     } catch {
       throw new RemoteAuthFailure('auth-unavailable');
     }
+    // Every later write migrates too, so a busy lock here only defers it.
+    await store.mutate(() => undefined).catch(() => undefined);
+    return store;
   }
   private now() {
     return timeSchema.parse(this.clock());
   }
   private async read() {
-    const state = await readState(this.directory);
+    const stored = await readState(this.directory);
     if (
-      JSON.stringify(state.configuration) !== JSON.stringify(this.configuration)
+      JSON.stringify(stored.state.configuration) !== JSON.stringify(this.configuration)
     )
       throw new Error('Configuration changed; restart required');
-    return state;
+    return stored;
   }
   private async mutate<T>(
     action: (state: State, now: number) => T
@@ -258,12 +372,13 @@ export class RemoteAuthStore {
       await checkDirectory(this.directory);
       await mkdir(lock, { mode: 0o700 });
       locked = true;
-      const state = await this.read(),
+      const { state, v1Bytes } = await this.read(),
         now = this.now();
       state.codes = state.codes.filter((x) => x.expiresAt > now);
       state.devices = state.devices.filter((x) => x.expiresAt > now);
       state.attempts = state.attempts.filter((x) => now < x.startedAt + 60_000);
       const result = action(state, now);
+      if (v1Bytes) await backupV1(this.directory, v1Bytes);
       await writeState(this.directory, state);
       return result;
     } catch (error) {
@@ -275,7 +390,7 @@ export class RemoteAuthStore {
   }
   async createPairing(
     login: string,
-    scopes: RemoteScope[] = ['generation:health', 'generation:create']
+    scopes: readonly RemoteScope[] = PHONE_SCOPES
   ) {
     loginSchema.parse(login);
     const checkedScopes = scopesSchema.parse(scopes);
@@ -309,7 +424,7 @@ export class RemoteAuthStore {
   async isPairingActive(code: string): Promise<boolean> {
     if (!/^[A-Za-z0-9_-]{32}$/.test(code)) return false;
     try {
-      const state = await this.read();
+      const { state } = await this.read();
       return state.codes.some(x => x.expiresAt > this.now() && matches(code, x.codeHash));
     } catch {
       return false;
@@ -325,7 +440,7 @@ export class RemoteAuthStore {
       } else state.attempts.push({ login, startedAt: now, count: 1 });
     });
   }
-  async exchange(login: string, input: unknown) {
+  async exchange(login: string, input: unknown): Promise<DeviceCredential> {
     const parsed = exchangeSchema.safeParse(input);
     if (!parsed.success || !this.allowsLogin(login))
       throw new RemoteAuthFailure('unauthorized');
@@ -344,18 +459,72 @@ export class RemoteAuthStore {
       state.devices.push({
         deviceId,
         deviceName: parsed.data.deviceName,
-        login,
         tokenHash: hash(token),
         scopes: code.scopes,
+        pairedAt: now,
+        lastRefreshedAt: now,
         expiresAt,
+        pairedVia: { transport: this.transport, login },
       });
-      return {
-        protocolVersion: '0.1.0',
+      return DeviceCredentialSchema.parse({
+        protocolVersion: DEVICE_AUTH_PROTOCOL_VERSION,
         deviceId,
         token,
         expiresAt,
         scopes: code.scopes,
-      };
+      });
+    });
+  }
+  /** A credential is valid only on a path whose login is allowed; device lookup ignores the path. */
+  private valid(
+    state: State,
+    login: string,
+    deviceId: string | undefined,
+    token: string | undefined
+  ) {
+    const device = state.devices.find((x) => x.deviceId === deviceId);
+    if (
+      !this.allowsLogin(login) ||
+      !device ||
+      !token ||
+      !/^[A-Za-z0-9_-]{43}$/.test(token) ||
+      device.expiresAt <= this.now() ||
+      !matches(token, device.tokenHash)
+    )
+      throw new RemoteAuthFailure('unauthorized');
+    return device;
+  }
+  /**
+   * Rolling refresh: a valid credential gets another full lifetime from now, with the
+   * same token. An expired or revoked credential stays dead; pair again.
+   */
+  async refresh(
+    login: string,
+    deviceId: string | undefined,
+    token: string | undefined
+  ): Promise<DeviceCredential> {
+    const credential = (device: State['devices'][number]) =>
+      DeviceCredentialSchema.parse({
+        protocolVersion: DEVICE_AUTH_PROTOCOL_VERSION,
+        deviceId: device.deviceId,
+        token,
+        expiresAt: device.expiresAt,
+        scopes: device.scopes,
+      });
+    // Validate without the lock first, so bad or repeated requests never contend for it.
+    try {
+      const { state } = await this.read();
+      const device = this.valid(state, login, deviceId, token);
+      if (this.now() - device.lastRefreshedAt < REFRESH_INTERVAL) return credential(device);
+    } catch (error) {
+      if (error instanceof RemoteAuthFailure) throw error;
+      throw new RemoteAuthFailure('auth-unavailable');
+    }
+    return this.mutate((state, now) => {
+      const device = this.valid(state, login, deviceId, token);
+      device.lastRefreshedAt = now;
+      device.expiresAt = now + TOKEN_LIFETIME;
+      return credential(device);
     });
   }
   async authorize(
@@ -365,19 +534,8 @@ export class RemoteAuthStore {
     scope: RemoteScope
   ) {
     try {
-      const state = await this.read();
-      const device = state.devices.find(
-        (x) => x.deviceId === deviceId && x.login === login
-      );
-      if (
-        !this.allowsLogin(login) ||
-        !device ||
-        !token ||
-        !/^[A-Za-z0-9_-]{43}$/.test(token) ||
-        device.expiresAt <= this.now() ||
-        !matches(token, device.tokenHash)
-      )
-        throw new RemoteAuthFailure('unauthorized');
+      const { state } = await this.read();
+      const device = this.valid(state, login, deviceId, token);
       if (!device.scopes.includes(scope))
         throw new RemoteAuthFailure('forbidden');
     } catch (error) {
