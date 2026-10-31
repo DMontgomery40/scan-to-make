@@ -10,7 +10,8 @@ import {CaptureStore} from './capture-import.js';
 import {DetailStillStore} from './detail-stills.js';
 import {createCaptureConverter} from './capture-converter.js';
 import { startCompanionServer } from './server.js';
-import { discoverAddresses, localHostName } from './lan-addresses.js';
+import { instanceName } from './bonjour.js';
+import { computerName, discoverAddresses, localHostName } from './lan-addresses.js';
 import { RemoteAuthStore } from './remote-auth.js';
 import { createPrintHandoffServices } from './print-handoff-http.js';
 import { readPrinterHandoffConfig } from '@scan-to-make/printer-handoff';
@@ -59,9 +60,16 @@ if (certPath !== undefined || keyPath !== undefined) {
 // Pairing v2 (MAC-5): also answer on the Mac's other addresses. Off until v2 links are minted.
 const allAddresses = process.env.SCAN_TO_MAKE_LAN_ALL_ADDRESSES;
 if (allAddresses !== undefined && allAddresses !== '1') throw new Error('SCAN_TO_MAKE_LAN_ALL_ADDRESSES must be 1 when set');
+// Nearby pairing (MAC-5): Bonjour advert, 6-digit code and Allow. Needs the v2 addresses,
+// and the Mac app's Allow card, so it is off until both are in place.
+const nearbyPairing = process.env.SCAN_TO_MAKE_NEARBY_PAIRING;
+if (nearbyPairing !== undefined && (nearbyPairing !== '1' || allAddresses !== '1'))
+  throw new Error('SCAN_TO_MAKE_NEARBY_PAIRING must be 1 when set, with SCAN_TO_MAKE_LAN_ALL_ADDRESSES=1');
+const macName = allAddresses === '1' ? computerName() : undefined;
 const server = await startCompanionServer({
   lanTls,
   ...(allAddresses === '1' ? { lanAddresses: () => discoverAddresses(), localName: localHostName() } : {}),
+  ...(nearbyPairing === '1' ? { nearby: { name: macName ?? 'Scan to Make' } } : {}),
   capture,
   printHandoff,
   remoteAuth,
@@ -76,7 +84,11 @@ try {
     // The auth directory is private even when its state/volume parent is not.
     path:process.env.SCAN_TO_MAKE_CONTROL_SOCKET ?? join(remoteAuth.directory,'control.sock'),
     dispatch:createControlDispatcher({auth:remoteAuth,modelAccess,companionVersion:await companionVersion(),capture,
-      captureDirectory:captureDirectory ? join(captureDirectory,'captures') : undefined,printHandoff}),
+      captureDirectory:captureDirectory ? join(captureDirectory,'captures') : undefined,printHandoff,
+      // With every address answering, the Mac's QR is a v2 link from the live list.
+      ...(allAddresses === '1' && server.publicKeySha256 ? {pairingLink:() => ({addresses:server.addresses(),publicKeySha256:server.publicKeySha256!,
+        ...(macName ? {name:instanceName(macName)} : {})})} : {}),
+      ...(server.nearby ? {nearby:server.nearby} : {})}),
   });
   else if (process.env.SCAN_TO_MAKE_CONTROL_SOCKET !== undefined) throw new Error('Local control requires an auth store');
 } catch {

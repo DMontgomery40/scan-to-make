@@ -23,11 +23,15 @@ Errors use `{v:1,id,error:{code,message}}`; malformed envelopes may have `id:nul
 | `jobs.list` | `{projectId?,cursor?,limit?}` | `{items:[{kind,projectId,projectName,job}],nextCursor?}`. Default limit 50; range 1–100. |
 | `devices.list` | `{}` | `{devices:[{deviceId,deviceName,scopes,pairedAt,lastRefreshedAt,expiresAt,pairedVia:{transport,login}}]}`. No tokens or token hashes. |
 | `devices.remove` | `{deviceId}` | `{removed:true}`; an unknown device returns `not-found`. Existing device credentials are revoked. |
-| `pairing.create` | `{login?}` | Existing invitation `{version:1,baseUrl,code,expiresAt,certificateSha256?,qrPayload}` with capture and printer-handoff scopes. LAN selects `lan`; Tailscale defaults to the first retained allowed login. An explicit login must be allowed. |
+| `pairing.create` | `{login?}` | Existing invitation `{version:1,baseUrl,code,expiresAt,certificateSha256?,qrPayload}` with capture and printer-handoff scopes. LAN selects `lan`; Tailscale defaults to the first retained allowed login. An explicit login must be allowed. When the companion answers on every address (`SCAN_TO_MAKE_LAN_ALL_ADDRESSES=1`), `qrPayload` is a pairing link v2 (`@scan-to-make/contracts/pairing-link`) listing those addresses; the JSON fields keep their v1 shape. |
 | `pairing.isActive` | `{code}` | `{active:boolean}`; false after consumption or expiry. |
+| `nearby.list` | `{}` | `{items:[{id,deviceName,code,expiresAt}]}`: nearby pairing requests waiting for **Allow** (`@scan-to-make/contracts/nearby-pairing`). `code` is the 6 digits the phone shows. Empty when nearby pairing is off (`capabilities.nearbyPairing`). |
+| `nearby.answer` | `{id,allow}` | `{answered:true}`. Allow mints one pairing code for that request only; the phone that made it collects it. An unknown, expired or already answered `id` returns `not-found`; with nearby pairing off, `unavailable`. |
 | `confirmations.list` | `{}` | `{items:[PendingElicitation]}` using the existing relay's fields, including original schema/photo and expiry. |
 | `confirmations.answer` | `{id,answer}` | `{answered:true}`. Answer is `{action:"accept",content:{...}}`, `{action:"decline"}` or `{action:"cancel"}`. Expired or already answered IDs return `not-found`. |
 | `doors.prepare` | `{projectId,door}` **or** `{handoffId,door}` | `{action:"open"\|"reveal",fileURL,applicationBundleId?,projectRevision}`. Exactly one target identifier. |
+
+`status.get` capabilities also include `nearbyPairing`. Poll `nearby.list` while it is true and show each request as its own card with the code; the code on the Mac must match the phone's before **Allow**. Requests expire two minutes after they start.
 
 Times are Unix milliseconds. Pairing secrets stay in memory, never argv, logs, analytics or error messages. The caller retains one active invitation per visible pairing session and uses `pairing.isActive` before reusing it. Creating repeated unused invitations still obeys the auth store's existing eight-invitation limit.
 

@@ -72,7 +72,29 @@ link lists them (the configured address, the other LAN addresses, the `.local`
 name, then Tailscale, at most 8), and `publicKeySha256`. Pass both, with an
 optional Mac name, as `createPairing`'s third argument to mint a v2 link. Without
 it the link stays version 1. Turn this on only once the phones that will pair can
-read version 2.
+read version 2. With it on, the control socket's `pairing.create` mints the v2 link
+from that live list and the Mac's name (`scutil --get ComputerName`).
+
+**Nearby pairing (MAC-5), off by default.** `SCAN_TO_MAKE_NEARBY_PAIRING=1` needs
+`SCAN_TO_MAKE_LAN_ALL_ADDRESSES=1`. The phone finds the Mac over Bonjour, both
+screens show the same 6-digit code, and the user clicks **Allow** on the Mac. The
+protocol and its exact bytes are in `@scan-to-make/contracts/nearby-pairing`.
+- On macOS the companion advertises `_scantomake._tcp` under the Mac's name through
+  `/usr/bin/dns-sd -R`, while its listener is up. TXT `v=1` and `k=<public-key pin>`
+  are hints only. This is the app's first Bonjour operation, so it raises the macOS
+  Local Network prompt for Scan to Make. A refused or lost registration
+  re-registers after a back-off. Other platforms do not advertise.
+- `POST /v1/pair/nearby {commit, deviceName}` → `{session, nonce, expiresAt}`. It
+  counts as a pairing attempt, shared with `/v1/pair`. At most 4 sessions are open
+  at once, and each lasts 2 minutes. `POST /v1/pair/nearby/reveal {session, key}`
+  checks the key against the commit, and only then is there a code.
+  `POST /v1/pair/nearby/result {session, key}` waits up to 25 seconds for the
+  answer: `waiting`, `denied`, or `allowed` with a v2 pairing link. A wrong key
+  ends the session.
+- The control socket lists waiting requests (`nearby.list`, with the code) and
+  answers them (`nearby.answer`). **Allow** mints one ordinary pairing code for that
+  request only, so the phone ends at the same `/v1/pair` exchange and credential as
+  a scanned QR.
 
 LAN invitations include `certificateSha256`, the lowercase SHA-256 of the DER
 leaf certificate, and add `f` with that value to the deep-link query. The phone

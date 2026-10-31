@@ -27,6 +27,16 @@ public enum JSONValue: Codable, Sendable, Equatable {
 public struct ControlStatus: Decodable, Sendable {
     public struct Capabilities: Decodable, Sendable {
         public let capture: Bool, cleanup: Bool, printerHandoff: Bool
+        /// Nearby pairing (MAC-5): poll `nearbyRequests()` while true. False from a companion that predates it.
+        public let nearbyPairing: Bool
+        private enum CodingKeys: String, CodingKey { case capture, cleanup, printerHandoff, nearbyPairing }
+        public init(from decoder: Decoder) throws {
+            let values = try decoder.container(keyedBy: CodingKeys.self)
+            capture = try values.decode(Bool.self, forKey: .capture)
+            cleanup = try values.decode(Bool.self, forKey: .cleanup)
+            printerHandoff = try values.decode(Bool.self, forKey: .printerHandoff)
+            nearbyPairing = try values.decodeIfPresent(Bool.self, forKey: .nearbyPairing) ?? false
+        }
     }
     public let protocolVersion: Int
     public let companionVersion: String, transport: String
@@ -48,6 +58,12 @@ public struct ControlInvitation: Decodable, Sendable, CustomStringConvertible, C
     public let certificateSha256: String?
     public var description: String { "ControlInvitation(<private>)" }
     public var debugDescription: String { description }
+}
+/// A nearby phone waiting for Allow (MAC-5). Show `code` with the request: it must match the
+/// phone's screen before the user allows it. Each request expires two minutes after it starts.
+public struct ControlNearbyRequest: Decodable, Sendable, Identifiable, Equatable {
+    public let id: String, deviceName: String, code: String
+    public let expiresAt: Double
 }
 public struct ControlJob: Decodable, Sendable, Identifiable {
     public let kind: String
