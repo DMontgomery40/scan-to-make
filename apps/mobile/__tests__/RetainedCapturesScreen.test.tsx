@@ -4,7 +4,10 @@ import { NativeModules, Text, Alert } from 'react-native';
 import { createSavedProjects } from '@scan-to-make/contracts/saved-project';
 import { RetainedCapturesScreen } from '../src/screens/RetainedCapturesScreen';
 
-async function fixture(supported = true) {
+type Status = { supported: boolean; lidar?: boolean };
+async function fixture(
+  status: Status | (() => Promise<Status>) = { supported: true, lidar: true },
+) {
   const records = new Map<string, string>();
   const repo = createSavedProjects({
     listIds: async () => [...records.keys()],
@@ -34,7 +37,10 @@ async function fixture(supported = true) {
     },
   };
   NativeModules.NativeCaptureCoordinator = {
-    status: async () => ({ supported, activeRunID: null }),
+    status: async () => ({
+      ...(typeof status === 'function' ? await status() : status),
+      activeRunID: null,
+    }),
     drafts: async () => drafts,
     start: async (origin: unknown) => {
       const draft = {
@@ -101,12 +107,57 @@ test('unpaired project can scan locally and keep a ready draft without upload', 
   expect(button(tree, 'Add scan 1 to this project')).toBeTruthy();
   await act(async () => tree.unmount());
 });
-test('unsupported hardware preserves Files import and explains unavailable scanning', async () => {
-  const { tree, requests } = await fixture(false);
-  expect(button(tree, 'Scan object').props.disabled).toBe(true);
-  expect(text(tree)).toContain('Choose a USDZ file');
+const hasButton = (tree: Renderer.ReactTestRenderer, name: string) =>
+  tree.root.findAll(
+    n =>
+      n.props.accessibilityRole === 'button' &&
+      n.props.accessibilityLabel === name,
+  ).length > 0;
+test('a device without LiDAR says scanning needs LiDAR and keeps Files import', async () => {
+  const { tree, requests } = await fixture({ supported: false, lidar: false });
+  expect(hasButton(tree, 'Scan object')).toBe(false);
+  expect(text(tree)).toContain('Scanning needs LiDAR');
+  expect(text(tree)).toContain('This device has no LiDAR scanner');
   await press(tree, 'Choose USDZ capture');
   expect(requests).toEqual(['pick']);
+  await act(async () => tree.unmount());
+});
+test('a LiDAR device without Object Capture support is not told it lacks LiDAR', async () => {
+  for (const status of [
+    { supported: false, lidar: true },
+    { supported: false },
+  ]) {
+    const { tree } = await fixture(status);
+    expect(hasButton(tree, 'Scan object')).toBe(false);
+    expect(text(tree)).toContain('Scanning isn’t available here');
+    expect(text(tree)).not.toContain('no LiDAR');
+    await act(async () => tree.unmount());
+  }
+});
+test('scanning stays off when the device check fails, and can be retried', async () => {
+  let fail = true;
+  const { tree, requests } = await fixture(async () => {
+    if (fail) throw Error('bridge unavailable');
+    return { supported: true, lidar: true };
+  });
+  expect(hasButton(tree, 'Scan object')).toBe(false);
+  expect(text(tree)).toContain('Couldn’t check for LiDAR');
+  fail = false;
+  await press(tree, 'Check again');
+  expect(text(tree)).not.toContain('Couldn’t check for LiDAR');
+  await press(tree, 'Scan object');
+  expect(requests).toEqual(['scan']);
+  await act(async () => tree.unmount());
+});
+test('scanning is not offered before the device check finishes', async () => {
+  let finish!: (status: Status) => void;
+  const { tree } = await fixture(
+    () => new Promise<Status>(resolve => (finish = resolve)),
+  );
+  expect(button(tree, 'Scan object').props.disabled).toBe(true);
+  expect(text(tree)).not.toContain('Scanning needs LiDAR');
+  await act(async () => finish({ supported: true, lidar: true }));
+  expect(button(tree, 'Scan object').props.disabled).toBe(false);
   await act(async () => tree.unmount());
 });
 test('choosing a changed destination requires explicit confirmation before import', async () => {

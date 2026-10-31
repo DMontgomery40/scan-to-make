@@ -58,6 +58,7 @@ enum NativeCaptureOutcome { case completed, stopped, failed(String) }
 import UIKit
 import SwiftUI
 import RealityKit
+import ARKit
 import React
 
 @MainActor final class GuidedNativeCaptureEngine: NativeCaptureEngine {
@@ -84,7 +85,9 @@ final class NativeCaptureCoordinator: NSObject {
     @objc nonisolated static func requiresMainQueueSetup() -> Bool { true }
     @objc nonisolated func methodQueue() -> DispatchQueue { .main }
     @objc func status(_ resolve: RCTPromiseResolveBlock, reject: RCTPromiseRejectBlock) {
+        // Scene depth is only available with a LiDAR scanner; it lets the app say why scanning is off.
         resolve(["supported": ObjectCaptureSession.isSupported && PhotogrammetrySession.isSupported,
+                 "lidar": ARWorldTrackingConfiguration.supportsFrameSemantics(.sceneDepth),
                  "activeRunID": Self.owner.activeRunID as Any? ?? NSNull()])
     }
     @objc func drafts(_ resolve: RCTPromiseResolveBlock, reject: RCTPromiseRejectBlock) {

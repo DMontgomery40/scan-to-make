@@ -22,7 +22,12 @@ export type NativeCaptureDraft = {
   addRequested?: boolean;
 };
 export interface ObjectCaptureNative {
-  status(): Promise<{ supported: boolean; activeRunID: string | null }>;
+  status(): Promise<{
+    supported: boolean;
+    // False when the device has no LiDAR scanner. Missing from older builds.
+    lidar?: boolean;
+    activeRunID: string | null;
+  }>;
   drafts(): Promise<NativeCaptureDraft[]>;
   start(origin: CaptureDestination): Promise<NativeCaptureDraft>;
   stop(): Promise<void>;

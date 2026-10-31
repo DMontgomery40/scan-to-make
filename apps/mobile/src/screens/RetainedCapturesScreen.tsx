@@ -12,8 +12,17 @@ import {
   objectCaptureNative,
   type NativeCaptureDraft,
 } from '../capture/nativeObjectCapture';
-import { Button, Card, Screen } from '../ui/components';
+import { Button, Card, Notice, Screen } from '../ui/components';
 import { type } from '../ui/theme';
+
+// Whether this device can scan. Scanning is only offered once the native
+// status confirms it; it is never simulated on devices without LiDAR.
+type ScanSupport =
+  | 'checking'
+  | 'supported'
+  | 'no-lidar'
+  | 'unsupported'
+  | 'unknown';
 
 export function RetainedCapturesScreen({
   id,
@@ -41,7 +50,9 @@ export function RetainedCapturesScreen({
       ? new NativeObjectCaptureClient(client, native)
       : null;
   });
-  const [supported, setSupported] = useState(false);
+  const [support, setSupport] = useState<ScanSupport>(
+    scanner ? 'checking' : 'unsupported',
+  );
   const [activeRunID, setActiveRunID] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<NativeCaptureDraft[]>([]);
   const [state, setState] = useState<CaptureState>({ captures: [] });
@@ -53,9 +64,17 @@ export function RetainedCapturesScreen({
   const refresh = async () => {
     // Local scans remain available even when there is no companion connection.
     if (scanner) {
-      const status = await scanner.native.status();
-      setSupported(status.supported);
-      setActiveRunID(status.activeRunID);
+      const status = await scanner.native.status().catch(() => null);
+      setSupport(
+        !status
+          ? 'unknown'
+          : status.supported
+          ? 'supported'
+          : status.lidar === false
+          ? 'no-lidar'
+          : 'unsupported',
+      );
+      if (status) setActiveRunID(status.activeRunID);
       setDrafts(await scanner.drafts(id));
     }
     if (client) setState(await client.state(id));
@@ -132,24 +151,47 @@ export function RetainedCapturesScreen({
         </Text>
       ) : (
         <>
-          <Button
-            label="Scan object"
-            disabled={busy || !supported || !!activeRunID}
-            onPress={() =>
-              run(async () => {
-                if (!scanner) return;
-                const draft = await scanner.start(id);
-                if (draft.addRequested)
-                  setSelected(await scanner.add(id, draft));
-              }, 'Your scan is kept on this device. Add a ready scan when you want to review it with this project.')
-            }
-          />
-          {!supported ? (
-            <Text style={type.body}>
-              Scanning is unavailable on this device. Choose a USDZ file to keep
-              a scan with this project.
-            </Text>
-          ) : null}
+          {support === 'supported' || support === 'checking' ? (
+            <Button
+              label="Scan object"
+              disabled={busy || support !== 'supported' || !!activeRunID}
+              onPress={() =>
+                run(async () => {
+                  if (!scanner) return;
+                  const draft = await scanner.start(id);
+                  if (draft.addRequested)
+                    setSelected(await scanner.add(id, draft));
+                }, 'Your scan is kept on this device. Add a ready scan when you want to review it with this project.')
+              }
+            />
+          ) : support === 'unknown' ? (
+            <Notice
+              title="Couldn’t check for LiDAR"
+              action={
+                <Button
+                  label="Check again"
+                  variant="secondary"
+                  disabled={busy}
+                  onPress={() => run(refresh, 'Checked this device again.')}
+                />
+              }
+            >
+              Scanning stays off until this device confirms it has a LiDAR
+              scanner.
+            </Notice>
+          ) : (
+            <Notice
+              title={
+                support === 'no-lidar'
+                  ? 'Scanning needs LiDAR'
+                  : 'Scanning isn’t available here'
+              }
+            >
+              {support === 'no-lidar'
+                ? 'This device has no LiDAR scanner, so it can’t make a true-to-size scan. Scan the object on an iPhone or iPad with LiDAR. You can still add a USDZ scan file to this project here.'
+                : 'This device doesn’t support Object Capture, so it can’t make a scan. Scan the object on an iPhone or iPad with LiDAR. You can still add a USDZ scan file to this project here.'}
+            </Notice>
+          )}
           {activeRunID ? (
             <Text accessibilityLiveRegion="polite" style={type.body}>
               A scan is still active or stopping. Your files are kept. A new
