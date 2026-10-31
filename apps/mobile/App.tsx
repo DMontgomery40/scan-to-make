@@ -21,6 +21,7 @@ import { ProjectsScreen } from './src/screens/ProjectsScreen';
 import { ScanResultsScreen } from './src/screens/ScanResultsScreen';
 import type { ReferenceDraft } from './src/screens/scanResultsModel';
 import { CloseUpsScreen } from './src/screens/CloseUpsScreen';
+import { PrintScreen } from './src/screens/PrintScreen';
 import { liveScanServices } from './src/screens/liveScanServices';
 import { RequestGateProvider } from './src/screens/requestGate';
 import type { ScanServices, ScanTarget } from './src/screens/scanServices';
@@ -33,7 +34,8 @@ type Route =
   | 'projects'
   | 'retainedCaptures'
   | 'scanResults'
-  | 'closeUps';
+  | 'closeUps'
+  | 'print';
 const PARENT: Record<Route, Route | null> = {
   home: null,
   about: 'home',
@@ -41,6 +43,7 @@ const PARENT: Record<Route, Route | null> = {
   retainedCaptures: 'projects',
   scanResults: 'retainedCaptures',
   closeUps: 'scanResults',
+  print: 'scanResults',
 };
 
 function App({
@@ -151,10 +154,23 @@ function App({
             onBack={() => setRoute('retainedCaptures')}
             onCompanion={() => setCompanionOpen(true)}
             onCloseUps={() => setRoute('closeUps')}
+            onPrint={
+              scanServices.printing ? () => setRoute('print') : undefined
+            }
             reference={referenceDrafts[scanKey] ?? null}
             onReferenceChange={draft =>
               setReferenceDrafts(current => ({ ...current, [scanKey]: draft }))
             }
+          />
+        ) : null;
+        break;
+      case 'print':
+        screen = scanTarget ? (
+          <PrintScreen
+            target={scanTarget}
+            services={scanServices}
+            onBack={() => setRoute('scanResults')}
+            onCompanion={() => setCompanionOpen(true)}
           />
         ) : null;
         break;

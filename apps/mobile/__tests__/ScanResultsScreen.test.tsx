@@ -393,6 +393,29 @@ test('the hero view fits the gallery it is in, not the whole window', async () =
   await act(async () => tree.unmount());
 });
 
+test('a cleaned-up scan offers Send to printer only when printing is set up', async () => {
+  for (const onPrint of [undefined, jest.fn()]) {
+    const { services } = fakeScanServices({
+      jobs: [syntheticJob('succeeded')],
+    });
+    await services.jobs.save(PROJECT_ID, CAPTURE_ID, JOB_ID);
+    const { tree } = await render(services, { onPrint });
+    const send = tree.root.findAll(
+      n =>
+        n.props.accessibilityRole === 'button' &&
+        n.props.accessibilityLabel === 'Send to printer' &&
+        typeof n.props.onPress === 'function',
+      { deep: false },
+    );
+    expect(send).toHaveLength(onPrint ? 1 : 0);
+    if (onPrint) {
+      await press(tree, 'Send to printer');
+      expect(onPrint).toHaveBeenCalled();
+    }
+    await act(async () => tree.unmount());
+  }
+});
+
 test('without displayable images each view opens on its own', async () => {
   const { services, calls } = fakeScanServices({
     jobs: [syntheticJob('succeeded')],
