@@ -37,6 +37,8 @@ Why this rule exists: on 2026-10-30 this repo's lead treated bambu-printer-mcp a
 
 `slice_stl`, `lay_flat` and the harness were all documented beforehand. The owner had to find every one of these mistakes himself. The duplicates are being removed. Don't repeat this.
 
-Physical dispatch, hardware purchases and paid cloud deployments need the appropriate concrete user authorization. Use isolated fixtures for routine development. Printer operations retain exact artifact inspection, fresh observed identity/state, model/nozzle/material/plate checks, human approval and once-only dispatch.
+Hardware purchases and paid cloud deployments spend David's money: ask him first (kept pending his confirmation, 2026-10-31). Agents may use David's printer and phone for development and testing; bambu-printer-mcp keeps its own print confirmation.
+
+Don't add restrictions David never gave. Before writing a rule into AGENTS.md, a brief, memory or docs, point to where he said it. If you can't, it isn't a rule.
 
 Keep credentials, personal captures, private coordination and provider usage details out of Git. Never put agent attribution or session links in Git/GitHub commits, PRs or release notes. Shared local team records are private coordination, not public product documentation.
