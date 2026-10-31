@@ -50,10 +50,18 @@ export function defaultBlenderLaunch(bundleId = 'org.blenderfoundation.blender',
 const RESET_CODE = `import bpy, time
 if bpy.context.object and bpy.context.object.mode != 'OBJECT':
     bpy.ops.object.mode_set(mode='OBJECT')
-scene = bpy.data.scenes.new('Scan to Make ' + time.strftime('%Y-%m-%d %H:%M:%S'))
-windows = bpy.context.window_manager.windows
-if windows:
-    windows[0].scene = scene
+if bpy.app.driver_namespace.get("scan_to_make_owned"):
+    for o in list(bpy.data.objects):
+        bpy.data.objects.remove(o, do_unlink=True)
+    for collection in (bpy.data.meshes, bpy.data.materials, bpy.data.images, bpy.data.textures, bpy.data.cameras, bpy.data.lights):
+        for block in list(collection):
+            if block.users == 0:
+                collection.remove(block)
+else:
+    scene = bpy.data.scenes.new('Scan to Make ' + time.strftime('%Y-%m-%d %H:%M:%S'))
+    windows = bpy.context.window_manager.windows
+    if windows:
+        windows[0].scene = scene
 `;
 
 type BridgeClient = Pick<PrinterMcpClient, 'connect' | 'callTool' | 'close' | 'hasTool'>;
@@ -64,7 +72,11 @@ export function toolErrorText(result: ToolResult): string {
   return (result.content ?? []).flatMap(item => item.type === 'text' ? [item.text] : []).join(' ').trim() || 'no details';
 }
 
-/** Starts a fresh, empty scene through the user's printer MCP's own Blender bridge. The user's own scenes and objects are never touched. */
+/**
+ * Starts each pass empty, through the user's printer MCP's own Blender bridge. A Blender the app launched
+ * (marked by the startup script) is cleared of earlier passes; a user's own Blender only gets a new scene,
+ * so their work is never touched.
+ */
 export async function resetBlenderScene(client: BridgeClient, signal?: AbortSignal): Promise<void> {
   await client.connect(signal);
   try {

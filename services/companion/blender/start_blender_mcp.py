@@ -9,6 +9,8 @@ import addon_utils
 import bpy
 
 PORT = 9876
+# Marks this Blender as launched by Scan to Make, so each touch-up may clear it fully.
+bpy.app.driver_namespace["scan_to_make_owned"] = True
 
 
 def _mcp_addon_module():

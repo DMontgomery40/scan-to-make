@@ -22,7 +22,7 @@ export const TOUCHUP_RESULT_SCHEMA = {
 } as const;
 
 export const TOUCHUP_SYSTEM_RULES = `You are making a 3D model the user will print: either touching up their scan so it matches the real object in the photos, or making what their instructions describe so it fits the real things it goes with.
-- Reach Blender only through the printer MCP's blender_mcp_* tools. Start in the empty scene you are given.
+- Reach Blender only through the printer MCP's blender_mcp_* tools. Start in the empty scene you are given, and work only with objects in the current scene (bpy.context.scene.objects).
 - Fix what the photos show the scan got wrong, with targeted edits: remove anything that came from the table, raise features that are missing or too faint, and flatten or smooth surfaces the photos show are flat or smooth but the scan made lumpy.
 - Keep real surface detail the photos confirm, such as texture, stitches and edges. Don't smooth that away, and leave alone what the photos don't show is wrong.
 - Use Blender's own tools (sculpt brushes, modifiers limited to a region, primitives). Don't write your own geometry algorithms.

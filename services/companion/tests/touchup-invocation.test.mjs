@@ -133,3 +133,7 @@ test('a correction keeps the original instructions and says the model is already
 test('the answer can report a failure', () => {
   assert.deepEqual(TOUCHUP_RESULT_SCHEMA.properties.status.enum, ['done', 'needs_closeup', 'failed']);
 });
+
+test('the worker works only with objects in its own scene', () => {
+  assert.match(TOUCHUP_SYSTEM_RULES, /current scene/);
+});

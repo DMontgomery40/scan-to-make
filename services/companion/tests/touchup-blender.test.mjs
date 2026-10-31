@@ -53,7 +53,6 @@ test('reset goes through the bridge', async () => {
   assert.equal(calls[1][1].tool_name, 'execute_blender_code');
   assert.equal(calls[1][1].arguments.user_prompt, 'Start a fresh, empty scene for a scan touch-up');
   assert.match(calls[1][1].arguments.code, /scenes\.new/);
-  assert.doesNotMatch(calls[1][1].arguments.code, /objects\.remove/, "the user's own Blender work is never deleted");
   assert.equal(client.connected, 1);
   assert.equal(client.closed, 1);
 });
@@ -92,4 +91,21 @@ test('the timeout names the Blender MCP addon', async () => {
 test('Blender not installed says how to fix it', async () => {
   await assert.rejects(defaultBlenderLaunch('org.example.not-installed-blender')(), error =>
     error instanceof BlenderNotInstalledError && /blender\.org/.test(error.message));
+});
+
+test('a Blender the app launched is cleared fully; a user\'s own Blender only gets a new scene', async () => {
+  const {client, calls} = fakeClient();
+  await resetBlenderScene(client);
+  const code = calls[1][1].arguments.code;
+  assert.match(code, /scan_to_make_owned/);
+  const [owned, notOwned] = code.split(/\nelse:\n/);
+  assert.match(owned, /objects\.remove/, 'leftovers from earlier passes are removed in an app-owned Blender');
+  assert.match(notOwned, /scenes\.new/, 'a user\'s own Blender only gets a fresh scene');
+  assert.doesNotMatch(notOwned, /objects\.remove/);
+});
+
+test('the startup script marks the Blender it launches as app-owned', async () => {
+  const {readFile} = await import('node:fs/promises');
+  const {BLENDER_STARTUP_SCRIPT} = await import('../dist/touchup/blender.js');
+  assert.match(await readFile(BLENDER_STARTUP_SCRIPT, 'utf8'), /driver_namespace\["scan_to_make_owned"\] = True/);
 });
