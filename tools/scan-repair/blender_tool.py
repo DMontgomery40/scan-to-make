@@ -296,6 +296,9 @@ def export(bm,out,uv=False,libraries=(),materials=()):
         current, corner = None, 1
         for face in bm.faces:
             name = materials[face.material_index] if face.material_index < len(materials) else None
+            # A face without a material after an assigned run needs an explicit reset,
+            # as capture-mesh-convert writes; otherwise it inherits the previous texture.
+            name = name or (current and "unbound")
             if name and name != current:
                 f.write("usemtl "+name+"\n")
                 current = name
@@ -389,8 +392,9 @@ def repair(obj,bm,a):
     files = [] if uv_note else material.get("files",[])
     declared = material.get("names",[])
     # Blender may suffix an imported material name (.001) when it already exists.
-    names = [None if m is None else m.name if m.name in declared else
-             m.name.rpartition(".")[0] if m.name.rpartition(".")[0] in declared else None
+    # Undeclared names (such as the converter's `unbound`) keep their own name.
+    names = [None if m is None else m.name.rpartition(".")[0]
+             if m.name not in declared and m.name.rpartition(".")[0] in declared else m.name
              for m in obj.data.materials] if files else []
     out = Path(a["out"])
     out.mkdir(parents=True,exist_ok=True)

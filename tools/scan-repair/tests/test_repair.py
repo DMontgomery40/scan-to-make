@@ -183,13 +183,17 @@ class RepairTests(unittest.TestCase):
         return (b"\x89PNG\r\n\x1a\n"+chunk(b"IHDR", struct.pack(">IIBBBBB", 2, 2, 8, 2, 0, 0, 0))+
                 chunk(b"IDAT", zlib.compress(b"\0"+b"\xff\0\0"*2+b"\0"+b"\0\xff\0"*2))+chunk(b"IEND", b""))
 
-    def textured_cube(self, folder, mtllib="tex.mtl", texture="tex.png"):
+    def textured_cube(self, folder, mtllib="tex.mtl", texture="tex.png", unbound_from=None):
         # One UV chart per side, so the cube has UV seams on every edge.
         folder.mkdir()
         corners = [(0,0),(1,0),(1,1),(0,1)]
         lines = ["mtllib "+mtllib] + ["v %s %s %s" % v for v in CUBE]
         lines += ["vt %g %g" % ((side+u)/6, v) for side in range(6) for u,v in corners] + ["usemtl skin"]
-        lines += ["f "+" ".join("%d/%d" % (i+1, side*4+k+1) for k,i in enumerate(face)) for side,face in enumerate(FACES)]
+        faces = ["f "+" ".join("%d/%d" % (i+1, side*4+k+1) for k,i in enumerate(face)) for side,face in enumerate(FACES)]
+        if unbound_from is not None:
+            # capture-mesh-convert assigns `usemtl unbound` to meshes without a material.
+            faces.insert(unbound_from, "usemtl unbound")
+        lines += faces
         (folder/"cube.obj").write_text("\n".join(lines)+"\n")
         (folder/"tex.mtl").write_text("newmtl skin\nKd 1 1 1\nmap_Kd -clamp off %s\n" % texture)
         (folder/"tex.png").write_bytes(self.png())
@@ -224,6 +228,17 @@ class RepairTests(unittest.TestCase):
         export = next(o for o in r["operations"] if o["name"]=="export")
         self.assertEqual((export["uvRetained"], export["materialFiles"]), (True, []))
         self.assertIn("tex.jpg", export["materialNote"])
+
+    def test_unbound_faces_after_textured_faces_reset_material(self):
+        p = self.textured_cube(self.base/"mixed", unbound_from=3)
+        self.repair(p, name="mixed-out")
+        counts, current = {}, None
+        for line in (self.base/"mixed-out"/"repaired.obj").read_text().splitlines():
+            if line.startswith("usemtl "):
+                current = line.split()[1]
+            elif line.startswith("f "):
+                counts[current] = counts.get(current, 0)+1
+        self.assertEqual(counts, {"skin": 6, "unbound": 6})
 
     def test_material_references_cannot_escape_input_folder(self):
         (self.base/"secret.mtl").write_text("newmtl skin\n")

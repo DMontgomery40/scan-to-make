@@ -91,7 +91,9 @@ decimation), `repaired.obj` keeps them: one `vt` per face corner, so authored
 UV seams survive, and `f v/vt` faces. Its `mtllib` and `usemtl` lines then
 point at byte-for-byte copies of the input's material library and PNG textures
 in the output folder, with names unchanged, and each copy is hashed in
-`outputSha256`. Faces added by hole filling take UVs from neighbouring corners,
+`outputSha256`. Material names the MTL does not declare are kept as written,
+and a face without a material after a textured run gets `usemtl unbound`, as
+`tools/capture-mesh-convert` writes. Faces added by hole filling take UVs from neighbouring corners,
 so the texture is smeared across invented surface. The `export` operation
 records `uvRetained` (`uvNote` gives the reason when not), `uvCorners`,
 `materialFiles` and `materialNote`. Remeshing and decimation rebuild the
