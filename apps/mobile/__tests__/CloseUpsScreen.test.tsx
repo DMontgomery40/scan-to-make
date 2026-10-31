@@ -2,7 +2,10 @@ import React from 'react';
 import Renderer, { act } from 'react-test-renderer';
 import { Alert, Image, Text, TextInput } from 'react-native';
 import type { DetailStill } from '@scan-to-make/contracts';
-import { CloseUpsScreen } from '../src/screens/CloseUpsScreen';
+import {
+  CloseUpsScreen,
+  PREVIEW_RETRY_MS,
+} from '../src/screens/CloseUpsScreen';
 import { unavailableScanServices } from '../src/screens/scanServices';
 import {
   fakeScanServices,
@@ -505,4 +508,62 @@ test('a thumbnail attempt hit by a busy companion is retried, not failed', async
   await press(tree, 'Choose a photo');
   expect(tree.root.findAllByType(Image)).toHaveLength(1);
   await act(async () => tree.unmount());
+});
+
+test('a thumbnail interrupted while the user waits is retried on its own', async () => {
+  const stored = stillFrom(syntheticPhoto(), 0);
+  const { services } = fakeScanServices({ stills: [stored] });
+  const download = services.stills.download!;
+  let busyFor = 2;
+  services.stills.download = async (...args) => {
+    if (busyFor > 0) {
+      busyFor -= 1;
+      throw Object.assign(Error('Too many requests.'), { status: 429 });
+    }
+    return download(...args);
+  };
+  // Fake only the clock; promise chains keep real microtasks (Node 22).
+  jest.useFakeTimers({
+    doNotFake: ['nextTick', 'setImmediate', 'clearImmediate', 'queueMicrotask'],
+  });
+  try {
+    const { tree } = await render(services);
+    expect(tree.root.findAllByType(Image)).toHaveLength(0);
+    for (const ms of PREVIEW_RETRY_MS.slice(0, 2)) {
+      await act(async () => {
+        jest.advanceTimersByTime(ms);
+      });
+    }
+    expect(tree.root.findAllByType(Image)).toHaveLength(1);
+    expect(texts(tree)).not.toContain('The preview couldn’t be loaded.');
+    await act(async () => tree.unmount());
+  } finally {
+    jest.useRealTimers();
+  }
+});
+
+test('a thumbnail that stays interrupted offers Retry after the last wait', async () => {
+  const stored = stillFrom(syntheticPhoto(), 0);
+  const { services } = fakeScanServices({ stills: [stored] });
+  services.stills.download = async () => {
+    throw Object.assign(Error('A scan request is already running.'), {
+      code: 'busy',
+    });
+  };
+  jest.useFakeTimers({
+    doNotFake: ['nextTick', 'setImmediate', 'clearImmediate', 'queueMicrotask'],
+  });
+  try {
+    const { tree } = await render(services);
+    for (const ms of PREVIEW_RETRY_MS) {
+      expect(texts(tree)).not.toContain('The preview couldn’t be loaded.');
+      await act(async () => {
+        jest.advanceTimersByTime(ms);
+      });
+    }
+    expect(texts(tree)).toContain('The preview couldn’t be loaded.');
+    await act(async () => tree.unmount());
+  } finally {
+    jest.useRealTimers();
+  }
 });

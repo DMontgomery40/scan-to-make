@@ -81,6 +81,10 @@ function rejectedSummary(rejected: RejectedPhoto[]) {
   } added: ${parts.join(', ')}.`;
 }
 
+// Waits before retrying a thumbnail the companion was too busy for. After the
+// last one the close-up shows its Retry button instead.
+export const PREVIEW_RETRY_MS = [1500, 4000, 10000];
+
 export function CloseUpsScreen({
   target,
   services,
@@ -118,11 +122,16 @@ export function CloseUpsScreen({
   // to show. An interrupted attempt is neither, so it stays eligible.
   const inFlight = useRef(new Set<string>());
   const noPreview = useRef(new Set<string>());
+  const retries = useRef(new Map<string, number>());
+  const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [previewRetry, setPreviewRetry] = useState(0);
   const mounted = useRef(true);
   useEffect(() => {
     mounted.current = true;
     return () => {
       mounted.current = false;
+      if (retryTimer.current) clearTimeout(retryTimer.current);
+      retryTimer.current = null;
     };
   }, []);
   const previewsRef = useRef(previews);
@@ -218,6 +227,7 @@ export function CloseUpsScreen({
           // are verified either way.
           const uri = await step;
           if (!mounted.current) return;
+          retries.current.delete(still.id);
           if (uri) {
             setPreviews(current => ({ ...current, [still.sha256]: uri }));
           } else {
@@ -227,8 +237,19 @@ export function CloseUpsScreen({
           const f = failureOf(error);
           const interrupted =
             f.code === 'busy' || f.code === 'cancelled' || f.status === 429;
-          // An interrupted attempt stays eligible; a real failure is shown.
-          if (mounted.current && !interrupted) {
+          // An interrupted attempt is retried a few times on its own; a real
+          // failure, or one that keeps being interrupted, shows Retry.
+          const attempt = retries.current.get(still.id) ?? 0;
+          if (mounted.current && interrupted && attempt < PREVIEW_RETRY_MS.length) {
+            retries.current.set(still.id, attempt + 1);
+            if (!retryTimer.current) {
+              retryTimer.current = setTimeout(() => {
+                retryTimer.current = null;
+                if (mounted.current) setPreviewRetry(n => n + 1);
+              }, PREVIEW_RETRY_MS[attempt]);
+            }
+          } else if (mounted.current) {
+            retries.current.delete(still.id);
             setPreviewFailed(current => ({ ...current, [still.id]: true }));
           }
         } finally {
@@ -245,6 +266,7 @@ export function CloseUpsScreen({
     stills,
     busy,
     previewFailed,
+    previewRetry,
     services,
     projectId,
     captureId,
