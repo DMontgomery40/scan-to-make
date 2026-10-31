@@ -187,7 +187,7 @@ On 2026-10-31 the owner's first real scans never got a cleanup job, because toda
    - there is no repo, memory, rules, hooks or MCP, and nothing else in the prompt.
 3. **Pick the closest (KAN-184).** Best-of-N:
    - two or three runs side by side;
-   - each result is rendered against the photos and the closest one is picked by eye;
+   - each result is rendered with the captured scan from the same fixed cameras, and a sealed judge compares them with the photos under blind labels;
    - if no run is closer than the scan as captured, the captured scan is kept;
    - never a metrics-only gate. In the 2026-10-31 test, results varied a lot from run to run, and one of each tool's two runs damaged something.
 4. **Make it printable (KAN-185).** A deterministic step: fuse separate shells and make it watertight. Scale and the captured surface stay untouched.
@@ -822,7 +822,7 @@ Small and independent where possible. Owners are assigned in Jira. Every ticket 
 | ID | Ticket | Acceptance criteria |
 |---|---|---|
 | KAN-183 | AI step | The prompt is exactly "Look at the pictures of this, and then tweak the scan based on that." with nothing added. Each run happens in a fresh sealed workspace: copies of the scan and photos, originals read-only and hash-checked after, the user's own Claude Code or Codex login, no repo, memory, rules, hooks or MCP. The transcript proves the sentence was the only user text. Best-of-N: 2–3 runs side by side. |
-| KAN-184 | Visual pick | Every try is rendered from the photos' viewpoints and compared against the photos. The closest is picked, or the captured scan is kept when no try is closer. There is no metrics-only gate. All tries stay available for **Compare versions**. |
+| KAN-184 | Visual pick | Every try is rendered, with the captured scan, from the same fixed cameras: 8 views and 8 ring views set from the captured scan's box, textured and grey, under blind shuffled labels. A sealed judge compares them with the photos. The closest is picked, or the captured scan is kept when no try is clearly closer or the judge can't decide. A geometry veto can reject a try that moved the captured surface (smoothing, squashing), never pick one. There is no metrics-only gate. All tries stay available for **Compare versions**. Rendering from each photo's own viewpoint needs photo-pose registration (KAN-190). |
 | KAN-185 | Make printable | Runs after the pick: separate shells fused, watertight. Scale and the captured surface are unchanged, verified by renders against the photos. |
 
 ### Backend contracts

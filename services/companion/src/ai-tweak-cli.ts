@@ -4,6 +4,7 @@ import {homedir} from 'node:os';
 import {isAbsolute,join} from 'node:path';
 import {parseArgs} from 'node:util';
 import {checkModelAccess,modelAccessFromEnv,runAiTweak,type AiTweakOptions} from './ai-tweak.js';
+import {pickAiTweak} from './ai-tweak-pick.js';
 
 /** The user's own CLI: an explicit operator path, else the usual install locations. */
 export function findExecutable(name:'claude'|'codex',env:NodeJS.ProcessEnv=process.env):string|undefined{
@@ -31,7 +32,19 @@ async function main(argv:string[]){
   const result=await checkModelAccess(optionsFromEnv());
   process.stdout.write(JSON.stringify(result)+'\n');return result.ok?0:1;
  }
- if(command!=='run')throw Error('usage: ai-tweak-cli run --mesh <obj> [--usdz <path>] [--still <path>]... --out <dir> [--attempts N] | check');
+ if(command==='pick'){
+  // Visual pick over a runAiTweak output folder; the judge uses the same SCAN_TO_MAKE_AI_* access.
+  const {values}=parseArgs({args:rest,strict:true,options:{dir:{type:'string'},seed:{type:'string'}}});
+  const options=optionsFromEnv(),tool=process.env.SCAN_TO_MAKE_AI_JUDGE_TOOL;
+  if(!values.dir||!tool||!options.blender||!options.python)throw Error('pick needs --dir, SCAN_TO_MAKE_AI_JUDGE_TOOL, SCAN_TO_MAKE_SCAN_BLENDER and SCAN_TO_MAKE_CAPTURE_PYTHON');
+  // Same cancellation as `run`: the judge is a detached sealed run that must not outlive the CLI.
+  const controller=new AbortController();
+  for(const signal of ['SIGINT','SIGTERM'] as const)process.once(signal,()=>controller.abort());
+  const result=await pickAiTweak(values.dir,{...options,blender:options.blender,python:options.python,toolDir:tool,seed:values.seed,signal:controller.signal});
+  process.stdout.write(JSON.stringify({choice:result.choice,decidedBy:result.decidedBy,reason:result.reason,candidates:result.candidates.map(c=>({id:c.id,label:c.label,veto:c.veto?.reason}))})+'\n');
+  return 0;
+ }
+ if(command!=='run')throw Error('usage: ai-tweak-cli run --mesh <obj> [--usdz <path>] [--still <path>]... --out <dir> [--attempts N] | pick --dir <dir> [--seed s] | check');
  const {values}=parseArgs({args:rest,strict:true,options:{mesh:{type:'string'},usdz:{type:'string'},still:{type:'string',multiple:true},out:{type:'string'},
   attempts:{type:'string'},'timeout-ms':{type:'string'},'keep-workspaces':{type:'boolean'}}});
  if(!values.mesh||!values.out)throw Error('--mesh and --out are required');

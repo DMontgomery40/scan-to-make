@@ -487,7 +487,9 @@ async function logEnds(path:string,head=4*1024*1024,tail=16*1024*1024){
 
 // ---- one attempt -----------------------------------------------------------------------------
 
-interface AttemptContext {index:number;access:Exclude<ModelAccess,{kind:'none'}>;options:AiTweakOptions;inputsDir:string;inputs:Record<string,FileRef>;inputObj:string;out:string;prompt:string;collectResult:boolean}
+interface AttemptContext {index:number;access:Exclude<ModelAccess,{kind:'none'}>;options:AiTweakOptions;inputsDir:string;inputs:Record<string,FileRef>;inputObj:string;out:string;prompt:string;collectResult:boolean;
+ /** Reads the sealed folder after the run, before it is deleted (the visual pick's verdict file). */
+ onFinished?:(workspace:string)=>Promise<void>}
 
 async function attempt(ctx:AttemptContext):Promise<AttemptResult>{
  const {index,access,options,out}=ctx,started=Date.now(),cli=cliFor(access);
@@ -547,6 +549,7 @@ async function attempt(ctx:AttemptContext):Promise<AttemptResult>{
    Object.assign(base,{inputsModified:collected.inputsModified,alternates:collected.alternates,otherOutputs:collected.otherOutputs});
    if(collected.result)base.result={dir:relative(out,join(attemptDir,'result')),...collected.result};
   }
+  if(ctx.onFinished&&!result.cancelled&&!result.timedOut)await ctx.onFinished(workspace);
   if(result.cancelled)return finish({outcome:'cancelled'});
   if(result.timedOut)return finish({outcome:'timed-out',reason:'Attempt reached its time limit'});
   if(result.limit)return finish({outcome:'failed',reason:result.limit});
@@ -660,6 +663,22 @@ export async function runAiTweak(input:AiTweakInput,out:string,options:AiTweakOp
  });
  await Promise.all(workers);
  manifest.attempts=results.sort((a,b)=>a.index-b.index);await write();return manifest;
+}
+
+/**
+ * A sealed run with a caller-written prompt and files, for the visual pick's judge (KAN-184). It is a
+ * separate entry point on purpose: runAiTweak can only ever send David's sentence.
+ */
+export async function runSealedTask(task:{access:ModelAccess;prompt:string;inputsDir:string;out:string;
+ onFinished:(workspace:string)=>Promise<void>},options:Omit<AiTweakOptions,'access'>):Promise<AttemptResult|undefined>{
+ validateAccess(task.access);
+ if(task.access.kind==='none')return undefined;
+ if(!task.prompt.trim()||task.prompt===AI_TWEAK_PROMPT)throw Error('A sealed task needs its own prompt');
+ const inputs:Record<string,FileRef>={};
+ for(const name of await listFiles(task.inputsDir))inputs[name]=await fileRef(join(task.inputsDir,name));
+ await mkdir(task.out,{recursive:true,mode:0o700});
+ return attempt({index:1,access:task.access,options:{...options,access:task.access},inputsDir:task.inputsDir,inputs,inputObj:'',out:task.out,
+  prompt:task.prompt,collectResult:false,onFinished:task.onFinished});
 }
 
 /** The Mac app's "Connected" check: one tiny sealed call through the same route, no scan involved. */

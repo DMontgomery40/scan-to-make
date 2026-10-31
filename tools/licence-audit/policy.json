@@ -114,6 +114,7 @@
       "GPL-3.0-or-later"
     ],
     "folders": [
+      "tools/ai-tweak-judge",
       "tools/scan-correct",
       "tools/scan-repair"
     ]
