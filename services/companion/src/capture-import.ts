@@ -9,7 +9,7 @@ import {CaptureReceiptSchema,CaptureBindingSchema,validateCaptureBinding,type Ca
 
 export interface CaptureConverter {
   /** Trusted host configuration only; never supplied by an import request. */
-  convert(original: Buffer, signal?: AbortSignal): Promise<{derived: Buffer; report: Buffer}>;
+  convert(original: Buffer, signal?: AbortSignal): Promise<{derived: Buffer; report: Buffer; assets?: Record<string, Buffer>}>;
 }
 export interface CaptureLimits {maxSourceBytes?: number; maxDerivedBytes?: number; maxReportBytes?: number}
 export const DEFAULT_CAPTURE_LIMITS = {maxSourceBytes:32*1024*1024,maxDerivedBytes:64*1024*1024,maxReportBytes:1024*1024};
@@ -49,6 +49,50 @@ export function receiptFromConvertedBytes(original:Buffer,derived:Buffer,reportB
  qualification:{status:'qualified',reasons:[]},evidence:{metricAccuracy:'unknown',surfaceCompleteness:'unknown',physicalFit:'unknown'}});
 }
 
+/** Converter-owned basenames only; the report already records their byte identities. */
+export function captureMaterialManifest(reportBytes:Buffer) {
+ const report=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(reportBytes));
+ const outputs=z.array(identity.extend({path:z.string().regex(/^mesh(?:\.obj|\.mtl|_basecolor_[0-9]+\.png)$/)})).max(256).parse(report.outputs??[]);
+ if(new Set(outputs.map(item=>item.path)).size!==outputs.length)throw new Error('Duplicate converter output');
+ const obj=outputs.find(item=>item.path==='mesh.obj');
+ if(obj&&(obj.sha256!==report.output?.sha256||obj.bytes!==report.output?.bytes))throw new Error('Inconsistent converter OBJ identity');
+ return outputs.filter(item=>item.path!=='mesh.obj');
+}
+function* captureArtifactLines(bytes?:Buffer) {
+ // Match Python splitlines() boundaries used by the mesh tools. Iterate rather
+ // than allocating an array containing every line of a large OBJ.
+ for(const [raw] of (bytes?.toString('utf8')??'').matchAll(/[^\r\n\v\f\u001c-\u001e\u0085\u2028\u2029]+/g)){
+  const line=raw.trim();if(line&&!line.startsWith('#'))yield line;
+ }
+}
+export function snapshotCaptureMaterials(derived:Buffer,report:Buffer,assets:Record<string,Buffer>={},maxBytes:number=DEFAULT_CAPTURE_LIMITS.maxDerivedBytes) {
+ const manifest=captureMaterialManifest(report),result:Record<string,Buffer>={};
+ if(Object.keys(assets).length!==manifest.length)throw new Error('Converter material bundle is incomplete');
+ let total=derived.length;
+ for(const item of manifest){
+  const bytes=assets[item.path];
+  if(!Buffer.isBuffer(bytes))throw new Error('Missing converter material asset');
+  const copy=Buffer.from(bytes);total+=copy.length;
+  if(total>maxBytes)throw new Error('Converted capture byte limit exceeded');
+  if(copy.length!==item.bytes||ref(copy,'application/octet-stream').sha256!==item.sha256)throw new Error('Converter material identity mismatch');
+  result[item.path]=copy;
+ }
+ for(const line of captureArtifactLines(derived)){
+  const library=/^mtllib(?:\s+(.*))?$/.exec(line);
+  if(library&&(library[1]!=='mesh.mtl'||!result['mesh.mtl']))throw new Error('Missing referenced material library');
+ }
+ for(const line of captureArtifactLines(result['mesh.mtl'])){
+  const [directive,...args]=line.split(/\s+/);
+  // The trusted converter emits only base colour materials. Reject other MTL
+  // directives instead of silently accepting an unchecked map/bump/refl path.
+  if(directive==='newmtl'||directive==='Kd')continue;
+  if(directive!=='map_Kd')throw new Error('Unsupported converter material directive');
+  const texture=/^(?:-clamp (?:on|off) )?(mesh_basecolor_[0-9]+\.png)$/.exec(args.join(' '))?.[1];
+  if(!texture||!result[texture])throw new Error('Missing referenced material texture');
+ }
+ return result;
+}
+
 export async function readBoundedCaptureFile(path:string,maxBytes:number):Promise<Buffer> {
  const file=await open(path,constants.O_RDONLY|constants.O_NOFOLLOW);
  try {
@@ -58,6 +102,16 @@ export async function readBoundedCaptureFile(path:string,maxBytes:number):Promis
   if(length>maxBytes)throw new Error('Capture artifact exceeds byte limit');
   return Buffer.from(buffer.subarray(0,length));
  } finally {await file.close();}
+}
+/** Reused before converter cleanup and on reopen: only verified retained bytes. */
+export async function readCaptureMaterials(folder:string,derived:Buffer,report:Buffer,maxBytes:number=DEFAULT_CAPTURE_LIMITS.maxDerivedBytes) {
+ const assets:Record<string,Buffer>={};let remaining=maxBytes-derived.length;
+ for(const item of captureMaterialManifest(report)){
+  if(item.bytes>remaining)throw new Error('Converted capture byte limit exceeded');
+  assets[item.path]=await readBoundedCaptureFile(join(folder,item.path),item.bytes);
+  remaining-=item.bytes;
+ }
+ return snapshotCaptureMaterials(derived,report,assets,maxBytes);
 }
 async function writeSynced(path:string,bytes:Buffer):Promise<void>{
  const file=await open(path,'wx',0o600);try{await file.writeFile(bytes);await file.sync();}finally{await file.close();}
@@ -87,10 +141,12 @@ export class CaptureStore {
    if(!Buffer.isBuffer(converted.derived)||!Buffer.isBuffer(converted.report)||converted.derived.length>this.bound.maxDerivedBytes||converted.report.length>this.bound.maxReportBytes)throw new Error('Converted capture byte limit exceeded');
    const derived=Buffer.from(converted.derived),report=Buffer.from(converted.report);
    const capture=receiptFromConvertedBytes(original,derived,report);
+   const assets=snapshotCaptureMaterials(derived,report,converted.assets,this.bound.maxDerivedBytes);
    const binding=CaptureBindingSchema.parse({projectId,projectRevision,capture});
    const bindingBytes=Buffer.from(JSON.stringify(binding)+'\n');
    if(bindingBytes.length>this.bound.maxReportBytes)throw new Error('Capture binding byte limit exceeded');
    for(const [name,bytes] of [['original.usdz',original],['mesh.obj',derived],['conversion.json',report],['binding.json',bindingBytes]] as const){abort(signal);await writeSynced(join(staging,name),bytes);}
+   for(const [name,bytes] of Object.entries(assets)){abort(signal);await writeSynced(join(staging,name),bytes);}
    await syncDirectory(staging);
    const captureId=randomUUID();
    return await this.projects.withCurrentProject(projectId,projectRevision,async()=>{
@@ -114,6 +170,7 @@ export class CaptureStore {
    const capture=receiptFromConvertedBytes(original,derived,report);
    const binding=validateCaptureBinding(JSON.parse(bindingBytes.toString('utf8')),{projectId,projectRevision,original:capture.original,derived:capture.derived,conversionReport:capture.conversionReport});
    if(!isDeepStrictEqual(capture,binding.capture))throw new Error('Capture provenance does not match retained report');
+   await readCaptureMaterials(folder,derived,report,this.bound.maxDerivedBytes);
    return {captureId,project,binding,original,derived,report};
   },expectedProjectETag);
  }

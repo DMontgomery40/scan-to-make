@@ -3,7 +3,7 @@ import {mkdtemp,writeFile,rm,mkdir} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join,isAbsolute} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {DEFAULT_CAPTURE_LIMITS,readBoundedCaptureFile,receiptFromConvertedBytes,type CaptureConverter} from './capture-import.js';
+import {DEFAULT_CAPTURE_LIMITS,readBoundedCaptureFile,receiptFromConvertedBytes,readCaptureMaterials,type CaptureConverter} from './capture-import.js';
 
 export interface CaptureConverterOptions {
  /** Trusted operator configuration; never accepted from an import request. */
@@ -44,7 +44,8 @@ export function createCaptureConverter(options:CaptureConverterOptions={}):Captu
    const derived=await readBoundedCaptureFile(out,DEFAULT_CAPTURE_LIMITS.maxDerivedBytes);
    const reportBytes=await readBoundedCaptureFile(report,DEFAULT_CAPTURE_LIMITS.maxReportBytes);
    receiptFromConvertedBytes(original,derived,reportBytes);
-   return {derived,report:reportBytes};
+   const assets=await readCaptureMaterials(folder,derived,reportBytes);
+   return {derived,report:reportBytes,assets};
   } finally {await rm(folder,{recursive:true,force:true});}
  }};
 }

@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp,readFile,writeFile,readdir,rm} from 'node:fs/promises';
+import {mkdtemp,readFile,writeFile,readdir,rm,symlink} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {createHash} from 'node:crypto';
@@ -19,6 +19,15 @@ function output(bytes = source) {
  outputBasis:{coordinates:'world',units:'native stage units (unrescaled)',metersPerUnit:.01,upAxis:'Z'},
  contributingLayers:[{identifier:'fixture.usdc',sha256:'a'.repeat(64),bytes:30}],
  unsupportedFeatures:[],provesCompleteCapture:false,provesPhysicalFit:false}))};
+}
+function texturedOutput({obj='mtllib mesh.mtl\nusemtl skin\n'+derived,
+ mtl='newmtl skin\nKd 1 1 1\nmap_Kd -clamp on mesh_basecolor_0.png\n'}={}) {
+ const next=output(),report=JSON.parse(next.report);
+ next.derived=Buffer.from(obj);
+ next.assets={'mesh.mtl':Buffer.from(mtl),'mesh_basecolor_0.png':Buffer.from('synthetic PNG bytes')};
+ report.output={format:'obj',sha256:sha(next.derived),bytes:next.derived.length};
+ report.outputs=Object.entries({'mesh.obj':next.derived,...next.assets}).map(([path,bytes])=>({path,bytes:bytes.length,sha256:sha(bytes)}));
+ next.report=Buffer.from(JSON.stringify(report));return next;
 }
 async function fixture(t, converter={convert:async bytes=>output(bytes)}) {
  const root=await mkdtemp(join(tmpdir(),'capture-store-'));t.after(()=>rm(root,{recursive:true,force:true}));
@@ -106,4 +115,86 @@ test('snapshot ETag pins commit and reopen even if a trusted local writer change
  const saved=await f.captures.importCapture({...request(),expectedProjectETag:savedProjectETag(replacement)});
  await assert.rejects(f.captures.loadCapture('test',0,saved.captureId,expectedProjectETag),/snapshot/);
  assert.equal((await f.captures.loadCapture('test',0,saved.captureId,savedProjectETag(replacement))).captureId,saved.captureId);
+});
+
+test('material assets must match the converter manifest and share the derived byte budget',async t=>{
+ const f=await fixture(t);
+ const material=Buffer.from('newmtl skin\nKd 1 1 1\n');
+ const valid=()=>{
+  const next=output();const report=JSON.parse(next.report);
+  report.outputs=[{path:'mesh.obj',sha256:sha(derived),bytes:derived.length},{path:'mesh.mtl',sha256:sha(material),bytes:material.length}];
+  return {...next,report:Buffer.from(JSON.stringify(report)),assets:{'mesh.mtl':Buffer.from(material)}};
+ };
+ for(const mutate of [
+  v=>delete v.assets['mesh.mtl'],
+  v=>v.assets['mesh.mtl'].fill(0),
+  v=>v.assets['unexpected.png']=Buffer.from('extra'),
+  v=>{const r=JSON.parse(v.report);r.outputs[1].path='../escape.mtl';v.report=Buffer.from(JSON.stringify(r));},
+  v=>{const r=JSON.parse(v.report);r.outputs.push(r.outputs[1]);v.report=Buffer.from(JSON.stringify(r));},
+  v=>{const r=JSON.parse(v.report);r.outputs[0].sha256='a'.repeat(64);v.report=Buffer.from(JSON.stringify(r));},
+  v=>{const bytes=Buffer.from('newmtl skin\nmap_Kd mesh_basecolor_0.png\n');v.assets['mesh.mtl']=bytes;
+   const r=JSON.parse(v.report);r.outputs[1]={path:'mesh.mtl',bytes:bytes.length,sha256:sha(bytes)};v.report=Buffer.from(JSON.stringify(r));},
+ ]){
+  const next=valid();mutate(next);
+  const store=new CaptureStore(f.storage,join(f.root,'captures'),{convert:async()=>next});
+  await assert.rejects(store.importCapture(request()));
+ }
+ const bounded=new CaptureStore(f.storage,join(f.root,'captures'),{convert:async()=>valid()},{maxDerivedBytes:derived.length+material.length-1});
+ await assert.rejects(bounded.importCapture(request()),/byte limit/);
+ assert.deepEqual(await readdir(join(f.root,'captures')),[]);
+});
+
+test('reopen verifies material and texture identities, presence and regular files',async t=>{
+ const f=await fixture(t,{convert:async()=>texturedOutput()});
+ const fresh=new CaptureStore(f.storage,join(f.root,'captures'),f.converter);
+ for(const name of ['mesh.mtl','mesh_basecolor_0.png'])for(const damage of ['changed','truncated','oversized','missing','symlink']){
+  const saved=await f.captures.importCapture(request());
+  await fresh.loadCapture('test',0,saved.captureId);
+  const path=join(f.root,'captures',saved.captureId,name),bytes=await readFile(path);
+  if(damage==='changed'){
+   // Keep the MTL syntactically valid and the same size: only its hash differs.
+   if(name==='mesh.mtl')await writeFile(path,bytes.toString().replace('Kd 1 1 1','Kd 0 1 1'));
+   else {bytes[0]^=1;await writeFile(path,bytes);}
+  }
+  if(damage==='truncated')await writeFile(path,bytes.subarray(0,bytes.length-1));
+  if(damage==='oversized')await writeFile(path,Buffer.concat([bytes,Buffer.from('extra')]));
+  if(damage==='missing')await rm(path);
+  if(damage==='symlink'){
+   const target=join(f.root,'outside-'+name);await writeFile(target,bytes);await rm(path);await symlink(target,path);
+  }
+  await assert.rejects(fresh.loadCapture('test',0,saved.captureId),damage==='changed'?/identity mismatch/:undefined,`${name}: ${damage}`);
+ }
+});
+
+test('material references cannot escape the retained bundle or hide in other map directives',async t=>{
+ const f=await fixture(t);
+ for(const invalid of [
+  {obj:'  mtllib outside.mtl\n'+derived},
+  {obj:'mtllib mesh.mtl outside.mtl\n'+derived},
+  {obj:'mtllib\n'+derived},
+  {mtl:'newmtl skin\n  map_Kd ../outside.png\n'},
+  {mtl:'newmtl skin\nmap_Kd mesh_basecolor_9.png\n'},
+  ...['map_Ka','map_Ks','bump','disp','decal','refl','norm'].map(command=>({mtl:`newmtl skin\n${command} outside.png\n`})),
+  ...['\r','\v','\f','\x1c','\x85','\u2028','\u2029'].flatMap(separator=>[
+   {obj:`# comment${separator}mtllib outside.mtl\n`+derived},
+   {mtl:`newmtl skin${separator}map_Kd outside.png\n`},
+  ]),
+ ]){
+  const store=new CaptureStore(f.storage,join(f.root,'captures'),{convert:async()=>texturedOutput(invalid)});
+  await assert.rejects(store.importCapture(request()),undefined,JSON.stringify(invalid));
+ }
+ assert.deepEqual(await readdir(join(f.root,'captures')),[]);
+ const valid=texturedOutput({obj:'\tmtllib\tmesh.mtl  \r\n'+derived,
+  mtl:'  newmtl skin\r\nKd 1 1 1\r\n\tmap_Kd\t-clamp off\tmesh_basecolor_0.png  \r\n'});
+ const store=new CaptureStore(f.storage,join(f.root,'captures'),{convert:async()=>valid});
+ const saved=await store.importCapture(request());
+ await store.loadCapture('test',0,saved.captureId);
+});
+
+test('reopen applies the combined derived material byte budget',async t=>{
+ const next=texturedOutput(),f=await fixture(t,{convert:async()=>next});
+ const saved=await f.captures.importCapture(request());
+ const total=next.derived.length+Object.values(next.assets).reduce((n,bytes)=>n+bytes.length,0);
+ const bounded=new CaptureStore(f.storage,join(f.root,'captures'),f.converter,{maxDerivedBytes:total-1});
+ await assert.rejects(bounded.loadCapture('test',0,saved.captureId),/byte limit/);
 });
