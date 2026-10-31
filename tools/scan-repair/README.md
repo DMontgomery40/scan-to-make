@@ -41,8 +41,8 @@ All commands require `--units m|cm|mm` **or** `--units-sidecar FILE.json`.
 A sidecar must contain `unitsAuthored: true` and positive finite
 `metersPerUnit`, matching the capture converter's report. Units are declarations,
 not measurements. OBJ comments are not treated as unit authority. Coordinate
-basis is preserved on import (including Y-up captures); PCA later chooses a
-geometric frame. OBJ and STL inputs are supported; USDZ must first pass through
+basis is preserved on import (including Y-up captures); `--orient` later
+chooses the output frame. OBJ and STL inputs are supported; USDZ must first pass through
 `tools/capture-mesh-convert`. Repair is intended primarily for OBJ.
 
 ### Repair parameters and order
@@ -57,7 +57,7 @@ All distances below are in mm, independent of input units.
 | Manifold | `--voxel-size-mm .3`, optional `--force-voxel` | Recalculate normals; use voxel remesh if topology is still open/non-manifold, or explicitly forced |
 | Denoise | `--denoise-iterations 15 --denoise-factor .5 --denoise-mu -.53 --denoise-max-mm .35 --sharp-angle-deg 30` | Taubin cycles: a shrinking λ (`factor`) step then an inflating μ step, each moving vertices toward their inverse-edge-length-weighted neighbour average; freeze sharp-edge and boundary vertices; after each whole cycle, clamp cumulative vertex displacement from this step's start |
 | Decimate | optional `--target-faces N` | Triangulate, then collapse toward a target triangle count; Blender may not achieve the exact target |
-| Orient | always | Vertex-covariance PCA, descending eigenvalues, sign convention and right-handed frame; centre XY bounds and rest lowest vertex at Z=0 |
+| Orient | `--orient box` | `box`: the minimum-volume oriented box (`boxRotation` below), axes long to short. `pca`: vertex-covariance PCA, descending eigenvalues (the previous default). Both use the deterministic sign convention and a right-handed frame, centre XY bounds and rest the lowest vertex at Z=0. `keep`: input coordinates unchanged |
 
 Denoise cycles are bounded to 0–50, λ to (0, 0.5], μ to [−1, 0), and sharp
 angle to 0–90 degrees. The Taubin pass-band 1/λ + 1/μ must lie in (0, 0.2]:
@@ -76,8 +76,9 @@ Use a new output directory per attempt; failed attempts do not clear old files.
 
 Outputs: `repaired.obj` and binary `repaired.stl` both use **mm**, plus
 `report.json`. The report records runtime version, input/output SHA-256, units,
-all operation parameters, before/after topology, bounds, principal extents,
-area (mm²) and volume (mm³). Volume is null for open or inconsistently wound
+all operation parameters, before/after topology, bounds, principal and box
+extents, coarse fill, area (mm²) and volume (mm³). The `orient` operation
+records its `frame` and the applied rotation and translation. Volume is null for open or inconsistently wound
 input. Boundary edges are included in the non-manifold edge count; components
 are connected through vertices. “Watertight” means closed edges and consistent
 winding; it does **not** rule out intersecting surfaces or certify a printable
@@ -104,7 +105,11 @@ not certify the global minimum for arbitrary shapes. Extents are ordered long
 to short. `boxRotation` is a right-handed world-to-box rotation matrix:
 `boxPoint = boxRotation @ (inputPoint - boxInputCentreMm)`. Axis signs follow
 the PCA sign convention; symmetric shapes may have equivalent frames.
-PCA metrics and repair orientation remain unchanged for compatibility.
+Repair orients by this box frame by default. `principalExtentsMm` is unchanged.
+`coarseFillFaces` and `coarseFillAreaMm2` count faces larger than 10× the
+median face area: typically the few huge triangles Object Capture uses to
+close sides it never saw. Their sparse vertices skew vertex PCA; the hull-based
+box frame is insensitive to vertex density.
 Surface area and volume
 describe the mesh only. Closed components with opposing winding can cancel
 signed volumes; intersecting solids can overcount. No semantic upright or
@@ -128,8 +133,11 @@ same pinned Blender/runtime produce identical reports and output hashes in
 the tests. GPU drivers, Blender builds, numeric libraries and platforms may
 change floating-point geometry or rasterization. PCA is ambiguous for symmetric
 or nearly symmetric objects, sensitive to vertex density, and can rotate or
-flip the perceived object orientation. Compare principal extents or transform
-frames, not raw axis bounds before versus after orientation.
+flip the perceived object orientation. The box frame can also flip between
+equivalent frames of symmetric shapes. Compare box or principal extents or
+transform frames, not raw axis bounds before versus after orientation. Neither
+frame chooses which face rests on the print bed: bambu-printer-mcp `lay_flat`
+or the slicer's auto-orient does that.
 
 ## Verification
 
@@ -137,7 +145,9 @@ Only synthetic fixtures are generated in temporary directories: cube with a
 floater, sphere with open poles, noisy sharp box, non-manifold join, and
 metres/mm versions, a 5°-rotated box with uneven tessellation, and an
 asymmetric oriented part. The box test checks true extents within 0.05 mm and
-independently projects its vertices using the reported rotation; render tests
+independently projects its vertices using the reported rotation; repair of the
+same box checks output bounds under `box`, `pca` and `keep`, and a grid with
+one oversized face checks the coarse-fill count; render tests
 compare default/explicit preservation against PCA. Tests exercise actual Blender, hashes/repeatability,
 topology, volume, unit declarations/sidecars, STL framing, decimation and all
 ten PNGs. CI downloads Blender 5.0.1 from download.blender.org and verifies the
