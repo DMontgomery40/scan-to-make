@@ -8,7 +8,7 @@ import shlex
 LABEL = 'org.scantomake.companion'
 
 
-def configure(state, app, node, blender, launch_agents):
+def configure(state, app, node, blender, launch_agents, lan=False):
     state, app, launch_agents = map(Path, (state, app, launch_agents))
     state.mkdir(parents=True, exist_ok=True, mode=0o700)
     logs = state / 'logs'
@@ -30,6 +30,9 @@ def configure(state, app, node, blender, launch_agents):
         'SCAN_TO_MAKE_SCAN_REPAIR_TOOL': str(app / 'tools/scan-repair/repair.py'),
         'SCAN_TO_MAKE_SCAN_BLENDER': blender,
     }
+    if lan:
+        environment['SCAN_TO_MAKE_LAN_TLS_CERT'] = str(state / 'tls/cert.pem')
+        environment['SCAN_TO_MAKE_LAN_TLS_KEY'] = str(state / 'tls/key.pem')
     launcher = state / 'companion'
     # The helper runs any host CLI with the SAME env file and executable paths.
     script = '#!/bin/sh\nset -eu\numask 077\n'
@@ -58,5 +61,6 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ('state', 'app', 'node', 'blender', 'launch-agents'):
         parser.add_argument('--' + name, required=True)
+    parser.add_argument('--lan', action='store_true')
     args = parser.parse_args()
-    print(configure(args.state, args.app, args.node, args.blender, args.launch_agents))
+    print(configure(args.state, args.app, args.node, args.blender, args.launch_agents, args.lan))

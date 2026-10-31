@@ -15,11 +15,9 @@ its HTTP routes. Installing their dependencies does not add those routes.
 ## Linux / NAS
 
 Requires an x86-64 Linux Docker host, Docker Compose 2.30+ (raw env files), and
-Tailscale on the host and phone. Blender 5.0.1 has no official Linux ARM64 archive;
+LAN access from the phone (directly or through your existing VPN), or Tailscale. Blender 5.0.1 has no official Linux ARM64 archive;
 this image is **linux/amd64 only**. ARM NAS emulation is not qualified. Allow
-several GB of disk for the image, build cache and captures. Download and install
-[Tailscale](https://tailscale.com/download), sign both devices into the same
-tailnet, and note the host's full `*.ts.net` name and your Tailscale login.
+several GB of disk for the image, build cache and captures.
 
 ```sh
 git clone https://github.com/DMontgomery40/scan-to-make.git
@@ -29,7 +27,29 @@ chmod 600 deploy/companion/companion.env
 docker compose -f deploy/companion/compose.yaml build
 ```
 
-Initialize pairing storage **once**, replacing both example values:
+Choose one connection mode for this installation. **Existing LAN/VPN:** add
+`SCAN_TO_MAKE_LAN_TLS_CERT=/data/tls/cert.pem` and
+`SCAN_TO_MAKE_LAN_TLS_KEY=/data/tls/key.pem` to `companion.env`, then initialize
+once using the Docker host's LAN IPv4 address:
+
+```sh
+docker compose -f deploy/companion/compose.yaml run --rm companion \
+  python3 /app/deploy/companion/generate-lan-tls.py /data/tls 192.168.1.10
+docker compose -f deploy/companion/compose.yaml run --rm companion \
+  node /app/services/companion/dist/remote-auth-cli.js \
+  init-lan /data/auth https://192.168.1.10:9077 /data/tls/cert.pem
+docker compose -f deploy/companion/compose.yaml up -d
+docker compose -f deploy/companion/compose.yaml exec companion \
+  node /app/services/companion/dist/remote-auth-cli.js pair-capture /data/auth
+```
+
+Scan the QR with a phone build supporting the LAN certificate pin. No Serve
+mapping is needed in this mode. The host firewall and existing VPN must allow
+access to the selected address on port 9077.
+
+**Tailscale option:** install [Tailscale](https://tailscale.com/download) and sign
+both devices into the same tailnet. Initialize pairing storage **once**, replacing
+both example values:
 
 ```sh
 docker compose -f deploy/companion/compose.yaml run --rm companion \
@@ -45,15 +65,17 @@ docker compose -f deploy/companion/compose.yaml exec companion \
   pair-capture /data/auth me@example.com
 ```
 
-Paste the invitation into the app's Companion pairing screen within five
-minutes. Tailscale may ask you to enable HTTPS for your tailnet. This uses
+Scan the terminal QR with the iPhone Camera app within five minutes. The CLI
+also prints a localhost-only pairing page address and the invitation JSON for
+manual-paste clients. On Linux host networking the page is reachable from the
+host browser; never add its temporary port to Serve. Tailscale may ask you to enable HTTPS for your tailnet. This uses
 private Serve, not public Funnel: the existing companion requires Serve's
 identity headers and a paired device token. See [transport setup](../../docs/tailscale-setup.md).
 
-Compose uses **host networking on Linux**, so host Tailscale Serve can reach
-the companion's existing `127.0.0.1:9077` listener. A Docker `ports:` mapping
+Compose uses **host networking on Linux**. In LAN mode the companion binds the
+selected host IP; in Serve mode host Tailscale reaches the `127.0.0.1:9077` listener. A Docker `ports:` mapping
 cannot reach a service bound only to the container's loopback. NAS platforms
-must support Linux host networking and host-side Tailscale Serve. The compose
+must support Linux host networking; Serve mode also needs host-side Tailscale. The compose
 file is not a Docker Desktop networking recipe.
 
 The named `companion-data` volume holds `/data/auth`, `/data/capture`, and
@@ -85,11 +107,33 @@ removes captures and pairing state, so use ordinary `down` when preserving data.
 
 ## macOS
 
-Clone the repo as above, then run one installer command as your login user:
+Choose the connection you already use. **I'm already set up:** if the phone can
+reach this Mac on your LAN, including through an existing WireGuard, Firewalla or
+other VPN tunnel, no Tailscale account is needed. Use the Mac's LAN IPv4 address:
+
+```sh
+bash deploy/companion/install-macos.sh --lan 192.168.1.10
+```
+
+This installs a native HTTPS listener on that address at port 9077. The QR carries
+the companion's certificate fingerprint as well as the one-time code; the phone
+pins that certificate before sending the code and for subsequent requests. Use a
+mobile build with LAN QR support. There is no certificate-profile installation.
+Allow incoming connections to Node if macOS Firewall prompts, and use a DHCP
+reservation so the address stays stable. The VPN must already route the phone to
+that LAN address; this installer does not alter your router or VPN.
+
+**Tailscale option:** install and sign in to [Tailscale on the Mac](https://tailscale.com/docs/install/mac)
+and phone. Obtain the Mac's `*.ts.net` name and allowed login, then run:
 
 ```sh
 bash deploy/companion/install-macos.sh my-mac.my-tailnet.ts.net me@example.com
 ```
+
+For the standalone macOS Tailscale app the CLI may be
+`/Applications/Tailscale.app/Contents/MacOS/Tailscale` rather than on `PATH`.
+Only this option uses Serve. Both installer forms run as your login user from
+the cloned checkout.
 
 The installer uses Homebrew when present to install Node 24 and Python 3.12.
 Without Homebrew it accepts an existing Node 24 plus Python 3.10+ with compatible
@@ -121,8 +165,10 @@ this is network isolation, not a general sandbox for model-written code.
 Apple deprecates `sandbox-exec`; if it is absent or fails, installation/cleanup
 fails closed instead of running without isolation.
 
-The installer prints a short-lived invitation. Install/sign in to Tailscale on
-the Mac and phone, enable private HTTPS, then pair:
+The installer prints a terminal QR, a localhost-only QR page address, and the
+invitation JSON fallback. Scan with your iPhone Camera app to pair. In Tailscale
+mode only, first enable Serve; if that takes more than five minutes, generate a
+fresh invitation with the helper below:
 
 ```sh
 tailscale serve --bg http://127.0.0.1:9077
@@ -131,12 +177,22 @@ tailscale serve --bg http://127.0.0.1:9077
 Private credentials go in
 `~/Library/Application Support/Scan to Make/companion.env` (Node dotenv syntax;
 quote values containing spaces or `#`). Installation paths are configured by
-the launcher and kept out of the credential file. To get another invitation or
-manage phones, use the installed CLI helper from any directory:
+the launcher and kept out of the credential file. LAN certificate/key files live
+under `tls/` in that same private state directory and survive upgrades. Certificates
+last one year. For an expired certificate or changed LAN address, stop the agent,
+move **both** `auth/` and `tls/` into a private backup directory, rerun the installer
+with the new/current address, and re-pair every phone. Moving only `auth/` leaves
+the old certificate in place and cannot repair its expiry or address mismatch.
+Captures and `companion.env` can stay in place. The installer never silently
+rotates a certificate under existing phone pairings.
+
+To get another invitation or manage phones, use the helper from any directory.
+In LAN mode omit the login (or use `lan`); in Tailscale mode supply your login:
 
 ```sh
 stm="$HOME/Library/Application Support/Scan to Make"
-"$stm/companion" services/companion/dist/remote-auth-cli.js pair-capture "$stm/auth" me@example.com
+"$stm/companion" services/companion/dist/remote-auth-cli.js pair-capture "$stm/auth"
+# Tailscale: append your login to pair-capture.
 "$stm/companion" services/companion/dist/remote-auth-cli.js devices "$stm/auth"
 # After editing companion.env:
 launchctl kickstart -k "gui/$(id -u)/org.scantomake.companion"
@@ -144,6 +200,37 @@ launchctl kickstart -k "gui/$(id -u)/org.scantomake.companion"
 tail -n 100 "$stm/logs/companion-error.log"
 ```
 
+
+Open the printed local page on the companion computer; its port is temporary and
+is **not** the companion's Serve/API port. It refreshes to remove a consumed or
+expired QR and closes shortly after expiry. Over SSH, the terminal QR is available
+without opening a Mac window. Do not forward the page through Serve or share the
+QR, invitation JSON or pairing deep link in chat or tickets. Stdout from the
+pairing CLI remains JSON; QR and page instructions go to stderr.
+
+To verify a real capture through the same HTTPS API as the phone, create a fresh
+invitation privately and run the included smoke client. It pairs a separate test
+device, uploads the USDZ, runs repair → measure → render, downloads all thirteen
+artifacts and checks their hashes. It never supplies simulated Serve headers or
+disables TLS verification. For LAN mode, the installed helper supplies the private
+certificate path and the client verifies its fingerprint. For Tailscale, append
+your login to the pairing command. Use a new output directory for each run:
+
+```sh
+umask 077
+"$stm/companion" services/companion/dist/remote-auth-cli.js \
+  pair-capture "$stm/auth" > "$HOME/companion-invitation.json"
+"$stm/companion" deploy/companion/capture-smoke.mjs \
+  "$HOME/companion-invitation.json" /absolute/capture.usdz "$HOME/companion-smoke-results"
+rm "$HOME/companion-invitation.json"
+```
+
+The output directory is private and contains a device token in `device.json`,
+job metadata and the returned meshes/report/images. Its summary prints only
+identifiers, dimensions and verification counts. Revoke the displayed smoke
+`deviceId` with the existing `revoke` command when finished. A failed run can
+leave a retained project/job; the client never retries ambiguous POST requests.
+Do not commit the invitation, token, capture or output directory.
 
 For host-side cleanup while phone pipeline integration is in progress, the
 installed launcher loads the same private env file and Python runtime:

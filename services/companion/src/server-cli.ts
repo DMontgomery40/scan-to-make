@@ -1,3 +1,4 @@
+import {readFile} from 'node:fs/promises';
 import {ScanProcessingStore,createScanRunner} from './scan-processing.js';
 import {isAbsolute,join} from 'node:path';
 import {FileSavedProjectStorage} from '@scan-to-make/project';
@@ -25,16 +26,24 @@ if(scanTool!==undefined||scanBlender!==undefined){
  Object.assign(capture,{scanProcessing:new ScanProcessingStore(capture.storage,capture.captures,join(captureDirectory,'captures'),createScanRunner({toolPath:scanTool,blender:scanBlender,python:process.env.SCAN_TO_MAKE_CAPTURE_PYTHON??'python3'}))});
 }
 // The port variable keeps its original name so existing operator setups still start.
+let lanTls;
+const certPath = process.env.SCAN_TO_MAKE_LAN_TLS_CERT;
+const keyPath = process.env.SCAN_TO_MAKE_LAN_TLS_KEY;
+if (certPath !== undefined || keyPath !== undefined) {
+  if (!certPath || !keyPath || !isAbsolute(certPath) || !isAbsolute(keyPath)) throw new Error('Absolute LAN TLS certificate and key paths required');
+  lanTls = {cert: await readFile(certPath), key: await readFile(keyPath)};
+}
 const server = await startCompanionServer({
+  lanTls,
   capture,
   remoteAuth,
   port:
     process.env.SCAN_TO_MAKE_GENERATION_PORT === undefined
-      ? 9077
+      ? undefined
       : Number(process.env.SCAN_TO_MAKE_GENERATION_PORT),
 });
 process.stdout.write(
-  `${remoteAuth ? 'Private Serve companion' : 'Local companion'} ready at ${
+  `${remoteAuth?.transport === 'lan' ? 'Paired LAN companion' : remoteAuth ? 'Private Serve companion' : 'Local companion'} ready at ${
     server.url
   }\n`
 );

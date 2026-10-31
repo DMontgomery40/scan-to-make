@@ -27,6 +27,8 @@
 **/.venv
 **/.env*
 **/*.env
+**/*.pem
+**/*.key
 **/captures
 **/artifacts
 **/secrets

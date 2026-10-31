@@ -30,4 +30,5 @@ docker exec "$name" python3 -c 'from pxr import Usd; from PIL import Image; impo
 # Exercise the real correction sandbox as the image's non-root user.
 docker exec "$name" python3 -m unittest discover -s tools/scan-correct/tests -p test_service.py -k network_sandbox -v
 docker exec "$name" xvfb-run -a python3 -m unittest discover -s tools/scan-repair/tests -p test_repair.py -k test_render_and_decimate -v
+docker run --rm --entrypoint node "$image" --test /app/services/companion/tests/lan-pairing.test.mjs
 echo 'Companion container smoke passed'

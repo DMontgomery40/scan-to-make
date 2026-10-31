@@ -2,13 +2,23 @@
 set -euo pipefail
 if [ "${1:-}" = --help ]; then
   echo 'Usage: bash deploy/companion/install-macos.sh <host.tailnet.ts.net> <tailscale-login>'
+  echo 'Existing LAN/VPN: bash deploy/companion/install-macos.sh --lan <LAN-IP>'
+  echo 'Tailscale option: sign in on the Mac and phone; obtain the Mac FQDN and login.'
   echo 'Optional: BLENDER=/absolute/path/to/Blender; STM_INSTALL_ROOT=/absolute/private/directory'
   exit 0
 fi
 [ "$(uname -s)" = Darwin ] || { echo 'This installer requires macOS.' >&2; exit 1; }
-[ "$#" = 2 ] || { echo 'Pass the Tailscale Serve FQDN and allowed login (see --help).' >&2; exit 1; }
+[ "$#" = 2 ] || { echo 'Pass --lan <LAN-IP>, or Tailscale FQDN and login (see --help).' >&2; exit 1; }
 [ "$(id -u)" != 0 ] || { echo 'Run as your login user, not sudo (launchd user agent).' >&2; exit 1; }
 umask 077
+mode=tailscale
+pairing_host=$1
+pairing_login=$2
+if [ "$1" = --lan ]; then
+  mode=lan
+  pairing_host="$2:9077"
+  pairing_login=lan
+fi
 source_root=$(cd "$(dirname "$0")/../.." && pwd)
 state=${STM_INSTALL_ROOT:-"$HOME/Library/Application Support/Scan to Make"}
 case "$state" in /*) ;; *) echo 'STM_INSTALL_ROOT must be absolute' >&2; exit 1 ;; esac
@@ -57,16 +67,28 @@ version=$("$blender" --version)
 export BLENDER="$blender"
 "$app/.venv/bin/python" -m unittest discover -s "$app/tools/scan-correct/tests" -p test_sandbox.py -v
 "$app/.venv/bin/python" -m unittest discover -s "$app/tools/scan-correct/tests" -p test_native_cleanup.py -v
+if [ "$mode" = lan ]; then
+  "$python" "$app/deploy/companion/generate-lan-tls.py" "$state/tls" "$2"
+fi
 if [ ! -e "$state/auth" ]; then
-  "$node" "$app/services/companion/dist/remote-auth-cli.js" init "$state/auth" "$1" "$2"
+  if [ "$mode" = lan ]; then
+    "$node" "$app/services/companion/dist/remote-auth-cli.js" init-lan "$state/auth" "https://$pairing_host" "$state/tls/cert.pem"
+  else
+    "$node" "$app/services/companion/dist/remote-auth-cli.js" init "$state/auth" "$pairing_host" "$pairing_login"
+  fi
 else
   # Do not silently reuse a different host/login when reinstalling.
-  "$node" --input-type=module - "$app" "$state/auth" "$1" "$2" <<'JS'
+  "$node" --input-type=module - "$app" "$state/auth" "$pairing_host" "$pairing_login" "$mode" "$state/tls/cert.pem" <<'JS'
 import {pathToFileURL} from 'node:url';
-const [app, dir, host, login] = process.argv.slice(2);
+import {readFile} from 'node:fs/promises';
+const [app, dir, host, login, mode, certPath] = process.argv.slice(2);
 const {RemoteAuthStore} = await import(pathToFileURL(`${app}/services/companion/dist/remote-auth.js`));
 const store = await RemoteAuthStore.open(dir);
-if (store.host !== host || !store.allowsLogin(login)) throw new Error('Existing pairing configuration differs; use the original host/login.');
+if (store.transport !== mode || store.host !== host || !store.allowsLogin(login)) throw new Error('Existing pairing configuration differs; use the original settings or a new STM_INSTALL_ROOT.');
+if (mode === 'lan') {
+  const {checkLanCertificate} = await import(pathToFileURL(`${app}/services/companion/dist/lan-transport.js`));
+  checkLanCertificate(await readFile(certPath), new URL(store.baseUrl).hostname, store.certificateSha256);
+}
 JS
 fi
 export PATH="$app/printers/bambu/bin:$app/printers/generic/bin:$PATH"
@@ -75,8 +97,9 @@ label=org.scantomake.companion
 plist="$HOME/Library/LaunchAgents/$label.plist"
 # All builds/downloads verified before replacing the running service.
 launchctl bootout "gui/$(id -u)/$label" 2>/dev/null || true
-"$python" "$app/deploy/companion/configure-macos.py" --state "$state" --app "$app" \
-  --node "$node" --blender "$blender" --launch-agents "$HOME/Library/LaunchAgents"
+configure_args=(--state "$state" --app "$app" --node "$node" --blender "$blender" --launch-agents "$HOME/Library/LaunchAgents")
+if [ "$mode" = lan ]; then configure_args+=(--lan); fi
+"$python" "$app/deploy/companion/configure-macos.py" "${configure_args[@]}"
 launchctl bootstrap "gui/$(id -u)" "$plist"
 launchctl kickstart "gui/$(id -u)/$label"
 ready=0
@@ -86,6 +109,11 @@ for attempt in {1..15}; do
 done
 [ "$ready" = 1 ] || { echo "Service did not become ready. Inspect $state/logs" >&2; exit 1; }
 printf '\nInstalled. Config: %s/companion.env\nCLI: %s/companion\n' "$state" "$state"
-printf 'Enable private HTTPS with: tailscale serve --bg http://127.0.0.1:9077\n'
+if [ "$mode" = tailscale ]; then
+  printf 'Enable private HTTPS with: tailscale serve --bg http://127.0.0.1:9077\n'
+else
+  printf 'Existing LAN/VPN mode: scan the QR from the same LAN or through your existing VPN.\n'
+fi
+printf 'The QR and local pairing page expire in five minutes; rerun pair-capture if Serve setup takes longer.\n'
 printf 'Native capture, repair and AI correction are installed; correction workers have no network access.\n'
-"$state/companion" "$app/services/companion/dist/remote-auth-cli.js" pair-capture "$state/auth" "$2"
+"$state/companion" "$app/services/companion/dist/remote-auth-cli.js" pair-capture "$state/auth" "$pairing_login"
