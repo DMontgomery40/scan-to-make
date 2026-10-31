@@ -4,7 +4,7 @@
 
 **Tracking:** **KAN-134** (hosted cleanup worker design — docs only).
 
-**Architecture:** After local, repeatable workers and isolation proof, the lean hosted prototype uses **Modal** for compute and **Cloudflare R2** for bytes. **The same cleanup job contract** must run locally and on Modal; hosted is a configuration change, not a second pipeline.
+**Decision (D003):** After local, repeatable workers and isolation proof, the lean hosted prototype uses **Modal** for compute and **Cloudflare R2** for bytes. D003 requires the same cleanup job contract locally and on Modal; hosted is a configuration change, not a second pipeline.
 
 This document covers only the **hosted cleanup worker**: headless [`tools/scan-repair`](../tools/scan-repair) plus [`tools/scan-correct`](../tools/scan-correct) (including deterministic `advise`), using **project-owned model API keys** for users who cannot run Linux + Blender 5.0.1 + libseccomp on their own machine. Capture conversion, companion pairing, project sync, billing, and printer MCPs stay on the self-host path documented elsewhere ([`deploy/companion/README.md`](../deploy/companion/README.md), [`services/companion/`](../services/companion/)).
 
@@ -41,7 +41,7 @@ Printer MCP packages in the image are unused by the hosted cleanup worker; they 
 
 ## Job pipeline (what actually runs)
 
-Align with companion scan processing today ([`services/companion/SCAN-PROCESSING.md`](../services/companion/SCAN-PROCESSING.md)): re-import retained textured geometry, then:
+Align with companion scan processing today ([`services/companion/SCAN-PROCESSING.md`](../services/companion/SCAN-PROCESSING.md)) and the cleanup stages implemented in [`tools/scan-repair`](../tools/scan-repair) and [`tools/scan-correct`](../tools/scan-correct). Re-import retained textured geometry, then:
 
 | Stage | Tool | Notes |
 | --- | --- | --- |
