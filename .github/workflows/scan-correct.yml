@@ -50,8 +50,10 @@ jobs:
           rm blender-5.0.1-linux-x64.tar.xz
       - name: Install headless graphics and unprivileged seccomp runtime
         run: sudo apt-get update && sudo apt-get install -y libegl1 libgl1 libxkbcommon0 libsm6 libxi6 libxrender1 xvfb xauth libseccomp2
-      - name: Install exact converter bridge test dependencies
-        run: python -m pip install --disable-pip-version-check -r tools/capture-mesh-convert/requirements.txt
+      - name: Install converter bridge and scan-correct still dependencies
+        run: |
+          python -m pip install --disable-pip-version-check -r tools/capture-mesh-convert/requirements.txt
+          python -m pip install --disable-pip-version-check -r tools/scan-correct/requirements.txt
       - name: Check actual IPv4 and IPv6 denial as the ordinary runner user
         # libseccomp loads a no_new_privs filter; no sudo, namespaces or elevated caps.
         # Failure is fatal. Never skip or disable the production sandbox in CI.
@@ -60,7 +62,7 @@ jobs:
         run: |
           "$BLENDER" --version
           test -x "$BLENDER"
-          python -c 'from pxr import Usd; from PIL import Image; print(Usd.GetVersion(), Image.__version__)'
+          python -c 'from pxr import Usd; from PIL import Image; import pillow_heif; print(Usd.GetVersion(), Image.__version__, pillow_heif.__version__)'
           python -m py_compile tools/scan-correct/*.py tools/scan-correct/tests/*.py
       - name: Run all synthetic Blender and adapter tests (no skips)
         run: |
