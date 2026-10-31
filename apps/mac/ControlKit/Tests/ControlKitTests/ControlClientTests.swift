@@ -65,6 +65,36 @@ private let status: [String: Any] = ["protocolVersion": 1, "companionVersion": "
     "capabilities": ["capture": true, "cleanup": false, "printerHandoff": true]]
 
 final class ControlClientTests: XCTestCase {
+    func testDependenciesCarryRequiredProgressAndExplicitSlicerEnvironment() async throws {
+        let server = try UnixFixture { request in
+            XCTAssertEqual(request["method"] as? String, "dependencies.get")
+            let params = request["params"] as! [String: Any]
+            XCTAssertEqual(params["backend"] as? String, "bambu-printer-mcp")
+            XCTAssertEqual(params["model"] as? String, "p1s")
+            return [try reply(request, result: ["items": [
+                ["id": "blender", "state": "Downloading", "required": true, "bytesReceived": 8192, "totalBytes": 16384],
+                ["id": "ffmpeg", "state": "Missing", "required": false]
+            ], "environment": ["SLICER_TYPE": "orcaslicer", "SLICER_PATH": "/Applications/OrcaSlicer.app/Contents/MacOS/OrcaSlicer"]])]
+        }
+        let result = try await ControlClient(socketPath: server.path).dependencies(backend: .bambu, model: "p1s")
+        XCTAssertEqual(result.items[0].state, .downloading)
+        XCTAssertEqual(result.items[0].bytesReceived, 8192)
+        XCTAssertFalse(result.items[1].required)
+        XCTAssertEqual(result.environment["SLICER_TYPE"], "orcaslicer")
+        withExtendedLifetime(server) {}
+    }
+
+    func testDependencyRetryUsesOnlyTheFixedID() async throws {
+        let server = try UnixFixture { request in
+            XCTAssertEqual(request["method"] as? String, "dependencies.retry")
+            XCTAssertEqual(request["params"] as? [String: String], ["id": "bambu-printer-mcp"])
+            return [try reply(request, result: ["item": ["id": "bambu-printer-mcp", "state": "Downloading", "required": true]])]
+        }
+        let item = try await ControlClient(socketPath: server.path).retryDependency(id: .bambu)
+        XCTAssertEqual(item.state, .downloading)
+        withExtendedLifetime(server) {}
+    }
+
     func testModelChoiceSetUsesReferenceOnlyAndCAS() async throws {
         let revision = UUID(), reference = UUID()
         let server = try UnixFixture { request in

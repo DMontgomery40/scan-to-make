@@ -1,0 +1,39 @@
+{
+  "version": 1,
+  "bambu-printer-mcp": {
+    "version": "1.1.42",
+    "url": "https://github.com/DMontgomery40/bambu-printer-mcp/releases/download/v1.1.42/bambu-printer-mcp.mcpb",
+    "integrity": "sha256-HMIjA6QNcYZv3+E7oexiEKmlvS4wXBTeh36dpOwNciM=",
+    "maxBytes": 33554432,
+    "entryPoint": "dist/index.js",
+    "licence": "GPL-2.0-only",
+    "sourceUrl": "https://github.com/DMontgomery40/bambu-printer-mcp/tree/v1.1.42"
+  },
+  "mcp-3d-printer-server": {
+    "version": "1.2.20",
+    "lockfile": "generic/package-lock.json",
+    "lockfileSha256": "3b5bd8755f7bc66e1c816427cc97a16fb4c8c5151968c269d8d7dc0877002bbf",
+    "entryPoint": "node_modules/mcp-3d-printer-server/dist/index.js",
+    "licence": "GPL-2.0-only",
+    "sourceUrl": "https://github.com/DMontgomery40/mcp-3D-printer-server/tree/v1.2.20"
+  },
+  "blender": {
+    "version": "5.0.1",
+    "licence": "GPL-3.0-or-later",
+    "sourceUrl": "https://projects.blender.org/blender/blender/src/tag/v5.0.1",
+    "platforms": {
+      "darwin-arm64": {
+        "url": "https://download.blender.org/release/Blender5.0/blender-5.0.1-macos-arm64.dmg",
+        "integrity": "sha256-ECqB3e5TRsljOcalKQaaLVLfBfMw65v9QxyN15+0r7Y=",
+        "maxBytes": 1073741824,
+        "entryPoint": "Blender.app/Contents/MacOS/Blender"
+      },
+      "linux-x64": {
+        "url": "https://download.blender.org/release/Blender5.0/blender-5.0.1-linux-x64.tar.xz",
+        "integrity": "sha256-gBlYDuG3Ji5QX0GWoAI3zPdDyI0gWzjTQgFRBnbmCwk=",
+        "maxBytes": 1073741824,
+        "entryPoint": "blender"
+      }
+    }
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "name": "scan-to-make-external-generic-printer",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Pinned external MCP process; never linked into the app or companion",
+  "dependencies": {"mcp-3d-printer-server": "1.2.20"}
+}

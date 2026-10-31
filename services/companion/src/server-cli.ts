@@ -20,6 +20,7 @@ import {createControlDispatcher, companionVersion} from './local-control-service
 import type {CaptureServices} from './capture-http.js';
 import {ModelAccessService} from './model-access.js';
 import {createPrinterCheck} from './printer-check.js';
+import {DependencyManager} from './dependencies.js';
 
 // Presence is explicit opt-in. Invalid/empty configuration must fail, never fall back.
 const directory = process.env.SCAN_TO_MAKE_REMOTE_AUTH_DIR;
@@ -27,6 +28,8 @@ const remoteAuth =
   directory === undefined ? undefined : await RemoteAuthStore.open(directory);
 // Invalid model preferences must not take the paired phone API offline.
 const modelAccess = remoteAuth ? await ModelAccessService.open(remoteAuth.directory).catch(() => undefined) : undefined;
+// A damaged optional dependency installation must not take paired phones offline.
+const dependencies=remoteAuth?await DependencyManager.open(join(remoteAuth.directory,'dependencies')).catch(()=>undefined):undefined;
 
 const captureDirectory=process.env.SCAN_TO_MAKE_CAPTURE_DIR;
 if(captureDirectory!==undefined&&(!remoteAuth||!isAbsolute(captureDirectory)))throw new Error('Capture requires authentication and an absolute private directory');
@@ -50,7 +53,7 @@ const handoffConfig=handoffConfigPath===undefined?undefined:await readPrinterHan
 const printerCheck=handoffConfig===undefined?undefined:createPrinterCheck(handoffConfig);
 const printHandoff=handoffConfig===undefined?undefined:createPrintHandoffServices(handoffConfig,handoffDirectory!);
 if(capture?.scanProcessing&&captureDirectory)capture.modelSize=new ModelSizeStore(capture.storage,capture.scanProcessing,join(captureDirectory,'captures'),
- createModelSizeRunner(async()=>handoffConfig?.backend==='bambu-printer-mcp'?handoffConfig.process:installedBambuProcess()));
+ createModelSizeRunner(async()=>handoffConfig?.backend==='bambu-printer-mcp'?handoffConfig.process:(await dependencies?.processFor('bambu-printer-mcp'))??installedBambuProcess()));
 // The port variable keeps its original name so existing operator setups still start.
 let lanTls;
 const certPath = process.env.SCAN_TO_MAKE_LAN_TLS_CERT;
@@ -85,7 +88,7 @@ try {
   if (remoteAuth) control = await startLocalControl({
     // The auth directory is private even when its state/volume parent is not.
     path:process.env.SCAN_TO_MAKE_CONTROL_SOCKET ?? join(remoteAuth.directory,'control.sock'),
-    dispatch:createControlDispatcher({auth:remoteAuth,modelAccess,printerCheck,companionVersion:await companionVersion(),capture,
+    dispatch:createControlDispatcher({auth:remoteAuth,modelAccess,printerCheck,dependencies,companionVersion:await companionVersion(),capture,
       captureDirectory:captureDirectory ? join(captureDirectory,'captures') : undefined,printHandoff,
       // With every address answering, the Mac's QR is a v2 link from the live list.
       ...(allAddresses === '1' && server.publicKeySha256 ? {pairingLink:() => ({addresses:server.addresses(),publicKeySha256:server.publicKeySha256!,
@@ -105,7 +108,7 @@ process.stdout.write(
 for (const signal of ['SIGINT', 'SIGTERM'] as const)
   process.once(signal, () => {
     modelAccess?.close();
-    void Promise.all([printerCheck?.close(),control?.close(),server.close()]).catch(() => {
+    void Promise.all([dependencies?.close(),printerCheck?.close(),control?.close(),server.close()]).catch(() => {
       process.exitCode = 1;
     });
   });

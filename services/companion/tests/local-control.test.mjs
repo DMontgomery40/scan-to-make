@@ -36,6 +36,14 @@ function wire(path,request, split=false) {
   });
 }
 
+test('dependency control accepts audited IDs only and reports unavailable when no manager exists',async t=>{
+ const f=await fixture(t);
+ assert.equal((await f.call('dependencies.get')).error.code,'unavailable');
+ assert.equal((await f.call('dependencies.install',{id:'blender',url:'https://example.test/override'})).error.code,'invalid-request');
+ assert.equal((await f.call('dependencies.retry',{id:'../../outside'})).error.code,'invalid-request');
+ assert.equal((await f.call('dependencies.install',{id:'slicer'})).error.code,'invalid-request');
+});
+
 test('printer check stays local, bounded to an empty/poll or start request',async t=>{
   const starts=[];const f=await fixture(t,{printerCheck:{get:start=>{starts.push(start);return {state:'checking'};}}});
   assert.equal((await f.call('printer.check',{start:true})).result.state,'checking');

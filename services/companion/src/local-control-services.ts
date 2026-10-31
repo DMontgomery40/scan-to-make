@@ -14,6 +14,7 @@ import {RemoteAuthStore, RemoteAuthFailure} from './remote-auth.js';
 import type {ModelAccessService} from './model-access.js';
 import type {NearbyRequest} from '@scan-to-make/contracts/nearby-pairing';
 import type {createPrinterCheck} from './printer-check.js';
+import type {DependencyManager} from './dependencies.js';
 import {ControlFailure, parameters, type ControlMethod, type DoorParameters, type JobParameters} from './local-control-protocol.js';
 
 interface JobItem {
@@ -23,6 +24,7 @@ interface JobItem {
   job: ScanProcessingJob | HandoffManifest;
 }
 export interface ControlServices {
+  dependencies?: DependencyManager;
   printerCheck?: ReturnType<typeof createPrinterCheck>;
   modelAccess?: ModelAccessService;
   auth: RemoteAuthStore;
@@ -131,6 +133,15 @@ export function createControlDispatcher(services: ControlServices) {
     if (!parameters[method].safeParse(raw).success) throw new ControlFailure('invalid-request');
     try {
       switch (method) {
+        case 'dependencies.get': {
+          if(!services.dependencies)throw new ControlFailure('unavailable');
+          return services.dependencies.get(parameters[method].parse(raw));
+        }
+        case 'dependencies.install':
+        case 'dependencies.retry': {
+          if(!services.dependencies)throw new ControlFailure('unavailable');
+          return services.dependencies.install(parameters[method].parse(raw).id);
+        }
         case 'printer.check': {
           if(!services.printerCheck)throw new ControlFailure('unavailable');
           return services.printerCheck.get(parameters[method].parse(raw).start);

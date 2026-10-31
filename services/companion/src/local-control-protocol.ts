@@ -27,6 +27,9 @@ const answer = z.union([
   z.strictObject({action: z.enum(['decline', 'cancel'])}),
 ]);
 export const parameters = {
+  'dependencies.get': z.strictObject({backend:z.enum(['bambu-printer-mcp','mcp-3d-printer-server']).optional(),model:z.string().max(128).optional()}),
+  'dependencies.install': z.strictObject({id:z.enum(['bambu-printer-mcp','mcp-3d-printer-server','blender'])}),
+  'dependencies.retry': z.strictObject({id:z.enum(['bambu-printer-mcp','mcp-3d-printer-server','blender'])}),
   'printer.check': z.strictObject({start:z.boolean().default(false)}),
   'modelAccess.get': empty,
   'modelAccess.set': z.strictObject({expectedRevision:z.uuid(),choice:ModelAccessChoiceSchema}),
