@@ -7,6 +7,7 @@
 #import <ModelIO/ModelIO.h>
 #import <SceneKit/ModelIO.h>
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
+#import <ImageIO/ImageIO.h>
 #import "CompanionPairing.h"
 #import "ContentHash.h"
 #include <fcntl.h>
@@ -81,6 +82,31 @@ static NSData *PickRead(NSURL *url,unsigned long long *size) {
   NSMutableData *data=[NSMutableData dataWithLength:(NSUInteger)*size];NSUInteger offset=0;
   while(offset<data.length){ssize_t got=read(fd,(char*)data.mutableBytes+offset,data.length-offset);if(got<=0){close(fd);return nil;}offset+=(NSUInteger)got;}
   char extra;ssize_t tail=read(fd,&extra,1);close(fd);return tail==0?data:nil;
+}
+// HEIC photos are re-encoded as JPEG with ImageIO on the phone, so the
+// companion never needs an HEVC decoder. Orientation and camera metadata are
+// copied from the source image.
+static NSData *JPEGFromHEIC(NSData *heic) {
+  CGImageSourceRef source=CGImageSourceCreateWithData((__bridge CFDataRef)heic,NULL);if(!source)return nil;
+  NSMutableData *jpeg=[NSMutableData data];
+  CGImageDestinationRef destination=CGImageSourceGetCount(source)>0?CGImageDestinationCreateWithData((__bridge CFMutableDataRef)jpeg,(__bridge CFStringRef)UTTypeJPEG.identifier,1,NULL):NULL;
+  BOOL ok=NO;
+  if(destination){
+    CGImageDestinationAddImageFromSource(destination,source,0,(__bridge CFDictionaryRef)@{(id)kCGImageDestinationLossyCompressionQuality:@0.92});
+    ok=CGImageDestinationFinalize(destination);CFRelease(destination);
+  }
+  CFRelease(source);return ok&&jpeg.length?jpeg:nil;
+}
+/** A picked photo's identity as kept and uploaded, or a rejection reason. HEIC becomes JPEG. */
+static NSDictionary *PickedStill(NSData *data,NSData **kept) {
+  NSString *mediaType=SniffMediaType(data);
+  if(!mediaType)return @{@"reason":@"unsupported"};
+  if([mediaType isEqual:@"image/heic"]){
+    data=JPEGFromHEIC(data);mediaType=@"image/jpeg";
+    if(!data)return @{@"reason":@"unreadable"};
+    if(data.length>STILL_LIMIT)return @{@"reason":@"too-large",@"byteLength":@(data.length)};
+  }
+  *kept=data;return @{@"sha256":STMHash(data),@"byteLength":@(data.length),@"mediaType":mediaType};
 }
 static NSString *PickTypeIdentifier(NSItemProvider *provider) {
   NSArray<UTType*> *accepted=@[UTTypeHEIC,UTTypeJPEG,UTTypePNG];
@@ -241,12 +267,11 @@ RCT_REMAP_METHOD(pickImages,pickImagesLimit:(double)limit resolve:(RCTPromiseRes
       unsigned long long size=0;NSData *data=url?PickRead(url,&size):nil;
       if(!data&&size>STILL_LIMIT){outcome=@{@"reason":@"too-large",@"byteLength":@(size)};}
       else if(data){
-        NSString *mediaType=SniffMediaType(data);
-        if(!mediaType){outcome=@{@"reason":@"unsupported"};}
+        NSData *kept=nil;NSDictionary *f=PickedStill(data,&kept);
+        if(!kept){outcome=f;}
         else{
-          NSDictionary *f=@{@"sha256":STMHash(data),@"byteLength":@(data.length),@"mediaType":mediaType};
-          __block BOOL written=NO;dispatch_sync(files,^{written=Cache(data,f);});
-          if(written)outcome=@{@"sha256":f[@"sha256"],@"byteLength":f[@"byteLength"],@"mediaType":mediaType,@"uri":FileURL(f).absoluteString};
+          __block BOOL written=NO;dispatch_sync(files,^{written=Cache(kept,f);});
+          if(written)outcome=@{@"sha256":f[@"sha256"],@"byteLength":f[@"byteLength"],@"mediaType":f[@"mediaType"],@"uri":FileURL(f).absoluteString};
         }
       }
       dispatch_async(dispatch_get_main_queue(),^{outcomes[index]=outcome;dispatch_group_leave(group);});

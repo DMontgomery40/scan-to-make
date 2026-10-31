@@ -10,6 +10,7 @@ import { unavailableScanServices } from '../src/screens/scanServices';
 import {
   fakeScanServices,
   stillFrom,
+  syntheticAdvice,
   syntheticPhoto,
   syntheticTarget,
 } from '../src/screens/testing/fakeScanServices';
@@ -114,6 +115,78 @@ test('chosen photos get optional labels and are added one by one', async () => {
   expect(shown).toContain('Close-up 2');
   expect(shown).toContain('2 of 24');
   expect(shown).not.toContain('READY TO ADD');
+  await act(async () => tree.unmount());
+});
+
+test('suggested close-ups are listed, and a photo chosen for one carries its label', async () => {
+  const photo = syntheticPhoto({ mediaType: 'image/jpeg' });
+  const { services, calls } = fakeScanServices({
+    advice: syntheticAdvice(),
+    picks: [{ photos: [photo], rejected: [] }],
+  });
+  const { tree } = await render(services);
+  let shown = texts(tree);
+  expect(shown).toContain('SUGGESTED BY YOUR SCAN');
+  expect(shown.indexOf('Back (hinge side)')).toBeLessThan(
+    shown.indexOf('Bottom (USB-C port)'),
+  );
+  expect(shown).toContain(
+    'The scan didn’t see this area, so it was filled in.',
+  );
+  expect(shown).toContain('Start about 25 cm away');
+  expect(shown).toContain('Start about 13 cm away');
+  expect(shown).not.toContain('No close-ups yet');
+  await press(tree, 'Choose a photo of Back (hinge side)');
+  expect(calls).toContain('pick 1');
+  expect(texts(tree)).toContain('Ready to add');
+  expect(buttons(tree, 'Choose a photo of Back (hinge side)')).toHaveLength(0);
+  expect(buttons(tree, 'Choose a photo of Bottom (USB-C port)')).toHaveLength(
+    1,
+  );
+  await press(tree, 'Add 1 photo to scan');
+  expect(calls.filter(c => c.startsWith('upload'))).toEqual([
+    `upload ${photo.sha256.slice(-4)} "Back (hinge side)"`,
+  ]);
+  shown = texts(tree);
+  expect(shown).toContain('Added');
+  expect(shown).toContain('ADDED TO THIS SCAN');
+  await act(async () => tree.unmount());
+});
+
+test('a close-up already labelled for a suggestion marks it added', async () => {
+  const { services } = fakeScanServices({
+    advice: syntheticAdvice(),
+    stills: [stillFrom(syntheticPhoto(), 0, 'back (hinge side)')],
+  });
+  const { tree } = await render(services);
+  expect(texts(tree)).toContain('Added');
+  expect(buttons(tree, 'Choose a photo of Back (hinge side)')).toHaveLength(0);
+  expect(buttons(tree, 'Choose a photo of Bottom (USB-C port)')).toHaveLength(
+    1,
+  );
+  await act(async () => tree.unmount());
+});
+
+test('suggestions that fail to load leave close-ups usable', async () => {
+  const { services, calls } = fakeScanServices({
+    advice: new Error('companion busy'),
+    picks: [{ photos: [syntheticPhoto()], rejected: [] }],
+  });
+  const { tree } = await render(services);
+  expect(calls).toContain('advice');
+  expect(texts(tree)).toContain('Suggested close-ups couldn’t load.');
+  await press(tree, 'Choose a photo');
+  expect(texts(tree)).toContain('READY TO ADD');
+  await act(async () => tree.unmount());
+});
+
+test('without suggestions the general close-up tips stay', async () => {
+  const { services } = fakeScanServices({ advice: null });
+  const { tree } = await render(services);
+  const shown = texts(tree);
+  expect(shown).not.toContain('SUGGESTED BY YOUR SCAN');
+  expect(shown).not.toContain('couldn’t load');
+  expect(shown).toContain('No close-ups yet');
   await act(async () => tree.unmount());
 });
 

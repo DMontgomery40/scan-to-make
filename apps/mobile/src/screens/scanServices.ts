@@ -5,6 +5,7 @@ import type {
   ScanReference,
 } from '@scan-to-make/contracts';
 import type { CaptureFile, RetainedCapture } from '../capture/retainedCaptures';
+import type { CloseupTarget } from './closeupAdviceModel';
 
 /**
  * What the scan results, close-up and make screens need from the data layer.
@@ -96,6 +97,16 @@ export interface DetailStills {
   imageUri?(still: DetailStill): Promise<string | null>;
 }
 
+/** Suggested close-ups from the companion's scan check (scan-correct `advise`). */
+export interface CloseupAdvice {
+  /** Best first, or null when the companion has no suggestions for the scan yet. */
+  load(
+    projectId: string,
+    captureId: string,
+    ack: ProjectAcknowledgment,
+  ): Promise<CloseupTarget[] | null>;
+}
+
 /** A chosen photo kept by the app, identified by its exact bytes. */
 export type PickedPhoto = CaptureFile & { uri?: string };
 export type RejectedPhoto = {
@@ -131,6 +142,8 @@ export type ScanServices = {
   stills: DetailStills;
   picker: PhotoPicker;
   jobs: ScanJobMemory;
+  /** Absent until the companion returns its scan check's advice. */
+  advice?: CloseupAdvice;
   /** A displayable URI for verified image bytes, when the platform has one. */
   imageUri?: (file: CaptureFile) => Promise<string | null>;
 };

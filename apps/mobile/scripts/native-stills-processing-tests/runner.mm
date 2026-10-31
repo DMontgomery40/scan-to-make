@@ -103,10 +103,37 @@ static void Require(BOOL ok,NSString *why){if(!ok){fprintf(stderr,"FAIL %s\n",wh
   } attempt:0];
  } attempt:0];
 }
+// A picked HEIC is kept as JPEG with its orientation and camera metadata; a JPEG is kept byte for byte.
+- (void)pickedStills {
+ CGColorSpaceRef rgb=CGColorSpaceCreateDeviceRGB();
+ CGContextRef context=CGBitmapContextCreate(NULL,64,48,8,0,rgb,(CGBitmapInfo)kCGImageAlphaNoneSkipLast);CGColorSpaceRelease(rgb);
+ CGContextSetRGBFillColor(context,.2,.5,.3,1);CGContextFillRect(context,CGRectMake(0,0,64,48));
+ CGImageRef image=CGBitmapContextCreateImage(context);CGContextRelease(context);
+ NSMutableData *heic=[NSMutableData data];
+ CGImageDestinationRef destination=CGImageDestinationCreateWithData((__bridge CFMutableDataRef)heic,(__bridge CFStringRef)UTTypeHEIC.identifier,1,NULL);
+ Require(destination!=NULL,@"HEIC encoder available");
+ CGImageDestinationAddImage(destination,image,(__bridge CFDictionaryRef)@{(id)kCGImagePropertyOrientation:@6,(id)kCGImagePropertyTIFFDictionary:@{(id)kCGImagePropertyTIFFModel:@"STM fixture camera"}});
+ Require(CGImageDestinationFinalize(destination),@"HEIC fixture encoded");CFRelease(destination);CGImageRelease(image);
+ Require([SniffMediaType(heic) isEqual:@"image/heic"],@"fixture sniffs as HEIC");
+ NSData *kept=nil;NSDictionary *f=PickedStill(heic,&kept);
+ Require([f[@"mediaType"] isEqual:@"image/jpeg"]&&[SniffMediaType(kept) isEqual:@"image/jpeg"],@"HEIC kept as JPEG");
+ Require([f[@"sha256"] isEqual:STMHash(kept)]&&[f[@"byteLength"] unsignedIntegerValue]==kept.length,@"identity describes the JPEG bytes");
+ CGImageSourceRef source=CGImageSourceCreateWithData((__bridge CFDataRef)kept,NULL);
+ NSDictionary *properties=CFBridgingRelease(CGImageSourceCopyPropertiesAtIndex(source,0,NULL));CFRelease(source);
+ Require([properties[(id)kCGImagePropertyOrientation] integerValue]==6,@"orientation kept");
+ Require([properties[(id)kCGImagePropertyPixelWidth] integerValue]==64&&[properties[(id)kCGImagePropertyPixelHeight] integerValue]==48,@"pixels kept");
+ Require([properties[(id)kCGImagePropertyTIFFDictionary][(id)kCGImagePropertyTIFFModel] isEqual:@"STM fixture camera"],@"camera metadata kept");
+ Require(Cache(kept,f)&&[Verified(f) isEqual:kept],@"converted still verifies for upload");
+ NSData *same=nil;NSDictionary *g=PickedStill(self.jpeg,&same);
+ Require([same isEqual:self.jpeg]&&[g isEqual:self.jpegFile],@"JPEG kept byte for byte");
+ unsigned char junk[16]={0};NSData *none=nil;
+ Require([PickedStill([NSData dataWithBytes:junk length:16],&none)[@"reason"] isEqual:@"unsupported"]&&!none,@"unknown bytes rejected");
+}
 - (void)phaseOne {
  unsigned char head[4]={0xFF,0xD8,0xFF,0xE0};NSMutableData *jpeg=[NSMutableData dataWithBytes:head length:4];char pad[64];memset(pad,7,sizeof(pad));[jpeg appendBytes:pad length:sizeof(pad)];
  self.jpeg=jpeg;self.jpegFile=@{@"sha256":STMHash(jpeg),@"byteLength":@(jpeg.length),@"mediaType":@"image/jpeg"};
  Require(Cache(jpeg,self.jpegFile),@"cache synthetic jpeg source");
+ [self pickedStills];
  [self negatives];
  NSMutableDictionary *upload=[self options:@"POST" path:[[self path:@"/detail-stills?"] stringByAppendingString:@"&label=USB-C%20port"]];upload[@"source"]=self.jpegFile;
  [self request:upload status:201 then:^(NSDictionary*r){

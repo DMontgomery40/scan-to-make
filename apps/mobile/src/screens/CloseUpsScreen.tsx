@@ -17,6 +17,12 @@ import type { CaptureFile } from '../capture/retainedCaptures';
 import { Badge, Button, Card, Field, Notice, Screen } from '../ui/components';
 import { ImageViewer } from '../ui/ImageViewer';
 import { useRequestGate } from './requestGate';
+import {
+  distanceText,
+  matchAdvice,
+  reasonText,
+  type CloseupTarget,
+} from './closeupAdviceModel';
 import { colors, radius, space, type } from '../ui/theme';
 import {
   failureOf,
@@ -110,6 +116,8 @@ export function CloseUpsScreen({
   // Stills whose preview download failed, by still id; each can be retried.
   const [previewFailed, setPreviewFailed] = useState<Record<string, true>>({});
   const [notice, setNotice] = useState<string | null>(null);
+  // Suggestions are optional: failing to load them never blocks close-ups.
+  const [advice, setAdvice] = useState<CloseupTarget[] | 'failed' | null>(null);
   const [busy, setBusy] = useState(false);
   const ack = useRef<ProjectAcknowledgment | null>(null);
   const staged = useRef<CaptureFile[]>([]);
@@ -167,10 +175,20 @@ export function CloseUpsScreen({
       ack.current = await gate(() => services.acknowledge(projectId));
       await refresh();
       setPhase({ kind: 'ready' });
+      const source = services.advice;
+      const acked = ack.current;
+      if (source) {
+        // Called as a method: real clients rely on `this`.
+        setAdvice(
+          await gate(() => source.load(projectId, captureId, acked)).catch(
+            () => 'failed' as const,
+          ),
+        );
+      }
     } catch (error) {
       block(error);
     }
-  }, [services, projectId, refresh, gate]);
+  }, [services, projectId, captureId, refresh, gate]);
   useEffect(() => {
     load();
   }, [load]);
@@ -240,7 +258,11 @@ export function CloseUpsScreen({
           // An interrupted attempt is retried a few times on its own; a real
           // failure, or one that keeps being interrupted, shows Retry.
           const attempt = retries.current.get(still.id) ?? 0;
-          if (mounted.current && interrupted && attempt < PREVIEW_RETRY_MS.length) {
+          if (
+            mounted.current &&
+            interrupted &&
+            attempt < PREVIEW_RETRY_MS.length
+          ) {
             retries.current.set(still.id, attempt + 1);
             if (!retryTimer.current) {
               retryTimer.current = setTimeout(() => {
@@ -296,12 +318,15 @@ export function CloseUpsScreen({
     }
   }
 
-  const add = () =>
+  // A suggestion's photo is labelled with the suggestion, which matches them.
+  const add = (suggestion?: string) =>
     exclusive(async () => {
       setNotice(null);
       if (room <= 0) return;
       try {
-        const { photos, rejected } = await services.picker.pick(room);
+        const { photos, rejected } = await services.picker.pick(
+          suggestion ? 1 : room,
+        );
         staged.current.push(...photos);
         const fresh: Draft[] = [];
         let duplicates = 0;
@@ -318,7 +343,7 @@ export function CloseUpsScreen({
           } else if (!MEDIA_TYPES.includes(photo.mediaType)) {
             extra.push({ reason: 'unsupported' });
           } else {
-            fresh.push({ photo, label: '', state: 'ready' });
+            fresh.push({ photo, label: suggestion ?? '', state: 'ready' });
           }
         }
         const kept = fresh.slice(0, Math.max(0, room));
@@ -492,6 +517,13 @@ export function CloseUpsScreen({
     });
 
   const pending = drafts.filter(uploadable).length;
+  const suggestions = Array.isArray(advice)
+    ? matchAdvice(
+        advice,
+        stills,
+        drafts.map(d => d.label),
+      )
+    : [];
   const uploading = drafts.some(d => d.state === 'uploading');
   const ready = phase.kind === 'ready';
   return (
@@ -570,6 +602,43 @@ export function CloseUpsScreen({
               Up to {LIMIT} photos, 25 MB each. JPEG, HEIC or PNG.
             </Text>
           </View>
+          {suggestions.length ? (
+            <View style={styles.section}>
+              <Text style={type.label}>SUGGESTED BY YOUR SCAN</Text>
+              {suggestions.map(({ target: advised, still, chosen }) => (
+                <Card key={advised.rank} style={styles.photoCard}>
+                  <View style={styles.suggestionHead}>
+                    <Text style={[type.heading, styles.grow]}>
+                      {advised.label}
+                    </Text>
+                    {still ? (
+                      <Badge label="Added" tone="pass" />
+                    ) : chosen ? (
+                      <Badge label="Ready to add" tone="pending" />
+                    ) : null}
+                  </View>
+                  <Text style={type.body}>{reasonText(advised)}</Text>
+                  <Text style={type.caption}>
+                    {distanceText(advised)}. Move back a little if it won’t
+                    focus.
+                  </Text>
+                  {!still && !chosen ? (
+                    <Button
+                      label="Choose photo"
+                      accessibilityLabel={`Choose a photo of ${advised.label}`}
+                      variant="secondary"
+                      disabled={busy || room <= 0}
+                      onPress={() => add(advised.label)}
+                    />
+                  ) : null}
+                </Card>
+              ))}
+            </View>
+          ) : advice === 'failed' ? (
+            <Text style={type.caption}>
+              Suggested close-ups couldn’t load. You can still add any photos.
+            </Text>
+          ) : null}
           {full ? (
             <Notice tone="pending" title="That’s the limit">
               {`You’ve added ${LIMIT} close-ups to this scan. Remove one to add another.`}
@@ -584,12 +653,12 @@ export function CloseUpsScreen({
                   ? 'Add or remove the photos you’ve chosen first'
                   : 'JPEG, HEIC or PNG, up to 25 MB'
               }
-              onPress={add}
+              onPress={() => add()}
             />
           )}
           {notice ? <Notice tone="pending">{notice}</Notice> : null}
 
-          {!stills.length && !drafts.length ? (
+          {!stills.length && !drafts.length && !suggestions.length ? (
             <Card>
               <Text style={type.heading}>No close-ups yet</Text>
               <Text style={type.body}>
@@ -810,6 +879,8 @@ const styles = StyleSheet.create({
   },
   section: { gap: space.md },
   photoCard: { gap: space.md },
+  suggestionHead: { flexDirection: 'row', alignItems: 'center', gap: space.md },
+  grow: { flex: 1 },
   photoRow: { flexDirection: 'row', gap: space.md, alignItems: 'center' },
   photo: {
     width: 72,
