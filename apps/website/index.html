@@ -1,0 +1,308 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Scan to Make — scan it, fix it, print it</title>
+    <meta
+      name="description"
+      content="Scan an object with the LiDAR Scanner on your iPhone or iPad, clean up the scan, and print it on your own printer through bambu-printer-mcp or mcp-3D-printer-server. Coming soon for iPhone, iPhone Duo and iPad."
+    />
+    <meta name="color-scheme" content="light dark" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23202621'/%3E%3Crect x='8' y='7' width='16' height='14' rx='5' fill='%23E4E9DB'/%3E%3Cline x1='6' y1='25' x2='26' y2='25' stroke='%23F08A63' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <a class="skip" href="#main">Skip to content</a>
+    <header class="site-header">
+      <div class="wrap header-row">
+        <a class="wordmark" href="#top" aria-label="Scan to Make, back to top"
+          >SCAN TO MAKE</a
+        >
+        <nav aria-label="Sections">
+          <ul class="nav">
+            <li><a href="#how">How it works</a></li>
+            <li><a href="#print">Printing</a></li>
+            <li><a href="#devices">Devices</a></li>
+            <li><a href="#faq">Questions</a></li>
+          </ul>
+        </nav>
+      </div>
+    </header>
+
+    <main id="main">
+      <section class="hero" id="top" aria-labelledby="hero-title">
+        <div class="wrap hero-grid">
+          <div class="hero-copy">
+            <p class="eyebrow">iPhone · iPhone Duo · iPad · Coming soon</p>
+            <h1 id="hero-title">Scan it. Fix it. Print it.</h1>
+            <p class="lead">
+              Scan an object with LiDAR, clean up the rough spots, and send it
+              to the printer you already have.
+            </p>
+            <div class="actions">
+              <p class="soon" role="note">Coming soon for iPhone and iPad</p>
+              <a class="button secondary" href="#how">See how it works</a>
+            </div>
+          </div>
+          <figure class="hero-art">
+            <svg
+              viewBox="0 0 360 300"
+              role="img"
+              aria-labelledby="hero-art-title"
+            >
+              <title id="hero-art-title">
+                A rough scan with gaps, cleaned into a smooth shape that sits
+                on a print bed
+              </title>
+              <line class="grid" x1="0" y1="150" x2="360" y2="150" />
+              <line class="grid" x1="180" y1="10" x2="180" y2="270" />
+              <path
+                class="scan"
+                d="M36 128 L54 88 L84 74 L104 84 L130 72 L150 96 L154 128 L142 152 L152 180 L124 202 L94 194 L70 206 L46 182 L50 154 Z"
+              />
+              <circle class="scan-point" cx="84" cy="74" r="4" />
+              <circle class="scan-point" cx="150" cy="96" r="4" />
+              <circle class="scan-point" cx="142" cy="152" r="4" />
+              <circle class="scan-point" cx="70" cy="206" r="4" />
+              <circle class="scan-point" cx="46" cy="182" r="4" />
+              <path class="flow" d="M168 150 h20 m-8 -8 l8 8 l-8 8" />
+              <rect class="object" x="210" y="94" width="116" height="116" rx="34" />
+              <line class="bed" x1="198" y1="228" x2="338" y2="228" />
+              <text class="art-label" x="20" y="292">
+                SCAN · CLEAN UP · PRINT
+              </text>
+            </svg>
+          </figure>
+        </div>
+      </section>
+
+      <section id="how" class="section" aria-labelledby="how-title">
+        <div class="wrap">
+          <p class="eyebrow">How it works</p>
+          <h2 id="how-title">From the real thing to a clean print.</h2>
+          <ol class="steps">
+            <li>
+              <span class="step-number" aria-hidden="true">01</span>
+              <h3>Scan it</h3>
+              <p>
+                Walk around the object with an iPhone or iPad that has a LiDAR
+                Scanner. The app guides you round every side.
+              </p>
+            </li>
+            <li>
+              <span class="step-number" aria-hidden="true">02</span>
+              <h3>Add close-ups</h3>
+              <p>
+                A scan gets the shape right but softens small details. The app
+                tells you which close-ups to take, like a port or a seam.
+              </p>
+            </li>
+            <li>
+              <span class="step-number" aria-hidden="true">03</span>
+              <h3>Clean it up</h3>
+              <p>
+                Your companion fills holes, smooths out lumps and checks the
+                size. Your close-ups put the fine details back.
+              </p>
+            </li>
+            <li>
+              <span class="step-number" aria-hidden="true">04</span>
+              <h3>Print it</h3>
+              <p>
+                The clean model goes to your printer server, which slices it
+                for your printer. Nothing prints until you say so.
+              </p>
+            </li>
+          </ol>
+        </div>
+      </section>
+
+      <section id="print" class="section tinted" aria-labelledby="print-title">
+        <div class="wrap">
+          <p class="eyebrow">Printing</p>
+          <h2 id="print-title">Prints go through tools makers already use.</h2>
+          <ul class="cards three">
+            <li class="card">
+              <svg class="glyph" viewBox="0 0 48 48" aria-hidden="true">
+                <rect x="10" y="10" width="28" height="28" rx="5" />
+                <line x1="16" y1="31" x2="32" y2="31" />
+              </svg>
+              <h3>bambu-printer-mcp</h3>
+              <p>
+                For Bambu Lab printers. It slices with your printer’s exact
+                settings, matches AMS filament and checks the print file before
+                it’s sent.
+              </p>
+              <a href="https://github.com/DMontgomery40/bambu-printer-mcp"
+                >bambu-printer-mcp on GitHub</a
+              >
+            </li>
+            <li class="card">
+              <svg class="glyph" viewBox="0 0 48 48" aria-hidden="true">
+                <rect x="8" y="12" width="14" height="24" rx="4" />
+                <rect x="26" y="12" width="14" height="24" rx="4" />
+              </svg>
+              <h3>mcp-3D-printer-server</h3>
+              <p>
+                For OctoPrint, Klipper, Duet, Repetier, Prusa, Creality and
+                Bambu Lab printers.
+              </p>
+              <a href="https://github.com/DMontgomery40/mcp-3D-printer-server"
+                >mcp-3D-printer-server on GitHub</a
+              >
+            </li>
+            <li class="card">
+              <svg class="glyph" viewBox="0 0 48 48" aria-hidden="true">
+                <rect x="14" y="10" width="20" height="20" rx="5" />
+                <line x1="10" y1="37" x2="38" y2="37" />
+              </svg>
+              <h3>Change it first</h3>
+              <p>
+                Both servers work with Blender, so an AI agent can change the
+                model before it prints: scale it, give it a wider base, or cut
+                a slot.
+              </p>
+            </li>
+          </ul>
+        </div>
+      </section>
+
+      <section id="devices" class="section" aria-labelledby="devices-title">
+        <div class="wrap split">
+          <div>
+            <p class="eyebrow">Devices</p>
+            <h2 id="devices-title">Made for iPhone, iPhone Duo and iPad.</h2>
+            <p class="lead small">
+              Scanning needs a LiDAR Scanner. Everything else works on any
+              iPhone or iPad that runs iOS 27 or iPadOS 27.
+            </p>
+          </div>
+          <ul class="checklist">
+            <li>
+              <h3>Scanning needs LiDAR</h3>
+              <p>
+                Scan to Make uses Apple’s Object Capture with the LiDAR Scanner,
+                which is on Pro models of iPhone and iPad. On a device without
+                one, the app tells you plainly instead of guessing the size
+                from photos.
+              </p>
+            </li>
+            <li>
+              <h3>iPhone Duo, folded or open</h3>
+              <p>
+                Layouts are made for both ways of holding it. iPhone Duo has no
+                LiDAR Scanner, so it can’t scan, but it can open a scan made on
+                another device, add close-ups and send prints.
+              </p>
+            </li>
+            <li>
+              <h3>iPad, on the big screen</h3>
+              <p>
+                Every screen has its own iPad layout, and iPad Pro models with
+                LiDAR can scan.
+              </p>
+            </li>
+            <li>
+              <h3>iOS 27 or later</h3>
+              <p>Scan to Make needs iOS 27 or iPadOS 27, or later.</p>
+            </li>
+          </ul>
+        </div>
+      </section>
+
+      <section id="companion" class="section tinted" aria-labelledby="companion-title">
+        <div class="wrap split">
+          <div>
+            <p class="eyebrow">Your computer, your network</p>
+            <h2 id="companion-title">Clean-up runs on a computer you own.</h2>
+          </div>
+          <div class="prose">
+            <p>
+              Your iPhone or iPad scans, and you make the choices. The
+              companion, on your own computer, cleans up the scan and passes it
+              to your printer server, over your own private network.
+            </p>
+            <p>
+              With your own companion, scans and photos go from your device to
+              it, not to us. Clean-up that uses an AI model sends your close-ups
+              and views of the scan to that model’s provider.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section id="faq" class="section" aria-labelledby="faq-title">
+        <div class="wrap narrow">
+          <p class="eyebrow">Questions</p>
+          <h2 id="faq-title">Good to know.</h2>
+          <div class="faq">
+            <details>
+              <summary>Do I need a 3D printer?</summary>
+              <p>
+                Yes. Prints go to your own printer through bambu-printer-mcp,
+                for Bambu Lab printers, or mcp-3D-printer-server, for
+                OctoPrint, Klipper, Duet, Repetier, Prusa, Creality and Bambu
+                Lab.
+              </p>
+            </details>
+            <details>
+              <summary>Which iPhones and iPads can scan?</summary>
+              <p>
+                Ones with a LiDAR Scanner, which Apple puts in Pro models,
+                running iOS 27 or iPadOS 27 or later. Other iPhones and iPads,
+                including iPhone Duo, run the rest of the app.
+              </p>
+            </details>
+            <details>
+              <summary>Why not scan with the camera alone?</summary>
+              <p>
+                LiDAR measures depth directly, so the scan comes out at real
+                size. Without it the app would be guessing, so it tells you
+                instead.
+              </p>
+            </details>
+            <details>
+              <summary>What does clean-up fix?</summary>
+              <p>
+                Holes, lumps and rough patches the scan picked up, plus a size
+                check against measurements you know. Close-ups help it put back
+                details like ports and seams.
+              </p>
+            </details>
+            <details>
+              <summary>What is the companion?</summary>
+              <p>
+                Software that runs on a computer you own, on your own network.
+                It does the clean-up and hands the result to your printer
+                server.
+              </p>
+            </details>
+            <details>
+              <summary>Is it open source?</summary>
+              <p>
+                Yes. Scan to Make is built so you can run all of it yourself,
+                and its source will be public before release. The printer
+                servers already are.
+              </p>
+            </details>
+            <details>
+              <summary>How much will it cost?</summary>
+              <p>We’ll share pricing before launch.</p>
+            </details>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="wrap footer-row">
+        <p class="wordmark">SCAN TO MAKE</p>
+        <p>A preview of what’s coming. Nothing here is for sale yet.</p>
+      </div>
+    </footer>
+  </body>
+</html>
