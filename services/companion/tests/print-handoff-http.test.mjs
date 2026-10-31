@@ -3,11 +3,13 @@ import assert from 'node:assert/strict';
 import {mkdtemp, readFile, rm, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {request as httpRequest} from 'node:http';
+import {createServer, request as httpRequest} from 'node:http';
+import {execFile} from 'node:child_process';
+import {promisify} from 'node:util';
 import {fileURLToPath} from 'node:url';
 import {RemoteAuthStore} from '../dist/remote-auth.js';
 import {startCompanionServer} from '../dist/server.js';
-import {createPrintHandoffServices} from '../dist/print-handoff-http.js';
+import {createPrintHandoffRoutes, createPrintHandoffServices} from '../dist/print-handoff-http.js';
 import {HandoffBundleStore, InMemoryElicitationRelay} from '@scan-to-make/printer-handoff';
 
 const forwarded = JSON.parse(await readFile(new URL('./fixtures/tailscale-serve-v1.94.2.json', import.meta.url), 'utf8')).expected;
@@ -38,7 +40,7 @@ async function fixture(t, scopes = ['printer-handoff:use'], makeServices) {
   t.after(() => server.close());
   const headers = {authorization: `Bearer ${phone.token}`, 'x-scan-device': phone.deviceId};
   const calls = async () => (await readFile(log, 'utf8')).trim().split('\n').filter(Boolean).map(JSON.parse);
-  return {root, server, headers, calls};
+  return {root, server, headers, calls, printHandoff};
 }
 
 function wire(f, path, {method = 'GET', headers = {}, body} = {}) {
@@ -51,6 +53,16 @@ function wire(f, path, {method = 'GET', headers = {}, body} = {}) {
     });
     req.on('error', reject);
     req.end(body);
+  });
+}
+
+function answerFixturePrompts(f) {
+  f.printHandoff.relay.subscribe(pending => {
+    const content = {};
+    const properties = pending.requestedSchema?.properties ?? {};
+    if ('confirmed' in properties) content.confirmed = true;
+    if ('bambu_model' in properties) content.bambu_model = 'p1s';
+    setImmediate(() => f.printHandoff.relay.respond(pending.id, {action: 'accept', content}));
   });
 }
 
@@ -93,6 +105,18 @@ test('bundle create, list and read round-trip the prompt and configured backend'
   assert.equal((await wire(f, '/v1/printer-handoff/bundles/00000000-0000-4000-8000-000000000000')).status, 404);
 });
 
+test('a malformed prompt header does not wedge later bundle uploads', async t => {
+  const f = await fixture(t);
+  const bad = await wire(f, '/v1/printer-handoff/bundles', {
+    method: 'POST',
+    headers: {'content-type': 'model/stl', 'x-handoff-prompt': '%'},
+    body: stl,
+  });
+  assert.equal(bad.status, 400);
+  const bundle = await createBundle(f);
+  assert.equal(bundle.status, 'ready');
+});
+
 test('print runs through the fixture MCP server with phone-answered elicitation', async t => {
   const f = await fixture(t);
   const bundle = await createBundle(f);
@@ -100,10 +124,12 @@ test('print runs through the fixture MCP server with phone-answered elicitation'
   assert.equal(started.status, 202, started.bytes.toString());
   assert.equal((await wire(f, `/v1/printer-handoff/bundles/${bundle.id}/print`, {method: 'POST'})).status, 409);
   let answered = 0;
+  let sawSnapshot = false;
   let final;
   for (let attempt = 0; attempt < 200; attempt++) {
     const pending = json(await wire(f, '/v1/printer-handoff/elicitations')).elicitations;
     for (const item of pending) {
+      if (item.cameraSnapshot?.base64 === 'ZmFrZQ==') sawSnapshot = true;
       const properties = item.requestedSchema?.properties ?? {};
       const content = {};
       if ('confirmed' in properties) content.confirmed = true;
@@ -121,6 +147,10 @@ test('print runs through the fixture MCP server with phone-answered elicitation'
   }
   assert.equal(final.bundle.status, 'printed');
   assert.ok(answered >= 1);
+  assert.equal(sawSnapshot, true);
+  const again = await wire(f, `/v1/printer-handoff/bundles/${bundle.id}/print`, {method: 'POST'});
+  assert.equal(again.status, 409);
+  assert.equal(json(again).error.code, 'already-printed');
   assert.ok(final.bundle.artifacts.sliced);
   const tools = (await f.calls()).filter(entry => entry.tool).map(entry => entry.tool);
   assert.deepEqual(tools, ['lay_flat', 'slice_stl', 'inspect_print_file', 'camera_snapshot', 'print_3mf']);
@@ -168,4 +198,191 @@ test('a failure after slicing persists a sanitized failed status instead of runn
   assert.equal(final.bundle.status, 'failed');
   assert.equal(final.bundle.failure, 'record-failed');
   assert.ok(!String(final.bundle.failure).includes('/private'));
+});
+
+test('an output persistence failure after dispatch cannot make a bundle printable again', async t => {
+  const f = await fixture(t);
+  const bundle = await createBundle(f);
+  f.printHandoff.store.recordArtifact = async () => {
+    throw Object.assign(new Error('/private/operator/output failed'), {code: 'record-failed'});
+  };
+  answerFixturePrompts(f);
+  assert.equal((await wire(f, `/v1/printer-handoff/bundles/${bundle.id}/print`, {method: 'POST'})).status, 202);
+  let final;
+  for (let attempt = 0; attempt < 200; attempt++) {
+    final = json(await wire(f, `/v1/printer-handoff/bundles/${bundle.id}`));
+    if (!final.printing) break;
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+  assert.equal(final.printing, false);
+  assert.equal(final.bundle.status, 'printed');
+  assert.equal(final.bundle.failure, 'record-failed');
+  const retry = await wire(f, `/v1/printer-handoff/bundles/${bundle.id}/print`, {method: 'POST'});
+  assert.equal(retry.status, 409);
+  assert.equal(json(retry).error.code, 'already-printed');
+  assert.equal((await f.calls()).filter(item => item.tool === 'print_3mf').length, 1);
+});
+
+for (const failedWrites of [2, Infinity]) {
+  test(`dispatch cannot be replayed when printed status writes fail (${failedWrites})`, async t => {
+    const f = await fixture(t);
+    const bundle = await createBundle(f);
+    const setStatus = f.printHandoff.store.setStatus.bind(f.printHandoff.store);
+    let writes = 0;
+    f.printHandoff.store.setStatus = async (...args) => {
+      if (args[1] === 'printed' && ++writes <= failedWrites) {
+        throw Object.assign(new Error('fixture disk full'), {code: 'ENOSPC'});
+      }
+      return setStatus(...args);
+    };
+    answerFixturePrompts(f);
+    const path = `/v1/printer-handoff/bundles/${bundle.id}`;
+    assert.equal((await wire(f, `${path}/print`, {method: 'POST'})).status, 202);
+    let final;
+    for (let attempt = 0; attempt < 200; attempt++) {
+      final = json(await wire(f, path));
+      if (!final.printing) break;
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
+    assert.equal(final.printing, false);
+    assert.equal(final.bundle.status, 'printed');
+    assert.equal(final.bundle.failure, 'print-failed');
+    assert.equal(json(await wire(f, '/v1/printer-handoff/bundles')).bundles[0].status, 'printed');
+    const retry = await wire(f, `${path}/print`, {method: 'POST'});
+    assert.equal(retry.status, 409);
+    assert.equal(json(retry).error.code, 'already-printed');
+    assert.equal((await f.calls()).filter(item => item.tool === 'print_3mf').length, 1);
+  });
+}
+
+for (const shutdown of [false, true]) {
+  test(`pending print admission is exclusive and obeys shutdown (${shutdown})`, {timeout: 5000}, async t => {
+    const root = await mkdtemp(join(tmpdir(), 'print-admission-'));
+    const store = new HandoffBundleStore(root);
+    const bundle = await store.create({stl, prompt: 'one dispatch', backend: 'bambu-printer-mcp'});
+    let releaseAuthorization;
+    let authorizationReached;
+    const paused = new Promise(resolve => { authorizationReached = resolve; });
+    const release = new Promise(resolve => { releaseAuthorization = resolve; });
+    let runs = 0;
+    let requests = 0;
+    const routes = createPrintHandoffRoutes({
+      store, relay: new InMemoryElicitationRelay(),
+      runner: {backend: 'bambu-printer-mcp', async runBundle(store, id) {
+        runs++;
+        await store.setStatus(id, 'printed');
+      }},
+    });
+    const server = createServer(async (request, response) => {
+      const ordinal = ++requests;
+      let checks = 0;
+      await routes.handle(request, response, async () => {
+        if (ordinal === 1 && ++checks === 2) {
+          authorizationReached();
+          await release;
+        }
+      }, () => undefined);
+    });
+    t.after(async () => {
+      releaseAuthorization();
+      await routes.close();
+      server.closeAllConnections();
+      await new Promise(resolve => server.close(resolve));
+      await rm(root, {recursive: true, force: true});
+    });
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+    const f = {server: {url: `http://127.0.0.1:${server.address().port}`}, headers: {}};
+    const path = `/v1/printer-handoff/bundles/${bundle.id}/print`;
+    const first = wire(f, path, {method: 'POST'});
+    await paused;
+    if (shutdown) {
+      const stopped = routes.close();
+      releaseAuthorization();
+      await stopped;
+      assert.equal((await first).status, 503);
+      assert.equal((await wire(f, path, {method: 'POST'})).status, 503);
+      assert.equal(runs, 0);
+      return;
+    }
+    const second = await wire(f, path, {method: 'POST'});
+    releaseAuthorization();
+    const accepted = await first;
+    assert.equal(second.status, 409);
+    assert.equal(json(second).error.code, 'print-busy');
+    assert.equal(accepted.status, 202);
+    await routes.close();
+    assert.equal(runs, 1);
+  });
+}
+
+for (const [command, scopes] of [
+  ['pair-capture', ['generation:health', 'projects:read', 'projects:write', 'captures:read', 'captures:import']],
+  ['pair-printer-handoff', ['generation:health', 'printer-handoff:use']],
+  ['pair-capture-and-printer-handoff', ['generation:health', 'projects:read', 'projects:write', 'captures:read', 'captures:import', 'printer-handoff:use']],
+]) {
+  test(`${command} grants exactly its explicit scopes`, async t => {
+    const root = await mkdtemp(join(tmpdir(), 'handoff-pairing-'));
+    t.after(() => rm(root, {recursive: true, force: true}));
+    const directory = join(root, 'auth');
+    const store = await RemoteAuthStore.create(directory, {
+      host: 'companion.example-tail.ts.net', allowedLogins: ['alice@example.test'],
+    });
+    const {stdout} = await promisify(execFile)(process.execPath, [
+      fileURLToPath(new URL('../dist/remote-auth-cli.js', import.meta.url)), command, directory, 'alice@example.test',
+    ]);
+    const phone = await store.exchange('alice@example.test', {code: JSON.parse(stdout).code, deviceName: 'Fixture'});
+    assert.deepEqual(phone.scopes, scopes);
+    for (const scope of scopes) await store.authorize('alice@example.test', phone.deviceId, phone.token, scope);
+  });
+}
+
+for (const action of ['decline', 'cancel']) {
+  test(`HTTP ${action} resolves a pending elicitation exactly once`, async t => {
+    const f = await fixture(t);
+    const answer = f.printHandoff.relay.request({
+      method: 'elicitation/create',
+      params: {
+        mode: 'form', message: 'Print this?',
+        requestedSchema: {type: 'object', properties: {confirmed: {type: 'boolean'}}, required: ['confirmed']},
+      },
+    });
+    const [pending] = f.printHandoff.relay.pending();
+    const respond = () => wire(f, `/v1/printer-handoff/elicitations/${pending.id}/respond`, {
+      method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify({action}),
+    });
+    assert.equal((await respond()).status, 200);
+    assert.deepEqual(await answer, {action});
+    assert.deepEqual(f.printHandoff.relay.pending(), []);
+    assert.equal((await respond()).status, 404);
+  });
+}
+
+test('elicitation answers are limited to what the printer server asked', async t => {
+  const f = await fixture(t, ['printer-handoff:use'], root => ({
+    store: new HandoffBundleStore(join(root, 'bundles-answer')),
+    relay: new InMemoryElicitationRelay({timeoutMs: 5000}),
+    runner: {backend: 'bambu-printer-mcp', runBundle: async () => { throw new Error('unused'); }},
+    selection,
+  }));
+  const relay = f.printHandoff.relay;
+  const answerPromise = relay.request({
+    method: 'elicitation/create',
+    params: {
+      mode: 'form', message: 'Print this?',
+      requestedSchema: {type: 'object', properties: {confirmed: {type: 'boolean'}}, required: ['confirmed']},
+    },
+  });
+  const [pending] = relay.pending();
+  const respond = content => wire(f, `/v1/printer-handoff/elicitations/${pending.id}/respond`, {
+    method: 'POST', headers: {'content-type': 'application/json'},
+    body: JSON.stringify({action: 'accept', content}),
+  });
+  const smuggled = await respond({confirmed: true, bambu_model: 'x1c'});
+  assert.equal(smuggled.status, 400);
+  assert.equal(json(smuggled).error.code, 'invalid-answer');
+  assert.equal((await respond({confirmed: 'yes'})).status, 400);
+  assert.equal((await respond({})).status, 400);
+  assert.equal(relay.pending().length, 1);
+  assert.equal((await respond({confirmed: true})).status, 200);
+  assert.deepEqual(await answerPromise, {action: 'accept', content: {confirmed: true}});
 });

@@ -2,12 +2,15 @@ import type {IncomingMessage, ServerResponse} from 'node:http';
 import {z} from 'zod';
 import {
   HandoffBundleStore,
+  DispatchedPrintError,
   InMemoryElicitationRelay,
   PrinterHandoffRunner,
   printerHandoffConfigSchema,
+  sanitizedFailureReason,
   timeoutsFor,
   type ElicitationAnswer,
   type ElicitationRelay,
+  type HandoffManifest,
   type PrinterHandoffConfig,
 } from '@scan-to-make/printer-handoff';
 import {RemoteAuthFailure, type RemoteScope} from './remote-auth.js';
@@ -107,23 +110,66 @@ const elicitationPath = /^\/v1\/printer-handoff\/elicitations(?:\/([a-f0-9-]{36}
  */
 interface ActivePrint {bundleId: string; controller: AbortController; done: Promise<void>}
 
+// The phone may only answer what the printer server actually asked: content
+// keys, types, enums and required fields are checked against the pending
+// prompt's requested schema, so an answer cannot smuggle in a printer,
+// model or process choice the server never offered.
+function validateAnswer(requestedSchema: unknown, answer: ElicitationAnswer): void {
+  if (answer.action !== 'accept') return;
+  const schema = requestedSchema as {
+    properties?: Record<string, {type?: string; enum?: unknown[]}>;
+    required?: string[];
+  } | undefined;
+  const properties = schema?.properties;
+  const invalid = () => { throw new Failure(400, 'invalid-answer'); };
+  if (!properties || typeof properties !== 'object') {
+    if (Object.keys(answer.content).length) invalid();
+    return;
+  }
+  for (const required of schema.required ?? []) {
+    if (!(required in answer.content)) invalid();
+  }
+  for (const [key, value] of Object.entries(answer.content)) {
+    const property = properties[key];
+    if (!property) invalid();
+    if (property!.enum && !property!.enum.includes(value as never)) invalid();
+    const type = property!.type;
+    if (type === 'string' && typeof value !== 'string') invalid();
+    if (type === 'boolean' && typeof value !== 'boolean') invalid();
+    if (type === 'number' && typeof value !== 'number') invalid();
+    if (type === 'integer' && !(typeof value === 'number' && Number.isInteger(value))) invalid();
+    if (type === 'array' && !(Array.isArray(value) && value.every(item => typeof item === 'string'))) invalid();
+  }
+}
+
 export function createPrintHandoffRoutes(services: PrintHandoffServices) {
   let activePrint: ActivePrint | undefined;
+  let startingPrint: Promise<void> | undefined;
+  let closed = false;
+  let creating = false;
+  const unpersistedDispatches = new Map<string, string>();
+  const phoneManifest = (manifest: HandoffManifest): HandoffManifest => {
+    const failure = unpersistedDispatches.get(manifest.id);
+    return failure ? {...manifest, status: 'printed', failure} : manifest;
+  };
 
   const startPrint = (bundleId: string) => {
+    if (closed) throw new Failure(503, 'closing');
     if (activePrint) throw new Failure(409, 'print-busy');
     const controller = new AbortController();
     const entry: ActivePrint = {bundleId, controller, done: Promise.resolve()};
     entry.done = (async () => {
       try { await services.runner.runBundle(services.store, bundleId, {signal: controller.signal}); }
       catch (error) {
-        // runBundle records failures from its own run, but a failure while
-        // recording outputs escapes it; persist a terminal status here so
-        // the phone never polls a bundle that runs forever. Only a bare
-        // error code is stored, never a message or path.
-        const code = (error as {code?: unknown})?.code;
-        const reason = typeof code === 'string' && /^[a-z0-9-]{1,64}$/.test(code) ? code : 'print-failed';
-        await services.store.setStatus(bundleId, 'failed', reason).catch(() => undefined);
+        // Preserve a successful dispatch even if saving its outputs failed.
+        // Other escaped failures must still leave a terminal, phone-safe code.
+        const manifest = await services.store.read(bundleId).catch(() => undefined);
+        const dispatched = error instanceof DispatchedPrintError || manifest?.status === 'printed';
+        const failure = sanitizedFailureReason(error);
+        if (dispatched) unpersistedDispatches.set(bundleId, failure);
+        await services.store.setStatus(bundleId, dispatched ? 'printed' : 'failed', failure)
+          .then(() => { unpersistedDispatches.delete(bundleId); })
+          .catch(() => undefined);
       } finally { if (activePrint === entry) activePrint = undefined; }
     })();
     activePrint = entry;
@@ -131,9 +177,11 @@ export function createPrintHandoffRoutes(services: PrintHandoffServices) {
 
   return {
     async close() {
+      closed = true;
       services.relay.cancelAll();
       const pending = activePrint;
       pending?.controller.abort();
+      await startingPrint;
       await pending?.done;
     },
     async handle(
@@ -146,18 +194,23 @@ export function createPrintHandoffRoutes(services: PrintHandoffServices) {
       const disconnected = () => { if (!response.writableEnded) controller.abort(); };
       response.once('close', disconnected);
       try {
+        if (closed) throw new Failure(503, 'closing');
         const url = new URL(request.url!, 'http://localhost');
         if (url.search) throw new Failure(400, 'invalid-request');
         const bundle = bundlePath.exec(url.pathname);
         const elicitation = elicitationPath.exec(url.pathname);
         if (!bundle && !elicitation) throw new Failure(404, 'not-found');
+        // Re-authorize after awaited body/storage reads too: a pairing can
+        // be revoked while those operations are in progress.
         await authorize(HANDOFF_SCOPE);
 
         if (elicitation) {
           const id = elicitation[1];
           if (!id) {
             if (request.method !== 'GET') throw new Failure(405, 'method-not-allowed');
-            await send(response, JSON.stringify({elicitations: services.relay.pending()}));
+            const elicitations = services.relay.pending();
+            await authorize(HANDOFF_SCOPE);
+            await send(response, JSON.stringify({elicitations}));
             return;
           }
           if (request.method !== 'POST') throw new Failure(405, 'method-not-allowed');
@@ -170,6 +223,9 @@ export function createPrintHandoffRoutes(services: PrintHandoffServices) {
           try { answer = answerSchema.parse(JSON.parse(bytes.toString('utf8'))); }
           catch { throw new Failure(400, 'invalid-request'); }
           await authorize(HANDOFF_SCOPE);
+          const pending = services.relay.pending().find(item => item.id === id);
+          if (!pending) throw new Failure(404, 'elicitation-not-pending');
+          validateAnswer(pending.requestedSchema, answer);
           if (!services.relay.respond(id, answer)) throw new Failure(404, 'elicitation-not-pending');
           await send(response, JSON.stringify({id, answered: true}));
           return;
@@ -178,7 +234,9 @@ export function createPrintHandoffRoutes(services: PrintHandoffServices) {
         const bundleId = bundle![1];
         const isPrint = url.pathname.endsWith('/print');
         if (!bundleId && request.method === 'GET') {
-          await send(response, JSON.stringify({bundles: await services.store.list()}));
+          const bundles = await services.store.list();
+          await authorize(HANDOFF_SCOPE);
+          await send(response, JSON.stringify({bundles: bundles.map(phoneManifest)}));
           return;
         }
         if (!bundleId && request.method === 'POST') {
@@ -192,33 +250,55 @@ export function createPrintHandoffRoutes(services: PrintHandoffServices) {
           if (rawPrompt !== undefined) {
             try { prompt = decodeURIComponent(rawPrompt); } catch { throw new Failure(400, 'invalid-request'); }
           }
-          const stl = await body(request, controller.signal, MAX_STL_BYTES, 120000);
-          await authorize(HANDOFF_SCOPE);
-          let created: Awaited<ReturnType<HandoffBundleStore['create']>>;
+          if (creating) throw new Failure(429, 'busy');
+          creating = true;
           try {
-            created = await services.store.create({
-              stl, prompt, backend: services.runner.backend, selection: services.selection,
-            });
-          } catch { throw new Failure(400, 'invalid-stl'); }
-          response.statusCode = 201;
-          await send(response, JSON.stringify({bundle: created}));
+            const stl = await body(request, controller.signal, MAX_STL_BYTES, 120000);
+            await authorize(HANDOFF_SCOPE);
+            let created: Awaited<ReturnType<HandoffBundleStore['create']>>;
+            try {
+              created = await services.store.create({
+                stl, prompt, backend: services.runner.backend, selection: services.selection,
+              });
+            } catch (error) {
+              const code = (error as NodeJS.ErrnoException)?.code;
+              if (code && ['EACCES', 'ENOSPC', 'EROFS', 'EIO'].includes(code)) throw new Failure(503, 'storage-unavailable');
+              if (error instanceof z.ZodError) throw new Failure(400, 'invalid-request');
+              throw new Failure(400, 'invalid-stl');
+            }
+            response.statusCode = 201;
+            await send(response, JSON.stringify({bundle: created}));
+          } finally { creating = false; }
           return;
         }
         if (!bundleId) throw new Failure(405, 'method-not-allowed');
         if (!z.uuid().safeParse(bundleId).success) throw new Failure(400, 'invalid-request');
         if (isPrint) {
           if (request.method !== 'POST') throw new Failure(405, 'method-not-allowed');
-          const manifest = await services.store.read(bundleId);
-          if (manifest.backend !== services.runner.backend) throw new Failure(409, 'backend-mismatch');
-          await authorize(HANDOFF_SCOPE);
-          startPrint(bundleId);
+          // Reserve admission before reading status or re-authorizing. A
+          // concurrent request must not dispatch from a stale ready manifest.
+          if (activePrint || startingPrint) throw new Failure(409, 'print-busy');
+          let finishAdmission!: () => void;
+          startingPrint = new Promise(resolve => { finishAdmission = resolve; });
+          try {
+            if (unpersistedDispatches.has(bundleId)) throw new Failure(409, 'already-printed');
+            const manifest = await services.store.read(bundleId);
+            if (manifest.backend !== services.runner.backend) throw new Failure(409, 'backend-mismatch');
+            if (manifest.status === 'printed') throw new Failure(409, 'already-printed');
+            await authorize(HANDOFF_SCOPE);
+            startPrint(bundleId);
+          } finally {
+            startingPrint = undefined;
+            finishAdmission();
+          }
           response.statusCode = 202;
           await send(response, JSON.stringify({bundleId, printing: true}));
           return;
         }
         if (request.method !== 'GET') throw new Failure(405, 'method-not-allowed');
         const manifest = await services.store.read(bundleId);
-        await send(response, JSON.stringify({bundle: manifest, printing: activePrint?.bundleId === bundleId}));
+        await authorize(HANDOFF_SCOPE);
+        await send(response, JSON.stringify({bundle: phoneManifest(manifest), printing: activePrint?.bundleId === bundleId}));
       } catch (error) {
         const failure = error instanceof Failure || error instanceof RemoteAuthFailure
           ? error

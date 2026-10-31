@@ -40,6 +40,17 @@ export interface ProcessAndPrintInput {
 }
 
 function fail(code: string): never { throw new PrinterMcpError(code); }
+
+/** Bare, phone-safe failure code for a bundle manifest; never a message or path. */
+export function sanitizedFailureReason(error: unknown): string {
+  const code = (error as {code?: unknown})?.code;
+  return typeof code === 'string' && /^[a-z0-9-]{1,64}$/.test(code) ? code : 'print-failed';
+}
+
+/** A print call succeeded even though recording its result failed. */
+export class DispatchedPrintError extends PrinterMcpError {
+  constructor(cause: unknown) { super(sanitizedFailureReason(cause), cause); }
+}
 function defined(args: Record<string, unknown>): Record<string, unknown> {
   return Object.fromEntries(Object.entries(args).filter(([, value]) => value !== undefined));
 }
@@ -229,16 +240,15 @@ export class PrinterHandoffRunner {
     // the input STL, and a re-slice must never overwrite a manifest-owned
     // artifact before the new one is recorded.
     const workDirectory = await mkdtemp(join(tmpdir(), 'printer-handoff-run-'));
+    let dispatched = false;
     try {
       const inputStl = join(workDirectory, basename(store.stlPath(manifest)));
       await copyFile(store.stlPath(manifest), inputStl);
-      let result: PrintRunResult;
-      try {
-        result = await this.run({stlPath: inputStl, selection: manifest.selection, print: options.print, signal: options.signal});
-      } catch (error) {
-        await store.setStatus(id, 'failed', error instanceof Error ? error.message : 'print failed').catch(() => undefined);
-        throw error;
-      }
+      const result = await this.run({stlPath: inputStl, selection: manifest.selection, print: options.print, signal: options.signal});
+      dispatched = options.print !== false;
+      // A later artifact write must not erase a successful print dispatch
+      // and make the phone offer the same bundle for printing again.
+      if (dispatched) await store.setStatus(id, 'printed');
       const sliced = await readFile(result.slicedPath);
       let updated = await store.recordArtifact(id, 'sliced', basename(result.slicedPath), sliced);
       if (result.orientedStlPath !== inputStl) {
@@ -256,6 +266,9 @@ export class PrinterHandoffRunner {
         slicedPath: join(store.directory(id), updated.artifacts.sliced!.file),
       };
       return {manifest: updated, result: persisted};
+    } catch (error) {
+      await store.setStatus(id, dispatched ? 'printed' : 'failed', sanitizedFailureReason(error)).catch(() => undefined);
+      throw dispatched ? new DispatchedPrintError(error) : error;
     } finally {
       await rm(workDirectory, {recursive: true, force: true}).catch(() => undefined);
     }

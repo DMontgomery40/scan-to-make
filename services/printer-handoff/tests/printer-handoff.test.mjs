@@ -237,6 +237,32 @@ test('slicing the same bundle twice with different output bytes stays readable',
   assert.equal((await store.read(bundle.id)).artifacts.sliced.sha256, second.manifest.artifacts.sliced.sha256);
 });
 
+test('runBundle stores only a bare failure code on the bundle', async t => {
+  const f = await setup(t, {answer: 'decline'});
+  const store = new HandoffBundleStore(join(f.root, 'bundles-failcode'));
+  const bundle = await store.create({stl, prompt: 'decline it', backend: 'bambu-printer-mcp', selection});
+  await assert.rejects(f.runner.runBundle(store, bundle.id), {code: 'tool-failed'});
+  const read = await store.read(bundle.id);
+  assert.equal(read.status, 'failed');
+  assert.equal(read.failure, 'tool-failed');
+});
+
+for (const print of [true, false]) {
+  test(`runBundle preserves dispatch state when recording output fails (print=${print})`, async t => {
+    const f = await setup(t);
+    const store = new HandoffBundleStore(join(f.root, 'bundles-record-failure'));
+    const bundle = await store.create({stl, prompt: 'record failure', backend: 'bambu-printer-mcp', selection});
+    store.recordArtifact = async () => {
+      throw Object.assign(new Error('/private/operator/output failed'), {code: 'record-failed'});
+    };
+    await assert.rejects(f.runner.runBundle(store, bundle.id, {print}), {code: 'record-failed'});
+    assert.equal((await f.calls()).filter(item => item.tool === 'print_3mf').length, print ? 1 : 0);
+    const read = await store.read(bundle.id);
+    assert.equal(read.status, print ? 'printed' : 'failed');
+    assert.equal(read.failure, 'record-failed');
+  });
+}
+
 test('aborting a run awaiting confirmation clears its pending elicitation', async t => {
   const f = await setup(t, {answer: 'none', relayTimeoutMs: 60000});
   const controller = new AbortController();

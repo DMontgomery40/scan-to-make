@@ -1,6 +1,6 @@
 # Companion
 
-The companion runs on the user's own computer. It receives LiDAR captures and close-up stills from the phone, converts captures to meshes and runs scan cleanup (`tools/scan-repair`) as retained jobs. It has no printer routes: slicing and printing belong to [bambu-printer-mcp](https://github.com/DMontgomery40/bambu-printer-mcp) or [mcp-3D-printer-server](https://github.com/DMontgomery40/mcp-3D-printer-server).
+The companion runs on the user's own computer. It receives LiDAR captures and close-up stills from the phone, converts captures to meshes and runs scan cleanup (`tools/scan-repair`) as retained jobs. With the optional printer-handoff configuration it can also hand a clean mesh to the operator-installed [bambu-printer-mcp](https://github.com/DMontgomery40/bambu-printer-mcp) or [mcp-3D-printer-server](https://github.com/DMontgomery40/mcp-3D-printer-server) for slicing and printing, relaying that server's confirmations to the phone (see Printer handoff below).
 
 ```sh
 npm ci --prefix packages/contracts --ignore-scripts
@@ -127,8 +127,12 @@ printer selection come only from the operator config file named by
 schema); bundles are stored under `SCAN_TO_MAKE_PRINTER_HANDOFF_DIR`. The
 phone never chooses the backend, process or printer. Every route requires
 the `printer-handoff:use` scope, granted explicitly by host-local
-`remote-auth-cli.js pair-printer-handoff <auth-directory> <login>` (capture
-pairings do not gain it).
+`remote-auth-cli.js pair-printer-handoff <auth-directory> <login>`, which
+grants only that scope plus health (capture pairings do not gain it, and a
+handoff pairing does not gain capture access).
+For a phone that captures and hands off with its single companion credential,
+use `remote-auth-cli.js pair-capture-and-printer-handoff <auth-directory> <login>`
+to explicitly grant both sets of scopes in one invitation.
 
 | Route | Behaviour |
 | --- | --- |
@@ -138,6 +142,14 @@ pairings do not gain it).
 | `POST /v1/printer-handoff/bundles/:id/print` | Starts the slice, inspect and print run; `202 {bundleId, printing:true}`. One print at a time (`409 print-busy`); poll the bundle for `sliced`/`printed`/`failed` |
 | `GET /v1/printer-handoff/elicitations` | `{elicitations}` pending printer-server confirmations, including any camera snapshot |
 | `POST /v1/printer-handoff/elicitations/:id/respond` | JSON `{action:"accept",content}` or `{action:"decline"\|"cancel"}`. `404 elicitation-not-pending` once answered or expired |
+
+Use bundle and elicitation IDs exactly as returned (lowercase UUIDs).
+`printed` records a successful printer MCP call, not physical print completion.
+If saving the resulting artifacts fails, the bundle retains `printed` with a
+sanitized `failure` code and rejects another print with `409 already-printed`.
+If even the manifest cannot be saved, that dispatch status and retry guard
+remain in memory for the companion process lifetime; they are not a durable
+receipt across a restart while storage is unavailable.
 
 Confirmations are never answered by the companion itself: an unanswered
 prompt expires as cancel. A desktop agent with filesystem access to the
