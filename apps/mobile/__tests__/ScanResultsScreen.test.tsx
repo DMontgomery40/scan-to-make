@@ -579,3 +579,61 @@ test('views without a display copy open one at a time instead', async () => {
   expect(calls).toContain('open pos_z.png');
   await act(async () => tree.unmount());
 });
+
+test('switching checks never shows the previous check’s renders', async () => {
+  const first = 'aaaaaaaa-0000-4000-8000-0000000000aa';
+  const second = 'bbbbbbbb-0000-4000-8000-0000000000bb';
+  const { services } = fakeScanServices({
+    listed: [
+      syntheticJob('succeeded', { jobId: first }),
+      syntheticJob('succeeded', { jobId: second }),
+    ],
+  });
+  const download = services.processing.downloadArtifact;
+  services.processing.downloadArtifact = async (p, c, a, job, name) => {
+    if (job.jobId === second) throw Error('Couldn’t reach your companion.');
+    return download(p, c, a, job, name);
+  };
+  const { tree } = await render(services);
+  expect(tree.root.findAllByType(Image).length).toBeGreaterThan(0);
+  await press(tree, 'Open Finished check, No real size · Check bbbbbbbb');
+  // The second check's views failed, so none of the first one's may linger.
+  expect(tree.root.findAllByType(Image)).toHaveLength(0);
+  expect(texts(tree)).toContain('Some views couldn’t be loaded.');
+  await act(async () => tree.unmount());
+});
+
+test('viewing the model waits for a gallery download already in flight', async () => {
+  const { services, calls } = fakeScanServices({
+    jobs: [syntheticJob('succeeded')],
+  });
+  await services.jobs.save(PROJECT_ID, CAPTURE_ID, JOB_ID);
+  let inFlight = false;
+  let release!: () => void;
+  const download = services.processing.downloadArtifact;
+  let first = true;
+  services.processing.downloadArtifact = async (...args) => {
+    if (!first) return download(...args);
+    first = false;
+    inFlight = true;
+    await new Promise<void>(resolve => {
+      release = resolve;
+    });
+    inFlight = false;
+    return download(...args);
+  };
+  const open = services.processing.openArtifact;
+  services.processing.openArtifact = async (...args) => {
+    // The native bridge serves one request at a time.
+    if (inFlight) calls.push('open during download');
+    return open(...args);
+  };
+  const { tree } = await render(services);
+  expect(inFlight).toBe(true);
+  await press(tree, 'View 3D model');
+  expect(calls).not.toContain('open repaired.obj');
+  await act(async () => release());
+  expect(calls).toContain('open repaired.obj');
+  expect(calls).not.toContain('open during download');
+  await act(async () => tree.unmount());
+});

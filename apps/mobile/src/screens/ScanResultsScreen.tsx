@@ -105,6 +105,14 @@ export function ScanResultsScreen({
   const epoch = useRef(0);
   const busy = useRef(false);
   const mounted = useRef(true);
+  // The companion bridge serves one request at a time, so gallery downloads
+  // and model actions queue through a single gate instead of colliding.
+  const queue = useRef<Promise<unknown>>(Promise.resolve());
+  const gate = useCallback(<T,>(task: () => Promise<T>): Promise<T> => {
+    const run = queue.current.then(task);
+    queue.current = run.catch(() => undefined);
+    return run;
+  }, []);
 
   const load = useCallback(async () => {
     const token = ++epoch.current;
@@ -231,9 +239,9 @@ export function ScanResultsScreen({
     const tick = async () => {
       // A cancel in progress restarts polling itself once it settles.
       if (stopping.current) return;
-      const gate = pollGate.current;
+      const generation = pollGate.current;
       const stale = () =>
-        stopped || token !== epoch.current || gate !== pollGate.current;
+        stopped || token !== epoch.current || generation !== pollGate.current;
       const request = services.processing.status(
         projectId,
         captureId,
@@ -397,13 +405,16 @@ export function ScanResultsScreen({
     busy.current = true;
     setNotice(null);
     try {
-      await services.processing.openArtifact(
-        projectId,
-        captureId,
-        ack.current,
-        job,
-        share ? 'repaired.stl' : 'repaired.obj',
-        share,
+      const current = ack.current;
+      await gate(() =>
+        services.processing.openArtifact(
+          projectId,
+          captureId,
+          current,
+          job,
+          share ? 'repaired.stl' : 'repaired.obj',
+          share,
+        ),
       );
     } catch (error) {
       setNotice(failureOf(error).message);
@@ -602,10 +613,12 @@ export function ScanResultsScreen({
             </Text>
           </View>
           <Gallery
+            key={succeeded.jobId}
             job={succeeded}
             services={services}
             target={target}
             ack={ack.current}
+            gate={gate}
           />
           <SizeSection job={succeeded} comparison={comparison} />
         </>
@@ -757,16 +770,19 @@ function Progress({ job }: { job: ScanProcessingJob }) {
   );
 }
 
+/** One check's renders. Keyed by job, so another check starts empty. */
 function Gallery({
   job,
   services,
   target,
   ack,
+  gate,
 }: {
   job: ScanProcessingJob;
   services: ScanServices;
   target: ScanTarget;
   ack: ProjectAcknowledgment | null;
+  gate: <T>(task: () => Promise<T>) => Promise<T>;
 }) {
   const { width } = useWindowDimensions();
   const [selected, setSelected] = useState<ViewName>(VIEW_ORDER[0]);
@@ -782,14 +798,17 @@ function Gallery({
       // One at a time: the companion serves a single request per project.
       for (const name of VIEW_ORDER) {
         try {
-          const file = await services.processing.downloadArtifact(
-            target.projectId,
-            target.capture.captureId,
-            ack,
-            job,
-            name,
-          );
-          const uri = await resolve(file);
+          if (cancelled) return;
+          const uri = await gate(async () => {
+            const file = await services.processing.downloadArtifact(
+              target.projectId,
+              target.capture.captureId,
+              ack,
+              job,
+              name,
+            );
+            return resolve(file);
+          });
           if (cancelled) return;
           if (uri) setUris(current => ({ ...current, [name]: uri }));
           // No displayable copy: fall back to opening views one at a time.
@@ -803,18 +822,20 @@ function Gallery({
     return () => {
       cancelled = true;
     };
-  }, [resolve, ack, job, services, target]);
+  }, [resolve, ack, job, services, target, gate]);
   const open = async (name: ViewName) => {
     if (!ack) return;
     setMessage(null);
     try {
-      await services.processing.openArtifact(
-        target.projectId,
-        target.capture.captureId,
-        ack,
-        job,
-        name,
-        false,
+      await gate(() =>
+        services.processing.openArtifact(
+          target.projectId,
+          target.capture.captureId,
+          ack,
+          job,
+          name,
+          false,
+        ),
       );
     } catch (error) {
       setMessage(failureOf(error).message);

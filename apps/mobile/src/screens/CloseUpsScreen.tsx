@@ -158,8 +158,9 @@ export function CloseUpsScreen({
   // Verified thumbnails for stored close-ups, one at a time, pausing for
   // anything the user starts. Photos picked here already have a preview.
   useEffect(() => {
-    const resolve = services.stills.imageUri;
-    if (phase.kind !== 'ready' || !resolve || busy) return;
+    // Called as methods: the real clients rely on `this`.
+    const client = services.stills;
+    if (phase.kind !== 'ready' || !client.imageUri || busy) return;
     let cancelled = false;
     (async () => {
       for (const still of stills) {
@@ -169,15 +170,10 @@ export function CloseUpsScreen({
         }
         tried.current.add(still.id);
         const step = (async () => {
-          let uri = await resolve(still);
-          if (!uri && services.stills.download && ack.current) {
-            await services.stills.download(
-              projectId,
-              captureId,
-              ack.current,
-              still,
-            );
-            uri = await resolve(still);
+          let uri = (await client.imageUri?.(still)) ?? null;
+          if (!uri && client.download && ack.current) {
+            await client.download(projectId, captureId, ack.current, still);
+            uri = (await client.imageUri?.(still)) ?? null;
           }
           return uri;
         })();

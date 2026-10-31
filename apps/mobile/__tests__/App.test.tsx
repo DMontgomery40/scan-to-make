@@ -938,7 +938,14 @@ test('production wiring drives the real clients through the native bridges', asy
     await press(tree, 'Add 1 photo to scan');
     expect(texts(tree)).toContain('1 of 24');
     expect(texts(tree)).toContain('USB-C port');
-    expect(requests.slice(-3)).toEqual(['PUT project', 'GET still', 'POST still']);
+    const from = requests.lastIndexOf('PUT project');
+    // Sync, list, upload; then at most a thumbnail read for the new still.
+    expect(requests.slice(from, from + 3)).toEqual([
+      'PUT project',
+      'GET still',
+      'POST still',
+    ]);
+    expect(requests.slice(from + 3).every(r => r === 'GET still')).toBe(true);
   } finally {
     jest.useRealTimers();
     if (tree) await act(async () => tree.unmount());

@@ -1,6 +1,7 @@
 import React from 'react';
 import Renderer, { act } from 'react-test-renderer';
 import { Alert, Image, Text, TextInput } from 'react-native';
+import type { DetailStill } from '@scan-to-make/contracts';
 import { CloseUpsScreen } from '../src/screens/CloseUpsScreen';
 import { unavailableScanServices } from '../src/screens/scanServices';
 import {
@@ -395,5 +396,28 @@ test('choosing photos waits for a thumbnail request already in flight', async ()
   await act(async () => finish());
   expect(calls.some(c => c.startsWith('pick'))).toBe(true);
   expect(texts(tree)).toContain('READY TO ADD');
+  await act(async () => tree.unmount());
+});
+
+test('thumbnails work with a client whose methods rely on this', async () => {
+  const stored = stillFrom(syntheticPhoto(), 0, 'USB-C port');
+  const { services } = fakeScanServices({ stills: [stored] });
+  const base = services.stills;
+  // Like DetailStillsClient: methods read instance state through `this`.
+  class ClientLikeStills {
+    private readonly root = 'file:///client/';
+    list = base.list;
+    upload = base.upload;
+    openFile = base.openFile;
+    remove = base.remove;
+    async imageUri(still: DetailStill) {
+      return `${this.root}${still.sha256.slice(-6)}.jpg`;
+    }
+  }
+  services.stills = new ClientLikeStills();
+  const { tree } = await render(services);
+  expect(tree.root.findAllByType(Image).map(i => i.props.source.uri)).toEqual([
+    `file:///client/${stored.sha256.slice(-6)}.jpg`,
+  ]);
   await act(async () => tree.unmount());
 });
