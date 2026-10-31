@@ -1,0 +1,24 @@
+services:
+  companion:
+    image: scan-to-make-companion:local
+    platform: linux/amd64
+    build:
+      context: ../..
+      dockerfile: deploy/companion/Dockerfile
+    # The existing listener binds 127.0.0.1. Host Tailscale Serve reaches it here.
+    network_mode: host
+    restart: unless-stopped
+    stop_grace_period: 30s
+    env_file:
+      - path: ./companion.env
+        format: raw
+    environment:
+      SCAN_TO_MAKE_REMOTE_AUTH_DIR: /data/auth
+      SCAN_TO_MAKE_CAPTURE_DIR: /data/capture
+      SCAN_TO_MAKE_CAPTURE_PYTHON: /opt/python/bin/python3
+      SCAN_TO_MAKE_SCAN_REPAIR_TOOL: /app/tools/scan-repair/repair.py
+      SCAN_TO_MAKE_SCAN_BLENDER: /opt/blender/blender
+    volumes:
+      - companion-data:/data
+volumes:
+  companion-data:
