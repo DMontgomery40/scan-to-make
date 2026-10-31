@@ -1,3 +1,5 @@
+import {createObjectRoutes} from './objects/http.js';
+import type {ObjectService} from './objects/service.js';
 import {createCaptureRoutes,type CaptureServices} from './capture-http.js';
 import {createPrintHandoffRoutes,type PrintHandoffServices} from './print-handoff-http.js';
 import {acquireInstanceLock} from './instance-lock.js';
@@ -107,6 +109,8 @@ export async function startCompanionServer(
     lanTls?: {cert: Buffer; key: Buffer};
     capture?: CaptureServices;
     printHandoff?: PrintHandoffServices;
+    /** Objects (scan or instructions → touch-up → print), when touch-ups are set up. */
+    objects?: ObjectService;
     /** Extra addresses to bind beside the configured one; looked up again every `rediscoverMs`. */
     lanAddresses?: () => LanAddresses;
     /** The Mac's `.local` name, accepted as a Host and listed in v2 links. */
@@ -167,6 +171,7 @@ export async function startCompanionServer(
   const instanceLock=options.capture?.scanProcessing?await acquireInstanceLock(options.capture.scanProcessing.directory):undefined;
   const captureRoutes=options.capture?createCaptureRoutes(options.capture):undefined;
   const printHandoffRoutes=options.printHandoff?createPrintHandoffRoutes(options.printHandoff):undefined;
+  const objectRoutes=options.objects?createObjectRoutes(options.objects):undefined;
   let authority = '';
   const handler: RequestListener = async (request, response) => {
     response.setHeader('Content-Type', 'application/json');
@@ -221,6 +226,9 @@ export async function startCompanionServer(
       }
       if(captureRoutes&&request.url?.startsWith('/v1/saved-projects/')){
         await captureRoutes.handle(request,response,authorize,name=>singleHeader(request,name));return;
+      }
+      if(objectRoutes&&(request.url==='/v1/objects'||request.url?.startsWith('/v1/objects/')||request.url?.startsWith('/v1/objects?'))){
+        await objectRoutes.handle(request,response,authorize,name=>singleHeader(request,name));return;
       }
       if(printHandoffRoutes&&request.url?.startsWith('/v1/printer-handoff/')){
         await printHandoffRoutes.handle(request,response,authorize,name=>singleHeader(request,name));return;
@@ -311,7 +319,8 @@ export async function startCompanionServer(
   server.headersTimeout = 5000;
   // Handoff STL uploads are bounded at 64 MiB and need longer than the small
   // JSON routes; the route body reader enforces its own matching timeout.
-  server.requestTimeout = printHandoffRoutes ? 120000 : 5000;
+  // Scan uploads (tens of MB over Wi-Fi) and printer runs need longer than plain API calls.
+  server.requestTimeout = printHandoffRoutes || objectRoutes ? 120000 : 5000;
   server.maxRequestsPerSocket = 1;
   try {
     await new Promise<void>((resolve, reject) => {

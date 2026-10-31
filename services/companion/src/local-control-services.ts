@@ -13,6 +13,9 @@ import {readBoundedCaptureFile} from './capture-import.js';
 import {RemoteAuthStore, RemoteAuthFailure} from './remote-auth.js';
 import type {ModelAccessService} from './model-access.js';
 import type {NearbyRequest} from '@scan-to-make/contracts/nearby-pairing';
+import {InvalidStateError, type ObjectService} from './objects/service.js';
+import {ObjectNotFoundError} from './objects/store.js';
+import {publicObject} from './objects/http.js';
 import type {createPrinterCheck} from './printer-check.js';
 import {ControlFailure, parameters, type ControlMethod, type DoorParameters, type JobParameters} from './local-control-protocol.js';
 
@@ -23,6 +26,8 @@ interface JobItem {
   job: ScanProcessingJob | HandoffManifest;
 }
 export interface ControlServices {
+  /** The objects list the Mac app shows (spec §5.6), the same one the phone sees. */
+  objects?: ObjectService;
   printerCheck?: ReturnType<typeof createPrinterCheck>;
   modelAccess?: ModelAccessService;
   auth: RemoteAuthStore;
@@ -185,6 +190,24 @@ export function createControlDispatcher(services: ControlServices) {
           return {answered:true};
         }
         case 'doors.prepare': return await prepareDoor(parameters[method].parse(raw));
+        case 'objects.list': case 'objects.get': case 'objects.correct': case 'objects.answerCloseup': case 'objects.print': case 'objects.answerPlate': {
+          const objects = services.objects;
+          if (!objects) throw new ControlFailure('unavailable');
+          try {
+            if (method === 'objects.list') return {objects: (await objects.list()).map(publicObject)};
+            const params = parameters[method].parse(raw) as {id: string; note?: string; bestGuess?: boolean};
+            const object = method === 'objects.get' ? await objects.get(params.id)
+              : method === 'objects.correct' ? await objects.correct(params.id, params.note!)
+              : method === 'objects.answerCloseup' ? await objects.answerCloseup(params.id, {bestGuess: params.bestGuess!})
+              : method === 'objects.print' ? await objects.print(params.id)
+              : await objects.answerPlate(params.id, {clear: true});
+            return {object: publicObject(object)};
+          } catch (error) {
+            if (error instanceof ObjectNotFoundError) throw new ControlFailure('not-found');
+            if (error instanceof InvalidStateError) throw new ControlFailure('conflict');
+            throw error;
+          }
+        }
       }
     } catch (error) {
       if (error instanceof ControlFailure) throw error;

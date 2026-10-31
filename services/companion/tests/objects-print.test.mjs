@@ -3,14 +3,14 @@ import assert from 'node:assert/strict';
 import {mkdtemp, mkdir, writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
-import {HandoffBundleStore, InMemoryElicitationRelay} from '@scan-to-make/printer-handoff';
+import {DispatchedPrintError, HandoffBundleStore, InMemoryElicitationRelay} from '@scan-to-make/printer-handoff';
 import {ObjectStore} from '../dist/objects/store.js';
 import {ObjectService, InvalidStateError} from '../dist/objects/service.js';
 
 const STL = Buffer.from('solid m\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 1 0 0\nvertex 0 1 0\nendloop\nendfacet\nendsolid m\n' + ' '.repeat(40));
 const CONFIRM = {type: 'object', properties: {confirmed: {type: 'boolean', title: 'I checked the printer and confirm this operation'}}, required: ['confirmed']};
 
-async function setup({judge = async () => ({clear: true}), camera = true, runnerFails} = {}) {
+async function setup({judge = async () => ({clear: true}), camera = true, runnerFails, afterDispatch} = {}) {
   const root = await mkdtemp(join(tmpdir(), 'objects-print-'));
   const store = new ObjectStore(join(root, 'objects'));
   const relay = new InMemoryElicitationRelay({timeoutMs: 5000});
@@ -24,6 +24,7 @@ async function setup({judge = async () => ({clear: true}), camera = true, runner
         camera ? {cameraSnapshot: {format: 'jpeg', base64: Buffer.from('jpeg').toString('base64')}} : undefined);
       answers.push(result);
       if (result.action !== 'accept') throw new Error('declined');
+      if (afterDispatch) throw afterDispatch;
       return {bundleId: id};
     },
   };
@@ -91,4 +92,10 @@ test('a print that fails says why', async () => {
   const done = await service.settled(object.id);
   assert.equal(done.state, 'failed');
   assert.match(done.failure, /printer is busy/);
+});
+
+test('a print the printer took is printed, even if saving its files failed afterwards', async () => {
+  const {service, object} = await setup({afterDispatch: new DispatchedPrintError('could not save the sliced file', new Error('disk full'))});
+  await service.print(object.id);
+  assert.equal((await service.settled(object.id)).state, 'printed');
 });

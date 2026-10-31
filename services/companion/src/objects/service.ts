@@ -1,6 +1,6 @@
 import {copyFile, mkdir, readFile, rm} from 'node:fs/promises';
 import {basename, join} from 'node:path';
-import type {ElicitationRelay, HandoffBundleStore, PendingElicitation, PrinterHandoffConfig, PrinterHandoffRunner} from '@scan-to-make/printer-handoff';
+import {DispatchedPrintError, type ElicitationRelay, type HandoffBundleStore, type PendingElicitation, type PrinterHandoffConfig, type PrinterHandoffRunner} from '@scan-to-make/printer-handoff';
 import type {PlateVerdict} from './bedcheck.js';
 import type {TouchupInput} from '../touchup/touchup.js';
 import type {TouchupResult} from '../touchup/runner.js';
@@ -52,6 +52,7 @@ export class ObjectService {
   create(instructions?: string) { return this.#deps.store.create(instructions).then(o => this.#changed(o)); }
   list() { return this.#deps.store.list(); }
   get(id: string) { return this.#deps.store.get(id); }
+  dir(id: string) { return this.#deps.store.dir(id); }
 
   async addScan(id: string, name: string, bytes: Buffer): Promise<StmObject> {
     const object = await this.get(id);
@@ -103,7 +104,12 @@ export class ObjectService {
     const unsubscribe = relay.subscribe(pending => { void this.#confirm(id, pending); });
     const work = runner.runBundle(bundles, manifest.id, {print: true})
       .then(() => this.#deps.store.update(id, o => ({...o, state: 'printed', plate: undefined})),
-        error => this.#deps.store.update(id, o => ({...o, state: 'failed', plate: undefined, failure: error instanceof Error ? error.message : String(error)})))
+        async error => {
+          // Once the printer has the job it is printing, whatever went wrong afterwards (as the phone's print route does).
+          const dispatched = error instanceof DispatchedPrintError || (await bundles.read(manifest.id).catch(() => undefined))?.status === 'printed';
+          return this.#deps.store.update(id, o => dispatched ? {...o, state: 'printed', plate: undefined}
+            : {...o, state: 'failed', plate: undefined, failure: error instanceof Error ? error.message : String(error)});
+        })
       .then(o => this.#changed(o))
       .finally(() => { unsubscribe(); this.#running.delete(id); this.#confirmations.delete(id); });
     this.#running.set(id, work);

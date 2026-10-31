@@ -20,6 +20,11 @@ import {createControlDispatcher, companionVersion} from './local-control-service
 import type {CaptureServices} from './capture-http.js';
 import {ModelAccessService} from './model-access.js';
 import {createPrinterCheck} from './printer-check.js';
+import {ObjectStore} from './objects/store.js';
+import {ObjectService} from './objects/service.js';
+import {judgePlate} from './objects/bedcheck.js';
+import {printerStlSize} from './objects/stl-size.js';
+import {runTouchup} from './touchup/touchup.js';
 
 // Presence is explicit opt-in. Invalid/empty configuration must fail, never fall back.
 const directory = process.env.SCAN_TO_MAKE_REMOTE_AUTH_DIR;
@@ -49,6 +54,17 @@ if(handoffConfigPath!==undefined&&(!remoteAuth||!isAbsolute(handoffConfigPath)||
 const handoffConfig=handoffConfigPath===undefined?undefined:await readPrinterHandoffConfig(handoffConfigPath);
 const printerCheck=handoffConfig===undefined?undefined:createPrinterCheck(handoffConfig);
 const printHandoff=handoffConfig===undefined?undefined:createPrintHandoffServices(handoffConfig,handoffDirectory!);
+// Objects: the touch-up runs through the user's own printer MCP and their own Claude login. Needs both.
+const claudePath=process.env.SCAN_TO_MAKE_CLAUDE_PATH||undefined;
+if(claudePath!==undefined&&!isAbsolute(claudePath))throw new Error('SCAN_TO_MAKE_CLAUDE_PATH must be absolute');
+let objects:ObjectService|undefined;
+if(handoffConfig&&printHandoff&&captureDirectory&&claudePath){
+  const objectStore=new ObjectStore(join(captureDirectory,'objects'));
+  await objectStore.recoverInterrupted();
+  objects=new ObjectService({store:objectStore,runTouchup:input=>runTouchup(input),claudePath,handoff:handoffConfig,
+    stlInfo:path=>printerStlSize(handoffConfig,path),
+    print:{services:printHandoff,judgePlate:photo=>judgePlate(photo,claudePath)}});
+}
 if(capture?.scanProcessing&&captureDirectory)capture.modelSize=new ModelSizeStore(capture.storage,capture.scanProcessing,join(captureDirectory,'captures'),
  createModelSizeRunner(async()=>handoffConfig?.backend==='bambu-printer-mcp'?handoffConfig.process:installedBambuProcess()));
 // The port variable keeps its original name so existing operator setups still start.
@@ -74,6 +90,7 @@ const server = await startCompanionServer({
   ...(nearbyPairing === '1' ? { nearby: { name: macName ?? 'Scan to Make' } } : {}),
   capture,
   printHandoff,
+  ...(objects ? {objects} : {}),
   remoteAuth,
   port:
     process.env.SCAN_TO_MAKE_GENERATION_PORT === undefined
@@ -87,6 +104,7 @@ try {
     path:process.env.SCAN_TO_MAKE_CONTROL_SOCKET ?? join(remoteAuth.directory,'control.sock'),
     dispatch:createControlDispatcher({auth:remoteAuth,modelAccess,printerCheck,companionVersion:await companionVersion(),capture,
       captureDirectory:captureDirectory ? join(captureDirectory,'captures') : undefined,printHandoff,
+      ...(objects ? {objects} : {}),
       // With every address answering, the Mac's QR is a v2 link from the live list.
       ...(allAddresses === '1' && server.publicKeySha256 ? {pairingLink:() => ({addresses:server.addresses(),publicKeySha256:server.publicKeySha256!,
         ...(macName ? {name:instanceName(macName)} : {})})} : {}),
