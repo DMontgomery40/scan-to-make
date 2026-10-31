@@ -103,3 +103,8 @@ test('a pass with no scan and no photos lists neither', async () => {
   assert.equal(prompt.includes('- Photos:'), false);
   assert.ok(prompt.includes('- Output folder:'));
 });
+
+test('every STL the worker saves is in millimetres', () => {
+  assert.match(TOUCHUP_SYSTEM_RULES, /millimetres/);
+  assert.match(TOUCHUP_SYSTEM_RULES, /metres/);
+});
