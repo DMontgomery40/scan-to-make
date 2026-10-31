@@ -11,7 +11,7 @@ public struct ControlClient: Sendable {
     }
     private struct Request: Encodable { let v = 1; let id: String, method: String; let params: JSONValue }
     private struct Response<T: Decodable>: Decodable { let v: Int; let id: String; let result: T?; let error: ControlRemoteError? }
-    private func call<T: Decodable>(_ method: String, _ params: [String: JSONValue] = [:]) async throws -> T {
+    func call<T: Decodable>(_ method: String, _ params: [String: JSONValue] = [:]) async throws -> T {
         let id = UUID().uuidString
         var data: Data
         do { data = try JSONEncoder().encode(Request(id: id, method: method, params: .object(params))) }
@@ -69,7 +69,7 @@ public struct ControlClient: Sendable {
         }
         return try await call("doors.prepare", params)
     }
-    /// Native app launch only; Blender import/save tracking belongs to MAC-7.
+    /// Native app launch only; editor import/save tracking is a separate layer.
     @MainActor public func openDoor(_ door: ControlDoor, target: DoorTarget) async throws {
         let prepared = try await prepareDoor(door, target: target)
         guard prepared.fileURL.isFileURL, prepared.fileURL.host == nil || prepared.fileURL.host == "" || prepared.fileURL.host == "localhost",

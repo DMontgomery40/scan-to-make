@@ -1,0 +1,82 @@
+[
+  {
+    "url": "http://localhost:1234/v1",
+    "valid": true
+  },
+  {
+    "url": "https://models.example.test/v1",
+    "valid": true
+  },
+  {
+    "url": "http://127.0.0.1:0/v1",
+    "valid": true
+  },
+  {
+    "url": "http://localhost:65535/v1",
+    "valid": true
+  },
+  {
+    "url": "https://[::1]:8080/v1",
+    "valid": true
+  },
+  {
+    "url": "https://models.example.test/v1/model%20name",
+    "valid": true
+  },
+  {
+    "url": "HTTPS://models.example.test/v1",
+    "valid": false
+  },
+  {
+    "url": "HTTP://localhost:1234/v1",
+    "valid": false
+  },
+  {
+    "url": "http://localhost:1234/v1?",
+    "valid": false
+  },
+  {
+    "url": "http://localhost:1234/v1#",
+    "valid": false
+  },
+  {
+    "url": "http://@localhost:1234/v1",
+    "valid": false
+  },
+  {
+    "url": "http://localhost:99999/v1",
+    "valid": false
+  },
+  {
+    "url": "http://localhost:-1/v1",
+    "valid": false
+  },
+  {
+    "url": "http://user:secret@localhost/v1",
+    "valid": false
+  },
+  {
+    "url": "https://models.example.test?token=x",
+    "valid": false
+  },
+  {
+    "url": "http://localhost/v1#x",
+    "valid": false
+  },
+  {
+    "url": "file:///tmp/model",
+    "valid": false
+  },
+  {
+    "url": " http://localhost/v1",
+    "valid": false
+  },
+  {
+    "url": "http://localhost/a b",
+    "valid": false
+  },
+  {
+    "url": "http://localhost\\evil/v1",
+    "valid": false
+  }
+]

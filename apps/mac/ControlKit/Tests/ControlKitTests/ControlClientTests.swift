@@ -65,6 +65,32 @@ private let status: [String: Any] = ["protocolVersion": 1, "companionVersion": "
     "capabilities": ["capture": true, "cleanup": false, "printerHandoff": true]]
 
 final class ControlClientTests: XCTestCase {
+    func testModelChoiceSetUsesReferenceOnlyAndCAS() async throws {
+        let revision = UUID(), reference = UUID()
+        let server = try UnixFixture { request in
+            XCTAssertEqual(request["method"] as? String, "modelAccess.set")
+            let params = request["params"] as! [String: Any]
+            XCTAssertEqual(params["expectedRevision"] as? String, revision.uuidString)
+            let choice = params["choice"] as! [String: Any]
+            XCTAssertEqual(Set(choice.keys), ["kind", "provider", "model", "keychainRef"])
+            XCTAssertEqual(choice["keychainRef"] as? String, reference.uuidString)
+            return [try reply(request, result: ["revision": UUID().uuidString, "choice": choice, "check": NSNull()])]
+        }
+        let result = try await ControlClient(socketPath: server.path).setModelAccess(.api(provider: .openai, model: "gpt-6-astra", keychainRef: reference), expectedRevision: revision)
+        XCTAssertFalse(result.connected); XCTAssertNil(result.check); withExtendedLifetime(server) {}
+    }
+    func testModelCheckIsRevisionBound() async throws {
+        let revision = UUID()
+        let server = try UnixFixture { request in
+            XCTAssertEqual(request["method"] as? String, "modelAccess.check")
+            XCTAssertEqual((request["params"] as? [String: String])?["revision"], revision.uuidString)
+            return [try reply(request, result: ["revision": revision.uuidString, "choice": ["kind": "codex-cli"],
+                "check": ["id": UUID().uuidString, "revision": UUID().uuidString, "state": "connected"]])]
+        }
+        let result = try await ControlClient(socketPath: server.path).checkModelAccess(revision: revision)
+        XCTAssertFalse(result.connected); withExtendedLifetime(server) {}
+    }
+
     func testMissingEndpointIsUnavailableBeforeAnyRequestIsSent() async throws {
         let client = try ControlClient(socketPath: "/tmp/stm-absent-\(UUID().uuidString).sock", timeout: 1)
         do { try await client.removeDevice(UUID().uuidString); XCTFail("Missing endpoint accepted") }

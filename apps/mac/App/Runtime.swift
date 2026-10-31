@@ -69,6 +69,7 @@ func launchAgent(_ installation: Installation) -> Never {
     child.executableURL = installation.node
     child.arguments = installation.arguments("serve")
     child.environment = installation.environment
+    child.environment?["SCAN_TO_MAKE_MODEL_WORKER"] = installation.bundle.executableURL?.path
     child.standardInput = FileHandle.nullDevice
     child.standardOutput = FileHandle.nullDevice
     child.standardError = FileHandle.nullDevice
@@ -83,4 +84,46 @@ func launchAgent(_ installation: Installation) -> Never {
     do { try child.run() } catch { exit(1) }
     withExtendedLifetime(sources) { RunLoop.main.run() }
     exit(1)
+}
+
+/// Headless signed entry point; it does not initialize SwiftUI or open windows.
+/// The secret exists only in this short-lived helper and the worker it spawns.
+func launchModelWorker(_ installation: Installation) -> Never {
+    umask(0o077)
+    do {
+        let args = Array(CommandLine.arguments.dropFirst(2))
+        guard let mode = args.first, ["check", "run"].contains(mode), mode != "check" || args.count == 1 else { exit(2) }
+        var input = Data()
+        while let chunk = try FileHandle.standardInput.read(upToCount: 4096), !chunk.isEmpty {
+            input.append(chunk)
+            guard input.count <= 65536 else { exit(2) }
+        }
+        let choice = try JSONDecoder().decode(ModelAccessChoice.self, from: input)
+        var environment = try ModelWorkerEnvironment.make(choice: choice, base: ProcessInfo.processInfo.environment, credentials: ModelKeychain())
+        if choice.keychainReference != nil {
+            // App-owned paths, never values supplied by the helper caller.
+            environment["SCAN_TO_MAKE_CAPTURE_PYTHON"] = installation.resources.appendingPathComponent("Payload/python/bin/python3").path
+            let blender = "/Applications/Blender.app/Contents/MacOS/Blender"
+            if FileManager.default.isExecutableFile(atPath: blender) { environment["SCAN_TO_MAKE_SCAN_BLENDER"] = blender }
+        }
+        let arguments = [installation.node.path, installation.resources.appendingPathComponent("Payload/source/services/companion/dist/ai-tweak-cli.js").path] + args
+        let null = open("/dev/null", O_RDWR)
+        guard null >= 0, dup2(null, STDIN_FILENO) >= 0, dup2(null, STDERR_FILENO) >= 0 else { exit(2) }
+        if null > STDERR_FILENO { close(null) }
+        var argv = arguments.map { strdup($0) } + [nil]
+        var envp = environment.map { strdup($0.key + "=" + $0.value) } + [nil]
+        defer { for value in argv + envp { free(value) } }
+        // Replace this process: Foundation.Process would create a second process
+        // group, outside the companion's cancellation/SIGKILL target.
+        installation.node.path.withCString { executable in
+            argv.withUnsafeMutableBufferPointer { arguments in
+                envp.withUnsafeMutableBufferPointer { environment in
+                    _ = execve(executable, arguments.baseAddress!, environment.baseAddress!)
+                }
+            }
+        }
+    } catch {
+        // Never include Keychain errors, input metadata, keys or provider output.
+    }
+    exit(2)
 }

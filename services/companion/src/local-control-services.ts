@@ -11,6 +11,7 @@ import type {CaptureServices} from './capture-http.js';
 import type {PrintHandoffServices} from './print-handoff-http.js';
 import {readBoundedCaptureFile} from './capture-import.js';
 import {RemoteAuthStore, RemoteAuthFailure} from './remote-auth.js';
+import type {ModelAccessService} from './model-access.js';
 import {ControlFailure, parameters, type ControlMethod, type DoorParameters, type JobParameters} from './local-control-protocol.js';
 
 interface JobItem {
@@ -20,6 +21,7 @@ interface JobItem {
   job: ScanProcessingJob | HandoffManifest;
 }
 export interface ControlServices {
+  modelAccess?: ModelAccessService;
   auth: RemoteAuthStore;
   companionVersion: string;
   capture?: CaptureServices;
@@ -141,6 +143,19 @@ export function createControlDispatcher(services: ControlServices) {
           }
           if (!auth.allowsLogin(login)) throw new ControlFailure('invalid-request');
           return await auth.createPairing(login);
+        }
+        case 'modelAccess.get': {
+          if (!services.modelAccess) throw new ControlFailure('unavailable');
+          return services.modelAccess.get();
+        }
+        case 'modelAccess.set': {
+          if (!services.modelAccess) throw new ControlFailure('unavailable');
+          const {expectedRevision,choice} = parameters[method].parse(raw);
+          return await services.modelAccess.set(expectedRevision,choice);
+        }
+        case 'modelAccess.check': {
+          if (!services.modelAccess) throw new ControlFailure('unavailable');
+          return services.modelAccess.startCheck(parameters[method].parse(raw).revision);
         }
         case 'pairing.isActive': return {active:await auth.isPairingActive(parameters[method].parse(raw).code)};
         case 'jobs.list': return await jobIndex(parameters[method].parse(raw));

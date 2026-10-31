@@ -2,9 +2,9 @@ name: Mac app
 on:
   push:
     branches: [main]
-    paths: ['apps/mac/**', 'services/companion/src/local-control*', '.github/workflows/mac.yml']
+    paths: ['apps/mac/**', 'services/companion/src/local-control*', 'services/companion/src/model-access*', 'packages/contracts/src/model-access.ts', 'packages/contracts/fixtures/model-access*.json', '.github/workflows/mac.yml']
   pull_request:
-    paths: ['apps/mac/**', 'services/companion/src/local-control*', '.github/workflows/mac.yml']
+    paths: ['apps/mac/**', 'services/companion/src/local-control*', 'services/companion/src/model-access*', 'packages/contracts/src/model-access.ts', 'packages/contracts/fixtures/model-access*.json', '.github/workflows/mac.yml']
 permissions:
   contents: read
 jobs:
@@ -19,4 +19,6 @@ jobs:
       - name: Companion runtime configuration tests
         run: node --test apps/mac/Tests/runtime.test.mjs
       - name: Build shell without signing or runtime downloads
-        run: xcodebuild -project apps/mac/ScanToMake.xcodeproj -scheme ScanToMake -configuration Debug -destination 'generic/platform=macOS' CODE_SIGNING_ALLOWED=NO build
+        run: xcodebuild -project apps/mac/ScanToMake.xcodeproj -scheme ScanToMake -configuration Debug -destination 'generic/platform=macOS' -derivedDataPath "${{ runner.temp }}/mac-build" CODE_SIGNING_ALLOWED=NO build
+      - name: Compiled model worker boundary tests
+        run: STM_MAC_BUILT_APP="${{ runner.temp }}/mac-build/Build/Products/Debug/Scan to Make.app" node --test apps/mac/Tests/model-worker.test.mjs

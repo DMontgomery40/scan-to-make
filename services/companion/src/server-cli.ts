@@ -13,11 +13,14 @@ import { readPrinterHandoffConfig } from '@scan-to-make/printer-handoff';
 import {startLocalControl} from './local-control.js';
 import {createControlDispatcher, companionVersion} from './local-control-services.js';
 import type {CaptureServices} from './capture-http.js';
+import {ModelAccessService} from './model-access.js';
 
 // Presence is explicit opt-in. Invalid/empty configuration must fail, never fall back.
 const directory = process.env.SCAN_TO_MAKE_REMOTE_AUTH_DIR;
 const remoteAuth =
   directory === undefined ? undefined : await RemoteAuthStore.open(directory);
+// Invalid model preferences must not take the paired phone API offline.
+const modelAccess = remoteAuth ? await ModelAccessService.open(remoteAuth.directory).catch(() => undefined) : undefined;
 
 const captureDirectory=process.env.SCAN_TO_MAKE_CAPTURE_DIR;
 if(captureDirectory!==undefined&&(!remoteAuth||!isAbsolute(captureDirectory)))throw new Error('Capture requires authentication and an absolute private directory');
@@ -63,7 +66,7 @@ try {
   if (remoteAuth) control = await startLocalControl({
     // The auth directory is private even when its state/volume parent is not.
     path:process.env.SCAN_TO_MAKE_CONTROL_SOCKET ?? join(remoteAuth.directory,'control.sock'),
-    dispatch:createControlDispatcher({auth:remoteAuth,companionVersion:await companionVersion(),capture,
+    dispatch:createControlDispatcher({auth:remoteAuth,modelAccess,companionVersion:await companionVersion(),capture,
       captureDirectory:captureDirectory ? join(captureDirectory,'captures') : undefined,printHandoff}),
   });
   else if (process.env.SCAN_TO_MAKE_CONTROL_SOCKET !== undefined) throw new Error('Local control requires an auth store');
@@ -78,6 +81,7 @@ process.stdout.write(
 );
 for (const signal of ['SIGINT', 'SIGTERM'] as const)
   process.once(signal, () => {
+    modelAccess?.close();
     void Promise.all([control?.close(),server.close()]).catch(() => {
       process.exitCode = 1;
     });
