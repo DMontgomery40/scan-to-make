@@ -7,11 +7,16 @@ export const DimensionsMmSchema=z.tuple([z.number().finite().positive(),z.number
 export const ScanReferenceSchema=z.strictObject({dimensionsMm:DimensionsMmSchema,source:z.string().min(1).max(500).optional(),productName:z.string().min(1).max(200).optional()});
 export const ScanProcessingRequestSchema=z.strictObject({reference:ScanReferenceSchema.optional()});
 const status=z.enum(['queued','running','succeeded','failed']);
+// Taubin smoothing params. The Laplacian record stays valid so jobs retained before the change still load.
+const repairParams=z.union([
+ z.strictObject({weldMm:z.literal(.01),componentFraction:z.literal(.01),componentMetric:z.literal('area'),holeMaxEdges:z.literal(0),voxelSizeMm:z.literal(.3),forceVoxel:z.literal(false),denoiseIterations:z.literal(15),denoiseFactor:z.literal(.5),denoiseMu:z.literal(-.53),denoiseMaxMm:z.literal(.35),sharpAngleDeg:z.literal(30),deviationSamples:z.literal(10000)}),
+ z.strictObject({weldMm:z.literal(.01),componentFraction:z.literal(.01),componentMetric:z.literal('area'),holeMaxEdges:z.literal(0),voxelSizeMm:z.literal(.3),forceVoxel:z.literal(false),denoiseIterations:z.literal(1),denoiseFactor:z.literal(.1),denoiseMaxMm:z.literal(.05),sharpAngleDeg:z.literal(30),deviationSamples:z.literal(10000)}),
+]);
 const artifact=z.strictObject({sha256:z.string().regex(/^[a-f0-9]{64}$/),byteLength:z.number().int().positive().max(64*1024*1024),mediaType:z.enum(['model/stl','model/obj','application/json','image/png'])});
 export const ScanProcessingJobSchema=z.strictObject({
  schema:z.literal(SCAN_PROCESSING_SCHEMA_ID),jobId:z.uuid(),projectId:z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/),captureId:z.uuid(),projectRevision:z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),status,previewOnly:z.literal(true),
  stages:z.tuple([
-  z.strictObject({kind:z.literal('repair'),status,params:z.strictObject({weldMm:z.literal(.01),componentFraction:z.literal(.01),componentMetric:z.literal('area'),holeMaxEdges:z.literal(0),voxelSizeMm:z.literal(.3),forceVoxel:z.literal(false),denoiseIterations:z.literal(1),denoiseFactor:z.literal(.1),denoiseMaxMm:z.literal(.05),sharpAngleDeg:z.literal(30),deviationSamples:z.literal(10000)})}),
+  z.strictObject({kind:z.literal('repair'),status,params:repairParams}),
   z.strictObject({kind:z.literal('measure'),status,params:z.strictObject({units:z.literal('mm')})}),
   z.strictObject({kind:z.literal('render'),status,params:z.strictObject({units:z.literal('mm'),resolution:z.literal(512)})})
  ]),reference:ScanReferenceSchema.optional(),measuredPrincipalExtentsMm:DimensionsMmSchema.optional(),

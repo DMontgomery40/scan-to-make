@@ -55,12 +55,17 @@ All distances below are in mm, independent of input units.
 | Floaters | `--component-fraction .01 --component-metric area` | Drop vertex-connected components whose area is below the fraction of the largest component; `volume` requires closed components |
 | Holes | `--hole-max-edges 0` | Fill boundary loops; 0 allows all sizes, positive values bound loop edge count |
 | Manifold | `--voxel-size-mm .3`, optional `--force-voxel` | Recalculate normals; use voxel remesh if topology is still open/non-manifold, or explicitly forced |
-| Denoise | `--denoise-iterations 1 --denoise-factor .1 --denoise-max-mm .05 --sharp-angle-deg 30` | Simultaneous Laplacian steps; freeze sharp-edge and boundary vertices; clamp cumulative vertex displacement from this step's start |
+| Denoise | `--denoise-iterations 15 --denoise-factor .5 --denoise-mu -.53 --denoise-max-mm .35 --sharp-angle-deg 30` | Taubin cycles: a shrinking λ (`factor`) step then an inflating μ step, each moving vertices toward their inverse-edge-length-weighted neighbour average; freeze sharp-edge and boundary vertices; after each whole cycle, clamp cumulative vertex displacement from this step's start |
 | Decimate | optional `--target-faces N` | Triangulate, then collapse toward a target triangle count; Blender may not achieve the exact target |
 | Orient | always | Vertex-covariance PCA, descending eigenvalues, sign convention and right-handed frame; centre XY bounds and rest lowest vertex at Z=0 |
 
-Denoise iterations are bounded to 0–10, factor to 0–0.5, and sharp angle to
-0–90 degrees. The voxel fallback is bounded to 512 cells along the longest
+Denoise cycles are bounded to 0–50, λ to (0, 0.5], μ to [−1, 0), and sharp
+angle to 0–90 degrees. The Taubin pass-band 1/λ + 1/μ must lie in (0, 0.2]:
+at or below 0 the cycles shrink the mesh, and above 0.2 they amplify noise
+(λ .1 with μ −.53 gives 8.1, so every frequency grows). The defaults give 0.113. Inverse edge-length
+weights stop long Object Capture fill edges from pulling their vertices, and
+clamping whole cycles stops a clipped λ step leaving the μ step to inflate
+the vertex. `--denoise-iterations 0` disables denoising. The voxel fallback is bounded to 512 cells along the longest
 axis; choose a larger voxel size if rejected. Voxelization and decimation can
 erase detail, including sharp features; denoising alone protects the detected
 sharp vertices. The fallback runs only when needed unless forced.

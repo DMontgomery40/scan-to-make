@@ -13,4 +13,8 @@ test('actual Blender 5.0.1: retained synthetic metric box, repair, measure, ten 
  const f=await fixture(t,runner);const {job}=await f.store.start({...f.input,request:{reference:{dimensionsMm:[60,40,20]}}});await f.store.wait();const saved=(await f.store.load(f.input,job.jobId)).job;
  assert.equal(saved.status,'succeeded',JSON.stringify(saved));assert.equal(Object.keys(saved.artifacts).length,13);for(const x of saved.comparison.errorMm)assert(Math.abs(x)<.01);
  for(const name of Object.keys(saved.artifacts))await f.store.artifact(f.input,job.jobId,name);
+ // The recorded params must be what scan-repair actually ran.
+ const {repair}=JSON.parse((await f.store.artifact(f.input,job.jobId,'report.json')).bytes.toString('utf8'));
+ const denoise=repair.operations.find(o=>o.name==='denoise'),params=saved.stages[0].params;
+ assert.deepEqual([denoise.iterations,denoise.factor,denoise.mu,denoise.maxDisplacementMm],[params.denoiseIterations,params.denoiseFactor,params.denoiseMu,params.denoiseMaxMm]);
 });
