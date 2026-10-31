@@ -37,15 +37,21 @@ def transform_evidence(source, directory, rotation, origin):
     for vertex in source.data.vertices:
         vertex.co = rotation @ (vertex.co-origin)
     source.data.update()
-    for filename,field in (('features.json','centreMm'),('samples.json','pointMm')):
+    samples=None
+    for filename,field in (('samples.json','pointMm'),('features.json','centreMm')):
         path = directory/filename
         if path.exists():
             items = json.loads(path.read_text())
             for item in items:
                 item[field] = list(rotation @ (Vector(item[field])-origin))
-                if filename=='features.json' and 'extentsMm' in item:
-                    item['extentsMm'] = (np.abs(np.array(rotation)) @ np.array(item['extentsMm'])).tolist()
-                    item['extentMethod'] = 'conservative rotated prior cluster bounding box'
+                if filename=='features.json':
+                    if 'sampleIndices' in item:
+                        if samples is None:samples=json.loads((directory/'samples.json').read_text())
+                        points=np.array([samples[i]['pointMm'] for i in item['sampleIndices']])
+                        item.update(evidence.describe(points,item['sampleIndices']))
+                    else:
+                        item['extentsMm'] = (np.abs(np.array(rotation)) @ np.array(item['extentsMm'])).tolist()
+                        item['extentMethod'] = 'conservative rotated prior cluster bounding box'
             core.write_json(path,items)
 
 
@@ -135,17 +141,32 @@ def execute(config):
             new,data = geometry.cut(obj,bm,args,core)
             bm.free()
             bm = new
-        elif operation=='sample_texture':
-            sampled = evidence.samples(source,args['count'],args['seed'],texture=True)
+        elif operation in ('sample_texture','sample_texture_region'):
+            region=(args['min_mm'],args['max_mm']) if operation=='sample_texture_region' else None
+            prior=[]
+            if args.get('retain_samples')=='append':
+                prior=json.loads((directory/'samples.json').read_text())
+                if len(prior)+args['count']>20000:raise ValueError('combined texture sample cap exceeded')
+            sampled = evidence.samples(source,args['count'],args['seed'],texture=True,region=region)
+            sampled=prior+sampled
             core.write_json(directory/'samples.json',sampled)
+            (directory/'features.json').unlink(missing_ok=True)
             data = {'samples':len(sampled),'preview':sampled[:128],
                     'evidenceFrame':'retained source; nearest texel; Blender RGB',
-                    'artifact':'samples.json'}
+                    'artifact':'samples.json','regionBoundsMm':region}
         elif operation=='find_features':
             sampled = json.loads((directory/'samples.json').read_text())
-            features = evidence.clusters(sampled,args['threshold'],args['link_mm'],args['min_samples'])
+            features = evidence.clusters(sampled,args['threshold'],args['link_mm'],args['min_samples'],
+                                         args.get('contrast_min',0),args.get('contrast_radius_mm',1.5))
             core.write_json(directory/'features.json',features)
-            data = {'features':features,'semanticLabelsInferred':False}
+            data = {'features':[{k:v for k,v in f.items() if k!='sampleIndices'} for f in features],'semanticLabelsInferred':False,
+                    'contrastMethod':'approximate spatial median, at most 64 neighbours per sample' if args.get('contrast_min',0) else 'disabled'}
+        elif operation=='fit_feature_plane':
+            features=json.loads((directory/'features.json').read_text())
+            sampled=json.loads((directory/'samples.json').read_text())
+            fitted=evidence.fit_plane(sampled,features,args['feature_ids'],args['tolerance_mm'],args['min_inlier_fraction'])
+            core.write_json(directory/'features.json',features+[fitted])
+            data={'feature':{k:v for k,v in fitted.items() if k!='sampleIndices'},'semanticLabelsInferred':False}
         elif operation=='feature_frame':
             features = json.loads((directory/'features.json').read_text())
             rotation,origin = geometry.feature_frame(features,args)
@@ -153,6 +174,32 @@ def execute(config):
                 vertex.co = rotation @ (vertex.co-origin)
             transform_evidence(source,directory,rotation,origin)
             data = {'rotation':list(map(list,rotation)),'originMm':list(origin)}
+        elif operation=='render_features':
+            import closeups
+            features=json.loads((directory/'features.json').read_text())
+            sampled=json.loads((directory/'samples.json').read_text())
+            if max(args['feature_ids'])>=len(features):raise ValueError('feature ID not present in current evidence')
+            indices=sorted({i for fid in args['feature_ids'] for i in features[fid]['sampleIndices']})
+            points=np.array([sampled[i]['pointMm'] for i in indices])
+            # At most 2048 tiny markers; they show observations, not invented cuts.
+            displayed=points[np.linspace(0,len(points)-1,min(2048,len(points)),dtype=int)]
+            edges=[[list(p-np.eye(3)[axis]*.035),list(p+np.eye(3)[axis]*.035)] for p in displayed for axis in range(3)]
+            direction=Vector(args['view_direction']).normalized()
+            overall=float(np.ptp(np.array([v.co[:] for v in source.data.vertices]),axis=0).max())
+            marker_radius=max(.025,.65*max(float(np.linalg.norm(np.ptp(points,axis=0)))*1.25,overall*.65)/args['resolution'])
+            target={'targetMm':points.mean(0).tolist(),'viewDirection':list(direction),'distanceMm':max(100,float(np.ptp(points,axis=0).max())*4),
+                    'regionBoundsMm':{'min':points.min(0).tolist(),'max':points.max(0).tolist()},
+                    '_faces':[],'_openingEdges':edges,'_markerRadiusMm':marker_radius}
+            display=source.copy();display.data=source.data.copy();bpy.context.collection.objects.link(display)
+            display.hide_set(False);display.hide_render=False;source.hide_render=True;obj.hide_render=True
+            display_bm=bm_from(display)
+            path=directory/('feature-view-%04d.png'%config['sequence'])
+            try:closeups.render_target(display,display_bm,target,path,args['resolution'],core)
+            finally:
+                display_bm.free();mesh=display.data;bpy.data.objects.remove(display,do_unlink=True);bpy.data.meshes.remove(mesh)
+                obj.hide_render=False
+            data={'featureIds':args['feature_ids'],'containsTexture':False,'evidenceFrame':'retained source',
+                  'displayedSamples':len(displayed),'markerRadiusMm':marker_radius,'artifacts':{path.name:core.sha(path)}}
         elif operation=='classify_regions':
             data = evidence.classify(source,args['saturation_min'])
         elif operation=='deviation':

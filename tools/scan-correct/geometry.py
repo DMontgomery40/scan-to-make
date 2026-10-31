@@ -62,9 +62,20 @@ def smooth(bm, iterations, factor):
 
 
 def feature_frame(features, args):
+    if max(args[k] for k in ('origin_feature','x_feature','plane_feature'))>=len(features):
+        raise ValueError('feature ID not present in current evidence')
     origin = Vector(features[args['origin_feature']]['centreMm'])
-    x = Vector(features[args['x_feature']]['centreMm'])-origin
-    y = Vector(features[args['plane_feature']]['centreMm'])-origin
+    if args.get('mode','centres')=='principal_axes':
+        xf,pf=features[args['x_feature']],features[args['plane_feature']]
+        xs,ps=xf['principalRmsMm'],pf['principalRmsMm']
+        if xs[0]<.01 or ps[1]<.01 or xs[0]<1.5*xs[1] or ps[1]<.1*ps[0] or ps[2]>.3*ps[1]:
+            raise ValueError('feature axes require an elongated cluster and a non-collinear planar cluster')
+        x=Vector(xf['principalAxes'][0]);y=Vector(pf['principalAxes'][2])
+        if abs(x.dot(y))>.25:
+            raise ValueError('feature long axis and plane normal disagree')
+    else:
+        x = Vector(features[args['x_feature']]['centreMm'])-origin
+        y = Vector(features[args['plane_feature']]['centreMm'])-origin
     if x.length < .01 or x.cross(y).length < .01:
         raise ValueError('feature datums are coincident/collinear')
     x.normalize()
