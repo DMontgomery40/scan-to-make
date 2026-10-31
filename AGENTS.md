@@ -44,3 +44,7 @@ Hardware purchases and paid cloud deployments spend David's money: ask him first
 Don't add restrictions David never gave. Before writing a rule into AGENTS.md, a brief, memory or docs, point to where he said it. If you can't, it isn't a rule.
 
 Keep credentials, personal captures, private coordination and provider usage details out of Git. Never put agent attribution or session links in Git/GitHub commits, PRs or release notes. Shared local team records are private coordination, not public product documentation.
+
+## Local PR checks
+
+Before pushing, run `scripts/ci-local.sh all --changed-only` and the local reviews described in [scripts/README.md](scripts/README.md). Paste the command/result summary into the PR and its KAN ticket. The workflow YAML is the test source of truth; the guide explains local runtime selection and Mac launchd execution. This is David's local-gate process from 2026-10-31 (KAN-181); the lead routes current-head bot verdicts and calls merges.
