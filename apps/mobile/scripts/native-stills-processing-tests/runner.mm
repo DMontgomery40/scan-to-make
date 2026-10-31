@@ -200,7 +200,7 @@ static void Require(BOOL ok,NSString *why){if(!ok){fprintf(stderr,"FAIL %s\n",wh
  self.bridge=[StillsProcessingBridge new];self.pair=[CompanionPairing new];
  if([NSProcessInfo.processInfo.arguments containsObject:@"--cleanup"]){[self.pair disconnectResolve:^(id r){exit(0);} reject:^(NSString*c,NSString*m,NSError*e){exit(1);}];return;}
  if([NSUserDefaults.standardUserDefaults integerForKey:@"phase"]>0){[self.pair statusResolve:^(id r){Require([r[@"state"] isEqual:@"paired"],@"pairing survived process restart");[self withContext:^{[self phaseTwo];}];} reject:^(NSString*c,NSString*m,NSError*e){Require(NO,c);}];return;}
- [self.pair pairURL:config[@"invitation"][@"baseUrl"] code:config[@"invitation"][@"code"] deviceName:@"Stills processing native fixture" resolve:^(id r){Require(r[@"token"]==nil,@"secret-free metadata");[self withContext:^{[self phaseOne];}];} reject:^(NSString*c,NSString*m,NSError*e){Require(NO,c);}];
+ [self.pair pairURL:config[@"invitation"][@"baseUrl"] code:config[@"invitation"][@"code"] deviceName:@"Stills processing native fixture" certificateSha256:nil resolve:^(id r){Require(r[@"token"]==nil,@"secret-free metadata");[self withContext:^{[self phaseOne];}];} reject:^(NSString*c,NSString*m,NSError*e){Require(NO,c);}];
 }
 @end
 @interface SceneDelegate:UIResponder<UIWindowSceneDelegate>

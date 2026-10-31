@@ -85,7 +85,12 @@ export function CompanionScreen({
       const parsed = invitation(code, url);
       // Do not retain the invitation in the form after exchange, even on error.
       setCode('');
-      return native!.pair(parsed.baseUrl, parsed.code, name.trim());
+      return native!.pair(
+        parsed.baseUrl,
+        parsed.code,
+        name.trim(),
+        parsed.certificateSha256 ?? null,
+      );
     }, 'Paired securely on this device. Check connection to verify the companion is ready.');
   const pairWith = (value: string) =>
     run(async () => {
@@ -94,6 +99,7 @@ export function CompanionScreen({
         parsed.baseUrl,
         parsed.code,
         name.trim() || 'My phone',
+        parsed.certificateSha256 ?? null,
       );
     }, 'Paired with your computer.');
   const scan = async () => {
@@ -227,8 +233,8 @@ export function CompanionScreen({
                 </Text>
                 <Text style={type.body}>
                   Open the Scan to Make companion on your computer and scan the
-                  QR code it shows. Both devices need to be on your Tailscale
-                  network.
+                  QR code it shows. Your phone needs to reach your computer: the
+                  same Wi-Fi, your VPN or Tailscale.
                 </Text>
                 <Button
                   label={busy ? 'Connecting…' : 'Scan QR code'}

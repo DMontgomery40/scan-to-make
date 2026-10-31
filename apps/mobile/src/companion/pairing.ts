@@ -12,6 +12,8 @@ export interface CompanionNative {
     baseUrl: string,
     code: string,
     deviceName: string,
+    /** SHA-256 of the companion's certificate; when set, only it is trusted. */
+    certificateSha256: string | null,
   ): Promise<PairingStatus>;
   check(): Promise<PairingStatus>;
   disconnect(): Promise<PairingStatus>;
@@ -28,15 +30,17 @@ const errors: Record<string, string> = {
   unauthorized:
     'This code or device pairing was rejected or revoked. Get a new invitation from your companion and connect again.',
   forbidden:
-    'Access was denied. Check that both devices use the intended Tailscale account and that the companion allows this device.',
+    'Access was denied. Check that the companion allows this device, and that you’re on the network or Tailscale account it expects.',
   'rate-limited':
     'Too many pairing attempts. Wait a minute, then use a fresh invitation.',
+  'certificate-changed':
+    'Your computer’s companion presented a different certificate. Scan a new QR code from it.',
   certificate:
     'The companion’s HTTPS certificate could not be verified. Check the exact address and ask the host owner to repair HTTPS. Certificate checks stay enabled.',
   'wrong-host':
     'The companion redirected to another address. Check the original HTTPS address; credentials were not forwarded.',
   network:
-    'Couldn’t reach your companion. Check that it is running and both devices are connected to the same Tailscale network, then retry.',
+    'Couldn’t reach your companion. Check that it’s running and that your phone can reach your computer (the same Wi-Fi, your VPN or Tailscale), then retry.',
   timeout:
     'The companion took too long to respond. Check its connection and retry.',
   unavailable:
@@ -55,9 +59,15 @@ const errors: Record<string, string> = {
 export function pairingError(error: unknown): string | undefined {
   return errors[(error as { code?: string })?.code ?? ''];
 }
+// Lowercase hex SHA-256 of the companion's certificate, as it prints it.
+const PIN = /^[a-f0-9]{64}$/;
+const PINNED_URL =
+  /^https:\/\/(\[[0-9a-f:.]+\]|\d{1,3}(\.\d{1,3}){3}|[a-z0-9-]+|([a-z0-9-]+\.)+local)(:\d{1,5})?\/?$/i;
+
 export function invitation(input: string, baseUrl: string, now = Date.now()) {
   let code = input.trim();
   let url = baseUrl.trim();
+  let pin: string | undefined;
   if (code.startsWith('{')) {
     let payload;
     try {
@@ -70,7 +80,9 @@ export function invitation(input: string, baseUrl: string, now = Date.now()) {
       payload.version !== 1 ||
       typeof payload.baseUrl !== 'string' ||
       typeof payload.code !== 'string' ||
-      !Number.isSafeInteger(payload.expiresAt)
+      !Number.isSafeInteger(payload.expiresAt) ||
+      (payload.certificateSha256 !== undefined &&
+        !PIN.test(String(payload.certificateSha256)))
     ) {
       throw { code: 'invalid-invitation' };
     }
@@ -82,10 +94,19 @@ export function invitation(input: string, baseUrl: string, now = Date.now()) {
     }
     url = payload.baseUrl;
     code = payload.code;
+    pin = payload.certificateSha256;
   }
   // Native validation is authoritative, including Simulator-only fixture URLs.
   if (!url || !/^[A-Za-z0-9_-]{32}$/.test(code)) {
     throw { code: 'invalid-invitation' };
   }
-  return { baseUrl: url, code };
+  // A pinned companion uses its own certificate, which iOS only allows on an
+  // IP address, a name ending in .local (one or more labels before it) or a
+  // single-label name, as native checks.
+  if (pin && !PINNED_URL.test(url)) {
+    throw { code: 'invalid-invitation' };
+  }
+  return pin
+    ? { baseUrl: url, code, certificateSha256: pin }
+    : { baseUrl: url, code };
 }

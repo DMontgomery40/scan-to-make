@@ -112,6 +112,7 @@ it('clears invitation after a failed exchange and permits retry without clearing
     paired.baseUrl,
     'A'.repeat(32),
     'My phone',
+    null,
   );
   expect(
     tree.root.findByProps({ accessibilityLabel: 'Pairing code or invitation' })
@@ -152,7 +153,12 @@ it('scanning the companion QR pairs straight away, without typing', async () => 
   const { tree, native } = await unpaired({ scanner });
   expect(tree.root.findAllByType(TextInput)).toHaveLength(0);
   await press(tree, 'Scan QR code');
-  expect(native.pair).toHaveBeenCalledWith(paired.baseUrl, qrCode, 'My phone');
+  expect(native.pair).toHaveBeenCalledWith(
+    paired.baseUrl,
+    qrCode,
+    'My phone',
+    null,
+  );
   expect(text(tree)).toContain('Paired with your computer.');
   await act(async () => tree.unmount());
 });
@@ -195,7 +201,12 @@ it('a pairing link from the Camera app pairs once when the screen opens', async 
   const { tree, native } = await unpaired({ link: qrLink(), onLinkUsed });
   expect(onLinkUsed).toHaveBeenCalledTimes(1);
   expect(native.pair).toHaveBeenCalledTimes(1);
-  expect(native.pair).toHaveBeenCalledWith(paired.baseUrl, qrCode, 'My phone');
+  expect(native.pair).toHaveBeenCalledWith(
+    paired.baseUrl,
+    qrCode,
+    'My phone',
+    null,
+  );
   await act(async () => tree.unmount());
 });
 
@@ -245,5 +256,23 @@ it('a link waits while the stored pairing cannot be read', async () => {
     );
   });
   expect(native.pair).not.toHaveBeenCalled();
+  await act(async () => tree.unmount());
+});
+
+it('a QR with a certificate pin passes the pin to the native pairing', async () => {
+  const pin = 'ab'.repeat(32);
+  const lanLink = qrLink().replace(
+    encodeURIComponent(paired.baseUrl!),
+    encodeURIComponent('https://192.168.1.20:9077'),
+  );
+  const scanner = { scan: jest.fn(async () => lanLink + '&f=' + pin) };
+  const { tree, native } = await unpaired({ scanner });
+  await press(tree, 'Scan QR code');
+  expect(native.pair).toHaveBeenCalledWith(
+    'https://192.168.1.20:9077',
+    qrCode,
+    'My phone',
+    pin,
+  );
   await act(async () => tree.unmount());
 });
