@@ -194,20 +194,32 @@ def apply_modifier(obj,bm,kind, **params):
 
 
 def denoise(bm,a):
-    original = {v:v.co.copy() for v in bm.verts}
-    locked = {v for e in bm.edges if not e.is_manifold or e.calc_face_angle(0)>math.radians(a["sharp_angle_deg"]) for v in e.verts}
+    # Taubin lambda|mu cycles: the negative mu pass undoes the shrinkage of each lambda pass.
+    bm.verts.index_update()
+    co = np.array([tuple(v.co) for v in bm.verts]).reshape(-1,3)
+    original = co.copy()
+    sharp = math.radians(a["sharp_angle_deg"])
+    pairs = np.array([[v.index for v in e.verts] for e in bm.edges],dtype=np.int64).reshape(-1,2)
+    locked = np.zeros(len(co),dtype=bool)
+    locked[np.array([v.index for e in bm.edges if not e.is_manifold or e.calc_face_angle(0)>sharp
+                     for v in e.verts],dtype=np.int64)] = True
+    i, j = np.concatenate([pairs[:,0],pairs[:,1]]), np.concatenate([pairs[:,1],pairs[:,0]])
+    free = ~locked & (np.bincount(i,minlength=len(co)) > 0)
     for _ in range(a["denoise_iterations"]):
-        positions = {}
-        for v in bm.verts:
-            if v in locked or not v.link_edges:
-                continue
-            avg = sum((e.other_vert(v).co for e in v.link_edges), Vector())/len(v.link_edges)
-            delta = v.co.lerp(avg,a["denoise_factor"])-original[v]
-            if delta.length > a["denoise_max_mm"]:
-                delta = delta.normalized()*a["denoise_max_mm"]
-            positions[v] = original[v]+delta
-        for v,p in positions.items():
-            v.co = p
+        moved = co.copy()
+        for step in (a["denoise_factor"],a["denoise_mu"]):
+            # Inverse edge-length weights keep uneven scan tessellation from dragging vertices.
+            weight = 1/np.maximum(np.linalg.norm(moved[j]-moved[i],axis=1),1e-9)
+            total = np.bincount(i,weight,len(co))
+            mean = np.stack([np.bincount(i,weight*moved[j,k],len(co)) for k in range(3)],axis=1)
+            moved[free] += step*(mean/np.maximum(total,1e-300)[:,None]-moved)[free]
+        # Clamp whole cycles: clipping only the lambda half would let mu inflate the vertex.
+        delta = moved-original
+        length = np.linalg.norm(delta,axis=1)
+        co = original+delta*np.minimum(1,a["denoise_max_mm"]/np.maximum(length,1e-300))[:,None]
+    for v in bm.verts:
+        if free[v.index]:
+            v.co = Vector(co[v.index])
     normals(bm)
 
 
@@ -317,7 +329,8 @@ def repair(obj,bm,a):
         normals(bm)
     ops.append({"name":"voxelRemesh","applied":fallback,"forced":a["force_voxel"],"voxelSizeMm":a["voxel_size_mm"],"adaptivity":0})
     denoise(bm,a)
-    ops.append({"name":"denoise","iterations":a["denoise_iterations"],"factor":a["denoise_factor"],
+    ops.append({"name":"denoise","method":"Taubin lambda|mu cycles; inverse edge-length weights",
+                "iterations":a["denoise_iterations"],"factor":a["denoise_factor"],"mu":a["denoise_mu"],
                 "maxDisplacementMm":a["denoise_max_mm"],"sharpAngleDeg":a["sharp_angle_deg"]})
     bmesh.ops.triangulate(bm,faces=list(bm.faces))
     ops.append({"name":"triangulate","quadMethod":"BEAUTY","ngonMethod":"BEAUTY"})

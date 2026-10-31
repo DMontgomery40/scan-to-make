@@ -53,9 +53,10 @@ def parser():
             s.add_argument("--hole-max-edges", type=int, default=0)
             s.add_argument("--voxel-size-mm", type=float, default=.3)
             s.add_argument("--force-voxel", action="store_true")
-            s.add_argument("--denoise-iterations", type=int, default=1)
-            s.add_argument("--denoise-factor", type=float, default=.1)
-            s.add_argument("--denoise-max-mm", type=float, default=.05)
+            s.add_argument("--denoise-iterations", type=int, default=15, help="Taubin cycles")
+            s.add_argument("--denoise-factor", type=float, default=.5, help="Taubin lambda")
+            s.add_argument("--denoise-mu", type=float, default=-.53, help="Taubin mu; negative, |mu| > lambda")
+            s.add_argument("--denoise-max-mm", type=float, default=.35)
             s.add_argument("--sharp-angle-deg", type=float, default=30)
             s.add_argument("--target-faces", type=int)
             s.add_argument("--deviation-samples", type=int, default=10000)
@@ -80,13 +81,15 @@ def main():
             raise ValueError("units must have a positive finite scale")
         config["scale_mm"] = scale
         for key, value in config.items():
-            if isinstance(value,float) and (not math.isfinite(value) or value < 0):
+            if isinstance(value,float) and (not math.isfinite(value) or (value < 0 and key != "denoise_mu")):
                 raise ValueError(key+" must be finite and nonnegative")
         if a.command == "repair":
-            if not 0 <= a.component_fraction < 1 or not 0 <= a.denoise_factor <= .5:
-                raise ValueError("component fraction must be [0,1); denoise factor [0,.5]")
-            if not 0 <= a.denoise_iterations <= 10 or not 0 <= a.sharp_angle_deg <= 90:
-                raise ValueError("denoise iterations must be [0,10]; sharp angle [0,90]")
+            if not 0 <= a.component_fraction < 1 or not 0 < a.denoise_factor <= .5:
+                raise ValueError("component fraction must be [0,1); denoise factor (0,.5]")
+            if not -1 <= a.denoise_mu < -a.denoise_factor:
+                raise ValueError("denoise mu must be [-1,-factor) so Taubin cycles do not shrink")
+            if not 0 <= a.denoise_iterations <= 50 or not 0 <= a.sharp_angle_deg <= 90:
+                raise ValueError("denoise iterations must be [0,50]; sharp angle [0,90]")
             if a.voxel_size_mm <= 0 or a.deviation_samples < 1 or a.hole_max_edges < 0:
                 raise ValueError("invalid voxel size, sample count or hole limit")
             if a.target_faces is not None and a.target_faces < 4:

@@ -4,6 +4,7 @@ import json
 import math
 import os
 from pathlib import Path
+import random
 import shutil
 import struct
 import subprocess
@@ -15,6 +16,35 @@ ROOT = Path(__file__).resolve().parents[1]
 BLENDER = os.environ.get("BLENDER") or shutil.which("blender") or "/Applications/Blender.app/Contents/MacOS/Blender"
 CUBE = [(-1,-1,-1),(1,-1,-1),(1,1,-1),(-1,1,-1),(-1,-1,1),(1,-1,1),(1,1,1),(-1,1,1)]
 FACES = [(0,3,2,1),(4,5,6,7),(0,1,5,4),(1,2,6,5),(2,3,7,6),(3,0,4,7)]
+
+
+def icosphere(radius, levels, noise=0, seed=0):
+    t = (1+5**.5)/2
+    verts = [(-1,t,0),(1,t,0),(-1,-t,0),(1,-t,0),(0,-1,t),(0,1,t),(0,-1,-t),(0,1,-t),
+             (t,0,-1),(t,0,1),(-t,0,-1),(-t,0,1)]
+    faces = [(0,11,5),(0,5,1),(0,1,7),(0,7,10),(0,10,11),(1,5,9),(5,11,4),(11,10,2),(10,7,6),(7,1,8),
+             (3,9,4),(3,4,2),(3,2,6),(3,6,8),(3,8,9),(4,9,5),(2,4,11),(6,2,10),(8,6,7),(9,8,1)]
+    for _ in range(levels):
+        cache, split = {}, []
+        def mid(a, b):
+            key = (min(a,b), max(a,b))
+            if key not in cache:
+                cache[key] = len(verts)
+                verts.append(tuple((p+q)/2 for p,q in zip(verts[a], verts[b])))
+            return cache[key]
+        for a,b,c in faces:
+            ab, bc, ca = mid(a,b), mid(b,c), mid(c,a)
+            split += [(a,ab,ca),(b,bc,ab),(c,ca,bc),(ab,bc,ca)]
+        faces = split
+    rng = random.Random(seed)
+    return [tuple(c/math.hypot(*v)*(radius+rng.uniform(-noise,noise)) for c in v) for v in verts], faces
+
+
+def radial_roughness(points):
+    centre = [sum(axis)/len(points) for axis in zip(*points)]
+    radii = [math.dist(v, centre) for v in points]
+    mean = sum(radii)/len(radii)
+    return math.sqrt(sum((r-mean)**2 for r in radii)/len(radii))
 
 
 @unittest.skipUnless(Path(BLENDER).is_file(), "Blender absent; set BLENDER to Blender 5.0.1 to run real integration tests")
@@ -82,6 +112,21 @@ class RepairTests(unittest.TestCase):
         self.assertLess(r["deviation"]["maxMm"], 1e-5)
         self.assertEqual(r["after"]["vertices"], 8)
 
+    def test_default_denoise_smooths_without_shrinking(self):
+        # Seeded radial noise on a sphere: plain Laplacian steps shrink it; Taubin must not.
+        vertices, faces = icosphere(20, 4, noise=.05, seed=7)
+        r = self.repair(self.mesh("noisy-sphere.obj", vertices, faces))
+        repaired = [tuple(map(float, line.split()[1:])) for line in
+                    (self.base/"out"/"repaired.obj").read_text().splitlines() if line.startswith("v ")]
+        self.assertLess(radial_roughness(repaired), radial_roughness(vertices)*.5)
+        # Laplacian steps at the same lambda lose about 5% here; Taubin stays within 0.5%.
+        self.assertAlmostEqual(r["after"]["volumeMm3"]/r["before"]["volumeMm3"], 1, delta=.005)
+        self.assertEqual((r["after"]["vertices"], r["after"]["faces"]),
+                         (r["before"]["vertices"], r["before"]["faces"]))
+        denoise = next(o for o in r["operations"] if o["name"]=="denoise")
+        self.assertEqual((denoise["iterations"], denoise["factor"], denoise["mu"], denoise["maxDisplacementMm"]),
+                         (15, .5, -.53, .35))
+
     def test_nonmanifold_join_uses_fallback(self):
         p = self.mesh("join.obj", CUBE+[(0,0,2)], FACES+[(4,5,8)])
         r = self.repair(p, "--voxel-size-mm", ".15")
@@ -124,7 +169,8 @@ class RepairTests(unittest.TestCase):
 
     def test_reject_invalid_parameters(self):
         p = self.mesh("invalid.obj", CUBE,FACES)
-        for args in [("--voxel-size-mm","0"),("--denoise-iterations","11"),
+        for args in [("--voxel-size-mm","0"),("--denoise-iterations","51"),("--denoise-mu","-.4"),
+                     ("--denoise-mu","nan"),("--denoise-factor","0"),
                      ("--weld-mm","nan"),("--target-faces","0")]:
             self.run_cli("repair",p,"--units","mm","--out",self.base/"invalid",*args,ok=False)
 
