@@ -45,8 +45,8 @@ jobs:
           bash -n deploy/companion/download-blender.sh
           bash -n deploy/companion/smoke.sh
           python3 deploy/companion/test_macos.py -v
-      - name: Build companion image
-        run: docker build --platform linux/amd64 -t scan-to-make-companion:local -f deploy/companion/Dockerfile .
+      - name: Build with secret, dependency and capture sentinels
+        run: bash deploy/companion/context-smoke.sh
       - name: Container, auth, Blender and both MCP servers
         run: bash deploy/companion/smoke.sh
       - name: Validate Compose configuration

@@ -93,7 +93,8 @@ bash deploy/companion/install-macos.sh my-mac.my-tailnet.ts.net me@example.com
 
 The installer uses Homebrew when present to install Node 24 and Python 3.12.
 Without Homebrew it accepts an existing Node 24 plus Python 3.10+ with compatible
-USD/HEIC wheels. It builds a committed source snapshot in
+USD/HEIC wheels. It always snapshots the current `HEAD` commit, not uncommitted changes.
+It builds that source snapshot in
 `~/Library/Application Support/Scan to Make/releases/`, installs both npm MCPs,
 and creates `~/Library/LaunchAgents/org.scantomake.companion.plist`. It starts
 at login, runs as you, and restarts after a crash. The computer must be awake

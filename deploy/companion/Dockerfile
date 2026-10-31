@@ -1,4 +1,8 @@
 # syntax=docker/dockerfile:1
+# CI can export the exact filtered build context without npm/apt changing it.
+FROM scratch AS context-audit
+COPY . /
+
 FROM node:24-bookworm-slim@sha256:c86ecead9e55a5210ac1727de38a4ca840bf03dcaf34dc9749addbf383b1920c
 ARG TARGETARCH
 RUN test "$TARGETARCH" = amd64 || (echo 'Blender 5.0.1 publishes Linux x64 only' >&2; exit 1)
