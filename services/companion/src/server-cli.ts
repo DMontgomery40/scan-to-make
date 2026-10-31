@@ -6,6 +6,8 @@ import {DetailStillStore} from './detail-stills.js';
 import {createCaptureConverter} from './capture-converter.js';
 import { startCompanionServer } from './server.js';
 import { RemoteAuthStore } from './remote-auth.js';
+import { createPrintHandoffServices } from './print-handoff-http.js';
+import { readPrinterHandoffConfig } from '@scan-to-make/printer-handoff';
 
 // Presence is explicit opt-in. Invalid/empty configuration must fail, never fall back.
 const directory = process.env.SCAN_TO_MAKE_REMOTE_AUTH_DIR;
@@ -24,9 +26,15 @@ if(scanTool!==undefined||scanBlender!==undefined){
  if(!capture||!captureDirectory||!scanTool||!scanBlender)throw new Error('Scan processing requires authenticated capture storage, tool and Blender paths');
  Object.assign(capture,{scanProcessing:new ScanProcessingStore(capture.storage,capture.captures,join(captureDirectory,'captures'),createScanRunner({toolPath:scanTool,blender:scanBlender,python:process.env.SCAN_TO_MAKE_CAPTURE_PYTHON??'python3'}))});
 }
+const handoffConfigPath=process.env.SCAN_TO_MAKE_PRINTER_HANDOFF_CONFIG||undefined;
+const handoffDirectory=process.env.SCAN_TO_MAKE_PRINTER_HANDOFF_DIR||undefined;
+if((handoffConfigPath===undefined)!==(handoffDirectory===undefined))throw new Error('Printer handoff requires both its config path and bundle directory');
+if(handoffConfigPath!==undefined&&(!remoteAuth||!isAbsolute(handoffConfigPath)||!isAbsolute(handoffDirectory!)))throw new Error('Printer handoff requires authentication and absolute config and directory paths');
+const printHandoff=handoffConfigPath===undefined?undefined:createPrintHandoffServices(await readPrinterHandoffConfig(handoffConfigPath),handoffDirectory!);
 // The port variable keeps its original name so existing operator setups still start.
 const server = await startCompanionServer({
   capture,
+  printHandoff,
   remoteAuth,
   port:
     process.env.SCAN_TO_MAKE_GENERATION_PORT === undefined

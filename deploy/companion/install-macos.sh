@@ -33,13 +33,13 @@ export PATH="$(dirname "$node"):$PATH"
 mkdir -p "$state/releases"
 app=$(mktemp -d "$state/releases/install-XXXXXXXX")
 # Install the committed snapshot only, never local credentials, captures or node_modules.
-git -C "$source_root" archive HEAD packages/contracts services/project services/companion \
+git -C "$source_root" archive HEAD packages/contracts services/project services/printer-handoff services/companion \
   tools/capture-mesh-convert tools/capture-pipeline tools/capture-fit-eval \
   tools/scan-repair tools/scan-correct deploy/companion | tar -xf - -C "$app"
 git -C "$source_root" rev-parse HEAD > "$app/REVISION"
-for package in packages/contracts services/project services/companion; do npm ci --prefix "$app/$package"; done
+for package in packages/contracts services/project services/printer-handoff services/companion; do npm ci --prefix "$app/$package"; done
 npm run build --prefix "$app/services/companion"
-for package in packages/contracts services/project services/companion; do npm prune --omit=dev --prefix "$app/$package"; done
+for package in packages/contracts services/project services/printer-handoff services/companion; do npm prune --omit=dev --prefix "$app/$package"; done
 "$python" -m venv "$app/.venv"
 "$app/.venv/bin/pip" install -r "$app/tools/capture-mesh-convert/requirements.txt" -r "$app/tools/scan-correct/requirements.txt"
 npm install --global --prefix "$app/printers/bambu" bambu-printer-mcp@1.1.42
@@ -88,4 +88,4 @@ done
 printf '\nInstalled. Config: %s/companion.env\nCLI: %s/companion\n' "$state" "$state"
 printf 'Enable private HTTPS with: tailscale serve --bg http://127.0.0.1:9077\n'
 printf 'Native capture, repair and AI correction are installed; correction workers have no network access.\n'
-"$state/companion" "$app/services/companion/dist/remote-auth-cli.js" pair-capture "$state/auth" "$2"
+"$state/companion" "$app/services/companion/dist/remote-auth-cli.js" pair-capture-and-printer-handoff "$state/auth" "$2"

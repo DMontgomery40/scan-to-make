@@ -108,6 +108,8 @@ server.setRequestHandler(CallToolRequestSchema, async request => {
   if (name === 'camera_snapshot') return text({format: 'jpeg', base64: 'ZmFrZQ==', savedTo: join(directory, 'snapshot.jpg')});
   if (name === 'print_3mf' || name === 'upload_gcode' || name === 'process_and_print_stl') {
     await confirmPrint();
+    if (process.env.HANDOFF_FIXTURE_DISPATCH === 'crash') process.exit(9);
+    if (process.env.HANDOFF_FIXTURE_DISPATCH === 'timeout') await new Promise(() => {});
     return text({dispatch: 'started', tool: name});
   }
   throw Error(`Unknown fixture tool: ${name}`);

@@ -10,6 +10,7 @@ on:
       - 'tools/scan-correct/**'
       - 'packages/contracts/**'
       - 'services/project/**'
+      - 'services/printer-handoff/**'
       - '.github/workflows/e2e-pipeline.yml'
   push:
     branches: [main]
@@ -21,6 +22,7 @@ on:
       - 'tools/scan-correct/**'
       - 'packages/contracts/**'
       - 'services/project/**'
+      - 'services/printer-handoff/**'
       - '.github/workflows/e2e-pipeline.yml'
 permissions:
   contents: read
@@ -39,6 +41,7 @@ jobs:
           cache-dependency-path: |
             packages/contracts/package-lock.json
             services/project/package-lock.json
+            services/printer-handoff/package-lock.json
             services/companion/package-lock.json
             tests/e2e/package-lock.json
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
@@ -78,6 +81,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libegl1 libgl1 libxkbcommon0 libsm6 libxi6 libxrender1 xvfb xauth libseccomp2
       - run: npm ci --prefix packages/contracts --ignore-scripts
       - run: npm ci --prefix services/project --ignore-scripts
+      - run: npm ci --prefix services/printer-handoff --ignore-scripts
       - run: npm ci --prefix services/companion --ignore-scripts
       - run: npm ci --prefix tests/e2e --ignore-scripts
       - name: Run end-to-end pipeline test

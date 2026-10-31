@@ -12,6 +12,8 @@ import {PrinterMcpClient, PrinterMcpError, toolResultJson, toolResultText, type 
 
 export type PrintStep = 'discover' | 'lay_flat' | 'slice_stl' | 'inspect' | 'camera_snapshot' | 'print';
 export interface PrintRunInput {
+  /** Persist a non-replayable intent before sending the print tool call. */
+  beforePrint?: () => Promise<void>;
   stlPath: string;
   selection?: PrinterSelection;
   slicer?: PrinterSlicer;
@@ -40,6 +42,17 @@ export interface ProcessAndPrintInput {
 }
 
 function fail(code: string): never { throw new PrinterMcpError(code); }
+
+/** Bare, phone-safe failure code for a bundle manifest; never a message or path. */
+export function sanitizedFailureReason(error: unknown): string {
+  const code = (error as {code?: unknown})?.code;
+  return typeof code === 'string' && /^[a-z0-9-]{1,64}$/.test(code) ? code : 'print-failed';
+}
+
+/** A print call succeeded even though recording its result failed. */
+export class DispatchedPrintError extends PrinterMcpError {
+  constructor(cause: unknown) { super(sanitizedFailureReason(cause), cause); }
+}
 function defined(args: Record<string, unknown>): Record<string, unknown> {
   return Object.fromEntries(Object.entries(args).filter(([, value]) => value !== undefined));
 }
@@ -51,8 +64,9 @@ function filtered(client: PrinterMcpClient, name: string, args: Record<string, u
   const allowed = new Set(Object.keys(properties));
   return Object.fromEntries(Object.entries(clean).filter(([key]) => allowed.has(key)));
 }
-async function call(client: PrinterMcpClient, name: string, args: Record<string, unknown>, signal?: AbortSignal) {
-  return client.callTool(name, filtered(client, name, args), {signal});
+async function call(client: PrinterMcpClient, name: string, args: Record<string, unknown>, signal?: AbortSignal, beforeDispatch?: () => Promise<void>) {
+  const dispatchSensitive = ['print_3mf', 'upload_gcode', 'process_and_print_stl'].includes(name);
+  return client.callTool(name, filtered(client, name, args), {signal, dispatchSensitive, beforeDispatch});
 }
 function absolutePath(result: Parameters<typeof toolResultText>[0]): string {
   const path = toolResultText(result).trim();
@@ -196,7 +210,7 @@ export class PrinterHandoffRunner {
             vibration_calibration: printOptions.vibrationCalibration,
             layer_inspect: printOptions.layerInspect,
             timelapse: printOptions.timelapse,
-          }, input.signal);
+          }, input.signal, input.beforePrint);
           printed = resultValue(result);
         } else {
           const result = await call(client, 'upload_gcode', {
@@ -207,7 +221,7 @@ export class PrinterHandoffRunner {
             type: selection.printerType,
             host: selection.host,
             port: selection.port,
-          }, input.signal);
+          }, input.signal, input.beforePrint);
           printed = resultValue(result);
         }
       } finally { client.clearElicitationContext(); }
@@ -225,24 +239,43 @@ export class PrinterHandoffRunner {
   async runBundle(store: HandoffBundleStore, id: string, options: {print?: boolean; signal?: AbortSignal} = {}) {
     const manifest = await store.read(id);
     if (manifest.backend !== this.#config.backend) fail('backend-mismatch');
+    if (manifest.status === 'uncertain') fail('dispatch-uncertain');
+    if (manifest.status === 'printed') fail('already-printed');
     // Slice in a throwaway per-run directory: backends write outputs beside
     // the input STL, and a re-slice must never overwrite a manifest-owned
     // artifact before the new one is recorded.
     const workDirectory = await mkdtemp(join(tmpdir(), 'printer-handoff-run-'));
+    let dispatched = false;
     try {
       const inputStl = join(workDirectory, basename(store.stlPath(manifest)));
       await copyFile(store.stlPath(manifest), inputStl);
-      let result: PrintRunResult;
-      try {
-        result = await this.run({stlPath: inputStl, selection: manifest.selection, print: options.print, signal: options.signal});
-      } catch (error) {
-        await store.setStatus(id, 'failed', error instanceof Error ? error.message : 'print failed').catch(() => undefined);
-        throw error;
-      }
+      const result = await this.run({stlPath: inputStl, selection: manifest.selection, print: options.print, signal: options.signal,
+        beforePrint: async () => { await store.setStatus(id, 'uncertain', 'dispatch-uncertain'); },
+      });
+      dispatched = options.print !== false;
+      // A later artifact write must not erase a successful print dispatch
+      // and make the phone offer the same bundle for printing again.
+      if (dispatched) await store.setStatus(id, 'printed');
       const sliced = await readFile(result.slicedPath);
       let updated = await store.recordArtifact(id, 'sliced', basename(result.slicedPath), sliced);
+      if (result.orientedStlPath !== inputStl) {
+        const oriented = await readFile(result.orientedStlPath);
+        updated = await store.recordArtifact(id, 'oriented', basename(result.orientedStlPath), oriented);
+      }
       updated = await store.setStatus(id, options.print === false ? 'sliced' : 'printed');
-      return {manifest: updated, result};
+      // Report persisted bundle paths, not the throwaway run directory.
+      const persisted: PrintRunResult = {
+        ...result,
+        stlPath: store.stlPath(updated),
+        orientedStlPath: updated.artifacts.oriented
+          ? join(store.directory(id), updated.artifacts.oriented.file)
+          : store.stlPath(updated),
+        slicedPath: join(store.directory(id), updated.artifacts.sliced!.file),
+      };
+      return {manifest: updated, result: persisted};
+    } catch (error) {
+      await store.setStatus(id, dispatched ? 'printed' : sanitizedFailureReason(error) === 'dispatch-uncertain' ? 'uncertain' : 'failed', sanitizedFailureReason(error)).catch(() => undefined);
+      throw dispatched ? new DispatchedPrintError(error) : error;
     } finally {
       await rm(workDirectory, {recursive: true, force: true}).catch(() => undefined);
     }

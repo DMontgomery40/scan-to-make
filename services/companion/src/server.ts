@@ -1,4 +1,5 @@
 import {createCaptureRoutes,type CaptureServices} from './capture-http.js';
+import {createPrintHandoffRoutes,type PrintHandoffServices} from './print-handoff-http.js';
 import {acquireInstanceLock} from './instance-lock.js';
 import { createServer, type IncomingMessage } from 'node:http';
 import {
@@ -84,12 +85,13 @@ function singleHeader(
   return value;
 }
 
-/** Loopback listener; remote access requires explicit private Serve authentication. No printer routes. */
+/** Loopback listener; remote access requires explicit private Serve authentication. */
 export async function startCompanionServer(
   options: {
     port?: number;
     remoteAuth?: RemoteAuthStore;
     capture?: CaptureServices;
+    printHandoff?: PrintHandoffServices;
   } = {}
 ): Promise<{ url: string; close(): Promise<void> }> {
   const port = options.port ?? 9077;
@@ -97,10 +99,12 @@ export async function startCompanionServer(
     throw new Error('Invalid local port');
   const auth = options.remoteAuth;
   if(options.capture&&!auth)throw new Error('Capture routes require explicit authentication');
+  if(options.printHandoff&&!auth)throw new Error('Printer handoff routes require explicit authentication');
   // One companion process per capture directory: scan processing assumes its
   // jobs, workers and cancellation all live in this process.
   const instanceLock=options.capture?.scanProcessing?await acquireInstanceLock(options.capture.scanProcessing.directory):undefined;
   const captureRoutes=options.capture?createCaptureRoutes(options.capture):undefined;
+  const printHandoffRoutes=options.printHandoff?createPrintHandoffRoutes(options.printHandoff):undefined;
   let authority = '';
   const server = createServer(async (request, response) => {
     response.setHeader('Content-Type', 'application/json');
@@ -152,6 +156,9 @@ export async function startCompanionServer(
       if(captureRoutes&&request.url?.startsWith('/v1/saved-projects/')){
         await captureRoutes.handle(request,response,authorize,name=>singleHeader(request,name));return;
       }
+      if(printHandoffRoutes&&request.url?.startsWith('/v1/printer-handoff/')){
+        await printHandoffRoutes.handle(request,response,authorize,name=>singleHeader(request,name));return;
+      }
       if (!auth || request.url !== '/v1/pair')
         throw new ServerFailure('not-found');
       if (request.method !== 'POST')
@@ -194,7 +201,9 @@ export async function startCompanionServer(
     }
   });
   server.headersTimeout = 5000;
-  server.requestTimeout = 5000;
+  // Handoff STL uploads are bounded at 64 MiB and need longer than the small
+  // JSON routes; the route body reader enforces its own matching timeout.
+  server.requestTimeout = printHandoffRoutes ? 120000 : 5000;
   server.maxRequestsPerSocket = 1;
   try {
     await new Promise<void>((resolve, reject) => {
@@ -224,9 +233,11 @@ export async function startCompanionServer(
             server.close((error) => (error ? reject(error) : resolve()))
           );
           const capturesStopped=captureRoutes?.close();
+          const handoffStopped=printHandoffRoutes?.close();
           server.closeAllConnections();
           await stopped;
           await capturesStopped;
+          await handoffStopped;
           await instanceLock?.release();
         })();
       return closing;
