@@ -95,5 +95,4 @@ settings digest needs its own coupon.
   the analytic design volume) and against the contract schemas. **No
   physical print has been made or claimed** — first plastic, measurements,
   and the resulting profile are the next evidence step.
-- Geometry files only. No slicing, dispatch, or printer contact lives here;
-  that stays behind the companion's inspection/approval gates.
+- Geometry files only.

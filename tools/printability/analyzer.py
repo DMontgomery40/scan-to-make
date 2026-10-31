@@ -1055,7 +1055,6 @@ def analyze_stl(
         "reasons": reasons,
         "warnings": warnings,
         "dispatchAuthorized": False,
-        "printerContacted": False,
         "provesPhysicalFit": False,
         "input": {
             "fileName": path.name,

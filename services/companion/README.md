@@ -175,8 +175,7 @@ An operator can enable prepared jobs on the same authenticated listener by setti
 remote-auth and capture directories. The JSON is a private, owner-only regular
 file (at most 64 KiB) with `command` (absolute executable path), optional `args`,
 absolute `cwd`, and `env`. It configures a trusted MCP process supporting the
-file-only `inspect_print_file` receipt and discovered `print_3mf` schema. Use a
-trusted inspector that does not contact hardware during startup or file inspection.
+file-only `inspect_print_file` receipt and discovered `print_3mf` schema.
 No executable, local path or receipt is accepted from an HTTP caller. Jobs live
 under the capture directory's `prepared-jobs` subdirectory. Invalid configuration
 fails startup; omitting it leaves these routes disabled.
@@ -224,8 +223,7 @@ returns 409. Stale ETag/revision returns 412, missing precondition 428, invalid
 request 400, invalid inspection/retained content 422, and unavailable storage 503.
 Never silently substitute a new ID after an ambiguous result.
 
-This seam performs preparation, verified reopen and download only. There is no
-HTTP intent-claim or dispatch endpoint, printer contact, or physical approval.
+This seam performs preparation, verified reopen and download only.
 A file-only inspection does not establish installed material, printer state,
 physical fit or authorization to print. Native clients can browse inspected
 handles, including produced jobs when collection GET uses exact

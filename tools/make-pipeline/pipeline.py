@@ -78,7 +78,7 @@ class Pipeline:
         self.started=time.monotonic();self.deadline=self.started+args.max_seconds
         self.active='intake';self.timings=[]
         self.report={'schema':'scan-to-make.make-pipeline/1','status':'failed','previewOnly':True,
-                     'printerContacted':False,'dispatchAuthorized':False,'provesPhysicalFit':False,
+                     'dispatchAuthorized':False,'provesPhysicalFit':False,
                      'referenceMm':self.reference,'referenceInputMm':args.reference,'specComparisonMetric':'boxExtentsMm',
                      'profile':args.profile,'material':args.material,'adapter':args.adapter,'request':args.request,
                      'allowSupports':args.allow_supports,
@@ -310,9 +310,9 @@ class Pipeline:
                       'templateManifest':receipt(design/'manifest.json',self.out),
                       'printability':receipt(self.out/'printability-result.json',self.out),
                       'verdict':data['verdict'],'profile':a.profile,'material':a.material,'allowSupports':a.allow_supports,
-                      'previewOnly':True,'acceptedByHuman':False,'dispatchAuthorized':False,'printerContacted':False,
+                      'previewOnly':True,'acceptedByHuman':False,'dispatchAuthorized':False,
                       'provesPhysicalFit':False,'orientation':'template frame unchanged',
-                      'nextBoundary':'companion accepted-artifact/prepared-job flow; lay_flat, slice_stl, inspect_print_file in credential-free MCP process; separate human-approved dispatch'}
+                      'nextBoundary':'companion accepted-artifact/prepared-job flow: lay_flat, slice_stl, inspect_print_file, then human-approved dispatch'}
             write_json(self.out/'manifest.json',manifest)
             self.report.update(status='complete',checkedArtifact=artifact,manifest=receipt(self.out/'manifest.json',self.out))
             self.persist();(self.out/'summary.txt').write_text(self.summary()+'\n')
@@ -331,4 +331,4 @@ class Pipeline:
 
     def summary(self):
         stages=', '.join(s['stage']+': '+s['verdict'] for s in self.report['stages'])
-        return f"{self.report['status']}. {stages}. Preview only; no printer contact or dispatch."
+        return f"{self.report['status']}. {stages}. Preview only."

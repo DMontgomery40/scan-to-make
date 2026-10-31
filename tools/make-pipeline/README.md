@@ -2,8 +2,8 @@
 
 MIT, Python 3.11+ standard-library subprocess orchestration. This command ends
 at a printability-checked **preview STL plus hash-bound manifest**. It does not
-slice, orient, inspect sliced files, contact a printer, accept a project on the
-user's behalf, or authorize dispatch.
+slice, orient, inspect sliced files, accept a project on the user's behalf, or
+authorize dispatch.
 
 ```sh
 # Use a Python environment with capture-mesh-convert/requirements.txt installed.
@@ -89,12 +89,10 @@ The following capabilities already cover subsequent work and are deliberately
 - `slice_stl` accepts the explicit model, nozzle diameter/type, bed type and
   `orient`/`arrange`; it resolves the exact machine preset and exports sliced 3MF.
 - `inspect_print_file` inspects exact sliced-file bytes and a selected plate
-  without contacting a printer; it establishes no readiness or dispatch authority.
+  and establishes no readiness or dispatch authority.
 
-The companion's accepted-artifact/prepared-job flow owns these calls in a
-separate credential-free process with a file-only tool allowlist and no
-`PRINTER_HOST`, `BAMBU_SERIAL`, `BAMBU_TOKEN`. Human-approved dispatch uses its
-separate credentialed flow. This tool creates no prepared job, approval intent,
+The companion's accepted-artifact/prepared-job flow owns these calls, followed
+by human-approved dispatch. This tool creates no prepared job, approval intent,
 MCP client, slicer wrapper, orientation picker or fake-slicer production flag.
 
 ## Outputs and integrity

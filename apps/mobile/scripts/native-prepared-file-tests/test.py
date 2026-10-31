@@ -1,6 +1,6 @@
 """Bounded real Simulator prepared-file tests. Requires built companion.
 
-Uses a separate disposable app/container, never the product app or physical device.
+Uses a separate disposable app/container.
 Uses real prepared-only credentials and protocol inspection fixtures, not slicing proof.
 """
 import argparse
