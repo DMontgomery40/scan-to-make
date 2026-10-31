@@ -15,6 +15,8 @@ try {
     const store = await RemoteAuthStore.open(directory);
     if(command==='pair-capture'&&args.length===1)
       result=await store.createPairing(args[0]!,['generation:health','projects:read','projects:write','captures:read','captures:import']);
+    else if(command==='pair-printer-handoff'&&args.length===1)
+      result=await store.createPairing(args[0]!,['generation:health','projects:read','projects:write','captures:read','captures:import','printer-handoff:use']);
     else if (command === 'devices' && args.length === 0)
       result = await store.listDevices();
     else if (command === 'revoke' && args.length === 1) {
@@ -25,7 +27,7 @@ try {
   process.stdout.write(`${JSON.stringify(result)}\n`);
 } catch {
   process.stderr.write(
-    'Remote auth operation failed. Check command, private directory, configuration and lock.\nUsage: remote-auth-cli.js init <absolute-new-directory> <fqdn.ts.net> <login> [login...] | pair-capture <directory> <login> | devices <directory> | revoke <directory> <device-id>\n'
+    'Remote auth operation failed. Check command, private directory, configuration and lock.\nUsage: remote-auth-cli.js init <absolute-new-directory> <fqdn.ts.net> <login> [login...] | pair-capture <directory> <login> | pair-printer-handoff <directory> <login> | devices <directory> | revoke <directory> <device-id>\n'
   );
   process.exitCode = 1;
 }

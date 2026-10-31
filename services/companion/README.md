@@ -23,6 +23,7 @@ npm run serve --prefix services/companion
 | `SCAN_TO_MAKE_CAPTURE_DIR` | Saved-project sync, capture import and detail stills; requires authentication |
 | `SCAN_TO_MAKE_CAPTURE_PYTHON` | The Python 3.12 environment with `usd-core==26.8` used for conversion and cleanup |
 | `SCAN_TO_MAKE_SCAN_REPAIR_TOOL`, `SCAN_TO_MAKE_SCAN_BLENDER` | Scan processing (see [SCAN-PROCESSING.md](SCAN-PROCESSING.md)) |
+| `SCAN_TO_MAKE_PRINTER_HANDOFF_CONFIG`, `SCAN_TO_MAKE_PRINTER_HANDOFF_DIR` | Printer handoff bundles and elicitation relay (below); both required together, and authentication |
 
 ## Authenticated private Serve transport
 
@@ -115,3 +116,31 @@ Host-configured Blender repair, measurement, ten canonical views and optional
 reference-dimension errors are available as preview-only capture jobs. See
 [SCAN-PROCESSING.md](SCAN-PROCESSING.md) for configuration, routes, retention,
 resource bounds and tests.
+
+## Printer handoff
+
+Optional routes hand a clean STL to the operator-installed printer MCP
+server (bambu-printer-mcp or mcp-3D-printer-server) through the
+`@scan-to-make/printer-handoff` client. The backend, MCP process command and
+printer selection come only from the operator config file named by
+`SCAN_TO_MAKE_PRINTER_HANDOFF_CONFIG` (see that package's README for its
+schema); bundles are stored under `SCAN_TO_MAKE_PRINTER_HANDOFF_DIR`. The
+phone never chooses the backend, process or printer. Every route requires
+the `printer-handoff:use` scope, granted explicitly by host-local
+`remote-auth-cli.js pair-printer-handoff <auth-directory> <login>` (capture
+pairings do not gain it).
+
+| Route | Behaviour |
+| --- | --- |
+| `POST /v1/printer-handoff/bundles` | Raw `model/stl` body (64 MiB bound); optional percent-encoded `x-handoff-prompt` header. Returns `201 {bundle}` in the configured backend/selection |
+| `GET /v1/printer-handoff/bundles` | `{bundles}` manifests, verified on read |
+| `GET /v1/printer-handoff/bundles/:id` | `{bundle, printing}` |
+| `POST /v1/printer-handoff/bundles/:id/print` | Starts the slice, inspect and print run; `202 {bundleId, printing:true}`. One print at a time (`409 print-busy`); poll the bundle for `sliced`/`printed`/`failed` |
+| `GET /v1/printer-handoff/elicitations` | `{elicitations}` pending printer-server confirmations, including any camera snapshot |
+| `POST /v1/printer-handoff/elicitations/:id/respond` | JSON `{action:"accept",content}` or `{action:"decline"\|"cancel"}`. `404 elicitation-not-pending` once answered or expired |
+
+Confirmations are never answered by the companion itself: an unanswered
+prompt expires as cancel. A desktop agent with filesystem access to the
+bundle directory may claim a bundle and add a designed STL locally; the
+companion then runs the final slice and print so elicitation still reaches
+the phone.

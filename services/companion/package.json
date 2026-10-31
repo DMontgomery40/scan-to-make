@@ -34,12 +34,13 @@
     }
   },
   "scripts": {
-    "build": "npm run build --prefix ../project && tsc -p tsconfig.json",
+    "build": "npm run build --prefix ../project && npm run build --prefix ../printer-handoff && tsc -p tsconfig.json",
     "test": "npm run build && node --test tests/*.test.mjs",
     "serve": "npm run build && node dist/server-cli.js"
   },
   "dependencies": {
     "@scan-to-make/contracts": "file:../../packages/contracts",
+    "@scan-to-make/printer-handoff": "file:../printer-handoff",
     "@scan-to-make/project": "file:../project",
     "zod": "4.6.7"
   },
