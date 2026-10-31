@@ -18,7 +18,7 @@ test('real USDZ conversion imports and reopens exact source, binary-layer proven
  const inputs=join(root,'fixtures'),jobs=join(root,'jobs');await mkdir(jobs);
  await promisify(execFile)(python,[makeFixtures,inputs],{timeout:30000});
  const storage=new FileSavedProjectStorage(join(root,'projects'));const projects=createSavedProjects(storage);
- await projects.create({id:'real-fixture',brief:{object:'Synthetic two-layer mesh',context:'Fixture',addition:'Holder'},fit:null});
+ await projects.create({id:'real-fixture',brief:{object:'Synthetic two-layer mesh',context:'Fixture',addition:'Holder'}});
  const worker=createCaptureConverter({executable:python,temporaryRoot:jobs});
  const store=new CaptureStore(storage,join(root,'captures'),worker);
  const original=await readFile(join(inputs,'two_layer.usdz'));

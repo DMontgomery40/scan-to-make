@@ -215,25 +215,16 @@ test('racing exchanges cannot redeem twice, limits survive restart, and corrupt 
 });
 
 const { request: httpRequest } = await import('node:http');
-const { startGenerationServer } = await import('../dist/generation.js');
+const { startCompanionServer } = await import('../dist/server.js');
 const forwarded = JSON.parse(
   await readFile(
     new URL('./fixtures/tailscale-serve-v1.94.2.json', import.meta.url),
     'utf8'
   )
 );
-const sourceFit = JSON.parse(
-  await readFile(
-    new URL(
-      '../../../packages/contracts/fixtures/drawer-tray.json',
-      import.meta.url
-    ),
-    'utf8'
-  )
-);
 async function httpFixture(t) {
   const f = await fixture(t);
-  const server = await startGenerationServer({ port: 0, remoteAuth: f.store });
+  const server = await startCompanionServer({ port: 0, remoteAuth: f.store });
   t.after(() => server.close());
   return { ...f, server };
 }
@@ -275,27 +266,16 @@ const pairHttp = (s, code) =>
     body: JSON.stringify({ code, deviceName: 'HTTP phone' }),
   });
 
-test('HTTP source-derived Serve fixture pairs a phone and runs real verified drawer generation', async (t) => {
+test('HTTP source-derived Serve fixture pairs a phone that then passes the authenticated health check', async (t) => {
   const { store, server } = await httpFixture(t);
   const invite = await store.createPairing('alice@example.test');
   const paired = await pairHttp(server, invite.code);
   assert.equal(paired.status, 200);
-  assert.equal(
-    (await wire(server, '/healthz', { headers: credentials(paired.body) }))
-      .status,
-    200
-  );
-  const result = await wire(server, '/v1/generate', {
-    method: 'POST',
-    headers: {
-      ...credentials(paired.body),
-      'content-type': 'application/json',
-    },
-    body: JSON.stringify({ formatVersion: '0.1.0', sourceFit }),
+  const health = await wire(server, '/healthz', {
+    headers: credentials(paired.body),
   });
-  assert.equal(result.status, 200);
-  assert.deepEqual(result.body.receipt.sourceFit, sourceFit);
-  assert.equal(result.body.receipt.geometry.triangleCount, 364);
+  assert.equal(health.status, 200);
+  assert.deepEqual(health.body, { status: 'ok', protocolVersion: '0.1.0' });
 });
 
 test('HTTP rejects missing, wrong and duplicated identity, browser origins, Funnel and local-mode fallback', async (t) => {
@@ -388,13 +368,13 @@ test('HTTP token scopes, expiry, revocation and per-device credentials prevent c
     ).status,
     401
   );
+  const projectsOnly = await exchange(store, 'alice@example.test', [
+    'projects:read',
+    'projects:write',
+  ]);
   assert.equal(
-    (
-      await wire(server, '/v1/generate', {
-        method: 'POST',
-        headers: credentials(b),
-      })
-    ).status,
+    (await wire(server, '/healthz', { headers: credentials(projectsOnly) }))
+      .status,
     403
   );
   await store.revoke(a.deviceId);
@@ -407,6 +387,7 @@ test('HTTP token scopes, expiry, revocation and per-device credentials prevent c
     200
   );
   for (const route of [
+    '/v1/generate',
     '/v1/revoke',
     '/v1/devices',
     '/v1/print',
@@ -427,7 +408,7 @@ test('HTTP token scopes, expiry, revocation and per-device credentials prevent c
 });
 
 test('local default still works directly and refuses proxy headers instead of bypassing pairing', async (t) => {
-  const server = await startGenerationServer({ port: 0 });
+  const server = await startCompanionServer({ port: 0 });
   t.after(() => server.close());
   assert.equal(
     (await wire(server, '/healthz', { forward: false })).status,
@@ -450,7 +431,7 @@ const admin = fileURLToPath(
   new URL('../dist/remote-auth-cli.js', import.meta.url)
 );
 const serve = fileURLToPath(
-  new URL('../dist/generation-cli.js', import.meta.url)
+  new URL('../dist/server-cli.js', import.meta.url)
 );
 function runCli(file, args, env = {}) {
   return new Promise((resolve) => {
@@ -488,7 +469,7 @@ test('operator CLI initializes once, returns QR material, lists and individually
     0
   );
   const invitation = await runCli(admin, [
-    'pair',
+    'pair-capture',
     directory,
     'alice@example.test',
   ]);

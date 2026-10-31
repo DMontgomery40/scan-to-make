@@ -9,7 +9,7 @@ import { FileSavedProjectStorage } from '@scan-to-make/project';
 import { CaptureStore } from '../dist/capture-import.js';
 import { DetailStillStore } from '../dist/detail-stills.js';
 import { RemoteAuthStore } from '../dist/remote-auth.js';
-import { startGenerationServer } from '../dist/generation.js';
+import { startCompanionServer } from '../dist/server.js';
 
 const forwarded = JSON.parse(
   await readFile(new URL('./fixtures/tailscale-serve-v1.94.2.json', import.meta.url), 'utf8'),
@@ -51,7 +51,7 @@ async function fixture(t, scopes = ['projects:read', 'projects:write', 'captures
   const storage = new FileSavedProjectStorage(join(root, 'projects'));
   const captures = new CaptureStore(storage, join(root, 'captures'), converter);
   const detailStills = new DetailStillStore(storage, join(root, 'captures'));
-  const server = await startGenerationServer({ port: 0, remoteAuth, capture: { storage, captures, detailStills } });
+  const server = await startCompanionServer({ port: 0, remoteAuth, capture: { storage, captures, detailStills } });
   t.after(() => server.close());
   return {
     root, remoteAuth, phone, storage, captures, server,
@@ -205,7 +205,7 @@ test('detail still routes are absent when the store is not configured', async (t
   const invitation = await remoteAuth.createPairing('alice@example.test', ['captures:read']);
   const phone = await remoteAuth.exchange('alice@example.test', { code: invitation.code, deviceName: 'Fixture' });
   const storage = new FileSavedProjectStorage(join(root, 'projects'));
-  const server = await startGenerationServer({ port: 0, remoteAuth, capture: { storage } });
+  const server = await startCompanionServer({ port: 0, remoteAuth, capture: { storage } });
   t.after(() => server.close());
   const path = '/v1/saved-projects/phone/captures/9a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d/detail-stills?projectRevision=7';
   const result = await new Promise((resolve, reject) => {

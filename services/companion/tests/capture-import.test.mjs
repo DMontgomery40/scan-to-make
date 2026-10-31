@@ -24,7 +24,7 @@ async function fixture(t, converter={convert:async bytes=>output(bytes)}) {
  const root=await mkdtemp(join(tmpdir(),'capture-store-'));t.after(()=>rm(root,{recursive:true,force:true}));
  const storage=new FileSavedProjectStorage(join(root,'projects'));
  const projects=createSavedProjects(storage);
- assert.equal((await projects.create({id:'test',brief,fit:null})).status,'ok');
+ assert.equal((await projects.create({id:'test',brief})).status,'ok');
  const captures=new CaptureStore(storage,join(root,'captures'),converter);
  return {root,storage,projects,captures,converter};
 }

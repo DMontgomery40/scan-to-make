@@ -14,7 +14,7 @@ export const fakeRunner={async run(stage,input,output){await mkdir(output,{recur
 export async function fixture(t,runner=fakeRunner,timeout=600000){
  const root=await mkdtemp(join(tmpdir(),'scan-processing-'));t.after(()=>rm(root,{recursive:true,force:true}));
  const storage=new FileSavedProjectStorage(join(root,'projects'));
- const projects=createSavedProjects(storage);await projects.create({id:'test',brief:{object:'Box',context:'Desk',addition:'Holder'},fit:null});
+ const projects=createSavedProjects(storage);await projects.create({id:'test',brief:{object:'Box',context:'Desk',addition:'Holder'}});
  const converter={async convert(original){return {derived:cube,report:Buffer.from(JSON.stringify({tool:'capture-mesh-convert',toolVersion:'0.3.0',source:{sha256:sha(original),bytes:original.length},output:{sha256:sha(cube),bytes:cube.length,format:'obj'},metersPerUnit:1,unitsAuthored:true,upAxis:'Y',metricQualified:true,metricQualifiedReason:null,outputBasis:{coordinates:'world',units:'native stage units (unrescaled)',metersPerUnit:1,upAxis:'Y'},contributingLayers:[{identifier:'synthetic.usdc',sha256:'a'.repeat(64),bytes:30}],unsupportedFeatures:[],provesCompleteCapture:false,provesPhysicalFit:false}))};}};
  const captures=new CaptureStore(storage,join(root,'captures'),converter);
  const {captureId}=await captures.importCapture({projectId:'test',projectRevision:0,source:Buffer.from('synthetic source')});

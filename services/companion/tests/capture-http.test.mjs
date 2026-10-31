@@ -11,7 +11,7 @@ import {FileSavedProjectStorage} from '@scan-to-make/project';
 import {CaptureStore} from '../dist/capture-import.js';
 import {createCaptureConverter} from '../dist/capture-converter.js';
 import {RemoteAuthStore} from '../dist/remote-auth.js';
-import {startGenerationServer} from '../dist/generation.js';
+import {startCompanionServer} from '../dist/server.js';
 const forwarded=JSON.parse(await readFile(new URL('./fixtures/tailscale-serve-v1.94.2.json',import.meta.url),'utf8')).expected;
 const python=process.env.CAPTURE_TEST_PYTHON??'python3';
 const project={formatVersion:'0.2.0',id:'phone',revision:7,brief:{object:'Bottle',context:'Drawer',addition:'Holder'},fit:null,preview:null,acceptedArtifact:null};
@@ -22,7 +22,7 @@ async function fixture(t,wrap=x=>x){
  const phone=await remoteAuth.exchange('alice@example.test',{code:invitation.code,deviceName:'Fixture'});
  const storage=new FileSavedProjectStorage(join(root,'projects'));
  const captures=new CaptureStore(storage,join(root,'captures'),wrap(createCaptureConverter({executable:python,temporaryRoot:join(root,'workers')})));
- const server=await startGenerationServer({port:0,remoteAuth,capture:{storage,captures}});t.after(()=>server.close());
+ const server=await startCompanionServer({port:0,remoteAuth,capture:{storage,captures}});t.after(()=>server.close());
  const headers={authorization:`Bearer ${phone.token}`,'x-scan-device':phone.deviceId};
  return {root,remoteAuth,phone,storage,captures,server,headers};
 }
@@ -96,7 +96,7 @@ test('revocation during actual conversion prevents publication',async t=>{
 });
 
 test('capture routes cannot be enabled in anonymous local mode',async()=>{
- await assert.rejects(startGenerationServer({port:0,capture:{storage:{},captures:{}}}),/authentication/i);
+ await assert.rejects(startCompanionServer({port:0,capture:{storage:{},captures:{}}}),/authentication/i);
 });
 
 test('project edit during conversion rejects stale publication through HTTP',async t=>{

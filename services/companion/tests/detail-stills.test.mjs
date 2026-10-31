@@ -38,7 +38,7 @@ async function fixture(t) {
   t.after(() => rm(root, { recursive: true, force: true }));
   const storage = new FileSavedProjectStorage(join(root, 'projects'));
   const projects = createSavedProjects(storage);
-  assert.equal((await projects.create({ id: 'test', brief, fit: null })).status, 'ok');
+  assert.equal((await projects.create({ id: 'test', brief })).status, 'ok');
   const converter = { convert: async (bytes) => converterOutput(bytes) };
   const captures = new CaptureStore(storage, join(root, 'captures'), converter);
   const saved = await captures.importCapture({ projectId: 'test', projectRevision: 0, source: Buffer.from('synthetic source') });
