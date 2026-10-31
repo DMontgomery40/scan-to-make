@@ -2,7 +2,7 @@
 
 From "open the app" to "part on the print bed", on iPhone, iPhone Duo, iPad and the Mac.
 
-Design seat, 2026-10-31. Scope is the accepted 2026-10-31 decision: LiDAR scan + defect cleanup + hand-off to bambu-printer-mcp or mcp-3D-printer-server, selectable from the start. That decision supersedes D002 and the template/design scope. Mockups are in [`mockups/`](mockups/); open [`mockups/index.html`](mockups/index.html).
+2026-10-31. Scope is the accepted 2026-10-31 decision: LiDAR scan + defect cleanup + hand-off to bambu-printer-mcp or mcp-3D-printer-server, selectable from the start. That decision supersedes D002 and the template/design scope. Mockups are in [`mockups/`](mockups/); open [`mockups/index.html`](mockups/index.html).
 
 ## Contents
 
@@ -18,14 +18,14 @@ Design seat, 2026-10-31. Scope is the accepted 2026-10-31 decision: LiDAR scan +
 10. [Cuts](#10-cuts)
 11. [Open questions for David](#11-open-questions-for-david)
 12. [Tickets](#12-tickets)
-13. [Reviews folded in](#13-reviews-folded-in)
+13. [Changes from review](#13-changes-from-review)
 14. [Sources](#14-sources)
 
 ---
 
 ## 1. The product in one paragraph
 
-You point your iPhone at a thing. A minute later it's on your Mac, which quietly fills the holes, smooths the bumps, gets the size right and lays it flat for printing. You get a notification. You tap **Print**, see a photo of your printer's empty bed, tap **Start print**, and walk away. That's the whole product for most people.
+You point your iPhone at a thing. A minute later it's on your Mac, which quietly fills the gaps the camera missed, matches the details to your photos, gets the size right and makes it ready to print. You get a notification. You tap **Print**, see a photo of your printer's empty bed, tap **Start print**, and walk away. That's the whole product for most people.
 
 There are two apps. **Scan to Make** on the iPhone or iPad does the scanning, shows your projects and has the Print button. **Scan to Make for Mac** lives in the menu bar and does the heavy work: cleanup, Blender, AI, slicing and talking to the printer through bambu-printer-mcp. People who want to tweak can open the model in Blender or the print in Bambu Studio or OrcaSlicer with one click. Nobody else ever sees those apps.
 
@@ -33,16 +33,15 @@ There are two apps. **Scan to Make** on the iPhone or iPad does the scanning, sh
 
 | # | Where | The user does | The product does |
 |---|---|---|---|
-| 1 | Mac | Downloads Scan to Make for Mac and opens it. | Shows a welcome window and starts fetching Blender and the printer tools in the background. |
-| 2 | Mac | Picks their printer from a list and types the access code shown on the printer's screen. | Finds Bambu printers on the network, checks the connection, shows a live camera photo ("Here's what your printer sees"). |
-| 3 | Mac | Chooses how AI cleanup signs in (or skips it). | Stores the choice in the Keychain. Cleanup still works without AI. |
-| 4 | Mac + iPhone | Scans the QR code on the Mac with the iPhone Camera. The iPhone app opens. | Pairs. If the phone is on the same Wi-Fi, it can also just find the Mac and ask "Pair with David's Mac mini?". |
-| 5 | iPhone | Taps **Scan something** and walks around the object. | Object Capture with our guidance; the scan uploads to the Mac by itself as soon as it ends. |
-| 6 | iPhone | Names it (prefilled), optionally takes close-ups while the object is still there. | The Mac starts cleanup immediately. No "check" button. |
-| 7 | iPhone (later) | Gets "AirPods Pro 2 case is ready to print". Opens it. | Shows the cleaned model, its size, and one question if the size needs it. |
-| 8 | iPhone | Taps **Print**. | Mac lays it flat, slices it for the exact printer, reads the filament, takes a camera photo. |
-| 9 | iPhone | Looks at the bed photo and taps **Start print**. | That tap answers bambu-printer-mcp's own confirmation. The printer starts. |
-| 10 | iPhone | Glances at progress or leaves. | Live progress and camera; **Stop** is always there. "Done. Take it off the bed." |
+| 1 | Mac + iPhone | Downloads Scan to Make for Mac and opens it. The window is a QR code and nothing else. Scans it with the iPhone Camera; the iPhone app opens. | Pairs, and starts fetching Blender and the printer tools in the background. If the phone is on the same Wi-Fi, it can also just find the Mac and ask "Pair with David's Mac mini?". |
+| 2 | Mac | Once the phone is connected, the same window asks two questions. First: picks their printer from a list and types the access code shown on the printer's screen. | Finds Bambu printers on the network, checks the connection, shows a live camera photo ("Here's what your printer sees"). |
+| 3 | Mac | Second: chooses how AI cleanup signs in (or skips it). | Stores the choice in the Keychain. Cleanup still works without AI. |
+| 4 | iPhone | Taps **Scan something** and walks around the object. | Object Capture with our guidance; the scan uploads to the Mac by itself as soon as it ends. |
+| 5 | iPhone | Names it (prefilled), optionally takes close-ups while the object is still there. | The Mac starts cleanup immediately. No "check" button. |
+| 6 | iPhone (later) | Gets "AirPods Pro 2 case is ready to print". Opens it. | Shows the cleaned model, its size, and one question if the size needs it. |
+| 7 | iPhone | Taps **Print**. | Mac lays it flat, slices it for the exact printer, reads the filament, takes a camera photo. |
+| 8 | iPhone | Looks at the bed photo and taps **Start print**. | That tap answers bambu-printer-mcp's own confirmation. The printer starts. |
+| 9 | iPhone | Glances at progress or leaves. | Live progress and camera; **Stop** is always there. "Done. Take it off the bed." |
 
 The power-user branch hangs off steps 7–8. **Open in Blender** and **Open in Bambu Studio / OrcaSlicer** live on the Mac, or under ••• on the phone, where they tell the Mac to open them.
 
@@ -59,8 +58,8 @@ Each one is a recommendation with a reason, plus what is already decided elsewhe
 **Already decided.**
 - PRD WP5: the bridge is "packaged as Docker, HA add-on and **tray app**".
 - PRD §9.2 R-Bridge: "a macOS/Windows tray app".
-- Codex PRD §14: "Docker alone is not a consumer setup experience".
-- Muse plan: "The companion is the v1 product, stated plainly. A signed desktop installer (macOS first…) pairs over QR".
+- The research PRD, §14: "Docker alone is not a consumer setup experience".
+- The fit-first plan: "The companion is the v1 product, stated plainly. A signed desktop installer (macOS first…) pairs over QR".
 
 Docker and the Home Assistant add-on stay as the self-host shapes.
 
@@ -88,7 +87,7 @@ Tauri is the fallback if the team insists on TypeScript UI. Electron is not.
 | Companion (`services/companion`) | Bundled Node 24 and a standalone Python (python-build-standalone) for `capture-mesh-convert` and `scan-correct`. Run as an SMAppService agent. | Removes the Homebrew/Node-exactly-24 requirement that breaks `install-macos.sh` for normal people. |
 | bambu-printer-mcp | Pinned npm version (the companion already pins `1.1.42`), installed into `~/Library/Application Support/Scan to Make/` on first run, integrity-checked, spawned over stdio by `services/printer-handoff`. | It stays GPL-2.0 in a separate process, as PRD §10.2 L03 says. It updates with its own releases. We call it; we don't copy it. |
 | mcp-3D-printer-server | Same, installed only when the user adds a non-Bambu printer. | Other brands, from the start (scope decision). |
-| Blender | Use `/Applications/Blender.app` when its version is supported; otherwise download the pinned build into Application Support with the existing SHA-256 check (`deploy/companion/download-blender.sh`). About 330 MB, with progress shown in the first-run window. | Downloading from blender.org avoids redistributing GPL Blender. Today's installer hard-fails on any Blender that isn't 5.0.1; accept a tested range instead. |
+| Blender | Use `/Applications/Blender.app` when its version is supported; otherwise download the pinned build into Application Support with the existing SHA-256 check (`deploy/companion/download-blender.sh`). About 300 MB for the pinned 5.0.1, with progress shown in the first-run window. | Downloading from blender.org avoids redistributing GPL Blender. Today's installer hard-fails on any Blender that isn't 5.0.1; accept a tested range instead. |
 | Slicer | Detect Bambu Studio (preferred; its CLI is verified on P1S) or upstream OrcaSlicer. Set `SLICER_TYPE` and `SLICER_PATH` explicitly. If neither is installed, show **Get Bambu Studio**, which opens Bambu's download page. Never the FULU CLI. | FULU v1.0.0's CLI segfaults on every run (FULU.md). mcp-3D-printer-server defaults to FULU when unset, so leaving it unset is a trap. |
 | ffmpeg | Downloaded on demand only for printers whose camera is RTSP (X1, P2S, H2 family, X2D). | bambu-printer-mcp needs it for those cameras; P1S and A1 don't. |
 | Model access | §3.6. Secrets in the Keychain; the companion gets a reference, never a raw key in an env file. | — |
@@ -104,18 +103,18 @@ There's no Terminal step, no git clone, no admin password and no Full Disk Acces
 | Permission | When | Our words before the system prompt |
 |---|---|---|
 | Local Network | When the app first looks for printers. | "Scan to Make needs to talk to your printer and your iPhone over your home network." |
-| Notifications | Optional, at the end of first run. | "Get a heads-up when cleanup finishes or a print is done." |
-| Open at login | On by default, shown as a switch. | "Keep Scan to Make running in the menu bar." |
+| Notifications | Optional, the first time a cleanup finishes. | "Get a heads-up when cleanup finishes or a print is done." |
+| Open at login | On by default; the switch is in Settings → General, not in first run. | "Keep Scan to Make running in the menu bar." |
 
 **Updates.** Sparkle checks daily. An update never restarts the companion while a cleanup or a print is running; it waits. The MCP version bumps ship inside app updates with a one-line note.
 
 **Readiness.** First run never ends on a half-working Mac. The first-run rail keeps a **Getting ready** list:
 - Blender;
 - the slicer (with its printer profiles);
-- the printer tools;
+- printer support (bambu-printer-mcp, plus mcp-3D-printer-server when needed);
 - ffmpeg, when the printer needs it.
 
-Each item shows *Ready*, *Downloading 212 of 330 MB*, *Needs Bambu Studio*, with **Install**, or *Failed* with **Try again**. Downloads resume. The popover keeps an amber "Not ready to print: Bambu Studio is missing" row until it's fixed.
+Each item shows *Ready*, *Downloading 212 of 304 MB*, *Needs Bambu Studio*, with **Install**, or *Failed* with **Try again**. Downloads resume. The popover keeps an amber "Not ready to print: Bambu Studio is missing" row until it's fixed.
 
 Printer setup has **Set up a printer later**. Pairing and scanning work before any printer exists; Print then says "Add a printer on your Mac first."
 
@@ -125,8 +124,14 @@ Printer setup has **Set up a printer later**. Pairing and scanning work before a
 
 David asked for QR pairing directly (2026-10-31): everything else pairs by scanning a code, and so should this.
 
+**Hard requirement (David, 2026-10-31, after seeing the first mockups): "why is there not just a fucking qr code and nothing else".**
+- The Mac's pairing window is the QR code and nothing else: no title, no instructions, no steps, no fields, no toggles, no buttons beyond the window's own traffic lights.
+- The Mac app opens on it at first launch, and **Add a phone…** opens the same window.
+- Anything else the Mac needs to ask (printer, AI) comes after a phone is connected.
+- A QR-only window is already built in the Mac app's open PR (#143, KAN-157/158).
+
 **Recommendation.**
-1. **QR is the main path.** The Mac's first-run window ends on a large QR code, and **Add a phone…** in the popover shows it any time. It is a `scantomake://pair` link, so the iPhone Camera app opens Scan to Make directly. The link carries:
+1. **QR is the main path.** The Mac's first window is the QR code alone, and **Add a phone…** in the popover opens the same window any time. It is a `scantomake://pair` link, so the iPhone Camera app opens Scan to Make directly. The link carries:
    - a one-time code (5 minutes);
    - the Mac's public-key fingerprint;
    - **every address the Mac can be reached at**: its LAN IPs, `<name>.local`, and its Tailscale address and MagicDNS name if Tailscale is running.
@@ -134,21 +139,17 @@ David asked for QR pairing directly (2026-10-31): everything else pairs by scann
    - Both screens then show the same 6-digit code, and the user clicks **Allow** on the Mac.
    - Each side computes the code independently, as a truncated hash of the Mac's long-term public key, the phone's fresh key and a session nonce. The phone commits to its key before the Mac reveals its nonce.
    - Anything in the Bonjour advert (name, fingerprint) is only a hint, because anyone on the Wi-Fi can advertise `_scantomake._tcp`. The matching code is the proof.
-   - **Allow** binds only that session, and the existing attempt limit (`remote-auth.ts:287`) applies.
+   - **Allow** binds only that session, and the existing attempt limit (`remote-auth.ts:436-438`) applies.
+   - **Allow** appears as a card in the menu-bar popover. The QR window itself stays QR-only.
    - The phone's pairing screen is a QR scanner, with the nearby Mac shown as a card underneath. Both paths end at the same device credential.
 3. **There is no Tailscale question.** After pairing, the phone stores every address and simply tries them in order: Bonjour on the same Wi-Fi, then the last known LAN IP, then the Tailscale address. This covers the case David couldn't find a button for:
    - "I'm already on my home network through Firewalla/WireGuard" works automatically, because the QR carries the LAN IP and the VPN routes to it.
    - Bonjour can't cross a VPN (TN3179: a local network is "Wi-Fi and Ethernet, but not cellular (WWAN) or VPN"). That is why the QR carries addresses.
    - Tailscale shows up only under **Advanced** on the Mac, as a read-out of the addresses in use.
 4. **Pin the key, not the IP.** The Mac app creates one long-lived identity (key in the Keychain) and the phone pins its public key (SPKI). A DHCP change then breaks nothing. #133 pins one IP and a 365-day certificate, which breaks on a new IP or after a year.
-5. **Credentials refresh by themselves.** Replace today's 30-day device tokens, which have no refresh, with rolling refresh. Phones are listed in the Mac's **Devices** settings with **Remove**.
-6. **This needs auth v2.** Today a pairing code and a device token are bound to one transport:
-   - a Tailscale login on a `*.ts.net` host (`remote-auth.ts:27`), enforced through Serve identity headers (`server.ts:116`);
-   - or #133's separate LAN mode with the pseudo-login `lan`.
-
-   "One credential, many addresses" needs a device identity that doesn't depend on the transport, and a migration of the `version: 1` auth store (`remote-auth.ts:50`).
-   - Pairing must mint the scopes the phone actually uses, including #124's `printer-handoff:use`. Today's default is health only (`remote-auth.ts:260`).
-   - The v1 payload is already split: #133's LAN QR adds `f=`, but the phone parser accepts exactly `v,u,c,e` (`apps/mobile/src/companion/pairingLink.ts:13`). Reconcile that first. Then v2 parsing ignores unknown keys within a known version, so the address list can grow.
+5. **Credentials refresh by themselves.** Device tokens roll forward on use, and `POST /v1/auth/refresh` extends them (#147, `server.ts:176-183`); the phone still needs a small change to call it. Phones are listed in the Mac's **Devices** settings with **Remove**.
+6. **Auth v2 is built** (#147, KAN-161). Device identity no longer depends on the transport. The `version: 1` auth store migrates to `version: 2` in place (`remote-auth.ts:82`, `:117`). Pairing mints the phone's scopes by default, including `printer-handoff:use` (`PHONE_SCOPES`, `remote-auth.ts:393`). "One credential, many addresses" now only needs the v2 payload (BE-5).
+   - The v1 payload works end to end today. Main's phone parser accepts #133's optional `f=` certificate pin (`apps/mobile/src/companion/pairingLink.ts`), and a contract test proves it. It still rejects unknown keys, so v2 parsing must ignore unknown keys within a known version for the address list to grow.
 
 **Installing from the QR.** If the iPhone app isn't installed, the QR goes through a universal link to the App Store. That needs a web origin that can serve Apple's `/.well-known/apple-app-site-association` (see open question 1); until then the QR opens the app only when it's installed.
 - After installing, the app opens on Find your Mac and says "Scan the code on your Mac again." The first code may have expired.
@@ -160,7 +161,7 @@ David asked for QR pairing directly (2026-10-31): everything else pairs by scann
 
 **Remote use.**
 - **v1:** away from home, the phone reaches the Mac through whatever VPN the user already has (Tailscale, WireGuard, Firewalla), with no setup on our side.
-- **Without a VPN:** scans wait on the phone ("We'll send it to your Mac when you're home") and project status shows "last seen at 6:12 pm". The Muse plan says it the same way: "Gateway-absent is a first-class state".
+- **Without a VPN:** scans wait on the phone ("We'll send it to your Mac when you're home") and project status shows "last seen at 6:12 pm". The fit-first plan says it the same way: "Gateway-absent is a first-class state".
 - **Later:** the PRD's relay is the planned default for remote use. §5.1 rejects Tailscale as the *default* because "iOS allows one active VPN configuration at a time" and the free plan is non-commercial. The relay costs money to host, so it is open question 3.
 
 **Already decided.**
@@ -172,27 +173,46 @@ David asked for QR pairing directly (2026-10-31): everything else pairs by scann
 
 **Recommendation.** The phone has a single forward path: **Scan something → scan → name → (close-ups) → Ready → Print → Start print**.
 - The upload starts the moment the scan ends.
-- The Mac starts the one-job cleanup pipeline (#128: import → repair → advise → correct → measure → render) on arrival.
+- The Mac starts the one-job cleanup pipeline (#128) on arrival (#144, KAN-170).
 - Nobody presses "Check my scan".
 
 On 2026-10-31 the owner's first real scans never got a cleanup job, because today that button sits two screens deep.
 
+**Cleanup never smooths what the scanner actually captured** (KAN-176). On 2026-10-31 a heuristic denoise melted real crochet stitches on a test object and was reverted (#140). Cleanup does four things:
+
+1. **Fill the gaps.** Only where the scan saw nothing: holes and the unseen underside. Only filled faces, their rim and isolated single-vertex outliers move (scan-repair since #142).
+2. **Match your photos (AI, optional; KAN-183).** The prompt is David's sentence, verbatim and alone: "Look at the pictures of this, and then tweak the scan based on that." The run happens in a **sealed workspace**:
+   - it holds only a copy of the scan and the photos; the originals stay read-only and are hash-checked afterwards;
+   - it uses the user's own Claude Code or Codex login;
+   - there is no repo, memory, rules, hooks or MCP, and nothing else in the prompt.
+3. **Pick the closest (KAN-184).** Best-of-N:
+   - two or three runs side by side;
+   - each result is rendered against the photos and the closest one is picked by eye;
+   - if no run is closer than the scan as captured, the captured scan is kept;
+   - never a metrics-only gate. In the 2026-10-31 test, results varied a lot from run to run, and one of each tool's two runs damaged something.
+4. **Make it printable (KAN-185).** A deterministic step: fuse separate shells and make it watertight. Scale and the captured surface stay untouched.
+
+Then measure and render. In the test, the best run (sealed Codex) came out closer to the real object than the raw scan. The card lettering, the eyes and the dark back matched the photos, and nothing captured was damaged.
+
 **What the Mac does, in the words the phone shows:**
 
-| Pipeline stage (#128) | Phone label | Typical |
+| Pipeline stage | Phone label | Typical |
 |---|---|---|
 | import | Getting your scan | seconds |
-| repair | Filling holes | under a minute |
-| advise | Looking for weak spots | under 2 min |
-| correct (only with AI on) | Fixing details from your close-ups | a few min |
-| measure | Measuring | seconds |
-| render | Almost done | seconds |
+| repair (gaps and underside only) | Filling the gaps | under a minute |
+| AI tries + visual pick (AI on) | Matching your photos | 10–20 min, tries run side by side |
+| make printable | Making it printable | under a minute |
+| measure, render | Measuring | seconds |
 
-With AI off, the **correct** stage still runs, using the `scripted` adapter (#128 requires all six stages to succeed and produce `corrected.stl`). The phone simply hides the "Fixing details from your close-ups" label for it. Estimates need per-stage timestamps on the job record, which don't exist yet (BE-2).
+The **advise** stage now only suggests photos to take ("a photo of the hinge would help"). It never changes the model.
 
-The phone shows one line, "Cleaning up · about 3 min", with a thin progress bar. Tapping it shows the stage list above. Times come from the Mac's own estimate; never show a fake countdown. **Late close-ups.** Close-ups that arrive after correction has started queue a short follow-up correction with the new photos. The status reads "Updating with your close-ups". The newest finished result always wins; an older job can never replace a newer model. (BE-2.)
+**Power-user door.** Project ••• → **Compare versions** shows the scan as captured, each AI try and the one picked, side by side, and **Use this one** switches.
 
-When **advise** finds weak spots, they appear *while correction keeps running* (#128 publishes `advice.json` early), so the user can still take those close-ups.
+With AI off, cleanup fills the gaps and makes the model printable, and everything else stays exactly as scanned. The phone hides "Matching your photos". #128's stage contract (`correct` must produce `corrected.stl`) changes with KAN-183. Estimates need per-stage timestamps on the job record, which don't exist yet (BE-2).
+
+The phone shows one line, "Cleaning up · about 15 min", with a thin progress bar. Tapping it shows the stage list above. Times come from the Mac's own estimate; never show a fake countdown. **Late photos.** Photos that arrive after matching has started queue one more round of tries with all the photos. The status reads "Updating with your photos". The newest finished result always wins; an older job can never replace a newer model. (BE-2.)
+
+When **advise** suggests photos, they appear *while matching keeps running* (#128 publishes `advice.json` early), so the user can still take those close-ups.
 
 ### 3.6 Model sign-in: on the Mac, honest about the terms
 
@@ -206,16 +226,18 @@ David asked whether we should wrap CLIProxyAPI so every subscription looks like 
 - **OpenAI tolerates it, and also has a sanctioned path.** OpenAI tolerates third-party tools using a ChatGPT plan, but that isn't contractual. The sanctioned route is **Sign in with ChatGPT**: OIDC, and "ChatGPT plan usage is available to all open-source partners".
 - **What *is* allowed for Claude:** the user's own, unmodified Claude Code, signed in through Anthropic's own flow. Anthropic's page says a product may run Claude Code if "each end user… authenticate[s] with their own… Claude subscription plan credentials", under Anthropic's Commercial Terms.
 
-**Recommendation.** One **AI cleanup** card in the Mac app, with these choices in this order:
+**Recommendation.** One **AI cleanup** card in the Mac app, with these choices in this order.
+- The first two are the **primary path** (KAN-183): the cleanup agent *is* the user's own Claude Code or Codex, run in the sealed workspace with David's sentence (§3.5).
+- Best-of-N uses the plan's allowance two or three times per scan, and the card says so.
 
-1. **Use my Claude subscription.** It uses the user's own Claude Code; if it isn't installed, the app offers Anthropic's official installer. Sign-in happens in Anthropic's own window. The cleanup agent runs as `claude -p` with scan-correct's Blender tools exposed over MCP. This needs David to accept Anthropic's Commercial Terms for Scan to Make (open question 2).
+1. **Use my Claude subscription.** It uses the user's own Claude Code; if it isn't installed, the app offers Anthropic's official installer. Sign-in happens in Anthropic's own window. The cleanup agent runs as `claude -p` in the sealed workspace, with only the scan, the photos and the sentence. This needs David to accept Anthropic's Commercial Terms for Scan to Make (open question 2).
 2. **Use my ChatGPT plan.** Sign in with ChatGPT as an open-source partner. Until the client ID arrives, it uses the user's own Codex CLI (`codex exec`) the same way.
-3. **Use an API key.** Anthropic, OpenAI, Google or OpenRouter. Stored in the Keychain. The scan-correct adapters already accept these (`tools/scan-correct/adapters.py`).
+3. **Use an API key.** Anthropic, OpenAI, Google or OpenRouter. Stored in the Keychain. The same sentence and photos go through scan-correct's adapters (`tools/scan-correct/adapters.py`), with the same best-of-N and visual pick.
 4. **Advanced → Custom endpoint.** Any OpenAI-compatible URL: a local proxy such as CLIProxyAPI, Ollama or LM Studio. The adapter already allows `http://127.0.0.1` (`adapters.py:56-62`). We don't ship the proxy and we don't touch its credentials. What a power user points it at is their call.
    - Choices 1 and 2 still carry conditions:
      - Claude Code: the binary is unmodified, each user signs in with their own credentials, and Anthropic's Commercial Terms apply.
      - Sign in with ChatGPT: open-source partner eligibility and a client ID.
-5. **Skip.** Cleanup runs without AI: holes filled, bumps smoothed, size checked. The close-up-driven fixes are off, and the popover says so once.
+5. **Skip.** Cleanup runs without AI: it fills the gaps, makes the model printable and checks the size, and the captured surface stays exactly as scanned. Photo matching is off, and the popover says so once.
 
 **Every choice ends in a verified state, not a click.**
 - The card shows **Connected · Claude (your subscription)** only after a tiny test call succeeds.
@@ -230,9 +252,13 @@ David asked whether we should wrap CLIProxyAPI so every subscription looks like 
 
 **Naming.** Anthropic's page lets us say in plain text that the app runs Claude Code. It doesn't let us use the Claude Code or Anthropic names or logos in our own feature names or icons. So the row is a plain description ("Use my Claude subscription · Uses Claude Code on this Mac"), with our own icon and no Anthropic logo.
 
-**The abstraction.** The companion sees one `ModelAccess` setting: `claude-code | codex-cli | api(provider, model, keychainRef) | endpoint(url, model, keychainRef) | none`. `none` is #128's `scripted` adapter.
+**The abstraction.** The companion sees one `ModelAccess` setting: `claude-code | codex-cli | api(provider, model, keychainRef) | endpoint(url, model, keychainRef) | none`. `none` skips the AI step.
 - The Mac app reads the secret from the Keychain and injects it into the cleanup worker's environment when it spawns it, over the control socket. scan-correct reads keys from an env var (`adapters.py:93`) and needs an explicit model for OpenAI-style calls (`adapters.py:91`).
-- The two CLI kinds need their own adapter and a sandbox exception, because the correction sandbox denies network. That's its own ticket (MAC-7b), not a promise in MAC-7. Keys and tokens never leave the Mac, never go in `companion.env`, and never reach the phone. This is the "abstract it away" David asked for, on routes that won't get his users' accounts banned.
+- The two CLI kinds are the primary path (KAN-183). Each run gets a fresh sealed workspace:
+  - a copy of the scan and photos; the originals stay read-only and are hash-checked afterwards (in the test, one tool overwrote its inputs in place);
+  - a clean config home holding only the login and model settings;
+  - no repo, memory, rules, hooks or MCP.
+- The correction sandbox's network ban gets a scoped exception for the CLI's own connection to its provider. Keys and tokens never leave the Mac, never go in `companion.env`, and never reach the phone. This is the "abstract it away" David asked for, on routes that won't get his users' accounts banned.
 
 **Already decided.** The PRD home-bridge shape is "bring-your-own model key or a local model" (PRD §5). No accepted decision covers subscriptions; KAN-104 was closed during the scope rewrite.
 
@@ -252,18 +278,18 @@ The Print sheet shows what the slice returned: a picture of how it sits on the p
 
 **The confirmation.** bambu-printer-mcp asks its own question, a form with one boolean, "I checked the printer and confirm this operation" (`src/index.ts:1225-1232`). When the pending question's schema is **exactly** that one required boolean, the phone shows it as:
 - the camera photo, large;
-- the MCP's own message, **verbatim**, laid out one line per sentence (printer model, nozzle, material, "build plate is clear", plus any physical-check notes it adds after a finished job). The relay carries only free text (`elicitation.ts:16`), so we format it but never rewrite it;
+- the MCP's own message, **verbatim**, laid out one line per sentence (printer model, nozzle, material, "build plate is clear", plus any physical-check notes it adds after a finished job). The relay carries the message as free text, next to the form schema and the snapshot (`elicitation.ts:19-23`), so we lay the message out but never rewrite it;
 - one button: **The bed is clear — Start print**.
 
 Any other question, such as the model picker (`index.ts:1278`) or a hardware-error confirmation, uses the generic form renderer from #132, with the same photo on top.
 
-The photo **stays fresh while the screen is open**. It refreshes every few seconds, shows its real age ("Updated 3 s ago"), and offers **Refresh camera** if a refresh fails.
+The photo **stays fresh while the screen is open**. It refreshes every few seconds, shows its real age ("Updated 3 s ago"), and carries a small **Refresh** button for when a refresh fails.
 
 The camera check **fails closed**:
 - On a camera-capable route with no snapshot, or a snapshot older than about 30 seconds, the phone shows "Can't see the bed right now. Check the printer, then try again." and no Start button.
-- Today the snapshot is taken before `print_3mf`'s own checks and failures are swallowed (`print.ts:161`); BE-4 changes that.
+- Today the snapshot is taken before `print_3mf`'s own checks and failures are swallowed (`print.ts:176-189`); BE-4 changes that.
 
-That tap *is* the MCP's confirmation. There's no separate checkbox and no second approval screen. David's rule: the camera check is the bed check, and there are no extra approval phases. #132's required "I checked the printer…" checkbox therefore becomes the button itself. If the MCP's 10-minute wait runs out, the phone says "You didn't answer in time, so nothing printed."
+That tap *is* the MCP's confirmation. There's no separate checkbox and no second approval screen. David, 2026-10-25, on checking the bed before a print: "that is what the camera check is for." So the photo and this one button are the whole approval. #132's required "I checked the printer…" checkbox therefore becomes the button itself. If the MCP's 10-minute wait runs out, the phone says "You didn't answer in time, so nothing printed."
 
 **Route.** Set once at printer setup on the Mac, never at print time.
 - The choices come from the detected model and firmware, not one fixed list:
@@ -333,7 +359,7 @@ Hidden under ••• → **Earlier scans**: re-scanning replaces the current s
    - Each side may move at most ±5%. On the AirPods scan that is −2.1%, −3.2% and 0%, so the result is exactly 60.6 × 45.2 × 21.7 mm.
    - If any side would need more: "Your scan is too far from Apple's size to fix safely. Scan again, or keep the scanned size."
    - This comes from the AI step, with a source link shown.
-   - It matches David's rule that a known product's published spec is the ground truth, and the KAN-96 run that scaled the real scan "to exactly the spec".
+   - It matches David's direction that a known product's published size is the ground truth (2026-10-30: "very very publicly known object with well known exact sizing"), and the KAN-96 run that scaled the real scan "to exactly the spec".
 2. **One measurement.** "Measured it yourself? Enter one side." A sheet shows a 3D box around the model with three labelled edges: tap the edge you measured, type its length, done.
    - One number can only scale the whole model **evenly**. The sheet shows the result: "Makes it 2.1% smaller · 60.6 × 45.7 × 21.2 mm".
 3. **Keep the scanned size**, which is the default. It is fine for most things.
@@ -342,7 +368,7 @@ Changing the size never re-runs cleanup. It is applied after the job with bambu-
 - The cleaned model is already turned to its box frame by scan-repair (KAN-115), so X/Y/Z are the box edges.
 - The scale is per side for the maker's size and even for one measurement.
 - It is keyed to the cleaned model's oriented box: Length = longest edge, Width = middle, Height = shortest. Those are stable ids, so "the edge you measured" means something.
-- #128's `scale_to_reference` is the wrong tool for this. It fits independent per-axis factors with a hard 0.5–2× limit (`worker.py:127`), and it runs only with the `scripted` adapter. Unlike today, the size **actually changes the model**: today's "real size" only grades the scan (`compareScanDimensions`) and is lost on relaunch.
+- #128's `scale_to_reference` is the wrong tool for this. It fits independent per-axis factors with a hard 0.5–2× limit (`worker.py:127`), and only the `scripted` adapter calls it deterministically. Unlike today, the size **actually changes the model**: today's "real size" only grades the scan (`compareScanDimensions`) and is lost on relaunch.
 
 **Already decided.**
 - Team vote, 2026-10-14: "Ruler entry is a low-confidence correction path, never the default" and "Dimensions shown with an uncertainty interval". The Size card shows "± about 2 mm" for *Scanned*.
@@ -417,7 +443,7 @@ The copy here is the real copy. ⓘ marks the mockup file.
 - **Grid:** two columns on iPhone. Each card has a dark stage with the model, the name, one status chip and the size.
   - Status chips, exactly one per card:
     - "Ready to print" (green)
-    - "Cleaning up · 2 min" (amber, with a thin bar)
+    - "Cleaning up", with "About 12 min left" under it (amber, with a thin bar)
     - "Printing · 42%" (clay)
     - "2 close-ups to add" (grey)
     - "Waiting for your Mac" (grey)
@@ -429,7 +455,7 @@ The copy here is the real copy. ⓘ marks the mockup file.
   - "Pick something small that fits in your hand. Put it on a table with some space around it."
   - Three steps:
     1. "Walk around it with your iPhone" / "About a minute. LiDAR measures it as you go."
-    2. "Your Mac cleans it up" / "Fills holes and smooths bumps. You can put the phone down."
+    2. "Your Mac cleans it up" / "Fills the gaps the camera missed. You can put the phone down."
     3. "Print it" / "One button. Your Mac checks the printer first."
 - **Not paired:** home is replaced by Find your Mac (P7).
 
@@ -460,7 +486,7 @@ The copy here is the real copy. ⓘ marks the mockup file.
 
 ### P3 Close-ups, ⓘ `03-phone-closeups.html`
 
-- **Title:** "Close-ups". Subtitle: "Scans blur small things like ports, buttons and edges. A few sharp photos fix that."
+- **Title:** "Close-ups". Subtitle: "Your Mac matches the scan to these. About a dozen, all the way around, plus anything small."
 - **Before the Mac has looked:** generic targets as tappable rows: "Ports and openings", "Buttons and switches", "Edges, lips and hinges".
 - **After advise:** "Your Mac would like a closer look at:", then up to 4 rows, each with a thumbnail of the model with the area highlighted, e.g. "The back, by the hinge" · "about a hand's length away". Rows tick off as photos arrive.
 - **Camera:**
@@ -476,7 +502,7 @@ The copy here is the real copy. ⓘ marks the mockup file.
 
 - **Hero:** a dark stage with the model, rotatable (drag), and a "3D" hint chip.
 - **Title:** the name (tap to rename). Under it, a status line:
-  - "Cleaning up · about 3 min" with a bar. Tapping expands the stage list (§3.5): ✓ Getting your scan · ✓ Filling holes · ● Looking for weak spots · ○ Fixing details from your close-ups · ○ Measuring.
+  - "Cleaning up · about 15 min" with a bar. Tapping expands the stage list (§3.5): ✓ Getting your scan · ✓ Filling the gaps · ● Matching your photos · ○ Making it printable · ○ Measuring.
   - "Ready to print" once done.
 - **Size card:**
   - Header "Size", the value "61.9 × 46.7 × 21.7 mm" and its source chip ("Scanned · ± about 2 mm").
@@ -490,6 +516,7 @@ The copy here is the real copy. ⓘ marks the mockup file.
   - Rename
   - Scan again
   - Earlier scans
+  - Compare versions (the scan as captured, each AI try, the one picked)
   - Edit on your Mac → Open in Blender / Open in Bambu Studio
   - Save for SD card
   - Share model…
@@ -518,17 +545,18 @@ The copy here is the real copy. ⓘ marks the mockup file.
 
 **Confirmation** (bambu-printer-mcp's question):
 - Title "Is the bed clear?"
-- Large camera photo that refreshes while the screen is open, labelled with its real age ("Updated 3 s ago"). **Refresh camera** if a refresh fails; no Start button without a fresh photo on a camera printer.
-- The MCP's message, verbatim, one line per sentence (example for a P1S):
-  - "Workshop P1S · 0.4 mm hardened nozzle"
-  - "Grey PLA in slot 3"
-  - "Nothing left on the plate"
+- Large camera photo that refreshes while the screen is open, labelled with its real age ("Updated 3 s ago"). A small **Refresh** button on the photo; no Start button without a fresh photo on a camera printer.
+- The MCP's message, verbatim, one line per sentence (bambu-printer-mcp `confirmPrintPreflight`; example for a P1S):
+  - "Start a checked print on P1S (01P00A…)?"
+  - "Nozzles: 0.4 mm. Materials: PLA."
+  - "Confirm the physical spool labels and that the build plate is clear."
+  - In small type below: "Peak targets: nozzle 220°C, bed 65°C, chamber 0°C. File SHA-256: 3f9a…c21e."
 - Primary: "The bed is clear — Start print". Plain: "Not now".
 - Footer: "Waiting for you · 9 min left. If you don't answer, nothing prints."
-- After a finished job, the MCP's physical-check line appears in bold: "Take the last print and any bits off the plate first."
+- After a finished job, the MCP's physical-check sentence appears in bold: "The printer reports FINISH: remove the previous part and debris before confirming."
 
 **Printing:**
-- Live camera, refreshed every few seconds: "Printing · 42% · 38 min left · layer 61 of 144".
+- Live camera, refreshed every few seconds: "Printing · 42% · 42 min left · layer 61 of 144".
 - Big **Stop** (red outline). Its confirmation: "Stop this print? The printer will stop and cool down." **Stop print**.
 - Bambu Connect route instead: "Finish on your Mac: press Print in Bambu Connect." and **Done**.
 
@@ -602,12 +630,12 @@ The copy here is the real copy. ⓘ marks the mockup file.
 - **Icon:** a monochrome cube glyph. A small clay dot while working; a green dot while printing.
 - **Header:** "Scan to Make", status "Ready" / "Working on Cabinet knob" / "Printing GoPro mount".
 - **Now** section, one card per active thing:
-  - Cleanup: "Cabinet knob · Filling holes · about 2 min" with a bar.
+  - Cleanup: "Cabinet knob · Matching your photos · about 12 min" with a bar.
   - Print: camera thumbnail, "GoPro mount · 42% · 38 min left", **Stop**.
   - Waiting for an answer: "The printer is waiting for you. Answer on your iPhone, or **Check here**". The Mac can answer the same confirmation, with the same photo and button.
 - **Projects** section: the last 5. Each row has a thumbnail, name and status. On hover the row shows icon buttons for **Open in Blender**, **Open in Bambu Studio** and **Show in Finder**, plus ••• (Open in OrcaSlicer, Print, Delete).
 - **Printer:** "Workshop P1S · Idle · Grey PLA, Black PLA, White PLA".
-- **Footer:** **Add a phone…** · **Settings…** · **Quit**.
+- **Footer:** **All projects…** · **Add a phone…** (opens the QR-only window) · **Settings…** · **Quit**.
 - **"Use your version?" banner,** after a Blender save: "You changed AirPods Pro 2 case in Blender." **Use my version** · **Keep the cleaned one**.
 - **Pair request:** a persistent card at the top of the popover, "David's iPhone wants to connect · 482 913", with **Allow** · **Don't Allow**. A notification says the same thing if notifications are on.
 - **All projects…** opens a small searchable window of every project, with the same doors. The popover stays about what's happening now.
@@ -615,34 +643,32 @@ The copy here is the real copy. ⓘ marks the mockup file.
 
 ### M2 First run, ⓘ `09-mac-first-run.html`
 
-A 720 × 520 window. The left rail lists the steps (Welcome · Printer · AI cleanup · Your iPhone), each with a check when done. A "Getting ready" row at the bottom of the rail shows background downloads: "Blender 5.2 · 212 of 330 MB".
-
-1. **Welcome.**
-   - "Your Mac does the heavy lifting."
-   - "Scan to Make for Mac cleans up your scans and sends them to your printer. It lives in the menu bar and stays out of the way."
-   - **Get started**.
-2. **Printer.**
-   - "Choose your printer".
-   - List of printers found on the network (SSDP), e.g. "Workshop · P1S · 192.168.1.71". Plus **Other brand…** and **Enter address…**.
-   - Selecting one asks for "Access code". Hint: "On the printer: Settings → WLAN → Access Code" with the photo from bambu-printer-mcp `docs/images/p1s-network-settings.jpeg`.
+1. **The QR window (first launch, and every Add a phone…).**
+   - A small white window: the QR code and nothing else (hard requirement, §3.4).
+   - No title, no caption, no status line, no buttons. The window's traffic lights are the only chrome.
+   - The code renews itself every 5 minutes without any visible countdown.
+   - When a phone connects, the window turns into the two questions below. If the user closes it, the app stays in the menu bar and **Add a phone…** reopens it.
+2. **Printer** (after a phone is connected). A 720 × 520 window.
+   - The left rail lists "Your iPhone ✓ · Printer · AI cleanup".
+   - A "Getting ready" list at the bottom of the rail shows each dependency: "Blender 5.0 · 212 of 304 MB", "Bambu Studio · Ready", "Printer support · Ready".
+   - "Choose your printer", then the printers found on the network (SSDP), e.g. "Workshop · P1S · 192.168.1.71". Plus **Other brand…** and **Enter address…**.
+   - Selecting one asks for "Access code". Hint: "On the printer: Settings → WLAN → Access Code", with the photo from bambu-printer-mcp `docs/images/p1s-network-settings.jpeg`.
    - The check runs `get_printer_status` and `camera_snapshot`, never a print: "Here's what your printer sees", with the photo.
-   - Then the route question (§3.7):
-     - **Print from your phone (recommended):** "Turns on LAN Only and Developer Mode on the printer. Bambu Handy stops working while it's on; Scan to Make shows the camera and progress instead." Then **Show me how**.
+   - Then the route question (§3.7), derived from the detected model:
+     - **Print from your phone (recommended):** "Requires changing settings on your printer: LAN Only and Developer Mode. Bambu Handy stops working while they're on; Scan to Make shows the camera and progress instead." **Show me how**.
      - **Keep Bambu Handy:** "You'll press Print in Bambu Connect on this Mac."
+   - Footer: **Set up a printer later** · **Back** · **Continue**.
 3. **AI cleanup.**
-   - "Sharper details with AI (optional)". Body: "AI looks at your close-ups and fixes what the scan blurred. Your scans go to the AI service you pick."
-   - Buttons:
-     - **Use my Claude subscription**, with caption "Uses Claude Code on this Mac. You sign in with Anthropic."
+   - "Sharper details with AI (optional)". Body: "AI looks at your photos and tweaks the scan to match. Your scan and photos go to the AI service you pick."
+   - Choices:
+     - **Use my Claude subscription**, captioned "Uses Claude Code on this Mac. You sign in with Anthropic." It shows "Connected · Claude (your subscription)" only after a test call succeeds.
      - **Use my ChatGPT plan**
      - **Use an API key…**
      - **Skip for now**
-   - **Advanced: custom endpoint** sits under a disclosure.
-4. **Your iPhone.**
-   - "Scan this with your iPhone". A large QR with the caption "Opens Scan to Make on your iPhone. Don't have it yet? The code takes you to the App Store." (The App Store fallback needs a universal link; see open question 1.)
-   - Under it, a live status: "Waiting for your iPhone…", then "David's iPhone connected".
-   - Finish: "You're set. Scan something with your iPhone. We'll be in the menu bar." **Done**.
+   - **Advanced: custom endpoint** sits under a collapsed disclosure.
+   - Footer: **Continue without AI** · **Back** · **Continue**. Continue closes the window; the app lives in the menu bar from then on.
 
-### M3 Settings window, ⓘ `09-mac-first-run.html` (second window)
+### M3 Settings window, ⓘ `09-mac-first-run.html` (last scene)
 
 | Tab | Contents |
 |---|---|
@@ -670,10 +696,11 @@ A 720 × 520 window. The left rail lists the steps (Welcome · Printer · AI cle
 | Confirmation timed out | "You didn't answer in time, so nothing printed." | — | **Print** again |
 | Started but unconfirmed | "We couldn't confirm whether printing started." Live camera and printer status shown. **Print** is hidden until it's resolved. | Same, in the Now card | **Check printer** reconciles by job name (PRD X03). Never a second send from here. |
 | Queued print | "Queued · we'll ask you to check the bed" | Same | **Cancel**; the notification opens the confirmation |
-| Camera can't refresh | "Can't see the bed right now." No Start button. | — | **Refresh camera** |
+| Camera can't refresh | "Can't see the bed right now." No Start button. | — | **Refresh** |
 | Mac not ready to print | "Your Mac isn't ready to print yet: Bambu Studio is missing." | Amber row with **Install** | Install on the Mac |
 | No printer yet | "Add a printer on your Mac first." | **Add printer…** | — |
 | Camera or Local Network denied | "Scan to Make can't use the camera" / "…can't look on your Wi-Fi" | — | **Open Settings** |
+| No AI try is closer than the scan | "Your scan already matched the photos best, so we kept it." | Same | **Compare versions** |
 | AI sign-in expired or limit hit | Nothing blocks; cleanup finishes without AI | "Sign-in expired" with **Sign in again** | — |
 | Code expired (pairing) | "That code expired. Show a new one on your Mac." | — | — |
 | Mac key changed | "This Mac looks different from last time. Pair again to be safe." | — | **Pair again** |
@@ -747,72 +774,79 @@ These are the only ones I can't decide, because each spends money or binds his n
    - Which do you want? Until then, the QR works for people who already have the app.
 2. **"Use my Claude subscription."** It's allowed only by running the user's own Claude Code under **Anthropic's Commercial Terms**, which you'd accept for Scan to Make.
    - Also: apply for a **Sign in with ChatGPT** client ID as an open-source partner. It's free and gives ChatGPT-plan sign-in on a sanctioned route.
-   - Without these, v1 ships with API keys, a custom endpoint and the no-AI path.
+   - Without them, the Claude Code path waits. The user's own Codex login, API keys, the custom endpoint and the no-AI path still work.
 3. **Away-from-home without a VPN.** The PRD's relay costs about the $5/month Cloudflare minimum to host. Build it for v1, or ship v1 as "home Wi-Fi or your own VPN, scans wait otherwise"? I recommend shipping without it and adding it in v1.1.
 
 Not a design question: pricing is KAN-103 and isn't designed here. Nothing in this design depends on it.
 
 ## 12. Tickets
 
-Small and independent where possible. Owner seats: **Opus** (UI, copy, components, interactions, including the Mac app's SwiftUI), **Codex/Astra** (companion and Mac services), **Muse** (backend contracts and data). Every ticket that touches printing names the bambu-printer-mcp capability it uses.
+Small and independent where possible. Owners are assigned in Jira. Every ticket that touches printing names the bambu-printer-mcp capability it uses.
 
-### UI (Opus)
+### UI
 
 | ID | Ticket | Acceptance criteria |
 |---|---|---|
 | UI-1 | Projects home (P1) | Grid of project cards with exactly one status chip each; Mac pill; single "Scan something" in a glass bar; empty state copy as spec; HomeScreen hero, About screen and "Refresh projects" removed; VoiceOver labels on every card. |
 | UI-2 | Scan from home (P2) | "Scan something" opens capture in one tap; Ready/Scanning/Flip/Finished states with spec copy; name asked after the scan, prefilled; upload starts without a tap; offline copy when the Mac is unreachable; ✕ asks before discarding. |
-| UI-3 | Project page (P4) | Replaces RetainedCaptures + ScanResults; live cleanup status with plain stage names; Size card; Close-ups card; sticky Print / Print when it's ready / Waiting for your Mac; ••• menu as spec; cleanup-failed state with both buttons. |
+| UI-3 | Project page (P4) | Replaces RetainedCaptures + ScanResults; ••• **Compare versions** (captured scan, each AI try, the pick; **Use this one**); live cleanup status with plain stage names; Size card; Close-ups card; sticky Print / Print when it's ready / Waiting for your Mac; ••• menu as spec; cleanup-failed state with both buttons. |
 | UI-4 | Size question (P4 + P5) | Maker's-size question when the Mac proposes one (source shown); one-edge measurement sheet with 3D box, live % preview; Keep scanned size; size source chip on the card; no three-field form anywhere. |
-| UI-5 | Close-ups camera (P3) | In-app camera with target ring; Mac suggestions with highlighted thumbnails tick off; photos upload as taken; library is secondary; footer copy changes with AI on/off. |
+| UI-5 | Close-ups camera (P3), building on #138 | In-app camera with target ring; Mac suggestions with highlighted thumbnails tick off; photos upload as taken; library is secondary; footer copy changes with AI on/off. |
 | UI-6 | Print sheet, confirmation, progress (P6) | Plate preview, printer, AMS colour chips, time/grams, size; confirmation shows the camera photo + the MCP's message verbatim + one "The bed is clear — Start print" button that answers bambu-printer-mcp's `confirmed` form, **only when the schema is exactly that one boolean** (any other question uses #132's generic form); no Start button without a fresh photo; no separate checkbox; timeout copy; printing view with camera, % and Stop; Bambu Connect variant; Done with 👍/👎. Uses: `slice_stl`, `get_printer_filaments`, `camera_snapshot`, `print_3mf` via printer-handoff. |
 | UI-7 | Find your Mac (P7, P8) | QR viewfinder first; Bonjour nearby card; 6-digit code confirm screen; Connected screen; Local Network pre-prompt; expired/unreachable copy; Tailscale and JSON-paste UI removed; Connection sheet from the pill. |
 | UI-8 | Duo and iPad layouts | Folded = iPhone layout with the no-LiDAR card and no scan button; open = two panes; half-open = camera/model top, controls bottom, nothing across the hinge; iPad sidebar + detail with Scan; verified on Duo and iPad iOS 27 simulators in all postures. |
 | UI-9 | Mac popover (M1) | SwiftUI `MenuBarExtra(.window)`; Now/Projects/Printer/footer sections; hover doors; Stop on printing; answer-confirmation-here card; "Use your version?" banner; pair-request notification with Allow. |
-| UI-10a | Mac first run (M2) | 4-step window; Getting ready rail with Ready/Downloading/Install/Try again per item; printer list + access code + camera check + model-derived route choice + **Set up a printer later**; AI choices that end in a verified **Connected** state or a plain error with **Continue without AI**; custom endpoint asks address, model, key; QR step that refreshes every 5 min with live "Waiting for your iPhone…". |
+| UI-10a | Mac first run (M2) | Opens on the QR-only window (the code and nothing else; same window for Add a phone…, renewing every 5 min with no visible countdown), then printer and AI questions once a phone is connected; Getting ready rail with Ready/Downloading/Install/Try again per item; printer list + access code + camera check + model-derived route choice + **Set up a printer later**; AI choices that end in a verified **Connected** state or a plain error with **Continue without AI**; custom endpoint asks address, model, key. |
 | UI-10b | Mac settings and All projects (M3) | Settings tabs as spec; **All projects…** searchable window with the same doors; persistent pair-request card in the popover. |
-| UI-12 | Recovery screens | Queued print (card, Cancel, notification opens confirmation); uncertain print ("We couldn't confirm whether printing started", **Check printer**, no Print until resolved); camera refresh failure; permission denied with **Open Settings**; Duo empty state and **Open projects** after pairing. Each has an acceptance test on the simulator. |
 | UI-11 | Words pass | Every string in §9's right-hand column is gone from phone UI (grep list in the PR); plain-word failure copy from §8 in place. |
+| UI-12 | Recovery screens | Queued print (card, Cancel, notification opens confirmation); uncertain print ("We couldn't confirm whether printing started", **Check printer**, no Print until resolved); camera refresh failure; permission denied with **Open Settings**; Duo empty state and **Open projects** after pairing. Each has an acceptance test on the simulator. |
 
-### Mac services (Codex/Astra)
+### Mac services
 
 | ID | Ticket | Acceptance criteria |
 |---|---|---|
 | MAC-1 | App shell and distribution | Xcode project `apps/mac`; `LSUIElement`; `SMAppService.mainApp` login item; Sparkle 2 with EdDSA feed; Developer ID signing + Hardened Runtime + notarization script (runs once membership is active). |
 | MAC-2 | Companion as an app-owned agent | Bundled Node 24 + standalone Python; companion registered with `SMAppService.agent` from `Contents/Library/LaunchAgents`; one Local Network prompt naming Scan to Make, **verified in a real login session, not over SSH**; migrates an existing `org.scantomake.companion` install without losing projects. |
 | MAC-3 | Dependency manager | Every item reports Ready / Downloading / Missing / Failed to the app with resumable downloads and **Try again**; installs pinned bambu-printer-mcp and (on demand) mcp-3D-printer-server with integrity checks; Blender: uses a supported installed version or downloads the pinned build with SHA-256 (reuse `download-blender.sh`), with progress; detects Bambu Studio / OrcaSlicer and sets `SLICER_TYPE`/`SLICER_PATH` explicitly; ffmpeg only for RTSP-camera models. |
-| MAC-4 | Local control socket | App↔companion over a Unix socket (never the network): status, cross-project job index, devices list/remove, create pairing, answer a pending confirmation from the Mac, door actions. Not exposed over HTTPS (keeps `remote-auth.ts:185`'s rule). |
-| MAC-5a | Auth v2 | Transport-independent device identity; migration of the `version: 1` auth store; pairing mints the scopes the phone uses (incl. `printer-handoff:use`); rolling refresh; existing paired phones keep working. Ships first. |
-| MAC-5 | Pairing v2 (after MAC-5a, BE-5) | Multi-address QR payload (BE-5), refreshed every 5 min while shown; long-lived identity in Keychain with SPKI pin (replaces #133's single-IP, 365-day cert); Bonjour `_scantomake._tcp` advert; 6-digit code derived from both keys and a nonce, with Allow on the Mac bound to that session and rate-limited; persistent pair-request card in the popover. |
+| MAC-4 | Local control socket | App↔companion over a Unix socket (never the network): status, cross-project job index, devices list/remove, create pairing, answer a pending confirmation from the Mac, door actions. Not exposed over HTTPS (keeps `remote-auth.ts:299`'s rule). |
+| MAC-5a | Auth v2 | **Done in #147 (KAN-161):** transport-independent device identity, `version: 1` store migrated in place, phone scopes minted by default (including `printer-handoff:use`), rolling refresh. Follow-up: the phone calls `POST /v1/auth/refresh`. |
+| MAC-5 | Pairing v2 (after BE-5; MAC-5a is done) | Multi-address QR payload (BE-5), refreshed every 5 min while shown; long-lived identity in Keychain with SPKI pin (replaces #133's single-IP, 365-day cert); Bonjour `_scantomake._tcp` advert; 6-digit code derived from both keys and a nonce, with Allow on the Mac bound to that session and rate-limited; persistent pair-request card in the popover. |
 | MAC-6 | Printer setup | Routes derived from detected model and firmware (X2D → `bambu_native`); **Set up a printer later**; SSDP discovery (UDP 2021) of Bambu printers; fields mirror bambu-printer-mcp `manifest.json` `user_config`; access code in Keychain; check = `get_printer_status` + `camera_snapshot` (never a print); route choice writes `connection_mode`; detects FULU via `bambu_network_bridge_status`; Other brand via mcp-3D-printer-server `get_printer_status`. |
-| MAC-7 | Model access | `ModelAccess` kinds `api(provider, model, keychainRef)`, `endpoint(url, model, keychainRef)`, `none` (= `scripted`); the Mac app injects the secret into the worker's env at spawn; companion never stores a raw key in `companion.env`. |
-| MAC-7b | CLI model kinds | `claude-code` (user's unmodified Claude Code, `claude -p` with scan-correct tools over MCP) and `codex-cli`: own adapter + a scoped sandbox exception for the CLI's network; ships only after open question 2. |
+| MAC-7 | Model access | Primary (KAN-183): `claude-code` and `codex-cli`. Each run gets a fresh sealed workspace: a copy of the scan and photos, with the originals read-only and hash-checked after; a clean config home holding only the login and model settings; no repo, memory, rules, hooks or MCP; only David's sentence as the prompt; and a scoped network exception for the CLI's provider. The Claude Code path ships after open question 2. Also `api(provider, model, keychainRef)`, `endpoint(url, model, keychainRef)`, `none` (= `scripted`); the Mac app injects the secret into the worker's env at spawn; companion never stores a raw key in `companion.env`. |
 | MAC-8 | Doors | Open in Blender (import script with "Send back to Scan to Make" button; directory watcher; "Use your version?" flow); Open in Bambu Studio / OrcaSlicer (`open -a` with the sliced 3MF; saved-3MF pickup goes through `print_3mf`, which re-inspects); Show in Finder. |
 | MAC-9 | Keep awake and notify | Power assertion while a job runs or a print is watched; notifications for cleanup done, print done, confirmation waiting. |
 | MAC-10 | FULU spike | Can the Mac app manage FULU's Linux runtime (Lima/Colima, x86-64 emulation, glibc ≥ 2.38) without the user touching it? Report only; reuse the kept `bambu-fulu` harness knowledge; no consumer default until it works from a GUI session. |
 
-### Backend contracts (Muse)
+### Cleanup
 
 | ID | Ticket | Acceptance criteria |
 |---|---|---|
-| BE-1 | Projects live on the Mac (split: BE-1a contract + migration, BE-1b list route + command writes + conflict outcome, BE-1c close-ups re-keyed to the project) | Project = {id, name, currentScanId, earlierScanIds, closeUps, size{value, source, uncertainty}, prints[]}; `formatVersion` bump with a byte-preserving migration of today's strict 0.2.0 records (`saved-project.ts:25`); command-based writes to the Mac instead of snapshot PUT, with a defined outcome when two phones edit offline (today: hard 409, `saved-project-sync.ts:43`); a project-list route (none today); close-ups re-keyed from capture to project (`detail-still.ts:14`); drop `brief.context`/`brief.addition` through the migration; revision binding stays internal. |
-| BE-2 | Cleanup starts on arrival | Close-ups that arrive after correction starts queue a follow-up correction, and the newest finished result always wins; a server-side queue (today `start()` throws `busy`, `scan-processing.ts:89`), keyed by the capture's SHA-256 so retries don't duplicate; the current project revision is resolved at enqueue, and job reads keep working after later project edits (today they re-check the original revision, `scan-processing.ts:172`); a job index across projects; per-stage timestamps for estimates; stage names map to §3.5 labels. |
+| KAN-183 | AI step | The prompt is exactly "Look at the pictures of this, and then tweak the scan based on that." with nothing added. Each run happens in a fresh sealed workspace: copies of the scan and photos, originals read-only and hash-checked after, the user's own Claude Code or Codex login, no repo, memory, rules, hooks or MCP. The transcript proves the sentence was the only user text. Best-of-N: 2–3 runs side by side. |
+| KAN-184 | Visual pick | Every try is rendered from the photos' viewpoints and compared against the photos. The closest is picked, or the captured scan is kept when no try is closer. There is no metrics-only gate. All tries stay available for **Compare versions**. |
+| KAN-185 | Make printable | Runs after the pick: separate shells fused, watertight. Scale and the captured surface are unchanged, verified by renders against the photos. |
+
+### Backend contracts
+
+| ID | Ticket | Acceptance criteria |
+|---|---|---|
+| BE-1 | Projects live on the Mac (split: BE-1a contract + migration, BE-1b list route + command writes + conflict outcome, BE-1c close-ups re-keyed to the project) | Project = {id, name, currentScanId, earlierScanIds, closeUps, size{value, source, uncertainty}, prints[]}; `formatVersion` bump with a byte-preserving migration of today's strict 0.2.0 records (`saved-project.ts:25`); command-based writes to the Mac instead of snapshot PUT, with a defined outcome when two phones edit offline (today: hard 409, `saved-project-sync.ts:43`); a project-list route (none today); close-ups re-keyed from capture to project (`detail-still.ts:19`); drop `brief.context`/`brief.addition` through the migration; revision binding stays internal. |
+| BE-2 | Cleanup starts on arrival (KAN-170, #144) | #135 already stops the phone sending a scan twice; the companion side still needs the rest. Close-ups that arrive after correction starts queue a follow-up correction, and the newest finished result always wins; a server-side queue (today `start()` throws `busy`, `scan-processing.ts:95`), keyed by the capture's SHA-256 so retries don't duplicate; the current project revision is resolved at enqueue, and job reads keep working after later project edits (today they re-check the original revision, `scan-processing.ts:249-258`); a job index across projects; per-stage timestamps for estimates; stage names map to §3.5 labels. |
 | BE-3 | Size contract | `SizeSource = scanned | maker{name, sourceUrl} | measured{edge: length|width|height, mm}` on the oriented box (longest/middle/shortest); maker = per-side factors each within ±5% (else refuse with the spec copy), measured = one even factor; applied after the job with bambu-printer-mcp `scale_stl` (`scale_x/y/z` on the KAN-115 box-frame model), producing a new model artifact; result dimensions returned for display; no cleanup re-run; uncertainty for scanned. |
-| BE-4 | Print session contract | Capability-specific per backend (Bambu: camera, AMS, pause; mcp-3D-printer-server: no camera, no pause, `upload_gcode` with `print:true`, `cancel_print`), with a full non-Bambu example; a **queued** state (wait for cleanup or a free printer, then ask); an **uncertain** state reconciled by job name with no re-send; the photo refreshed while the confirmation is open. Per-printer runner instances keyed by printer id (today one backend per config, `config.ts:61`). **prepare:** `lay_flat` or slicer orient → `slice_stl` with `use_printer_filaments` (today hard-coded false, `print.ts:149`). The sources for each field are named: plate image and time/grams read from the sliced 3MF's thumbnail and slice metadata on the companion; materials and temperatures from `inspect_print_file`; colour options from `get_printer_filaments`. **confirm:** carries `connection_mode` (missing from `PrinterSelection` today) and Bambu Connect dispatch through `bambu_connect_import_file`; a fresh `camera_snapshot` with a max age, failing closed. **progress:** `get_printer_status` polling plus camera frames. **stop:** `cancel_print` (or the backend equivalent), always available. Builds on #124/#132. |
-| BE-5 | Pairing payload v2 | `scantomake://pair` with v=2, code, SPKI fingerprint, address list (LAN IPs, `.local`, Tailscale IP/MagicDNS); phone tries addresses in order; unknown keys are ignored within a known version; first reconcile v1 (#133 emits `f=`, the phone parser rejects it); reader still accepts v1 links. |
+| BE-4 | Print session contract | Capability-specific per backend (Bambu: camera, AMS, pause; mcp-3D-printer-server: no camera, no pause, `upload_gcode` with `print:true`, `cancel_print`), with a full non-Bambu example; a **queued** state (wait for cleanup or a free printer, then ask); an **uncertain** state reconciled by job name with no re-send; the photo refreshed while the confirmation is open. Per-printer runner instances keyed by printer id (today one backend per config, `config.ts:61`). **prepare:** `lay_flat` or slicer orient → `slice_stl` with `use_printer_filaments` (today hard-coded false, `print.ts:163`). The sources for each field are named: plate image and time/grams read from the sliced 3MF's thumbnail and slice metadata on the companion; materials and temperatures from `inspect_print_file`; colour options from `get_printer_filaments`. **confirm:** carries `connection_mode` (missing from `PrinterSelection` today) and Bambu Connect dispatch through `bambu_connect_import_file`; a fresh `camera_snapshot` with a max age, failing closed. **progress:** `get_printer_status` polling plus camera frames. **stop:** `cancel_print` (or the backend equivalent), always available. Builds on #124/#132. |
+| BE-5 | Pairing payload v2 | `scantomake://pair` with v=2, code, SPKI fingerprint, address list (LAN IPs, `.local`, Tailscale IP/MagicDNS); phone tries addresses in order; unknown keys are ignored within a known version (main's parser still rejects them); reader still accepts v1 links, including #133's `f=` pin, which main already accepts. |
 | BE-6 | Maker's size lookup | When AI is on, cleanup may propose `{productName, dimensionsMm, sourceUrl}` with a confidence; never applied without the user's tap; absent when AI is off. |
 
-### Lead and David
+### Decisions and repo housekeeping
 
 | ID | Item |
 |---|---|
 | L-1 | Open questions 1–3 above. |
-| L-2 | Reconcile open PRs with this design: #133/#134 → MAC-5/BE-5; #132 → UI-6 (keep its contract work, replace its checkbox UI); #124 and #128 stay. |
-| L-3 | Fix AGENTS.md drift: it says the printer hand-off "isn't built yet", but `services/printer-handoff` exists (KAN-125). |
+| L-2 | Map the PRs to this design. Status on main `c2a2abd`, 2026-10-31. **Merged:** #124 (companion printer handoff and pairing relay), #128 (one cleanup job), #132 (Send to printer on the phone; UI-6 keeps its contract work and replaces its checkbox UI), #134 (LAN pairing with a pinned certificate → MAC-5/BE-5), #135 (KAN-143: each scan goes to the companion once → part of BE-2), #138 (KAN-123: the companion's close-up advice and pictures on the phone → the base for UI-5), #133 (KAN-138: companion-side QR pairing over LAN or VPN → MAC-5/BE-5), #136 (KAN-141: keep capture textures), #141 (KAN-178), #142 (KAN-176: no smoothing of captured surface), #147 (KAN-161 → MAC-5a, auth v2). **Reverted:** #137 (KAN-111), by #140, because its denoise melted real crochet stitches. **Open:** #143 (KAN-157/158: the Mac app's QR-only window and companion agent → MAC-1/MAC-2, UI-10a), #144 (KAN-170 → BE-2; its title says KAN-140, but its ticket is KAN-170), #145 (KAN-144 → UI-1). |
+| L-3 | Done in this change (KAN-175): AGENTS.md no longer says the printer hand-off "isn't built yet". It names #124 and #132 and points here. |
 
-## 13. Reviews folded in
+## 13. Changes from review
 
-Two cross-lab reviews ran on the draft on 2026-10-31, plus a visual QA pass on the mockups. What changed because of them:
+The draft was reviewed on 2026-10-31 for its backend contracts and for the product journey, and the mockups had a visual QA pass. What changed:
 
 **Backend contracts:**
 - the single "bed is clear" button applies only to the plain `confirmed` form;
@@ -841,6 +875,8 @@ Two cross-lab reviews ran on the draft on 2026-10-31, plus a visual QA pass on t
 
 **Visual QA:** chip overflow, alignment, contrast and copy fixes across the mockups.
 
+**One-sentence AI cleanup (2026-10-31, KAN-177):** after a sealed side-by-side test, cleanup only fills gaps. The AI step is David's sentence alone, best-of-N with a visual pick against the photos, then a make-printable step. Heuristic smoothing of captured surface is gone everywhere, and the user's own Claude Code / Codex login is the primary path.
+
 ## 14. Sources
 
 **This repo:**
@@ -849,7 +885,7 @@ Two cross-lab reviews ran on the draft on 2026-10-31, plus a visual QA pass on t
 - `services/printer-handoff/src/print.ts`, `elicitation.ts`
 - `deploy/companion/install-macos.sh`, `download-blender.sh`
 - `tools/scan-correct/adapters.py`
-- open PRs #124, #128, #132, #133, #134
+- PRs #124, #128, #132, #133, #134, #135, #136, #138, #141, #142, #147 (merged); #137 (reverted by #140); #143, #144, #145 (open)
 - `docs/hosted-service.md` (#123)
 
 **bambu-printer-mcp (1.1.41/1.1.42):**
@@ -868,7 +904,7 @@ Two cross-lab reviews ran on the draft on 2026-10-31, plus a visual QA pass on t
 - NET-001
 - the 2026-10-14 capture-feedback vote
 
-**Mac archive:** `shared/PLANS.md`, `shared/team/DECISIONS.md`, `docs/research/PRD.md` (Codex), `shared/plans/muse.md`.
+**Private planning archive (not in Git):** the plans index, the decision log, the research PRD and the fit-first plan.
 
 **External (fetched 2026-10-31):**
 - Anthropic, Claude Code legal and compliance, "Authentication and credential use": code.claude.com/docs/en/legal-and-compliance

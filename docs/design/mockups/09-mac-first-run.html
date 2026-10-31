@@ -237,6 +237,10 @@ body{min-height:100vh;padding:48px 32px 64px}
 
 /* Settings window */
 .sw{width:490px;height:auto;background:#F6F4F0}
+.qr-only{width:360px;height:392px;background:#fff;display:flex;flex-direction:column}
+.qr-only .traffic{padding:14px 16px 0}
+.qr-only-code{flex:1;display:grid;place-items:center;padding:6px 34px 34px}
+.qr-only-code svg{width:292px;height:292px}
 .sw .tb{height:94px;border-bottom:1px solid var(--line);background:linear-gradient(#FBFAF7,#F2F0EB);position:relative}
 .sw .traffic{position:absolute;left:4px;top:2px}
 .sw .wt{position:absolute;top:15px;left:0;right:0;text-align:center;font:600 13px/1 var(--font)}
@@ -403,10 +407,24 @@ body{min-height:100vh;padding:48px 32px 64px}
   </defs>
 </svg>
 
-<div class="page-head"><div><div class="tag">Mac · First run and Settings</div><h1>Set up once, in four short steps</h1>
-<p>Open the app and one small window walks you through it: pick your printer and how it prints, choose how AI helps (or skip it), then pair your iPhone with a QR code. Blender downloads quietly in the corner while you answer, so there’s no Terminal and no waiting screen. Everything chosen here lives in Settings afterwards, with network addresses and version numbers kept under Advanced.</p></div></div>
+<div class="page-head"><div><div class="tag">Mac · First run and Settings</div><h1>A QR code and nothing else, then two short questions</h1>
+<p>Open the app and the first window is the pairing code: no title, no steps, no buttons. Scan it with your iPhone and the window turns into two short questions on the Mac: your printer and how it prints, then how AI helps (or skip it). Blender downloads quietly in the corner while you answer, so there’s no Terminal and no waiting screen. Everything chosen here lives in Settings afterwards, with network addresses and version numbers kept under Advanced.</p></div></div>
 
 <div class="row">
+
+<!-- 0: First launch: the QR code and nothing else -->
+<div>
+<div class="desk">
+  <div class="wall"></div>
+  <div class="menubar"><div class="left"><svg class="apple"><use href="#s9-apple"/></svg><span class="app">Scan to Make</span><span>File</span><span>Edit</span><span>Window</span><span>Help</span></div>
+  <div class="right"><span class="mb-icon"><svg class="ic" style="width:16px;height:16px"><use href="#logo-mono"/></svg></span><svg class="ic" style="width:16px;height:16px"><use href="#i-wifi"/></svg><span class="clock">Sun Oct 25&nbsp;&nbsp;10:21 AM</span></div></div>
+  <div class="mac-window qr-only" style="left:50%;top:50%;transform:translate(-50%,-46%)">
+    <div class="traffic"><i></i><i></i><i></i></div>
+    <div class="qr-only-code"><svg viewBox="0 0 29 29"><use href="#s9-qr" width="29" height="29"/></svg></div>
+  </div>
+</div>
+<p class="caption dcap"><b>First launch, and Add a phone….</b> The window is the code and nothing else, a hard requirement from David (2026-10-31): “why is there not just a fucking qr code and nothing else”. No title, no instructions, no steps, no buttons. Scanning it with the iPhone Camera opens Scan to Make and pairs; the code quietly renews itself every 5 minutes. Once a phone is connected the window becomes the two questions below.</p>
+</div>
 
 <!-- A: Printer step -->
 <div>
@@ -420,17 +438,16 @@ body{min-height:100vh;padding:48px 32px 64px}
       <div class="traffic"><i></i><i></i><i></i></div>
       <div class="brand"><svg><use href="#logo"/></svg><div><b>Scan to Make</b><span>Set up your Mac</span></div></div>
       <div class="rsteps">
-        <div class="rs done"><span class="n"><svg><use href="#i-check"/></svg></span>Welcome</div>
+        <div class="rs done"><span class="n"><svg><use href="#i-check"/></svg></span>Your iPhone</div>
         <div class="rs now"><span class="n">2</span>Printer</div>
         <div class="rs"><span class="n">3</span>AI cleanup</div>
-        <div class="rs"><span class="n">4</span>Your iPhone</div>
       </div>
       <div class="ready"><div class="t-cap">Getting ready</div>
-        <div class="ri"><div class="ln"><svg><use href="#i-blender"/></svg>Blender 5.2</div>
+        <div class="ri"><div class="ln"><svg><use href="#i-blender"/></svg>Blender 5.0</div>
           <div class="pbar"><i style="width:64%"></i></div>
-          <div class="sz num">212 of 330 MB</div></div>
+          <div class="sz num">212 of 304 MB</div></div>
         <div class="ri ok"><div class="ln"><span class="ck"><svg><use href="#i-check"/></svg></span>Bambu Studio<span class="st">Ready</span></div></div>
-        <div class="ri ok"><div class="ln"><span class="ck"><svg><use href="#i-check"/></svg></span>Printer tools<span class="st">Ready</span></div></div>
+        <div class="ri ok"><div class="ln"><span class="ck"><svg><use href="#i-check"/></svg></span>Printer support<span class="st">Ready</span></div></div>
       </div>
     </div>
 
@@ -486,28 +503,27 @@ body{min-height:100vh;padding:48px 32px 64px}
       <div class="traffic"><i></i><i></i><i></i></div>
       <div class="brand"><svg><use href="#logo"/></svg><div><b>Scan to Make</b><span>Set up your Mac</span></div></div>
       <div class="rsteps">
-        <div class="rs done"><span class="n"><svg><use href="#i-check"/></svg></span>Welcome</div>
+        <div class="rs done"><span class="n"><svg><use href="#i-check"/></svg></span>Your iPhone</div>
         <div class="rs done"><span class="n"><svg><use href="#i-check"/></svg></span>Printer</div>
         <div class="rs now"><span class="n">3</span>AI cleanup</div>
-        <div class="rs"><span class="n">4</span>Your iPhone</div>
       </div>
       <div class="ready"><div class="t-cap">Getting ready</div>
-        <div class="ri"><div class="ln"><svg><use href="#i-blender"/></svg>Blender 5.2</div>
+        <div class="ri"><div class="ln"><svg><use href="#i-blender"/></svg>Blender 5.0</div>
           <div class="pbar"><i style="width:83%"></i></div>
-          <div class="sz num">274 of 330 MB</div></div>
+          <div class="sz num">274 of 304 MB</div></div>
         <div class="ri ok"><div class="ln"><span class="ck"><svg><use href="#i-check"/></svg></span>Bambu Studio<span class="st">Ready</span></div></div>
-        <div class="ri ok"><div class="ln"><span class="ck"><svg><use href="#i-check"/></svg></span>Printer tools<span class="st">Ready</span></div></div>
+        <div class="ri ok"><div class="ln"><span class="ck"><svg><use href="#i-check"/></svg></span>Printer support<span class="st">Ready</span></div></div>
       </div>
     </div>
 
     <div class="cnt">
       <h2>Sharper details with AI (optional)</h2>
-      <p class="lede">AI looks at your close-ups and fixes what the scan blurred. Your scans go to the AI service you pick.</p>
+      <p class="lede">AI looks at your photos and tweaks the scan to match. Your scan and photos go to the AI service you pick.</p>
       <div class="opts">
         <div class="opt sel"><div class="oico" style="background:var(--clay-soft);color:var(--clay-ink)"><svg><use href="#i-sparkle"/></svg></div><div class="ot"><b>Use my Claude subscription</b><span>Uses Claude Code on this Mac. You sign in with Anthropic.</span><span class="conn"><span class="dot"></span>Connected · Claude (your subscription)</span></div><span class="radio on"></span></div>
         <div class="opt"><div class="oico" style="background:#E3EEE8;color:var(--ok)"><svg><use href="#s9-chat"/></svg></div><div class="ot"><b>Use my ChatGPT plan</b><span>You sign in with OpenAI.</span></div><span class="radio"></span></div>
         <div class="opt"><div class="oico" style="background:#EEEBE5;color:var(--ink-2)"><svg><use href="#i-key"/></svg></div><div class="ot"><b>Use an API key…</b><span>Anthropic, OpenAI, Google or OpenRouter. Kept in your Keychain.</span></div><span class="radio"></span></div>
-        <div class="opt"><div class="oico" style="background:#EEEBE5;color:var(--ink-2)"><svg><use href="#s9-skip"/></svg></div><div class="ot"><b>Skip for now</b><span>Cleanup still fills holes, smooths bumps and checks the size.</span></div><span class="radio"></span></div>
+        <div class="opt"><div class="oico" style="background:#EEEBE5;color:var(--ink-2)"><svg><use href="#s9-skip"/></svg></div><div class="ot"><b>Skip for now</b><span>Cleanup still fills the gaps. The scanned surface stays as captured.</span></div><span class="radio"></span></div>
       </div>
       <div class="disc">
         <div class="disc-h"><svg><use href="#i-chev"/></svg>Advanced: custom endpoint</div>
@@ -519,47 +535,14 @@ body{min-height:100vh;padding:48px 32px 64px}
 <p class="caption dcap"><b>AI cleanup.</b> Optional, in the recommended order: your own Claude sign-in in Anthropic’s window, then ChatGPT, then an API key stored in the Keychain. Keys never leave the Mac or reach the phone. The custom endpoint is a power-user door behind a disclosure.</p>
 </div>
 
-<!-- C: Your iPhone step + Settings -->
+<!-- C: Settings -->
 <div>
 <div class="desk">
   <div class="wall"></div>
   <div class="menubar"><div class="left"><svg class="apple"><use href="#s9-apple"/></svg><span class="app">Scan to Make</span><span>File</span><span>Edit</span><span>Window</span><span>Help</span></div>
   <div class="right"><span class="mb-icon"><svg class="ic" style="width:16px;height:16px"><use href="#logo-mono"/></svg></span><svg class="ic" style="width:16px;height:16px"><use href="#i-wifi"/></svg><span class="clock">Sun Oct 25&nbsp;&nbsp;10:27 AM</span></div></div>
 
-  <div class="mac-window fr inactive" style="left:28px;top:124px">
-    <div class="rail">
-      <div class="traffic"><i></i><i></i><i></i></div>
-      <div class="brand"><svg><use href="#logo"/></svg><div><b>Scan to Make</b><span>Set up your Mac</span></div></div>
-      <div class="rsteps">
-        <div class="rs done"><span class="n"><svg><use href="#i-check"/></svg></span>Welcome</div>
-        <div class="rs done"><span class="n"><svg><use href="#i-check"/></svg></span>Printer</div>
-        <div class="rs done"><span class="n"><svg><use href="#i-check"/></svg></span>AI cleanup</div>
-        <div class="rs now"><span class="n">4</span>Your iPhone</div>
-      </div>
-      <div class="ready"><div class="t-cap">Getting ready</div>
-        <div class="ri"><div class="ln"><svg><use href="#i-blender"/></svg>Blender 5.2</div>
-          <div class="pbar"><i style="width:94%"></i></div>
-          <div class="sz num">311 of 330 MB</div></div>
-        <div class="ri ok"><div class="ln"><span class="ck"><svg><use href="#i-check"/></svg></span>Bambu Studio<span class="st">Ready</span></div></div>
-        <div class="ri ok"><div class="ln"><span class="ck"><svg><use href="#i-check"/></svg></span>Printer tools<span class="st">Ready</span></div></div>
-      </div>
-    </div>
-
-    <div class="cnt center">
-      <h2>Scan this with your iPhone</h2>
-      <div class="qrcard"><svg viewBox="0 0 29 29"><use href="#s9-qr" width="29" height="29"/></svg></div>
-      <div class="qtime num">New code in 4:12</div>
-      <p class="qcap">Opens Scan to Make on your iPhone. Don’t have it yet? The code takes you to the App Store.</p>
-      <div class="wait"><span class="okc"><svg><use href="#i-check"/></svg></span>David’s iPhone connected</div>
-      <div class="box sw-card">
-        <div class="tg-row"><span>Keep Scan to Make running in the menu bar.</span><i class="tog on"></i></div>
-        <div class="tg-row"><span>Get a heads-up when cleanup finishes or a print is done.</span><i class="tog"></i></div>
-      </div>
-    </div>
-    <div class="foot"><span class="skip">Pair later</span><span class="mac-btn secondary lg">Back</span><span class="mac-btn primary lg">Done</span></div>
-  </div>
-
-  <div class="mac-window sw" style="left:772px;top:66px">
+  <div class="mac-window sw" style="left:50%;top:84px;transform:translateX(-50%)">
     <div class="tb">
       <div class="traffic"><i></i><i></i><i></i></div>
       <div class="wt">Advanced</div>
@@ -596,7 +579,7 @@ body{min-height:100vh;padding:48px 32px 64px}
     </div>
   </div>
 </div>
-<p class="caption dcap"><b>Your iPhone.</b> One QR code pairs the phone; the line under it changes to “David’s iPhone connected” the moment it does, and Done lights up. The two switches are the last questions. Settings (front) keeps every choice from first run; Advanced is the only place the Mac’s addresses, Tailscale and version numbers appear.</p>
+<p class="caption dcap"><b>Settings.</b> Every choice from first run lives here: Devices lists paired phones (and Add a phone… shows the same QR-only window); Advanced is the only place the Mac’s addresses, Tailscale, the custom model endpoint and version numbers appear.</p>
 </div>
 
 </div>
