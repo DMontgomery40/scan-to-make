@@ -50,6 +50,17 @@ export function localHostName(): string | undefined {
   }
 }
 
+/** The Mac's name as the user set it (System Settings › General › About), on macOS; otherwise none. */
+export function computerName(): string | undefined {
+  if (process.platform !== 'darwin') return undefined;
+  try {
+    const name = execFileSync('/usr/sbin/scutil', ['--get', 'ComputerName'], { encoding: 'utf8', timeout: 2000 }).trim();
+    return name || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /** The Host form of host:port as clients send it: lowercase, with the default port 443 left off. */
 export const authority = (host: string, port: number) => new URL(`https://${host}:${port}`).host.toLowerCase();
 
