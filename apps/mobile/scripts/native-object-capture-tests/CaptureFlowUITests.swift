@@ -28,7 +28,7 @@ final class CaptureFlowUITests: XCTestCase {
     }
     #if PRODUCT_FIXTURE
     @MainActor func testOrdinaryAppNativeBridgeAndFilesFallback() {
-        let app = XCUIApplication(bundleIdentifier: "org.reactjs.native.example.ScanToMake")
+        let app = XCUIApplication(bundleIdentifier: "com.scantomake")
         app.launch()
         let describe = app.buttons["Describe a project"].firstMatch
         XCTAssertTrue(describe.waitForExistence(timeout: 15)); describe.tap()

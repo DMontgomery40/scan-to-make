@@ -101,7 +101,7 @@ if args.ui:
         'schemes':{'NativeCaptureFixture':{'build':{'targets':{'NativeCaptureFixture':'all'}},'test':{'targets':['NativeCaptureUITests']}}}}
     if args.product_app:
         spec['settings']['base']['SWIFT_ACTIVE_COMPILATION_CONDITIONS'] += ' PRODUCT_FIXTURE'
-        subprocess.run(['xcrun','simctl','uninstall',args.simulator,'org.reactjs.native.example.ScanToMake'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+        subprocess.run(['xcrun','simctl','uninstall',args.simulator,'com.scantomake'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
         subprocess.run(['xcrun','simctl','install',args.simulator,str(args.product_app)],check=True,timeout=60)
     (project / 'project.json').write_text(json.dumps(spec, indent=2)+'\n')
     subprocess.run(['xcodegen','generate','--spec',str(project / 'project.json')],check=True,timeout=30)
