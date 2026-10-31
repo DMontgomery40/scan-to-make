@@ -72,7 +72,7 @@ async function fixture(
       />,
     );
   });
-  return { tree, requests, project: created.project };
+  return { tree, requests, project: created.project, repo };
 }
 function button(tree: Renderer.ReactTestRenderer, name: string) {
   return tree.root.find(
@@ -171,9 +171,11 @@ test('choosing a changed destination requires explicit confirmation before impor
   await act(async () => tree.unmount());
 });
 
-test('ordinary screen hands a completed native draft through real importer and verified reopen', async () => {
-  const { tree, requests, project } = await fixture();
-  const history = new Map<string, string>();
+// The real importer against a companion that makes a new capture per POST.
+function connect(
+  { requests, project }: Awaited<ReturnType<typeof fixture>>,
+  { loseReplies = false, history = new Map<string, string>() } = {},
+) {
   const ref = (c: string, mediaType: string) => ({
     sha256: c.repeat(64),
     byteLength: 123,
@@ -222,6 +224,7 @@ test('ordinary screen hands a completed native draft through real importer and v
     adoptNativeOutput: async () => original,
     request: async (options: { method: string; path: string }) => {
       requests.push(options.method);
+      if (options.method === 'POST' && loseReplies) throw Error('reply lost');
       return {
         status: options.method === 'POST' ? 201 : 200,
         body: JSON.stringify(
@@ -231,10 +234,25 @@ test('ordinary screen hands a completed native draft through real importer and v
       };
     },
   });
+  return history;
+}
+test('ordinary screen hands a completed native draft through real importer and verified reopen', async () => {
+  const f = await fixture();
+  const { tree, requests } = f;
+  const history = connect(f);
   await press(tree, 'Scan object');
   expect(requests).toEqual(['scan']);
-  await press(tree, 'Add scan 1 to this project');
+  // Two quick taps send the scan once.
+  await act(async () => {
+    const add = button(tree, 'Add scan 1 to this project');
+    add.props.onPress();
+    add.props.onPress();
+  });
   expect(requests).toEqual(['scan', 'GET', 'POST', 'GET']);
+  // An added scan can't be added again, so the companion never gets a copy.
+  expect(text(tree)).toContain('Added to this project as capture 1');
+  expect(hasButton(tree, 'Add scan 1 to this project')).toBe(false);
+  expect(hasButton(tree, 'Choose destination for scan 1')).toBe(false);
   expect(text(tree)).toContain('Review capture');
   expect(text(tree)).toContain('Capture imported and verified.');
   expect(button(tree, 'Review converted mesh')).toBeTruthy();
@@ -246,4 +264,65 @@ test('ordinary screen hands a completed native draft through real importer and v
     ),
   ).toBe(true);
   await act(async () => tree.unmount());
+});
+
+type AlertButton = { text: string; onPress?: () => unknown };
+async function answer(prompt: jest.SpyInstance, label: string) {
+  const buttons: AlertButton[] = prompt.mock.calls.at(-1)[2];
+  await act(async () => {
+    await buttons.find(b => b.text === label)!.onPress!();
+  });
+}
+test('an added scan can be added again once the project has a newer version', async () => {
+  const f = await fixture();
+  connect(f);
+  await press(f.tree, 'Scan object');
+  await press(f.tree, 'Add scan 1 to this project');
+  expect(hasButton(f.tree, 'Add scan 1 to this project')).toBe(false);
+  await f.repo.change('one', 0, {
+    kind: 'replace-brief',
+    brief: { ...f.project.brief, addition: 'Edited' },
+  });
+  await press(f.tree, 'Refresh local scans');
+  expect(text(f.tree)).toContain('Ready to add');
+  expect(hasButton(f.tree, 'Choose destination for scan 1')).toBe(true);
+  await act(async () => f.tree.unmount());
+});
+test('answering the destination question right away still adds the scan', async () => {
+  const f = await fixture();
+  connect(f);
+  await press(f.tree, 'Scan object');
+  const prompt = jest.spyOn(Alert, 'alert');
+  await press(f.tree, 'Choose destination for scan 1');
+  await answer(prompt, 'Add to this version');
+  expect(f.requests).toEqual(['scan', 'GET', 'POST', 'GET']);
+  expect(text(f.tree)).toContain('Added to this project as capture 1');
+  await act(async () => f.tree.unmount());
+});
+test('after a lost reply is set aside, adding the same scan asks before sending it again', async () => {
+  const f = await fixture();
+  const history = connect(f, { loseReplies: true });
+  await press(f.tree, 'Scan object');
+  await press(f.tree, 'Add scan 1 to this project');
+  expect(text(f.tree)).toContain('Import unconfirmed');
+  const prompt = jest.spyOn(Alert, 'alert');
+  await press(f.tree, 'Review unconfirmed import');
+  await answer(prompt, 'Allow a new import');
+  connect(f, { history });
+  await press(f.tree, 'Add scan 1 to this project');
+  expect(f.requests.filter(r => r === 'POST')).toHaveLength(1);
+  expect(prompt).toHaveBeenLastCalledWith(
+    'Add this scan again?',
+    expect.stringContaining('may already be on your companion'),
+    expect.anything(),
+  );
+  // The question is in the alert; the status line doesn't repeat it as an error.
+  expect(text(f.tree)).toContain(
+    'Nothing was sent. Choose whether to add it again.',
+  );
+  expect(text(f.tree)).not.toContain('may already be on your companion');
+  await answer(prompt, 'Add again');
+  expect(f.requests.filter(r => r === 'POST')).toHaveLength(2);
+  expect(text(f.tree)).toContain('Added to this project as capture 1');
+  await act(async () => f.tree.unmount());
 });

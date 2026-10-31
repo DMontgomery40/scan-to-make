@@ -26,6 +26,9 @@ export type CaptureState = {
   snapshot?: string;
   captures: RetainedCapture[];
   pending?: { revision: number; source: CaptureFile };
+  // Imports whose reply was lost and that the person chose to move past.
+  // Their bytes may be on the companion, so sending them again needs a yes.
+  unconfirmed?: { revision: number; source: CaptureFile }[];
 };
 type Request = {
   context: string;
@@ -73,6 +76,22 @@ function failure(status: number): never {
       : `The companion could not complete this request (${status}).`,
   );
 }
+const sameFile = (a: CaptureFile, b: CaptureFile) =>
+  a.sha256 === b.sha256 &&
+  a.byteLength === b.byteLength &&
+  a.mediaType === b.mediaType;
+/** The capture already holding these bytes for this project version, if any. */
+export function retainedIndex(
+  state: CaptureState,
+  revision: number,
+  file: CaptureFile,
+) {
+  return state.captures.findIndex(
+    c =>
+      c.binding.projectRevision === revision &&
+      sameFile(c.binding.capture.original, file),
+  );
+}
 function etag(value: string) {
   if (!/^"[a-f0-9]{64}"$/.test(value))
     throw Error('Invalid project acknowledgment.');
@@ -88,6 +107,18 @@ function retained(body: string, id: string, revision: number): RetainedCapture {
   )
     throw Error('Capture belongs to a different project version.');
   return { captureId: data.captureId, binding };
+}
+// The capture record is one value per pairing, so every client on the same
+// bridge takes turns changing it, and only one import runs at a time.
+const turns = new WeakMap<object, Promise<unknown>>();
+const importing = new WeakSet<object>();
+function inTurn<T>(native: object, task: () => Promise<T>): Promise<T> {
+  const run = (turns.get(native) ?? Promise.resolve()).then(task);
+  turns.set(
+    native,
+    run.catch(() => {}),
+  );
+  return run;
 }
 export class CaptureClient {
   constructor(
@@ -110,7 +141,11 @@ export class CaptureClient {
       (await this.native.read(JSON.stringify([context, id])));
     if (bytes == null) return { captures: [] };
     const s = JSON.parse(bytes) as CaptureState;
-    if (!Array.isArray(s.captures) || s.captures.length > 1000)
+    if (
+      !Array.isArray(s.captures) ||
+      s.captures.length > 1000 ||
+      (s.unconfirmed !== undefined && !Array.isArray(s.unconfirmed))
+    )
       throw Error('Saved capture history could not be read.');
     for (const c of s.captures)
       retained(JSON.stringify(c), id, c.binding.projectRevision);
@@ -134,6 +169,9 @@ export class CaptureClient {
     }
   }
   async sync(id: string, expected?: CaptureDestination) {
+    return inTurn(this.native, () => this.syncNow(id, expected));
+  }
+  private async syncNow(id: string, expected?: CaptureDestination) {
     const context = await this.native.context();
     const project = await this.load(id);
     const snapshot = JSON.stringify(project);
@@ -206,14 +244,57 @@ export class CaptureClient {
       );
     }
   }
-  async import(id: string, source: CaptureFile, expected?: CaptureDestination) {
+  /**
+   * Each import creates a new capture on the companion, so one runs at a time
+   * and bytes it already holds for this project version are never re-sent.
+   * `again` sends bytes whose earlier upload went unconfirmed.
+   */
+  async import(
+    id: string,
+    source: CaptureFile,
+    expected?: CaptureDestination,
+    again = false,
+  ) {
+    if (importing.has(this.native))
+      throw Error('An import is already running. Wait for it to finish.');
+    importing.add(this.native);
+    try {
+      return await inTurn(this.native, () =>
+        this.importOnce(id, source, expected, again),
+      );
+    } finally {
+      importing.delete(this.native);
+    }
+  }
+  private async importOnce(
+    id: string,
+    source: CaptureFile,
+    expected: CaptureDestination | undefined,
+    again: boolean,
+  ) {
     if (expected) await this.checkDestination(id, expected);
     const context = await this.native.context();
-    if ((await this.read(context, id)).pending)
+    const before = await this.read(context, id);
+    const revision = (await this.load(id)).revision;
+    const held = retainedIndex(before, revision, source);
+    if (held >= 0) return before.captures[held];
+    if (before.pending)
       throw Error(
         'An earlier import is unconfirmed. Review it before starting another.',
       );
-    const state = await this.sync(id, expected);
+    if (
+      !again &&
+      before.unconfirmed?.some(
+        u => u.revision === revision && sameFile(u.source, source),
+      )
+    )
+      throw Object.assign(
+        Error(
+          'An earlier upload of this scan may already be on your companion. Adding it again could make a second copy.',
+        ),
+        { code: 'maybe-imported' },
+      );
+    const state = await this.syncNow(id, expected);
     if (expected) await this.checkDestination(id, expected);
     const project = await this.load(id);
     if (state.snapshot !== JSON.stringify(project))
@@ -273,14 +354,30 @@ export class CaptureClient {
     }
     state.captures.push(capture);
     delete state.pending;
+    // These bytes are now held, so their unconfirmed upload needs no question.
+    state.unconfirmed = state.unconfirmed?.filter(
+      u => !(u.revision === project.revision && sameFile(u.source, source)),
+    );
+    if (!state.unconfirmed?.length) delete state.unconfirmed;
     await this.save(context, id, state);
     return capture;
   }
   async acknowledgeUnknown(id: string) {
-    const context = await this.native.context();
-    const s = await this.read(context, id);
-    delete s.pending;
-    await this.save(context, id, s);
+    return inTurn(this.native, async () => {
+      const context = await this.native.context();
+      const s = await this.read(context, id);
+      const p = s.pending;
+      // Kept until those bytes are held as a capture; each file once.
+      if (
+        p &&
+        !s.unconfirmed?.some(
+          u => u.revision === p.revision && sameFile(u.source, p.source),
+        )
+      )
+        s.unconfirmed = [...(s.unconfirmed ?? []), p];
+      delete s.pending;
+      await this.save(context, id, s);
+    });
   }
   async reopen(id: string, capture: RetainedCapture) {
     const context = await this.native.context();
