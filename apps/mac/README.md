@@ -140,6 +140,26 @@ Local Network acceptance requires a real login-session launch and a LAN operatio
 with a prompt naming **Scan to Make**, and deny/allow checks. SSH-started tools
 are exempt and cannot establish this. See [Apple TN3179](https://developer.apple.com/documentation/technotes/tn3179-understanding-local-network-privacy).
 
+The foreground app makes one bounded SSDP discovery attempt per launch after a
+LAN is available. Login/background launch does not consume that attempt. The
+system owns the permission decision; the app never stores an inferred grant.
+The user must answer the system's Local Network alert. The app stays running
+even when access is denied; it does not use a short-lived permission helper.
+
+The app-owned agent pins `SCAN_TO_MAKE_PRINTER_NODE` to its signed bundled Node,
+overriding retained environment values. Printer MCP sessions substitute this
+runtime for absolute Node commands and npm Node-script entry points, and put its
+directory first in the child's PATH. Arguments, cwd and printer credentials stay
+unchanged in memory; `printer-handoff.json` is not rewritten. Native helpers keep
+their own entry point. Node has a stable `<app bundle ID>.node` signing identifier.
+
+After an approved redeploy and the user's Allow, call local `printer.check` with
+`{"start":true}`, then poll without `start` until complete. This calls Bambu's
+`get_printer_status` and `camera_snapshot` from the actual companion process tree,
+without printing. Preserve the redacted status/camera hash receipt alongside the
+usual auth, TLS pin, capture and paired-client preservation checks. Signed build
+and unit tests alone do not prove Local Network attribution or live reachability.
+
 ## Updates and distribution
 
 Sparkle 2 is linked. Development builds leave `SUFeedURL` and `SUPublicEDKey` unset.

@@ -35,6 +35,8 @@
 		203FB9BDE3698C0B30E3568D /* ModelAccess.swift in Sources */ = {isa = PBXBuildFile; fileRef = D01E4CB308D5F8181ED0D141 /* ModelAccess.swift */; };
 		B38F0009D79EB71A159A001C /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = FCCF82162113B52441A256F0 /* Models.swift */; };
 		1C2CCC14C6E2D80580B7FE9B /* UnixTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4220829805C0608EBCFF9664 /* UnixTransport.swift */; };
+		901197000000000000000002 /* LocalNetworkAccess.swift in Sources */ = {isa = PBXBuildFile; fileRef = 901197000000000000000001 /* LocalNetworkAccess.swift */; };
+		901197000000000000000004 /* LocalNetworkAccessTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 901197000000000000000003 /* LocalNetworkAccessTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -101,6 +103,8 @@
 		4220829805C0608EBCFF9664 /* UnixTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnixTransport.swift; sourceTree = "<group>"; };
 		441F9E4D52189960D333C49C /* ModelAccessModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelAccessModel.swift; sourceTree = "<group>"; };
 		3C4709FCE9FA36E84033305F /* ModelAccessModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelAccessModelTests.swift; sourceTree = "<group>"; };
+		901197000000000000000001 /* LocalNetworkAccess.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalNetworkAccess.swift; sourceTree = "<group>"; };
+		901197000000000000000003 /* LocalNetworkAccessTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalNetworkAccessTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -139,6 +143,7 @@
 			children = (
 				D7B0BA880A7A95145CB837BE /* AgentManager.swift */,
 				2E40641D5842346F76EB19B3 /* NetworkAddresses.swift */,
+				901197000000000000000001 /* LocalNetworkAccess.swift */,
 				296E8C1354818E038DD4E375 /* PairingSession.swift */,
 				34EF17D723E37A90F3F98F7F /* ModelKeychain.swift */,
 				8C16EEE29AB7D43A60876E8A /* ModelAccess.swift */,
@@ -152,6 +157,7 @@
 				910E4B0114E7E04F953E42A1 /* AgentManagerTests.swift */,
 				666DD15803F0A0C9F25C5AB3 /* PairingSessionTests.swift */,
 				D04E57F8EA06595C9C5DE5DC /* ModelAccessTests.swift */,
+				901197000000000000000003 /* LocalNetworkAccessTests.swift */,
 			);
 			path = Tests;
 			sourceTree = "<group>";
@@ -337,6 +343,7 @@
 			files = (
 				F7C6B30924946562ED38E49A /* AgentManager.swift in Sources */,
 				FEC965F8C46620AD288BA7C3 /* NetworkAddresses.swift in Sources */,
+				901197000000000000000002 /* LocalNetworkAccess.swift in Sources */,
 				8591EC1044C78F60778FCC71 /* PairingSession.swift in Sources */,
 				E93C1BBCC27768E164A3EB1C /* ModelKeychain.swift in Sources */,
 				C73E7AE1DF507DF6FA161E37 /* ModelAccess.swift in Sources */,
@@ -372,6 +379,7 @@
 				685F7884CACEC1D1FA9A8105 /* AgentManagerTests.swift in Sources */,
 				AA8A4960648DEA5F67A8ACB2 /* PairingSessionTests.swift in Sources */,
 				633CBA0128EBCA20CD2A8778 /* ModelAccessTests.swift in Sources */,
+				901197000000000000000004 /* LocalNetworkAccessTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

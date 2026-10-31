@@ -36,6 +36,14 @@ function wire(path,request, split=false) {
   });
 }
 
+test('printer check stays local, bounded to an empty/poll or start request',async t=>{
+  const starts=[];const f=await fixture(t,{printerCheck:{get:start=>{starts.push(start);return {state:'checking'};}}});
+  assert.equal((await f.call('printer.check',{start:true})).result.state,'checking');
+  assert.equal((await f.call('printer.check')).result.state,'checking');
+  assert.deepEqual(starts,[true,false]);
+  assert.equal((await f.call('printer.check',{host:'caller-picked'})).error.code,'invalid-request');
+});
+
 test('private Unix endpoint handles fragmented/half-closed clients and removes its socket on shutdown',async t=>{
   const f=await fixture(t);
   assert.equal((await stat(f.root)).mode&0o777,0o700);
