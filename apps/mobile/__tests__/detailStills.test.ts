@@ -205,6 +205,16 @@ test('imageUri resolves a downloaded still only through a verifying transport', 
     `file:///private/${'b'.repeat(64)}.jpg`,
   );
   expect(h.native.imageUri).toHaveBeenCalledWith(source);
+  h.native.imageUri = jest.fn(async () => null);
+  expect(await h.client.imageUri(record)).toBeNull();
+  h.native.imageUri = jest.fn(async () => {
+    throw Object.assign(Error('The image could not be verified.'), {
+      code: 'verification-failed',
+    });
+  });
+  await expect(h.client.imageUri(record)).rejects.toMatchObject({
+    code: 'verification-failed',
+  });
   h.native.imageUri = jest.fn(async () => 'content://media/1');
   await expect(h.client.imageUri(record)).rejects.toThrow('display path');
 });

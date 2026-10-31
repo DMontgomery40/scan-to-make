@@ -86,6 +86,7 @@ with tempfile.TemporaryDirectory(prefix='native-stills-processing-') as temp:
         first=json.loads((container / 'Documents/results-1.json').read_text())
         assert result['passed'] and result['runId'] == run_id and result['phase']==2
         assert first['passed'] and first['runId']==run_id and first['phase']==1
+        assert first.get('imageUriCacheStates') is True, 'imageUri cache-miss and corrupt-cache states not exercised'
         assert result['jobId'] and first['jobId']==result['jobId']
         assert result['pngSha256']==media['png']['sha256']
         result['bridgeSha256'] = hashlib.sha256((REPO / 'apps/mobile/modules/local-project-storage/ios/StillsProcessingBridge.mm').read_bytes()).hexdigest()

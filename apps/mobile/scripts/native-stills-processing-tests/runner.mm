@@ -15,6 +15,7 @@ static void Require(BOOL ok,NSString *why){if(!ok){fprintf(stderr,"FAIL %s\n",wh
 @property NSDictionary *jpegFile;
 @property NSDictionary *still;
 @property NSDictionary *job;
+@property BOOL imageUriCacheStatesChecked;
 @end
 @implementation Driver
 - (NSString*)path:(NSString*)suffix {
@@ -38,6 +39,22 @@ static void Require(BOOL ok,NSString *why){if(!ok){fprintf(stderr,"FAIL %s\n",wh
   Require(bytes&&[STMHash(bytes) isEqual:file[@"sha256"]],@"image uri exact bytes");then();
  } reject:^(NSString*c,NSString*m,NSError*e){Require(NO,c);}];
 }
+- (void)imageUriCacheStates {
+ NSData *missingBytes=[@"synthetic uncached image" dataUsingEncoding:NSUTF8StringEncoding];
+ NSDictionary *missing=@{@"sha256":STMHash(missingBytes),@"byteLength":@(missingBytes.length),@"mediaType":@"image/jpeg"};
+ NSURL *missingURL=FileURL(missing);
+ [NSFileManager.defaultManager removeItemAtURL:missingURL error:nil];
+ __block BOOL resolvedNull=NO;
+ [self.bridge imageUriFile:missing resolve:^(id uri){resolvedNull=uri==NSNull.null;} reject:^(NSString*c,NSString*m,NSError*e){Require(NO,c);}];
+ Require(resolvedNull,@"imageUri cache miss resolves null");
+ NSMutableData *corrupt=[missingBytes mutableCopy];((char*)corrupt.mutableBytes)[0]^=1;
+ Require(DurableWrite(corrupt,missingURL),@"write corrupt cached image");
+ __block BOOL rejected=NO;
+ [self.bridge imageUriFile:missing resolve:^(id uri){Require(NO,@"corrupt cached image resolved");} reject:^(NSString*c,NSString*m,NSError*e){rejected=[c isEqual:@"verification-failed"];}];
+ Require(rejected,@"imageUri corrupt cache rejects");
+ [NSFileManager.defaultManager removeItemAtURL:missingURL error:nil];
+ self.imageUriCacheStatesChecked=YES;
+}
 - (void)rejects:(NSDictionary*)options code:(NSString*)code {
  __block BOOL rejected=NO;
  [self.bridge requestOptions:options resolve:^(id r){Require(NO,@"unexpected request accepted");} reject:^(NSString*c,NSString*m,NSError*e){rejected=[c isEqual:code];}];
@@ -57,11 +74,12 @@ static void Require(BOOL ok,NSString *why){if(!ok){fprintf(stderr,"FAIL %s\n",wh
  bad=[self options:@"GET" path:stills];bad[@"etag"]=@"\"bad\"";[self rejects:bad code:@"invalid-request"];
  bad=[self options:@"GET" path:stills];bad[@"create"]=@YES;[self rejects:bad code:@"invalid-request"];
  bad=[self options:@"POST" path:stills];bad[@"source"]=@{@"sha256":self.jpegFile[@"sha256"],@"byteLength":@68,@"mediaType":@"model/stl"};[self rejects:bad code:@"invalid-source"];
+ [self imageUriCacheStates];
 }
 - (void)finish {
  NSInteger phase=[NSUserDefaults.standardUserDefaults integerForKey:@"phase"]+1;
  [NSUserDefaults.standardUserDefaults setInteger:phase forKey:@"phase"];
- NSDictionary *receipt=@{@"phase":@(phase),@"passed":@YES,@"runId":config[@"runId"],@"jobId":[NSUserDefaults.standardUserDefaults stringForKey:@"jobId"]?:@"",@"pngSha256":config[@"media"][@"png"][@"sha256"]};
+ NSDictionary *receipt=@{@"phase":@(phase),@"passed":@YES,@"runId":config[@"runId"],@"jobId":[NSUserDefaults.standardUserDefaults stringForKey:@"jobId"]?:@"",@"pngSha256":config[@"media"][@"png"][@"sha256"],@"imageUriCacheStates":@(self.imageUriCacheStatesChecked)};
  NSURL *url=[NSFileManager.defaultManager URLsForDirectory:NSDocumentDirectory inDomains:NSUserDomainMask].firstObject;
  url=[url URLByAppendingPathComponent:[NSString stringWithFormat:@"results-%ld.json",(long)phase]];
  Require([[NSJSONSerialization dataWithJSONObject:receipt options:NSJSONWritingPrettyPrinted error:nil] writeToURL:url atomically:YES],@"receipt");

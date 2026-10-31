@@ -10,6 +10,7 @@
 #import <ImageIO/ImageIO.h>
 #import "CompanionPairing.h"
 #import "ContentHash.h"
+#include <errno.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/stat.h>
@@ -284,8 +285,13 @@ RCT_REMAP_METHOD(pickImages,pickImagesLimit:(double)limit resolve:(RCTPromiseRes
   });
 }
 RCT_REMAP_METHOD(imageUri,imageUriFile:(NSDictionary*)f resolve:(RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject){
-  if(![f isKindOfClass:NSDictionary.class]||!IsStillMedia(f[@"mediaType"])||![f[@"byteLength"] isKindOfClass:NSNumber.class]||[f[@"byteLength"] unsignedIntegerValue]>STILL_LIMIT||!Verified(f)){reject(@"verification-failed",@"The image could not be verified.",nil);return;}
-  resolve(FileURL(f).absoluteString);
+  NSURL *url=FileURL(f);NSNumber *length=[f isKindOfClass:NSDictionary.class]?f[@"byteLength"]:nil;
+  if(![f isKindOfClass:NSDictionary.class]||!IsStillMedia(f[@"mediaType"])||!url||![length isKindOfClass:NSNumber.class]||length.doubleValue<1||length.doubleValue>STILL_LIMIT||length.doubleValue!=length.unsignedIntegerValue){reject(@"verification-failed",@"The image could not be verified.",nil);return;}
+  // A cache miss is an expected display state, not a verification failure.
+  struct stat st;
+  if(lstat(url.fileSystemRepresentation,&st)!=0&&errno==ENOENT){resolve(NSNull.null);return;}
+  if(!Verified(f)){reject(@"verification-failed",@"The image could not be verified.",nil);return;}
+  resolve(url.absoluteString);
 }
 RCT_REMAP_METHOD(present,presentFile:(NSDictionary*)f share:(BOOL)share resolve:(RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject){
   NSData *d=Verified(f);UIViewController *presenter=RCTPresentedViewController();if(!d||!presenter||presenter.presentedViewController){reject(@"verification-failed",@"The scan file could not be opened.",nil);return;}

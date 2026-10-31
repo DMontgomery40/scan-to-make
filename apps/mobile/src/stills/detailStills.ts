@@ -70,7 +70,8 @@ export interface DetailStillNative {
   pickImages?(limit: number): Promise<StillPickResult>;
   /**
    * Optional display seam: resolves a verified, app-private cached file URI
-   * for already-downloaded still bytes, or null when unavailable.
+   * for already-downloaded still bytes, or null when those bytes are not
+   * cached. Rejects when cached bytes fail verification.
    */
   imageUri?(file: CaptureFile): Promise<string | null>;
 }
@@ -308,7 +309,8 @@ export class DetailStillsClient {
   /**
    * Displayable URI for an already-downloaded still, verified natively
    * against the still's exact-byte identity. Null when the transport
-   * cannot provide one. Download the still first.
+   * cannot provide one or the bytes are not cached; cached bytes that fail
+   * verification reject. Download the still first.
    */
   async imageUri(still: DetailStill): Promise<string | null> {
     if (!this.native.imageUri) return null;
