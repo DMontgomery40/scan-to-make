@@ -12,6 +12,7 @@ import {
   type PairingStatus,
 } from '../src/companion/pairing';
 import { Button } from '../src/ui/components';
+import type { NearbyAnswer } from '../src/companion/nearby';
 
 const paired: PairingStatus = {
   state: 'paired',
@@ -720,4 +721,300 @@ it('a pairing still waiting its turn never starts once Find your Mac has closed'
   await act(async () => finishRefresh());
   expect(native.pair).not.toHaveBeenCalled();
   await act(async () => tree.unmount());
+});
+
+describe('nearby pairing on Find your Mac (KAN-162)', () => {
+  const { formatPairingLink } = require('@scan-to-make/contracts/pairing-link');
+  const { RequestGateProvider, useRequestGate } = require('../src/screens/requestGate');
+  const S = 'd3'.repeat(32);
+  const addresses = ['https://192.168.68.123:9077'];
+  const allowed = () => ({
+    status: 'allowed' as const,
+    link: formatPairingLink({ version: 2, code: 'A'.repeat(32), expiresAt: Date.now() + 300000, addresses, publicKeySha256: S, name: 'Mac mini' }),
+  });
+  // A Mac on this Wi-Fi whose answers the test gives by hand.
+  function macNearby(macs: { name: string; publicKeySha256?: string }[] = [{ name: 'Mac mini', publicKeySha256: S }]) {
+    const waits: { resolve: (a: NearbyAnswer) => void; reject: (e: unknown) => void }[] = [];
+    // Like the native module: start() knows only Macs from the last browse,
+    // and cancel() forgets them.
+    let known: string[] = [];
+    const nearby = {
+      browse: jest.fn(async (_timeoutMs: number) => {
+        known = macs.map(mac => mac.name);
+        return macs;
+      }),
+      start: jest.fn(async (name: string, _deviceName: string) => {
+        if (!known.includes(name)) throw { code: 'invalid-invitation' };
+        return { code: '482913', publicKeySha256: S, baseUrl: addresses[0]!, expiresAt: Date.now() + 120000 };
+      }),
+      result: jest.fn(() => new Promise<NearbyAnswer>((resolve, reject) => waits.push({ resolve, reject }))),
+      cancel: jest.fn(async () => {
+        known = [];
+        waits.splice(0).forEach(w => w.reject({ code: 'cancelled' }));
+      }),
+    };
+    const answer = (value: NearbyAnswer) => act(async () => waits.shift()!.resolve(value));
+    const fail = (code: string) => act(async () => waits.shift()!.reject({ code }));
+    return { nearby, answer, fail, waits };
+  }
+  // Pair's promise lasts until the Mac answers, so taps don't wait for it.
+  const tap = (tree: Tree, label: string) =>
+    act(async () => {
+      tree.root.findAllByType(Button).find(x => x.props.label === label)!.props.onPress();
+    });
+  const tapTwice = (tree: Tree, label: string) =>
+    act(async () => {
+      const target = tree.root.findAllByType(Button).find(x => x.props.label === label)!;
+      target.props.onPress();
+      target.props.onPress();
+    });
+  const lookAgain = (tree: Tree) =>
+    act(async () =>
+      tree.root
+        .find(n => n.props.accessibilityRole === 'button' && n.findAllByType(Text).some(t => t.props.children === 'Look again'))
+        .props.onPress(),
+    );
+
+  it('looks on the Wi-Fi only after Continue, then shows the Mac, its code, and Connected after Allow, with the camera kept', async () => {
+    const { nearby, answer } = macNearby();
+    const { tree, native } = await unpaired({ nearby });
+    expect(nearby.browse).not.toHaveBeenCalled();
+    expect(text(tree)).toContain('To find your Mac, Scan to Make needs to look on your Wi-Fi.');
+    await press(tree, 'Continue');
+    expect(nearby.browse).toHaveBeenCalledTimes(1);
+    expect(text(tree)).toContain('Mac found nearby');
+    expect(text(tree)).toContain('Mac mini');
+    expect(text(tree)).toContain('On this Wi-Fi');
+    expect(viewfinder(tree).props.active).toBe(true);
+    await tap(tree, 'Pair');
+    expect(nearby.start).toHaveBeenCalledWith('Mac mini', 'My phone');
+    expect(text(tree)).toContain('Pair with Mac mini?');
+    expect(text(tree)).toContain('482 913');
+    expect(text(tree)).toContain('Make sure your Mac shows the same number, then click Allow on your Mac.');
+    expect(text(tree)).toContain('Waiting for your Mac…');
+    // The camera stays, resting while the code is up.
+    expect(viewfinder(tree).props.active).toBe(false);
+    await answer(allowed());
+    expect(native.pairAddresses).toHaveBeenCalledWith(addresses, 'A'.repeat(32), 'My phone', S);
+    expect(text(tree)).toContain('Connected to your Mac');
+    await act(async () => tree.unmount());
+  });
+
+  it('a Mac that says no, or a wait that runs out, says so, and Try again goes back to the Mac', async () => {
+    const { nearby, answer, fail } = macNearby();
+    const { tree } = await unpaired({ nearby });
+    await press(tree, 'Continue');
+    await tap(tree, 'Pair');
+    await answer({ status: 'denied' });
+    expect(text(tree)).toContain(pairingError({ code: 'nearby-denied' })!);
+    await press(tree, 'Try again');
+    expect(text(tree)).toContain('Mac found nearby');
+    await tap(tree, 'Pair');
+    await fail('nearby-expired');
+    expect(text(tree)).toContain(pairingError({ code: 'nearby-expired' })!);
+    await act(async () => tree.unmount());
+  });
+
+  it('Cancel goes back quietly; the cancelled attempt never answers the next one, and a double tap starts one', async () => {
+    const { nearby, answer } = macNearby();
+    const { tree, native } = await unpaired({ nearby });
+    await press(tree, 'Continue');
+    await tapTwice(tree, 'Pair');
+    expect(nearby.start).toHaveBeenCalledTimes(1);
+    await press(tree, 'Cancel');
+    expect(nearby.cancel).toHaveBeenCalledTimes(1);
+    // Cancelling forgets the Macs found, so it looks again.
+    expect(nearby.browse).toHaveBeenCalledTimes(2);
+    expect(text(tree)).toContain('Mac found nearby');
+    expect(text(tree)).not.toContain('Cancelled');
+    await tap(tree, 'Pair');
+    expect(nearby.start).toHaveBeenCalledTimes(2);
+    await answer(allowed());
+    expect(native.pairAddresses).toHaveBeenCalledTimes(1);
+    expect(text(tree)).toContain('Connected to your Mac');
+    await act(async () => tree.unmount());
+  });
+
+  it('a cancelled attempt that answers late never changes the new one', async () => {
+    const { nearby, answer, waits } = macNearby();
+    // This Mac lets go of a cancelled wait only later.
+    nearby.cancel.mockImplementation(async () => {});
+    const { tree, native } = await unpaired({ nearby });
+    await press(tree, 'Continue');
+    await tap(tree, 'Pair');
+    await press(tree, 'Cancel');
+    await tap(tree, 'Pair');
+    expect(waits).toHaveLength(2);
+    // The old wait answers now: "no".
+    await answer({ status: 'denied' });
+    expect(text(tree)).not.toContain(pairingError({ code: 'nearby-denied' })!);
+    expect(text(tree)).toContain('Pair with Mac mini?');
+    await answer(allowed());
+    expect(native.pairAddresses).toHaveBeenCalledTimes(1);
+    expect(text(tree)).toContain('Connected to your Mac');
+    await act(async () => tree.unmount());
+  });
+
+  it('closing cancels only a search or session this screen started', async () => {
+    const started = macNearby();
+    const a = await unpaired({ nearby: started.nearby });
+    await press(a.tree, 'Continue');
+    await tap(a.tree, 'Pair');
+    await act(async () => a.tree.unmount());
+    expect(started.nearby.cancel).toHaveBeenCalledTimes(1);
+
+    const idle = macNearby();
+    const b = await unpaired({ nearby: idle.nearby });
+    await act(async () => b.tree.unmount());
+    expect(idle.nearby.cancel).not.toHaveBeenCalled();
+
+    // The Bonjour browser keeps running after browse() returns: closing stops it.
+    const browsed = macNearby();
+    const c = await unpaired({ nearby: browsed.nearby });
+    await press(c.tree, 'Continue');
+    await act(async () => c.tree.unmount());
+    expect(browsed.nearby.cancel).toHaveBeenCalledTimes(1);
+  });
+
+  it('a pairing still waiting its turn never starts once Find your Mac has closed', async () => {
+    const { nearby, answer } = macNearby();
+    const native = nativeMock();
+    (native.status as jest.Mock).mockResolvedValue({ state: 'disconnected' });
+    let finishRefresh!: () => void;
+    function Refreshing() {
+      const gate = useRequestGate();
+      React.useEffect(() => {
+        gate(() => new Promise<void>(done => { finishRefresh = done; }));
+      }, [gate]);
+      return null;
+    }
+    const app = (showing: boolean) => (
+      <RequestGateProvider>
+        <Refreshing />
+        {showing ? <FindYourMacScreen native={native} nearby={nearby} onDone={jest.fn()} /> : null}
+      </RequestGateProvider>
+    );
+    let tree!: Tree;
+    await act(async () => {
+      tree = Renderer.create(app(true));
+    });
+    await press(tree, 'Continue');
+    await tap(tree, 'Pair');
+    await answer(allowed());
+    await act(async () => tree.update(app(false)));
+    await act(async () => finishRefresh());
+    expect(native.pairAddresses).not.toHaveBeenCalled();
+    await act(async () => tree.unmount());
+  });
+
+  it('Local Network off points to Settings, no Mac found offers Look again, and the camera stays either way', async () => {
+    const off = macNearby();
+    off.nearby.browse.mockRejectedValueOnce({ code: 'local-network' }).mockRejectedValueOnce({ code: 'local-network' });
+    const open = jest.spyOn(Linking, 'openSettings').mockResolvedValue();
+    const { AppState } = require('react-native');
+    let onAppState: ((state: string) => void) | undefined;
+    const appState = jest.spyOn(AppState, 'addEventListener').mockImplementation(((_type: string, handler: (state: string) => void) => {
+      onAppState = handler;
+      return { remove: () => {} };
+    }) as never);
+    const a = await unpaired({ nearby: off.nearby });
+    await press(a.tree, 'Continue');
+    expect(text(a.tree)).toContain('Scan to Make can’t look on your Wi-Fi.');
+    expect(viewfinder(a.tree).props.active).toBe(true);
+    await press(a.tree, 'Open Settings');
+    expect(open).toHaveBeenCalled();
+    // Still off: Look again says so again.
+    await press(a.tree, 'Look again');
+    expect(off.nearby.browse).toHaveBeenCalledTimes(2);
+    expect(text(a.tree)).toContain('Scan to Make can’t look on your Wi-Fi.');
+    // Back from Settings with it turned on: it looks again by itself.
+    await act(async () => onAppState?.('active'));
+    expect(off.nearby.browse).toHaveBeenCalledTimes(3);
+    expect(text(a.tree)).toContain('Mac found nearby');
+    open.mockRestore();
+    appState.mockRestore();
+    await act(async () => a.tree.unmount());
+
+    const none = macNearby([]);
+    const b = await unpaired({ nearby: none.nearby });
+    await press(b.tree, 'Continue');
+    expect(text(b.tree)).toContain('No Mac found on this Wi-Fi.');
+    await lookAgain(b.tree);
+    expect(none.nearby.browse).toHaveBeenCalledTimes(2);
+    expect(viewfinder(b.tree).props.active).toBe(true);
+    await act(async () => b.tree.unmount());
+  });
+
+  it('waits for the stored pairing before offering a Mac nearby', async () => {
+    const { nearby } = macNearby();
+    const native = nativeMock();
+    let read!: (value: PairingStatus) => void;
+    (native.status as jest.Mock).mockImplementation(() => new Promise(resolve => { read = resolve; }));
+    const { tree } = await render(native, { nearby });
+    expect(text(tree)).not.toContain('To find your Mac, Scan to Make needs to look on your Wi-Fi.');
+    await act(async () => read(paired));
+    expect(text(tree)).toContain('Your Mac');
+    expect(nearby.browse).not.toHaveBeenCalled();
+    await act(async () => tree.unmount());
+  });
+
+  it('Cancel after Allow also stops the pairing that has started', async () => {
+    const { nearby, answer } = macNearby();
+    const { tree, native } = await unpaired({ nearby });
+    (native.pairAddresses as jest.Mock).mockImplementation(() => new Promise(() => {}));
+    await press(tree, 'Continue');
+    await tap(tree, 'Pair');
+    await answer(allowed());
+    expect(native.pairAddresses).toHaveBeenCalledTimes(1);
+    (native.cancel as jest.Mock).mockClear();
+    await press(tree, 'Cancel');
+    expect(native.cancel).toHaveBeenCalledTimes(1);
+    await act(async () => tree.unmount());
+  });
+
+  it('a search stopped because another screen covered this one never reports "No Mac found"', async () => {
+    const { nearby } = macNearby();
+    let stop!: (e: unknown) => void;
+    nearby.browse.mockImplementationOnce(() => new Promise((_resolve, reject) => { stop = reject; }));
+    nearby.cancel.mockImplementation(async () => stop({ code: 'cancelled' }));
+    const { tree, native, onDone } = await unpaired({ nearby });
+    await tap(tree, 'Continue');
+    expect(text(tree)).toContain('Looking for your Mac on this Wi-Fi…');
+    await act(async () => tree.update(<FindYourMacScreen native={native} nearby={nearby} onDone={onDone} paused />));
+    await act(async () => tree.update(<FindYourMacScreen native={native} nearby={nearby} onDone={onDone} />));
+    expect(nearby.cancel).toHaveBeenCalledTimes(1);
+    expect(text(tree)).not.toContain('No Mac found on this Wi-Fi.');
+    expect(text(tree)).toContain('To find your Mac, Scan to Make needs to look on your Wi-Fi.');
+    await act(async () => tree.unmount());
+  });
+
+  it('being covered stops the nearby search but never releases a QR pairing in flight', async () => {
+    const { nearby } = macNearby();
+    const { tree, native, onDone } = await unpaired({ nearby });
+    (native.pair as jest.Mock).mockImplementation(() => new Promise(() => {}));
+    await press(tree, 'Continue');
+    await scanned(tree, qrLink());
+    expect(native.pair).toHaveBeenCalledTimes(1);
+    const show = (props: Partial<React.ComponentProps<typeof FindYourMacScreen>>) =>
+      act(async () => tree.update(<FindYourMacScreen native={native} nearby={nearby} onDone={onDone} {...props} />));
+    await show({ paused: true });
+    await show({});
+    // A link now must wait for the pairing already running.
+    await show({ link: qrLink() });
+    expect(native.pair).toHaveBeenCalledTimes(1);
+    await act(async () => tree.unmount());
+  });
+
+  it('a pairing link that arrives during the session waits, then asks before replacing', async () => {
+    const { nearby, answer } = macNearby();
+    const { tree, native, onDone } = await unpaired({ nearby });
+    await press(tree, 'Continue');
+    await tap(tree, 'Pair');
+    await act(async () => tree.update(<FindYourMacScreen native={native} nearby={nearby} onDone={onDone} link={qrLink()} />));
+    expect(native.pair).not.toHaveBeenCalled();
+    await answer(allowed());
+    expect(text(tree)).toContain('Pair with another Mac?');
+    expect(native.pair).not.toHaveBeenCalled();
+    await act(async () => tree.unmount());
+  });
 });

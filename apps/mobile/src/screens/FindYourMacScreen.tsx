@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  AppState,
   Alert,
   Linking,
   Pressable,
@@ -21,6 +22,14 @@ import {
   type PairingStatus,
 } from '../companion/pairing';
 import { parsePairingQR } from '../companion/pairingLink';
+import {
+  formatNearbyCode,
+  nearbyNative,
+  pairNearby,
+  type NearbyMac,
+  type NearbyNative,
+  type NearbyStarted,
+} from '../companion/nearby';
 import { QRViewfinder, type ViewfinderState } from '../companion/QRViewfinder';
 import { Button, READABLE_WIDTH } from '../ui/components';
 import { useRequestGate } from './requestGate';
@@ -34,8 +43,14 @@ type Phase =
   // The one sentence shown before iOS asks about the local network.
   | { kind: 'asking'; code: string }
   | { kind: 'pairing' }
-  | { kind: 'failed'; message: string; retry?: string }
+  | { kind: 'failed'; message: string; retry?: string; nearby?: boolean }
+  // Nearby (Bonjour) pairing: the code to compare once the Mac has it.
+  | { kind: 'nearby'; mac: NearbyMac; started?: NearbyStarted }
   | { kind: 'connected' };
+
+/** What the nearby search has found, separate from the camera's phase. */
+type Nearby = 'idle' | 'looking' | 'none' | 'denied' | NearbyMac[];
+const CLOSED = () => Object.assign(Error('Closed'), { code: 'cancelled' });
 
 const DEVICE_NAME = 'My phone';
 const OUT_OF_REACH = new Set(['network', 'timeout']);
@@ -60,6 +75,7 @@ export function FindYourMacScreen({
   resume = false,
   paused = false,
   native = companionNative(),
+  nearby = nearbyNative(),
   link,
   onLinkUsed,
 }: {
@@ -73,6 +89,8 @@ export function FindYourMacScreen({
   /** True while another screen covers this one: the camera stays off. */
   paused?: boolean;
   native?: CompanionNative;
+  /** Bonjour pairing with a Mac on this Wi-Fi; absent in builds without it. */
+  nearby?: NearbyNative;
   /** A pairing link the app was opened with, e.g. from the Camera app. */
   link?: string | null;
   onLinkUsed?: () => void;
@@ -210,6 +228,151 @@ export function FindYourMacScreen({
     }
     pair(value);
   };
+
+  // Nearby pairing (journey P7): after the Wi-Fi sentence, look for a Mac
+  // on this Wi-Fi; Pair shows the code both screens share, then Allow on the
+  // Mac pairs it. The camera stays for the QR path the whole time.
+  const [found, setFound] = useState<Nearby>('idle');
+  // True while this screen has native nearby work it started: a session, or
+  // the Bonjour browser, which keeps running after browse() returns. Only
+  // this screen cancels it, and cancelling stops both.
+  const nearbyOwned = useRef(false);
+  // A browse() still waiting for its list.
+  const searching = useRef(false);
+  // The final pairing request is running on the companion bridge.
+  const companionBusy = useRef(false);
+  // `working` is held by a nearby attempt (not by a QR or link pairing).
+  const nearbyHolds = useRef(false);
+  // Bumped by every Pair and Cancel: an older attempt's late answer is ignored.
+  const attempt = useRef(0);
+  const look = async () => {
+    // Like the camera, it waits until the stored pairing is read.
+    if (!nearby || paused || status === null || searching.current || working.current) return;
+    asked.current = true;
+    searching.current = true;
+    nearbyOwned.current = true;
+    setFound('looking');
+    // A search stopped on the way (the screen was covered) changes nothing.
+    const mine = attempt.current;
+    const current = () => open.current && attempt.current === mine;
+    try {
+      const macs = await nearby.browse(3000);
+      if (current()) setFound(macs.length ? macs : 'none');
+    } catch (error) {
+      if (current())
+        setFound((error as { code?: string })?.code === 'local-network' ? 'denied' : 'none');
+    } finally {
+      searching.current = false;
+    }
+  };
+  const pairWith = async (mac: NearbyMac) => {
+    if (!nearby || !native || paused || status === null || working.current || searching.current) return;
+    working.current = true;
+    nearbyHolds.current = true;
+    nearbyOwned.current = true;
+    const mine = ++attempt.current;
+    const current = () => open.current && attempt.current === mine;
+    setPhase({ kind: 'nearby', mac });
+    // Waiting for Allow doesn't hold the app's queue; only the pairing itself
+    // waits its turn, and never starts once this attempt is over.
+    const companion: CompanionNative = {
+      status: () => native.status(),
+      pair: (baseUrl, code, deviceName, pin) =>
+        gate(async () => {
+          if (!current()) throw CLOSED();
+          companionBusy.current = true;
+          try {
+            return await native.pair(baseUrl, code, deviceName, pin);
+          } finally {
+            companionBusy.current = false;
+          }
+        }),
+      pairAddresses: (addresses, code, deviceName, key) =>
+        gate(async () => {
+          if (!current()) throw CLOSED();
+          companionBusy.current = true;
+          try {
+            return await native.pairAddresses(addresses, code, deviceName, key);
+          } finally {
+            companionBusy.current = false;
+          }
+        }),
+      check: () => native.check(),
+      disconnect: () => native.disconnect(),
+      cancel: () => native.cancel(),
+    };
+    try {
+      const result = await pairNearby(nearby, companion, mac.name, DEVICE_NAME, started => {
+        if (current()) setPhase({ kind: 'nearby', mac, started });
+      });
+      if (!current()) return;
+      setStatus(result);
+      setReplacing(false);
+      setReachable(true);
+      setPhase({ kind: 'connected' });
+    } catch (error) {
+      if (!current()) return;
+      setPhase(
+        (error as { code?: string })?.code === 'cancelled'
+          ? { kind: 'scanning' }
+          : {
+              kind: 'failed',
+              nearby: true,
+              message:
+                pairingError(error) ??
+                'Pairing didn’t finish. Try again, then click Allow on your Mac.',
+            },
+      );
+    } finally {
+      if (attempt.current === mine) {
+        working.current = false;
+        nearbyHolds.current = false;
+      }
+    }
+  };
+  // Ends this screen's native nearby work: the session and the browser.
+  const halt = () => {
+    attempt.current++;
+    // Only a nearby attempt's hold is released: a QR pairing keeps its own.
+    if (nearbyHolds.current) {
+      nearbyHolds.current = false;
+      working.current = false;
+    }
+    if (nearbyOwned.current) {
+      nearbyOwned.current = false;
+      nearby?.cancel().catch(() => {});
+    }
+    // After Allow the pairing itself may be running: stop that too.
+    if (companionBusy.current) native?.cancel().catch(() => {});
+  };
+  // Cancel: nothing to apologise for. Cancelling forgets the Macs found, so
+  // look again for the card to come back.
+  const stopNearby = () => {
+    halt();
+    setPhase({ kind: 'scanning' });
+    look();
+  };
+  // Covered by another screen: stop only what this screen started.
+  useEffect(() => {
+    if (!paused || !nearbyOwned.current) return;
+    halt();
+    setPhase(current => (current.kind === 'nearby' ? { kind: 'scanning' } : current));
+    setFound('idle');
+  }, [paused]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Back from Settings with Local Network turned on: look again by itself.
+  useEffect(() => {
+    if (found !== 'denied') return;
+    const subscription = AppState.addEventListener('change', state => {
+      if (state === 'active') look();
+    });
+    return () => subscription.remove();
+  }, [found]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(
+    () => () => {
+      if (nearbyOwned.current) nearby?.cancel().catch(() => {});
+    },
+    [nearby],
+  );
 
   // A link is taken once. It waits for the stored pairing to be read, and
   // never replaces a paired Mac without asking.
@@ -485,11 +648,87 @@ export function FindYourMacScreen({
             label="Try again"
             onPress={() => {
               const retry = phase.retry;
+              const nearbyFailed = phase.nearby;
               setPhase({ kind: 'scanning' });
               if (retry) use(retry);
+              // The Mac forgets an ended session; look again for its card.
+              else if (nearbyFailed) look();
             }}
           />
         </View>
+      ) : null}
+      {nearby && phase.kind === 'nearby' ? (
+        <View style={styles.panel}>
+          {phase.started ? (
+            <>
+              <Text accessibilityRole="header" style={type.heading}>
+                {`Pair with ${phase.mac.name}?`}
+              </Text>
+              <Text
+                accessibilityLabel={phase.started.code.split('').join(' ')}
+                style={styles.nearbyCode}
+              >
+                {formatNearbyCode(phase.started.code)}
+              </Text>
+              <Text style={styles.body}>
+                Make sure your Mac shows the same number, then click Allow on your Mac.
+              </Text>
+            </>
+          ) : null}
+          <View style={styles.row}>
+            <ActivityIndicator />
+            <Text accessibilityLiveRegion="polite" style={styles.panelText}>
+              {phase.started ? 'Waiting for your Mac…' : `Asking ${phase.mac.name}…`}
+            </Text>
+          </View>
+          <Button label="Cancel" variant="secondary" onPress={stopNearby} />
+        </View>
+      ) : nearby && phase.kind === 'scanning' && status !== null && !readFailed ? (
+        found === 'idle' ? (
+          <View style={styles.panel}>
+            <Text style={styles.body}>
+              To find your Mac, Scan to Make needs to look on your Wi-Fi.
+            </Text>
+            <Button label="Continue" variant="secondary" disabled={paused} onPress={look} />
+          </View>
+        ) : found === 'looking' ? (
+          <View style={styles.row}>
+            <ActivityIndicator />
+            <Text accessibilityLiveRegion="polite" style={styles.body}>
+              Looking for your Mac on this Wi-Fi…
+            </Text>
+          </View>
+        ) : found === 'denied' ? (
+          <View style={styles.panel}>
+            <Text style={styles.body}>Scan to Make can’t look on your Wi-Fi.</Text>
+            <Button
+              label="Open Settings"
+              variant="secondary"
+              onPress={() => Linking.openSettings()}
+            />
+            <Button label="Look again" variant="secondary" onPress={look} />
+          </View>
+        ) : found === 'none' ? (
+          <View style={styles.row}>
+            <Text style={styles.body}>No Mac found on this Wi-Fi.</Text>
+            <Pressable
+              accessibilityRole="button"
+              onPress={look}
+              style={({ pressed }) => [styles.link, pressed && styles.pressed]}
+            >
+              <Text style={styles.linkText}>Look again</Text>
+            </Pressable>
+          </View>
+        ) : (
+          found.map(mac => (
+            <View key={mac.name} style={styles.panel}>
+              <Text style={type.caption}>Mac found nearby</Text>
+              <Text style={type.heading}>{mac.name}</Text>
+              <Text style={styles.body}>On this Wi-Fi</Text>
+              <Button label="Pair" disabled={paused} onPress={() => pairWith(mac)} />
+            </View>
+          ))
+        )
       ) : null}
       <Pressable
         accessibilityRole="button"
@@ -632,6 +871,16 @@ const styles = StyleSheet.create({
   dot: { width: 9, height: 9, borderRadius: 4.5 },
   panelText: { ...type.body, fontWeight: '600', flex: 1 },
   footnote: { ...type.caption, textAlign: 'center' },
+  // The number both screens show, read side by side with the Mac.
+  nearbyCode: {
+    fontSize: 40,
+    lineHeight: 46,
+    fontWeight: '700',
+    letterSpacing: 2,
+    color: colors.ink,
+    textAlign: 'center',
+    fontVariant: ['tabular-nums'],
+  },
   link: { alignSelf: 'center', padding: space.sm },
   linkText: { ...type.body, color: colors.accent, fontWeight: '600' },
   connected: { justifyContent: 'space-between', alignItems: 'center' },
