@@ -967,6 +967,96 @@ def synthetic_three_foot_tripod_stl() -> bytes:
     return pack_binary_stl(tris)
 
 
+def synthetic_scan_like_rounded_box_stl(
+    lx: float = 120.0,
+    ly: float = 110.0,
+    lz: float = 22.0,
+    r_xy: float = 14.0,
+    noise_mm: float = 0.012,
+) -> bytes:
+    """Watertight scan-like rounded box with filleted corners/edges and micro-rough triangulated faces."""
+    cx, cy = 0.5 * lx, 0.5 * ly
+    hx, hy = cx - r_xy, cy - r_xy
+    z_rings = [
+        (0.00, 1.50),
+        (0.90, 0.90),
+        (2.10, 0.25),
+        (3.20, 0.00),
+        (lz - 3.60, 0.00),
+        (lz - 2.30, 0.35),
+        (lz - 1.15, 1.15),
+        (lz - 0.35, 2.35),
+        (lz, 3.80),
+    ]
+    n_corner = 6
+    m_perim = 4 * n_corner
+
+    def rounded_rect_ring(inset_mm: float) -> list[tuple[float, float]]:
+        rc = max(1.0, r_xy - inset_mm)
+        pts2: list[tuple[float, float]] = []
+        corners = (
+            (hx, hy, 0.0),
+            (-hx, hy, 0.5 * math.pi),
+            (-hx, -hy, math.pi),
+            (hx, -hy, 1.5 * math.pi),
+        )
+        for ox, oy, a0 in corners:
+            for s in range(n_corner):
+                ang = a0 + (0.5 * math.pi * s) / n_corner
+                pts2.append((cx + ox + rc * math.cos(ang), cy + oy + rc * math.sin(ang)))
+        return pts2
+
+    def jitter(x: float, y: float, z: float) -> float:
+        if noise_mm <= 0.0:
+            return 0.0
+        return noise_mm * math.sin(0.37 * x + 0.53 * y + 0.19 * z) * math.cos(0.29 * x - 0.41 * y)
+
+    rings: list[list[tuple[float, float, float]]] = []
+    for z_val, inset_mm in z_rings:
+        ring: list[tuple[float, float, float]] = []
+        for x, y in rounded_rect_ring(inset_mm):
+            dz = jitter(x, y, z_val) if z_val in (0.0, lz) else 0.0
+            ring.append((x, y, z_val + dz))
+        rings.append(ring)
+
+    tris: list[tuple[tuple[float, float, float], tuple[float, float, float], tuple[float, float, float]]] = []
+    for k in range(len(rings) - 1):
+        r0, r1 = rings[k], rings[k + 1]
+        for i in range(m_perim):
+            j = (i + 1) % m_perim
+            tris.append((r0[i], r0[j], r1[j]))
+            tris.append((r0[i], r1[j], r1[i]))
+
+    for is_top, cap_ring, z_val in ((False, rings[0], 0.0), (True, rings[-1], lz)):
+        cap_levels = [cap_ring]
+        for sc in (0.68, 0.35):
+            lvl = []
+            for vx, vy, _ in cap_ring:
+                x = cx + (vx - cx) * sc
+                y = cy + (vy - cy) * sc
+                lvl.append((x, y, z_val + jitter(x, y, z_val)))
+            cap_levels.append(lvl)
+        center = (cx, cy, z_val + jitter(cx, cy, z_val))
+        for k in range(len(cap_levels) - 1):
+            c0, c1 = cap_levels[k], cap_levels[k + 1]
+            for i in range(m_perim):
+                j = (i + 1) % m_perim
+                if is_top:
+                    tris.append((c0[i], c0[j], c1[j]))
+                    tris.append((c0[i], c1[j], c1[i]))
+                else:
+                    tris.append((c0[j], c0[i], c1[j]))
+                    tris.append((c1[j], c0[i], c1[i]))
+        last = cap_levels[-1]
+        for i in range(m_perim):
+            j = (i + 1) % m_perim
+            if is_top:
+                tris.append((last[i], last[j], center))
+            else:
+                tris.append((last[j], last[i], center))
+    return pack_binary_stl(tris)
+
+
 class OrientationTests(unittest.TestCase):
     """KAN-101 follow-up: deterministic auto-orientation candidate generation, scoring, and backend parity."""
 
@@ -1142,6 +1232,129 @@ class OrientationTests(unittest.TestCase):
         self.assertFalse(after["checks"]["bedFit"]["requiresZRotation90"])
         self.assertEqual(after["warnings"], [])
 
+    def test_near_axis_tilted_slab_orients_to_true_face_and_is_printable(self) -> None:
+        # Connector finding 4429456603: 100 x 100 x 10 mm slab tilted 0.04 deg around X has ~0.07 mm
+        # base height variation (> 0.05 mm base tolerance), so collapsing onto axis:-z loses the base.
+        slab_bytes = _rotate_binary_stl_arbitrary(
+            build_rectilinear_solid([0.0, 100.0], [0.0, 100.0], [0.0, 10.0], lambda *_: True),
+            0.04,
+            0.0,
+            0.0,
+        )
+        slab_path = self.write_stl("slab_0p04_deg.stl", slab_bytes)
+        raw_verdict = analyzer.analyze_stl(slab_path, self.p1s, self.pla)
+        self.assertEqual(raw_verdict["verdict"], "not-printable")
+        self.assertIn("missing-flat-base", raw_verdict["reasonCodes"])
+
+        rep, oriented_bytes = orient.orient_and_rotate_stl(slab_path, self.p1s)
+        by_id = {c["candidateId"]: c for c in rep["candidates"]}
+        self.assertFalse(by_id["axis:-z"]["metrics"]["hasFlatBase"])
+        self.assertFalse(by_id["axis:+z"]["metrics"]["hasFlatBase"])
+        self.assertTrue(rep["selected"]["applied"])
+        self.assertNotIn("axis-aligned", rep["selected"]["sources"])
+        self.assertIn("flat-facet-cluster", rep["selected"]["sources"])
+        self.assertIn("convex-hull", rep["selected"]["sources"])
+        self.assertAlmostEqual(rep["selected"]["angleDeg"], 0.04, places=2)
+        self.assertAlmostEqual(rep["selected"]["metrics"]["flatBaseAreaMm2"], 10000.0, delta=0.5)
+        self.assertTrue(rep["selected"]["metrics"]["isStable"])
+
+        oriented_check = analyzer.analyze_stl(
+            self.write_stl("slab_0p04_deg_oriented.stl", oriented_bytes),
+            self.p1s,
+            self.pla,
+        )
+        self.assertEqual(oriented_check["verdict"], "printable")
+
+        # Also verify dry-run --auto-orient accepts and slices the 0.04-deg slab cleanly
+        fake_bundle, fake_sandbox = make_fake_bambu_bundle(self.root / "bambu-slab")
+        tpl_dir = self.root / "slab-tpl"
+        tpl_dir.mkdir(parents=True, exist_ok=True)
+        (tpl_dir / "cradle.stl").write_bytes(slab_bytes)
+        (tpl_dir / "manifest.json").write_text(
+            json.dumps(
+                {
+                    "schemaVersion": 1,
+                    "units": "mm",
+                    "previewOnly": True,
+                    "provesPhysicalAccuracy": False,
+                    "watertight": True,
+                    "outputSha256": {"cradle.stl": hashlib.sha256(slab_bytes).hexdigest()},
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n"
+        )
+        dry_res = dry_run.run_dry_run(
+            template_dir=tpl_dir,
+            profile_id="p1s-0.4-hardened",
+            out_dir=self.root / "slab-dryrun-out",
+            bundle=str(fake_bundle),
+            auto_orient=True,
+            _sandbox=fake_sandbox,
+        )
+        self.assertTrue(dry_res["orientation"]["applied"])
+        self.assertEqual(dry_res["printability"]["verdict"], "printable")
+
+    def test_slightly_tilted_scan_like_rounded_box_orients_to_true_face_and_is_printable(self) -> None:
+        # Scan-derived rounded box with filleted corners/edges and micro-rough triangulated faces,
+        # tilted ~0.0445 deg off-axis ((0.032, -0.031) deg): un-oriented CoM misses the lifted base hull.
+        tilted_rbox_bytes = _rotate_binary_stl_arbitrary(
+            synthetic_scan_like_rounded_box_stl(),
+            0.032,
+            -0.031,
+            0.5,
+        )
+        rbox_path = self.write_stl("scan_rounded_box_tilted.stl", tilted_rbox_bytes)
+        raw_verdict = analyzer.analyze_stl(rbox_path, self.p1s, self.pla)
+        self.assertEqual(raw_verdict["verdict"], "not-printable")
+        self.assertIn("unstable-base-contact", raw_verdict["reasonCodes"])
+
+        rep, oriented_bytes = orient.orient_and_rotate_stl(rbox_path, self.p1s)
+        self.assertTrue(rep["selected"]["applied"])
+        self.assertNotIn("axis-aligned", rep["selected"]["sources"])
+        self.assertLess(rep["selected"]["angleDeg"], 0.1)
+        self.assertGreater(rep["selected"]["metrics"]["flatBaseAreaMm2"], 12000.0)
+        self.assertTrue(rep["selected"]["metrics"]["isStable"])
+        self.assertFalse(rep["selected"]["metrics"]["requiresSupports"])
+
+        oriented_check = analyzer.analyze_stl(
+            self.write_stl("scan_rounded_box_oriented.stl", oriented_bytes),
+            self.p1s,
+            self.pla,
+        )
+        self.assertEqual(oriented_check["verdict"], "printable")
+
+        fake_bundle, fake_sandbox = make_fake_bambu_bundle(self.root / "bambu-rbox")
+        tpl_dir = self.root / "rbox-tpl"
+        tpl_dir.mkdir(parents=True, exist_ok=True)
+        (tpl_dir / "cradle.stl").write_bytes(tilted_rbox_bytes)
+        (tpl_dir / "manifest.json").write_text(
+            json.dumps(
+                {
+                    "schemaVersion": 1,
+                    "units": "mm",
+                    "previewOnly": True,
+                    "provesPhysicalAccuracy": False,
+                    "watertight": True,
+                    "outputSha256": {"cradle.stl": hashlib.sha256(tilted_rbox_bytes).hexdigest()},
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n"
+        )
+        dry_res = dry_run.run_dry_run(
+            template_dir=tpl_dir,
+            profile_id="p1s-0.4-hardened",
+            out_dir=self.root / "rbox-dryrun-out",
+            bundle=str(fake_bundle),
+            auto_orient=True,
+            _sandbox=fake_sandbox,
+        )
+        self.assertTrue(dry_res["orientation"]["applied"])
+        self.assertEqual(dry_res["printability"]["verdict"], "printable")
+
     @unittest.skipUnless(analyzer.HAS_NUMPY, "NumPy parity test requires NumPy installed")
     def test_stdlib_and_numpy_byte_identical_parity(self) -> None:
         fixtures = {
@@ -1151,6 +1364,18 @@ class OrientationTests(unittest.TestCase):
             "tall_thin": build_rectilinear_solid([0.0, 4.0], [0.0, 40.0], [0.0, 80.0], lambda *_: True),
             "tilted_cradle": _rotate_binary_stl_arbitrary(synthetic_pocketed_cradle_stl(), 31.0, 19.0),
             "tilted_tripod": _rotate_binary_stl_arbitrary(synthetic_three_foot_tripod_stl(), 27.0, -16.0),
+            "near_axis_slab": _rotate_binary_stl_arbitrary(
+                build_rectilinear_solid([0.0, 100.0], [0.0, 100.0], [0.0, 10.0], lambda *_: True),
+                0.04,
+                0.0,
+                0.0,
+            ),
+            "near_axis_scan_rounded_box": _rotate_binary_stl_arbitrary(
+                synthetic_scan_like_rounded_box_stl(),
+                0.032,
+                -0.031,
+                0.5,
+            ),
         }
         for name, raw_stl in fixtures.items():
             with self.subTest(fixture=name):

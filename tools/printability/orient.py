@@ -430,12 +430,18 @@ def _flat_facet_cluster_normals(mesh: dict[str, Any]) -> list[tuple[tuple[float,
     visited = [False] * n_facets
     clusters: list[tuple[tuple[float, float, float], float]] = []
 
-    for start in range(n_facets):
+    seed_order = sorted(
+        range(n_facets),
+        key=lambda idx: (-_r(facets[idx][15]), _rvec((facets[idx][9], facets[idx][10], facets[idx][11])), idx),
+    )
+
+    for start in seed_order:
         if visited[start]:
             continue
         visited[start] = True
         snx, sny, snz = facets[start][9], facets[start][10], facets[start][11]
         queue: deque[int] = deque([start])
+        members: list[int] = []
         area_terms: list[float] = []
         wx_terms: list[float] = []
         wy_terms: list[float] = []
@@ -443,6 +449,7 @@ def _flat_facet_cluster_normals(mesh: dict[str, Any]) -> list[tuple[tuple[float,
 
         while queue:
             cur = queue.popleft()
+            members.append(cur)
             cf = facets[cur]
             cnx, cny, cnz, carea = cf[9], cf[10], cf[11], cf[15]
             area_terms.append(carea)
@@ -469,8 +476,44 @@ def _flat_facet_cluster_normals(mesh: dict[str, Any]) -> list[tuple[tuple[float,
         if total_area < MIN_BASE_AREA_MM2 * 0.5:
             continue
         unit = _normalize3(math.fsum(wx_terms), math.fsum(wy_terms), math.fsum(wz_terms))
-        if unit is not None:
-            clusters.append((unit, total_area))
+        if unit is None:
+            continue
+
+        # Refine normal onto the outermost contact plane (within BASE_PLANE_TOLERANCE_MM)
+        # so adjacent shallow bevel/fillet strips recessed inward cannot tilt a broad flat face.
+        ux0, uy0, uz0 = unit
+        max_proj = -float("inf")
+        facet_min_proj: list[float] = []
+        for midx in members:
+            mf = facets[midx]
+            ax, ay, az, dux, duy, duz, dvx, dvy, dvz = mf[:9]
+            p0 = (ux0 * ax + uy0 * ay) + uz0 * az
+            p1 = (ux0 * (ax + dux) + uy0 * (ay + duy)) + uz0 * (az + duz)
+            p2 = (ux0 * (ax + dvx) + uy0 * (ay + dvy)) + uz0 * (az + dvz)
+            hi = max(p0, p1, p2)
+            if hi > max_proj:
+                max_proj = hi
+            facet_min_proj.append(min(p0, p1, p2))
+
+        c_areas: list[float] = []
+        c_wx: list[float] = []
+        c_wy: list[float] = []
+        c_wz: list[float] = []
+        for midx, lo_p in zip(members, facet_min_proj):
+            if max_proj - lo_p <= BASE_PLANE_TOLERANCE_MM:
+                mf = facets[midx]
+                marea = mf[15]
+                c_areas.append(marea)
+                c_wx.append(marea * mf[9])
+                c_wy.append(marea * mf[10])
+                c_wz.append(marea * mf[11])
+        contact_area = math.fsum(c_areas)
+        if contact_area >= MIN_BASE_AREA_MM2 * 0.5:
+            refined = _normalize3(math.fsum(c_wx), math.fsum(c_wy), math.fsum(c_wz))
+            if refined is not None:
+                unit = refined
+
+        clusters.append((unit, total_area))
 
     clusters.sort(key=lambda item: (-_r(item[1]), _rvec(item[0])))
     return clusters[:MAX_FLAT_CLUSTER_CANDIDATES]
@@ -505,7 +548,8 @@ def _thin_hull_vertices(pts: list[tuple[float, float, float]]) -> list[tuple[flo
                 best_idx = idx
         chosen_indices.add(best_idx)
 
-    # Also keep octree outer-grid per-cell min/max vertices for fine local support coverage
+    # Retain local per-column coordinate min/max vertices across all 3 axis projections
+    # so broad flat or slightly tilted faces on rounded high-poly scans keep full support coverage.
     xs = [p[0] for p in pts]
     ys = [p[1] for p in pts]
     zs = [p[2] for p in pts]
@@ -515,27 +559,45 @@ def _thin_hull_vertices(pts: list[tuple[float, float, float]]) -> list[tuple[flo
     sx = max(x1 - x0, 1e-6)
     sy = max(y1 - y0, 1e-6)
     sz = max(z1 - z0, 1e-6)
-    grid_extremes: dict[tuple[int, int, int], list[int]] = {}
+    xy_z_ext: dict[tuple[int, int], list[int]] = {}
+    yz_x_ext: dict[tuple[int, int], list[int]] = {}
+    xz_y_ext: dict[tuple[int, int], list[int]] = {}
     for idx, (px, py, pz) in enumerate(pts):
-        cell = (
-            min(7, int(8.0 * (px - x0) / sx)),
-            min(7, int(8.0 * (py - y0) / sy)),
-            min(7, int(8.0 * (pz - z0) / sz)),
-        )
-        r2 = px * px + py * py + pz * pz
-        entry = grid_extremes.get(cell)
-        if entry is None:
-            grid_extremes[cell] = [idx, idx]
+        ix = min(7, int(8.0 * (px - x0) / sx))
+        iy = min(7, int(8.0 * (py - y0) / sy))
+        iz = min(7, int(8.0 * (pz - z0) / sz))
+
+        ez = xy_z_ext.get((ix, iy))
+        if ez is None:
+            xy_z_ext[(ix, iy)] = [idx, idx]
         else:
-            lo_p = pts[entry[0]]
-            hi_p = pts[entry[1]]
-            if r2 < lo_p[0] ** 2 + lo_p[1] ** 2 + lo_p[2] ** 2:
-                entry[0] = idx
-            if r2 > hi_p[0] ** 2 + hi_p[1] ** 2 + hi_p[2] ** 2:
-                entry[1] = idx
-    for lo_idx, hi_idx in grid_extremes.values():
-        chosen_indices.add(lo_idx)
-        chosen_indices.add(hi_idx)
+            if pz < pts[ez[0]][2]:
+                ez[0] = idx
+            if pz > pts[ez[1]][2]:
+                ez[1] = idx
+
+        ex = yz_x_ext.get((iy, iz))
+        if ex is None:
+            yz_x_ext[(iy, iz)] = [idx, idx]
+        else:
+            if px < pts[ex[0]][0]:
+                ex[0] = idx
+            if px > pts[ex[1]][0]:
+                ex[1] = idx
+
+        ey = xz_y_ext.get((ix, iz))
+        if ey is None:
+            xz_y_ext[(ix, iz)] = [idx, idx]
+        else:
+            if py < pts[ey[0]][1]:
+                ey[0] = idx
+            if py > pts[ey[1]][1]:
+                ey[1] = idx
+
+    for col_map in (xy_z_ext, yz_x_ext, xz_y_ext):
+        for lo_idx, hi_idx in col_map.values():
+            chosen_indices.add(lo_idx)
+            chosen_indices.add(hi_idx)
 
     return [pts[i] for i in sorted(chosen_indices)]
 
@@ -767,29 +829,37 @@ def _convex_hull_3d_normals(mesh: dict[str, Any]) -> list[tuple[tuple[float, flo
             if best_nfid >= 0:
                 conflicts[best_nfid].append(pidx)
 
-    # Merge coplanar hull triangles by outward normal
+    # Merge hull triangles only when they are coplanar within half the base-plane tolerance,
+    # preventing shallow fillet/bevel hull triangles from skewing a flat support plane normal.
     cos_1p5 = math.cos(math.radians(1.5))
-    merged_hull: list[list[float]] = []  # [area, wx, wy, wz, ux, uy, uz]
+    coplanar_tol = 0.5 * BASE_PLANE_TOLERANCE_MM
+    merged_hull: list[list[float]] = []  # [area, wx, wy, wz, ux, uy, uz, seed_off]
     ordered_faces = sorted(
         faces.values(),
         key=lambda rec: (-round(rec[7], 6), _rvec((rec[3], rec[4], rec[5]))),
     )
     for rec in ordered_faces:
-        nx, ny, nz, area = rec[3], rec[4], rec[5], rec[7]
+        va_idx, vb_idx, vc_idx, nx, ny, nz, off, area = rec
+        pa, pb, pc = pts[va_idx], pts[vb_idx], pts[vc_idx]
         placed = False
         for mh in merged_hull:
-            if (mh[4] * nx + mh[5] * ny) + mh[6] * nz >= cos_1p5:
-                mh[0] += area
-                mh[1] += area * nx
-                mh[2] += area * ny
-                mh[3] += area * nz
-                nu = _normalize3(mh[1], mh[2], mh[3])
-                if nu is not None:
-                    mh[4], mh[5], mh[6] = nu
-                placed = True
-                break
+            mux, muy, muz, moff = mh[4], mh[5], mh[6], mh[7]
+            if (mux * nx + muy * ny) + muz * nz >= cos_1p5:
+                d_a = abs(((mux * pa[0] + muy * pa[1]) + muz * pa[2]) - moff)
+                d_b = abs(((mux * pb[0] + muy * pb[1]) + muz * pb[2]) - moff)
+                d_c = abs(((mux * pc[0] + muy * pc[1]) + muz * pc[2]) - moff)
+                if d_a <= coplanar_tol and d_b <= coplanar_tol and d_c <= coplanar_tol:
+                    mh[0] += area
+                    mh[1] += area * nx
+                    mh[2] += area * ny
+                    mh[3] += area * nz
+                    nu = _normalize3(mh[1], mh[2], mh[3])
+                    if nu is not None:
+                        mh[4], mh[5], mh[6] = nu
+                    placed = True
+                    break
         if not placed:
-            merged_hull.append([area, area * nx, area * ny, area * nz, nx, ny, nz])
+            merged_hull.append([area, area * nx, area * ny, area * nz, nx, ny, nz, off])
 
     hull_candidates = [
         ((mh[4], mh[5], mh[6]), mh[0])
@@ -800,10 +870,147 @@ def _convex_hull_3d_normals(mesh: dict[str, Any]) -> list[tuple[tuple[float, flo
     return hull_candidates[:MAX_CONVEX_HULL_CANDIDATES]
 
 
-def generate_candidate_normals(mesh: dict[str, Any]) -> list[dict[str, Any]]:
-    """Collect deduplicated candidate downward normals from axis-aligned, flat-cluster, and convex-hull sources."""
-    cos_axis_snap = math.cos(math.radians(0.05))
-    cos_general_merge = math.cos(math.radians(0.25))
+def _base_contact_facet_indices(rot_mesh: dict[str, Any]) -> frozenset[int]:
+    """Return exact facet indices qualifying as build-plate contact in `evaluate_base_stability`."""
+    z_min = rot_mesh["boundsMm"]["min"][2]
+    cos5 = math.cos(math.radians(5.0))
+    indices: list[int] = []
+    for idx, f in enumerate(rot_mesh["facets"]):
+        if f[17] <= z_min + BASE_PLANE_TOLERANCE_MM and f[11] <= -cos5:
+            indices.append(idx)
+    return frozenset(indices)
+
+
+def _probe_candidate_normal(
+    down_normal: tuple[float, float, float],
+    raw_tris: list[tuple[float, ...]],
+    verts_np: Any,
+    *,
+    profile: dict[str, Any] | None = None,
+    overhang_threshold_deg: float = DEFAULT_OVERHANG_THRESHOLD_DEG,
+    use_numpy: bool | None = None,
+) -> dict[str, Any]:
+    rot_base_raw = rotation_mapping_down_normal(down_normal)
+    rot_base = tuple(tuple(_r(v, 9) for v in row) for row in rot_base_raw)
+    rot_bytes = _pack_rotated_tris(raw_tris, verts_np, rot_base, use_numpy=use_numpy)
+    rot_mesh = _parse_and_build_facets(rot_bytes, use_numpy=use_numpy)
+    bed_fit = evaluate_bed_fit(rot_mesh, profile) if profile is not None else None
+    base_facets = _base_contact_facet_indices(rot_mesh)
+    base_stability = evaluate_base_stability(rot_mesh)
+    overhangs = evaluate_overhangs(rot_mesh, threshold_deg=overhang_threshold_deg)
+    return {
+        "rotBaseRaw": rot_base_raw,
+        "rotBase": rot_base,
+        "rotBytes": rot_bytes,
+        "rotMesh": rot_mesh,
+        "bedFit": bed_fit,
+        "baseFacetIndices": base_facets,
+        "baseStability": base_stability,
+        "overhangs": overhangs,
+    }
+
+
+def _collapsing_preserves_base_contact(
+    existing_normal: tuple[float, float, float],
+    existing_probe: dict[str, Any],
+    new_normal: tuple[float, float, float],
+    new_probe: dict[str, Any],
+) -> bool:
+    """Return True iff collapsing `new_normal` onto `existing_normal` provably preserves base contact."""
+    if existing_normal == new_normal:
+        return True
+
+    dot = (
+        existing_normal[0] * new_normal[0]
+        + existing_normal[1] * new_normal[1]
+    ) + existing_normal[2] * new_normal[2]
+    # Necessary same-face sanity guard (base facets themselves must be within 5 deg of -Z);
+    # never sufficient without re-evaluating base contact on the collapsed normal below.
+    if dot < math.cos(math.radians(5.0)):
+        return False
+
+    new_facets: frozenset[int] = new_probe["baseFacetIndices"]
+    ex_facets: frozenset[int] = existing_probe["baseFacetIndices"]
+    if not new_facets:
+        return (not ex_facets) and (dot >= 1.0 - 1e-12)
+    if ex_facets != new_facets:
+        return False
+
+    ex_stab = existing_probe["baseStability"]
+    new_stab = new_probe["baseStability"]
+    if bool(ex_stab["hasFlatBase"]) != bool(new_stab["hasFlatBase"]):
+        return False
+    if bool(ex_stab["isStable"]) != bool(new_stab["isStable"]):
+        return False
+    if abs(float(ex_stab["flatBaseAreaMm2"]) - float(new_stab["flatBaseAreaMm2"])) > 1e-3:
+        return False
+    if float(ex_stab["supportHullAreaMm2"]) + 1e-2 < float(new_stab["supportHullAreaMm2"]):
+        return False
+    if float(ex_stab["comSupportMarginMm"]) + 1e-2 < float(new_stab["comSupportMarginMm"]):
+        return False
+    if float(ex_stab["minTipAngleDeg"]) + 0.05 < float(new_stab["minTipAngleDeg"]):
+        return False
+
+    ex_oh = existing_probe["overhangs"]
+    new_oh = new_probe["overhangs"]
+    if bool(ex_oh["requiresSupports"]) and not bool(new_oh["requiresSupports"]):
+        return False
+    if float(ex_oh["overhangAreaMm2"]) > float(new_oh["overhangAreaMm2"]) + 1e-2:
+        return False
+
+    ex_fit = existing_probe["bedFit"]
+    new_fit = new_probe["bedFit"]
+    if ex_fit is not None and new_fit is not None:
+        ex_ok = bool(ex_fit["fits"] and existing_probe["rotMesh"]["watertight"])
+        new_ok = bool(new_fit["fits"] and new_probe["rotMesh"]["watertight"])
+        if new_ok and not ex_ok:
+            return False
+
+    return True
+
+
+def generate_candidate_normals(
+    mesh: dict[str, Any],
+    *,
+    profile: dict[str, Any] | None = None,
+    overhang_threshold_deg: float = DEFAULT_OVERHANG_THRESHOLD_DEG,
+    raw_tris: list[tuple[float, ...]] | None = None,
+    verts_np: Any = None,
+    use_numpy: bool | None = None,
+    _keep_probes: bool = False,
+) -> list[dict[str, Any]]:
+    """Collect candidate downward normals from axis-aligned, flat-cluster, and convex-hull sources.
+
+    Near-axis or near-collinear normals are collapsed onto an existing candidate
+    only when re-evaluating the rotated mesh proves that the collapsed normal
+    preserves exact base-contact facet membership, stability, bed fit, and
+    support status — never via a fixed angular tolerance alone.
+    """
+    cos_same_face = math.cos(math.radians(5.0))
+    if raw_tris is None and verts_np is None:
+        raw_tris = [
+            (
+                f[0], f[1], f[2],
+                f[0] + f[3], f[1] + f[4], f[2] + f[5],
+                f[0] + f[6], f[1] + f[7], f[2] + f[8],
+            )
+            for f in mesh["facets"]
+        ]
+    tris_list = raw_tris if raw_tris is not None else []
+
+    def get_probe(cand_dict: dict[str, Any]) -> dict[str, Any]:
+        probe = cand_dict.get("_probe")
+        if probe is None:
+            probe = _probe_candidate_normal(
+                cand_dict["downNormal"],
+                tris_list,
+                verts_np,
+                profile=profile,
+                overhang_threshold_deg=overhang_threshold_deg,
+                use_numpy=use_numpy,
+            )
+            cand_dict["_probe"] = probe
+        return probe
 
     candidates: list[dict[str, Any]] = []
     for axis_rank, (cid, normal) in enumerate(AXIS_ALIGNED_CANDIDATES):
@@ -814,48 +1021,54 @@ def generate_candidate_normals(mesh: dict[str, Any]) -> list[dict[str, Any]]:
             "sources": ["axis-aligned"],
         })
 
-    cluster_idx = 0
-    for normal, _area in _flat_facet_cluster_normals(mesh):
-        matched = False
+    def merge_or_append(normal: tuple[float, float, float], source_name: str, prefix: str, counter: int) -> int:
+        new_probe: dict[str, Any] | None = None
         for existing in candidates:
             en = existing["downNormal"]
-            tol = cos_axis_snap if existing["axisOrderRank"] < 6 else cos_general_merge
-            if (en[0] * normal[0] + en[1] * normal[1]) + en[2] * normal[2] >= tol:
-                if "flat-facet-cluster" not in existing["sources"]:
-                    existing["sources"].append("flat-facet-cluster")
-                matched = True
-                break
-        if not matched:
-            cluster_idx += 1
-            candidates.append({
-                "candidateId": f"cluster:{cluster_idx}",
-                "downNormal": normal,
-                "axisOrderRank": 6,
-                "sources": ["flat-facet-cluster"],
-            })
+            if en == normal:
+                if source_name not in existing["sources"]:
+                    existing["sources"].append(source_name)
+                return counter
+            if (en[0] * normal[0] + en[1] * normal[1]) + en[2] * normal[2] < cos_same_face:
+                continue
+            if new_probe is None:
+                new_probe = _probe_candidate_normal(
+                    normal,
+                    tris_list,
+                    verts_np,
+                    profile=profile,
+                    overhang_threshold_deg=overhang_threshold_deg,
+                    use_numpy=use_numpy,
+                )
+            if _collapsing_preserves_base_contact(en, get_probe(existing), normal, new_probe):
+                if source_name not in existing["sources"]:
+                    existing["sources"].append(source_name)
+                return counter
+
+        counter += 1
+        entry: dict[str, Any] = {
+            "candidateId": f"{prefix}:{counter}",
+            "downNormal": normal,
+            "axisOrderRank": 6,
+            "sources": [source_name],
+        }
+        if new_probe is not None:
+            entry["_probe"] = new_probe
+        candidates.append(entry)
+        return counter
+
+    cluster_idx = 0
+    for normal, _area in _flat_facet_cluster_normals(mesh):
+        cluster_idx = merge_or_append(normal, "flat-facet-cluster", "cluster", cluster_idx)
 
     hull_idx = 0
     for normal, _area in _convex_hull_3d_normals(mesh):
-        matched = False
-        for existing in candidates:
-            en = existing["downNormal"]
-            tol = cos_axis_snap if existing["axisOrderRank"] < 6 else cos_general_merge
-            if (en[0] * normal[0] + en[1] * normal[1]) + en[2] * normal[2] >= tol:
-                if "convex-hull" not in existing["sources"]:
-                    existing["sources"].append("convex-hull")
-                matched = True
-                break
-        if not matched:
-            hull_idx += 1
-            candidates.append({
-                "candidateId": f"hull:{hull_idx}",
-                "downNormal": normal,
-                "axisOrderRank": 6,
-                "sources": ["convex-hull"],
-            })
+        hull_idx = merge_or_append(normal, "convex-hull", "hull", hull_idx)
 
     for cand in candidates:
         cand["sources"] = sorted(cand["sources"])
+        if not _keep_probes:
+            cand.pop("_probe", None)
     return candidates
 
 
@@ -966,18 +1179,38 @@ def orient_stl(
     raw_tris, verts_np = _extract_raw_tris(data, use_numpy=use_numpy)
 
     ref_surface_area = float(mesh["surfaceAreaMm2"])
-    raw_candidates = generate_candidate_normals(mesh)
+    raw_candidates = generate_candidate_normals(
+        mesh,
+        profile=profile,
+        overhang_threshold_deg=overhang_threshold_deg,
+        raw_tris=raw_tris,
+        verts_np=verts_np,
+        use_numpy=use_numpy,
+        _keep_probes=True,
+    )
 
     evaluated: list[dict[str, Any]] = []
     baseline_entry: dict[str, Any] | None = None
 
     for cand in raw_candidates:
         down_normal: tuple[float, float, float] = cand["downNormal"]
-        rot_base_raw = rotation_mapping_down_normal(down_normal)
-        rot_base = tuple(tuple(_r(v, 9) for v in row) for row in rot_base_raw)
-        rot_bytes = _pack_rotated_tris(raw_tris, verts_np, rot_base, use_numpy=use_numpy)
-        rot_mesh = _parse_and_build_facets(rot_bytes, use_numpy=use_numpy)
-        bed_fit = evaluate_bed_fit(rot_mesh, profile)
+        cached_probe = cand.pop("_probe", None)
+        if cached_probe is not None:
+            rot_base_raw = cached_probe["rotBaseRaw"]
+            rot_base = cached_probe["rotBase"]
+            rot_bytes = cached_probe["rotBytes"]
+            rot_mesh = cached_probe["rotMesh"]
+            bed_fit = cached_probe["bedFit"] if cached_probe["bedFit"] is not None else evaluate_bed_fit(rot_mesh, profile)
+            base_stability = cached_probe["baseStability"]
+            overhangs = cached_probe["overhangs"]
+        else:
+            rot_base_raw = rotation_mapping_down_normal(down_normal)
+            rot_base = tuple(tuple(_r(v, 9) for v in row) for row in rot_base_raw)
+            rot_bytes = _pack_rotated_tris(raw_tris, verts_np, rot_base, use_numpy=use_numpy)
+            rot_mesh = _parse_and_build_facets(rot_bytes, use_numpy=use_numpy)
+            bed_fit = evaluate_bed_fit(rot_mesh, profile)
+            base_stability = evaluate_base_stability(rot_mesh)
+            overhangs = evaluate_overhangs(rot_mesh, threshold_deg=overhang_threshold_deg)
 
         z_yaw_deg = 0
         final_rot = rot_base
@@ -988,9 +1221,9 @@ def orient_stl(
             rot_bytes = _pack_rotated_tris(raw_tris, verts_np, final_rot, use_numpy=use_numpy)
             rot_mesh = _parse_and_build_facets(rot_bytes, use_numpy=use_numpy)
             bed_fit = evaluate_bed_fit(rot_mesh, profile)
+            base_stability = evaluate_base_stability(rot_mesh)
+            overhangs = evaluate_overhangs(rot_mesh, threshold_deg=overhang_threshold_deg)
 
-        base_stability = evaluate_base_stability(rot_mesh)
-        overhangs = evaluate_overhangs(rot_mesh, threshold_deg=overhang_threshold_deg)
         score, breakdown = _score_candidate(
             rot_mesh=rot_mesh,
             bed_fit=bed_fit,
@@ -1093,6 +1326,7 @@ def orient_stl(
             item["metrics"]["overhangAreaMm2"],
             -item["metrics"]["flatBaseAreaMm2"],
             item["metrics"]["heightMm"],
+            item["angleDeg"],
             item["downNormal"],
         )
     )
