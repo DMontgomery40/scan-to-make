@@ -1,0 +1,14 @@
+{
+  "name": "@scan-to-make/e2e",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "npm run build --prefix ../../packages/contracts && npm run build --prefix ../../services/project && npm run build --prefix ../../services/companion && node --test *.test.mjs"
+  },
+  "dependencies": {
+    "@scan-to-make/companion": "file:../../services/companion",
+    "@scan-to-make/contracts": "file:../../packages/contracts",
+    "@scan-to-make/project": "file:../../services/project"
+  }
+}
