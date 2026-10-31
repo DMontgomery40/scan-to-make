@@ -2,6 +2,8 @@
 
 **Status:** design only. **Nothing in this document is deployed.** No Modal app, R2 bucket, or paid cloud account exists for Scan to Make yet. Turning any of this on spends David's money and needs his explicit approval first (team rule, 2026-10-31).
 
+**Tracking:** **KAN-134** (hosted cleanup worker design — docs only).
+
 **Decision:** [D003](https://app.slack.com/client/T0C92NRJM5G/C0C96L9JC76) — after local, repeatable workers and isolation proof, the lean hosted prototype uses **Modal** for compute and **Cloudflare R2** for bytes. David's D003 addendum: **the same cleanup job contract** must run locally and on Modal; hosted is a configuration change, not a second pipeline.
 
 This document covers only the **hosted cleanup worker**: headless [`tools/scan-repair`](../tools/scan-repair) plus [`tools/scan-correct`](../tools/scan-correct) (including deterministic `advise`), using **project-owned model API keys** for users who cannot run Linux + Blender 5.0.1 + libseccomp on their own machine. Capture conversion, companion pairing, project sync, billing, and printer MCPs stay on the self-host path documented elsewhere ([`deploy/companion/README.md`](../deploy/companion/README.md), [`services/companion/`](../services/companion/)).
