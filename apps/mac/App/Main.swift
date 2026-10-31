@@ -144,7 +144,23 @@ extension NSImage {
     private var showingSetup = false
     private lazy var setupModel = ModelAccessModel(installation:Installation(bundle:.main))
     private let updates = Updates()
+    private let localNetwork = LocalNetworkAccess()
+    /// A MenuBarExtra window can become key without activating an LSUIElement
+    /// app. Bring the app forward only for its first permission request.
+    private func permissionProbeForeground() -> Bool {
+        if !localNetwork.hasAttempted, !NSApp.isActive, NSApp.keyWindow?.isVisible == true,
+           !NetworkAddresses.current().lan.isEmpty { NSApp.activate(ignoringOtherApps:true) }
+        return NSApp.isActive
+    }
+    @objc private func windowBecameKey(_ notification: Notification) {
+        localNetwork.requestIfNeeded(isForeground:permissionProbeForeground(),hasLAN:!NetworkAddresses.current().lan.isEmpty)
+    }
+    func applicationDidBecomeActive(_ notification: Notification) {
+        localNetwork.requestIfNeeded(isForeground:NSApp.isActive,hasLAN:!NetworkAddresses.current().lan.isEmpty)
+    }
     func applicationDidFinishLaunching(_ notification: Notification) {
+        localNetwork.observeNetwork { [weak self] in self?.permissionProbeForeground() ?? false }
+        NotificationCenter.default.addObserver(self,selector:#selector(windowBecameKey(_:)),name:NSWindow.didBecomeKeyNotification,object:nil)
         if Installation(bundle:.main).variant.isEmpty && SMAppService.mainApp.status == .notRegistered {
             try? SMAppService.mainApp.register()
         }

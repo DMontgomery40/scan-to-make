@@ -55,6 +55,18 @@ Rows sort by `(kind, job ID)` with a cursor bound to the project filter. Each pa
 
 ## Swift integration
 
+`printer.check` accepts `{start:true}` to start a read-only check of the retained
+operator printer configuration, and `{}` (or `{start:false}`) to poll. It returns
+`{state:"idle"|"checking"|"complete", status?, camera?, cameraSha256?, cameraBytes?}`.
+Starts coalesce while a check runs. Completed `status` is `connected` or `failed`;
+`camera` is `connected`, `failed`, or `not-supported` for a non-Bambu backend,
+a backend without the tool, or an operator config with `cameraSnapshot:false`.
+Only `get_printer_status` and, for a connected Bambu, `camera_snapshot` are called.
+The receipt contains a SHA-256 and length of the returned JPEG, never its bytes,
+printer report, access code or raw error. No print is dispatched. A missing
+operator configuration returns `unavailable`. `ControlClient.checkPrinter(start:)`
+exposes this diagnostic; each poll stays within the socket deadline.
+
 `apps/mac/ControlKit` is an independent Swift package for macOS 13+. It provides typed status, device, invitation, confirmation and door results. `ControlJob.job` preserves the existing job schema as `JSONValue`; `id` and `status` are convenience properties. Calls are asynchronous, deadline bounded and cancellable. A missing/refused endpoint returns `unavailable` before a request is sent; a deadline after sending still has unknown mutation outcome. Large replies are processed linearly. Socket errors and decoding failures are sanitized, and invitations redact ordinary debug descriptions.
 
 ```swift

@@ -2,6 +2,7 @@ import {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import {StdioClientTransport} from '@modelcontextprotocol/sdk/client/stdio.js';
 import {ElicitRequestSchema, type CallToolResult, type Tool} from '@modelcontextprotocol/sdk/types.js';
 import {Ajv, type ValidateFunction} from 'ajv';
+import {appOwnedPrinterProcess} from './node-runtime.js';
 import {timeoutsFor, type PrinterHandoffConfig} from './config.js';
 import type {ElicitationContext, ElicitationRelay} from './elicitation.js';
 
@@ -74,7 +75,7 @@ export class PrinterMcpClient {
     if (this.#catalog) return this.#catalog;
     if (signal?.aborted) fail('cancelled');
     const timeouts = timeoutsFor(this.#config);
-    const processConfig = this.#config.process;
+    const processConfig = await appOwnedPrinterProcess(this.#config.process);
     const transport = new StdioClientTransport({
       command: processConfig.command,
       args: [...(processConfig.args ?? [])],

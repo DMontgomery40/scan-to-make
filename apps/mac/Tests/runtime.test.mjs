@@ -37,6 +37,11 @@ test('fresh agent uses bundled Python without inventing optional worker paths', 
   assert.equal(env.SCAN_TO_MAKE_SCAN_BLENDER, undefined);
 });
 
+test('app-owned printer runtime cannot be redirected by retained companion.env', async t => {
+  const {env}=await runAgent(t,{},'SCAN_TO_MAKE_PRINTER_NODE=/opt/homebrew/bin/node\n');
+  assert.equal(env.SCAN_TO_MAKE_PRINTER_NODE,process.execPath);
+});
+
 test('migrated agent preserves external worker executables and Python', async t => {
   const paths = {
     SCAN_TO_MAKE_CAPTURE_PYTHON:'/external worker/.venv/bin/python3',

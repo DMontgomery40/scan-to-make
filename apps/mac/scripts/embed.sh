@@ -22,5 +22,5 @@ with (Path(contents)/'Library/LaunchAgents'/f'{label}.plist').open('wb') as f:
     plistlib.dump({'Label':label,'BundleProgram':'Contents/MacOS/'+exe,'ProgramArguments':[exe,'--companion-agent'], 'AssociatedBundleIdentifiers':['com.scantomake.mac'+variant], 'RunAtLoad':True,'KeepAlive':True,'ThrottleInterval':15,'Umask':63}, f)
 PY
 if [ "${CODE_SIGNING_ALLOWED:-NO}" = YES ] && [ -d "$contents/Resources/Payload" ]; then
-  python3 "$SRCROOT/scripts/sign-runtime.py" "$contents/Resources/Payload" "$EXPANDED_CODE_SIGN_IDENTITY" "$SRCROOT/Config/Node.entitlements"
+  python3 "$SRCROOT/scripts/sign-runtime.py" "$contents/Resources/Payload" "$EXPANDED_CODE_SIGN_IDENTITY" "$SRCROOT/Config/Node.entitlements" "$PRODUCT_BUNDLE_IDENTIFIER"
 fi

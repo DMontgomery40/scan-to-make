@@ -27,6 +27,7 @@ const answer = z.union([
   z.strictObject({action: z.enum(['decline', 'cancel'])}),
 ]);
 export const parameters = {
+  'printer.check': z.strictObject({start:z.boolean().default(false)}),
   'modelAccess.get': empty,
   'modelAccess.set': z.strictObject({expectedRevision:z.uuid(),choice:ModelAccessChoiceSchema}),
   'modelAccess.check': z.strictObject({revision:z.uuid()}),

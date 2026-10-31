@@ -19,6 +19,10 @@ Object.assign(env, {
   PATH: [join(payload, 'node/bin'),join(payload, 'python/bin'),...(legacy.workingDirectory ? [join(legacy.workingDirectory,'printers/bambu/bin'),join(legacy.workingDirectory,'printers/generic/bin')] : []),'/opt/homebrew/bin','/usr/local/bin','/usr/bin','/bin'].join(':'),
   SCAN_TO_MAKE_REMOTE_AUTH_DIR: join(state,'auth'),
   SCAN_TO_MAKE_CAPTURE_DIR: join(state,'capture'),
+  // The app's signed runtime is responsible for printer LAN traffic too. This
+  // pin overrides retained operator env; changing PATH alone misses absolute
+  // Homebrew Node commands in existing printer-handoff.json files.
+  SCAN_TO_MAKE_PRINTER_NODE: process.execPath,
   SCAN_TO_MAKE_CAPTURE_PYTHON: env.SCAN_TO_MAKE_CAPTURE_PYTHON || legacy.workerEnvironment?.SCAN_TO_MAKE_CAPTURE_PYTHON || python,
 });
 if (existsSync(join(state, 'tls/cert.pem'))) {
