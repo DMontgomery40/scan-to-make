@@ -31,6 +31,10 @@
     "./instance-lock": {
       "types": "./dist/instance-lock.d.ts",
       "import": "./dist/instance-lock.js"
+    },
+    "./ai-tweak": {
+      "types": "./dist/ai-tweak.d.ts",
+      "import": "./dist/ai-tweak.js"
     }
   },
   "scripts": {
