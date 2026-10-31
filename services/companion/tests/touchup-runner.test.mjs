@@ -114,3 +114,18 @@ test('the worker can say it failed, and the last checkpoint is kept', async () =
   assert.equal(result.reason, 'Blender crashed while merging the beads.');
   assert.equal(result.model, join(pass.checkpointsDir, '01.stl'));
 });
+
+test('a make job with no scan is done, not unchanged', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'touchup-run-'));
+  const pass = await prepareTouchupPass({root, objectId: 'mount', scan: [], photos: [], requirePhotos: false});
+  const inv = {command: process.execPath, args: [fakeClaude, 'nocheckpoint'], env: {PATH: process.env.PATH}, cwd: pass.dir, mcpConfigPath: join(pass.dir, 'mcp.json'), mcpConfig: {mcpServers: {}}};
+  const result = await runTouchupWorker(inv, pass);
+  assert.equal(result.status, 'done');
+});
+
+test('the report records what the worker actually started with', async () => {
+  const {pass, inv} = await setup('done');
+  const result = await runTouchupWorker(inv, pass);
+  assert.deepEqual(result.worker, {model: 'claude-opus-5-5', apiKeySource: 'none', tools: ['Read', 'WebSearch'],
+    plugins: ['cc-plugin-telemetry@builtin'], mcpServers: ['printer:connected']});
+});

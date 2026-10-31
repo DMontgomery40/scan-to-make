@@ -9,7 +9,7 @@ const result = (structured, extra = {}) => emit({type: 'result', subtype: 'succe
 const stl = 'solid touched\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 1 0 0\nvertex 0 1 0\nendloop\nendfacet\nendsolid touched\n';
 const hang = () => setInterval(() => {}, 1000);
 mkdirSync('out/checkpoints', {recursive: true});
-emit({type: 'system', subtype: 'init', model: 'claude-opus-5-5', tools: ['Read'], mcp_servers: [{name: 'printer', status: 'connected'}]});
+emit({type: 'system', subtype: 'init', model: 'claude-opus-5-5', apiKeySource: 'none', tools: ['Read', 'WebSearch'], plugins: [{name: 'cc-plugin-telemetry', source: 'cc-plugin-telemetry@builtin'}], mcp_servers: [{name: 'printer', status: 'connected'}]});
 switch (scenario) {
   case 'done':
     toolUse('Read'); toolUse(); say('Restored the texture on the underside.'); toolUse();

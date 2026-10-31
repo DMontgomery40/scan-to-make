@@ -19,6 +19,8 @@ export interface TouchupResult {
   renders: string[];
   checkpoints: string[];
   stats: {seconds: number; toolCalls: number; costUsd?: number};
+  /** What the worker actually started with, from Claude Code's init event: proof of isolation. */
+  worker?: {model?: string; apiKeySource?: string; tools: string[]; plugins: string[]; mcpServers: string[]};
 }
 export interface TouchupProgress {seconds: number; toolCalls: number; lastText?: string}
 
@@ -60,6 +62,7 @@ export async function runTouchupWorker(inv: TouchupInvocation, pass: TouchupPass
   const seconds = () => Math.round((Date.now() - started) / 1000);
   const child = spawn(inv.command, inv.args, {cwd: inv.cwd, env: inv.env, detached: true, stdio: ['ignore', 'pipe', 'pipe']});
   let toolCalls = 0, lastText: string | undefined, resultEvent: ResultEvent | undefined, stopReason: string | undefined, stderrTail = '';
+  let worker: TouchupResult['worker'];
   let killTimer: NodeJS.Timeout | undefined;
 
   const stop = (reason: string) => {
@@ -77,7 +80,14 @@ export async function runTouchupWorker(inv: TouchupInvocation, pass: TouchupPass
   lines.on('line', line => {
     let event: {type?: string; message?: {content?: {type?: string; text?: string}[]}} & ResultEvent;
     try { event = JSON.parse(line); } catch { return; }
-    if (event.type === 'assistant') {
+    if (event.type === 'system' && (event as {subtype?: string}).subtype === 'init') {
+      const init = event as {model?: string; apiKeySource?: string; tools?: string[]; plugins?: {name?: string; source?: string}[]; mcp_servers?: {name?: string; status?: string}[]};
+      worker = {
+        ...(init.model ? {model: init.model} : {}), ...(init.apiKeySource ? {apiKeySource: init.apiKeySource} : {}),
+        tools: init.tools ?? [], plugins: (init.plugins ?? []).map(plugin => plugin.source ?? plugin.name ?? '?'),
+        mcpServers: (init.mcp_servers ?? []).map(server => `${server.name}:${server.status}`),
+      };
+    } else if (event.type === 'assistant') {
       for (const block of event.message?.content ?? []) {
         if (block.type === 'tool_use') toolCalls++;
         else if (block.type === 'text' && block.text?.trim()) lastText = block.text.trim();
@@ -110,7 +120,7 @@ export async function runTouchupWorker(inv: TouchupInvocation, pass: TouchupPass
   if (await isValidStl(touched)) model = touched;
   else model = validCheckpoints.at(-1);
 
-  const base = {renders, checkpoints, stats: {seconds: seconds(), toolCalls, ...(resultEvent?.total_cost_usd !== undefined ? {costUsd: resultEvent.total_cost_usd} : {})}};
+  const base = {renders, checkpoints, ...(worker ? {worker} : {}), stats: {seconds: seconds(), toolCalls, ...(resultEvent?.total_cost_usd !== undefined ? {costUsd: resultEvent.total_cost_usd} : {})}};
   const withModel = model ? {model} : {};
   const answer = resultEvent?.structured_output;
   const summary = answer?.summary ? {summary: answer.summary} : {};
@@ -128,8 +138,9 @@ export async function runTouchupWorker(inv: TouchupInvocation, pass: TouchupPass
   if (answer.status === 'failed') return {status: 'failed', reason: answer.summary?.trim() || 'the worker could not finish', ...withModel, ...base};
   if (answer.status === 'needs_closeup') return {status: 'needs_closeup', closeup: answer.closeup ?? 'a part of the object', ...summary, ...withModel, ...base};
   if (!model) return {status: 'failed', reason: 'no model was saved', ...summary, ...base};
-  // The rules require a checkpoint after every fix: none saved means nothing was fixed.
-  if (validCheckpoints.length === 0) return {status: 'unchanged', ...summary, model, ...base};
+  // The rules require a checkpoint after every fix: a touch-up of a scan with none saved fixed nothing.
+  // A make job (no scan) has nothing to be unchanged.
+  if (pass.scanPaths.length > 0 && validCheckpoints.length === 0) return {status: 'unchanged', ...summary, model, ...base};
   if (opts.inputStlSha256 && await sha256(model) === opts.inputStlSha256) return {status: 'unchanged', ...summary, model, ...base};
   return {status: 'done', ...summary, model, ...base};
 }
