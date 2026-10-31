@@ -98,9 +98,13 @@ test('advice success is committed with artifacts even if cancellation arrives at
 });
 
 test('whole-job deadline is distinct from user cancellation',async t=>{
- const runner=cleanupRunner(),run=runner.cleanup.run;
- runner.cleanup.run=async(stage,ctx)=>{if(stage!=='correct')return run(stage,ctx);await new Promise(resolve=>ctx.signal.addEventListener('abort',resolve,{once:true}));ctx.signal.throwIfAborted();};
- const f=await fixture(t,runner,500);const {job}=await f.store.start(f.input);await f.store.wait();
+ const runner=cleanupRunner(),run=runner.cleanup.run;let entered;
+ const correcting=new Promise(resolve=>entered=resolve);
+ runner.cleanup.run=async(stage,ctx)=>{if(stage!=='correct')return run(stage,ctx);entered();await new Promise(resolve=>ctx.signal.addEventListener('abort',resolve,{once:true}));ctx.signal.throwIfAborted();};
+ const f=await fixture(t,runner,500);
+ // Disk/CPU speed must not decide which stage owns this timeout assertion.
+ t.mock.timers.enable({apis:['setTimeout']});
+ const {job}=await f.store.start(f.input);await correcting;t.mock.timers.tick(500);await f.store.wait();
  const result=(await f.store.load(f.input,job.jobId)).job;assert.equal(result.failure,'deadline-exceeded');assert.equal(result.failureStage,'correct');assert.equal(result.wallClockLimitMs,500);
 });
 
