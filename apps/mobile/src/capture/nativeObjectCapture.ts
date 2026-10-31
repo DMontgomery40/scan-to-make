@@ -52,6 +52,7 @@ export class NativeObjectCaptureClient {
     id: string,
     draft: NativeCaptureDraft,
     selectedDestination?: CaptureDestination,
+    again = false,
   ) {
     if (draft.status !== 'ready' || !draft.file)
       throw Error(
@@ -81,6 +82,7 @@ export class NativeObjectCaptureClient {
       id,
       file,
       selectedDestination ?? draft.origin,
+      again,
     );
     await this.captures.reopen(id, capture);
     return capture;

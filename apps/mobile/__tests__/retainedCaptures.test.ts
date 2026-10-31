@@ -311,3 +311,223 @@ test('pairing changed between handoff precheck and sync cannot send project byte
   ).rejects.toThrow('capture destination changed');
   expect(h.native.request).not.toHaveBeenCalled();
 });
+
+// David's "Thing" reached the companion three times: the same 7 MB scan,
+// added again 10 and 15 seconds later, each POST making a new capture.
+test('bytes already imported for this project version are never sent again', async () => {
+  const h = harness();
+  const p = await h.create();
+  const fixture = captureFixture();
+  let made = 0;
+  // A companion that makes a new capture for every POST, as it does today.
+  h.native.request = jest.fn(async o => {
+    const project = await h.repo.load('one');
+    if (project.status !== 'ok') throw Error();
+    const revision = project.project.revision;
+    return {
+      status: o.method === 'POST' ? 201 : 200,
+      body:
+        o.method === 'POST'
+          ? JSON.stringify({
+              captureId: `capture-${++made}`,
+              binding: {
+                ...fixture.binding,
+                projectRevision: revision,
+                capture: { ...fixture.binding.capture, original: o.source },
+              },
+            })
+          : o.method === 'PUT'
+          ? o.body!
+          : JSON.stringify(revision === 0 ? p : project.project),
+      etag: '"' + String(revision).repeat(64) + '"',
+    };
+  });
+  const posts = () =>
+    (h.native.request as jest.Mock).mock.calls.filter(
+      ([o]) => o.method === 'POST',
+    ).length;
+  const source = fixture.binding.capture.original;
+  const first = await h.client.import('one', source);
+  const restarted = new CaptureClient(h.repo, h.native, async () => {});
+  expect(await restarted.import('one', source)).toEqual(first);
+  expect(await h.client.import('one', { ...source })).toEqual(first);
+  expect(posts()).toBe(1);
+  expect((await h.client.state('one')).captures).toHaveLength(1);
+  // Other bytes, or the same bytes for a newer project version, are new captures.
+  await h.client.import('one', { ...source, sha256: 'e'.repeat(64) });
+  expect(posts()).toBe(2);
+  await h.repo.change('one', 0, {
+    kind: 'replace-brief',
+    brief: { ...p.brief, addition: 'Edited' },
+  });
+  expect((await h.client.import('one', source)).captureId).toBe('capture-3');
+  expect(posts()).toBe(3);
+});
+test('a second import while one is running is refused without a request', async () => {
+  const h = harness();
+  const p = await h.create();
+  const fixture = captureFixture();
+  let reply!: () => void;
+  h.native.request = jest.fn(async o => {
+    if (o.method === 'POST') await new Promise<void>(r => (reply = r));
+    return {
+      status: o.method === 'POST' ? 201 : 200,
+      body: JSON.stringify(o.path.includes('/captures') ? fixture : p),
+      etag: '"' + 'a'.repeat(64) + '"',
+    };
+  });
+  const source = fixture.binding.capture.original;
+  const first = h.client.import('one', source);
+  await expect(
+    h.client.import('one', { ...source, sha256: 'e'.repeat(64) }),
+  ).rejects.toThrow('already running');
+  while (!reply) await new Promise<void>(r => setImmediate(r));
+  reply();
+  await first;
+  expect(
+    (h.native.request as jest.Mock).mock.calls.filter(
+      ([o]) => o.method === 'POST',
+    ),
+  ).toHaveLength(1);
+});
+
+// A companion that makes a new capture for every POST, as it does today.
+function companion(h: ReturnType<typeof harness>, p: unknown) {
+  const fixture = captureFixture();
+  let made = 0;
+  let lose = false;
+  h.native.request = jest.fn(async o => {
+    if (o.method === 'POST') {
+      made++;
+      if (lose) throw Error('reply lost');
+    }
+    return {
+      status: o.method === 'POST' ? 201 : 200,
+      body:
+        o.method === 'POST'
+          ? JSON.stringify({
+              captureId: `capture-${made}`,
+              binding: {
+                ...fixture.binding,
+                capture: { ...fixture.binding.capture, original: o.source },
+              },
+            })
+          : JSON.stringify(p),
+      etag: '"' + 'a'.repeat(64) + '"',
+    };
+  });
+  return {
+    source: fixture.binding.capture.original,
+    posts: () => made,
+    loseReplies: (value: boolean) => (lose = value),
+  };
+}
+test('after an unconfirmed import is set aside, the same bytes need an explicit yes', async () => {
+  const h = harness();
+  const p = await h.create();
+  const c = companion(h, p);
+  c.loseReplies(true);
+  await expect(h.client.import('one', c.source)).rejects.toThrow(
+    'may have finished',
+  );
+  await h.client.acknowledgeUnknown('one');
+  c.loseReplies(false);
+  await expect(h.client.import('one', c.source)).rejects.toMatchObject({
+    code: 'maybe-imported',
+  });
+  expect(c.posts()).toBe(1);
+  // Other bytes go straight through; the same bytes only when asked again.
+  await h.client.import('one', { ...c.source, sha256: 'e'.repeat(64) });
+  expect(c.posts()).toBe(2);
+  const again = await h.client.import('one', c.source, undefined, true);
+  expect(c.posts()).toBe(3);
+  expect(await h.client.import('one', c.source)).toEqual(again);
+  expect(c.posts()).toBe(3);
+});
+test('a held capture is returned even while another import is unconfirmed', async () => {
+  const h = harness();
+  const p = await h.create();
+  const c = companion(h, p);
+  const held = await h.client.import('one', c.source);
+  c.loseReplies(true);
+  await expect(
+    h.client.import('one', { ...c.source, sha256: 'e'.repeat(64) }),
+  ).rejects.toThrow('may have finished');
+  expect(await h.client.import('one', c.source)).toEqual(held);
+  await expect(
+    h.client.import('one', { ...c.source, sha256: 'f'.repeat(64) }),
+  ).rejects.toThrow('unconfirmed');
+  expect(c.posts()).toBe(2);
+});
+test('a held capture never bypasses a changed destination', async () => {
+  const h = harness();
+  const p = await h.create();
+  const c = companion(h, p);
+  await h.client.import('one', c.source);
+  await expect(
+    h.client.import('one', c.source, {
+      projectId: 'one',
+      revision: 0,
+      snapshot: JSON.stringify(p),
+      context: 'host/other-device',
+    }),
+  ).rejects.toThrow('capture destination changed');
+});
+test('clients on the same bridge take turns: one import at a time, and sync never overwrites it', async () => {
+  const h = harness();
+  const p = await h.create();
+  const fixture = captureFixture();
+  let reply!: () => void;
+  h.native.request = jest.fn(async o => {
+    if (o.method === 'POST') await new Promise<void>(r => (reply = r));
+    return {
+      status: o.method === 'POST' ? 201 : 200,
+      body: JSON.stringify(o.path.includes('/captures') ? fixture : p),
+      etag: '"' + 'a'.repeat(64) + '"',
+    };
+  });
+  const other = new CaptureClient(h.repo, h.native, async () => {});
+  const first = h.client.import('one', fixture.binding.capture.original);
+  while (!reply) await new Promise<void>(r => setImmediate(r));
+  await expect(
+    other.import('one', {
+      ...fixture.binding.capture.original,
+      sha256: 'e'.repeat(64),
+    }),
+  ).rejects.toThrow('already running');
+  let synced = false;
+  const sync = other.sync('one').then(() => (synced = true));
+  await new Promise<void>(r => setImmediate(r));
+  expect(synced).toBe(false);
+  reply();
+  await first;
+  await sync;
+  expect((await other.state('one')).captures).toHaveLength(1);
+  expect((await other.state('one')).pending).toBeUndefined();
+});
+test('unconfirmed uploads are never forgotten until their bytes are held', async () => {
+  const h = harness();
+  const p = await h.create();
+  const c = companion(h, p);
+  c.loseReplies(true);
+  const file = (n: number) => ({
+    ...c.source,
+    sha256: n.toString(16).padStart(64, '0'),
+  });
+  for (let n = 0; n < 25; n++) {
+    await expect(h.client.import('one', file(n))).rejects.toThrow(
+      'may have finished',
+    );
+    await h.client.acknowledgeUnknown('one');
+  }
+  c.loseReplies(false);
+  await expect(h.client.import('one', file(0))).rejects.toMatchObject({
+    code: 'maybe-imported',
+  });
+  await h.client.import('one', file(0), undefined, true);
+  const state = await h.client.state('one');
+  expect(state.unconfirmed).toHaveLength(24);
+  expect(state.unconfirmed?.some(u => u.source.sha256 === file(0).sha256)).toBe(
+    false,
+  );
+});

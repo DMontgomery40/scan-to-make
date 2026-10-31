@@ -1,9 +1,11 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Alert, AppState, Text } from 'react-native';
 import type { SavedProjects } from '@scan-to-make/contracts/saved-project';
 import {
   CaptureClient,
   captureNative,
+  retainedIndex,
+  type CaptureFile,
   type CaptureState,
   type RetainedCapture,
 } from '../capture/retainedCaptures';
@@ -56,7 +58,11 @@ export function RetainedCapturesScreen({
   const [activeRunID, setActiveRunID] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<NativeCaptureDraft[]>([]);
   const [state, setState] = useState<CaptureState>({ captures: [] });
+  // The saved project's current version, which a new capture is bound to.
+  const [revision, setRevision] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
+  // Set synchronously, so a second tap before the next render does nothing.
+  const running = useRef(false);
   const [message, setMessage] = useState(
     'Scan an object or choose a saved USDZ scan to keep with this project.',
   );
@@ -77,7 +83,11 @@ export function RetainedCapturesScreen({
       if (status) setActiveRunID(status.activeRunID);
       setDrafts(await scanner.drafts(id));
     }
-    if (client) setState(await client.state(id));
+    // The version and the captures held for it are shown together.
+    const project = await repository.load(id);
+    const next = client ? await client.state(id) : null;
+    setRevision(project.status === 'ok' ? project.project.revision : null);
+    if (next) setState(next);
   };
   useEffect(() => {
     refresh().catch(e => setMessage(e.message));
@@ -111,20 +121,57 @@ export function RetainedCapturesScreen({
       clearInterval(timer);
     };
   }, [scanner, activeRunID]); // eslint-disable-line react-hooks/exhaustive-deps
-  async function run(action: () => Promise<unknown>, success: string) {
-    if (busy || !client) return;
+  async function run(
+    action: () => Promise<unknown>,
+    success: string | (() => string),
+  ) {
+    if (running.current || !client) return;
+    running.current = true;
     setBusy(true);
     try {
       await action();
-      setMessage(success);
+      setMessage(typeof success === 'string' ? success : success());
     } catch (e) {
       setMessage(
         e instanceof Error ? e.message : 'The request could not be completed.',
       );
     } finally {
       await refresh().catch(() => {});
+      running.current = false;
       setBusy(false);
     }
+  }
+  // Imports, and if an earlier unconfirmed upload may have sent the same
+  // bytes, asks before sending them again (after this run has finished, so
+  // the answer isn't dropped by the tap guard).
+  async function send(
+    upload: (again: boolean) => Promise<RetainedCapture>,
+    success: string,
+    again = false,
+  ) {
+    let ask: string | null = null;
+    await run(
+      async () => {
+        try {
+          setSelected(await upload(again));
+        } catch (error) {
+          // Not a failure: the alert below asks, and nothing was sent.
+          if ((error as { code?: string })?.code !== 'maybe-imported')
+            throw error;
+          ask = (error as Error).message;
+        }
+      },
+      () =>
+        ask ? 'Nothing was sent. Choose whether to add it again.' : success,
+    );
+    if (ask)
+      Alert.alert('Add this scan again?', ask, [
+        { text: 'Keep for later', style: 'cancel' },
+        {
+          text: 'Add again',
+          onPress: () => send(upload, success, true),
+        },
+      ]);
   }
   return (
     <Screen
@@ -206,68 +253,92 @@ export function RetainedCapturesScreen({
               onPress={() => run(refresh, 'Local scans refreshed.')}
             />
           ) : null}
-          {drafts.map((draft, index) => (
-            <Card key={draft.runID}>
-              <Text style={type.heading}>Local scan {index + 1}</Text>
-              <Text style={type.body}>
-                {draft.status === 'ready'
-                  ? 'Ready to add'
-                  : draft.status === 'stopping'
-                  ? 'Stopping scan'
-                  : draft.status === 'capturing'
-                  ? 'Scan in progress'
-                  : 'Original files kept on this device'}
-              </Text>
-              {draft.message ? (
-                <Text style={type.body}>{draft.message}</Text>
-              ) : null}
-              {draft.file ? (
-                <Text style={type.caption}>
-                  {(draft.file.byteLength / 1048576).toFixed(1)} MB · Project
-                  version {draft.origin.revision}
+          {drafts.map((draft, index) => {
+            // Adding the same scan again would make a second copy on the companion.
+            const added =
+              draft.file && revision !== null
+                ? retainedIndex(state, revision, draft.file)
+                : -1;
+            return (
+              <Card key={draft.runID}>
+                <Text style={type.heading}>Local scan {index + 1}</Text>
+                <Text style={type.body}>
+                  {added >= 0
+                    ? `Added to this project as capture ${added + 1}`
+                    : draft.status === 'ready'
+                    ? 'Ready to add'
+                    : draft.status === 'stopping'
+                    ? 'Stopping scan'
+                    : draft.status === 'capturing'
+                    ? 'Scan in progress'
+                    : 'Original files kept on this device'}
                 </Text>
-              ) : null}
-              {draft.status === 'ready' && scanner ? (
-                <>
-                  <Button
-                    label={`Add scan ${index + 1} to this project`}
-                    disabled={busy || !!state.pending}
-                    onPress={() =>
-                      run(async () => {
-                        setSelected(await scanner.add(id, draft));
-                      }, 'Capture imported and verified. Open it to review the original scan.')
-                    }
-                  />
-                  <Button
-                    label={`Choose destination for scan ${index + 1}`}
-                    variant="secondary"
-                    disabled={busy || !!state.pending}
-                    onPress={() =>
-                      run(async () => {
-                        const destination = await client.destination(id);
+                {draft.message ? (
+                  <Text style={type.body}>{draft.message}</Text>
+                ) : null}
+                {draft.file ? (
+                  <Text style={type.caption}>
+                    {(draft.file.byteLength / 1048576).toFixed(1)} MB · Project
+                    version {draft.origin.revision}
+                  </Text>
+                ) : null}
+                {draft.status === 'ready' && added < 0 && scanner ? (
+                  <>
+                    <Button
+                      label={`Add scan ${index + 1} to this project`}
+                      disabled={busy || !!state.pending}
+                      onPress={() =>
+                        send(
+                          again => scanner.add(id, draft, undefined, again),
+                          'Capture imported and verified. Open it to review the original scan.',
+                        )
+                      }
+                    />
+                    <Button
+                      label={`Choose destination for scan ${index + 1}`}
+                      variant="secondary"
+                      disabled={busy || !!state.pending}
+                      onPress={async () => {
+                        if (running.current) return;
+                        // Asked outside run(), so the answer is never dropped.
+                        let destination;
+                        try {
+                          destination = await client.destination(id);
+                        } catch (e) {
+                          setMessage(
+                            e instanceof Error
+                              ? e.message
+                              : 'The request could not be completed.',
+                          );
+                          return;
+                        }
+                        setMessage(
+                          'Choose whether to add the scan to the current destination.',
+                        );
+                        const chosen = destination;
                         Alert.alert(
                           'Use the current project version?',
-                          `Add this retained scan to project version ${destination.revision} on your connected companion? Its original files stay on this device.`,
+                          `Add this retained scan to project version ${chosen.revision} on your connected companion? Its original files stay on this device.`,
                           [
                             { text: 'Keep for later', style: 'cancel' },
                             {
                               text: 'Add to this version',
                               onPress: () =>
-                                run(async () => {
-                                  setSelected(
-                                    await scanner.add(id, draft, destination),
-                                  );
-                                }, 'Capture imported and verified.'),
+                                send(
+                                  again =>
+                                    scanner.add(id, draft, chosen, again),
+                                  'Capture imported and verified.',
+                                ),
                             },
                           ],
                         );
-                      }, 'Choose whether to add the scan to the current destination.')
-                    }
-                  />
-                </>
-              ) : null}
-            </Card>
-          ))}
+                      }}
+                    />
+                  </>
+                ) : null}
+              </Card>
+            );
+          })}
           <Button
             label={busy ? 'Working…' : 'Sync saved project'}
             disabled={busy}
@@ -281,14 +352,16 @@ export function RetainedCapturesScreen({
           <Button
             label="Choose USDZ capture"
             disabled={busy || !!state.pending}
-            onPress={() =>
-              run(async () => {
-                const file = await client.native.pick();
-                const capture = await client.import(id, file);
+            onPress={() => {
+              // Chosen once; adding it again reuses the same file.
+              let file: CaptureFile | undefined;
+              send(async again => {
+                file ??= await client.native.pick();
+                const capture = await client.import(id, file, undefined, again);
                 await client.reopen(id, capture);
-                setSelected(capture);
-              }, 'Capture imported and verified. Open it to review the original scan.')
-            }
+                return capture;
+              }, 'Capture imported and verified. Open it to review the original scan.');
+            }}
           />
           {state.pending ? (
             <Card>
