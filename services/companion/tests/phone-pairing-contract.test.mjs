@@ -32,7 +32,7 @@ function wire(url,cert,path,{method='GET',headers={},body}={}) {
 }
 async function phonePairingParser() {
  // Execute the phone's real TypeScript parser; only its unused native bridge is stubbed.
- const modules={};
+ const modules={},contract=await import('@scan-to-make/contracts/pairing-link');
  for(const name of ['pairing','pairingLink']){
   const source=await readFile(new URL(`../../../apps/mobile/src/companion/${name}.ts`,import.meta.url),'utf8');
   const code=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
@@ -40,6 +40,7 @@ async function phonePairingParser() {
   const require=name=>{
    if(name==='react-native')return {NativeModules:{}};
    if(name==='./pairing')return modules.pairing;
+   if(name==='@scan-to-make/contracts/pairing-link')return contract;
    throw Error(`Unexpected phone parser dependency: ${name}`);
   };
   runInNewContext(code,{module,exports:module.exports,require},{filename:`${name}.js`});
@@ -68,4 +69,15 @@ for(const command of ['pair-capture','pair-capture-and-printer-handoff'])test(`$
  assert.throws(()=>parse(withoutPin.href),error=>error.code==='invalid-invitation');
  const badPin=new URL(invite.qrPayload);badPin.searchParams.set('f','invalid');
  assert.throws(()=>parse(badPin.href),error=>error.code==='invalid-invitation');
+});
+test('the companion still mints v1 byte-for-byte, and the phone reads a v2 link from the shared formatter',async t=>{
+ const f=await fixture(t),parse=await phonePairingParser();
+ const {formatPairingLink}=await import('@scan-to-make/contracts/pairing-link');
+ const invite=await f.store.createPairing('lan');
+ const q=new URLSearchParams({v:'1',u:f.store.baseUrl,c:invite.code,e:String(invite.expiresAt)});q.set('f',f.certificateSha256);
+ assert.equal(invite.qrPayload,`scantomake://pair?${q}`);
+ const addresses=[f.store.baseUrl,'https://davids-mac-mini.local:9077','https://100.101.102.103:9077'];
+ const v2=formatPairingLink({version:2,addresses,code:invite.code,expiresAt:invite.expiresAt,publicKeySha256:'ab'.repeat(32),name:"David's Mac mini"});
+ assert.deepEqual({...parse(v2)},{baseUrl:addresses[0],code:invite.code,addresses,publicKeySha256:'ab'.repeat(32),name:"David's Mac mini"});
+ assert.throws(()=>parse(v2.replace('v=2','v=3')),error=>error.code==='unsupported-invitation');
 });

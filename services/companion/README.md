@@ -90,10 +90,23 @@ Origin and proxy headers, and closes no later than ten seconds after expiry.
 
 Stdout remains one invitation JSON object containing `version`, `baseUrl`, `code`
 and `expiresAt`, plus `qrPayload` and (when the page starts) `pairingPageUrl`.
-Existing JSON-paste clients continue to work. `qrPayload` is now the deep link
-`scantomake://pair?v=1&u=<encoded-HTTPS-base-URL>&c=<code>&e=<expiry-ms>`;
-parameters use `URLSearchParams` encoding. This replaces the former JSON string
-in that field. Terminal/page generation uses pinned MIT-licensed `qrcode`; its
+Existing JSON-paste clients continue to work. `qrPayload` is the deep link
+`scantomake://pair?v=1&u=<encoded-HTTPS-base-URL>&c=<code>&e=<expiry-ms>`, plus
+`f=<certificate SHA-256>` in LAN mode; parameters use `URLSearchParams` encoding.
+This replaced the former JSON string in that field.
+
+The link is defined once, for the companion and the phone, in
+`@scan-to-make/contracts/pairing-link` (`parsePairingLink`, `formatPairingLink`).
+Version 2 (BE-5) adds what MAC-5 needs: `v=2&c=<code>&e=<expiry-ms>&k=<public-key
+SHA-256>&a=<origin>[&a=<origin>…][&n=<Mac name>]`. `k` pins the companion's public
+key (the SHA-256 of its DER SubjectPublicKeyInfo, 64 lowercase hex), so a new
+address or a renewed certificate on the same key keeps working. `a` repeats once per
+address in the order to try (at most 8, distinct, each an `https://host[:port]`
+origin whose host iOS lets a pinned certificate use: an IP address, a `.local` name
+or a single label). `n` is an optional Mac name. In both versions unknown keys are
+ignored and a repeated single key is invalid; a later version is refused as
+`unsupported-invitation`. The companion keeps minting version 1 until phones that
+read version 2 are installed; MAC-5 switches it. Terminal/page generation uses pinned MIT-licensed `qrcode`; its
 licence is included in the installed npm package and checked by the repository audit.
 
 The code has 192 random bits, is bound to the selected login, expires after five

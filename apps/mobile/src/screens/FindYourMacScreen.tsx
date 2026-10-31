@@ -15,6 +15,7 @@ import {
   companionNative,
   EXPIRED,
   pairingError,
+  pairWithInvitation,
   UNREACHABLE,
   type CompanionNative,
   type PairingStatus,
@@ -155,16 +156,12 @@ export function FindYourMacScreen({
     try {
       const parsed = parsePairingQR(value);
       // Queued like every other request, so a refresh waiting its turn
-      // can't take the phone's one request first.
+      // can't take the phone's one request first. v1 codes pair at their
+      // one address; v2 codes try every address with the key pin.
       const result = await gate(() => {
         if (!open.current)
           throw Object.assign(Error('Closed'), { code: 'cancelled' });
-        return native.pair(
-          parsed.baseUrl,
-          parsed.code,
-          DEVICE_NAME,
-          parsed.certificateSha256 ?? null,
-        );
+        return pairWithInvitation(native, parsed, DEVICE_NAME);
       });
       setStatus(result);
       setReplacing(false);
@@ -196,7 +193,8 @@ export function FindYourMacScreen({
     working.current = true;
     try {
       const parsed = parsePairingQR(value);
-      if (parsed.certificateSha256 && !asked.current) {
+      // A pinned code (v1 certificate or v2 public key) means a Mac on the local network.
+      if ((parsed.certificateSha256 || parsed.publicKeySha256) && !asked.current) {
         setPhase({ kind: 'asking', code: value });
         working.current = false;
         return;

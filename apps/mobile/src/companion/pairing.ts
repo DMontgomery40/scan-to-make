@@ -15,6 +15,16 @@ export interface CompanionNative {
     /** SHA-256 of the companion's certificate; when set, only it is trusted. */
     certificateSha256: string | null,
   ): Promise<PairingStatus>;
+  /**
+   * Pairing link v2: tries each address in order, trusting only the companion's
+   * public key (SHA-256 of its SubjectPublicKeyInfo), and keeps the list.
+   */
+  pairAddresses(
+    addresses: string[],
+    code: string,
+    deviceName: string,
+    publicKeySha256: string,
+  ): Promise<PairingStatus>;
   check(): Promise<PairingStatus>;
   /**
    * POST /v1/auth/refresh: the same credential for another full lifetime.
@@ -27,6 +37,35 @@ export interface CompanionNative {
 export function companionNative(): CompanionNative | undefined {
   return NativeModules.CompanionPairing;
 }
+/** A parsed invitation: v1 (`baseUrl`, optional certificate pin) or v2 (addresses and a public-key pin). */
+export type PairingInvitation = {
+  baseUrl: string;
+  code: string;
+  certificateSha256?: string;
+  addresses?: string[];
+  publicKeySha256?: string;
+  name?: string;
+};
+/** Pairs with any parsed invitation; the screens call this rather than a native method. */
+export function pairWithInvitation(
+  native: CompanionNative,
+  parsed: PairingInvitation,
+  deviceName: string,
+): Promise<PairingStatus> {
+  return parsed.publicKeySha256 !== undefined && parsed.addresses
+    ? native.pairAddresses(
+        parsed.addresses,
+        parsed.code,
+        deviceName,
+        parsed.publicKeySha256,
+      )
+    : native.pair(
+        parsed.baseUrl,
+        parsed.code,
+        deviceName,
+        parsed.certificateSha256 ?? null,
+      );
+}
 // Plain words only: what happened, and the one thing to do about it.
 export const EXPIRED =
   'That code expired. Show a new one on your Mac: click the Scan to Make icon in the menu bar → Add a phone.';
@@ -36,6 +75,8 @@ const errors: Record<string, string> = {
   'invalid-invitation':
     'That isn’t a Scan to Make code. Point at the code in Scan to Make on your Mac.',
   'expired-invitation': EXPIRED,
+  'unsupported-invitation':
+    'That code is from a newer Scan to Make. Update the app on this phone, then scan it again.',
   unauthorized:
     'Your Mac turned this phone down, or the code was already used. Show a new code on your Mac and scan it.',
   forbidden: 'Your Mac turned this phone down. Show a new code and scan it.',

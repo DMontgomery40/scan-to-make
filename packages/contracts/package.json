@@ -9,7 +9,8 @@
     "./capture": { "types": "./dist/capture.d.ts", "import": "./dist/capture.js", "default": "./dist/capture.js" },
     "./detail-still": { "types": "./dist/detail-still.d.ts", "import": "./dist/detail-still.js", "default": "./dist/detail-still.js" },
     "./scan-processing": { "types": "./dist/scan-processing.d.ts", "import": "./dist/scan-processing.js", "default": "./dist/scan-processing.js" },
-    "./device-auth": { "types": "./dist/device-auth.d.ts", "import": "./dist/device-auth.js", "default": "./dist/device-auth.js" }
+    "./device-auth": { "types": "./dist/device-auth.d.ts", "import": "./dist/device-auth.js", "default": "./dist/device-auth.js" },
+    "./pairing-link": { "types": "./dist/pairing-link.d.ts", "import": "./dist/pairing-link.js", "default": "./dist/pairing-link.js" }
   },
   "files": ["dist", "fixtures", "README.md"],
   "scripts": {
