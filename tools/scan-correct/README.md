@@ -10,7 +10,9 @@ accuracy or authorize printing. Every successful operation and report carries
 ## Runtime
 
 Linux, Python 3.10+, **Blender 5.0.1**, and system `libseccomp.so.2`. Blender
-supplies numpy/bmesh/mathutils. The host uses only Python's standard library.
+supplies numpy/bmesh/mathutils. The host uses Pillow for still decoding/resizing and pillow-heif for HEIC.
+Install them with `python -m pip install -r tools/scan-correct/requirements.txt`.
+The model adapters use only Python's standard library.
 Keep the sibling `tools/scan-repair` folder: import/export, rendering and
 `boxExtentsMm` measurement reuse that GPL core. No research stacks, SDKs or
 pip packages are required for the correction worker. Blender retains its own
@@ -31,8 +33,8 @@ Only the mesh, declared `--units mm|cm|m`, and fresh `--out` directory are
 required. Omit optional flags rather than passing placeholder filenames.
 Textures/UVs are imported directly from the merged capture converter's
 OBJ/MTL/PNG output. `--texture` overrides the sampled image but still requires
-UVs; an override uses repeat sampling. Up to four PNG/JPEG/WebP detail stills
-(maximum 8 MiB each) go to the model for interpretation; they are not silently
+UVs; an override uses repeat sampling. Up to four PNG/JPEG/WebP/HEIC detail stills
+(up to the companion's 25 MiB each) go to the model for interpretation; they are not silently
 registered to the mesh. No frame, units or product dimensions are inferred
 from a filename. Reference dimensions must be ordered long to short.
 
@@ -109,11 +111,30 @@ checks do not establish exact feature dimensions, collision freedom or printabil
 
 ## Detail-still provenance
 
-`--still` accepts local paths from companion detail-still storage; it does not
+`--still` accepts companion `detail-stills/<stillId>.img` paths directly; it does not
 access companion accounts or download images. The runner snapshots supplied
-image bytes under `stills/still-N.ext`, records stable `still-1`…`still-4` IDs
+provider-ready image bytes under `stills/still-N.ext`, records stable `still-1`…`still-4` IDs
 and SHA-256 receipts in `detailStills`, and identifies those images in the model
-context. Both adapters forward the images as before.
+context. Type comes from magic bytes, not the suffix or a possibly stale sidecar.
+JPEG, PNG and WebP below the output budget retain their bytes unless EXIF
+orientation needs applying. HEIC becomes JPEG; oversized images are downscaled
+with aspect ratio preserved and converted to JPEG (transparency flattened onto
+white). Normalized JPEGs omit metadata. Both adapters receive the resulting MIME
+type and bytes, and job snapshots use matching `.png`/`.jpg`/`.webp` extensions.
+
+Provider-ready base64 is bounded to 5,000,000 bytes per image and 8000 pixels
+per edge. This fits the lower 5 MB managed-endpoint allowance and direct Claude
+API's 10 MB per-image allowance, leaving room for four images within the normal
+32 MB request budget; see [Anthropic's image limits](https://platform.claude.com/docs/en/build-with-claude/vision#request-limits).
+These are output budgets, not extra upload rejection limits. OpenAI-compatible
+endpoints vary; this is a portable default, not a guarantee for every proxy.
+The loop's other messages/render results also count toward provider request limits.
+
+Original upload bytes are retained privately as `stills/still-N-source.img`.
+Each `detailStills`/`evidenceStills` entry records `sourceArtifact`, `sourceSha256`,
+`sourceBytes`, `sourceMediaType`, original/sent pixel sizes and normalization
+operations. Existing `sha256` and `artifact` describe exactly the image sent to
+the model. No sidecar-provided media type or claimed hash overrides the bytes.
 
 Tool schemas expose optional `evidence_still_ids`, consumed by the runner before
 geometry dispatch (not a Blender/Worker parameter). Scripted and real models can
@@ -203,7 +224,10 @@ BLENDER=$HOME/opt/blender-5.0.1/blender LIBGL_ALWAYS_SOFTWARE=1 \
 ```
 
 The converter bridge test additionally needs the existing capture converter's
-requirements (usd-core/Pillow). Other tests need no pip packages. Tests skip
+requirements (usd-core/Pillow). Still tests also need this tool's requirements. Without the optional HEIC
+decoder, the HEIC test verifies the explicit install error; with it, a synthetic
+HEIC is actually encoded and decoded. Full local qualification installs both
+requirement files. Tests skip
 explicitly if Blender or that optional bridge runtime is absent. The dedicated `scan-correct` GitHub Actions workflow installs pinned Blender,
 libseccomp and exactly the converter bridge's pinned Python dependencies, then
 runs the full suite under Xvfb; any skip fails CI. It also probes real IPv4/IPv6
