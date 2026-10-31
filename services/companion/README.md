@@ -337,3 +337,58 @@ repair-only runner and full cleanup pipeline stage and publish texture files.
 Render PNGs remain geometry inspection views; the model bundle carries the texture.
 
 The make-printable Blender worker (`scan_printable.py`) and repair core are resolved beside the configured `SCAN_TO_MAKE_SCAN_REPAIR_TOOL`, in the independent cleanup installation. They are not part of the Mac app payload. The direct `runMakePrintable` interface takes that absolute `repairTool` path too.
+
+### Size after cleanup
+
+`@scan-to-make/contracts/model-size` defines the size contract. Length, width and
+height identify the original completed model's longest, middle and shortest
+oriented-box edges. They are never re-sorted after an edit. Every choice scales
+that original model, so successive changes do not compound.
+
+`GET` and `POST /v1/saved-projects/:project/captures/:capture/scan-processing/:job/size?projectRevision=N`
+require the current project `If-Match` ETag. Reads use `captures:read`, writes use
+`captures:import`. POST takes a strict JSON body:
+
+```json
+{
+  "expectedModelSha256": "<completed repaired.stl SHA-256>",
+  "expectedSizeRevision": 0,
+  "source": {"kind": "maker", "name": "Apple", "sourceUrl": "https://support.apple.com/en-us/111834"},
+  "dimensionsMm": {"length": 60.6, "width": 45.2, "height": 21.7}
+}
+```
+
+The alternative sources are `{"kind":"measured","edge":"width","mm":45.2}`
+and `{"kind":"scanned"}`; neither accepts `dimensionsMm`. Maker choices apply
+independent factors, each within inclusive 0.95–1.05. A refusal returns 422,
+`maker-size-out-of-range`, and the attributed message: “Your scan is too far from
+Apple's size to fix safely. Scan again, or keep the scanned size.” A measurement
+applies one uniform factor. Scanned restores the original dimensions and carries
+`uncertaintyMm: 2` (estimated “± about 2 mm”); other sources return null, meaning
+unknown uncertainty. The source URL is provenance only and is never fetched.
+
+Both methods return `{size}` with `schema`, `jobId`, `revision`, `source`,
+`baseModelSha256`, `scannedDimensionsMm`, actual `dimensionsMm`, `scaleFactors`,
+`uncertaintyMm`, `artifact` and `transform`. Revision zero defaults to scanned,
+with null artifact/transform. A successful POST publishes a new immutable STL
+`artifact: {id, sha256, byteLength, mediaType}`. Download it at
+`.../:job/size/artifacts/:id?projectRevision=N` with the same read preconditions.
+Choices survive restart; artifacts and metadata are verified on reopen. A stale
+source hash, revision or competing save returns 409; read the current choice
+before explicitly submitting again. A lost response can have committed, so do
+not automatically replay a mutation.
+
+The companion calls Bambu MCP `get_stl_info`, `rotate_stl` when the recorded box
+frame needs applying, then `scale_stl` and `get_stl_info` again. It verifies the
+exported dimensions within 0.01 mm (or one part per million for larger models),
+face count and unchanged source hash. The existing Bambu handoff process config
+is reused; otherwise the installed `bambu-printer-mcp` executable is resolved
+from the trusted host PATH. MCP intermediates are private and discarded. No
+cleanup job is repeated and legacy job JSON stays unchanged.
+
+For textured display, keep the job's `/model-assets` bundle and apply the returned
+transform to its millimetre coordinates:
+`p_result = scaleFactors * (rotation * (p_source - centreMm) + centreMm)`.
+The STL is the downloadable resized model; the transform preserves the original
+texture coordinates for viewers. The phone must save only a successfully
+accepted size, restore it with GET, and pass its artifact to the print handoff.

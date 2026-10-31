@@ -13,3 +13,4 @@ export type ArtifactRef = z.infer<typeof ArtifactRefSchema>;
 export function validateArtifactRef(input: unknown): ArtifactRef { return ArtifactRefSchema.parse(input); }
 
 export * from './scan-processing.js';
+export * from './model-size.js';
