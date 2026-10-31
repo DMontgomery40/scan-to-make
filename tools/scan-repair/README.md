@@ -54,6 +54,7 @@ All distances below are in mm, independent of input units.
 | Weld | `--weld-mm .01` | Merge vertices within distance |
 | Floaters | `--component-fraction .01 --component-metric area` | Drop vertex-connected components whose area is below the fraction of the largest component; `volume` requires closed components |
 | Holes | `--hole-max-edges 0` | Fill boundary loops; 0 allows all sizes, positive values bound loop edge count |
+| Coarse fill | `--coarse-fill refill --fill-fairing harmonic --fill-crease-deg 60` | Replace disk-shaped regions of faces larger than 10× the median area (edge-connected, split at creases) with a densified, faired patch; captured faces and vertices are not changed. `keep` leaves them |
 | Manifold | `--voxel-size-mm .3`, optional `--force-voxel` | Recalculate normals; use voxel remesh if topology is still open/non-manifold, or explicitly forced |
 | Denoise | `--denoise-iterations 15 --denoise-factor .5 --denoise-mu -.53 --denoise-max-mm .35 --sharp-angle-deg 30` | Taubin cycles: a shrinking λ (`factor`) step then an inflating μ step, each moving vertices toward their inverse-edge-length-weighted neighbour average; freeze sharp-edge and boundary vertices; after each whole cycle, clamp cumulative vertex displacement from this step's start |
 | Decimate | optional `--target-faces N` | Triangulate, then collapse toward a target triangle count; Blender may not achieve the exact target |
@@ -83,6 +84,47 @@ input. Boundary edges are included in the non-manifold edge count; components
 are connected through vertices. “Watertight” means closed edges and consistent
 winding; it does **not** rule out intersecting surfaces or certify a printable
 solid. Disconnected closed solids may remain above the floater threshold.
+
+### Coarse fill
+
+Object Capture closes sides it never saw with a few huge triangles, usually a
+fan; on the AirPods scan 46 faces cover 21.5% of the surface. By default,
+repair replaces each such region after hole filling:
+
+- **Detect:** faces larger than 10× the median face area, edge-connected and
+  split at creases above `--fill-crease-deg` (60°). Only disk-shaped regions
+  (one rim loop) are replaced; others are listed in `skipped` with a reason.
+- **Densify:** the rim is projected (float64) onto the region's area-weighted
+  plane. Inside it goes a triangular lattice whose triangles match the median
+  face area, triangulated by Blender's constrained Delaunay with the rim as
+  constraint edges. The rim's vertices and edges belong to captured faces and
+  are reused unchanged, so captured faces, their UVs and their vertices never
+  move (`capturedMaxMoveMm` is 0). A rim that does not project to a simple
+  polygon is skipped.
+- **Fair:** patch vertices minimise an inverse-length weighted umbrella with
+  the rim fixed. `harmonic` (default) stays within the rim and cannot extend
+  the part. `biharmonic` adds rim rows so the patch continues the captured
+  curvature across two fixed rings, releasing rows at rim creases (a box
+  face stays flat); it can overshoot convex parts. Both are solved by
+  Jacobi-preconditioned conjugate gradients in NumPy.
+
+The new faces are **inferred surface**, not measurement. `refillCoarse`
+records removed and inferred faces and areas, `patchMaxOffsetMm` (how far
+the patch departs from the fill it replaced), solver iterations, residual and
+`solverConverged`, and `capturedMaxMoveMm`, measured right after this step
+(0; later denoising still smooths every vertex). A solve that reaches the
+20,000-iteration cap reports `solverConverged: false`; the patch is then a
+valid but only partly faired surface. Regions are processed in mesh face
+order, so patch ids and the `skipped` order are stable for identical input
+and runtime. The `export` operation lists
+their 1-based OBJ `inferredFaceRanges`. Textured output always puts them under
+`usemtl unbound`, so they carry no captured texture; untextured output has no
+materials, so use the ranges.
+Rim edges are never split, so patch triangles along long captured rim edges
+can still exceed the coarse threshold. Voxel remeshing, when it runs, replaces
+the whole surface; Blender carries the inferred marking over to the new faces
+approximately, and `inferredNote` says so. Treat ranges after a remesh as a
+heuristic, not a face-for-face record of the refill.
 
 ### Texture
 
@@ -177,6 +219,8 @@ compare default/explicit preservation against PCA. Tests exercise actual Blender
 topology, volume, unit declarations/sidecars, STL framing, decimation, all
 ten PNGs, a textured cube with a UV seam on every edge (UVs, `usemtl` and
 byte-identical MTL/PNG copies; dropped under voxel remesh; JPEG not copied)
-and rejected material references (parent, absolute, link). CI downloads Blender 5.0.1 from download.blender.org and verifies the
+and rejected material references (parent, absolute, link), and a
+lattice box whose top is one coarse fan (refilled flat under both fairing modes,
+every captured vertex kept, `keep` leaves the fan). CI downloads Blender 5.0.1 from download.blender.org and verifies the
 archive against Blender's published `blender-5.0.1.sha256` file before caching.
 Personal captures, outputs and their private paths never belong in Git.

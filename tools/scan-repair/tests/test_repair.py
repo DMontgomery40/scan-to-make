@@ -48,6 +48,39 @@ def radial_roughness(points):
     return math.sqrt(sum((r-mean)**2 for r in radii)/len(radii))
 
 
+def fan_box(size=(40,20,10), step=.4, centre=(4,1), fans=((2,1),), drop=()):
+    """Lattice box; each (axis, side) in fans is closed by one coarse fan, like Object
+    Capture's unseen side. Sides in drop are left open."""
+    n = [round(s/step) for s in size]
+    index, vertices, faces = {}, [], []
+    def vid(*c):
+        if c not in index:
+            index[c] = len(vertices)
+            vertices.append(tuple(i*step for i in c))
+        return index[c]
+    for axis in range(3):
+        a, b = (axis+1)%3, (axis+2)%3
+        for side in (0, 1):
+            if (axis, side) in drop:
+                continue
+            def point(u, w):
+                c = [0,0,0]
+                c[axis], c[a], c[b] = side*n[axis], u, w
+                return c
+            if (axis, side) in fans:
+                rim = ([(u,0) for u in range(n[a])] + [(n[a],w) for w in range(n[b])] +
+                       [(u,n[b]) for u in range(n[a],0,-1)] + [(0,w) for w in range(n[b],0,-1)])
+                ring = [vid(*point(u,w)) for u,w in rim]
+                tip = [0,0,0]
+                tip[axis], tip[a], tip[b] = side*size[axis], size[a]/2+centre[0], size[b]/2+centre[1]
+                vertices.append(tuple(tip))
+                faces += [(ring[k], ring[(k+1)%len(ring)], len(vertices)-1) for k in range(len(ring))]
+                continue
+            faces += [tuple(vid(*point(u+du,w+dw)) for du,dw in ((0,0),(1,0),(1,1),(0,1)))
+                      for u in range(n[a]) for w in range(n[b])]
+    return vertices, faces
+
+
 @unittest.skipUnless(Path(BLENDER).is_file(), "Blender absent; set BLENDER to Blender 5.0.1 to run real integration tests")
 class RepairTests(unittest.TestCase):
     def setUp(self):
@@ -142,6 +175,119 @@ class RepairTests(unittest.TestCase):
         repaired = [tuple(map(float, line.split()[1:])) for line in
                     (self.base/"pair-ok"/"repaired.obj").read_text().splitlines() if line.startswith("v ")]
         self.assertLess(radial_roughness(repaired), radial_roughness(vertices)*.7)
+
+    def test_coarse_fan_refills_flat_without_moving_captured_surface(self):
+        vertices, faces = fan_box()
+        p = self.mesh("fan.obj", vertices, faces)
+        r = self.repair(p, "--denoise-iterations", "0", "--orient", "keep", name="fan")
+        self.assertEqual((r["before"]["coarseFillFaces"], r["after"]["coarseFillFaces"]), (300, 0))
+        refill = next(o for o in r["operations"] if o["name"]=="refillCoarse")
+        self.assertEqual((refill["regions"], refill["refilled"], refill["capturedMaxMoveMm"]), (1, 1, 0))
+        self.assertTrue(refill["solverConverged"])
+        self.assertAlmostEqual(refill["removedAreaMm2"], 800, places=3)
+        self.assertAlmostEqual(refill["inferredAreaMm2"], 800, places=3)
+        out = (self.base/"fan"/"repaired.obj").read_text().splitlines()
+        points = [tuple(map(float, line.split()[1:])) for line in out if line.startswith("v ")]
+        # Every vertex stays on the box surface: the faired top is flat, not bulged.
+        for x,y,z in points:
+            self.assertLess(min(x, 40-x, y, 20-y, z, 10-z), 1e-4)
+            self.assertGreater(min(x, 40-x, y, 20-y, z, 10-z), -1e-4)
+        # Captured vertices are kept exactly; only the fan centre is replaced.
+        kept = {tuple(round(c, 4) for c in v) for v in points}
+        centre = vertices.index((24, 11, 10))
+        self.assertTrue({tuple(round(c, 4) for c in v) for i,v in enumerate(vertices) if i != centre} <= kept)
+        top = [[points[int(i.split("/")[0])-1] for i in line.split()[1:]] for line in out
+               if line.startswith("f ") and all(abs(points[int(i.split("/")[0])-1][2]-10) < 1e-4 for i in line.split()[1:])]
+        self.assertLess(max(math.dist(f[k], f[k-1]) for f in top for k in range(3)), 1)
+        # Untextured output relies on the reported ranges: they must be exactly the refilled top.
+        export = next(o for o in r["operations"] if o["name"]=="export")
+        ranges = {n for a,b in export["inferredFaceRanges"] for n in range(a, b+1)}
+        numbers = [n for n,line in enumerate((l for l in out if l.startswith("f ")), 1)
+                   if all(abs(points[int(i.split("/")[0])-1][2]-10) < 1e-4 for i in line.split()[1:])]
+        self.assertEqual(ranges, set(numbers))
+        self.assertEqual(len(ranges), refill["inferredFaces"])
+        # Defaults: Taubin and box frame keep the 40 x 20 x 10 box.
+        r = self.repair(p, name="fan-default")
+        for actual, expected in zip(r["after"]["boxExtentsMm"], (40, 20, 10)):
+            self.assertAlmostEqual(actual, expected, delta=.02)
+        self.assertLess(r["deviation"]["maxMm"], .02)
+        # Box edges are creases, so the curvature-continuing mode stays flat too.
+        r = self.repair(p, "--fill-fairing", "biharmonic", "--denoise-iterations", "0", name="fan-bi")
+        self.assertLess(next(o for o in r["operations"] if o["name"]=="refillCoarse")["patchMaxOffsetMm"], 1e-3)
+        kept = self.repair(p, "--coarse-fill", "keep", name="fan-keep")
+        self.assertEqual(kept["after"]["coarseFillFaces"], 300)
+
+    def test_adjacent_fans_keep_their_crease(self):
+        # Two coarse regions meeting at a box edge are refilled separately; the edge stays sharp.
+        vertices, faces = fan_box(size=(40,30,24), step=.5, centre=(1,1), fans=((2,1),(1,0)))
+        r = self.repair(self.mesh("two-fans.obj", vertices, faces), "--denoise-iterations", "0",
+                        "--orient", "keep", "--fill-fairing", "biharmonic", name="two-fans")
+        refill = next(o for o in r["operations"] if o["name"]=="refillCoarse")
+        self.assertEqual((refill["regions"], refill["refilled"], refill["capturedMaxMoveMm"]), (2, 2, 0))
+        for line in (self.base/"two-fans"/"repaired.obj").read_text().splitlines():
+            if line.startswith("v "):
+                x,y,z = map(float, line.split()[1:])
+                self.assertLess(abs(min(x, 40-x, y, 30-y, z, 24-z)), 1e-4)
+
+    def test_coarse_fan_on_open_boundary_is_refilled(self):
+        # The fan's rim along the missing side belongs only to the fan; it must survive the swap.
+        vertices, faces = fan_box(drop=((1,0),))
+        r = self.repair(self.mesh("open-fan.obj", vertices, faces), "--hole-max-edges", "3", name="open-fan")
+        refill = next(o for o in r["operations"] if o["name"]=="refillCoarse")
+        self.assertEqual((refill["refilled"], refill["capturedMaxMoveMm"]), (1, 0))
+        self.assertTrue(next(o for o in r["operations"] if o["name"]=="voxelRemesh")["applied"])
+        export = next(o for o in r["operations"] if o["name"]=="export")
+        self.assertTrue(export["inferredFaceRanges"])
+        self.assertIn("approximately", export["inferredNote"])
+
+    def test_textured_refill_marks_inferred_faces_unbound(self):
+        # Captured faces keep their UVs and texture; every inferred face is explicitly unbound.
+        vertices, faces = fan_box()
+        folder = self.base/"textured-fan"
+        folder.mkdir()
+        lines = ["mtllib tex.mtl"] + ["v %s %s %s" % v for v in vertices]
+        lines += ["vt %r %r" % (vertices[i][0]/40, vertices[i][1]/20+vertices[i][2]/100) for f in faces for i in f]
+        lines += ["usemtl skin"]
+        corner = 0
+        for f in faces:
+            lines.append("f "+" ".join("%d/%d" % (i+1, corner+k+1) for k,i in enumerate(f)))
+            corner += len(f)
+        (folder/"fan.obj").write_text("\n".join(lines)+"\n")
+        (folder/"tex.mtl").write_text("newmtl skin\nmap_Kd tex.png\n")
+        (folder/"tex.png").write_bytes(self.png())
+        r = self.repair(folder/"fan.obj", "--denoise-iterations", "0", "--orient", "keep", name="textured-fan-out")
+        out = (self.base/"textured-fan-out"/"repaired.obj").read_text().splitlines()
+        points = [tuple(map(float, line.split()[1:])) for line in out if line.startswith("v ")]
+        uvs = [tuple(map(float, line.split()[1:])) for line in out if line.startswith("vt ")]
+        export = next(o for o in r["operations"] if o["name"]=="export")
+        inferred = {n for a,b in export["inferredFaceRanges"] for n in range(a, b+1)}
+        current, number = None, 0
+        for line in out:
+            if line.startswith("usemtl "):
+                current = line.split()[1]
+            elif line.startswith("f "):
+                number += 1
+                corners = [tuple(map(int, c.split("/"))) for c in line.split()[1:]]
+                top = all(abs(points[v-1][2]-10) < 1e-6 for v,_ in corners)
+                self.assertEqual(number in inferred, top)
+                self.assertEqual(current, "unbound" if top else "skin")
+                if not top:
+                    for v,t in corners:
+                        x,y,z = points[v-1]
+                        self.assertAlmostEqual(uvs[t-1][0], x/40, places=5)
+                        self.assertAlmostEqual(uvs[t-1][1], y/20+z/100, places=5)
+        self.assertEqual(len(inferred), next(o for o in r["operations"] if o["name"]=="refillCoarse")["inferredFaces"])
+
+    def test_fan_pinned_to_captured_face_is_skipped(self):
+        # A captured triangle shares only the fan centre; replacing the fan would delete it.
+        vertices, faces = fan_box()
+        tip = vertices.index((24, 11, 10))
+        vertices += [(24.5, 11, 10.5), (24, 11.5, 10.5)]
+        faces.append((tip, len(vertices)-2, len(vertices)-1))
+        r = self.repair(self.mesh("pinned-fan.obj", vertices, faces), name="pinned-fan")
+        refill = next(o for o in r["operations"] if o["name"]=="refillCoarse")
+        self.assertEqual((refill["refilled"], refill["capturedMaxMoveMm"]), (0, 0))
+        self.assertEqual(refill["skipped"][0]["reason"], "interior vertex touches captured geometry")
 
     def test_nonmanifold_join_uses_fallback(self):
         p = self.mesh("join.obj", CUBE+[(0,0,2)], FACES+[(4,5,8)])
@@ -267,7 +413,7 @@ class RepairTests(unittest.TestCase):
         p = self.mesh("invalid.obj", CUBE,FACES)
         for args in [("--voxel-size-mm","0"),("--denoise-iterations","51"),("--denoise-mu","-.4"),("--denoise-mu","-.6"),
                      ("--denoise-mu","nan"),("--denoise-factor","0"),
-                     ("--weld-mm","nan"),("--target-faces","0")]:
+                     ("--weld-mm","nan"),("--fill-crease-deg","181"),("--target-faces","0")]:
             self.run_cli("repair",p,"--units","mm","--out",self.base/"invalid",*args,ok=False)
 
     def rotated_box(self):
