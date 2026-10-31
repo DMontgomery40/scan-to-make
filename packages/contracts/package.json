@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./maker-size": { "types": "./dist/maker-size.d.ts", "import": "./dist/maker-size.js", "default": "./dist/maker-size.js" },
     "./model-size": { "types": "./dist/model-size.d.ts", "import": "./dist/model-size.js", "default": "./dist/model-size.js" },
     ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js", "default": "./dist/index.js" },
     "./saved-project": { "types": "./dist/saved-project.d.ts", "import": "./dist/saved-project.js", "default": "./dist/saved-project.js" },

@@ -11,6 +11,7 @@ import {DetailStillStore,DetailStillFailure} from './detail-stills.js';
 import {runCleanup,type CleanupSnapshot} from './scan-cleanup-job.js';
 import {AI_CLEANUP_JOB_MS,AI_WORKER_GRACE_MS} from './scan-cleanup-runner.js';
 import {MAX_DETAIL_STILLS_PER_CAPTURE} from '@scan-to-make/contracts/detail-still';
+import {MakerSizeResultSchema} from '@scan-to-make/contracts/maker-size';
 import type {ScanRunner} from './scan-processing-runner.js';
 export {createScanCleanupRunner} from './scan-cleanup-runner.js';
 export {createScanRunner} from './scan-processing-runner.js';
@@ -577,6 +578,18 @@ export class ScanProcessingStore {
   if(!ref||(job.status!=='succeeded'&&!SCAN_ADVICE_NAMES.some(n=>n===name)))throw new ScanProcessingFailure('not-found');
   const bytes=await readBoundedCaptureFile(join(this.folder(request),jobId,name),Math.min(ref.byteLength,64*1024*1024));
   if(bytes.length!==ref.byteLength||sha(bytes)!==ref.sha256)throw new ScanProcessingFailure('processing-unavailable');return {job,ref,bytes};
+ }
+ /** Optional suggestion in the hash-verified report; legacy job JSON remains unchanged. */
+ async makerSize(input:Request,jobId:string){
+  const {job,bytes}=await this.artifact(input,jobId,'report.json');
+  const model=await this.artifact(input,jobId,'repaired.stl');
+  try{
+   const correction=JSON.parse(bytes.toString('utf8')).correction;
+   // AI-off and historical repair-only jobs never offer a maker suggestion.
+   const proposal=job.correctionAdapter==='ai-tweak'&&job.aiTweak?correction?.makerSize??null:null;
+   if(proposal&&correction?.outputs?.['corrected.stl']!==model.ref.sha256)throw Error('Proposal model mismatch');
+   return MakerSizeResultSchema.parse({jobId,baseModelSha256:model.ref.sha256,proposal});
+  }catch{throw new ScanProcessingFailure('processing-unavailable');}
  }
  /** A hash-bound dependency manifest, separate from the legacy job artifact enum. */
  async modelAssets(input:Request,jobId:string){
