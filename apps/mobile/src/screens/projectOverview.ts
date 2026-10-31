@@ -39,6 +39,7 @@ export type ChipKind =
   | 'check-printer'
   | 'cleaning'
   | 'printed'
+  | 'in-bambu-connect'
   | 'ready'
   | 'cleanup-failed'
   | 'not-cleaned'
@@ -52,6 +53,8 @@ const CHIPS: Record<ChipKind, Omit<Chip, 'kind'>> = {
   'check-printer': { label: 'Check your printer', tone: 'accent' },
   cleaning: { label: 'Cleaning up', tone: 'pending' },
   printed: { label: 'Printed', tone: 'pass' },
+  // A fact that stays true: whether it printed is decided in Bambu Connect.
+  'in-bambu-connect': { label: 'Sent to Bambu Connect', tone: 'pass' },
   ready: { label: 'Ready to print', tone: 'pass' },
   'cleanup-failed': { label: 'Cleanup didn’t finish', tone: 'fail' },
   'not-cleaned': { label: 'Not cleaned up yet', tone: 'neutral' },
@@ -80,6 +83,9 @@ export function projectChip(overview: ProjectOverview | null): Chip {
     return chip('cleaning');
   }
   if (prints.some(p => p.status === 'printed')) return chip('printed');
+  if (prints.some(p => p.status === 'handed-off')) {
+    return chip('in-bambu-connect');
+  }
   if (jobs.some(j => j.status === 'succeeded')) return chip('ready');
   if (jobs.some(j => j.status === 'failed')) return chip('cleanup-failed');
   if (overview.scans > 0) {

@@ -40,6 +40,24 @@ test('each card shows exactly one status: the furthest along', () => {
       }),
       'Printed',
     ],
+    // MAC-6: Bambu Connect has the file; the phone never says it printed.
+    [
+      view({
+        jobs: [job('succeeded')],
+        prints: [{ id: 'p', status: 'handed-off' }],
+      }),
+      'Sent to Bambu Connect',
+    ],
+    [
+      view({
+        jobs: [job('succeeded')],
+        prints: [
+          { id: 'p', status: 'handed-off' },
+          { id: 'q', status: 'printed' },
+        ],
+      }),
+      'Printed',
+    ],
     [
       view({
         jobs: [job('running')],

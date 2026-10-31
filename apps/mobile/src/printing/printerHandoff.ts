@@ -24,6 +24,11 @@ export type HandoffStatus =
   | 'sliced'
   | 'printed'
   /**
+   * Bambu Connect route (MAC-6): your Mac imported the file into Bambu Connect.
+   * Nothing prints until you press Print there. Final; never sent again.
+   */
+  | 'handed-off'
+  /**
    * The printer software has been asked to print. While the companion is
    * still printing that is normal (its questions come now); once it stops
    * without hearing back, the job may have started and is never resent.
@@ -291,12 +296,17 @@ export const STATUS_TEXT: Record<HandoffStatus, string> = {
   designed: 'The design is ready. Slicing comes next.',
   sliced: 'Sliced and ready for your printer.',
   printed: 'Sent to your printer.',
+  'handed-off': 'Finish on your Mac: press Print in Bambu Connect.',
   uncertain: 'This may already be printing. Check your printer.',
   failed: 'This didn’t reach your printer.',
 };
 
-/** Nothing more will happen: printed, failed, or uncertain once the companion stopped printing. */
+/**
+ * Nothing more will happen here: printed, in Bambu Connect, failed, or
+ * uncertain once the companion stopped printing.
+ */
 export const isFinished = (handoff: Handoff) =>
   handoff.status === 'printed' ||
+  handoff.status === 'handed-off' ||
   handoff.status === 'failed' ||
   (handoff.status === 'uncertain' && handoff.printing === false);

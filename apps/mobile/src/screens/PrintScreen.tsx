@@ -61,6 +61,15 @@ function describe(
       detail: 'Watch it start on the printer itself.',
     };
   }
+  if (handoff.status === 'handed-off') {
+    // Bambu Connect imports the file; only pressing Print there starts it.
+    return {
+      badge: 'In Bambu Connect',
+      tone: 'pass',
+      title: 'Finish on your Mac: press Print in Bambu Connect.',
+      detail: 'Your Mac opened this in Bambu Connect. Nothing prints until you press Print there.',
+    };
+  }
   if (handoff.status === 'uncertain' && !handoff.printing) {
     return {
       badge: 'Check printer',
@@ -688,6 +697,8 @@ export function PrintScreen({
             <Button label="Start over" variant="secondary" onPress={startOver} />
           ) : handoff.status === 'printed' ? (
             <Button label="Send again" variant="secondary" onPress={startOver} />
+          ) : handoff.status === 'handed-off' ? (
+            <Button label="Done" onPress={onBack} />
           ) : null}
         </Card>
       ) : null}

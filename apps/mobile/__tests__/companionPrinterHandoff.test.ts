@@ -237,3 +237,18 @@ test('listing jobs before a send skips entries this app can’t read', async () 
   ]);
   expect(await companionPrinterHandoff(bridge).bundleIds(ackFor())).toEqual([ID, Q]);
 });
+
+// MAC-6: a Bambu Connect job ends as `handed-off`. Phones that didn't know it
+// rejected the whole list as an invalid response.
+test('a job handed off to Bambu Connect reads as handed-off, not as an invalid reply', async () => {
+  const handedOff = {
+    ...manifest,
+    id: ID,
+    status: 'handed-off',
+    createdAtMs: 1_800_000_000_000,
+    cleanStl: { file: 'clean.stl', sha256: MODEL.sha256, byteLength: 2048 },
+  };
+  const { bridge } = native([{ status: 200, body: { bundle: handedOff, printing: false } }]);
+  const client = companionPrinterHandoff(bridge);
+  expect(await client.status('p', 'c', ackFor(), ID)).toMatchObject({ id: ID, status: 'handed-off', printing: false });
+});

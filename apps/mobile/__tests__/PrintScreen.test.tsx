@@ -55,6 +55,7 @@ async function render(
   client?: PrinterHandoff,
   shared?: ScanServices,
   job: ReturnType<typeof syntheticJob> | null = syntheticJob('succeeded'),
+  onBack: () => void = () => {},
 ) {
   const services = shared ?? fakeScanServices().services;
   if (client) services.printing = client;
@@ -65,7 +66,7 @@ async function render(
         target={syntheticTarget()}
         job={job}
         services={services}
-        onBack={() => {}}
+        onBack={onBack}
         onCompanion={() => {}}
       />,
     );
@@ -764,5 +765,29 @@ test('two quick taps on Send to printer send once', async () => {
   });
   expect(calls.filter(c => c.startsWith('create'))).toHaveLength(1);
   expect(calls.filter(c => c.startsWith('print'))).toHaveLength(1);
+  await act(async () => tree.unmount());
+});
+
+// MAC-6: Bambu Connect imports the file and the print starts only from there,
+// so the phone never says it printed and never sends it again.
+test('a job handed off to Bambu Connect says to finish there, and only offers Done', async () => {
+  const { client } = fakePrinting({
+    statuses: [{ printing: true }, { status: 'handed-off', printing: false }],
+  });
+  const onBack = jest.fn();
+  const tree = await render(client, undefined, undefined, onBack);
+  await press(tree, 'Send to printer');
+  await tick();
+  await tick();
+  const shown = texts(tree);
+  expect(shown).toContain('Finish on your Mac: press Print in Bambu Connect.');
+  expect(shown).toContain(
+    'Your Mac opened this in Bambu Connect. Nothing prints until you press Print there.',
+  );
+  expect(shown).not.toContain('Sent to your printer.');
+  expect(find(tree, 'button', 'Send again')).toHaveLength(0);
+  expect(find(tree, 'button', 'Cancel print')).toHaveLength(0);
+  await press(tree, 'Done');
+  expect(onBack).toHaveBeenCalled();
   await act(async () => tree.unmount());
 });

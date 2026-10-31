@@ -37,7 +37,17 @@ export interface PrinterHandoffNative {
 }
 
 const ROOT = '/v1/printer-handoff';
-const STATUSES = ['ready', 'claimed', 'designed', 'sliced', 'printed', 'uncertain', 'failed'] as const;
+const STATUSES = [
+  'ready',
+  'claimed',
+  'designed',
+  'sliced',
+  'printed',
+  // Bambu Connect imported the file; the print starts only from there (MAC-6).
+  'handed-off',
+  'uncertain',
+  'failed',
+] as const;
 const backendSchema = z.enum(PRINTER_BACKENDS as [PrinterBackend, PrinterBackend]);
 // The companion keeps every job; the bridge caps the list reply at 6 MB.
 const MAX_BUNDLES = 10000;
