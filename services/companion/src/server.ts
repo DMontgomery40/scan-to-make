@@ -1,7 +1,9 @@
 import {createCaptureRoutes,type CaptureServices} from './capture-http.js';
 import {createPrintHandoffRoutes,type PrintHandoffServices} from './print-handoff-http.js';
 import {acquireInstanceLock} from './instance-lock.js';
-import { createServer, type IncomingMessage } from 'node:http';
+import { createServer, type IncomingMessage, type RequestListener } from 'node:http';
+import {createServer as createHttpsServer} from 'node:https';
+import {checkLanCertificate} from './lan-transport.js';
 import {
   RemoteAuthFailure,
   RemoteAuthStore,
@@ -85,19 +87,27 @@ function singleHeader(
   return value;
 }
 
-/** Loopback listener; remote access requires explicit private Serve authentication. */
+/** Explicit paired TLS LAN mode or loopback-only private Serve mode. */
 export async function startCompanionServer(
   options: {
     port?: number;
     remoteAuth?: RemoteAuthStore;
+    lanTls?: {cert: Buffer; key: Buffer};
     capture?: CaptureServices;
     printHandoff?: PrintHandoffServices;
   } = {}
 ): Promise<{ url: string; close(): Promise<void> }> {
-  const port = options.port ?? 9077;
+  const auth = options.remoteAuth;
+  const lan = auth?.transport === 'lan';
+  const lanUrl = lan ? new URL(auth.baseUrl) : undefined;
+  const port = options.port ?? (lanUrl ? Number(lanUrl.port || '443') : 9077);
+  if (lan) {
+    if (!options.lanTls) throw new Error('LAN mode requires TLS');
+    if (port !== Number(lanUrl!.port || '443')) throw new Error('LAN port differs from pairing URL');
+    checkLanCertificate(options.lanTls.cert, lanUrl!.hostname, auth!.certificateSha256!);
+  } else if (options.lanTls) throw new Error('TLS requires explicit LAN pairing configuration');
   if (!Number.isSafeInteger(port) || port < 0 || port > 65535)
     throw new Error('Invalid local port');
-  const auth = options.remoteAuth;
   if(options.capture&&!auth)throw new Error('Capture routes require explicit authentication');
   if(options.printHandoff&&!auth)throw new Error('Printer handoff routes require explicit authentication');
   // One companion process per capture directory: scan processing assumes its
@@ -106,7 +116,7 @@ export async function startCompanionServer(
   const captureRoutes=options.capture?createCaptureRoutes(options.capture):undefined;
   const printHandoffRoutes=options.printHandoff?createPrintHandoffRoutes(options.printHandoff):undefined;
   let authority = '';
-  const server = createServer(async (request, response) => {
+  const handler: RequestListener = async (request, response) => {
     response.setHeader('Content-Type', 'application/json');
     response.setHeader('Cache-Control', 'no-store');
     response.setHeader('Connection', 'close');
@@ -117,7 +127,13 @@ export async function startCompanionServer(
       )
         throw new ServerFailure('forbidden');
       let login = '';
-      if (auth) {
+      if (auth && lan) {
+        if (singleHeader(request, 'host') !== auth.host ||
+            Object.keys(request.headers).some(key => key === 'forwarded' || key.startsWith('x-forwarded-') || key.startsWith('tailscale-'))) {
+          throw new RemoteAuthFailure('forbidden');
+        }
+        login = 'lan'; // The single-use invitation, then device token, authorizes this mode.
+      } else if (auth) {
         login = singleHeader(request, 'tailscale-user-login') ?? '';
         if (
           singleHeader(request, 'host') !== auth.host ||
@@ -199,7 +215,14 @@ export async function startCompanionServer(
         );
       }
     }
-  });
+  };
+  let server;
+  try {
+    server = lan ? createHttpsServer(options.lanTls!, handler) : createServer(handler);
+  } catch (error) {
+    await instanceLock?.release();
+    throw error;
+  }
   server.headersTimeout = 5000;
   // Handoff STL uploads are bounded at 64 MiB and need longer than the small
   // JSON routes; the route body reader enforces its own matching timeout.
@@ -208,7 +231,7 @@ export async function startCompanionServer(
   try {
     await new Promise<void>((resolve, reject) => {
       server.once('error', reject);
-      server.listen(port, '127.0.0.1', () => {
+      server.listen(port, lanUrl?.hostname ?? '127.0.0.1', () => {
         server.off('error', reject);
         resolve();
       });
@@ -225,7 +248,7 @@ export async function startCompanionServer(
   authority = `127.0.0.1:${address.port}`;
   let closing: Promise<void> | undefined;
   return {
-    url: `http://${authority}`,
+    url: lan ? auth!.baseUrl : `http://${authority}`,
     close() {
       if (!closing)
         closing = (async () => {

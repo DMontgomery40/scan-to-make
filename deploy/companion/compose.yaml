@@ -5,7 +5,7 @@ services:
     build:
       context: ../..
       dockerfile: deploy/companion/Dockerfile
-    # The existing listener binds 127.0.0.1. Host Tailscale Serve reaches it here.
+    # LAN mode binds the selected host IP; Serve mode stays on host loopback.
     network_mode: host
     restart: unless-stopped
     stop_grace_period: 30s

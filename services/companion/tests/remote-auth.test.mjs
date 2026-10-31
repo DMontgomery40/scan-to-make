@@ -55,12 +55,7 @@ test('single-use code is login bound, expires within five minutes and never surv
   const { store, advance } = await fixture(t);
   const invite = await store.createPairing('alice@example.test');
   assert.equal(invite.expiresAt - 1_800_000_000_000, 300_000);
-  assert.deepEqual(JSON.parse(invite.qrPayload), {
-    version: 1,
-    baseUrl: 'https://companion.example-tail.ts.net',
-    code: invite.code,
-    expiresAt: invite.expiresAt,
-  });
+  assert.equal(new URL(invite.qrPayload).searchParams.get('c'), invite.code);
   await denied(() =>
     store.exchange('bob@example.test', {
       code: invite.code,
@@ -474,6 +469,12 @@ test('operator CLI initializes once, returns QR material, lists and individually
     'alice@example.test',
   ]);
   assert.equal(invitation.code, 0, invitation.stderr);
+  assert.match(invitation.stderr, /[▄▀█]/);
+  const pageUrl = JSON.parse(invitation.stdout).pairingPageUrl;
+  assert.match(pageUrl, /^http:\/\/127\.0\.0\.1:\d+\/pair$/);
+  const page = await fetch(pageUrl);
+  assert.equal(page.status, 200);
+  assert.match(await page.text(), /<svg/);
   const store = await authModule.RemoteAuthStore.open(directory);
   const p = await store.exchange('alice@example.test', {
     code: JSON.parse(invitation.stdout).code,
