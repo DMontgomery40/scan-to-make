@@ -11,6 +11,7 @@ import time
 from adapters import Adapter, Scripted, image_data
 from host import Worker, digest, write_json
 from schema import validate
+from still_images import prepare_still
 
 
 SYSTEM = '''Correct a scanned object using only the bounded tools. Mesh units are declared, not measured.
@@ -33,7 +34,8 @@ def run_job(args):
         validate('scale_to_reference',{'target_mm':args.reference_mm})
     if len(args.product)>512:
         raise ValueError('product name too long')
-    images = [image_data(path) for path in args.still]
+    prepared = [prepare_still(path) for path in args.still]
+    images = [item['image'] for item in prepared]
     if args.adapter=='scripted':
         if not args.script or Path(args.script).stat().st_size>1024*1024:
             raise ValueError('bounded --script required for scripted adapter')
@@ -50,10 +52,13 @@ def run_job(args):
         (output/'stills').mkdir()
     for index,(path,image) in enumerate(zip(args.still,images),1):
         identity='still-'+str(index)
-        relative='stills/'+identity+Path(path).suffix.lower()
+        extension={'image/png':'.png','image/jpeg':'.jpg','image/webp':'.webp'}[image[0]]
+        relative='stills/'+identity+extension
+        source_relative='stills/'+identity+'-source.img'
+        (output/source_relative).write_bytes(prepared[index-1]['source'])
         raw=base64.b64decode(image[1])
         (output/relative).write_bytes(raw)
-        stills.append({'id':identity,'name':Path(path).name,'sha256':hashlib.sha256(raw).hexdigest(),'artifact':relative})
+        stills.append({'id':identity,'name':Path(path).name,'sha256':hashlib.sha256(raw).hexdigest(),'artifact':relative,'sourceArtifact':source_relative,**prepared[index-1]['metadata']})
     still_by_id={item['id']:item for item in stills}
     worker = Worker(output/'work',seconds=args.max_seconds,max_faces=args.max_faces)
     log_path = output/'tool-calls.jsonl'

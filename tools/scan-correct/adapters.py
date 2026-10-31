@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Stdlib provider adapters. Keys stay in the host process, outside Blender/logs."""
-import base64
 import json
 import multiprocessing
 import os
@@ -64,11 +63,8 @@ def endpoint(base, suffix):
 
 
 def image_data(path):
-    path = Path(path)
-    mime = {'.png':'image/png','.jpg':'image/jpeg','.jpeg':'image/jpeg','.webp':'image/webp'}.get(path.suffix.lower())
-    if not mime or not path.is_file() or path.stat().st_size > 8*1024*1024:
-        raise ValueError('detail still must be PNG/JPEG/WebP under 8 MiB')
-    return mime,base64.b64encode(path.read_bytes()).decode()
+    from still_images import prepare_still
+    return prepare_still(path)['image']
 
 
 class Scripted:
