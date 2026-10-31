@@ -389,12 +389,19 @@ export class RemoteAuthStore {
       if (locked) await rm(lock, { recursive: true });
     }
   }
+  /**
+   * Mints a one-time invitation. With `link`, its QR is pairing link v2 (MAC-5): every
+   * address the server is bound to and its public-key pin. Otherwise version 1.
+   */
   async createPairing(
     login: string,
-    scopes: readonly RemoteScope[] = PHONE_SCOPES
+    scopes: readonly RemoteScope[] = PHONE_SCOPES,
+    link?: { addresses: string[]; publicKeySha256: string; name?: string }
   ) {
     loginSchema.parse(login);
     const checkedScopes = scopesSchema.parse(scopes);
+    // A bad v2 link is the caller's error (PairingLinkError), found before the store is locked.
+    if (link) formatPairingLink({ version: 2, code: 'A'.repeat(32), expiresAt: Number.MAX_SAFE_INTEGER, ...link });
     if (!this.allowsLogin(login)) throw new RemoteAuthFailure('forbidden');
     return this.mutate((state, now) => {
       if (state.codes.length >= 8 || state.devices.length >= 64)
@@ -414,11 +421,13 @@ export class RemoteAuthStore {
         expiresAt,
         ...(this.certificateSha256 ? {certificateSha256: this.certificateSha256} : {}),
       };
-      // Version 1 until phones read version 2 (BE-5); same bytes as before.
-      const qrPayload = formatPairingLink({
-        version: 1, baseUrl: this.baseUrl, code, expiresAt,
-        ...(this.certificateSha256 ? { certificateSha256: this.certificateSha256 } : {}),
-      });
+      // Version 1 unless the caller supplies the v2 address list; same bytes as before.
+      const qrPayload = link
+        ? formatPairingLink({ version: 2, code, expiresAt, ...link })
+        : formatPairingLink({
+            version: 1, baseUrl: this.baseUrl, code, expiresAt,
+            ...(this.certificateSha256 ? { certificateSha256: this.certificateSha256 } : {}),
+          });
       return { ...payload, qrPayload };
     });
   }

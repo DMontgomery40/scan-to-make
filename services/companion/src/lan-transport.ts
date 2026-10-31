@@ -1,4 +1,4 @@
-import {X509Certificate} from 'node:crypto';
+import {createHash, X509Certificate} from 'node:crypto';
 import {isIP} from 'node:net';
 
 /** Direct LAN mode binds one selected IPv4 address, never every interface. */
@@ -14,6 +14,11 @@ export function isLanAuthority(authority: string) {
       url.pathname === '/' && !url.username && !url.password && !url.search && !url.hash &&
       Number(url.port || '443') > 0;
   } catch { return false; }
+}
+/** SHA-256 of the certificate's DER SubjectPublicKeyInfo: the pairing link v2 key pin (`k=`). */
+export function certificatePublicKeySha256(cert: string | Buffer) {
+  const spki = new X509Certificate(cert).publicKey.export({ type: 'spki', format: 'der' });
+  return createHash('sha256').update(spki).digest('hex');
 }
 export function certificateFingerprint(cert: string | Buffer) {
   return new X509Certificate(cert).fingerprint256.replaceAll(':', '').toLowerCase();

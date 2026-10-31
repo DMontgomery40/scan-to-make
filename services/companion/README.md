@@ -49,6 +49,31 @@ exchange. There is no silent fallback from Serve and no anonymous capture mode.
 The synthetic `lan` identity binds invitations/devices to this local registry;
 it is not an identity-provider login. Tailscale mode still checks Serve identity.
 
+**Every address (pairing v2, MAC-5), off by default.** With
+`SCAN_TO_MAKE_LAN_ALL_ADDRESSES=1` the LAN companion also binds the Mac's other
+addresses, each one explicitly, never `0.0.0.0`:
+- private IPv4 addresses on wired and Wi-Fi interfaces (`en*`, and `eth*` or `wl*`
+  on Linux), but not VM or container bridges, Apple peer links or link-local
+  addresses;
+- the Tailscale address, taken from a tunnel that also carries Tailscale's
+  `fd7a:115c:a1e0::/48` address, so carrier NAT in `100.64.0.0/10` alone doesn't
+  count.
+
+It looks again every 30 seconds. A new address gets a listener, and a vanished
+one loses it. These listeners are best effort; the configured address stays
+required. The Host check accepts exactly the bound addresses and the Mac's
+`.local` name (`scutil --get LocalHostName`).
+
+All listeners use the one configured certificate. A v1 phone pins that whole
+certificate on the configured address, as before. A v2 phone pins its public
+key, which matches on every address even though the certificate names only one.
+`startCompanionServer` returns `addresses()`, the live origins in the order a v2
+link lists them (the configured address, the other LAN addresses, the `.local`
+name, then Tailscale, at most 8), and `publicKeySha256`. Pass both, with an
+optional Mac name, as `createPairing`'s third argument to mint a v2 link. Without
+it the link stays version 1. Turn this on only once the phones that will pair can
+read version 2.
+
 LAN invitations include `certificateSha256`, the lowercase SHA-256 of the DER
 leaf certificate, and add `f` with that value to the deep-link query. The phone
 must verify that certificate before transmitting the code, store the pin with

@@ -6,6 +6,7 @@ import {CaptureStore} from './capture-import.js';
 import {DetailStillStore} from './detail-stills.js';
 import {createCaptureConverter} from './capture-converter.js';
 import { startCompanionServer } from './server.js';
+import { discoverAddresses, localHostName } from './lan-addresses.js';
 import { RemoteAuthStore } from './remote-auth.js';
 import { createPrintHandoffServices } from './print-handoff-http.js';
 import { readPrinterHandoffConfig } from '@scan-to-make/printer-handoff';
@@ -43,8 +44,12 @@ if (certPath !== undefined || keyPath !== undefined) {
   if (!certPath || !keyPath || !isAbsolute(certPath) || !isAbsolute(keyPath)) throw new Error('Absolute LAN TLS certificate and key paths required');
   lanTls = {cert: await readFile(certPath), key: await readFile(keyPath)};
 }
+// Pairing v2 (MAC-5): also answer on the Mac's other addresses. Off until v2 links are minted.
+const allAddresses = process.env.SCAN_TO_MAKE_LAN_ALL_ADDRESSES;
+if (allAddresses !== undefined && allAddresses !== '1') throw new Error('SCAN_TO_MAKE_LAN_ALL_ADDRESSES must be 1 when set');
 const server = await startCompanionServer({
   lanTls,
+  ...(allAddresses === '1' ? { lanAddresses: () => discoverAddresses(), localName: localHostName() } : {}),
   capture,
   printHandoff,
   remoteAuth,
