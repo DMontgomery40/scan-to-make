@@ -74,12 +74,41 @@ def analyse(obj,source,bm,stats,reference,limit,labels):
         add('inferred_fill',faces,score,
             {'coarseAreaMm2':round(float(areas[faces].sum()),6),'coarseCoverageFraction':round(coverage,6),'textureFilledFraction':round(fraction,6),
              'method':'large near-axis faces versus median tessellation; saturation supports but does not prove fill'})
-    boundary=defaultdict(set)
-    for edge in bm.edges:
-        if edge.is_boundary:
-            for f in edge.link_faces:boundary[side((edge.verts[0].co+edge.verts[1].co)/2)].add(f.index)
-    for faces in boundary.values():
-        add('inferred_fill',faces,98,{'method':'open boundary; missing coverage inferred'})
+    # Fit each connected opening, rather than aiming at its incident walls.
+    boundary=[e for e in bm.edges if e.is_boundary]
+    incident=defaultdict(list)
+    for index,edge in enumerate(boundary):
+        for v in edge.verts:incident[v.index].append(index)
+    remaining=set(range(len(boundary)))
+    for seed in range(len(boundary)):
+        if seed not in remaining:continue
+        remaining.remove(seed);stack=[seed];component=[]
+        while stack:
+            edge=boundary[stack.pop()];component.append(edge)
+            for v in edge.verts:
+                for other in incident[v.index]:
+                    if other in remaining:remaining.remove(other);stack.append(other)
+        vertices=sorted({v.index for e in component for v in e.verts})
+        points=coords[vertices];target=points.mean(0)
+        _,singular,basis=np.linalg.svd(points-target,full_matrices=False)
+        if len(singular)<2 or singular[1]<1e-8:continue
+        normal=basis[-1]
+        # A virtual closing face winds opposite the adjacent boundary face.
+        # Use that orientation when available, with the mesh envelope as fallback.
+        closing=np.zeros(3)
+        for edge in component:
+            loop=next(loop for loop in edge.link_faces[0].loops if loop.edge==edge)
+            closing+=np.cross(np.array(loop.link_loop_next.vert.co)-target,
+                              np.array(loop.vert.co)-target)
+        outward=closing if abs(float(normal@closing))>1e-8 else target-centre
+        if float(normal@outward)<0:normal=-normal
+        axis=int(np.argmax(np.abs(normal)))
+        direction=SIDES[axis*2+(1 if normal[axis]<0 else 0)]
+        faces={f.index for e in component for f in e.link_faces}
+        groups[('boundary',seed)]={'code':'inferred_fill','side':direction,'faces':faces,'score':98,
+            'details':{'method':'open boundary centroid and fitted outward plane; missing coverage inferred'},
+            'points':points,'target':target,'direction':normal,
+            'openingEdges':[[list(e.verts[0].co),list(e.verts[1].co)] for e in component]}
 
     # Local normal curvature and normal-projected neighbour residual, without fitting a product model.
     residual=np.zeros(len(bm.verts));curvature=np.zeros(len(bm.verts));neighbours=[];eligible=[]
@@ -144,6 +173,9 @@ def analyse(obj,source,bm,stats,reference,limit,labels):
         if any(abs(e)>max(.3,r*.01) for e,r in zip(errors,reference)):
             axis=int(np.argmin(extent))
             faces=[f.index for f in bm.faces if f.normal[axis]>.75]
+            if not faces:
+                best=max(f.normal[axis] for f in bm.faces)
+                faces=[f.index for f in bm.faces if f.normal[axis]>=best-1e-6]
             add('size_check',faces,40,{'method':'oriented-box discrepancy; reference dimensions are declarations'})
     ranked=sorted(groups.values(),key=lambda g:(-g['score'],SIDES.index(g['side']),g['code']))
     # One view per side; preserve the strongest reason and its measured region.
@@ -151,10 +183,14 @@ def analyse(obj,source,bm,stats,reference,limit,labels):
     for group in ranked:
         if group['side'] in seen:continue
         seen.add(group['side']);faces=sorted(group.pop('faces'))
-        points=np.array([tuple(v.co) for i in faces for v in bm.faces[i].verts])
-        target=np.average(centres[faces],axis=0,weights=areas[faces])
+        points=group.get('points')
+        if points is None:points=np.array([tuple(v.co) for i in faces for v in bm.faces[i].verts])
+        target=group.get('target')
+        if target is None:target=np.average(centres[faces],axis=0,weights=areas[faces])
         axis=SIDES.index(group['side'])//2;direction=[0,0,0]
         direction[axis]=-1 if group['side'].startswith('neg') else 1
+        direction=group.get('direction',direction)
+        direction=[round(float(x),6) for x in direction]
         distance=max(50,float(np.linalg.norm(extent))*1.5,float(np.linalg.norm(np.ptp(points,axis=0)))*4)
         selected.append({'rank':len(selected)+1,'label':labels.get(group['side'],LABELS[group['side']]),
                          'labelSource':'caller' if group['side'] in labels else 'input-axis-default',
@@ -162,7 +198,8 @@ def analyse(obj,source,bm,stats,reference,limit,labels):
                          'viewDirection':direction,'targetMm':[round(float(x),6) for x in target],
                          'distanceMm':round(distance,6),'expectedBenefitScore':group['score'],
                          'regionBoundsMm':{'min':points.min(0).round(6).tolist(),'max':points.max(0).round(6).tolist()},
-                         'evidence':{**group['details'],'faces':len(faces),'heuristic':True},'_faces':faces})
+                         'evidence':{**group['details'],'faces':len(faces),'heuristic':True},'_faces':faces,
+                         '_openingEdges':group.get('openingEdges',[])})
         if len(selected)>=limit:break
     return {'schemaVersion':1,'coordinateFrame':'input axes; target-to-camera view direction; mm',
             'targets':selected,'specComparison':comparison,'regionClassification':classification,
@@ -179,7 +216,8 @@ def render_target(obj,bm,target,path,resolution,core):
         material=bpy.data.materials.new(name);material.diffuse_color=colour;material.use_nodes=False
         obj.data.materials.append(material)
     faces=set(target.pop('_faces'))
-    for face in obj.data.polygons:face.material_index=1 if face.index in faces else 0
+    opening=target.pop('_openingEdges')
+    for face in obj.data.polygons:face.material_index=1 if not opening and face.index in faces else 0
     scene=bpy.context.scene;scene.render.engine='BLENDER_WORKBENCH'
     scene.display.shading.light='STUDIO';scene.display.shading.color_type='MATERIAL'
     scene.display.shading.show_shadows=False;scene.display.shading.show_cavity=False
@@ -194,8 +232,20 @@ def render_target(obj,bm,target,path,resolution,core):
     camera.location=point+direction*target['distanceMm'];camera.rotation_euler=(point-camera.location).to_track_quat('-Z','Y').to_euler()
     bounds=target['regionBoundsMm'];region=(Vector(bounds['max'])-Vector(bounds['min'])).length
     overall=max(max(v.co[i] for v in bm.verts)-min(v.co[i] for v in bm.verts) for i in range(3))
+    rim=None
+    if opening:
+        curve=bpy.data.curves.new('opening-rim','CURVE');curve.dimensions='3D'
+        curve.bevel_depth=max(overall*.004,.001);curve.bevel_resolution=0
+        curve.materials.append(obj.data.materials[1])
+        for ends in opening:
+            spline=curve.splines.new('POLY');spline.points.add(1)
+            for point,co in zip(spline.points,ends):point.co=(*co,1)
+        rim=bpy.data.objects.new('opening-rim',curve);scene.collection.objects.link(rim)
     camera_data.type='ORTHO';camera_data.ortho_scale=max(region*1.25,overall*.65,.1)
     camera_data.clip_start=.001;camera_data.clip_end=target['distanceMm']+overall*4
     path=Path(path);path.parent.mkdir(exist_ok=True,parents=True)
     scene.render.filepath=str(path);bpy.ops.render.render(write_still=True);core.strip_png_metadata(path)
     bpy.data.objects.remove(camera,do_unlink=True)
+    if rim is not None:
+        bpy.data.objects.remove(rim,do_unlink=True)
+        bpy.data.curves.remove(curve)

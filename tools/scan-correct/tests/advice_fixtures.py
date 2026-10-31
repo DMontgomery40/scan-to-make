@@ -19,6 +19,13 @@ bpy.ops.object.transform_apply(location=False,rotation=False,scale=True)
 bm=bmesh.new();bm.from_mesh(obj.data)
 bmesh.ops.subdivide_edges(bm,edges=list(bm.edges),cuts=12,use_grid_fill=True)
 bm.normal_update()
+if kind=='open_top':
+    bmesh.ops.delete(bm,geom=[f for f in bm.faces if f.normal.z>.9],context='FACES')
+if kind=='rotated_mismatch':
+    from mathutils import Matrix
+    rotation=Matrix.Rotation(math.pi/4,3,'X')
+    for v in bm.verts:v.co=rotation @ v.co
+    for v in bm.verts:v.co*=1.25
 if kind in ('filled','filled_competition'):
     bmesh.ops.delete(bm,geom=[f for f in bm.faces if f.normal.z>.9],context='FACES')
     bmesh.ops.holes_fill(bm,edges=[e for e in bm.edges if e.is_boundary],sides=0)

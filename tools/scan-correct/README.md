@@ -259,8 +259,9 @@ boundaries or unusually coarse, near-axis faces, with texture saturation as
 support), local normal residual and curvature variation, small connected
 concavities, and dark texture clusters. A reference, when provided long-to-short,
 is compared with **boxExtentsMm**, never PCA extents. Large discrepancies suggest
-a view with a ruler. Geometry still works without textures; unavailable texture
-or capped clustering produces an explicit warning. A repaired mesh that lost UVs
+a view with a ruler. If no face clears the normal cutoff, the best-facing
+faces still supply that size-check region. Geometry still works without textures;
+unavailable texture or capped clustering produces an explicit warning. A repaired mesh that lost UVs
 cannot recover texture evidence through this command.
 
 Each target includes a reason, a heuristic expected-benefit score from 0 to 100,
@@ -273,8 +274,10 @@ example `{"pos_z":"Back (hinge side)"}`; `labelSource` distinguishes caller labe
 from defaults. These labels do not affect ranking or assert anatomy detection.
 
 Each target's `render` is a small PNG of the current mesh, neutral grey with
-orange highlighted faces. Source geometry is hidden, source materials are
-removed from the displayed mesh, and the renderer uses material colours rather
+orange highlighted faces, or an orange boundary rim for an opening. Opening
+targets use the boundary centroid and fitted outward plane normal rather than
+incident wall centres; their bounds describe the opening. Source geometry is
+hidden, source materials are removed from the displayed mesh, and the renderer uses material colours rather
 than texture pixels. No images or requests go to a model. Keep the complete job
 private because `work/` still contains the staged source texture and geometry.
 `--resolution` is bounded to 64–512 pixels (default 256); wall time and face caps

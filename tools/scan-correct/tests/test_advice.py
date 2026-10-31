@@ -40,6 +40,29 @@ class AdviceTests(unittest.TestCase):
                 self.assertGreater(top['distanceMm'],0)
                 self.assertTrue(0<=top['expectedBenefitScore']<=100)
 
+    def test_open_top_targets_opening_instead_of_incident_walls(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base=Path(tmp);mesh=make_advice_fixture(base/'input',os.environ['BLENDER'],'open_top')
+            advice=self.advise(mesh,base/'out')
+            top=advice['targets'][0]
+            self.assertEqual(top['side'],'pos_z')
+            self.assertEqual(top['reasonCode'],'inferred_fill')
+            for actual,expected in zip(top['targetMm'],[0,0,4]):
+                self.assertAlmostEqual(actual,expected,places=4)
+            for actual,expected in zip(top['viewDirection'],[0,0,1]):
+                self.assertAlmostEqual(actual,expected,places=4)
+            self.assertEqual(top['regionBoundsMm'],{'min':[-10,-6,4],'max':[10,6,4]})
+            self.assertEqual(len(advice['targets']),1)
+
+    def test_rotated_reference_mismatch_keeps_size_check(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base=Path(tmp);mesh=make_advice_fixture(base/'input',os.environ['BLENDER'],'rotated_mismatch')
+            advice=self.advise(mesh,base/'out')
+            self.assertGreater(max(abs(e) for e in advice['specComparison']['errorMm']),1)
+            checks=[t for t in advice['targets'] if t['reasonCode']=='size_check']
+            self.assertEqual(len(checks),1)
+            self.assertGreater(checks[0]['evidence']['faces'],0)
+
     def test_large_reconstructed_side_outranks_small_coarse_patch_without_texture(self):
         with tempfile.TemporaryDirectory() as tmp:
             base=Path(tmp);mesh=make_advice_fixture(base/'input',os.environ['BLENDER'],'filled_competition')
