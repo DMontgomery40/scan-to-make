@@ -68,3 +68,11 @@ test('each pass gets a new folder', async () => {
   const [first, second] = await Promise.all([prepareTouchupPass(input), prepareTouchupPass(input)]);
   assert.notEqual(first.dir, second.dir);
 });
+
+test('photos are optional when the user gave instructions', async () => {
+  const root = await temp('touchup-root-');
+  const pass = await prepareTouchupPass({root, objectId: 'obj-5', scan: [], photos: [], requirePhotos: false});
+  assert.deepEqual(await walk(pass.dir), ['out/', 'out/checkpoints/', 'photos/', 'scan/']);
+  assert.deepEqual(pass.photoPaths, []);
+  assert.deepEqual(pass.scanPaths, []);
+});

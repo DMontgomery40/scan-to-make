@@ -144,6 +144,20 @@ Files:
 - [ ] **Step 5: Verify the CLI contract once, by hand.** Run `claude -p "Reply with status done and summary ok." --json-schema '<schema>' --output-format stream-json --verbose --tools Read`. Expect the final `type:"result"` line to carry the structured object. Record its field name (expected `structured_output`) in a code comment next to `TOUCHUP_RESULT_SCHEMA`. Task 4 parses that field.
 - [ ] **Step 6:** Commit: `feat(companion): KAN-202 lean touch-up worker invocation`.
 
+### Task 2b (amendment): Make something from instructions
+
+Spec §2 and §5.2: the main job is making something that fits or attaches, from a scan, a photo or two, or published dimensions alone, plus the user's exact instructions.
+- `buildTouchupInvocation` takes `instructions?: string`. They become the opening of the prompt exactly as written, falling back to the touch-up sentence. The Scan and Photos lines are left out when there are none.
+- Built-in tools are `Read,WebSearch,WebFetch`, so the worker can look up published dimensions. `--allowedTools` is `Read,WebSearch,WebFetch,mcp__printer`.
+- `prepareTouchupPass` takes `requirePhotos?: boolean`, defaulting to true. `runTouchup` passes `requirePhotos: false` when instructions are given. The CLI gains `--instructions`, and `--scan`/`--photos` become optional.
+- Tests:
+  - `the user's instructions are the prompt, word for word`;
+  - `a pass with no scan and no photos lists neither`;
+  - `photos are optional when the user gave instructions`;
+  - `making something from instructions needs no scan or photos`;
+  - an updated `args are exactly the lean worker`.
+- Task 6 adds a proof of this job: an attachment for a real product, made from a photo or two plus instructions using its published dimensions.
+
 ### Task 3: Blender readiness and a fresh scene through the printer MCP
 
 **Files:**

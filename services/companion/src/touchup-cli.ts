@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Milestone tool: touch up one scan through the user's printer MCP and write report.json.
- *   node dist/touchup-cli.js --object <id> --scan <file> [--scan <file>…] --photos <dir>
+ *   node dist/touchup-cli.js --object <id> [--scan <file>…] [--photos <dir>] [--instructions <text>]
  *     --handoff-config <printer-handoff.json> [--note <text> --summary <text>] [--root <dir>]
  */
 import {execFileSync} from 'node:child_process';
@@ -17,19 +17,20 @@ const PHOTO_TYPES = new Set(['.jpg', '.jpeg', '.heic', '.heif', '.png']);
 async function main(): Promise<void> {
   const {values} = parseArgs({options: {
     object: {type: 'string'}, scan: {type: 'string', multiple: true}, photos: {type: 'string'},
-    'handoff-config': {type: 'string'}, note: {type: 'string'}, summary: {type: 'string'},
+    'handoff-config': {type: 'string'}, instructions: {type: 'string'}, note: {type: 'string'}, summary: {type: 'string'},
     root: {type: 'string', default: join(homedir(), 'scan-to-make-work', 'touchups')},
   }});
-  if (!values.object || !values.scan?.length || !values.photos || !values['handoff-config']) {
-    throw new Error('Usage: touchup-cli --object <id> --scan <file>… --photos <dir> --handoff-config <path> [--note <text> --summary <text>] [--root <dir>]');
+  if (!values.object || !values['handoff-config'] || (!values.scan?.length && !values.photos && !values.instructions)) {
+    throw new Error('Usage: touchup-cli --object <id> [--scan <file>…] [--photos <dir>] [--instructions <text>] --handoff-config <path> [--note <text> --summary <text>] [--root <dir>]');
   }
-  const photos = (await readdir(values.photos)).filter(name => PHOTO_TYPES.has(extname(name).toLowerCase())).sort().map(name => join(values.photos!, name));
+  const photos = values.photos ? (await readdir(values.photos)).filter(name => PHOTO_TYPES.has(extname(name).toLowerCase())).sort().map(name => join(values.photos!, name)) : [];
   const handoff = await readPrinterHandoffConfig(values['handoff-config']);
   const claudePath = process.env.SCAN_TO_MAKE_CLAUDE_PATH || execFileSync('/usr/bin/which', ['claude']).toString().trim();
   const startedAt = new Date().toISOString();
   let lastLine = '';
   const result = await runTouchup({
-    root: values.root!, objectId: values.object, scan: values.scan, photos, handoff, claudePath,
+    root: values.root!, objectId: values.object, scan: values.scan ?? [], photos, handoff, claudePath,
+    ...(values.instructions !== undefined ? {instructions: values.instructions} : {}),
     ...(values.note !== undefined ? {note: values.note} : {}), ...(values.summary !== undefined ? {summary: values.summary} : {}),
     onProgress: progress => {
       const line = `${progress.seconds}s · ${progress.toolCalls} tool calls${progress.lastText ? ' · ' + progress.lastText.slice(0, 160) : ''}`;

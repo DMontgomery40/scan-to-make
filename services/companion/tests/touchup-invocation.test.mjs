@@ -25,8 +25,8 @@ test('args are exactly the lean worker', async () => {
   assert.equal(valueOf(inv.args, '--model'), 'claude-opus-5-5');
   assert.equal(valueOf(inv.args, '--effort'), 'high');
   assert.equal(valueOf(inv.args, '--mcp-config'), inv.mcpConfigPath);
-  assert.equal(valueOf(inv.args, '--tools'), 'Read');
-  assert.equal(valueOf(inv.args, '--allowedTools'), 'Read,mcp__printer');
+  assert.equal(valueOf(inv.args, '--tools'), 'Read,WebSearch,WebFetch');
+  assert.equal(valueOf(inv.args, '--allowedTools'), 'Read,WebSearch,WebFetch,mcp__printer');
   assert.equal(valueOf(inv.args, '--output-format'), 'stream-json');
   assert.equal(valueOf(inv.args, '--json-schema'), JSON.stringify(TOUCHUP_RESULT_SCHEMA));
   assert.equal(valueOf(inv.args, '--settings'), '{"disableAllHooks":true}');
@@ -85,4 +85,21 @@ test('cwd is the pass dir', async () => {
   const prompt = inv.args.at(-1);
   for (const path of [...p.scanPaths, p.checkpointsDir, p.outDir]) assert.ok(prompt.includes(path), path);
   assert.ok(prompt.includes(join(p.photosDir, 'photo-01.jpg')));
+});
+
+test('the user\'s instructions are the prompt, word for word', async () => {
+  const p = await pass();
+  const instructions = 'A clip that holds my mic on the monitor arm. The arm tube is 30 mm across.';
+  const inv = buildTouchupInvocation({pass: p, printer, claudePath: '/c', sourceEnv, instructions});
+  assert.ok(inv.args.at(-1).startsWith(instructions + '\n'));
+  assert.equal(inv.args.at(-1).includes(TOUCHUP_INSTRUCTION), false);
+});
+
+test('a pass with no scan and no photos lists neither', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'touchup-inv-'));
+  const p = await prepareTouchupPass({root, objectId: 'mount', scan: [], photos: [], requirePhotos: false});
+  const prompt = buildTouchupInvocation({pass: p, printer, claudePath: '/c', sourceEnv, instructions: 'A hook.'}).args.at(-1);
+  assert.equal(prompt.includes('- Scan:'), false);
+  assert.equal(prompt.includes('- Photos:'), false);
+  assert.ok(prompt.includes('- Output folder:'));
 });

@@ -13,7 +13,12 @@ Every screen the user sees is rebuilt from first principles. Two parts work well
 
 ## 2. What it is
 
-You scan a thing with your iPhone. Your Mac's Opus, working in Blender, looks at the photos from that scan and fixes what the scanner got wrong. Your phone tells you when it's ready and shows you exactly what will print and its size, and you tap Print. If something is wrong, you say so in a sentence and it goes again.
+Two jobs, one flow:
+
+- **Make something that fits or attaches.** This is the main use: a hook for a handle, a holder for a cup, a mount that joins a product to an arm or stand. You give it a scan of the thing you have, or just a photo or two, plus exact instructions. When a product's dimensions are published, Opus looks them up instead of needing a scan.
+- **Copy an object.** You scan a thing, and Opus fixes what the scanner got wrong, using the photos from that scan.
+
+Either way, your Mac's Opus does the work in Blender through your printer MCP. Your phone tells you when it's ready and shows you exactly what will print and its size, and you tap Print. If something is wrong, you say so in a sentence and it goes again.
 
 ## 3. The rule for code
 
@@ -59,9 +64,15 @@ States are in plain words. The builder writes the copy, in this voice:
 - "Printed"
 - Failures, each in one sentence with the one action that fixes it.
 
-### 5.2 Scanning (iPhone)
+### 5.2 Starting something (iPhone)
 
-The list has one obvious **Scan** button, which opens the LiDAR capture. When the scan ends, the phone sends the model **and the photos Object Capture took** to the Mac by itself. There is no send button, photo step or size step. If sending can't happen, the phone says why and what to do.
+The list has one obvious way to start. It opens on a box for instructions ("what do you want to make?", which can be left empty for a plain copy), and the user then adds either:
+- a **scan**: the LiDAR capture;
+- **photos**: a photo or two, or none when the instructions name a product with published dimensions.
+
+The instructions are used exactly as written.
+
+**Scan** opens the LiDAR capture. When the scan ends, the phone sends the model **and the photos Object Capture took** to the Mac by itself. There is no send button, photo step or size step. If sending can't happen, the phone says why and what to do.
 
 Devices without LiDAR run the app fully but can't scan. They say scanning needs a LiDAR device. There is no photo-only substitute. iPad and the foldable iPhone get real layouts: folded is the iPhone layout, open is two panes, and iPad is sidebar plus detail.
 
@@ -98,7 +109,13 @@ A menu-bar app whose window shows the same object list and object pages, plus th
 
 1. **Receive** the scan's model and photos into a fresh folder for that object.
 2. **Touch up** by running the user's own Claude Code login (`claude -p`, Opus 5.5, effort `high`) with one MCP server: **the user's printer MCP**, whichever they use (bambu-printer-mcp or mcp-3D-printer-server). Both have a built-in Blender MCP bridge (discover, forward calls such as `execute_blender_code`, verified STL edits and export), enabled in that MCP's own config. Blender is reached only through that bridge, and this app never wires a second Blender path. The worker uses whatever tool names that MCP exposes, and must work with either.
-   - **Input:** the scan as captured, with its colour texture, plus its photos and the instruction "Look at the pictures of this, and then tweak the scan based on that."
+   - **Input:** whatever the user gave, as is:
+     - the scan as captured, with its colour texture, if there is one;
+     - its photos or the photos the user added;
+     - the user's instructions.
+
+     With no instructions, the instruction is "Look at the pictures of this, and then tweak the scan based on that." Making something new from instructions is the same pass, with the same tools and guard rails. The app adds no design code; Opus designs in Blender through the printer MCP.
+   - **Web lookup:** the worker may look up published dimensions of named products on the web. That's the only tool it gets besides Read and the printer MCP.
    - **Output:** an STL plus renders.
    - **Behaviour:**
      - **Targeted edits only**, like a brush: restore surface the scanner smoothed over, add a small feature it missed, flatten a surface that light or movement left noisy. Everything the scanner captured well stays as it is.
@@ -112,7 +129,7 @@ A menu-bar app whose window shows the same object list and object pages, plus th
      - a fresh, empty Blender scene per touch-up;
      - a working folder holding only that object's files, because Blender's Python can read the whole disk.
    - **Isolation:** the worker runs isolated from the user's personal Claude setup:
-     - only Read among the built-in tools;
+     - only Read and web lookup among the built-in tools;
      - no skills or slash commands;
      - no personal instructions, memory or hooks;
      - only the user's printer MCP.
@@ -145,6 +162,7 @@ v1 targets people who already have a printer MCP (bambu-printer-mcp or mcp-3D-pr
 Someone scans an object and puts the phone down. They get "ready to print", see a model that matches the object at its real size, tap Print, and it prints, with no confusing screen along the way.
 
 - The first touch-up fixes what the photos make obvious.
+- Something made to fit or attach fits the real thing on the first print, from a scan, from a photo or two, or from published dimensions alone.
 - At most one correction round for typical objects.
 - A touch-up pass takes a few minutes. Time and usage per object are measured and reported in each PR that changes the touch-up.
 
@@ -168,6 +186,7 @@ Someone scans an object and puts the phone down. They get "ready to print", see 
 ## 11. Milestones and the builder's calls
 
 1. **Prove the touch-up first, before any UI.** Run it end to end through a printer MCP's Blender bridge only (both MCPs), under the guard rails in §6, using only the photos Object Capture took during the scan. Those photos currently stay on the phone in the capture's `Images/` folder; only the model is sent. If they aren't enough for a good result, change what is captured or sent before building screens. "Need a close-up" must stay the exception.
+   Also prove the main job: make an attachment for a real product from a photo or two plus instructions, using its published dimensions, with no scan.
 2. Phone and Mac object list and object page, scan → send → touch-up → ready → print, with notifications.
 3. Setup for users missing a tool (§7).
 

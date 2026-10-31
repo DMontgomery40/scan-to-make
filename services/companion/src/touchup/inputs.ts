@@ -39,8 +39,9 @@ async function writePhoto(source: string, target: string): Promise<void> {
  * The model's Blender session can read any file on disk, so nothing else may
  * sit next to its inputs.
  */
-export async function prepareTouchupPass(input: {root: string; objectId: string; scan: string[]; photos: string[]}): Promise<TouchupPass> {
-  if (input.photos.length === 0) throw new NoPhotosError();
+export async function prepareTouchupPass(input: {root: string; objectId: string; scan: string[]; photos: string[]; requirePhotos?: boolean}): Promise<TouchupPass> {
+  // Photos are optional only when the user's instructions say what to make.
+  if (input.photos.length === 0 && input.requirePhotos !== false) throw new NoPhotosError();
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
   const dir = join(input.root, input.objectId, `${stamp}-${randomUUID().slice(0, 8)}`);
   const scanDir = join(dir, 'scan'), photosDir = join(dir, 'photos'), outDir = join(dir, 'out'), checkpointsDir = join(outDir, 'checkpoints');

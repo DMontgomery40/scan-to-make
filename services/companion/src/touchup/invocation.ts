@@ -21,7 +21,7 @@ export const TOUCHUP_RESULT_SCHEMA = {
   },
 } as const;
 
-export const TOUCHUP_SYSTEM_RULES = `You are touching up a 3D scan so it matches the real object in the photos.
+export const TOUCHUP_SYSTEM_RULES = `You are making a 3D model the user will print: either touching up their scan so it matches the real object in the photos, or making what their instructions describe so it fits the real things it goes with.
 - Reach Blender only through the printer MCP's blender_mcp_* tools. Start in the empty scene you are given.
 - Make targeted edits only where the photos show the scan is wrong. Leave everything the scanner captured well as it is, and never smooth captured surface.
 - Use Blender's own tools (sculpt brushes, modifiers limited to a region, primitives). Don't write your own geometry algorithms.
@@ -67,20 +67,21 @@ function workerEnv(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   return env;
 }
 
-function prompt(pass: TouchupPass, note?: string, summary?: string): string {
-  const opening = note === undefined ? TOUCHUP_INSTRUCTION : `This is the current model. ${summary ?? ''}`.trimEnd() + `\n\nChange requested: ${note}`;
-  const last = String(pass.photoPaths.length).padStart(2, '0');
-  return `${opening}
-
-Files:
-- Scan: ${pass.scanPaths.join(', ')}
-- Photos: ${join(pass.photosDir, 'photo-01.jpg')} … photo-${last}.jpg
-- Checkpoints folder: ${pass.checkpointsDir}
-- Output folder: ${pass.outDir}`;
+function prompt(pass: TouchupPass, instructions?: string, note?: string, summary?: string): string {
+  const opening = note !== undefined
+    ? `This is the current model. ${summary ?? ''}`.trimEnd() + `\n\nChange requested: ${note}`
+    : instructions?.trim() || TOUCHUP_INSTRUCTION;
+  const files = [
+    ...(pass.scanPaths.length ? [`- Scan: ${pass.scanPaths.join(', ')}`] : []),
+    ...(pass.photoPaths.length ? [`- Photos: ${join(pass.photosDir, 'photo-01.jpg')} … photo-${String(pass.photoPaths.length).padStart(2, '0')}.jpg`] : []),
+    `- Checkpoints folder: ${pass.checkpointsDir}`,
+    `- Output folder: ${pass.outDir}`,
+  ];
+  return `${opening}\n\nFiles:\n${files.join('\n')}`;
 }
 
 /** The lean, isolated `claude -p` call for one touch-up pass. Writes the pass's MCP config file. */
-export function buildTouchupInvocation(input: {pass: TouchupPass; printer: PrinterMcpProcess; claudePath: string; note?: string; summary?: string; sourceEnv?: NodeJS.ProcessEnv}): TouchupInvocation {
+export function buildTouchupInvocation(input: {pass: TouchupPass; printer: PrinterMcpProcess; claudePath: string; instructions?: string; note?: string; summary?: string; sourceEnv?: NodeJS.ProcessEnv}): TouchupInvocation {
   const {pass} = input;
   const mcpConfig = {mcpServers: {printer: printerServer(input.printer)}};
   const mcpConfigPath = join(pass.dir, 'mcp.json');
@@ -91,15 +92,15 @@ export function buildTouchupInvocation(input: {pass: TouchupPass; printer: Print
     '--effort', 'high',
     '--mcp-config', mcpConfigPath,
     '--strict-mcp-config',
-    '--tools', 'Read',
-    '--allowedTools', 'Read,mcp__printer',
+    '--tools', 'Read,WebSearch,WebFetch',
+    '--allowedTools', 'Read,WebSearch,WebFetch,mcp__printer',
     '--disable-slash-commands',
     '--settings', '{"disableAllHooks":true}',
     '--append-system-prompt', TOUCHUP_SYSTEM_RULES,
     '--json-schema', JSON.stringify(TOUCHUP_RESULT_SCHEMA),
     '--output-format', 'stream-json',
     '--verbose',
-    prompt(pass, input.note, input.summary),
+    prompt(pass, input.instructions, input.note, input.summary),
   ];
   return {command: input.claudePath, args, env: workerEnv(input.sourceEnv ?? process.env), cwd: pass.dir, mcpConfigPath, mcpConfig};
 }

@@ -69,3 +69,11 @@ test('correction pass', async () => {
   assert.ok(seenPrompt.startsWith('This is the current model. Added texture.'));
   assert.match(seenSha, /^[0-9a-f]{64}$/, 'an STL input is hashed so an unchanged result is caught');
 });
+
+test('making something from instructions needs no scan or photos', async () => {
+  const log = [];
+  let seenPrompt;
+  const deps = {...recorder(log), run: async (inv, pass) => { seenPrompt = inv.args.at(-1); return done(pass); }};
+  await runTouchup(await input({scan: [], photos: [], instructions: 'A hook for a 25 mm handle.'}), deps);
+  assert.ok(seenPrompt.startsWith('A hook for a 25 mm handle.'));
+});

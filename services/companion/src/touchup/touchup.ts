@@ -15,6 +15,8 @@ export interface TouchupInput {
   /** The user's own printer MCP config, unchanged (bambu-printer-mcp or mcp-3D-printer-server). */
   handoff: PrinterHandoffConfig;
   claudePath: string;
+  /** The user's own words, used as the prompt exactly as written. Without them the pass is a touch-up. */
+  instructions?: string;
   note?: string;
   summary?: string;
   onProgress?: (progress: TouchupProgress) => void;
@@ -40,8 +42,10 @@ async function touchUp(input: TouchupInput, deps: TouchupDeps): Promise<TouchupR
   await (deps.ensureBlender ?? (() => ensureBlenderMcp({launch: defaultBlenderLaunch()})))();
   const client = (deps.client ?? (handoff => new PrinterMcpClient(handoff)))(input.handoff);
   await (deps.resetScene ?? resetBlenderScene)(client, input.signal);
-  const pass = await (deps.prepare ?? prepareTouchupPass)({root: input.root, objectId: input.objectId, scan: input.scan, photos: input.photos});
+  const pass = await (deps.prepare ?? prepareTouchupPass)({root: input.root, objectId: input.objectId, scan: input.scan, photos: input.photos,
+    requirePhotos: !input.instructions?.trim()});
   const inv = buildTouchupInvocation({pass, printer: input.handoff.process, claudePath: input.claudePath,
+    ...(input.instructions !== undefined ? {instructions: input.instructions} : {}),
     ...(input.note !== undefined ? {note: input.note} : {}), ...(input.summary !== undefined ? {summary: input.summary} : {})});
   const inputStlSha256 = await stlSha256(input.scan);
   const result = await (deps.run ?? runTouchupWorker)(inv, pass, {
