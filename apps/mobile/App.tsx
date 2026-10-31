@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   BackHandler,
   Modal,
@@ -6,6 +6,7 @@ import {
   StatusBar,
   Text,
   useColorScheme,
+  Linking,
 } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import type {
@@ -14,6 +15,7 @@ import type {
 } from '@scan-to-make/contracts/saved-project';
 import { localSavedProjects, newProjectId } from './src/project/savedProjects';
 import { CompanionScreen } from './src/screens/CompanionScreen';
+import { isPairingLink } from './src/companion/pairingLink';
 import { HomeScreen } from './src/screens/HomeScreen';
 import { AboutScreen } from './src/screens/AboutScreen';
 import { RetainedCapturesScreen } from './src/screens/RetainedCapturesScreen';
@@ -65,6 +67,27 @@ function App({
     ? JSON.stringify([scanTarget.projectId, scanTarget.capture.captureId])
     : '';
   const [companionOpen, setCompanionOpen] = useState(false);
+  // scantomake://pair links, e.g. the companion's QR read by the Camera app.
+  const [pairLink, setPairLink] = useState<string | null>(null);
+  // A cold start can deliver the same link twice within moments. Drop that
+  // repeat, but let the user open the same link again later to retry.
+  const lastLink = useRef<{ url: string; at: number } | null>(null);
+  useEffect(() => {
+    const open = (url?: string | null) => {
+      if (!url || !isPairingLink(url)) return;
+      const now = Date.now();
+      const last = lastLink.current;
+      lastLink.current = { url, at: now };
+      if (last?.url === url && now - last.at < 2000) return;
+      setPairLink(url);
+      setCompanionOpen(true);
+    };
+    Linking.getInitialURL().then(open, () => {});
+    const subscription = Linking.addEventListener('url', event =>
+      open(event.url),
+    );
+    return () => subscription.remove();
+  }, []);
   const [route, setRoute] = useState<Route>('home');
   const [hydrated, setHydrated] = useState(false);
   const [listing, setListing] = useState<ListProjectsResult | null>(null);
@@ -219,7 +242,11 @@ function App({
             presentationStyle="fullScreen"
             onRequestClose={() => setCompanionOpen(false)}
           >
-            <CompanionScreen onBack={() => setCompanionOpen(false)} />
+            <CompanionScreen
+              onBack={() => setCompanionOpen(false)}
+              link={pairLink}
+              onLinkUsed={() => setPairLink(null)}
+            />
           </Modal>
         ) : null}
       </RequestGateProvider>

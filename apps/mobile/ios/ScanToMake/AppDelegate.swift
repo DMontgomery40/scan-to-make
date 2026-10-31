@@ -42,11 +42,22 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     let window = UIWindow(windowScene: windowScene)
     self.window = window
 
+    // A pairing link that launched the app reaches Linking.getInitialURL.
+    var options = appDelegate.launchOptions ?? [:]
+    if let url = connectionOptions.urlContexts.first?.url {
+      options[.url] = url
+    }
     factory.startReactNative(
       withModuleName: "ScanToMake",
       in: window,
-      launchOptions: appDelegate.launchOptions
+      launchOptions: options
     )
+  }
+
+  // Links opened while the app runs, e.g. a pairing QR read by the Camera app.
+  func scene(_ scene: UIScene, openURLContexts URLContexts: Set<UIOpenURLContext>) {
+    guard let url = URLContexts.first?.url else { return }
+    RCTLinkingManager.application(UIApplication.shared, open: url, options: [:])
   }
 }
 
