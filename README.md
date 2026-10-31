@@ -1,47 +1,26 @@
 # Scan to Make
 
-An open-source consumer app for making useful things that fit the objects and spaces around you: scan objects and their surroundings, describe an addition, make something that fits, and print it. A hosted service can supply inference and compute; the same core remains self-hostable.
+An open-source iPhone and iPad app that scans a real object with LiDAR and cleans up the scan's defects. In David's words: "this app is so you can scan an object USING LIDAR on iphone. and then smooth out defects and such. but really anything after that is already built and downloaded by 10k people a month and it's my bambu mcp. later we may add mcp 3d printer. actually, may as well just have that be an option from the get go."
 
-This repository is the product. Printer adapters stay behind the companion contract and are not inlined here. The cup-holder adapter is one validation example — captured reference and confirmed dimensions, editable preview, a scoped fit coupon, and independently checked export or companion printing — not the app identity. A drawer organizer is a second dimensional template.
+The app captures the object (LiDAR Object Capture, plus close-up stills of details). A companion on your own computer converts the capture and repairs it: it fills holes, removes stray geometry, measures it and renders check views. Slicing and printing belong to [bambu-printer-mcp](https://github.com/DMontgomery40/bambu-printer-mcp) or [mcp-3D-printer-server](https://github.com/DMontgomery40/mcp-3D-printer-server). The handoff of the clean mesh to those servers isn't built yet; today you share the repaired STL from the scan results.
 
-Native review/export is demonstrated on an isolated iOS Simulator only. Physical-fit acceptance remains **OPEN**. Preview geometry is not print authorization. Software licences and distribution rights will be recorded before shipping code that depends on them.
+The app requires iOS 27 and a device with LiDAR. Physical accuracy of a scan is not established by the cleanup; check sizes against the real object.
 
-## Current capabilities
+## What's here
 
-| Area | What exists now | Entrypoints |
+| Area | What it does | Entrypoints |
 | --- | --- | --- |
-| Mobile shell | React Native app: project brief, local saved projects, cup-holder measurement study, drawer design preview, companion pairing, capture support check | [`apps/mobile/`](apps/mobile/), [`apps/mobile/README.md`](apps/mobile/README.md), [`apps/mobile/src/screens/`](apps/mobile/src/screens/) |
-| Fit contracts | Shared schemas for cup-holder and drawer-tray templates, portable saved projects, generation protocol, capture provenance | [`packages/contracts/`](packages/contracts/), [`packages/contracts/README.md`](packages/contracts/README.md) |
-| Cup-holder example | Template that turns a validated FitSpec into preview STL + manifest | [`tools/templates/cup-holder-adapter/`](tools/templates/cup-holder-adapter/), fixture [`packages/contracts/fixtures/tapered-holder.json`](packages/contracts/fixtures/tapered-holder.json) |
-| Drawer organizer | Template that turns a `DrawerFitSpec` into a tray STL + manifest; iOS generation preview | [`tools/templates/drawer-organizer/`](tools/templates/drawer-organizer/), [`apps/mobile/src/screens/DrawerScreen.tsx`](apps/mobile/src/screens/DrawerScreen.tsx), fixture [`packages/contracts/fixtures/drawer-tray.json`](packages/contracts/fixtures/drawer-tray.json) |
-| Characterization | Coupon that records achievable clearance for a printer, nozzle, material, and settings profile | [`tools/characterization/`](tools/characterization/) |
-| Capture conversion | Offline USDZ → OBJ with authored-unit provenance | [`tools/capture-mesh-convert/`](tools/capture-mesh-convert/) |
-| Capture evaluation | Bounds-only mesh evaluation against held-out dimensions | [`tools/capture-fit-eval/`](tools/capture-fit-eval/) |
-| Capture pipeline | Bounded convert → evaluate, plus exact duplicate of a qualified capture | [`tools/capture-pipeline/`](tools/capture-pipeline/) |
-| Object Capture eval | Isolated LiDAR Object Capture evaluation app (not the consumer UI) | [`apps/mobile/modules/object-capture/`](apps/mobile/modules/object-capture/), [`EVALUATION.md`](apps/mobile/modules/object-capture/EVALUATION.md) |
-| RoomPlan / depth | RoomPlan suitability notes for drawer interiors; bounded ARKit depth/mesh evidence collector | [`apps/mobile/modules/room-capture/`](apps/mobile/modules/room-capture/), [`apps/mobile/modules/depth-capture/`](apps/mobile/modules/depth-capture/) |
-| Consumer capture | Support check and manual sizes; developer AR probe is separate from consumer scan-to-mesh | [`apps/mobile/src/screens/CaptureScreen.tsx`](apps/mobile/src/screens/CaptureScreen.tsx), [`apps/mobile/modules/scan-capture/`](apps/mobile/modules/scan-capture/) |
-| Local workers | Filesystem project store; companion generation, capture import, pairing, and print-intent journal | [`services/project/`](services/project/), [`services/companion/`](services/companion/) |
+| Mobile app | Projects, LiDAR Object Capture scans, scan results and close-up stills; companion pairing | [`apps/mobile/`](apps/mobile/), [`apps/mobile/README.md`](apps/mobile/README.md) |
+| Object Capture | Native guided LiDAR capture embedded in the app | [`apps/mobile/modules/object-capture/`](apps/mobile/modules/object-capture/) |
+| Contracts | Shared schemas for saved projects, capture provenance, detail stills and scan processing | [`packages/contracts/`](packages/contracts/) |
+| Companion | Authenticated loopback listener: project sync, capture import, detail stills and scan processing | [`services/companion/`](services/companion/), [`services/project/`](services/project/) |
+| Capture conversion | Offline USDZ → OBJ with authored-unit provenance, input checks and bounds evaluation | [`tools/capture-mesh-convert/`](tools/capture-mesh-convert/), [`tools/capture-pipeline/`](tools/capture-pipeline/), [`tools/capture-fit-eval/`](tools/capture-fit-eval/) |
+| Scan cleanup | Headless Blender repair, measurement and views; close-up-guided correction | [`tools/scan-repair/`](tools/scan-repair/), [`tools/scan-correct/`](tools/scan-correct/) |
 | Private companion path | Read-only Tailscale preflight and setup notes | [`tools/tailscale/`](tools/tailscale/), [`docs/tailscale-setup.md`](docs/tailscale-setup.md) |
+| Licence audit | Dependency licence allowlist and mobile third-party notices | [`tools/licence-audit/`](tools/licence-audit/) |
 
-## Still OPEN
+## Still open
 
-- **Native review/export.** Demonstrated (isolated iOS Simulator only, separate app bundle, against a disposable loopback authenticated companion fixture; independently reviewed in [PR #46](https://github.com/DMontgomery40/scan-to-make/pull/46), merged as `1c194c5`, [public review](https://github.com/DMontgomery40/scan-to-make/pull/46#issuecomment-6190152023)): native Files-picker import of a public sample USDZ photogrammetry reconstruction, companion conversion to OBJ, app restart with the saved project and retained capture surviving and reopening verified, native rendering of the converted hash-checked OBJ, share-sheet export of the original USDZ, derived OBJ and JSON conversion report with exact-byte identity verified, and explicit capture-permission denial, credential revocation, and re-pair/reopen recovery. Quick Look on Simulator showed metadata only, not a geometry render. Still OPEN / not established: capture on a physical iPhone/device, live private HTTPS/tailnet (private-network) reachability, metric accuracy, surface completeness and physical fit, print approval or dispatch, and Android capture import (Android reports it unavailable).
-- **Physical-fit acceptance.** Generated preview STLs, bounds-only mesh checks, and coupon geometry are not printed-and-measured fit. Cup-holder and drawer examples emit preview/check artifacts (`preview-geometry-not-print-authorized` / `preview-only`). Physical insertion, caliper comparison, and printer dispatch remain separate.
-- **Native capture qualification.** Object Capture, RoomPlan, and ARKit depth/mesh paths exist as isolated evaluation or evidence modules. They do not substitute for a qualified consumer capture flow or physical accuracy. RoomPlan parametric output is not the measurement authority for a fitted drawer interior.
-
-## Self-host
-
-From a clean clone, two commands cover the offline tools and the authenticated portable-project/capture HTTP path. Both reuse a `usd-core` 26.8 venv (prefer `PYTHON=python3.12` when available). Both summaries still print native review/export as `OPEN`; they do not exercise the isolated Simulator path.
-
-```sh
-git clone https://github.com/DMontgomery40/scan-to-make && cd scan-to-make
-tools/self-host-smoke/smoke.sh
-tools/self-host-smoke/auth-smoke.sh
-```
-
-`smoke.sh` bootstraps the venv and runs the tests and synthetic repros for `tools/capture-mesh-convert`, `tools/capture-fit-eval` and `tools/capture-pipeline` (pipeline and duplicate). It does not start the companion listener.
-
-`auth-smoke.sh` installs the checkout's companion/project/contracts packages, starts the authenticated generation/capture listener with isolated fixture auth only (no live tailnet or device changes), then exercises portable-project sync → real USDZ import → listener restart against the same storage → verified reopen and exact original download. Wrong-scope and stale `If-Match` requests are rejected. The checkout is left clean (`git status --porcelain` empty).
-
-Each command prints a PASS/FAIL summary and exits nonzero on any failure. A passing authenticated run is the HTTP path only; it does not claim native review, export, or physical-fit validation. See [`tools/self-host-smoke/README.md`](tools/self-host-smoke/README.md).
+- **Physical-device capture.** The capture, import, cleanup and close-up flows are exercised in tests and the iOS Simulator. A full run on a physical LiDAR iPhone over a live private tailnet is still to be recorded.
+- **Printer handoff.** Sending the clean mesh to bambu-printer-mcp or mcp-3D-printer-server is designed separately and not built.
+- **Android.** Android reports capture as unavailable.

@@ -12,7 +12,7 @@ This directory is **MIT** licensed; see [LICENSE](LICENSE). Implementation uses 
 2. **`services/**` and `packages/**` (`server` / shared `app` scope)**
    - All locked npm dependencies across `services/**/package-lock.json` and `packages/**/package-lock.json` (production dependencies of workspace packages imported by `apps/mobile` are enforced against the `app` allowlist).
 3. **`tools/**` (`server` scope + isolation boundary)**
-   - Each concrete `tools/*` (and `tools/templates/*`) folder's own declared `LICENSE`.
+   - Each concrete `tools/*` folder's own declared `LICENSE` (nested category folders are walked too).
    - Declared Python requirements (`requirements*.txt`, `pyproject.toml`, `uv.lock`, `pylock.toml`, `Pipfile.lock`) and their full transitive `Requires-Dist` closure in installed `.dist-info` metadata, including embedded `LICENSE*` clause scanning to catch hidden non-commercial sub-dependencies behind permissive wrappers.
    - AST import checks on `.py` files to flag undeclared third-party imports.
    - Cross-boundary check flagging any file under `apps/` that imports, references, or bundles a GPL/LGPL/AGPL `tools/` folder.
@@ -21,7 +21,7 @@ This directory is **MIT** licensed; see [LICENSE](LICENSE). Implementation uses 
 
 - **`allowlists.app`**: `0BSD`, `Apache-2.0`, `BSD-2-Clause`, `BSD-3-Clause`, `BSL-1.0`, `ISC`, `MIT`, `MPL-2.0`, `Unlicense`, `Zlib`.
 - **`allowlists.server`**: Same permissive set plus `PSF-2.0` / `Python-2.0`.
-- **`isolatedGplTools`**: Permits `GPL-3.0-only` / `GPL-3.0-or-later` **only** for explicitly listed isolated server process folders (`tools/scan-repair`, `tools/templates/scan-cradle`), and never if imported from `apps/`.
+- **`isolatedGplTools`**: Permits `GPL-3.0-only` / `GPL-3.0-or-later` **only** for explicitly listed isolated server process folders (`tools/scan-correct`, `tools/scan-repair`), and never if imported from `apps/`.
 - **`denied`**: Blocks `GPL`/`LGPL` in `app`, `AGPL` everywhere, `NON-COMMERCIAL` everywhere, and `UNKNOWN` everywhere unless explicitly listed in `exemptions` with a non-empty `reason`.
 
 ## Usage

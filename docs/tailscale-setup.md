@@ -2,13 +2,13 @@
 
 Status: companion authenticated transport and iOS native pairing are implemented. Physical-phone/private-tailnet acceptance remains unverified. This preflight checks host prerequisites; it does not perform setup or authenticate the phone path.
 
-The goal is boring and safe: a phone reaches the user's own companion over their private tailnet, while the companion process stays on loopback and every app request is paired. Tailscale gives us device identity, encrypted transport, MagicDNS names, and private HTTPS through Serve. It does not replace app pairing, and it must never become a public route to generation or printing.
+The goal is boring and safe: a phone reaches the user's own companion over their private tailnet, while the companion process stays on loopback and every app request is paired. Tailscale gives us device identity, encrypted transport, MagicDNS names, and private HTTPS through Serve. It does not replace app pairing, and it must never become a public route to the companion.
 
 ## What exists today
 
-The generation listener stays on `127.0.0.1:9077`. Legacy local mode requires the exact loopback `Host` and rejects browser-origin headers. Explicit authenticated mode instead requires the configured Serve host, HTTPS forwarding metadata, an allowed Tailscale login, and a per-device credential. See the [implemented companion transport and operator commands](../services/companion/README.md#authenticated-private-serve-transport). Do not expose legacy mode or widen the bind address.
+The companion listener stays on `127.0.0.1:9077`. Legacy local mode requires the exact loopback `Host` and rejects browser-origin headers. Explicit authenticated mode instead requires the configured Serve host, HTTPS forwarding metadata, an allowed Tailscale login, and a per-device credential. See the [implemented companion transport and operator commands](../services/companion/README.md#authenticated-private-serve-transport). Do not expose legacy mode or widen the bind address.
 
-The iOS app accepts a companion URL and one-time code or pasted invitation, exchanges them natively, and keeps credentials in Keychain. Native health/generation reject redirects and invalid certificates. Simulator fixture evidence is separate from real phone/private-HTTPS qualification. Camera QR scanning and Android secure pairing are not delivered by this flow.
+The iOS app accepts a companion URL and one-time code or pasted invitation, exchanges them natively, and keeps credentials in Keychain. Native pairing, health and capture requests reject redirects and invalid certificates. Simulator fixture evidence is separate from real phone/private-HTTPS qualification. Camera QR scanning and Android secure pairing are not delivered by this flow.
 
 Run the read-only check first:
 
@@ -53,7 +53,7 @@ phone app
 4. **Tailnet policy is the outer gate.** Grants should allow only the account's intended phone/user to reach the companion host's Serve port. Do not ship or require a permissive tailnet-wide rule.
 5. **Serve identity is required.** Serve strips spoofed identity headers and supplies `Tailscale-User-Login` for tailnet traffic. Remote mode must require that header and allowlist the expected login explicitly. Tagged or shared nodes without a user identity need an explicit policy decision, not a silent pass.
 6. **Pair every phone.** The companion CLI emits a single-use pairing code and invitation JSON valid for at most five minutes. A QR payload is data, not a delivered camera-scanning interface. The invitation contains its version, Serve URL, code and expiry, never a Tailscale credential or auth key. The phone exchanges it for a per-device token stored in the phone keychain; the companion stores only a token hash, device label, scopes, expiry, and paired-device state.
-7. **Scope narrowly.** The first remote scope is generation health/create only. Print plans, journal writes, printer discovery, and dispatch are not exposed by this contract. Any future route needs its own scope plus the existing exact-artifact, fresh-state, and human-approval gates.
+7. **Scope narrowly.** Remote scopes cover health, saved projects and captures (including detail stills and scan processing). The companion has no printer routes. Any future route needs its own scope.
 8. **Fail closed.** Missing identity header, wrong login, wrong Host, unknown/revoked/expired pairing token, or a Funnel/public route rejects. Pairing attempts are rate-limited and errors do not reveal which secret part failed.
 9. **Make revocation obvious.** The companion must list paired devices and revoke one without rotating everyone else. Removing a phone from the tailnet and revoking its pairing token are separate levers; do both for a lost phone.
 
@@ -70,7 +70,7 @@ Why user-installed Tailscale + Serve first, not embedded `tsnet`: the companion 
 
 ## Remaining work
 
-- **Physical-phone acceptance:** with a real phone and host on one tailnet, prove trusted HTTPS health, paired generation, wrong-login rejection, revoked-token rejection, and no Funnel route. No printing claim follows from that test.
+- **Physical-phone acceptance:** with a real phone and host on one tailnet, prove trusted HTTPS health, a paired capture import, wrong-login rejection, revoked-token rejection, and no Funnel route. No printing claim follows from that test.
 - **Onboarding follow-ons:** camera QR scanning, Android secure pairing, and installation/sign-in assistance need separate implementation and acceptance. Existing iOS pairing is documented in the [mobile README](../apps/mobile/README.md).
 - **Confirmed Serve helper:** if needed, a separate explicit action may enable/disable the private mapping and verify it. It must not be folded into read-only preflight.
 

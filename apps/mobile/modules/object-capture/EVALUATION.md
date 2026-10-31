@@ -1,6 +1,6 @@
 # Native Object Capture evaluation
 
-This isolated iOS 18+ application starts from Apple's public GuidedCaptureSample. See PROVENANCE.md and LICENSE.txt. The shared capture model is also compiled into Scan to Make saved-project capture; its watchdog applies there too. Source target identity is `org.scantomake.capture-evaluation`; select an already-authorized development identity locally when deploying. Never commit team, profile, signing or device data.
+This isolated iOS 27+ application starts from Apple's public GuidedCaptureSample. See PROVENANCE.md and LICENSE.txt. The shared capture model is also compiled into Scan to Make saved-project capture; its watchdog applies there too. Source target identity is `org.scantomake.capture-evaluation`; select an already-authorized development identity locally when deploying. Never commit team, profile, signing or device data.
 
 ## Build and start
 
