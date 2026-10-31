@@ -2,18 +2,20 @@ name: Mac app
 on:
   push:
     branches: [main]
-    paths: ['apps/mac/**', '.github/workflows/mac.yml']
+    paths: ['apps/mac/**', 'services/companion/src/local-control*', '.github/workflows/mac.yml']
   pull_request:
-    paths: ['apps/mac/**', '.github/workflows/mac.yml']
+    paths: ['apps/mac/**', 'services/companion/src/local-control*', '.github/workflows/mac.yml']
 permissions:
   contents: read
 jobs:
   build:
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Unit tests
         run: swift test --package-path apps/mac
+      - name: ControlKit tests
+        run: swift test --package-path apps/mac/ControlKit
       - name: Companion runtime configuration tests
         run: node --test apps/mac/Tests/runtime.test.mjs
       - name: Build shell without signing or runtime downloads

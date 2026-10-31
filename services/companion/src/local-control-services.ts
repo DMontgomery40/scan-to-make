@@ -1,0 +1,170 @@
+import {lstat, mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile} from 'node:fs/promises';
+import {dirname, join, sep} from 'node:path';
+import {createHash} from 'node:crypto';
+import {pathToFileURL} from 'node:url';
+import {z} from 'zod';
+import {CaptureBindingSchema} from '@scan-to-make/contracts/capture';
+import {ScanProcessingJobSchema, type ScanProcessingJob} from '@scan-to-make/contracts/scan-processing';
+import {SavedProjectSync} from '@scan-to-make/project';
+import type {HandoffManifest} from '@scan-to-make/printer-handoff';
+import type {CaptureServices} from './capture-http.js';
+import type {PrintHandoffServices} from './print-handoff-http.js';
+import {readBoundedCaptureFile} from './capture-import.js';
+import {RemoteAuthStore, RemoteAuthFailure} from './remote-auth.js';
+import {ControlFailure, parameters, type ControlMethod, type DoorParameters, type JobParameters} from './local-control-protocol.js';
+
+interface JobItem {
+  kind: 'cleanup' | 'print';
+  projectId: string | null;
+  projectName: string | null;
+  job: ScanProcessingJob | HandoffManifest;
+}
+export interface ControlServices {
+  auth: RemoteAuthStore;
+  companionVersion: string;
+  capture?: CaptureServices;
+  captureDirectory?: string;
+  printHandoff?: PrintHandoffServices;
+}
+const keyOf = (item: JobItem) => `${item.kind}:${item.kind === 'cleanup' ? (item.job as ScanProcessingJob).jobId : (item.job as HandoffManifest).id}`;
+async function entries(directory: string) {
+  try { return await readdir(directory, {withFileTypes:true}); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []; throw error; }
+}
+async function contained(root: string, path: string, directory = false) {
+  const base = await realpath(root), resolved = await realpath(path);
+  const info = await lstat(path);
+  if (!resolved.startsWith(base + sep) || (directory ? !info.isDirectory() : !info.isFile())) throw new ControlFailure('unavailable');
+  return pathToFileURL(resolved).href;
+}
+
+export function createControlDispatcher(services: ControlServices) {
+  const {auth,capture,printHandoff} = services;
+  const projects = capture ? new SavedProjectSync(capture.storage) : undefined;
+  async function captureRows(projectId?: string) {
+    if (!projects || !services.captureDirectory) return [];
+    const rows = [];
+    for (const entry of await entries(services.captureDirectory)) {
+      if (!entry.isDirectory() || !z.uuid().safeParse(entry.name).success) continue;
+      const folder = join(services.captureDirectory,entry.name);
+      const binding = CaptureBindingSchema.parse(JSON.parse((await readBoundedCaptureFile(join(folder,'binding.json'),1024*1024)).toString('utf8')));
+      if (projectId !== undefined && binding.projectId !== projectId) continue;
+      let project;
+      try { project = await projects.get(binding.projectId); }
+      catch (error) { if ((error as {code?:string}).code === 'not-found') continue; throw error; }
+      // Old revisions retain their bytes, but are not current project work.
+      if (project.project.revision !== binding.projectRevision) continue;
+      rows.push({folder,captureId:entry.name,binding,project:project.project,mtime:(await lstat(join(folder,'binding.json'))).mtimeMs});
+    }
+    return rows.sort((a,b) => b.mtime-a.mtime || a.captureId.localeCompare(b.captureId));
+  }
+  async function jobIndex(params: JobParameters) {
+    const items: JobItem[] = [];
+    for (const row of await captureRows(params.projectId)) {
+      for (const entry of await entries(join(row.folder,'scan-processing'))) {
+        if (!entry.isFile() || !entry.name.endsWith('.json') || !z.uuid().safeParse(entry.name.slice(0,-5)).success) continue;
+        const job = ScanProcessingJobSchema.parse(JSON.parse((await readBoundedCaptureFile(join(row.folder,'scan-processing',entry.name),65536)).toString('utf8')));
+        if (job.captureId !== row.captureId || job.projectId !== row.project.id || job.projectRevision !== row.project.revision || entry.name !== job.jobId+'.json') throw new ControlFailure('unavailable');
+        items.push({kind:'cleanup',projectId:job.projectId,projectName:row.project.brief.object,job});
+      }
+    }
+    if (printHandoff && params.projectId === undefined) {
+      for (const job of await printHandoff.store.list()) items.push({kind:'print',projectId:null,projectName:null,job});
+    }
+    items.sort((a,b) => keyOf(a).localeCompare(keyOf(b)));
+    // Cursor is bound to the project filter, so it cannot silently skip a different list.
+    let after = '';
+    if (params.cursor !== undefined) {
+      try {
+        const cursor = z.strictObject({projectId:z.string().nullable(),after:z.string()}).parse(JSON.parse(Buffer.from(params.cursor,'base64url').toString('utf8')));
+        if (cursor.projectId !== (params.projectId ?? null)) throw new Error();
+        after = cursor.after;
+      } catch { throw new ControlFailure('invalid-request'); }
+    }
+    const remaining = items.filter(item => keyOf(item).localeCompare(after) > 0);
+    const page = remaining.slice(0,params.limit);
+    return {items:page,...(remaining.length > page.length ? {nextCursor:Buffer.from(JSON.stringify({projectId:params.projectId ?? null,after:keyOf(page.at(-1)!)})).toString('base64url')} : {})};
+  }
+  async function prepareDoor(params: DoorParameters) {
+    const apps = {blender:'org.blenderfoundation.blender', 'bambu-studio':'com.bambulab.bambu-studio', orca:'com.softfever3d.orca-slicer'};
+    if (params.handoffId) {
+      if (!printHandoff) throw new ControlFailure('unavailable');
+      const manifest = await printHandoff.store.read(params.handoffId);
+      const folder = printHandoff.store.directory(manifest.id);
+      if (params.door === 'finder') return {action:'reveal',fileURL:pathToFileURL(await realpath(folder)).href,projectRevision:null};
+      const suffix = params.door === 'blender' ? '.blend' : '.3mf';
+      const artifacts = Object.values(manifest.artifacts).filter(artifact => artifact.file.toLowerCase().endsWith(suffix));
+      if (artifacts.length !== 1) throw new ControlFailure('unavailable');
+      const artifact = artifacts[0]!;
+      const original = join(folder,artifact.file);
+      await contained(folder,original);
+      const bytes = await readBoundedCaptureFile(original,artifact.byteLength);
+      if (bytes.length !== artifact.byteLength || createHash('sha256').update(bytes).digest('hex') !== artifact.sha256) throw new ControlFailure('unavailable');
+      // Desktop editors may save in place. Never give them the immutable,
+      // hash-verified bundle; each open gets its own retained editable copy.
+      const copies = join(dirname(auth.directory),'door-copies');
+      await mkdir(copies,{recursive:true,mode:0o700});
+      const info = await lstat(copies);
+      if (!info.isDirectory() || info.uid !== process.getuid!() || (info.mode & 0o077) !== 0) throw new ControlFailure('unavailable');
+      const destination = await mkdtemp(join(copies,'open-'));
+      const file = join(destination,artifact.file);
+      try { await writeFile(file,bytes,{flag:'wx',mode:0o600}); }
+      catch (error) { await rm(destination,{recursive:true,force:true}); throw error; }
+      return {action:'open',fileURL:pathToFileURL(file).href,applicationBundleId:apps[params.door],projectRevision:null};
+    }
+    if (!projects) throw new ControlFailure('unavailable');
+    await projects.get(params.projectId!); // Distinguish a missing project from one awaiting capture.
+    const row = (await captureRows(params.projectId))[0];
+    if (!row || params.door !== 'finder') throw new ControlFailure('unavailable');
+    return {action:'reveal',fileURL:await contained(services.captureDirectory!,row.folder,true),projectRevision:row.project.revision};
+  }
+  return async (method: ControlMethod, raw: unknown): Promise<unknown> => {
+    if (!parameters[method].safeParse(raw).success) throw new ControlFailure('invalid-request');
+    try {
+      switch (method) {
+        case 'status.get': return {protocolVersion:1,companionVersion:services.companionVersion,transport:auth.transport,
+          pairedDeviceCount:(await auth.listDevices()).length,capabilities:{capture:!!capture?.captures,cleanup:!!capture?.scanProcessing,printerHandoff:!!printHandoff}};
+        case 'devices.list': return {devices:await auth.listDevices()};
+        case 'devices.remove': {
+          const {deviceId} = parameters[method].parse(raw);
+          if (!(await auth.listDevices()).some(device => device.deviceId === deviceId)) throw new ControlFailure('not-found');
+          await auth.revoke(deviceId); return {removed:true};
+        }
+        case 'pairing.create': {
+          let {login} = parameters[method].parse(raw);
+          if (login === undefined) {
+            if (auth.transport === 'lan') login = 'lan';
+            else {
+              const state = JSON.parse((await readBoundedCaptureFile(join(auth.directory,'auth.json'),4*1024*1024)).toString('utf8'));
+              login = z.string().parse(state.configuration.allowedLogins[0]);
+            }
+          }
+          if (!auth.allowsLogin(login)) throw new ControlFailure('invalid-request');
+          return await auth.createPairing(login);
+        }
+        case 'pairing.isActive': return {active:await auth.isPairingActive(parameters[method].parse(raw).code)};
+        case 'jobs.list': return await jobIndex(parameters[method].parse(raw));
+        case 'confirmations.list': return {items:printHandoff?.relay.pending() ?? []};
+        case 'confirmations.answer': {
+          const {id,answer} = parameters[method].parse(raw);
+          if (!printHandoff?.relay.pending().some(item => item.id === id && item.expiresAtMs > Date.now()) || !printHandoff.relay.respond(id,answer)) throw new ControlFailure('not-found');
+          return {answered:true};
+        }
+        case 'doors.prepare': return await prepareDoor(parameters[method].parse(raw));
+      }
+    } catch (error) {
+      if (error instanceof ControlFailure) throw error;
+      // Request schemas were checked above. A schema failure here belongs to
+      // persisted/service data, not to the caller's valid request.
+      if (error instanceof z.ZodError) throw new ControlFailure('unavailable');
+      if (error instanceof RemoteAuthFailure) throw new ControlFailure(error.code === 'rate-limited' ? 'conflict' : 'unavailable');
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT' || (error as {code?:string}).code === 'not-found') throw new ControlFailure('not-found');
+      if ((error as {code?:string}).code === 'precondition-failed') throw new ControlFailure('conflict');
+      throw new ControlFailure('unavailable');
+    }
+  };
+}
+
+export async function companionVersion() {
+  return z.object({version:z.string()}).parse(JSON.parse(await readFile(new URL('../package.json',import.meta.url),'utf8'))).version;
+}
