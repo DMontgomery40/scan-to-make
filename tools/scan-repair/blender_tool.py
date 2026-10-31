@@ -4,6 +4,7 @@ import hashlib
 import json
 import math
 from pathlib import Path
+import shutil
 import struct
 import sys
 
@@ -278,14 +279,34 @@ def orient(bm, frame):
             "inputCentreMm":centre.tolist(),"translationMm":list(shift)}
 
 
-def export(bm,out):
+def export(bm,out,uv=False,libraries=(),materials=()):
+    """Write mm OBJ/STL; with uv, one vt per face corner keeps authored seams."""
     bm.verts.index_update()
+    layer = bm.loops.layers.uv.active if uv else None
     with (out/"repaired.obj").open("w") as f:
         f.write("# units: mm\n")
+        if libraries:
+            f.write("mtllib "+" ".join(libraries)+"\n")
         for v in bm.verts:
             f.write("v "+" ".join(format(c,".9g") for c in v.co)+"\n")
+        if layer:
+            for face in bm.faces:
+                for loop in face.loops:
+                    f.write("vt "+" ".join(format(c,".9g") for c in loop[layer].uv)+"\n")
+        current, corner = None, 1
         for face in bm.faces:
-            f.write("f "+" ".join(str(v.index+1) for v in face.verts)+"\n")
+            name = materials[face.material_index] if face.material_index < len(materials) else None
+            # A face without a material after an assigned run needs an explicit reset,
+            # as capture-mesh-convert writes; otherwise it inherits the previous texture.
+            name = name or (current and "unbound")
+            if name and name != current:
+                f.write("usemtl "+name+"\n")
+                current = name
+            if layer:
+                f.write("f "+" ".join("%d/%d" % (v.index+1,corner+i) for i,v in enumerate(face.verts))+"\n")
+                corner += len(face.verts)
+            else:
+                f.write("f "+" ".join(str(v.index+1) for v in face.verts)+"\n")
     tri = bm.copy()
     bmesh.ops.triangulate(tri,faces=list(tri.faces))
     tri.normal_update()
@@ -364,12 +385,28 @@ def repair(obj,bm,a):
     original.free()
     transform = orient(bm,a["orient"])
     ops.append({"name":"orient",**transform})
+    # Remeshing and decimation rebuild the surface, so source UVs no longer describe it.
+    material = a.get("material") or {}
+    uv_note = ("input has no UVs" if bm.loops.layers.uv.active is None else
+               "voxel remesh replaced the surface" if fallback else "decimation changed the surface" if ratio < 1 else None)
+    files = [] if uv_note else material.get("files",[])
+    declared = material.get("names",[])
+    # Blender may suffix an imported material name (.001) when it already exists.
+    # Undeclared names (such as the converter's `unbound`) keep their own name.
+    names = [None if m is None else m.name.rpartition(".")[0]
+             if m.name not in declared and m.name.rpartition(".")[0] in declared else m.name
+             for m in obj.data.materials] if files else []
     out = Path(a["out"])
     out.mkdir(parents=True,exist_ok=True)
-    export(bm,out)
+    export(bm,out,uv=uv_note is None,libraries=material.get("libraries",[]) if files else [],materials=names)
+    for name in files:
+        shutil.copyfile(Path(material["stage"])/name,out/name)
+    ops.append({"name":"export","uvRetained":uv_note is None,"uvNote":uv_note,
+                "uvCorners":sum(len(f.loops) for f in bm.faces) if uv_note is None else 0,"materialFiles":files,
+                "materialNote":"UVs not retained" if uv_note else material.get("note")})
     return {"schemaVersion":1,"blenderVersion":bpy.app.version_string,"provesPhysicalAccuracy":False,
-            "previewOnly":True,"inputSha256":sha(a["input"]),"inputScaleMm":a["scale_mm"],
-            "outputUnits":"mm","outputSha256":{n:sha(out/n) for n in ("repaired.obj","repaired.stl")},
+            "previewOnly":True,"inputSha256":sha(a.get("import_path",a["input"])),"inputScaleMm":a["scale_mm"],
+            "outputUnits":"mm","outputSha256":{n:sha(out/n) for n in ("repaired.obj","repaired.stl",*files)},
             "before":before,"after":stats(bm),"operations":ops,"deviation":dev,
             "limitations":["Topological watertightness does not detect self intersections or certify a valid solid.",
                            "Box and PCA frames are ambiguous for symmetric objects; neither infers semantic upright or print-bed placement.",
@@ -437,7 +474,7 @@ def render(obj,bm,a):
 
 def main():
     a = json.loads(Path(sys.argv[sys.argv.index("--")+1]).read_text())
-    obj,bm = load(a["input"],a["scale_mm"])
+    obj,bm = load(a.get("import_path",a["input"]),a["scale_mm"])
     if a["command"]=="repair":
         result = repair(obj,bm,a)
         write_json(Path(a["out"])/"report.json",result)

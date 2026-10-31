@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import zlib
 
 ROOT = Path(__file__).resolve().parents[1]
 BLENDER = os.environ.get("BLENDER") or shutil.which("blender") or "/Applications/Blender.app/Contents/MacOS/Blender"
@@ -174,6 +175,86 @@ class RepairTests(unittest.TestCase):
         self.assertAlmostEqual(measured["bboxMm"]["min"][2],0,places=5)
         for size in measured["principalExtentsMm"]:
             self.assertAlmostEqual(size,2,places=4)
+
+    @staticmethod
+    def png():
+        def chunk(kind, data):
+            return struct.pack(">I", len(data))+kind+data+struct.pack(">I", zlib.crc32(kind+data))
+        return (b"\x89PNG\r\n\x1a\n"+chunk(b"IHDR", struct.pack(">IIBBBBB", 2, 2, 8, 2, 0, 0, 0))+
+                chunk(b"IDAT", zlib.compress(b"\0"+b"\xff\0\0"*2+b"\0"+b"\0\xff\0"*2))+chunk(b"IEND", b""))
+
+    def textured_cube(self, folder, mtllib="tex.mtl", texture="tex.png", unbound_from=None):
+        # One UV chart per side, so the cube has UV seams on every edge.
+        folder.mkdir()
+        corners = [(0,0),(1,0),(1,1),(0,1)]
+        lines = ["mtllib "+mtllib] + ["v %s %s %s" % v for v in CUBE]
+        lines += ["vt %g %g" % ((side+u)/6, v) for side in range(6) for u,v in corners] + ["usemtl skin"]
+        faces = ["f "+" ".join("%d/%d" % (i+1, side*4+k+1) for k,i in enumerate(face)) for side,face in enumerate(FACES)]
+        if unbound_from is not None:
+            # capture-mesh-convert assigns `usemtl unbound` to meshes without a material.
+            faces.insert(unbound_from, "usemtl unbound")
+        lines += faces
+        (folder/"cube.obj").write_text("\n".join(lines)+"\n")
+        (folder/"tex.mtl").write_text("newmtl skin\nKd 1 1 1\nmap_Kd -clamp off %s\n" % texture)
+        (folder/"tex.png").write_bytes(self.png())
+        return folder/"cube.obj"
+
+    def test_textured_obj_keeps_uvs_and_material(self):
+        p = self.textured_cube(self.base/"textured")
+        r = self.repair(p, name="kept")
+        out = (self.base/"kept"/"repaired.obj").read_text().splitlines()
+        self.assertIn("mtllib tex.mtl", out)
+        self.assertIn("usemtl skin", out)
+        faces = [line.split()[1:] for line in out if line.startswith("f ")]
+        uvs = [tuple(map(float, line.split()[1:])) for line in out if line.startswith("vt ")]
+        self.assertEqual(len(uvs), sum(map(len, faces)))
+        self.assertTrue(all("/" in corner for face in faces for corner in face))
+        source = {(round((side+u)/6, 5), v) for side in range(6) for u,v in [(0,0),(1,0),(1,1),(0,1)]}
+        self.assertTrue({(round(u, 5), v) for u,v in uvs} <= source)
+        for name in ("tex.mtl", "tex.png"):
+            self.assertEqual((self.base/"kept"/name).read_bytes(), (self.base/"textured"/name).read_bytes())
+            self.assertIn(name, r["outputSha256"])
+        export = next(o for o in r["operations"] if o["name"]=="export")
+        self.assertEqual((export["uvRetained"], export["materialFiles"]), (True, ["tex.mtl", "tex.png"]))
+        # Voxel remeshing replaces the surface, so UVs and materials cannot follow it.
+        r = self.repair(p, "--force-voxel", name="voxel")
+        self.assertNotIn("vt ", (self.base/"voxel"/"repaired.obj").read_text())
+        self.assertFalse((self.base/"voxel"/"tex.png").exists())
+        self.assertFalse(next(o for o in r["operations"] if o["name"]=="export")["uvRetained"])
+        # A JPEG texture keeps UVs but is not copied.
+        jpeg = self.textured_cube(self.base/"jpeg", texture="tex.jpg")
+        (jpeg.parent/"tex.jpg").write_bytes(b"\xff\xd8\xff")
+        r = self.repair(jpeg, name="jpeg-out")
+        export = next(o for o in r["operations"] if o["name"]=="export")
+        self.assertEqual((export["uvRetained"], export["materialFiles"]), (True, []))
+        self.assertIn("tex.jpg", export["materialNote"])
+
+    def test_unbound_faces_after_textured_faces_reset_material(self):
+        p = self.textured_cube(self.base/"mixed", unbound_from=3)
+        self.repair(p, name="mixed-out")
+        counts, current = {}, None
+        for line in (self.base/"mixed-out"/"repaired.obj").read_text().splitlines():
+            if line.startswith("usemtl "):
+                current = line.split()[1]
+            elif line.startswith("f "):
+                counts[current] = counts.get(current, 0)+1
+        self.assertEqual(counts, {"skin": 6, "unbound": 6})
+
+    def test_material_references_cannot_escape_input_folder(self):
+        (self.base/"secret.mtl").write_text("newmtl skin\n")
+        (self.base/"secret.png").write_bytes(self.png())
+        cases = [("mtllib", "../secret.mtl"), ("mtllib", str(self.base/"secret.mtl")),
+                 ("texture", "../secret.png"), ("texture", "/etc/hostname"), ("link", "tex.png")]
+        for i,(kind,target) in enumerate(cases):
+            folder = self.base/("escape%d" % i)
+            p = self.textured_cube(folder, **({"mtllib":target} if kind=="mtllib" else
+                                              {"texture":target} if kind=="texture" else {}))
+            if kind == "link":
+                (folder/"tex.png").unlink()
+                (folder/"tex.png").symlink_to(self.base/"secret.png")
+            r = self.run_cli("repair", p, "--units", "mm", "--out", self.base/("escaped%d" % i), ok=False)
+            self.assertIn("material", r.stderr)
+            self.assertFalse((self.base/("escaped%d" % i)).exists())
 
     def test_volume_floater_metric(self):
         p = self.mesh("volume.obj", CUBE + [(x*.05+5,y*.05,z*.05) for x,y,z in CUBE],
