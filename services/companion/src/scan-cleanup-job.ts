@@ -1,7 +1,7 @@
 import {createHash} from 'node:crypto';
 import {mkdir,writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
-import {SCAN_VIEW_NAMES,DimensionsMmSchema,type ScanProcessingJob} from '@scan-to-make/contracts/scan-processing';
+import {AI_ATTEMPT_PREVIEW_NAMES,AiTweakRecordSchema,SCAN_VIEW_NAMES,DimensionsMmSchema,type AiTweakRecord,type ScanProcessingJob} from '@scan-to-make/contracts/scan-processing';
 import type {DetailStill} from '@scan-to-make/contracts/detail-still';
 import {readBoundedCaptureFile,receiptFromConvertedBytes} from './capture-import.js';
 import type {ScanRunner} from './scan-processing-runner.js';
@@ -16,10 +16,11 @@ const write=(path:string,data:Buffer|string)=>writeFile(path,data,{flag:'wx',mod
 
 /** Orchestrate existing CLIs; publish only explicit artifacts after their hashes are verified. */
 export async function runCleanup(runner:ScanRunner,root:string,job:ScanProcessingJob,snapshot:CleanupSnapshot,signal:AbortSignal,
- onStage:(kind:Stage,status:'running'|'succeeded')=>Promise<void>,onAdvice:(output:string,names:string[])=>Promise<void>,onProcessGroup:(pid:number)=>Promise<void>){
+ onStage:(kind:Stage,status:'running'|'succeeded')=>Promise<void>,onAdvice:(output:string,names:string[])=>Promise<void>,onProcessGroup:(pid:number)=>Promise<void>,deadlineAt?:number){
  const output=join(root,'output'),sidecar=join(root,'units.json');
  const ctx:CleanupContext={source:join(root,'original.usdz'),imported:join(root,'imported'),repaired:join(root,'repaired'),
-  advice:join(root,'advice'),corrected:join(root,'corrected'),stills:[],reference:job.reference,signal,onProcessGroup};
+  advice:join(root,'advice'),corrected:join(root,'corrected'),stills:[],reference:job.reference,signal,onProcessGroup,deadlineAt,
+  inputBytes:snapshot.source.length+snapshot.stills.reduce((sum,{bytes})=>sum+bytes.length,0)};
  await mkdir(output,{mode:0o700});await write(ctx.source,snapshot.source);
  const stillDir=join(root,'detail-stills');await mkdir(stillDir,{mode:0o700});
  for(const {still,bytes} of snapshot.stills){
@@ -40,7 +41,7 @@ export async function runCleanup(runner:ScanRunner,root:string,job:ScanProcessin
    const bytes=await readBoundedCaptureFile(join(ctx.imported,artifact.path),64*1024*1024);
    if(bytes.length!==artifact.bytes||sha(bytes)!==artifact.sha256)throw Error('Converter output mismatch');
   }
-  await write(sidecar,JSON.stringify({unitsAuthored:true,metersPerUnit:receipt.provenance.metersPerUnit}));
+  await write(sidecar,JSON.stringify({unitsAuthored:true,metersPerUnit:receipt.provenance.metersPerUnit}));ctx.metersPerUnit=receipt.provenance.metersPerUnit;
   return {receipt,report};
  });
  const repair=await stage('repair',async()=>{
@@ -62,6 +63,7 @@ export async function runCleanup(runner:ScanRunner,root:string,job:ScanProcessin
   }
   await onAdvice(output,names);return names;
  },true);
+ let aiTweak:AiTweakRecord|undefined;const previews:string[]=[];
  const correction=await stage('correct',async()=>{
   await runner.cleanup!.run('correct',ctx);const report=await readJSON(join(ctx.corrected,'report.json'));
   if(report.status!=='complete')throw Error('Incomplete correction');
@@ -78,6 +80,16 @@ export async function runCleanup(runner:ScanRunner,root:string,job:ScanProcessin
   if(sha(log)!==report.toolLogSha256)throw Error('Correction log hash mismatch');
   await write(join(output,'correction-calls.jsonl'),log);
   await write(join(output,'correction.json'),await readBoundedCaptureFile(join(ctx.corrected,'report.json'),2*1024*1024));
+  if(runner.cleanup!.adapter==='ai-tweak'){
+   // The AI step's record and each rendered attempt's preview (KAN-184); both are hash-bound to the report.
+   aiTweak=AiTweakRecordSchema.parse(report.aiTweak);
+   for(const name of AI_ATTEMPT_PREVIEW_NAMES){
+    if(report.outputs?.[name]===undefined)continue;
+    const image=await readBoundedCaptureFile(join(ctx.corrected,name),8*1024*1024);
+    if(sha(image)!==report.outputs[name])throw Error('Correction output hash mismatch');
+    await write(join(output,name),image);previews.push(name);
+   }
+  }
   return report;
  });
  const measured=await stage('measure',async()=>{
@@ -88,7 +100,7 @@ export async function runCleanup(runner:ScanRunner,root:string,job:ScanProcessin
  await stage('render',async()=>{
   await runner.run('render',join(output,'corrected.obj'),views,sidecar,signal,onProcessGroup);
   for(const name of SCAN_VIEW_NAMES)await write(join(output,name),await readBoundedCaptureFile(join(views,name),8*1024*1024));
-  await checkCleanupDisk(root);
+  await checkCleanupDisk(root,ctx.inputBytes);
  });
- return {output,measured,repair,conversion,correction,names:[...adviceNames,'corrected.obj','corrected.stl','correction.json','correction-calls.jsonl']};
+ return {output,measured,repair,conversion,correction,aiTweak,names:[...adviceNames,'corrected.obj','corrected.stl','correction.json','correction-calls.jsonl',...previews]};
 }

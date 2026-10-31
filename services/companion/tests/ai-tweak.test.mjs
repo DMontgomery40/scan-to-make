@@ -297,3 +297,22 @@ test('model access parsing fails closed and the Connected check uses the same se
  assert.deepEqual([denied.ok,denied.outcome],[false,'auth-failed']);
  assert.deepEqual(await checkModelAccess(base(f,{access:{kind:'none'}})),{ok:false,outcome:'skipped'});
 });
+
+test('ai-tweak-cli run --pick --export is the whole AI step of a cleanup job (KAN-184)',async t=>{
+ const f=await fixture(t),claudePath=await fakeCli(f,'claude','new-folder'),out=join(f.root,'run'),exported=join(f.root,'corrected');
+ const cli=new URL('../dist/ai-tweak-cli.js',import.meta.url).pathname;
+ // The pick takes only absolute tool paths.
+ const absolutePython=python.startsWith('/')?python:(await run('/bin/sh',['-c',`command -v ${python}`])).stdout.trim();
+ const {stdout}=await run(process.execPath,[cli,'run','--mesh',f.mesh,'--usdz',f.usdz,'--out',out,'--attempts','1','--pick',
+  '--export',exported,'--mm-per-unit','1000'],{env:{HOME:f.home,PATH:'/usr/bin:/bin',SCAN_TO_MAKE_AI_ACCESS:'claude-code',SCAN_TO_MAKE_AI_MODEL:'claude-opus-5-5',
+  SCAN_TO_MAKE_CLAUDE_PATH:claudePath,SCAN_TO_MAKE_SCAN_BLENDER:'/bin/false',SCAN_TO_MAKE_CAPTURE_PYTHON:absolutePython,SCAN_TO_MAKE_AI_JUDGE_TOOL:join(f.root,'judge')}});
+ const report=JSON.parse(await readFile(join(exported,'report.json'),'utf8'));
+ // No Blender here, so the attempt can't be measured: the veto rejects it and the captured scan is exported.
+ assert.deepEqual(report.aiTweak.attempts.map(a=>[a.index,a.outcome,a.veto]),[[1,'changed','unreadable']]);
+ assert.deepEqual([report.aiTweak.pick.choice,report.aiTweak.pick.decidedBy],['captured','veto']);
+ assert.deepEqual(report.aiTweak.access,{kind:'claude-code',model:'claude-opus-5-5'});
+ assert.deepEqual(JSON.parse(stdout).aiTweak,report.aiTweak);
+ assert.deepEqual((await readFile(join(exported,'corrected.obj'),'utf8')).split('\n').filter(l=>l.startsWith('v ')),['v 0 0 0','v 1000 0 0','v 0 1000 0','v 0 0 1000']);
+ assert.deepEqual(Object.keys(report.outputs).sort(),['corrected.obj','corrected.stl','mesh.mtl','mesh_basecolor_0.png']);
+ assert.equal(report.status,'complete');
+});
