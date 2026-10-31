@@ -12,12 +12,14 @@ import { readFileSync } from 'node:fs';
 import { FileSavedProjectStorage } from '@scan-to-make/project';
 import { SCAN_VIEW_NAMES } from '@scan-to-make/contracts/scan-processing';
 import { CaptureStore } from '@scan-to-make/companion/capture-import';
+import { DetailStillStore } from '@scan-to-make/companion/detail-stills';
 import { ScanProcessingStore, createScanRunner } from '@scan-to-make/companion/scan-processing';
 import { createCaptureConverter } from '@scan-to-make/companion/capture-converter';
 import { RemoteAuthStore } from '@scan-to-make/companion/remote-auth';
 import { startCompanionServer } from '@scan-to-make/companion';
 import { repoRoot } from './repo-root.mjs';
 import { generateSyntheticUsdz } from './generate-synthetic-usdz.mjs';
+import { generateSyntheticHeic } from './generate-synthetic-heic.mjs';
 import { startFakePrinterMcp } from './fake-printer-mcp.mjs';
 import { python } from './resolve-python.mjs';
 
@@ -56,7 +58,7 @@ async function pythonReady() {
   try {
     await execFileAsync(python, [
       '-c',
-      'from pxr import Usd; import PIL',
+      'from pxr import Usd; import PIL; import pillow_heif',
     ]);
     return true;
   } catch {
@@ -115,12 +117,19 @@ test(
     skip:
       (await blenderReady()) && (await pythonReady())
         ? false
-        : 'Requires Blender 5.0.1 (BLENDER) and pxr/Pillow (python3 on PATH or CAPTURE_TEST_PYTHON)',
+        : 'Requires Blender 5.0.1 (BLENDER), pxr/Pillow/pillow-heif (python3 on PATH or CAPTURE_TEST_PYTHON)',
     timeout: 900_000,
   },
   async (t) => {
     const { path: usdzPath, outDir: usdzTemp } = generateSyntheticUsdz('two_layer');
     t.after(() => rm(usdzTemp, { recursive: true, force: true }));
+
+    const {
+      bytes: heicBytes,
+      outDir: heicTemp,
+      sha256: heicSha256,
+    } = generateSyntheticHeic();
+    t.after(() => rm(heicTemp, { recursive: true, force: true }));
 
     const root = await mkdtemp(join(tmpdir(), 'e2e-pipeline-'));
     t.after(() => rm(root, { recursive: true, force: true }));
@@ -166,7 +175,7 @@ test(
     const server = await startCompanionServer({
       port: 0,
       remoteAuth,
-      capture: { storage, captures, scanProcessing },
+      capture: { storage, captures, scanProcessing, detailStills: new DetailStillStore(storage, join(root, 'captures')) },
     });
     t.after(() => server.close());
 
@@ -216,6 +225,46 @@ test(
     const binding = JSON.parse(await readFile(bindingPath, 'utf8'));
     assert.equal(binding.capture.provenance.unitsAuthored, true);
     assert.equal(binding.capture.evidence.physicalFit, 'unknown');
+
+    const stillBase = `/v1/saved-projects/e2e-phone/captures/${captureId}/detail-stills`;
+    const heicUpload = await wire(
+      server.url,
+      `${stillBase}?projectRevision=0&label=${encodeURIComponent('synthetic closeup')}`,
+      {
+        method: 'POST',
+        headers: {
+          ...authHeaders,
+          'content-type': 'image/heic',
+          'if-match': etag,
+        },
+        body: heicBytes,
+      }
+    );
+    assert.equal(heicUpload.status, 201, heicUpload.bytes.toString());
+    const { still: heicStill } = JSON.parse(heicUpload.bytes.toString());
+    assert.equal(heicStill.mediaType, 'image/heic');
+    assert.equal(heicStill.sha256, heicSha256);
+    assert.equal(heicStill.sha256, sha(heicBytes));
+    await waitCompanionSlot(server.url, authHeaders);
+
+    const heicDownload = await wire(
+      server.url,
+      `${stillBase}/${heicStill.id}?projectRevision=0`,
+      { headers: { ...authHeaders, 'if-match': etag } }
+    );
+    assert.equal(heicDownload.status, 200);
+    assert.equal(heicDownload.headers['content-type'], 'image/heic');
+    assert.equal(heicDownload.headers['x-content-sha256'], heicSha256);
+    assert.deepEqual(heicDownload.bytes, heicBytes);
+
+    const heicStillPath = join(
+      root,
+      'captures',
+      captureId,
+      'detail-stills',
+      `${heicStill.id}.img`
+    );
+    await access(heicStillPath);
 
     const scanBase = `/v1/saved-projects/e2e-phone/captures/${captureId}/scan-processing`;
     const queued = await wire(server.url, `${scanBase}?projectRevision=0`, {
@@ -307,6 +356,8 @@ test(
       'scripted',
       '--script',
       scriptPath,
+      '--still',
+      heicStillPath,
       '--max-steps',
       '4',
       '--max-seconds',
@@ -315,6 +366,8 @@ test(
     const correctReport = JSON.parse(correctStdout);
     assert.equal(correctReport.status, 'complete');
     assert.ok(correctReport.final?.boxExtentsMm?.length === 3);
+    assert.equal(correctReport.detailStills?.length, 1);
+    assert.equal(correctReport.detailStills[0].sourceMediaType, 'image/heic');
     await access(join(toolOut, 'correct', 'corrected.stl'));
   }
 );
