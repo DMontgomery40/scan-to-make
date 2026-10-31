@@ -24,6 +24,7 @@ import {
 } from '@scan-to-make/contracts';
 import type { CaptureFile } from '../capture/retainedCaptures';
 import { adviceJob, parseCloseupAdvice } from './closeupAdviceModel';
+import { projectOverviewLoader } from './projectOverview';
 import {
   sessionJobMemory,
   unavailableScanServices,
@@ -99,6 +100,11 @@ export function liveScanServices(
   // finds the jobs the companion kept.
   const jobs = sessionJobMemory();
   const readJson = bridge.readJson?.bind(bridge);
+  // A sent print job outlives this screen and the app session.
+  const handoffs = storedHandoffMemory(captures);
+  const printing = modules.PrinterHandoffBridge
+    ? companionPrinterHandoff(modules.PrinterHandoffBridge)
+    : undefined;
   return {
     async acknowledge(projectId) {
       const state = await sync.sync(projectId);
@@ -111,14 +117,23 @@ export function liveScanServices(
     stills,
     picker: bridgePhotoPicker(bridge),
     jobs,
-    // A sent print job outlives this screen and the app session.
-    handoffs: storedHandoffMemory(captures),
+    handoffs,
     printerChoice: storedPrinterChoice(captures),
     // Present only in builds with the printer handoff transport.
-    ...(modules.PrinterHandoffBridge
-      ? { printing: companionPrinterHandoff(modules.PrinterHandoffBridge) }
-      : {}),
+    ...(printing ? { printing } : {}),
     imageUri: file => client.imageUri(file),
+    overview: projectOverviewLoader({
+      state: id => sync.state(id),
+      listJobs: (p, c, a) => client.listJobs(p, c, a),
+      remembered: (p, c) => jobs.load(p, c),
+      handoff: (p, c) => handoffs.load(p, c),
+      ...(printing
+        ? { printStatus: (p, c, a, h) => printing.status(p, c, a, h) }
+        : {}),
+      downloadArtifact: (p, c, a, job, name) =>
+        client.downloadArtifact(p, c, a, job, name),
+      imageUri: file => client.imageUri(file),
+    }),
     ...(readJson
       ? {
           advice: closeupAdviceLoader({

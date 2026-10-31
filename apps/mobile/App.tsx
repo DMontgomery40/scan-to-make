@@ -16,10 +16,9 @@ import type {
 import { localSavedProjects, newProjectId } from './src/project/savedProjects';
 import { CompanionScreen } from './src/screens/CompanionScreen';
 import { isPairingLink } from './src/companion/pairingLink';
-import { HomeScreen } from './src/screens/HomeScreen';
-import { AboutScreen } from './src/screens/AboutScreen';
+import { ProjectsHomeScreen } from './src/screens/ProjectsHomeScreen';
+import { SettingsScreen } from './src/screens/SettingsScreen';
 import { RetainedCapturesScreen } from './src/screens/RetainedCapturesScreen';
-import { ProjectsScreen } from './src/screens/ProjectsScreen';
 import { ScanResultsScreen } from './src/screens/ScanResultsScreen';
 import type { ReferenceDraft } from './src/screens/scanResultsModel';
 import { CloseUpsScreen } from './src/screens/CloseUpsScreen';
@@ -33,17 +32,15 @@ import { type } from './src/ui/theme';
 
 type Route =
   | 'home'
-  | 'about'
-  | 'projects'
+  | 'settings'
   | 'retainedCaptures'
   | 'scanResults'
   | 'closeUps'
   | 'print';
 const PARENT: Record<Route, Route | null> = {
   home: null,
-  about: 'home',
-  projects: 'home',
-  retainedCaptures: 'projects',
+  settings: 'home',
+  retainedCaptures: 'home',
   scanResults: 'retainedCaptures',
   closeUps: 'scanResults',
   print: 'scanResults',
@@ -73,6 +70,8 @@ function App({
   // The finished scan check whose cleaned-up model Send to printer uses.
   const [printJob, setPrintJob] = useState<ScanProcessingJob | null>(null);
   const [companionOpen, setCompanionOpen] = useState(false);
+  // Bumped when the pairing screen closes, so home reads the pairing again.
+  const [pairingKey, setPairingKey] = useState(0);
   // scantomake://pair links, e.g. the companion's QR read by the Camera app.
   const [pairLink, setPairLink] = useState<string | null>(null);
   // A cold start can deliver the same link twice within moments. Drop that
@@ -100,8 +99,8 @@ function App({
   const [captureProjectId, setCaptureProjectId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
+  // The grid keeps showing while it reloads.
   const refresh = useCallback(async () => {
-    setListing(null);
     const result = await repository.list();
     setListing(result);
     setHydrated(true);
@@ -130,11 +129,17 @@ function App({
   const createProject = async (name: string) => {
     setCreating(true);
     setCreateError(null);
-    const result = await repository.create({
-      id: newProjectId(),
-      brief: { object: name, context: '', addition: '' },
-    });
-    setCreating(false);
+    let result: Awaited<ReturnType<SavedProjects['create']>>;
+    try {
+      result = await repository.create({
+        id: newProjectId(),
+        brief: { object: name, context: '', addition: '' },
+      });
+    } catch {
+      result = { status: 'storage-error' };
+    } finally {
+      setCreating(false);
+    }
     if (result.status !== 'ok') {
       setCreateError(
         'The project couldn’t be saved. Your other projects are unchanged.',
@@ -162,7 +167,7 @@ function App({
             repository={repository}
             onBack={() => {
               refresh();
-              setRoute('projects');
+              setRoute('home');
             }}
             onCompanion={() => setCompanionOpen(true)}
             onResults={capture => {
@@ -216,37 +221,29 @@ function App({
           />
         ) : null;
         break;
-      case 'projects':
+      case 'settings':
         screen = (
-          <ProjectsScreen
-            result={listing}
-            error={createError}
-            creating={creating}
-            onCreate={createProject}
-            onOpen={openCaptures}
-            onBack={() => setRoute('home')}
-            onRetry={refresh}
-          />
-        );
-        break;
-      case 'about':
-        screen = (
-          <AboutScreen
-            onCompanion={() => setCompanionOpen(true)}
+          <SettingsScreen
+            onPair={() => setCompanionOpen(true)}
             onBack={() => setRoute('home')}
           />
         );
         break;
       default:
         screen = (
-          <HomeScreen
-            onCompanion={() => setCompanionOpen(true)}
-            onAbout={() => setRoute('about')}
-            onProjects={() => {
-              setCreateError(null);
-              refresh();
-              setRoute('projects');
-            }}
+          <ProjectsHomeScreen
+            result={listing}
+            services={scanServices}
+            pairingKey={pairingKey}
+            paused={companionOpen}
+            creating={creating}
+            createError={createError}
+            onCreate={createProject}
+            onNaming={() => setCreateError(null)}
+            onOpen={openCaptures}
+            onRetry={refresh}
+            onPair={() => setCompanionOpen(true)}
+            onSettings={() => setRoute('settings')}
           />
         );
     }
@@ -265,10 +262,16 @@ function App({
         {companionOpen ? (
           <Modal
             presentationStyle="fullScreen"
-            onRequestClose={() => setCompanionOpen(false)}
+            onRequestClose={() => {
+              setCompanionOpen(false);
+              setPairingKey(key => key + 1);
+            }}
           >
             <CompanionScreen
-              onBack={() => setCompanionOpen(false)}
+              onBack={() => {
+                setCompanionOpen(false);
+                setPairingKey(key => key + 1);
+              }}
               link={pairLink}
               onLinkUsed={() => setPairLink(null)}
             />

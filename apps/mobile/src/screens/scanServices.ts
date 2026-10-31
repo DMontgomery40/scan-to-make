@@ -6,6 +6,8 @@ import type {
 } from '@scan-to-make/contracts';
 import type { CaptureFile, RetainedCapture } from '../capture/retainedCaptures';
 import type { CloseupTarget } from './closeupAdviceModel';
+import type { SavedProject } from '@scan-to-make/contracts/saved-project';
+import type { ProjectOverview } from './projectOverview';
 import {
   sessionHandoffMemory,
   sessionPrinterChoice,
@@ -159,6 +161,8 @@ export type ScanServices = {
   printerChoice: PrinterChoiceMemory;
   /** A displayable URI for verified image bytes, when the platform has one. */
   imageUri?: (file: CaptureFile) => Promise<string | null>;
+  /** What the Projects grid shows for a project, read without sending it. */
+  overview?: (project: SavedProject) => Promise<ProjectOverview>;
 };
 
 export type ScanTarget = { projectId: string; capture: RetainedCapture };

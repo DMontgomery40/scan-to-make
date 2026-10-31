@@ -67,15 +67,35 @@ function press(tree: ReactTestRenderer.ReactTestRenderer, label: string) {
   });
 }
 
-test('home renders and opens projects', async () => {
+// Project cards are one button each, labelled "<name>, <status>[, <size>]".
+function openProject(tree: ReactTestRenderer.ReactTestRenderer, name: string) {
+  const card = tree.root.find(
+    n =>
+      n.props.accessibilityRole === 'button' &&
+      typeof n.props.onPress === 'function' &&
+      typeof n.props.accessibilityLabel === 'string' &&
+      n.props.accessibilityLabel.startsWith(`${name}, `),
+  );
+  return act(async () => {
+    card.props.onPress();
+  });
+}
+
+test('home is the projects grid, with the empty state and one Scan something', async () => {
   let tree!: ReactTestRenderer.ReactTestRenderer;
   await act(async () => {
     tree = ReactTestRenderer.create(<App repository={testStore()} />);
   });
-  expect(texts(tree)).toContain('Scan it true.');
-  await press(tree, 'Your projects');
-  expect(texts(tree)).toContain('New project');
-  expect(texts(tree)).toContain('Your scan projects will appear here.');
+  const shown = texts(tree);
+  expect(shown).toContain('Projects');
+  expect(shown).toContain('Scan your first thing');
+  expect(shown).toContain('Scan something');
+  expect(shown).not.toContain('Scan it true.');
+  expect(shown).not.toContain('Refresh projects');
+  await press(tree, 'Settings');
+  expect(texts(tree)).toContain('About Scan to Make');
+  await press(tree, 'Back');
+  expect(texts(tree)).toContain('Scan your first thing');
 });
 
 test('a new project is saved from its name and opens its scans', async () => {
@@ -92,14 +112,14 @@ test('a new project is saved from its name and opens its scans', async () => {
     await act(async () => {
       tree = ReactTestRenderer.create(<App repository={store} />);
     });
-    await press(tree, 'Your projects');
+    await press(tree, 'Scan something');
     const name = tree.root.find(
       n =>
         n.type === TextInput &&
         n.props.accessibilityLabel === 'What are you scanning?',
     );
     await act(async () => name.props.onChangeText('  Desk lamp  '));
-    await press(tree, 'Create and scan');
+    await press(tree, 'Continue');
     expect(texts(tree)).toContain('Project captures');
     const project = await onlyProject(store);
     expect(project.brief).toEqual({
@@ -112,7 +132,7 @@ test('a new project is saved from its name and opens its scans', async () => {
 
     await press(tree, 'Back');
     expect(texts(tree)).toContain('Desk lamp');
-    await press(tree, 'Open scans for Desk lamp');
+    await openProject(tree, 'Desk lamp');
     expect(texts(tree)).toContain('Project captures');
   } finally {
     if (tree) await act(async () => tree.unmount());
@@ -135,7 +155,7 @@ test('a failed create keeps the typed name and other projects', async () => {
   await act(async () => {
     tree = ReactTestRenderer.create(<App repository={failing} />);
   });
-  await press(tree, 'Your projects');
+  await press(tree, 'Scan something');
   const name = () =>
     tree.root.find(
       n =>
@@ -143,7 +163,7 @@ test('a failed create keeps the typed name and other projects', async () => {
         n.props.accessibilityLabel === 'What are you scanning?',
     );
   await act(async () => name().props.onChangeText('Desk lamp'));
-  await press(tree, 'Create and scan');
+  await press(tree, 'Continue');
   expect(texts(tree)).toContain(
     'The project couldn’t be saved. Your other projects are unchanged.',
   );
@@ -178,8 +198,7 @@ test('projects saved with earlier fit data still list and open their scans', asy
     await act(async () => {
       tree = ReactTestRenderer.create(<App repository={testStore(bytes)} />);
     });
-    await press(tree, 'Your projects');
-    await press(tree, 'Open scans for Kitchen drawer');
+    await openProject(tree, 'Kitchen drawer');
     expect(texts(tree)).toContain('Project captures');
     expect(bytes.get('drawer-study')).toBe(JSON.stringify(legacy));
   } finally {
@@ -202,9 +221,9 @@ test('corrupt and future records remain visible alongside healthy projects', asy
   await act(async () => {
     tree = ReactTestRenderer.create(<App repository={store} />);
   });
-  await press(tree, 'Your projects');
-  expect(texts(tree)).toContain('This project couldn’t be read.');
-  expect(texts(tree)).toContain('This project needs a newer app.');
+  expect(texts(tree)).toContain('Can’t be read');
+  expect(texts(tree)).toContain('Needs a newer app');
+  expect(texts(tree)).toContain('Good drawer');
   expect(bytes.get('broken')).toBe('{');
 });
 
@@ -231,8 +250,7 @@ test('a retained capture leads to scan results and close-ups, and back', async (
         <App repository={store} scanServices={services} />,
       );
     });
-    await press(tree, 'Your projects');
-    await press(tree, 'Open scans for Synthetic case');
+    await openProject(tree, 'Synthetic case');
     expect(texts(tree)).toContain('Capture 1');
     await press(tree, 'See scan results for capture 1');
     expect(texts(tree)).toContain('Scan results');
@@ -360,8 +378,7 @@ test('production wiring drives the real clients through the native bridges', asy
     await act(async () => {
       tree = ReactTestRenderer.create(<App repository={store} />);
     });
-    await press(tree, 'Your projects');
-    await press(tree, 'Open scans for Synthetic case');
+    await openProject(tree, 'Synthetic case');
     await press(tree, 'See scan results for capture 1');
     expect(requests).toEqual(['GET project', 'PUT project', 'LIST scan']);
     await act(async () => {
@@ -450,8 +467,7 @@ test('real-size edits survive moving to close-ups and back', async () => {
         <App repository={store} scanServices={services} />,
       );
     });
-    await press(tree, 'Your projects');
-    await press(tree, 'Open scans for Synthetic case');
+    await openProject(tree, 'Synthetic case');
     await press(tree, 'See scan results for capture 1');
     // The job's own reference fills the form until the user edits it.
     expect(field('Height').props.value).toBe('21.7');
@@ -584,8 +600,7 @@ test('real clients reopen a kept check and upload camera-roll photos by identity
     await act(async () => {
       tree = ReactTestRenderer.create(<App repository={store} />);
     });
-    await press(tree, 'Your projects');
-    await press(tree, 'Open scans for Synthetic case');
+    await openProject(tree, 'Synthetic case');
     await press(tree, 'See scan results for capture 1');
     expect(texts(tree)).toContain('Ready');
     expect(
@@ -680,8 +695,7 @@ test('opening close-ups waits for a gallery download the results screen left run
         <App repository={store} scanServices={services} />,
       );
     });
-    await press(tree, 'Your projects');
-    await press(tree, 'Open scans for Synthetic case');
+    await openProject(tree, 'Synthetic case');
     await press(tree, 'See scan results for capture 1');
     expect(held).toBe(true);
     await press(tree, 'Add close-up photos');
@@ -771,4 +785,36 @@ test('a pairing link delivered twice at launch pairs only once', async () => {
   await act(async () => tree.unmount());
   delete native.CompanionPairing;
   jest.restoreAllMocks();
+});
+
+test('a create that throws still lets you try again', async () => {
+  const { TextInput } = require('react-native');
+  const store = testStore();
+  const failing = {
+    ...store,
+    create: async () => {
+      throw Error('disk gone');
+    },
+  };
+  let tree!: ReactTestRenderer.ReactTestRenderer;
+  await act(async () => {
+    tree = ReactTestRenderer.create(<App repository={failing} />);
+  });
+  await press(tree, 'Scan something');
+  const name = tree.root.find(
+    n =>
+      n.type === TextInput &&
+      n.props.accessibilityLabel === 'What are you scanning?',
+  );
+  await act(async () => name.props.onChangeText('Desk lamp'));
+  await press(tree, 'Continue');
+  expect(texts(tree)).toContain(
+    'The project couldn’t be saved. Your other projects are unchanged.',
+  );
+  expect(name.props.editable).toBe(true);
+  await press(tree, 'Cancel');
+  await press(tree, 'Scan something');
+  expect(texts(tree)).not.toContain(
+    'The project couldn’t be saved. Your other projects are unchanged.',
+  );
 });
