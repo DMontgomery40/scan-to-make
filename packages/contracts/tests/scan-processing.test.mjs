@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {compareScanDimensions,ScanProcessingRequestSchema,ScanProcessingJobSchema} from '../dist/scan-processing.js';
+import {compareScanDimensions,ScanProcessingRequestSchema,ScanProcessingJobSchema,ScanModelAssetsSchema} from '../dist/scan-processing.js';
 test('principal extents match reference by descending size, errors are measured minus reference',()=>{
  const comparison=compareScanDimensions([21.7,62.9,48.7],[45.2,21.7,60.6]);assert.equal(comparison.matching,'sorted-descending');assert.deepEqual(comparison.errorMm.map(x=>+x.toFixed(2)),[2.3,3.5,0]);
 });
@@ -36,4 +36,13 @@ test('cleanup success requires final geometry, advice, box measurement and compl
  // On terminal failure, queued denotes work never started, not a retry scheduled by the server.
  const failed=structuredClone(job);failed.status='failed';failed.failure='processing-failed';failed.pipelineStages[3].status='failed';failed.pipelineStages[4].status='queued';failed.pipelineStages[5].status='queued';
  assert(ScanProcessingJobSchema.safeParse(failed).success);
+});
+
+
+test('model bundle is closed to canonical basenames, consistent MIME types and a bounded unique file set',()=>{
+ const model={schema:'scan-to-make.scan-model/0.1',jobId:'44444444-4444-4444-8444-444444444444',entrypoint:'repaired.obj',files:[{name:'repaired.obj',sha256:'a'.repeat(64),byteLength:20,mediaType:'model/obj'},{name:'mesh.mtl',sha256:'b'.repeat(64),byteLength:30,mediaType:'text/plain'}]};
+ assert(ScanModelAssetsSchema.safeParse(model).success);
+ for(const mutate of [m=>m.files.push(m.files[0]),m=>m.files.shift(),m=>m.files[1].name='../mesh.mtl',m=>m.files[1].mediaType='image/png',m=>m.files[0].byteLength=64*1024*1024]){
+  const bad=structuredClone(model);mutate(bad);assert(!ScanModelAssetsSchema.safeParse(bad).success);
+ }
 });

@@ -364,3 +364,27 @@ Use reference **boxExtentsMm** for spec comparisons. Published accessory keep-ou
 are clearance requirements, not physical opening sizes, and must be reported as
 such. Personal texture evidence and region selections remain private; repository
 tests use synthetic small holes, faint seams and disconnected planar samples.
+
+
+### Texture-preserving export
+
+`corrected.obj` retains captured per-corner UVs and material bindings. Its staged
+MTL and texture files are copied into the result at the same relative paths and
+included in `report.json.outputs` SHA-256 identities. Keep that bundle together.
+With no geometry edits and millimetre OBJ input (including the companion's repaired
+scan), the OBJ is copied byte for byte. Other input units are still converted to
+millimetres. `report.json.export` records `geometryEdited`, `inputObjCopied`,
+`uvRetained` and `materialFiles`. Remesh and convex-hull edits reject textured inputs before changing the checkpoint,
+so the model can choose another operation. Export also rejects any other edit
+that loses the captured UV layer. New cut walls/floors are marked inferred and
+exported without captured material bindings.
+
+These changes reuse scan-repair's UV-aware OBJ exporter. Bambu's `merge_vertices`
+and Blender edit helper operate on STL and do not preserve the capture's OBJ/MTL
+texture bundle, so neither fits this export step. No slicing or print behavior is
+added.
+
+Asset references that collide with generated geometry, reports, audit logs, or the
+job's `work`/`stills` directories are rejected before staging (including case
+aliases). Multi-library OBJ results keep one `mtllib` declaration per library so
+the exported bundle can be imported again.

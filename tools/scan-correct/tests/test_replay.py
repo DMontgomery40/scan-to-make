@@ -19,7 +19,9 @@ class ReplayTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             base=Path(tmp)
             worker=Worker(base/'job',seconds=120)
-            worker.stage(textured_box(base),'mm')
+            mesh=textured_box(base)
+            mesh.write_text('\n'.join(line for line in mesh.read_text().splitlines() if not line.startswith(('mtllib ', 'usemtl ')))+'\n')
+            worker.stage(mesh,'mm')
             result=worker.apply('rigid_frame',{'rotation':[1,0,0,0,1,0,0,0,1],'translation_mm':[2,3,4]})
             self.assertAlmostEqual(result['after']['bboxMm']['min'][0],-8)
             worker.apply('rigid_frame',{'rotation':[1,0,0,0,1,0,0,0,1],'translation_mm':[-2,-3,-4]})

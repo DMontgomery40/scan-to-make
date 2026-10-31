@@ -47,6 +47,17 @@ class WorkerTests(unittest.TestCase):
             Worker(self.base/'unsafe-job',seconds=30).stage(self.mesh,'mm')
 
     def test_geometry_effects_and_reference_box(self):
+        # Hull/remesh deliberately replace topology: exercise them on an
+        # untextured mesh rather than discarding a captured texture silently.
+        plain=self.base/'plain.obj'
+        lines=[]
+        for line in self.mesh.read_text().splitlines():
+            if line.startswith(('mtllib ', 'usemtl ', 'vt ')):continue
+            if line.startswith('f '):line='f '+' '.join(p.split('/')[0] for p in line.split()[1:])
+            lines.append(line)
+        plain.write_text('\n'.join(lines)+'\n')
+        self.worker=Worker(self.base/'plain-job',seconds=120)
+        self.worker.stage(plain,'mm')
         self.operation('measure',{})
         self.operation('symmetrize',{'axis':'X','direction':'NEGATIVE','iterations':1})
         self.operation('convex_hull',{})

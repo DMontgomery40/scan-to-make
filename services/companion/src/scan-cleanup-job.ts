@@ -6,6 +6,7 @@ import type {DetailStill} from '@scan-to-make/contracts/detail-still';
 import {readBoundedCaptureFile,receiptFromConvertedBytes} from './capture-import.js';
 import type {ScanRunner} from './scan-processing-runner.js';
 import {checkCleanupDisk,type CleanupContext} from './scan-cleanup-runner.js';
+import {readScanMaterials} from './scan-model-assets.js';
 
 export interface CleanupSnapshot {source:Buffer;stills:{still:DetailStill;bytes:Buffer}[]}
 type Stage=NonNullable<ScanProcessingJob['pipelineStages']>[number]['kind'];
@@ -71,6 +72,8 @@ export async function runCleanup(runner:ScanRunner,root:string,job:ScanProcessin
    // Existing phone clients download these names; both now refer to final geometry.
    await write(join(output,name.replace('corrected','repaired')),bytes);
   }
+  const materials=await readScanMaterials(ctx.corrected,await readBoundedCaptureFile(join(output,'repaired.obj'),64*1024*1024),report.outputs);
+  for(const [name,bytes] of Object.entries(materials))await write(join(output,name),bytes);
   const log=await readBoundedCaptureFile(join(ctx.corrected,'tool-calls.jsonl'),16*1024*1024);
   if(sha(log)!==report.toolLogSha256)throw Error('Correction log hash mismatch');
   await write(join(output,'correction-calls.jsonl'),log);

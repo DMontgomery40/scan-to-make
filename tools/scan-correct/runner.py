@@ -10,7 +10,7 @@ import shutil
 import time
 
 from adapters import Adapter, Scripted, image_data
-from host import Worker, digest, write_json
+from host import Worker, digest, write_json, validate_export_asset_path
 from schema import validate
 from still_images import prepare_still
 
@@ -135,12 +135,28 @@ def run_job(args):
             report['specErrorMm'] = [actual-target for actual,target in zip(final['after']['boxExtentsMm'],args.reference_mm)]
             if any(abs(delta)>.05 for delta in report['specErrorMm']):
                 raise ValueError('final measured dimensions miss reference tolerance 0.05 mm')
-        worker.export()
-        for source,target in [('repaired.obj','corrected.obj'),('repaired.stl','corrected.stl')]:
-            shutil.copyfile(worker.directory/'export'/source,output/target)
+        exported = worker.export()['data']
+        outputs, targets = {}, set()
+        for name,expected in exported['artifacts'].items():
+            source = (worker.directory/name).resolve()
+            relative = source.relative_to(worker.directory/'export')
+            if digest(source)!=expected:
+                raise ValueError('worker export identity mismatch')
+            if str(relative) not in ('repaired.obj','repaired.stl'):
+                validate_export_asset_path(relative)
+            target = {'repaired.obj':'corrected.obj','repaired.stl':'corrected.stl'}.get(str(relative),str(relative))
+            if target.casefold() in targets:
+                raise ValueError('duplicate worker export destination')
+            targets.add(target.casefold())
+            destination = output/target
+            destination.parent.mkdir(parents=True,exist_ok=True)
+            shutil.copyfile(source,destination)
+            outputs[target] = digest(destination)
+        if not {'corrected.obj','corrected.stl'}.issubset(outputs):
+            raise ValueError('incomplete worker export')
         worker.remaining()
         report.update({'status':'complete','final':final['after'],
-                       'outputs':{name:digest(output/name) for name in ('corrected.obj','corrected.stl')}})
+                       'outputs':outputs,'export':{k:v for k,v in exported.items() if k!='artifacts'}})
         log({'type':'final','result':final})
         return report
     except Exception:

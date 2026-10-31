@@ -20,6 +20,19 @@ repair = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(repair)
 
 
+# Files/directories owned by the exporter or host loop, including aliases on
+# case-insensitive filesystems. Asset paths must never replace these outputs.
+RESERVED_EXPORT_ROOTS = {'repaired.obj','repaired.stl','corrected.obj','corrected.stl',
+                         'report.json','tool-calls.jsonl','work','stills'}
+
+
+def validate_export_asset_path(relative):
+    path = Path(relative)
+    if (path.is_absolute() or not path.parts or '..' in path.parts or
+        path.parts[0].casefold() in RESERVED_EXPORT_ROOTS):
+        raise ValueError('material asset conflicts with reserved output path')
+
+
 def digest(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
@@ -86,6 +99,8 @@ class Worker:
             if not resolved.is_file():
                 raise ValueError('missing input asset')
             relative = path.relative_to(mesh.parent)
+            if role in ('material','image'):
+                validate_export_asset_path(relative)
             if relative in roles:
                 if roles[relative]!=role:
                     raise ValueError('input asset has conflicting reference roles')
@@ -139,6 +154,23 @@ class Worker:
         manifest = {str((assets/name).relative_to(self.directory)):hashlib.sha256(data).hexdigest()
                     for name,data in planned.items()}
         write_json(self.directory/'inputs.json',manifest)
+        libraries = []
+        if mesh.suffix.lower()=='.obj':
+            for line in planned[Path(mesh.name)].decode('utf-8').splitlines():
+                fields = shlex.split(line,comments=True)
+                if fields and fields[0]=='mtllib':
+                    libraries.append(fields[1])
+        names = []
+        for name,role in roles.items():
+            if role=='material':
+                for line in planned[name].decode('utf-8').splitlines():
+                    fields = shlex.split(line,comments=True)
+                    if fields and fields[0]=='newmtl':
+                        names.append(' '.join(fields[1:]))
+        write_json(self.directory/'materials.json',{
+            'mesh':mesh.name,'scale':{'mm':1,'cm':10,'m':1000}[units],
+            'libraries':list(dict.fromkeys(libraries)),'names':names,
+            'files':[str(name) for name,role in roles.items() if role in ('material','image')]})
         return self._run('initialize',{'mesh':str(assets/mesh.name),
                          'scale':{'mm':1,'cm':10,'m':1000}[units],
                          'texture':str(override) if override else None})
