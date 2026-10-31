@@ -1,7 +1,7 @@
 """Bounded real Simulator detail-still and scan-processing bridge tests.
 
-Requires built companion. Uses a separate disposable app/container, never
-the product app or a physical device. Uses real capture-scoped credentials
+Requires built companion. Uses a separate disposable app/container. Uses real
+capture-scoped credentials
 against the synthetic pairing fixture (fake converter and scan runner), so
 this proves the native transport, not conversion, Blender or physical fit.
 """

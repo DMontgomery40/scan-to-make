@@ -1,6 +1,6 @@
 """Bounded real Simulator bridge fault tests. Requires built companion + pxr Python.
 
-Uses a separate disposable app/container, never the product app or physical device.
+Uses a separate disposable app/container.
 The fixture authenticates normal scoped requests; only its response is corrupted.
 """
 import argparse
