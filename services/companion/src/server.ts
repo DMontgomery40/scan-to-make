@@ -3,7 +3,8 @@ import {createPrintHandoffRoutes,type PrintHandoffServices} from './print-handof
 import {acquireInstanceLock} from './instance-lock.js';
 import { createServer, type IncomingMessage, type RequestListener } from 'node:http';
 import {createServer as createHttpsServer} from 'node:https';
-import {checkLanCertificate} from './lan-transport.js';
+import {certificatePublicKeySha256, checkLanCertificate} from './lan-transport.js';
+import {authority as hostAuthority, bindable, pairingOrigins, type LanAddresses} from './lan-addresses.js';
 import {
   RemoteAuthFailure,
   RemoteAuthStore,
@@ -87,7 +88,15 @@ function singleHeader(
   return value;
 }
 
-/** Explicit paired TLS LAN mode or loopback-only private Serve mode. */
+/**
+ * Explicit paired TLS LAN mode or loopback-only private Serve mode.
+ *
+ * In LAN mode the companion always binds its configured address. With `lanAddresses`
+ * (pairing v2, MAC-5) it also binds every other address that function finds, never
+ * 0.0.0.0, with the same certificate: a v2 phone pins the public key, so a certificate
+ * that names only the configured address serves them all, and a v1 phone's
+ * whole-certificate pin keeps matching on the configured address.
+ */
 export async function startCompanionServer(
   options: {
     port?: number;
@@ -95,8 +104,20 @@ export async function startCompanionServer(
     lanTls?: {cert: Buffer; key: Buffer};
     capture?: CaptureServices;
     printHandoff?: PrintHandoffServices;
+    /** Extra addresses to bind beside the configured one; looked up again every `rediscoverMs`. */
+    lanAddresses?: () => LanAddresses;
+    /** The Mac's `.local` name, accepted as a Host and listed in v2 links. */
+    localName?: string;
+    rediscoverMs?: number;
   } = {}
-): Promise<{ url: string; close(): Promise<void> }> {
+): Promise<{
+  url: string;
+  close(): Promise<void>;
+  /** Pairing link v2 origins in the order to try: only addresses this server is bound to. */
+  addresses(): string[];
+  /** The SHA-256 of the TLS public key (v2 `k=`), in LAN mode. */
+  publicKeySha256?: string;
+}> {
   const auth = options.remoteAuth;
   const lan = auth?.transport === 'lan';
   const lanUrl = lan ? new URL(auth.baseUrl) : undefined;
@@ -106,6 +127,15 @@ export async function startCompanionServer(
     if (port !== Number(lanUrl!.port || '443')) throw new Error('LAN port differs from pairing URL');
     checkLanCertificate(options.lanTls.cert, lanUrl!.hostname, auth!.certificateSha256!);
   } else if (options.lanTls) throw new Error('TLS requires explicit LAN pairing configuration');
+  if (options.lanAddresses && !lan) throw new Error('Extra addresses require LAN pairing');
+  // Extra listeners by address, and the Host values this server answers to.
+  const extras = new Map<string, ReturnType<typeof createHttpsServer>>();
+  // Hosts as clients send them: on port 443 the port is left off.
+  const hosts = () => new Set([
+    auth?.host?.toLowerCase(),
+    ...[...extras.keys()].map(a => hostAuthority(a, port)),
+    ...(options.localName ? [hostAuthority(options.localName, port)] : []),
+  ]);
   if (!Number.isSafeInteger(port) || port < 0 || port > 65535)
     throw new Error('Invalid local port');
   if(options.capture&&!auth)throw new Error('Capture routes require explicit authentication');
@@ -128,7 +158,7 @@ export async function startCompanionServer(
         throw new ServerFailure('forbidden');
       let login = '';
       if (auth && lan) {
-        if (singleHeader(request, 'host') !== auth.host ||
+        if (!hosts().has(singleHeader(request, 'host')?.toLowerCase()) ||
             Object.keys(request.headers).some(key => key === 'forwarded' || key.startsWith('x-forwarded-') || key.startsWith('tailscale-'))) {
           throw new RemoteAuthFailure('forbidden');
         }
@@ -255,11 +285,70 @@ export async function startCompanionServer(
   }
   authority = `127.0.0.1:${address.port}`;
   let closing: Promise<void> | undefined;
+  // Extra addresses are best effort: a bind that fails is retried at the next look,
+  // and an address that disappears loses its listener.
+  let found: LanAddresses = { lan: [], tailscale: [] };
+  let stopping = false;
+  let syncing: Promise<void> | undefined;
+  const closeExtra = (extra: ReturnType<typeof createHttpsServer>) => new Promise<void>(resolve => {
+    extra.close(() => resolve());
+    extra.closeAllConnections();
+  });
+  const syncExtras = async () => {
+    if (!options.lanAddresses || stopping) return;
+    try {
+      found = options.lanAddresses();
+    } catch {
+      return;
+    }
+    const wanted = new Set([...found.lan, ...found.tailscale].filter(a => a !== lanUrl!.hostname && bindable(a)));
+    for (const [address, extra] of [...extras])
+      if (!wanted.has(address)) {
+        extras.delete(address);
+        await closeExtra(extra);
+      }
+    for (const address of wanted) {
+      if (stopping) return;
+      if (extras.has(address)) continue;
+      const extra = createHttpsServer(options.lanTls!, handler);
+      extra.headersTimeout = server.headersTimeout;
+      extra.requestTimeout = server.requestTimeout;
+      extra.maxRequestsPerSocket = 1;
+      const bound = await new Promise<boolean>(resolve => {
+        // A failed bind is retried at the next look; a later error must never crash the companion.
+        extra.on('error', () => resolve(false));
+        extra.listen(port, address, () => resolve(true));
+      });
+      if (!bound) continue;
+      if (stopping) {
+        await closeExtra(extra);
+        return;
+      }
+      extras.set(address, extra);
+    }
+  };
+  // One look at a time: a tick that arrives while one runs waits for it instead.
+  const sync = () => (syncing ??= syncExtras().finally(() => { syncing = undefined; }));
+  await sync();
+  const timer = options.lanAddresses ? setInterval(() => void sync(), options.rediscoverMs ?? 30_000) : undefined;
+  timer?.unref();
   return {
     url: lan ? auth!.baseUrl : `http://${authority}`,
+    ...(lan ? { publicKeySha256: certificatePublicKeySha256(options.lanTls!.cert) } : {}),
+    addresses() {
+      if (!lan) return [];
+      const live = (list: string[]) => list.filter(a => extras.has(a));
+      return pairingOrigins(lanUrl!.hostname, port, { lan: live(found.lan), tailscale: live(found.tailscale) }, options.localName);
+    },
     close() {
       if (!closing)
         closing = (async () => {
+          stopping = true;
+          if (timer) clearInterval(timer);
+          // No listener outlives close(): a look in progress finishes first, then every extra closes.
+          await syncing;
+          await Promise.all([...extras.values()].map(closeExtra));
+          extras.clear();
           const stopped = new Promise<void>((resolve, reject) =>
             server.close((error) => (error ? reject(error) : resolve()))
           );
