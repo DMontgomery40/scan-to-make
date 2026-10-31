@@ -2,9 +2,8 @@ import { z } from 'zod';
 import type { DetailStill } from '@scan-to-make/contracts';
 
 /**
- * The part of scan-correct's `closeupAdvice` (tools/scan-correct,
- * closeup-advice.schema.json) that the Close-ups screen shows. Other fields
- * are accepted and ignored.
+ * The part of the companion's `closeupAdvice` (closeup-advice.schema.json)
+ * that the Close-ups screen shows. Other fields are accepted and ignored.
  */
 const TargetSchema = z.object({
   rank: z.number().int().min(1).max(6),
@@ -34,12 +33,16 @@ export function parseCloseupAdvice(json: unknown): CloseupTarget[] {
   );
 }
 
+// What the scan shows there, and what a photo helps with.
 const REASONS: Record<CloseupTarget['reasonCode'], string> = {
-  inferred_fill: 'The scan didn’t see this area, so it was filled in.',
-  surface_lumpy: 'The surface came out lumpy here.',
-  fine_feature: 'Small details here are too fine for the scan.',
-  dark_texture: 'This area is dark, so the scan may have missed detail.',
-  size_check: 'A photo here helps check the real size. Include a ruler.',
+  inferred_fill:
+    'This side looks sparse in the scan. A close-up helps fill it in accurately.',
+  surface_lumpy:
+    'The surface looks lumpy here. A close-up shows its real shape.',
+  fine_feature: 'Small detail here. A close-up captures it.',
+  dark_texture:
+    'This area looks dark in the scan. A close-up shows what’s there.',
+  size_check: 'Include a ruler in this close-up to check the real size.',
 };
 export const reasonText = (target: CloseupTarget) => REASONS[target.reasonCode];
 

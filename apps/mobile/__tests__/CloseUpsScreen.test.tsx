@@ -131,7 +131,7 @@ test('suggested close-ups are listed, and a photo chosen for one carries its lab
     shown.indexOf('Bottom (USB-C port)'),
   );
   expect(shown).toContain(
-    'The scan didn’t see this area, so it was filled in.',
+    'This side looks sparse in the scan. A close-up helps fill it in accurately.',
   );
   expect(shown).toContain('Start about 25 cm away');
   expect(shown).toContain('Start about 13 cm away');

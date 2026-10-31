@@ -27,7 +27,7 @@ test('advice.json targets are read best first, ignoring fields the app does not 
   });
   expect(second?.rank).toBe(2);
   expect(reasonText(first!)).toBe(
-    'The scan didn’t see this area, so it was filled in.',
+    'This side looks sparse in the scan. A close-up helps fill it in accurately.',
   );
   expect(distanceText(first!)).toBe('Start about 25 cm away');
   expect(distanceText({ ...first!, distanceMm: 4 })).toBe(
