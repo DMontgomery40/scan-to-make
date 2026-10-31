@@ -1,0 +1,411 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Scan to Make · iPhone · Pairing</title>
+<style>
+/* Scan to Make design kit v1 (2026-10-31). Inline this block into every mockup. */
+:root{
+  --paper:#F4F1EB; --card:#FFFFFF; --card-2:#FAF8F4; --ink:#1B1D1B; --ink-2:#5D615C; --ink-3:#646862;
+  --line:rgba(27,29,27,.09); --line-2:rgba(27,29,27,.14);
+  --clay:#C4512B; --clay-press:#A8421F; --clay-soft:#F7E5DB; --clay-ink:#8A3519;
+  --stage:#191E1C; --stage-2:#232A27; --stage-ink:#E9EEE6; --stage-ink-2:#9AA59D;
+  --ok:#2E7A55; --ok-soft:#E1EFE6; --amber:#A4650C; --amber-soft:#F6EBD4; --red:#B3261E; --red-soft:#F8E1DE;
+  --glass:rgba(255,255,255,.72); --glass-line:rgba(255,255,255,.6);
+  --r-card:22px; --r-btn:999px; --r-sheet:34px;
+  --shadow-1:0 1px 2px rgba(20,22,20,.05),0 4px 14px rgba(20,22,20,.06);
+  --shadow-2:0 2px 6px rgba(20,22,20,.08),0 18px 40px rgba(20,22,20,.14);
+  --font:-apple-system,BlinkMacSystemFont,"SF Pro Text","SF Pro Display","Helvetica Neue",Inter,system-ui,sans-serif;
+  --mono:"SF Mono",ui-monospace,Menlo,monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:#E7E3DB;font-family:var(--font);color:var(--ink);-webkit-font-smoothing:antialiased}
+body{min-height:100vh;padding:48px 32px 64px}
+.page-head{max-width:1100px;margin:0 0 28px;display:flex;align-items:flex-end;justify-content:space-between;gap:24px}
+.page-head h1{font-size:28px;letter-spacing:-.6px;font-weight:700}
+.page-head p{color:var(--ink-2);font-size:15px;max-width:640px;line-height:1.45;margin-top:6px}
+.page-head .tag{font:600 11px/1 var(--font);letter-spacing:1.4px;text-transform:uppercase;color:var(--clay)}
+.row{display:flex;gap:44px;justify-content:flex-start;align-items:flex-start;flex-wrap:wrap;margin:0}
+.caption{max-width:402px;margin-top:16px;font-size:13px;line-height:1.5;color:var(--ink-2)}
+.caption b{color:var(--ink)}
+
+/* ---------- iPhone frame (iPhone 18 Pro, 402x874 pt) ---------- */
+.phone{width:426px;height:898px;border-radius:68px;background:#0D0E0D;padding:12px;box-shadow:0 0 0 2px #3a3d3a inset,0 30px 60px rgba(0,0,0,.25),0 8px 18px rgba(0,0,0,.18);position:relative;flex:none}
+.screen{width:402px;height:874px;border-radius:56px;overflow:hidden;position:relative;background:var(--paper);display:flex;flex-direction:column}
+.island{position:absolute;top:11px;left:50%;transform:translateX(-50%);width:124px;height:36px;border-radius:20px;background:#000;z-index:50}
+.status{height:54px;flex:none;display:flex;align-items:center;justify-content:space-between;padding:6px 34px 0 46px;font:600 17px/1 var(--font);z-index:40;position:relative}
+.status .icons{display:flex;gap:7px;align-items:center}
+.status.dark{color:#fff}
+.home-ind{position:absolute;bottom:8px;left:50%;transform:translateX(-50%);width:140px;height:5px;border-radius:3px;background:#111;z-index:60}
+.home-ind.light{background:#fff}
+.content{flex:1;overflow:hidden;padding:0 20px;position:relative}
+
+/* nav */
+.nav{display:flex;align-items:center;justify-content:space-between;padding:6px 16px 4px;height:48px}
+.nav .circle-btn{width:40px;height:40px;border-radius:20px;background:var(--glass);border:1px solid var(--line);display:grid;place-items:center;backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);box-shadow:var(--shadow-1)}
+.large-title{font:700 34px/1.12 var(--font);letter-spacing:-.9px;padding:4px 20px 2px}
+.subtitle{font-size:15px;color:var(--ink-2);padding:0 20px;line-height:1.4}
+
+/* type */
+.t-title2{font:700 22px/1.2 var(--font);letter-spacing:-.4px}
+.t-headline{font:600 17px/1.3 var(--font);letter-spacing:-.2px}
+.t-body{font:400 17px/1.4 var(--font);letter-spacing:-.2px}
+.t-sub{font:400 15px/1.4 var(--font);color:var(--ink-2)}
+.t-foot{font:400 13px/1.38 var(--font);color:var(--ink-2)}
+.t-cap{font:600 11px/1 var(--font);letter-spacing:1.2px;text-transform:uppercase;color:var(--ink-3)}
+.num{font-variant-numeric:tabular-nums}
+
+/* cards, lists */
+.card{background:var(--card);border-radius:var(--r-card);box-shadow:var(--shadow-1)}
+.list{background:var(--card);border-radius:18px;overflow:hidden;box-shadow:var(--shadow-1)}
+.list .item{display:flex;align-items:center;gap:12px;padding:13px 16px;min-height:52px;border-bottom:1px solid var(--line)}
+.list .item:last-child{border-bottom:none}
+.chev{color:var(--ink-3);font-size:18px;margin-left:auto}
+
+/* buttons */
+.btn{display:flex;align-items:center;justify-content:center;gap:8px;height:54px;border-radius:var(--r-btn);font:600 17px/1 var(--font);letter-spacing:-.2px;border:none;width:100%}
+.btn.primary{background:var(--clay);color:#fff;box-shadow:0 6px 16px rgba(196,81,43,.28)}
+.btn.secondary{background:var(--card);color:var(--ink);box-shadow:var(--shadow-1);border:1px solid var(--line)}
+.btn.tinted{background:var(--clay-soft);color:var(--clay-ink)}
+.btn.plain{background:transparent;color:var(--clay);height:44px}
+.btn.dark{background:var(--ink);color:#fff}
+.btn.sm{height:36px;font-size:15px;width:auto;padding:0 16px}
+
+/* chips */
+.chip{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 10px 0 9px;border-radius:13px;font:600 12px/1 var(--font);letter-spacing:-.1px;white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis;align-self:flex-start}
+.chip svg{flex:none}
+.chip.ok{background:var(--ok-soft);color:var(--ok)}
+.chip.work{background:var(--amber-soft);color:var(--amber)}
+.chip.clay{background:var(--clay-soft);color:var(--clay-ink)}
+.chip.grey{background:#EEEBE5;color:var(--ink-2)}
+.chip.dark{background:rgba(255,255,255,.12);color:var(--stage-ink)}
+.dot{width:7px;height:7px;min-width:7px;border-radius:50%;background:currentColor;display:inline-block;flex:none}
+.dot.pulse{outline:3px solid rgba(0,0,0,.06);outline-offset:0}
+
+/* 3D stage */
+.stage{background:radial-gradient(120% 90% at 50% 30%,#2C3531 0%,#1A1F1D 60%,#141816 100%);color:var(--stage-ink);position:relative;overflow:hidden}
+.stage .floor{position:absolute;left:-10%;right:-10%;bottom:-30%;height:70%;background:repeating-linear-gradient(90deg,rgba(255,255,255,.05) 0 1px,transparent 1px 28px),repeating-linear-gradient(0deg,rgba(255,255,255,.05) 0 1px,transparent 1px 28px);transform:perspective(380px) rotateX(62deg);transform-origin:50% 0;mask-image:linear-gradient(to bottom,rgba(0,0,0,.9),transparent)}
+
+/* tab bar / bottom glass */
+.glassbar{position:absolute;left:12px;right:12px;bottom:26px;height:64px;border-radius:32px;background:var(--glass);backdrop-filter:blur(24px) saturate(1.4);-webkit-backdrop-filter:blur(24px) saturate(1.4);border:1px solid rgba(255,255,255,.7);box-shadow:var(--shadow-2);display:flex;align-items:center;padding:0 8px;gap:8px;z-index:30}
+
+/* sheet */
+.scrim{position:absolute;inset:0;background:rgba(10,12,10,.32);z-index:20}
+.sheet{position:absolute;left:0;right:0;bottom:0;background:var(--paper);border-radius:var(--r-sheet) var(--r-sheet) 0 0;z-index:25;padding:10px 20px 40px;box-shadow:0 -10px 40px rgba(0,0,0,.18)}
+.grabber{width:38px;height:5px;border-radius:3px;background:rgba(0,0,0,.18);margin:0 auto 14px}
+
+/* ---------- Mac ---------- */
+.desk{width:1280px;height:800px;border-radius:14px;overflow:hidden;position:relative;background:linear-gradient(160deg,#6F7F79 0%,#A89A86 45%,#D8B79A 100%);box-shadow:0 30px 70px rgba(0,0,0,.28);margin:0}
+.menubar{height:30px;background:rgba(246,244,240,.55);backdrop-filter:blur(30px) saturate(1.6);-webkit-backdrop-filter:blur(30px) saturate(1.6);display:flex;align-items:center;justify-content:space-between;padding:0 14px;font:500 13.5px/1 var(--font);color:#1b1d1b}
+.menubar .left,.menubar .right{display:flex;gap:18px;align-items:center}
+.menubar .app{font-weight:700}
+.mb-icon{width:26px;height:22px;border-radius:5px;display:grid;place-items:center}
+.mb-icon.active{background:rgba(0,0,0,.14)}
+.popover{position:absolute;top:38px;width:372px;border-radius:16px;background:rgba(250,249,246,.86);backdrop-filter:blur(40px) saturate(1.8);-webkit-backdrop-filter:blur(40px) saturate(1.8);box-shadow:0 0 0 .5px rgba(0,0,0,.18),0 22px 60px rgba(0,0,0,.28);overflow:hidden;font-size:13px}
+.mac-window{position:absolute;border-radius:12px;background:#F7F5F1;box-shadow:0 0 0 .5px rgba(0,0,0,.25),0 30px 80px rgba(0,0,0,.35);overflow:hidden}
+.traffic{display:flex;gap:8px;padding:14px 16px}
+.traffic i{width:12px;height:12px;border-radius:6px;display:block}
+.traffic i:nth-child(1){background:#FF5F57}.traffic i:nth-child(2){background:#FEBC2E}.traffic i:nth-child(3){background:#28C840}
+.mac-btn{height:30px;padding:0 14px;border-radius:8px;font:500 13px/30px var(--font);border:none;display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+.mac-btn.primary{background:var(--clay);color:#fff;box-shadow:0 1px 2px rgba(0,0,0,.15)}
+.mac-btn.secondary{background:#fff;color:var(--ink);box-shadow:0 0 0 .5px rgba(0,0,0,.18),0 1px 2px rgba(0,0,0,.06)}
+.mac-btn.lg{height:38px;line-height:38px;padding:0 20px;font-size:14px;border-radius:10px}
+
+.ic{width:22px;height:22px;display:inline-block;vertical-align:middle}
+.row{flex-wrap:nowrap}
+
+/* P7 find your Mac */
+.p6-title{font:700 34px/1.12 var(--font);letter-spacing:-.9px;padding:14px 20px 0}
+.p6-body{font:400 16px/1.4 var(--font);letter-spacing:-.2px;color:var(--ink-2);padding:6px 20px 0}
+.vf{position:relative;margin:18px 20px 0;height:420px;border-radius:30px;overflow:hidden;background:#1d1b19;box-shadow:var(--shadow-2);isolation:isolate}
+.vf-room{position:absolute;inset:0;background:radial-gradient(90% 70% at 50% 40%,#4B453E 0%,#2B2723 58%,#1A1816 100%)}
+.vf-desk{position:absolute;left:0;right:0;bottom:0;height:30px;background:linear-gradient(180deg,#7A6450 0%,#8C7158 40%,#6E5743 100%)}
+.vf-desk:after{content:"";position:absolute;inset:0;background:repeating-linear-gradient(97deg,rgba(0,0,0,.06) 0 2px,transparent 2px 22px)}
+.vf-mon{position:absolute;left:-79px;top:48px;width:520px;height:330px;transform-origin:260px 162px;transform:perspective(900px) rotateY(-9deg) rotateX(4deg) rotateZ(-1.4deg)}
+.vf-bezel{position:absolute;inset:0;border-radius:18px;background:#0C0D0D;box-shadow:0 0 0 2px #A3A5A4,0 0 0 3px #6d6f6e,0 0 90px rgba(226,190,158,.28)}
+.vf-stand{position:absolute;left:50%;top:100%;width:112px;height:34px;margin-left:-56px;background:linear-gradient(90deg,#7f8180,#d3d5d4 38%,#b9bbba 62%,#8a8c8b);border-radius:0 0 4px 4px}
+.vf-scr{position:absolute;inset:9px;border-radius:10px;overflow:hidden;background:linear-gradient(160deg,#6F7F79 0%,#A89A86 45%,#D8B79A 100%)}
+.vf-mb{height:13px;background:rgba(246,244,240,.55);display:flex;align-items:center;gap:9px;padding:0 9px;font:600 7px/1 var(--font);color:#1b1d1b}
+.vf-mb span{font-weight:500}
+.vf-mb .r{margin-left:auto;display:flex;gap:8px;align-items:center}
+.vf-win{position:absolute;left:50%;top:20px;width:250px;height:262px;margin-left:-125px;border-radius:11px;background:#F7F5F1;box-shadow:0 0 0 .5px rgba(0,0,0,.25),0 14px 30px rgba(0,0,0,.3);text-align:center}
+.vf-win .tl{position:absolute;left:10px;top:10px;display:flex;gap:5px}
+.vf-win .tl i{width:7px;height:7px;border-radius:50%;display:block;background:#FF5F57}
+.vf-win .tl i:nth-child(2){background:#FEBC2E}.vf-win .tl i:nth-child(3){background:#28C840}
+.vf-win .wt{position:absolute;left:0;right:0;top:25px;font:700 12.5px/1 var(--font);letter-spacing:-.2px;color:var(--ink)}
+.vf-qr{position:absolute;left:50%;top:58px;width:150px;height:150px;margin-left:-75px;background:#fff;border-radius:7px;padding:8px;box-shadow:0 0 0 .5px rgba(0,0,0,.08)}
+.vf-qr>svg{width:134px;height:134px;display:block;color:#1B1D1B}
+.vf-qr .lg{position:absolute;left:50%;top:50%;width:26px;height:26px;margin:-13px 0 0 -13px;border-radius:7px;background:#fff;display:grid;place-items:center}
+.vf-win .ws{position:absolute;left:0;right:0;top:222px;display:flex;justify-content:center;align-items:center;gap:5px;font:500 9.5px/1 var(--font);color:var(--ink-2)}
+.vf-win .ws i{width:8px;height:8px;border-radius:50%;border:1.5px solid #E7DED6;border-top-color:var(--clay);display:block}
+.vf-mini{position:absolute;right:16px;bottom:9px;width:96px;height:22px;border-radius:6px;background:linear-gradient(180deg,#E3E4E3 0%,#C4C6C5 55%,#9C9E9D 100%);box-shadow:0 4px 8px rgba(0,0,0,.35)}
+.vf-mini:after{content:"";position:absolute;right:10px;top:12px;width:3px;height:3px;border-radius:50%;background:#fff;box-shadow:0 0 4px #fff}
+.vf-glare{position:absolute;inset:0;background:linear-gradient(118deg,rgba(255,255,255,.07) 0 34%,transparent 34% 100%);pointer-events:none}
+.vf-vig{position:absolute;inset:0;background:radial-gradient(120% 95% at 50% 46%,transparent 52%,rgba(0,0,0,.42) 100%)}
+.vf-br{position:absolute;left:97px;top:126px;width:168px;height:168px;z-index:3}
+.vf-br i{position:absolute;width:34px;height:34px;border:3.5px solid #fff;filter:drop-shadow(0 1px 3px rgba(0,0,0,.35))}
+.vf-br i:nth-child(1){left:0;top:0;border-right:none;border-bottom:none;border-radius:14px 0 0 0}
+.vf-br i:nth-child(2){right:0;top:0;border-left:none;border-bottom:none;border-radius:0 14px 0 0}
+.vf-br i:nth-child(3){left:0;bottom:0;border-right:none;border-top:none;border-radius:0 0 0 14px}
+.vf-br i:nth-child(4){right:0;bottom:0;border-left:none;border-top:none;border-radius:0 0 14px 0}
+.vf-sweep{position:absolute;left:104px;right:104px;top:246px;height:2px;border-radius:1px;z-index:3;background:linear-gradient(90deg,transparent,rgba(255,255,255,.95) 30%,rgba(255,255,255,.95) 70%,transparent);box-shadow:0 0 14px 3px rgba(255,232,214,.45)}
+.p6-hint{font:400 15px/1.4 var(--font);letter-spacing:-.2px;color:var(--ink-2);text-align:center;padding:14px 28px 0}
+.p6-sec{display:flex;align-items:center;gap:7px;padding:22px 24px 9px}
+.p6-sec .dot{color:var(--ok)}
+.p6-near{margin:0 20px;display:flex;align-items:center;gap:13px;padding:13px 13px 13px 14px}
+.p6-macb{width:48px;height:48px;border-radius:14px;flex:none;display:grid;place-items:center;background:linear-gradient(180deg,#F4F3F1,#E2E1DE);box-shadow:inset 0 0 0 .5px rgba(0,0,0,.08);color:var(--ink)}
+.p6-near .who{flex:1;min-width:0}
+.p6-near .where{display:flex;align-items:center;gap:5px;margin-top:3px;font:400 13px/1 var(--font);color:var(--ink-2)}
+.p6-foot{position:absolute;left:0;right:0;bottom:34px;text-align:center;font:600 15px/1 var(--font);letter-spacing:-.2px;color:var(--clay)}
+
+/* pre-prompt */
+.p6-scrim{position:absolute;inset:0;background:rgba(14,16,14,.40);z-index:45}
+.p6-alert{position:absolute;left:50%;top:50%;width:302px;transform:translate(-50%,-50%);z-index:46;border-radius:34px;background:rgba(250,248,244,.86);backdrop-filter:blur(30px) saturate(1.6);-webkit-backdrop-filter:blur(30px) saturate(1.6);box-shadow:inset 0 0 0 1px rgba(255,255,255,.75),0 24px 60px rgba(0,0,0,.30);padding:26px 22px 20px;text-align:center}
+.p6-alert .ico{width:58px;height:58px;border-radius:29px;margin:0 auto;display:grid;place-items:center;background:var(--clay-soft);color:var(--clay)}
+.p6-alert .msg{font:600 17px/1.35 var(--font);letter-spacing:-.25px;margin:16px 4px 20px}
+
+/* confirm + connected */
+.p6-mid{position:absolute;left:0;right:0;top:102px;bottom:140px;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:0 20px}
+.p6-orb{position:relative;width:184px;height:184px;display:grid;place-items:center;flex:none}
+.p6-orb .ring{position:absolute;border-radius:50%;border:1px solid var(--line-2)}
+.p6-orb .ring.a{inset:0;opacity:.55}.p6-orb .ring.b{inset:24px}
+.p6-orb .core{width:104px;height:104px;border-radius:52px;background:var(--card);box-shadow:var(--shadow-2);display:grid;place-items:center;color:var(--ink);position:relative}
+.p6-h{font:700 28px/1.18 var(--font);letter-spacing:-.6px;text-align:center;margin-top:18px;max-width:320px;text-wrap:balance}
+.p6-code{margin-top:24px;width:100%;padding:24px 0 22px;text-align:center;font:700 60px/1 var(--font);letter-spacing:3px;font-variant-numeric:tabular-nums;color:var(--ink)}
+.p6-code span{display:inline-block;width:22px;overflow:hidden;vertical-align:top}
+.p6-instr{font:400 16px/1.42 var(--font);letter-spacing:-.2px;color:var(--ink-2);text-align:center;margin-top:18px;max-width:330px}
+.p6-wait{margin-top:34px;height:48px;padding:0 22px 0 18px;border-radius:24px;display:flex;align-items:center;gap:11px;white-space:nowrap;background:var(--glass);border:1px solid rgba(255,255,255,.8);box-shadow:var(--shadow-1);font:600 15px/1 var(--font);letter-spacing:-.2px;color:var(--ink-2)}
+.p6-spin{width:20px;height:20px;border-radius:50%;border:2.75px solid #E6DFD7;border-top-color:var(--ink-2);flex:none}
+.p6-orb.ok .ring{border:none;background:rgba(46,122,85,.07)}
+.p6-orb.ok .ring.b{background:rgba(46,122,85,.11)}
+.p6-orb.ok .core{background:var(--ok);color:#fff;box-shadow:0 10px 26px rgba(46,122,85,.32)}
+.p6-spark{position:absolute;width:6px;height:6px;border-radius:3px;background:#7FC7A0}
+.p6-sub{font:400 16px/1.4 var(--font);letter-spacing:-.2px;color:var(--ink-2);text-align:center;margin-top:10px;white-space:nowrap}
+.p6-chain{margin-top:28px;width:100%;display:flex;align-items:center;padding:18px 22px}
+.p6-node{width:54px;height:54px;border-radius:27px;background:var(--paper);display:grid;place-items:center;color:var(--ink);position:relative;flex:none}
+.p6-node .ok{position:absolute;right:-3px;top:-3px;width:20px;height:20px;border-radius:10px;background:var(--ok);color:#fff;display:grid;place-items:center;box-shadow:0 0 0 2.5px var(--card)}
+.p6-link{flex:1;height:2px;margin:0 8px;background:linear-gradient(90deg,rgba(46,122,85,.25),rgba(46,122,85,.6),rgba(46,122,85,.25));position:relative}
+.p6-link i{position:absolute;left:50%;top:50%;width:7px;height:7px;margin:-3.5px 0 0 -3.5px;border-radius:50%;background:var(--ok)}
+.p6-fab{flex:1;height:50px;border-radius:25px;background:var(--clay);color:#fff;display:flex;align-items:center;justify-content:center;gap:10px;font:600 17px/1 var(--font);letter-spacing:-.2px;box-shadow:0 6px 16px rgba(196,81,43,.32)}
+</style></head>
+<body>
+<!-- Shared line icons (SF Symbols-like). Use: <svg class="ic"><use href="#i-scan"/></svg> -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-scan" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2"/><path d="M12 7.5l4 2.3v4.4l-4 2.3-4-2.3V9.8z"/><path d="M8 9.8l4 2.3 4-2.3M12 12.1v4.4"/></symbol>
+    <symbol id="i-printer" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="3.5" width="17" height="17" rx="2.5"/><path d="M3.5 8.5h17M8 13h8M10 13v4h4v-4"/></symbol>
+    <symbol id="i-mac" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M9 20h6M12 16v4"/></symbol>
+    <symbol id="i-gear" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></symbol>
+    <symbol id="i-camera" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l1.5-2.5h7L17 8h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="13" r="3.6"/></symbol>
+    <symbol id="i-ruler" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 16.5l13-13 4 4-13 13z"/><path d="M7 13l2 2M10 10l1.5 1.5M13 7l2 2"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></symbol>
+    <symbol id="i-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></symbol>
+    <symbol id="i-back" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></symbol>
+    <symbol id="i-more" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.9"/><circle cx="12" cy="12" r="1.9"/><circle cx="19" cy="12" r="1.9"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-sparkle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/></symbol>
+    <symbol id="i-wifi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2.5 9a14 14 0 0 1 19 0M5.5 12.5a9.5 9.5 0 0 1 13 0M8.6 16a5 5 0 0 1 6.8 0"/><circle cx="12" cy="19.2" r="1.2" fill="currentColor"/></symbol>
+    <symbol id="i-lock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></symbol>
+    <symbol id="i-qr" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"><rect x="3.5" y="3.5" width="6.5" height="6.5" rx="1"/><rect x="14" y="3.5" width="6.5" height="6.5" rx="1"/><rect x="3.5" y="14" width="6.5" height="6.5" rx="1"/><path d="M14 14h3v3h-3zM17.5 17.5h3v3h-3z"/></symbol>
+    <symbol id="i-blender" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="14" cy="13.5" r="6"/><circle cx="14" cy="13.5" r="2.2"/><path d="M3 9.5h8M6 6h7"/></symbol>
+    <symbol id="i-layers" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"><path d="M12 3.5l8.5 4.5-8.5 4.5L3.5 8z"/><path d="M3.5 12.5L12 17l8.5-4.5M3.5 16.5L12 21l8.5-4.5"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"><path d="M3.5 6.5a1 1 0 0 1 1-1h5l2 2.5h8a1 1 0 0 1 1 1v9.5a1 1 0 0 1-1 1h-15a1 1 0 0 1-1-1z"/></symbol>
+    <symbol id="i-warn" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4l9 16H3z"/><path d="M12 10v4.5M12 17.5v.2"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.5v13l11-6.5z"/></symbol>
+    <symbol id="i-stop" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></symbol>
+    <symbol id="i-pause" viewBox="0 0 24 24" fill="currentColor"><rect x="6.5" y="5.5" width="4" height="13" rx="1.2"/><rect x="13.5" y="5.5" width="4" height="13" rx="1.2"/></symbol>
+    <symbol id="i-key" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="15" r="4"/><path d="M11 12l8.5-8.5M16 7l2.5 2.5M14 9l2 2"/></symbol>
+    <symbol id="i-globe" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.6 2.6 2.6 14.4 0 17M12 3.5c-2.6 2.6-2.6 14.4 0 17"/></symbol>
+    <symbol id="i-cube" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M4 7.5l8 4.5 8-4.5M12 12v9"/></symbol>
+    <symbol id="i-battery" viewBox="0 0 28 13"><rect x=".5" y=".5" width="24" height="12" rx="3.5" fill="none" stroke="currentColor" opacity=".4"/><rect x="2.5" y="2.5" width="18" height="8" rx="2" fill="currentColor"/><path d="M26 4.5v4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" opacity=".45"/></symbol>
+    <symbol id="i-signal" viewBox="0 0 18 12" fill="currentColor"><rect x="0" y="8" width="3" height="4" rx="1"/><rect x="5" y="5.5" width="3" height="6.5" rx="1"/><rect x="10" y="3" width="3" height="9" rx="1"/><rect x="15" y="0" width="3" height="12" rx="1"/></symbol>
+    <symbol id="logo" viewBox="0 0 24 24" fill="none"><path d="M12 2.8l8 4.6v9.2L12 21.2l-8-4.6V7.4z" fill="#C4512B"/><path d="M4 7.4l8 4.6 8-4.6M12 12v9.2" stroke="#fff" stroke-width="1.5" stroke-linejoin="round"/><path d="M7.5 5.4l8 4.6" stroke="#fff" stroke-opacity=".55" stroke-width="1.1"/></symbol>
+    <symbol id="logo-mono" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M12 3l8 4.6v8.8L12 21l-8-4.6V7.6z"/><path d="M4 7.6l8 4.6 8-4.6M12 12.2V21"/></symbol>
+  </defs>
+</svg>
+<!-- Shared object art: inline these <symbol>s once per file inside a hidden <svg>, then <svg viewBox="0 0 200 200"><use href="#obj-airpods"/></svg> -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <pattern id="mesh" width="14" height="12" patternUnits="userSpaceOnUse" patternTransform="rotate(8)">
+      <path d="M0 12 L7 0 L14 12 M0 0 H14" fill="none" stroke="rgba(255,255,255,.10)" stroke-width=".6"/>
+    </pattern>
+    <radialGradient id="shadow" cx="50%" cy="50%" r="50%"><stop offset="0" stop-color="#000" stop-opacity=".55"/><stop offset="1" stop-color="#000" stop-opacity="0"/></radialGradient>
+    <linearGradient id="white-body" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FBFBF8"/><stop offset=".55" stop-color="#E4E5E0"/><stop offset="1" stop-color="#B9BCB5"/></linearGradient>
+    <linearGradient id="white-lid" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#E7E8E3"/></linearGradient>
+    <linearGradient id="clay-body" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#E9805C"/><stop offset=".6" stop-color="#C4512B"/><stop offset="1" stop-color="#8E3418"/></linearGradient>
+    <linearGradient id="brass" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#F1D9A0"/><stop offset=".5" stop-color="#C9A25A"/><stop offset="1" stop-color="#7E6127"/></linearGradient>
+    <linearGradient id="slate" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#8FA3A8"/><stop offset=".6" stop-color="#5B6E74"/><stop offset="1" stop-color="#34454A"/></linearGradient>
+    <linearGradient id="sage" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#C9D8C0"/><stop offset=".6" stop-color="#93A98A"/><stop offset="1" stop-color="#5E7357"/></linearGradient>
+    <symbol id="obj-airpods" viewBox="0 0 200 200">
+      <ellipse cx="100" cy="158" rx="70" ry="12" fill="url(#shadow)"/>
+      <rect x="38" y="62" width="124" height="92" rx="34" fill="url(#white-body)"/>
+      <rect x="38" y="62" width="124" height="92" rx="34" fill="url(#mesh)"/>
+      <path d="M40 92 Q100 98 160 92" stroke="#A9ADA6" stroke-width="1.6" fill="none"/>
+      <rect x="38" y="62" width="124" height="32" rx="30" fill="url(#white-lid)" opacity=".85"/>
+      <circle cx="100" cy="122" r="3.2" fill="#9BA098"/>
+      <rect x="92" y="150" width="16" height="3" rx="1.5" fill="#8C9089"/>
+    </symbol>
+    <symbol id="obj-knob" viewBox="0 0 200 200">
+      <ellipse cx="100" cy="160" rx="54" ry="10" fill="url(#shadow)"/>
+      <path d="M86 156 L90 112 H110 L114 156 Z" fill="url(#brass)"/>
+      <ellipse cx="100" cy="156" rx="16" ry="5" fill="#7E6127"/>
+      <ellipse cx="100" cy="92" rx="52" ry="30" fill="url(#brass)"/>
+      <ellipse cx="100" cy="92" rx="52" ry="30" fill="url(#mesh)"/>
+      <ellipse cx="100" cy="82" rx="40" ry="16" fill="#F6E3B4" opacity=".55"/>
+    </symbol>
+    <symbol id="obj-mug" viewBox="0 0 200 200">
+      <ellipse cx="96" cy="162" rx="62" ry="11" fill="url(#shadow)"/>
+      <path d="M140 84 C176 84 176 136 140 134" stroke="#7E8F78" stroke-width="13" fill="none" stroke-linecap="round"/>
+      <path d="M48 62 H144 L138 150 Q96 166 54 150 Z" fill="url(#sage)"/>
+      <path d="M48 62 H144 L138 150 Q96 166 54 150 Z" fill="url(#mesh)"/>
+      <ellipse cx="96" cy="62" rx="48" ry="12" fill="#B4C6AB"/>
+      <ellipse cx="96" cy="63" rx="40" ry="8" fill="#4A5C45"/>
+    </symbol>
+    <symbol id="obj-mount" viewBox="0 0 200 200">
+      <ellipse cx="100" cy="160" rx="66" ry="10" fill="url(#shadow)"/>
+      <path d="M44 150 H156 V132 Q156 120 144 120 H56 Q44 120 44 132 Z" fill="url(#slate)"/>
+      <rect x="72" y="58" width="16" height="66" rx="5" fill="url(#slate)"/>
+      <rect x="92" y="58" width="16" height="66" rx="5" fill="url(#slate)"/>
+      <rect x="112" y="58" width="16" height="66" rx="5" fill="url(#slate)"/>
+      <circle cx="100" cy="78" r="9" fill="#283539"/>
+      <path d="M44 150 H156 V132 Q156 120 144 120 H56 Q44 120 44 132 Z" fill="url(#mesh)"/>
+    </symbol>
+    <symbol id="obj-clip" viewBox="0 0 200 200">
+      <ellipse cx="100" cy="160" rx="60" ry="10" fill="url(#shadow)"/>
+      <path d="M50 150 V90 Q50 56 84 56 H120 Q150 56 150 86 V100 H130 V88 Q130 76 118 76 H86 Q70 76 70 92 V150 Z" fill="url(#clay-body)"/>
+      <path d="M50 150 V90 Q50 56 84 56 H120 Q150 56 150 86 V100 H130 V88 Q130 76 118 76 H86 Q70 76 70 92 V150 Z" fill="url(#mesh)"/>
+    </symbol>
+  </defs>
+</svg>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+  <symbol id="p6-qr" viewBox="0 0 25 25"><path fill="currentColor" shape-rendering="crispEdges" d="M0 0h7v1h-7zM11 0h1v1h-1zM14 0h2v1h-2zM18 0h7v1h-7zM0 1h1v1h-1zM6 1h1v1h-1zM10 1h1v1h-1zM12 1h1v1h-1zM18 1h1v1h-1zM24 1h1v1h-1zM0 2h1v1h-1zM2 2h3v1h-3zM6 2h1v1h-1zM13 2h1v1h-1zM18 2h1v1h-1zM20 2h3v1h-3zM24 2h1v1h-1zM0 3h1v1h-1zM2 3h3v1h-3zM6 3h1v1h-1zM8 3h1v1h-1zM10 3h1v1h-1zM12 3h1v1h-1zM14 3h1v1h-1zM16 3h1v1h-1zM18 3h1v1h-1zM20 3h3v1h-3zM24 3h1v1h-1zM0 4h1v1h-1zM2 4h3v1h-3zM6 4h1v1h-1zM9 4h1v1h-1zM11 4h2v1h-2zM14 4h2v1h-2zM18 4h1v1h-1zM20 4h3v1h-3zM24 4h1v1h-1zM0 5h1v1h-1zM6 5h1v1h-1zM8 5h6v1h-6zM15 5h1v1h-1zM18 5h1v1h-1zM24 5h1v1h-1zM0 6h7v1h-7zM8 6h1v1h-1zM10 6h1v1h-1zM12 6h1v1h-1zM14 6h1v1h-1zM16 6h1v1h-1zM18 6h7v1h-7zM10 7h1v1h-1zM12 7h1v1h-1zM15 7h1v1h-1zM0 8h1v1h-1zM2 8h1v1h-1zM5 8h2v1h-2zM8 8h3v1h-3zM14 8h1v1h-1zM16 8h1v1h-1zM18 8h1v1h-1zM24 8h1v1h-1zM0 9h1v1h-1zM4 9h2v1h-2zM9 9h1v1h-1zM11 9h2v1h-2zM14 9h4v1h-4zM19 9h2v1h-2zM22 9h3v1h-3zM0 10h1v1h-1zM6 10h3v1h-3zM17 10h3v1h-3zM21 10h1v1h-1zM0 11h1v1h-1zM2 11h1v1h-1zM4 11h2v1h-2zM9 11h1v1h-1zM17 11h1v1h-1zM20 11h1v1h-1zM1 12h1v1h-1zM4 12h6v1h-6zM16 12h3v1h-3zM20 12h1v1h-1zM1 13h5v1h-5zM7 13h3v1h-3zM17 13h1v1h-1zM20 13h2v1h-2zM23 13h1v1h-1zM2 14h2v1h-2zM6 14h4v1h-4zM15 14h3v1h-3zM21 14h1v1h-1zM24 14h1v1h-1zM0 15h3v1h-3zM4 15h2v1h-2zM7 15h1v1h-1zM9 15h1v1h-1zM13 15h4v1h-4zM18 15h3v1h-3zM22 15h1v1h-1zM24 15h1v1h-1zM1 16h3v1h-3zM5 16h2v1h-2zM9 16h1v1h-1zM15 16h10v1h-10zM8 17h1v1h-1zM11 17h3v1h-3zM15 17h2v1h-2zM20 17h1v1h-1zM23 17h1v1h-1zM0 18h7v1h-7zM8 18h2v1h-2zM11 18h2v1h-2zM14 18h1v1h-1zM16 18h1v1h-1zM18 18h1v1h-1zM20 18h1v1h-1zM0 19h1v1h-1zM6 19h1v1h-1zM9 19h4v1h-4zM16 19h1v1h-1zM20 19h3v1h-3zM0 20h1v1h-1zM2 20h3v1h-3zM6 20h1v1h-1zM8 20h2v1h-2zM11 20h3v1h-3zM15 20h6v1h-6zM24 20h1v1h-1zM0 21h1v1h-1zM2 21h3v1h-3zM6 21h1v1h-1zM8 21h1v1h-1zM12 21h3v1h-3zM16 21h2v1h-2zM21 21h1v1h-1zM23 21h1v1h-1zM0 22h1v1h-1zM2 22h3v1h-3zM6 22h1v1h-1zM8 22h1v1h-1zM10 22h1v1h-1zM12 22h1v1h-1zM15 22h2v1h-2zM18 22h1v1h-1zM21 22h4v1h-4zM0 23h1v1h-1zM6 23h1v1h-1zM8 23h1v1h-1zM10 23h1v1h-1zM13 23h1v1h-1zM15 23h3v1h-3zM19 23h3v1h-3zM23 23h1v1h-1zM0 24h7v1h-7zM8 24h1v1h-1zM10 24h1v1h-1zM12 24h1v1h-1zM14 24h1v1h-1zM16 24h1v1h-1zM20 24h3v1h-3zM24 24h1v1h-1z"/></symbol>
+  <symbol id="p6-iphone" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="6.5" y="2.5" width="11" height="19" rx="2.8"/><path d="M10.5 5.3h3"/></symbol>
+</defs></svg>
+
+<div class="page-head"><div><div class="tag">iPhone · Pairing</div><h1>Find your Mac: point the camera at the code, and you’re done</h1>
+<p>Pairing needs no typing, no addresses and no network settings. If no Mac is paired, the app opens on a camera that reads the code your Mac is showing. If the Mac is on the same Wi-Fi, it also shows up underneath as a one-tap shortcut, and you confirm it with a matching number. Both ways end on the same screen: connected, printer ready, scan something.</p></div></div>
+<div class="row">
+
+<!-- 1: find your Mac -->
+<div>
+<div class="phone"><div class="screen">
+  <div class="island"></div>
+  <div class="status"><span class="num">9:41</span><span class="icons"><svg width="18" height="12"><use href="#i-signal"/></svg><svg class="ic" style="width:17px;height:17px"><use href="#i-wifi"/></svg><svg width="28" height="13"><use href="#i-battery"/></svg></span></div>
+  <div class="p6-title">Find your Mac</div>
+  <div class="p6-body">Scan to Make uses your Mac to clean up scans and talk to your printer.</div>
+  <div class="vf">
+    <div class="vf-room"></div>
+    <div class="vf-desk"></div>
+    <div class="vf-mon">
+      <div class="vf-bezel"></div>
+      <div class="vf-stand"></div>
+      <div class="vf-scr">
+        <div class="vf-mb"><svg width="8" height="8"><use href="#logo-mono"/></svg>Scan to Make<span>File</span><span>Edit</span><span>Window</span><div class="r"><svg width="9" height="9"><use href="#logo-mono"/></svg><svg width="9" height="9"><use href="#i-wifi"/></svg><span>Sat 9:41</span></div></div>
+        <div class="vf-win">
+          <div class="tl"><i></i><i></i><i></i></div>
+          <div class="vf-qr"><svg><use href="#p6-qr"/></svg><div class="lg"><svg width="20" height="20"><use href="#logo"/></svg></div></div>
+        </div>
+      </div>
+    </div>
+    <div class="vf-mini"></div>
+    <div class="vf-glare"></div>
+    <div class="vf-vig"></div>
+    <div class="vf-br"><i></i><i></i><i></i><i></i></div>
+  </div>
+  <div class="p6-hint">Point at the code in Scan to Make on your Mac</div>
+  <div class="p6-sec"><span class="dot pulse"></span><span class="t-cap">Nearby</span></div>
+  <div class="p6-near card">
+    <div class="p6-macb"><svg class="ic" style="width:26px;height:26px"><use href="#i-mac"/></svg></div>
+    <div class="who"><div class="t-headline">David’s Mac mini</div><div class="where"><svg class="ic" style="width:14px;height:14px;color:var(--ok)"><use href="#i-wifi"/></svg>On this Wi-Fi</div></div>
+    <div class="btn primary sm" style="padding:0 20px">Pair</div>
+  </div>
+  <div class="p6-foot">Don’t have the Mac app yet?</div>
+  <div class="home-ind"></div>
+</div></div>
+<p class="caption"><b>Find your Mac.</b> The camera is already on, and the code carries every address the Mac answers on, so pointing at it is the whole job, even over a VPN. The Nearby card appears only when the Mac turns up on this Wi-Fi (Bonjour). After a fresh App Store install from the code, the app asks you to scan the code again; the Mac shows a fresh code every 5 minutes, so the one on screen always works.</p>
+</div>
+
+<!-- 2: local network pre-prompt -->
+<div>
+<div class="phone"><div class="screen">
+  <div class="island"></div>
+  <div class="status"><span class="num">9:41</span><span class="icons"><svg width="18" height="12"><use href="#i-signal"/></svg><svg class="ic" style="width:17px;height:17px"><use href="#i-wifi"/></svg><svg width="28" height="13"><use href="#i-battery"/></svg></span></div>
+  <div class="p6-title">Find your Mac</div>
+  <div class="p6-body">Scan to Make uses your Mac to clean up scans and talk to your printer.</div>
+  <div class="vf">
+    <div class="vf-room"></div>
+    <div class="vf-desk"></div>
+    <div class="vf-mon">
+      <div class="vf-bezel"></div>
+      <div class="vf-stand"></div>
+      <div class="vf-scr">
+        <div class="vf-mb"><svg width="8" height="8"><use href="#logo-mono"/></svg>Scan to Make<span>File</span><span>Edit</span><span>Window</span><div class="r"><svg width="9" height="9"><use href="#logo-mono"/></svg><svg width="9" height="9"><use href="#i-wifi"/></svg><span>Sat 9:41</span></div></div>
+        <div class="vf-win">
+          <div class="tl"><i></i><i></i><i></i></div>
+          <div class="vf-qr"><svg><use href="#p6-qr"/></svg><div class="lg"><svg width="20" height="20"><use href="#logo"/></svg></div></div>
+        </div>
+      </div>
+    </div>
+    <div class="vf-mini"></div>
+    <div class="vf-glare"></div>
+    <div class="vf-vig"></div>
+    <div class="vf-br"><i></i><i></i><i></i><i></i></div>
+  </div>
+  <div class="p6-hint">Point at the code in Scan to Make on your Mac</div>
+  <div class="p6-foot">Don’t have the Mac app yet?</div>
+  <div class="p6-scrim"></div>
+  <div class="p6-alert">
+    <div class="ico"><svg class="ic" style="width:30px;height:30px"><use href="#i-wifi"/></svg></div>
+    <div class="msg">To find your Mac, Scan&nbsp;to&nbsp;Make needs to look on your Wi-Fi.</div>
+    <div class="btn primary" style="height:50px">Continue</div>
+  </div>
+  <div class="home-ind"></div>
+</div></div>
+<p class="caption"><b>Before iOS asks.</b> One plain sentence sets up iOS’s own Local Network question, so its “Allow” isn’t a surprise. The Nearby card isn’t there yet, because nothing can be found until you answer; the camera keeps working underneath.</p>
+</div>
+
+<!-- 3: confirm code -->
+<div>
+<div class="phone"><div class="screen">
+  <div class="island"></div>
+  <div class="status"><span class="num">9:42</span><span class="icons"><svg width="18" height="12"><use href="#i-signal"/></svg><svg class="ic" style="width:17px;height:17px"><use href="#i-wifi"/></svg><svg width="28" height="13"><use href="#i-battery"/></svg></span></div>
+  <div class="nav"><div class="circle-btn"><svg class="ic" style="width:20px;height:20px"><use href="#i-back"/></svg></div></div>
+  <div class="p6-mid" style="bottom:40px">
+    <div class="p6-orb"><i class="ring a"></i><i class="ring b"></i><div class="core"><svg class="ic" style="width:50px;height:50px"><use href="#i-mac"/></svg></div></div>
+    <div class="p6-h">Pair with David’s Mac mini?</div>
+    <div class="p6-code card num">482<span> </span>913</div>
+    <div class="p6-instr">Make sure your Mac shows the same number, then click Allow on your Mac.</div>
+    <div class="p6-wait"><span class="p6-spin"></span>Waiting for your Mac…</div>
+  </div>
+  <div class="home-ind"></div>
+</div></div>
+<p class="caption"><b>Matching number (nearby shortcut only).</b> Both screens show the same six digits and you click Allow on the Mac, which proves it’s your Mac and not something else on the Wi-Fi. Scanning the code skips this step, because the code itself is the proof.</p>
+</div>
+
+<!-- 4: connected -->
+<div>
+<div class="phone"><div class="screen">
+  <div class="island"></div>
+  <div class="status"><span class="num">9:42</span><span class="icons"><svg width="18" height="12"><use href="#i-signal"/></svg><svg class="ic" style="width:17px;height:17px"><use href="#i-wifi"/></svg><svg width="28" height="13"><use href="#i-battery"/></svg></span></div>
+  <div class="p6-mid" style="top:54px;bottom:100px">
+    <div class="p6-orb ok"><i class="ring a"></i><i class="ring b"></i>
+      <i class="p6-spark" style="left:14px;top:40px"></i><i class="p6-spark" style="right:8px;top:62px;width:5px;height:5px"></i><i class="p6-spark" style="left:30px;bottom:18px;width:4px;height:4px;opacity:.7"></i><i class="p6-spark" style="right:26px;bottom:10px;opacity:.6"></i>
+      <div class="core"><svg class="ic" style="width:54px;height:54px"><use href="#i-check"/></svg></div></div>
+    <div class="p6-h">Connected to David’s Mac mini</div>
+    <div class="p6-sub">Printer: Workshop P1S · AI cleanup: on</div>
+    <div class="p6-chain card">
+      <div class="p6-node"><svg class="ic" style="width:26px;height:26px"><use href="#p6-iphone"/></svg></div>
+      <div class="p6-link"><i></i></div>
+      <div class="p6-node"><svg class="ic" style="width:26px;height:26px"><use href="#i-mac"/></svg><b class="ok"><svg class="ic" style="width:12px;height:12px"><use href="#i-check"/></svg></b></div>
+      <div class="p6-link"><i></i></div>
+      <div class="p6-node"><svg class="ic" style="width:26px;height:26px"><use href="#i-printer"/></svg><b class="ok"><svg class="ic" style="width:12px;height:12px"><use href="#i-check"/></svg></b></div>
+    </div>
+  </div>
+  <div class="glassbar">
+    <div class="p6-fab"><svg class="ic"><use href="#i-scan"/></svg>Scan something</div>
+  </div>
+  <div class="home-ind"></div>
+</div></div>
+<p class="caption"><b>Connected.</b> Both ways of pairing end here, reading back what the Mac already knows (its printer, and whether AI cleanup is on) so you can see it’s ready. The only button is the next real step. On an iPhone Duo, which has no LiDAR, it reads “Open projects” instead.</p>
+</div>
+
+</div>
+</body></html>
