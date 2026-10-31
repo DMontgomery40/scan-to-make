@@ -312,9 +312,9 @@ export class ScanProcessingClient {
     return job;
   }
   /**
-   * Downloads one retained output of a succeeded job (`repaired.stl`,
-   * `repaired.obj`, `report.json`, or one of `SCAN_VIEW_NAMES`) and
-   * verifies it against the identity sealed in the job record.
+   * Downloads an output listed in the current job's artifact manifest and
+   * verifies its sealed identity. Advice can be available during correction
+   * or after failure; final geometry is published only when the job succeeds.
    */
   async downloadArtifact(
     projectId: string,

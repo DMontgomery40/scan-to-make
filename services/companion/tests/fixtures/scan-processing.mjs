@@ -10,7 +10,7 @@ import {ScanProcessingStore} from '../../dist/scan-processing.js';
 export const sha=b=>createHash('sha256').update(b).digest('hex');
 export const cube=Buffer.from('v 0 0 0\nv .06 0 0\nv .06 .04 0\nv 0 .04 0\nv 0 0 .02\nv .06 0 .02\nv .06 .04 .02\nv 0 .04 .02\nf 1 4 3 2\nf 5 6 7 8\nf 1 2 6 5\nf 2 3 7 6\nf 3 4 8 7\nf 4 1 5 8\n');
 export const png=Buffer.from([137,80,78,71,13,10,26,10,0]);
-export const fakeRunner={async run(stage,input,output){await mkdir(output,{recursive:true});if(stage==='repair'){await writeFile(join(output,'repaired.obj'),cube);await writeFile(join(output,'repaired.stl'),'synthetic stl');await writeFile(join(output,'report.json'),'{}');}if(stage==='render')for(const n of SCAN_VIEW_NAMES)await writeFile(join(output,n),png);return Buffer.from(JSON.stringify({principalExtentsMm:[62.9,48.7,21.7]}));}};
+export const fakeRunner={async run(stage,input,output){await mkdir(output,{recursive:true});if(stage==='repair'){await writeFile(join(output,'repaired.obj'),cube);await writeFile(join(output,'repaired.stl'),'synthetic stl');await writeFile(join(output,'report.json'),'{}');}if(stage==='render')for(const n of SCAN_VIEW_NAMES)await writeFile(join(output,n),png);return Buffer.from(JSON.stringify({principalExtentsMm:[62.9,48.7,21.7],boxExtentsMm:[62.9,48.7,21.7]}));}};
 export async function fixture(t,runner=fakeRunner,timeout=600000){
  const root=await mkdtemp(join(tmpdir(),'scan-processing-'));t.after(()=>rm(root,{recursive:true,force:true}));
  const storage=new FileSavedProjectStorage(join(root,'projects'));
