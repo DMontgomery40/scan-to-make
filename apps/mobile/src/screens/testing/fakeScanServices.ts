@@ -8,6 +8,7 @@ import {
   type ScanReference,
 } from '@scan-to-make/contracts';
 import type { CaptureFile } from '../../capture/retainedCaptures';
+import { parseCloseupAdvice, type CloseupTarget } from '../closeupAdviceModel';
 import {
   sessionJobMemory,
   type PickedPhoto,
@@ -230,6 +231,8 @@ export function fakeScanServices(
     listed?: ScanProcessingJob[] | 'not-available';
     /** Stills whose bytes are already on the device (by sha256). */
     cachedStills?: string[];
+    /** The companion's suggested close-ups; an Error makes loading fail. */
+    advice?: CloseupTarget[] | null | Error;
   } = {},
 ) {
   const cached = new Set(options.cachedStills ?? []);
@@ -343,5 +346,63 @@ export function fakeScanServices(
     jobs: sessionJobMemory(),
     imageUri: async file => `file:///synthetic/${file.sha256.slice(0, 8)}.png`,
   };
+  const advice = options.advice;
+  if (advice !== undefined) {
+    services.advice = {
+      load: async () => {
+        calls.push('advice');
+        if (advice instanceof Error) throw advice;
+        return advice;
+      },
+    };
+  }
   return { services, calls, stills };
+}
+
+/**
+ * Suggestions shaped like scan-correct's advice.json for a small case, with
+ * the fields the app ignores left in.
+ */
+export function syntheticAdvice(): CloseupTarget[] {
+  const target = (
+    rank: number,
+    label: string,
+    side: string,
+    reasonCode: string,
+    distanceMm: number,
+  ) => ({
+    rank,
+    label,
+    side,
+    reasonCode,
+    reason: 'not shown',
+    viewDirection: [0, 0, 1],
+    targetMm: [0, 0, 0],
+    distanceMm,
+    expectedBenefitScore: 90 - rank * 10,
+    regionBoundsMm: { min: [0, 0, 0], max: [1, 1, 1] },
+    evidence: { method: 'synthetic', faces: 12, heuristic: true },
+    render: {
+      path: `target-${rank}.png`,
+      sha256: 'c'.repeat(64),
+      containsTexture: false,
+    },
+    labelSource: 'caller',
+  });
+  return parseCloseupAdvice({
+    closeupAdvice: {
+      schemaVersion: 1,
+      coordinateFrame: 'input',
+      targets: [
+        target(2, 'Bottom (USB-C port)', 'neg_z', 'fine_feature', 130),
+        target(1, 'Back (hinge side)', 'neg_y', 'inferred_fill', 250),
+      ],
+      warnings: [],
+      limitations: [],
+      previewOnly: true,
+      provesPhysicalAccuracy: false,
+      inputs: {},
+      boxExtentsMm: [62, 47, 22],
+    },
+  });
 }
