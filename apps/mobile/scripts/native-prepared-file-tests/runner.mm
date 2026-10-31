@@ -3,6 +3,10 @@
 #import "../../modules/local-project-storage/ios/CompanionPairing.mm"
 #import "../../modules/local-project-storage/ios/PreparedFileBridge.mm"
 NSString *STMHash(NSData *data){unsigned char hash[CC_SHA256_DIGEST_LENGTH];CC_SHA256(data.bytes,(CC_LONG)data.length,hash);NSMutableString*s=[NSMutableString new];for(int i=0;i<CC_SHA256_DIGEST_LENGTH;i++)[s appendFormat:@"%02x",hash[i]];return s;}
+// Test-local copy of ArtifactBridge's shared-cache verified read, which
+// PreparedFileBridge now links against for production source bytes.
+NSURL *STMArtifactURL(NSString *digest){if(![[NSPredicate predicateWithFormat:@"SELF MATCHES %@",@"[a-f0-9]{64}"] evaluateWithObject:digest])return nil;NSURL *root=[[[NSFileManager defaultManager] URLsForDirectory:NSApplicationSupportDirectory inDomains:NSUserDomainMask] firstObject];return [[root URLByAppendingPathComponent:@"Artifacts" isDirectory:YES] URLByAppendingPathComponent:[digest stringByAppendingString:@".stl"]];}
+NSData *STMVerifiedArtifact(NSString *digest,NSNumber *length,NSError **error){NSURL *url=STMArtifactURL(digest);if(!url||length.doubleValue<1||length.doubleValue>32*1024*1024||length.doubleValue!=length.unsignedIntegerValue)return nil;NSData *data=[NSData dataWithContentsOfURL:url options:0 error:error];return data&&data.length==length.unsignedIntegerValue&&[STMHash(data) isEqualToString:digest]?data:nil;}
 static NSDictionary *config;
 static void Require(BOOL ok,NSString *why){if(!ok){fprintf(stderr,"FAIL %s\n",why.UTF8String);exit(1);}}
 @interface Driver:NSObject
@@ -18,17 +22,60 @@ static void Require(BOOL ok,NSString *why){if(!ok){fprintf(stderr,"FAIL %s\n",wh
  [self.files requestOptions:options resolve:^(id r){if([r[@"status"] integerValue]==429&&n<5){dispatch_after(dispatch_time(DISPATCH_TIME_NOW,50*NSEC_PER_MSEC),dispatch_get_main_queue(),^{[self request:options then:then attempt:n+1];});return;}BOOL unsupported=[r[@"status"] integerValue]==400&&[options[@"path"] containsString:@"&productionVersion=1"]&&![options[@"path"] containsString:@"&cursor="];
  Require([r[@"status"] integerValue]==200||unsupported,@"verified GET status");if(!unsupported)Require([r[@"etag"] isEqual:config[@"prepared"][@"etag"]],@"exact ETag");then(r);} reject:^(NSString*c,NSString*m,NSError*e){Require(NO,c);}];
 }
+// KAN-102: production/approval bridge shapes. The fixture companion has app
+// production disabled and holds no prints:approve scope, so well-shaped
+// requests must fail closed over the wire and wrong shapes locally.
+- (void)productionChecks:(void(^)(void))done {
+ NSDictionary *project=config[@"prepared"][@"project"],*expected=[config[@"prepared"][@"jobs"] firstObject],*pairing=STMReadPairing(nil);
+ NSString *base=[NSString stringWithFormat:@"/v1/saved-projects/%@/prepared-jobs/%@?projectRevision=%@",project[@"id"],expected[@"jobId"],project[@"revision"]];
+ NSData *source=[@"synthetic source" dataUsingEncoding:NSUTF8StringEncoding];
+ NSString *sha=STMHash(source);NSURL *url=STMArtifactURL(sha);
+ [NSFileManager.defaultManager createDirectoryAtURL:url.URLByDeletingLastPathComponent withIntermediateDirectories:YES attributes:nil error:nil];
+ Require([source writeToURL:url atomically:YES],@"synthetic source cache");
+ NSDictionary *sourceRef=@{@"sha256":sha,@"byteLength":@(source.length),@"mediaType":@"model/stl"};
+ NSString *ctx=Context(pairing),*etag=config[@"prepared"][@"etag"];
+ NSString *(^sub)(NSString*)=^(NSString*s){return [base stringByReplacingOccurrencesOfString:@"?" withString:[@"/" stringByAppendingFormat:@"%@?",s]];};
+ for(NSDictionary *bad in @[@{@"context":ctx,@"method":@"GET",@"path":sub(@"intent"),@"etag":etag},
+   @{@"context":ctx,@"method":@"POST",@"path":sub(@"production"),@"etag":etag,@"body":@"{}"},
+   @{@"context":ctx,@"method":@"POST",@"path":sub(@"intent"),@"etag":etag,@"source":sourceRef}]){
+  __block BOOL rejected=NO;
+  [self.files requestOptions:bad resolve:^(id r){Require(NO,@"invalid production shape accepted");} reject:^(NSString*c,NSString*m,NSError*e){rejected=[c isEqual:@"invalid-request"];}];
+  Require(rejected,@"production shape rejection");
+ }
+ NSDictionary *production=@{@"context":ctx,@"method":@"POST",@"path":sub(@"production"),@"etag":etag,@"source":sourceRef};
+ [self.files requestOptions:production resolve:^(id r){
+  NSDictionary *body=[NSJSONSerialization JSONObjectWithData:[r[@"body"] dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil];
+  Require([r[@"status"] integerValue]==404&&[body[@"error"][@"code"] isEqual:@"not-available"],@"disabled app production fails closed");
+  NSDictionary *intent=@{@"context":ctx,@"method":@"POST",@"path":sub(@"intent"),@"etag":etag,@"body":[NSString stringWithFormat:@"{\"jobSha256\":\"%@\",\"confirmed\":true}",sha]};
+  // The bridge enforces pairing scopes locally, before any network request.
+  __block BOOL scopeDenied=NO;
+  [self.files requestOptions:intent resolve:^(id ri){Require(NO,@"ungranted prints:approve scope was accepted");} reject:^(NSString*c,NSString*m,NSError*e){scopeDenied=[c isEqual:@"scope-denied"];}];
+  Require(scopeDenied,@"prints:approve scope enforced");
+  NSDictionary *attempt=@{@"context":ctx,@"method":@"GET",@"path":sub(@"attempt"),@"etag":etag};
+  [self.files requestOptions:attempt resolve:^(id ra){
+   NSDictionary *ab=[NSJSONSerialization JSONObjectWithData:[ra[@"body"] dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil][@"attempt"];
+   Require([ra[@"status"] integerValue]==200&&ab[@"intent"]==NSNull.null&&ab[@"linkedAttempt"]==NSNull.null,@"attempt status before approval");done();
+  } reject:^(NSString*c,NSString*m,NSError*e){Require(NO,c);}];
+ } reject:^(NSString*c,NSString*m,NSError*e){Require(NO,c);}];
+}
 - (void)next {
  NSArray *jobs=config[@"prepared"][@"jobs"];
  if(self.index==jobs.count){
+  [self productionChecks:^{ [self writeReceipt]; }];return;
+ }
+ [self nextCase];
+}
+- (void)writeReceipt {
   NSInteger phase=[NSUserDefaults.standardUserDefaults integerForKey:@"phase"]+1;
   [NSUserDefaults.standardUserDefaults setInteger:phase forKey:@"phase"];
   if(phase==2){[self.pair disconnectResolve:^(id r){Require([r[@"state"] isEqual:@"disconnected"],@"test credential cleanup");} reject:^(NSString*c,NSString*m,NSError*e){Require(NO,c);}];}
-  NSDictionary *receipt=@{@"phase":@(phase),@"passed":@YES,@"runId":config[@"runId"],@"preparedOnlyPairing":@YES,@"discoveryPagination":@YES,@"producedDiscovery":@(self.producedDiscovery),@"discovered":self.discovered,@"cases":self.results};
+  NSDictionary *receipt=@{@"phase":@(phase),@"passed":@YES,@"runId":config[@"runId"],@"preparedOnlyPairing":@YES,@"discoveryPagination":@YES,@"productionBridge":@YES,@"producedDiscovery":@(self.producedDiscovery),@"discovered":self.discovered,@"cases":self.results};
   NSURL *url=[NSFileManager.defaultManager URLsForDirectory:NSDocumentDirectory inDomains:NSUserDomainMask].firstObject;
   url=[url URLByAppendingPathComponent:[NSString stringWithFormat:@"results-%ld.json",(long)phase]];
   Require([[NSJSONSerialization dataWithJSONObject:receipt options:NSJSONWritingPrettyPrinted error:nil] writeToURL:url atomically:YES],@"receipt");printf("NATIVE_PREPARED_PASS phase=%ld\n",(long)phase);fflush(stdout);exit(0);
- }
+}
+- (void)nextCase {
+ NSArray *jobs=config[@"prepared"][@"jobs"];
  NSDictionary *expected=jobs[self.index],*job=expected[@"job"],*project=config[@"prepared"][@"project"];
  NSString *path=[NSString stringWithFormat:@"/v1/saved-projects/%@/prepared-jobs/%@?projectRevision=%@",project[@"id"],expected[@"jobId"],project[@"revision"]];
  NSDictionary *pairing=STMReadPairing(nil);Require(![pairing[@"scopes"] containsObject:@"generation:create"],@"prepared-only credential");

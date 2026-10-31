@@ -61,6 +61,18 @@ test('sparse project filament mapping remains correct independent of selection a
   {projectSlot:2,material:'PETG',physicalTray:129},{projectSlot:0,material:'PLA',physicalTray:3}]}});
  assert.deepEqual(result.job.inspection.receipt.inspection.usedFilamentPositions,[0,2]);
 });
+test('the selected nozzle type is cross-checked against the inspection receipt',async t=>{
+ const root=await mkdtemp(join(tmpdir(),'prepared-nozzle-type-'));t.after(()=>rm(root,{recursive:true,force:true}));
+ const storage=new FileSavedProjectStorage(join(root,'projects')),projects=createSavedProjects(storage);
+ await projects.create({id:fit.id,brief:{object:'Cup',context:'Desk',addition:'Holder'},fit});
+ const binding={sourceFit:fit,artifact:{...artifact,mediaType:'model/stl'}};
+ await projects.change(fit.id,0,{kind:'attach-preview',...binding});await projects.change(fit.id,1,{kind:'accept-preview',...binding});
+ const inspection={process:{command:process.execPath,args:[fileURLToPath(new URL('./fixtures/inspection-server.mjs',import.meta.url)),'nozzle-type',join(root,'calls.jsonl')]},options:{timeoutMs:5000}};
+ const request={projectId:fit.id,projectRevision:2,printable:bytes,printableArtifact:artifact,selection};
+ const jobs=new PreparedJobStore(storage,join(root,'jobs'),{inspection});
+ await assert.rejects(jobs.prepare({...request,selection:{...selection,nozzleType:'hardened_steel'}}),{code:'inspection-failed'});
+ const result=await jobs.prepare({...request,selection:{...selection,nozzleType:'stainless_steel'}});assert.deepEqual(result.job.inspection.receipt.inspection.nozzleTypes,['stainless_steel']);
+});
 test('unknown physical tray identifiers are rejected even when a loose tool schema allows them',async t=>{
  const f=await setup(t);await assert.rejects(f.jobs.prepare({...f.request,selection:{...selection,materials:[{projectSlot:0,material:'PLA',physicalTray:99}]}}),{code:'inspection-failed'});
 });

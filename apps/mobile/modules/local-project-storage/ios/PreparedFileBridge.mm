@@ -22,6 +22,7 @@ static NSData *Verified(NSDictionary *f) {
   int fd=open(u.fileSystemRepresentation,O_RDONLY|O_NOFOLLOW);if(fd<0)return nil;
   NSMutableData *d=[NSMutableData dataWithLength:n.unsignedIntegerValue];NSUInteger off=0;while(off<d.length){ssize_t got=read(fd,(char*)d.mutableBytes+off,d.length-off);if(got<=0){close(fd);return nil;}off+=got;}char extra;ssize_t tail=read(fd,&extra,1);close(fd);return tail==0&&[STMHash(d) isEqual:f[@"sha256"]]?d:nil;
 }
+static BOOL Matches(NSString *value,NSString *pattern) { return [value isKindOfClass:NSString.class]&&[[NSPredicate predicateWithFormat:@"SELF MATCHES %@",pattern] evaluateWithObject:value]; }
 static BOOL DurableWrite(NSData *data, NSURL *url) {
   NSFileManager *fm=NSFileManager.defaultManager;NSURL *directory=url.URLByDeletingLastPathComponent;
   if(![fm createDirectoryAtURL:directory withIntermediateDirectories:YES attributes:nil error:nil])return NO;
@@ -67,13 +68,44 @@ RCT_REMAP_METHOD(request,requestOptions:(NSDictionary*)o resolve:(RCTPromiseReso
   NSError *e=nil;NSDictionary *p=STMReadPairing(&e);NSURL *base=p?STMCompanionBaseURL(p[@"baseUrl"]):nil;
   if(e||!base||![Context(p) isEqual:o[@"context"]]||[p[@"expiresAt"] doubleValue]<=NSDate.date.timeIntervalSince1970*1000){reject(@"pairing-required",@"Connect to your companion again.",e);return;}
   NSString *path=o[@"path"],*method=o[@"method"];
-  NSString *pattern=@"^/v1/saved-projects/[A-Za-z0-9][A-Za-z0-9_-]{0,127}/prepared-jobs/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}(/artifacts/printable)?\\?projectRevision=(0|[1-9][0-9]*)$";
+  NSString *jobId=@"[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}";
+  NSString *prefix=[NSString stringWithFormat:@"^/v1/saved-projects/[A-Za-z0-9][A-Za-z0-9_-]{0,127}/prepared-jobs/%@",jobId];
+  NSString *revision=@"\\?projectRevision=(0|[1-9][0-9]*)$";
+  NSString *pattern=[NSString stringWithFormat:@"%@(/artifacts/printable|/intent|/attempt)?%@",prefix,revision];
+  NSString *productionPattern=[NSString stringWithFormat:@"%@/production\\?projectRevision=(0|[1-9][0-9]*)(&allowSupports=1)?$",prefix];
   NSString *collectionPattern=@"^/v1/saved-projects/[A-Za-z0-9][A-Za-z0-9_-]{0,127}/prepared-jobs\\?projectRevision=(0|[1-9][0-9]*)(?:&limit=(?:[1-9]|[1-4][0-9]|50))?(?:&productionVersion=1)?(?:&cursor=[A-Za-z0-9_-]{1,1024})?$";
-  BOOL listing=[path isKindOfClass:NSString.class]&&[[NSPredicate predicateWithFormat:@"SELF MATCHES %@",collectionPattern] evaluateWithObject:path];
+  BOOL listing=Matches(path,collectionPattern);
+  BOOL production=Matches(path,productionPattern);
   BOOL download=[path isKindOfClass:NSString.class]&&[path containsString:@"/artifacts/printable?"];
-  if(![path isKindOfClass:NSString.class]||(!listing&&![[NSPredicate predicateWithFormat:@"SELF MATCHES %@",pattern] evaluateWithObject:path])||![method isEqual:@"GET"]||![o[@"etag"] isKindOfClass:NSString.class]||![[NSPredicate predicateWithFormat:@"SELF MATCHES %@",@"\"[a-f0-9]{64}\""] evaluateWithObject:o[@"etag"]]||download!=(o[@"artifact"]!=nil)||o[@"body"]||o[@"source"]||o[@"create"]){reject(@"invalid-request",@"Invalid prepared file request.",nil);return;}
-  if(![p[@"scopes"] containsObject:@"prepared-jobs:read"]){reject(@"scope-denied",@"Connect with permission to read inspected files.",nil);return;}
-  NSMutableURLRequest *req=[NSMutableURLRequest requestWithURL:[NSURL URLWithString:path relativeToURL:base].absoluteURL];req.HTTPMethod=@"GET";
+  BOOL intent=[path isKindOfClass:NSString.class]&&[path containsString:@"/intent?"];
+  BOOL attempt=[path isKindOfClass:NSString.class]&&[path containsString:@"/attempt?"];
+  BOOL validMethod=[method isKindOfClass:NSString.class]&&([method isEqual:@"GET"]||[method isEqual:@"POST"]);
+  BOOL shape=validMethod&&(listing||production||Matches(path,pattern))&&[o[@"etag"] isKindOfClass:NSString.class]&&Matches(o[@"etag"],@"\"[a-f0-9]{64}\"")&&!o[@"create"]&&(
+    (listing&&[method isEqual:@"GET"]&&!o[@"artifact"]&&!o[@"source"]&&!o[@"body"])||
+    (download&&[method isEqual:@"GET"]&&o[@"artifact"]!=nil&&!o[@"source"]&&!o[@"body"])||
+    (production&&[method isEqual:@"GET"]&&!o[@"artifact"]&&!o[@"source"]&&!o[@"body"])||
+    (production&&[method isEqual:@"POST"]&&o[@"source"]!=nil&&!o[@"artifact"]&&!o[@"body"])||
+    (attempt&&[method isEqual:@"GET"]&&!o[@"artifact"]&&!o[@"source"]&&!o[@"body"])||
+    (intent&&[method isEqual:@"POST"]&&[o[@"body"] isKindOfClass:NSString.class]&&!o[@"source"]&&!o[@"artifact"])||
+    (!listing&&!download&&!production&&!intent&&!attempt&&[method isEqual:@"GET"]&&!o[@"artifact"]&&!o[@"source"]&&!o[@"body"]));
+  if(!shape){reject(@"invalid-request",@"Invalid prepared file request.",nil);return;}
+  NSString *scope=intent?@"prints:approve":(production&&[method isEqual:@"POST"])?@"prepared-jobs:prepare":@"prepared-jobs:read";
+  if(![p[@"scopes"] containsObject:scope]){reject(@"scope-denied",intent?@"Connect with permission to approve prints.":@"Connect with permission to read inspected files.",nil);return;}
+  NSData *body=nil;NSString *contentType=nil;
+  if(o[@"source"]){
+    NSDictionary *source=o[@"source"];
+    if(![source isKindOfClass:NSDictionary.class]||source.count!=3||![source[@"mediaType"] isEqual:@"model/stl"]||![source[@"sha256"] isKindOfClass:NSString.class]||!Matches(source[@"sha256"],@"[a-f0-9]{64}")||![source[@"byteLength"] isKindOfClass:NSNumber.class]){reject(@"invalid-source",@"The accepted design file is unavailable.",nil);return;}
+    // Accepted design bytes live in the shared artifact cache, keyed by digest.
+    body=STMVerifiedArtifact(source[@"sha256"],source[@"byteLength"],nil);
+    if(!body){reject(@"invalid-source",@"The accepted design file is unavailable.",nil);return;}
+    contentType=@"model/stl";
+  }
+  if(intent){
+    body=[o[@"body"] dataUsingEncoding:NSUTF8StringEncoding];if(!body||body.length<1||body.length>4096){reject(@"payload-too-large",@"Approval request is too large.",nil);return;}
+    contentType=@"application/json";
+  }
+  NSMutableURLRequest *req=[NSMutableURLRequest requestWithURL:[NSURL URLWithString:path relativeToURL:base].absoluteURL];req.HTTPMethod=method;req.HTTPBody=body;
+  if(body)[req setValue:contentType forHTTPHeaderField:@"Content-Type"];
   [req setValue:[@"Bearer " stringByAppendingString:p[@"token"]] forHTTPHeaderField:@"Authorization"];[req setValue:p[@"deviceId"] forHTTPHeaderField:@"X-Scan-Device"];
   [req setValue:o[@"etag"] forHTTPHeaderField:@"If-Match"];
   self.artifact=o[@"artifact"];if(self.artifact&&![self.artifact isKindOfClass:NSDictionary.class]){reject(@"invalid-artifact",@"Invalid prepared file identity.",nil);return;}self.limit=self.artifact?MIN(CAP_LIMIT,[self.artifact[@"byteLength"] unsignedIntegerValue]):(listing?64*1024:1024*1024);
@@ -85,7 +117,7 @@ RCT_REMAP_METHOD(request,requestOptions:(NSDictionary*)o resolve:(RCTPromiseReso
 - (void)URLSession:(NSURLSession*)s task:(NSURLSessionTask*)t willPerformHTTPRedirection:(NSHTTPURLResponse*)r newRequest:(NSURLRequest*)q completionHandler:(void(^)(NSURLRequest*))done{done(nil);}
 - (void)URLSession:(NSURLSession*)s dataTask:(NSURLSessionDataTask*)t didReceiveResponse:(NSURLResponse*)r completionHandler:(void(^)(NSURLSessionResponseDisposition))done{
   if(t!=self.task){done(NSURLSessionResponseCancel);return;}self.response=(NSHTTPURLResponse*)r;
-  if(self.response.statusCode!=200&&self.response.statusCode!=201)self.limit=64*1024;
+  if(self.response.statusCode!=200&&self.response.statusCode!=201&&self.response.statusCode!=202)self.limit=64*1024;
   if(r.expectedContentLength>(long long)self.limit){done(NSURLSessionResponseCancel);[self fail:@"payload-too-large" message:@"Prepared file response exceeded its limit."];return;}done(NSURLSessionResponseAllow);
 }
 - (void)URLSession:(NSURLSession*)s dataTask:(NSURLSessionDataTask*)t didReceiveData:(NSData*)d{if(t!=self.task)return;if(d.length>self.limit-self.received.length){[self fail:@"payload-too-large" message:@"Prepared file response exceeded its limit."];return;}[self.received appendData:d];}

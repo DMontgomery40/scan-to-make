@@ -1,5 +1,8 @@
 import {ScanProcessingStore,createScanRunner} from './scan-processing.js';
-import {PreparedJobStore} from './prepared-jobs.js';
+import {PreparedJobStore, createPreparedProducer} from './prepared-jobs.js';
+import {preparedProducerConfigurationSchema} from './prepared-production.js';
+import {preparedPrintabilityConfigurationSchema, type PreparedPrintabilityConfiguration} from './prepared-printability.js';
+import {z} from 'zod';
 import {isAbsolute,join} from 'node:path';
 import {FileSavedProjectStorage} from '@scan-to-make/project';
 import {CaptureStore} from './capture-import.js';
@@ -28,10 +31,25 @@ if(scanTool!==undefined||scanBlender!==undefined){
 }
 // Only a host operator chooses the executable. Remote envelopes cannot select it.
 const inspectorFile=process.env.SCAN_TO_MAKE_PREPARED_MCP_CONFIG;
-if(inspectorFile!==undefined){
- if(!capture||!captureDirectory||!isAbsolute(inspectorFile))throw new Error('Prepared jobs require authenticated storage and an absolute private inspector configuration');
+const productionFile=process.env.SCAN_TO_MAKE_PREPARED_PRODUCTION_CONFIG;
+if(inspectorFile!==undefined||productionFile!==undefined){
+ if(!capture||!captureDirectory||!inspectorFile||!isAbsolute(inspectorFile))throw new Error('Prepared jobs require authenticated storage and an absolute private inspector configuration');
  const configuration=await readPrivateConfig(inspectorFile,inspectorProcessSchema,'Inspector configuration');
- Object.assign(capture,{preparedJobs:new PreparedJobStore(capture.storage,join(captureDirectory,'prepared-jobs'),{inspection:{process:configuration}})});
+ const options:{inspection:{process:typeof configuration};production?:ReturnType<typeof createPreparedProducer>;printability?:PreparedPrintabilityConfiguration;appProduction?:{selection:unknown;displayName:string}}={inspection:{process:configuration}};
+ if(productionFile!==undefined){
+  if(!isAbsolute(productionFile))throw new Error('App prepared production requires an absolute private production configuration');
+  // Operator-pinned printer profile: phones never choose hardware settings.
+  const productionConfiguration=await readPrivateConfig(productionFile,z.strictObject({
+   producer:preparedProducerConfigurationSchema,
+   printability:preparedPrintabilityConfigurationSchema.optional(),
+   selection:z.unknown(),
+   displayName:z.string().trim().min(1).max(256),
+  }),'Prepared production configuration');
+  options.production=createPreparedProducer(productionConfiguration.producer);
+  if(productionConfiguration.printability)options.printability=productionConfiguration.printability;
+  options.appProduction={selection:productionConfiguration.selection,displayName:productionConfiguration.displayName};
+ }
+ Object.assign(capture,{preparedJobs:new PreparedJobStore(capture.storage,join(captureDirectory,'prepared-jobs'),options)});
 }
 const server = await startGenerationServer({
   capture,

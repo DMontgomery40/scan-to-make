@@ -102,18 +102,23 @@ lock requires manual inspection before recovery.
 
 The internal `prepareProduced` method accepts a current portable project ID,
 revision, strong ETag, client job UUID, exact accepted STL bytes, and a selection
-without `slicerSettingsSha256`. Configure both `production` and `inspection` on
-the store. `createPreparedProducer` supplies the maintained macOS producer with
-fixed host configuration: Python path, producer script and SHA-256 pin, bundle,
-binary SHA-256 pin, version, and bundled machine/process/filament preset names.
-Requests cannot choose executables, paths, presets, or receipts. This method is
-not exposed by HTTP and adds no device permissions. Host operators create
+without `slicerSettingsSha256`. The produced selection must name `nozzleType`
+(David's P1S is `hardened_steel`). Configure both `production` and `inspection`
+on the store. `createPreparedProducer` calls bambu-printer-mcp's `slice_stl`
+through a separate trusted MCP process, using the same `TrustedMcpProcess`
+pattern as file inspection. Its private config is
+`{process: {command, args?, cwd?, env}, timeoutMs?}`. The operator-configured
+environment must set `SLICER_TYPE` and an absolute `SLICER_PATH`; the producer
+adds a per-call private `TEMP_DIR`. Requests cannot choose executables, paths,
+presets, or receipts. Host operators create
 produced jobs with `npm run prepared:produce --prefix services/companion --`
 followed by the capture directory, private inspector config, private producer
 config, project id/revision/ETag, job UUID, accepted STL path, and selection
 JSON. The CLI prints `{jobId, jobSha256, created}` and is the operator-host
 entrypoint for `prepareProduced`. CLI arguments and environment variables cannot
 override the producer or inspector identities pinned in those private files.
+The CLI also accepts an optional `--printability-config <path>` (private config,
+same reader) and a bare `--allow-supports` flag for the printability gate below.
 
 Source identity and STL structure are checked before slicing: the CLI reads the
 supplied STL and `prepareProduced` rejects it unless those bytes match the
@@ -128,20 +133,109 @@ after an ambiguous result: a persisted job is reverified and returned without
 slicing or inspecting again. A different request, producer configuration, or
 imported/produced identity rejects.
 
-The optional `production` record is sealed in the job digest. The job retains
-`source.stl`, `settings.json`, and `production.json` alongside the printable and
-job metadata. Reopen verifies their exact lengths and SHA-256 values, their
-manifest bindings and the current accepted source. Source is capped at32MiB,
-settings at8MiB, manifest at1MiB, and G-code at the store's printable limit.
-The runner requires enforced macOS isolation, limits runtime/logs, and reaps its
-owned slicer group on cancellation. Unsupported platforms refuse execution.
-The original user home is resolved by the producer for its read-denial profile;
-the slicer itself receives a fresh scratch home and no inherited credentials.
+## Printability gate and selection-driven slicing
+
+When the store is configured with `printability`, `prepareProduced` runs an
+operator-pinned printability gate after `readVerifiedStl` and before slicing.
+The private config pins the report CLI, its analyzer sibling, and the profiles
+file by SHA-256, plus the printer profile id; the gate invokes
+`python -I -B <script> check <tmp-stl> --profile <id> --out <tmp-report>` as a
+bounded detached subprocess and strictly validates the report (schema, input
+digest/length, and the profile's model, bed type, nozzle type, and nozzle
+diameter against the sealed selection). Verdict handling is fail-closed:
+
+- `not-printable` rejects with `printability-failed` (HTTP 422).
+- `printable-with-supports` rejects with `supports-required` (HTTP 409) unless
+  the caller passed an explicit `allowSupports`. Support generation itself is
+  governed by the operator-pinned slicer profile used by `slice_stl`; there is
+  no per-request slicer override.
+- Any gate, pin, or report failure rejects with `printability-unavailable`
+  (HTTP 503). A failed gate never falls through to slicing.
+
+The sealed `production.printability` record
+(`{profileId, verdict, allowSupports, reportArtifact}`) binds the verdict into
+the job digest; the full report is retained as `printability.json` beside
+`production.json` and reverified on reopen. `requestSha256` also binds
+`allowSupports` and the gate identity, so changing either is a different
+request. Without a gate config, production behaves exactly as before; enabling
+the gate is an operator deployment choice.
+
+Slicing takes `bambu_model`, `nozzle_diameter`, `bed_type`, and `nozzle_type`
+from the sealed selection and calls `slice_stl` with
+`use_printer_filaments: false`, `orient: true`, `arrange: true`, and
+`ensure_on_bed: true`.
+The producer identity (`adapterVersion: 3`) binds the trusted MCP process and
+its operator slicer environment. The selected nozzle type is cross-checked
+against every inspected `nozzleTypes` entry; an explicit inspector
+`expectedNozzleType` pin wins over the selection value. The output is a sliced
+`model/3mf`, read only from the producer's per-call private `TEMP_DIR` and then
+inspected with `inspect_print_file` before sealing.
+
+## App-facing production, approval, and attempt routes
+
+When the listener is configured with `SCAN_TO_MAKE_PREPARED_PRODUCTION_CONFIG`
+(absolute private JSON: `{producer, printability?, selection, displayName}`),
+the store enables app production behind three authenticated routes under
+`/v1/saved-projects/:projectId/prepared-jobs/:jobId`. Without it, production
+routes return 404 `not-available` and behavior is unchanged. Printer, material,
+tray, and profile are operator-pinned in that config; the phone never picks
+hardware.
+
+- `POST .../production?projectRevision=N[&allowSupports=1]` (scope
+  `prepared-jobs:prepare`) runs `prepareProduced` as a background operation.
+  The body is the raw accepted `model/stl` bytes streamed by the native bridge
+  from the phone's verified cache; the companion checks them against the
+  project's accepted artifact digest before slicing. Returns 202 with the
+  production view, or 200 for an identical replay. An identical start returns
+  the retained operation instead of slicing again; a different request for the
+  same job id conflicts. Only one production runs per capture directory; a
+  concurrent start returns `busy`. `GET .../production` (scope
+  `prepared-jobs:read`) polls the view:
+  `{jobId, status, failure?, job{jobId, jobSha256, printableArtifact, selection}, printability, gcodeSummary?, profile{displayName, nozzleDiameterMm, nozzleType?, bedType}}`,
+  where `gcodeSummary` appears only if the producer manifest emits one.
+  Operation records are retained under `.production-operations/`; an operation
+  interrupted by a companion restart reads as failed with `interrupted`.
+- `POST .../intent?projectRevision=N` (new scope `prints:approve`, granted
+  only by an explicit `pair-print` invitation) records the user's approval.
+  The body is exactly `{jobSha256, confirmed: true}`. The approving actor is
+  derived from the authenticated pairing and the five-minute expiry is stamped
+  on the host clock; client-supplied actor or expiry values are rejected.
+  Returns 201 with `{intent}`, the full sealed intent record. The app's approval creates the intent only —
+  physical dispatch stays with the host's printer adapter and its own safety
+  gates.
+- `GET .../attempt?projectRevision=N` (scope `prepared-jobs:read`) returns
+  `{jobId, intent, linkedAttempt}`. `linkedAttempt` is populated only when the
+  host executor writes an `attempt-link.json` beside the job
+  (`{attemptId, printerId, planSha256, outcome?, resolution?}`, outcome one of
+  `started`/`unconfirmed`/`uncertain`, resolution one of
+  `finished`/`cancelled`/`rejected`). A null `linkedAttempt` means the intent
+  reached the companion only; it never means anything printed.
+
+Error codes clients branch on: `printability-failed`, `supports-required`,
+`approval-expired`, `already-approved`, `approval-mismatch`, `busy`,
+`not-available`, and `project-changed` (client mapping of a stale ETag).
+`printer-offline`, `printer-busy`, `already-sent`, and `ambiguous-send` are
+reserved for the host executor and are not emitted by these routes. Starts
+and approvals are never automatically replayed by the client: a transport
+failure surfaces as an explicit ambiguous code and the UI polls status
+instead.
+
+The optional `production` record is sealed in the job digest. New MCP-produced
+jobs carry `producerKind: "bambu-printer-mcp"`, the MCP server name/version and
+catalog digest, `tool: "slice_stl"`, and the configured slicer type. The job
+retains `source.stl`, `settings.json`, and `production.json` alongside the
+printable and job metadata. Reopen verifies their exact lengths and SHA-256
+values, their manifest bindings and the current accepted source. Source is
+capped at 32 MiB, settings at 8 MiB, manifest at 1 MiB, and the sliced 3MF at
+the store's printable limit. Jobs retained by the removed local slicer wrapper
+keep their legacy production record and still reverify on reopen.
 
 For **trusted-produced jobs only**, `selection.slicerSettingsSha256` means the
-SHA-256 of the exact retained exported-settings bytes from that run. Imported
-jobs keep their caller-declared meaning. This is not proof of complete internal
-settings equivalence, calibration, physical fit, or observed printer/tray state.
+SHA-256 of the exact retained settings bytes from that run: the canonical
+`slice_stl` request recorded by the companion for MCP-produced jobs, or the
+exported settings for legacy jobs. Imported jobs keep their caller-declared
+meaning. This is not proof of complete internal settings equivalence,
+calibration, physical fit, or observed printer/tray state.
 No `CalibrationScope` is created or modified.
 
 Collection GET discovery stays imported-only unless the client opts in with

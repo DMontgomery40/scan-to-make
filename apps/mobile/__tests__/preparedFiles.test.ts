@@ -373,6 +373,90 @@ test('produced metadata verifies in canonical digest order and preserves retaine
     ),
   ).toMatchObject({ production: f.job.production });
 });
+test('gated production records validate with the sealed printability verdict', async () => {
+  const f = await producedFixture();
+  f.job.production.printability = {
+    profileId: 'p1s-04',
+    verdict: 'printable-with-supports',
+    allowSupports: true,
+    reportArtifact: {
+      sha256: '5'.repeat(64),
+      mediaType: 'application/json',
+      byteLength: 123,
+    },
+  };
+  const body = Object.fromEntries(
+    Object.entries(f.job).filter(([key]) => key !== 'sha256'),
+  );
+  f.job.sha256 = await hash(JSON.stringify(body));
+  expect(
+    await validatePreparedResponse(
+      { jobId: f.id, job: f.job },
+      f.project,
+      f.id,
+      hash,
+    ),
+  ).toMatchObject({
+    production: { printability: f.job.production.printability },
+  });
+});
+test('MCP produced metadata validates as a sliced 3MF with the selected nozzle type', async () => {
+  const base = await fixture();
+  const f = {
+    ...base,
+    job: JSON.parse(JSON.stringify(base.response.job)),
+  };
+  f.job.printableArtifact.mediaType = 'model/3mf';
+  f.job.selection = {
+    printerId: f.job.selection.printerId,
+    model: f.job.selection.model,
+    plateIndex: f.job.selection.plateIndex,
+    nozzleDiameters: f.job.selection.nozzleDiameters,
+    nozzleType: 'hardened_steel',
+    bedType: f.job.selection.bedType,
+    materials: f.job.selection.materials,
+    slicerSettingsSha256: f.job.selection.slicerSettingsSha256,
+  };
+  f.job.inspection.receipt.artifact.file_format = '3mf';
+  f.job.inspection.receipt.inspection.plateInternalPath =
+    'Metadata/plate_1.gcode';
+  f.job.inspection.receipt.inspection.nozzleTypes = ['hardened_steel'];
+  f.job.production = {
+    producerKind: 'bambu-printer-mcp',
+    requestSha256: '1'.repeat(64),
+    producerIdentity: '2'.repeat(64),
+    sourceArtifact: f.job.designArtifact,
+    settingsArtifact: {
+      sha256: f.job.selection.slicerSettingsSha256,
+      mediaType: 'application/json',
+      byteLength: 42,
+    },
+    manifestArtifact: {
+      sha256: '3'.repeat(64),
+      mediaType: 'application/json',
+      byteLength: 50,
+    },
+    mcpServer: { name: 'bambu-printer-mcp', version: '1.1.41' },
+    catalogSha256: '4'.repeat(64),
+    tool: 'slice_stl',
+    slicerType: 'bambustudio',
+  };
+  const body = Object.fromEntries(
+    Object.entries(f.job).filter(([key]) => key !== 'sha256'),
+  );
+  f.job.sha256 = await hash(JSON.stringify(body));
+  expect(
+    await validatePreparedResponse(
+      { jobId: f.id, job: f.job },
+      f.project,
+      f.id,
+      hash,
+    ),
+  ).toMatchObject({
+    production: { producerKind: 'bambu-printer-mcp', tool: 'slice_stl' },
+    printableArtifact: { mediaType: 'model/3mf' },
+  });
+});
 test('self-consistent produced metadata cannot substitute source/settings or exceed bounds', async () => {
   const f = await producedFixture();
   const changes = [
@@ -473,4 +557,209 @@ test('an unsupported first page never loops compatibility retries', async () => 
   };
   await expect(f.client.list(f.project.id, f.ack)).rejects.toThrow();
   expect(calls).toBe(2);
+});
+
+const productionProfile = {
+  id: 'p1s-04',
+  bambuModel: 'p1s',
+  displayName: 'Bambu P1S 0.4',
+  bedMm: { x: 256, y: 256 },
+  excludeZonesMm: [],
+  nozzleDiameterMm: 0.4,
+  nozzleCount: 1,
+  nozzleType: 'stainless_steel',
+  bedType: 'textured_plate',
+};
+const summary = {
+  verdict: 'printable' as const,
+  reasonCodes: [],
+  reasons: [],
+  warnings: [],
+  profile: productionProfile,
+};
+function runningView(f: Awaited<ReturnType<typeof fixture>>) {
+  return {
+    jobId: f.id,
+    status: 'running' as const,
+    profile: {
+      displayName: 'Bambu P1S',
+      nozzleDiameterMm: 0.4,
+      bedType: 'textured_plate',
+    },
+  };
+}
+test('startProduction streams the accepted STL identity, flags supports, and never retries an ambiguous transport', async () => {
+  const f = await fixture();
+  const seen: unknown[] = [];
+  f.native.request = jest.fn(async o => {
+    seen.push(o);
+    return {
+      status: 202,
+      etag: f.ack.etag,
+      body: JSON.stringify({ production: runningView(f) }),
+    };
+  });
+  const view = await f.client.startProduction(f.project.id, f.ack, {
+    jobId: f.id,
+    allowSupports: true,
+  });
+  expect(view.status).toBe('running');
+  const sent = seen[0] as {
+    method: string;
+    path: string;
+    source: { mediaType: string };
+  };
+  expect(sent.method).toBe('POST');
+  expect(sent.path).toContain(`/prepared-jobs/${f.id}/production?`);
+  expect(sent.path).toContain('&allowSupports=1');
+  expect(sent.source).toMatchObject({ mediaType: 'model/stl' });
+  // A transport failure may hide a started production: surface ambiguity
+  // and never reissue the mutation.
+  let calls = 0;
+  f.native.request = jest.fn(async () => {
+    calls++;
+    throw Error('connection lost');
+  });
+  await expect(
+    f.client.startProduction(f.project.id, f.ack, { jobId: f.id }),
+  ).rejects.toMatchObject({ code: 'production-ambiguous' });
+  expect(calls).toBe(1);
+});
+test('productionStatus parses the finished view with printability and job identity', async () => {
+  const f = await fixture();
+  const succeeded = {
+    jobId: f.id,
+    status: 'succeeded' as const,
+    job: {
+      jobId: f.id,
+      jobSha256: f.response.job.sha256,
+      printableArtifact: f.response.job.printableArtifact,
+      selection: f.response.job.selection,
+    },
+    printability: summary,
+    profile: runningView(f).profile,
+  };
+  f.native.request = jest.fn(async () => ({
+    status: 200,
+    etag: f.ack.etag,
+    body: JSON.stringify({ production: succeeded }),
+  }));
+  const view = await f.client.productionStatus(f.project.id, f.id, f.ack);
+  expect(view.job?.jobSha256).toBe(f.response.job.sha256);
+  expect(view.printability?.verdict).toBe('printable');
+  // A view for a different job is an identity mismatch, not a fallback.
+  f.native.request = jest.fn(async () => ({
+    status: 200,
+    etag: f.ack.etag,
+    body: JSON.stringify({
+      production: {
+        ...succeeded,
+        jobId: 'cfde3dd6-4e26-4aa2-bdf7-740d6f85b9dc',
+      },
+    }),
+  }));
+  await expect(
+    f.client.productionStatus(f.project.id, f.id, f.ack),
+  ).rejects.toThrow('Production identity mismatch');
+});
+test('claimIntent sends only the job digest and confirmation; approval errors keep their codes', async () => {
+  const f = await fixture();
+  const seen: unknown[] = [];
+  f.native.request = jest.fn(async o => {
+    seen.push(o);
+    return {
+      status: 201,
+      etag: f.ack.etag,
+      body: JSON.stringify({
+        intent: {
+          kind: 'intent',
+          intentId: f.id,
+          jobId: f.id,
+          jobSha256: f.response.job.sha256,
+          atMs: 1_790_000_000_000,
+          approval: {
+            jobSha256: f.response.job.sha256,
+            actorId: 'cfde3dd6-4e26-4aa2-bdf7-740d6f85b9db',
+            confirmed: true,
+            expiresAtMs: 1_790_000_300_000,
+          },
+        },
+      }),
+    };
+  });
+  const intent = await f.client.claimIntent(
+    f.project.id,
+    f.id,
+    f.ack,
+    f.response.job.sha256,
+  );
+  expect(intent.intentId).toBe(f.id);
+  expect(JSON.parse((seen[0] as { body: string }).body)).toEqual({
+    jobSha256: f.response.job.sha256,
+    confirmed: true,
+  });
+  for (const [status, code] of [
+    [409, 'already-approved'],
+    [409, 'approval-expired'],
+    [404, 'not-available'],
+  ] as const) {
+    f.native.request = jest.fn(async () => ({
+      status,
+      etag: f.ack.etag,
+      body: JSON.stringify({ error: { code } }),
+    }));
+    await expect(
+      f.client.claimIntent(f.project.id, f.id, f.ack, f.response.job.sha256),
+    ).rejects.toMatchObject({ code });
+  }
+  // Transport ambiguity never replays an approval.
+  f.native.request = jest.fn(async () => {
+    throw Error('connection lost');
+  });
+  await expect(
+    f.client.claimIntent(f.project.id, f.id, f.ack, f.response.job.sha256),
+  ).rejects.toMatchObject({ code: 'ambiguous-intent' });
+});
+test('attemptStatus reports approval with no linked dispatch, and printability failures carry the summary', async () => {
+  const f = await fixture();
+  f.native.request = jest.fn(async o => {
+    if (o.path.includes('/attempt?'))
+      return {
+        status: 200,
+        etag: f.ack.etag,
+        body: JSON.stringify({
+          attempt: {
+            jobId: f.id,
+            intent: { intentId: f.id, atMs: 1_790_000_000_000 },
+            linkedAttempt: null,
+          },
+        }),
+      };
+    return {
+      status: 422,
+      etag: f.ack.etag,
+      body: JSON.stringify({
+        error: {
+          code: 'printability-failed',
+          printability: {
+            ...summary,
+            verdict: 'not-printable',
+            reasonCodes: ['overhang'],
+          },
+        },
+      }),
+    };
+  });
+  const attempt = await f.client.attemptStatus(f.project.id, f.id, f.ack);
+  expect(attempt.linkedAttempt).toBeNull();
+  expect(attempt.intent?.intentId).toBe(f.id);
+  await expect(
+    f.client.startProduction(f.project.id, f.ack, { jobId: f.id }),
+  ).rejects.toMatchObject({
+    code: 'printability-failed',
+    printability: { verdict: 'not-printable' },
+  });
+  expect(
+    preparedError(Object.assign(Error('x'), { code: 'supports-required' })),
+  ).toContain('needs supports');
 });

@@ -180,7 +180,10 @@ export function InspectedFilesScreen({
             {selected.job.production ? (
               <>
                 <Text style={type.body}>
-                  Slicer: {selected.job.production.slicer.version}
+                  Slicer:{' '}
+                  {'producerKind' in selected.job.production
+                    ? selected.job.production.slicerType
+                    : selected.job.production.slicer.version}
                 </Text>
                 <Text style={type.caption}>
                   The source matches this accepted design. Settings were saved

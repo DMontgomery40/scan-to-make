@@ -4,7 +4,8 @@ import type {IncomingMessage,ServerResponse} from 'node:http';
 import {z} from 'zod';
 import {ArtifactRefSchema} from '@scan-to-make/contracts';
 import {PrintSelectionSchema} from './index.js';
-import {PreparedJobStore,PreparedJobFailure} from './prepared-jobs.js';
+import {PreparedJobStore,PreparedJobFailure,PreparedPrintabilityFailure} from './prepared-jobs.js';
+import {PRODUCTION_LIMITS} from './prepared-production.js';
 import {SavedProjectSync,SavedProjectSyncFailure,MAX_SAVED_PROJECT_SYNC_BYTES,type FileSavedProjectStorage} from '@scan-to-make/project';
 import {CaptureStore,DEFAULT_CAPTURE_LIMITS} from './capture-import.js';
 import {DetailStillStore,DetailStillFailure,sniffDetailStillMediaType} from './detail-stills.js';
@@ -62,18 +63,18 @@ export function createCaptureRoutes(services:CaptureServices){
  const projects=new SavedProjectSync(services.storage);
  let active:{controller:AbortController;done:Promise<void>}|undefined;
  return {
-  async close(){const pending=active;pending?.controller.abort();await pending?.done;await services.scanProcessing?.close();},
+  async close(){const pending=active;pending?.controller.abort();await pending?.done;await services.scanProcessing?.close();await services.preparedJobs?.close();},
   async handle(request:IncomingMessage,response:ServerResponse,authorize:(scope:RemoteScope)=>Promise<void>,header:(name:string)=>string|undefined){
    let finish:(()=>void)|undefined;let disconnected:(()=>void)|undefined;
    try {
     const url=new URL(request.url!,'http://localhost');
     const match=/^\/v1\/saved-projects\/([A-Za-z0-9][A-Za-z0-9_-]{0,127})(?:\/captures(?:\/([a-fA-F0-9-]{36})(?:\/artifacts\/(original|derived|report))?)?)?$/.exec(url.pathname);
-    const prepared=/^\/v1\/saved-projects\/([A-Za-z0-9][A-Za-z0-9_-]{0,127})\/prepared-jobs(?:\/([a-fA-F0-9-]{36})(?:\/artifacts\/(printable))?)?$/.exec(url.pathname);
+    const prepared=/^\/v1\/saved-projects\/([A-Za-z0-9][A-Za-z0-9_-]{0,127})\/prepared-jobs(?:\/([a-fA-F0-9-]{36})(?:\/artifacts\/(printable)|\/(production|intent|attempt))?)?$/.exec(url.pathname);
     const stills=/^\/v1\/saved-projects\/([A-Za-z0-9][A-Za-z0-9_-]{0,127})\/captures\/([a-fA-F0-9-]{36})\/detail-stills(?:\/([a-fA-F0-9-]{36}))?$/.exec(url.pathname);
     const processing=/^\/v1\/saved-projects\/([A-Za-z0-9][A-Za-z0-9_-]{0,127})\/captures\/([a-fA-F0-9-]{36})\/scan-processing(?:\/([a-fA-F0-9-]{36})(?:\/artifacts\/([^/]+))?)?$/.exec(url.pathname);
     if(!match&&!prepared&&!stills&&!processing)throw new Failure(404,'not-found');
     const id=(processing??prepared??stills??match)![1]!,captureId=match?.[2],kind=match?.[3] as 'original'|'derived'|'report'|undefined;
-    const jobId=prepared?.[2]?.toLowerCase(),listing=!!prepared&&!prepared[2];
+    const jobId=prepared?.[2]?.toLowerCase(),listing=!!prepared&&!prepared[2],preparedSub=prepared?.[4] as 'production'|'intent'|'attempt'|undefined;
     if(jobId&&!z.uuid().safeParse(jobId).success)throw new Failure(400,'invalid-request');
     if(prepared&&!services.preparedJobs)throw new Failure(404,'not-found');
     const stillCaptureId=stills?.[2]?.toLowerCase(),stillId=stills?.[3]?.toLowerCase();
@@ -84,18 +85,20 @@ export function createCaptureRoutes(services:CaptureServices){
     const captureRoute=!!match&&match[0]!==`/v1/saved-projects/${id}`;
     if(captureRoute&&!services.captures)throw new Failure(404,'not-found');
     const writing=request.method==='PUT'||request.method==='POST';
-    const scope:RemoteScope=processing?(writing||request.method==='DELETE'?'captures:import':'captures:read'):stills?(writing||request.method==='DELETE'?'captures:import':'captures:read'):prepared?(writing?'prepared-jobs:prepare':'prepared-jobs:read'):captureRoute?(writing?'captures:import':'captures:read'):(writing?'projects:write':'projects:read');
+    const scope:RemoteScope=processing?(writing||request.method==='DELETE'?'captures:import':'captures:read'):stills?(writing||request.method==='DELETE'?'captures:import':'captures:read'):preparedSub==='intent'?'prints:approve':prepared?(writing?'prepared-jobs:prepare':'prepared-jobs:read'):captureRoute?(writing?'captures:import':'captures:read'):(writing?'projects:write':'projects:read');
     await authorize(scope);
-    if(processing?(processing[3]?(processing[4]?request.method!=='GET':!['GET','DELETE'].includes(request.method??'')):!['GET','POST'].includes(request.method??'')):stills?(stillId?!['GET','DELETE'].includes(request.method??''):!['GET','POST'].includes(request.method??'')):prepared?(listing||prepared[3]?request.method!=='GET':!['GET','POST'].includes(request.method??'')):captureRoute?(captureId?request.method!=='GET':request.method!=='POST'):!['GET','PUT'].includes(request.method??''))throw new Failure(405,'method-not-allowed');
+    if(processing?(processing[3]?(processing[4]?request.method!=='GET':!['GET','DELETE'].includes(request.method??'')):!['GET','POST'].includes(request.method??'')):stills?(stillId?!['GET','DELETE'].includes(request.method??''):!['GET','POST'].includes(request.method??'')):prepared?(listing||prepared[3]||preparedSub==='attempt'?request.method!=='GET':preparedSub==='production'?!['GET','POST'].includes(request.method??''):preparedSub==='intent'?request.method!=='POST':!['GET','POST'].includes(request.method??'')):captureRoute?(captureId?request.method!=='GET':request.method!=='POST'):!['GET','PUT'].includes(request.method??''))throw new Failure(405,'method-not-allowed');
     if(active)throw new Failure(429,'busy');
     const controller=new AbortController();active={controller,done:new Promise<void>(resolve=>finish=resolve)};
     disconnected=()=>{if(!response.writableEnded)controller.abort();};response.once('close',disconnected);
     const assertActive=()=>{if(controller.signal.aborted)throw new Failure(499,'cancelled');};
     const ifMatch=header('if-match'),ifNoneMatch=header('if-none-match');
-    let revision=0,listLimit:number|undefined,listCursor:string|undefined,productionVersion:1|undefined,stillLabel:string|undefined;
+    let revision=0,listLimit:number|undefined,listCursor:string|undefined,productionVersion:1|undefined,stillLabel:string|undefined,allowSupports=false;
+    const productionPost=preparedSub==='production'&&request.method==='POST';
     if(captureRoute||prepared||stills||processing){
      const keys=[...url.searchParams.keys()];const raw=url.searchParams.get('projectRevision');
-     if((listing?(new Set(keys).size!==keys.length||keys.some(key=>!['projectRevision','limit','cursor','productionVersion'].includes(key))):stillPost?(new Set(keys).size!==keys.length||keys.some(key=>!['projectRevision','label'].includes(key))):keys.length!==1||keys[0]!=='projectRevision')||raw===null||! /^(0|[1-9][0-9]*)$/.test(raw)||!Number.isSafeInteger(Number(raw)))throw new Failure(400,'invalid-request');
+     if((listing?(new Set(keys).size!==keys.length||keys.some(key=>!['projectRevision','limit','cursor','productionVersion'].includes(key))):stillPost?(new Set(keys).size!==keys.length||keys.some(key=>!['projectRevision','label'].includes(key))):productionPost?(new Set(keys).size!==keys.length||keys.some(key=>!['projectRevision','allowSupports'].includes(key))):keys.length!==1||keys[0]!=='projectRevision')||raw===null||! /^(0|[1-9][0-9]*)$/.test(raw)||!Number.isSafeInteger(Number(raw)))throw new Failure(400,'invalid-request');
+     if(productionPost){const rawSupports=url.searchParams.get('allowSupports');if(rawSupports!==null&&rawSupports!=='1')throw new Failure(400,'invalid-request');allowSupports=rawSupports==='1';}
      if(stillPost)stillLabel=url.searchParams.get('label')??undefined;
      if(listing){
       const limit=url.searchParams.get('limit');listCursor=url.searchParams.get('cursor')??undefined;
@@ -134,6 +137,48 @@ export function createCaptureRoutes(services:CaptureServices){
       if(artifact){response.setHeader('Content-Type',artifact.ref.mediaType);response.setHeader('X-Content-SHA256',artifact.ref.sha256);await send(response,artifact.bytes);}
       else await send(response,JSON.stringify(result));
      },ifMatch);
+     return;
+    }
+    if(preparedSub){
+     const input={projectId:id,projectRevision:revision,expectedProjectETag:ifMatch!,jobId:jobId!};
+     if(preparedSub==='attempt'){
+      const result=await services.preparedJobs!.loadAttemptStatus(input);
+      await authorize(scope);assertActive();response.setHeader('ETag',ifMatch!);await send(response,JSON.stringify({attempt:result}));
+     }else if(preparedSub==='production'&&request.method==='GET'){
+      if(!services.preparedJobs!.appProductionEnabled)throw new Failure(404,'not-available');
+      const result=await services.preparedJobs!.loadPreparedProduction(input);
+      await authorize(scope);assertActive();response.setHeader('ETag',ifMatch!);await send(response,JSON.stringify({production:result.view}));
+     }else if(preparedSub==='production'){
+      if(!services.preparedJobs!.appProductionEnabled)throw new Failure(404,'not-available');
+      if(header('content-type')!=='model/stl'||!['identity',undefined].includes(header('content-encoding')))throw new Failure(415,'unsupported-media-type');
+      if(Number(header('content-length')??0)>PRODUCTION_LIMITS.sourceBytes)throw new Failure(413,'payload-too-large');
+      const bytes=await body(request,controller.signal,PRODUCTION_LIMITS.sourceBytes,30000);assertActive();await authorize(scope);assertActive();
+      const result=await services.preparedJobs!.startPreparedProduction({...input,source:bytes,allowSupports},()=>authorize(scope));
+      assertActive();response.statusCode=result.created?202:200;response.setHeader('ETag',ifMatch!);
+      await send(response,JSON.stringify({production:result.view}));
+     }else{
+      if(!/^application\/json(?:;\s*charset=utf-8)?$/i.test(header('content-type')??'')||!['identity',undefined].includes(header('content-encoding')))throw new Failure(415,'unsupported-media-type');
+      const bytes=await body(request,controller.signal,4096);let approval:{jobSha256:string;confirmed:true};
+      try{approval=z.strictObject({jobSha256:z.string().regex(/^[a-f0-9]{64}$/),confirmed:z.literal(true)}).parse(JSON.parse(bytes.toString('utf8')));}catch{throw new Failure(400,'invalid-request');}
+      assertActive();await authorize(scope);assertActive();
+      // Actor and expiry are derived on the host, never accepted from the client.
+      const deviceId=header('x-scan-device')?.toLowerCase();
+      if(!deviceId||!z.uuid().safeParse(deviceId).success)throw new Failure(403,'forbidden');
+      const loaded=await services.preparedJobs!.loadPreparedJob(jobId!,ifMatch);
+      if(loaded.job.projectId!==id||loaded.job.projectRevision!==revision)throw new Failure(404,'not-found');
+      if(approval.jobSha256!==loaded.job.sha256)throw new Failure(409,'approval-mismatch');
+      if(loaded.intent)throw new Failure(409,'already-approved');
+      let intent:Awaited<ReturnType<PreparedJobStore['claimIntent']>>;
+      try{
+       intent=await services.preparedJobs!.claimIntent(jobId!,{jobSha256:approval.jobSha256,actorId:deviceId,confirmed:true,expiresAtMs:Date.now()+300000});
+      }catch(error){
+       const message=error instanceof Error?error.message:'';
+       if(message.includes('already has an intent'))throw new Failure(409,'already-approved');
+       if(message.includes('Approval must match'))throw new Failure(409,'approval-expired');
+       throw error;
+      }
+      assertActive();response.statusCode=201;response.setHeader('ETag',ifMatch!);await send(response,JSON.stringify({intent}));
+     }
      return;
     }
     if(writing){
@@ -208,7 +253,7 @@ export function createCaptureRoutes(services:CaptureServices){
      const result=await projects.get(id);await authorize(scope);assertActive();response.setHeader('ETag',result.etag);await send(response,result.bytes);
     }
    }catch(error){
-    const failure=error instanceof Failure||error instanceof RemoteAuthFailure?error:error instanceof SavedProjectSyncFailure?new Failure(snapshotStatus[error.code],error.code):error instanceof PreparedJobFailure?new Failure({'not-found':404,'job-conflict':409,cancelled:499,'invalid-cursor':400,'cursor-stale':409,'discovery-unavailable':503}[error.code],error.code):error instanceof ScanProcessingFailure?new Failure({'busy':429,'not-found':404,'processing-unavailable':422,'invalid-request':400}[error.code],error.code):error instanceof DetailStillFailure?new Failure({'not-found':404,'still-limit':409,'unsupported-media-type':415,'invalid-still':400,'payload-too-large':413,'still-unavailable':422}[error.code],error.code):['EACCES','EIO','ENOSPC','EROFS'].includes((error as NodeJS.ErrnoException)?.code??'')?new Failure(503,'storage-unavailable'):new Failure(422,'capture-unavailable');
+    const failure=error instanceof Failure||error instanceof RemoteAuthFailure?error:error instanceof SavedProjectSyncFailure?new Failure(snapshotStatus[error.code],error.code):error instanceof PreparedPrintabilityFailure?new Failure({'printability-failed':422,'supports-required':409,'printability-unavailable':503}[error.code],error.code):error instanceof PreparedJobFailure?new Failure({'not-found':404,'job-conflict':409,cancelled:499,'invalid-cursor':400,'cursor-stale':409,'discovery-unavailable':503,busy:429,'not-available':404,'already-approved':409,'approval-mismatch':409,'approval-expired':409}[error.code],error.code):error instanceof ScanProcessingFailure?new Failure({'busy':429,'not-found':404,'processing-unavailable':422,'invalid-request':400}[error.code],error.code):error instanceof DetailStillFailure?new Failure({'not-found':404,'still-limit':409,'unsupported-media-type':415,'invalid-still':400,'payload-too-large':413,'still-unavailable':422}[error.code],error.code):['EACCES','EIO','ENOSPC','EROFS'].includes((error as NodeJS.ErrnoException)?.code??'')?new Failure(503,'storage-unavailable'):new Failure(422,'capture-unavailable');
     if(!response.destroyed&&!response.headersSent){response.statusCode=failure.status;await send(response,JSON.stringify({error:{code:failure.code,message:failure.code}}));}
    }finally{
     if(disconnected)response.off('close',disconnected);

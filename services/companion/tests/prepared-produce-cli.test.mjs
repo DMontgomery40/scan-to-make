@@ -13,18 +13,19 @@ import {PreparedJobStore,PreparedJobFailure} from '../dist/prepared-jobs.js';
 import {RemoteAuthStore} from '../dist/remote-auth.js';
 import {startGenerationServer} from '../dist/generation.js';
 import {parseProduceArgs,runProduce} from '../dist/prepared-produce-cli.js';
+import {fakeProductionResult, fakeProductionSettings, fakeSlicedThreeMf} from './fixtures/prepared-production-result.mjs';
 const forwarded=JSON.parse(await readFile(new URL('./fixtures/tailscale-serve-v1.94.2.json',import.meta.url))).expected;
 const fit=JSON.parse(await readFile(new URL('../../../packages/contracts/fixtures/tapered-holder.json',import.meta.url),'utf8'));
 const sha=b=>createHash('sha256').update(b).digest('hex');
 const source=Buffer.from('solid test\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 10 0 0\nvertex 0 10 0\nendloop\nendfacet\nendsolid test\n');
-const output=Buffer.from('; isolated production fixture\nG28\n');
-const settings=Buffer.from('{"printer_model":"P1S","layer_height":"0.2"}');
-const selection={printerId:'fixture',model:'p1s',plateIndex:0,nozzleDiameters:[0.4],bedType:'textured_plate',materials:[{projectSlot:0,material:'PLA',physicalTray:254}]};
+const output=fakeSlicedThreeMf;
+const selection={printerId:'fixture',model:'p1s',plateIndex:0,nozzleDiameters:[0.4],nozzleType:'hardened_steel',bedType:'textured_plate',materials:[{projectSlot:0,material:'PLA',physicalTray:254}]};
+const settings=fakeProductionSettings({selection,allowSupports:false});
 const brief={object:'Cup',context:'Console',addition:'Insert'};
 const cli=fileURLToPath(new URL('../dist/prepared-produce-cli.js',import.meta.url));
 const inspectorScript=fileURLToPath(new URL('./fixtures/inspection-server.mjs',import.meta.url));
-function result(input){return {printable:Buffer.from(output),settings:Buffer.from(settings),manifest:Buffer.from(JSON.stringify({schema:'scan-to-make.slicer-producer/0.1.0',operatorOnly:true,exitCode:0,slicer:{version:'02.08.02.61',binary:{sha256:'b'.repeat(64)}},input:{sha256:sha(input),bytes:input.length,expectedDigestChecked:true},invocation:{sandbox:{kind:'macos-sandbox-exec',path:'/usr/bin/sandbox-exec'}},outputs:{gcode:{file:'plate_1.gcode',sha256:sha(output),bytes:output.length},exportedSettings:{file:'exported-settings.json',sha256:sha(settings),bytes:settings.length}}}))};}
-function producerConfig(){return {python:'/usr/bin/python3',script:'/usr/bin/true',expectedScriptSha256:'a'.repeat(64),bundle:'/isolated/test/bundle',expectedVersion:'fixture',expectedBinarySha256:'b'.repeat(64),machine:'fixture',process:'fixture',filament:'fixture'};}
+function result(input,request){return fakeProductionResult(input,request);}
+function producerConfig(){return {process:{command:process.execPath,args:['-e','process.exit(1)'],env:{SLICER_TYPE:'bambustudio',SLICER_PATH:'/operator/BambuStudio'}},timeoutMs:1000};}
 function argvOf(request){return ['--capture-dir',request.captureDir,'--inspector-config',request.inspectorConfig,'--producer-config',request.producerConfig,'--project-id',request.projectId,'--project-revision',String(request.projectRevision),'--etag',request.expectedProjectETag,'--job-id',request.jobId,'--stl',request.stlPath,'--selection',request.selectionPath];}
 function jobDirs(root){return readdir(join(root,'prepared-jobs')).then(names=>names.filter(name=>/^[0-9a-f-]{36}$/.test(name)),()=>[]);}
 function spawnCli(args,env={}){return new Promise((resolve,reject)=>{const child=spawn(process.execPath,[cli,...args],{env:{...process.env,...env},stdio:['ignore','pipe','pipe']});let out='',err='';const timer=setTimeout(()=>{child.kill('SIGKILL');reject(Error('CLI timeout'));},15000);child.stdout.on('data',b=>out+=b);child.stderr.on('data',b=>err+=b);child.on('error',reject);child.on('close',code=>{clearTimeout(timer);resolve({code,out,err});});});}
@@ -36,20 +37,20 @@ async function setup(t){
  await projects.create({id:fit.id,brief,fit});const binding={sourceFit:fit,artifact:{sha256:sha(source),byteLength:source.length,mediaType:'model/stl'}};
  await projects.change(fit.id,0,{kind:'attach-preview',...binding});await projects.change(fit.id,1,{kind:'accept-preview',...binding});
  const inspectorLog=join(root,'inspector.jsonl');
- const inspector={command:process.execPath,args:[inspectorScript,'ok',inspectorLog]};
+ const inspector={command:process.execPath,args:[inspectorScript,'nozzle-hardened',inspectorLog]};
  const inspectorConfig=join(root,'inspector.json'),producerPath=join(root,'producer.json'),stlPath=join(root,'source.stl'),selectionPath=join(root,'selection.json');
  await writeFile(inspectorConfig,JSON.stringify(inspector));await chmod(inspectorConfig,0o600);
  await writeFile(producerPath,JSON.stringify(producerConfig()));await chmod(producerPath,0o600);
  await writeFile(stlPath,source);await writeFile(selectionPath,JSON.stringify(selection));
  const request={captureDir:root,inspectorConfig,producerConfig:producerPath,projectId:fit.id,projectRevision:2,expectedProjectETag:savedProjectETag(await storage.read(fit.id)),jobId:randomUUID(),stlPath,selectionPath};
- let calls=0;const producer={identity:'c'.repeat(64),async produce(input){calls++;return result(input);}};
+ let calls=0;const producer={identity:'c'.repeat(64),async produce(input,request){calls++;return result(input,request);}};
  return {root,storage,projects,request,producer,calls:()=>calls,inspectorLog};
 }
 async function listen(t,f){
  const auth=await RemoteAuthStore.create(join(f.root,'auth'),{host:'companion.example-tail.ts.net',allowedLogins:['alice@example.test']});
  const invite=await auth.createPairing('alice@example.test',['generation:health','projects:read','projects:write','prepared-jobs:read','prepared-jobs:prepare']);
  const phone=await auth.exchange('alice@example.test',{code:invite.code,deviceName:'produce-listener'});
- const inspection={process:{command:process.execPath,args:[inspectorScript,'ok',join(f.root,'listener-inspector.jsonl')]},options:{timeoutMs:5000}};
+ const inspection={process:{command:process.execPath,args:[inspectorScript,'nozzle-hardened',join(f.root,'listener-inspector.jsonl')]},options:{timeoutMs:5000}};
  const preparedJobs=new PreparedJobStore(new FileSavedProjectStorage(join(f.root,'projects')),join(f.root,'prepared-jobs'),{inspection});
  const server=await startGenerationServer({port:0,remoteAuth:auth,capture:{storage:f.storage,preparedJobs}});t.after(()=>server.close());
  return {server,auth,phone,headers:{authorization:`Bearer ${phone.token}`,'x-scan-device':phone.deviceId},etag:f.request.expectedProjectETag};
@@ -116,9 +117,18 @@ test('CLI arguments and environment cannot override pinned producer identity',as
  assert.throws(()=>parseProduceArgs([...argvOf(f.request),'--python','/tmp/evil-python']),/Invalid produce arguments/);
 });
 
+test('produce arguments accept the supports opt-in and printability config exactly once',async t=>{
+ const f=await setup(t);
+ const parsed=parseProduceArgs([...argvOf(f.request),'--allow-supports','--printability-config','/operator/printability.json']);
+ assert.equal(parsed.allowSupports,true);assert.equal(parsed.printabilityConfig,'/operator/printability.json');
+ assert.equal(parseProduceArgs(argvOf(f.request)).allowSupports,false);
+ assert.throws(()=>parseProduceArgs([...argvOf(f.request),'--allow-supports','--allow-supports']),/Invalid produce arguments/);
+ assert.throws(()=>parseProduceArgs([...argvOf(f.request),'--printability-config']),/Invalid produce arguments/);
+});
+
 test('overlapping same jobId fails closed without a second slice',async t=>{
  const f=await setup(t);let resolveProduce;const gate=new Promise(resolve=>{resolveProduce=resolve;});
- const producer={identity:f.producer.identity,async produce(input){f.producer.produce(input);await gate;return result(input);}};
+ const producer={identity:f.producer.identity,async produce(input,request){f.producer.produce(input,request);await gate;return result(input,request);}};
  const first=runProduce(f.request,{producer});
  while(f.calls()<1)await new Promise(ok=>setTimeout(ok,10));
  await assert.rejects(runProduce(f.request,{producer}),error=>error instanceof PreparedJobFailure&&error.code==='job-conflict');
@@ -128,17 +138,15 @@ test('overlapping same jobId fails closed without a second slice',async t=>{
 test('separate processes cannot double-slice the same jobId',async t=>{
  const f=await setup(t);
  const started=join(f.root,'started.jsonl'),helper=join(f.root,'race.mjs'),produceUrl=new URL('../dist/prepared-produce-cli.js',import.meta.url).href;
+ const resultUrl=new URL('./fixtures/prepared-production-result.mjs',import.meta.url).href;
  await writeFile(helper,`import {appendFileSync,writeFileSync} from 'node:fs';
-import {createHash} from 'node:crypto';
 import {runProduce} from ${JSON.stringify(produceUrl)};
+import {fakeProductionResult} from ${JSON.stringify(resultUrl)};
 const request=${JSON.stringify(f.request)};
-const sha=b=>createHash('sha256').update(b).digest('hex');
-const output=Buffer.from(${JSON.stringify(output.toString('base64'))},'base64');
-const settings=Buffer.from(${JSON.stringify(settings.toString('base64'))},'base64');
-const producer={identity:${JSON.stringify(f.producer.identity)},async produce(input){
+const producer={identity:${JSON.stringify(f.producer.identity)},async produce(input,produceRequest){
  appendFileSync(${JSON.stringify(started)},'1\\n');
  await new Promise(ok=>setTimeout(ok,1500));
- return {printable:Buffer.from(output),settings:Buffer.from(settings),manifest:Buffer.from(JSON.stringify({schema:'scan-to-make.slicer-producer/0.1.0',operatorOnly:true,exitCode:0,slicer:{version:'02.08.02.61',binary:{sha256:${JSON.stringify('b'.repeat(64))}}},input:{sha256:sha(input),bytes:input.length,expectedDigestChecked:true},invocation:{sandbox:{kind:'macos-sandbox-exec',path:'/usr/bin/sandbox-exec'}},outputs:{gcode:{file:'plate_1.gcode',sha256:sha(output),bytes:output.length},exportedSettings:{file:'exported-settings.json',sha256:sha(settings),bytes:settings.length}}}))};
+ return fakeProductionResult(input,produceRequest);
 }};
 try {
  writeFileSync(process.argv[2],JSON.stringify({ok:true,result:await runProduce(request,{producer})})+'\\n');
@@ -160,9 +168,9 @@ try {
  assert.ok(ra.code===0&&rb.code===1||ra.code===1&&rb.code===0);
 });
 
-test('live produce path stays macOS-gated; injected fixtures stay portable',async t=>{
+test('live produce path fails closed when the configured MCP process is unavailable; injected fixtures stay portable',async t=>{
  const f=await setup(t);
- await assert.rejects(runProduce(f.request),process.platform==='darwin'?/identity mismatch|Producer|failed|macOS/: /Enforced slicer isolation requires macOS/);
+ await assert.rejects(runProduce(f.request),/MCP discovery failed|Producer|failed/);
  assert.equal(f.calls(),0);assert.deepEqual(await jobDirs(f.root),[]);
  const portable=await runProduce({...f.request,jobId:randomUUID()},{producer:f.producer});assert.equal(portable.created,true);
 });

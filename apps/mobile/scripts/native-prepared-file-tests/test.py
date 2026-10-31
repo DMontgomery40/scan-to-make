@@ -90,6 +90,7 @@ with tempfile.TemporaryDirectory(prefix='native-prepared-files-') as temp:
         container = Path(subprocess.check_output(['xcrun','simctl','get_app_container',args.simulator,BUNDLE,'data'],env=env,text=True).strip())
         result = json.loads((container / 'Documents/results-2.json').read_text())
         assert result['passed'] and len(result['cases']) == len(prepared['jobs']) and result['runId'] == run_id
+        assert result.get('productionBridge') is True, 'KAN-102 production bridge shapes not exercised'
         first=json.loads((container / 'Documents/results-1.json').read_text())
         assert first['passed'] and first['runId']==run_id and first['phase']==1 and result['phase']==2
         for case in result['cases']:

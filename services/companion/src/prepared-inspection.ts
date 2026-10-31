@@ -22,7 +22,8 @@ export const PreparedInspectionSchema = z.strictObject({
   receipt: receiptSchema, catalogSha256: digest,
   server: z.strictObject({name: z.string().max(512), version: z.string().max(512)}),
 });
-export interface PreparedInspectionConfiguration {process: TrustedMcpProcess; options?: DiscoveryOptions}
+export type ExpectedNozzleType = 'stainless_steel' | 'hardened_steel' | 'tungsten_carbide' | 'brass';
+export interface PreparedInspectionConfiguration {process: TrustedMcpProcess; options?: DiscoveryOptions; expectedNozzleType?: ExpectedNozzleType}
 const beds = {textured_plate: 'textured pei plate', cool_plate: 'cool plate', engineering_plate: 'engineering plate',
   hot_plate: 'smooth pei plate', supertack_plate: 'cool plate supertack'};
 export function printableFormat(artifact: ArtifactRef): '3mf' | 'gcode' {
@@ -30,7 +31,7 @@ export function printableFormat(artifact: ArtifactRef): '3mf' | 'gcode' {
   if (artifact.mediaType === 'text/x.gcode') return 'gcode';
   throw new Error('Inspected preparation requires sliced model/3mf or text/x.gcode');
 }
-function compatible(receiptInput: unknown, artifact: ArtifactRef, selection: z.infer<typeof PrintSelectionSchema>) {
+function compatible(receiptInput: unknown, artifact: ArtifactRef, selection: z.infer<typeof PrintSelectionSchema>, expectedNozzleType?: ExpectedNozzleType) {
   const receipt = receiptSchema.parse(receiptInput), actual = receipt.inspection;
   const expected = {bambu_model: selection.model, plate_index: selection.plateIndex,
     nozzle_diameters: selection.nozzleDiameters, bed_type: selection.bedType};
@@ -41,6 +42,11 @@ function compatible(receiptInput: unknown, artifact: ArtifactRef, selection: z.i
       (selection.nozzleDiameters.length === 1 ? actual.nozzleDiameters.some(n => n !== selection.nozzleDiameters[0]) :
         JSON.stringify(actual.nozzleDiameters) !== JSON.stringify(selection.nozzleDiameters))) {
     throw new Error('File inspection does not match the retained bytes and selection');
+  }
+  // Declared hotend metallurgy must match the sliced file now, not at live preflight.
+  if (expectedNozzleType !== undefined &&
+      (!actual.nozzleTypes?.length || actual.nozzleTypes.some(type => type !== expectedNozzleType))) {
+    throw new Error('Inspected nozzle type does not match the selected nozzle type');
   }
   if (receipt.artifact.file_format === '3mf' ? actual.plateInternalPath !== `Metadata/plate_${selection.plateIndex + 1}.gcode` :
       selection.plateIndex !== 0 || actual.plateInternalPath !== undefined) throw new Error('Inspected plate mismatch');
@@ -63,14 +69,15 @@ export function createPreparedFileInspector(configuration: PreparedInspectionCon
   const process = structuredClone(configuration.process);
   const options = {...configuration.options};
   return async (file: string, artifact: ArtifactRef, selection: z.infer<typeof PrintSelectionSchema>, signal?: AbortSignal) => {
+    const expectedNozzleType = configuration.expectedNozzleType ?? selection.nozzleType;
     const result = await inspectPreparedFile(process, {file_path: file, bambu_model: selection.model,
       plate_index: selection.plateIndex, nozzle_diameters: selection.nozzleDiameters, bed_type: selection.bedType}, receipt => {
-      const checked = compatible(receipt, artifact, selection);
+      const checked = compatible(receipt, artifact, selection, expectedNozzleType);
       return {three_mf_path: file, bambu_model: selection.model, plate_index: selection.plateIndex,
         nozzle_diameters: selection.nozzleDiameters, bed_type: selection.bedType,
         use_ams: checked.useAms, ams_mapping: checked.mapping};
     }, {...options, signal: signal && options.signal ? AbortSignal.any([signal, options.signal]) : signal ?? options.signal});
-    return PreparedInspectionSchema.parse({receipt: compatible(result.receipt, artifact, selection).receipt,
+    return PreparedInspectionSchema.parse({receipt: compatible(result.receipt, artifact, selection, expectedNozzleType).receipt,
       catalogSha256: createHash('sha256').update(JSON.stringify(result.catalog)).digest('hex'), server: result.catalog.server});
   };
 }

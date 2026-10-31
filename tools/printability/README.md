@@ -2,7 +2,7 @@
 
 Deterministic pre-slice mesh checker for preview STLs produced by Scan to Make templates (`scan-cradle`, `drawer-organizer`, and compatible STL + manifest outputs). It covers what `bambu-printer-mcp` does not: watertightness, bed fit with keep-out zones, base stability, wall thickness and overhangs.
 
-**Slicing, orientation and printing are not done here.** They go through `bambu-printer-mcp`: `slice_stl` (bed type, nozzle type, `orient`, `arrange`, sliced 3MF export), `lay_flat`, `inspect_print_file` and `print_3mf`. See [docs/print-path.md](../../docs/print-path.md). This tool's former `dry-run` slicer duplicated `slice_stl` and was removed; `tools/slicer-producer` is being removed with the companion re-route (#97).
+**Slicing, orientation and printing are not done here.** They go through `bambu-printer-mcp`: `slice_stl` (bed type, nozzle type, `orient`, `arrange`, sliced 3MF export), `lay_flat`, `inspect_print_file` and `print_3mf`. See [docs/print-path.md](../../docs/print-path.md). This tool's former `dry-run` slicer duplicated `slice_stl` and was removed; `tools/slicer-producer` is removed with the companion re-route (#97).
 
 It never authorises dispatch and never claims physical fit or structural strength. Every report carries `dispatchAuthorized: false` and `provesPhysicalFit: false`.
 

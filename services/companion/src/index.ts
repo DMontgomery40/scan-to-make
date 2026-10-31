@@ -13,6 +13,7 @@ const snapshotSchema=z.strictObject({id:z.uuid(),artifact:ArtifactRefSchema});
 export const PrintSelectionSchema=z.strictObject({
  printerId:safeId, model:z.string().trim().min(1), plateIndex:integer,
  nozzleDiameters:z.array(z.literal([0.2,0.4,0.6,0.8])).min(1).max(2),
+ nozzleType:z.enum(['stainless_steel','hardened_steel','tungsten_carbide','brass']).optional(),
  bedType:z.enum(['textured_plate','cool_plate','engineering_plate','hot_plate','supertack_plate']),
  materials:z.array(z.strictObject({projectSlot:integer,material:z.string().trim().min(1),physicalTray:integer})).min(1),
  slicerSettingsSha256:digest,

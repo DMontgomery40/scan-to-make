@@ -29,7 +29,8 @@ export interface PrinterToolCatalog {
 type DiscoveryFailure = 'invalid-configuration' | 'connection-failed' | 'discovery-timeout'
   | 'discovery-cancelled' | 'catalog-limit' | 'duplicate-tool' | 'cursor-cycle'
   | 'missing-print-tool' | 'invalid-print-schema' | 'cleanup-failed'
-  | 'invalid-inspection-schema' | 'inspection-failed' | 'inspection-limit' | 'incompatible-print-schema';
+  | 'invalid-inspection-schema' | 'inspection-failed' | 'inspection-limit' | 'incompatible-print-schema'
+  | 'invalid-slice-schema' | 'slice-failed' | 'slice-limit';
 export class McpDiscoveryError extends Error {
   constructor(readonly code: DiscoveryFailure) {
     // Never expose subprocess arguments, environment, stderr or remote error text.
@@ -90,7 +91,8 @@ export async function discoverPrinterTools(config: TrustedMcpProcess, options: D
 
 // Only this module can access the live client; public operations name their one capability.
 async function withPrinterTools<T>(config: TrustedMcpProcess, options: DiscoveryOptions,
-  operation: (client: Client, catalog: PrinterToolCatalog, requestOptions: {signal: AbortSignal; timeout: number; maxTotalTimeout: number}) => Promise<T>): Promise<T> {
+  operation: (client: Client, catalog: PrinterToolCatalog, requestOptions: {signal: AbortSignal; timeout: number; maxTotalTimeout: number}) => Promise<T>,
+  requirePrintValidator = true): Promise<T> {
   if (options.signal?.aborted) fail('discovery-cancelled');
   const timeoutMs = bounded(options.timeoutMs, 10_000, 50, 120_000);
   const maxPages = bounded(options.maxPages, 32, 1, 128);
@@ -131,7 +133,7 @@ async function withPrinterTools<T>(config: TrustedMcpProcess, options: Discovery
       cursor = response.nextCursor;
       if (cursor === undefined) {
         const catalog = freeze({ server: { name: server.name, version: server.version }, tools });
-        createPreparedPrintValidator(catalog);
+        if (requirePrintValidator) createPreparedPrintValidator(catalog);
         return await operation(client, catalog, requestOptions);
       }
       if (cursors.has(cursor)) fail('cursor-cycle');
@@ -198,4 +200,60 @@ export async function inspectPreparedFile(config: TrustedMcpProcess,
     if (!createPreparedPrintValidator(catalog)(candidate).ok) fail('incompatible-print-schema');
     return {receipt, catalog};
   });
+}
+
+async function callPreparedTool(client: Client, catalog: PrinterToolCatalog,
+  name: string, args: Record<string, unknown>,
+  requestOptions: {signal: AbortSignal; timeout: number; maxTotalTimeout: number}): Promise<string> {
+  const tool = catalog.tools.find(tool => tool.name === name);
+  if (!tool) fail('invalid-slice-schema');
+  try {
+    if (tool.inputSchema.type !== 'object' || !new Ajv({strict: false}).compile(structuredClone(tool.inputSchema))(args)) {
+      fail('invalid-slice-schema');
+    }
+  } catch { fail('invalid-slice-schema'); }
+  const result = await client.callTool({name, arguments: args}, undefined, requestOptions);
+  if (Buffer.byteLength(JSON.stringify(result)) > 64 * 1024) fail('slice-limit');
+  if (result.isError || !Array.isArray(result.content) || result.content.length !== 1 ||
+      result.content[0]?.type !== 'text' || typeof result.content[0].text !== 'string') fail('slice-failed');
+  const path = result.content[0].text;
+  if (!path.startsWith('/') || path.length > 4096 || /[\0\r\n]/.test(path)) fail('slice-failed');
+  return path;
+}
+export interface PreparedSliceInput {
+  stl_path: string;
+  bambu_model: string;
+  nozzle_diameter: string;
+  bed_type: string;
+  nozzle_type: string;
+  slicer_type?: string;
+}
+/**
+ * Slicing through a separate bambu-printer-mcp process. The fixed tool name
+ * and argument set cannot be replaced by callers.
+ */
+export async function slicePreparedStl(config: TrustedMcpProcess, input: PreparedSliceInput, options: DiscoveryOptions = {}) {
+  return withPrinterTools(config, options, async (client, catalog, requestOptions) => {
+    const args: Record<string, unknown> = {
+      stl_path: input.stl_path,
+      bambu_model: input.bambu_model,
+      nozzle_diameter: input.nozzle_diameter,
+      bed_type: input.bed_type,
+      nozzle_type: input.nozzle_type,
+      use_printer_filaments: false,
+      orient: true,
+      arrange: true,
+      ensure_on_bed: true,
+      ...(input.slicer_type === undefined ? {} : {slicer_type: input.slicer_type}),
+    };
+    const path = await callPreparedTool(client, catalog, 'slice_stl', args, requestOptions);
+    return {path, catalog};
+  }, false);
+}
+/** Orientation through bambu-printer-mcp's `lay_flat`. */
+export async function layFlatPreparedStl(config: TrustedMcpProcess, stlPath: string, options: DiscoveryOptions = {}) {
+  return withPrinterTools(config, options, async (client, catalog, requestOptions) => {
+    const path = await callPreparedTool(client, catalog, 'lay_flat', {stl_path: stlPath}, requestOptions);
+    return {path, catalog};
+  }, false);
 }
