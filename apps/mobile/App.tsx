@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  Alert,
   BackHandler,
   Modal,
   Platform,
@@ -14,6 +15,7 @@ import type {
   ListProjectsResult,
 } from '@scan-to-make/contracts/saved-project';
 import { localSavedProjects, newProjectId } from './src/project/savedProjects';
+import { emptyUnnamedProject, unnamedBrief } from './src/project/scanFirst';
 import {
   FindYourMacScreen,
   type AfterPairing,
@@ -104,8 +106,6 @@ function App({
       .then(value => setCanScan(value.supported && value.lidar !== false))
       .catch(() => {});
   }, []);
-  // Opens home's "Scan something" sheet once; home clears it when used.
-  const [scanRequested, setScanRequested] = useState(false);
   const afterPairing = (next: AfterPairing) => {
     setCompanionOpen(false);
     setNeedsMac(false);
@@ -113,7 +113,7 @@ function App({
     // Paired in the middle of something: stay there.
     if (next === 'back') return;
     setRoute('home');
-    if (next === 'scan') setScanRequested(true);
+    if (next === 'scan') startScan();
   };
   // scantomake://pair links, e.g. the companion's QR read by the Camera app.
   const [pairLink, setPairLink] = useState<string | null>(null);
@@ -143,7 +143,9 @@ function App({
   const [listing, setListing] = useState<ListProjectsResult | null>(null);
   const [captureProjectId, setCaptureProjectId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
-  const [createError, setCreateError] = useState<string | null>(null);
+  const creatingNow = useRef(false);
+  // Opens the camera once on the project scans screen; cleared when it starts.
+  const [scanNow, setScanNow] = useState(false);
   // The grid keeps showing while it reloads.
   const refresh = useCallback(async () => {
     const result = await repository.list();
@@ -167,34 +169,49 @@ function App({
     });
     return () => sub.remove();
   }, [route, creating]);
-  const openCaptures = (id: string) => {
+  const openCaptures = (id: string, scan = false) => {
+    setScanNow(scan);
     setCaptureProjectId(id);
     setRoute('retainedCaptures');
   };
-  const createProject = async (name: string) => {
+  // Scan something: the camera opens first and the name is asked after the
+  // scan (P2). A scan needs its project, so an unnamed one is made first, or
+  // one left empty by a stopped scan is used again.
+  // One at a time: the guard is held from the tap through the project, the
+  // list reload and the move to the scans screen, so a second tap can't make
+  // a second project or open the camera twice.
+  const startScan = async () => {
+    if (creatingNow.current) return;
+    creatingNow.current = true;
     setCreating(true);
-    setCreateError(null);
-    let result: Awaited<ReturnType<SavedProjects['create']>>;
     try {
-      result = await repository.create({
-        id: newProjectId(),
-        brief: { object: name, context: '', addition: '' },
-      });
-    } catch {
-      result = { status: 'storage-error' };
+      let id: string | null = null;
+      try {
+        // Read now, not from the last render's list.
+        id = await emptyUnnamedProject(await repository.list(), repository);
+        if (!id) {
+          const result = await repository.create({
+            id: newProjectId(),
+            brief: unnamedBrief(),
+          });
+          if (result.status === 'ok') id = result.project.id;
+        }
+      } catch {
+        id = null;
+      }
+      await refresh().catch(() => {});
+      if (!id) {
+        Alert.alert(
+          'Couldn’t start a scan',
+          'The project couldn’t be saved. Your other projects are unchanged.',
+        );
+        return;
+      }
+      openCaptures(id, true);
     } finally {
+      creatingNow.current = false;
       setCreating(false);
     }
-    if (result.status !== 'ok') {
-      setCreateError(
-        'The project couldn’t be saved. Your other projects are unchanged.',
-      );
-      await refresh();
-      return false;
-    }
-    await refresh();
-    openCaptures(result.project.id);
-    return true;
   };
   let screen: React.ReactNode;
   if (!hydrated) {
@@ -215,6 +232,8 @@ function App({
               setRoute('home');
             }}
             onCompanion={() => setCompanionOpen(true)}
+            scanNow={scanNow}
+            onScanStarted={() => setScanNow(false)}
             onResults={capture => {
               setScanTarget({ projectId: captureProjectId, capture });
               setRoute('scanResults');
@@ -290,13 +309,9 @@ function App({
             result={listing}
             services={scanServices}
             pairingKey={pairingKey}
-            scanRequested={scanRequested}
-            onScanRequestUsed={() => setScanRequested(false)}
             paused={companionOpen}
             creating={creating}
-            createError={createError}
-            onCreate={createProject}
-            onNaming={() => setCreateError(null)}
+            onScan={startScan}
             onOpen={openCaptures}
             onRetry={refresh}
             onPair={() => setCompanionOpen(true)}

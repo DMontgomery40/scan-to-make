@@ -145,3 +145,44 @@ test('changed destination needs a new explicit selection, never implicit rebindi
   );
   expect(h.calls.filter(x => x === 'POST')).toHaveLength(1);
 });
+test('a scan started before its project was named follows it to the named version; any other change still needs choosing', async () => {
+  const h = await harness();
+  await h.repo.create({
+    id: 'two',
+    brief: { object: '', context: '', addition: '' },
+  });
+  h.native.request = async o => {
+    h.calls.push(o.method);
+    if (o.method === 'POST') throw Error('reply lost');
+    const now = await h.repo.load('two');
+    if (now.status !== 'ok') throw Error();
+    return {
+      status: 200,
+      body: JSON.stringify(now.project),
+      etag: '"' + 'a'.repeat(64) + '"',
+    };
+  };
+  const draft = await h.client.start('two');
+  const brief = async (next: {
+    object: string;
+    context: string;
+    addition: string;
+  }) => {
+    const project = await h.repo.load('two');
+    if (project.status !== 'ok') throw Error();
+    await h.repo.change('two', project.project.revision, {
+      kind: 'replace-brief',
+      brief: next,
+    });
+  };
+  // More than the name changed: the scan waits for an explicit choice.
+  await brief({ object: 'Desk lamp', context: 'Kitchen', addition: '' });
+  await expect(h.client.add('two', draft)).rejects.toThrow(
+    'destination changed',
+  );
+  expect(h.calls).not.toContain('POST');
+  // Only the name: it goes to the named version.
+  await brief({ object: 'Desk lamp', context: '', addition: '' });
+  await expect(h.client.add('two', draft)).rejects.toThrow('may have finished');
+  expect(h.calls.filter(x => x === 'POST')).toHaveLength(1);
+});

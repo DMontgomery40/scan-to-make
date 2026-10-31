@@ -1,5 +1,15 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Alert, AppState, Text } from 'react-native';
+import {
+  Alert,
+  AppState,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import type { SavedProjects } from '@scan-to-make/contracts/saved-project';
 import {
   CaptureClient,
@@ -14,8 +24,8 @@ import {
   objectCaptureNative,
   type NativeCaptureDraft,
 } from '../capture/nativeObjectCapture';
-import { Button, Card, Screen } from '../ui/components';
-import { type } from '../ui/theme';
+import { Button, Card, Field, READABLE_WIDTH, Screen } from '../ui/components';
+import { colors, space, type } from '../ui/theme';
 
 // Whether this device can scan. Scanning is only offered once the native
 // status confirms it; it is never simulated on devices without LiDAR.
@@ -26,18 +36,26 @@ type ScanSupport =
   | 'unsupported'
   | 'unknown';
 
+const BUSY = 'Still working on the last request. Try again in a moment.';
+
 export function RetainedCapturesScreen({
   id,
   repository,
   onBack,
   onCompanion,
   onResults,
+  scanNow = false,
+  onScanStarted,
 }: {
   id: string;
   repository: SavedProjects;
   onBack: () => void;
   onCompanion: () => void;
   onResults?: (capture: RetainedCapture) => void;
+  /** True to open the camera once, as Scan something does. */
+  scanNow?: boolean;
+  /** Called when that scan starts, so coming back doesn't start another. */
+  onScanStarted?: () => void;
 }) {
   const [client] = useState(() => {
     try {
@@ -63,10 +81,30 @@ export function RetainedCapturesScreen({
   const [busy, setBusy] = useState(false);
   // Set synchronously, so a second tap before the next render does nothing.
   const running = useRef(false);
+  // Taps that look something up before they start a request (or open the
+  // name sheet or a question) hold this from the tap until they hand off.
+  const starting = useRef(false);
+  const once = (task: () => Promise<unknown>) => async () => {
+    if (starting.current || running.current) return;
+    starting.current = true;
+    try {
+      await task();
+    } finally {
+      starting.current = false;
+    }
+  };
   const [message, setMessage] = useState(
     'Scan an object or choose a saved USDZ scan to keep with this project.',
   );
   const [selected, setSelected] = useState<RetainedCapture | null>(null);
+  // A finished scan whose project still needs its name (P2: name after), and
+  // whether to add it to the project once named.
+  // A USDZ file chosen for an unnamed project waits for the name too.
+  const [finished, setFinished] = useState<{
+    draft: NativeCaptureDraft | null;
+    add: boolean;
+    then?: () => void;
+  } | null>(null);
   const refresh = async () => {
     // Local scans remain available even when there is no companion connection.
     if (scanner) {
@@ -121,11 +159,108 @@ export function RetainedCapturesScreen({
       clearInterval(timer);
     };
   }, [scanner, activeRunID]); // eslint-disable-line react-hooks/exhaustive-deps
+  const scan = async () => {
+    const toName: { draft?: NativeCaptureDraft } = {};
+    await run(async () => {
+      if (!scanner) return;
+      const draft = await scanner.start(id);
+      if (draft.status === 'ready' && (await unnamed())) {
+        toName.draft = draft;
+        return;
+      }
+      if (draft.addRequested) setSelected(await scanner.add(id, draft));
+    }, 'Your scan is kept on this device. Add a ready scan when you want to review it with this project.');
+    // Named first, so the scan joins the project under its name. Asked once
+    // this run has let go, so Continue can start the next one.
+    const { draft } = toName;
+    if (draft) setFinished({ draft, add: !!draft.addRequested });
+  };
+  const unnamed = async () => {
+    const project = await repository.load(id);
+    return project.status === 'ok' && project.project.brief.object === '';
+  };
+  // Scan something: the camera opens first, once.
+  useEffect(() => {
+    // Waits out a running check, so only a real start uses the request.
+    if (!scanNow || support !== 'supported' || activeRunID || busy) return;
+    onScanStarted?.();
+    scan();
+  }, [scanNow, support, activeRunID, busy]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Saves the name, then adds the scan to the named project. Returns why the
+  // sheet should stay open, or null once it's done.
+  const name = async (value: string): Promise<string | null> => {
+    const draft = finished?.draft;
+    const add = finished?.add;
+    const then = finished?.then;
+    const project = await repository.load(id).catch(() => null);
+    const saved =
+      project?.status === 'ok'
+        ? await repository
+            .change(id, project.project.revision, {
+              kind: 'replace-brief',
+              brief: { ...project.project.brief, object: value },
+            })
+            .catch(() => null)
+        : null;
+    if (saved?.status !== 'ok')
+      return 'The name couldn’t be saved. Your scan is kept on this phone.';
+    if (
+      draft &&
+      add &&
+      scanner &&
+      !(await send(
+        again => scanner.add(id, draft, undefined, again),
+        'Capture imported and verified. Open it to review the original scan.',
+      ))
+    )
+      return BUSY;
+    setFinished(null);
+    if (then) then();
+    else if (!(draft && add)) await refresh().catch(() => {});
+    return null;
+  };
+  // Use the current destination, after asking (asked outside run(), so the
+  // answer is never dropped).
+  const choose = async (draft: NativeCaptureDraft) => {
+    if (!client || !scanner) return;
+    let destination;
+    try {
+      destination = await client.destination(id);
+    } catch (e) {
+      setMessage(
+        e instanceof Error ? e.message : 'The request could not be completed.',
+      );
+      return;
+    }
+    setMessage('Choose whether to add the scan to the current destination.');
+    const chosen = destination;
+    Alert.alert(
+      'Use the current project version?',
+      `Add this retained scan to project version ${chosen.revision} on your connected companion? Its original files stay on this device.`,
+      [
+        { text: 'Keep for later', style: 'cancel' },
+        {
+          text: 'Add to this version',
+          onPress: () =>
+            send(
+              again => scanner.add(id, draft, chosen, again),
+              'Capture imported and verified.',
+            ),
+        },
+      ],
+    );
+  };
+  // One request at a time. One that can't start says so, and reports false,
+  // so nothing is ever dropped silently.
   async function run(
     action: () => Promise<unknown>,
     success: string | (() => string),
-  ) {
-    if (running.current || !client) return;
+  ): Promise<boolean> {
+    if (!client) return false;
+    if (running.current) {
+      setMessage(BUSY);
+      return false;
+    }
     running.current = true;
     setBusy(true);
     try {
@@ -140,6 +275,7 @@ export function RetainedCapturesScreen({
       running.current = false;
       setBusy(false);
     }
+    return true;
   }
   // Imports, and if an earlier unconfirmed upload may have sent the same
   // bytes, asks before sending them again (after this run has finished, so
@@ -150,7 +286,7 @@ export function RetainedCapturesScreen({
     again = false,
   ) {
     let ask: string | null = null;
-    await run(
+    const ran = await run(
       async () => {
         try {
           setSelected(await upload(again));
@@ -172,6 +308,7 @@ export function RetainedCapturesScreen({
           onPress: () => send(upload, success, true),
         },
       ]);
+    return ran;
   }
   return (
     <Screen
@@ -202,14 +339,7 @@ export function RetainedCapturesScreen({
             <Button
               label="Scan object"
               disabled={busy || support !== 'supported' || !!activeRunID}
-              onPress={() =>
-                run(async () => {
-                  if (!scanner) return;
-                  const draft = await scanner.start(id);
-                  if (draft.addRequested)
-                    setSelected(await scanner.add(id, draft));
-                }, 'Your scan is kept on this device. Add a ready scan when you want to review it with this project.')
-              }
+              onPress={() => scan()}
             />
           ) : support === 'unknown' ? (
             <Card>
@@ -287,52 +417,34 @@ export function RetainedCapturesScreen({
                     <Button
                       label={`Add scan ${index + 1} to this project`}
                       disabled={busy || !!state.pending}
-                      onPress={() =>
-                        send(
-                          again => scanner.add(id, draft, undefined, again),
-                          'Capture imported and verified. Open it to review the original scan.',
-                        )
-                      }
+                      onPress={once(async () => {
+                        // A scan kept from before the project had a name
+                        // (the app closed first) is named before it's added.
+                        if (await unnamed()) setFinished({ draft, add: true });
+                        else
+                          await send(
+                            again => scanner.add(id, draft, undefined, again),
+                            'Capture imported and verified. Open it to review the original scan.',
+                          );
+                      })}
                     />
                     <Button
                       label={`Choose destination for scan ${index + 1}`}
                       variant="secondary"
                       disabled={busy || !!state.pending}
-                      onPress={async () => {
-                        if (running.current) return;
-                        // Asked outside run(), so the answer is never dropped.
-                        let destination;
-                        try {
-                          destination = await client.destination(id);
-                        } catch (e) {
-                          setMessage(
-                            e instanceof Error
-                              ? e.message
-                              : 'The request could not be completed.',
-                          );
+                      onPress={once(async () => {
+                        // An unnamed project is named first; the choice
+                        // below then follows, for the named version.
+                        if (await unnamed()) {
+                          setFinished({
+                            draft,
+                            add: false,
+                            then: () => choose(draft),
+                          });
                           return;
                         }
-                        setMessage(
-                          'Choose whether to add the scan to the current destination.',
-                        );
-                        const chosen = destination;
-                        Alert.alert(
-                          'Use the current project version?',
-                          `Add this retained scan to project version ${chosen.revision} on your connected companion? Its original files stay on this device.`,
-                          [
-                            { text: 'Keep for later', style: 'cancel' },
-                            {
-                              text: 'Add to this version',
-                              onPress: () =>
-                                send(
-                                  again =>
-                                    scanner.add(id, draft, chosen, again),
-                                  'Capture imported and verified.',
-                                ),
-                            },
-                          ],
-                        );
-                      }}
+                        await choose(draft);
+                      })}
                     />
                   </>
                 ) : null}
@@ -352,16 +464,26 @@ export function RetainedCapturesScreen({
           <Button
             label="Choose USDZ capture"
             disabled={busy || !!state.pending}
-            onPress={() => {
+            onPress={once(async () => {
               // Chosen once; adding it again reuses the same file.
               let file: CaptureFile | undefined;
-              send(async again => {
-                file ??= await client.native.pick();
-                const capture = await client.import(id, file, undefined, again);
-                await client.reopen(id, capture);
-                return capture;
-              }, 'Capture imported and verified. Open it to review the original scan.');
-            }}
+              const pick = () =>
+                send(async again => {
+                  file ??= await client.native.pick();
+                  const capture = await client.import(
+                    id,
+                    file,
+                    undefined,
+                    again,
+                  );
+                  await client.reopen(id, capture);
+                  return capture;
+                }, 'Capture imported and verified. Open it to review the original scan.');
+              // An unnamed project gets its name before anything joins it.
+              if (await unnamed())
+                setFinished({ draft: null, add: false, then: pick });
+              else await pick();
+            })}
           />
           {state.pending ? (
             <Card>
@@ -496,6 +618,109 @@ export function RetainedCapturesScreen({
           ) : null}
         </>
       )}
+      <FinishedSheet
+        visible={finished !== null}
+        busy={busy}
+        title={finished?.draft === null ? 'Name this project' : 'Scan finished'}
+        onName={name}
+        onLater={() => setFinished(null)}
+      />
     </Screen>
   );
 }
+
+/**
+ * Scan finished (P2, mockup 02): the project gets its name now, after the
+ * scan. The scan stays on this phone until the name is saved.
+ */
+function FinishedSheet({
+  visible,
+  busy,
+  title,
+  onName,
+  onLater,
+}: {
+  visible: boolean;
+  /** Another request is still running: Continue waits for it. */
+  busy: boolean;
+  title: string;
+  onName: (name: string) => Promise<string | null>;
+  /** Closes the sheet; the scan stays on this phone to add later. */
+  onLater: () => void;
+}) {
+  const [name, setName] = useState('');
+  const [saving, setSaving] = useState(false);
+  // Held synchronously, so a double tap names and adds once.
+  const savingNow = useRef(false);
+  const [failed, setFailed] = useState<string | null>(null);
+  const trimmed = name.trim();
+  return (
+    <Modal
+      visible={visible}
+      animationType="slide"
+      presentationStyle="pageSheet"
+      onRequestClose={saving ? undefined : onLater}
+    >
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        style={styles.sheet}
+      >
+        <ScrollView
+          keyboardShouldPersistTaps="handled"
+          contentContainerStyle={styles.sheetScroll}
+        >
+          <View style={styles.sheetColumn}>
+            <Text accessibilityRole="header" style={styles.finished}>
+              {title}
+            </Text>
+            <Field
+              label="What did you scan?"
+              hint="Name it so you can find it later."
+              value={name}
+              onChangeText={setName}
+              editable={!saving}
+              maxLength={200}
+              returnKeyType="done"
+            />
+            {failed ? (
+              <Text accessibilityLiveRegion="polite" style={type.body}>
+                {failed}
+              </Text>
+            ) : null}
+            <Button
+              label={saving ? 'Saving…' : 'Continue'}
+              disabled={saving || busy || !trimmed}
+              onPress={async () => {
+                if (savingNow.current) return;
+                savingNow.current = true;
+                setSaving(true);
+                setFailed(null);
+                try {
+                  const problem = await onName(trimmed);
+                  if (problem === null) setName('');
+                  else setFailed(problem);
+                } finally {
+                  savingNow.current = false;
+                  setSaving(false);
+                }
+              }}
+            />
+            <Button
+              label="Not now"
+              variant="secondary"
+              disabled={saving}
+              onPress={onLater}
+            />
+          </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </Modal>
+  );
+}
+
+const styles = StyleSheet.create({
+  sheet: { flex: 1, backgroundColor: colors.background },
+  sheetScroll: { padding: space.xl, alignItems: 'center' },
+  sheetColumn: { width: '100%', maxWidth: READABLE_WIDTH, gap: space.lg },
+  finished: { ...type.heading, color: colors.pass },
+});
