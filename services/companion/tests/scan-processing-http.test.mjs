@@ -41,7 +41,7 @@ const converter = {
 const jpeg = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(64, 0x11), Buffer.from([0xff, 0xd9])]);
 const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(64, 0x22)]);
 
-async function fixture(t, scopes = ['projects:read', 'projects:write', 'captures:read', 'captures:import']) {
+async function fixture(t, scopes = ['projects:read', 'projects:write', 'captures:read', 'captures:import'],runner=fakeRunner) {
   const root = await mkdtemp(join(tmpdir(), 'detail-stills-http-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const remoteAuth = await RemoteAuthStore.create(join(root, 'auth'), {
@@ -51,7 +51,7 @@ async function fixture(t, scopes = ['projects:read', 'projects:write', 'captures
   const phone = await remoteAuth.exchange('alice@example.test', { code: invitation.code, deviceName: 'Fixture' });
   const storage = new FileSavedProjectStorage(join(root, 'projects'));
   const captures = new CaptureStore(storage, join(root, 'captures'), converter);
-  const scanProcessing = new ScanProcessingStore(storage,captures,join(root,'captures'),fakeRunner);
+  const scanProcessing = new ScanProcessingStore(storage,captures,join(root,'captures'),runner);
   const server = await startCompanionServer({ port: 0, remoteAuth, capture: { storage, captures, scanProcessing } });
   t.after(() => server.close());
   return {
@@ -80,8 +80,8 @@ async function waitReady(f) {
   }
   throw new Error('slot stayed busy');
 }
-async function setup(t) {
-  const f = await fixture(t);
+async function setup(t,runner) {
+  const f = await fixture(t,undefined,runner);
   const sync = await wire(f, '/v1/saved-projects/phone', {
     method: 'PUT', headers: { 'content-type': 'application/json', 'if-none-match': '*' }, body: JSON.stringify(project),
   });
@@ -125,4 +125,40 @@ test('authenticated scan jobs: scopes, ETag, strict body, status, artifacts and 
  assert.equal((await wire(f,artifact,{headers:{'if-match':etag}})).status,422);await waitReady(f);
  const pairing=await f.remoteAuth.createPairing('alice@example.test',['captures:read']);const reader=await f.remoteAuth.exchange('alice@example.test',{code:pairing.code,deviceName:'Reader'});
  assert.equal((await wire(f,base+'?projectRevision=7',{...post({}),headers:{...post({}).headers,authorization:`Bearer ${reader.token}`,'x-scan-device':reader.deviceId}})).status,403);
+});
+
+
+test('textured model bundle downloads under capture auth and rejects stale or altered dependencies',async t=>{
+ const obj=Buffer.from('mtllib mesh.mtl\n'+derived.toString().replace('f 1 2 3','vt 0 0\nvt 1 0\nvt 0 1\nusemtl captured\nf 1/1 2/2 3/3'));
+ const materials={'mesh.mtl':Buffer.from('newmtl captured\nKd 1 1 1\nmap_Kd mesh_basecolor_0.png\n'),'mesh_basecolor_0.png':png};
+ const runner={async run(...args){
+  const result=await fakeRunner.run(...args);
+  if(args[0]==='repair'){
+   await writeFile(join(args[2],'repaired.obj'),obj);
+   for(const [name,bytes] of Object.entries(materials))await writeFile(join(args[2],name),bytes);
+   await writeFile(join(args[2],'report.json'),JSON.stringify({outputSha256:Object.fromEntries(Object.entries(materials).map(([name,bytes])=>[name,sha(bytes)]))}));
+  }
+  return result;
+ }};
+ const {f,etag,base,captureId}=await setup(t,runner);
+ const created=await wire(f,base+'?projectRevision=7',{method:'POST',headers:{'content-type':'application/json','if-match':etag},body:'{}'});
+ assert.equal(created.status,202);const {job}=JSON.parse(created.bytes);await f.scanProcessing.wait();await waitReady(f);
+ const model=base+'/'+job.jobId+'/model-assets',headers={'if-match':etag};
+ const get=async(path,opts={headers})=>{const response=await wire(f,path,opts);await waitReady(f);return response;};
+ const response=await get(model+'?projectRevision=7');assert.equal(response.status,200,response.bytes.toString());
+ const bundle=JSON.parse(response.bytes).model;
+ assert.equal(bundle.entrypoint,'repaired.obj');assert.equal(bundle.jobId,job.jobId);assert.equal(bundle.files.length,3);
+ for(const file of bundle.files){const asset=await get(model+'/'+file.name+'?projectRevision=7');assert.equal(asset.status,200);assert.equal(sha(asset.bytes),file.sha256);assert.equal(asset.headers['content-type'],file.mediaType);assert.equal(asset.bytes.length,file.byteLength);}
+ const listing=JSON.parse((await get(base+'/'+job.jobId+'?projectRevision=7')).bytes).job;
+ assert(!('mesh.mtl' in listing.artifacts),'legacy artifact enum stays unchanged');
+ assert.equal((await get(model+'?projectRevision=7',{headers:{}})).status,428);
+ assert.equal((await get(model+'?projectRevision=7',{headers:{'if-match':'"'+'0'.repeat(64)+'"'}})).status,412);
+ assert.equal((await get(model+'/binding.json?projectRevision=7')).status,404);
+ assert.equal((await get(model+'?projectRevision=7',{method:'POST',headers})).status,405);
+ const invitation=await f.remoteAuth.createPairing('alice@example.test',['projects:read']);
+ const reader=await f.remoteAuth.exchange('alice@example.test',{code:invitation.code,deviceName:'No capture scope'});
+ assert.equal((await get(model+'?projectRevision=7',{headers:{...headers,authorization:`Bearer ${reader.token}`,'x-scan-device':reader.deviceId}})).status,403);
+ await writeFile(join(f.root,'captures',captureId,'scan-processing',job.jobId,'mesh_basecolor_0.png'),Buffer.alloc(png.length));
+ assert.equal((await get(model+'?projectRevision=7')).status,422);
+ assert.equal((await get(model+'/repaired.obj?projectRevision=7')).status,422,'never serve an OBJ with an unverifiable dependency');
 });

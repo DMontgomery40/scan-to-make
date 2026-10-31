@@ -122,6 +122,10 @@ def cut(obj, bm, args, core):
     before = core.stats(bm)
     if not before['watertight']:
         raise ValueError('feature cuts require watertight input')
+    # Boolean interpolation carries this face-domain provenance to the result.
+    # Captured faces keep zero; every cutter-derived surface is unobserved.
+    if bm.faces.layers.int.get(core.INFERRED) is None:
+        bm.faces.layers.int.new(core.INFERRED)
     bm.to_mesh(obj.data)
     tools = []
     try:
@@ -169,6 +173,10 @@ def cut(obj, bm, args, core):
         faces += [(i,(i+1)%n,(i+1)%n+n,i+n) for i in range(n)]
         cutter = cutter_mesh('cutter',points,faces)
         tools.append(cutter)
+        for tool in tools:
+            inferred = tool.data.attributes.get(core.INFERRED)
+            if inferred is None:inferred = tool.data.attributes.new(core.INFERRED,'INT','FACE')
+            for face in inferred.data:face.value = 1
         if args['kind']=='groove':
             boolean(cutter,inner)
         boolean(obj,cutter)

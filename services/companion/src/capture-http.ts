@@ -50,8 +50,9 @@ export function createCaptureRoutes(services:CaptureServices){
     const match=/^\/v1\/saved-projects\/([A-Za-z0-9][A-Za-z0-9_-]{0,127})(?:\/captures(?:\/([a-fA-F0-9-]{36})(?:\/artifacts\/(original|derived|report))?)?)?$/.exec(url.pathname);
     const stills=/^\/v1\/saved-projects\/([A-Za-z0-9][A-Za-z0-9_-]{0,127})\/captures\/([a-fA-F0-9-]{36})\/detail-stills(?:\/([a-fA-F0-9-]{36}))?$/.exec(url.pathname);
     const processing=/^\/v1\/saved-projects\/([A-Za-z0-9][A-Za-z0-9_-]{0,127})\/captures\/([a-fA-F0-9-]{36})\/scan-processing(?:\/([a-fA-F0-9-]{36})(?:\/artifacts\/([^/]+))?)?$/.exec(url.pathname);
-    if(!match&&!stills&&!processing)throw new Failure(404,'not-found');
-    const id=(processing??stills??match)![1]!,captureId=match?.[2],kind=match?.[3] as 'original'|'derived'|'report'|undefined;
+    const modelAssets=/^\/v1\/saved-projects\/([A-Za-z0-9][A-Za-z0-9_-]{0,127})\/captures\/([a-fA-F0-9-]{36})\/scan-processing\/([a-fA-F0-9-]{36})\/model-assets(?:\/([^/]+))?$/.exec(url.pathname);
+    if(!match&&!stills&&!processing&&!modelAssets)throw new Failure(404,'not-found');
+    const id=(modelAssets??processing??stills??match)![1]!,captureId=match?.[2],kind=match?.[3] as 'original'|'derived'|'report'|undefined;
     const stillCaptureId=stills?.[2]?.toLowerCase(),stillId=stills?.[3]?.toLowerCase();
     if(stillCaptureId&&!z.uuid().safeParse(stillCaptureId).success)throw new Failure(400,'invalid-request');
     if(stillId&&!z.uuid().safeParse(stillId).success)throw new Failure(400,'invalid-request');
@@ -60,16 +61,16 @@ export function createCaptureRoutes(services:CaptureServices){
     const captureRoute=!!match&&match[0]!==`/v1/saved-projects/${id}`;
     if(captureRoute&&!services.captures)throw new Failure(404,'not-found');
     const writing=request.method==='PUT'||request.method==='POST';
-    const scope:RemoteScope=processing?(writing||request.method==='DELETE'?'captures:import':'captures:read'):stills?(writing||request.method==='DELETE'?'captures:import':'captures:read'):captureRoute?(writing?'captures:import':'captures:read'):(writing?'projects:write':'projects:read');
+    const scope:RemoteScope=modelAssets?'captures:read':processing?(writing||request.method==='DELETE'?'captures:import':'captures:read'):stills?(writing||request.method==='DELETE'?'captures:import':'captures:read'):captureRoute?(writing?'captures:import':'captures:read'):(writing?'projects:write':'projects:read');
     await authorize(scope);
-    if(processing?(processing[3]?(processing[4]?request.method!=='GET':!['GET','DELETE'].includes(request.method??'')):!['GET','POST'].includes(request.method??'')):stills?(stillId?!['GET','DELETE'].includes(request.method??''):!['GET','POST'].includes(request.method??'')):captureRoute?(captureId?request.method!=='GET':request.method!=='POST'):!['GET','PUT'].includes(request.method??''))throw new Failure(405,'method-not-allowed');
+    if(modelAssets?request.method!=='GET':processing?(processing[3]?(processing[4]?request.method!=='GET':!['GET','DELETE'].includes(request.method??'')):!['GET','POST'].includes(request.method??'')):stills?(stillId?!['GET','DELETE'].includes(request.method??''):!['GET','POST'].includes(request.method??'')):captureRoute?(captureId?request.method!=='GET':request.method!=='POST'):!['GET','PUT'].includes(request.method??''))throw new Failure(405,'method-not-allowed');
     if(active)throw new Failure(429,'busy');
     const controller=new AbortController();active={controller,done:new Promise<void>(resolve=>finish=resolve)};
     disconnected=()=>{if(!response.writableEnded)controller.abort();};response.once('close',disconnected);
     const assertActive=()=>{if(controller.signal.aborted)throw new Failure(499,'cancelled');};
     const ifMatch=header('if-match'),ifNoneMatch=header('if-none-match');
     let revision=0,stillLabel:string|undefined;
-    if(captureRoute||stills||processing){
+    if(captureRoute||stills||processing||modelAssets){
      const keys=[...url.searchParams.keys()];const raw=url.searchParams.get('projectRevision');
      if((stillPost?(new Set(keys).size!==keys.length||keys.some(key=>!['projectRevision','label'].includes(key))):keys.length!==1||keys[0]!=='projectRevision')||raw===null||! /^(0|[1-9][0-9]*)$/.test(raw)||!Number.isSafeInteger(Number(raw)))throw new Failure(400,'invalid-request');
      if(stillPost)stillLabel=url.searchParams.get('label')??undefined;
@@ -79,13 +80,16 @@ export function createCaptureRoutes(services:CaptureServices){
      const current=await projects.get(id);
      if(current.etag!==ifMatch||current.project.revision!==revision)throw new Failure(412,'precondition-failed');
     }else if(url.search)throw new Failure(400,'invalid-request');
-    if(processing){
+    if(processing||modelAssets){
      if(!services.scanProcessing)throw new Failure(404,'not-found');
-     const cid=processing[2]!.toLowerCase(),jid=processing[3]?.toLowerCase();
+     const route=(modelAssets??processing)!,cid=route[2]!.toLowerCase(),jid=route[3]?.toLowerCase();
      if(!z.uuid().safeParse(cid).success||jid&&!z.uuid().safeParse(jid).success)throw new Failure(400,'invalid-request');
      const input={projectId:id,projectRevision:revision,captureId:cid,expectedProjectETag:ifMatch};
-     let result:unknown,artifact:Awaited<ReturnType<ScanProcessingStore['artifact']>>|undefined;
-     if(request.method==='POST'){
+     let result:unknown,artifact:Awaited<ReturnType<ScanProcessingStore['artifact']>>|Awaited<ReturnType<ScanProcessingStore['modelAsset']>>|undefined;
+     if(modelAssets){
+      if(modelAssets[4])artifact=await services.scanProcessing.modelAsset(input,jid!,modelAssets[4]);
+      else result={model:(await services.scanProcessing.modelAssets(input,jid!)).model};
+     }else if(request.method==='POST'){
       if(!/^application\/json(?:;\s*charset=utf-8)?$/i.test(header('content-type')??'')||!['identity',undefined].includes(header('content-encoding')))throw new Failure(415,'unsupported-media-type');
       const bytes=await body(request,controller.signal,4096);let value:unknown;
       try{value=ScanProcessingRequestSchema.parse(JSON.parse(bytes.toString('utf8')));}catch{throw new Failure(400,'invalid-request');}
@@ -93,8 +97,8 @@ export function createCaptureRoutes(services:CaptureServices){
       result=await services.scanProcessing.start({...input,request:value},()=>authorize(scope),controller.signal);response.statusCode=202;
      }else if(request.method==='DELETE'){
       await authorize(scope);assertActive();result=await services.scanProcessing.cancel(input,jid!);
-     }else if(processing[4]){
-      const name=ScanArtifactNameSchema.safeParse(processing[4]);if(!name.success)throw new Failure(404,'not-found');
+     }else if(processing![4]){
+      const name=ScanArtifactNameSchema.safeParse(processing![4]);if(!name.success)throw new Failure(404,'not-found');
       artifact=await services.scanProcessing.artifact(input,jid!,name.data);result={job:artifact.job};
      }else if(jid)result=await services.scanProcessing.load(input,jid);
      else result=await services.scanProcessing.list(input);

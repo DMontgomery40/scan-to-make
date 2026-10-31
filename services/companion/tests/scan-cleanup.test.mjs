@@ -122,3 +122,49 @@ test('diagnostic retention failure cannot hide the durable correction failure',a
  const result=(await f.store.load(f.input,jobId)).job;assert.equal(result.failure,'processing-failed');assert.equal(result.failureStage,'correct');
  assert.equal(result.pipelineStages.find(s=>s.kind==='correct').status,'failed');
 });
+
+
+test('correction carries its hash-verified material closure into the public result',async t=>{
+ const runner=cleanupRunner(),run=runner.cleanup.run;
+ const obj=Buffer.from('mtllib mesh.mtl\n'+cube.toString()),mtl=Buffer.from('newmtl captured\nKd 1 1 1\nmap_Kd mesh_basecolor_0.png\n');
+ runner.cleanup.run=async(stage,ctx)=>{
+  const result=await run(stage,ctx);
+  if(stage==='correct'){
+   const report=JSON.parse(await readFile(join(ctx.corrected,'report.json'),'utf8'));
+   for(const [name,bytes] of Object.entries({'corrected.obj':obj,'mesh.mtl':mtl,'mesh_basecolor_0.png':png})){
+    await writeFile(join(ctx.corrected,name),bytes);report.outputs[name]=sha(bytes);
+   }
+   await writeFile(join(ctx.corrected,'report.json'),JSON.stringify(report));
+  }
+  return result;
+ };
+ const f=await fixture(t,runner);const {job}=await f.store.start(f.input);await f.store.wait();
+ assert.equal((await f.store.load(f.input,job.jobId)).job.status,'succeeded');
+ const {model}=await f.store.modelAssets(f.input,job.jobId);assert.equal(model.files.length,3);
+ assert.deepEqual((await f.store.modelAsset(f.input,job.jobId,'repaired.obj')).bytes,obj);
+ assert.deepEqual((await f.store.modelAsset(f.input,job.jobId,'mesh.mtl')).bytes,mtl);
+ assert.deepEqual((await f.store.modelAsset(f.input,job.jobId,'mesh_basecolor_0.png')).bytes,png);
+});
+
+test('correction cannot publish dangling or altered material references',async t=>{
+ for(const defect of ['missing','hash','escape','unsupported-map']){
+  const runner=cleanupRunner(),run=runner.cleanup.run;
+  runner.cleanup.run=async(stage,ctx)=>{
+   const result=await run(stage,ctx);
+   if(stage==='correct'){
+    const obj=Buffer.from('mtllib mesh.mtl\n'+cube.toString());
+    const mtl=Buffer.from('newmtl captured\n'+(defect==='unsupported-map'?'bump':'map_Kd')+' '+(defect==='escape'?'../secret.png':'mesh_basecolor_0.png')+'\n');
+    const report=JSON.parse(await readFile(join(ctx.corrected,'report.json'),'utf8'));
+    for(const [name,bytes] of Object.entries({'corrected.obj':obj,'mesh.mtl':mtl,'mesh_basecolor_0.png':png})){
+     if(defect==='missing'&&name==='mesh.mtl')continue;
+     await writeFile(join(ctx.corrected,name),bytes);report.outputs[name]=defect==='hash'&&name.endsWith('.png')?'0'.repeat(64):sha(bytes);
+    }
+    await writeFile(join(ctx.corrected,'report.json'),JSON.stringify(report));
+   }
+   return result;
+  };
+  const f=await fixture(t,runner);const {job}=await f.store.start(f.input);await f.store.wait();
+  assert.equal((await f.store.load(f.input,job.jobId)).job.status,'failed',defect);
+  await assert.rejects(f.store.modelAssets(f.input,job.jobId));
+ }
+});

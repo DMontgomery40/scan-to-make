@@ -223,3 +223,29 @@ Check the printer before preparing another handoff. Pre-call failures and declin
 confirmations remain `failed` and retryable. A successful retry clears its old
 failure code. `printed` with a failure code means dispatch succeeded but saving
 outputs failed; it is also not retryable.
+
+
+### Textured scan result downloads
+
+Successful jobs expose a model bundle without changing the existing job artifact
+record (older phone clients accept only its fixed artifact names):
+
+- `GET /v1/saved-projects/:project/captures/:capture/scan-processing/:job/model-assets?projectRevision=N`
+  returns `{model: ScanModelAssets}` from `@scan-to-make/contracts/scan-processing`.
+- `GET .../:job/model-assets/:name?projectRevision=N` returns a declared file with
+  `Content-Type` and `X-Content-SHA256`.
+
+Both require `captures:read` and the saved project's current `If-Match` ETag.
+`model.entrypoint` is `repaired.obj`; `model.files` lists each basename, SHA-256,
+byte length and MIME type. Download and verify **all** files into the same local
+folder before presenting the OBJ: `mesh.mtl` and `mesh_basecolor_N.png` are its
+relative dependencies. The manifest is retained inside hash-bound `report.json`;
+every request verifies the complete dependency graph. Missing or changed assets
+return 422, never an apparently successful partial textured model. Old untextured
+jobs expose an OBJ-only bundle. A failed job exposes no model bundle.
+
+A correction with no geometry edits exports the repaired millimetre OBJ unchanged,
+including UVs and material bindings. Edits export retained per-corner UVs and the
+original material files; loss of the captured UV layer makes export fail. Both the
+repair-only runner and full cleanup pipeline stage and publish texture files.
+Render PNGs remain geometry inspection views; the model bundle carries the texture.

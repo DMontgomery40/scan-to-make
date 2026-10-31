@@ -3,7 +3,9 @@
 import json
 import math
 from pathlib import Path
+import shutil
 import sys
+import tempfile
 
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0,str(ROOT))
@@ -16,6 +18,11 @@ import blender_tool as core
 import evidence
 import geometry
 from schema import validate
+
+# New operations conservatively count as edits unless they are known observations.
+OBSERVATIONS = {'initialize','export','measure','render','advise','sample_texture',
+                'sample_texture_region','find_features','fit_feature_plane',
+                'render_features','classify_regions','deviation'}
 
 
 def bm_from(obj):
@@ -64,6 +71,11 @@ def execute(config):
         obj,bm = core.load(args['mesh'],args['scale'])
         obj.name = 'current'
         checked(bm,cap)
+        obj['geometry_edited'] = False
+        # Blender primitives may carry unused UVs without any material. Only
+        # a textured input requires them for the captured appearance.
+        material = json.loads((directory/'materials.json').read_text())
+        obj['source_has_texture'] = bm.loops.layers.uv.active is not None and bool(material['libraries'] or args['texture'])
         bm.to_mesh(obj.data)
         source = obj.copy()
         source.data = obj.data.copy()
@@ -88,6 +100,10 @@ def execute(config):
         bm = bm_from(obj)
     try:
         before = checked(bm,cap)
+        if obj.get('source_has_texture') and operation in ('remesh','convex_hull'):
+            raise ValueError('operation would discard captured UVs; choose a texture-preserving edit')
+        if operation not in OBSERVATIONS:
+            obj['geometry_edited'] = True
         if operation=='rigid_frame':
             rotation=Matrix([args['rotation'][i:i+3] for i in (0,3,6)])
             translation=Vector(args['translation_mm'])
@@ -222,8 +238,41 @@ def execute(config):
         elif operation=='export':
             out = directory/'export'
             out.mkdir(exist_ok=True)
-            core.export(bm,out)
-            data = {'artifacts':{str(p.relative_to(directory)):core.sha(p) for p in sorted(out.iterdir())}}
+            material = json.loads((directory/'materials.json').read_text())
+            uv = bm.loops.layers.uv.active is not None
+            edited = bool(obj.get('geometry_edited',True))
+            if edited and obj.get('source_has_texture') and not uv:
+                raise ValueError('edit discarded captured UVs; textured result cannot be exported')
+            declared = material['names']
+            names = [None if m is None else m.name.rpartition('.')[0]
+                     if m.name not in declared and m.name.rpartition('.')[0] in declared else m.name
+                     for m in obj.data.materials]
+            core.export(bm,out,uv=uv,materials=names)
+            source = directory/'input'/material['mesh']
+            copied = not edited and material['scale']==1 and source.suffix.lower()=='.obj'
+            if copied:
+                # A measured/observed-only run must not rewrite the repaired capture.
+                shutil.copyfile(source,out/'repaired.obj')
+            elif material['libraries']:
+                # Keep one library per declaration, matching staging and Blender's
+                # importer; a joined filename is not a portable multi-MTL OBJ.
+                with tempfile.TemporaryFile(dir=out) as spool:
+                    with (out/'repaired.obj').open('rb') as geometry_file:
+                        spool.write(geometry_file.readline())  # units header
+                        for library in material['libraries']:
+                            spool.write(('mtllib '+library+'\n').encode('utf-8'))
+                        shutil.copyfileobj(geometry_file,spool)
+                    spool.seek(0)
+                    with (out/'repaired.obj').open('wb') as geometry_file:
+                        shutil.copyfileobj(spool,geometry_file)
+            for name in material['files']:
+                target = out/name
+                target.parent.mkdir(parents=True,exist_ok=True)
+                shutil.copyfile(directory/'input'/name,target)
+            data = {'uvRetained':uv,'geometryEdited':edited,'inputObjCopied':copied,
+                    'materialFiles':material['files'],
+                    'artifacts':{str(p.relative_to(directory)):core.sha(p)
+                                 for p in sorted(out.rglob('*')) if p.is_file()}}
         after = checked(bm,cap)
         if operation=='scale_to_reference' and any(abs(a-b)>.05 for a,b in zip(after['boxExtentsMm'],args['target_mm'])):
             raise ValueError('reference box comparison failed after scaling')

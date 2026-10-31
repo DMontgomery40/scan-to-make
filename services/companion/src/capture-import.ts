@@ -166,8 +166,8 @@ export class CaptureStore {
    const capture=receiptFromConvertedBytes(original,derived,report);
    const binding=validateCaptureBinding(JSON.parse(bindingBytes.toString('utf8')),{projectId,projectRevision,original:capture.original,derived:capture.derived,conversionReport:capture.conversionReport});
    if(!isDeepStrictEqual(capture,binding.capture))throw new Error('Capture provenance does not match retained report');
-   await readCaptureMaterials(folder,derived,report,this.bound.maxDerivedBytes);
-   return {captureId,project,binding,original,derived,report};
+   const materials=await readCaptureMaterials(folder,derived,report,this.bound.maxDerivedBytes);
+   return {captureId,project,binding,original,derived,report,materials};
   },expectedProjectETag);
  }
 }

@@ -3,8 +3,9 @@ import {mkdir,mkdtemp,open,readdir,rename,rm,stat} from 'node:fs/promises';
 import {join} from 'node:path';
 import {z} from 'zod';
 import type {FileSavedProjectStorage} from '@scan-to-make/project';
-import {ScanProcessingJobSchema,ScanProcessingRequestSchema,ScanArtifactNameSchema,SCAN_VIEW_NAMES,SCAN_ADVICE_NAMES,SCAN_CLEANUP_STAGES,SCAN_PROCESSING_SCHEMA_ID,compareScanDimensions,DimensionsMmSchema,type ScanProcessingJob,type ScanArtifactName} from '@scan-to-make/contracts/scan-processing';
+import {ScanProcessingJobSchema,ScanProcessingRequestSchema,ScanArtifactNameSchema,SCAN_VIEW_NAMES,SCAN_ADVICE_NAMES,SCAN_CLEANUP_STAGES,SCAN_PROCESSING_SCHEMA_ID,compareScanDimensions,DimensionsMmSchema,ScanModelAssetsSchema,ScanModelAssetNameSchema,type ScanProcessingJob,type ScanArtifactName} from '@scan-to-make/contracts/scan-processing';
 import {CaptureStore,readBoundedCaptureFile} from './capture-import.js';
+import {readScanMaterials,scanModelManifest} from './scan-model-assets.js';
 import {DetailStillStore} from './detail-stills.js';
 import {runCleanup,type CleanupSnapshot} from './scan-cleanup-job.js';
 import type {ScanRunner} from './scan-processing-runner.js';
@@ -118,7 +119,7 @@ export class ScanProcessingStore {
    await write(join(lock,'owner.json'),Buffer.from(JSON.stringify({pid:process.pid,jobId:job.jobId})));
    await this.projects.withCurrentProject(r.projectId,r.projectRevision,async()=>{await authorize?.();signal?.throwIfAborted();await this.persist(r,job);},r.expectedProjectETag);
    const snapshot=structuredClone(job);
-   const done=Promise.resolve().then(()=>this.execute(r,job,capture.derived,capture.binding.capture.provenance.metersPerUnit,controller,authorize,cleanup)).finally(async()=>{await rm(lock,{recursive:true,force:true});this.active=undefined;activeJobs.delete(job.jobId);});
+   const done=Promise.resolve().then(()=>this.execute(r,job,capture.derived,capture.binding.capture.provenance.metersPerUnit,controller,authorize,cleanup,capture.materials)).finally(async()=>{await rm(lock,{recursive:true,force:true});this.active=undefined;activeJobs.delete(job.jobId);});
    entry.done=done;this.active={id:job.jobId,controller,done};launched=true;
    // All worker errors are converted to durable generic failure records; storage errors remain fail closed.
    void done.catch(()=>undefined);return {job:snapshot};
@@ -130,13 +131,13 @@ export class ScanProcessingStore {
   const lock=join(this.directory,'.scan-processing-lock'),temp=join(lock,`.owner-${randomUUID()}`);
   try{await write(temp,Buffer.from(JSON.stringify({pid:process.pid,jobId,pgid})));await rename(temp,join(lock,'owner.json'));}finally{await rm(temp,{force:true});}
  }
- private async execute(r:Request,job:ScanProcessingJob,mesh:Buffer,metersPerUnit:number,controller:AbortController,authorize?:()=>Promise<void>,cleanup?:CleanupSnapshot){
+ private async execute(r:Request,job:ScanProcessingJob,mesh:Buffer,metersPerUnit:number,controller:AbortController,authorize?:()=>Promise<void>,cleanup?:CleanupSnapshot,materials:Record<string,Buffer>={}){
   const timer=setTimeout(()=>controller.abort('deadline-exceeded'),this.timeoutMs);let staging:string|undefined,registrationFailed=false;
   let activeStage:NonNullable<ScanProcessingJob['failureStage']>=cleanup?'import':'repair';
   try{
    staging=await mkdtemp(join(this.folder(r),'.work-'));
    const source=join(staging,'input.obj'),sidecar=join(staging,'units.json'),output=join(staging,'output');
-   if(!cleanup){await write(source,mesh);await write(sidecar,Buffer.from(JSON.stringify({unitsAuthored:true,metersPerUnit})));}
+   if(!cleanup){await write(source,mesh);for(const [name,bytes] of Object.entries(materials))await write(join(staging,name),bytes);await write(sidecar,Buffer.from(JSON.stringify({unitsAuthored:true,metersPerUnit})));}
    job.status='running';await this.persist(r,job);
    let measured:Buffer|undefined,extraNames:string[]=[],extraReport:Record<string,unknown>={};
    const register=async(pgid:number)=>{
@@ -181,15 +182,19 @@ export class ScanProcessingStore {
    if(job.reference)job.comparison=ScanProcessingJobSchema.shape.comparison.parse(compareScanDimensions(job.measuredBoxExtentsMm,job.reference.dimensionsMm));
    // Retain the repair tool's report plus measured/reference comparison in one hash-bound report.
    const repair=JSON.parse((await readBoundedCaptureFile(join(output,'report.json'),1024*1024)).toString('utf8'));
-   await rm(join(output,'report.json'));await write(join(output,'report.json'),Buffer.from(JSON.stringify({...extraReport,repair,measurement:metrics,reference:job.reference,comparison:job.comparison,previewOnly:true})+'\n'));
-   const artifacts=await this.collectArtifacts(output,[...names,...extraNames]);
+   const finalObj=await readBoundedCaptureFile(join(output,'repaired.obj'),64*1024*1024);
+   const finalMaterials=await readScanMaterials(output,finalObj,cleanup?(extraReport.correction as {outputs?:Record<string,unknown>}).outputs:repair.outputSha256);
+   const modelAssets=scanModelManifest(job.jobId,finalObj,finalMaterials);
+   await rm(join(output,'report.json'));await write(join(output,'report.json'),Buffer.from(JSON.stringify({...extraReport,repair,modelAssets,measurement:metrics,reference:job.reference,comparison:job.comparison,previewOnly:true})+'\n'));
+   for(const [name,bytes] of Object.entries(finalMaterials)){await rm(join(output,name));await write(join(output,name),bytes);}
+   const artifacts=await this.collectArtifacts(output,[...names,...extraNames],Object.values(finalMaterials).reduce((total,bytes)=>total+bytes.length,0));
    await sync(output);
    await retryProjectBusy(controller.signal,()=>this.projects.withCurrentProject(r.projectId,r.projectRevision,async()=>{
     await authorize?.();controller.signal.throwIfAborted();
     const destination=join(this.folder(r),job.jobId);
     if(cleanup){
      // Advice is already published. The final record is the commit point for geometry.
-     for(const name of Object.keys(artifacts)){
+     for(const name of [...Object.keys(artifacts),...Object.keys(finalMaterials)]){
       if(job.artifacts?.[name as ScanArtifactName])continue;
       await rename(join(output,name),join(destination,name));
      }
@@ -213,8 +218,8 @@ export class ScanProcessingStore {
    }
   }finally{clearTimeout(timer);if(staging)await rm(staging,{recursive:true,force:true});}
  }
- private async collectArtifacts(output:string,artifactNames:readonly string[]){
-  const artifacts={} as NonNullable<ScanProcessingJob['artifacts']>;let total=0;
+ private async collectArtifacts(output:string,artifactNames:readonly string[],materialBytes=0){
+  const artifacts={} as NonNullable<ScanProcessingJob['artifacts']>;let total=materialBytes;
   for(const candidate of artifactNames){
    const name=ScanArtifactNameSchema.parse(candidate);
    const limit=name.endsWith('.png')?8*1024*1024:name.endsWith('.json')?2*1024*1024:name.endsWith('.jsonl')?16*1024*1024:64*1024*1024;
@@ -272,6 +277,29 @@ export class ScanProcessingStore {
   if(!ref||(job.status!=='succeeded'&&!SCAN_ADVICE_NAMES.some(n=>n===name)))throw new ScanProcessingFailure('not-found');
   const bytes=await readBoundedCaptureFile(join(this.folder(request),jobId,name),Math.min(ref.byteLength,64*1024*1024));
   if(bytes.length!==ref.byteLength||sha(bytes)!==ref.sha256)throw new ScanProcessingFailure('processing-unavailable');return {job,ref,bytes};
+ }
+ /** A hash-bound dependency manifest, separate from the legacy job artifact enum. */
+ async modelAssets(input:Request,jobId:string){
+  const request=requestSchema.parse(input);
+  const {job,bytes:report}=await this.artifact(request,jobId,'report.json');
+  const obj=await this.artifact(request,jobId,'repaired.obj');
+  try{
+   const retained=JSON.parse(report.toString('utf8')).modelAssets;
+   // Old untextured jobs remain downloadable; an old dangling mtllib fails closed.
+   const model=retained===undefined?scanModelManifest(jobId,obj.bytes,{}):ScanModelAssetsSchema.parse(retained);
+   if(model.jobId!==jobId)throw Error('Model job mismatch');
+   const entry=model.files.find(f=>f.name===model.entrypoint)!;
+   if(entry.sha256!==obj.ref.sha256||entry.byteLength!==obj.bytes.length)throw Error('Model identity mismatch');
+   const hashes=Object.fromEntries(model.files.filter(f=>f.name!==model.entrypoint).map(f=>[f.name,f.sha256]));
+   const materials=await readScanMaterials(join(this.folder(request),jobId),obj.bytes,hashes);
+   for(const file of model.files)if(file.name!==model.entrypoint&&materials[file.name]?.length!==file.byteLength)throw Error('Material size mismatch');
+   const bytes:Record<string,Buffer>={'repaired.obj':obj.bytes,...materials};return {job,model,bytes};
+  }catch{throw new ScanProcessingFailure('processing-unavailable');}
+ }
+ async modelAsset(input:Request,jobId:string,name:string){
+  if(!ScanModelAssetNameSchema.safeParse(name).success)throw new ScanProcessingFailure('not-found');
+  const {job,model,bytes}=await this.modelAssets(input,jobId),ref=model.files.find(f=>f.name===name);
+  if(!ref)throw new ScanProcessingFailure('not-found');return {job,ref,bytes:bytes[name]!};
  }
  // Routes through the process-wide registry: any same-process instance cancels the owning one.
  // Cross-process ownership is excluded by the listener instance lock (one companion per directory).
