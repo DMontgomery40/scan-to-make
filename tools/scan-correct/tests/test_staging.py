@@ -57,7 +57,7 @@ class StagingSecurityTests(unittest.TestCase):
             worker.stage(self.mesh,'mm',texture=self.outside)
             args=run.call_args.args[1]
         override=Path(args['texture'])
-        self.assertTrue(override.is_relative_to(self.base/'job'/'input'))
+        self.assertTrue(override.is_relative_to((self.base/'job'/'input').resolve()))
         self.assertEqual(override.read_bytes(),self.outside.read_bytes())
         self.assertFalse(override.is_symlink())
 

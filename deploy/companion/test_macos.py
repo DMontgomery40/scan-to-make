@@ -33,11 +33,35 @@ class MacConfiguration(unittest.TestCase):
             value = json.loads(result.stdout)
             self.assertEqual(value['token'], 'synthetic dollar $literal')
             self.assertEqual(value['python'], str(app / '.venv/bin/python3'))
-            self.assertEqual(value['cwd'], str(app))
+            self.assertEqual(value['cwd'], str(app.resolve()))
             module.configure(state, app, node, '/blender', agents)
             self.assertIn('synthetic dollar', env.read_text())
             self.assertEqual(env.stat().st_mode & 0o777, 0o600)
             self.assertNotIn('synthetic dollar', plist.read_text())
+
+    def test_installed_cleanup_helper_runs_tools_and_preserves_exit_status(self):
+        import json
+        import sys
+        app = Path(__file__).resolve().parents[2]
+        with tempfile.TemporaryDirectory(prefix='cleanup launcher ') as tmp:
+            state = Path(tmp) / 'state'
+            module.configure(state, app, shutil.which('node'), '/unused/blender', Path(tmp) / 'agents')
+            # The generated launcher normally points at the installed venv.
+            # Use a disposable app layout linked to the actual tracked tools.
+            release = Path(tmp) / 'release'
+            release.mkdir()
+            (release / 'tools').symlink_to(app / 'tools', target_is_directory=True)
+            (release / 'deploy').symlink_to(app / 'deploy', target_is_directory=True)
+            (release / '.venv/bin').mkdir(parents=True)
+            (release / '.venv/bin/python3').symlink_to(sys.executable)
+            module.configure(state, release, shutil.which('node'), '/unused/blender', Path(tmp) / 'agents')
+            command = [state / 'companion', 'deploy/companion/cleanup.mjs']
+            result = subprocess.run([*command, 'tools'], capture_output=True, text=True, check=True)
+            self.assertIn('measure', {tool['name'] for tool in json.loads(result.stdout)})
+            result = subprocess.run([*command, 'run'], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 2)  # Python argparse, not Node's success status
+            result = subprocess.run([*command, 'unknown'], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 2)
 
     def test_installer_help_and_linux_guard(self):
         installer = str(Path(__file__).with_name('install-macos.sh'))

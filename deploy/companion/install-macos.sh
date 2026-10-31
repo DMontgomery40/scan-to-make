@@ -52,6 +52,11 @@ fi
 [ -x "$blender" ] || { echo 'BLENDER must name an executable Blender 5.0.1 binary.' >&2; exit 1; }
 version=$("$blender" --version)
 [ "${version%%$'\n'*}" = 'Blender 5.0.1' ] || { echo 'Select Blender 5.0.1 with BLENDER (existing installation is preserved).' >&2; exit 1; }
+# Qualify the native security boundary and full host/model/worker path before
+# replacing a running service. Fixtures are synthetic; no provider API is called.
+export BLENDER="$blender"
+"$app/.venv/bin/python" -m unittest discover -s "$app/tools/scan-correct/tests" -p test_sandbox.py -v
+"$app/.venv/bin/python" -m unittest discover -s "$app/tools/scan-correct/tests" -p test_native_cleanup.py -v
 if [ ! -e "$state/auth" ]; then
   "$node" "$app/services/companion/dist/remote-auth-cli.js" init "$state/auth" "$1" "$2"
 else
@@ -82,5 +87,5 @@ done
 [ "$ready" = 1 ] || { echo "Service did not become ready. Inspect $state/logs" >&2; exit 1; }
 printf '\nInstalled. Config: %s/companion.env\nCLI: %s/companion\n' "$state" "$state"
 printf 'Enable private HTTPS with: tailscale serve --bg http://127.0.0.1:9077\n'
-printf 'Native macOS runs capture and scan-repair; scan-correct requires the Linux container.\n'
+printf 'Native capture, repair and AI correction are installed; correction workers have no network access.\n'
 "$state/companion" "$app/services/companion/dist/remote-auth-cli.js" pair-capture "$state/auth" "$2"

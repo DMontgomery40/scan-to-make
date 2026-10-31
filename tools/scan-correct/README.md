@@ -9,7 +9,8 @@ accuracy or authorize printing. Every successful operation and report carries
 
 ## Runtime
 
-Linux, Python 3.10+, **Blender 5.0.1**, and system `libseccomp.so.2`. Blender
+Python 3.10+, **Blender 5.0.1**, and either Linux with system `libseccomp.so.2`
+or macOS with `/usr/bin/sandbox-exec`. Blender
 supplies numpy/bmesh/mathutils. The host uses Pillow for still decoding/resizing and pillow-heif for HEIC.
 Install them with `python -m pip install -r tools/scan-correct/requirements.txt`.
 The model adapters use only Python's standard library.
@@ -17,8 +18,8 @@ Keep the sibling `tools/scan-repair` folder: import/export, rendering and
 `boxExtentsMm` measurement reuse that GPL core. No research stacks, SDKs or
 pip packages are required for the correction worker. Blender retains its own
 runtime notices, including NumPy's BSD licence. Blender discovery is `$BLENDER`,
-then PATH, then the repair helper's fallback; network isolation currently
-requires Linux even if Blender can be found on another platform.
+then PATH, then the repair helper's macOS fallback. Native Apple Silicon macOS
+runs the same cleanup and model runner without Docker or emulation.
 
 ```sh
 export BLENDER=$HOME/opt/blender-5.0.1/blender
@@ -172,9 +173,17 @@ are work/polygon caps, not an OS memory quota.
 
 A Linux libseccomp filter denies non-Unix socket creation (including IPv4/IPv6),
 legacy socketcall and io_uring setup before executing Blender. It is inherited
-by children and fails closed if unavailable. The worker environment excludes
-provider credentials; auto-execution is disabled. This is network syscall
-isolation, not a filesystem/container sandbox. Only trusted fixed Python
+by children and fails closed if unavailable. On macOS the launcher replaces
+itself with `/usr/bin/sandbox-exec -p '(version 1)(allow default)(deny network*)'`
+before Blender starts. That OS-enforced rule denies network operations in the
+worker and its descendants, including loopback. Local IPC is not a security boundary here. The host model
+adapter stays outside either sandbox and can still call the configured provider.
+A missing sandbox executable, rejected profile or unsupported OS fails before
+the worker runs; there is no unsandboxed fallback. `sandbox-exec` is deprecated
+by Apple, so its presence and behavior are qualified by tests and the installer.
+The worker environment excludes provider credentials; auto-execution is disabled.
+These are network restrictions, not filesystem/container sandboxes. Only trusted
+fixed Python
 implementations run: no model-written Python, shell, arbitrary executables or
 operation paths. Every `mtllib` target must have a `.mtl` suffix; nonstandard
 suffixes are rejected before import. Material and base-colour dependencies must resolve inside the
@@ -185,8 +194,8 @@ dependency graph is validated and snapshotted before any assets are staged;
 Blender receives those validated bytes. An explicit caller-selected `--texture`
 override is snapshotted into the staged input directory separately from MTL
 references. A future filesystem sandbox would add defence in depth against
-importer behaviour; it is not implemented here. The socket filter does not
-restrict filesystem reads, and callers must keep source/job directories private
+importer behaviour; it is not implemented here. Neither backend restricts filesystem
+reads, and callers must keep source/job directories private
 and unmodified during staging.
 
 Each successful operation saves `pending.blend`, then the host commits it as
