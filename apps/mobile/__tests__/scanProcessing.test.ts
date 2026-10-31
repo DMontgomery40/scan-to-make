@@ -217,6 +217,43 @@ test('listJobs recovers retained jobs after a relaunch and validates bindings', 
   );
 });
 
+test('listJobs and status accept jobs pinned at an earlier project revision', async () => {
+  const h = harness();
+  await h.create();
+  // The project is edited after the retained job was enqueued: the job keeps
+  // the revision resolved at enqueue (0) while the project is now at 1.
+  const changed = await h.repo.change('one', 0, {
+    kind: 'replace-brief',
+    brief: { object: 'Renamed mug', context: 'Desk', addition: 'Handle' },
+  });
+  expect(changed.status).toBe('ok');
+  if (changed.status !== 'ok') throw Error();
+  const ack1 = { etag, snapshot: JSON.stringify(changed.project) };
+  const historical = job({
+    jobId: '33333333-3333-4333-8333-333333333333',
+    projectRevision: 0,
+  });
+  const current = job({ projectRevision: 1 });
+  h.native.request = jest.fn(async () => ({
+    status: 200,
+    body: JSON.stringify({ jobs: [historical, current] }),
+    etag,
+  }));
+  const jobs = await h.client.listJobs('one', captureId, ack1);
+  expect(jobs.map(j => j.projectRevision)).toEqual([0, 1]);
+  expect(calls(h)[0].path).toBe(
+    `/v1/saved-projects/one/captures/${captureId}/scan-processing?projectRevision=1`,
+  );
+  h.native.request = jest.fn(async () => ({
+    status: 200,
+    body: JSON.stringify({ job: historical }),
+    etag,
+  }));
+  await expect(
+    h.client.status('one', captureId, ack1, historical.jobId),
+  ).resolves.toMatchObject({ projectRevision: 0 });
+});
+
 test('listJobs maps an older companion without the listing route to not-available', async () => {
   const h = harness();
   const ack = await h.create();
@@ -305,6 +342,26 @@ test('cancel returns the terminal job; a lost reply is ambiguous', async () => {
     h.client.cancel('one', captureId, ack, jobId),
   ).rejects.toMatchObject({ code: 'ambiguous-cancel' });
   expect(h.native.request).toHaveBeenCalledTimes(1);
+});
+
+test('artifacts of a job pinned at an earlier project revision still download', async () => {
+  const h = harness();
+  await h.create();
+  const changed = await h.repo.change('one', 0, {
+    kind: 'replace-brief',
+    brief: { object: 'Renamed mug', context: 'Desk', addition: 'Handle' },
+  });
+  if (changed.status !== 'ok') throw Error();
+  const ack1 = { etag, snapshot: JSON.stringify(changed.project) };
+  // Enqueued at revision 0; the project is now at revision 1.
+  const done = succeededJob() as unknown as ScanProcessingJob;
+  expect(done.projectRevision).toBe(0);
+  h.native.request = jest.fn(async o => ({ status: 200, body: '', etag, file: o.artifact }));
+  const file = await h.client.downloadArtifact('one', captureId, ack1, done, 'iso_pp.png');
+  expect(file.mediaType).toBe('image/png');
+  expect(calls(h)[0].path).toBe(
+    `/v1/saved-projects/one/captures/${captureId}/scan-processing/${jobId}/artifacts/iso_pp.png?projectRevision=1`,
+  );
 });
 
 test('artifact download verifies the sealed identity, including PNG views', async () => {

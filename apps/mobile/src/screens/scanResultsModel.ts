@@ -242,22 +242,48 @@ export function snapshotRevision(snapshot: string): number | null {
   }
 }
 
+/** Start order for a job: `createdAtMs`, falling back to `enqueuedAt`. */
+export function jobCreatedOrder(job: ScanProcessingJob): number {
+  return (
+    job.createdAtMs ??
+    (job.enqueuedAt ? Date.parse(job.enqueuedAt) : 0)
+  );
+}
+function newestJob(
+  jobs: ScanProcessingJob[],
+): ScanProcessingJob | null {
+  let best: ScanProcessingJob | null = null;
+  for (const job of jobs) {
+    if (!best || jobCreatedOrder(job) > jobCreatedOrder(best)) best = job;
+  }
+  return best;
+}
+
 /**
- * Which listed job to show. Job IDs are random, so the listing has no start
- * order: prefer an active job, then the one this session started, then a
- * finished check. The rest stay available as other checks.
+ * Which listed job to show. Job IDs are random, so start order comes from
+ * `createdAtMs`: prefer the newest active job, then the newest finished
+ * check when it is newer than the remembered one (a follow-up correction
+ * supersedes the job it followed), then the remembered job. Without any
+ * timestamps the remembered job keeps its old preference. The rest stay
+ * available as other checks.
  */
 export function chooseJob(
   jobs: ScanProcessingJob[],
   rememberedId: string | null,
 ): ScanProcessingJob | null {
-  return (
-    jobs.find(isActive) ??
-    jobs.find(job => job.jobId === rememberedId) ??
-    jobs.find(job => job.status === 'succeeded') ??
-    jobs[0] ??
-    null
+  const active = newestJob(jobs.filter(isActive));
+  if (active) return active;
+  const remembered = jobs.find(job => job.jobId === rememberedId) ?? null;
+  const finished = newestJob(
+    jobs.filter(job => job.status === 'succeeded'),
   );
+  if (
+    finished &&
+    (!remembered || jobCreatedOrder(finished) > jobCreatedOrder(remembered))
+  ) {
+    return finished;
+  }
+  return remembered ?? finished ?? newestJob(jobs);
 }
 
 export function jobLabel(job: ScanProcessingJob): {

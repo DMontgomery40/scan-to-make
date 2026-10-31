@@ -1,5 +1,7 @@
 import {
+  featuredJob,
   mergeOverview,
+  pickFinishedJob,
   projectChip,
   projectOverviewLoader,
   projectSize,
@@ -353,4 +355,23 @@ test('a kept picture never goes with a different cleanup', () => {
     unread: { jobs: [], prints: ['x'] },
   })!;
   expect(same.imageUri).toBe('file:///a.png');
+});
+
+test('a scan card shows the newest finished cleanup, so a follow-up correction replaces the first result', () => {
+  const at = (jobId: string, createdAtMs: number) => ({
+    ...syntheticJob('succeeded', { jobId }),
+    createdAtMs,
+  });
+  // Random job ids: the follow-up's id sorts before the first job's.
+  const first = at('99999999-9999-4999-8999-999999999999', 1000);
+  const followUp = at('11111111-1111-4111-8111-111111111111', 2000);
+  expect(pickFinishedJob([first, followUp], null)?.jobId).toBe(followUp.jobId);
+  // Even when the phone last followed the first job.
+  expect(pickFinishedJob([first, followUp], first.jobId)?.jobId).toBe(followUp.jobId);
+  // A followed job that is the newest stays.
+  expect(pickFinishedJob([first, followUp], followUp.jobId)?.jobId).toBe(followUp.jobId);
+  // Unfinished jobs are never picked.
+  const running = { ...syntheticJob('running', { jobId: '22222222-2222-4222-8222-222222222222' }), createdAtMs: 3000 };
+  expect(pickFinishedJob([first, running], null)?.jobId).toBe(first.jobId);
+  expect(featuredJob(view({ jobs: [first, followUp] }))?.jobId).toBe(followUp.jobId);
 });

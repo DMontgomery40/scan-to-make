@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdir,writeFile,readFile} from 'node:fs/promises';
+import {mkdir,writeFile,readFile,rm} from 'node:fs/promises';
 import {join} from 'node:path';
 import {ScanProcessingStore} from '../dist/scan-processing.js';
 import {DetailStillStore} from '../dist/detail-stills.js';
@@ -167,4 +167,15 @@ test('correction cannot publish dangling or altered material references',async t
   assert.equal((await f.store.load(f.input,job.jobId)).job.status,'failed',defect);
   await assert.rejects(f.store.modelAssets(f.input,job.jobId));
  }
+});
+
+test('a close-up whose image is deleted after its record is read is skipped, not a failed job',async t=>{
+ const f=await fixture(t,cleanupRunner()),stills=new DetailStillStore(f.storage,join(f.root,'captures'));
+ const gone=await stills.addDetailStill({...f.input,source:Buffer.concat([png,Buffer.from([1])]),label:'Gone'});
+ const kept=await stills.addDetailStill({...f.input,source:Buffer.concat([png,Buffer.from([2])]),label:'Kept'});
+ // The record stays and only the image goes, as when a delete lands between the record read and the image open.
+ await rm(join(f.root,'captures',f.input.captureId,'detail-stills',`${gone.still.id}.img`));
+ await assert.rejects(stills.loadRetainedDetailStill(f.input.projectId,f.input.captureId,gone.still.id),e=>e.code==='not-found');
+ const {job}=await f.store.start(f.input);await f.store.wait();const result=(await f.store.load(f.input,job.jobId)).job;
+ assert.equal(result.status,'succeeded');assert.deepEqual(result.detailStills.map(s=>s.id),[kept.still.id]);
 });

@@ -38,8 +38,10 @@ export function parseCloseupAdvice(json: unknown): CloseupTarget[] {
 
 // What the scan shows there, and what a photo helps with.
 /**
- * The job whose advice to show: the one this app last followed if it has
- * advice, else any the companion kept. Advice survives a failed correction.
+ * The job whose advice to show: the newest job with advice by
+ * `createdAtMs` (a follow-up's advice supersedes the followed job's),
+ * falling back to the remembered job when timestamps tie or are absent.
+ * Advice survives a failed correction.
  */
 export function adviceJob(
   jobs: ScanProcessingJob[],
@@ -47,11 +49,20 @@ export function adviceJob(
 ): ScanProcessingJob | null {
   const hasAdvice = (job: ScanProcessingJob) =>
     !!job.artifacts?.['advice.json'];
-  return (
-    jobs.find(job => job.jobId === rememberedId && hasAdvice(job)) ??
-    jobs.find(hasAdvice) ??
-    null
-  );
+  const order = (job: ScanProcessingJob) =>
+    job.createdAtMs ?? (job.enqueuedAt ? Date.parse(job.enqueuedAt) : 0);
+  const remembered =
+    jobs.find(job => job.jobId === rememberedId && hasAdvice(job)) ?? null;
+  let newest: ScanProcessingJob | null = null;
+  for (const job of jobs) {
+    if (hasAdvice(job) && (!newest || order(job) > order(newest))) {
+      newest = job;
+    }
+  }
+  if (newest && (!remembered || order(newest) > order(remembered))) {
+    return newest;
+  }
+  return remembered ?? newest;
 }
 
 const REASONS: Record<CloseupTarget['reasonCode'], string> = {

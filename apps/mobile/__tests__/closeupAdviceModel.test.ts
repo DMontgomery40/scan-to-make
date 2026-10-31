@@ -111,3 +111,21 @@ test('advice comes from the remembered job when it has some, else any job with a
   expect(adviceJob([plain, failedWithAdvice], 'plain')).toBe(failedWithAdvice);
   expect(adviceJob([plain], null)).toBeNull();
 });
+
+test('adviceJob shows the newest job with advice by createdAtMs', () => {
+  const file = {
+    sha256: 'd'.repeat(64),
+    byteLength: 10,
+    mediaType: 'application/json' as const,
+  };
+  const withAdvice = (jobId: string, createdAtMs: number) => ({
+    ...syntheticJob('succeeded'),
+    jobId,
+    createdAtMs,
+    artifacts: { 'advice.json': file },
+  });
+  const older = withAdvice('remembered', 1000);
+  const newer = withAdvice('follow-up', 2000);
+  expect(adviceJob([newer, older], 'remembered')).toBe(newer);
+  expect(adviceJob([older, newer], 'remembered')).toBe(newer);
+});

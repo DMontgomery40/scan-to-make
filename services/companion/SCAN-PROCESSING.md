@@ -62,7 +62,7 @@ POST takes strict JSON, at most 4096 bytes, with a five-second body deadline:
 {"reference":{"dimensionsMm":[60,40,20],"source":"Published dimensions","productName":"Known object"},"stillIds":[]}
 ```
 
-Both fields are optional. Omit `stillIds` to select the first four retained
+Both fields are optional. Omit `stillIds` to select the newest four retained
 stills in attachment order; use `[]` to select none, or up to four unique IDs to
 choose photos. The job snapshots exact hash-verified `.img` bytes and sidecars.
 The correction CLI sniffs the actual type, converts HEIC and normalizes provider
@@ -118,22 +118,69 @@ directory as personal data; retention has no automatic expiry.
 
 Records are private synced temporary files renamed atomically. The advice record
 is its publication point; the final successful record publishes the geometry.
-Final hashes, current project revision/ETag and authorization are checked before
-publication. Downloads rehash regular no-follow files. A project edit or revoked
-credential prevents further usable publication. No job is rebound to another
-revision. Output failures expose `failureStage` (including `publish` for final publication)
-and a fixed error code; provider
-error bodies are not returned to the phone.
+Final hashes and authorization are checked before publication; the revision
+resolved at enqueue is not re-checked, so a later project edit neither blocks
+publication nor breaks job reads. No job is rebound to another revision.
+Downloads rehash regular no-follow files. Output failures expose
+`failureStage` (including `publish` for final publication) and a fixed error
+code; provider error bodies are not returned to the phone.
+
+## Queueing and automatic starts (BE-2)
+
+Cleanup starts by itself: a successful capture import enqueues a job
+(`trigger: "capture-import"`, no reference needed), and a detail still that
+arrives afterwards enqueues a follow-up (`trigger: "detail-still"`) unless a
+job is already waiting, in which case that job absorbs it. Still bytes are
+snapshotted when a job starts, so a waiting job sees the newest close-ups.
+Jobs run one at a time in FIFO order per capture directory; nothing fails
+busy any more. Because execution is serial, jobs for a capture finish in
+enqueue order, so the newest finished result is the latest successful one
+enqueued (a failed or cancelled job never displaces it). A follow-up
+inherits the newest live job's reference, since the reference drives
+correction scaling. Which job the phone displays is the app's choice; the
+records carry `enqueuedAt`/`finishedAt` for that ordering.
+
+Every job records `captureSha256` (the retained capture's original bytes).
+Within one retained capture, the same SHA-256 with the same reference, the
+same close-up selection and the same pipeline/adapter is one job while it
+is queued or running: POST retries, double taps and the automatic import
+job all resolve to the existing in-flight record instead of duplicating
+work, and automatic re-enqueues also resolve to a finished record. An
+explicit POST after completion is a deliberate re-check and always runs
+fresh, so a tool fix or model change is never masked by the old result.
+Re-importing identical bytes creates a distinct retained capture (unchanged
+capture-store behavior) and therefore its own job. A different reference,
+or a close-up set the finished job did not use, is a new job. The current
+project revision and ETag are resolved at enqueue and pinned on the record;
+reads never re-check them.
+
+Job and stage records carry `enqueuedAt`/`startedAt`/`finishedAt` (per-stage
+on both `pipelineStages` and the legacy `stages` tuple) for time estimates.
+Every job also carries `createdAtMs` (epoch milliseconds at enqueue, the
+same instant as `enqueuedAt`): job IDs are random, so clients order jobs by
+`createdAtMs` — the newest finished result is the succeeded job with the
+largest `createdAtMs`. Records written before the field existed derive it
+from `enqueuedAt` on read; older records have neither and sort oldest. The
+per-capture collection GET keeps ascending job-ID order (the current phone
+validates it); only the cross-project index is newest-first. Stage kinds
+map to the phone labels in the contract's `SCAN_CLEANUP_STAGE_LABELS`
+(Getting your scan, Filling holes, Looking for weak spots, Fixing details
+from your close-ups, Measuring, Almost done). `scan-job-index.json` in the
+captures directory indexes every job across projects, newest first by
+`createdAtMs`; `listJobIndex()` refreshes nonterminal entries from their
+records and rebuilds the file from records when it is missing.
 
 Stale revision/ETag returns 412; missing precondition 428; invalid request 400;
-wrong scope 403; missing artifact 404; concurrent job 429; corrupt artifact 422;
-storage errors 503. POST is not idempotent: retain its job ID, and use the
-collection GET after an ambiguous response instead of automatically rerunning.
-A disconnect after 202 does not cancel the job. DELETE and shutdown do.
+wrong scope 403; missing artifact 404; corrupt artifact 422; storage errors
+503. POST is idempotent per capture and request while the job is in flight
+(see above); after an ambiguous response, re-POST or use the collection
+GET to find the same job.
+A disconnect after 202 does not cancel the job. DELETE and shutdown do;
+DELETE of a still-queued job removes it before it ever runs.
 
 ## Bounds and lifecycle
 
-One job owns the existing process-wide registry and filesystem job lock.
+One job at a time owns the existing process-wide registry and filesystem job lock; further jobs wait in the per-directory queue.
 The listener also owns the capture-directory instance lock; embedded users must
 maintain the same one-process-per-directory rule. Full cleanup has a thirty-minute whole-job ceiling (recorded as
 `wallClockLimitMs`); legacy repair-only jobs retain ten minutes. Each cleanup

@@ -11,6 +11,7 @@ import type {
 } from '../printing/printerHandoff';
 import type { Tone } from '../ui/components';
 import { failureOf } from './scanServices';
+import { jobCreatedOrder } from './scanResultsModel';
 
 /**
  * What the Projects grid knows about one project. It is read without changing
@@ -127,17 +128,40 @@ export function mergeOverview(
   };
 }
 
+/** The newest of these jobs by enqueue time (`createdAtMs`), as the results screen orders them. */
+function newestOf(jobs: ScanProcessingJob[]): ScanProcessingJob | null {
+  let best: ScanProcessingJob | null = null;
+  for (const job of jobs)
+    if (!best || jobCreatedOrder(job) > jobCreatedOrder(best)) best = job;
+  return best;
+}
+
+/**
+ * The finished cleanup a scan's card shows, matching the results screen: the
+ * newest finished job, unless the one this phone followed is at least as new.
+ * A follow-up correction (late close-ups) therefore replaces the first result.
+ */
+export function pickFinishedJob(
+  jobs: ScanProcessingJob[],
+  followed: string | null,
+): ScanProcessingJob | null {
+  const finished = jobs.filter(j => j.status === 'succeeded');
+  const newest = newestOf(finished);
+  const remembered = finished.find(j => j.jobId === followed) ?? null;
+  if (newest && (!remembered || jobCreatedOrder(newest) > jobCreatedOrder(remembered))) return newest;
+  return remembered ?? newest;
+}
+
 /**
  * The job whose size and picture a card shows: the one the loader chose,
- * else any finished cleanup. Jobs carry no time, so "newest" isn't knowable
- * within one scan.
+ * else the newest finished cleanup, else the newest job that was measured.
  */
 export function featuredJob(overview: ProjectOverview) {
   const { jobs } = overview;
   return (
     overview.featured ??
-    jobs.find(j => j.status === 'succeeded') ??
-    jobs.find(j => j.measuredBoxExtentsMm || j.measuredPrincipalExtentsMm) ??
+    pickFinishedJob(jobs, null) ??
+    newestOf(jobs.filter(j => j.measuredBoxExtentsMm || j.measuredPrincipalExtentsMm)) ??
     null
   );
 }
@@ -228,14 +252,12 @@ export function projectOverviewLoader(source: OverviewSource) {
         // All of them: a finished cleanup still counts after a failed retry.
         const listed = await source.listJobs(project.id, id, ack);
         overview.jobs.push(...listed);
-        // The cleanup the results screen shows: the one this phone followed
-        // if it finished, else any finished one. Scans are kept oldest first,
-        // so the newest scan's choice is the one left at the end.
+        // The cleanup the results screen shows (newest finished, see
+        // pickFinishedJob). Scans are kept oldest first, so the newest scan's
+        // choice is the one left at the end.
         const followed =
           (await source.remembered?.(project.id, id).catch(() => null)) ?? null;
-        const pick =
-          listed.find(j => j.jobId === followed && j.status === 'succeeded') ??
-          listed.find(j => j.status === 'succeeded');
+        const pick = pickFinishedJob(listed, followed);
         if (pick) overview.featured = pick;
       } catch {
         unread(overview, 'jobs', id);

@@ -279,7 +279,10 @@ test(
     assert.equal(queued.status, 202, queued.bytes.toString());
     const { job } = JSON.parse(queued.bytes.toString());
     assert.match(job.jobId, /^[0-9a-f-]{36}$/i);
-    assert.equal(job.status, 'queued');
+    // BE-2: the import already started this job; the POST dedupes onto it,
+    // so it may be queued or already running rather than freshly queued.
+    assert(['queued', 'running'].includes(job.status), job.status);
+    assert.equal(job.trigger, 'capture-import');
 
     await scanProcessing.wait();
     await waitCompanionSlot(server.url, authHeaders);
