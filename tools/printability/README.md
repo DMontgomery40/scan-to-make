@@ -4,7 +4,7 @@ Deterministic pre-slice mesh checker for preview STLs produced by Scan to Make t
 
 **Slicing, orientation and printing are not done here.** They go through `bambu-printer-mcp`: `slice_stl` (bed type, nozzle type, `orient`, `arrange`, sliced 3MF export), `lay_flat`, `inspect_print_file` and `print_3mf`. See [docs/print-path.md](../../docs/print-path.md). This tool's former `dry-run` slicer duplicated `slice_stl` and was removed; `tools/slicer-producer` is being removed with the companion re-route (#97).
 
-It **never contacts a printer, LAN broker or Bambu Cloud endpoint**, never authorises dispatch, and never claims physical fit or structural strength. Every report carries `printerContacted: false`, `dispatchAuthorized: false`, and `provesPhysicalFit: false`.
+It never authorises dispatch and never claims physical fit or structural strength. Every report carries `dispatchAuthorized: false` and `provesPhysicalFit: false`.
 
 ## Licence decision and runtime
 

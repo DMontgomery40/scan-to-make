@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-"""Synthetic integration and fail-fast contract checks; never contacts a printer."""
+"""Synthetic integration and fail-fast contract checks."""
 import importlib.util
 import json
 import os
@@ -137,7 +137,7 @@ class BlenderIntegration(unittest.TestCase):
             one=self.run_pipeline(b,mesh,'one',['--units','mm'])
             two=self.run_pipeline(b,mesh,'two',['--units','mm'])
             self.assertEqual(one['status'],'complete')
-            self.assertFalse(one['printerContacted']);self.assertFalse(one['dispatchAuthorized'])
+            self.assertFalse(one['dispatchAuthorized'])
             self.assertEqual((b/'one/pipeline-report.json').read_bytes(),(b/'two/pipeline-report.json').read_bytes())
             self.assertNotEqual((b/'one/timings.json').read_bytes(),(b/'two/timings.json').read_bytes())
             final=json.loads((b/'one/correct-result.json').read_text())['final']['boxExtentsMm']
