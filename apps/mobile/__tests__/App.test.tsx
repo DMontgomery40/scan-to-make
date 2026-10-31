@@ -1083,3 +1083,46 @@ test('a link after forgetting the Mac in Settings still reaches Find your Mac', 
     jest.restoreAllMocks();
   }
 });
+
+test('the credential refresh at launch waits its turn with the Mac check, so the pill is right', async () => {
+  const { NativeModules } = require('react-native');
+  // As on iOS: one request to the Mac at a time, or "busy".
+  let inFlight = false;
+  const one = () =>
+    new Promise((resolve, reject) => {
+      if (inFlight) return reject({ code: 'busy' });
+      inFlight = true;
+      setTimeout(() => {
+        inFlight = false;
+        resolve(mac);
+      }, 5);
+    });
+  const mac = {
+    state: 'paired',
+    baseUrl: 'https://mac.example.ts.net',
+    expiresAt: Date.now() + 3 * 86_400_000,
+  };
+  const refresh = jest.fn(one);
+  NativeModules.CompanionPairing = {
+    status: async () => mac,
+    pair: jest.fn(),
+    check: jest.fn(one),
+    refresh,
+    disconnect: jest.fn(),
+    cancel: async () => {},
+  };
+  launchLink(null);
+  let tree!: ReactTestRenderer.ReactTestRenderer;
+  try {
+    await act(async () => {
+      tree = ReactTestRenderer.create(<App repository={testStore()} />);
+    });
+    await act(async () => new Promise<void>(done => setTimeout(done, 40)));
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(texts(tree)).not.toContain('Pair again');
+  } finally {
+    await act(async () => tree.unmount());
+    delete NativeModules.CompanionPairing;
+    jest.restoreAllMocks();
+  }
+});

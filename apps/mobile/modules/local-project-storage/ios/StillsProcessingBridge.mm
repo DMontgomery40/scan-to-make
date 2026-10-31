@@ -204,7 +204,7 @@ RCT_REMAP_METHOD(request,requestOptions:(NSDictionary*)o resolve:(RCTPromiseReso
 }
 - (void)URLSession:(NSURLSession*)s task:(NSURLSessionTask*)t didCompleteWithError:(NSError*)e{
   if(t!=self.task)return;if(e){if(self.pinRejected){[self fail:@"certificate-changed" message:@"Your computer's companion presented a different certificate. Scan a new QR code from it."];return;}[self fail:STMTransportError(e) message:@"The companion response was interrupted."];return;}
-  NSError *pe=nil;NSDictionary *p=STMReadPairing(&pe);if(pe||![p isEqual:self.pairing]){[self fail:@"pairing-changed" message:@"Companion connection changed."];return;}
+  NSError *pe=nil;NSDictionary *p=STMReadPairing(&pe);if(pe||!STMSamePairing(p,self.pairing)){[self fail:@"pairing-changed" message:@"Companion connection changed."];return;}
   NSInteger status=self.response.statusCode;NSMutableDictionary *result=[@{@"status":@(status),@"etag":[self.response valueForHTTPHeaderField:@"ETag"]?:@"",@"body":@""} mutableCopy];
   if(self.artifact&&status==200){
     if(![[self.response valueForHTTPHeaderField:@"X-Content-SHA256"] isEqual:self.artifact[@"sha256"]]||![[self.response valueForHTTPHeaderField:@"Content-Type"] isEqual:self.artifact[@"mediaType"]]||self.response.expectedContentLength!=[self.artifact[@"byteLength"] longLongValue]||!Cache(self.received,self.artifact)){[self fail:@"verification-failed" message:@"Scan bytes could not be verified."];return;}result[@"file"]=self.artifact;

@@ -458,3 +458,199 @@ it('every Find your Mac state uses only the plain words', async () => {
   const all = shown.join('\n');
   for (const word of BANNED) expect(all).not.toMatch(word);
 });
+
+describe('keeping the credential alive (KAN-182)', () => {
+  const {
+    keepPairingFresh,
+    KeepPairingFresh,
+    REFRESH_WITHIN,
+  } = require('../src/companion/keepPairingFresh');
+  const { createRequestGate } = require('../src/screens/requestGate');
+  const { AppState } = require('react-native');
+  const DAY = 86_400_000;
+  const now = 1_800_000_000_000;
+  function phone(daysLeft: number, refresh?: jest.Mock) {
+    const native = nativeMock();
+    (native.status as jest.Mock).mockResolvedValue({
+      ...paired,
+      expiresAt: now + daysLeft * DAY,
+    });
+    if (refresh) native.refresh = refresh;
+    return native;
+  }
+  const fresh = (native: CompanionNative) =>
+    keepPairingFresh(native, createRequestGate(), () => now);
+
+  it('asks for more time only in the last 20 of 30 days', async () => {
+    expect(REFRESH_WITHIN).toBe(20 * DAY);
+    const early = jest.fn(async () => paired);
+    expect(await fresh(phone(21, early))).toBe('fresh');
+    expect(early).not.toHaveBeenCalled();
+    const due = jest.fn(async () => paired);
+    expect(await fresh(phone(19, due))).toBe('refreshed');
+    expect(due).toHaveBeenCalledTimes(1);
+  });
+
+  it('stays quiet when the Mac is away or busy, and says pair again only when it refuses', async () => {
+    for (const code of ['network', 'timeout', 'busy', 'unavailable']) {
+      const refresh = jest.fn(async () => {
+        throw { code };
+      });
+      expect(await fresh(phone(5, refresh))).toBe('skipped');
+    }
+    for (const code of ['unauthorized', 'forbidden', 'pairing-required']) {
+      const refresh = jest.fn(async () => {
+        throw { code };
+      });
+      expect(await fresh(phone(5, refresh))).toBe('pair-again');
+    }
+  });
+
+  it('never refreshes an expired, missing or unreadable pairing, or on an older build', async () => {
+    const refresh = jest.fn(async () => paired);
+    const expired = phone(5, refresh);
+    (expired.status as jest.Mock).mockResolvedValue({ state: 'expired' });
+    expect(await fresh(expired)).toBe('pair-again');
+    const none = phone(5, refresh);
+    (none.status as jest.Mock).mockResolvedValue({ state: 'disconnected' });
+    expect(await fresh(none)).toBe('skipped');
+    const locked = phone(5, refresh);
+    (locked.status as jest.Mock).mockRejectedValue({ code: 'secure-storage' });
+    expect(await fresh(locked)).toBe('skipped');
+    expect(refresh).not.toHaveBeenCalled();
+    expect(await fresh(phone(5))).toBe('skipped');
+  });
+
+  it('runs when the app opens and comes back to the front, once at a time', async () => {
+    let resolve!: () => void;
+    const refresh = jest.fn(
+      () =>
+        new Promise<PairingStatus>(done => {
+          resolve = () => done(paired);
+        }),
+    );
+    const native = phone(5, refresh);
+    let onChange!: (state: string) => void;
+    const remove = jest.fn();
+    jest.spyOn(AppState, 'addEventListener').mockImplementation(((
+      _type: string,
+      handler: (s: string) => void,
+    ) => {
+      onChange = handler;
+      return { remove };
+    }) as never);
+    jest.spyOn(Date, 'now').mockReturnValue(now);
+    const onPairAgain = jest.fn();
+    let tree!: Renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = Renderer.create(
+        <KeepPairingFresh native={native} onPairAgain={onPairAgain} />,
+      );
+    });
+    expect(refresh).toHaveBeenCalledTimes(1);
+    // Still running: coming to the front again doesn't start another.
+    await act(async () => onChange('active'));
+    expect(refresh).toHaveBeenCalledTimes(1);
+    await act(async () => resolve());
+    await act(async () => onChange('background'));
+    await act(async () => onChange('active'));
+    expect(refresh).toHaveBeenCalledTimes(2);
+    await act(async () => resolve());
+    expect(onPairAgain).not.toHaveBeenCalled();
+    // Refused: the app is told to read the pairing again.
+    refresh.mockImplementationOnce(async () => {
+      throw { code: 'unauthorized' };
+    });
+    await act(async () => onChange('active'));
+    expect(onPairAgain).toHaveBeenCalledTimes(1);
+    await act(async () => tree.unmount());
+    expect(remove).toHaveBeenCalled();
+    jest.restoreAllMocks();
+  });
+
+  it('Your Mac says to pair again when the Mac no longer accepts this phone', async () => {
+    const native = nativeMock();
+    (native.check as jest.Mock).mockRejectedValue({ code: 'unauthorized' });
+    const { tree } = await render(native);
+    expect(text(tree)).toContain('Pair this phone with your Mac again.');
+    expect(text(tree)).not.toContain('same Wi-Fi');
+    await act(async () => tree.unmount());
+  });
+});
+
+it('Your Mac waits its turn behind a refresh instead of saying it can’t reach the Mac', async () => {
+  const {
+    RequestGateProvider,
+    useRequestGate,
+  } = require('../src/screens/requestGate');
+  const native = nativeMock();
+  let finishRefresh!: () => void;
+  // A refresh already running in the app's queue.
+  function Refreshing() {
+    const gate = useRequestGate();
+    React.useEffect(() => {
+      gate(
+        () =>
+          new Promise<void>(done => {
+            finishRefresh = done;
+          }),
+      );
+    }, [gate]);
+    return null;
+  }
+  let tree!: Renderer.ReactTestRenderer;
+  await act(async () => {
+    tree = Renderer.create(
+      <RequestGateProvider>
+        <Refreshing />
+        <FindYourMacScreen native={native} onDone={jest.fn()} />
+      </RequestGateProvider>,
+    );
+  });
+  expect(native.check).not.toHaveBeenCalled();
+  expect(text(tree)).toContain('Looking for your Mac…');
+  await act(async () => finishRefresh());
+  expect(native.check).toHaveBeenCalledTimes(1);
+  expect(text(tree)).toContain('Connected');
+  await act(async () => tree.unmount());
+});
+
+it('a pairing still waiting its turn never starts once Find your Mac has closed', async () => {
+  const {
+    RequestGateProvider,
+    useRequestGate,
+  } = require('../src/screens/requestGate');
+  const native = nativeMock();
+  (native.status as jest.Mock).mockResolvedValue({ state: 'disconnected' });
+  let finishRefresh!: () => void;
+  function Refreshing() {
+    const gate = useRequestGate();
+    React.useEffect(() => {
+      gate(
+        () =>
+          new Promise<void>(done => {
+            finishRefresh = done;
+          }),
+      );
+    }, [gate]);
+    return null;
+  }
+  const app = (showing: boolean) => (
+    <RequestGateProvider>
+      <Refreshing />
+      {showing ? (
+        <FindYourMacScreen native={native} onDone={jest.fn()} />
+      ) : null}
+    </RequestGateProvider>
+  );
+  let tree!: Renderer.ReactTestRenderer;
+  await act(async () => {
+    tree = Renderer.create(app(true));
+  });
+  await scanned(tree, qrLink());
+  // Closed while the code waits behind the refresh.
+  await act(async () => tree.update(app(false)));
+  await act(async () => finishRefresh());
+  expect(native.pair).not.toHaveBeenCalled();
+  await act(async () => tree.unmount());
+});
