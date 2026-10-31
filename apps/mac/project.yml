@@ -52,6 +52,7 @@ targets:
         excludes: ['*.mjs']
       - AppTests
       - App/ModelAccessModel.swift
+      - App/NearbyModel.swift
       - ControlKit/Sources/ControlKit
     dependencies:
       - target: AgentKit
