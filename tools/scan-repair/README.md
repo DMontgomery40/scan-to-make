@@ -56,9 +56,33 @@ All distances below are in mm, independent of input units.
 | Holes | `--hole-max-edges 0` | Fill boundary loops; 0 allows all sizes, positive values bound loop edge count |
 | Coarse fill | `--coarse-fill refill --fill-fairing harmonic --fill-crease-deg 60` | Replace disk-shaped regions of faces larger than 10× the median area (edge-connected, split at creases) with a densified, faired patch; captured faces and vertices are not changed. `keep` leaves them |
 | Manifold | `--voxel-size-mm .3`, optional `--force-voxel` | Recalculate normals; use voxel remesh if topology is still open/non-manifold, or explicitly forced |
-| Denoise | `--denoise-iterations 15 --denoise-factor .5 --denoise-mu -.53 --denoise-max-mm .35 --sharp-angle-deg 30` | Taubin cycles: a shrinking λ (`factor`) step then an inflating μ step, each moving vertices toward their inverse-edge-length-weighted neighbour average; freeze sharp-edge and boundary vertices; after each whole cycle, clamp cumulative vertex displacement from this step's start |
+| Denoise | `--denoise-scope filled --denoise-iterations 15 --denoise-factor .5 --denoise-mu -.53 --denoise-max-mm .35 --sharp-angle-deg 30` | Captured surface is kept (below); only filled faces and their rim are smoothed. Taubin cycles: a shrinking λ (`factor`) step then an inflating μ step, each moving vertices toward their inverse-edge-length-weighted neighbour average; freeze sharp-edge and boundary vertices; after each whole cycle, clamp cumulative vertex displacement from this step's start |
 | Decimate | optional `--target-faces N` | Triangulate, then collapse toward a target triangle count; Blender may not achieve the exact target |
 | Orient | `--orient box` | `box`: the minimum-volume oriented box (`boxRotation` below), axes long to short. `pca`: vertex-covariance PCA, descending eigenvalues (the previous default). Both use the deterministic sign convention and a right-handed frame, centre XY bounds and rest the lowest vertex at Z=0. `keep`: input coordinates unchanged |
+
+**Captured surface is measurement, so by default denoise does not smooth it.**
+Crochet stitches, knurling, engraved text and crisp edges are real relief at
+the scale of scan noise, and smoothing erases them. Only vertices of filled
+faces (hole fills and coarse refills) and their rim, the seam they share with
+captured faces, are smoothed. Every other captured vertex keeps its position,
+except isolated single-vertex outliers. A vertex is pulled back to its one-ring
+average only when its offset from that average meets all three conditions:
+- it is at least 8 times the median offset of the ring beyond its neighbours;
+- it is at least 0.25 of the median edge length;
+- it is at least 3 times the offset of its tallest neighbour.
+
+Repeated relief raises that outer ring, so it stays; in doubt, a vertex stays.
+A spike on an open boundary or a non-manifold edge is never pulled. Hole
+filling closes boundaries first, so this matters only where `--hole-max-edges`
+leaves a hole open or the topology stays non-manifold.
+`--denoise-iterations 0` disables outlier removal too.
+`--denoise-scope all` smooths every vertex, as before. A voxel remesh rebuilds
+the whole surface, so after one every vertex is smoothed. The `denoise`
+operation reports `scope`, `movableVertices`, `outliers` (count, largest offset
+and input positions) and `capturedRelief`. That last one is the RMS one-ring
+relief of captured vertices away from removed outliers, before and after this
+step, with their ratio and largest move. It should stay near 1 by default; it
+falls when captured surface is smoothed.
 
 Denoise cycles are bounded to 0–50, λ to (0, 0.5], μ to [−1, 0), and sharp
 angle to 0–90 degrees. The Taubin pass-band 1/λ + 1/μ must lie in (0, 0.2]:

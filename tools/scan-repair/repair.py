@@ -120,6 +120,9 @@ def parser():
             s.add_argument("--denoise-mu", type=float, default=-.53, help="Taubin mu; pass-band 1/lambda+1/mu in (0,.2]")
             s.add_argument("--denoise-max-mm", type=float, default=.35)
             s.add_argument("--sharp-angle-deg", type=float, default=30)
+            s.add_argument("--denoise-scope", choices=("filled","all"), default="filled",
+                           help="filled: smooth only hole fills, coarse refills and their rim; captured surface keeps "
+                                "its relief (default). all: smooth every vertex")
             s.add_argument("--target-faces", type=int)
             s.add_argument("--deviation-samples", type=int, default=10000)
             s.add_argument("--orient", choices=("box","pca","keep"), default="box",
