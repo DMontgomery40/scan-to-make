@@ -29,7 +29,8 @@ static void Require(BOOL ok,NSString *why){if(!ok){fprintf(stderr,"FAIL %s\n",wh
  [self.bridge requestOptions:options resolve:^(id r){
   if([r[@"status"] integerValue]==429&&n<5){dispatch_after(dispatch_time(DISPATCH_TIME_NOW,50*NSEC_PER_MSEC),dispatch_get_main_queue(),^{[self request:options status:status then:then attempt:n+1];});return;}
   Require([r[@"status"] integerValue]==status,@"expected response status");
-  Require([r[@"etag"] isEqual:config[@"media"][@"etag"]],@"exact ETag echo");then(r);
+  // The companion echoes the project ETag on success; error replies carry none.
+  Require(status>=300||[r[@"etag"] isEqual:config[@"media"][@"etag"]],@"exact ETag echo");then(r);
  } reject:^(NSString*c,NSString*m,NSError*e){Require(NO,c);}];
 }
 - (void)requireImageUri:(NSDictionary*)file then:(void(^)(void))then {
@@ -117,7 +118,15 @@ static void Require(BOOL ok,NSString *why){if(!ok){fprintf(stderr,"FAIL %s\n",wh
   [self requireImageUri:pngRef then:^{}];
   NSMutableDictionary *report=[self options:@"GET" path:[self path:[NSString stringWithFormat:@"/scan-processing/%@/artifacts/report.json?",jobId]]];report[@"artifact"]=self.job[@"artifacts"][@"report.json"];
   [self request:report status:200 then:^(NSDictionary*rr){
-   Require([rr[@"file"] isEqual:self.job[@"artifacts"][@"report.json"]],@"report download identity");[self checkCleanupArtifactPaths:0];
+   NSDictionary *reportRef=self.job[@"artifacts"][@"report.json"];
+   Require([rr[@"file"] isEqual:reportRef],@"report download identity");
+   // readJson (close-up advice) returns a verified JSON download as text and refuses other media.
+   [self.bridge readJsonFile:reportRef resolve:^(id text){
+    Require([text isKindOfClass:NSString.class]&&[[text dataUsingEncoding:NSUTF8StringEncoding] isEqual:Verified(reportRef)],@"readJson returns the verified JSON text");
+    [self.bridge readJsonFile:pngRef resolve:^(id t){Require(NO,@"readJson read an image");} reject:^(NSString*c,NSString*m,NSError*e){
+     Require([c isEqual:@"verification-failed"],@"readJson refuses other media");[self checkCleanupArtifactPaths:0];
+    }];
+   } reject:^(NSString*c,NSString*m,NSError*e){Require(NO,c);}];
   } attempt:0];
  } attempt:0];
 }

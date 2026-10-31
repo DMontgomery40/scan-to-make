@@ -288,6 +288,15 @@ RCT_REMAP_METHOD(pickImages,pickImagesLimit:(double)limit resolve:(RCTPromiseRes
     [self finishPhotos:photos rejected:rejected];
   });
 }
+// Small verified JSON artifacts, such as close-up advice, read as text from the
+// hash-checked download cache.
+RCT_REMAP_METHOD(readJson,readJsonFile:(NSDictionary*)f resolve:(RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject){
+  NSNumber *length=[f isKindOfClass:NSDictionary.class]?f[@"byteLength"]:nil;
+  NSData *d=[f isKindOfClass:NSDictionary.class]&&[f[@"mediaType"] isEqual:@"application/json"]&&[length isKindOfClass:NSNumber.class]&&length.doubleValue<=2*1024*1024?Verified(f):nil;
+  NSString *text=d?[[NSString alloc] initWithData:d encoding:NSUTF8StringEncoding]:nil;
+  if(!text){reject(@"verification-failed",@"The file could not be verified.",nil);return;}
+  resolve(text);
+}
 RCT_REMAP_METHOD(imageUri,imageUriFile:(NSDictionary*)f resolve:(RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject){
   NSURL *url=FileURL(f);NSNumber *length=[f isKindOfClass:NSDictionary.class]?f[@"byteLength"]:nil;
   if(![f isKindOfClass:NSDictionary.class]||!IsStillMedia(f[@"mediaType"])||!url||![length isKindOfClass:NSNumber.class]||length.doubleValue<1||length.doubleValue>STILL_LIMIT||length.doubleValue!=length.unsignedIntegerValue){reject(@"verification-failed",@"The image could not be verified.",nil);return;}

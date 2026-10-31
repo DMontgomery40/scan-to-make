@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { DetailStill } from '@scan-to-make/contracts';
+import type { DetailStill, ScanProcessingJob } from '@scan-to-make/contracts';
 
 /**
  * The part of the companion's `closeupAdvice` (closeup-advice.schema.json)
@@ -24,7 +24,10 @@ const AdviceSchema = z.object({
     targets: z.array(TargetSchema).max(6),
   }),
 });
-export type CloseupTarget = z.infer<typeof TargetSchema>;
+export type CloseupTarget = z.infer<typeof TargetSchema> & {
+  /** The companion's render of the area to photograph, when it has one. */
+  imageUri?: string;
+};
 
 /** Targets from an `advice.json` wrapper, best first. Throws if it isn't one. */
 export function parseCloseupAdvice(json: unknown): CloseupTarget[] {
@@ -34,6 +37,23 @@ export function parseCloseupAdvice(json: unknown): CloseupTarget[] {
 }
 
 // What the scan shows there, and what a photo helps with.
+/**
+ * The job whose advice to show: the one this app last followed if it has
+ * advice, else any the companion kept. Advice survives a failed correction.
+ */
+export function adviceJob(
+  jobs: ScanProcessingJob[],
+  rememberedId: string | null,
+): ScanProcessingJob | null {
+  const hasAdvice = (job: ScanProcessingJob) =>
+    !!job.artifacts?.['advice.json'];
+  return (
+    jobs.find(job => job.jobId === rememberedId && hasAdvice(job)) ??
+    jobs.find(hasAdvice) ??
+    null
+  );
+}
+
 const REASONS: Record<CloseupTarget['reasonCode'], string> = {
   inferred_fill:
     'This side looks sparse in the scan. A close-up helps fill it in accurately.',
