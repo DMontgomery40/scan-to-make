@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		CABC16300100000000000001 /* PrinterSetup.swift in Sources */ = {isa = PBXBuildFile; fileRef = CABC16300100000000000002 /* PrinterSetup.swift */; };
 		16062DFD6EE91A1948D2FD7F /* Runtime.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1DA7ED6F82EDD9901D021D2 /* Runtime.swift */; };
 		20680B926C59DC5E0AE1AA44 /* AgentKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 084617C3A2280F650DFB14EA /* AgentKit.framework */; };
 		685F7884CACEC1D1FA9A8105 /* AgentManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 910E4B0114E7E04F953E42A1 /* AgentManagerTests.swift */; };
@@ -68,6 +69,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		CABC16300100000000000002 /* PrinterSetup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrinterSetup.swift; sourceTree = "<group>"; };
 		084617C3A2280F650DFB14EA /* AgentKit.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = AgentKit.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		21B73436F785508B3D834AF9 /* Main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Main.swift; sourceTree = "<group>"; };
 		296E8C1354818E038DD4E375 /* PairingSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingSession.swift; sourceTree = "<group>"; };
@@ -122,6 +124,7 @@
 				2E40641D5842346F76EB19B3 /* NetworkAddresses.swift */,
 				296E8C1354818E038DD4E375 /* PairingSession.swift */,
 				34EF17D723E37A90F3F98F7F /* ModelKeychain.swift */,
+				CABC16300100000000000002 /* PrinterSetup.swift */,
 				8C16EEE29AB7D43A60876E8A /* ModelAccess.swift */,
 			);
 			path = AgentKit;
@@ -297,6 +300,7 @@
 				FEC965F8C46620AD288BA7C3 /* NetworkAddresses.swift in Sources */,
 				8591EC1044C78F60778FCC71 /* PairingSession.swift in Sources */,
 				E93C1BBCC27768E164A3EB1C /* ModelKeychain.swift in Sources */,
+				CABC16300100000000000001 /* PrinterSetup.swift in Sources */,
 				C73E7AE1DF507DF6FA161E37 /* ModelAccess.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

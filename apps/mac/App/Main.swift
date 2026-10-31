@@ -5,6 +5,7 @@ import AgentKit
 
 @main enum EntryPoint {
     static func main() {
+        if CommandLine.arguments.dropFirst().first == "--printer-worker" { launchPrinterWorker(Installation(bundle:.main)) }
         if CommandLine.arguments.dropFirst().first == "--model-worker" { launchModelWorker(Installation(bundle:.main)) }
         if CommandLine.arguments.contains("--companion-agent") { launchAgent(Installation(bundle:.main)) }
         if CommandLine.arguments.contains("--unregister-agent") {

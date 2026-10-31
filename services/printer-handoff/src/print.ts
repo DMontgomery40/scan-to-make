@@ -14,6 +14,7 @@ export type PrintStep = 'discover' | 'lay_flat' | 'slice_stl' | 'inspect' | 'cam
 export interface PrintRunInput {
   /** Persist a non-replayable intent before sending the print tool call. */
   beforePrint?: () => Promise<void>;
+  persistOutput?: (output: {slicedPath:string;orientedStlPath:string}) => Promise<{slicedPath:string;orientedStlPath:string}>;
   stlPath: string;
   selection?: PrinterSelection;
   slicer?: PrinterSlicer;
@@ -51,7 +52,7 @@ export function sanitizedFailureReason(error: unknown): string {
 
 /** A print call succeeded even though recording its result failed. */
 export class DispatchedPrintError extends PrinterMcpError {
-  constructor(cause: unknown) { super(sanitizedFailureReason(cause), cause); }
+  constructor(cause: unknown, readonly outcome:'printed'|'handed-off' = 'printed') { super(sanitizedFailureReason(cause), cause); }
 }
 function defined(args: Record<string, unknown>): Record<string, unknown> {
   return Object.fromEntries(Object.entries(args).filter(([, value]) => value !== undefined));
@@ -149,7 +150,7 @@ export class PrinterHandoffRunner {
         orientedStlPath = absolutePath(await call(client, 'lay_flat', {stl_path: input.stlPath}, input.signal));
         step('lay_flat');
       }
-      const slicedPath = absolutePath(await call(client, 'slice_stl', {
+      let slicedPath = absolutePath(await call(client, 'slice_stl', {
         stl_path: orientedStlPath,
         bambu_model: isBambuSlicing(this.#config, selection, slicer) ? selection.model : undefined,
         nozzle_diameter: selection.nozzleDiameterMm === undefined ? undefined : String(selection.nozzleDiameterMm),
@@ -169,6 +170,7 @@ export class PrinterHandoffRunner {
       step('slice_stl');
       const inspection = await this.inspect(client, slicedPath, selection, input.signal);
       if (inspection) step('inspect');
+      if (input.persistOutput) ({slicedPath,orientedStlPath}=await input.persistOutput({slicedPath,orientedStlPath}));
       const common = {backend: this.#config.backend, catalog, stlPath: input.stlPath, orientedStlPath, slicedPath, inspection, steps};
       if (input.print === false) return common;
 
@@ -240,29 +242,31 @@ export class PrinterHandoffRunner {
     const manifest = await store.read(id);
     if (manifest.backend !== this.#config.backend) fail('backend-mismatch');
     if (manifest.status === 'uncertain') fail('dispatch-uncertain');
-    if (manifest.status === 'printed') fail('already-printed');
+    if (manifest.status === 'printed' || manifest.status === 'handed-off') fail('already-printed');
     // Slice in a throwaway per-run directory: backends write outputs beside
     // the input STL, and a re-slice must never overwrite a manifest-owned
     // artifact before the new one is recorded.
     const workDirectory = await mkdtemp(join(tmpdir(), 'printer-handoff-run-'));
     let dispatched = false;
+    const outcome = this.#config.dispatch === 'handoff' ? 'handed-off' : 'printed';
     try {
       const inputStl = join(workDirectory, basename(store.stlPath(manifest)));
       await copyFile(store.stlPath(manifest), inputStl);
       const result = await this.run({stlPath: inputStl, selection: manifest.selection, print: options.print, signal: options.signal,
+        persistOutput: async output => {
+          // The backend may delete its scratch directory as soon as MCP closes.
+          // Dispatch a durable bundle path, including asynchronous Connect opens.
+          let saved=await store.recordArtifact(id,'sliced',basename(output.slicedPath),await readFile(output.slicedPath));
+          if(output.orientedStlPath!==inputStl) saved=await store.recordArtifact(id,'oriented',basename(output.orientedStlPath),await readFile(output.orientedStlPath));
+          return {slicedPath:join(store.directory(id),saved.artifacts.sliced!.file),orientedStlPath:saved.artifacts.oriented?join(store.directory(id),saved.artifacts.oriented.file):store.stlPath(saved)};
+        },
         beforePrint: async () => { await store.setStatus(id, 'uncertain', 'dispatch-uncertain'); },
       });
       dispatched = options.print !== false;
       // A later artifact write must not erase a successful print dispatch
       // and make the phone offer the same bundle for printing again.
-      if (dispatched) await store.setStatus(id, 'printed');
-      const sliced = await readFile(result.slicedPath);
-      let updated = await store.recordArtifact(id, 'sliced', basename(result.slicedPath), sliced);
-      if (result.orientedStlPath !== inputStl) {
-        const oriented = await readFile(result.orientedStlPath);
-        updated = await store.recordArtifact(id, 'oriented', basename(result.orientedStlPath), oriented);
-      }
-      updated = await store.setStatus(id, options.print === false ? 'sliced' : 'printed');
+      if (dispatched) await store.setStatus(id, outcome);
+      const updated = await store.setStatus(id, options.print === false ? 'sliced' : outcome);
       // Report persisted bundle paths, not the throwaway run directory.
       const persisted: PrintRunResult = {
         ...result,
@@ -274,8 +278,8 @@ export class PrinterHandoffRunner {
       };
       return {manifest: updated, result: persisted};
     } catch (error) {
-      await store.setStatus(id, dispatched ? 'printed' : sanitizedFailureReason(error) === 'dispatch-uncertain' ? 'uncertain' : 'failed', sanitizedFailureReason(error)).catch(() => undefined);
-      throw dispatched ? new DispatchedPrintError(error) : error;
+      await store.setStatus(id, dispatched ? outcome : sanitizedFailureReason(error) === 'dispatch-uncertain' ? 'uncertain' : 'failed', sanitizedFailureReason(error)).catch(() => undefined);
+      throw dispatched ? new DispatchedPrintError(error, outcome) : error;
     } finally {
       await rm(workDirectory, {recursive: true, force: true}).catch(() => undefined);
     }

@@ -1,3 +1,5 @@
+import {createConfiguredPrintHandoffServices} from './printer-setup-handoff.js';
+import {PrinterSetupService} from './printer-setup.js';
 import {readFile} from 'node:fs/promises';
 import {ScanProcessingStore,createScanCleanupRunner} from './scan-processing.js';
 import {dirname,isAbsolute,join} from 'node:path';
@@ -22,6 +24,9 @@ const remoteAuth =
 // Invalid model preferences must not take the paired phone API offline.
 const modelAccess = remoteAuth ? await ModelAccessService.open(remoteAuth.directory).catch(() => undefined) : undefined;
 
+const printerWorker=process.env.SCAN_TO_MAKE_PRINTER_WORKER;
+const printerSetup = remoteAuth && printerWorker && isAbsolute(printerWorker) ? await PrinterSetupService.open(remoteAuth.directory).catch(() => undefined) : undefined;
+
 const captureDirectory=process.env.SCAN_TO_MAKE_CAPTURE_DIR;
 if(captureDirectory!==undefined&&(!remoteAuth||!isAbsolute(captureDirectory)))throw new Error('Capture requires authentication and an absolute private directory');
 const storage=captureDirectory===undefined?undefined:new FileSavedProjectStorage(join(captureDirectory,'projects'));
@@ -38,7 +43,10 @@ const handoffConfigPath=process.env.SCAN_TO_MAKE_PRINTER_HANDOFF_CONFIG||undefin
 const handoffDirectory=process.env.SCAN_TO_MAKE_PRINTER_HANDOFF_DIR||undefined;
 if((handoffConfigPath===undefined)!==(handoffDirectory===undefined))throw new Error('Printer handoff requires both its config path and bundle directory');
 if(handoffConfigPath!==undefined&&(!remoteAuth||!isAbsolute(handoffConfigPath)||!isAbsolute(handoffDirectory!)))throw new Error('Printer handoff requires authentication and absolute config and directory paths');
-const printHandoff=handoffConfigPath===undefined?undefined:createPrintHandoffServices(await readPrinterHandoffConfig(handoffConfigPath),handoffDirectory!);
+const legacyHandoff=handoffConfigPath===undefined?undefined:await readPrinterHandoffConfig(handoffConfigPath);
+const printHandoff=printerSetup && printerWorker && remoteAuth
+  ? createConfiguredPrintHandoffServices(printerSetup,printerWorker,handoffDirectory ?? join(dirname(remoteAuth.directory),'printer-handoff'),legacyHandoff)
+  : legacyHandoff?createPrintHandoffServices(legacyHandoff,handoffDirectory!):undefined;
 // The port variable keeps its original name so existing operator setups still start.
 let lanTls;
 const certPath = process.env.SCAN_TO_MAKE_LAN_TLS_CERT;
@@ -66,7 +74,7 @@ try {
   if (remoteAuth) control = await startLocalControl({
     // The auth directory is private even when its state/volume parent is not.
     path:process.env.SCAN_TO_MAKE_CONTROL_SOCKET ?? join(remoteAuth.directory,'control.sock'),
-    dispatch:createControlDispatcher({auth:remoteAuth,modelAccess,companionVersion:await companionVersion(),capture,
+    dispatch:createControlDispatcher({auth:remoteAuth,modelAccess,printerSetup,companionVersion:await companionVersion(),capture,
       captureDirectory:captureDirectory ? join(captureDirectory,'captures') : undefined,printHandoff}),
   });
   else if (process.env.SCAN_TO_MAKE_CONTROL_SOCKET !== undefined) throw new Error('Local control requires an auth store');
@@ -82,6 +90,7 @@ process.stdout.write(
 for (const signal of ['SIGINT', 'SIGTERM'] as const)
   process.once(signal, () => {
     modelAccess?.close();
+    printerSetup?.close();
     void Promise.all([control?.close(),server.close()]).catch(() => {
       process.exitCode = 1;
     });

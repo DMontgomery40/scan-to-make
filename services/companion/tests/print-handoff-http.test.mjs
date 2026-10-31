@@ -230,8 +230,10 @@ test('a failure after slicing persists a sanitized failed status instead of runn
 test('an output persistence failure after dispatch cannot make a bundle printable again', async t => {
   const f = await fixture(t);
   const bundle = await createBundle(f);
-  f.printHandoff.store.recordArtifact = async () => {
-    throw Object.assign(new Error('/private/operator/output failed'), {code: 'record-failed'});
+  const persistStatus=f.printHandoff.store.setStatus.bind(f.printHandoff.store);
+  f.printHandoff.store.setStatus = async (id,status,...rest) => {
+    if(status==='printed') throw Object.assign(new Error('/private/operator/output failed'), {code:'record-failed'});
+    return persistStatus(id,status,...rest);
   };
   answerFixturePrompts(f);
   assert.equal((await wire(f, `/v1/printer-handoff/bundles/${bundle.id}/print`, {method: 'POST'})).status, 202);
@@ -578,4 +580,19 @@ test('HTTP successful retry of a declined print clears its persisted failure', {
   assert.equal(replay.status, 409);
   assert.equal(json(replay).error.code, 'already-printed');
   assert.equal((await f.calls()).filter(item => item.tool === 'print_3mf').length, 2);
+});
+
+for(const scenario of ['skip-upload','stale-print']) test(`setup changes during authorization reject ${scenario} before admission`,async t=>{
+ const root=await mkdtemp(join(tmpdir(),'handoff-setup-race-'));t.after(()=>rm(root,{recursive:true,force:true}));
+ const store=new HandoffBundleStore(root);let available=true,revision='00000000-0000-4000-8000-000000000001',runs=0;
+ const bundle=await store.create({stl,prompt:'fixture',backend:'bambu-printer-mcp',selection:{setupRevision:revision}});
+ const routes=createPrintHandoffRoutes({store,relay:new InMemoryElicitationRelay(),get available(){return available;},get selection(){return {setupRevision:revision};},runner:{backend:'bambu-printer-mcp',runBundle:async()=>{runs++;}}});
+ const server=createServer(async(req,res)=>{let checks=0;await routes.handle(req,res,async()=>{if(++checks===2){if(scenario==='skip-upload')available=false;else revision='00000000-0000-4000-8000-000000000002';}},name=>req.headers[name]);});
+ await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+ t.after(async()=>{await routes.close();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));});
+ const url=`http://127.0.0.1:${server.address().port}/v1/printer-handoff/bundles`+(scenario==='stale-print'?`/${bundle.id}/print`:'');
+ const response=await fetch(url,{method:'POST',...(scenario==='skip-upload'?{headers:{'content-type':'model/stl'},body:stl}:{})});
+ assert.equal(response.status,scenario==='skip-upload'?503:409);
+ assert((await response.text()).includes(scenario==='skip-upload'?'printer-not-configured':'printer-setup-changed'));
+ assert.equal(runs,0);assert.equal((await store.list()).length,1);
 });

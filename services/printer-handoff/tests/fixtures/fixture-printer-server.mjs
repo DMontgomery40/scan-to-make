@@ -3,9 +3,11 @@
 import {Server} from '@modelcontextprotocol/sdk/server/index.js';
 import {StdioServerTransport} from '@modelcontextprotocol/sdk/server/stdio.js';
 import {CallToolRequestSchema, ListToolsRequestSchema} from '@modelcontextprotocol/sdk/types.js';
-import {appendFileSync, writeFileSync} from 'node:fs';
+import {appendFileSync, writeFileSync, mkdtempSync, rmSync} from 'node:fs';
 import {basename, dirname, join} from 'node:path';
 
+const ephemeral=process.env.HANDOFF_FIXTURE_EPHEMERAL==='1'?mkdtempSync('/tmp/stm-backend-output-'):undefined;
+if(ephemeral){process.on('exit',()=>rmSync(ephemeral,{recursive:true,force:true}));process.once('SIGTERM',()=>process.exit(0));}
 const [mode, log] = process.argv.slice(2);
 const record = entry => appendFileSync(log, JSON.stringify(entry) + '\n');
 const string = {type: 'string'};
@@ -19,6 +21,7 @@ const sliceProps = {
   use_printer_filaments: bool, orient: bool, arrange: bool, ensure_on_bed: bool,
 };
 const bambuPrintProps = {
+  connection_mode: string, connection_type: string,
   three_mf_path: string, bambu_model: string, bed_type: string, nozzle_type: string,
   nozzle_diameter: string, nozzle_diameters: {type: 'array', items: number}, plate_index: integer,
   use_ams: bool, ams_slots: {type: 'array', items: integer},
@@ -90,7 +93,7 @@ server.setRequestHandler(CallToolRequestSchema, async request => {
   let args = request.params.arguments ?? {};
   if ((name === 'slice_stl' || name === 'print_3mf') && !args.bambu_model) args = await elicitModel(args);
   record({tool: name, arguments: args});
-  const directory = dirname(args.stl_path ?? args.three_mf_path ?? args.gcode_path ?? process.cwd());
+  const directory = ephemeral ?? dirname(args.stl_path ?? args.three_mf_path ?? args.gcode_path ?? process.cwd());
   if (name === 'lay_flat') {
     const path = join(directory, `${basename(args.stl_path, '.stl')}_flat.stl`);
     writeFileSync(path, 'solid flat\nendsolid flat\n');

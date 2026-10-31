@@ -144,3 +144,9 @@ The cleanup pipeline's attempt/judge/export wiring is a separate change; this
 plumbing does not substitute a model into existing scripted cleanup stages.
 Non-app deployments can persist preferences but cannot resolve Mac Keychain
 references; checks fail as unavailable until a signed worker is configured.
+
+## Printer setup
+
+`printerSetup.get`, `.set`, `.check` and `.discover` expose the Mac printer
+model. See [the printer setup contract](printer-setup.md) for complete fields,
+Keychain binding, revision/lease semantics and the MCP handoff integration.

@@ -49,3 +49,16 @@ test('compiled helper refuses keyed caller environment before starting any worke
   assert.equal((await closed)[0],2);assert.equal(output,'');
  }
 });
+
+
+test('compiled printer helper refuses caller environment for check and MCP serve',async t=>{
+ const executable=await fixture(t);
+ const choice={kind:'bambu',printer_host:'printer.local',bambu_serial:'TEST123',bambu_model:'p1s',keychainRef:'6f3de8c4-83b6-4ad7-9c6f-9b73c7077c73',connection_mode:'lan_mqtt_ftps'};
+ for(const mode of ['check','serve']) for(const variable of ['NODE_OPTIONS','HOME','BAMBU_TOKEN','STM_PRINTER_SERVER']) {
+  const args=mode==='serve'?['--printer-worker',mode,JSON.stringify(choice)]:['--printer-worker',mode];
+  const child=spawn(executable,args,{env:{[variable]:'/tmp/attacker'},stdio:['pipe','pipe','pipe']});
+  const closed=once(child,'close');let output='';child.stdout.on('data',chunk=>output+=chunk);
+  child.stdin.end(mode==='check'?JSON.stringify(choice):'');
+  assert.equal((await closed)[0],2);assert.equal(output,'');
+ }
+});

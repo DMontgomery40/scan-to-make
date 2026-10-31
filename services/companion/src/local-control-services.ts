@@ -1,3 +1,5 @@
+import type {PrinterSetupService} from './printer-setup.js';
+import {discoverPrinters} from './printer-discovery.js';
 import {lstat, mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile} from 'node:fs/promises';
 import {dirname, join, sep} from 'node:path';
 import {createHash} from 'node:crypto';
@@ -22,6 +24,7 @@ interface JobItem {
 }
 export interface ControlServices {
   modelAccess?: ModelAccessService;
+  printerSetup?: PrinterSetupService;
   auth: RemoteAuthStore;
   companionVersion: string;
   capture?: CaptureServices;
@@ -125,7 +128,7 @@ export function createControlDispatcher(services: ControlServices) {
     try {
       switch (method) {
         case 'status.get': return {protocolVersion:1,companionVersion:services.companionVersion,transport:auth.transport,
-          pairedDeviceCount:(await auth.listDevices()).length,capabilities:{capture:!!capture?.captures,cleanup:!!capture?.scanProcessing,printerHandoff:!!printHandoff}};
+          pairedDeviceCount:(await auth.listDevices()).length,capabilities:{capture:!!capture?.captures,cleanup:!!capture?.scanProcessing,printerHandoff:!!printHandoff && printHandoff.available!==false}};
         case 'devices.list': return {devices:await auth.listDevices()};
         case 'devices.remove': {
           const {deviceId} = parameters[method].parse(raw);
@@ -143,6 +146,20 @@ export function createControlDispatcher(services: ControlServices) {
           }
           if (!auth.allowsLogin(login)) throw new ControlFailure('invalid-request');
           return await auth.createPairing(login);
+        }
+        case 'printerSetup.discover': return await discoverPrinters();
+        case 'printerSetup.get': {
+          if (!services.printerSetup) throw new ControlFailure('unavailable');
+          return services.printerSetup.get();
+        }
+        case 'printerSetup.set': {
+          if (!services.printerSetup) throw new ControlFailure('unavailable');
+          const {expectedRevision,choice} = parameters[method].parse(raw);
+          return await services.printerSetup.set(expectedRevision,choice);
+        }
+        case 'printerSetup.check': {
+          if (!services.printerSetup) throw new ControlFailure('unavailable');
+          return services.printerSetup.startCheck(parameters[method].parse(raw).revision);
         }
         case 'modelAccess.get': {
           if (!services.modelAccess) throw new ControlFailure('unavailable');

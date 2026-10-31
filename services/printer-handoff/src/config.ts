@@ -15,6 +15,7 @@ export const printerMcpProcessSchema = z.strictObject({
 export type PrinterMcpProcess = z.infer<typeof printerMcpProcessSchema>;
 
 export const printerSelectionSchema = z.strictObject({
+  setupRevision: z.uuid().optional(),
   model: z.string().trim().min(1).max(128).optional(),
   printerType: z.enum(['octoprint', 'klipper', 'duet', 'repetier', 'bambu', 'prusa', 'creality']).optional(),
   host: z.string().trim().min(1).max(255).optional(),
@@ -65,6 +66,7 @@ export const printerHandoffConfigSchema = z.strictObject({
   slicer: printerSlicerSchema.optional(),
   print: printerPrintOptionsSchema.optional(),
   cameraSnapshot: z.boolean().optional(),
+  dispatch: z.enum(['print','handoff']).optional(),
   timeouts: printerTimeoutsSchema.optional(),
 });
 export type PrinterHandoffConfig = z.infer<typeof printerHandoffConfigSchema>;

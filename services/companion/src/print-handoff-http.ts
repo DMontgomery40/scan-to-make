@@ -81,6 +81,7 @@ function send(response: ServerResponse, bytes: Buffer | string): Promise<void> {
 
 /** The pieces the handoff routes drive. Tests inject a fake runner. */
 export interface PrintHandoffServices {
+  available?: boolean;
   store: HandoffBundleStore;
   relay: ElicitationRelay;
   runner: Pick<PrinterHandoffRunner, 'runBundle' | 'backend'>;
@@ -143,12 +144,13 @@ function validateAnswer(requestedSchema: unknown, answer: ElicitationAnswer): vo
 }
 
 export function createPrintHandoffRoutes(services: PrintHandoffServices) {
+  const isAvailable=()=>services.available!==false;
   let activePrint: ActivePrint | undefined;
   let completedPrints = 0;
   let startingPrint: Promise<void> | undefined;
   let closed = false;
   let creating = false;
-  const unpersistedDispatches = new Map<string, {status: 'printed' | 'uncertain'; failure: string}>();
+  const unpersistedDispatches = new Map<string, {status: 'printed' | 'handed-off' | 'uncertain'; failure: string}>();
   const phoneManifest = (manifest: HandoffManifest): HandoffManifest => {
     const failure = unpersistedDispatches.get(manifest.id);
     return failure ? {...manifest, ...failure} : manifest;
@@ -165,9 +167,9 @@ export function createPrintHandoffRoutes(services: PrintHandoffServices) {
         // Preserve a successful dispatch even if saving its outputs failed.
         // Other escaped failures must still leave a terminal, phone-safe code.
         const manifest = await services.store.read(bundleId).catch(() => undefined);
-        const dispatched = error instanceof DispatchedPrintError || manifest?.status === 'printed';
+        const dispatched = error instanceof DispatchedPrintError ? error.outcome : ['printed','handed-off'].includes(manifest?.status ?? '') ? manifest!.status as 'printed'|'handed-off' : undefined;
         const failure = sanitizedFailureReason(error);
-        const status = dispatched ? 'printed' : failure === 'dispatch-uncertain' ? 'uncertain' : 'failed';
+        const status = dispatched ?? ( failure === 'dispatch-uncertain' ? 'uncertain' : 'failed');
         if (status !== 'failed') unpersistedDispatches.set(bundleId, {status, failure});
         await services.store.setStatus(bundleId, status, failure)
           .then(() => { unpersistedDispatches.delete(bundleId); })
@@ -245,6 +247,7 @@ export function createPrintHandoffRoutes(services: PrintHandoffServices) {
           return;
         }
         if (!bundleId && request.method === 'POST') {
+          if(!isAvailable()) throw new Failure(503,'printer-not-configured');
           if ((header('content-type') ?? '') !== 'model/stl'
             || !['identity', undefined].includes(header('content-encoding'))) {
             throw new Failure(415, 'unsupported-media-type');
@@ -260,10 +263,12 @@ export function createPrintHandoffRoutes(services: PrintHandoffServices) {
           try {
             const stl = await body(request, controller.signal, MAX_STL_BYTES, 120000);
             await authorize(HANDOFF_SCOPE);
+            if(!isAvailable()) throw new Failure(503,'printer-not-configured');
+            const backend=services.runner.backend,selection=services.selection;
             let created: Awaited<ReturnType<HandoffBundleStore['create']>>;
             try {
               created = await services.store.create({
-                stl, prompt, backend: services.runner.backend, selection: services.selection,
+                stl, prompt, backend, selection,
               });
             } catch (error) {
               const code = (error as NodeJS.ErrnoException)?.code;
@@ -288,10 +293,16 @@ export function createPrintHandoffRoutes(services: PrintHandoffServices) {
           try {
             if (unpersistedDispatches.has(bundleId)) throw new Failure(409, unpersistedDispatches.get(bundleId)!.status === 'uncertain' ? 'dispatch-uncertain' : 'already-printed');
             const manifest = await services.store.read(bundleId);
+            if(!isAvailable()) throw new Failure(503,'printer-not-configured');
             if (manifest.backend !== services.runner.backend) throw new Failure(409, 'backend-mismatch');
             if (manifest.status === 'uncertain') throw new Failure(409, 'dispatch-uncertain');
-            if (manifest.status === 'printed') throw new Failure(409, 'already-printed');
+            if (manifest.status === 'printed' || manifest.status === 'handed-off') throw new Failure(409, 'already-printed');
             await authorize(HANDOFF_SCOPE);
+            // Authorization may await I/O. Read the current setup only after it
+            // returns; the runner independently leases and checks before dispatch.
+            if(!isAvailable()) throw new Failure(503,'printer-not-configured');
+            if(manifest.backend!==services.runner.backend) throw new Failure(409,'backend-mismatch');
+            if(manifest.selection?.setupRevision!==services.selection?.setupRevision) throw new Failure(409,'printer-setup-changed');
             startPrint(bundleId);
           } finally {
             startingPrint = undefined;

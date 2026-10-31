@@ -19,7 +19,7 @@ const selection = {
   bedType: 'textured_plate', material: 'PLA', plateIndex: 0,
 };
 
-async function setup(t, {mode = 'bambu', backend = 'bambu-printer-mcp', answer = 'accept', relayTimeoutMs = 5000, dispatch} = {}) {
+async function setup(t, {mode = 'bambu', backend = 'bambu-printer-mcp', answer = 'accept', relayTimeoutMs = 5000, dispatch, outcome, ephemeral=false} = {}) {
   const root = await mkdtemp(join(tmpdir(), 'printer-handoff-'));
   t.after(() => rm(root, {recursive: true, force: true}));
   const log = join(root, 'calls.jsonl');
@@ -28,7 +28,8 @@ async function setup(t, {mode = 'bambu', backend = 'bambu-printer-mcp', answer =
   await writeFile(stlPath, stl);
   const config = {
     backend,
-    process: {command: process.execPath, args: [fixture, mode, log], cwd: root, ...(dispatch ? {env: {HANDOFF_FIXTURE_DISPATCH: dispatch}} : {})},
+    ...(outcome ? {dispatch:outcome} : {}),
+    process: {command: process.execPath, args: [fixture, mode, log], cwd: root, env: {...(dispatch ? {HANDOFF_FIXTURE_DISPATCH:dispatch} : {}),...(ephemeral?{HANDOFF_FIXTURE_EPHEMERAL:'1'}:{})}},
     selection,
     timeouts: {connectMs: 5000, toolMs: 5000, elicitationMs: relayTimeoutMs},
   };
@@ -248,7 +249,7 @@ test('runBundle stores only a bare failure code on the bundle', async t => {
 });
 
 for (const print of [true, false]) {
-  test(`runBundle preserves dispatch state when recording output fails (print=${print})`, async t => {
+  test(`runBundle refuses dispatch when recording output fails (print=${print})`, async t => {
     const f = await setup(t);
     const store = new HandoffBundleStore(join(f.root, 'bundles-record-failure'));
     const bundle = await store.create({stl, prompt: 'record failure', backend: 'bambu-printer-mcp', selection});
@@ -256,9 +257,9 @@ for (const print of [true, false]) {
       throw Object.assign(new Error('/private/operator/output failed'), {code: 'record-failed'});
     };
     await assert.rejects(f.runner.runBundle(store, bundle.id, {print}), {code: 'record-failed'});
-    assert.equal((await f.calls()).filter(item => item.tool === 'print_3mf').length, print ? 1 : 0);
+    assert.equal((await f.calls()).filter(item => item.tool === 'print_3mf').length, 0);
     const read = await store.read(bundle.id);
-    assert.equal(read.status, print ? 'printed' : 'failed');
+    assert.equal(read.status, 'failed');
     assert.equal(read.failure, 'record-failed');
   });
 }
@@ -321,4 +322,26 @@ test('a successful retry clears its prior failure code', async t => {
   const result = await f.runner.runBundle(store, bundle.id);
   assert.equal(result.manifest.status, 'printed');
   assert.equal(result.manifest.failure, undefined);
+});
+
+test('Bambu Connect handoff is terminal but never claims a print started', async t => {
+  const f = await setup(t, {outcome:'handoff'});
+  const store = new HandoffBundleStore(join(f.root,'bundles'));
+  const bundle = await store.create({stl,prompt:'open in Connect',backend:'bambu-printer-mcp',selection});
+  const result = await f.runner.runBundle(store,bundle.id);
+  assert.equal(result.manifest.status,'handed-off');
+  await assert.rejects(f.runner.runBundle(store,bundle.id),{code:'already-printed'});
+});
+
+test('backend scratch cleanup cannot remove artifacts or the Connect import path',async t=>{
+ const f=await setup(t,{outcome:'handoff',ephemeral:true});
+ const store=new HandoffBundleStore(join(f.root,'bundles'));
+ const bundle=await store.create({stl,prompt:'Connect import',backend:'bambu-printer-mcp',selection});
+ const result=await f.runner.runBundle(store,bundle.id);
+ const print=(await f.calls()).find(v=>v.tool==='print_3mf');
+ assert.equal(print.arguments.three_mf_path,result.result.slicedPath);
+ assert(print.arguments.three_mf_path.startsWith(store.directory(bundle.id)));
+ assert((await readFile(print.arguments.three_mf_path)).length>0);
+ assert((await readFile(result.result.orientedStlPath)).length>0);
+ assert.equal(result.manifest.status,'handed-off');
 });

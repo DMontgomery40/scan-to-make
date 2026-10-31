@@ -8,21 +8,20 @@ export type ModelWorker = (choice:ModelAccessChoice,args:string[],options:ModelW
 
 /** The signed app alone resolves Keychain references and launches ai-tweak-cli.
  * No API credential enters the companion process or the helper's arguments. */
-export function createModelWorker(executable:string|undefined):ModelWorker {
-  return async (choice,args,options) => {
-    ModelAccessChoiceSchema.parse(choice);
-    if (!executable || !isAbsolute(executable) || !['check','run'].includes(args[0] ?? '')) throw new Error('Model worker unavailable');
+export function createBoundWorker(executable:string|undefined,flag:string,maxBytes=1024*1024) {
+  return async (choice:unknown,args:string[],options:ModelWorkerOptions = {}):Promise<ModelWorkerResult> => {
+    if (!executable || !isAbsolute(executable)) throw new Error('Model worker unavailable');
     options.signal?.throwIfAborted();
     // Reuse the bridge's allowlisted child environment pattern. Never inherit
     // printer tokens, provider keys or arbitrary operator environment variables.
     const env:NodeJS.ProcessEnv = {};
-    if (!('keychainRef' in choice && choice.keychainRef)) for (const key of ['HOME','PATH','TMPDIR','LANG','SCAN_TO_MAKE_CLAUDE_PATH','SCAN_TO_MAKE_CODEX_PATH','SCAN_TO_MAKE_SCAN_BLENDER','SCAN_TO_MAKE_CAPTURE_PYTHON']) {
+    if (flag === '--model-worker' && !('keychainRef' in (choice as object) && (choice as {keychainRef?:string}).keychainRef)) for (const key of ['HOME','PATH','TMPDIR','LANG','SCAN_TO_MAKE_CLAUDE_PATH','SCAN_TO_MAKE_CODEX_PATH','SCAN_TO_MAKE_SCAN_BLENDER','SCAN_TO_MAKE_CAPTURE_PYTHON']) {
       if (process.env[key]) env[key] = process.env[key];
     }
-    if (choice.kind === 'claude-code' || choice.kind === 'codex-cli') for (const key of ['CODEX_HOME','CLAUDE_CONFIG_DIR']) {
+    if (flag === '--model-worker' && ['claude-code','codex-cli'].includes((choice as {kind:string}).kind)) for (const key of ['CODEX_HOME','CLAUDE_CONFIG_DIR']) {
       if (process.env[key]) env[key] = process.env[key];
     }
-    const child = spawn(executable,['--model-worker',...args],{env,detached:true,stdio:['pipe','pipe','ignore']});
+    const child = spawn(executable,[flag,...args],{env,detached:true,stdio:['pipe','pipe','ignore']});
     let exceeded = false, bytes = 0, terminating = false;
     let settle:(code:number)=>void = () => {};
     const chunks:Buffer[] = [];
@@ -45,7 +44,7 @@ export function createModelWorker(executable:string|undefined):ModelWorker {
     options.signal?.addEventListener('abort',terminate,{once:true});
     child.stdout.on('data',(chunk:Buffer) => {
       bytes += chunk.length;
-      if (bytes > 1024*1024) { exceeded = true; terminate(); }
+      if (bytes > maxBytes) { exceeded = true; terminate(); }
       else chunks.push(chunk);
     });
     child.stdin.on('error',() => {});
@@ -65,5 +64,14 @@ export function createModelWorker(executable:string|undefined):ModelWorker {
       clearTimeout(timer); if (killTimer) clearTimeout(killTimer);
       options.signal?.removeEventListener('abort',terminate);
     }
+  };
+}
+
+export function createModelWorker(executable:string|undefined):ModelWorker {
+  const run = createBoundWorker(executable,'--model-worker');
+  return async (choice,args,options) => {
+    ModelAccessChoiceSchema.parse(choice);
+    if (!['check','run'].includes(args[0] ?? '')) throw new Error('Model worker unavailable');
+    return run(choice,args,options);
   };
 }

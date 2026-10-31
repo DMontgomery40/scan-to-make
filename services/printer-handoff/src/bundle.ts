@@ -14,7 +14,7 @@ const artifactSchema = z.strictObject({
 });
 export type HandoffArtifact = z.infer<typeof artifactSchema>;
 
-export const handoffStatusSchema = z.enum(['ready', 'claimed', 'designed', 'sliced', 'printed', 'uncertain', 'failed']);
+export const handoffStatusSchema = z.enum(['ready', 'claimed', 'designed', 'sliced', 'printed', 'handed-off', 'uncertain', 'failed']);
 export type HandoffStatus = z.infer<typeof handoffStatusSchema>;
 
 export const handoffManifestSchema = z.strictObject({

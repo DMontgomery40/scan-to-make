@@ -70,6 +70,7 @@ func launchAgent(_ installation: Installation) -> Never {
     child.arguments = installation.arguments("serve")
     child.environment = installation.environment
     child.environment?["SCAN_TO_MAKE_MODEL_WORKER"] = installation.bundle.executableURL?.path
+    child.environment?["SCAN_TO_MAKE_PRINTER_WORKER"] = installation.bundle.executableURL?.path
     child.standardInput = FileHandle.nullDevice
     child.standardOutput = FileHandle.nullDevice
     child.standardError = FileHandle.nullDevice
@@ -125,5 +126,53 @@ func launchModelWorker(_ installation: Installation) -> Never {
     } catch {
         // Never include Keychain errors, input metadata, keys or provider output.
     }
+    exit(2)
+}
+
+/// Setup probes use the same signed, destination-bound Keychain boundary as
+/// model workers. No view or caller-supplied executable is initialized here.
+func launchPrinterWorker(_ installation: Installation) -> Never {
+    umask(0o077)
+    do {
+        let request = Array(CommandLine.arguments.dropFirst(2))
+        let serve = request.first == "serve"
+        var input = Data()
+        if serve {
+            guard request.count == 2, request[1].utf8.count <= 16384 else { exit(2) }
+            input = Data(request[1].utf8)
+        } else {
+            guard request == ["check"] else { exit(2) }
+            while let chunk = try FileHandle.standardInput.read(upToCount: 4096), !chunk.isEmpty {
+                input.append(chunk); guard input.count <= 16384 else { exit(2) }
+            }
+        }
+        let choice = try JSONDecoder().decode(PrinterSetupChoice.self, from: input)
+        var environment = try PrinterWorkerEnvironment.make(choice: choice, base: ProcessInfo.processInfo.environment, credentials: PrinterKeychain())
+        let family = choice.kind == .bambu ? "bambu" : "generic"
+        let package = choice.kind == .bambu ? "bambu-printer-mcp" : "mcp-3d-printer-server"
+        var roots = [installation.state]
+        if let data = try? Data(contentsOf: installation.state.appendingPathComponent("app-migration.json")),
+           let value = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let path = value["workingDirectory"] as? String, path.hasPrefix("/") { roots.append(URL(fileURLWithPath: path)) }
+        guard let server = roots.map({ $0.appendingPathComponent("printers/" + family + "/lib/node_modules/" + package + "/dist/index.js") })
+            .first(where: { FileManager.default.fileExists(atPath: $0.path) }) else { exit(2) }
+        environment["STM_PRINTER_SERVER"] = server.path
+        environment["STM_PRINTER_STATE"] = installation.state.path
+        environment["STM_PRINTER_CHOICE"] = String(data: try JSONEncoder().encode(choice), encoding: .utf8)
+        let arguments = [installation.node.path, installation.resources.appendingPathComponent("Payload/source/services/companion/dist/printer-setup-cli.js").path, serve ? "serve" : "check"]
+        let null = open("/dev/null", O_RDWR)
+        guard null >= 0, (serve || dup2(null, STDIN_FILENO) >= 0), dup2(null, STDERR_FILENO) >= 0 else { exit(2) }
+        if null > STDERR_FILENO { close(null) }
+        var argv = arguments.map { strdup($0) } + [nil]
+        var envp = environment.map { strdup($0.key + "=" + $0.value) } + [nil]
+        defer { for value in argv + envp { free(value) } }
+        installation.node.path.withCString { executable in
+            argv.withUnsafeMutableBufferPointer { arguments in
+                envp.withUnsafeMutableBufferPointer { environment in
+                    _ = execve(executable, arguments.baseAddress!, environment.baseAddress!)
+                }
+            }
+        }
+    } catch { /* No credentials or raw backend errors in logs. */ }
     exit(2)
 }

@@ -1,3 +1,4 @@
+import {PrinterSetupChoiceSchema} from './printer-setup-protocol.js';
 import {z} from 'zod';
 import {ModelAccessChoiceSchema} from './model-access-protocol.js';
 
@@ -27,6 +28,10 @@ const answer = z.union([
   z.strictObject({action: z.enum(['decline', 'cancel'])}),
 ]);
 export const parameters = {
+  'printerSetup.get': empty,
+  'printerSetup.set': z.strictObject({expectedRevision:z.uuid(),choice:PrinterSetupChoiceSchema}),
+  'printerSetup.check': z.strictObject({revision:z.uuid()}),
+  'printerSetup.discover': empty,
   'modelAccess.get': empty,
   'modelAccess.set': z.strictObject({expectedRevision:z.uuid(),choice:ModelAccessChoiceSchema}),
   'modelAccess.check': z.strictObject({revision:z.uuid()}),

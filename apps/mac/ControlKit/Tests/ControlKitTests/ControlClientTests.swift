@@ -187,4 +187,21 @@ final class ControlClientTests: XCTestCase {
         catch { XCTAssertEqual(error as? ControlClientError, .invalidResponse) }
         withExtendedLifetime(server) {}
     }
+    func testPrinterChoiceCarriesOnlyReferenceAndRevision() async throws {
+        let revision = UUID(), ref = UUID()
+        let choice = PrinterSetupChoice(kind: .bambu, printer_host: "printer.local", bambu_serial: "TEST123", bambu_model: "p1s", keychainRef: ref, connection_mode: "lan_mqtt_ftps")
+        let server = try UnixFixture { request in
+            XCTAssertEqual(request["method"] as? String, "printerSetup.set")
+            let params = request["params"] as! [String: Any]
+            XCTAssertEqual(params["expectedRevision"] as? String, revision.uuidString)
+            let saved = params["choice"] as! [String: Any]
+            XCTAssertNil(saved["bambu_token"]); XCTAssertEqual(saved["keychainRef"] as? String, ref.uuidString)
+            return [try reply(request, result: ["revision": revision.uuidString, "configured": true, "choice": saved,
+                "check": ["id": UUID().uuidString, "revision": revision.uuidString, "state": "connected"], "routes": []])]
+        }
+        let snapshot = try await ControlClient(socketPath: server.path).setPrinterSetup(choice, expectedRevision: revision)
+        XCTAssertTrue(snapshot.configured); XCTAssertTrue(snapshot.connected); XCTAssertEqual(snapshot.choice, choice)
+        withExtendedLifetime(server) {}
+    }
+
 }
