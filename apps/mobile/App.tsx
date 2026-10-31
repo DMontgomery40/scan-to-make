@@ -27,6 +27,7 @@ import { PrintScreen } from './src/screens/PrintScreen';
 import { liveScanServices } from './src/screens/liveScanServices';
 import { RequestGateProvider } from './src/screens/requestGate';
 import type { ScanServices, ScanTarget } from './src/screens/scanServices';
+import type { ScanProcessingJob } from '@scan-to-make/contracts';
 import { Screen } from './src/ui/components';
 import { type } from './src/ui/theme';
 
@@ -69,6 +70,8 @@ function App({
   const scanKey = scanTarget
     ? JSON.stringify([scanTarget.projectId, scanTarget.capture.captureId])
     : '';
+  // The finished scan check whose cleaned-up model Send to printer uses.
+  const [printJob, setPrintJob] = useState<ScanProcessingJob | null>(null);
   const [companionOpen, setCompanionOpen] = useState(false);
   // scantomake://pair links, e.g. the companion's QR read by the Camera app.
   const [pairLink, setPairLink] = useState<string | null>(null);
@@ -178,7 +181,12 @@ function App({
             onCompanion={() => setCompanionOpen(true)}
             onCloseUps={() => setRoute('closeUps')}
             onPrint={
-              scanServices.printing ? () => setRoute('print') : undefined
+              scanServices.printing
+                ? job => {
+                    setPrintJob(job);
+                    setRoute('print');
+                  }
+                : undefined
             }
             reference={referenceDrafts[scanKey] ?? null}
             onReferenceChange={draft =>
@@ -191,6 +199,7 @@ function App({
         screen = scanTarget ? (
           <PrintScreen
             target={scanTarget}
+            job={printJob}
             services={scanServices}
             onBack={() => setRoute('scanResults')}
             onCompanion={() => setCompanionOpen(true)}
