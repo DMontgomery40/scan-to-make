@@ -113,4 +113,5 @@ server.setRequestHandler(CallToolRequestSchema, async request => {
   throw Error(`Unknown fixture tool: ${name}`);
 });
 
+console.error('fixture stderr ready');
 await server.connect(new StdioServerTransport());

@@ -84,11 +84,12 @@ export class InMemoryElicitationRelay implements ElicitationRelay {
       expiresAtMs: now + this.#timeoutMs,
     };
     return new Promise(resolve => {
+      // Ref'd on purpose: a pending confirmation must keep the process alive
+      // until it is answered or expires. Cleared in respond()/cancelAll().
       const timer = setTimeout(() => {
         this.#pending.delete(snapshot.id);
         resolve({action: 'cancel'});
       }, this.#timeoutMs);
-      timer.unref();
       this.#pending.set(snapshot.id, {snapshot, resolve, timer});
       this.#onPending?.(structuredClone(snapshot));
       for (const listener of this.#listeners) listener(structuredClone(snapshot));

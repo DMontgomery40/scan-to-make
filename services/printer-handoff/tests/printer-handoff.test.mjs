@@ -76,6 +76,31 @@ test('bundle store creates, verifies, claims and records designed artifacts', as
   await assert.rejects(store.read('../outside'), /uuid|Invalid/i);
 });
 
+test('replacing bundle artifacts twice stays readable; claim requires ready', async t => {
+  const f = await setup(t);
+  const bundles = join(f.root, 'bundles2');
+  const store = new HandoffBundleStore(bundles);
+  const created = await store.create({stl, prompt: 'replace me', backend: 'bambu-printer-mcp', selection});
+  await store.claim(created.id, 'desktop-agent');
+  await assert.rejects(store.claim(created.id, 'second-agent'), /not ready/);
+  const first = await store.writeDesignedStl(created.id, Buffer.concat([stl, Buffer.from(' ')]));
+  const secondBytes = Buffer.concat([stl, Buffer.from('  ')]);
+  const second = await store.writeDesignedStl(created.id, secondBytes);
+  assert.notEqual(second.designedStl.file, first.designedStl.file);
+  assert.equal((await store.read(created.id)).designedStl.byteLength, secondBytes.length);
+  assert.deepEqual(await readFile(store.stlPath(second)), secondBytes);
+  await store.recordArtifact(created.id, 'notes', 'notes.txt', Buffer.from('one'));
+  const notes = await store.recordArtifact(created.id, 'notes', 'notes.txt', Buffer.from('two!!'));
+  assert.equal((await store.read(created.id)).artifacts.notes.byteLength, 5);
+  assert.notEqual(notes.artifacts.notes.file, 'notes.txt');
+  await assert.rejects(store.recordArtifact(created.id, 'bad', '../escape.txt', Buffer.from('x')));
+  const manifestPath = join(bundles, created.id, 'handoff.json');
+  const tampered = JSON.parse(await readFile(manifestPath, 'utf8'));
+  tampered.cleanStl.file = '../outside.stl';
+  await writeFile(manifestPath, JSON.stringify(tampered));
+  await assert.rejects(store.read(created.id));
+});
+
 test('elicitation relay never answers itself: timeout resolves cancel', async () => {
   const relay = new InMemoryElicitationRelay({timeoutMs: 20});
   const pending = relay.request({method: 'elicitation/create', params: {mode: 'form', message: 'confirm', requestedSchema: {type: 'object', properties: {}}}});
@@ -90,6 +115,14 @@ test('discovery lists fixture tools without calling one', async t => {
   const catalog = await f.runner.discover();
   assert.deepEqual(catalog.tools.map(tool => tool.name), ['lay_flat', 'slice_stl', 'inspect_print_file', 'camera_snapshot', 'print_3mf']);
   assert.equal((await f.calls()).filter(entry => entry.tool).length, 0);
+});
+
+test('MCP server stderr is forwarded to the configured callback', async t => {
+  const f = await setup(t);
+  let stderr = '';
+  const runner = new PrinterHandoffRunner(f.config, {onStderr: chunk => { stderr += chunk; }});
+  await runner.discover();
+  assert.match(stderr, /fixture stderr ready/);
 });
 
 test('tool arguments are validated against the discovered schema before the call', async t => {

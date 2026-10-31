@@ -6,8 +6,9 @@ import {z} from 'zod';
 import {printerBackendSchema, printerSelectionSchema, type PrinterBackend, type PrinterSelection} from './config.js';
 
 const digest = z.string().regex(/^[a-f0-9]{64}$/);
+const safeBasename = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,254}$/).refine(name => name !== '.' && name !== '..');
 const artifactSchema = z.strictObject({
-  file: z.string().min(1).max(256),
+  file: safeBasename,
   sha256: digest,
   byteLength: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
 });
@@ -116,15 +117,36 @@ export class HandoffBundleStore {
     return manifests.sort((a, b) => a.createdAtMs - b.createdAtMs);
   }
 
+  private async writeManifest(manifest: HandoffManifest): Promise<void> {
+    await writeAtomically(this.manifestPath(manifest.id), Buffer.from(JSON.stringify(manifest) + '\n'));
+  }
   private async update(id: string, patch: Partial<HandoffManifest>): Promise<HandoffManifest> {
     const current = await this.read(id);
     const next = handoffManifestSchema.parse({...current, ...patch, id: current.id});
-    await writeAtomically(this.manifestPath(id), Buffer.from(JSON.stringify(next) + '\n'));
+    await this.writeManifest(next);
     return next;
   }
+  // Publishes replacement bytes under a digest-versioned name first, so the
+  // manifest never points at bytes that fail its previous digest mid-swap.
+  private async publishReplacement(id: string, fileName: string, copy: Buffer, existing?: HandoffArtifact): Promise<HandoffArtifact> {
+    const digest = sha256(copy);
+    if (existing?.sha256 === digest && existing.byteLength === copy.length) return existing;
+    let target = fileName;
+    if (existing) {
+      const dot = fileName.lastIndexOf('.');
+      target = dot > 0 ? `${fileName.slice(0, dot)}-${digest.slice(0, 12)}${fileName.slice(dot)}` : `${fileName}-${digest.slice(0, 12)}`;
+      safeBasename.parse(target);
+    }
+    await writeAtomically(join(this.directory(id), target), copy);
+    return artifactFor(target, copy);
+  }
 
-  claim(id: string, claimedBy: string): Promise<HandoffManifest> {
-    return this.update(id, {status: 'claimed', claimedBy: z.string().max(256).parse(claimedBy)});
+  async claim(id: string, claimedBy: string): Promise<HandoffManifest> {
+    const current = await this.read(id);
+    if (current.status !== 'ready') throw new Error(`Handoff bundle is not ready to claim: ${current.status}`);
+    const next = handoffManifestSchema.parse({...current, status: 'claimed', claimedBy: z.string().max(256).parse(claimedBy)});
+    await this.writeManifest(next);
+    return next;
   }
   setStatus(id: string, status: HandoffStatus, failure?: string): Promise<HandoffManifest> {
     return this.update(id, {status, ...(failure === undefined ? {} : {failure: failure.slice(0, 2048)})});
@@ -132,20 +154,25 @@ export class HandoffBundleStore {
 
   async writeDesignedStl(id: string, bytes: Buffer): Promise<HandoffManifest> {
     if (!Buffer.isBuffer(bytes) || bytes.length < 84 || bytes.length > MAX_STL_BYTES) throw new Error('Designed STL byte limit exceeded');
-    await this.read(id);
+    const current = await this.read(id);
     const copy = Buffer.from(bytes);
-    await writeAtomically(join(this.directory(id), 'designed.stl'), copy);
-    return this.update(id, {designedStl: artifactFor('designed.stl', copy), status: 'designed'});
+    const designedStl = await this.publishReplacement(id, 'designed.stl', copy, current.designedStl);
+    const next = handoffManifestSchema.parse({...current, designedStl, status: 'designed'});
+    await this.writeManifest(next);
+    return next;
   }
 
   async recordArtifact(id: string, name: string, fileName: string, bytes: Buffer): Promise<HandoffManifest> {
     if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(name)) throw new Error('Invalid artifact name');
-    if (fileName.includes('/') || fileName.includes('\\') || fileName === 'handoff.json') throw new Error('Invalid artifact file');
+    safeBasename.parse(fileName);
+    if (fileName === 'handoff.json') throw new Error('Invalid artifact file');
     if (!Buffer.isBuffer(bytes) || !bytes.length || bytes.length > MAX_STL_BYTES) throw new Error('Artifact byte limit exceeded');
     const current = await this.read(id);
     const copy = Buffer.from(bytes);
-    await writeAtomically(join(this.directory(id), fileName), copy);
-    return this.update(id, {artifacts: {...current.artifacts, [name]: artifactFor(fileName, copy)}});
+    const artifact = await this.publishReplacement(id, fileName, copy, current.artifacts[name]);
+    const next = handoffManifestSchema.parse({...current, artifacts: {...current.artifacts, [name]: artifact}});
+    await this.writeManifest(next);
+    return next;
   }
 
   stlPath(manifest: HandoffManifest): string {

@@ -36,12 +36,14 @@ function alive(pid: number): boolean {
 }
 async function waitForExit(pid: number, timeoutMs: number): Promise<boolean> {
   const deadline = Date.now() + timeoutMs;
-  while (alive(pid) && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 10).unref());
+  while (alive(pid) && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 10));
   return !alive(pid);
 }
 
 export interface PrinterMcpClientOptions {
   relay?: ElicitationRelay;
+  /** Receives bounded chunks of the MCP server's stderr, for field diagnosis. */
+  onStderr?: (chunk: string) => void;
 }
 
 /** One stdio MCP session against the operator-configured printer server. */
@@ -53,10 +55,13 @@ export class PrinterMcpClient {
   #catalog?: PrinterToolCatalog;
   #elicitationContext: ElicitationContext = {};
   readonly #validators = new Map<Tool, ValidateFunction>();
+  readonly #ajv = new Ajv({strict: false});
+  readonly #onStderr?: (chunk: string) => void;
 
   constructor(config: PrinterHandoffConfig, options: PrinterMcpClientOptions = {}) {
     this.#config = structuredClone(config);
     this.#relay = options.relay;
+    this.#onStderr = options.onStderr;
   }
 
   get catalog(): PrinterToolCatalog | undefined { return this.#catalog; }
@@ -76,7 +81,7 @@ export class PrinterMcpClient {
       stderr: 'pipe',
     });
     this.#transport = transport;
-    transport.stderr?.on('data', () => undefined);
+    transport.stderr?.on('data', (chunk: Buffer) => this.#onStderr?.(chunk.toString('utf8', 0, Math.min(chunk.length, 4096))));
     const client = new Client(
       {name: 'scan-to-make-printer-handoff', version: '0.1.0'},
       {capabilities: this.#relay ? {elicitation: {form: {}, url: {}}} : {}},
@@ -89,7 +94,7 @@ export class PrinterMcpClient {
     const controller = new AbortController();
     const abort = () => controller.abort();
     signal?.addEventListener('abort', abort, {once: true});
-    const timer = setTimeout(() => controller.abort(), timeouts.connectMs).unref();
+    const timer = setTimeout(() => controller.abort(), timeouts.connectMs);
     try {
       await client.connect(transport, {signal: controller.signal, timeout: timeouts.connectMs, maxTotalTimeout: timeouts.connectMs});
       const server = client.getServerVersion();
@@ -133,7 +138,7 @@ export class PrinterMcpClient {
   #validate(tool: Tool, args: Record<string, unknown>): void {
     let compiled = this.#validators.get(tool);
     if (!compiled) {
-      try { compiled = new Ajv({strict: false}).compile(structuredClone(tool.inputSchema)); }
+      try { compiled = this.#ajv.compile(structuredClone(tool.inputSchema)); }
       catch (error) { fail('invalid-tool-schema', error); }
       this.#validators.set(tool, compiled);
     }

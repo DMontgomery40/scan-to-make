@@ -74,16 +74,18 @@ export class PrinterHandoffRunner {
   readonly #config: PrinterHandoffConfig;
   readonly #relay?: ElicitationRelay;
   readonly #onStep?: (step: PrintStep) => void;
+  readonly #onStderr?: (chunk: string) => void;
 
-  constructor(config: PrinterHandoffConfig, options: {relay?: ElicitationRelay; onStep?: (step: PrintStep) => void} = {}) {
+  constructor(config: PrinterHandoffConfig, options: {relay?: ElicitationRelay; onStep?: (step: PrintStep) => void; onStderr?: (chunk: string) => void} = {}) {
     this.#config = printerHandoffConfigSchema.parse(structuredClone(config));
     this.#relay = options.relay;
     this.#onStep = options.onStep;
+    this.#onStderr = options.onStderr;
   }
 
   get backend(): PrinterHandoffConfig['backend'] { return this.#config.backend; }
 
-  private client(): PrinterMcpClient { return new PrinterMcpClient(this.#config, {relay: this.#relay}); }
+  private client(): PrinterMcpClient { return new PrinterMcpClient(this.#config, {relay: this.#relay, onStderr: this.#onStderr}); }
 
   /** Connects, lists the server's tools, and disconnects without calling any tool. */
   async discover(signal?: AbortSignal): Promise<PrinterToolCatalog> {
