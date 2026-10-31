@@ -108,3 +108,10 @@ test('every STL the worker saves is in millimetres', () => {
   assert.match(TOUCHUP_SYSTEM_RULES, /millimetres/);
   assert.match(TOUCHUP_SYSTEM_RULES, /metres/);
 });
+
+test('the rules ask for the fixes the photos show, not just caution', () => {
+  assert.match(TOUCHUP_SYSTEM_RULES, /flatten/);
+  assert.match(TOUCHUP_SYSTEM_RULES, /too faint/);
+  assert.match(TOUCHUP_SYSTEM_RULES, /Keep real surface detail the photos confirm/);
+  assert.equal(/never smooth captured surface/.test(TOUCHUP_SYSTEM_RULES), false, 'a lumpy surface the photos show flat must be fixable');
+});
