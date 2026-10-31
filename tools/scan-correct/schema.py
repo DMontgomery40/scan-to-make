@@ -21,9 +21,9 @@ SPECS = {
     'render': ('Render ten neutral views in the stored input frame.', {'resolution':number(16,1024,True)}),
     'sample_texture': ('Sample retained textured source by surface area, returns evidence and cache.',
                        {'count':number(100,20000,True),'seed':number(0,1000000,True)}),
-    'find_features': ('Cluster dark texture samples by distance; inspect clusters before interpreting them.',
+    'find_features': ('Cluster dark or locally darker samples by distance; contrast is optional. Inspect measured clusters before interpreting them.',
                       {'threshold':number(0,1),'link_mm':number(.1,10),'min_samples':number(3,1000,True)}),
-    'feature_frame': ('Frame from three measured feature cluster IDs: origin, X direction and XY plane.',
+    'feature_frame': ('Frame from measured clusters: default centres mode uses origin, X direction and XY point. principal_axes mode uses the X cluster long axis and plane cluster normal as Y.',
                       {'origin_feature':number(0,127,True),'x_feature':number(0,127,True),
                        'plane_feature':number(0,127,True)}),
     'classify_regions': ('Heuristic filled-face mask on retained source using texture saturation, not capture truth.',
@@ -53,8 +53,24 @@ SPECS = {
 }
 SPECS['cut_oriented_feature']=('Cut with an explicit transverse length axis; same volume/topology guards.',
                                {**SPECS['cut_feature'][1],'length_axis':AXIS})
+SPECS['sample_texture_region']=('Area-sample only the retained surface inside a measured box, preserving UVs. Replaces prior samples/features.',
+    {**SPECS['sample_texture'][1],'min_mm':vector(),'max_mm':vector()})
+SPECS['render_features']=('Render selected measured sample clusters on neutral retained geometry; no texture or semantic labels.',
+    {'feature_ids':{'type':'array','items':number(0,127,True),'minItems':1,'maxItems':8},
+     'view_direction':vector(-1,1),'resolution':number(64,512,True)})
+SPECS['fit_feature_plane']=('Fit a robust plane through selected disconnected texture clusters; creates a measured feature ID for framing.',
+    {'feature_ids':{'type':'array','items':number(0,127,True),'minItems':1,'maxItems':8},
+     'tolerance_mm':number(.01,2),'min_inlier_fraction':number(.3,1)})
+OPTIONAL = {
+    'sample_texture': {'retain_samples':enum('replace','append')},
+    'sample_texture_region': {'retain_samples':enum('replace','append')},
+    'find_features': {'contrast_min':number(0,1),'contrast_radius_mm':number(.1,5)},
+    'feature_frame': {'mode':enum('centres','principal_axes')},
+}
 TOOLS = [{'name':name,'description':description,'input_schema':{'type':'object','properties':{**props,'evidence_still_ids':{'type':'array','items':enum('still-1','still-2','still-3','still-4'),'minItems':0,'maxItems':4}},
           'required':list(props),'additionalProperties':False}} for name,(description,props) in SPECS.items()]
+for tool in TOOLS:
+    tool['input_schema']['properties'].update(OPTIONAL.get(tool['name'],{}))
 
 
 def check_value(value, spec):
@@ -65,7 +81,7 @@ def check_value(value, spec):
     elif kind == 'string':
         valid = isinstance(value,str)
     elif kind == 'array':
-        valid = isinstance(value,list) and len(value)==spec['minItems']
+        valid = isinstance(value,list) and spec['minItems'] <= len(value) <= spec['maxItems']
         if valid:
             for item in value:
                 check_value(item,spec['items'])
@@ -79,10 +95,15 @@ def validate(name, args):
     if name not in SPECS or not isinstance(args,dict):
         raise ValueError('unknown tool or non-object arguments')
     props = SPECS[name][1]
-    if set(args) != set(props):
+    optional=OPTIONAL.get(name,{})
+    if not set(props)<=set(args) or set(args)-set(props)-set(optional):
         raise ValueError('missing or unexpected tool parameters')
     for key,value in args.items():
-        check_value(value,props[key])
+        check_value(value,{**props,**optional}[key])
+    if name=='sample_texture_region' and any(a>=b for a,b in zip(args['min_mm'],args['max_mm'])):
+        raise ValueError('region min_mm must be below max_mm on every axis')
+    if name=='render_features' and (sum(v*v for v in args['view_direction'])<1e-8 or len(set(args['feature_ids']))!=len(args['feature_ids'])):
+        raise ValueError('render needs a nonzero direction and unique feature IDs')
     if name == 'scale_to_reference' and args['target_mm'] != sorted(args['target_mm'],reverse=True):
         raise ValueError('target_mm must be long to short')
     if name=='cut_oriented_feature' and args['length_axis']==args['axis']:

@@ -235,7 +235,7 @@ def render_target(obj,bm,target,path,resolution,core):
     rim=None
     if opening:
         curve=bpy.data.curves.new('opening-rim','CURVE');curve.dimensions='3D'
-        curve.bevel_depth=max(overall*.004,.001);curve.bevel_resolution=0
+        curve.bevel_depth=target.pop('_markerRadiusMm',max(overall*.004,.001));curve.bevel_resolution=0
         curve.materials.append(obj.data.materials[1])
         for ends in opening:
             spline=curve.splines.new('POLY');spline.points.add(1)

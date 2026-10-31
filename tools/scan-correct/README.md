@@ -77,9 +77,12 @@ minimum-volume box; it is not a certified global optimum or semantic frame.
 | --- | --- |
 | `measure` | No parameters; mesh-only measurements. |
 | `render` | `resolution` 16–1024; ten neutral input-frame PNGs with hashes. Four views (+X/+Y/+Z/isometric) are forwarded to the model as images. |
-| `sample_texture` | `count` 100–20,000 and `seed`; deterministic area samples on the retained textured source, nearest texels, Blender RGB values, first 128 samples returned and full `samples.json` retained. OBJ repeat/clamp mapping is used; this does not reconstruct arbitrary USD shaders. |
-| `find_features` | `threshold` luminance, `link_mm`, `min_samples`; bounded connected clusters of dark samples with measured centres/spans, up to 128 IDs. Labels such as port/LED are model interpretations, not detector ground truth. Requires prior sampling. |
-| `feature_frame` | `origin_feature`, `x_feature`, `plane_feature` IDs from measured clusters; right-handed orthonormal frame from three non-collinear centres. Transforms current and source meshes/evidence together. It is a geometric datum, not automatic pose recognition. |
+| `sample_texture` | `count` 100–20,000 and `seed`; optional `retain_samples: append` (combined cap 20,000), otherwise replaces the cache and invalidates feature IDs; deterministic area samples on the retained textured source, nearest texels, Blender RGB values, first 128 samples returned and full `samples.json` retained. OBJ repeat/clamp mapping is used; this does not reconstruct arbitrary USD shaders. |
+| `find_features` | `threshold` luminance, `link_mm`, `min_samples`; optional `contrast_min` and `contrast_radius_mm` also select locally darker samples. Bounded connected clusters with centres, exact sampled bounds, principal axes/spans/RMS and up to 128 IDs. Labels such as port/LED are model interpretations, not detector ground truth. Requires prior sampling. |
+| `feature_frame` | `origin_feature`, `x_feature`, `plane_feature` IDs from measured clusters; right-handed orthonormal frame from three non-collinear centres. Transforms current and source meshes/evidence together. Optional `mode: principal_axes` uses the X cluster’s long axis and the plane cluster’s normal as Y; ambiguous/nonplanar/inconsistent datums fail. It is a geometric datum, not automatic pose recognition. |
+| `sample_texture_region` | Same sampler, with `min_mm`/`max_mm` in the current source frame. Clips triangles with barycentric UV interpolation before area sampling, concentrating the existing budget on fine details. |
+| `fit_feature_plane` | Up to eight cluster IDs, `tolerance_mm`, `min_inlier_fraction`; 512 seeded hypotheses plus least-squares refinement. Adds a measured plane feature ID; rejects insufficient, collinear or weak support. |
+| `render_features` | Up to eight cluster IDs, outward `view_direction`, resolution 64–512. Neutral retained mesh with at most 2048 observed-point markers, no texture; hash-receipted PNG also reaches the model. |
 | `classify_regions` | `saturation_min`; sample-majority saturation labels source faces as filled/captured, with unobserved faces unknown. A table-colour heuristic, not proof a region was uncaptured. |
 | `symmetrize` | `axis` X/Y/Z, `direction` NEGATIVE/POSITIVE, `iterations` 1–4; average both sides against a mirrored BVH, then copy the selected side across the origin. This assumes product symmetry and may erase asymmetric features. |
 | `rigid_frame` | `rotation` (nine row-major numbers, proper orthonormal matrix), `translation_mm`; explicit measured datums applied to current/source evidence together. No arbitrary affine scaling or reflection. |
@@ -315,3 +318,40 @@ does not modify the supplied mesh or perform correction. Synthetic tests cover
 a filled face competing with a smaller patch, an injected lump, a small blind
 cut, byte-repeatable advice/renders, texture-independent highlight pixels and
 rejection of out-of-bounds options before Blender staging.
+
+
+## Localizing fine texture details
+
+Whole-surface samples can miss submillimetre marks. First use `sample_texture`
+and `find_features` to inspect candidates; then use `sample_texture_region`
+to focus on a measured region. Regional sampling clips the original triangles,
+including UV coordinates, so triangles crossing a region boundary are neither
+lost nor sampled outside it. Empty regions fail. Optional `retain_samples:
+append` combines disjoint regions for a common datum, under the same 20,000
+sample cap. Every sampling call invalidates previous feature IDs; find them again.
+
+A faint seam can be selected by setting `contrast_min` above zero. Selection is
+absolute darkness **or** local luminance contrast; set `threshold: 0` for contrast
+alone. The local median uses up to 64 deterministic candidates within the requested
+spatial radius, with at least three neighbours. It is approximate, depends on
+sampling density and may include shadows or markings. Connected components still
+use the existing two-million neighbour-check cap. Thresholds, regions and feature
+interpretations are caller choices; these tools do not identify product anatomy.
+
+Disconnected seam segments can feed `fit_feature_plane`. Its plane has a measured
+inlier fraction and residual; the chosen tolerance is not an accuracy guarantee.
+A long port-like cluster and a seam-plane cluster can then drive `feature_frame`
+with `mode: principal_axes`. This preserves the original centre-based mode.
+Exact sample membership stays in private `features.json`; it is omitted from
+model replies. Frame changes recompute bounds and principal axes from those
+transformed samples, rather than rotating an axis-aligned bounding box.
+
+`render_features` displays retained geometry, not a guessed corrected feature.
+Orange markers represent observed dark/contrast samples. Their display radius is
+reported and enlarged to remain visible at the requested resolution; it is not a
+feature-size measurement. They are not cuts or
+proof of holes. Both rendering and measurement preserve the source UVs/materials.
+Use reference **boxExtentsMm** for spec comparisons. Published accessory keep-outs
+are clearance requirements, not physical opening sizes, and must be reported as
+such. Personal texture evidence and region selections remain private; repository
+tests use synthetic small holes, faint seams and disconnected planar samples.
