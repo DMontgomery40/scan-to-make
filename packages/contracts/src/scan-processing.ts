@@ -12,7 +12,27 @@ export const SCAN_CLEANUP_STAGE_LABELS={
  import:'Getting your scan',repair:'Filling holes',advise:'Looking for weak spots',
  correct:'Fixing details from your close-ups',measure:'Measuring',render:'Almost done',
 } as const satisfies Record<(typeof SCAN_CLEANUP_STAGES)[number],string>;
-export const ScanArtifactNameSchema=z.enum(['repaired.stl','repaired.obj','report.json','corrected.stl','corrected.obj','correction.json','correction-calls.jsonl',...SCAN_ADVICE_NAMES,...SCAN_VIEW_NAMES]);
+/** Textured previews of each AI attempt for the phone's "see other attempts" door (KAN-184). */
+export const AI_ATTEMPT_PREVIEW_NAMES=['ai-attempt-1-preview.png','ai-attempt-2-preview.png','ai-attempt-3-preview.png','ai-attempt-4-preview.png'] as const;
+export const ScanArtifactNameSchema=z.enum(['repaired.stl','repaired.obj','report.json','corrected.stl','corrected.obj','correction.json','correction-calls.jsonl',...SCAN_ADVICE_NAMES,...SCAN_VIEW_NAMES,...AI_ATTEMPT_PREVIEW_NAMES]);
+/**
+ * The AI step's record on a job: which route ran, what each attempt did, and what the visual pick chose
+ * and why. Never a key, a transcript or a path.
+ */
+export const AiTweakRecordSchema=z.strictObject({
+ access:z.strictObject({kind:z.enum(['claude-code','codex-cli','api','endpoint']),model:z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/).optional()}),
+ attempts:z.array(z.strictObject({
+  index:z.number().int().min(1).max(4),
+  outcome:z.enum(['changed','unchanged','other-format-only','invalid-output','failed','auth-failed','needs-gui-session','timed-out','cancelled']),
+  wallMs:z.number().int().nonnegative().max(7200000),
+  veto:z.enum(['smoothed','squashed-or-stretched','reshaped','unreadable']).optional(),
+ })).max(4),
+ pick:z.strictObject({
+  choice:z.union([z.literal('captured'),z.string().regex(/^attempt-[1-4]$/)]),
+  decidedBy:z.enum(['judge','veto','fallback']),
+  reason:z.string().max(4000),
+ }),
+});
 export const DimensionsMmSchema=z.tuple([z.number().finite().positive(),z.number().finite().positive(),z.number().finite().positive()]);
 export const ScanReferenceSchema=z.strictObject({dimensionsMm:DimensionsMmSchema,source:z.string().min(1).max(500).optional(),productName:z.string().min(1).max(200).optional()});
 export const ScanProcessingRequestSchema=z.strictObject({reference:ScanReferenceSchema.optional(),stillIds:z.array(z.uuid()).max(4).refine(ids=>new Set(ids).size===ids.length,'Duplicate still IDs').optional()});
@@ -40,13 +60,17 @@ export const ScanProcessingJobSchema=z.strictObject({
   z.strictObject({kind:z.literal('render'),status,params:z.strictObject({units:z.literal('mm'),resolution:z.literal(512)}),...stageTimes})
  ]),reference:ScanReferenceSchema.optional(),measuredPrincipalExtentsMm:DimensionsMmSchema.optional(),measuredBoxExtentsMm:DimensionsMmSchema.optional(),
  pipelineStages:z.array(z.strictObject({kind:z.enum(SCAN_CLEANUP_STAGES),status,...stageTimes})).length(6).refine(stages=>stages.every((s,i)=>s.kind===SCAN_CLEANUP_STAGES[i]),'Invalid cleanup stage order').optional(),
- wallClockLimitMs:z.number().int().positive().max(1800000).optional(),
+ // Up to 60 minutes when the AI step runs (two sealed attempts plus the visual pick).
+ wallClockLimitMs:z.number().int().positive().max(3600000).optional(),
  failureStage:z.enum([...SCAN_CLEANUP_STAGES,'publish']).optional(),
- correctionAdapter:z.enum(['scripted','anthropic','openai']).optional(),detailStills:z.array(DetailStillSchema).max(4).optional(),
+ // 'ai-tweak' is the one-sentence AI step (KAN-183/184), which looks at every retained close-up (up to 24).
+ correctionAdapter:z.enum(['scripted','anthropic','openai','ai-tweak']).optional(),detailStills:z.array(DetailStillSchema).max(24).optional(),
+ aiTweak:AiTweakRecordSchema.optional(),
  comparison:z.strictObject({matching:z.literal('sorted-descending'),referenceDimensionsMm:DimensionsMmSchema,measuredDimensionsMm:DimensionsMmSchema,errorMm:z.tuple([z.number().finite(),z.number().finite(),z.number().finite()])}).optional(),
  artifacts:z.partialRecord(ScanArtifactNameSchema,artifact).optional(),failure:z.enum(['processing-failed','cancelled','interrupted','deadline-exceeded']).optional(),
 }).superRefine((job,ctx)=>{
  if(job.status==='succeeded'&&(!job.artifacts||!job.measuredPrincipalExtentsMm||['repaired.obj','repaired.stl','report.json',...SCAN_VIEW_NAMES].some(name=>!job.artifacts?.[name as ScanArtifactName])||job.stages.some(s=>s.status!=='succeeded')||!!job.reference!==!!job.comparison))ctx.addIssue({code:'custom',message:'Successful job requires complete outputs'});
+ if(job.aiTweak&&job.correctionAdapter!=='ai-tweak')ctx.addIssue({code:'custom',message:'AI record requires the ai-tweak adapter'});
  if(job.status==='succeeded'&&job.pipelineStages&&(!job.measuredBoxExtentsMm||job.pipelineStages.some(s=>s.status!=='succeeded')||['corrected.stl','corrected.obj','correction.json','correction-calls.jsonl','advice.json'].some(name=>!job.artifacts?.[name as ScanArtifactName])))ctx.addIssue({code:'custom',message:'Successful cleanup requires all stages and corrected/advice outputs'});
 });
 export type ScanProcessingJob=z.infer<typeof ScanProcessingJobSchema>;
@@ -61,6 +85,7 @@ export const ScanModelAssetsSchema=z.strictObject({schema:z.literal('scan-to-mak
  for(const f of model.files)if(f.mediaType!==(f.name.endsWith('.obj')?'model/obj':f.name.endsWith('.mtl')?'text/plain':'image/png'))ctx.addIssue({code:'custom',message:'Model asset type mismatch'});
 });
 export type ScanModelAssets=z.infer<typeof ScanModelAssetsSchema>;
+export type AiTweakRecord=z.infer<typeof AiTweakRecordSchema>;
 /** Compare measured minimum-volume box extents and the reference sorted descending. */
 export function compareScanDimensions(measured:unknown,reference:unknown){
  const m=DimensionsMmSchema.parse(measured).sort((a,b)=>b-a),r=DimensionsMmSchema.parse(reference).sort((a,b)=>b-a);

@@ -1,6 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {compareScanDimensions,ScanProcessingRequestSchema,ScanProcessingJobSchema,ScanModelAssetsSchema,SCAN_CLEANUP_STAGES,SCAN_CLEANUP_STAGE_LABELS} from '../dist/scan-processing.js';
+import {compareScanDimensions,ScanProcessingRequestSchema,ScanProcessingJobSchema,ScanModelAssetsSchema,SCAN_CLEANUP_STAGES,SCAN_CLEANUP_STAGE_LABELS,AiTweakRecordSchema,AI_ATTEMPT_PREVIEW_NAMES,ScanArtifactNameSchema} from '../dist/scan-processing.js';
+import {ModelAccessEnvironment} from '../dist/model-access.js';
 test('principal extents match reference by descending size, errors are measured minus reference',()=>{
  const comparison=compareScanDimensions([21.7,62.9,48.7],[45.2,21.7,60.6]);assert.equal(comparison.matching,'sorted-descending');assert.deepEqual(comparison.errorMm.map(x=>+x.toFixed(2)),[2.3,3.5,0]);
 });
@@ -70,4 +71,27 @@ test('model bundle is closed to canonical basenames, consistent MIME types and a
  for(const mutate of [m=>m.files.push(m.files[0]),m=>m.files.shift(),m=>m.files[1].name='../mesh.mtl',m=>m.files[1].mediaType='image/png',m=>m.files[0].byteLength=64*1024*1024]){
   const bad=structuredClone(model);mutate(bad);assert(!ScanModelAssetsSchema.safeParse(bad).success);
  }
+});
+
+test('AI jobs (KAN-184) record route, attempts and pick without keys, transcripts or paths; older jobs still load',()=>{
+ const params={weldMm:.01,componentFraction:.01,componentMetric:'area',holeMaxEdges:0,voxelSizeMm:.3,forceVoxel:false,denoiseIterations:15,denoiseFactor:.5,denoiseMu:-.53,denoiseMaxMm:.35,sharpAngleDeg:30,deviationSamples:10000};
+ const job={schema:'scan-to-make.scan-processing/0.1',jobId:'44444444-4444-4444-8444-444444444444',projectId:'one',captureId:'11111111-1111-4111-8111-111111111111',projectRevision:0,status:'running',previewOnly:true,
+  stages:[{kind:'repair',status:'succeeded',params},{kind:'measure',status:'running',params:{units:'mm'}},{kind:'render',status:'queued',params:{units:'mm',resolution:512}}],
+  pipelineStages:SCAN_CLEANUP_STAGES.map(kind=>({kind,status:'queued'})),correctionAdapter:'ai-tweak',wallClockLimitMs:3600000,
+  aiTweak:{access:{kind:'claude-code',model:'claude-opus-5-5'},attempts:[{index:1,outcome:'changed',wallMs:900000,veto:'smoothed'},{index:2,outcome:'timed-out',wallMs:1500000}],
+   pick:{choice:'captured',decidedBy:'veto',reason:'Every attempt was rejected.'}}};
+ assert(ScanProcessingJobSchema.safeParse(job).success);
+ const {aiTweak,...older}=job;older.correctionAdapter='scripted';older.wallClockLimitMs=1800000;
+ assert(ScanProcessingJobSchema.safeParse(older).success);
+ for(const mutate of [j=>j.correctionAdapter='scripted',j=>j.aiTweak.access.key='sk-x',j=>j.aiTweak.access.kind='none',j=>j.aiTweak.attempts[0].transcript='…',
+  j=>j.aiTweak.pick.choice='attempt-5',j=>j.aiTweak.pick.decidedBy='model',j=>j.aiTweak.attempts[0].index=0,j=>j.aiTweak.access.model='/Users/me/model',j=>j.wallClockLimitMs=3600001]){
+  const bad=structuredClone(job);mutate(bad);assert(!ScanProcessingJobSchema.safeParse(bad).success,mutate.toString());
+ }
+ assert.equal(AiTweakRecordSchema.safeParse({...job.aiTweak,attempts:Array(5).fill(job.aiTweak.attempts[1])}).success,false);
+ assert.deepEqual(AI_ATTEMPT_PREVIEW_NAMES.map(n=>ScanArtifactNameSchema.safeParse(n).success),[true,true,true,true]);
+});
+
+test('the model-access environment names are the ones #148 reads and MAC-7 writes',()=>{
+ assert.deepEqual(ModelAccessEnvironment,{kind:'SCAN_TO_MAKE_AI_ACCESS',model:'SCAN_TO_MAKE_AI_MODEL',provider:'SCAN_TO_MAKE_AI_PROVIDER',endpoint:'SCAN_TO_MAKE_AI_ENDPOINT',
+  keyName:'SCAN_TO_MAKE_AI_KEY_ENV',secret:'SCAN_TO_MAKE_MODEL_KEY',effort:'SCAN_TO_MAKE_AI_EFFORT',judgeTool:'SCAN_TO_MAKE_AI_JUDGE_TOOL'});
 });

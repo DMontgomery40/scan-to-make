@@ -1,6 +1,8 @@
 import {readFile} from 'node:fs/promises';
 import {ScanProcessingStore,createScanCleanupRunner} from './scan-processing.js';
 import {dirname,isAbsolute,join} from 'node:path';
+import {fileURLToPath} from 'node:url';
+import {modelAccessFromEnv} from './ai-tweak.js';
 import {FileSavedProjectStorage} from '@scan-to-make/project';
 import {CaptureStore} from './capture-import.js';
 import {DetailStillStore} from './detail-stills.js';
@@ -32,7 +34,9 @@ const scanTool=process.env.SCAN_TO_MAKE_SCAN_REPAIR_TOOL;
 const scanBlender=process.env.SCAN_TO_MAKE_SCAN_BLENDER;
 if(scanTool!==undefined||scanBlender!==undefined){
  if(!capture||!captureDirectory||!scanTool||!scanBlender)throw new Error('Scan processing requires authenticated capture storage, tool and Blender paths');
- Object.assign(capture,{scanProcessing:new ScanProcessingStore(capture.storage,capture.captures!,join(captureDirectory,'captures'),createScanCleanupRunner({toolPath:scanTool,blender:scanBlender,python:process.env.SCAN_TO_MAKE_CAPTURE_PYTHON??'python3',correctTool:process.env.SCAN_TO_MAKE_SCAN_CORRECT_TOOL??join(dirname(scanTool),'../scan-correct/correct.py'),adapter:process.env.SCAN_TO_MAKE_CORRECTION_ADAPTER as 'scripted'|'anthropic'|'openai'|undefined,model:process.env.SCAN_TO_MAKE_CORRECTION_MODEL,baseUrl:process.env.SCAN_TO_MAKE_CORRECTION_BASE_URL,keyEnv:process.env.SCAN_TO_MAKE_CORRECTION_KEY_ENV,printable:{}}))});
+ Object.assign(capture,{scanProcessing:new ScanProcessingStore(capture.storage,capture.captures!,join(captureDirectory,'captures'),createScanCleanupRunner({toolPath:scanTool,blender:scanBlender,python:process.env.SCAN_TO_MAKE_CAPTURE_PYTHON??'python3',correctTool:process.env.SCAN_TO_MAKE_SCAN_CORRECT_TOOL??join(dirname(scanTool),'../scan-correct/correct.py'),adapter:process.env.SCAN_TO_MAKE_CORRECTION_ADAPTER as 'scripted'|'anthropic'|'openai'|undefined,model:process.env.SCAN_TO_MAKE_CORRECTION_MODEL,baseUrl:process.env.SCAN_TO_MAKE_CORRECTION_BASE_URL,keyEnv:process.env.SCAN_TO_MAKE_CORRECTION_KEY_ENV,printable:{},
+  // KAN-184: with SCAN_TO_MAKE_AI_ACCESS set, the correct stage is David's one-sentence AI step and its visual pick.
+  ai:{access:modelAccessFromEnv(process.env),cli:fileURLToPath(new URL('./ai-tweak-cli.js',import.meta.url)),judgeTool:process.env.SCAN_TO_MAKE_AI_JUDGE_TOOL??join(dirname(scanTool),'../ai-tweak-judge')}}))});
 }
 const handoffConfigPath=process.env.SCAN_TO_MAKE_PRINTER_HANDOFF_CONFIG||undefined;
 const handoffDirectory=process.env.SCAN_TO_MAKE_PRINTER_HANDOFF_DIR||undefined;

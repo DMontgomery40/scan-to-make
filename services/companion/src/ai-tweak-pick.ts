@@ -138,7 +138,14 @@ export async function pickAiTweak(manifestDir:string,options:PickOptions):Promis
  }
  const contenders=candidates.filter(c=>!c.veto);
  const photos=Object.keys(manifest.inputs).filter(n=>/^still_\d{2}_[0-9a-f]{8}\.jpg$/.test(n));
- if(contenders.length===1)return finish({decidedBy:'veto',reason:candidates.length===1?'No attempt changed the scan.':'Every attempt was rejected: '+candidates.filter(c=>c.veto).map(c=>`${c.id} ${c.veto!.detail}`).join('; ')+'.'});
+ if(candidates.length===1){
+  // Nothing to compare. Say whether the attempts ran and left the scan alone, or never finished.
+  const unfinished=manifest.attempts.filter(a=>!['changed','unchanged','other-format-only'].includes(a.outcome)).map(a=>a.outcome);
+  return finish(unfinished.length&&unfinished.length===manifest.attempts.length
+   ?{decidedBy:'fallback',reason:`The AI attempts didn't finish (${[...new Set(unfinished)].join(', ')}), so the captured scan is kept.`}
+   :{decidedBy:'veto',reason:'No attempt changed the scan.'});
+ }
+ if(contenders.length===1)return finish({decidedBy:'veto',reason:'Every attempt was rejected: '+candidates.filter(c=>c.veto).map(c=>`${c.id} ${c.veto!.detail}`).join('; ')+'.'});
  if(!photos.length)return finish({reason:'There are no close-up photos to compare against, so the captured scan is kept.'});
  // 2. Render every contender from the captured scan's cameras.
  const cams=join(work,'cams.json'),resolution=String(options.resolution??1600);

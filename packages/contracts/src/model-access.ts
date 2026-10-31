@@ -23,4 +23,6 @@ export const ModelAccessEnvironment = {
   kind:'SCAN_TO_MAKE_AI_ACCESS', model:'SCAN_TO_MAKE_AI_MODEL',
   provider:'SCAN_TO_MAKE_AI_PROVIDER', endpoint:'SCAN_TO_MAKE_AI_ENDPOINT',
   keyName:'SCAN_TO_MAKE_AI_KEY_ENV', secret:'SCAN_TO_MAKE_MODEL_KEY', effort:'SCAN_TO_MAKE_AI_EFFORT',
+  /** The visual pick's render scripts (tools/ai-tweak-judge): set by the installation's owner, never an argument (KAN-184). */
+  judgeTool:'SCAN_TO_MAKE_AI_JUDGE_TOOL',
 } as const;

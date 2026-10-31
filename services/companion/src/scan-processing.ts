@@ -9,6 +9,8 @@ import {CaptureStore,readBoundedCaptureFile} from './capture-import.js';
 import {readScanMaterials,scanModelManifest} from './scan-model-assets.js';
 import {DetailStillStore,DetailStillFailure} from './detail-stills.js';
 import {runCleanup,type CleanupSnapshot} from './scan-cleanup-job.js';
+import {AI_CLEANUP_JOB_MS,AI_WORKER_GRACE_MS} from './scan-cleanup-runner.js';
+import {MAX_DETAIL_STILLS_PER_CAPTURE} from '@scan-to-make/contracts/detail-still';
 import type {ScanRunner} from './scan-processing-runner.js';
 export {createScanCleanupRunner} from './scan-cleanup-runner.js';
 export {createScanRunner} from './scan-processing-runner.js';
@@ -62,14 +64,23 @@ async function readLockOwner(lock:string):Promise<LockOwner|undefined>{
  * (false) for implausible ids or a group that cannot be signalled or verified
  * dead, so callers keep the lock instead of reclaiming over live workers.
  */
+/** A job record with 24 close-ups and an AI record, with room for escaped text. */
+const JOB_RECORD_BYTES=256*1024;
+/**
+ * The longest any instance can legitimately hold the execution lock: an AI job's whole deadline, its
+ * worker's shutdown grace, and a margin for publication. A live owner younger than this is never
+ * reclaimed, and a waiter waits at least this long.
+ */
+export const EXECUTION_LOCK_MS=AI_CLEANUP_JOB_MS+AI_WORKER_GRACE_MS+5*60000;
 async function terminateProcessGroup(pgid:number|undefined):Promise<boolean>{
  if(pgid===undefined)return true;
  if(!Number.isSafeInteger(pgid)||pgid<=1||pgid===process.pid)return false;
  const exists=()=>{try{process.kill(-pgid,0);return true;}catch(e){return (e as NodeJS.ErrnoException).code==='EPERM';}};
  if(!exists())return true;
- // Give a cleanup supervisor time to reap descendants in separate sessions.
+ // Give a cleanup supervisor time to reap descendants in separate sessions; an AI worker
+ // stops its detached attempt groups within AI_WORKER_GRACE_MS of SIGTERM.
  try{process.kill(pgid,'SIGTERM');}catch(e){if((e as NodeJS.ErrnoException).code!=='ESRCH')return false;}
- for(let attempt=0;attempt<80;attempt++){if(!exists())return true;await new Promise(r=>setTimeout(r,25));}
+ for(let attempt=0;attempt<(AI_WORKER_GRACE_MS+2000)/25;attempt++){if(!exists())return true;await new Promise(r=>setTimeout(r,25));}
  try{process.kill(-pgid,'SIGKILL');}catch(e){if((e as NodeJS.ErrnoException).code!=='ESRCH')return false;}
  for(let attempt=0;attempt<80;attempt++){if(!exists())return true;await new Promise(r=>setTimeout(r,25));}
  return !exists();
@@ -77,7 +88,7 @@ async function terminateProcessGroup(pgid:number|undefined):Promise<boolean>{
 /** Local trusted API. No executable, path or repair parameter is taken from a request. */
 export class ScanProcessingStore {
  private closed=false;
- constructor(private projects:FileSavedProjectStorage,private captures:CaptureStore,readonly directory:string,private runner:ScanRunner,private timeoutMs=runner.jobTimeoutMs??600000){if(!Number.isSafeInteger(timeoutMs)||timeoutMs<1||timeoutMs>1800000)throw new Error('Invalid job timeout');}
+ constructor(private projects:FileSavedProjectStorage,private captures:CaptureStore,readonly directory:string,private runner:ScanRunner,private timeoutMs=runner.jobTimeoutMs??600000){if(!Number.isSafeInteger(timeoutMs)||timeoutMs<1||timeoutMs>AI_CLEANUP_JOB_MS)throw new Error('Invalid job timeout');}
  private folder(r:Request){return join(this.directory,r.captureId,'scan-processing');}
  private queue(){return queueFor(this.directory);}
  /** Inspect, remove and re-create under one guard so concurrent recoverers cannot delete a fresh owner's lock. */
@@ -108,14 +119,14 @@ export class ScanProcessingStore {
    // unrelated live process after a crash between record and lock release.
    if(owner.projectId&&owner.captureId){
     try{
-     const record=ScanProcessingJobSchema.parse(JSON.parse((await readBoundedCaptureFile(join(this.directory,owner.captureId,'scan-processing',`${owner.jobId}.json`),65536)).toString('utf8')));
+     const record=ScanProcessingJobSchema.parse(JSON.parse((await readBoundedCaptureFile(join(this.directory,owner.captureId,'scan-processing',`${owner.jobId}.json`),JOB_RECORD_BYTES)).toString('utf8')));
      if(record.status==='succeeded'||record.status==='failed')return true;
     }catch{ /* unreadable record: fall through to pid and age */ }
    }
    try{process.kill(owner.pid,0);}catch(e){return (e as NodeJS.ErrnoException).code==='ESRCH';}
-   // No job can run past the 30-minute wall-clock ceiling, so an older lock
-   // cannot belong to live work whatever its pid now is.
-   try{return Date.now()-(await stat(lock)).mtimeMs>1860000;}catch{return false;}
+   // A live owner is waited out until no job could still be running (60 minutes with the AI step);
+   // past that the lock cannot belong to live work, whatever its pid now is.
+   try{return Date.now()-(await stat(lock)).mtimeMs>EXECUTION_LOCK_MS;}catch{return false;}
   }
   // No readable owner yet: only stale once it is clearly not a lock being created right now.
   try{return Date.now()-(await stat(lock)).mtimeMs>60000;}catch{return false;}
@@ -143,7 +154,7 @@ export class ScanProcessingStore {
    let files:string[]=[];
    try{files=await readdir(join(this.directory,captureId,'scan-processing'));}catch{continue;}
    for(const file of files.filter(name=>name.endsWith('.json'))){
-    try{entries.push(indexEntry(ScanProcessingJobSchema.parse(JSON.parse((await readBoundedCaptureFile(join(this.directory,captureId,'scan-processing',file),65536)).toString('utf8')))));}catch{ /* a torn record is not an index entry */ }
+    try{entries.push(indexEntry(ScanProcessingJobSchema.parse(JSON.parse((await readBoundedCaptureFile(join(this.directory,captureId,'scan-processing',file),JOB_RECORD_BYTES)).toString('utf8')))));}catch{ /* a torn record is not an index entry */ }
    }
   }
   return entries;
@@ -211,6 +222,8 @@ export class ScanProcessingStore {
  private adoptAuthorize(entry:QueueEntry,authorize?:()=>Promise<void>){
   if(authorize&&this.queue().pending.includes(entry))entry.authorize=authorize;
  }
+ /** Close-ups a job uses when none are named: the AI step looks at all of them (up to 24). */
+ private defaultStillCount(){return this.runner.cleanup?.adapter==='ai-tweak'?MAX_DETAIL_STILLS_PER_CAPTURE:4;}
  private pipelineMatches(job:ScanProcessingJob){
   return this.runner.cleanup?!!job.pipelineStages&&job.correctionAdapter===this.runner.cleanup.adapter:!job.pipelineStages;
  }
@@ -305,7 +318,7 @@ export class ScanProcessingStore {
      if(followUp)continue;
      // Any other request joins a running job only if its snapshot is still the
      // current selection: a deleted or newly added close-up needs a fresh job.
-     const effective=params.stillIds??retainedStills.slice(-4).map(s=>s.id);
+     const effective=params.stillIds??retainedStills.slice(-this.defaultStillCount()).map(s=>s.id);
      if(!job.detailStills||!sameIdSet(job.detailStills.map(s=>s.id),effective))continue;
     }
     if(sameStillRequest(entry.stillIds,params.stillIds)){this.adoptAuthorize(entry,authorize);return {job:structuredClone(job)};}
@@ -324,7 +337,7 @@ export class ScanProcessingStore {
    // satisfy new requests.
    if(!this.pipelineMatches(job))continue;
    if(this.runner.cleanup){
-    const effective=params.stillIds??retainedStills.slice(-4).map(s=>s.id);
+    const effective=params.stillIds??retainedStills.slice(-this.defaultStillCount()).map(s=>s.id);
     if(!sameIdSet((job.detailStills??[]).map(s=>s.id),effective))continue;
    }
    return {job:structuredClone(job)};
@@ -354,10 +367,10 @@ export class ScanProcessingStore {
  private async acquireExecutionLock(lock:string,signal:AbortSignal){
   // A filesystem lock serializes separate host instances; the in-process
   // queue has already serialized this process. The wait is bounded by a
-  // little over the 30-minute job ceiling: staleLock reclaims terminal or
-  // over-age locks long before that, so expiry means fail this job rather
+  // little over the longest job (EXECUTION_LOCK_MS): staleLock reclaims
+  // terminal or over-age locks by then, so expiry means fail this job rather
   // than block every later job forever.
-  const deadline=Date.now()+1860000;
+  const deadline=Date.now()+EXECUTION_LOCK_MS+60000;
   for(;;){
    try{await mkdir(lock,{mode:0o700});return;}catch(e){if((e as NodeJS.ErrnoException).code!=='EEXIST')throw e;}
    // A crashed owner must not block the queue forever; a live owner is waited out.
@@ -380,8 +393,9 @@ export class ScanProcessingStore {
     const stillStore=new DetailStillStore(this.projects,this.directory);
     const {stills}=await stillStore.listRetainedDetailStills(r.projectId,r.captureId);
     // Still bytes are snapshotted when the job starts, so close-ups that
-    // arrived while it waited are included. Default: the newest four.
-    const ids=entry.stillIds??stills.slice(-4).map(s=>s.id);
+    // arrived while it waited are included. Default: the newest four, or
+    // every retained close-up when the AI step runs.
+    const ids=entry.stillIds??stills.slice(-this.defaultStillCount()).map(s=>s.id);
     cleanup={source:capture.original,stills:[]};
     for(const id of ids){
      try{cleanup.stills.push(await stillStore.loadRetainedDetailStill(r.projectId,r.captureId,id));}
@@ -420,7 +434,7 @@ export class ScanProcessingStore {
   try{await write(temp,Buffer.from(JSON.stringify({pid:process.pid,jobId,pgid,projectId:owner?.projectId,captureId:owner?.captureId})));await rename(temp,join(lock,'owner.json'));}finally{await rm(temp,{force:true});}
  }
  private async execute(r:Request,job:ScanProcessingJob,mesh:Buffer,metersPerUnit:number,controller:AbortController,authorize?:()=>Promise<void>,cleanup?:CleanupSnapshot,materials:Record<string,Buffer>={}){
-  const timer=setTimeout(()=>controller.abort('deadline-exceeded'),this.timeoutMs);let staging:string|undefined,registrationFailed=false;
+  const deadlineAt=Date.now()+this.timeoutMs,timer=setTimeout(()=>controller.abort('deadline-exceeded'),this.timeoutMs);let staging:string|undefined,registrationFailed=false;
   let activeStage:NonNullable<ScanProcessingJob['failureStage']>=cleanup?'import':'repair';
   try{
    staging=await mkdtemp(join(this.folder(r),'.work-'));
@@ -447,7 +461,8 @@ export class ScanProcessingStore {
      const destination=join(this.folder(r),job.jobId);await mkdir(destination,{mode:0o700});
      for(const name of adviceNames)await write(join(destination,name),await readBoundedCaptureFile(join(adviceOutput,name),8*1024*1024));
      await sync(destination);job.artifacts=artifacts;const advise=job.pipelineStages!.find(s=>s.kind==='advise')!;advise.status='succeeded';advise.finishedAt=now();await this.persist(r,job);
-    },register);
+    },register,deadlineAt);
+    if(result.aiTweak)job.aiTweak=result.aiTweak;
     activeStage='publish';measured=result.measured;extraNames=result.names;extraReport={conversion:result.conversion,correction:result.correction,detailStills:job.detailStills};
     await write(join(output,'report.json'),Buffer.from(JSON.stringify(result.repair)));
    }else for(const stage of job.stages){
@@ -520,7 +535,7 @@ export class ScanProcessingStore {
  }
  private async readRecord(r:Request,jobId:string):Promise<ScanProcessingJob>{
   let job:ScanProcessingJob;
-  try{job=ScanProcessingJobSchema.parse(JSON.parse((await readBoundedCaptureFile(join(this.folder(r),`${jobId}.json`),65536)).toString('utf8')));}catch(e){if((e as NodeJS.ErrnoException).code==='ENOENT')throw new ScanProcessingFailure('not-found');throw new ScanProcessingFailure('processing-unavailable');}
+  try{job=ScanProcessingJobSchema.parse(JSON.parse((await readBoundedCaptureFile(join(this.folder(r),`${jobId}.json`),JOB_RECORD_BYTES)).toString('utf8')));}catch(e){if((e as NodeJS.ErrnoException).code==='ENOENT')throw new ScanProcessingFailure('not-found');throw new ScanProcessingFailure('processing-unavailable');}
   // The caller's revision is not re-checked: the job pins the revision
   // resolved at enqueue, and reads keep working after later project edits.
   if(job.jobId!==jobId||job.projectId!==r.projectId||job.captureId!==r.captureId)throw new ScanProcessingFailure('not-found');
