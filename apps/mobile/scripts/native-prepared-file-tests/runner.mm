@@ -26,7 +26,7 @@ static void Require(BOOL ok,NSString *why){if(!ok){fprintf(stderr,"FAIL %s\n",wh
 // production disabled and holds no prints:approve scope, so well-shaped
 // requests must fail closed over the wire and wrong shapes locally.
 - (void)productionChecks:(void(^)(void))done {
- NSDictionary *project=config[@"prepared"][@"project"],*expected=config[@"prepared"][@"jobs"].firstObject,*pairing=STMReadPairing(nil);
+ NSDictionary *project=config[@"prepared"][@"project"],*expected=[config[@"prepared"][@"jobs"] firstObject],*pairing=STMReadPairing(nil);
  NSString *base=[NSString stringWithFormat:@"/v1/saved-projects/%@/prepared-jobs/%@?projectRevision=%@",project[@"id"],expected[@"jobId"],project[@"revision"]];
  NSData *source=[@"synthetic source" dataUsingEncoding:NSUTF8StringEncoding];
  NSString *sha=STMHash(source);NSURL *url=STMArtifactURL(sha);
