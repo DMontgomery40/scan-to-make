@@ -27,16 +27,18 @@ function texts(tree: Tree) {
 function button(tree: Tree, name: string) {
   return tree.root.find(
     n =>
-      n.props.accessibilityRole === 'button' &&
-      n.props.accessibilityLabel === name &&
+      (n.props.accessibilityRole === 'button' ||
+        String(n.type) === 'STMActionButton') &&
+      (n.props.accessibilityLabel ?? n.props.spokenLabel) === name &&
       typeof n.props.onPress === 'function',
   );
 }
 const hasButton = (tree: Tree, name: string) =>
   tree.root.findAll(
     n =>
-      n.props.accessibilityRole === 'button' &&
-      n.props.accessibilityLabel === name &&
+      (n.props.accessibilityRole === 'button' ||
+        String(n.type) === 'STMActionButton') &&
+      (n.props.accessibilityLabel ?? n.props.spokenLabel) === name &&
       typeof n.props.onPress === 'function',
     { deep: false },
   ).length > 0;
@@ -48,7 +50,11 @@ async function press(tree: Tree, name: string) {
 async function type(tree: Tree, label: string, value: string) {
   await act(async () => {
     tree.root
-      .find(n => n.type === TextInput && n.props.accessibilityLabel === label)
+      .find(
+        n =>
+          n.type === TextInput &&
+          (n.props.accessibilityLabel ?? n.props.spokenLabel) === label,
+      )
       .props.onChangeText(value);
   });
 }
@@ -152,7 +158,7 @@ test('a known product reference is sent with the check and compared per side', a
   expect(
     tree.root.findAll(
       n =>
-        n.props.accessibilityLabel ===
+        (n.props.accessibilityLabel ?? n.props.spokenLabel) ===
         'Longest side: scan 61.4 mm, real 60.6 mm, 0.8 mm larger',
     ).length,
   ).toBeGreaterThan(0);
@@ -366,8 +372,9 @@ test('the hero view fits the gallery it is in, not the whole window', async () =
     StyleSheet.flatten(
       tree.root.findAll(
         n =>
-          n.props.accessibilityLabel?.startsWith?.('Cleaned-up scan,') &&
-          typeof n.props.onPress === 'function',
+          (n.props.accessibilityLabel ?? n.props.spokenLabel)?.startsWith?.(
+            'Cleaned-up scan,',
+          ) && typeof n.props.onPress === 'function',
         { deep: false },
       )[0]!.props.style,
     );
@@ -402,8 +409,10 @@ test('a cleaned-up scan offers Send to printer only when printing is set up', as
     const { tree } = await render(services, { onPrint });
     const send = tree.root.findAll(
       n =>
-        n.props.accessibilityRole === 'button' &&
-        n.props.accessibilityLabel === 'Send to printer' &&
+        (n.props.accessibilityRole === 'button' ||
+          String(n.type) === 'STMActionButton') &&
+        (n.props.accessibilityLabel ?? n.props.spokenLabel) ===
+          'Send to printer' &&
         typeof n.props.onPress === 'function',
       { deep: false },
     );

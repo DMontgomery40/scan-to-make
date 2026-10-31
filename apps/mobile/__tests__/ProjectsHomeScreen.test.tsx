@@ -24,12 +24,15 @@ const texts = (tree: Tree) =>
 const buttons = (tree: Tree) =>
   tree.root.findAll(
     n =>
-      n.props.accessibilityRole === 'button' &&
+      (n.props.accessibilityRole === 'button' ||
+        String(n.type) === 'STMActionButton') &&
       typeof n.props.onPress === 'function',
     { deep: false },
   );
 const labelled = (tree: Tree, label: string) =>
-  buttons(tree).filter(n => n.props.accessibilityLabel === label);
+  buttons(tree).filter(
+    n => (n.props.accessibilityLabel ?? n.props.spokenLabel) === label,
+  );
 
 const project = (id: string, object: string) => ({
   formatVersion: '0.2.0' as const,
@@ -185,8 +188,8 @@ test('with no projects, home explains the first scan; Scan something asks the na
   expect(sheet.findAllByType(ScrollView)).toHaveLength(1);
   const field = tree.root.find(
     n =>
-      n.props.accessibilityLabel === 'What are you scanning?' &&
-      n.props.onChangeText,
+      (n.props.accessibilityLabel ?? n.props.spokenLabel) ===
+        'What are you scanning?' && n.props.onChangeText,
   );
   await act(async () => field.props.onChangeText('  Thing '));
   await act(async () =>
@@ -288,8 +291,12 @@ test('home and settings use only the plain words', async () => {
       [
         texts(t),
         ...t.root
-          .findAll(n => typeof n.props.accessibilityLabel === 'string')
-          .map(n => n.props.accessibilityLabel),
+          .findAll(
+            n =>
+              typeof (n.props.accessibilityLabel ?? n.props.spokenLabel) ===
+              'string',
+          )
+          .map(n => n.props.accessibilityLabel ?? n.props.spokenLabel),
         ...t.root
           .findAll(n => typeof n.props.accessibilityHint === 'string')
           .map(n => n.props.accessibilityHint),
@@ -587,4 +594,74 @@ test('cards aren’t read while the pairing screen is open', async () => {
   });
   expect(reads).toBe(0);
   await act(async () => tree.unmount());
+});
+
+const captureStatus = (
+  status: { supported: boolean; lidar?: boolean } | Error,
+) =>
+  ({
+    status: jest.fn(async () => {
+      if (status instanceof Error) throw status;
+      return { ...status, activeRunID: null };
+    }),
+    drafts: jest.fn(async () => []),
+    start: jest.fn(),
+    stop: jest.fn(),
+  } as never);
+
+test('a device without LiDAR gets no Scan something and says why, once (KAN-186)', async () => {
+  const { tree } = await render({
+    capture: captureStatus({ supported: false, lidar: false }),
+  });
+  let shown = texts(tree);
+  expect(shown).toContain('This iPhone can’t scan.');
+  expect(shown).toContain(
+    'It has no LiDAR. Scanning needs an iPhone Pro or iPad Pro.',
+  );
+  expect(shown).not.toContain('Scan something');
+  // The first-scan steps would promise something this phone can't do.
+  expect(shown).not.toContain('Scan your first thing');
+  await act(async () => labelled(tree, 'Hide this note')[0]!.props.onPress());
+  shown = texts(tree);
+  expect(shown).not.toContain('It has no LiDAR');
+  expect(shown).toContain('No projects yet.');
+  await act(async () =>
+    labelled(tree, 'Why this iPhone can’t scan')[0]!.props.onPress(),
+  );
+  expect(texts(tree)).toContain('It has no LiDAR');
+});
+
+test('a device that can scan keeps Scan something, with its icon', async () => {
+  const { tree } = await render({
+    capture: captureStatus({ supported: true, lidar: true }),
+  });
+  const scan = tree.root.find(
+    n =>
+      String(n.type) === 'STMActionButton' &&
+      n.props.buttonTitle === 'Scan something',
+  );
+  expect(scan.props.systemImage).toBe('viewfinder');
+  expect(texts(tree)).not.toContain('can’t scan');
+});
+
+test('a status that can’t be read keeps the scan flow, which checks again itself', async () => {
+  const { tree } = await render({ capture: captureStatus(new Error('busy')) });
+  expect(texts(tree)).toContain('Scan something');
+  expect(texts(tree)).not.toContain('can’t scan');
+});
+
+test('settings is one glass icon button named Settings', async () => {
+  const { tree, onSettings } = await render();
+  const gear = tree.root.findAll(
+    n =>
+      String(n.type) === 'STMActionButton' &&
+      n.props.spokenLabel === 'Settings',
+  );
+  expect(gear).toHaveLength(1);
+  expect(gear[0]!.props).toMatchObject({
+    buttonTitle: '',
+    systemImage: 'gearshape',
+  });
+  await act(async () => gear[0]!.props.onPress());
+  expect(onSettings).toHaveBeenCalledTimes(1);
 });

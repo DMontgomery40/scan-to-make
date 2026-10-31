@@ -77,8 +77,9 @@ async function fixture(
 function button(tree: Renderer.ReactTestRenderer, name: string) {
   return tree.root.find(
     n =>
-      n.props.accessibilityRole === 'button' &&
-      n.props.accessibilityLabel === name &&
+      (n.props.accessibilityRole === 'button' ||
+        String(n.type) === 'STMActionButton') &&
+      (n.props.accessibilityLabel ?? n.props.spokenLabel) === name &&
       typeof n.props.onPress === 'function',
   );
 }
@@ -110,8 +111,9 @@ test('unpaired project can scan locally and keep a ready draft without upload', 
 const hasButton = (tree: Renderer.ReactTestRenderer, name: string) =>
   tree.root.findAll(
     n =>
-      n.props.accessibilityRole === 'button' &&
-      n.props.accessibilityLabel === name,
+      (n.props.accessibilityRole === 'button' ||
+        String(n.type) === 'STMActionButton') &&
+      (n.props.accessibilityLabel ?? n.props.spokenLabel) === name,
   ).length > 0;
 test('a device without LiDAR says scanning needs LiDAR and keeps Files import', async () => {
   const { tree, requests } = await fixture({ supported: false, lidar: false });

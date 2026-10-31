@@ -133,3 +133,31 @@ test('Android keeps its existing action control', async () => {
     Platform.OS = original;
   }
 });
+
+test('only the native UIButton is an accessibility element (KAN-187)', async () => {
+  let tree!: ReactTestRenderer.ReactTestRenderer;
+  await act(async () => {
+    tree = ReactTestRenderer.create(
+      <Button
+        label="Scan something"
+        systemImage="viewfinder"
+        onPress={() => {}}
+      />,
+    );
+  });
+  const host = nativeButton(tree).props;
+  // Role, label and state on this wrapper made VoiceOver and XCUITest find
+  // the same button three times; the UIButton carries them natively.
+  expect(host.accessible).toBe(false);
+  expect(host.accessibilityRole).toBeUndefined();
+  expect(host.accessibilityLabel).toBeUndefined();
+  expect(host.accessibilityState).toBeUndefined();
+  expect(host).toMatchObject({
+    buttonTitle: 'Scan something',
+    spokenLabel: 'Scan something',
+    systemImage: 'viewfinder',
+  });
+  await act(async () => {
+    tree.unmount();
+  });
+});

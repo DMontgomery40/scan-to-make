@@ -21,6 +21,11 @@ import type {
   SavedProject,
 } from '@scan-to-make/contracts/saved-project';
 import { companionNative, type CompanionNative } from '../companion/pairing';
+import {
+  objectCaptureNative,
+  type ObjectCaptureNative,
+} from '../capture/nativeObjectCapture';
+import { NativeActionButton } from '../ui/NativeActionButton';
 import { Button, Field, READABLE_WIDTH, type Tone } from '../ui/components';
 import { colors, radius, space, type } from '../ui/theme';
 import {
@@ -76,6 +81,13 @@ const MAX_POLLS = 180;
 const GAP = 14;
 // The Scan something bar: a 56 pt button inside 7 pt of padding.
 const BAR_HEIGHT = 70;
+/**
+ * Whether this device can scan, from the native capture status (the same
+ * check as RetainedCaptures). Scan something is hidden only when that status
+ * says no. Without the module, or when the status call fails, the scan flow
+ * keeps its own "couldn't check" handling.
+ */
+export type ScanSupport = 'checking' | 'supported' | 'no-lidar' | 'unsupported';
 const BAR_GAP = space.sm;
 const SIDE = 20;
 
@@ -87,6 +99,7 @@ export function ProjectsHomeScreen({
   result,
   services,
   pairing = companionNative(),
+  capture = objectCaptureNative(),
   pairingKey = 0,
   paused = false,
   creating,
@@ -101,6 +114,8 @@ export function ProjectsHomeScreen({
   result: ListProjectsResult | null;
   services: ScanServices;
   pairing?: CompanionNative;
+  /** Native Object Capture, asked once whether this device can scan. */
+  capture?: ObjectCaptureNative | null;
   /** Changes when pairing may have changed, so the pill is read again. */
   pairingKey?: number;
   /** True while the pairing screen is open over home. */
@@ -123,6 +138,33 @@ export function ProjectsHomeScreen({
     Record<string, ProjectOverview | null>
   >({});
   const [naming, setNaming] = useState(false);
+  const [scan, setScan] = useState<ScanSupport>(
+    capture ? 'checking' : 'supported',
+  );
+  // The "can't scan" note can be tucked away behind an ⓘ by the title.
+  const [noteHidden, setNoteHidden] = useState(false);
+  useEffect(() => {
+    if (!capture) return;
+    let current = true;
+    capture
+      .status()
+      .then(
+        status =>
+          status.supported
+            ? 'supported'
+            : status.lidar === false
+            ? 'no-lidar'
+            : 'unsupported',
+        () => 'supported' as const,
+      )
+      .then(next => {
+        if (current) setScan(next);
+      });
+    return () => {
+      current = false;
+    };
+  }, [capture]);
+  const cannotScan = scan === 'no-lidar' || scan === 'unsupported';
   const [refreshing, setRefreshing] = useState(false);
   // Bumped by pull to refresh and coming back to the app.
   const [round, setRound] = useState(0);
@@ -290,22 +332,50 @@ export function ProjectsHomeScreen({
         <View style={styles.column}>
           <View style={styles.topBar}>
             <MacPill state={mac} onPress={openPairing} />
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Settings"
-              onPress={onSettings}
-              hitSlop={8}
-              style={({ pressed }) => [
-                styles.circle,
-                pressed && styles.pressed,
-              ]}
-            >
-              <Text style={styles.gear}>⚙︎</Text>
-            </Pressable>
+            {Platform.OS === 'ios' ? (
+              <NativeActionButton
+                label=""
+                systemImage="gearshape"
+                accessibilityLabel="Settings"
+                onPress={onSettings}
+              />
+            ) : (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Settings"
+                onPress={onSettings}
+                hitSlop={8}
+                style={({ pressed }) => [
+                  styles.circle,
+                  pressed && styles.pressed,
+                ]}
+              >
+                <Text style={styles.gear}>⚙︎</Text>
+              </Pressable>
+            )}
           </View>
-          <Text accessibilityRole="header" style={styles.largeTitle}>
-            Projects
-          </Text>
+          <View style={styles.titleRow}>
+            <Text accessibilityRole="header" style={styles.largeTitle}>
+              Projects
+            </Text>
+            {cannotScan && noteHidden ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`Why ${deviceName()} can’t scan`}
+                onPress={() => setNoteHidden(false)}
+                hitSlop={10}
+                style={({ pressed }) => [
+                  styles.info,
+                  pressed && styles.pressed,
+                ]}
+              >
+                <Text style={styles.infoText}>i</Text>
+              </Pressable>
+            ) : null}
+          </View>
+          {cannotScan && !noteHidden ? (
+            <CannotScanNote reason={scan} onHide={() => setNoteHidden(true)} />
+          ) : null}
           {!result ? (
             <Text style={[type.body, styles.gapTop]}>
               Opening your projects…
@@ -319,7 +389,11 @@ export function ProjectsHomeScreen({
               <Button label="Try again" onPress={onRetry} />
             </View>
           ) : empty ? (
-            <EmptyState windowHeight={height} />
+            scan === 'supported' ? (
+              <EmptyState windowHeight={height} />
+            ) : cannotScan && noteHidden ? (
+              <Text style={[type.body, styles.gapTop]}>No projects yet.</Text>
+            ) : null
           ) : (
             <View style={styles.grid}>
               {result.entries.map(({ id, result: entry }) =>
@@ -356,16 +430,19 @@ export function ProjectsHomeScreen({
           },
         ]}
       >
-        <View style={styles.glassBar}>
-          <Button
-            label="Scan something"
-            accessibilityHint="Name the object, then scan it with LiDAR."
-            onPress={() => {
-              onNaming?.();
-              setNaming(true);
-            }}
-          />
-        </View>
+        {scan === 'supported' ? (
+          <View style={styles.glassBar}>
+            <Button
+              label="Scan something"
+              systemImage="viewfinder"
+              accessibilityHint="Name the object, then scan it with LiDAR."
+              onPress={() => {
+                onNaming?.();
+                setNaming(true);
+              }}
+            />
+          </View>
+        ) : null}
       </View>
       <NameSheet
         visible={naming}
@@ -541,6 +618,52 @@ function Stage({
   );
 }
 
+function deviceName() {
+  return Platform.OS === 'ios' && Platform.isPad ? 'this iPad' : 'this iPhone';
+}
+
+/** Shown instead of Scan something when the device can't scan. */
+function CannotScanNote({
+  reason,
+  onHide,
+}: {
+  reason: ScanSupport;
+  onHide: () => void;
+}) {
+  const device = deviceName();
+  const title =
+    reason === 'no-lidar'
+      ? `${device[0].toUpperCase()}${device.slice(1)} can’t scan.`
+      : 'Scanning isn’t available here.';
+  const body =
+    reason === 'no-lidar'
+      ? 'It has no LiDAR. Scanning needs an iPhone Pro or iPad Pro.'
+      : 'Scanning needs an iPhone Pro or iPad Pro with LiDAR.';
+  return (
+    <View style={styles.note}>
+      <View
+        accessible
+        accessibilityLabel={`${title} ${body}`}
+        style={styles.grow}
+      >
+        <Text style={styles.noteText}>
+          <Text style={styles.noteTitle}>{title} </Text>
+          {body}
+        </Text>
+      </View>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Hide this note"
+        onPress={onHide}
+        hitSlop={10}
+        style={({ pressed }) => [styles.noteClose, pressed && styles.pressed]}
+      >
+        <Text style={styles.noteCloseText}>✕</Text>
+      </Pressable>
+    </View>
+  );
+}
+
 const STEPS = [
   [
     'Walk around it with your iPhone',
@@ -560,9 +683,21 @@ function EmptyState({ windowHeight }: { windowHeight: number }) {
   return (
     <View>
       <View style={[styles.stage, styles.hero, { height: hero }]}>
+        <View style={styles.floor}>
+          {[0, 1, 2, 3, 4].map(line => (
+            <View
+              key={line}
+              style={[
+                styles.floorLine,
+                { top: `${(line * line + line) * 4.5}%` },
+              ]}
+            />
+          ))}
+        </View>
         <View
           style={[styles.ring, { width: hero * 0.67, height: hero * 0.67 }]}
         />
+        <View style={styles.heroShadow} />
         <View style={styles.heroShape} />
       </View>
       <Text style={styles.emptyTitle}>Scan your first thing</Text>
@@ -770,15 +905,75 @@ const styles = StyleSheet.create({
     borderRadius: 28,
     marginTop: space.lg,
   },
+  // A clay clip resting on a lit floor, like mockup 01's empty state.
+  floor: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: '42%',
+    backgroundColor: 'rgba(255,255,255,0.03)',
+  },
+  floorLine: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: 'rgba(255,255,255,0.09)',
+  },
+  heroShadow: {
+    position: 'absolute',
+    width: 120,
+    height: 22,
+    borderRadius: 60,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    transform: [{ translateY: 52 }],
+  },
   heroShape: {
     position: 'absolute',
-    width: 92,
-    height: 92,
-    borderRadius: 26,
+    width: 96,
+    height: 104,
+    borderTopLeftRadius: 40,
+    borderTopRightRadius: 36,
     borderWidth: 20,
-    borderColor: colors.accent,
-    transform: [{ rotate: '-9deg' }],
+    borderBottomWidth: 0,
+    borderColor: colors.clay,
+    transform: [{ translateY: -6 }],
   },
+  titleRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
+  info: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    borderWidth: 1.5,
+    borderColor: colors.muted,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 4,
+  },
+  infoText: { fontSize: 14, fontWeight: '700', color: colors.muted },
+  note: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: space.md,
+    marginTop: space.md,
+    padding: space.lg,
+    borderRadius: radius.lg,
+    backgroundColor: colors.surface,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.line,
+  },
+  noteText: { ...type.body, color: colors.muted },
+  noteTitle: { fontWeight: '700', color: colors.ink },
+  noteClose: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.background,
+  },
+  noteCloseText: { fontSize: 13, fontWeight: '700', color: colors.muted },
   emptyTitle: {
     fontSize: 22,
     lineHeight: 27,

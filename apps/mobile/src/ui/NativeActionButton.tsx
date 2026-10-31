@@ -14,6 +14,7 @@ type NativeProps = ViewProps & {
   primary: boolean;
   compact: boolean;
   disabled: boolean;
+  systemImage?: string;
   onPress: () => void;
   onSizeChange: (event: NativeSyntheticEvent<{ height: number }>) => void;
 };
@@ -27,6 +28,7 @@ export function NativeActionButton({
   disabled = false,
   accessibilityLabel = label,
   accessibilityHint,
+  systemImage,
 }: {
   label: string;
   onPress: () => void;
@@ -35,9 +37,12 @@ export function NativeActionButton({
   disabled?: boolean;
   accessibilityLabel?: string;
   accessibilityHint?: string;
+  /** SF Symbol name. With an empty label the button is a round icon button. */
+  systemImage?: string;
 }) {
   const { fontScale } = useWindowDimensions();
-  const minimumHeight = compact ? 48 : 56;
+  const iconOnly = !label && !!systemImage;
+  const minimumHeight = iconOnly ? 44 : compact ? 48 : 56;
   const [height, setHeight] = useState(minimumHeight);
   return (
     <NativeButton
@@ -47,26 +52,31 @@ export function NativeActionButton({
       primary={primary}
       compact={compact}
       disabled={disabled}
-      // UIKit exposes the actual UIButton to accessibility, not this wrapper.
+      systemImage={systemImage}
+      // Only the UIButton inside is an accessibility element: it carries the
+      // label, hint, button trait and disabled state. Accessibility props on
+      // this wrapper made VoiceOver find the same button three times (KAN-187).
       accessible={false}
-      accessibilityRole="button"
-      accessibilityLabel={accessibilityLabel}
-      accessibilityState={{ disabled }}
       onPress={() => {
         if (!disabled) {
           onPress();
         }
       }}
       onSizeChange={({ nativeEvent }) => {
+        if (iconOnly) return;
         if (Number.isFinite(nativeEvent.height) && nativeEvent.height > 0) {
           setHeight(Math.max(minimumHeight, Math.ceil(nativeEvent.height)));
         }
       }}
-      style={[
-        { height },
-        compact && styles.compact,
-        compact ? { width: 96 * fontScale } : undefined,
-      ]}
+      style={
+        iconOnly
+          ? { width: 44 * fontScale, height: 44 * fontScale }
+          : [
+              { height },
+              compact && styles.compact,
+              compact ? { width: 96 * fontScale } : undefined,
+            ]
+      }
     />
   );
 }

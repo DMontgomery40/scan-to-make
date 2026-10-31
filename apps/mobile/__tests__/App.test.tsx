@@ -57,9 +57,10 @@ function texts(tree: ReactTestRenderer.ReactTestRenderer): string[] {
 function press(tree: ReactTestRenderer.ReactTestRenderer, label: string) {
   const button = tree.root.find(
     n =>
-      n.props.accessibilityRole === 'button' &&
+      (n.props.accessibilityRole === 'button' ||
+        String(n.type) === 'STMActionButton') &&
       typeof n.props.onPress === 'function' &&
-      (n.props.accessibilityLabel === label ||
+      ((n.props.accessibilityLabel ?? n.props.spokenLabel) === label ||
         n.findAllByType(Text).some(t => t.props.children === label)),
   );
   return act(async () => {
@@ -71,10 +72,13 @@ function press(tree: ReactTestRenderer.ReactTestRenderer, label: string) {
 function openProject(tree: ReactTestRenderer.ReactTestRenderer, name: string) {
   const card = tree.root.find(
     n =>
-      n.props.accessibilityRole === 'button' &&
+      (n.props.accessibilityRole === 'button' ||
+        String(n.type) === 'STMActionButton') &&
       typeof n.props.onPress === 'function' &&
-      typeof n.props.accessibilityLabel === 'string' &&
-      n.props.accessibilityLabel.startsWith(`${name}, `),
+      typeof (n.props.accessibilityLabel ?? n.props.spokenLabel) === 'string' &&
+      (n.props.accessibilityLabel ?? n.props.spokenLabel).startsWith(
+        `${name}, `,
+      ),
   );
   return act(async () => {
     card.props.onPress();
@@ -116,7 +120,8 @@ test('a new project is saved from its name and opens its scans', async () => {
     const name = tree.root.find(
       n =>
         n.type === TextInput &&
-        n.props.accessibilityLabel === 'What are you scanning?',
+        (n.props.accessibilityLabel ?? n.props.spokenLabel) ===
+          'What are you scanning?',
     );
     await act(async () => name.props.onChangeText('  Desk lamp  '));
     await press(tree, 'Continue');
@@ -160,7 +165,8 @@ test('a failed create keeps the typed name and other projects', async () => {
     tree.root.find(
       n =>
         n.type === TextInput &&
-        n.props.accessibilityLabel === 'What are you scanning?',
+        (n.props.accessibilityLabel ?? n.props.spokenLabel) ===
+          'What are you scanning?',
     );
   await act(async () => name().props.onChangeText('Desk lamp'));
   await press(tree, 'Continue');
@@ -385,8 +391,11 @@ test('production wiring drives the real clients through the native bridges', asy
       tree.root
         .find(
           n =>
-            n.props.accessibilityRole === 'button' &&
-            n.props.accessibilityLabel?.startsWith('Use AirPods Pro 2 case') &&
+            (n.props.accessibilityRole === 'button' ||
+              String(n.type) === 'STMActionButton') &&
+            (n.props.accessibilityLabel ?? n.props.spokenLabel)?.startsWith(
+              'Use AirPods Pro 2 case',
+            ) &&
             typeof n.props.onPress === 'function',
         )
         .props.onPress();
@@ -408,7 +417,8 @@ test('production wiring drives the real clients through the native bridges', asy
       tree.root
         .find(
           n =>
-            n.props.accessibilityLabel === 'What does photo 1 show?' &&
+            (n.props.accessibilityLabel ?? n.props.spokenLabel) ===
+              'What does photo 1 show?' &&
             typeof n.props.onChangeText === 'function',
         )
         .props.onChangeText('USB-C port');
@@ -458,7 +468,9 @@ test('real-size edits survive moving to close-ups and back', async () => {
   );
   const field = (label: string) =>
     tree.root.find(
-      n => n.type === TextInput && n.props.accessibilityLabel === label,
+      n =>
+        n.type === TextInput &&
+        (n.props.accessibilityLabel ?? n.props.spokenLabel) === label,
     );
   let tree!: ReactTestRenderer.ReactTestRenderer;
   try {
@@ -804,7 +816,8 @@ test('a create that throws still lets you try again', async () => {
   const name = tree.root.find(
     n =>
       n.type === TextInput &&
-      n.props.accessibilityLabel === 'What are you scanning?',
+      (n.props.accessibilityLabel ?? n.props.spokenLabel) ===
+        'What are you scanning?',
   );
   await act(async () => name.props.onChangeText('Desk lamp'));
   await press(tree, 'Continue');
