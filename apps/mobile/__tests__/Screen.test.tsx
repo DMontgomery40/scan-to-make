@@ -159,7 +159,9 @@ test('on a wide window, content and the Save action stay in one centred, readabl
     .filter(
       v =>
         StyleSheet.flatten(v.props.style)?.maxWidth === READABLE_WIDTH + 48 &&
-        v.findAll(n => n.props.accessibilityLabel === 'Save').length > 0,
+        v.findAll(
+          n => (n.props.accessibilityLabel ?? n.props.spokenLabel) === 'Save',
+        ).length > 0,
     );
   expect(actions.length).toBeGreaterThan(0);
   // On a 1366 pt iPad window the Save action stays a phone-like width.

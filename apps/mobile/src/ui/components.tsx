@@ -118,10 +118,13 @@ export function Button({
   disabled,
   accessibilityHint,
   accessibilityLabel,
+  systemImage,
 }: {
   label: string;
   onPress: () => void;
   variant?: 'primary' | 'secondary';
+  /** iOS: an SF Symbol before the label. */
+  systemImage?: string;
   disabled?: boolean;
   accessibilityHint?: string;
   /** Spoken name when the visible label repeats across a list. */
@@ -137,6 +140,7 @@ export function Button({
         disabled={disabled}
         accessibilityHint={accessibilityHint}
         accessibilityLabel={accessibilityLabel}
+        systemImage={systemImage}
       />
     );
   }

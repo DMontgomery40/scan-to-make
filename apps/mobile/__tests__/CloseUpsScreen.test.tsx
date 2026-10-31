@@ -30,8 +30,9 @@ function texts(tree: Tree) {
 const buttons = (tree: Tree, name: string) =>
   tree.root.findAll(
     n =>
-      n.props.accessibilityRole === 'button' &&
-      n.props.accessibilityLabel === name &&
+      (n.props.accessibilityRole === 'button' ||
+        String(n.type) === 'STMActionButton') &&
+      (n.props.accessibilityLabel ?? n.props.spokenLabel) === name &&
       typeof n.props.onPress === 'function',
     { deep: false },
   );
@@ -45,7 +46,11 @@ async function press(tree: Tree, name: string) {
 async function label(tree: Tree, field: string, value: string) {
   await act(async () => {
     tree.root
-      .find(n => n.type === TextInput && n.props.accessibilityLabel === field)
+      .find(
+        n =>
+          n.type === TextInput &&
+          (n.props.accessibilityLabel ?? n.props.spokenLabel) === field,
+      )
       .props.onChangeText(value);
   });
 }
@@ -448,7 +453,8 @@ test('stored close-ups get verified thumbnails, downloading only uncached ones',
       .find(
         n =>
           n.props.accessibilityRole === 'imagebutton' &&
-          n.props.accessibilityLabel === 'Close-up 2' &&
+          (n.props.accessibilityLabel ?? n.props.spokenLabel) ===
+            'Close-up 2' &&
           typeof n.props.onPress === 'function',
       )
       .props.onPress();

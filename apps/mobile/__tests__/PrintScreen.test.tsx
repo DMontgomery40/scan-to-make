@@ -31,8 +31,9 @@ const texts = (tree: Tree) =>
 const find = (tree: Tree, role: string, name: string) =>
   tree.root.findAll(
     n =>
-      n.props.accessibilityRole === role &&
-      n.props.accessibilityLabel === name &&
+      (n.props.accessibilityRole === role ||
+        (role === 'button' && String(n.type) === 'STMActionButton')) &&
+      (n.props.accessibilityLabel ?? n.props.spokenLabel) === name &&
       typeof n.props.onPress === 'function',
     { deep: false },
   );
