@@ -241,8 +241,21 @@ export class PrinterHandoffRunner {
       }
       const sliced = await readFile(result.slicedPath);
       let updated = await store.recordArtifact(id, 'sliced', basename(result.slicedPath), sliced);
+      if (result.orientedStlPath !== inputStl) {
+        const oriented = await readFile(result.orientedStlPath);
+        updated = await store.recordArtifact(id, 'oriented', basename(result.orientedStlPath), oriented);
+      }
       updated = await store.setStatus(id, options.print === false ? 'sliced' : 'printed');
-      return {manifest: updated, result};
+      // Report persisted bundle paths, not the throwaway run directory.
+      const persisted: PrintRunResult = {
+        ...result,
+        stlPath: store.stlPath(updated),
+        orientedStlPath: updated.artifacts.oriented
+          ? join(store.directory(id), updated.artifacts.oriented.file)
+          : store.stlPath(updated),
+        slicedPath: join(store.directory(id), updated.artifacts.sliced!.file),
+      };
+      return {manifest: updated, result: persisted};
     } finally {
       await rm(workDirectory, {recursive: true, force: true}).catch(() => undefined);
     }

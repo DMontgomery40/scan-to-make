@@ -101,6 +101,21 @@ test('replacing bundle artifacts twice stays readable; claim requires ready', as
   await assert.rejects(store.read(created.id));
 });
 
+test('a new artifact key cannot overwrite a file owned by another bundle entry', async t => {
+  const f = await setup(t);
+  const store = new HandoffBundleStore(join(f.root, 'bundles-collide'));
+  const created = await store.create({stl, prompt: 'collide', backend: 'bambu-printer-mcp', selection});
+  await store.recordArtifact(created.id, 'notes', 'notes.txt', Buffer.from('first'));
+  const second = await store.recordArtifact(created.id, 'other', 'notes.txt', Buffer.from('second!!'));
+  assert.notEqual(second.artifacts.other.file, 'notes.txt');
+  const guarded = await store.recordArtifact(created.id, 'sneaky', 'clean.stl', Buffer.from('not the scan'));
+  assert.notEqual(guarded.artifacts.sneaky.file, 'clean.stl');
+  const read = await store.read(created.id);
+  assert.equal(read.artifacts.notes.byteLength, 5);
+  assert.equal(read.artifacts.other.byteLength, 8);
+  assert.equal(read.cleanStl.byteLength, stl.length);
+});
+
 test('elicitation relay never answers itself: timeout resolves cancel', async () => {
   const relay = new InMemoryElicitationRelay({timeoutMs: 20});
   const pending = relay.request({method: 'elicitation/create', params: {mode: 'form', message: 'confirm', requestedSchema: {type: 'object', properties: {}}}});
@@ -201,6 +216,12 @@ test('runBundle prints a claimed bundle and records the sliced artifact back', a
   assert.equal(outcome.manifest.status, 'printed');
   assert.equal(outcome.manifest.artifacts.sliced.file, 'sliced.3mf');
   assert.equal(outcome.result.print.dispatch, 'started');
+  assert.equal(outcome.result.stlPath, store.stlPath(outcome.manifest));
+  assert.equal(outcome.result.slicedPath, join(store.directory(bundle.id), outcome.manifest.artifacts.sliced.file));
+  assert.equal(outcome.result.orientedStlPath, join(store.directory(bundle.id), outcome.manifest.artifacts.oriented.file));
+  assert.ok((await readFile(outcome.result.slicedPath)).length > 0);
+  assert.ok((await readFile(outcome.result.orientedStlPath)).length > 0);
+  assert.ok(!outcome.result.slicedPath.includes('printer-handoff-run-'));
 });
 
 test('slicing the same bundle twice with different output bytes stays readable', async t => {

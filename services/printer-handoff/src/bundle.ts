@@ -128,14 +128,19 @@ export class HandoffBundleStore {
   }
   // Publishes replacement bytes under a digest-versioned name first, so the
   // manifest never points at bytes that fail its previous digest mid-swap.
-  private async publishReplacement(id: string, fileName: string, copy: Buffer, existing?: HandoffArtifact): Promise<HandoffArtifact> {
+  // A name already owned by another manifest entry is versioned the same
+  // way, so a new artifact key can never overwrite a sibling's file.
+  private async publishReplacement(
+    id: string, fileName: string, copy: Buffer, existing: HandoffArtifact | undefined, ownedFiles: ReadonlySet<string>,
+  ): Promise<HandoffArtifact> {
     const digest = sha256(copy);
     if (existing?.sha256 === digest && existing.byteLength === copy.length) return existing;
     let target = fileName;
-    if (existing) {
+    if (existing || ownedFiles.has(target)) {
       const dot = fileName.lastIndexOf('.');
       target = dot > 0 ? `${fileName.slice(0, dot)}-${digest.slice(0, 12)}${fileName.slice(dot)}` : `${fileName}-${digest.slice(0, 12)}`;
       safeBasename.parse(target);
+      if (ownedFiles.has(target)) throw new Error('Artifact file already in use');
     }
     await writeAtomically(join(this.directory(id), target), copy);
     return artifactFor(target, copy);
@@ -156,7 +161,8 @@ export class HandoffBundleStore {
     if (!Buffer.isBuffer(bytes) || bytes.length < 84 || bytes.length > MAX_STL_BYTES) throw new Error('Designed STL byte limit exceeded');
     const current = await this.read(id);
     const copy = Buffer.from(bytes);
-    const designedStl = await this.publishReplacement(id, 'designed.stl', copy, current.designedStl);
+    const owned = new Set([current.cleanStl.file, ...Object.values(current.artifacts).map(artifact => artifact.file)]);
+    const designedStl = await this.publishReplacement(id, 'designed.stl', copy, current.designedStl, owned);
     const next = handoffManifestSchema.parse({...current, designedStl, status: 'designed'});
     await this.writeManifest(next);
     return next;
@@ -169,7 +175,12 @@ export class HandoffBundleStore {
     if (!Buffer.isBuffer(bytes) || !bytes.length || bytes.length > MAX_STL_BYTES) throw new Error('Artifact byte limit exceeded');
     const current = await this.read(id);
     const copy = Buffer.from(bytes);
-    const artifact = await this.publishReplacement(id, fileName, copy, current.artifacts[name]);
+    const owned = new Set([
+      current.cleanStl.file,
+      ...(current.designedStl ? [current.designedStl.file] : []),
+      ...Object.entries(current.artifacts).filter(([key]) => key !== name).map(([, artifact]) => artifact.file),
+    ]);
+    const artifact = await this.publishReplacement(id, fileName, copy, current.artifacts[name], owned);
     const next = handoffManifestSchema.parse({...current, artifacts: {...current.artifacts, [name]: artifact}});
     await this.writeManifest(next);
     return next;
