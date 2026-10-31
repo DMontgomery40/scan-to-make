@@ -19,9 +19,9 @@ import { startCompanionServer } from '@scan-to-make/companion';
 import { repoRoot } from './repo-root.mjs';
 import { generateSyntheticUsdz } from './generate-synthetic-usdz.mjs';
 import { startFakePrinterMcp } from './fake-printer-mcp.mjs';
+import { python } from './resolve-python.mjs';
 
 const execFileAsync = promisify(execFile);
-const python = process.env.CAPTURE_TEST_PYTHON ?? 'python3';
 const blender = process.env.BLENDER;
 const scanRepairTool = join(repoRoot, 'tools/scan-repair/repair.py');
 const scanCorrectTool = join(repoRoot, 'tools/scan-correct/correct.py');
@@ -115,7 +115,7 @@ test(
     skip:
       (await blenderReady()) && (await pythonReady())
         ? false
-        : 'Requires Blender 5.0.1 (BLENDER) and pxr/Pillow (CAPTURE_TEST_PYTHON or python3 with usd-core)',
+        : 'Requires Blender 5.0.1 (BLENDER) and pxr/Pillow (python3 on PATH or CAPTURE_TEST_PYTHON)',
     timeout: 900_000,
   },
   async (t) => {

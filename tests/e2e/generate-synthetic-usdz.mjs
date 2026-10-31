@@ -6,8 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { repoRoot } from './repo-root.mjs';
-
-const python = process.env.CAPTURE_TEST_PYTHON ?? 'python3';
+import { python } from './resolve-python.mjs';
 const makeFixtures = join(
   repoRoot,
   'tools/capture-mesh-convert/make_fixtures.py'
