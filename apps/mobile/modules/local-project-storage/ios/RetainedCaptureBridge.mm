@@ -5,7 +5,7 @@
 #import <SceneKit/SceneKit.h>
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 #import "CompanionPairing.h"
-#import "ArtifactFiles.h"
+#import "ContentHash.h"
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/stat.h>

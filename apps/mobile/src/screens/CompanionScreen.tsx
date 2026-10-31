@@ -77,8 +77,8 @@ export function CompanionScreen({
   return (
     <Screen
       title="Your companion"
-      eyebrow="MAKE IT TOGETHER"
-      subtitle="Your computer does the making. Your projects stay with you."
+      eyebrow="CLEANUP ON YOUR COMPUTER"
+      subtitle="Your computer cleans up your scans. Your projects stay with you."
       onBack={busy ? undefined : onBack}
       footer={
         <Button
@@ -136,7 +136,7 @@ export function CompanionScreen({
                 onPress={() =>
                   run(
                     () => native.check(),
-                    'Connected. Your companion is ready to make a drawer design.',
+                    'Connected. Your companion is ready to clean up your scans.',
                   )
                 }
               />

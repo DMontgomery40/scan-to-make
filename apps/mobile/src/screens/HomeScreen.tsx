@@ -2,31 +2,20 @@ import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Button, Screen } from '../ui/components';
 import { colors, type } from '../ui/theme';
-import type { ProjectBrief } from '../project/projectBrief';
 
 export function HomeScreen({
   onCompanion,
-  onStartScan,
-  onNewProject,
-  onOpenBrief,
   onAbout,
-  brief,
   onProjects,
-  onDrawer,
 }: {
   onCompanion?: () => void;
-  onStartScan: () => void;
-  onNewProject: () => void;
-  onOpenBrief: () => void;
   onAbout: () => void;
-  brief: ProjectBrief | null;
   onProjects: () => void;
-  onDrawer: () => void;
 }) {
   return (
     <Screen
-      title="Make it fit."
-      subtitle="Something useful. Made for the things and spaces in your life."
+      title="Scan it true."
+      subtitle="LiDAR scans of real objects, cleaned up and true to size."
       accessory={
         <Pressable
           accessibilityRole="button"
@@ -42,52 +31,23 @@ export function HomeScreen({
         <View
           style={styles.art}
           accessible
-          accessibilityLabel="Illustration of an object and the space around it"
+          accessibilityLabel="Illustration of an object inside a scan grid"
         >
           <View style={styles.gridH} />
           <View style={styles.gridV} />
           <View style={styles.outline} />
           <View style={styles.circle} />
           <View style={styles.part} />
-          <Text style={styles.artLabel}>OBJECT + SPACE + YOUR IDEA</Text>
+          <Text style={styles.artLabel}>LIDAR SCAN + CLEANUP</Text>
         </View>
-        <Text style={styles.heroTitle}>Start with what’s around you.</Text>
+        <Text style={styles.heroTitle}>Start with the object.</Text>
         <Text style={styles.heroCopy}>
-          An awkward gap. A thing without a home. An idea that needs to fit.
+          Scan it with your iPhone. Your computer repairs holes and stray
+          geometry and checks the size.
         </Text>
-        <Button label="Describe a project" onPress={onNewProject} />
+        <Button label="Your projects" onPress={onProjects} />
       </View>
 
-      <Button
-        label="Your saved projects"
-        variant="secondary"
-        onPress={onProjects}
-      />
-      {brief ? (
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={`Open brief for ${
-            brief.object.trim() || 'Untitled project'
-          }`}
-          onPress={onOpenBrief}
-          style={({ pressed }) => [styles.draft, pressed && styles.pressed]}
-        >
-          <Text style={type.label}>CURRENT BRIEF</Text>
-          <Text style={type.heading} numberOfLines={2}>
-            {brief.object.trim() || 'Untitled project'}
-          </Text>
-          <Text style={type.caption} numberOfLines={2}>
-            {brief.addition.trim() || 'Continue describing your idea.'}
-          </Text>
-          <Text style={styles.link}>Continue project ↗</Text>
-        </Pressable>
-      ) : null}
-
-      <Button
-        label="Explore drawer organizer"
-        variant="secondary"
-        onPress={onDrawer}
-      />
       {onCompanion ? (
         <Button
           label="Connect your companion"
@@ -96,9 +56,9 @@ export function HomeScreen({
         />
       ) : null}
       <View style={styles.workflow}>
-        <Text style={type.label}>FROM REAL LIFE TO SOMETHING USEFUL</Text>
+        <Text style={type.label}>FROM OBJECT TO CLEAN MESH</Text>
         <View style={styles.steps}>
-          {['Scan the space', 'Describe the idea', 'Make it yours'].map(
+          {['Scan with LiDAR', 'Add close-ups', 'Clean up the mesh'].map(
             (label, i) => (
               <View key={label} style={styles.step}>
                 <Text style={styles.stepNumber}>0{i + 1}</Text>
@@ -108,24 +68,6 @@ export function HomeScreen({
           )}
         </View>
       </View>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel="Open cup-holder example"
-        onPress={onStartScan}
-        style={({ pressed }) => [styles.example, pressed && styles.pressed]}
-      >
-        <View style={styles.exampleIcon}>
-          <View style={styles.smallRing} />
-        </View>
-        <View style={styles.exampleText}>
-          <Text style={type.label}>EXPLORE A MEASURED EXAMPLE</Text>
-          <Text style={styles.exampleTitle}>Cup holder & cup</Text>
-          <Text style={type.caption}>
-            Four sizes. One clearer picture of fit.
-          </Text>
-        </View>
-        <Text style={styles.arrow}>↗</Text>
-      </Pressable>
     </Screen>
   );
 }
@@ -221,39 +163,4 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     color: colors.ink,
   },
-  example: {
-    borderTopWidth: 1,
-    borderColor: colors.line,
-    paddingTop: 20,
-    paddingBottom: 14,
-    flexDirection: 'row',
-    gap: 14,
-    alignItems: 'center',
-  },
-  exampleIcon: {
-    width: 48,
-    height: 56,
-    borderRadius: 14,
-    backgroundColor: colors.stone,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  smallRing: {
-    width: 27,
-    height: 27,
-    borderRadius: 14,
-    borderWidth: 5,
-    borderColor: colors.stoneStroke,
-  },
-  exampleText: { flex: 1, gap: 5 },
-  exampleTitle: { ...type.body, fontWeight: '600' },
-  arrow: { fontSize: 24, color: colors.ink },
-  draft: {
-    borderRadius: 20,
-    padding: 20,
-    backgroundColor: colors.surface,
-    gap: 9,
-  },
-  link: { color: colors.accent, fontWeight: '600', marginTop: 7 },
-  pressed: { opacity: 0.7 },
 });

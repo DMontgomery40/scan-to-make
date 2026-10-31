@@ -7,7 +7,7 @@ import { mkdtemp, writeFile, readFile, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { RemoteAuthStore } from '../../../../services/companion/dist/remote-auth.js';
-import { startGenerationServer } from '../../../../services/companion/dist/generation.js';
+import { startCompanionServer } from '../../../../services/companion/dist/server.js';
 const root = await mkdtemp(join(tmpdir(), 'scan-pairing-fixture-'));
 const auth = await RemoteAuthStore.create(join(root, 'auth'), {
   host: 'fixture.example.ts.net',
@@ -17,12 +17,11 @@ const nativeFaults = process.env.SCAN_NATIVE_FAULTS === '1';
 const faultKey = nativeFaults ? randomBytes(32).toString('hex') : null;
 if (faultKey)
   await writeFile(join(root, 'fault-key'), faultKey, { mode: 0o600 });
-const preparedEnabled = process.env.SCAN_PREPARED_FIXTURE === '1';
 const captureEnabled = process.env.SCAN_CAPTURE_FIXTURE === '1';
 const stillsProcessingEnabled =
   process.env.SCAN_STILLS_PROCESSING_FIXTURE === '1';
 let capture;
-if (captureEnabled || preparedEnabled || stillsProcessingEnabled) {
+if (captureEnabled || stillsProcessingEnabled) {
   const { FileSavedProjectStorage } = await import(
     '../../../../services/project/dist/index.js'
   );
@@ -143,7 +142,6 @@ if (captureEnabled || preparedEnabled || stillsProcessingEnabled) {
         context: 'Protocol fixture',
         addition: 'Cradle',
       },
-      fit: null,
     });
     const { captureId } = await captures.importCapture({
       projectId: 'scan-fixture',
@@ -167,154 +165,8 @@ if (captureEnabled || preparedEnabled || stillsProcessingEnabled) {
       { mode: 0o600 },
     );
   }
-  if (preparedEnabled) {
-    const { PreparedJobStore } = await import(
-      '../../../../services/companion/dist/prepared-jobs.js'
-    );
-    const { createSavedProjects } = await import(
-      '../../../../packages/contracts/dist/saved-project.js'
-    );
-    const { fileURLToPath } = await import('node:url');
-    const fit = JSON.parse(
-      await readFile(
-        new URL(
-          '../../../../packages/contracts/fixtures/tapered-holder.json',
-          import.meta.url,
-        ),
-      ),
-    );
-    const projects = createSavedProjects(storage);
-    await projects.create({
-      id: fit.id,
-      brief: {
-        object: 'Synthetic cup',
-        context: 'Protocol fixture',
-        addition: 'Holder',
-      },
-      fit,
-    });
-    const hash = bytes => createHash('sha256').update(bytes).digest('hex');
-    const settings = Buffer.from(
-      JSON.stringify({
-        fixture: true,
-        model: 'p1s',
-        nozzle: 0.4,
-        material: 'PLA',
-      }),
-    );
-    await writeFile(join(root, 'settings.json'), settings, { mode: 0o600 });
-    const producedDirectory = process.env.SCAN_PRODUCED_FIXTURE_DIR;
-    const design = producedDirectory
-      ? await readFile(join(producedDirectory, 'source.stl'))
-      : Buffer.from('synthetic accepted design identity');
-    const binding = {
-      sourceFit: fit,
-      artifact: {
-        sha256: hash(design),
-        byteLength: design.length,
-        mediaType: 'model/stl',
-      },
-    };
-    await projects.change(fit.id, 0, { kind: 'attach-preview', ...binding });
-    await projects.change(fit.id, 1, { kind: 'accept-preview', ...binding });
-    capture.preparedJobs = new PreparedJobStore(
-      storage,
-      join(root, 'prepared'),
-      {
-        inspection: {
-          process: {
-            command: process.execPath,
-            args: [
-              fileURLToPath(
-                new URL(
-                  '../../../../services/companion/tests/fixtures/inspection-server.mjs',
-                  import.meta.url,
-                ),
-              ),
-              'ok',
-              join(root, 'inspection.jsonl'),
-            ],
-          },
-        },
-      },
-    );
-    const jobs = [];
-    const count = Number(process.env.SCAN_PREPARED_FIXTURE_COUNT ?? 2);
-    if (!Number.isInteger(count) || count < 2 || count > 50)
-      throw Error('Fixture count must be 2–50');
-    for (let index = 0; index < count; index++) {
-      const mediaType = index % 2 ? 'text/x.gcode' : 'model/3mf';
-      // Protocol fixture bytes, not a slicer output or physical-print claim.
-      const printable = Buffer.from(
-        'isolated native protocol fixture ' + mediaType,
-      );
-      const result = await capture.preparedJobs.prepare({
-        projectId: fit.id,
-        projectRevision: 2,
-        printable,
-        printableArtifact: {
-          sha256: hash(printable),
-          byteLength: printable.length,
-          mediaType,
-        },
-        selection: {
-          printerId: 'synthetic',
-          model: 'p1s',
-          plateIndex: 0,
-          nozzleDiameters: [0.4],
-          bedType: 'textured_plate',
-          materials: [{ projectSlot: 0, material: 'PLA', physicalTray: 254 }],
-          slicerSettingsSha256: hash(settings),
-        },
-      });
-      jobs.push({ jobId: result.jobId, job: result.job });
-    }
-    if (producedDirectory) {
-      // Replay retained operator-produced evidence through the real read APIs.
-      // This fixture does not claim to rerun slicing or inspection.
-      const record = await readFile(join(producedDirectory, 'job.json'));
-      const job = JSON.parse(record.toString('utf8'));
-      if (
-        !/^[a-f0-9-]{36}$/.test(job.id) ||
-        job.projectId !== fit.id ||
-        job.projectRevision !== 2 ||
-        !job.production ||
-        job.designArtifact?.sha256 !== binding.artifact.sha256 ||
-        job.designArtifact?.mediaType !== binding.artifact.mediaType ||
-        job.designArtifact?.byteLength !== binding.artifact.byteLength
-      )
-        throw Error('Retained produced fixture does not match its source');
-      const folder = join(root, 'prepared', job.id);
-      await mkdir(folder);
-      await writeFile(join(folder, 'job.json'), record);
-      for (const name of [
-        'source.stl',
-        'settings.json',
-        'production.json',
-        'printable.bin',
-      ])
-        await writeFile(
-          join(folder, name),
-          await readFile(join(producedDirectory, name)),
-        );
-      // Reopen verifies every retained source/settings/manifest/printable identity.
-      await capture.preparedJobs.loadPreparedJob(job.id);
-      jobs.push({ jobId: job.id, job });
-    }
-    const snapshot = await storage.read(fit.id);
-    await writeFile(
-      join(root, 'prepared.json'),
-      JSON.stringify({
-        project: JSON.parse(snapshot),
-        snapshot,
-        etag: '"' + hash(snapshot) + '"',
-        jobs,
-      }),
-      { mode: 0o600 },
-    );
-  }
 }
-const backend = await startGenerationServer({
+const backend = await startCompanionServer({
   port: 0,
   remoteAuth: auth,
   capture,
@@ -323,18 +175,9 @@ await writeFile(join(root, 'mode'), 'ok', { mode: 0o600 });
 async function invite() {
   const value = await auth.createPairing(
     'fixture@example.test',
-    preparedEnabled
+    captureEnabled || stillsProcessingEnabled
       ? [
           'generation:health',
-          'projects:read',
-          'projects:write',
-          'prepared-jobs:read',
-          'prepared-jobs:prepare',
-        ]
-      : captureEnabled || stillsProcessingEnabled
-      ? [
-          'generation:health',
-          'generation:create',
           'projects:read',
           'projects:write',
           'captures:read',

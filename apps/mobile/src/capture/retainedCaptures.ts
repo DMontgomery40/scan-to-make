@@ -19,6 +19,8 @@ export type CaptureDestination = {
   context: string | null;
 };
 export type RetainedCapture = { captureId: string; binding: CaptureBinding };
+/** The companion's acknowledgment of the exact project bytes it holds. */
+export type ProjectAcknowledgment = { etag: string; snapshot: string };
 export type CaptureState = {
   etag?: string;
   snapshot?: string;

@@ -15,7 +15,6 @@ import {
   type ViewStyle,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import type { Verdict } from '../spike/d004';
 import { colors, radius, space, type } from './theme';
 import { NativeActionButton } from './NativeActionButton';
 
@@ -171,41 +170,6 @@ export function Card({
   style?: StyleProp<ViewStyle>;
 }) {
   return <View style={[styles.card, style]}>{children}</View>;
-}
-
-const VERDICT_STYLE: Record<
-  Verdict,
-  { fg: ColorValue; bg: ColorValue; text: string }
-> = {
-  pass: { fg: colors.pass, bg: colors.passSoft, text: 'Pass' },
-  fail: { fg: colors.fail, bg: colors.failSoft, text: 'Fail' },
-  inconclusive: {
-    fg: colors.pending,
-    bg: colors.pendingSoft,
-    text: 'Not yet known',
-  },
-};
-
-export function VerdictPill({ verdict }: { verdict: Verdict }) {
-  const v = VERDICT_STYLE[verdict];
-  return (
-    <View style={[styles.pill, { backgroundColor: v.bg }]}>
-      <Text style={[styles.pillText, { color: v.fg }]}>{v.text}</Text>
-    </View>
-  );
-}
-
-export function Stat({ label, value }: { label: string; value: string }) {
-  return (
-    <View
-      style={styles.stat}
-      accessible
-      accessibilityLabel={`${label}: ${value}`}
-    >
-      <Text style={type.label}>{label.toUpperCase()}</Text>
-      <Text style={type.stat}>{value}</Text>
-    </View>
-  );
 }
 
 export type Tone = 'neutral' | 'pass' | 'fail' | 'pending' | 'accent';
@@ -379,7 +343,6 @@ const styles = StyleSheet.create({
     paddingVertical: space.xs,
   },
   pillText: { fontSize: 13, fontWeight: '700' },
-  stat: { flexBasis: '45%', flexGrow: 1, gap: space.xs },
   notice: { borderRadius: radius.md, padding: space.lg, gap: space.sm },
   noticeTitle: { fontSize: 15, lineHeight: 21, fontWeight: '700' },
   field: { gap: 6 },

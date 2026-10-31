@@ -9,8 +9,10 @@ import {
   type ScanArtifactName,
 } from '@scan-to-make/contracts/scan-processing';
 import type { SavedProjects } from '@scan-to-make/contracts/saved-project';
-import type { CaptureFile } from '../capture/retainedCaptures';
-import type { ProjectAcknowledgment } from '../prepared/preparedFiles';
+import type {
+  CaptureFile,
+  ProjectAcknowledgment,
+} from '../capture/retainedCaptures';
 
 export type { ScanProcessingJob, ScanReference, ScanArtifactName, ProjectAcknowledgment };
 export { SCAN_VIEW_NAMES };

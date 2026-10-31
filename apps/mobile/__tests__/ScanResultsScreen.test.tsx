@@ -60,7 +60,6 @@ async function render(
     onBack: jest.fn(),
     onCompanion: jest.fn(),
     onCloseUps: jest.fn(),
-    onMake: jest.fn(),
   };
   let tree!: Tree;
   await act(async () => {
@@ -117,7 +116,7 @@ test('starting follows queued and running progress to results, then stops pollin
       syntheticJob('succeeded'),
     ],
   });
-  const { tree, onMake, onCloseUps } = await render(services);
+  const { tree, onCloseUps } = await render(services);
   await press(tree, 'Check my scan');
   expect(texts(tree)).toContain('Waiting for your companion');
   expect(await services.jobs.load(PROJECT_ID, CAPTURE_ID)).toBe(JOB_ID);
@@ -132,9 +131,7 @@ test('starting follows queued and running progress to results, then stops pollin
   expect(shown).toContain('Add the real size below');
   await advance(10000);
   expect(calls.filter(c => c.startsWith('status'))).toHaveLength(2);
-  await press(tree, 'Choose what to make');
   await press(tree, 'Add close-up photos');
-  expect(onMake).toHaveBeenCalled();
   expect(onCloseUps).toHaveBeenCalled();
   await act(async () => tree.unmount());
 });
