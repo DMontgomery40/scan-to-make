@@ -1,6 +1,6 @@
 # Scan to Make
 
-An open-source iPhone and iPad app that scans a real object with LiDAR and cleans up the scan's defects. In David's words: "this app is so you can scan an object USING LIDAR on iphone. and then smooth out defects and such. but really anything after that is already built and downloaded by 10k people a month and it's my bambu mcp. later we may add mcp 3d printer. actually, may as well just have that be an option from the get go."
+An open-source iPhone and iPad app that scans a real object with LiDAR and cleans up the scan's defects. Product scope: "this app is so you can scan an object USING LIDAR on iphone. and then smooth out defects and such. but really anything after that is already built and downloaded by 10k people a month and it's my bambu mcp. later we may add mcp 3d printer. actually, may as well just have that be an option from the get go."
 
 The app captures the object (LiDAR Object Capture, plus close-up stills of details). A companion on your own computer converts the capture and repairs it: it fills holes, removes stray geometry, measures it and renders check views. Slicing and printing belong to [bambu-printer-mcp](https://github.com/DMontgomery40/bambu-printer-mcp) or [mcp-3D-printer-server](https://github.com/DMontgomery40/mcp-3D-printer-server). The handoff of the clean mesh to those servers isn't built yet; today you share the repaired STL from the scan results.
 
@@ -21,6 +21,7 @@ The app requires iOS 27. Scanning needs a device with LiDAR (iPhone Pro or iPad 
 
 ## Still open
 
+- **Hosted cleanup (design only).** Modal + R2 worker scope for users without a local Linux companion: [`docs/hosted-service.md`](docs/hosted-service.md). Nothing deployed.
 - **Physical-device capture.** The capture, import, cleanup and close-up flows are exercised in tests and the iOS Simulator. A full run on a physical LiDAR iPhone over a live private tailnet is still to be recorded.
 - **Printer handoff.** Sending the clean mesh to bambu-printer-mcp or mcp-3D-printer-server is designed separately and not built.
 - **Android.** Android reports capture as unavailable.
