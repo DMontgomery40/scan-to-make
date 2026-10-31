@@ -22,39 +22,37 @@ export interface CompanionNative {
 export function companionNative(): CompanionNative | undefined {
   return NativeModules.CompanionPairing;
 }
+// Plain words only: what happened, and the one thing to do about it.
+export const EXPIRED =
+  'That code expired. Show a new one on your Mac: click the Scan to Make icon in the menu bar → Add a phone.';
+export const UNREACHABLE =
+  'Your phone can’t reach your Mac. Are they on the same Wi-Fi, or is your VPN on?';
 const errors: Record<string, string> = {
   'invalid-invitation':
-    'Use the HTTPS address and fresh pairing code from your companion. Don’t enter an account password.',
-  'expired-invitation':
-    'This invitation has expired. Ask your companion for a new one.',
+    'That isn’t a Scan to Make code. Point at the code in Scan to Make on your Mac.',
+  'expired-invitation': EXPIRED,
   unauthorized:
-    'This code or device pairing was rejected or revoked. Get a new invitation from your companion and connect again.',
-  forbidden:
-    'Access was denied. Check that the companion allows this device, and that you’re on the network or Tailscale account it expects.',
+    'Your Mac turned this phone down, or the code was already used. Show a new code on your Mac and scan it.',
+  forbidden: 'Your Mac turned this phone down. Show a new code and scan it.',
   'rate-limited':
-    'Too many pairing attempts. Wait a minute, then use a fresh invitation.',
+    'Too many tries. Wait a minute, then scan a new code from your Mac.',
   'certificate-changed':
-    'Your computer’s companion presented a different certificate. Scan a new QR code from it.',
+    'This Mac looks different from last time. Pair again to be safe.',
   certificate:
-    'The companion’s HTTPS certificate could not be verified. Check the exact address and ask the host owner to repair HTTPS. Certificate checks stay enabled.',
+    'Your phone couldn’t check that this is your Mac. Show a new code on your Mac and scan it.',
   'wrong-host':
-    'The companion redirected to another address. Check the original HTTPS address; credentials were not forwarded.',
-  network:
-    'Couldn’t reach your companion. Check that it’s running and that your phone can reach your computer (the same Wi-Fi, your VPN or Tailscale), then retry.',
-  timeout:
-    'The companion took too long to respond. Check its connection and retry.',
-  unavailable:
-    'The companion is temporarily unavailable. Wait briefly and retry; your projects are unchanged.',
+    'That code sent your phone somewhere else, so nothing was shared. Scan the code on your Mac again.',
+  network: UNREACHABLE,
+  timeout: UNREACHABLE,
+  unavailable: 'Your Mac is busy right now. Try again in a moment.',
   'secure-storage':
-    'Secure pairing storage is unavailable. Unlock this device and retry. If an invitation was consumed, request a new one.',
-  'pairing-required':
-    'Connect this device again using a fresh invitation from your companion.',
-  'pairing-changed':
-    'The companion connection changed. Your draft is still here; retry with the current connection.',
+    'This phone couldn’t store the pairing. Unlock it and try again.',
+  'pairing-required': 'Pair this phone with your Mac again.',
+  'pairing-changed': 'Your Mac changed while this was running. Try again.',
   'invalid-response':
-    'This companion returned an incompatible response. Check its version and this device’s permissions before pairing again.',
-  cancelled: 'Connection cancelled. Your projects are unchanged.',
-  busy: 'A connection request is already running. Wait for it to finish.',
+    'Your Mac answered in a way this app doesn’t understand. Update Scan to Make on both, then pair again.',
+  cancelled: 'Cancelled. Nothing changed.',
+  busy: 'Still working on the last request. Try again in a moment.',
 };
 export function pairingError(error: unknown): string | undefined {
   return errors[(error as { code?: string })?.code ?? ''];

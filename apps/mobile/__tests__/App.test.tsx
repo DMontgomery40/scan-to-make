@@ -4,7 +4,7 @@
 
 import React from 'react';
 import ReactTestRenderer, { act } from 'react-test-renderer';
-import { Linking, Text } from 'react-native';
+import { Alert, Linking, Modal, Text } from 'react-native';
 import App from '../App';
 import {
   createSavedProjects,
@@ -721,7 +721,7 @@ test('opening close-ups waits for a gallery download the results screen left run
   }
 });
 
-test('a scantomake://pair link opens the companion screen', async () => {
+test('a scantomake://pair link opens Find your Mac', async () => {
   const link =
     'scantomake://pair?v=1&u=https%3A%2F%2Fhost.example.ts.net&c=' +
     'Q'.repeat(32) +
@@ -732,7 +732,9 @@ test('a scantomake://pair link opens the companion screen', async () => {
   await act(async () => {
     tree = ReactTestRenderer.create(<App repository={testStore()} />);
   });
-  expect(texts(tree)).toContain('Your companion');
+  expect(texts(tree)).toContain(
+    'Pairing with your Mac works in the iPhone and iPad app.',
+  );
   await act(async () => tree.unmount());
   jest.restoreAllMocks();
 });
@@ -781,22 +783,33 @@ test('a pairing link delivered twice at launch pairs only once', async () => {
     handlers.forEach(handler => handler({ url: link }));
     await new Promise<void>(resolve => setTimeout(resolve, 5));
   });
-  expect(pair).toHaveBeenCalledTimes(1);
-  // The repeat is dropped, not held as a second link to replace the pairing.
-  expect(texts(tree).join(' ')).not.toContain('Pair with a new computer?');
-  // Opening the same link again later is a deliberate retry.
-  pair.mockClear();
-  native.CompanionPairing.status = async () => ({ state: 'disconnected' });
-  const later = Date.now() + 5000;
-  jest.spyOn(Date, 'now').mockReturnValue(later);
-  await act(async () => {
-    handlers.forEach(handler => handler({ url: link }));
-    await new Promise<void>(resolve => setTimeout(resolve, 5));
-  });
-  expect(texts(tree).join(' ')).toContain('Pair with a new computer?');
-  await act(async () => tree.unmount());
-  delete native.CompanionPairing;
-  jest.restoreAllMocks();
+  try {
+    expect(pair).toHaveBeenCalledTimes(1);
+    // The repeat is dropped, not held as a second link to replace the pairing.
+    expect(texts(tree).join(' ')).not.toContain('Pair with another Mac?');
+    expect(texts(tree).join(' ')).toContain('Connected to your Mac');
+    // The phone is paired now, as the native pairing reports.
+    native.CompanionPairing.status = async () => ({
+      state: 'paired',
+      baseUrl: 'https://host.example.ts.net',
+    });
+    await press(tree, 'Open projects');
+    expect(texts(tree).join(' ')).toContain('Projects');
+    // Opening the same link again later is a deliberate retry, and asks first.
+    pair.mockClear();
+    const later = Date.now() + 5000;
+    jest.spyOn(Date, 'now').mockReturnValue(later);
+    await act(async () => {
+      handlers.forEach(handler => handler({ url: link }));
+      await new Promise<void>(resolve => setTimeout(resolve, 5));
+    });
+    expect(texts(tree).join(' ')).toContain('Pair with another Mac?');
+    expect(pair).not.toHaveBeenCalled();
+  } finally {
+    await act(async () => tree.unmount());
+    delete native.CompanionPairing;
+    jest.restoreAllMocks();
+  }
 });
 
 test('a create that throws still lets you try again', async () => {
@@ -830,4 +843,243 @@ test('a create that throws still lets you try again', async () => {
   expect(texts(tree)).not.toContain(
     'The project couldn’t be saved. Your other projects are unchanged.',
   );
+});
+
+test('with no Mac paired the app opens on Find your Mac; otherwise on Projects', async () => {
+  const native = require('react-native').NativeModules;
+  const cases: [() => Promise<unknown>, string][] = [
+    [
+      async () => ({ state: 'disconnected' }),
+      'Point at the code in Scan to Make on your Mac',
+    ],
+    [
+      async () => ({ state: 'expired' }),
+      'Point at the code in Scan to Make on your Mac',
+    ],
+    [
+      async () => ({ state: 'paired', baseUrl: 'https://mac.example.ts.net' }),
+      'Scan your first thing',
+    ],
+    // A pairing that can't be read never locks anyone out of their projects.
+    [
+      async () => {
+        throw { code: 'secure-storage' };
+      },
+      'Scan your first thing',
+    ],
+  ];
+  try {
+    for (const [status, shown] of cases) {
+      native.CompanionPairing = {
+        status,
+        pair: jest.fn(),
+        check: async () => ({ state: 'paired' }),
+        disconnect: jest.fn(),
+        cancel: async () => {},
+      };
+      let tree!: ReactTestRenderer.ReactTestRenderer;
+      await act(async () => {
+        tree = ReactTestRenderer.create(<App repository={testStore()} />);
+      });
+      expect(texts(tree)).toContain(shown);
+      await act(async () => tree.unmount());
+    }
+  } finally {
+    delete native.CompanionPairing;
+  }
+});
+
+const macLink = () =>
+  `scantomake://pair?${new URLSearchParams({
+    v: '1',
+    u: 'https://mac.example.ts.net',
+    c: 'Q'.repeat(32),
+    e: String(Date.now() + 300_000),
+  })}`;
+const viewfinders = (tree: ReactTestRenderer.ReactTestRenderer) =>
+  tree.root.findAll(n => String(n.type) === 'STMQRScannerView');
+// Linking.getInitialURL is React Native's own jest.fn, so a value set by an
+// earlier test outlives restoreAllMocks. Say what each launch opens with.
+const launchLink = (url: string | null) =>
+  jest.spyOn(Linking, 'getInitialURL').mockResolvedValue(url as string);
+
+test('Scan something after pairing opens the name sheet once, not on every return home', async () => {
+  const { NativeModules, TextInput } = require('react-native');
+  const mac = { state: 'paired', baseUrl: 'https://mac.example.ts.net' };
+  let paired = false;
+  NativeModules.CompanionPairing = {
+    status: async () => (paired ? mac : { state: 'disconnected' }),
+    pair: jest.fn(async () => {
+      paired = true;
+      return mac;
+    }),
+    check: async () => mac,
+    disconnect: jest.fn(),
+    cancel: async () => {},
+  };
+  launchLink(null);
+  // A LiDAR iPhone, so Connected offers Scan something.
+  NativeModules.NativeCaptureCoordinator = {
+    status: async () => ({ supported: true, lidar: true }),
+  };
+  const naming = (tree: ReactTestRenderer.ReactTestRenderer) =>
+    tree.root.findAll(
+      n =>
+        n.type === TextInput &&
+        n.props.accessibilityLabel === 'What are you scanning?',
+    ).length > 0;
+  let tree!: ReactTestRenderer.ReactTestRenderer;
+  try {
+    await act(async () => {
+      tree = ReactTestRenderer.create(<App repository={testStore()} />);
+    });
+    await act(async () =>
+      viewfinders(tree)[0].props.onCode({ nativeEvent: { value: macLink() } }),
+    );
+    expect(texts(tree)).toContain('Connected to your Mac');
+    await press(tree, 'Scan something');
+    expect(naming(tree)).toBe(true);
+    await press(tree, 'Cancel');
+    expect(naming(tree)).toBe(false);
+    // Home unmounts for Settings; coming back must not ask again.
+    await press(tree, 'Settings');
+    await press(tree, 'Back');
+    expect(texts(tree)).toContain('Scan your first thing');
+    expect(naming(tree)).toBe(false);
+  } finally {
+    await act(async () => tree.unmount());
+    delete NativeModules.CompanionPairing;
+    delete NativeModules.NativeCaptureCoordinator;
+    jest.restoreAllMocks();
+  }
+});
+
+test('pairing another Mac from Settings comes back to Settings', async () => {
+  const { NativeModules } = require('react-native');
+  const mac = { state: 'paired', baseUrl: 'https://mac.example.ts.net' };
+  NativeModules.CompanionPairing = {
+    status: async () => mac,
+    pair: jest.fn(async () => mac),
+    check: async () => mac,
+    disconnect: jest.fn(),
+    cancel: async () => {},
+  };
+  launchLink(null);
+  // Confirms "Pair another Mac?".
+  jest
+    .spyOn(Alert, 'alert')
+    .mockImplementation((_title, _message, buttons) =>
+      buttons?.[1]?.onPress?.(),
+    );
+  let tree!: ReactTestRenderer.ReactTestRenderer;
+  try {
+    await act(async () => {
+      tree = ReactTestRenderer.create(<App repository={testStore()} />);
+    });
+    await press(tree, 'Settings');
+    await press(tree, 'Pair or forget your Mac');
+    await press(tree, 'Pair another Mac');
+    await act(async () =>
+      viewfinders(tree)[0].props.onCode({ nativeEvent: { value: macLink() } }),
+    );
+    expect(texts(tree)).toContain('Connected to your Mac');
+    expect(texts(tree)).not.toContain('Open projects');
+    await press(tree, 'Done');
+    expect(texts(tree)).toContain('About Scan to Make');
+    expect(viewfinders(tree)).toHaveLength(0);
+  } finally {
+    await act(async () => tree.unmount());
+    delete NativeModules.CompanionPairing;
+    jest.restoreAllMocks();
+  }
+});
+
+test('a link at launch, before the pairing is read, runs one camera only', async () => {
+  const { NativeModules } = require('react-native');
+  // The pairing is read after the link arrives, so the sheet opens first.
+  NativeModules.CompanionPairing = {
+    status: () =>
+      new Promise(resolve =>
+        setTimeout(() => resolve({ state: 'disconnected' }), 10),
+      ),
+    pair: () => new Promise(() => {}),
+    check: jest.fn(),
+    disconnect: jest.fn(),
+    cancel: async () => {},
+  };
+  launchLink(macLink());
+  let tree!: ReactTestRenderer.ReactTestRenderer;
+  try {
+    await act(async () => {
+      tree = ReactTestRenderer.create(<App repository={testStore()} />);
+    });
+    await act(
+      async () => new Promise<void>(resolve => setTimeout(resolve, 30)),
+    );
+    // Find your Mac is the first screen and the sheet is over it.
+    expect(viewfinders(tree)).toHaveLength(2);
+    expect(viewfinders(tree).filter(v => v.props.active).length).toBe(0);
+  } finally {
+    await act(async () => tree.unmount());
+    delete NativeModules.CompanionPairing;
+    launchLink(null);
+    jest.restoreAllMocks();
+  }
+});
+
+test('a link after forgetting the Mac in Settings still reaches Find your Mac', async () => {
+  const { NativeModules } = require('react-native');
+  const mac = { state: 'paired', baseUrl: 'https://mac.example.ts.net' };
+  let paired = true;
+  NativeModules.CompanionPairing = {
+    status: async () => (paired ? mac : { state: 'disconnected' }),
+    pair: jest.fn(async () => {
+      paired = true;
+      return mac;
+    }),
+    check: async () => mac,
+    disconnect: jest.fn(async () => {
+      paired = false;
+      return { state: 'disconnected' };
+    }),
+    cancel: async () => {},
+  };
+  launchLink(null);
+  const handlers: ((event: { url: string }) => void)[] = [];
+  jest.spyOn(Linking, 'addEventListener').mockImplementation(((
+    _type: string,
+    handler: (event: { url: string }) => void,
+  ) => {
+    handlers.push(handler);
+    return { remove: () => {} };
+  }) as never);
+  // Confirms "Forget this Mac?".
+  jest
+    .spyOn(Alert, 'alert')
+    .mockImplementation((_title, _message, buttons) =>
+      buttons?.[1]?.onPress?.(),
+    );
+  let tree!: ReactTestRenderer.ReactTestRenderer;
+  try {
+    await act(async () => {
+      tree = ReactTestRenderer.create(<App repository={testStore()} />);
+    });
+    await press(tree, 'Settings');
+    await press(tree, 'Pair or forget your Mac');
+    await press(tree, 'Forget this Mac');
+    await act(async () => {});
+    // Close the sheet: Settings stays on screen, and nothing is paired now.
+    await act(async () => tree.root.findByType(Modal).props.onRequestClose());
+    expect(texts(tree)).toContain('About Scan to Make');
+    expect(viewfinders(tree)).toHaveLength(0);
+    await act(async () => {
+      handlers.forEach(handler => handler({ url: macLink() }));
+    });
+    expect(NativeModules.CompanionPairing.pair).toHaveBeenCalledTimes(1);
+    expect(texts(tree)).toContain('Connected to your Mac');
+  } finally {
+    await act(async () => tree.unmount());
+    delete NativeModules.CompanionPairing;
+    jest.restoreAllMocks();
+  }
 });
