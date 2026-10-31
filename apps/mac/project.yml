@@ -1,0 +1,64 @@
+name: ScanToMake
+options:
+  bundleIdPrefix: com.scantomake
+  deploymentTarget:
+    macOS: '13.0'
+packages:
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle
+    exactVersion: 2.9.3
+settings:
+  base:
+    SWIFT_VERSION: '5.0'
+    DEVELOPMENT_TEAM: X7F5F9LR24
+    CODE_SIGN_STYLE: Automatic
+    ENABLE_HARDENED_RUNTIME: YES
+    MACOSX_DEPLOYMENT_TARGET: '13.0'
+    MARKETING_VERSION: 0.1.0
+    CURRENT_PROJECT_VERSION: 1
+    STM_VARIANT: ''
+    STM_USE_LEGACY_COMPANION: YES
+    SPARKLE_FEED_URL: ''
+    SPARKLE_PUBLIC_KEY: ''
+targets:
+  AgentKit:
+    type: framework
+    platform: macOS
+    sources: [AgentKit]
+    settings:
+      GENERATE_INFOPLIST_FILE: YES
+  ScanToMake:
+    type: application
+    platform: macOS
+    sources: [App]
+    dependencies:
+      - target: AgentKit
+      - package: Sparkle
+    settings:
+      PRODUCT_NAME: Scan to Make
+      PRODUCT_BUNDLE_IDENTIFIER: com.scantomake.mac$(STM_VARIANT)
+      INFOPLIST_FILE: Config/Info.plist
+      CODE_SIGN_ENTITLEMENTS: Config/App.entitlements
+      ENABLE_USER_SCRIPT_SANDBOXING: NO
+    postBuildScripts:
+      - name: Embed companion and launch agent
+        script: 'bash "$SRCROOT/scripts/embed.sh"'
+        basedOnDependencyAnalysis: false
+  AgentKitTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: Tests
+        excludes: ['*.mjs']
+    dependencies:
+      - target: AgentKit
+    settings:
+      GENERATE_INFOPLIST_FILE: YES
+schemes:
+  ScanToMake:
+    build:
+      targets:
+        ScanToMake: all
+        AgentKitTests: [test]
+    test:
+      targets: [AgentKitTests]

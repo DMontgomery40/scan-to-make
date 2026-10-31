@@ -6,6 +6,11 @@ This directory is **MIT** licensed; see [LICENSE](LICENSE). Implementation uses 
 
 ## What It Checks
 
+0. **`apps/mac` (`mac` distribution scope)**
+   - Exact runtime downloads, source URLs, retained licence checksums, pinned Sparkle revision and production npm closure from `apps/mac/distribution.json`.
+   - Generated Mac notices freshness. The payload build additionally checks actual packaged tool folders, Python distributions and npm packages, and rejects stale/extra runtimes.
+   - GPL worker references remain prohibited by the existing app boundary check. The Mac bundle excludes the GPL cleanup workers, pillow-heif and Blender; external workers retain separate-process execution.
+
 1. **`apps/mobile` (`app` scope)**
    - Production npm dependency closure from `apps/mobile/package-lock.json` and installed `node_modules` metadata/licence files (dev-only dependencies are excluded).
    - Native iOS CocoaPods from `apps/mobile/ios/Podfile.lock`, resolving real podspecs (including React Native's `rncore_facades.rb` / `rndeps_facades.rb` real third-party podspecs, codegen podspec templates, local module `LICENSE.txt` files, and checksum-pinned `verifiedCocoaPodsSpecs` in `policy.json`).
@@ -21,6 +26,7 @@ This directory is **MIT** licensed; see [LICENSE](LICENSE). Implementation uses 
 
 - **`allowlists.app`**: `0BSD`, `Apache-2.0`, `BSD-2-Clause`, `BSD-3-Clause`, `BSL-1.0`, `ISC`, `MIT`, `MPL-2.0`, `Unlicense`, `Zlib`.
 - **`allowlists.server`**: Same permissive set plus `PSF-2.0` / `Python-2.0`.
+- **`allowlists.mac`**: Explicit desktop distribution inventory; also includes the upstream CPython library licences, SQLite's public-domain dedication and OpenUSD's actual TOST-1.0 licence. Its denied set matches `app`; no copyleft exception is added.
 - **`isolatedGplTools`**: Permits `GPL-3.0-only` / `GPL-3.0-or-later` **only** for explicitly listed isolated server process folders (`tools/scan-correct`, `tools/scan-repair`), and never if imported from `apps/`.
 - **`denied`**: Blocks `GPL`/`LGPL` in `app`, `AGPL` everywhere, `NON-COMMERCIAL` everywhere, and `UNKNOWN` everywhere unless explicitly listed in `exemptions` with a non-empty `reason`.
 
@@ -38,6 +44,13 @@ Regenerate or check `apps/mobile/THIRD_PARTY_NOTICES.md`:
 ```sh
 python3 tools/licence-audit/audit.py notices --write
 python3 tools/licence-audit/audit.py notices --check
+```
+
+Mac notices are generated separately and checked by the repository audit:
+
+```sh
+python3 tools/licence-audit/mac_distribution.py --write-notices
+python3 tools/licence-audit/mac_distribution.py --payload apps/mac/Payload
 ```
 
 Run synthetic fixture unit tests:
