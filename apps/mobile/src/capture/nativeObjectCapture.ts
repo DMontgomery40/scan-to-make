@@ -48,6 +48,38 @@ export class NativeObjectCaptureClient {
       draft => draft.origin.projectId === id,
     );
   }
+  /**
+   * Scan something opens the camera before the project has a name, so naming
+   * it afterwards moves the project on one version. The scan follows it there
+   * only if the name is all that changed; anything else still needs choosing.
+   */
+  private async named(id: string, origin: CaptureDestination) {
+    const current = await this.captures.destination(id).catch(() => null);
+    if (
+      !current ||
+      current.snapshot === origin.snapshot ||
+      current.projectId !== origin.projectId ||
+      current.context !== origin.context
+    )
+      return null;
+    try {
+      const before = JSON.parse(origin.snapshot);
+      const after = JSON.parse(current.snapshot);
+      const unnamed = (project: { revision: number; brief: object }) =>
+        JSON.stringify({
+          ...project,
+          revision: 0,
+          brief: { ...project.brief, object: '' },
+        });
+      return before.brief?.object === '' &&
+        after.revision > before.revision &&
+        unnamed(before) === unnamed(after)
+        ? current
+        : null;
+    } catch {
+      return null;
+    }
+  }
   async add(
     id: string,
     draft: NativeCaptureDraft,
@@ -81,7 +113,9 @@ export class NativeObjectCaptureClient {
     const capture = await this.captures.import(
       id,
       file,
-      selectedDestination ?? draft.origin,
+      selectedDestination ??
+        (await this.named(id, draft.origin)) ??
+        draft.origin,
       again,
     );
     await this.captures.reopen(id, capture);

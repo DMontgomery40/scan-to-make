@@ -7,6 +7,14 @@ import { RetainedCapturesScreen } from '../src/screens/RetainedCapturesScreen';
 type Status = { supported: boolean; lidar?: boolean };
 async function fixture(
   status: Status | (() => Promise<Status>) = { supported: true, lidar: true },
+  options: {
+    // Scan something: an unnamed project, opened to scan once.
+    scanFirst?: boolean;
+    // How long the native draft list takes to answer.
+    draftsDelay?: number;
+    // The camera's own "add it to this project" choice.
+    addRequested?: boolean;
+  } = {},
 ) {
   const records = new Map<string, string>();
   const repo = createSavedProjects({
@@ -20,9 +28,12 @@ async function fixture(
   });
   const created = await repo.create({
     id: 'one',
-    brief: { object: 'Box', context: 'Desk', addition: 'Lid' },
+    brief: options.scanFirst
+      ? { object: '', context: '', addition: '' }
+      : { object: 'Box', context: 'Desk', addition: 'Lid' },
   });
   if (created.status !== 'ok') throw Error();
+  const started = jest.fn();
   const requests: string[] = [];
   const drafts: unknown[] = [];
   NativeModules.RetainedCaptureBridge = {
@@ -35,13 +46,24 @@ async function fixture(
       requests.push('pick');
       throw Error('File selection cancelled');
     },
+    // The first step of adding a scan to the project.
+    adoptNativeOutput: async () => {
+      requests.push('adopt');
+      throw Error('Not adopted in this test');
+    },
   };
   NativeModules.NativeCaptureCoordinator = {
     status: async () => ({
       ...(typeof status === 'function' ? await status() : status),
       activeRunID: null,
     }),
-    drafts: async () => drafts,
+    drafts: async () => {
+      if (options.draftsDelay)
+        await new Promise<void>(resolve =>
+          setTimeout(resolve, options.draftsDelay),
+        );
+      return drafts;
+    },
     start: async (origin: unknown) => {
       const draft = {
         formatVersion: 1,
@@ -49,6 +71,7 @@ async function fixture(
         origin,
         createdAt: '2026-01-01T00:00:00Z',
         status: 'ready',
+        ...(options.addRequested ? { addRequested: true } : {}),
         file: {
           sha256: 'a'.repeat(64),
           byteLength: 123,
@@ -62,17 +85,38 @@ async function fixture(
     stop: async () => {},
   };
   let tree!: Renderer.ReactTestRenderer;
-  await act(async () => {
-    tree = Renderer.create(
+  // As App does: the scan request is cleared once the scan starts.
+  function ScanFirst() {
+    const [scanNow, setScanNow] = React.useState(true);
+    return (
       <RetainedCapturesScreen
         id="one"
         repository={repo}
         onBack={() => {}}
         onCompanion={() => {}}
-      />,
+        scanNow={scanNow}
+        onScanStarted={() => {
+          started();
+          setScanNow(false);
+        }}
+      />
+    );
+  }
+  await act(async () => {
+    tree = Renderer.create(
+      options.scanFirst ? (
+        <ScanFirst />
+      ) : (
+        <RetainedCapturesScreen
+          id="one"
+          repository={repo}
+          onBack={() => {}}
+          onCompanion={() => {}}
+        />
+      ),
     );
   });
-  return { tree, requests, project: created.project, repo };
+  return { tree, requests, project: created.project, repo, drafts, started };
 }
 function button(tree: Renderer.ReactTestRenderer, name: string) {
   return tree.root.find(
@@ -89,11 +133,29 @@ function text(tree: Renderer.ReactTestRenderer) {
     .map(n => [n.props.children].flat().join(''))
     .join('\n');
 }
-async function press(tree: Renderer.ReactTestRenderer, name: string) {
+async function press(
+  tree: Renderer.ReactTestRenderer,
+  name: string,
+  times = 1,
+) {
+  // times > 1: a double tap, both before the next render.
   await act(async () => {
-    button(tree, name).props.onPress();
+    const target = button(tree, name);
+    for (let n = 0; n < times; n++) target.props.onPress();
   });
 }
+const settle = (ms: number) =>
+  act(async () => new Promise<void>(done => setTimeout(done, ms)));
+const nameIt = async (tree: Renderer.ReactTestRenderer, value: string) => {
+  const { TextInput } = require('react-native');
+  const field = tree.root.find(
+    n =>
+      n.type === TextInput &&
+      (n.props.accessibilityLabel ?? n.props.spokenLabel) ===
+        'What did you scan?',
+  );
+  await act(async () => field.props.onChangeText(value));
+};
 afterEach(() => {
   delete NativeModules.NativeCaptureCoordinator;
   delete NativeModules.RetainedCaptureBridge;
@@ -327,4 +389,164 @@ test('after a lost reply is set aside, adding the same scan asks before sending 
   expect(f.requests.filter(r => r === 'POST')).toHaveLength(2);
   expect(text(f.tree)).toContain('Added to this project as capture 1');
   await act(async () => f.tree.unmount());
+});
+
+test('a scan kept from before its project had a name is named before it is added', async () => {
+  const { tree, requests, repo, drafts } = await fixture(undefined, {
+    scanFirst: true,
+  });
+  // The camera opened once, then Not now: the scan stays on this phone.
+  expect(requests).toEqual(['scan']);
+  expect(text(tree)).toContain('Scan finished');
+  await press(tree, 'Not now');
+  expect(text(tree)).not.toContain('Scan finished');
+  expect(drafts).toHaveLength(1);
+  // Adding it later, by either button, asks for the name first.
+  await press(tree, 'Add scan 1 to this project');
+  expect(text(tree)).toContain('Scan finished');
+  await press(tree, 'Not now');
+  await press(tree, 'Choose destination for scan 1');
+  expect(text(tree)).toContain('Scan finished');
+  await press(tree, 'Not now');
+  // So does a USDZ file, before it's even chosen.
+  await press(tree, 'Choose USDZ capture');
+  expect(text(tree)).toContain('Name this project');
+  expect(requests).toEqual(['scan']);
+  const project = await repo.load('one');
+  expect(project.status === 'ok' && project.project.brief.object).toBe('');
+  await act(async () => tree.unmount());
+});
+
+test('Scan something waits out a running check, then opens the camera once', async () => {
+  let checks = 0;
+  const { tree, requests, started } = await fixture(
+    async () => {
+      if (checks++ === 0) throw Error('not yet');
+      return { supported: true, lidar: true };
+    },
+    { scanFirst: true, draftsDelay: 20 },
+  );
+  expect(text(tree)).toContain('Couldn’t check for LiDAR');
+  expect(requests).toEqual([]);
+  await press(tree, 'Check again');
+  await act(async () => new Promise<void>(resolve => setTimeout(resolve, 60)));
+  expect(started).toHaveBeenCalledTimes(1);
+  expect(requests).toEqual(['scan']);
+  await act(async () => new Promise<void>(resolve => setTimeout(resolve, 60)));
+  await act(async () => tree.unmount());
+});
+
+test('a scan made before pairing, named after pairing, still asks to use the current destination', async () => {
+  const alert = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+  const { tree } = await fixture(undefined, { scanFirst: true });
+  await press(tree, 'Not now');
+  // The phone was paired after the scan, so the scan's pairing differs.
+  NativeModules.RetainedCaptureBridge.context = async () => 'host|device';
+  await press(tree, 'Choose destination for scan 1');
+  expect(text(tree)).toContain('Scan finished');
+  const { TextInput } = require('react-native');
+  const field = tree.root.find(
+    n =>
+      n.type === TextInput &&
+      (n.props.accessibilityLabel ?? n.props.spokenLabel) ===
+        'What did you scan?',
+  );
+  await act(async () => field.props.onChangeText('Box'));
+  await press(tree, 'Continue');
+  expect(alert).toHaveBeenCalledWith(
+    'Use the current project version?',
+    expect.stringContaining('project version'),
+    expect.anything(),
+  );
+  expect(text(tree)).not.toContain('destination changed');
+  await act(async () => tree.unmount());
+});
+
+test('naming a scan while the screen is still catching up still adds it', async () => {
+  const { tree, requests } = await fixture(undefined, {
+    scanFirst: true,
+    addRequested: true,
+    // The read after the scan is slow.
+    draftsDelay: 40,
+  });
+  // Continue as soon as the sheet shows.
+  for (let i = 0; i < 30 && !text(tree).includes('Scan finished'); i++)
+    await act(async () => new Promise<void>(done => setTimeout(done, 5)));
+  expect(text(tree)).toContain('Scan finished');
+  const { TextInput } = require('react-native');
+  const field = tree.root.find(
+    n =>
+      n.type === TextInput &&
+      (n.props.accessibilityLabel ?? n.props.spokenLabel) ===
+        'What did you scan?',
+  );
+  await act(async () => field.props.onChangeText('Box'));
+  await press(tree, 'Continue');
+  await act(async () => new Promise<void>(done => setTimeout(done, 120)));
+  expect(requests).toContain('adopt');
+  await act(async () => tree.unmount());
+});
+
+// Every way into scanning, naming and adding holds its guard until it hands
+// off: a double tap while a slow read is still running does it once.
+describe('double taps while the screen catches up', () => {
+  test('Scan object starts one scan', async () => {
+    const { tree, requests } = await fixture(undefined, { draftsDelay: 30 });
+    await press(tree, 'Scan object', 2);
+    await settle(120);
+    expect(requests.filter(r => r === 'scan')).toHaveLength(1);
+    await act(async () => tree.unmount());
+  });
+
+  test('Continue names once and adds once', async () => {
+    const { tree, requests, repo, project } = await fixture(undefined, {
+      scanFirst: true,
+      addRequested: true,
+      draftsDelay: 30,
+    });
+    await settle(80);
+    await nameIt(tree, 'Box');
+    await press(tree, 'Continue', 2);
+    await settle(150);
+    expect(requests.filter(r => r === 'adopt')).toHaveLength(1);
+    const named = await repo.load('one');
+    expect(named.status === 'ok' && named.project.revision).toBe(
+      project.revision + 1,
+    );
+    await act(async () => tree.unmount());
+  });
+
+  test('Add scan adds once', async () => {
+    const { tree, requests } = await fixture(undefined, { draftsDelay: 30 });
+    await press(tree, 'Scan object');
+    await settle(80);
+    await press(tree, 'Add scan 1 to this project', 2);
+    await settle(150);
+    expect(requests.filter(r => r === 'adopt')).toHaveLength(1);
+    expect(text(tree)).not.toContain('Still working on the last request');
+    await act(async () => tree.unmount());
+  });
+
+  test('Choose destination asks once', async () => {
+    const alert = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+    const { tree } = await fixture(undefined, { draftsDelay: 30 });
+    NativeModules.RetainedCaptureBridge.context = async () => 'host|device';
+    await press(tree, 'Scan object');
+    await settle(80);
+    await press(tree, 'Choose destination for scan 1', 2);
+    await settle(80);
+    expect(
+      alert.mock.calls.filter(c => c[0] === 'Use the current project version?'),
+    ).toHaveLength(1);
+    await act(async () => tree.unmount());
+  });
+
+  test('Choose USDZ capture picks once', async () => {
+    const { tree, requests } = await fixture(undefined, { draftsDelay: 30 });
+    await press(tree, 'Choose USDZ capture', 2);
+    await settle(120);
+    expect(requests.filter(r => r === 'pick')).toHaveLength(1);
+    expect(text(tree)).not.toContain('Still working on the last request');
+    await act(async () => tree.unmount());
+  });
 });

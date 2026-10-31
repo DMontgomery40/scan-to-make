@@ -54,7 +54,11 @@ function texts(tree: ReactTestRenderer.ReactTestRenderer): string[] {
   ];
 }
 
-function press(tree: ReactTestRenderer.ReactTestRenderer, label: string) {
+function press(
+  tree: ReactTestRenderer.ReactTestRenderer,
+  label: string,
+  times = 1,
+) {
   const button = tree.root.find(
     n =>
       (n.props.accessibilityRole === 'button' ||
@@ -63,8 +67,9 @@ function press(tree: ReactTestRenderer.ReactTestRenderer, label: string) {
       ((n.props.accessibilityLabel ?? n.props.spokenLabel) === label ||
         n.findAllByType(Text).some(t => t.props.children === label)),
   );
+  // times > 1: a double tap, both before the next render.
   return act(async () => {
-    button.props.onPress();
+    for (let n = 0; n < times; n++) button.props.onPress();
   });
 }
 
@@ -102,13 +107,62 @@ test('home is the projects grid, with the empty state and one Scan something', a
   expect(texts(tree)).toContain('Scan your first thing');
 });
 
-test('a new project is saved from its name and opens its scans', async () => {
-  const { NativeModules, TextInput } = require('react-native');
+// A LiDAR scanner whose scans finish as `status` says. Like the native
+// one, it keeps a draft of every scan it opens, stopped ones included.
+function scanner(status: 'ready' | 'interrupted' = 'ready') {
+  const made: unknown[] = [];
+  const draft = (origin: { projectId: string }) => ({
+    formatVersion: 1,
+    runID: '14f6ca24-44fc-4984-9634-c14eef4eebc9',
+    origin,
+    createdAt: '2026-10-31T00:00:00Z',
+    status,
+    ...(status === 'ready'
+      ? {
+          file: {
+            sha256: 'a'.repeat(64),
+            byteLength: 10,
+            mediaType: 'model/vnd.usdz+zip',
+          },
+        }
+      : {}),
+  });
+  const start = jest.fn(async (origin: { projectId: string }) => {
+    const next = draft(origin);
+    made.push(next);
+    return next;
+  });
+  const { NativeModules } = require('react-native');
   NativeModules.RetainedCaptureBridge = {
     context: async () => 'host|device',
     read: async () => null,
     cancel: async () => {},
   };
+  NativeModules.NativeCaptureCoordinator = {
+    status: async () => ({ supported: true, lidar: true, activeRunID: null }),
+    drafts: async () => made,
+    start,
+    stop: async () => {},
+  };
+  return start;
+}
+function noScanner() {
+  const { NativeModules } = require('react-native');
+  delete NativeModules.RetainedCaptureBridge;
+  delete NativeModules.NativeCaptureCoordinator;
+}
+const nameField = (tree: ReactTestRenderer.ReactTestRenderer) => {
+  const { TextInput } = require('react-native');
+  return tree.root.find(
+    n =>
+      n.type === TextInput &&
+      (n.props.accessibilityLabel ?? n.props.spokenLabel) ===
+        'What did you scan?',
+  );
+};
+
+test('Scan something opens the camera first and names the project after the scan', async () => {
+  const start = scanner();
   const bytes = new Map<string, string>();
   const store = testStore(bytes);
   let tree!: ReactTestRenderer.ReactTestRenderer;
@@ -117,15 +171,12 @@ test('a new project is saved from its name and opens its scans', async () => {
       tree = ReactTestRenderer.create(<App repository={store} />);
     });
     await press(tree, 'Scan something');
-    const name = tree.root.find(
-      n =>
-        n.type === TextInput &&
-        (n.props.accessibilityLabel ?? n.props.spokenLabel) ===
-          'What are you scanning?',
-    );
-    await act(async () => name.props.onChangeText('  Desk lamp  '));
+    expect(start).toHaveBeenCalledTimes(1);
+    expect(texts(tree).join(' ')).not.toContain('What are you scanning?');
+    expect(texts(tree)).toContain('Scan finished');
+    await act(async () => nameField(tree).props.onChangeText('  Desk lamp  '));
     await press(tree, 'Continue');
-    expect(texts(tree)).toContain('Project captures');
+    expect(texts(tree)).not.toContain('Scan finished');
     const project = await onlyProject(store);
     expect(project.brief).toEqual({
       object: 'Desk lamp',
@@ -137,16 +188,42 @@ test('a new project is saved from its name and opens its scans', async () => {
 
     await press(tree, 'Back');
     expect(texts(tree)).toContain('Desk lamp');
+    // Opening the project again never starts another scan by itself.
     await openProject(tree, 'Desk lamp');
     expect(texts(tree)).toContain('Project captures');
+    expect(start).toHaveBeenCalledTimes(1);
   } finally {
     if (tree) await act(async () => tree.unmount());
-    delete NativeModules.RetainedCaptureBridge;
+    noScanner();
   }
 });
 
-test('a failed create keeps the typed name and other projects', async () => {
-  const { TextInput } = require('react-native');
+test('a stopped scan leaves one Untitled project, which the next Scan something uses again', async () => {
+  const start = scanner('interrupted');
+  const bytes = new Map<string, string>();
+  let tree!: ReactTestRenderer.ReactTestRenderer;
+  try {
+    await act(async () => {
+      tree = ReactTestRenderer.create(<App repository={testStore(bytes)} />);
+    });
+    await press(tree, 'Scan something');
+    expect(texts(tree)).not.toContain('Scan finished');
+    await press(tree, 'Back');
+    expect(texts(tree)).toContain('Untitled project');
+    await press(tree, 'Scan something');
+    expect(start).toHaveBeenCalledTimes(2);
+    expect(start.mock.calls[1][0].projectId).toBe(
+      start.mock.calls[0][0].projectId,
+    );
+    expect(bytes.size).toBe(1);
+  } finally {
+    if (tree) await act(async () => tree.unmount());
+    noScanner();
+  }
+});
+
+test('a failed create says so and keeps the other projects', async () => {
+  const alert = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
   const store = testStore();
   await store.create({
     id: 'kept',
@@ -161,20 +238,14 @@ test('a failed create keeps the typed name and other projects', async () => {
     tree = ReactTestRenderer.create(<App repository={failing} />);
   });
   await press(tree, 'Scan something');
-  const name = () =>
-    tree.root.find(
-      n =>
-        n.type === TextInput &&
-        (n.props.accessibilityLabel ?? n.props.spokenLabel) ===
-          'What are you scanning?',
-    );
-  await act(async () => name().props.onChangeText('Desk lamp'));
-  await press(tree, 'Continue');
-  expect(texts(tree)).toContain(
+  expect(alert).toHaveBeenCalledWith(
+    'Couldn’t start a scan',
     'The project couldn’t be saved. Your other projects are unchanged.',
   );
-  expect(name().props.value).toBe('Desk lamp');
   expect(texts(tree)).toContain('Phone case');
+  expect(texts(tree)).not.toContain('Project captures');
+  await act(async () => tree.unmount());
+  alert.mockRestore();
 });
 
 test('projects saved with earlier fit data still list and open their scans', async () => {
@@ -813,7 +884,7 @@ test('a pairing link delivered twice at launch pairs only once', async () => {
 });
 
 test('a create that throws still lets you try again', async () => {
-  const { TextInput } = require('react-native');
+  const alert = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
   const store = testStore();
   const failing = {
     ...store,
@@ -826,23 +897,14 @@ test('a create that throws still lets you try again', async () => {
     tree = ReactTestRenderer.create(<App repository={failing} />);
   });
   await press(tree, 'Scan something');
-  const name = tree.root.find(
-    n =>
-      n.type === TextInput &&
-      (n.props.accessibilityLabel ?? n.props.spokenLabel) ===
-        'What are you scanning?',
-  );
-  await act(async () => name.props.onChangeText('Desk lamp'));
-  await press(tree, 'Continue');
-  expect(texts(tree)).toContain(
-    'The project couldn’t be saved. Your other projects are unchanged.',
-  );
-  expect(name.props.editable).toBe(true);
-  await press(tree, 'Cancel');
   await press(tree, 'Scan something');
-  expect(texts(tree)).not.toContain(
+  expect(alert).toHaveBeenCalledTimes(2);
+  expect(alert).toHaveBeenLastCalledWith(
+    'Couldn’t start a scan',
     'The project couldn’t be saved. Your other projects are unchanged.',
   );
+  await act(async () => tree.unmount());
+  alert.mockRestore();
 });
 
 test('with no Mac paired the app opens on Find your Mac; otherwise on Projects', async () => {
@@ -903,8 +965,8 @@ const viewfinders = (tree: ReactTestRenderer.ReactTestRenderer) =>
 const launchLink = (url: string | null) =>
   jest.spyOn(Linking, 'getInitialURL').mockResolvedValue(url as string);
 
-test('Scan something after pairing opens the name sheet once, not on every return home', async () => {
-  const { NativeModules, TextInput } = require('react-native');
+test('Scan something after pairing opens the camera once, not on every return home', async () => {
+  const { NativeModules } = require('react-native');
   const mac = { state: 'paired', baseUrl: 'https://mac.example.ts.net' };
   let paired = false;
   NativeModules.CompanionPairing = {
@@ -919,15 +981,7 @@ test('Scan something after pairing opens the name sheet once, not on every retur
   };
   launchLink(null);
   // A LiDAR iPhone, so Connected offers Scan something.
-  NativeModules.NativeCaptureCoordinator = {
-    status: async () => ({ supported: true, lidar: true }),
-  };
-  const naming = (tree: ReactTestRenderer.ReactTestRenderer) =>
-    tree.root.findAll(
-      n =>
-        n.type === TextInput &&
-        n.props.accessibilityLabel === 'What are you scanning?',
-    ).length > 0;
+  const start = scanner();
   let tree!: ReactTestRenderer.ReactTestRenderer;
   try {
     await act(async () => {
@@ -937,19 +991,22 @@ test('Scan something after pairing opens the name sheet once, not on every retur
       viewfinders(tree)[0].props.onCode({ nativeEvent: { value: macLink() } }),
     );
     expect(texts(tree)).toContain('Connected to your Mac');
-    await press(tree, 'Scan something');
-    expect(naming(tree)).toBe(true);
-    await press(tree, 'Cancel');
-    expect(naming(tree)).toBe(false);
-    // Home unmounts for Settings; coming back must not ask again.
+    // A double tap still scans once.
+    await press(tree, 'Scan something', 2);
+    await act(async () => new Promise<void>(done => setTimeout(done, 20)));
+    expect(start).toHaveBeenCalledTimes(1);
+    await act(async () => nameField(tree).props.onChangeText('Mug'));
+    await press(tree, 'Continue');
+    await press(tree, 'Back');
+    // Home unmounts for Settings; coming back must not scan again.
     await press(tree, 'Settings');
     await press(tree, 'Back');
-    expect(texts(tree)).toContain('Scan your first thing');
-    expect(naming(tree)).toBe(false);
+    expect(texts(tree)).toContain('Mug');
+    expect(start).toHaveBeenCalledTimes(1);
   } finally {
     await act(async () => tree.unmount());
     delete NativeModules.CompanionPairing;
-    delete NativeModules.NativeCaptureCoordinator;
+    noScanner();
     jest.restoreAllMocks();
   }
 });
@@ -1124,5 +1181,38 @@ test('the credential refresh at launch waits its turn with the Mac check, so the
     await act(async () => tree.unmount());
     delete NativeModules.CompanionPairing;
     jest.restoreAllMocks();
+  }
+});
+
+test('Scan something tapped twice during a slow reload makes one project and opens the camera once', async () => {
+  const start = scanner();
+  const bytes = new Map<string, string>();
+  const store = testStore(bytes);
+  let slow = false;
+  const slowStore = {
+    ...store,
+    list: async () => {
+      if (slow) await new Promise<void>(done => setTimeout(done, 30));
+      return store.list();
+    },
+  };
+  let tree!: ReactTestRenderer.ReactTestRenderer;
+  try {
+    await act(async () => {
+      tree = ReactTestRenderer.create(<App repository={slowStore} />);
+    });
+    slow = true;
+    // A double tap, then another tap once the project exists but the list
+    // is still reloading.
+    await press(tree, 'Scan something', 2);
+    await act(async () => new Promise<void>(done => setTimeout(done, 10)));
+    await press(tree, 'Scan something');
+    await act(async () => new Promise<void>(done => setTimeout(done, 150)));
+    expect(bytes.size).toBe(1);
+    expect(start).toHaveBeenCalledTimes(1);
+    expect(texts(tree)).toContain('Scan finished');
+  } finally {
+    if (tree) await act(async () => tree.unmount());
+    noScanner();
   }
 });

@@ -74,7 +74,7 @@ async function render(
   services.overview = async p =>
     overviews[p.id] ?? { scans: 0, jobs: [], prints: [] };
   const handlers = {
-    onCreate: jest.fn(async () => true),
+    onScan: jest.fn(),
     onOpen: jest.fn(),
     onRetry: jest.fn(),
     onPair: jest.fn(),
@@ -88,7 +88,6 @@ async function render(
         services={services}
         pairing={pairing(async () => ({ state: 'paired' }))}
         creating={false}
-        createError={null}
         {...handlers}
         {...props}
       />,
@@ -163,8 +162,8 @@ test('the Mac pill says connected, asleep, pair again or find your Mac, and open
   }
 });
 
-test('with no projects, home explains the first scan; Scan something asks the name first', async () => {
-  const { tree, onCreate } = await render();
+test('with no projects, home explains the first scan; Scan something opens the camera, not a name sheet', async () => {
+  const { tree, onScan } = await render();
   const shown = texts(tree);
   expect(shown).toContain('Scan your first thing');
   expect(shown).toContain(
@@ -181,25 +180,12 @@ test('with no projects, home explains the first scan; Scan something asks the na
   expect(shown).toContain('Fills the gaps the camera missed.');
   expect(shown).not.toMatch(/smooth/i);
   expect(shown.match(/Scan something/g)).toHaveLength(1);
+  // P2: the camera opens first; the name is asked after the scan.
   await act(async () => labelled(tree, 'Scan something')[0]!.props.onPress());
-  // The sheet scrolls, so Continue and Cancel stay reachable in short windows.
-  const { ScrollView } = require('react-native');
-  const sheet = tree.root.findByProps({ presentationStyle: 'pageSheet' });
-  expect(sheet.findAllByType(ScrollView)).toHaveLength(1);
-  const field = tree.root.find(
-    n =>
-      (n.props.accessibilityLabel ?? n.props.spokenLabel) ===
-        'What are you scanning?' && n.props.onChangeText,
-  );
-  await act(async () => field.props.onChangeText('  Thing '));
-  await act(async () =>
-    buttons(tree)
-      .find(
-        b => b.props.label === 'Continue' || b.props.buttonTitle === 'Continue',
-      )!
-      .props.onPress(),
-  );
-  expect(onCreate).toHaveBeenCalledWith('Thing');
+  expect(onScan).toHaveBeenCalledTimes(1);
+  expect(
+    tree.root.findAllByProps({ presentationStyle: 'pageSheet' }),
+  ).toHaveLength(0);
   await act(async () => tree.unmount());
 });
 
@@ -215,8 +201,7 @@ test('until a status arrives the card shows a quiet placeholder, never a wrong o
         services={services}
         pairing={undefined}
         creating={false}
-        createError={null}
-        onCreate={jest.fn()}
+        onScan={jest.fn()}
         onOpen={jest.fn()}
         onRetry={jest.fn()}
         onPair={jest.fn()}
@@ -329,8 +314,7 @@ test('a card that is cleaning up is looked at again until it finishes', async ()
           services={services}
           pairing={undefined}
           creating={false}
-          createError={null}
-          onCreate={jest.fn()}
+          onScan={jest.fn()}
           onOpen={jest.fn()}
           onRetry={jest.fn()}
           onPair={jest.fn()}
@@ -407,8 +391,7 @@ test('a slow card isn’t cut off by the next look at a card that is cleaning up
           services={services}
           pairing={undefined}
           creating={false}
-          createError={null}
-          onCreate={jest.fn()}
+          onScan={jest.fn()}
           onOpen={jest.fn()}
           onRetry={jest.fn()}
           onPair={jest.fn()}
@@ -456,8 +439,7 @@ test('one lost reply while cleaning up keeps the card and keeps looking', async 
           services={services}
           pairing={undefined}
           creating={false}
-          createError={null}
-          onCreate={jest.fn()}
+          onScan={jest.fn()}
           onOpen={jest.fn()}
           onRetry={jest.fn()}
           onPair={jest.fn()}
@@ -508,8 +490,7 @@ test('a check still waiting behind a card read never starts once pairing opens',
         services={services}
         pairing={native}
         creating={false}
-        createError={null}
-        onCreate={jest.fn()}
+        onScan={jest.fn()}
         onOpen={jest.fn()}
         onRetry={jest.fn()}
         onPair={onPair}
@@ -583,8 +564,7 @@ test('cards aren’t read while the pairing screen is open', async () => {
         pairing={undefined}
         paused
         creating={false}
-        createError={null}
-        onCreate={jest.fn()}
+        onScan={jest.fn()}
         onOpen={jest.fn()}
         onRetry={jest.fn()}
         onPair={jest.fn()}

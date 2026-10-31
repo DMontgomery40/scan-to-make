@@ -3,8 +3,6 @@ import {
   AccessibilityInfo,
   AppState,
   Image,
-  KeyboardAvoidingView,
-  Modal,
   Platform,
   Pressable,
   RefreshControl,
@@ -26,7 +24,7 @@ import {
   type ObjectCaptureNative,
 } from '../capture/nativeObjectCapture';
 import { NativeActionButton } from '../ui/NativeActionButton';
-import { Button, Field, READABLE_WIDTH, type Tone } from '../ui/components';
+import { Button, READABLE_WIDTH, type Tone } from '../ui/components';
 import { colors, radius, space, type } from '../ui/theme';
 import {
   ACTIVE,
@@ -102,12 +100,8 @@ export function ProjectsHomeScreen({
   capture = objectCaptureNative(),
   pairingKey = 0,
   paused = false,
-  scanRequested = false,
-  onScanRequestUsed,
   creating,
-  createError,
-  onCreate,
-  onNaming,
+  onScan,
   onOpen,
   onRetry,
   onPair,
@@ -122,14 +116,10 @@ export function ProjectsHomeScreen({
   pairingKey?: number;
   /** True while the pairing screen is open over home. */
   paused?: boolean;
-  /** True to open the Scan something sheet once, e.g. right after pairing. */
-  scanRequested?: boolean;
-  onScanRequestUsed?: () => void;
+  /** True while Scan something is getting its project ready. */
   creating: boolean;
-  createError: string | null;
-  onCreate: (name: string) => Promise<boolean>;
-  /** Called when the name sheet opens or closes, to clear an old error. */
-  onNaming?: () => void;
+  /** Scan something: opens the camera; the name is asked after the scan. */
+  onScan: () => void;
   onOpen: (id: string) => void;
   onRetry: () => void;
   onPair: () => void;
@@ -142,7 +132,6 @@ export function ProjectsHomeScreen({
   const [overviews, setOverviews] = useState<
     Record<string, ProjectOverview | null>
   >({});
-  const [naming, setNaming] = useState(false);
   const [scan, setScan] = useState<ScanSupport>(
     capture ? 'checking' : 'supported',
   );
@@ -170,11 +159,6 @@ export function ProjectsHomeScreen({
     };
   }, [capture]);
   const cannotScan = scan === 'no-lidar' || scan === 'unsupported';
-  useEffect(() => {
-    if (!scanRequested) return;
-    setNaming(true);
-    onScanRequestUsed?.();
-  }, [scanRequested]); // eslint-disable-line react-hooks/exhaustive-deps
   const [refreshing, setRefreshing] = useState(false);
   // Bumped by pull to refresh and coming back to the app.
   const [round, setRound] = useState(0);
@@ -445,27 +429,13 @@ export function ProjectsHomeScreen({
             <Button
               label="Scan something"
               systemImage="viewfinder"
-              accessibilityHint="Name the object, then scan it with LiDAR."
-              onPress={() => {
-                onNaming?.();
-                setNaming(true);
-              }}
+              accessibilityHint="Opens the camera to scan an object with LiDAR."
+              disabled={creating}
+              onPress={onScan}
             />
           </View>
         ) : null}
       </View>
-      <NameSheet
-        visible={naming}
-        creating={creating}
-        error={createError}
-        onCancel={() => {
-          onNaming?.();
-          setNaming(false);
-        }}
-        onCreate={async name => {
-          if (await onCreate(name)) setNaming(false);
-        }}
-      />
     </View>
   );
 }
@@ -738,73 +708,6 @@ function EmptyState({ windowHeight }: { windowHeight: number }) {
 }
 
 /** Today's one question before a scan: what it is. */
-function NameSheet({
-  visible,
-  creating,
-  error,
-  onCancel,
-  onCreate,
-}: {
-  visible: boolean;
-  creating: boolean;
-  error: string | null;
-  onCancel: () => void;
-  onCreate: (name: string) => void;
-}) {
-  const [name, setName] = useState('');
-  const trimmed = name.trim();
-  return (
-    <Modal
-      visible={visible}
-      animationType="slide"
-      presentationStyle="pageSheet"
-      onRequestClose={creating ? undefined : onCancel}
-    >
-      {/* Scrolls and rises with the keyboard, so Continue and Cancel stay
-          reachable in landscape and at large text sizes. */}
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        style={styles.sheet}
-      >
-        <ScrollView
-          keyboardShouldPersistTaps="handled"
-          contentContainerStyle={styles.sheetScroll}
-        >
-          <View style={styles.sheetColumn}>
-            <Text accessibilityRole="header" style={type.heading}>
-              Scan something
-            </Text>
-            <Field
-              label="What are you scanning?"
-              hint="For example, a phone case or a desk lamp."
-              value={name}
-              onChangeText={setName}
-              editable={!creating}
-              maxLength={200}
-              returnKeyType="done"
-            />
-            {error ? (
-              <Text accessibilityLiveRegion="polite" style={type.body}>
-                {error}
-              </Text>
-            ) : null}
-            <Button
-              label={creating ? 'Saving…' : 'Continue'}
-              disabled={creating || !trimmed}
-              onPress={() => onCreate(trimmed)}
-            />
-            <Button
-              label="Cancel"
-              variant="secondary"
-              disabled={creating}
-              onPress={onCancel}
-            />
-          </View>
-        </ScrollView>
-      </KeyboardAvoidingView>
-    </Modal>
-  );
-}
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.background },
@@ -1029,7 +932,4 @@ const styles = StyleSheet.create({
     shadowRadius: 20,
     shadowOffset: { width: 0, height: 8 },
   },
-  sheet: { flex: 1, backgroundColor: colors.background },
-  sheetScroll: { padding: space.xl, alignItems: 'center' },
-  sheetColumn: { width: '100%', maxWidth: READABLE_WIDTH, gap: space.lg },
 });
