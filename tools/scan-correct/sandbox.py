@@ -1,10 +1,17 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Linux libseccomp network isolation, inherited across exec; fail closed."""
+"""OS-enforced worker network isolation, inherited across exec; fail closed."""
 import ctypes
 import ctypes.util
 import errno
 import os
 import sys
+
+
+MACOS_SANDBOX = '/usr/bin/sandbox-exec'
+# Block IP network traffic (including loopback) for the worker and
+# its descendants. Filesystem and Mach access retain the existing trusted-code
+# boundary; the host adapter stays outside this sandbox so it can call models.
+MACOS_PROFILE = '(version 1)(allow default)(deny network*)'
 
 
 def isolate():
@@ -45,10 +52,23 @@ def isolate():
         lib.seccomp_release(ctx)
 
 
+def main(command):
+    if not command:
+        raise ValueError('worker executable required')
+    if sys.platform == 'darwin':
+        # exec replaces the launcher: deadlines still target the same process
+        # group. A missing executable or rejected profile cannot run the worker.
+        os.execv(MACOS_SANDBOX, [MACOS_SANDBOX, '-p', MACOS_PROFILE, *command])
+    elif sys.platform == 'linux':
+        isolate()
+        os.execv(command[0], command)
+    else:
+        raise RuntimeError('unsupported platform for worker network isolation')
+
+
 if __name__ == '__main__':
     try:
-        isolate()
-        os.execv(sys.argv[1],sys.argv[1:])
+        main(sys.argv[1:])
     except Exception as exc:
         print('network sandbox failed: '+str(exc),file=sys.stderr)
         sys.exit(2)

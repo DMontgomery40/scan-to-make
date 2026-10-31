@@ -108,10 +108,18 @@ release folder. Existing Blender applications are never replaced. There is no
 official Intel macOS 5.0.1 download; this installer cannot supply that runtime
 on Intel Macs.
 
-Native macOS supports capture conversion and scan-repair. **Scan-correct
-requires Linux/libseccomp**; its existing sandbox deliberately fails on macOS.
-Use the Linux installation for that worker. The installer does not bypass the
-sandbox. No native macOS execution is claimed by the Linux packaging tests.
+Native macOS supports capture conversion, scan-repair and AI-driven scan-correct.
+The host model adapter can reach its configured provider; correction Blender
+workers and their children run under `/usr/bin/sandbox-exec` with `(deny network*)`, blocking
+IPv4/IPv6 TCP, UDP and listening operations. Local IPC remains outside this boundary. The installer proves
+that restriction and runs repair → a loopback model fixture → real correction
+before replacing a running service. No paid provider call is used for setup.
+
+This is a native path: no Colima VM, Docker context change or ARM Linux Blender
+build is needed. The trusted worker retains filesystem access, as on Linux;
+this is network isolation, not a general sandbox for model-written code.
+Apple deprecates `sandbox-exec`; if it is absent or fails, installation/cleanup
+fails closed instead of running without isolation.
 
 The installer prints a short-lived invitation. Install/sign in to Tailscale on
 the Mac and phone, enable private HTTPS, then pair:
@@ -135,6 +143,24 @@ launchctl kickstart -k "gui/$(id -u)/org.scantomake.companion"
 # Logs:
 tail -n 100 "$stm/logs/companion-error.log"
 ```
+
+
+For host-side cleanup while phone pipeline integration is in progress, the
+installed launcher loads the same private env file and Python runtime:
+
+```sh
+stm="$HOME/Library/Application Support/Scan to Make"
+"$stm/companion" deploy/companion/cleanup.mjs repair /absolute/capture.obj \
+  --units mm --out /absolute/repaired
+"$stm/companion" deploy/companion/cleanup.mjs run /absolute/repaired/repaired.obj \
+  --units mm --out /absolute/corrected --adapter anthropic
+```
+
+Put `ANTHROPIC_API_KEY` in `companion.env`, or select the existing OpenAI-compatible
+adapter with `--adapter openai --model MODEL --base-url URL --key-env KEY_NAME`.
+The key remains in the host adapter; the existing worker env allowlist omits it.
+`advise`, `measure` and `render` are also available through this helper. These
+commands reuse the Python CLIs; they add no HTTP routes or new geometry logic.
 
 Re-run the installer from a newer committed checkout to upgrade. Auth, captures
 and `companion.env` are preserved; old release directories remain available.
@@ -210,6 +236,9 @@ anonymous `/healthz` must return the expected 403. Only the smoke test or a
 paired phone proves authenticated health. macOS checks on Linux cover shell
 syntax, platform guard, plist serialization, paths with spaces/apostrophes and
 env-file preservation; they do not exercise Homebrew, DMG mounting or launchd.
+The native Mac acceptance tests additionally prove live socket denial in Python
+and Blender descendants, a real loopback model correction, and measured exports.
+The mac-cleanup CI workflow runs the full correction suite on Apple Silicon.
 
 Blender's Linux pin matches the existing scan-repair CI; both platforms also
 check Blender's published checksum manifest. Upstream licence texts remain in

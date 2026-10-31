@@ -24,7 +24,7 @@ class ContractTests(unittest.TestCase):
     def test_network_sandbox_blocks_inet(self):
         with tempfile.TemporaryDirectory() as tmp:
             probe = Path(tmp)/'probe.py'
-            probe.write_text("import socket\nfor family in (socket.AF_INET,socket.AF_INET6):\n    try: socket.socket(family)\n    except PermissionError: pass\n    else: raise AssertionError('network allowed')\n")
+            probe.write_text("import socket\nfor family in (socket.AF_INET,socket.AF_INET6):\n    try:\n        s=socket.socket(family); s.settimeout(2); s.connect(('127.0.0.1' if family==socket.AF_INET else '::1',9))\n    except PermissionError: pass\n    else: raise AssertionError('network allowed')\n")
             run = subprocess.run([sys.executable,str(ROOT/'sandbox.py'),sys.executable,str(probe)],
                                  capture_output=True,text=True)
             self.assertEqual(run.returncode,0,run.stderr)
