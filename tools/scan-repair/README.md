@@ -84,6 +84,29 @@ are connected through vertices. “Watertight” means closed edges and consiste
 winding; it does **not** rule out intersecting surfaces or certify a printable
 solid. Disconnected closed solids may remain above the floater threshold.
 
+### Texture
+
+When the input has UVs and the surface survives repair (no voxel remesh, no
+decimation), `repaired.obj` keeps them: one `vt` per face corner, so authored
+UV seams survive, and `f v/vt` faces. Its `mtllib` and `usemtl` lines then
+point at byte-for-byte copies of the input's material library and PNG textures
+in the output folder, with names unchanged, and each copy is hashed in
+`outputSha256`. Faces added by hole filling take UVs from neighbouring corners,
+so the texture is smeared across invented surface. The `export` operation
+records `uvRetained` (`uvNote` gives the reason when not), `uvCorners`,
+`materialFiles` and `materialNote`. Remeshing and decimation rebuild the
+surface, so they drop UVs and materials. `repaired.stl` never carries texture.
+
+For OBJ input, every command first snapshots the OBJ and its material graph
+into a private folder, and Blender reads only that snapshot. `mtllib` and
+texture references (`map_*`, `bump`, `disp`, `decal`, `refl`, `norm`) are read
+from the files themselves, never inferred from file names. A reference that
+is absolute, contains `..` or passes through a link exits 2 before Blender runs,
+as does a material library not named `.mtl`. Only plain sibling files
+(letters, digits, `.`, `_`, `-`) and real PNG textures are copied. A missing
+file, subfolder path or other image format keeps the UVs but drops the
+material, and says why in `materialNote`.
+
 Deviation is measured **before orientation**, original → repaired: deterministic
 area-stratified triangle samples plus every original vertex, nearest repaired
 surface distances. `--deviation-samples 10000` controls surface samples. Mean,
@@ -149,7 +172,9 @@ independently projects its vertices using the reported rotation; repair of the
 same box checks output bounds under `box`, `pca` and `keep`, and a grid with
 one oversized face checks the coarse-fill count; render tests
 compare default/explicit preservation against PCA. Tests exercise actual Blender, hashes/repeatability,
-topology, volume, unit declarations/sidecars, STL framing, decimation and all
-ten PNGs. CI downloads Blender 5.0.1 from download.blender.org and verifies the
+topology, volume, unit declarations/sidecars, STL framing, decimation, all
+ten PNGs, a textured cube with a UV seam on every edge (UVs, `usemtl` and
+byte-identical MTL/PNG copies; dropped under voxel remesh; JPEG not copied)
+and rejected material references (parent, absolute, link). CI downloads Blender 5.0.1 from download.blender.org and verifies the
 archive against Blender's published `blender-5.0.1.sha256` file before caching.
 Personal captures, outputs and their private paths never belong in Git.

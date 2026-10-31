@@ -6,6 +6,7 @@ import json
 import math
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -26,6 +27,67 @@ def find_blender():
     if os.access(mac, os.X_OK):
         return mac
     raise ValueError("Blender absent; set BLENDER to Blender 5.0.1")
+
+
+PLAIN_NAME = re.compile(r"[A-Za-z0-9_][A-Za-z0-9._-]*")
+TEXTURE_STATEMENTS = ("map_", "bump", "disp", "decal", "refl", "norm")
+PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+
+
+def stage_obj(source, stage):
+    """Snapshot an OBJ and its sibling MTL/PNG files; Blender reads only the snapshot.
+
+    References that leave the input folder or pass through links reject. Other
+    material problems drop the material and are reported, keeping the repair."""
+    def reference(name):
+        parts = re.split(r"[\\/]", name)
+        if Path(name).is_absolute() or name.startswith(("/", "\\")) or ".." in parts:
+            raise ValueError("material reference leaves the input folder: "+name)
+        path = source.parent/name
+        if any(p.is_symlink() for p in [path, *path.parents][:len(parts)]):
+            raise ValueError("material reference is a link: "+name)
+        if not PLAIN_NAME.fullmatch(name):
+            return None, "only plain sibling material files are copied: "+name
+        return path, None
+    obj = source.read_bytes()
+    files, names, notes = {}, [], []
+    libraries = [name.decode("utf-8", "replace") for match in re.finditer(rb"(?m)^[ \t]*mtllib[ \t]+([^\r\n]*)", obj)
+                 for name in match.group(1).split()]
+    for library in libraries:
+        path, note = reference(library)
+        if path and not library.lower().endswith(".mtl"):
+            raise ValueError("material library must be .mtl: "+library)
+        if path and not path.is_file():
+            note = "material library missing: "+library
+        if note:
+            notes.append(note)
+            continue
+        files[library] = path.read_bytes()
+        for line in files[library].decode("utf-8", "replace").splitlines():
+            words = line.split()
+            if words[:1] == ["newmtl"] and len(words) == 2:
+                names.append(words[1])
+            elif len(words) > 1 and words[0].lower().startswith(TEXTURE_STATEMENTS):
+                path, note = reference(words[-1])
+                if path and not path.is_file():
+                    note = "texture missing: "+words[-1]
+                elif path:
+                    data = path.read_bytes()
+                    if words[-1].lower().endswith(".png") and data.startswith(PNG_SIGNATURE):
+                        files[words[-1]] = data
+                    else:
+                        note = "only PNG textures are copied: "+words[-1]
+                if note:
+                    notes.append(note)
+    stage.mkdir()
+    (stage/"input.obj").write_bytes(obj)
+    if notes:
+        files = {}
+    for name, data in files.items():
+        (stage/name).write_bytes(data)
+    return {"import_path": str(stage/"input.obj"),
+            "material": {"stage": str(stage), "libraries": libraries if files else [], "files": list(files),
+                         "names": names if files else [], "note": "; ".join(notes) or None}}
 
 
 def parser():
@@ -105,6 +167,8 @@ def main():
             raise ValueError("output must not contain the input")
         with tempfile.TemporaryDirectory(prefix="scan-repair-") as tmp:
             request, result = Path(tmp)/"request.json", Path(tmp)/"result.json"
+            if a.input.suffix.lower() == ".obj":
+                config.update(stage_obj(a.input, Path(tmp)/"stage"))
             config["result"] = str(result)
             request.write_text(json.dumps(config))
             run = subprocess.run([find_blender(),"--background","--factory-startup","--python-exit-code","1",
