@@ -1,6 +1,6 @@
 import {readFile} from 'node:fs/promises';
 import {certificateFingerprint, checkLanCertificate, isLanAuthority} from './lan-transport.js';
-import { RemoteAuthStore } from './remote-auth.js';
+import { PHONE_SCOPES, RemoteAuthStore } from './remote-auth.js';
 import {launchPairingPage, renderPairingQr} from './pairing-display.js';
 
 try {
@@ -26,8 +26,9 @@ try {
     result = { status: 'initialized', host: store.host };
   } else {
     const store = await RemoteAuthStore.open(directory);
-    if((command==='pair-capture'||command==='pair-capture-and-printer-handoff')&&(args.length===1||(args.length===0&&store.transport==='lan'))) {
-      const invitation=await store.createPairing(args[0] ?? 'lan',['generation:health','projects:read','projects:write','captures:read','captures:import',...(command==='pair-capture-and-printer-handoff'?['printer-handoff:use' as const]:[])]);
+    if((command==='pair'||command==='pair-capture'||command==='pair-capture-and-printer-handoff')&&(args.length===1||(args.length===0&&store.transport==='lan'))) {
+      // A phone pairing grants what the iPhone app uses; pair-capture omits only printing.
+      const invitation=await store.createPairing(args[0] ?? 'lan',command==='pair-capture'?PHONE_SCOPES.filter(scope=>scope!=='printer-handoff:use'):PHONE_SCOPES);
       result=invitation;
       // stdout remains a single JSON object for existing automation.
       let terminalQrShown = false;
@@ -56,7 +57,7 @@ try {
   process.stdout.write(`${JSON.stringify(result)}\n`);
 } catch {
   process.stderr.write(
-    'Remote auth operation failed. Check command, private directory, configuration and lock.\nUsage: remote-auth-cli.js init <absolute-new-directory> <fqdn.ts.net> <login> [login...] | init-lan <absolute-new-directory> <https-lan-url> <certificate.pem> | pair-capture <directory> [login] | pair-capture-and-printer-handoff <directory> [login] | pair-printer-handoff <directory> <login> | devices <directory> | revoke <directory> <device-id>\n'
+    'Remote auth operation failed. Check command, private directory, configuration and lock.\nUsage: remote-auth-cli.js init <absolute-new-directory> <fqdn.ts.net> <login> [login...] | init-lan <absolute-new-directory> <https-lan-url> <certificate.pem> | pair <directory> [login] | pair-capture <directory> [login] | pair-capture-and-printer-handoff <directory> [login] | pair-printer-handoff <directory> <login> | devices <directory> | revoke <directory> <device-id>\n'
   );
   process.exitCode = 1;
 }

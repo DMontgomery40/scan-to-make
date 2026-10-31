@@ -10,6 +10,7 @@ import {
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { randomUUID } from 'node:crypto';
 
 // A missing export is asserted as missing behavior, before implementation exists.
 const authModule = await import('../dist/remote-auth.js').catch((e) => {
@@ -46,7 +47,9 @@ async function fixture(t) {
 }
 const denied = (f, code = 'unauthorized') =>
   assert.rejects(f, (e) => e.code === code);
-const exchange = async (s, login = 'alice@example.test', scopes) => {
+// Pairings minted by the generation-era default; the phone default is tested separately.
+const LEGACY_SCOPES = ['generation:health', 'generation:create'];
+const exchange = async (s, login = 'alice@example.test', scopes = LEGACY_SCOPES) => {
   const invite = await s.createPairing(login, scopes);
   return s.exchange(login, { code: invite.code, deviceName: 'Test phone' });
 };
@@ -83,7 +86,7 @@ test('single-use code is login bound, expires within five minutes and never surv
   );
 });
 
-test('private persistence stores hashes only; revocation, expiry, device and login binding survive reopen', async (t) => {
+test('private persistence stores hashes only; revocation, expiry and device binding survive reopen; the path does not bind the device', async (t) => {
   const { store, directory, clock, advance } = await fixture(t);
   const a = await exchange(store),
     b = await exchange(store);
@@ -106,13 +109,12 @@ test('private persistence stores hashes only; revocation, expiry, device and log
       'generation:create'
     )
   );
-  await denied(() =>
-    other.authorize(
-      'bob@example.test',
-      a.deviceId,
-      a.token,
-      'generation:create'
-    )
+  // Auth v2: one credential works over every allowed path (LAN, VPN, Tailscale login),
+  // so a device paired through alice's login also works through bob's. Unlisted logins never do.
+  await other.authorize('bob@example.test', a.deviceId, a.token, 'generation:create');
+  await assert.rejects(
+    () => other.authorize('mallory@example.test', a.deviceId, a.token, 'generation:health'),
+    (e) => e.code === 'unauthorized'
   );
   await other.revoke(a.deviceId);
   await denied(() =>
@@ -352,6 +354,8 @@ test('HTTP token scopes, expiry, revocation and per-device credentials prevent c
     ).status,
     401
   );
+  // The credential, not the path, is the device: another allowed login may carry it,
+  // and a login outside the allow list is stopped before the credential is checked.
   assert.equal(
     (
       await wire(server, '/healthz', {
@@ -361,7 +365,18 @@ test('HTTP token scopes, expiry, revocation and per-device credentials prevent c
         },
       })
     ).status,
-    401
+    200
+  );
+  assert.equal(
+    (
+      await wire(server, '/healthz', {
+        headers: {
+          ...credentials(a),
+          'tailscale-user-login': 'mallory@example.test',
+        },
+      })
+    ).status,
+    403
   );
   const projectsOnly = await exchange(store, 'alice@example.test', [
     'projects:read',
@@ -624,4 +639,244 @@ test('existing generation pairing never acquires project/capture authority and e
  await denied(()=>reopened.authorize('alice@example.test',capture.deviceId,capture.token,'generation:create'),'forbidden');
  await reopened.revoke(capture.deviceId);
  await denied(()=>reopened.authorize('alice@example.test',capture.deviceId,capture.token,'captures:read'));
+});
+
+const contracts = await import('@scan-to-make/contracts/device-auth');
+const DAY = 24 * 60 * 60 * 1000;
+
+test('a phone pairing grants exactly the scopes the iPhone app uses, and the credential shape is unchanged', async (t) => {
+  const { store } = await fixture(t);
+  const invite = await store.createPairing('alice@example.test');
+  const phone = await store.exchange('alice@example.test', { code: invite.code, deviceName: 'Phone' });
+  assert.deepEqual(phone.scopes, [...contracts.PHONE_SCOPES]);
+  assert.ok(phone.scopes.includes('printer-handoff:use'));
+  // The phone's own validator: at least two scopes, including generation:health.
+  assert.ok(phone.scopes.length >= 2 && phone.scopes.includes('generation:health'));
+  assert.deepEqual(Object.keys(phone).sort(), ['deviceId', 'expiresAt', 'protocolVersion', 'scopes', 'token']);
+  assert.equal(phone.protocolVersion, '0.1.0');
+  assert.deepEqual(contracts.DeviceCredentialSchema.parse(phone), phone);
+  assert.equal(phone.expiresAt - 1_800_000_000_000, contracts.DEVICE_CREDENTIAL_LIFETIME_MS);
+});
+
+test('rolling refresh extends a live credential with the same token; expired or revoked ones stay dead', async (t) => {
+  const { store, directory, advance } = await fixture(t);
+  const phone = await exchange(store, 'alice@example.test', [...contracts.PHONE_SCOPES]);
+  advance(29 * DAY);
+  // Refresh is identity-bound, not path-bound: bob's allowed login carries alice's device.
+  const refreshed = await store.refresh('bob@example.test', phone.deviceId, phone.token);
+  assert.deepEqual(refreshed, { ...phone, expiresAt: 1_800_000_000_000 + 59 * DAY });
+  assert.ok(!(await readFile(join(directory, 'auth.json'), 'utf8')).includes(phone.token));
+  advance(29 * DAY);
+  await store.authorize('alice@example.test', phone.deviceId, phone.token, 'printer-handoff:use');
+  const [device] = await store.listDevices();
+  assert.equal(device.lastRefreshedAt, 1_800_000_000_000 + 29 * DAY);
+  assert.equal(device.pairedAt, 1_800_000_000_000);
+  assert.deepEqual(device.pairedVia, { transport: 'tailscale', login: 'alice@example.test' });
+  assert.equal(device.tokenHash, undefined);
+  advance(DAY);
+  await denied(() => store.refresh('alice@example.test', phone.deviceId, phone.token));
+  const other = await exchange(store);
+  await denied(() => store.refresh('alice@example.test', other.deviceId, phone.token));
+  await denied(() => store.refresh('mallory@example.test', other.deviceId, other.token));
+  await store.revoke(other.deviceId);
+  await denied(() => store.refresh('alice@example.test', other.deviceId, other.token));
+});
+
+test('HTTP refresh returns the stored credential shape and needs a valid device credential', async (t) => {
+  const { store, server, advance } = await httpFixture(t);
+  const phone = await exchange(store, 'alice@example.test', [...contracts.PHONE_SCOPES]);
+  advance(10 * DAY);
+  const refreshed = await wire(server, '/v1/auth/refresh', { method: 'POST', headers: credentials(phone) });
+  assert.equal(refreshed.status, 200);
+  assert.deepEqual(contracts.DeviceCredentialSchema.parse(refreshed.body), {
+    ...phone,
+    expiresAt: 1_800_000_000_000 + 40 * DAY,
+  });
+  assert.equal((await wire(server, '/v1/auth/refresh', { headers: credentials(phone) })).status, 405);
+  assert.equal((await wire(server, '/v1/auth/refresh', { method: 'POST' })).status, 401);
+  assert.equal(
+    (await wire(server, '/v1/auth/refresh', { method: 'POST', headers: { ...credentials(phone), 'x-scan-device': randomUUID() } })).status,
+    401
+  );
+  assert.equal(
+    (await wire(server, '/v1/auth/refresh', { method: 'POST', headers: { ...credentials(phone), 'tailscale-user-login': 'mallory@example.test' } })).status,
+    403
+  );
+});
+
+async function writeV1(directory, state) {
+  await mkdir(directory, { mode: 0o700 });
+  const bytes = Buffer.from(JSON.stringify(state));
+  await writeFile(join(directory, 'auth.json'), bytes, { mode: 0o600 });
+  return bytes;
+}
+
+test('a version 1 LAN store migrates in place: same devices, hashes, scopes and expiry, a byte-exact backup, no escalation', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'auth-v1-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const directory = join(root, 'auth');
+  const now = 1_800_000_000_000;
+  const token = 'A'.repeat(43);
+  const { createHash } = await import('node:crypto');
+  const tokenHash = createHash('sha256').update(token).digest('hex');
+  const configuration = {
+    transport: 'lan', host: '192.168.68.123:9077', allowedLogins: ['lan'],
+    certificateSha256: 'b'.repeat(64),
+  };
+  const capture = ['generation:health', 'projects:read', 'projects:write', 'captures:read', 'captures:import'];
+  const phoneId = randomUUID(), oldId = randomUUID();
+  const original = await writeV1(directory, {
+    version: 1,
+    configuration,
+    codes: [{ codeHash: 'c'.repeat(64), login: 'lan', scopes: capture, expiresAt: now + 60_000 }],
+    devices: [
+      { deviceId: phoneId, deviceName: 'My phone', login: 'lan', tokenHash, scopes: capture, expiresAt: now + 20 * DAY },
+      { deviceId: oldId, deviceName: 'Expired', login: 'lan', tokenHash: 'd'.repeat(64), scopes: capture, expiresAt: now - 1 },
+    ],
+    attempts: [],
+  });
+  const store = await authModule.RemoteAuthStore.open(directory, () => now);
+  const migrated = JSON.parse(await readFile(join(directory, 'auth.json'), 'utf8'));
+  assert.equal(migrated.version, 2);
+  assert.deepEqual(migrated.configuration, configuration);
+  assert.equal(migrated.codes.length, 1);
+  assert.deepEqual(migrated.devices, [{
+    deviceId: phoneId, deviceName: 'My phone', tokenHash, scopes: capture,
+    pairedAt: now - 10 * DAY, lastRefreshedAt: now - 10 * DAY, expiresAt: now + 20 * DAY,
+    pairedVia: { transport: 'lan', login: 'lan' },
+  }]);
+  assert.deepEqual(await readFile(join(directory, 'auth.v1.json')), original);
+  assert.equal((await stat(join(directory, 'auth.v1.json'))).mode & 0o777, 0o600);
+  assert.equal((await stat(join(directory, 'auth.json'))).mode & 0o777, 0o600);
+  // The phone's stored token still works, and gains no scope it never had.
+  await store.authorize('lan', phoneId, token, 'captures:import');
+  await denied(() => store.authorize('lan', phoneId, token, 'printer-handoff:use'), 'forbidden');
+  // Reopening is a no-op and never overwrites the first backup.
+  await authModule.RemoteAuthStore.open(directory, () => now);
+  assert.deepEqual(await readFile(join(directory, 'auth.v1.json')), original);
+  assert.equal(JSON.parse(await readFile(join(directory, 'auth.json'), 'utf8')).version, 2);
+});
+
+test('an unknown store version fails closed and is left untouched', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'auth-v3-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const directory = join(root, 'auth');
+  const original = await writeV1(directory, {
+    version: 3, configuration: { host: 'companion.example-tail.ts.net', allowedLogins: ['alice@example.test'] },
+    codes: [], devices: [], attempts: [],
+  });
+  await denied(() => authModule.RemoteAuthStore.open(directory), 'auth-unavailable');
+  assert.deepEqual(await readFile(join(directory, 'auth.json')), original);
+  await assert.rejects(() => stat(join(directory, 'auth.v1.json')));
+});
+
+test('CLI pair mints the phone scopes; pair-capture omits only printing', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'auth-cli-pair-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const directory = join(root, 'private');
+  assert.equal((await runCli(admin, ['init', directory, 'companion.example-tail.ts.net', 'alice@example.test'])).code, 0);
+  const store = await authModule.RemoteAuthStore.open(directory);
+  const scopesOf = async (command) => {
+    const invitation = await runCli(admin, [command, directory, 'alice@example.test']);
+    assert.equal(invitation.code, 0, invitation.stderr);
+    const code = JSON.parse(invitation.stdout).code;
+    return (await store.exchange('alice@example.test', { code, deviceName: command })).scopes;
+  };
+  assert.deepEqual(await scopesOf('pair'), [...contracts.PHONE_SCOPES]);
+  assert.deepEqual(await scopesOf('pair-capture-and-printer-handoff'), [...contracts.PHONE_SCOPES]);
+  assert.deepEqual(
+    await scopesOf('pair-capture'),
+    contracts.PHONE_SCOPES.filter((scope) => scope !== 'printer-handoff:use')
+  );
+  const devices = JSON.parse((await runCli(admin, ['devices', directory])).stdout);
+  assert.deepEqual(devices.map((d) => d.pairedVia.transport), ['tailscale', 'tailscale', 'tailscale']);
+});
+
+test('a version 1 Serve store migrates with its login provenance, and a code minted before migration still pairs', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'auth-v1-serve-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const directory = join(root, 'auth');
+  const now = 1_800_000_000_000;
+  const { createHash } = await import('node:crypto');
+  const sha = (x) => createHash('sha256').update(x).digest('hex');
+  const code = 'C'.repeat(32), token = 'T'.repeat(43), deviceId = randomUUID();
+  await writeV1(directory, {
+    version: 1,
+    configuration: { host: 'companion.example-tail.ts.net', allowedLogins: ['alice@example.test', 'bob@example.test'] },
+    codes: [{ codeHash: sha(code), login: 'bob@example.test', scopes: ['generation:health', 'captures:read'], expiresAt: now + 60_000 }],
+    devices: [{ deviceId, deviceName: 'Alice phone', login: 'alice@example.test', tokenHash: sha(token), scopes: ['generation:health', 'generation:create'], expiresAt: now + DAY }],
+    attempts: [],
+  });
+  const store = await authModule.RemoteAuthStore.open(directory, () => now);
+  const [device] = (await store.listDevices()).filter((d) => d.deviceId === deviceId);
+  assert.deepEqual(device.pairedVia, { transport: 'tailscale', login: 'alice@example.test' });
+  // Codes stay bound to the login that minted them.
+  await denied(() => store.exchange('alice@example.test', { code, deviceName: 'Wrong login' }));
+  const paired = await store.exchange('bob@example.test', { code, deviceName: 'Bob phone' });
+  assert.deepEqual(paired.scopes, ['generation:health', 'captures:read']);
+  await store.authorize('bob@example.test', deviceId, token, 'generation:create');
+});
+
+test('a busy lock defers migration: reads work on the version 1 file without writing; the next write migrates', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'auth-v1-busy-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const directory = join(root, 'auth');
+  const now = 1_800_000_000_000;
+  const { createHash } = await import('node:crypto');
+  const token = 'B'.repeat(43), deviceId = randomUUID();
+  const original = await writeV1(directory, {
+    version: 1,
+    configuration: { transport: 'lan', host: '192.168.1.2:9077', allowedLogins: ['lan'], certificateSha256: 'e'.repeat(64) },
+    codes: [],
+    devices: [{ deviceId, deviceName: 'My phone', login: 'lan', tokenHash: createHash('sha256').update(token).digest('hex'), scopes: ['generation:health', 'captures:read'], expiresAt: now + DAY }],
+    attempts: [],
+  });
+  await mkdir(join(directory, '.lock'));
+  const store = await authModule.RemoteAuthStore.open(directory, () => now);
+  await store.authorize('lan', deviceId, token, 'captures:read');
+  assert.deepEqual(await readFile(join(directory, 'auth.json')), original);
+  await assert.rejects(() => stat(join(directory, 'auth.v1.json')));
+  await rm(join(directory, '.lock'), { recursive: true });
+  await store.createPairing('lan');
+  assert.equal(JSON.parse(await readFile(join(directory, 'auth.json'), 'utf8')).version, 2);
+  assert.deepEqual(await readFile(join(directory, 'auth.v1.json')), original);
+  await store.authorize('lan', deviceId, token, 'captures:read');
+});
+
+test('an older, different backup is never overwritten; the new one gets a hash suffix', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'auth-v1-stale-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const directory = join(root, 'auth');
+  const original = await writeV1(directory, {
+    version: 1,
+    configuration: { host: 'companion.example-tail.ts.net', allowedLogins: ['alice@example.test'] },
+    codes: [], devices: [], attempts: [],
+  });
+  await writeFile(join(directory, 'auth.v1.json'), 'stale', { mode: 0o600 });
+  await authModule.RemoteAuthStore.open(directory, () => 1_800_000_000_000);
+  const { createHash } = await import('node:crypto');
+  const suffix = createHash('sha256').update(original).digest('hex').slice(0, 12);
+  assert.equal(await readFile(join(directory, 'auth.v1.json'), 'utf8'), 'stale');
+  assert.deepEqual(await readFile(join(directory, `auth.v1-${suffix}.json`)), original);
+  assert.equal((await stat(join(directory, `auth.v1-${suffix}.json`))).mode & 0o777, 0o600);
+  assert.equal(JSON.parse(await readFile(join(directory, 'auth.json'), 'utf8')).version, 2);
+});
+
+test('refreshing again within an hour writes nothing; the HTTP route refuses a body', async (t) => {
+  const { store, server, directory, advance } = await httpFixture(t);
+  const phone = await exchange(store, 'alice@example.test', [...contracts.PHONE_SCOPES]);
+  advance(2 * DAY);
+  const first = await store.refresh('alice@example.test', phone.deviceId, phone.token);
+  const bytes = await readFile(join(directory, 'auth.json'));
+  advance(30 * 60 * 1000);
+  assert.deepEqual(await store.refresh('alice@example.test', phone.deviceId, phone.token), first);
+  assert.deepEqual(await readFile(join(directory, 'auth.json')), bytes);
+  // A busy lock does not fail a refresh that needs no write.
+  await mkdir(join(directory, '.lock'));
+  assert.deepEqual(await store.refresh('alice@example.test', phone.deviceId, phone.token), first);
+  await rm(join(directory, '.lock'), { recursive: true });
+  assert.equal(
+    (await wire(server, '/v1/auth/refresh', { method: 'POST', headers: { ...credentials(phone), 'content-type': 'application/json' }, body: '{}' })).status,
+    400
+  );
 });
