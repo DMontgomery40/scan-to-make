@@ -73,7 +73,7 @@ def execute(config):
                 image.pack()
         data['units'] = 'mm'
     else:
-        if operation not in ('export',):
+        if operation not in ('export','advise'):
             validate(operation,args)
         bpy.ops.wm.open_mainfile(filepath=str(directory/'state.blend'),load_ui=False,use_scripts=False)
         obj,source = bpy.data.objects['current'],bpy.data.objects['source']
@@ -157,6 +157,15 @@ def execute(config):
             data = evidence.classify(source,args['saturation_min'])
         elif operation=='deviation':
             data = evidence.deviation(source,obj,args['count'],args['seed'])
+        elif operation=='advise':
+            import closeups
+            source.hide_render=True
+            data=closeups.analyse(obj,source,bm,before,args['reference_mm'],args['max_targets'],args['axis_labels'])
+            for target in data['targets']:
+                relative='renders/target-%02d.png'%target['rank']
+                path=directory/relative
+                closeups.render_target(obj,bm,target,path,args['resolution'],core)
+                target['render']={'path':relative,'sha256':core.sha(path),'containsTexture':False}
         elif operation=='render':
             source.hide_render = True
             obj.hide_render = False
