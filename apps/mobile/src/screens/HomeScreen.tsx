@@ -34,10 +34,14 @@ export function HomeScreen({
           accessibilityLabel="Illustration of an object inside a scan grid"
         >
           <View style={styles.gridH} />
-          <View style={styles.gridV} />
-          <View style={styles.outline} />
-          <View style={styles.circle} />
-          <View style={styles.part} />
+          {/* Fixed-size stage, centred, so the drawing keeps its proportions
+              on wide cards (iPad, an unfolded iPhone Duo). */}
+          <View style={styles.stage}>
+            <View style={styles.gridV} />
+            <View style={styles.outline} />
+            <View style={styles.circle} />
+            <View style={styles.part} />
+          </View>
           <Text style={styles.artLabel}>LIDAR SCAN + CLEANUP</Text>
         </View>
         <Text style={styles.heroTitle}>Start with the object.</Text>
@@ -86,6 +90,14 @@ const styles = StyleSheet.create({
     gap: 14,
   },
   art: { height: 168, overflow: 'hidden', marginBottom: 4 },
+  stage: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    left: '50%',
+    width: 300,
+    marginLeft: -150,
+  },
   gridH: {
     position: 'absolute',
     top: 82,

@@ -1,6 +1,6 @@
 import React from 'react';
 import Renderer, { act } from 'react-test-renderer';
-import { Alert, Image, Text, TextInput } from 'react-native';
+import { Alert, Image, StyleSheet, Text, TextInput } from 'react-native';
 import type { ScanProcessingJob } from '@scan-to-make/contracts';
 import { ScanResultsScreen } from '../src/screens/ScanResultsScreen';
 import { unavailableScanServices } from '../src/screens/scanServices';
@@ -353,6 +353,43 @@ test('the view gallery shows each render and shares the model', async () => {
   await press(tree, 'Share STL file');
   expect(calls).toContain('open repaired.obj');
   expect(calls).toContain('share repaired.stl');
+  await act(async () => tree.unmount());
+});
+
+test('the hero view fits the gallery it is in, not the whole window', async () => {
+  const { services } = fakeScanServices({
+    jobs: [syntheticJob('succeeded')],
+  });
+  await services.jobs.save(PROJECT_ID, CAPTURE_ID, JOB_ID);
+  const { tree } = await render(services);
+  const hero = () =>
+    StyleSheet.flatten(
+      tree.root.findAll(
+        n =>
+          n.props.accessibilityLabel?.startsWith?.('Cleaned-up scan,') &&
+          typeof n.props.onPress === 'function',
+        { deep: false },
+      )[0]!.props.style,
+    );
+  // The innermost view that measures itself around the hero is the gallery.
+  const gallery = tree.root
+    .findAll(
+      n =>
+        typeof n.props.onLayout === 'function' &&
+        n.findAll(c =>
+          c.props.accessibilityLabel?.startsWith?.('Cleaned-up scan,'),
+        ).length > 0,
+    )
+    .pop()!;
+  // A folded iPhone Duo's side system bar narrows the column.
+  await act(async () => {
+    gallery.props.onLayout({ nativeEvent: { layout: { width: 338 } } });
+  });
+  expect(hero()).toMatchObject({ width: 338, height: 338 });
+  await act(async () => {
+    gallery.props.onLayout({ nativeEvent: { layout: { width: 640 } } });
+  });
+  expect(hero()).toMatchObject({ width: 520, height: 520 });
   await act(async () => tree.unmount());
 });
 
