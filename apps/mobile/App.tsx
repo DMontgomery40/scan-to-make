@@ -14,7 +14,12 @@ import type {
   ListProjectsResult,
 } from '@scan-to-make/contracts/saved-project';
 import { localSavedProjects, newProjectId } from './src/project/savedProjects';
-import { CompanionScreen } from './src/screens/CompanionScreen';
+import {
+  FindYourMacScreen,
+  type AfterPairing,
+} from './src/screens/FindYourMacScreen';
+import { companionNative } from './src/companion/pairing';
+import { objectCaptureNative } from './src/capture/nativeObjectCapture';
 import { isPairingLink } from './src/companion/pairingLink';
 import { ProjectsHomeScreen } from './src/screens/ProjectsHomeScreen';
 import { SettingsScreen } from './src/screens/SettingsScreen';
@@ -72,6 +77,43 @@ function App({
   const [companionOpen, setCompanionOpen] = useState(false);
   // Bumped when the pairing screen closes, so home reads the pairing again.
   const [pairingKey, setPairingKey] = useState(0);
+  // With no Mac paired, Find your Mac is the first screen. A pairing that
+  // can't be read (or no pairing module) leaves home in place, so local
+  // projects stay reachable.
+  const [needsMac, setNeedsMac] = useState(false);
+  // True while Find your Mac is the screen on show, so a link goes to it.
+  const findingMac = useRef(false);
+  useEffect(() => {
+    let live = true;
+    companionNative()
+      ?.status()
+      .then(
+        value => live && setNeedsMac(value.state !== 'paired'),
+        () => {},
+      );
+    return () => {
+      live = false;
+    };
+  }, [pairingKey]);
+  // Scan something after pairing needs LiDAR; elsewhere it's Open projects.
+  const [canScan, setCanScan] = useState(false);
+  useEffect(() => {
+    objectCaptureNative()
+      ?.status()
+      .then(value => setCanScan(value.supported && value.lidar !== false))
+      .catch(() => {});
+  }, []);
+  // Opens home's "Scan something" sheet once; home clears it when used.
+  const [scanRequested, setScanRequested] = useState(false);
+  const afterPairing = (next: AfterPairing) => {
+    setCompanionOpen(false);
+    setNeedsMac(false);
+    setPairingKey(key => key + 1);
+    // Paired in the middle of something: stay there.
+    if (next === 'back') return;
+    setRoute('home');
+    if (next === 'scan') setScanRequested(true);
+  };
   // scantomake://pair links, e.g. the companion's QR read by the Camera app.
   const [pairLink, setPairLink] = useState<string | null>(null);
   // A cold start can deliver the same link twice within moments. Drop that
@@ -85,7 +127,8 @@ function App({
       lastLink.current = { url, at: now };
       if (last?.url === url && now - last.at < 2000) return;
       setPairLink(url);
-      setCompanionOpen(true);
+      // Find your Mac takes the link itself when it's already on screen.
+      if (!findingMac.current) setCompanionOpen(true);
     };
     Linking.getInitialURL().then(open, () => {});
     const subscription = Linking.addEventListener('url', event =>
@@ -95,6 +138,7 @@ function App({
   }, []);
   const [route, setRoute] = useState<Route>('home');
   const [hydrated, setHydrated] = useState(false);
+  findingMac.current = hydrated && route === 'home' && needsMac;
   const [listing, setListing] = useState<ListProjectsResult | null>(null);
   const [captureProjectId, setCaptureProjectId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
@@ -230,11 +274,23 @@ function App({
         );
         break;
       default:
-        screen = (
+        screen = needsMac ? (
+          <FindYourMacScreen
+            onDone={afterPairing}
+            canScan={canScan}
+            // One camera at a time: this one waits under an open sheet.
+            paused={companionOpen}
+            // A link goes to one screen only: the open pairing sheet if any.
+            link={companionOpen ? null : pairLink}
+            onLinkUsed={() => setPairLink(null)}
+          />
+        ) : (
           <ProjectsHomeScreen
             result={listing}
             services={scanServices}
             pairingKey={pairingKey}
+            scanRequested={scanRequested}
+            onScanRequestUsed={() => setScanRequested(false)}
             paused={companionOpen}
             creating={creating}
             createError={createError}
@@ -267,11 +323,15 @@ function App({
               setPairingKey(key => key + 1);
             }}
           >
-            <CompanionScreen
+            <FindYourMacScreen
               onBack={() => {
                 setCompanionOpen(false);
                 setPairingKey(key => key + 1);
               }}
+              onDone={afterPairing}
+              canScan={canScan}
+              // Opened from anywhere but home, Connected goes back there.
+              resume={route !== 'home'}
               link={pairLink}
               onLinkUsed={() => setPairLink(null)}
             />

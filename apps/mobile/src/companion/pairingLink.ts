@@ -1,4 +1,3 @@
-import { NativeModules } from 'react-native';
 import { invitation } from './pairing';
 
 /**
@@ -66,7 +65,3 @@ function parseQR(text: string, now: number) {
     now,
   );
 }
-
-export type QRScanner = { scan(): Promise<string> };
-export const qrScanner = (): QRScanner | undefined =>
-  NativeModules.QRScannerBridge;

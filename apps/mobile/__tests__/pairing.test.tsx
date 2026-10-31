@@ -1,17 +1,20 @@
 import React from 'react';
 import Renderer, { act } from 'react-test-renderer';
-import { TextInput, Text } from 'react-native';
-import { CompanionScreen } from '../src/screens/CompanionScreen';
+import { Alert, Linking, Text } from 'react-native';
+import { FindYourMacScreen } from '../src/screens/FindYourMacScreen';
 import {
+  EXPIRED,
   invitation,
   pairingError,
+  UNREACHABLE,
   type CompanionNative,
   type PairingStatus,
 } from '../src/companion/pairing';
 import { Button } from '../src/ui/components';
+
 const paired: PairingStatus = {
   state: 'paired',
-  baseUrl: 'https://host.example.ts.net',
+  baseUrl: 'https://mac.example.ts.net',
   deviceId: 'id',
   expiresAt: 2000000000000,
 };
@@ -24,7 +27,8 @@ function nativeMock(): CompanionNative {
     cancel: jest.fn(async () => {}),
   };
 }
-async function press(tree: Renderer.ReactTestRenderer, label: string) {
+type Tree = Renderer.ReactTestRenderer;
+async function press(tree: Tree, label: string) {
   await act(async () =>
     tree.root
       .findAllByType(Button)
@@ -32,14 +36,57 @@ async function press(tree: Renderer.ReactTestRenderer, label: string) {
       .props.onPress(),
   );
 }
-function text(tree: Renderer.ReactTestRenderer) {
+const hasButton = (tree: Tree, label: string) =>
+  tree.root.findAllByType(Button).some(x => x.props.label === label);
+function text(tree: Tree) {
   return tree.root
     .findAllByType(Text)
-    .map(x => x.props.children)
-    .flat()
-    .join(' ');
+    .map(x => [x.props.children].flat().join(''))
+    .join('\n');
 }
-it('rejects expired and cross-host invitations before native exchange', () => {
+const viewfinder = (tree: Tree) =>
+  tree.root.find(n => String(n.type) === 'STMQRScannerView');
+async function scanned(tree: Tree, value: string) {
+  await act(async () =>
+    viewfinder(tree).props.onCode({ nativeEvent: { value } }),
+  );
+}
+
+const qrCode = 'Q'.repeat(20) + 'r_-'.repeat(4);
+const pin = '0f'.repeat(32);
+// Built the way your Mac builds it (URLSearchParams).
+function qrLink(options: { expiresAt?: number; lan?: boolean } = {}): string {
+  const params = new URLSearchParams({
+    v: '1',
+    u: options.lan ? 'https://192.168.1.20:9077' : paired.baseUrl!,
+    c: qrCode,
+    e: String(options.expiresAt ?? Date.now() + 300_000),
+    ...(options.lan ? { f: pin } : {}),
+  });
+  return `scantomake://pair?${params.toString()}`;
+}
+async function render(
+  native: CompanionNative,
+  props: Partial<React.ComponentProps<typeof FindYourMacScreen>> = {},
+) {
+  let tree!: Tree;
+  const onDone = jest.fn();
+  await act(async () => {
+    tree = Renderer.create(
+      <FindYourMacScreen native={native} onDone={onDone} {...props} />,
+    );
+  });
+  return { tree, onDone };
+}
+async function unpaired(
+  props: Partial<React.ComponentProps<typeof FindYourMacScreen>> = {},
+) {
+  const native = nativeMock();
+  (native.status as jest.Mock).mockResolvedValue({ state: 'disconnected' });
+  return { native, ...(await render(native, props)) };
+}
+
+it('rejects expired and cross-host codes before anything is sent', () => {
   const json = JSON.stringify({
     version: 1,
     baseUrl: paired.baseUrl,
@@ -55,219 +102,62 @@ it('rejects expired and cross-host invitations before native exchange', () => {
     code: 'A'.repeat(32),
   });
 });
-it('does not expose arbitrary server errors or secrets in recovery copy', () => {
+
+it('recovery copy never repeats what your Mac sent, and says what to do', () => {
   expect(
     pairingError({ code: 'unauthorized', message: 'secret' }),
   ).not.toContain('secret');
-  expect(pairingError({ code: 'certificate' })).toContain(
-    'Certificate checks stay enabled',
+  expect(pairingError({ code: 'expired-invitation' })).toBe(EXPIRED);
+  expect(pairingError({ code: 'network' })).toBe(UNREACHABLE);
+  expect(pairingError({ code: 'certificate-changed' })).toBe(
+    'This Mac looks different from last time. Pair again to be safe.',
   );
-  expect(pairingError({ code: 'wrong-host' })).toContain('not forwarded');
-});
-it('hydrates native metadata, shows revoked recovery, and disconnects explicitly', async () => {
-  const native = nativeMock();
-  let tree!: Renderer.ReactTestRenderer;
-  await act(async () => {
-    tree = Renderer.create(
-      <CompanionScreen onBack={() => {}} native={native} />,
-    );
-  });
-  expect(native.check).not.toHaveBeenCalled();
-  expect(text(tree)).toContain(paired.baseUrl);
-  (native.check as jest.Mock).mockRejectedValue({ code: 'unauthorized' });
-  await press(tree, 'Check connection');
-  expect(text(tree)).toContain('revoked');
-  expect(native.disconnect).not.toHaveBeenCalled();
-  await press(tree, 'Disconnect this device');
-  expect(native.disconnect).toHaveBeenCalledTimes(1);
-  expect(text(tree)).toContain('projects and drafts are unchanged');
-  expect(tree.root.findAllByType(TextInput).length).toBe(0);
-  await press(tree, 'Enter code instead');
-  expect(tree.root.findAllByType(TextInput).length).toBe(3);
-  await act(async () => tree.unmount());
-});
-it('clears invitation after a failed exchange and permits retry without clearing pairing', async () => {
-  const native = nativeMock();
-  let tree!: Renderer.ReactTestRenderer;
-  (native.status as jest.Mock).mockResolvedValue({
-    state: 'disconnected' as const,
-  });
-  (native.pair as jest.Mock).mockRejectedValue({ code: 'network' });
-  await act(async () => {
-    tree = Renderer.create(
-      <CompanionScreen onBack={() => {}} native={native} />,
-    );
-  });
-  await press(tree, 'Enter code instead');
-  await act(async () => {
-    tree.root
-      .findByProps({ accessibilityLabel: 'Companion HTTPS address' })
-      .props.onChangeText(paired.baseUrl);
-    tree.root
-      .findByProps({ accessibilityLabel: 'Pairing code or invitation' })
-      .props.onChangeText('A'.repeat(32));
-  });
-  await press(tree, 'Pair companion');
-  expect(native.pair).toHaveBeenCalledWith(
-    paired.baseUrl,
-    'A'.repeat(32),
-    'My phone',
-    null,
-  );
-  expect(
-    tree.root.findByProps({ accessibilityLabel: 'Pairing code or invitation' })
-      .props.value,
-  ).toBe('');
-  expect(native.disconnect).not.toHaveBeenCalled();
-  expect(text(tree)).toContain('Couldn’t reach');
-  await act(async () => tree.unmount());
 });
 
-const qrCode = 'Q'.repeat(20) + 'r_-'.repeat(4);
-// Built the way the companion builds it (URLSearchParams).
-function qrLink(expiresAt = Date.now() + 300_000) {
-  const params = new URLSearchParams({
-    v: '1',
-    u: paired.baseUrl!,
-    c: qrCode,
-    e: String(expiresAt),
-  });
-  return `scantomake://pair?${params.toString()}`;
-}
-async function unpaired(
-  props: Partial<React.ComponentProps<typeof CompanionScreen>> = {},
-) {
-  const native = nativeMock();
-  (native.status as jest.Mock).mockResolvedValue({ state: 'disconnected' });
-  let tree!: Renderer.ReactTestRenderer;
-  await act(async () => {
-    tree = Renderer.create(
-      <CompanionScreen onBack={() => {}} native={native} {...props} />,
-    );
-  });
-  return { tree, native };
-}
-
-it('scanning the companion QR pairs straight away, without typing', async () => {
-  const scanner = { scan: jest.fn(async () => qrLink()) };
-  const { tree, native } = await unpaired({ scanner });
-  expect(tree.root.findAllByType(TextInput)).toHaveLength(0);
-  await press(tree, 'Scan QR code');
+it('Find your Mac opens on the viewfinder: point at the code and it pairs', async () => {
+  const { tree, native, onDone } = await unpaired();
+  expect(text(tree)).toContain('Find your Mac');
+  expect(text(tree)).toContain('Point at the code in Scan to Make on your Mac');
+  expect(viewfinder(tree).props.active).toBe(true);
+  await scanned(tree, qrLink());
   expect(native.pair).toHaveBeenCalledWith(
     paired.baseUrl,
     qrCode,
     'My phone',
     null,
   );
-  expect(text(tree)).toContain('Paired with your computer.');
+  expect(text(tree)).toContain('Connected to your Mac');
+  await press(tree, 'Open projects');
+  expect(onDone).toHaveBeenCalledWith('projects');
   await act(async () => tree.unmount());
 });
 
-it('a cancelled scan changes nothing, and a refused camera says what to do', async () => {
-  const scanner = { scan: jest.fn() };
-  const { tree, native } = await unpaired({ scanner });
-  scanner.scan.mockRejectedValueOnce({
-    code: 'cancelled',
-    message: 'Scanning cancelled.',
-  });
-  await press(tree, 'Scan QR code');
-  expect(text(tree)).not.toContain('Scanning cancelled.');
-  scanner.scan.mockRejectedValueOnce({
-    code: 'camera-denied',
-    message:
-      'Camera access is off for Scan to Make. Turn it on in Settings, or enter the code instead.',
-  });
-  await press(tree, 'Scan QR code');
-  expect(text(tree)).toContain('Camera access is off for Scan to Make.');
-  expect(native.pair).not.toHaveBeenCalled();
-  await act(async () => tree.unmount());
-});
-
-it('an expired or foreign QR is refused before any exchange', async () => {
-  const scanner = { scan: jest.fn() };
-  const { tree, native } = await unpaired({ scanner });
-  scanner.scan.mockResolvedValueOnce(qrLink(Date.now() - 1));
-  await press(tree, 'Scan QR code');
-  expect(text(tree)).toContain('This invitation has expired.');
-  scanner.scan.mockResolvedValueOnce('https://example.com/menu');
-  await press(tree, 'Scan QR code');
-  expect(text(tree)).toContain('Use the HTTPS address and fresh pairing code');
-  expect(native.pair).not.toHaveBeenCalled();
-  await act(async () => tree.unmount());
-});
-
-it('a pairing link from the Camera app pairs once when the screen opens', async () => {
-  const onLinkUsed = jest.fn();
-  const { tree, native } = await unpaired({ link: qrLink(), onLinkUsed });
-  expect(onLinkUsed).toHaveBeenCalledTimes(1);
-  expect(native.pair).toHaveBeenCalledTimes(1);
-  expect(native.pair).toHaveBeenCalledWith(
-    paired.baseUrl,
-    qrCode,
-    'My phone',
-    null,
+it('a code the camera sees many times is used once', async () => {
+  const { tree, native } = await unpaired();
+  let release!: () => void;
+  (native.pair as jest.Mock).mockImplementation(
+    () => new Promise(r => (release = () => r(paired))),
   );
-  await act(async () => tree.unmount());
-});
-
-it('a link while already paired asks before replacing the pairing', async () => {
-  const native = nativeMock();
-  const onLinkUsed = jest.fn();
-  let tree!: Renderer.ReactTestRenderer;
   await act(async () => {
-    tree = Renderer.create(
-      <CompanionScreen
-        onBack={() => {}}
-        native={native}
-        link={qrLink()}
-        onLinkUsed={onLinkUsed}
-      />,
-    );
+    for (let i = 0; i < 5; i++) {
+      viewfinder(tree).props.onCode({ nativeEvent: { value: qrLink() } });
+    }
   });
-  expect(native.pair).not.toHaveBeenCalled();
-  expect(text(tree)).toContain('Pair with a new computer?');
-  await press(tree, 'Keep current pairing');
-  expect(text(tree)).not.toContain('Pair with a new computer?');
-  expect(native.pair).not.toHaveBeenCalled();
-  await act(async () => {
-    tree.update(
-      <CompanionScreen
-        onBack={() => {}}
-        native={native}
-        link={qrLink(Date.now() + 400_000)}
-        onLinkUsed={onLinkUsed}
-      />,
-    );
-  });
-  await press(tree, 'Pair with this one');
   expect(native.pair).toHaveBeenCalledTimes(1);
+  // While it's in use the camera is off, so it re-arms for the next code.
+  expect(viewfinder(tree).props.active).toBe(false);
+  await act(async () => release());
   await act(async () => tree.unmount());
 });
 
-it('a link waits while the stored pairing cannot be read', async () => {
-  const native = nativeMock();
-  (native.status as jest.Mock).mockRejectedValue({
-    code: 'storage-unavailable',
-  });
-  let tree!: Renderer.ReactTestRenderer;
-  await act(async () => {
-    tree = Renderer.create(
-      <CompanionScreen onBack={() => {}} native={native} link={qrLink()} />,
-    );
-  });
+it('the first code for a Mac on this Wi-Fi explains the local network question first', async () => {
+  const { tree, native } = await unpaired();
+  await scanned(tree, qrLink({ lan: true }));
   expect(native.pair).not.toHaveBeenCalled();
-  await act(async () => tree.unmount());
-});
-
-it('a QR with a certificate pin passes the pin to the native pairing', async () => {
-  const pin = 'ab'.repeat(32);
-  const lanLink = qrLink().replace(
-    encodeURIComponent(paired.baseUrl!),
-    encodeURIComponent('https://192.168.1.20:9077'),
+  expect(text(tree)).toContain(
+    'To find your Mac, Scan to Make needs to look on your Wi-Fi.',
   );
-  const scanner = { scan: jest.fn(async () => lanLink + '&f=' + pin) };
-  const { tree, native } = await unpaired({ scanner });
-  await press(tree, 'Scan QR code');
+  await press(tree, 'Continue');
   expect(native.pair).toHaveBeenCalledWith(
     'https://192.168.1.20:9077',
     qrCode,
@@ -275,4 +165,296 @@ it('a QR with a certificate pin passes the pin to the native pairing', async () 
     pin,
   );
   await act(async () => tree.unmount());
+});
+
+it('an unreachable Mac says so and tries the same code again; an expired one says how to get a new one', async () => {
+  const { tree, native } = await unpaired();
+  (native.pair as jest.Mock).mockRejectedValueOnce({ code: 'network' });
+  await scanned(tree, qrLink());
+  expect(text(tree)).toContain(UNREACHABLE);
+  expect(viewfinder(tree).props.active).toBe(false);
+  await press(tree, 'Try again');
+  expect(native.pair).toHaveBeenCalledTimes(2);
+  expect(text(tree)).toContain('Connected to your Mac');
+  await act(async () => tree.unmount());
+
+  const second = await unpaired();
+  await scanned(second.tree, qrLink({ expiresAt: Date.now() - 1 }));
+  expect(second.native.pair).not.toHaveBeenCalled();
+  expect(text(second.tree)).toContain(EXPIRED);
+  await press(second.tree, 'Try again');
+  expect(viewfinder(second.tree).props.active).toBe(true);
+  await act(async () => second.tree.unmount());
+});
+
+it('after pairing on a LiDAR device the next step is Scan something', async () => {
+  const { tree, onDone } = await unpaired({ canScan: true });
+  await scanned(tree, qrLink());
+  await press(tree, 'Scan something');
+  expect(onDone).toHaveBeenCalledWith('scan');
+  await act(async () => tree.unmount());
+});
+
+it('a refused camera points to Settings', async () => {
+  const open = jest.spyOn(Linking, 'openSettings').mockResolvedValue();
+  const { tree } = await unpaired();
+  await act(async () =>
+    viewfinder(tree).props.onState({ nativeEvent: { state: 'denied' } }),
+  );
+  expect(text(tree)).toContain('Scan to Make can’t use the camera.');
+  await press(tree, 'Open Settings');
+  expect(open).toHaveBeenCalled();
+  open.mockRestore();
+  await act(async () => tree.unmount());
+});
+
+it('a paired phone sees its Mac and can forget it', async () => {
+  const native = nativeMock();
+  const alert = jest.spyOn(Alert, 'alert');
+  const { tree } = await render(native, { onBack: () => {} });
+  expect(text(tree)).toContain('Your Mac');
+  expect(text(tree)).toContain('Connected');
+  expect(text(tree)).toContain('mac.example.ts.net');
+  await press(tree, 'Forget this Mac');
+  const buttons = alert.mock.calls.at(-1)![2]!;
+  await act(async () => {
+    await buttons.find(b => b.text === 'Forget')!.onPress!();
+  });
+  expect(native.disconnect).toHaveBeenCalled();
+  expect(text(tree)).toContain('Find your Mac');
+  alert.mockRestore();
+  await act(async () => tree.unmount());
+});
+
+it('a pairing link pairs once when the screen opens', async () => {
+  const native = nativeMock();
+  (native.status as jest.Mock).mockResolvedValue({ state: 'disconnected' });
+  const onLinkUsed = jest.fn();
+  const { tree } = await render(native, { link: qrLink(), onLinkUsed });
+  expect(onLinkUsed).toHaveBeenCalledTimes(1);
+  expect(native.pair).toHaveBeenCalledTimes(1);
+  await act(async () => tree.unmount());
+});
+
+it('a link while already paired asks before replacing the paired Mac', async () => {
+  const native = nativeMock();
+  const { tree } = await render(native, { link: qrLink() });
+  expect(native.pair).not.toHaveBeenCalled();
+  expect(text(tree)).toContain('Pair with another Mac?');
+  await press(tree, 'Keep this Mac');
+  expect(native.pair).not.toHaveBeenCalled();
+  await act(async () => tree.unmount());
+
+  const again = await render(nativeMock(), { link: qrLink() });
+  await press(again.tree, 'Pair with that Mac');
+  expect(hasButton(again.tree, 'Keep this Mac')).toBe(false);
+  await act(async () => again.tree.unmount());
+});
+
+it('a link waits while the stored pairing can’t be read', async () => {
+  const native = nativeMock();
+  (native.status as jest.Mock).mockRejectedValueOnce({
+    code: 'secure-storage',
+  });
+  const { tree } = await render(native, { link: qrLink() });
+  expect(native.pair).not.toHaveBeenCalled();
+  expect(text(tree)).toContain('This phone couldn’t read its pairing.');
+  (native.status as jest.Mock).mockResolvedValueOnce({
+    state: 'disconnected',
+  });
+  await press(tree, 'Try again');
+  expect(native.pair).toHaveBeenCalledTimes(1);
+  await act(async () => tree.unmount());
+});
+
+it('pairing another Mac stops the check of the paired one first', async () => {
+  const native = nativeMock();
+  // As on iOS, the phone sends one request to a Mac at a time.
+  let checking: ((reason: unknown) => void) | null = null;
+  (native.check as jest.Mock).mockImplementation(
+    () =>
+      new Promise((_resolve, reject) => {
+        checking = reject;
+      }),
+  );
+  (native.cancel as jest.Mock).mockImplementation(async () => {
+    checking?.({ code: 'cancelled' });
+    checking = null;
+  });
+  (native.pair as jest.Mock).mockImplementation(async () => {
+    if (checking) throw { code: 'busy' };
+    return paired;
+  });
+  const alert = jest
+    .spyOn(Alert, 'alert')
+    .mockImplementation((_title, _message, buttons) =>
+      buttons?.[1]?.onPress?.(),
+    );
+  const { tree } = await render(native, { onBack: () => {} });
+  expect(text(tree)).toContain('Looking for your Mac…');
+  await press(tree, 'Pair another Mac');
+  await scanned(tree, qrLink());
+  expect(text(tree)).toContain('Connected to your Mac');
+  alert.mockRestore();
+  await act(async () => tree.unmount());
+});
+
+it('the camera waits for the stored pairing, so a paired Mac is never replaced unasked', async () => {
+  const native = nativeMock();
+  let read!: (value: PairingStatus) => void;
+  (native.status as jest.Mock).mockImplementation(
+    () =>
+      new Promise(resolve => {
+        read = resolve;
+      }),
+  );
+  const { tree } = await render(native, { onBack: () => {} });
+  expect(viewfinder(tree).props.active).toBe(false);
+  await scanned(tree, qrLink());
+  expect(native.pair).not.toHaveBeenCalled();
+  await act(async () => read(paired));
+  expect(text(tree)).toContain('Your Mac');
+  expect(native.pair).not.toHaveBeenCalled();
+  await act(async () => tree.unmount());
+});
+
+it('a link that comes in while a code is in use is tried next', async () => {
+  const { native, tree, onDone } = await unpaired();
+  let fail!: (reason: unknown) => void;
+  (native.pair as jest.Mock).mockImplementationOnce(
+    () =>
+      new Promise((_resolve, reject) => {
+        fail = reject;
+      }),
+  );
+  await scanned(tree, qrLink());
+  const other = 'N'.repeat(32);
+  const link = qrLink().replace(`c=${qrCode}`, `c=${other}`);
+  await act(async () =>
+    tree.update(
+      <FindYourMacScreen native={native} onDone={onDone} link={link} />,
+    ),
+  );
+  expect(native.pair).toHaveBeenCalledTimes(1);
+  await act(async () => fail({ code: 'unauthorized' }));
+  expect(native.pair).toHaveBeenCalledTimes(2);
+  expect((native.pair as jest.Mock).mock.calls[1][1]).toBe(other);
+  expect(text(tree)).toContain('Connected to your Mac');
+  await act(async () => tree.unmount());
+});
+
+it('a link that comes in while pairing or on Connected asks before replacing the new Mac', async () => {
+  const { native, tree, onDone } = await unpaired();
+  let finish!: (value: PairingStatus) => void;
+  (native.pair as jest.Mock).mockImplementationOnce(
+    () =>
+      new Promise(resolve => {
+        finish = resolve;
+      }),
+  );
+  await scanned(tree, qrLink());
+  const other = 'N'.repeat(32);
+  const link = qrLink().replace(`c=${qrCode}`, `c=${other}`);
+  const show = (next: string | null) =>
+    act(async () =>
+      tree.update(
+        <FindYourMacScreen native={native} onDone={onDone} link={next} />,
+      ),
+    );
+  // During the exchange.
+  await show(link);
+  await act(async () => finish(paired));
+  expect(text(tree)).toContain('Pair with another Mac?');
+  expect(hasButton(tree, 'Open projects')).toBe(false);
+  await press(tree, 'Keep this Mac');
+  expect(text(tree)).toContain('Connected to your Mac');
+  expect(native.pair).toHaveBeenCalledTimes(1);
+  // While Connected shows.
+  await show(null);
+  await show(link);
+  expect(text(tree)).toContain('Pair with another Mac?');
+  await press(tree, 'Pair with that Mac');
+  expect(native.pair).toHaveBeenCalledTimes(2);
+  expect((native.pair as jest.Mock).mock.calls[1][1]).toBe(other);
+  expect(text(tree)).toContain('Connected to your Mac');
+  await act(async () => tree.unmount());
+});
+
+it('a paired Mac that turns this phone away says to pair again, not to check the Wi-Fi', async () => {
+  const native = nativeMock();
+  (native.check as jest.Mock).mockRejectedValue({
+    code: 'certificate-changed',
+  });
+  const { tree } = await render(native);
+  expect(text(tree)).toContain(
+    'This Mac looks different from last time. Pair again to be safe.',
+  );
+  expect(text(tree)).not.toContain('same Wi-Fi');
+  await act(async () => tree.unmount());
+
+  const offline = nativeMock();
+  (offline.check as jest.Mock).mockRejectedValue({ code: 'network' });
+  const again = await render(offline);
+  expect(text(again.tree)).toContain(
+    'Your phone can’t reach your Mac right now.',
+  );
+  expect(text(again.tree)).toContain(
+    'Are they on the same Wi-Fi, or is your VPN on?',
+  );
+  await act(async () => again.tree.unmount());
+});
+
+// journey.md §9: words the app no longer uses.
+const BANNED = [
+  /companion/i,
+  /invitation/i,
+  /one-time code/i,
+  /https address/i,
+  /tailscale/i,
+  /\bhost\b/i,
+  /server/i,
+  /\bcomputer\b/i,
+];
+
+it('every Find your Mac state uses only the plain words', async () => {
+  const shown: string[] = [];
+  const keep = (tree: Tree) => {
+    shown.push(text(tree));
+    shown.push(
+      ...tree.root
+        .findAll(n => typeof n.props.accessibilityLabel === 'string')
+        .map(n => n.props.accessibilityLabel),
+    );
+  };
+  const one = await unpaired();
+  keep(one.tree);
+  await scanned(one.tree, qrLink({ lan: true }));
+  keep(one.tree);
+  await act(async () => one.tree.unmount());
+  for (const code of [
+    'network',
+    'expired-invitation',
+    'unauthorized',
+    'certificate-changed',
+    'certificate',
+    'wrong-host',
+    'unavailable',
+    'invalid-response',
+    'rate-limited',
+  ]) {
+    const failing = await unpaired();
+    (failing.native.pair as jest.Mock).mockRejectedValueOnce({ code });
+    await scanned(failing.tree, qrLink());
+    keep(failing.tree);
+    await act(async () => failing.tree.unmount());
+  }
+  const done = await unpaired();
+  await scanned(done.tree, qrLink());
+  keep(done.tree);
+  await act(async () => done.tree.unmount());
+  const mine = await render(nativeMock(), { onBack: () => {} });
+  keep(mine.tree);
+  await act(async () => mine.tree.unmount());
+  const all = shown.join('\n');
+  for (const word of BANNED) expect(all).not.toMatch(word);
 });

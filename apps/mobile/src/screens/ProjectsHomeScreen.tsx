@@ -102,6 +102,8 @@ export function ProjectsHomeScreen({
   capture = objectCaptureNative(),
   pairingKey = 0,
   paused = false,
+  scanRequested = false,
+  onScanRequestUsed,
   creating,
   createError,
   onCreate,
@@ -120,6 +122,9 @@ export function ProjectsHomeScreen({
   pairingKey?: number;
   /** True while the pairing screen is open over home. */
   paused?: boolean;
+  /** True to open the Scan something sheet once, e.g. right after pairing. */
+  scanRequested?: boolean;
+  onScanRequestUsed?: () => void;
   creating: boolean;
   createError: string | null;
   onCreate: (name: string) => Promise<boolean>;
@@ -165,6 +170,11 @@ export function ProjectsHomeScreen({
     };
   }, [capture]);
   const cannotScan = scan === 'no-lidar' || scan === 'unsupported';
+  useEffect(() => {
+    if (!scanRequested) return;
+    setNaming(true);
+    onScanRequestUsed?.();
+  }, [scanRequested]); // eslint-disable-line react-hooks/exhaustive-deps
   const [refreshing, setRefreshing] = useState(false);
   // Bumped by pull to refresh and coming back to the app.
   const [round, setRound] = useState(0);
