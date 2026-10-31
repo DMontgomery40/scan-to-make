@@ -8,6 +8,7 @@ import {fileURLToPath} from 'node:url';
 import {RemoteAuthStore} from '../dist/remote-auth.js';
 import {startCompanionServer} from '../dist/server.js';
 import {createPrintHandoffServices} from '../dist/print-handoff-http.js';
+import {HandoffBundleStore, InMemoryElicitationRelay} from '@scan-to-make/printer-handoff';
 
 const forwarded = JSON.parse(await readFile(new URL('./fixtures/tailscale-serve-v1.94.2.json', import.meta.url), 'utf8')).expected;
 const fixtureServer = fileURLToPath(new URL('../../printer-handoff/tests/fixtures/fixture-printer-server.mjs', import.meta.url));
@@ -17,7 +18,7 @@ const selection = {
   bedType: 'textured_plate', material: 'PLA', plateIndex: 0,
 };
 
-async function fixture(t, scopes = ['printer-handoff:use']) {
+async function fixture(t, scopes = ['printer-handoff:use'], makeServices) {
   const root = await mkdtemp(join(tmpdir(), 'print-handoff-http-'));
   t.after(() => rm(root, {recursive: true, force: true}));
   const remoteAuth = await RemoteAuthStore.create(join(root, 'auth'), {
@@ -27,7 +28,7 @@ async function fixture(t, scopes = ['printer-handoff:use']) {
   const phone = await remoteAuth.exchange('alice@example.test', {code: invitation.code, deviceName: 'Fixture'});
   const log = join(root, 'calls.jsonl');
   await writeFile(log, '');
-  const printHandoff = createPrintHandoffServices({
+  const printHandoff = makeServices ? makeServices(root) : createPrintHandoffServices({
     backend: 'bambu-printer-mcp',
     process: {command: process.execPath, args: [fixtureServer, 'bambu', log], cwd: root},
     selection,
@@ -137,4 +138,34 @@ test('elicitation respond rejects unknown ids and malformed answers', async t =>
   });
   assert.equal(malformed.status, 400);
   assert.equal((await wire(f, '/v1/printer-handoff/bundles/00000000-0000-4000-8000-000000000000/print', {method: 'POST'})).status, 404);
+});
+
+test('a failure after slicing persists a sanitized failed status instead of running forever', async t => {
+  const f = await fixture(t, ['printer-handoff:use'], root => ({
+    store: new HandoffBundleStore(join(root, 'bundles-fail')),
+    relay: new InMemoryElicitationRelay({timeoutMs: 1000}),
+    runner: {
+      backend: 'bambu-printer-mcp',
+      // Simulates runBundle failing outside its inner run() catch, while
+      // recording the sliced artifact back into the bundle.
+      runBundle: async (store, id) => {
+        await store.recordArtifact(id, 'sliced', 'sliced.3mf', Buffer.from('fixture 3mf'));
+        throw Object.assign(new Error('/private/operator/path exploded'), {code: 'record-failed'});
+      },
+    },
+    selection,
+  }));
+  const bundle = await createBundle(f);
+  const started = await wire(f, `/v1/printer-handoff/bundles/${bundle.id}/print`, {method: 'POST'});
+  assert.equal(started.status, 202, started.bytes.toString());
+  let final;
+  for (let attempt = 0; attempt < 200; attempt++) {
+    final = json(await wire(f, `/v1/printer-handoff/bundles/${bundle.id}`));
+    if (!final.printing) break;
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+  assert.equal(final.printing, false);
+  assert.equal(final.bundle.status, 'failed');
+  assert.equal(final.bundle.failure, 'record-failed');
+  assert.ok(!String(final.bundle.failure).includes('/private'));
 });

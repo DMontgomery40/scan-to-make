@@ -116,8 +116,15 @@ export function createPrintHandoffRoutes(services: PrintHandoffServices) {
     const entry: ActivePrint = {bundleId, controller, done: Promise.resolve()};
     entry.done = (async () => {
       try { await services.runner.runBundle(services.store, bundleId, {signal: controller.signal}); }
-      catch { /* runBundle records the failure on the bundle itself. */ }
-      finally { if (activePrint === entry) activePrint = undefined; }
+      catch (error) {
+        // runBundle records failures from its own run, but a failure while
+        // recording outputs escapes it; persist a terminal status here so
+        // the phone never polls a bundle that runs forever. Only a bare
+        // error code is stored, never a message or path.
+        const code = (error as {code?: unknown})?.code;
+        const reason = typeof code === 'string' && /^[a-z0-9-]{1,64}$/.test(code) ? code : 'print-failed';
+        await services.store.setStatus(bundleId, 'failed', reason).catch(() => undefined);
+      } finally { if (activePrint === entry) activePrint = undefined; }
     })();
     activePrint = entry;
   };
