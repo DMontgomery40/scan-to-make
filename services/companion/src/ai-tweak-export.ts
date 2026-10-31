@@ -10,8 +10,8 @@ import {readScanMaterials} from './scan-model-assets.js';
 /**
  * The AI step's hand-off to the rest of cleanup (KAN-184 PR B). The picked result, an attempt or the
  * captured scan, becomes the same files scan-correct writes: corrected.obj (mm) and corrected.stl,
- * plus mesh.mtl and mesh_basecolor_N.png in the converter's base-colour grammar (newmtl, Kd, map_Kd),
- * which the /model-assets publisher (KAN-141) verifies with snapshotCaptureMaterials.
+ * plus mesh.mtl, mesh_basecolor_N.png and mesh_normal_N.png in the final-result grammar that the
+ * /model-assets publisher (KAN-141) and make-printable (KAN-185) check with readScanMaterials.
  */
 export const AI_CLEANUP_SCHEMA='scan-to-make.ai-tweak-cleanup/0.1';
 /** The pick's render that becomes an attempt's preview on the phone. */
@@ -19,6 +19,9 @@ export const PREVIEW_VIEW='textured_iso_front_left.png';
 const PNG=Buffer.from([137,80,78,71,13,10,26,10]);
 const MAX_MESH_BYTES=64*1024*1024,MAX_PREVIEW_BYTES=8*1024*1024,MAX_TRIANGLES=1200000;
 const sha=(bytes:Buffer|string)=>createHash('sha256').update(bytes).digest('hex');
+/** Material values the final-result grammar accepts (scan-model-assets.ts readScanMaterials). */
+const VECTOR_VALUES=new Set(['Kd','Ka','Ks','Ke','Tf']);
+const SCALAR_VALUES=new Set(['Ns','Ni','d','Tr','illum','Pr','Pm','Ps','Pc','Pcr','aniso','anisor']);
 
 /**
  * The judge writes its reason freely, so before it is public: known secret values, absolute paths and
@@ -62,9 +65,10 @@ function resolver(bundle:Awaited<ReturnType<typeof aiTweakInternals.objBundle>>)
 
 /**
  * Rewrite one OBJ bundle into `out` in millimetres. Vertex positions are scaled; UVs, normals, faces and
- * material assignments are copied unchanged, and base-colour images keep their bytes. Non-base maps
- * (normal, bump, roughness) and other material values are dropped; a material without map_Kd keeps Kd.
- * Fails on anything the grammar can't carry faithfully (texture offsets or scales, a non-PNG base colour).
+ * material assignments are copied unchanged. Each material keeps its own values, base colour and normal
+ * map (PNG bytes unchanged, as mesh_basecolor_N.png and mesh_normal_N.png) within the final-result
+ * grammar; maps and values outside it are dropped. Fails on anything that would change the base colour
+ * (texture offsets or scales, a non-PNG base colour), so the caller can keep the captured scan.
  */
 export async function exportMeshBundle(obj:string,mmPerUnit:number,out:string):Promise<Record<string,string>>{
  if(!isAbsolute(obj)||!isAbsolute(out))throw Error('Export paths must be absolute');
@@ -73,38 +77,66 @@ export async function exportMeshBundle(obj:string,mmPerUnit:number,out:string):P
  if(bundle.escaped||bundle.missing.length)throw Error('Mesh bundle references missing, outside or oversized files');
  const target=resolver(bundle),objBytes=await readFile(obj);
  if(objBytes.length>MAX_MESH_BYTES)throw Error('Mesh too large');
- // Materials: first definition of a name wins, as OBJ readers do.
- const materials=new Map<string,{kd?:string;map?:{clamp?:string;image:string}}>(),images=new Map<string,string>(),files:Record<string,Buffer>={};
+ // Materials: the first definition of a name wins, and within one the last statement of each directive
+ // wins, as OBJ readers do (in the position it first appeared). Limited to the final-result grammar the
+ // publisher and make-printable check (KAN-185, #160). Image bytes are read only for maps that are kept.
+ type Entry={line:string}|{map:'basecolor'|'normal';source:string;prefix:string};
+ const materials=new Map<string,Map<string,Entry>>(),images=new Map<string,string>(),files:Record<string,Buffer>={};
+ const counts={basecolor:0,normal:0};
+ const image=async(kind:'basecolor'|'normal',source:string)=>{
+  let name=images.get(`${kind}:${source}`);
+  if(!name){
+   const bytes=await readFile(source);
+   if(!bytes.subarray(0,8).equals(PNG))return undefined;
+   name=`mesh_${kind}_${counts[kind]++}.png`;images.set(`${kind}:${source}`,name);files[name]=bytes;
+  }
+  return name;
+ };
  const libraries:string[]=[];
  for(const line of meshTextLines(objBytes)){const name=materialLibrary(line);if(name)libraries.push(target(obj,name));}
  for(const library of new Set(libraries)){
-  let current:{kd?:string;map?:{clamp?:string;image:string}}|undefined;
+  let current:Map<string,Entry>|undefined;
   for(const line of meshTextLines(await readFile(library))){
-   const [directive]=line.split(/\s+/);
+   const [directive,...values]=line.split(/\s+/);
    if(directive==='newmtl'){
     const name=line.slice(6).trim();if(!name)throw Error('Unnamed material');
-    current=materials.has(name)?undefined:{};if(current)materials.set(name,current);continue;
+    current=materials.has(name)?undefined:new Map();if(current)materials.set(name,current);continue;
    }
    if(!current)continue;
-   if(directive==='Kd'){
-    const values=line.split(/\s+/).slice(1);if(values.length!==3)throw Error('Unsupported Kd');
-    current.kd=values.map(v=>fixed(number(v))).join(' ');
+   const finite=values.length>0&&values.every(v=>Number.isFinite(Number(v)));
+   if(VECTOR_VALUES.has(directive!)){
+    if(values.length===3&&finite)current.set(directive!,{line:`${directive} ${values.join(' ')}`});
+    else if(directive==='Kd')throw Error('Unsupported Kd');
+   }else if(SCALAR_VALUES.has(directive!)){
+    if(values.length===1&&finite)current.set(directive!,{line:`${directive} ${values[0]}`});
    }else if(directive==='map_Kd'){
     const map=textureMap(line);if(!map)throw Error('Unreadable map_Kd');
     const clamp=map.options.length===2&&map.options[0]==='-clamp'&&/^(on|off)$/.test(map.options[1]!)?map.options[1]:undefined;
     if(map.options.length&&!clamp)throw Error('Unsupported map_Kd options');
-    const source=target(library,map.file);
-    let image=images.get(source);
-    if(!image){
-     const bytes=await readFile(source);
-     if(!bytes.subarray(0,8).equals(PNG))throw Error('Base colour is not a PNG');
-     image=`mesh_basecolor_${images.size}.png`;images.set(source,image);files[image]=bytes;
-    }
-    current.map={clamp,image};
+    current.set('map_Kd',{map:'basecolor',source:target(library,map.file),prefix:clamp?`-clamp ${clamp} `:''});
+   }else if(/^(map_bump|bump|norm)$/i.test(directive!)){
+    // The attempt's own normal map, when the grammar can carry it. One it can't is dropped on its own,
+    // since readers would use it over any earlier one.
+    const map=textureMap(line),[option,value]=map?.options??[];
+    const kept=map&&(map.options.length===0||map.options.length===2&&(option==='-bm'&&Number.isFinite(Number(value))||option==='-clamp'&&/^(on|off)$/.test(value!)));
+    if(kept)current.set('map_Bump',{map:'normal',source:target(library,map.file),prefix:map.options.length?`${option} ${value} `:''});
+    else current.delete('map_Bump');
    }
+   // Anything else (roughness or metal maps, reflection, spectral values) has no place in the grammar.
   }
  }
- const mtl=[...materials].flatMap(([name,m])=>[`newmtl ${name}`,...(m.kd?[`Kd ${m.kd}`]:[]),...(m.map?[`map_Kd ${m.map.clamp?`-clamp ${m.map.clamp} `:''}${m.map.image}`]:[])]);
+ const mtl:string[]=[];
+ for(const [name,entries] of materials){
+  mtl.push(`newmtl ${name}`);
+  for(const entry of entries.values()){
+   if('line' in entry){mtl.push(entry.line);continue;}
+   const file=await image(entry.map,entry.source);
+   // `bump`, not `map_Bump`: the phone's SceneKit importer loads only the former as the normal map.
+   if(file)mtl.push(`${entry.map==='basecolor'?'map_Kd':'bump'} ${entry.prefix}${file}`);
+   else if(entry.map==='basecolor')throw Error('Base colour is not a PNG');
+   // A normal map that isn't a PNG is dropped; the colour stays.
+  }
+ }
  if(mtl.length)files['mesh.mtl']=Buffer.from(mtl.join('\n')+'\n');
  // Geometry: scale positions, keep every other line. One mtllib, only when a material survived.
  const lines:string[]=[],vertices:number[]=[],triangles:number[]=[];let library=false;
