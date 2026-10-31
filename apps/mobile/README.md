@@ -39,6 +39,8 @@ npm run ios -- --mode Release --device
 
 Release bundles JavaScript, so it does not need Metro running.
 
+The app target signs automatically as `com.scantomake` with team `X7F5F9LR24`. To sign with your own Apple account, set your team and a bundle ID you own on the ScanToMake target (Signing & Capabilities in Xcode). Passing `PRODUCT_BUNDLE_IDENTIFIER` to `xcodebuild` also renames the Pods resource bundles, so set it on the target instead.
+
 ## Android local build and persistence check
 
 Use an already provisioned Android SDK and JDK 17 (the React Native Gradle
