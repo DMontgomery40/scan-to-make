@@ -3,7 +3,9 @@ import {isAbsolute} from 'node:path';
 import {ModelAccessChoiceSchema,type ModelAccessChoice} from './model-access-protocol.js';
 
 export interface ModelWorkerResult {exitCode:number; stdout:string}
-export interface ModelWorkerOptions {signal?:AbortSignal; timeoutMs?:number}
+export interface ModelWorkerOptions {signal?:AbortSignal; timeoutMs?:number;
+  /** Cleanup jobs record the helper's process group so crash recovery can stop it (KAN-198). */
+  onProcessGroup?:(pgid:number)=>void|Promise<void>}
 export type ModelWorker = (choice:ModelAccessChoice,args:string[],options:ModelWorkerOptions)=>Promise<ModelWorkerResult>;
 
 /** The signed app alone resolves Keychain references and launches ai-tweak-cli.
@@ -16,7 +18,7 @@ export function createModelWorker(executable:string|undefined):ModelWorker {
     // Reuse the bridge's allowlisted child environment pattern. Never inherit
     // printer tokens, provider keys or arbitrary operator environment variables.
     const env:NodeJS.ProcessEnv = {};
-    if (!('keychainRef' in choice && choice.keychainRef)) for (const key of ['HOME','PATH','TMPDIR','LANG','SCAN_TO_MAKE_CLAUDE_PATH','SCAN_TO_MAKE_CODEX_PATH','SCAN_TO_MAKE_SCAN_BLENDER','SCAN_TO_MAKE_CAPTURE_PYTHON']) {
+    if (!('keychainRef' in choice && choice.keychainRef)) for (const key of ['HOME','PATH','TMPDIR','LANG','SCAN_TO_MAKE_CLAUDE_PATH','SCAN_TO_MAKE_CODEX_PATH','SCAN_TO_MAKE_SCAN_BLENDER','SCAN_TO_MAKE_CAPTURE_PYTHON','SCAN_TO_MAKE_AI_JUDGE_TOOL']) {
       if (process.env[key]) env[key] = process.env[key];
     }
     if (choice.kind === 'claude-code' || choice.kind === 'codex-cli') for (const key of ['CODEX_HOME','CLAUDE_CONFIG_DIR']) {
@@ -57,6 +59,8 @@ export function createModelWorker(executable:string|undefined):ModelWorker {
     child.stdin.end(JSON.stringify(choice));
     if (options.signal?.aborted) terminate();
     try {
+      // Acknowledged before the worker's result counts; an unrecorded group is stopped, never orphaned.
+      try { if (child.pid) await options.onProcessGroup?.(child.pid); } catch { exceeded = true; terminate(); }
       const exitCode = await completion;
       options.signal?.throwIfAborted();
       if (exceeded) throw new Error('Model worker limit exceeded');

@@ -8,6 +8,8 @@ import {join} from 'node:path';
 import {DetailStillStore} from '../dist/detail-stills.js';
 import {writeAiCorrection,aiTweakRecord} from '../dist/ai-tweak-export.js';
 import {createScanCleanupRunner,aiWorkerEnv,AI_WORKER_GRACE_MS} from '../dist/scan-cleanup-runner.js';
+import {accessFromChoice,cleanupModelAccess} from '../dist/model-access.js';
+import {createModelWorker} from '../dist/model-access-worker.js';
 import {fixture,cleanupRunner,png,sha} from './fixtures/scan-processing.mjs';
 
 const realPng=Buffer.from([137,80,78,71,13,10,26,10,4,4]);
@@ -20,7 +22,7 @@ test('an AI cleanup job records the pick, publishes attempt previews and looks a
  const base=runner.cleanup.run;
  runner.cleanup.run=async(stage,ctx)=>{
   if(stage!=='correct')return base(stage,ctx);
-  seen={stills:ctx.stills.length,metersPerUnit:ctx.metersPerUnit,deadlineAt:ctx.deadlineAt};
+  seen={stills:ctx.stills.length,metersPerUnit:ctx.metersPerUnit,deadlineAt:ctx.deadlineAt,adapter:ctx.adapter};
   const preview=join(ctx.imported,'preview.png');await writeFile(preview,realPng);
   await writeAiCorrection({obj:join(ctx.imported,'mesh.obj'),mmPerUnit:ctx.metersPerUnit*1000,out:ctx.corrected,record,previews:{'ai-attempt-2-preview.png':preview}});
   return Buffer.from('{}');
@@ -33,6 +35,7 @@ test('an AI cleanup job records the pick, publishes attempt previews and looks a
  assert.deepEqual(result.aiTweak,record);
  assert.deepEqual(result.aiTweak.attempts.map(a=>a.veto),['smoothed',undefined]);
  assert.equal(result.detailStills.length,6);assert.equal(seen.stills,6);assert.equal(seen.metersPerUnit,1);
+ assert.equal(seen.adapter,'ai-tweak','the job tells the runner which correction it was queued for');
  assert(seen.deadlineAt>Date.now()&&seen.deadlineAt<=Date.now()+600000);
  assert.equal((await f.store.artifact(f.input,job.jobId,'ai-attempt-2-preview.png')).ref.sha256,sha(realPng));
  assert.equal(result.artifacts['ai-attempt-1-preview.png'],undefined);
@@ -149,4 +152,56 @@ test('a lock older than any job could run is reclaimed even if its pid is alive 
  const old=new Date(Date.now()-EXECUTION_LOCK_MS-60000);await utimes(lock,old,old);
  const {job}=await f.store.start(f.input);await f.store.wait();
  assert.equal((await f.store.load(f.input,job.jobId)).job.status,'succeeded');
+});
+
+test('under the Mac app the saved choice is read for every job and the step launches through its helper (KAN-198)',async t=>{
+ let choice={kind:'none'};const calls=[];
+ const service={get:()=>({revision:'r',choice,check:null}),run:async(args,options)=>{calls.push({args,options});return {exitCode:1,stdout:''};}};
+ const env=cleanupModelAccess(service,{SCAN_TO_MAKE_MODEL_WORKER:'/Applications/Scan to Make.app/Contents/MacOS/Scan to Make',SCAN_TO_MAKE_AI_ACCESS:'claude-code'},()=>assert.fail('env must not be read under the app'));
+ const {runner,ctx,report}=await aiFixture(t,env);
+ // A live choice can turn the step on at any time, so the AI deadline always applies.
+ assert.equal(runner.jobTimeoutMs,3600000);assert.equal(runner.cleanup.adapter,'scripted');
+ choice={kind:'api',provider:'anthropic',model:'claude-opus-5-5',keychainRef:'11111111-1111-4111-8111-111111111111'};
+ assert.equal(runner.cleanup.adapter,'ai-tweak');
+ await runner.cleanup.run('correct',{...ctx,adapter:'ai-tweak'});
+ assert.equal(calls.length,1);assert(calls[0].args.includes('--pick')&&calls[0].args[0]==='--mesh','ModelAccessService.run adds the run subcommand itself');
+ assert.equal(calls[0].options.signal,ctx.signal);
+ const r=await report();assert.deepEqual(r.aiTweak.access,{kind:'api',model:'claude-opus-5-5'});assert.equal(r.aiTweak.pick.decidedBy,'fallback');
+});
+
+test('a job queued for the AI step whose access was turned off is corrected without AI, with at most four close-ups',async t=>{
+ let calls=0;
+ const {root,ctx}=await aiFixture(t);
+ // A stand-in python records how scan-correct would be started, then fails.
+ const python=join(root,'python');await writeFile(python,`#!/bin/sh\nprintf '%s\\n' "$@" > ${JSON.stringify(join(root,'argv.txt'))}\nexit 1\n`);await chmod(python,0o755);
+ const runner=createScanCleanupRunner({blender:'/bin/false',toolPath:'/opt/scan-repair/repair.py',correctTool:'/opt/scan-correct/correct.py',python,
+  ai:{access:()=>({kind:'none'}),worker:async()=>{calls++;return {exitCode:0,stdout:''};},cli:join(root,'cli.mjs'),judgeTool:'/opt/ai-tweak-judge'}});
+ const stills=Array.from({length:6},(_,i)=>`/stills/${i}.img`);
+ await assert.rejects(runner.cleanup.run('correct',{...ctx,stills,adapter:'ai-tweak'}),/Cleanup subprocess failed/);
+ assert.equal(calls,0);
+ const argv=(await readFile(join(root,'argv.txt'),'utf8')).split('\n');
+ assert.deepEqual(argv.filter((_,i)=>argv[i-1]==='--still'),stills.slice(-4));
+});
+
+test('the Mac app worker registers its process group so crash recovery can stop it (KAN-198)',async t=>{
+ const root=await mkdtemp(join(tmpdir(),'model-worker-test-'));t.after(()=>rm(root,{recursive:true,force:true}));
+ const helper=join(root,'helper');await writeFile(helper,'#!/bin/sh\ncat > /dev/null\necho "{}"\n');await chmod(helper,0o755);
+ const groups=[];const worker=createModelWorker(helper);
+ const result=await worker({kind:'claude-code'},['run','--mesh','/x.obj'],{onProcessGroup:pid=>{groups.push(pid);}});
+ assert.equal(result.exitCode,0);assert.equal(groups.length,1);assert(groups[0]>1);
+ await assert.rejects(worker({kind:'claude-code'},['run'],{onProcessGroup:()=>{throw Error('lock gone');}}),/limit/,'an unrecorded helper is stopped, never left running');
+});
+
+test('saved choices map to the AI step route, and headless setups keep the environment',()=>{
+ const ref='11111111-1111-4111-8111-111111111111';
+ assert.deepEqual(accessFromChoice({kind:'codex-cli'}),{kind:'codex-cli'});
+ assert.deepEqual(accessFromChoice({kind:'api',provider:'openai',model:'gpt-6-astra',keychainRef:ref}),{kind:'api',provider:'openai',model:'gpt-6-astra',keyEnv:'SCAN_TO_MAKE_MODEL_KEY'});
+ assert.deepEqual(accessFromChoice({kind:'endpoint',url:'https://models.example/v1',model:'m'}),{kind:'endpoint',url:'https://models.example/v1',model:'m'});
+ assert.deepEqual(accessFromChoice({kind:'endpoint',url:'https://models.example/v1',model:'m',keychainRef:ref}).keyEnv,'SCAN_TO_MAKE_MODEL_KEY');
+ const service={get:()=>assert.fail('no app worker, no service'),run:()=>assert.fail()};
+ for(const env of [{SCAN_TO_MAKE_AI_ACCESS:'claude-code'},{SCAN_TO_MAKE_AI_ACCESS:'claude-code',SCAN_TO_MAKE_MODEL_WORKER:''}]){
+  const picked=cleanupModelAccess(service,env,e=>({kind:e.SCAN_TO_MAKE_AI_ACCESS}));
+  assert.deepEqual(picked,{access:{kind:'claude-code'}});
+ }
+ assert.deepEqual(cleanupModelAccess(undefined,{SCAN_TO_MAKE_MODEL_WORKER:'/app'},()=>({kind:'none'})),{access:{kind:'none'}});
 });

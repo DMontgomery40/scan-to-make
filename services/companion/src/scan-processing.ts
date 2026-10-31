@@ -224,7 +224,7 @@ export class ScanProcessingStore {
   if(authorize&&this.queue().pending.includes(entry))entry.authorize=authorize;
  }
  /** Close-ups a job uses when none are named: the AI step looks at all of them (up to 24). */
- private defaultStillCount(){return this.runner.cleanup?.adapter==='ai-tweak'?MAX_DETAIL_STILLS_PER_CAPTURE:4;}
+ private defaultStillCount(adapter=this.runner.cleanup?.adapter){return adapter==='ai-tweak'?MAX_DETAIL_STILLS_PER_CAPTURE:4;}
  private pipelineMatches(job:ScanProcessingJob){
   return this.runner.cleanup?!!job.pipelineStages&&job.correctionAdapter===this.runner.cleanup.adapter:!job.pipelineStages;
  }
@@ -396,7 +396,7 @@ export class ScanProcessingStore {
     // Still bytes are snapshotted when the job starts, so close-ups that
     // arrived while it waited are included. Default: the newest four, or
     // every retained close-up when the AI step runs.
-    const ids=entry.stillIds??stills.slice(-this.defaultStillCount()).map(s=>s.id);
+    const ids=entry.stillIds??stills.slice(-this.defaultStillCount(job.correctionAdapter)).map(s=>s.id);
     cleanup={source:capture.original,stills:[]};
     for(const id of ids){
      try{cleanup.stills.push(await stillStore.loadRetainedDetailStill(r.projectId,r.captureId,id));}

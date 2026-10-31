@@ -303,6 +303,8 @@ test('ai-tweak-cli run --pick --export is the whole AI step of a cleanup job (KA
  const cli=new URL('../dist/ai-tweak-cli.js',import.meta.url).pathname;
  // The pick takes only absolute tool paths.
  const absolutePython=python.startsWith('/')?python:(await run('/bin/sh',['-c',`command -v ${python}`])).stdout.trim();
+ // A judge folder with its scripts (stubs: Blender is /bin/false here, so measuring fails and the veto decides).
+ await mkdir(join(f.root,'judge'));for(const name of ['render.py','measure.py','sheet.py'])await writeFile(join(f.root,'judge',name),'# stub\n');
  const {stdout}=await run(process.execPath,[cli,'run','--mesh',f.mesh,'--usdz',f.usdz,'--out',out,'--attempts','1','--pick',
   '--export',exported,'--mm-per-unit','1000'],{env:{HOME:f.home,PATH:'/usr/bin:/bin',SCAN_TO_MAKE_AI_ACCESS:'claude-code',SCAN_TO_MAKE_AI_MODEL:'claude-opus-5-5',
   SCAN_TO_MAKE_CLAUDE_PATH:claudePath,SCAN_TO_MAKE_SCAN_BLENDER:'/bin/false',SCAN_TO_MAKE_CAPTURE_PYTHON:absolutePython,SCAN_TO_MAKE_AI_JUDGE_TOOL:join(f.root,'judge')}});

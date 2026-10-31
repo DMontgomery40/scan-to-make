@@ -3,7 +3,9 @@ import {lstat,open,rename,rm,link} from 'node:fs/promises';
 import {join} from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {ControlFailure} from './local-control-protocol.js';
-import {ModelAccessChoiceSchema,ModelAccessRecordSchema,type ModelAccessCheck,type ModelAccessRecord} from './model-access-protocol.js';
+import {ModelAccessChoiceSchema,ModelAccessRecordSchema,type ModelAccessCheck,type ModelAccessChoice,type ModelAccessRecord} from './model-access-protocol.js';
+import {ModelAccessEnvironment} from '@scan-to-make/contracts/model-access';
+import type {ModelAccess} from './ai-tweak.js';
 import {createModelWorker,type ModelWorker,type ModelWorkerOptions} from './model-access-worker.js';
 
 async function writeRecord(path:string,record:ModelAccessRecord,createOnly=false) {
@@ -88,3 +90,27 @@ export class ModelAccessService {
   }
   close() { this.controller?.abort(); }
 }
+
+/**
+ * The cleanup AI step's route for a saved choice (KAN-198): kind, provider, endpoint and model. A keyed
+ * choice's secret is resolved by the signed helper into SCAN_TO_MAKE_MODEL_KEY; the companion never sees it.
+ */
+export function accessFromChoice(choice:ModelAccessChoice):ModelAccess{
+  switch (choice.kind) {
+    case 'none': case 'claude-code': case 'codex-cli': return {kind:choice.kind};
+    case 'api': return {kind:'api',provider:choice.provider,model:choice.model,keyEnv:ModelAccessEnvironment.secret};
+    case 'endpoint': return {kind:'endpoint',url:choice.url,model:choice.model,...(choice.keychainRef?{keyEnv:ModelAccessEnvironment.secret}:{})};
+  }
+}
+
+/**
+ * Where cleanup's AI step gets its access. When the Mac app runs the companion (it sets
+ * SCAN_TO_MAKE_MODEL_WORKER), the saved choice is read for every job and the step launches through the
+ * app's signed helper. Headless setups and tests keep SCAN_TO_MAKE_AI_ACCESS and a direct worker.
+ */
+export function cleanupModelAccess(service:ModelAccessService|undefined,env:NodeJS.ProcessEnv,fromEnv:(env:NodeJS.ProcessEnv)=>ModelAccess){
+  if (service && env.SCAN_TO_MAKE_MODEL_WORKER)
+    return {access:()=>accessFromChoice(service.get().choice),worker:(args:string[],options:ModelWorkerOptions)=>service.run(args,options)};
+  return {access:fromEnv(env)};
+}
+

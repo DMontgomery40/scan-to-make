@@ -19,6 +19,8 @@ export interface CleanupContext {
  metersPerUnit?:number;
  /** When the whole job's deadline fires (epoch ms); the AI step sizes its budget from it. */
  deadlineAt?:number;
+ /** The correction this job was queued for; the runner's current adapter may have changed since (KAN-198). */
+ adapter?:CleanupRunner['adapter'];
  /** Bytes of the job's input snapshot (original capture and close-ups) under the job folder. */
  inputBytes?:number;
 }
@@ -27,10 +29,13 @@ export interface CleanupRunner {
  run(stage:'import'|'advise'|'correct',context:CleanupContext):Promise<Buffer>;
 }
 /** Runs `ai-tweak-cli run <args>` with the user's model access; the Mac app's ModelAccessService.run fits. */
-export type AiWorker=(args:string[],options:{signal?:AbortSignal;timeoutMs?:number})=>Promise<{exitCode:number;stdout:string}>;
+export type AiWorker=(args:string[],options:{signal?:AbortSignal;timeoutMs?:number;onProcessGroup?:(pgid:number)=>void|Promise<void>})=>Promise<{exitCode:number;stdout:string}>;
 export interface AiCleanupOptions {
- /** From SCAN_TO_MAKE_AI_* (modelAccessFromEnv); 'none' keeps scan-correct. */
- access:ModelAccess;
+ /**
+  * From SCAN_TO_MAKE_AI_* (modelAccessFromEnv) for headless setups and tests, or read live from the Mac app's
+  * saved choice (KAN-198). 'none' keeps scan-correct.
+  */
+ access:ModelAccess|(()=>ModelAccess);
  /** Absolute path to the built ai-tweak-cli.js, spawned directly when no worker is given. */
  cli:string;
  /** Absolute path to tools/ai-tweak-judge, handed to a direct worker as SCAN_TO_MAKE_AI_JUDGE_TOOL (never an argument). */
@@ -149,13 +154,29 @@ async function command(python:string,args:string[],root:string,blender:string,ti
 /** Operator-selected executables/provider only; no executable or provider URL comes from the phone. */
 export function createScanCleanupRunner(options:CleanupOptions):ScanRunner{
  const repair=createScanRunner(options),timeout=options.timeoutMs??300000;
- const ai=options.ai&&options.ai.access.kind!=='none'?options.ai:undefined;
- const adapter:CleanupRunner['adapter']=ai?'ai-tweak':options.adapter??'scripted';
+ const ai=options.ai,live=typeof ai?.access==='function',fixed=options.adapter??'scripted';
+ // The access in force right now; an unreadable choice counts as none.
+ const accessNow=()=>{
+  if(!ai)return undefined;
+  try{const access=typeof ai.access==='function'?ai.access():ai.access;validateAccess(access);return access;}catch{return undefined;}
+ };
+ const aiOn=()=>{const access=accessNow();return !!access&&access.kind!=='none';};
  const converter=options.converterAdapter??fileURLToPath(new URL('../python/capture_convert.py',import.meta.url));
- if(!isAbsolute(options.correctTool)||!isAbsolute(converter)||!['scripted','anthropic','openai','ai-tweak'].includes(adapter))throw Error('Invalid cleanup configuration');
- if(ai){validateAccess(ai.access);if(!isAbsolute(ai.cli)||!isAbsolute(ai.judgeTool))throw Error('Invalid cleanup configuration');}
- return {...repair,jobTimeoutMs:ai?AI_CLEANUP_JOB_MS:CLEANUP_JOB_MS,cleanup:{adapter,async run(stage,ctx){
-  if(stage==='correct'&&ai){const result=await aiCorrect(ai,options,ctx);if(options.printable)await makePrintable(options,ctx);return result;}
+ if(!isAbsolute(options.correctTool)||!isAbsolute(converter)||!['scripted','anthropic','openai'].includes(fixed))throw Error('Invalid cleanup configuration');
+ if(ai&&!live)validateAccess(ai.access as ModelAccess);
+ if(ai&&(live||aiOn())&&(!isAbsolute(ai.cli)||!isAbsolute(ai.judgeTool)))throw Error('Invalid cleanup configuration');
+ // A live choice can turn the AI step on at any time, so its jobs always get the AI deadline.
+ return {...repair,jobTimeoutMs:ai&&(live||aiOn())?AI_CLEANUP_JOB_MS:CLEANUP_JOB_MS,cleanup:{
+  get adapter():CleanupRunner['adapter']{return aiOn()?'ai-tweak':fixed;},
+  async run(stage,ctx){
+  if(stage==='correct'&&ai&&(ctx.adapter??(aiOn()?'ai-tweak':fixed))==='ai-tweak'){
+   const access=accessNow();
+   if(access&&access.kind!=='none'){const result=await aiCorrect(ai,access,options,ctx);if(options.printable)await makePrintable(options,ctx);return result;}
+   // The AI step was turned off after this job was queued: correct it the way an AI-off job would be.
+  }
+  const adapter=fixed;
+  // An AI job corrected without AI may hold up to 24 close-ups; scan-correct takes the newest four.
+  const stills=ctx.stills.slice(-4);
   const dimensions=ctx.reference?[...ctx.reference.dimensionsMm].sort((a,b)=>b-a):undefined;
   const reference=dimensions?['--reference-mm',...dimensions.map(String)]:[];
   const stageBudget=Math.min(timeout,stage==='correct'?300000:120000);
@@ -171,7 +192,7 @@ export function createScanCleanupRunner(options:CleanupOptions):ScanRunner{
   }else{
    args=[options.correctTool,'run',join(ctx.repaired,'repaired.obj'),'--units','mm','--out',ctx.corrected,'--adapter',adapter,
     '--max-steps','24','--max-seconds',workerSeconds,'--max-faces','200000','--product',ctx.reference?.productName??'unidentified object',...reference,
-    ...ctx.stills.flatMap(path=>['--still',path])];
+    ...stills.flatMap(path=>['--still',path])];
    if(adapter==='scripted'){
     const script=join(ctx.imported,'cleanup-sequence.json');
     await writeFile(script,JSON.stringify(dimensions?[{name:'scale_to_reference',arguments:{target_mm:dimensions}},{name:'measure',arguments:{}}]:[{name:'measure',arguments:{}}]),{flag:'wx',mode:0o600});
@@ -219,9 +240,8 @@ async function makePrintable(options:CleanupOptions,ctx:CleanupContext){
  * USDZ and every retained close-up, then the blind visual pick, then the mm export into ctx.corrected.
  * Anything short of cancellation that stops the worker keeps the captured scan, so the job still finishes.
  */
-async function aiCorrect(ai:AiCleanupOptions,options:CleanupOptions,ctx:CleanupContext):Promise<Buffer>{
+async function aiCorrect(ai:AiCleanupOptions,access:Exclude<ModelAccess,{kind:'none'}>,options:CleanupOptions,ctx:CleanupContext):Promise<Buffer>{
  ctx.signal.throwIfAborted();
- const access=ai.access as Exclude<ModelAccess,{kind:'none'}>;
  const mmPerUnit=(ctx.metersPerUnit??1)*1000,mesh=join(ctx.imported,'mesh.obj');
  const budget=aiStageBudget((ctx.deadlineAt??Date.now()+AI_CLEANUP_JOB_MS)-Date.now(),access.kind);
  const fallback=async(reason:string)=>{
@@ -238,7 +258,7 @@ async function aiCorrect(ai:AiCleanupOptions,options:CleanupOptions,ctx:CleanupC
  try{
   let result:{exitCode:number;stdout:string}|undefined;
   const env=()=>aiWorkerEnv(access,{blender:options.blender,python:options.python,judgeTool:ai.judgeTool});
-  try{result=await (ai.worker??directWorker(ai.cli,env,ctx))(args,{signal:ctx.signal,timeoutMs:budget.stageMs});}
+  try{result=await (ai.worker??directWorker(ai.cli,env))(args,{signal:ctx.signal,timeoutMs:budget.stageMs,onProcessGroup:ctx.onProcessGroup});}
   catch(error){if(ctx.signal.aborted)throw error;}
   ctx.signal.throwIfAborted();
   // Private diagnostics: the attempt manifest and the pick (never published).
@@ -252,8 +272,8 @@ async function aiCorrect(ai:AiCleanupOptions,options:CleanupOptions,ctx:CleanupC
 }
 
 /** Spawn ai-tweak-cli in its own process group, registered with the job so a crash can reap it. */
-function directWorker(cli:string,env:()=>NodeJS.ProcessEnv,ctx:CleanupContext):AiWorker{
- return async(args,{signal,timeoutMs})=>{
+function directWorker(cli:string,env:()=>NodeJS.ProcessEnv):AiWorker{
+ return async(args,{signal,timeoutMs,onProcessGroup})=>{
   signal?.throwIfAborted();
   const child=spawn(process.execPath,[cli,'run',...args],{detached:true,stdio:['ignore','pipe','pipe'],env:env(),windowsHide:true});
   let failed=false,size=0;const chunks:Buffer[]=[];let fallback:NodeJS.Timeout|undefined;
@@ -268,7 +288,7 @@ function directWorker(cli:string,env:()=>NodeJS.ProcessEnv,ctx:CleanupContext):A
   const done=new Promise<number|null>(resolve=>{child.once('error',()=>{failed=true;});child.once('close',resolve);});
   signal?.addEventListener('abort',terminate,{once:true});if(signal?.aborted)terminate();
   try{
-   try{if(child.pid)await ctx.onProcessGroup?.(child.pid);}catch{failed=true;terminate();}
+   try{if(child.pid)await onProcessGroup?.(child.pid);}catch{failed=true;terminate();}
    const code=await done;signal?.throwIfAborted();
    return {exitCode:failed?1:code??1,stdout:Buffer.concat(chunks).toString('utf8')};
   }finally{

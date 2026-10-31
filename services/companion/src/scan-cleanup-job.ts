@@ -20,7 +20,7 @@ export async function runCleanup(runner:ScanRunner,root:string,job:ScanProcessin
  const output=join(root,'output'),sidecar=join(root,'units.json');
  const ctx:CleanupContext={source:join(root,'original.usdz'),imported:join(root,'imported'),repaired:join(root,'repaired'),
   advice:join(root,'advice'),corrected:join(root,'corrected'),stills:[],reference:job.reference,signal,onProcessGroup,deadlineAt,
-  inputBytes:snapshot.source.length+snapshot.stills.reduce((sum,{bytes})=>sum+bytes.length,0)};
+  inputBytes:snapshot.source.length+snapshot.stills.reduce((sum,{bytes})=>sum+bytes.length,0),adapter:job.correctionAdapter};
  await mkdir(output,{mode:0o700});await write(ctx.source,snapshot.source);
  const stillDir=join(root,'detail-stills');await mkdir(stillDir,{mode:0o700});
  for(const {still,bytes} of snapshot.stills){
@@ -80,7 +80,8 @@ export async function runCleanup(runner:ScanRunner,root:string,job:ScanProcessin
   if(sha(log)!==report.toolLogSha256)throw Error('Correction log hash mismatch');
   await write(join(output,'correction-calls.jsonl'),log);
   await write(join(output,'correction.json'),await readBoundedCaptureFile(join(ctx.corrected,'report.json'),2*1024*1024));
-  if(runner.cleanup!.adapter==='ai-tweak'){
+  // This job's own adapter: an AI job whose step was turned off before it ran has no AI record.
+  if((job.correctionAdapter??runner.cleanup!.adapter)==='ai-tweak'&&report.aiTweak!==undefined){
    // The AI step's record and each rendered attempt's preview (KAN-184); both are hash-bound to the report.
    aiTweak=AiTweakRecordSchema.parse(report.aiTweak);
    for(const name of AI_ATTEMPT_PREVIEW_NAMES){

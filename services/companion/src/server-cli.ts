@@ -18,7 +18,7 @@ import { readPrinterHandoffConfig } from '@scan-to-make/printer-handoff';
 import {startLocalControl} from './local-control.js';
 import {createControlDispatcher, companionVersion} from './local-control-services.js';
 import type {CaptureServices} from './capture-http.js';
-import {ModelAccessService} from './model-access.js';
+import {ModelAccessService,cleanupModelAccess} from './model-access.js';
 import {createPrinterCheck} from './printer-check.js';
 
 // Presence is explicit opt-in. Invalid/empty configuration must fail, never fall back.
@@ -38,9 +38,15 @@ const scanTool=process.env.SCAN_TO_MAKE_SCAN_REPAIR_TOOL;
 const scanBlender=process.env.SCAN_TO_MAKE_SCAN_BLENDER;
 if(scanTool!==undefined||scanBlender!==undefined){
  if(!capture||!captureDirectory||!scanTool||!scanBlender)throw new Error('Scan processing requires authenticated capture storage, tool and Blender paths');
+ // The installed judge scripts sit beside scan-repair. Publish the path so the Mac app's model worker can
+ // inherit it for subscription choices (KAN-198). The app's helper must pass it on (and set it itself for
+ // keyed choices); until it does, the pick can't run and app-routed jobs keep the captured scan.
+ const aiJudgeTool=process.env.SCAN_TO_MAKE_AI_JUDGE_TOOL||join(dirname(scanTool),'../ai-tweak-judge');
+ process.env.SCAN_TO_MAKE_AI_JUDGE_TOOL=aiJudgeTool;
  Object.assign(capture,{scanProcessing:new ScanProcessingStore(capture.storage,capture.captures!,join(captureDirectory,'captures'),createScanCleanupRunner({toolPath:scanTool,blender:scanBlender,python:process.env.SCAN_TO_MAKE_CAPTURE_PYTHON??'python3',correctTool:process.env.SCAN_TO_MAKE_SCAN_CORRECT_TOOL??join(dirname(scanTool),'../scan-correct/correct.py'),adapter:process.env.SCAN_TO_MAKE_CORRECTION_ADAPTER as 'scripted'|'anthropic'|'openai'|undefined,model:process.env.SCAN_TO_MAKE_CORRECTION_MODEL,baseUrl:process.env.SCAN_TO_MAKE_CORRECTION_BASE_URL,keyEnv:process.env.SCAN_TO_MAKE_CORRECTION_KEY_ENV,printable:{},
-  // KAN-184: with SCAN_TO_MAKE_AI_ACCESS set, the correct stage is David's one-sentence AI step and its visual pick.
-  ai:{access:modelAccessFromEnv(process.env),cli:fileURLToPath(new URL('./ai-tweak-cli.js',import.meta.url)),judgeTool:process.env.SCAN_TO_MAKE_AI_JUDGE_TOOL??join(dirname(scanTool),'../ai-tweak-judge')}}))});
+  // KAN-184: the correct stage is David's one-sentence AI step and its visual pick when access is on.
+  // KAN-198: under the Mac app that access is the choice saved in the app, launched through its signed helper.
+  ai:{...cleanupModelAccess(modelAccess,process.env,modelAccessFromEnv),cli:fileURLToPath(new URL('./ai-tweak-cli.js',import.meta.url)),judgeTool:aiJudgeTool}}))});
 }
 const handoffConfigPath=process.env.SCAN_TO_MAKE_PRINTER_HANDOFF_CONFIG||undefined;
 const handoffDirectory=process.env.SCAN_TO_MAKE_PRINTER_HANDOFF_DIR||undefined;
