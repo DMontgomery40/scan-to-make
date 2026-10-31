@@ -1,11 +1,17 @@
+import type { CaptureFile } from '../capture/retainedCaptures';
 import type { ProjectAcknowledgment } from '../screens/scanServices';
 
 /**
  * Hands a cleaned scan to a printer MCP server on the companion computer
- * (services/printer-handoff). The phone picks the backend and says what to
- * make; slicing and printing stay with that server.
+ * (services/printer-handoff). The phone picks the backend, sends the cleaned
+ * model and any request, and answers the printer server's confirmations;
+ * slicing and printing stay with that server.
  */
 export type PrinterBackend = 'bambu-printer-mcp' | 'mcp-3d-printer-server';
+export const PRINTER_BACKENDS: readonly PrinterBackend[] = [
+  'bambu-printer-mcp',
+  'mcp-3d-printer-server',
+];
 export type PrinterOption = {
   backend: PrinterBackend;
   /** The operator's defaults, e.g. `{ printerType: 'klipper' }`. */
@@ -23,16 +29,48 @@ export type Handoff = {
   backend: PrinterBackend;
   status: HandoffStatus;
   failure?: string;
+  /** The request saved with it; an agent on the computer acts on it. */
+  prompt?: string;
+  /** The companion is slicing or printing it right now. */
+  printing?: boolean;
 };
 
+/** A photo the printer server took just before asking, e.g. of the bed. */
+export type CameraSnapshot = {
+  mediaType: 'image/jpeg' | 'image/png';
+  base64: string;
+};
+/**
+ * A printer server's question (an MCP elicitation), relayed by the companion.
+ * Nothing prints until the person answers; an unanswered one expires as cancel.
+ */
+export type Confirmation = {
+  id: string;
+  mode: 'form' | 'url';
+  message: string;
+  requestedSchema?: unknown;
+  url?: string;
+  cameraSnapshot?: CameraSnapshot;
+  /** When the companion stops waiting, on its clock. */
+  expiresAtMs: number;
+};
+export type ConfirmationValue = string | number | boolean | string[];
+export type ConfirmationAnswer =
+  | { action: 'accept'; content: Record<string, ConfirmationValue> }
+  | { action: 'decline' | 'cancel' };
+
 export interface PrinterHandoff {
-  /** The backends the companion is set up to run, with their defaults. */
-  backends(ack: ProjectAcknowledgment): Promise<PrinterOption[]>;
+  /**
+   * The backends the companion is set up to run, with their defaults, or
+   * null when the companion doesn't say and uses its own configured one.
+   */
+  backends(ack: ProjectAcknowledgment): Promise<PrinterOption[] | null>;
+  /** Sends the verified cleaned model; `backend` null leaves it to the companion. */
   create(
     projectId: string,
     captureId: string,
     ack: ProjectAcknowledgment,
-    request: { prompt: string; backend: PrinterBackend },
+    request: { prompt: string; backend: PrinterBackend | null; model: CaptureFile },
   ): Promise<Handoff>;
   status(
     projectId: string,
@@ -51,13 +89,23 @@ export interface PrinterHandoff {
     ack: ProjectAcknowledgment,
     request: UncertainSend,
   ): Promise<Handoff | null>;
+  /** Starts slicing and printing; confirmations follow. */
+  print(handoffId: string): Promise<void>;
+  /** Stops a running handoff. False when the companion can't stop one. */
+  cancel(handoffId: string): Promise<boolean>;
+  /** Questions waiting for an answer, newest last. */
+  confirmations(): Promise<Confirmation[]>;
+  answer(confirmationId: string, answer: ConfirmationAnswer): Promise<void>;
 }
 
 /** A send whose outcome is unknown because its reply never arrived. */
 export type UncertainSend = {
   startedAtMs: number;
   prompt: string;
-  backend: PrinterBackend;
+  /** Null when the companion picks its own printer software. */
+  backend: PrinterBackend | null;
+  /** SHA-256 of the model sent. */
+  model: string;
 };
 /** What this phone keeps per scan: the job it sent, or a send it can't confirm. */
 export type HandoffRecord = { handoffId: string } | { uncertain: UncertainSend };
@@ -83,7 +131,7 @@ export interface HandoffMemory {
   ): Promise<void>;
 }
 const isBackend = (value: unknown): value is PrinterBackend =>
-  value === 'bambu-printer-mcp' || value === 'mcp-3d-printer-server';
+  PRINTER_BACKENDS.includes(value as PrinterBackend);
 function recordOf(value: unknown): HandoffRecord | null {
   const v = value as { handoffId?: unknown; uncertain?: Partial<UncertainSend> } | null;
   if (typeof v?.handoffId === 'string') return { handoffId: v.handoffId };
@@ -91,8 +139,16 @@ function recordOf(value: unknown): HandoffRecord | null {
   return u &&
     typeof u.startedAtMs === 'number' &&
     typeof u.prompt === 'string' &&
-    isBackend(u.backend)
-    ? { uncertain: { startedAtMs: u.startedAtMs, prompt: u.prompt, backend: u.backend } }
+    typeof u.model === 'string' &&
+    (u.backend === null || isBackend(u.backend))
+    ? {
+        uncertain: {
+          startedAtMs: u.startedAtMs,
+          prompt: u.prompt,
+          backend: u.backend,
+          model: u.model,
+        },
+      }
     : null;
 }
 const memoryKey = (projectId: string, captureId: string) =>
@@ -140,6 +196,44 @@ export function storedHandoffMemory(native: {
       session.set(key, record);
       await native.write(key, JSON.stringify(record ?? {}));
     },
+  };
+}
+
+/**
+ * The printer software the person chose once (KAN-125). It is sent with each
+ * handoff and offered again only when the companion can't run it.
+ */
+export interface PrinterChoiceMemory {
+  load(): Promise<PrinterBackend | null>;
+  save(backend: PrinterBackend): Promise<void>;
+}
+const CHOICE_KEY = JSON.stringify(['printer-choice', 1]);
+
+export function sessionPrinterChoice(): PrinterChoiceMemory {
+  let chosen: PrinterBackend | null = null;
+  return {
+    load: async () => chosen,
+    save: async backend => {
+      chosen = backend;
+    },
+  };
+}
+
+export function storedPrinterChoice(native: {
+  read(key: string): Promise<string | null>;
+  write(key: string, body: string): Promise<void>;
+}): PrinterChoiceMemory {
+  return {
+    async load() {
+      const body = await native.read(CHOICE_KEY);
+      try {
+        const backend = body ? JSON.parse(body)?.backend : null;
+        return isBackend(backend) ? backend : null;
+      } catch {
+        return null;
+      }
+    },
+    save: backend => native.write(CHOICE_KEY, JSON.stringify({ backend })),
   };
 }
 

@@ -87,7 +87,8 @@ export function ScanResultsScreen({
   onBack: () => void;
   onCompanion: () => void;
   onCloseUps: () => void;
-  onPrint?: () => void;
+  /** Opens Send to printer for this finished check. */
+  onPrint?: (job: ScanProcessingJob) => void;
   /** The user's real-size draft for this scan, kept while they navigate. */
   reference?: ReferenceDraft | null;
   onReferenceChange?: (draft: ReferenceDraft) => void;
@@ -644,8 +645,17 @@ export function ScanResultsScreen({
         <Card>
           <Text style={type.heading}>The cleaned-up model</Text>
           <Text style={type.caption}>
-            Turn it around in 3D, or share the STL file with your own slicer.
+            {onPrint
+              ? 'Send it to your printer, turn it around in 3D, or share the STL file with your own slicer.'
+              : 'Turn it around in 3D, or share the STL file with your own slicer.'}
           </Text>
+          {onPrint ? (
+            <Button
+              label="Send to printer"
+              variant="secondary"
+              onPress={() => onPrint(succeeded)}
+            />
+          ) : null}
           <Button
             label="View 3D model"
             variant="secondary"
@@ -656,13 +666,6 @@ export function ScanResultsScreen({
             variant="secondary"
             onPress={() => modelAction(succeeded, true)}
           />
-          {onPrint ? (
-            <Button
-              label="Send to printer"
-              variant="secondary"
-              onPress={onPrint}
-            />
-          ) : null}
         </Card>
       ) : null}
 

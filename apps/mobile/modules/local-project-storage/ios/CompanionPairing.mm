@@ -29,8 +29,8 @@ NSURL *STMCompanionBaseURL(NSString *value) {
   return c.URL;
 }
 static BOOL ValidScopes(id value) {
-  if (![value isKindOfClass:NSArray.class] || [value count]<2 || [value count]>9) return NO;
-  NSSet *allowed=[NSSet setWithArray:@[@"generation:health",@"generation:create",@"projects:read",@"projects:write",@"captures:read",@"captures:import",@"prepared-jobs:read",@"prepared-jobs:prepare",@"prints:approve"]];
+  if (![value isKindOfClass:NSArray.class] || [value count]<2 || [value count]>10) return NO;
+  NSSet *allowed=[NSSet setWithArray:@[@"generation:health",@"generation:create",@"projects:read",@"projects:write",@"captures:read",@"captures:import",@"prepared-jobs:read",@"prepared-jobs:prepare",@"prints:approve",@"printer-handoff:use"]];
   NSMutableSet *seen=[NSMutableSet new];
   for(id scope in value){if(![scope isKindOfClass:NSString.class]||![allowed containsObject:scope]||[seen containsObject:scope])return NO;[seen addObject:scope];}
   return [seen containsObject:@"generation:health"];
