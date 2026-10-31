@@ -1,7 +1,12 @@
 import React, { useEffect, useState } from 'react';
-import { Linking, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Linking, StyleSheet, Text, TextInput } from 'react-native';
 import { Button, Card, Screen } from '../ui/components';
 import { colors, type } from '../ui/theme';
+import {
+  parsePairingQR,
+  qrScanner,
+  type QRScanner,
+} from '../companion/pairingLink';
 import {
   companionNative,
   invitation,
@@ -13,9 +18,16 @@ import {
 export function CompanionScreen({
   onBack,
   native = companionNative(),
+  scanner = qrScanner(),
+  link,
+  onLinkUsed,
 }: {
   onBack: () => void;
   native?: CompanionNative;
+  scanner?: QRScanner;
+  /** A pairing link the app was opened with, e.g. from the Camera app. */
+  link?: string | null;
+  onLinkUsed?: () => void;
 }) {
   const [status, setStatus] = useState<PairingStatus | null>(null);
   const [url, setUrl] = useState('');
@@ -23,8 +35,10 @@ export function CompanionScreen({
   const [name, setName] = useState('My phone');
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
-  const [guide, setGuide] = useState<'existing' | 'new'>('existing');
   const [replace, setReplace] = useState(false);
+  const [manual, setManual] = useState(false);
+  // A pairing link waiting to be used, e.g. from the Camera app.
+  const [pending, setPending] = useState<string | null>(null);
   useEffect(() => {
     let live = true;
     native
@@ -73,7 +87,40 @@ export function CompanionScreen({
       setCode('');
       return native!.pair(parsed.baseUrl, parsed.code, name.trim());
     }, 'Paired securely on this device. Check connection to verify the companion is ready.');
+  const pairWith = (value: string) =>
+    run(async () => {
+      const parsed = parsePairingQR(value);
+      return native!.pair(
+        parsed.baseUrl,
+        parsed.code,
+        name.trim() || 'My phone',
+      );
+    }, 'Paired with your computer.');
+  const scan = async () => {
+    let value: string;
+    try {
+      value = await scanner!.scan();
+    } catch (error) {
+      if ((error as { code?: string })?.code !== 'cancelled') {
+        setMessage((error as { message?: string })?.message ?? null);
+      }
+      return;
+    }
+    await pairWith(value);
+  };
+  // A link is taken once. It pairs only after the stored pairing has been
+  // read successfully, and never replaces an existing pairing without asking.
+  useEffect(() => {
+    if (!link) return;
+    onLinkUsed?.();
+    setPending(link);
+  }, [link]); // eslint-disable-line react-hooks/exhaustive-deps
   const paired = status?.state === 'paired' && !replace;
+  useEffect(() => {
+    if (!pending || !native || !status || busy || paired) return;
+    setPending(null);
+    pairWith(pending);
+  }, [pending, native, status, busy, paired]); // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <Screen
       title="Your companion"
@@ -119,6 +166,26 @@ export function CompanionScreen({
               </Text>
             </Card>
           ) : null}
+          {pending && paired ? (
+            <Card>
+              <Text style={type.heading}>Pair with a new computer?</Text>
+              <Text style={type.body}>
+                This phone is already paired. Pairing with the computer in this
+                code replaces the current pairing.
+              </Text>
+              <Button
+                label="Pair with this one"
+                disabled={busy}
+                onPress={() => setReplace(true)}
+              />
+              <Button
+                label="Keep current pairing"
+                variant="secondary"
+                disabled={busy}
+                onPress={() => setPending(null)}
+              />
+            </Card>
+          ) : null}
           {paired ? (
             <Card>
               <Text style={type.label}>SAVED COMPANION</Text>
@@ -153,30 +220,29 @@ export function CompanionScreen({
           ) : (
             <>
               <Card>
-                <Text style={type.heading}>Connect privately</Text>
-                <Text style={type.body}>
-                  Use Tailscale to reach your own computer. Then pair this app
-                  with the invitation from its Scan to Make companion.
+                <Text style={type.heading}>
+                  {status?.state === 'expired'
+                    ? 'Pairing expired. Scan a new code.'
+                    : 'Pair with your computer'}
                 </Text>
-                <View style={styles.options}>
-                  <Button
-                    label="I use Tailscale"
-                    variant={guide === 'existing' ? 'primary' : 'secondary'}
-                    onPress={() => setGuide('existing')}
-                  />
-                  <Button
-                    label="I’m new to Tailscale"
-                    variant={guide === 'new' ? 'primary' : 'secondary'}
-                    onPress={() => setGuide('new')}
-                  />
-                </View>
                 <Text style={type.body}>
-                  {guide === 'new'
-                    ? 'Install Tailscale on this phone and your computer. Sign in to the same network on both, and complete any device approval requested by your network owner. These steps happen in Tailscale.'
-                    : 'Connect both devices to the same Tailscale network. On your computer, start the companion in private HTTPS mode and create a fresh invitation for your account.'}
+                  Open the Scan to Make companion on your computer and scan the
+                  QR code it shows. Both devices need to be on your Tailscale
+                  network.
                 </Text>
                 <Button
-                  label="Open Tailscale setup guide"
+                  label={busy ? 'Connecting…' : 'Scan QR code'}
+                  disabled={busy || !scanner}
+                  onPress={scan}
+                />
+                <Button
+                  label={manual ? 'Hide code entry' : 'Enter code instead'}
+                  variant="secondary"
+                  disabled={busy}
+                  onPress={() => setManual(value => !value)}
+                />
+                <Button
+                  label="Tailscale setup guide"
                   variant="secondary"
                   onPress={() => {
                     Linking.openURL(
@@ -188,67 +254,65 @@ export function CompanionScreen({
                     );
                   }}
                 />
-                <Text style={type.caption}>
-                  The companion owner sets up private HTTPS and access. This app
-                  does not sign you in, approve devices or change your network.
-                </Text>
               </Card>
-              <Card>
-                <Text style={type.heading}>
-                  {status?.state === 'expired'
-                    ? 'Pairing expired'
-                    : 'Add your invitation'}
-                </Text>
-                <Text style={type.body}>
-                  Enter the companion address and one-time code, or paste the
-                  invitation JSON into the code field. Invitations expire after
-                  five minutes. Leave the address blank when using the full
-                  invitation.
-                </Text>
-                <Text style={type.label}>COMPANION HTTPS ADDRESS</Text>
-                <TextInput
-                  accessibilityLabel="Companion HTTPS address"
-                  value={url}
-                  onChangeText={setUrl}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  keyboardType="url"
-                  editable={!busy}
-                  placeholder="https://computer.network.ts.net"
-                  style={styles.input}
-                />
-                <Text style={type.label}>PAIRING CODE OR INVITATION</Text>
-                <TextInput
-                  accessibilityLabel="Pairing code or invitation"
-                  value={code}
-                  onChangeText={setCode}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  secureTextEntry
-                  editable={!busy}
-                  maxLength={2048}
-                  placeholder="One-time invitation"
-                  style={styles.input}
-                />
-                <Text style={type.label}>THIS DEVICE’S NAME</Text>
-                <TextInput
-                  accessibilityLabel="Device name"
-                  value={name}
-                  onChangeText={setName}
-                  maxLength={80}
-                  editable={!busy}
-                  style={styles.input}
-                />
-                <Button
-                  label="Pair companion"
-                  disabled={busy || !code.trim() || !name.trim()}
-                  onPress={connect}
-                />
-                <Text style={type.caption}>
-                  Pairing credentials are kept in this device’s secure storage,
-                  separate from your projects.
-                </Text>
-              </Card>
+              {manual ? (
+                <Card>
+                  <Text style={type.heading}>
+                    {status?.state === 'expired'
+                      ? 'Pairing expired'
+                      : 'Add your invitation'}
+                  </Text>
+                  <Text style={type.body}>
+                    Enter the companion address and one-time code, or paste the
+                    invitation JSON into the code field. Invitations expire
+                    after five minutes. Leave the address blank when using the
+                    full invitation.
+                  </Text>
+                  <Text style={type.label}>COMPANION HTTPS ADDRESS</Text>
+                  <TextInput
+                    accessibilityLabel="Companion HTTPS address"
+                    value={url}
+                    onChangeText={setUrl}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    keyboardType="url"
+                    editable={!busy}
+                    placeholder="https://computer.network.ts.net"
+                    style={styles.input}
+                  />
+                  <Text style={type.label}>PAIRING CODE OR INVITATION</Text>
+                  <TextInput
+                    accessibilityLabel="Pairing code or invitation"
+                    value={code}
+                    onChangeText={setCode}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    secureTextEntry
+                    editable={!busy}
+                    maxLength={2048}
+                    placeholder="One-time invitation"
+                    style={styles.input}
+                  />
+                  <Text style={type.label}>THIS DEVICE’S NAME</Text>
+                  <TextInput
+                    accessibilityLabel="Device name"
+                    value={name}
+                    onChangeText={setName}
+                    maxLength={80}
+                    editable={!busy}
+                    style={styles.input}
+                  />
+                  <Button
+                    label="Pair companion"
+                    disabled={busy || !code.trim() || !name.trim()}
+                    onPress={connect}
+                  />
+                  <Text style={type.caption}>
+                    Pairing credentials are kept in this device’s secure
+                    storage, separate from your projects.
+                  </Text>
+                </Card>
+              ) : null}
             </>
           )}
           {status?.baseUrl ? (
@@ -296,5 +360,4 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.line,
   },
-  options: { gap: 8 },
 });

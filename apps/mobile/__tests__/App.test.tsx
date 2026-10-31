@@ -4,7 +4,7 @@
 
 import React from 'react';
 import ReactTestRenderer, { act } from 'react-test-renderer';
-import { Text } from 'react-native';
+import { Linking, Text } from 'react-native';
 import App from '../App';
 import {
   createSavedProjects,
@@ -127,7 +127,10 @@ test('a failed create keeps the typed name and other projects', async () => {
     id: 'kept',
     brief: { object: 'Phone case', context: '', addition: '' },
   });
-  const failing = { ...store, create: async () => ({ status: 'storage-error' as const }) };
+  const failing = {
+    ...store,
+    create: async () => ({ status: 'storage-error' as const }),
+  };
   let tree!: ReactTestRenderer.ReactTestRenderer;
   await act(async () => {
     tree = ReactTestRenderer.create(<App repository={failing} />);
@@ -160,7 +163,12 @@ test('projects saved with earlier fit data still list and open their scans', asy
     id: 'drawer-study',
     revision: 2,
     brief: { object: 'Kitchen drawer', context: '', addition: 'Tray' },
-    fit: { schemaVersion: '0.2.0', template: 'drawer-tray', id: 'drawer-study', revision: 1 },
+    fit: {
+      schemaVersion: '0.2.0',
+      template: 'drawer-tray',
+      id: 'drawer-study',
+      revision: 1,
+    },
     preview: null,
     acceptedArtifact: null,
   };
@@ -199,7 +207,6 @@ test('corrupt and future records remain visible alongside healthy projects', asy
   expect(texts(tree)).toContain('This project needs a newer app.');
   expect(bytes.get('broken')).toBe('{');
 });
-
 
 test('a retained capture leads to scan results and close-ups, and back', async () => {
   const { NativeModules } = require('react-native');
@@ -248,7 +255,6 @@ test('a retained capture leads to scan results and close-ups, and back', async (
   }
 });
 
-
 test('production wiring drives the real clients through the native bridges', async () => {
   const { NativeModules } = require('react-native');
   const store = testStore();
@@ -259,7 +265,10 @@ test('production wiring drives the real clients through the native bridges', asy
   const capture = syntheticTarget().capture;
   const etag = `"${'f'.repeat(64)}"`;
   const history = new Map<string, string>([
-    [JSON.stringify(['host', PROJECT_ID]), JSON.stringify({ captures: [capture] })],
+    [
+      JSON.stringify(['host', PROJECT_ID]),
+      JSON.stringify({ captures: [capture] }),
+    ],
   ]);
   const requests: string[] = [];
   NativeModules.RetainedCaptureBridge = {
@@ -344,12 +353,7 @@ test('production wiring drives the real clients through the native bridges', asy
   // Fake only the clock the screen polls with; the clients' promise chains
   // must keep running on real microtasks (Node 22 stalls otherwise).
   jest.useFakeTimers({
-    doNotFake: [
-      'nextTick',
-      'setImmediate',
-      'clearImmediate',
-      'queueMicrotask',
-    ],
+    doNotFake: ['nextTick', 'setImmediate', 'clearImmediate', 'queueMicrotask'],
   });
   let tree!: ReactTestRenderer.ReactTestRenderer;
   try {
@@ -411,7 +415,6 @@ test('production wiring drives the real clients through the native bridges', asy
   }
 });
 
-
 test('real-size edits survive moving to close-ups and back', async () => {
   const { NativeModules, TextInput } = require('react-native');
   const store = testStore();
@@ -421,8 +424,7 @@ test('real-size edits survive moving to close-ups and back', async () => {
   });
   NativeModules.RetainedCaptureBridge = {
     context: async () => 'host|device',
-    read: async () =>
-      JSON.stringify({ captures: [syntheticTarget().capture] }),
+    read: async () => JSON.stringify({ captures: [syntheticTarget().capture] }),
     cancel: async () => {},
   };
   const { services } = fakeScanServices({
@@ -432,7 +434,11 @@ test('real-size edits survive moving to close-ups and back', async () => {
       }),
     ],
   });
-  await services.jobs.save(PROJECT_ID, syntheticTarget().capture.captureId, JOB_ID);
+  await services.jobs.save(
+    PROJECT_ID,
+    syntheticTarget().capture.captureId,
+    JOB_ID,
+  );
   const field = (label: string) =>
     tree.root.find(
       n => n.type === TextInput && n.props.accessibilityLabel === label,
@@ -475,7 +481,6 @@ test('real-size edits survive moving to close-ups and back', async () => {
     delete NativeModules.RetainedCaptureBridge;
   }
 });
-
 
 test('real clients reopen a kept check and upload camera-roll photos by identity', async () => {
   const { NativeModules } = require('react-native');
@@ -595,12 +600,15 @@ test('real clients reopen a kept check and upload camera-roll photos by identity
     // The stored close-up's lookup rejects, so it's downloaded, then shown.
     expect(
       tree.root.findAll(
-        n => n.props.source?.uri === `file:///app/ScanMediaFiles/${'d'.repeat(8)}`,
+        n =>
+          n.props.source?.uri === `file:///app/ScanMediaFiles/${'d'.repeat(8)}`,
       ).length,
     ).toBeGreaterThan(0);
     await press(tree, 'Choose a photo');
     expect(
-      texts(tree).some(t => t.includes('1 photo wasn’t added: 1 is over 25 MB')),
+      texts(tree).some(t =>
+        t.includes('1 photo wasn’t added: 1 is over 25 MB'),
+      ),
     ).toBe(true);
     await press(tree, 'Add 1 photo to scan');
     // The display path stays on the phone; only the identity is sent.
@@ -619,7 +627,6 @@ test('real clients reopen a kept check and upload camera-roll photos by identity
     delete NativeModules.StillsProcessingBridge;
   }
 });
-
 
 test('opening close-ups waits for a gallery download the results screen left running', async () => {
   const { NativeModules } = require('react-native');
@@ -686,4 +693,82 @@ test('opening close-ups waits for a gallery download the results screen left run
     if (tree) await act(async () => tree.unmount());
     delete NativeModules.RetainedCaptureBridge;
   }
+});
+
+test('a scantomake://pair link opens the companion screen', async () => {
+  const link =
+    'scantomake://pair?v=1&u=https%3A%2F%2Fhost.example.ts.net&c=' +
+    'Q'.repeat(32) +
+    '&e=' +
+    (Date.now() + 300_000);
+  jest.spyOn(Linking, 'getInitialURL').mockResolvedValue(link);
+  let tree!: ReactTestRenderer.ReactTestRenderer;
+  await act(async () => {
+    tree = ReactTestRenderer.create(<App repository={testStore()} />);
+  });
+  expect(texts(tree)).toContain('Your companion');
+  await act(async () => tree.unmount());
+  jest.restoreAllMocks();
+});
+
+test('a pairing link delivered twice at launch pairs only once', async () => {
+  const link =
+    'scantomake://pair?v=1&u=https%3A%2F%2Fhost.example.ts.net&c=' +
+    'Q'.repeat(32) +
+    '&e=' +
+    (Date.now() + 300_000);
+  const handlers: ((event: { url: string }) => void)[] = [];
+  jest.spyOn(Linking, 'getInitialURL').mockResolvedValue(link);
+  jest.spyOn(Linking, 'addEventListener').mockImplementation(((
+    _type: string,
+    handler: (event: { url: string }) => void,
+  ) => {
+    handlers.push(handler);
+    return { remove: () => {} };
+  }) as never);
+  const pair = jest.fn(
+    () =>
+      new Promise(resolve =>
+        setTimeout(
+          () =>
+            resolve({
+              state: 'paired',
+              baseUrl: 'https://host.example.ts.net',
+            }),
+          0,
+        ),
+      ),
+  );
+  const native = require('react-native').NativeModules;
+  native.CompanionPairing = {
+    status: async () => ({ state: 'disconnected' }),
+    pair,
+    check: async () => ({ state: 'paired' }),
+    disconnect: async () => ({ state: 'disconnected' }),
+    cancel: async () => {},
+  };
+  let tree!: ReactTestRenderer.ReactTestRenderer;
+  await act(async () => {
+    tree = ReactTestRenderer.create(<App repository={testStore()} />);
+  });
+  await act(async () => {
+    handlers.forEach(handler => handler({ url: link }));
+    await new Promise<void>(resolve => setTimeout(resolve, 5));
+  });
+  expect(pair).toHaveBeenCalledTimes(1);
+  // The repeat is dropped, not held as a second link to replace the pairing.
+  expect(texts(tree).join(' ')).not.toContain('Pair with a new computer?');
+  // Opening the same link again later is a deliberate retry.
+  pair.mockClear();
+  native.CompanionPairing.status = async () => ({ state: 'disconnected' });
+  const later = Date.now() + 5000;
+  jest.spyOn(Date, 'now').mockReturnValue(later);
+  await act(async () => {
+    handlers.forEach(handler => handler({ url: link }));
+    await new Promise<void>(resolve => setTimeout(resolve, 5));
+  });
+  expect(texts(tree).join(' ')).toContain('Pair with a new computer?');
+  await act(async () => tree.unmount());
+  delete native.CompanionPairing;
+  jest.restoreAllMocks();
 });
