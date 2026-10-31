@@ -54,9 +54,9 @@ All distances below are in mm, independent of input units.
 | Weld | `--weld-mm .01` | Merge vertices within distance |
 | Floaters | `--component-fraction .01 --component-metric area` | Drop vertex-connected components whose area is below the fraction of the largest component; `volume` requires closed components |
 | Holes | `--hole-max-edges 0` | Fill boundary loops; 0 allows all sizes, positive values bound loop edge count |
-| Coarse fill | `--coarse-fill refill --fill-fairing harmonic --fill-crease-deg 60` | Replace disk-shaped regions of faces larger than 10× the median area (edge-connected, split at creases) with a densified, faired patch; captured faces and vertices are not changed. `keep` leaves them |
+| Coarse fill | `--coarse-fill refill --fill-fairing auto --fill-crease-deg 60` | Replace disk-shaped regions of faces larger than 10× the median area (edge-connected, split at creases) with a densified, faired patch; captured faces and vertices are not changed. `keep` leaves them |
 | Manifold | `--voxel-size-mm .3`, optional `--force-voxel` | Recalculate normals; use voxel remesh if topology is still open/non-manifold, or explicitly forced |
-| Denoise | `--denoise-iterations 15 --denoise-factor .5 --denoise-mu -.53 --denoise-max-mm .35 --sharp-angle-deg 30` | Taubin cycles: a shrinking λ (`factor`) step then an inflating μ step, each moving vertices toward their inverse-edge-length-weighted neighbour average; freeze sharp-edge and boundary vertices; after each whole cycle, clamp cumulative vertex displacement from this step's start |
+| Denoise | `--denoise-iterations 15 --denoise-factor .5 --denoise-mu -.53 --denoise-max-mm .35 --sharp-angle-deg 55` | Taubin cycles: a shrinking λ (`factor`) step then an inflating μ step, each moving vertices toward their inverse-edge-length-weighted neighbour average; freeze crease and non-manifold vertices (below); relax foldover fins first; after each whole cycle, clamp cumulative vertex displacement from this step's start |
 | Decimate | optional `--target-faces N` | Triangulate, then collapse toward a target triangle count; Blender may not achieve the exact target |
 | Orient | `--orient box` | `box`: the minimum-volume oriented box (`boxRotation` below), axes long to short. `pca`: vertex-covariance PCA, descending eigenvalues (the previous default). Both use the deterministic sign convention and a right-handed frame, centre XY bounds and rest the lowest vertex at Z=0. `keep`: input coordinates unchanged |
 
@@ -66,7 +66,14 @@ at or below 0 the cycles shrink the mesh, and above 0.2 they amplify noise
 (λ .1 with μ −.53 gives 8.1, so every frequency grows). The defaults give 0.113. Inverse edge-length
 weights stop long Object Capture fill edges from pulling their vertices, and
 clamping whole cycles stops a clipped λ step leaving the μ step to inflate
-the vertex. `--denoise-iterations 0` disables denoising. The voxel fallback is bounded to 512 cells along the longest
+the vertex. An edge is sharp above `--sharp-angle-deg`. Only crease vertices
+are frozen: two or more sharp edges that lead to other vertices with two or
+more sharp edges. Creases and box corners therefore hold, while an isolated
+spike, whose sharp edges end at a smooth ring, is smoothed. An edge above 115°
+is a foldover fin, not a feature: its vertices and their neighbours are never
+frozen and get four umbrella relaxation passes before the cycles, inside the
+same displacement clamp. The `denoise` operation reports `lockedVertices` and
+`foldoverVertices`. `--denoise-iterations 0` disables denoising. The voxel fallback is bounded to 512 cells along the longest
 axis; choose a larger voxel size if rejected. Voxelization and decimation can
 erase detail, including sharp features; denoising alone protects the detected
 sharp vertices. The fallback runs only when needed unless forced.
@@ -102,14 +109,31 @@ repair replaces each such region after hole filling:
   move (`capturedMaxMoveMm` is 0). A rim that does not project to a simple
   polygon is skipped.
 - **Fair:** patch vertices minimise an inverse-length weighted umbrella with
-  the rim fixed. `harmonic` (default) stays within the rim and cannot extend
-  the part. `biharmonic` adds rim rows so the patch continues the captured
-  curvature across two fixed rings, releasing rows at rim creases (a box
-  face stays flat); it can overshoot convex parts. Both are solved by
-  Jacobi-preconditioned conjugate gradients in NumPy.
+  the rim fixed. `harmonic` stays within the rim and cannot extend the part.
+  `biharmonic` adds rim rows so the patch continues the captured curvature
+  across two fixed rings, releasing rows at rim creases (a box face stays
+  flat); it can overshoot convex parts. `auto` (default) chooses per region:
+  biharmonic where the rim's RMS distance from its best-fit plane, weighted
+  by length along the rim, exceeds
+  0.04 × √(region area) (`curvedRimRatio`), harmonic otherwise. A flat
+  opening, such as a case lying on its back, has no curvature of its own to
+  continue, so it stays harmonic; a rim that climbs a rounded body continues
+  it. Both are solved together by Jacobi-preconditioned conjugate gradients
+  in NumPy.
+
+The 0.04 threshold sits between the two real captures it was chosen on: a
+crocheted plush lying on its back (rim 0.089, whose unseen back a membrane
+dished) and an AirPods Pro 2 case lying on its back (rim 0.021, where
+biharmonic overshot the published 21.7 mm thickness by 0.34 mm). Regions
+near it can go either way; set `--fill-fairing` explicitly to override. A
+rounded body resting level, whose unseen side ends on a nearly flat circle
+(a ball on a table), also reads as flat and gets the harmonic membrane,
+which undershoots it; pass `biharmonic` for such parts.
 
 The new faces are **inferred surface**, not measurement. `refillCoarse`
-records removed and inferred faces and areas, `patchMaxOffsetMm` (how far
+records removed and inferred faces and areas, each refilled region's
+`patches` entry (`rimDeviation`, the `fairing` it got, and a `fairingNote` when
+auto could not measure the rim and kept harmonic), `patchMaxOffsetMm` (how far
 the patch departs from the fill it replaced), solver iterations, residual and
 `solverConverged`, and `capturedMaxMoveMm`, measured right after this step
 (0; later denoising still smooths every vertex). A solve that reaches the
@@ -173,6 +197,15 @@ to short. `boxRotation` is a right-handed world-to-box rotation matrix:
 `boxPoint = boxRotation @ (inputPoint - boxInputCentreMm)`. Axis signs follow
 the PCA sign convention; symmetric shapes may have equivalent frames.
 Repair orients by this box frame by default. `principalExtentsMm` is unchanged.
+`supportAlignedExtentsMm` is reported when the units sidecar authors the up
+axis (`upAxisAuthored: true` and `upAxis` X, Y or Z, as the capture converter's
+report does): the minimum-area rectangle across that axis, long then short,
+then the height along it, with `supportUp` giving the axis in the reported
+frame. Object Capture's up axis is the support the object rested on, so this is
+the size as it stood. A part resting tilted (the AirPods case: 22.36 mm high
+against its 21.7 mm thickness) reads taller than `boxExtentsMm`, so it is an
+additional figure, not a replacement; `--orient` is unchanged. Without an
+authored up axis both are null.
 `coarseFillFaces` and `coarseFillAreaMm2` count faces larger than 10× the
 median face area: typically the few huge triangles Object Capture uses to
 close sides it never saw. Their sparse vertices skew vertex PCA; the hull-based
@@ -220,7 +253,11 @@ topology, volume, unit declarations/sidecars, STL framing, decimation, all
 ten PNGs, a textured cube with a UV seam on every edge (UVs, `usemtl` and
 byte-identical MTL/PNG copies; dropped under voxel remesh; JPEG not copied)
 and rejected material references (parent, absolute, link), and a
-lattice box whose top is one coarse fan (refilled flat under both fairing modes,
-every captured vertex kept, `keep` leaves the fan). CI downloads Blender 5.0.1 from download.blender.org and verifies the
+lattice box whose top is one coarse fan (refilled flat under every fairing mode,
+every captured vertex kept, `keep` leaves the fan), a sphere whose underside
+below a climbing cut is one fan (`auto` continues the body and lands closer to
+the sphere than `harmonic`), a spiked sphere and a sphere with a folded-over
+vertex (both smoothed; a cube's corners stay locked), and a tilted box measured
+with an authored up axis. CI downloads Blender 5.0.1 from download.blender.org and verifies the
 archive against Blender's published `blender-5.0.1.sha256` file before caching.
 Personal captures, outputs and their private paths never belong in Git.

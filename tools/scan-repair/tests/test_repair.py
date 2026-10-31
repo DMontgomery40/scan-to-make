@@ -81,6 +81,41 @@ def fan_box(size=(40,20,10), step=.4, centre=(4,1), fans=((2,1),), drop=()):
     return vertices, faces
 
 
+def capped_sphere(radius=20, around=64, rows=96, cut=120, wave=15):
+    """Sphere grid from the north pole down to a cut that climbs and falls twice around the
+    body; one coarse fan to the south pole closes the rest, like an unseen rounded underside."""
+    vertices, faces = [(0, 0, radius)], []
+    for r in range(1, rows+1):
+        for k in range(around):
+            phi = 2*math.pi*k/around
+            t = math.radians(cut+wave*math.cos(2*phi))*r/rows
+            vertices.append((radius*math.sin(t)*math.cos(phi), radius*math.sin(t)*math.sin(phi), radius*math.cos(t)))
+    ring = lambda r, k: 1+(r-1)*around+k%around
+    faces += [(0, ring(1, k), ring(1, k+1)) for k in range(around)]
+    faces += [(ring(r, k), ring(r+1, k), ring(r+1, k+1), ring(r, k+1)) for r in range(1, rows) for k in range(around)]
+    vertices.append((0, 0, -radius))
+    faces += [(ring(rows, k), len(vertices)-1, ring(rows, k+1)) for k in range(around)]
+    return vertices, faces
+
+
+def max_dihedral(path):
+    """Largest angle between neighbouring face normals in an OBJ, in degrees."""
+    lines = Path(path).read_text().splitlines()
+    points = [tuple(map(float, line.split()[1:4])) for line in lines if line.startswith("v ")]
+    edges = {}
+    for line in lines:
+        if line.startswith("f "):
+            face = [int(i.split("/")[0])-1 for i in line.split()[1:]]
+            a, b, c = (points[i] for i in face[:3])
+            u, w = [q-p for p,q in zip(a,b)], [q-p for p,q in zip(a,c)]
+            n = (u[1]*w[2]-u[2]*w[1], u[2]*w[0]-u[0]*w[2], u[0]*w[1]-u[1]*w[0])
+            n = tuple(x/math.hypot(*n) for x in n)
+            for k in range(len(face)):
+                edges.setdefault(frozenset((face[k], face[k-1])), []).append(n)
+    return max(math.degrees(math.acos(max(-1, min(1, sum(x*y for x,y in zip(*pair))))))
+               for pair in edges.values() if len(pair) == 2)
+
+
 @unittest.skipUnless(Path(BLENDER).is_file(), "Blender absent; set BLENDER to Blender 5.0.1 to run real integration tests")
 class RepairTests(unittest.TestCase):
     def setUp(self):
@@ -184,6 +219,9 @@ class RepairTests(unittest.TestCase):
         refill = next(o for o in r["operations"] if o["name"]=="refillCoarse")
         self.assertEqual((refill["regions"], refill["refilled"], refill["capturedMaxMoveMm"]), (1, 1, 0))
         self.assertTrue(refill["solverConverged"])
+        # A flat opening has no rim curvature to continue: auto keeps it harmonic.
+        self.assertEqual([p["fairing"] for p in refill["patches"]], ["harmonic"])
+        self.assertLess(refill["patches"][0]["rimDeviation"], 1e-6)
         self.assertAlmostEqual(refill["removedAreaMm2"], 800, places=3)
         self.assertAlmostEqual(refill["inferredAreaMm2"], 800, places=3)
         out = (self.base/"fan"/"repaired.obj").read_text().splitlines()
@@ -216,6 +254,57 @@ class RepairTests(unittest.TestCase):
         self.assertLess(next(o for o in r["operations"] if o["name"]=="refillCoarse")["patchMaxOffsetMm"], 1e-3)
         kept = self.repair(p, "--coarse-fill", "keep", name="fan-keep")
         self.assertEqual(kept["after"]["coarseFillFaces"], 300)
+
+    def test_curved_rim_fan_continues_the_body(self):
+        # The unseen underside of a rounded body: its rim climbs 9 mm, so auto continues the
+        # captured curvature instead of spanning a membrane, and lands closer to the sphere.
+        p = self.mesh("cap.obj", *capped_sphere())
+        auto = self.repair(p, "--denoise-iterations", "0", "--orient", "keep", name="cap-auto")
+        harmonic = self.repair(p, "--denoise-iterations", "0", "--orient", "keep",
+                               "--fill-fairing", "harmonic", name="cap-harmonic")
+        refill = next(o for o in auto["operations"] if o["name"]=="refillCoarse")
+        self.assertEqual((refill["refilled"], refill["capturedMaxMoveMm"], refill["skipped"]), (1, 0, []))
+        self.assertEqual([(p["fairing"], p["fairingNote"]) for p in refill["patches"]], [("biharmonic", None)])
+        self.assertGreater(refill["patches"][0]["rimDeviation"], refill["curvedRimRatio"])
+        sphere = 4/3*math.pi*20**3
+        self.assertLess(sphere-auto["after"]["volumeMm3"], sphere-harmonic["after"]["volumeMm3"]-500)
+
+    def test_auto_fairing_without_a_measured_rim_stays_harmonic(self):
+        # Every refill path today measures a disk rim; a future one without it must not crash auto.
+        script = ("import json, sys; sys.path.insert(0, %r); import blender_tool as bt; "
+                  "print('RESULT', json.dumps([bt.patch_fairing('auto', None), bt.patch_fairing('auto', .5), "
+                  "bt.patch_fairing('auto', .01), bt.patch_fairing('biharmonic', None)]))") % str(ROOT)
+        run = subprocess.run([BLENDER, "--background", "--factory-startup", "--python-exit-code", "1",
+                              "--python-expr", script], capture_output=True, text=True)
+        self.assertEqual(run.returncode, 0, run.stdout+run.stderr)
+        result = json.loads(next(line for line in run.stdout.splitlines() if line.startswith("RESULT "))[7:])
+        self.assertEqual(result[0][0], "harmonic")
+        self.assertIn("not measurable", result[0][1])
+        self.assertEqual(result[1:], [["biharmonic", None], ["harmonic", None], ["biharmonic", None]])
+
+    def test_denoise_frees_spikes_and_foldovers_but_keeps_corners(self):
+        # An isolated spike's sharp edges end at a smooth ring, so they do not lock it, even at 30 degrees.
+        vertices, faces = icosphere(20, 3)
+        vertices[0] = tuple(c*21/20 for c in vertices[0])
+        self.repair(self.mesh("spike.obj", vertices, faces), "--orient", "keep", "--sharp-angle-deg", "30", name="spike")
+        tip = max(math.hypot(*map(float, line.split()[1:4])) for line in
+                  (self.base/"spike"/"repaired.obj").read_text().splitlines() if line.startswith("v "))
+        self.assertLess(tip, 20.8)
+        # A vertex dragged past its ring folds its faces over; main locked it as sharp and kept the fin.
+        vertices, faces = icosphere(20, 4)
+        far = vertices[sorted({i for f in faces if 0 in f for i in f} - {0})[0]]
+        vertices[0] = tuple(a+1.25*(b-a) for a,b in zip(vertices[0], far))
+        p = self.mesh("fin.obj", vertices, faces)
+        self.assertGreater(max_dihedral(p), 170)
+        r = self.repair(p, "--orient", "keep", name="fin")
+        self.assertLess(max_dihedral(self.base/"fin"/"repaired.obj"), 30)
+        denoise = next(o for o in r["operations"] if o["name"]=="denoise")
+        self.assertGreater(denoise["foldoverVertices"], 0)
+        self.assertEqual(denoise["sharpAngleDeg"], 55)
+        # Cube corners are crease vertices whose sharp edges lead to other crease vertices: locked.
+        r = self.repair(self.mesh("corners.obj", CUBE, FACES), name="corners")
+        self.assertEqual(next(o for o in r["operations"] if o["name"]=="denoise")["lockedVertices"], 8)
+        self.assertLess(r["deviation"]["maxMm"], 1e-5)
 
     def test_adjacent_fans_keep_their_crease(self):
         # Two coarse regions meeting at a box edge are refilled separately; the edge stays sharp.
@@ -475,6 +564,29 @@ class RepairTests(unittest.TestCase):
         for kept,source in zip(sorted(output("keep")),sorted(map(tuple,vertices)),strict=True):
             for a,b in zip(kept,source):
                 self.assertAlmostEqual(a,b,delta=1e-4)
+
+    def test_support_aligned_extents_from_authored_up_axis(self):
+        # A part resting tilted on its support: the box frame still finds the part, while the
+        # support frame reports the height it stood at. Neither replaces the other.
+        vertices, faces = self.rotated_box()
+        p = self.mesh("rotated.obj", vertices, faces)
+        sidecar = self.base/"conversion.json"
+        sidecar.write_text(json.dumps({"unitsAuthored": True, "metersPerUnit": .001, "upAxis": "Z", "upAxisAuthored": True}))
+        result = self.run_cli("measure", p, "--units-sidecar", sidecar)
+        for actual, expected in zip(result["boxExtentsMm"], (60.6, 45.2, 21.7)):
+            self.assertAlmostEqual(actual, expected, delta=.05)
+        height = max(v[2] for v in vertices)-min(v[2] for v in vertices)
+        self.assertAlmostEqual(result["supportAlignedExtentsMm"][2], height, places=4)
+        self.assertGreater(height, 21.7+3)
+        self.assertEqual(result["supportUp"], [0, 0, 1])
+        self.assertIsNone(self.run_cli("measure", p, "--units", "mm")["supportAlignedExtentsMm"])
+        # Repair reports the up axis through the output rotation, so the height survives orientation.
+        out = self.base/"support"
+        self.run_cli("repair", p, "--units-sidecar", sidecar, "--out", out, "--denoise-iterations", "0")
+        r = json.loads((out/"report.json").read_text())
+        self.assertAlmostEqual(r["after"]["supportAlignedExtentsMm"][2], height, delta=1e-3)
+        sidecar.write_text(json.dumps({"unitsAuthored": True, "metersPerUnit": .001, "upAxis": "Q", "upAxisAuthored": True}))
+        self.assertIn("upAxis", self.run_cli("measure", p, "--units-sidecar", sidecar, ok=False).stderr)
 
     def test_coarse_fill_area(self):
         # Object Capture closes unseen sides with a few huge faces among fine ones.
