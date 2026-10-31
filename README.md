@@ -4,7 +4,7 @@ An open-source iPhone and iPad app that scans a real object with LiDAR and clean
 
 The app captures the object (LiDAR Object Capture, plus close-up stills of details). A companion on your own computer converts the capture and repairs it: it fills holes, removes stray geometry, measures it and renders check views. Slicing and printing belong to [bambu-printer-mcp](https://github.com/DMontgomery40/bambu-printer-mcp) or [mcp-3D-printer-server](https://github.com/DMontgomery40/mcp-3D-printer-server). The handoff of the clean mesh to those servers isn't built yet; today you share the repaired STL from the scan results.
 
-The app requires iOS 27 and a device with LiDAR. Physical accuracy of a scan is not established by the cleanup; check sizes against the real object.
+The app requires iOS 27. Scanning needs a device with LiDAR (iPhone Pro or iPad Pro). On devices without LiDAR, such as the iPhone Duo, everything except the scan step works.
 
 ## What's here
 
