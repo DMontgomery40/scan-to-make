@@ -706,3 +706,68 @@ test('viewing the model waits for a gallery download already in flight', async (
   expect(calls).not.toContain('open during download');
   await act(async () => tree.unmount());
 });
+
+test('an AI result opens Compare versions: pictures, the one picked, the reason, and the scan as captured', async () => {
+  const reason =
+    'B rounds the eyes and smooths the sign while keeping the stitches.';
+  const { services, calls } = fakeScanServices({
+    jobs: [
+      syntheticJob('succeeded', {
+        previews: [1, 2],
+        aiTweak: {
+          access: { kind: 'codex-cli' },
+          attempts: [
+            { index: 1, outcome: 'changed', wallMs: 1, veto: 'smoothed' },
+            { index: 2, outcome: 'changed', wallMs: 1 },
+          ],
+          pick: { choice: 'attempt-2', decidedBy: 'judge', reason },
+        },
+      }),
+    ],
+  });
+  await services.jobs.save(PROJECT_ID, CAPTURE_ID, JOB_ID);
+  const { tree } = await render(services);
+  let shown = texts(tree);
+  expect(shown).toContain('AI try 2 was closest to your photos.');
+  expect(shown).not.toContain('WHY THIS ONE');
+  await press(tree, 'Compare versions');
+  shown = texts(tree);
+  for (const line of [
+    'The scan as captured',
+    'AI try 1',
+    'AI try 2',
+    'Picked',
+    'This is the model you print.',
+    'Not used: it smoothed away detail your scan caught.',
+    'WHY THIS ONE',
+    reason,
+  ])
+    expect(shown).toContain(line);
+  expect(calls).toEqual(
+    expect.arrayContaining([
+      'download ai-attempt-1-preview.png',
+      'download ai-attempt-2-preview.png',
+    ]),
+  );
+  expect(
+    tree.root
+      .findAllByType(Image)
+      .some(i => i.props.accessibilityLabel === 'Picture of ai try 2'),
+  ).toBe(true);
+  expect(hasButton(tree, 'Open ai try 1 in 3D')).toBe(false);
+  await press(tree, 'Open the scan as captured in 3D');
+  expect(calls).toContain('open captured scan');
+  await press(tree, 'Open ai try 2 in 3D');
+  expect(calls).toContain('open repaired.obj');
+  await press(tree, 'Hide versions');
+  expect(texts(tree)).not.toContain('WHY THIS ONE');
+  await act(async () => tree.unmount());
+});
+
+test('a result without the AI step has no Compare versions door', async () => {
+  const { services } = fakeScanServices({ jobs: [syntheticJob('succeeded')] });
+  await services.jobs.save(PROJECT_ID, CAPTURE_ID, JOB_ID);
+  const { tree } = await render(services);
+  expect(hasButton(tree, 'Compare versions')).toBe(false);
+  await act(async () => tree.unmount());
+});

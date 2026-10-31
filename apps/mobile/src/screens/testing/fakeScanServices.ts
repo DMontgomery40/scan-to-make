@@ -116,6 +116,9 @@ export function syntheticJob(
     reference?: ScanReference;
     failure?: ScanProcessingJob['failure'];
     jobId?: string;
+    /** A result that went through the AI step, with previews for these tries. */
+    aiTweak?: ScanProcessingJob['aiTweak'];
+    previews?: number[];
   } = {},
 ): ScanProcessingJob {
   const [repair, measure, render] = STAGE_STATUS[status];
@@ -184,7 +187,19 @@ export function syntheticJob(
     ...(status === 'failed'
       ? { failure: options.failure ?? 'processing-failed' }
       : {}),
+    ...(options.aiTweak
+      ? { correctionAdapter: 'ai-tweak', aiTweak: options.aiTweak }
+      : {}),
   };
+  if (status === 'succeeded')
+    for (const n of options.previews ?? [])
+      (job as { artifacts: Record<string, unknown> }).artifacts[
+        `ai-attempt-${n}-preview.png`
+      ] = {
+        sha256: `${n}`.repeat(64),
+        byteLength: 2000 + n,
+        mediaType: 'image/png',
+      };
   return ScanProcessingJobSchema.parse(job);
 }
 
@@ -351,6 +366,9 @@ export function fakeScanServices(
     handoffs: sessionHandoffMemory(),
     printerChoice: sessionPrinterChoice(),
     imageUri: async file => `file:///synthetic/${file.sha256.slice(0, 8)}.png`,
+    openCapturedScan: async () => {
+      calls.push('open captured scan');
+    },
   };
   const advice = options.advice;
   if (advice !== undefined) {

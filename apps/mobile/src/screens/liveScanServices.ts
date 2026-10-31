@@ -122,6 +122,9 @@ export function liveScanServices(
     // Present only in builds with the printer handoff transport.
     ...(printing ? { printing } : {}),
     imageUri: file => client.imageUri(file),
+    // The original scan, verified against its retained hash, opens in Quick Look.
+    openCapturedScan: (projectId, capture) =>
+      sync.openFile(projectId, capture, 'original', false),
     overview: projectOverviewLoader({
       state: id => sync.state(id),
       listJobs: (p, c, a) => client.listJobs(p, c, a),

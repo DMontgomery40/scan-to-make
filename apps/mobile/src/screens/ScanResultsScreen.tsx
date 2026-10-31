@@ -23,6 +23,7 @@ import {
 } from '../ui/components';
 import { ImageViewer } from '../ui/ImageViewer';
 import { useRequestGate } from './requestGate';
+import { CompareVersions } from './CompareVersions';
 import { colors, radius, space, type } from '../ui/theme';
 import {
   failureOf,
@@ -431,6 +432,20 @@ export function ScanResultsScreen({
       busy.current = false;
     }
   };
+  /** Compare versions: opens the scan exactly as your phone captured it. */
+  const openCaptured = async () => {
+    if (busy.current || !services.openCapturedScan) return;
+    busy.current = true;
+    setNotice(null);
+    try {
+      const open = services.openCapturedScan;
+      await gate(() => open(projectId, target.capture));
+    } catch (error) {
+      setNotice(failureOf(error).message);
+    } finally {
+      busy.current = false;
+    }
+  };
   /** Shows another retained check of this scan; the current one stays listed. */
   const openEarlier = async (earlier: ScanProcessingJob) => {
     if (busy.current) return;
@@ -667,6 +682,19 @@ export function ScanResultsScreen({
             onPress={() => modelAction(succeeded, true)}
           />
         </Card>
+      ) : null}
+
+      {succeeded?.aiTweak ? (
+        <CompareVersions
+          key={succeeded.jobId}
+          job={succeeded}
+          services={services}
+          target={target}
+          ack={ack.current}
+          gate={gate}
+          onOpenModel={() => modelAction(succeeded, false)}
+          onOpenCaptured={services.openCapturedScan ? openCaptured : undefined}
+        />
       ) : null}
 
       {history.length && (phase.kind === 'ready' || (job && !isActive(job))) ? (

@@ -163,6 +163,11 @@ export type ScanServices = {
   imageUri?: (file: CaptureFile) => Promise<string | null>;
   /** What the Projects grid shows for a project, read without sending it. */
   overview?: (project: SavedProject) => Promise<ProjectOverview>;
+  /** Opens the scan exactly as captured (Compare versions); absent when unsupported. */
+  openCapturedScan?: (
+    projectId: string,
+    capture: RetainedCapture,
+  ) => Promise<unknown>;
 };
 
 export type ScanTarget = { projectId: string; capture: RetainedCapture };
