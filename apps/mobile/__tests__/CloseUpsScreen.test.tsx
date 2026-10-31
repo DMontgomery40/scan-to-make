@@ -457,3 +457,52 @@ test('a failed preview download is shown and can be retried', async () => {
   expect(calls.filter(c => c === 'download failed')).toHaveLength(1);
   await act(async () => tree.unmount());
 });
+
+test('a thumbnail interrupted by choosing photos still appears', async () => {
+  const stored = stillFrom(syntheticPhoto(), 0);
+  const { services } = fakeScanServices({
+    stills: [stored],
+    picks: [{ photos: [], rejected: [] }],
+  });
+  let release!: () => void;
+  const download = services.stills.download!;
+  services.stills.download = (...args) =>
+    new Promise(resolve => {
+      release = () => resolve(download(...args));
+    });
+  const { tree } = await render(services);
+  // The download is still running when the user starts something.
+  await act(async () => {
+    buttons(tree, 'Choose a photo')[0].props.onPress();
+  });
+  await act(async () => release());
+  expect(tree.root.findAllByType(Image)).toHaveLength(1);
+  expect(texts(tree)).not.toContain('The preview couldn’t be loaded.');
+  await act(async () => tree.unmount());
+});
+
+test('a thumbnail attempt hit by a busy companion is retried, not failed', async () => {
+  const stored = stillFrom(syntheticPhoto(), 0);
+  const { services } = fakeScanServices({
+    stills: [stored],
+    picks: [{ photos: [], rejected: [] }],
+  });
+  const download = services.stills.download!;
+  let busyOnce = true;
+  services.stills.download = async (...args) => {
+    if (busyOnce) {
+      busyOnce = false;
+      throw Object.assign(Error('A scan request is already running.'), {
+        code: 'busy',
+      });
+    }
+    return download(...args);
+  };
+  const { tree } = await render(services);
+  expect(texts(tree)).not.toContain('The preview couldn’t be loaded.');
+  expect(tree.root.findAllByType(Image)).toHaveLength(0);
+  // Any later activity lets the screen try again.
+  await press(tree, 'Choose a photo');
+  expect(tree.root.findAllByType(Image)).toHaveLength(1);
+  await act(async () => tree.unmount());
+});
