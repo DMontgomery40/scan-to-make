@@ -16,6 +16,8 @@ module.exports = {
       '<rootDir>/../../packages/contracts/dist/saved-project.js',
     '^@scan-to-make/contracts/scan-processing$':
       '<rootDir>/../../packages/contracts/dist/scan-processing.js',
+    '^@scan-to-make/contracts/pairing-link$':
+      '<rootDir>/../../packages/contracts/dist/pairing-link.js',
     '^@scan-to-make/contracts$':
       '<rootDir>/../../packages/contracts/dist/index.js',
   },

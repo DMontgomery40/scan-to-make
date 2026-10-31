@@ -34,7 +34,6 @@ test('expired, malformed or foreign codes are refused', () => {
     link().replace(encodeURIComponent('https://'), 'http%3A%2F%2F'),
     link().replace(code, 'short'),
     'https://example.com/pair?c=x',
-    link('&name=Mac'),
     link('&c=' + code),
     'hello',
   ]) {
@@ -155,4 +154,43 @@ test('an unpinned QR must name a Tailscale address, as the phone requires', () =
     baseUrl: 'https://mac.tail1234.ts.net/',
     code,
   });
+});
+
+test('unknown keys are ignored, so later companions can add optional fields', () => {
+  expect(parsePairingQR(link('&name=Mac&later=1'), now)).toEqual({
+    baseUrl: 'https://mac.tail1234.ts.net',
+    code,
+  });
+});
+
+test('a v2 link gives every address in order, the public-key pin and the Mac name', () => {
+  const key = 'ab'.repeat(32);
+  const addresses = [
+    'https://192.168.68.123:9077',
+    'https://davids-mac-mini.local:9077',
+    'https://100.101.102.103:9077',
+  ];
+  const v2 = (extra = '') =>
+    `scantomake://pair?v=2&c=${code}&e=${now + 300_000}&k=${key}` +
+    addresses.map(a => '&a=' + encodeURIComponent(a)).join('') +
+    extra;
+  expect(isPairingLink(' ' + v2())).toBe(true);
+  expect(parsePairingQR(v2('&n=' + encodeURIComponent("David's Mac mini")), now)).toEqual({
+    baseUrl: addresses[0],
+    code,
+    addresses,
+    publicKeySha256: key,
+    name: "David's Mac mini",
+  });
+  expect(() => parsePairingQR(v2().replace('v=2', 'v=3'), now)).toThrow(
+    expect.objectContaining({ code: 'unsupported-invitation' }),
+  );
+  expect(() => parsePairingQR(v2(), now + 300_000)).toThrow(
+    expect.objectContaining({ code: 'expired-invitation' }),
+  );
+  for (const bad of [v2('&k=' + key), v2('&a=' + encodeURIComponent('https://mac.tail1234.ts.net'))]) {
+    expect(() => parsePairingQR(bad, now)).toThrow(
+      expect.objectContaining({ code: 'invalid-invitation' }),
+    );
+  }
 });

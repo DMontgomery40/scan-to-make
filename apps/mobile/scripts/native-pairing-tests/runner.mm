@@ -75,7 +75,62 @@ int main(int argc, char **argv) { @autoreleasepool {
   NSCAssert(Decide(@"192.168.1.20", 9077, server, trust, pinned, &rejected) == NSURLSessionAuthChallengeCancelAuthenticationChallenge && rejected, @"other port refused");
   NSCAssert(Decide(@"192.168.1.20", 443, NSURLAuthenticationMethodClientCertificate, trust, pinned, &rejected) == NSURLSessionAuthChallengeCancelAuthenticationChallenge && rejected, @"pinned session fails closed");
   NSCAssert(Decide(@"host.example.ts.net", 443, server, trust, @{@"baseUrl":@"https://host.example.ts.net"}, &rejected) == NSURLSessionAuthChallengePerformDefaultHandling && !rejected, @"unpinned keeps system trust");
+  // Pairing link v2: trust by public key, on any listed address.
+  NSString *keyPin = [NSString stringWithUTF8String:argv[2]];
+  NSCAssert([STMHash(STMSubjectPublicKeyInfo(der)) isEqual:keyPin], @"RSA SubjectPublicKeyInfo matches OpenSSL");
+  NSData *ecDer = [NSData dataWithContentsOfFile:[NSString stringWithUTF8String:argv[3]]];
+  NSCAssert([STMHash(STMSubjectPublicKeyInfo(ecDer)) isEqual:[NSString stringWithUTF8String:argv[4]]], @"EC SubjectPublicKeyInfo matches OpenSSL");
+  NSUInteger cuts[] = {0, 1, 4, der.length / 2, der.length - 1};
+  for (NSUInteger i = 0; i < sizeof cuts / sizeof *cuts; i++)
+    NSCAssert(!STMSubjectPublicKeyInfo([der subdataWithRange:NSMakeRange(0, cuts[i])]), @"truncated certificate refused");
+  NSCAssert(!STMSubjectPublicKeyInfo([@"not a certificate" dataUsingEncoding:NSUTF8StringEncoding]), @"garbage refused");
+  NSArray *addresses = @[@"https://192.168.1.20:9077", @"https://mac.local:9077", @"https://100.101.102.103:9077"];
+  NSDictionary *keyed = @{@"baseUrl":@"https://192.168.1.20:9077", @"publicKeySha256":keyPin, @"addresses":addresses};
+  NSCAssert(Decide(@"192.168.1.20", 9077, server, trust, keyed, &rejected) == NSURLSessionAuthChallengeUseCredential && !rejected, @"pinned key on its address");
+  NSCAssert(Decide(@"192.168.1.20", 9077, server, trust, @{@"baseUrl":@"https://192.168.1.20:9077", @"publicKeySha256":pin, @"addresses":addresses}, &rejected) == NSURLSessionAuthChallengeCancelAuthenticationChallenge && rejected, @"other key refused");
+  NSCAssert(Decide(@"mac.local", 9077, server, trust, keyed, &rejected) == NSURLSessionAuthChallengeCancelAuthenticationChallenge && rejected, @"only the address being tried");
+  NSMutableDictionary *atLocal = [keyed mutableCopy]; atLocal[@"activeUrl"] = @"https://mac.local:9077";
+  NSCAssert(Decide(@"mac.local", 9077, server, trust, atLocal, &rejected) == NSURLSessionAuthChallengeUseCredential && !rejected, @"same key on the next address");
+  NSCAssert([STMPinnedAddresses(addresses, keyPin) isEqual:addresses], @"address list kept in order");
+  NSMutableArray *nine = [NSMutableArray new]; for (int i = 1; i <= 9; i++) [nine addObject:[NSString stringWithFormat:@"https://192.168.1.%d:9077", i]];
+  for (id bad in @[@[], nine, @[@"https://mac.local:9077", @"https://MAC.local:9077"], @[@"https://mac.local:9077/"], @[@"https://host.example.ts.net"], @[@"http://192.168.1.20:9077"], @[@42], @"https://mac.local"])
+    NSCAssert(!STMPinnedAddresses(bad, keyPin), @"address list refused");
+  NSCAssert(!STMPinnedAddresses(addresses, @"ABC"), @"malformed key pin refused");
+  NSCAssert([STMAttemptOrder(atLocal) isEqual:(@[@"https://mac.local:9077", @"https://192.168.1.20:9077", @"https://100.101.102.103:9077"])], @"last good address first");
+  // Requests follow activeUrl; baseUrl, which names the companion for every bridge's local state, never moves.
+  NSCAssert([STMPairingBaseURL(atLocal).absoluteString isEqual:@"https://mac.local:9077"] && [atLocal[@"baseUrl"] isEqual:@"https://192.168.1.20:9077"], @"active address used, base kept");
+  NSCAssert([STMAttemptOrder(pinned) isEqual:(@[@"https://192.168.1.20"])], @"v1 record has one address");
+  NSMutableDictionary *v1Active = [pinned mutableCopy]; v1Active[@"activeUrl"] = @"https://10.0.0.9";
+  NSMutableDictionary *v1Bad = [r mutableCopy]; [v1Bad addEntriesFromDictionary:v1Active]; v1Bad[@"deviceId"] = NSUUID.UUID.UUIDString;
+  stored = [NSJSONSerialization dataWithJSONObject:v1Bad options:0 error:nil];
+  error = nil; NSCAssert(!STMReadPairing(&error) && error, @"v1 record never has an active address");
+  for (NSString *next in @[@"network", @"timeout", @"certificate", @"certificate-changed"]) NSCAssert(STMTryNextAddress(next), @"move on");
+  for (NSString *stop in @[@"unauthorized", @"forbidden", @"rate-limited", @"unavailable", @"invalid-response", @"wrong-host"]) NSCAssert(!STMTryNextAddress(stop), @"the companion answered");
+  // A stored v2 record: its baseUrl must be one of its addresses, and it has no certificate pin.
+  NSMutableDictionary *record = [r mutableCopy]; record[@"deviceId"] = NSUUID.UUID.UUIDString;
+  [record addEntriesFromDictionary:keyed];
+  stored = [NSJSONSerialization dataWithJSONObject:record options:0 error:nil];
+  error = nil; NSCAssert(STMReadPairing(&error) && !error, @"v2 record valid");
+  NSCAssert([STMPairingBaseURL(record).absoluteString isEqual:@"https://192.168.1.20:9077"], @"v2 base URL");
+  NSMutableDictionary *moved = [record mutableCopy]; moved[@"activeUrl"] = @"https://100.101.102.103:9077";
+  stored = [NSJSONSerialization dataWithJSONObject:moved options:0 error:nil];
+  error = nil; NSCAssert(STMReadPairing(&error) && !error, @"v2 record with an active address valid");
+  for (NSDictionary *change in @[@{@"baseUrl":@"https://10.0.0.9:9077"}, @{@"activeUrl":@"https://10.0.0.9:9077"}, @{@"certificateSha256":pin}, @{@"addresses":@[@"https://mac.example.com"]}, @{@"publicKeySha256":@"x"}]) {
+    NSMutableDictionary *bad = [record mutableCopy]; [bad addEntriesFromDictionary:change];
+    stored = [NSJSONSerialization dataWithJSONObject:bad options:0 error:nil];
+    error = nil; NSCAssert(!STMReadPairing(&error) && error, @"invalid v2 record refused");
+  }
+  NSCAssert(!STMPinnedAddresses(nil, keyPin), @"missing list refused");
+  // Answering on another listed address, or a renewed expiry, is the same pairing; another key or list is not.
+  NSMutableDictionary *renewed = [moved mutableCopy]; renewed[@"expiresAt"] = @([record[@"expiresAt"] doubleValue] + 1000);
+  NSCAssert(STMSamePairing(record, moved) && STMSamePairing(record, renewed), @"active address and renewal keep the pairing");
+  for (NSDictionary *change in @[@{@"publicKeySha256":pin}, @{@"addresses":@[@"https://192.168.1.20:9077"]}, @{@"token":[@"" stringByPaddingToLength:43 withString:@"y" startingAtIndex:0]}]) {
+    NSMutableDictionary *other = [record mutableCopy]; [other addEntriesFromDictionary:change];
+    NSCAssert(!STMSamePairing(record, other), @"another key, address list or token is another pairing");
+  }
+  stored = nil;
   CFRelease(trust); CFRelease(policy); CFRelease(cert);
   puts("PASS native: certificate pin trust (match, default port, other certificate/host/port, fail closed, unpinned default)");
+  puts("PASS native: public-key pin (RSA and EC SubjectPublicKeyInfo = OpenSSL, other key/address refused, truncated DER refused), v2 address list, attempt order, fallback rule, v2 record validation");
   puts("PASS native: exact HTTPS host validation, certificate/timeout recovery, secret-free metadata, failed delete preservation, disconnect, corrupt credential rejection");
 } }

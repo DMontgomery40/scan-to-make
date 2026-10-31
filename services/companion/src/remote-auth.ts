@@ -17,6 +17,7 @@ import {
   type DeviceCredential,
   type RemoteScope,
 } from '@scan-to-make/contracts/device-auth';
+import { formatPairingLink } from '@scan-to-make/contracts/pairing-link';
 import {isLanAuthority} from './lan-transport.js';
 
 export { PHONE_SCOPES, type RemoteScope };
@@ -413,11 +414,12 @@ export class RemoteAuthStore {
         expiresAt,
         ...(this.certificateSha256 ? {certificateSha256: this.certificateSha256} : {}),
       };
-      const query = new URLSearchParams({
-        v: '1', u: payload.baseUrl, c: code, e: String(expiresAt),
+      // Version 1 until phones read version 2 (BE-5); same bytes as before.
+      const qrPayload = formatPairingLink({
+        version: 1, baseUrl: this.baseUrl, code, expiresAt,
+        ...(this.certificateSha256 ? { certificateSha256: this.certificateSha256 } : {}),
       });
-      if (this.certificateSha256) query.set('f', this.certificateSha256);
-      return { ...payload, qrPayload: `scantomake://pair?${query}` };
+      return { ...payload, qrPayload };
     });
   }
   /** Host-local display check only; never grants a device credential. */

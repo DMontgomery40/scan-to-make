@@ -6,6 +6,7 @@ import {
   EXPIRED,
   invitation,
   pairingError,
+  pairWithInvitation,
   UNREACHABLE,
   type CompanionNative,
   type PairingStatus,
@@ -22,6 +23,7 @@ function nativeMock(): CompanionNative {
   return {
     status: jest.fn(async () => paired),
     pair: jest.fn(async () => paired),
+    pairAddresses: jest.fn(async () => paired),
     check: jest.fn(async () => paired),
     disconnect: jest.fn(async () => ({ state: 'disconnected' as const })),
     cancel: jest.fn(async () => {}),
@@ -132,6 +134,44 @@ it('Find your Mac opens on the viewfinder: point at the code and it pairs', asyn
   await act(async () => tree.unmount());
 });
 
+it('a v2 code pairs through every address with the public-key pin', async () => {
+  const addresses = ['https://192.168.68.123:9077', 'https://mac.local:9077'];
+  const key = 'ab'.repeat(32);
+  const params = new URLSearchParams([
+    ['v', '2'],
+    ['c', qrCode],
+    ['e', String(Date.now() + 300_000)],
+    ['k', key],
+    ...addresses.map(a => ['a', a]),
+  ]);
+  const { tree, native } = await unpaired();
+  await scanned(tree, `scantomake://pair?${params}`);
+  await press(tree, 'Continue');
+  expect(native.pairAddresses).toHaveBeenCalledWith(
+    addresses,
+    qrCode,
+    'My phone',
+    key,
+  );
+  expect(native.pair).not.toHaveBeenCalled();
+  expect(text(tree)).toContain('Connected to your Mac');
+  await act(async () => tree.unmount());
+});
+
+it('pairWithInvitation uses the address list and key pin for v2, and the single address for v1', async () => {
+  const native = nativeMock();
+  const code = 'A'.repeat(32);
+  await pairWithInvitation(native, { baseUrl: 'https://mac.tail1234.ts.net', code }, 'Phone');
+  expect(native.pair).toHaveBeenLastCalledWith('https://mac.tail1234.ts.net', code, 'Phone', null);
+  await pairWithInvitation(native, { baseUrl: 'https://192.168.1.20:9077', code, certificateSha256: pin }, 'Phone');
+  expect(native.pair).toHaveBeenLastCalledWith('https://192.168.1.20:9077', code, 'Phone', pin);
+  const addresses = ['https://192.168.1.20:9077', 'https://mac.local:9077'];
+  await pairWithInvitation(native, { baseUrl: addresses[0], code, addresses, publicKeySha256: 'b'.repeat(64) }, 'Phone');
+  expect(native.pairAddresses).toHaveBeenCalledWith(addresses, code, 'Phone', 'b'.repeat(64));
+  expect(native.pair).toHaveBeenCalledTimes(2);
+  expect(pairingError({ code: 'unsupported-invitation' })).toMatch(/newer Scan to Make/);
+});
+
 it('a code the camera sees many times is used once', async () => {
   const { tree, native } = await unpaired();
   let release!: () => void;
@@ -163,6 +203,33 @@ it('the first code for a Mac on this Wi-Fi explains the local network question f
     qrCode,
     'My phone',
     pin,
+  );
+  await act(async () => tree.unmount());
+});
+
+it('the first v2 code also explains the local network question first', async () => {
+  const addresses = ['https://192.168.1.20:9077', 'https://mac.local:9077'];
+  const key = 'ab'.repeat(32);
+  const params = new URLSearchParams([
+    ['v', '2'],
+    ['c', qrCode],
+    ['e', String(Date.now() + 300_000)],
+    ['k', key],
+    ...addresses.map(a => ['a', a]),
+  ]);
+  const { tree, native } = await unpaired();
+  await scanned(tree, `scantomake://pair?${params}`);
+  expect(native.pairAddresses).not.toHaveBeenCalled();
+  expect(native.pair).not.toHaveBeenCalled();
+  expect(text(tree)).toContain(
+    'To find your Mac, Scan to Make needs to look on your Wi-Fi.',
+  );
+  await press(tree, 'Continue');
+  expect(native.pairAddresses).toHaveBeenCalledWith(
+    addresses,
+    qrCode,
+    'My phone',
+    key,
   );
   await act(async () => tree.unmount());
 });

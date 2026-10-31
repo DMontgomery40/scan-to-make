@@ -95,6 +95,12 @@ with authored units are eligible for bounds/topology evaluation through
 surface completeness and physical fit are always `unknown` in this contract.
 Future physical evidence needs a separate, explicitly observed evidence contract.
 
+## Device credentials and pairing links
+
+`@scan-to-make/contracts/device-auth` defines the companion's scopes (`REMOTE_SCOPES`), what a phone pairing grants (`PHONE_SCOPES`) and the device credential returned by `POST /v1/pair` and `POST /v1/auth/refresh` (`DeviceCredentialSchema`).
+
+`@scan-to-make/contracts/pairing-link` parses and formats the `scantomake://pair` link a companion shows as a QR code. Version 1 carries one HTTPS base URL (`u`) and, for a companion with its own certificate, that certificate's SHA-256 (`f`). Version 2 carries every address (`a`, repeated, at most 8, in the order to try), the companion's public-key pin (`k`, the SHA-256 of its DER SubjectPublicKeyInfo) and an optional Mac name (`n`). Both carry the one-time code (`c`) and its expiry (`e`, Unix ms). Unknown keys are ignored within a known version; a repeated single key is invalid; version 3 and later are `unsupported-invitation`. `parsePairingLink(text, now?)` throws a `PairingLinkError` with that `code`; `formatPairingLink` refuses anything the parser would refuse and encodes like `URLSearchParams`.
+
 ## Detail stills
 
 `./detail-still` (also re-exported from the package root) defines a `DetailStill`
