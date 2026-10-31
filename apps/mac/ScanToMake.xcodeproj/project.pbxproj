@@ -20,6 +20,9 @@
 		F3BAFE04E88CD925CF3D9C3B /* AgentKit.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 084617C3A2280F650DFB14EA /* AgentKit.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		F7C6B30924946562ED38E49A /* AgentManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7B0BA880A7A95145CB837BE /* AgentManager.swift */; };
 		FEC965F8C46620AD288BA7C3 /* NetworkAddresses.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E40641D5842346F76EB19B3 /* NetworkAddresses.swift */; };
+		C73E7AE1DF507DF6FA161E37 /* ModelAccess.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C16EEE29AB7D43A60876E8A /* ModelAccess.swift */; };
+		E93C1BBCC27768E164A3EB1C /* ModelKeychain.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34EF17D723E37A90F3F98F7F /* ModelKeychain.swift */; };
+		633CBA0128EBCA20CD2A8778 /* ModelAccessTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D04E57F8EA06595C9C5DE5DC /* ModelAccessTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -76,6 +79,9 @@
 		B8FC0CEA3CCA9AA8B21FB7AF /* AgentKitTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = AgentKitTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		C7E10258D71E1A28BE7C0F61 /* CompanionModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompanionModel.swift; sourceTree = "<group>"; };
 		D7B0BA880A7A95145CB837BE /* AgentManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentManager.swift; sourceTree = "<group>"; };
+		8C16EEE29AB7D43A60876E8A /* ModelAccess.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelAccess.swift; sourceTree = "<group>"; };
+		34EF17D723E37A90F3F98F7F /* ModelKeychain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelKeychain.swift; sourceTree = "<group>"; };
+		D04E57F8EA06595C9C5DE5DC /* ModelAccessTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelAccessTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -115,6 +121,8 @@
 				D7B0BA880A7A95145CB837BE /* AgentManager.swift */,
 				2E40641D5842346F76EB19B3 /* NetworkAddresses.swift */,
 				296E8C1354818E038DD4E375 /* PairingSession.swift */,
+				34EF17D723E37A90F3F98F7F /* ModelKeychain.swift */,
+				8C16EEE29AB7D43A60876E8A /* ModelAccess.swift */,
 			);
 			path = AgentKit;
 			sourceTree = "<group>";
@@ -124,6 +132,7 @@
 			children = (
 				910E4B0114E7E04F953E42A1 /* AgentManagerTests.swift */,
 				666DD15803F0A0C9F25C5AB3 /* PairingSessionTests.swift */,
+				D04E57F8EA06595C9C5DE5DC /* ModelAccessTests.swift */,
 			);
 			path = Tests;
 			sourceTree = "<group>";
@@ -287,6 +296,8 @@
 				F7C6B30924946562ED38E49A /* AgentManager.swift in Sources */,
 				FEC965F8C46620AD288BA7C3 /* NetworkAddresses.swift in Sources */,
 				8591EC1044C78F60778FCC71 /* PairingSession.swift in Sources */,
+				E93C1BBCC27768E164A3EB1C /* ModelKeychain.swift in Sources */,
+				C73E7AE1DF507DF6FA161E37 /* ModelAccess.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -306,6 +317,7 @@
 			files = (
 				685F7884CACEC1D1FA9A8105 /* AgentManagerTests.swift in Sources */,
 				AA8A4960648DEA5F67A8ACB2 /* PairingSessionTests.swift in Sources */,
+				633CBA0128EBCA20CD2A8778 /* ModelAccessTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

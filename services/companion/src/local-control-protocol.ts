@@ -1,4 +1,5 @@
 import {z} from 'zod';
+import {ModelAccessChoiceSchema} from './model-access-protocol.js';
 
 export const MAX_REQUEST_BYTES = 64 * 1024;
 export const MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
@@ -26,6 +27,9 @@ const answer = z.union([
   z.strictObject({action: z.enum(['decline', 'cancel'])}),
 ]);
 export const parameters = {
+  'modelAccess.get': empty,
+  'modelAccess.set': z.strictObject({expectedRevision:z.uuid(),choice:ModelAccessChoiceSchema}),
+  'modelAccess.check': z.strictObject({revision:z.uuid()}),
   'status.get': empty,
   'jobs.list': z.strictObject({projectId: projectId.optional(), cursor: z.string().max(1024).optional(), limit: z.number().int().min(1).max(100).default(50)}),
   'devices.list': empty,

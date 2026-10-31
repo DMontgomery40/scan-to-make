@@ -62,3 +62,85 @@ let pending = try await client.pendingConfirmations()
 ```
 
 No SwiftUI views are part of this package. Switching the existing Mac app's stdin helpers to this client is a separate integration after the app-shell PR merges. Existing CLI commands remain compatible.
+
+## Model access
+
+The signed Mac app owns API credentials in its local, non-synchronizing Keychain
+service `com.scantomake.model-access`, with a random UUID account per saved key.
+The companion stores only metadata in `auth/model-access.json` (0600 in the
+private auth directory). This is independent of phone authentication and TLS.
+The schema and worker environment names live in
+`packages/contracts/src/model-access.ts`.
+
+| Method | Parameters | Result |
+| --- | --- | --- |
+| `modelAccess.get` | `{}` | `{revision, choice, check}` |
+| `modelAccess.set` | `{expectedRevision, choice}` | New snapshot; stale revision returns `conflict` |
+| `modelAccess.check` | `{revision}` | Snapshot immediately; stale revision returns `conflict` |
+
+`revision` is a UUID. `choice` is one of:
+
+```json
+{"kind":"none"}
+{"kind":"claude-code"}
+{"kind":"codex-cli"}
+{"kind":"api","provider":"anthropic","model":"claude-opus-5-5","keychainRef":"6f3de8c4-83b6-4ad7-9c6f-9b73c7077c73"}
+{"kind":"endpoint","url":"http://localhost:1234/v1","model":"local-model"}
+```
+
+The API providers currently implemented by `ai-tweak` are `anthropic` and
+`openai`. Endpoint access uses the OpenAI Responses API through Codex; its
+`keychainRef` is optional. URLs cannot contain credentials, queries or fragments.
+CLI subscription modes use the user's own installed, unmodified CLI and its own
+login. The Mac app does not copy subscription credentials into its Keychain.
+
+`check` is `null` until a test starts, then
+`{id, revision, state, outcome?}`. States are `checking`, `connected`, `failed`
+and `skipped`. While checking, poll `get`; repeating `check` returns the same
+in-flight check. Only a successful tiny `ai-tweak-cli check` call produces
+`connected`. The result is bound to the choice revision and is cleared on edit
+or restart. A new choice cancels the old check. `none` returns `skipped` without
+launching a model. Failure outcomes are `auth-failed`, `needs-gui-session`,
+`timed-out`, `cancelled`, or `failed`; raw provider errors and transcripts never
+cross the socket.
+
+`ControlKit` exposes `ModelAccessChoice`, `ModelAccessSnapshot`,
+`ModelAccessCheck`, `ModelKeychain`, and the three typed `ControlClient` methods.
+Construct a choice with a fresh UUID, call `ModelKeychain.save(key, for: choice)`,
+then submit that same choice. The encrypted Keychain record binds its full kind,
+provider, endpoint, model and reference; existing bindings cannot be overwritten. On a socket timeout, refresh the choice before deleting an item: the
+mutation may have succeeded. Keep previous key references until jobs that
+snapshotted them finish. The UI owns sign-in, presentation, and polling.
+
+### Worker boundary
+
+The companion invokes the fixed signed app entry point `--model-worker`, sends
+choice metadata on private stdin, and passes `check` or `run` arguments. The app
+reads the selected Keychain item at spawn and launches its bundled
+`ai-tweak-cli.js`; the secret appears only in the worker's environment. It is
+never sent to the companion, put on command lines, or written to `companion.env`.
+For keyed workers, the helper rejects caller environment overrides and a choice
+that does not exactly match its Keychain binding. It derives the destination from
+the saved record and uses app-owned HOME/PATH/temp/locale and tool paths. CLI
+subscription modes inherit only HOME/PATH/temp/locale and explicit tool paths;
+printer tokens and unrelated provider keys are excluded, following the
+bambu-printer-mcp bridge's environment and error-handling pattern. That bridge
+does not provide this app-specific model-choice or Keychain API.
+
+The helper uses `execve` so Node retains its PID/process group. Cancellation sends
+one SIGTERM, then SIGKILL after ten seconds if needed; the response wait is bounded
+even if a faulty descendant holds a pipe open.
+
+The worker receives `SCAN_TO_MAKE_AI_ACCESS`, plus model/provider/endpoint fields
+as appropriate. For a referenced key, `SCAN_TO_MAKE_AI_KEY_ENV` names
+`SCAN_TO_MAKE_MODEL_KEY`; only the worker receives its value. Subscription and
+unauthenticated endpoint modes receive neither field. A missing/locked Keychain
+item fails the check without falling back to an inherited key or subscription.
+
+`ModelAccessService.run(args, {signal, timeoutMs})` snapshots the choice and
+exposes this boundary to the cleanup job integration. It runs the existing AI
+CLI, returning its exit code and bounded stdout to the local job orchestrator.
+The cleanup pipeline's attempt/judge/export wiring is a separate change; this
+plumbing does not substitute a model into existing scripted cleanup stages.
+Non-app deployments can persist preferences but cannot resolve Mac Keychain
+references; checks fail as unavailable until a signed worker is configured.

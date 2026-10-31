@@ -1,0 +1,83 @@
+[
+  {
+    "choice": {
+      "kind": "none"
+    },
+    "environment": {
+      "SCAN_TO_MAKE_AI_ACCESS": "none"
+    }
+  },
+  {
+    "choice": {
+      "kind": "claude-code"
+    },
+    "environment": {
+      "SCAN_TO_MAKE_AI_ACCESS": "claude-code"
+    }
+  },
+  {
+    "choice": {
+      "kind": "codex-cli"
+    },
+    "environment": {
+      "SCAN_TO_MAKE_AI_ACCESS": "codex-cli"
+    }
+  },
+  {
+    "choice": {
+      "kind": "api",
+      "provider": "anthropic",
+      "model": "claude-opus-5-5",
+      "keychainRef": "6f3de8c4-83b6-4ad7-9c6f-9b73c7077c73"
+    },
+    "environment": {
+      "SCAN_TO_MAKE_AI_ACCESS": "api",
+      "SCAN_TO_MAKE_AI_MODEL": "claude-opus-5-5",
+      "SCAN_TO_MAKE_AI_PROVIDER": "anthropic",
+      "SCAN_TO_MAKE_AI_KEY_ENV": "SCAN_TO_MAKE_MODEL_KEY",
+      "SCAN_TO_MAKE_MODEL_KEY": "fixture-secret"
+    }
+  },
+  {
+    "choice": {
+      "kind": "api",
+      "provider": "openai",
+      "model": "gpt-6-astra",
+      "keychainRef": "6f3de8c4-83b6-4ad7-9c6f-9b73c7077c73"
+    },
+    "environment": {
+      "SCAN_TO_MAKE_AI_ACCESS": "api",
+      "SCAN_TO_MAKE_AI_MODEL": "gpt-6-astra",
+      "SCAN_TO_MAKE_AI_PROVIDER": "openai",
+      "SCAN_TO_MAKE_AI_KEY_ENV": "SCAN_TO_MAKE_MODEL_KEY",
+      "SCAN_TO_MAKE_MODEL_KEY": "fixture-secret"
+    }
+  },
+  {
+    "choice": {
+      "kind": "endpoint",
+      "url": "http://localhost:1234/v1",
+      "model": "local-model"
+    },
+    "environment": {
+      "SCAN_TO_MAKE_AI_ACCESS": "endpoint",
+      "SCAN_TO_MAKE_AI_MODEL": "local-model",
+      "SCAN_TO_MAKE_AI_ENDPOINT": "http://localhost:1234/v1"
+    }
+  },
+  {
+    "choice": {
+      "kind": "endpoint",
+      "url": "https://models.example.test/v1",
+      "model": "remote-model",
+      "keychainRef": "6f3de8c4-83b6-4ad7-9c6f-9b73c7077c73"
+    },
+    "environment": {
+      "SCAN_TO_MAKE_AI_ACCESS": "endpoint",
+      "SCAN_TO_MAKE_AI_MODEL": "remote-model",
+      "SCAN_TO_MAKE_AI_ENDPOINT": "https://models.example.test/v1",
+      "SCAN_TO_MAKE_AI_KEY_ENV": "SCAN_TO_MAKE_MODEL_KEY",
+      "SCAN_TO_MAKE_MODEL_KEY": "fixture-secret"
+    }
+  }
+]

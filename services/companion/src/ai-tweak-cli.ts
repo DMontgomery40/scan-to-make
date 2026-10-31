@@ -29,7 +29,9 @@ export function optionsFromEnv(env:NodeJS.ProcessEnv=process.env):AiTweakOptions
 async function main(argv:string[]){
  const [command,...rest]=argv;
  if(command==='check'){
-  const result=await checkModelAccess(optionsFromEnv());
+  const controller=new AbortController();
+  for(const signal of ['SIGINT','SIGTERM'] as const)process.on(signal,()=>controller.abort());
+  const result=await checkModelAccess({...optionsFromEnv(),signal:controller.signal});
   process.stdout.write(JSON.stringify(result)+'\n');return result.ok?0:1;
  }
  if(command==='pick'){
@@ -53,7 +55,7 @@ async function main(argv:string[]){
  if(values['timeout-ms'])options.timeoutMs=Number(values['timeout-ms']);
  if(values['keep-workspaces'])options.keepWorkspaces=true;
  const controller=new AbortController();
- for(const signal of ['SIGINT','SIGTERM'] as const)process.once(signal,()=>controller.abort());
+ for(const signal of ['SIGINT','SIGTERM'] as const)process.on(signal,()=>controller.abort());
  options.signal=controller.signal;
  const manifest=await runAiTweak({mesh:values.mesh,usdz:values.usdz,stills:values.still??[]},values.out,options);
  process.stdout.write(JSON.stringify({skipped:manifest.skipped,attempts:manifest.attempts.map(a=>({index:a.index,outcome:a.outcome,reason:a.reason,wallMs:a.wallMs,result:a.result?.dir}))})+'\n');

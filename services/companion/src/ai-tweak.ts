@@ -1,3 +1,4 @@
+import {ModelAccessEnvironment as accessEnv} from '@scan-to-make/contracts/model-access';
 import {execFile,spawn} from 'node:child_process';
 import {createHash,randomBytes} from 'node:crypto';
 import {createReadStream,createWriteStream,type WriteStream} from 'node:fs';
@@ -95,13 +96,13 @@ const fileRef=async(path:string):Promise<FileRef>=>({sha256:await sha256File(pat
 
 /** Parse the operator/Mac-app environment contract; unknown or partial settings fail closed. */
 export function modelAccessFromEnv(env:NodeJS.ProcessEnv=process.env):ModelAccess{
- const kind=env.SCAN_TO_MAKE_AI_ACCESS??'none',model=env.SCAN_TO_MAKE_AI_MODEL||undefined,effort=env.SCAN_TO_MAKE_AI_EFFORT||undefined;
+ const kind=env[accessEnv.kind]??'none',model=env[accessEnv.model]||undefined,effort=env[accessEnv.effort]||undefined;
  let access:ModelAccess;
  if(kind==='none')access={kind};
  else if(kind==='claude-code')access={kind,model};
  else if(kind==='codex-cli')access={kind,model,reasoningEffort:effort};
- else if(kind==='api')access={kind,provider:env.SCAN_TO_MAKE_AI_PROVIDER as 'anthropic'|'openai',model,reasoningEffort:effort,keyEnv:env.SCAN_TO_MAKE_AI_KEY_ENV??''};
- else if(kind==='endpoint')access={kind,url:env.SCAN_TO_MAKE_AI_ENDPOINT??'',model:model??'',keyEnv:env.SCAN_TO_MAKE_AI_KEY_ENV||undefined,reasoningEffort:effort};
+ else if(kind==='api')access={kind,provider:env[accessEnv.provider] as 'anthropic'|'openai',model,reasoningEffort:effort,keyEnv:env[accessEnv.keyName]??''};
+ else if(kind==='endpoint')access={kind,url:env[accessEnv.endpoint]??'',model:model??'',keyEnv:env[accessEnv.keyName]||undefined,reasoningEffort:effort};
  else throw Error('Invalid SCAN_TO_MAKE_AI_ACCESS');
  validateAccess(access);return access;
 }
