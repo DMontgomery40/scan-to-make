@@ -28,16 +28,14 @@ Rules:
 - Never record that something is missing, wiped or needs a rebuild until you have checked that repo's memory, its session logs and the backups.
 - Treat "separate" as "don't edit it casually". It never means "don't read it". Changes to it follow its own AGENTS.md safety and release rules. Additional printer adapters belong behind the product contract, never inside the Bambu-only fork.
 
-Why this rule exists: on 2026-10-30 the scan-to-make lead (Claude Opus 5.5) treated bambu-printer-mcp as a sealed printer driver and never read it. As a result:
+Why this rule exists: on 2026-10-30 this repo's lead treated bambu-printer-mcp as a sealed driver and never read it. As a result:
 
-- The team merged a second BambuStudio slicing wrapper (`tools/slicer-producer`) and a printability dry-run slicer.
-- Two PRs were opened that duplicated existing tools: an orientation picker (#94, a copy of `lay_flat`) and companion slicer overrides (#97).
-- The lead wrote its own print client.
-- The lead recorded the working FULU print harness as wiped. It was intact and documented in that repo's memory.
-- The lead staged a replacement VM under Rosetta, which crashes FULU's host.
-- The lead asked David to decide pricing, licensing and hosting that the PRD (added to that repo the same day) already covers.
+- The repo gained a second BambuStudio slicing wrapper (`tools/slicer-producer`) and a printability dry-run slicer.
+- Two PRs duplicated existing tools: an orientation picker (#94, a copy of `lay_flat`) and companion slicer overrides (#97).
+- A working print harness was declared gone and replaced with a broken one.
+- Questions the PRD already answers were sent to the owner to decide.
 
-`slice_stl`, `lay_flat` and the FULU harness all existed and were documented before any of this started. David had to find every one of these mistakes himself. The duplicates are being removed. Don't repeat this.
+`slice_stl`, `lay_flat` and the harness were all documented beforehand. The owner had to find every one of these mistakes himself. The duplicates are being removed. Don't repeat this.
 
 Physical dispatch, hardware purchases and paid cloud deployments need the appropriate concrete user authorization. Use isolated fixtures for routine development. Printer operations retain exact artifact inspection, fresh observed identity/state, model/nozzle/material/plate checks, human approval and once-only dispatch.
 
