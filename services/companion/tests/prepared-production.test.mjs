@@ -1,6 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {mkdtemp,readFile,writeFile,readdir,rm,chmod} from 'node:fs/promises';
+const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -26,9 +27,10 @@ async function setup(t,hook){
  await projects.create({id:fit.id,brief,fit});const binding={sourceFit:fit,artifact:sourceRef};await projects.change(fit.id,0,{kind:'attach-preview',...binding});await projects.change(fit.id,1,{kind:'accept-preview',...binding});
  let calls=0;const production={identity:'c'.repeat(64),async produce(input,request,signal){calls++;return hook?await hook(input,request,signal,{projects,root}):result(input,request);}};
  const inspection={process:{command:process.execPath,args:[fileURLToPath(new URL('./fixtures/inspection-server.mjs',import.meta.url)),'nozzle-hardened',join(root,'inspector.jsonl')]},options:{timeoutMs:5000}};
- const jobs=new PreparedJobStore(storage,join(root,'jobs'),{production,inspection});
+ const appProduction={selection:structuredClone(selection),displayName:'P1S fixture'};
+ const jobs=new PreparedJobStore(storage,join(root,'jobs'),{production,inspection,appProduction});
  const request={projectId:fit.id,projectRevision:2,expectedProjectETag:savedProjectETag(await storage.read(fit.id)),jobId:randomUUID(),source:Buffer.from(source),selection:structuredClone(selection)};
- return {root,storage,projects,jobs,request,calls:()=>calls,fresh:()=>new PreparedJobStore(storage,join(root,'jobs'),{production,inspection})};
+ return {root,storage,projects,jobs,request,calls:()=>calls,fresh:()=>new PreparedJobStore(storage,join(root,'jobs'),{production,inspection,appProduction})};
 }
 test('trusted produced job retains exact evidence, survives restart, recovers ID and stays hidden from old discovery',async t=>{
  const f=await setup(t);const first=await f.jobs.prepareProduced(f.request);
@@ -65,4 +67,31 @@ test('source bytes are snapshotted before the first async boundary',async t=>{
  const f=await setup(t),request={...f.request,source:Buffer.from(source)};
  const pending=f.jobs.prepareProduced(request);request.source.fill(0);
  const job=await pending;assert.equal(job.job.production.sourceArtifact.sha256,sha(source));
+});
+test('app production replay of a CLI-produced job must match the retained request identity',async t=>{
+ const f=await setup(t);
+ const produced=await f.jobs.prepareProduced({...f.request,selection:{...selection,printerId:'other-printer'}});
+ await assert.rejects(f.jobs.startPreparedProduction({projectId:fit.id,projectRevision:2,
+  expectedProjectETag:f.request.expectedProjectETag,jobId:produced.jobId,source:Buffer.from(source)}),{code:'job-conflict'});
+ const matching=await setup(t),cli=await matching.jobs.prepareProduced(matching.request);
+ const replay=await matching.jobs.startPreparedProduction({projectId:fit.id,projectRevision:2,
+  expectedProjectETag:matching.request.expectedProjectETag,jobId:cli.jobId,source:Buffer.from(source)});
+ assert.equal(replay.created,false);assert.equal(replay.view.status,'succeeded');assert.equal(replay.view.job.jobSha256,cli.job.sha256);
+});
+test('ownerless running operation reconciles with its matching published job',async t=>{
+ const f=await setup(t),jobId=f.request.jobId;
+ const start={projectId:fit.id,projectRevision:2,expectedProjectETag:f.request.expectedProjectETag,jobId,source:Buffer.from(source)};
+ const load={projectId:fit.id,projectRevision:2,expectedProjectETag:f.request.expectedProjectETag,jobId};
+ await f.jobs.startPreparedProduction(start);
+ let view;
+ for(let attempt=0;attempt<200;attempt++){view=(await f.jobs.loadPreparedProduction(load)).view;if(view.status==='succeeded')break;await delay(10);}
+ assert.equal(view?.status,'succeeded');
+ // Simulate a crash after publication but before the success record landed.
+ const operationPath=join(f.root,'jobs','.production-operations',`${jobId}.json`);
+ const operation=JSON.parse(await readFile(operationPath,'utf8'));
+ operation.status='running';delete operation.finishedAtMs;
+ await writeFile(operationPath,JSON.stringify(operation)+'\n');
+ const recovered=await f.fresh().loadPreparedProduction(load);
+ assert.equal(recovered.view.status,'succeeded');assert.equal(recovered.view.job.jobId,jobId);
+ assert.equal(JSON.parse(await readFile(operationPath,'utf8')).status,'succeeded');
 });

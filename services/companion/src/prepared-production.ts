@@ -1,7 +1,7 @@
 import {createHash} from 'node:crypto';
 import {z} from 'zod';
 import {ArtifactRefSchema} from '@scan-to-make/contracts';
-import {assertCredentialFreeProcess, slicePreparedStl, type TrustedMcpProcess} from './mcp-discovery.js';
+import {slicePreparedStl, type TrustedMcpProcess} from './mcp-discovery.js';
 import {inspectorProcessSchema} from './private-config.js';
 
 export const PRODUCTION_LIMITS = {sourceBytes:32*1024*1024, settingsBytes:8*1024*1024, manifestBytes:1024*1024};
@@ -174,15 +174,12 @@ function checkedSlicerEnvironment(env: Record<string, string> | undefined): Prod
 }
 
 /**
- * Slicing through bambu-printer-mcp's `slice_stl` in a separate,
- * credential-free process. The process environment comes only from this
- * operator configuration (plus the per-call private TEMP_DIR below); it is
- * never inherited from `process.env` by this module, and configured printer
- * credential variables fail closed before spawn.
+ * Slicing through bambu-printer-mcp's `slice_stl` in a separate process,
+ * using the operator's configured MCP process and environment, plus the
+ * per-call private TEMP_DIR below.
  */
 export function createPreparedProducer(configuration: PreparedProducerConfiguration): PreparedProducer {
   const config = preparedProducerConfigurationSchema.parse(configuration);
-  assertCredentialFreeProcess(config.process);
   const slicerType = checkedSlicerEnvironment(config.process.env);
   const identity = productionHash(JSON.stringify({adapterVersion: 3, ...config}));
   const timeoutMs = config.timeoutMs ?? 120000;
@@ -221,20 +218,9 @@ export function createPreparedProducer(configuration: PreparedProducerConfigurat
       const input = join(scratch, 'source.stl');
       await writeFile(input, original, {flag: 'wx', mode: 0o400});
       if (signal?.aborted) throw new Error('Production cancelled');
-      // Explicit environment only. The fixed POSIX defaults below override the
-      // MCP transport's safe-default inheritance; operator values then win.
       // TEMP_DIR is pinned to this call's private scratch so the returned
       // sliced path is containable.
-      const env = {
-        HOME: mcpTemp,
-        LOGNAME: '',
-        PATH: '/usr/bin:/bin:/usr/sbin:/sbin',
-        SHELL: '/bin/sh',
-        TERM: 'dumb',
-        USER: '',
-        ...config.process.env,
-        TEMP_DIR: mcpTemp,
-      };
+      const env = {...config.process.env, TEMP_DIR: mcpTemp};
       const sliced = await slicePreparedStl(
         {...config.process, env},
         {

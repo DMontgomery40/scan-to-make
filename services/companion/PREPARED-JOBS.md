@@ -107,14 +107,10 @@ without `slicerSettingsSha256`. The produced selection must name `nozzleType`
 on the store. `createPreparedProducer` calls bambu-printer-mcp's `slice_stl`
 through a separate trusted MCP process, using the same `TrustedMcpProcess`
 pattern as file inspection. Its private config is
-`{process: {command, args?, cwd?, env}, timeoutMs?}`. The environment is built
-only from that operator config (plus a per-call private `TEMP_DIR`), must set
-`SLICER_TYPE` and an absolute `SLICER_PATH`, and must not contain
-`PRINTER_HOST`, `BAMBU_SERIAL`, `BAMBU_TOKEN` or their credential aliases;
-configured credentials fail closed before spawn. Only `slice_stl`, `lay_flat`
-and `inspect_print_file` are on the companion's file-tool allowlist; any other
-tool fails closed. Requests cannot choose executables, paths, presets, or
-receipts. Host operators create
+`{process: {command, args?, cwd?, env}, timeoutMs?}`. The operator-configured
+environment must set `SLICER_TYPE` and an absolute `SLICER_PATH`; the producer
+adds a per-call private `TEMP_DIR`. Requests cannot choose executables, paths,
+presets, or receipts. Host operators create
 produced jobs with `npm run prepared:produce --prefix services/companion --`
 followed by the capture directory, private inspector config, private producer
 config, project id/revision/ETag, job UUID, accepted STL path, and selection

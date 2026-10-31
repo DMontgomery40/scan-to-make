@@ -203,6 +203,22 @@ export class PreparedJobStore {
     }
   }
 
+  private producedRequestSha256(request: {projectId: string; projectRevision: number; expectedProjectETag: string; jobId: string; selection: unknown},
+      allowSupports: boolean, sourceArtifact: ReturnType<typeof productionRef>): string {
+    const ref = {sha256: sourceArtifact.sha256, byteLength: sourceArtifact.byteLength, mediaType: sourceArtifact.mediaType};
+    return productionHash(JSON.stringify({projectId: request.projectId, projectRevision: request.projectRevision,
+      expectedProjectETag: request.expectedProjectETag, jobId: request.jobId, selection: request.selection,
+      allowSupports, sourceArtifact: ref, producerIdentity: this.production!.identity,
+      printabilityIdentity: this.printability?.identity}));
+  }
+  private operationRequestSha256(operation: {projectId: string; projectRevision: number; jobId: string;
+      sourceArtifact: ProductionOperation['sourceArtifact']; allowSupports: boolean}, selection: unknown): string {
+    const ref = {sha256: operation.sourceArtifact.sha256, byteLength: operation.sourceArtifact.byteLength, mediaType: operation.sourceArtifact.mediaType};
+    return productionHash(JSON.stringify({projectId: operation.projectId, projectRevision: operation.projectRevision,
+      jobId: operation.jobId, sourceArtifact: ref, allowSupports: operation.allowSupports,
+      selection, producerIdentity: this.production!.identity, printabilityIdentity: this.printability?.identity}));
+  }
+
   /** Host-only production. Long slicing happens outside the project edit lock. */
   async prepareProduced(input:{projectId:string;projectRevision:number;expectedProjectETag:string;jobId:string;source:Uint8Array;selection:unknown;allowSupports?:boolean},
     signal?:AbortSignal,authorizeCommit?:()=>Promise<void>){
@@ -215,7 +231,7 @@ export class PreparedJobStore {
       expectedProjectETag:input.expectedProjectETag,jobId:input.jobId,selection:input.selection});
     if(!(input.source instanceof Uint8Array)||!input.source.length||input.source.length>PRODUCTION_LIMITS.sourceBytes)throw new Error('Produced source byte limit exceeded');
     const source=Buffer.from(input.source),sourceArtifact=productionRef(source,'model/stl');
-    const requestSha256=productionHash(JSON.stringify({...request,allowSupports,sourceArtifact,producerIdentity:producer.identity,printabilityIdentity:this.printability?.identity}));
+    const requestSha256=this.producedRequestSha256(request,allowSupports,sourceArtifact);
     await this.projects.withCurrentProject(request.projectId,request.projectRevision,async project=>{
       if(!project.acceptedArtifact||!sameRef(project.acceptedArtifact.artifact,sourceArtifact))throw new Error('Produced source does not match accepted artifact');
     },request.expectedProjectETag);active();
@@ -252,14 +268,41 @@ export class PreparedJobStore {
     if (snapshot === null) throw new PreparedJobFailure('not-found');
     if (savedProjectETag(snapshot) !== request.expectedProjectETag) throw new Error('Saved project ETag mismatch');
   }
+  // A crash can strand a running record after the job itself was published.
+  // Finish it only when the fully verified job matches both retained hashes.
+  private async reconcilePublishedOperation(operation: ProductionOperation): Promise<ProductionOperation | undefined> {
+    if (!this.production) return undefined;
+    const snapshot = await this.projects.read(operation.projectId).catch(() => null);
+    if (snapshot === null) return undefined;
+    const expectedProjectETag = savedProjectETag(snapshot);
+    let job: PreparedJob;
+    try { job = (await this.loadPreparedJob(operation.jobId, expectedProjectETag)).job; }
+    catch { return undefined; }
+    if (job.projectId !== operation.projectId || job.projectRevision !== operation.projectRevision || !job.production) return undefined;
+    if (!sameRef(job.designArtifact, operation.sourceArtifact) || !sameRef(job.production.sourceArtifact, operation.sourceArtifact)) return undefined;
+    if (job.production.producerIdentity !== this.production.identity) return undefined;
+    const {slicerSettingsSha256: _settingsDigest, ...selection} = job.selection;
+    if (this.operationRequestSha256(operation, selection) !== operation.requestSha256) return undefined;
+    const producedSha = this.producedRequestSha256(
+      {projectId: operation.projectId, projectRevision: operation.projectRevision, expectedProjectETag, jobId: operation.jobId, selection},
+      operation.allowSupports, operation.sourceArtifact);
+    if (producedSha !== job.production.requestSha256) return undefined;
+    if (this.printability && (!job.production.printability || job.production.printability.allowSupports !== operation.allowSupports)) return undefined;
+    return {...operation, status: 'succeeded', failure: undefined, finishedAtMs: integer.parse(this.clock())};
+  }
   private async readOperation(jobId: string): Promise<ProductionOperation | undefined> {
     let bytes: Buffer;
     try { bytes = await readBounded(this.operationPath(jobId), this.bound.maxMetadataBytes); }
     catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined; throw error; }
     const operation = productionOperationSchema.parse(JSON.parse(new TextDecoder('utf-8', {fatal: true}).decode(bytes)));
     if (operation.jobId !== jobId) throw new Error('Stored production operation identity mismatch');
-    // A running record with no live in-process owner is an interrupted attempt.
+    // A running record with no live owner may already have published its job.
     if (operation.status === 'running' && !activeProductions.has(`${this.directory}\0${jobId}`)) {
+      const reconciled = await this.reconcilePublishedOperation(operation);
+      if (reconciled) {
+        await this.writeOperation(reconciled).catch(() => undefined);
+        return reconciled;
+      }
       const interrupted: ProductionOperation = {...operation, status: 'failed', failure: {code: 'interrupted'}, finishedAtMs: integer.parse(this.clock())};
       await this.writeOperation(interrupted);
       return interrupted;
@@ -320,9 +363,8 @@ export class PreparedJobStore {
     if (!(input.source instanceof Uint8Array) || !input.source.length || input.source.length > PRODUCTION_LIMITS.sourceBytes) throw new Error('Produced source byte limit exceeded');
     const source = Buffer.from(input.source), sourceArtifact = productionRef(source, 'model/stl');
     const key = `${this.directory}\0${request.jobId}`;
-    const requestSha256 = productionHash(JSON.stringify({projectId: request.projectId, projectRevision: request.projectRevision,
-      jobId: request.jobId, sourceArtifact, allowSupports, selection: this.appProduction.selection,
-      producerIdentity: this.production!.identity, printabilityIdentity: this.printability?.identity}));
+    const requestSha256 = this.operationRequestSha256({projectId: request.projectId, projectRevision: request.projectRevision,
+      jobId: request.jobId, sourceArtifact, allowSupports}, this.appProduction.selection);
     await this.projects.withCurrentProject(request.projectId, request.projectRevision, async project => {
       if (!project.acceptedArtifact || !sameRef(project.acceptedArtifact.artifact, sourceArtifact)) throw new Error('Produced source does not match accepted artifact');
     }, request.expectedProjectETag);
@@ -336,7 +378,13 @@ export class PreparedJobStore {
     try { existingJob = await this.readJob(request.jobId); }
     catch (error) { if (!(error instanceof PreparedJobFailure) || error.code !== 'not-found') throw error; }
     if (existingJob) {
-      if (!existingJob.production || !sameRef(existingJob.designArtifact, sourceArtifact)) throw new PreparedJobFailure('job-conflict');
+      const producedSha = this.producedRequestSha256(
+        {projectId: request.projectId, projectRevision: request.projectRevision, expectedProjectETag: request.expectedProjectETag,
+          jobId: request.jobId, selection: this.appProduction.selection}, allowSupports, sourceArtifact);
+      if (!existingJob.production || existingJob.projectId !== request.projectId || existingJob.projectRevision !== request.projectRevision ||
+          !sameRef(existingJob.designArtifact, sourceArtifact) || !sameRef(existingJob.production.sourceArtifact, sourceArtifact) ||
+          existingJob.production.requestSha256 !== producedSha ||
+          existingJob.production.producerIdentity !== this.production!.identity) throw new PreparedJobFailure('job-conflict');
       const loaded = await this.loadPreparedJob(request.jobId, request.expectedProjectETag);
       return {view: await this.productionView(request, undefined, loaded.job), created: false};
     }

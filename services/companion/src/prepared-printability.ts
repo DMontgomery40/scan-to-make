@@ -37,7 +37,6 @@ export const PrintabilityReportSchema=z.strictObject({
  reasons:z.array(text(4096)).max(64),
  warnings:z.array(z.strictObject({code:text(128),message:text(4096)})).max(64),
  dispatchAuthorized:z.literal(false),
- printerContacted:z.literal(false),
  provesPhysicalFit:z.literal(false),
  input:z.strictObject({
   fileName:text(512), format:text(64), sha256:digest,
