@@ -2,6 +2,9 @@ import SwiftUI
 import Sparkle
 import ServiceManagement
 import AgentKit
+#if canImport(ControlKit)
+import ControlKit
+#endif
 
 @main enum EntryPoint {
     static func main() {
@@ -95,6 +98,10 @@ struct MenuBarPopover: View {
                 .background(Color.white)
             Divider()
             HStack {
+                Button { SettingsWindow.shared.show() } label: { Label("Settings…", systemImage:"gearshape") }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+                    .keyboardShortcut(",")
                 Spacer()
                 Button("Quit") { NSApp.terminate(nil) }
                     .buttonStyle(.plain)
@@ -133,6 +140,9 @@ extension NSImage {
 
 @MainActor final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var window: NSWindow?
+    private var phoneWatch: Task<Void, Never>?
+    private var showingSetup = false
+    private lazy var setupModel = ModelAccessModel(installation:Installation(bundle:.main))
     private let updates = Updates()
     func applicationDidFinishLaunching(_ notification: Notification) {
         if Installation(bundle:.main).variant.isEmpty && SMAppService.mainApp.status == .notRegistered {
@@ -144,12 +154,54 @@ extension NSImage {
         if !loginLaunch { showPairing() }
     }
     func windowWillClose(_ notification: Notification) {
+        phoneWatch?.cancel()
+        showingSetup = false
         window?.contentView = nil
     }
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         showPairing(); return true
     }
+    /// Mockup 09: once a phone connects, the QR window becomes the setup questions (first run only).
+    private func watchForPhone() {
+        phoneWatch?.cancel()
+        let socket = ModelAccessModel.socketPath(for:Installation(bundle:.main))
+        phoneWatch = Task { [weak self] in
+            var baseline: Int?
+            while !Task.isCancelled {
+                if let count = try? await ControlClient(socketPath:socket).status().pairedDeviceCount {
+                    // A new phone, or a phone paired before setup was finished.
+                    let unfinished = !UserDefaults.standard.bool(forKey:"setupFinished")
+                    if let baseline, count > baseline { self?.phoneConnected(); return }
+                    if baseline == nil, count > 0, unfinished { self?.phoneConnected(); return }
+                    baseline = baseline ?? count
+                }
+                try? await Task.sleep(for:.seconds(2))
+            }
+        }
+    }
+    private func phoneConnected() {
+        guard let window, window.isVisible else { return }
+        guard !UserDefaults.standard.bool(forKey:"setupFinished") else { window.close(); return }
+        showingSetup = true
+        window.backgroundColor = .windowBackgroundColor
+        window.appearance = nil
+        window.contentView = NSHostingView(rootView:SetupView(model:setupModel) { [weak self] in
+            UserDefaults.standard.set(true, forKey:"setupFinished")
+            self?.window?.close()
+        })
+        // Mockup 09: setup is 720 × 520. Grow from the code's window around its centre; the hosting
+        // view alone doesn't resize a window whose content was swapped after it was shown.
+        var frame = window.frameRect(forContentRect:NSRect(x:0, y:0, width:720, height:520))
+        frame.origin = NSPoint(x:window.frame.midX - frame.width / 2, y:window.frame.midY - frame.height / 2)
+        window.setFrame(window.constrainFrameRect(frame, to:window.screen), display:true, animate:true)
+    }
     private func showPairing() {
+        // Reopening the app brings an open setup forward instead of replacing it with the code.
+        if showingSetup, let window, window.isVisible {
+            window.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps:true)
+            return
+        }
         if window == nil {
             let window = NSWindow(contentRect:NSRect(x:0,y:0,width:360,height:360),
                                   styleMask:[.titled,.closable],backing:.buffered,defer:false)
@@ -164,7 +216,11 @@ extension NSImage {
             window.center()
             self.window = window
         }
+        window?.backgroundColor = .white
+        window?.appearance = NSAppearance(named:.aqua)
+        window?.setContentSize(NSSize(width:360, height:360)) // back from setup's 720 × 520
         window?.contentView = NSHostingView(rootView:PairingWindowContent(model:CompanionModel.shared))
+        watchForPhone()
         window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps:true)
     }

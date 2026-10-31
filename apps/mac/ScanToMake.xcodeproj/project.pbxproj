@@ -23,6 +23,18 @@
 		C73E7AE1DF507DF6FA161E37 /* ModelAccess.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C16EEE29AB7D43A60876E8A /* ModelAccess.swift */; };
 		E93C1BBCC27768E164A3EB1C /* ModelKeychain.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34EF17D723E37A90F3F98F7F /* ModelKeychain.swift */; };
 		633CBA0128EBCA20CD2A8778 /* ModelAccessTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D04E57F8EA06595C9C5DE5DC /* ModelAccessTests.swift */; };
+		EC1A76BE05ED6C0C26741CFB /* ModelAccessViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64FBB6677F2B47646F25E1A8 /* ModelAccessViews.swift */; };
+		9CC089B519FB5794C0C863BE /* ControlClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 403AF4C6FA0F1246634E60D7 /* ControlClient.swift */; };
+		B495AA2BDF5B5C2CE8D15EB6 /* ModelAccess.swift in Sources */ = {isa = PBXBuildFile; fileRef = D01E4CB308D5F8181ED0D141 /* ModelAccess.swift */; };
+		9D288BA2A49FC1CC7A6A4E66 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = FCCF82162113B52441A256F0 /* Models.swift */; };
+		DD19C067C264135879C90C79 /* UnixTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4220829805C0608EBCFF9664 /* UnixTransport.swift */; };
+		F8916C23910A4A823CDF4E8C /* ModelAccessModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 441F9E4D52189960D333C49C /* ModelAccessModel.swift */; };
+		88A74CC7EAA45799AC0995AB /* ModelAccessModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 441F9E4D52189960D333C49C /* ModelAccessModel.swift */; };
+		1D151A07F2FB0976CCD0CB85 /* ModelAccessModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C4709FCE9FA36E84033305F /* ModelAccessModelTests.swift */; };
+		7F01393CC92FE3169EEFE820 /* ControlClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 403AF4C6FA0F1246634E60D7 /* ControlClient.swift */; };
+		203FB9BDE3698C0B30E3568D /* ModelAccess.swift in Sources */ = {isa = PBXBuildFile; fileRef = D01E4CB308D5F8181ED0D141 /* ModelAccess.swift */; };
+		B38F0009D79EB71A159A001C /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = FCCF82162113B52441A256F0 /* Models.swift */; };
+		1C2CCC14C6E2D80580B7FE9B /* UnixTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4220829805C0608EBCFF9664 /* UnixTransport.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -82,6 +94,13 @@
 		8C16EEE29AB7D43A60876E8A /* ModelAccess.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelAccess.swift; sourceTree = "<group>"; };
 		34EF17D723E37A90F3F98F7F /* ModelKeychain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelKeychain.swift; sourceTree = "<group>"; };
 		D04E57F8EA06595C9C5DE5DC /* ModelAccessTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelAccessTests.swift; sourceTree = "<group>"; };
+		64FBB6677F2B47646F25E1A8 /* ModelAccessViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelAccessViews.swift; sourceTree = "<group>"; };
+		403AF4C6FA0F1246634E60D7 /* ControlClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ControlClient.swift; sourceTree = "<group>"; };
+		D01E4CB308D5F8181ED0D141 /* ModelAccess.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelAccess.swift; sourceTree = "<group>"; };
+		FCCF82162113B52441A256F0 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
+		4220829805C0608EBCFF9664 /* UnixTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnixTransport.swift; sourceTree = "<group>"; };
+		441F9E4D52189960D333C49C /* ModelAccessModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelAccessModel.swift; sourceTree = "<group>"; };
+		3C4709FCE9FA36E84033305F /* ModelAccessModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelAccessModelTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -142,6 +161,8 @@
 			children = (
 				7803AFB3CBE44726266F669A /* AgentKit */,
 				8C2EFD7461A2779836CE7443 /* App */,
+				35E1ED98BABFB5079530D1A0 /* AppTests */,
+				243D62C5BA5CE721CFA1E718 /* ControlKit */,
 				783A56ABECAEA7A53B3A8A35 /* Tests */,
 				763AC8A31A6FF6107CAB6571 /* Products */,
 			);
@@ -152,9 +173,30 @@
 			children = (
 				C7E10258D71E1A28BE7C0F61 /* CompanionModel.swift */,
 				21B73436F785508B3D834AF9 /* Main.swift */,
+				441F9E4D52189960D333C49C /* ModelAccessModel.swift */,
+				64FBB6677F2B47646F25E1A8 /* ModelAccessViews.swift */,
 				A1DA7ED6F82EDD9901D021D2 /* Runtime.swift */,
 			);
 			path = App;
+			sourceTree = "<group>";
+		};
+		243D62C5BA5CE721CFA1E718 /* ControlKit */ = {
+			isa = PBXGroup;
+			children = (
+				403AF4C6FA0F1246634E60D7 /* ControlClient.swift */,
+				D01E4CB308D5F8181ED0D141 /* ModelAccess.swift */,
+				FCCF82162113B52441A256F0 /* Models.swift */,
+				4220829805C0608EBCFF9664 /* UnixTransport.swift */,
+			);
+			path = ControlKit/Sources/ControlKit;
+			sourceTree = "<group>";
+		};
+		35E1ED98BABFB5079530D1A0 /* AppTests */ = {
+			isa = PBXGroup;
+			children = (
+				3C4709FCE9FA36E84033305F /* ModelAccessModelTests.swift */,
+			);
+			path = AppTests;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -305,9 +347,15 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				F8916C23910A4A823CDF4E8C /* ModelAccessModel.swift in Sources */,
 				CDAC222A911270AB01F443E8 /* CompanionModel.swift in Sources */,
 				75D893D14AC572EFCB90C634 /* Main.swift in Sources */,
 				16062DFD6EE91A1948D2FD7F /* Runtime.swift in Sources */,
+				EC1A76BE05ED6C0C26741CFB /* ModelAccessViews.swift in Sources */,
+				9CC089B519FB5794C0C863BE /* ControlClient.swift in Sources */,
+				B495AA2BDF5B5C2CE8D15EB6 /* ModelAccess.swift in Sources */,
+				9D288BA2A49FC1CC7A6A4E66 /* Models.swift in Sources */,
+				DD19C067C264135879C90C79 /* UnixTransport.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -315,6 +363,12 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				88A74CC7EAA45799AC0995AB /* ModelAccessModel.swift in Sources */,
+				1D151A07F2FB0976CCD0CB85 /* ModelAccessModelTests.swift in Sources */,
+				7F01393CC92FE3169EEFE820 /* ControlClient.swift in Sources */,
+				203FB9BDE3698C0B30E3568D /* ModelAccess.swift in Sources */,
+				B38F0009D79EB71A159A001C /* Models.swift in Sources */,
+				1C2CCC14C6E2D80580B7FE9B /* UnixTransport.swift in Sources */,
 				685F7884CACEC1D1FA9A8105 /* AgentManagerTests.swift in Sources */,
 				AA8A4960648DEA5F67A8ACB2 /* PairingSessionTests.swift in Sources */,
 				633CBA0128EBCA20CD2A8778 /* ModelAccessTests.swift in Sources */,

@@ -30,7 +30,7 @@ targets:
   ScanToMake:
     type: application
     platform: macOS
-    sources: [App]
+    sources: [App, ControlKit/Sources/ControlKit]
     dependencies:
       - target: AgentKit
       - package: Sparkle
@@ -50,6 +50,9 @@ targets:
     sources:
       - path: Tests
         excludes: ['*.mjs']
+      - AppTests
+      - App/ModelAccessModel.swift
+      - ControlKit/Sources/ControlKit
     dependencies:
       - target: AgentKit
     settings:
