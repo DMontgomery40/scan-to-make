@@ -8,6 +8,7 @@ import {ModelAccessEnvironment} from '@scan-to-make/contracts/model-access';
 import type {ScanReference} from '@scan-to-make/contracts/scan-processing';
 import {validateAccess,type ModelAccess} from './ai-tweak.js';
 import {aiTweakRecord,writeAiCorrection} from './ai-tweak-export.js';
+import {MAKER_LOOKUP_MS} from './maker-size-lookup.js';
 import {createScanRunner,type ScanRunner} from './scan-processing-runner.js';
 import type {PrinterMcpProcess} from '@scan-to-make/printer-handoff';
 
@@ -61,9 +62,9 @@ export function aiStageBudget(remainingMs:number,kind:Exclude<ModelAccess['kind'
  const stageMs=Math.min(45*MINUTE,remainingMs-AI_AFTER_MS);
  const warmupMs=kind==='codex-cli'?5*MINUTE:0,pickMs=6*MINUTE,judgeMs=Math.min(12*MINUTE,Math.max(3*MINUTE,Math.floor(stageMs/4)));
  // The worker also needs a moment after the attempts to export and exit.
- const attemptMs=stageMs-warmupMs-pickMs-judgeMs-MINUTE;
+ const attemptMs=stageMs-warmupMs-pickMs-judgeMs-MAKER_LOOKUP_MS-MINUTE;
  if(!(attemptMs>=5*MINUTE))return undefined;
- return {stageMs,attemptMs:Math.min(attemptMs,30*MINUTE),judgeMs,warmupMs,pickMs};
+ return {stageMs,attemptMs:Math.min(attemptMs,30*MINUTE),judgeMs,warmupMs,pickMs,makerLookupMs:MAKER_LOOKUP_MS};
 }
 
 /** An executable by absolute path, or found on PATH; the pick takes only absolute tool paths. */

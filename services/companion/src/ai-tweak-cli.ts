@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import {accessSync,constants,statSync} from 'node:fs';
+import {writeFile} from 'node:fs/promises';
 import {homedir} from 'node:os';
 import {isAbsolute,join} from 'node:path';
 import {parseArgs} from 'node:util';
@@ -7,6 +8,7 @@ import {ModelAccessEnvironment} from '@scan-to-make/contracts/model-access';
 import {checkModelAccess,modelAccessFromEnv,runAiTweak,type AiTweakOptions} from './ai-tweak.js';
 import {pickAiTweak,type PickResult} from './ai-tweak-pick.js';
 import {exportPicked} from './ai-tweak-export.js';
+import {lookupMakerSize} from './maker-size-lookup.js';
 
 /** The user's own CLI: an explicit operator path, else the usual install locations. */
 export function findExecutable(name:'claude'|'codex',env:NodeJS.ProcessEnv=process.env):string|undefined{
@@ -82,6 +84,11 @@ async function main(argv:string[]){
  if(!values.export){process.stdout.write(JSON.stringify({...summary,pick:{choice:pick.choice,decidedBy:pick.decidedBy,reason:pick.reason}})+'\n');return 0;}
  controller.signal.throwIfAborted();
  const report=await exportPicked(values.out,manifest,pick,options.access,mmPerUnit,values.export);
+ // A separate lookup uses pristine inputs and the same model access, never the tweak's prompt.
+ // Failure is optional metadata loss; cancellation still terminates the whole job.
+ const makerSize=await lookupMakerSize(values.out,manifest,options);
+ controller.signal.throwIfAborted();
+ if(makerSize)await writeFile(join(values.export,'report.json'),JSON.stringify({...report,makerSize})+'\n',{mode:0o600});
  process.stdout.write(JSON.stringify({aiTweak:report.aiTweak})+'\n');
  return 0;
 }

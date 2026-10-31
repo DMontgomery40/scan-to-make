@@ -340,6 +340,44 @@ The make-printable Blender worker (`scan_printable.py`) and repair core are reso
 
 ### Size after cleanup
 
+With AI enabled, cleanup also makes a separate, optional maker-size lookup using
+the configured model access and the pristine scan/photos (stills have already
+been normalized for EXIF orientation). The lookup asks the model to identify the
+exact product variant and open the manufacturer's published specifications. It
+must return no suggestion for ambiguous products or unavailable sources. The
+model's identification and source remain a suggestion for the user to check;
+the companion validates the output shape, not the truth of a web page.
+
+`GET /v1/saved-projects/:project/captures/:capture/scan-processing/:job/maker-size?projectRevision=N`
+uses `captures:read` and the same project `If-Match` precondition as model
+downloads. It returns `{jobId, baseModelSha256, proposal}`. `proposal` is null
+for AI-off, older jobs, or a failed/ambiguous lookup; otherwise it follows
+`@scan-to-make/contracts/maker-size`:
+
+```json
+{
+  "productName": "AirPods Pro 2 charging case (USB-C)",
+  "makerName": "Apple",
+  "dimensionsMm": {"length": 60.6, "width": 45.2, "height": 21.7},
+  "sourceUrl": "https://support.apple.com/en-us/111834",
+  "confidence": 0.92
+}
+```
+
+Confidence is the model's estimate, not a calibrated probability. The proposal
+is retained in the hash-verified correction report, bound to the completed job
+and its final STL, and survives make-printable. Legacy job JSON stays unchanged.
+The lookup reserves two minutes within the existing AI job deadline and never
+calls a mesh-editing or sizing tool. Lookup failures leave cleanup successful;
+cancellation still cancels the job.
+
+Only after the user's acceptance should the phone POST `/size`, using the
+proposal's `makerName` as `source.name`, `sourceUrl`, `dimensionsMm`, the returned
+`baseModelSha256` as `expectedModelSha256`, and the current size revision from
+GET `/size`. Dismissal needs no size request. The existing per-side ±5% limit
+still applies. The lookup never calls `scale_stl`; acceptance uses the existing
+bambu-printer-mcp size path described below.
+
 `@scan-to-make/contracts/model-size` defines the size contract. Length, width and
 height identify the original completed model's longest, middle and shortest
 oriented-box edges. They are never re-sorted after an edit. Every choice scales

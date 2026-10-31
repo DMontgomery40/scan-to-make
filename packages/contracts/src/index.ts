@@ -14,3 +14,4 @@ export function validateArtifactRef(input: unknown): ArtifactRef { return Artifa
 
 export * from './scan-processing.js';
 export * from './model-size.js';
+export * from './maker-size.js';
