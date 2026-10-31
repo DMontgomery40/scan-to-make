@@ -1,0 +1,190 @@
+{
+  "schemaVersion": 1,
+  "components": [
+    {
+      "name": "Node.js",
+      "version": "24.22.2",
+      "licence": "MIT AND Apache-2.0 AND BSD-2-Clause AND BSD-3-Clause AND ISC AND Zlib AND Unicode-3.0 AND ICU",
+      "sourceUrl": "https://github.com/nodejs/node/tree/v24.22.2",
+      "downloadUrl": "https://nodejs.org/dist/v24.22.2/node-v24.22.2-darwin-arm64.tar.gz",
+      "sha256": "aa9549349e47dffaa42dcf95d6e06ade8c4bdafc980979883b88767670df385a",
+      "notices": [
+        {
+          "path": "Licenses/Node.txt",
+          "sha256": "5888dbb9a1d2b18f2c3e6c5f6af1b39de658372b402a0577b002777f14c62ace",
+          "sourceUrl": "https://github.com/nodejs/node/blob/v24.22.2/LICENSE"
+        }
+      ],
+      "role": "Unmodified standalone companion runtime; npm is used only to build and removed before packaging.",
+      "licenceDetails": "Composite licence for the runtime and embedded libraries: Node/Acorn/amaro/merve/c-ares/libuv/llhttp/undici/nghttp2/ngtcp2/nghttp3/brotli (MIT); swc/LIEF/OpenSSL/simdjson (Apache-2.0); V8/ittapi/ICU dictionaries/zstd (BSD-3-Clause); HdrHistogram selects BSD-2-Clause; internal rimraf/minimatch (ISC); zlib (Zlib); ICU (Unicode-3.0 and retained ICU/third-party data terms). simdutf and ada select MIT. ICU Autoconf scripts referenced by the full upstream notice are build inputs, not present in the runtime archive; no GPL exception is requested.",
+      "runtimeNotice": "Licenses/Node.txt",
+      "runtimeNoticePath": "node/LICENSE"
+    },
+    {
+      "name": "CPython standalone",
+      "version": "3.12.16+20261026",
+      "licence": "Python-2.0 AND CNRI-Python AND bzip2-1.0.6 AND MIT AND X11 AND BSD-2-Clause AND Apache-2.0 AND 0BSD AND Zlib AND TCL AND BSD-3-Clause AND LicenseRef-SQLite-Public-Domain",
+      "sourceUrl": "https://github.com/astral-sh/python-build-standalone/tree/20261026",
+      "downloadUrl": "https://github.com/astral-sh/python-build-standalone/releases/download/20261026/cpython-3.12.16%2B20261026-aarch64-apple-darwin-install_only_stripped.tar.gz",
+      "sha256": "353d5f1b4fd2715e7053f12f068435d5bbad16b91e057006b5d01e0925709a7e",
+      "notices": [
+        {
+          "path": "Licenses/python/LICENSE.bzip2.txt",
+          "sha256": "1f38bbc7caacafd65169276d759c0d88c991b753b643ce35d0e45ea1971dd441",
+          "sourceUrl": "https://github.com/astral-sh/python-build-standalone/releases/tag/20261026"
+        },
+        {
+          "path": "Licenses/python/LICENSE.cpython.txt",
+          "sha256": "86e61415828a8b5b06ec8d024e6f086ce155a8b85fd0c419c0ba4dc004e74fdd",
+          "sourceUrl": "https://github.com/astral-sh/python-build-standalone/releases/tag/20261026"
+        },
+        {
+          "path": "Licenses/python/LICENSE.expat.txt",
+          "sha256": "122f2c27000472a201d337b9b31f7eb2b52d091b02857061a8880371612d9534",
+          "sourceUrl": "https://github.com/astral-sh/python-build-standalone/releases/tag/20261026"
+        },
+        {
+          "path": "Licenses/python/LICENSE.libedit.txt",
+          "sha256": "29cea33c32bbc9785142386377915612a2fa786482c46843383384aded2e09b1",
+          "sourceUrl": "https://github.com/astral-sh/python-build-standalone/releases/tag/20261026"
+        },
+        {
+          "path": "Licenses/python/LICENSE.libffi.txt",
+          "sha256": "deaf3a42effb551a5b140fa9afefed183a27f1341c6d1bf430d106a5e6931fc0",
+          "sourceUrl": "https://github.com/astral-sh/python-build-standalone/releases/tag/20261026"
+        },
+        {
+          "path": "Licenses/python/LICENSE.liblzma.txt",
+          "sha256": "9a4062de0a2c388a98cf35a35d348b62fa97c838a71c3c28ee1a2d7d0a565b02",
+          "sourceUrl": "https://github.com/astral-sh/python-build-standalone/releases/tag/20261026"
+        },
+        {
+          "path": "Licenses/python/LICENSE.libuuid.txt",
+          "sha256": "122ee1f7e258f2c3c0e538a75c037684f420454bf3850ddc74ce750bbf5fe86b",
+          "sourceUrl": "https://github.com/astral-sh/python-build-standalone/releases/tag/20261026"
+        },
+        {
+          "path": "Licenses/python/LICENSE.mpdecimal.txt",
+          "sha256": "669512af7219f58be03a398766d7c9da11a3b3df9d3f05cb74c5ceca25c8da3b",
+          "sourceUrl": "https://github.com/astral-sh/python-build-standalone/releases/tag/20261026"
+        },
+        {
+          "path": "Licenses/python/LICENSE.ncurses.txt",
+          "sha256": "87a4c4442337b8968ef956031c406b74f9cb7149b7ba87311bdaba534816201c",
+          "sourceUrl": "https://github.com/astral-sh/python-build-standalone/releases/tag/20261026"
+        },
+        {
+          "path": "Licenses/python/LICENSE.openssl-3.txt",
+          "sha256": "7d5450cb2d142651b8afa315b5f238efc805dad827d91ba367d8516bc9d49e7a",
+          "sourceUrl": "https://github.com/astral-sh/python-build-standalone/releases/tag/20261026"
+        },
+        {
+          "path": "Licenses/python/LICENSE.sqlite.txt",
+          "sha256": "38bef3d28b24f145ea293bd3b6eb4b20396982abc8303128fb493986ea5bc719",
+          "sourceUrl": "https://github.com/astral-sh/python-build-standalone/releases/tag/20261026"
+        },
+        {
+          "path": "Licenses/python/LICENSE.tcl.txt",
+          "sha256": "c0a69a2bfd757361ec7e6143973b103c90409316b49e9c88db26ad6388e79f16",
+          "sourceUrl": "https://github.com/astral-sh/python-build-standalone/releases/tag/20261026"
+        },
+        {
+          "path": "Licenses/python/LICENSE.zlib-ng.txt",
+          "sha256": "6c9f0d975b41afaa34d22f55bb8986ce69e5cb7ad327cb2b28820cd425edf5ee",
+          "sourceUrl": "https://github.com/astral-sh/python-build-standalone/releases/tag/20261026"
+        },
+        {
+          "path": "Licenses/python/LICENSE.zlib.txt",
+          "sha256": "818922b2620f12801a12bf78e399644a30990e66824abd8ca8ec24d451d6f92c",
+          "sourceUrl": "https://github.com/astral-sh/python-build-standalone/releases/tag/20261026"
+        },
+        {
+          "path": "Licenses/python/LICENSE.runtime.txt",
+          "sha256": "3b2f81fe21d181c499c59a256c8e1968455d6689d269aa85373bfb6af41da3bf",
+          "sourceUrl": "https://github.com/python/cpython/blob/v3.12.16/LICENSE"
+        }
+      ],
+      "role": "Unmodified interpreter and standard libraries, run as a separate process. pip and ensurepip are removed after the two approved wheels are installed. Bundled library notices are from the matching full archive.",
+      "noticeArchiveUrl": "https://github.com/astral-sh/python-build-standalone/releases/download/20261026/cpython-3.12.16%2B20261026-aarch64-apple-darwin-pgo%2Blto-full.tar.zst",
+      "noticeArchiveSha256": "016758f4881e5f71d63eddfbcdd53f25c5a9152435a863e4dc0770758eae32c3",
+      "runtimeNotice": "Licenses/python/LICENSE.runtime.txt",
+      "runtimeNoticePath": "python/lib/python3.12/LICENSE.txt"
+    },
+    {
+      "name": "Sparkle",
+      "version": "2.9.3",
+      "licence": "MIT AND BSD-2-Clause AND Zlib",
+      "sourceUrl": "https://github.com/sparkle-project/Sparkle/tree/2.9.3",
+      "revision": "d46d456107feacc80711b21847b82b07bd9fb46e",
+      "notices": [
+        {
+          "path": "Licenses/Sparkle.txt",
+          "sha256": "389a4e4e9a32f059775b13a06e25a591445ba229d2838d26dd3e7c0c45127cfe",
+          "sourceUrl": "https://github.com/sparkle-project/Sparkle/blob/2.9.3/LICENSE"
+        }
+      ],
+      "role": "Linked update framework; its bundled bsdiff, sais-lite and Ed25519 notices are retained."
+    },
+    {
+      "name": "Pillow",
+      "pythonPackage": "pillow",
+      "version": "13.0.0",
+      "licence": "MIT-CMU AND MIT AND BSD-2-Clause AND BSD-3-Clause AND bzip2-1.0.6 AND FTL AND IJG AND Libpng AND libpng-2.0 AND libtiff AND 0BSD AND Zlib AND TCL AND X11",
+      "sourceUrl": "https://github.com/python-pillow/Pillow/tree/13.0.0",
+      "downloadUrl": "https://files.pythonhosted.org/packages/39/4b/f2ed53d83aa44ac19599ac0a54897f867fafb95f406980d1e24083f8cbe3/pillow-13.0.0-cp312-cp312-macosx_11_0_arm64.whl",
+      "sha256": "fc481f742ccda20e9ed760b8f978dff50f2a4e9bc253ac167fb0a05b0783ef52",
+      "notices": [
+        {
+          "path": "Licenses/Pillow.txt",
+          "sha256": "dda12a98c1979cf3d94df1cff45d27a4cb3f04a60c76f76902ac54cac03ec0ce",
+          "sourceUrl": "https://github.com/python-pillow/Pillow/tree/13.0.0"
+        }
+      ],
+      "role": "Unmodified wheel used only by the companion Python process. Full wheel notice includes its bundled native libraries.",
+      "licenceDetails": "Composite licence for the wheel: Pillow (MIT-CMU); AOM/libavif (BSD-2-Clause); dav1d/libwebp/libyuv/openjpeg/zstd (BSD-3-Clause); brotli/harfbuzz/lcms2/raqm/XCB (MIT); bzip2 (bzip2-1.0.6); FreeType selects FTL, with MIT/X11 source subnotices; libjpeg (IJG plus BSD-3-Clause/Zlib turbo subnotices); liblzma (0BSD); libpng (Libpng and libpng-2.0); libtiff (libtiff); Tcl/Tk (TCL); Xau/Xdmcp (X11); zlib (Zlib). Full wheel notice is retained, including alternative licences not selected.",
+      "pythonPaths": [
+        "PIL",
+        "pillow-13.0.0.dist-info"
+      ]
+    },
+    {
+      "name": "OpenUSD",
+      "pythonPackage": "usd-core",
+      "version": "26.8",
+      "licence": "LicenseRef-TOST-1.0 AND MIT AND BSD-2-Clause AND BSD-3-Clause AND Apache-2.0 AND BSL-1.0 AND LicenseRef-Apple-Sample-Code",
+      "sourceUrl": "https://github.com/PixarAnimationStudios/OpenUSD/tree/v26.08",
+      "downloadUrl": "https://files.pythonhosted.org/packages/97/44/fb780d02b04bbebc410bfb6decccc66aec07fb0322172ad019c4579ad80a/usd_core-26.8-cp312-none-macosx_10_15_universal2.whl",
+      "sha256": "aaf1a68bf4c7ab959b9f4d3a6e0ef9347ff6135a1452676bb40916060146c53e",
+      "notices": [
+        {
+          "path": "Licenses/OpenUSD.txt",
+          "sha256": "4d6e8e3a9bd0104e10c48e3bc6af2f0976448a70a377d20cef674740f96f4452",
+          "sourceUrl": "https://github.com/PixarAnimationStudios/OpenUSD/tree/v26.08"
+        }
+      ],
+      "role": "Unmodified wheel used only by the companion Python process. Full wheel notice includes its bundled native libraries.",
+      "licenceDetails": "Composite licence for the wheel: OpenUSD (TOST-1.0); RapidJSON binary, libdeflate, stb, pugixml, robin-map, PEGTL and other MIT components (MIT); double-conversion/OpenEXR/libyuv (BSD-3-Clause); LZ4/libavif/libaom/pbrt (BSD-2-Clause); Draco/Roboto/Spirv Reflect/Cycles IES and other Apache components (Apache-2.0); Boost (BSL-1.0); retained Apple sample code terms (LicenseRef-Apple-Sample-Code). RapidJSON bin/jsonchecker is source-test-only and is not in the wheel; the JSON licence is not allowlisted.",
+      "pythonPaths": [
+        "pxr",
+        "usd_core-26.8.dist-info"
+      ]
+    }
+  ],
+  "sourcePaths": [
+    "packages/contracts",
+    "services/project",
+    "services/printer-handoff",
+    "services/companion",
+    "tools/capture-mesh-convert",
+    "tools/capture-pipeline",
+    "tools/capture-fit-eval",
+    "deploy/companion/generate-lan-tls.py",
+    "deploy/companion/healthcheck.mjs"
+  ],
+  "npmPackages": [
+    "packages/contracts",
+    "services/project",
+    "services/printer-handoff",
+    "services/companion"
+  ]
+}

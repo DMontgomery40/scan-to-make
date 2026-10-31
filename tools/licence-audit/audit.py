@@ -23,6 +23,7 @@ from inventory import (  # noqa: E402
     inventory_workspace_npm,
 )
 from notices import run_notices_cli  # noqa: E402
+from mac_distribution import inventory_mac  # noqa: E402
 from spdx import (  # noqa: E402
     FIRST_PARTY,
     NON_COMMERCIAL,
@@ -137,7 +138,7 @@ def _classify_violation_code(scope: str, offending: list[str], licence: str) -> 
         return "unknown-licence"
     if any(tok.startswith("AGPL-") for tok in offending):
         return "agpl-prohibited"
-    if scope == "app" and (any(is_gpl_family(tok) for tok in offending) or is_gpl_family(licence)):
+    if scope in ("app", "mac") and (any(is_gpl_family(tok) for tok in offending) or is_gpl_family(licence)):
         return "copyleft-in-app"
     return "disallowed-licence"
 
@@ -173,6 +174,8 @@ def run_audit(
         marker_env=marker_env,
     )
     app_gpl_imports = detect_app_gpl_tool_imports(repo_root, tool_folders)
+    mac_distribution, mac_violations = inventory_mac(repo_root, workspace_npm)
+    violations.extend(mac_violations)
 
     def _audit_standard_item(item: dict[str, Any]) -> None:
         if item.get("firstParty") and item.get("licence") == FIRST_PARTY:
@@ -180,8 +183,10 @@ def run_audit(
             return
 
         scope = item["scope"]
-        allow = app_allow if scope == "app" else server_allow
-        denied = app_denied if scope == "app" else server_denied
+        allow = ({normalize_expression(x) for x in allowlists_cfg.get("mac", [])}
+                 if scope == "mac" else app_allow if scope == "app" else server_allow)
+        denied = ({normalize_expression(x) for x in denied_cfg.get("mac", [])}
+                  if scope == "mac" else app_denied if scope == "app" else server_denied)
         lic = item["licence"]
 
         allowed, offending = evaluate_expression(lic, allow, denied)
@@ -226,6 +231,8 @@ def run_audit(
         _audit_standard_item(item)
 
     for item in workspace_npm:
+        _audit_standard_item(item)
+    for item in mac_distribution:
         _audit_standard_item(item)
 
     for tool in tool_folders:
@@ -384,7 +391,7 @@ def run_audit(
         )
     )
 
-    all_items = mobile_npm + cocoapods + workspace_npm + tool_folders + tool_python
+    all_items = mobile_npm + cocoapods + workspace_npm + tool_folders + tool_python + mac_distribution
     status_counts: dict[str, int] = {}
     for rec in all_items:
         st = str(rec.get("status") or "unknown")
@@ -398,6 +405,7 @@ def run_audit(
             "toolFolders": tool_folders,
             "toolPythonRequirements": tool_python,
             "workspaceNpm": workspace_npm,
+            "macDistribution": mac_distribution,
         },
         "ok": len(violations) == 0,
         "policySchemaVersion": policy.get("schemaVersion", 1),
@@ -411,6 +419,7 @@ def run_audit(
             "toolPythonRequirementsCount": len(tool_python),
             "violationCount": len(violations),
             "workspaceNpmCount": len(workspace_npm),
+            "macDistributionCount": len(mac_distribution),
         },
         "violations": violations,
     }

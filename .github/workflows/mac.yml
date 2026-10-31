@@ -1,0 +1,20 @@
+name: Mac app
+on:
+  push:
+    branches: [main]
+    paths: ['apps/mac/**', '.github/workflows/mac.yml']
+  pull_request:
+    paths: ['apps/mac/**', '.github/workflows/mac.yml']
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Unit tests
+        run: swift test --package-path apps/mac
+      - name: Companion runtime configuration tests
+        run: node --test apps/mac/Tests/runtime.test.mjs
+      - name: Build shell without signing or runtime downloads
+        run: xcodebuild -project apps/mac/ScanToMake.xcodeproj -scheme ScanToMake -configuration Debug -destination 'generic/platform=macOS' CODE_SIGNING_ALLOWED=NO build

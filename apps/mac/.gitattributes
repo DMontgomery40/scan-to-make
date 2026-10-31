@@ -1,0 +1,4 @@
+# Preserve checksummed upstream licence texts byte-for-byte.
+Licenses/** -whitespace -text
+# The generated document also retains verbatim npm licence text.
+THIRD_PARTY_NOTICES.md -whitespace

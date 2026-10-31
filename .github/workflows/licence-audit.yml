@@ -92,6 +92,7 @@ jobs:
         run: |
           npm ci --prefix packages/contracts --ignore-scripts
           npm ci --prefix services/project --ignore-scripts
+          npm ci --prefix services/printer-handoff --ignore-scripts
           npm ci --prefix services/companion --ignore-scripts
           npm ci --prefix apps/mobile --ignore-scripts
       - name: Install declared tool Python requirements and pinned USD runtime
