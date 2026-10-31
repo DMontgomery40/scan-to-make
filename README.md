@@ -21,6 +21,7 @@ The app requires iOS 27. Scanning needs a device with LiDAR (iPhone Pro or iPad 
 
 ## Still open
 
+- **Hosted cleanup (design only).** Modal + R2 worker scope for users without a local Linux companion: [`docs/hosted-service.md`](docs/hosted-service.md). Nothing deployed.
 - **Physical-device capture.** The capture, import, cleanup and close-up flows are exercised in tests and the iOS Simulator. A full run on a physical LiDAR iPhone over a live private tailnet is still to be recorded.
 - **Printer handoff.** Sending the clean mesh to bambu-printer-mcp or mcp-3D-printer-server is designed separately and not built.
 - **Android.** Android reports capture as unavailable.
