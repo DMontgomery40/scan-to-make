@@ -165,6 +165,37 @@ test('LAN pairing needs no login and an incomplete frame expires without a mutat
   assert.equal(calls,1);
 });
 
+test('with the server\'s v2 details the QR is a v2 link; nearby requests are listed and answered once (MAC-5)',async t=>{
+  const f=await fixture(t);
+  const auth=await RemoteAuthStore.create(join(f.root,'lan-v2'),{transport:'lan',host:'192.168.1.2:9077',certificateSha256:'a'.repeat(64),allowedLogins:['lan']});
+  const id=randomUUID(),answers=[];
+  const nearby={pending:()=>answers.length?[]:[{id,deviceName:"David's iPhone",code:'482913',expiresAt:1}],
+    async answer(requestId,allow){answers.push([requestId,allow]);return requestId===id&&answers.length===1;}};
+  const pairingLink=()=>({addresses:['https://192.168.1.2:9077','https://Mac-mini.local:9077'],publicKeySha256:'b'.repeat(64),name:'Mac mini'});
+  const server=await startLocalControl({path:join(f.root,'v2.sock'),dispatch:createControlDispatcher({auth,companionVersion:'0.1.0',pairingLink,nearby})});
+  t.after(()=>server.close());
+  const call=(method,params={})=>wire(server.path,{v:1,id:randomUUID(),method,params});
+  assert.equal((await call('status.get')).result.capabilities.nearbyPairing,true);
+  // The JSON keeps the v1 fields the Mac app decodes; the QR carries every address and the key pin.
+  const invitation=(await call('pairing.create')).result;
+  assert.deepEqual([invitation.version,invitation.baseUrl],[1,'https://192.168.1.2:9077']);
+  const qr=new URL(invitation.qrPayload);
+  assert.deepEqual([qr.searchParams.get('v'),qr.searchParams.getAll('a'),qr.searchParams.get('k'),qr.searchParams.get('n'),qr.searchParams.get('c')],
+    ['2',pairingLink().addresses,'b'.repeat(64),'Mac mini',invitation.code]);
+  assert.deepEqual((await call('nearby.list')).result,{items:[{id,deviceName:"David's iPhone",code:'482913',expiresAt:1}]});
+  assert.deepEqual((await call('nearby.answer',{id,allow:true})).result,{answered:true});
+  assert.equal((await call('nearby.answer',{id,allow:true})).error.code,'not-found');
+  assert.deepEqual(answers,[[id,true],[id,true]]);
+  assert.deepEqual((await call('nearby.list')).result,{items:[]});
+  for(const params of [{id},{id,allow:'yes'},{id:'x',allow:true},{id,allow:true,extra:1}])
+    assert.equal((await call('nearby.answer',params)).error.code,'invalid-request');
+  // Without nearby pairing: nothing listed, answers unavailable, and the QR stays v1.
+  assert.equal((await f.call('status.get')).result.capabilities.nearbyPairing,false);
+  assert.deepEqual((await f.call('nearby.list')).result,{items:[]});
+  assert.equal((await f.call('nearby.answer',{id,allow:true})).error.code,'unavailable');
+  assert.equal(new URL((await f.call('pairing.create')).result.qrPayload).searchParams.get('v'),'1');
+});
+
 test('server CLI owns the control socket lifecycle without exposing admin methods over HTTP',async t=>{
   const f=await fixture(t);await f.server.close();
   // Supported container state volumes are searchable; auth remains private.

@@ -105,7 +105,31 @@ final class ControlClientTests: XCTestCase {
         }
         let value = try await ControlClient(socketPath: server.path).status()
         XCTAssertEqual(value.pairedDeviceCount, 3); XCTAssertTrue(value.capabilities.printerHandoff)
+        XCTAssertFalse(value.capabilities.nearbyPairing, "a companion without nearby pairing reads as off")
         withExtendedLifetime(server) {}
+    }
+    func testNearbyRequestsAndAnswerKeepTheirContract() async throws {
+        let id = UUID().uuidString.lowercased()
+        let list = try UnixFixture { request in
+            XCTAssertEqual(request["method"] as? String, "nearby.list")
+            XCTAssertEqual((request["params"] as? [String: Any])?.count, 0)
+            return [try reply(request, result: ["items": [["id": id, "deviceName": "David's iPhone", "code": "482913", "expiresAt": 1800000000000]]])]
+        }
+        let requests = try await ControlClient(socketPath: list.path).nearbyRequests()
+        XCTAssertEqual(requests, [ControlNearbyRequest(id: id, deviceName: "David's iPhone", code: "482913", expiresAt: 1800000000000)])
+        let answer = try UnixFixture { request in
+            XCTAssertEqual(request["method"] as? String, "nearby.answer")
+            let params = request["params"] as! [String: Any]
+            XCTAssertEqual(params.count, 2); XCTAssertEqual(params["id"] as? String, id); XCTAssertEqual(params["allow"] as? Bool, true)
+            return [try reply(request, result: ["answered": true])]
+        }
+        try await ControlClient(socketPath: answer.path).answerNearby(id, allow: true)
+        let gone = try UnixFixture { request in
+            var data = try JSONSerialization.data(withJSONObject: ["v": 1, "id": request["id"]!, "error": ["code": "not-found", "message": "The requested item is no longer available"]]); data.append(10); return [data]
+        }
+        do { try await ControlClient(socketPath: gone.path).answerNearby(id, allow: false); XCTFail("Missing remote error") }
+        catch { XCTAssertEqual((error as? ControlRemoteError)?.code, "not-found") }
+        withExtendedLifetime([list, answer, gone]) {}
     }
     func testPairingRemainsPrivateAndLetsServerChooseRetainedLogin() async throws {
         let secret = String(repeating: "a", count: 32)

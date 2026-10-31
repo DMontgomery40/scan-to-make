@@ -16,6 +16,7 @@ static OSStatus Delete(CFDictionaryRef query) {
 #define SecItemCopyMatching Read
 #define SecItemDelete Delete
 #import "../../modules/local-project-storage/ios/CompanionPairing.mm"
+#import "../../modules/local-project-storage/ios/NearbyPairing.mm"
 // A protection space carrying a chosen server trust, as URLSession would hand it over.
 @interface STMTestSpace : NSURLProtectionSpace
 @property (assign) SecTrustRef trustRef;
@@ -30,6 +31,20 @@ static NSURLSessionAuthChallengeDisposition Decide(NSString *host, NSInteger por
   __block NSURLSessionAuthChallengeDisposition decided = (NSURLSessionAuthChallengeDisposition)-1;
   *rejected = STMPinnedTrust(challenge, record, ^(NSURLSessionAuthChallengeDisposition d, NSURLCredential *c) { decided = d; });
   return decided;
+}
+static NSData *NearbyDecide(NSString *host, NSInteger port, NSString *method, SecTrustRef trust, NSURL *base, NSData *seen) {
+  STMTestSpace *space = [[STMTestSpace alloc] initWithHost:host port:port protocol:NSURLProtectionSpaceHTTPS realm:nil authenticationMethod:method];
+  space.trustRef = trust;
+  NSURLAuthenticationChallenge *challenge = [[NSURLAuthenticationChallenge alloc] initWithProtectionSpace:space proposedCredential:nil previousFailureCount:0 failureResponse:nil error:nil sender:(id<NSURLAuthenticationChallengeSender>)[NSObject new]];
+  return STMNearbyTrust(challenge, base, seen);
+}
+static NSData *FromHex(NSString *text) {
+  NSMutableData *data = [NSMutableData new];
+  for (NSUInteger i = 0; i + 1 < text.length; i += 2) {
+    uint8_t byte = (uint8_t)strtoul([[text substringWithRange:NSMakeRange(i, 2)] UTF8String], NULL, 16);
+    [data appendBytes:&byte length:1];
+  }
+  return data;
 }
 int main(int argc, char **argv) { @autoreleasepool {
   NSCAssert(STMCompanionBaseURL(@"https://host.example.ts.net") != nil, @"valid host");
@@ -128,9 +143,34 @@ int main(int argc, char **argv) { @autoreleasepool {
     NSMutableDictionary *other = [record mutableCopy]; [other addEntriesFromDictionary:change];
     NSCAssert(!STMSamePairing(record, other), @"another key, address list or token is another pairing");
   }
+  // Nearby pairing v1: the contract's test vector (fixtures/nearby-pairing-v1.json), byte for byte.
+  NSDictionary *vector = [NSJSONSerialization JSONObjectWithData:[NSData dataWithContentsOfFile:[NSString stringWithUTF8String:argv[5]]] options:0 error:nil];
+  NSData *vectorS = FromHex(vector[@"publicKeySha256"]), *vectorKey = STMNearbyBytes(vector[@"key"]), *vectorNonce = STMNearbyBytes(vector[@"nonce"]);
+  NSCAssert(vectorS.length == 32 && vectorKey && vectorNonce, @"vector decodes");
+  NSCAssert([STMBase64URL(STMNearbyCommit(vectorKey)) isEqual:vector[@"commit"]], @"commit matches the contract vector");
+  NSCAssert([STMNearbyCode(vectorS, vectorKey, vectorNonce) isEqual:vector[@"code"]], @"code matches the contract vector");
+  NSCAssert([STMBase64URL(vectorKey) isEqual:vector[@"key"]], @"base64url round trip");
+  NSString *k = vector[@"key"];
+  for (NSString *bad in @[@"", [k substringFromIndex:1], [k stringByAppendingString:@"A"], [[k substringToIndex:42] stringByAppendingString:@"B"], [k stringByAppendingString:@"="], [k stringByReplacingOccurrencesOfString:@"I" withString:@"+"]])
+    NSCAssert(!STMNearbyBytes(bad), @"non-canonical bytes refused");
+  NSCAssert(!STMNearbyBytes(@42) && !STMNearbyCommit([NSData data]) && !STMNearbyCode(vectorS, vectorKey, [NSData dataWithBytes:"x" length:1]), @"wrong types and lengths refused");
+  // Trust on first use: the first key seen on the resolved address is S; then only that key, there.
+  SecCertificateRef ecCert = SecCertificateCreateWithData(NULL, (__bridge CFDataRef)ecDer);
+  SecTrustRef ecTrust = NULL;
+  NSCAssert(ecCert && SecTrustCreateWithCertificates(ecCert, policy, &ecTrust) == errSecSuccess, @"EC test trust");
+  NSURL *nearbyBase = [NSURL URLWithString:@"https://192.168.1.20:9077"];
+  NSData *first = NearbyDecide(@"192.168.1.20", 9077, server, trust, nearbyBase, nil);
+  NSCAssert([first isEqual:FromHex(keyPin)], @"the first certificate fixes S as its key's SHA-256");
+  NSCAssert([NearbyDecide(@"192.168.1.20", 9077, server, trust, nearbyBase, first) isEqual:first], @"the same key is accepted again");
+  NSCAssert(!NearbyDecide(@"192.168.1.20", 9077, server, ecTrust, nearbyBase, first), @"another key is refused after the first");
+  NSCAssert(!NearbyDecide(@"192.168.1.21", 9077, server, trust, nearbyBase, nil) && !NearbyDecide(@"192.168.1.20", 9078, server, trust, nearbyBase, nil), @"another host or port is refused");
+  NSCAssert(!NearbyDecide(@"192.168.1.20", 9077, NSURLAuthenticationMethodClientCertificate, trust, nearbyBase, nil) && !NearbyDecide(@"192.168.1.20", 9077, server, trust, nil, nil), @"other challenges and no address fail closed");
+  NSCAssert([NearbyDecide(@"192.168.1.20", 0, server, ecTrust, [NSURL URLWithString:@"https://192.168.1.20"], nil) isEqual:FromHex([NSString stringWithUTF8String:argv[4]])], @"default port, EC key");
+  CFRelease(ecTrust); CFRelease(ecCert);
   stored = nil;
   CFRelease(trust); CFRelease(policy); CFRelease(cert);
   puts("PASS native: certificate pin trust (match, default port, other certificate/host/port, fail closed, unpinned default)");
   puts("PASS native: public-key pin (RSA and EC SubjectPublicKeyInfo = OpenSSL, other key/address refused, truncated DER refused), v2 address list, attempt order, fallback rule, v2 record validation");
+  puts("PASS native: nearby pairing v1 (contract vector commit and code, canonical base64url, trust on first use: same key only, same host and port only)");
   puts("PASS native: exact HTTPS host validation, certificate/timeout recovery, secret-free metadata, failed delete preservation, disconnect, corrupt credential rejection");
 } }

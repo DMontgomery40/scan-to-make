@@ -12,6 +12,7 @@ import type {PrintHandoffServices} from './print-handoff-http.js';
 import {readBoundedCaptureFile} from './capture-import.js';
 import {RemoteAuthStore, RemoteAuthFailure} from './remote-auth.js';
 import type {ModelAccessService} from './model-access.js';
+import type {NearbyRequest} from '@scan-to-make/contracts/nearby-pairing';
 import {ControlFailure, parameters, type ControlMethod, type DoorParameters, type JobParameters} from './local-control-protocol.js';
 
 interface JobItem {
@@ -27,6 +28,10 @@ export interface ControlServices {
   capture?: CaptureServices;
   captureDirectory?: string;
   printHandoff?: PrintHandoffServices;
+  /** The running server's v2 details (pairing link v2, MAC-5). Without them pairing.create mints v1. */
+  pairingLink?: () => {addresses: string[]; publicKeySha256: string; name?: string};
+  /** Nearby pairing requests waiting for Allow (MAC-5), when the server has nearby pairing on. */
+  nearby?: {pending(): NearbyRequest[]; answer(id: string, allow: boolean): Promise<boolean>};
 }
 const keyOf = (item: JobItem) => `${item.kind}:${item.kind === 'cleanup' ? (item.job as ScanProcessingJob).jobId : (item.job as HandoffManifest).id}`;
 async function entries(directory: string) {
@@ -125,7 +130,7 @@ export function createControlDispatcher(services: ControlServices) {
     try {
       switch (method) {
         case 'status.get': return {protocolVersion:1,companionVersion:services.companionVersion,transport:auth.transport,
-          pairedDeviceCount:(await auth.listDevices()).length,capabilities:{capture:!!capture?.captures,cleanup:!!capture?.scanProcessing,printerHandoff:!!printHandoff}};
+          pairedDeviceCount:(await auth.listDevices()).length,capabilities:{capture:!!capture?.captures,cleanup:!!capture?.scanProcessing,printerHandoff:!!printHandoff,nearbyPairing:!!services.nearby}};
         case 'devices.list': return {devices:await auth.listDevices()};
         case 'devices.remove': {
           const {deviceId} = parameters[method].parse(raw);
@@ -142,7 +147,8 @@ export function createControlDispatcher(services: ControlServices) {
             }
           }
           if (!auth.allowsLogin(login)) throw new ControlFailure('invalid-request');
-          return await auth.createPairing(login);
+          // The invitation JSON keeps its v1 fields; with the server's v2 details the QR is a v2 link.
+          return await auth.createPairing(login,undefined,services.pairingLink?.());
         }
         case 'modelAccess.get': {
           if (!services.modelAccess) throw new ControlFailure('unavailable');
@@ -158,6 +164,13 @@ export function createControlDispatcher(services: ControlServices) {
           return services.modelAccess.startCheck(parameters[method].parse(raw).revision);
         }
         case 'pairing.isActive': return {active:await auth.isPairingActive(parameters[method].parse(raw).code)};
+        case 'nearby.list': return {items:services.nearby?.pending() ?? []};
+        case 'nearby.answer': {
+          const {id,allow} = parameters[method].parse(raw);
+          if (!services.nearby) throw new ControlFailure('unavailable');
+          if (!(await services.nearby.answer(id,allow))) throw new ControlFailure('not-found');
+          return {answered:true};
+        }
         case 'jobs.list': return await jobIndex(parameters[method].parse(raw));
         case 'confirmations.list': return {items:printHandoff?.relay.pending() ?? []};
         case 'confirmations.answer': {

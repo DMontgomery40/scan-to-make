@@ -11,7 +11,8 @@
     "./scan-processing": { "types": "./dist/scan-processing.d.ts", "import": "./dist/scan-processing.js", "default": "./dist/scan-processing.js" },
     "./model-access": { "types": "./dist/model-access.d.ts", "import": "./dist/model-access.js", "default": "./dist/model-access.js" },
     "./device-auth": { "types": "./dist/device-auth.d.ts", "import": "./dist/device-auth.js", "default": "./dist/device-auth.js" },
-    "./pairing-link": { "types": "./dist/pairing-link.d.ts", "import": "./dist/pairing-link.js", "default": "./dist/pairing-link.js" }
+    "./pairing-link": { "types": "./dist/pairing-link.d.ts", "import": "./dist/pairing-link.js", "default": "./dist/pairing-link.js" },
+    "./nearby-pairing": { "types": "./dist/nearby-pairing.d.ts", "import": "./dist/nearby-pairing.js", "default": "./dist/nearby-pairing.js" }
   },
   "files": ["dist", "fixtures", "README.md"],
   "scripts": {

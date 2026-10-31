@@ -1,0 +1,9 @@
+{
+  "//": "Nearby pairing v1 test vector (packages/contracts/src/nearby-pairing.ts). The TS contract tests and the phone native tests both check it.",
+  "publicKeySha256": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+  "key": "ICEiIyQlJicoKSorLC0uLzAxMjM0NTY3ODk6Ozw9Pj8",
+  "nonce": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8",
+  "commit": "TwuigJPfZVPhfPavPytrdKoIm9BposLrNRSqv1byDBA",
+  "codeDigest": "7bd88873ebb16d2ca33365a9fb7797e22c0255b48b698dd285d0f014b5e0dd1a",
+  "code": "527980"
+}
