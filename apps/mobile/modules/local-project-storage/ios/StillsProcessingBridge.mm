@@ -190,7 +190,7 @@ RCT_REMAP_METHOD(cancel,cancelResolve:(RCTPromiseResolveBlock)resolve reject:(RC
   configuration.filter=[PHPickerFilter imagesFilter];
   configuration.selectionLimit=limit;
   configuration.preferredAssetRepresentationMode=PHPickerConfigurationAssetRepresentationModeCurrent;
-  if(@available(iOS 15.0,*))configuration.selection=PHPickerConfigurationSelectionOrdered;
+  configuration.selection=PHPickerConfigurationSelectionOrdered;
   PHPickerViewController *picker=[[PHPickerViewController alloc] initWithConfiguration:configuration];
   picker.delegate=self;picker.presentationController.delegate=self;
   [presenter presentViewController:picker animated:YES completion:nil];

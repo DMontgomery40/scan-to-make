@@ -6,7 +6,7 @@ Pod::Spec.new do |s|
   s.license = { :type => 'Apple Sample Code', :file => 'LICENSE.txt' }
   s.authors = 'Scan to Make'
   s.source = { :git => s.homepage + '.git', :tag => s.version }
-  s.platforms = { :ios => '18.0' }
+  s.platforms = { :ios => '27.0' }
   s.swift_version = '5.0'
   sample = 'GuidedCaptureSample/GuidedCaptureSample'
   s.source_files = 'ios/*.{swift,mm}', "#{sample}/**/*.swift"

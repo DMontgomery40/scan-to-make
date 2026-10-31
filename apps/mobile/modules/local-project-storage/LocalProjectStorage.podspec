@@ -6,7 +6,7 @@ Pod::Spec.new do |s|
   s.license = { :type => "UNLICENSED" }
   s.authors = "Scan to Make"
   s.source = { :git => s.homepage + ".git", :tag => s.version }
-  s.platforms = { :ios => min_ios_version_supported }
+  s.platforms = { :ios => '27.0' }
   s.source_files = "ios/*.{h,m,mm}"
   s.libraries = "sqlite3"
   s.frameworks = "SceneKit", "ModelIO", "PhotosUI", "UIKit", "Security", "QuickLook", "UniformTypeIdentifiers"

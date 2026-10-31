@@ -94,7 +94,7 @@ if args.ui:
     (tests / 'CaptureFlowUITests.swift').write_text((HERE / 'CaptureFlowUITests.swift').read_text())
     spec = {
         'name':'NativeCaptureFixture',
-        'settings':{'base':{'IPHONEOS_DEPLOYMENT_TARGET':'18.0','SWIFT_VERSION':'5.0','CODE_SIGNING_ALLOWED':'NO', 'SWIFT_ACTIVE_COMPILATION_CONDITIONS':'MODEL_FIXTURE UI_FIXTURE'}},
+        'settings':{'base':{'IPHONEOS_DEPLOYMENT_TARGET':'27.0','SWIFT_VERSION':'5.0','CODE_SIGNING_ALLOWED':'NO', 'SWIFT_ACTIVE_COMPILATION_CONDITIONS':'MODEL_FIXTURE UI_FIXTURE'}},
         'targets':{
             'NativeCaptureFixture':{'type':'application','platform':'iOS','sources':['App'],'settings':{'base':{'PRODUCT_BUNDLE_IDENTIFIER':'com.scantomake.nativecapturefixture','GENERATE_INFOPLIST_FILE':'YES','INFOPLIST_KEY_UILaunchScreen_Generation':'YES','INFOPLIST_KEY_UIApplicationSceneManifest_Generation':'YES'}}},
             'NativeCaptureUITests':{'type':'bundle.ui-testing','platform':'iOS','sources':['Tests'],'dependencies':[{'target':'NativeCaptureFixture'}],'settings':{'base':{'PRODUCT_BUNDLE_IDENTIFIER':'com.scantomake.nativecapturefixture.tests','GENERATE_INFOPLIST_FILE':'YES'}}}},
