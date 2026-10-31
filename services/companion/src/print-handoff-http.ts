@@ -144,6 +144,7 @@ function validateAnswer(requestedSchema: unknown, answer: ElicitationAnswer): vo
 
 export function createPrintHandoffRoutes(services: PrintHandoffServices) {
   let activePrint: ActivePrint | undefined;
+  let completedPrints = 0;
   let startingPrint: Promise<void> | undefined;
   let closed = false;
   let creating = false;
@@ -171,7 +172,10 @@ export function createPrintHandoffRoutes(services: PrintHandoffServices) {
         await services.store.setStatus(bundleId, status, failure)
           .then(() => { unpersistedDispatches.delete(bundleId); })
           .catch(() => undefined);
-      } finally { if (activePrint === entry) activePrint = undefined; }
+      } finally {
+        completedPrints++;
+        if (activePrint === entry) activePrint = undefined;
+      }
     })();
     activePrint = entry;
   };
@@ -298,8 +302,15 @@ export function createPrintHandoffRoutes(services: PrintHandoffServices) {
           return;
         }
         if (request.method !== 'GET') throw new Failure(405, 'method-not-allowed');
-        const manifest = await services.store.read(bundleId);
-        await authorize(HANDOFF_SCOPE);
+        let manifest: HandoffManifest;
+        let completionAtRead: number;
+        do {
+          completionAtRead = completedPrints;
+          manifest = await services.store.read(bundleId);
+          await authorize(HANDOFF_SCOPE);
+          // Completion can persist a terminal status and clear its fallback
+          // during either await. Re-read before reporting printing: false.
+        } while (completionAtRead !== completedPrints);
         await send(response, JSON.stringify({bundle: phoneManifest(manifest), printing: activePrint?.bundleId === bundleId}));
       } catch (error) {
         const failure = error instanceof Failure || error instanceof RemoteAuthFailure
