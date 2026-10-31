@@ -34,6 +34,7 @@
     }
   },
   "scripts": {
+    "prebuild": "npm ci --prefix ../printer-handoff --ignore-scripts",
     "build": "npm run build --prefix ../project && npm run build --prefix ../printer-handoff && tsc -p tsconfig.json",
     "test": "npm run build && node --test tests/*.test.mjs",
     "serve": "npm run build && node dist/server-cli.js"
