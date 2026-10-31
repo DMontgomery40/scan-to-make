@@ -27,6 +27,12 @@ public final class STMActionButton: UIView {
 
   required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
+  private static let accent = UIColor { traits in
+    traits.userInterfaceStyle == .dark
+      ? UIColor(red: 0xF0 / 255, green: 0x8A / 255, blue: 0x63 / 255, alpha: 1)
+      : UIColor(red: 0xA9 / 255, green: 0x3D / 255, blue: 0x20 / 255, alpha: 1)
+  }
+
   private func configure() {
     var config: UIButton.Configuration = primary ? .prominentGlass() : .glass()
     let font = UIFont.preferredFont(forTextStyle: .headline, compatibleWith: traitCollection)
@@ -41,6 +47,8 @@ public final class STMActionButton: UIView {
     config.contentInsets = NSDirectionalEdgeInsets(top: compact ? 8 : 14, leading: compact ? 12 : 20,
                                                    bottom: compact ? 8 : 14, trailing: compact ? 12 : 20)
     control.configuration = config
+    // Primary actions use the app's clay accent (theme.ts `accent`), not system blue.
+    control.tintColor = primary ? Self.accent : nil
     control.isEnabled = !disabled
     control.titleLabel?.numberOfLines = 0
     control.accessibilityLabel = spokenLabel.isEmpty ? buttonTitle : spokenLabel
