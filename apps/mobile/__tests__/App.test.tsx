@@ -1102,16 +1102,30 @@ test('real clients reopen a kept check and upload camera-roll photos by identity
     uri: 'file:///app/ScanMediaFiles/picked.heic',
   };
   const sources: object[] = [];
-  const stills: unknown[] = [];
+  // A close-up stored on the companion but not on this device yet.
+  const stored = stillFrom(
+    { sha256: 'd'.repeat(64), byteLength: 3000, mediaType: 'image/jpeg' },
+    5,
+    'Hinge',
+  );
+  const stills: unknown[] = [stored];
+  const onDevice = new Set<string>([photo.sha256]);
   const kept = syntheticJob('succeeded');
   NativeModules.StillsProcessingBridge = {
     context: async () => 'host|device',
     cancel: async () => {},
     present: async () => {},
-    imageUri: async (file: { sha256: string }) =>
-      `file:///app/ScanMediaFiles/${file.sha256.slice(0, 8)}`,
+    // Like StillsProcessingBridge: a cache miss rejects.
+    imageUri: async (file: { sha256: string }) => {
+      if (!onDevice.has(file.sha256)) {
+        throw Object.assign(Error('Not on this device.'), {
+          code: 'verification-failed',
+        });
+      }
+      return `file:///app/ScanMediaFiles/${file.sha256.slice(0, 8)}`;
+    },
     pickImages: async (limit: number) => {
-      expect(limit).toBe(24);
+      expect(limit).toBe(23); // one close-up is already stored
       return {
         photos: [photo],
         rejected: [{ reason: 'too-large', byteLength: 30_000_000 }],
@@ -1125,6 +1139,11 @@ test('real clients reopen a kept check and upload camera-roll photos by identity
       artifact?: object;
     }) => {
       expect(o.etag).toBe(etag);
+      if (o.artifact) {
+        // A verified download leaves the bytes on the device.
+        onDevice.add((o.artifact as { sha256: string }).sha256);
+        return { status: 200, etag, body: '', file: o.artifact };
+      }
       if (o.path.includes('/detail-stills')) {
         if (o.method === 'POST') {
           sources.push(o.source!);
@@ -1137,9 +1156,6 @@ test('real clients reopen a kept check and upload camera-roll photos by identity
           etag,
           body: JSON.stringify({ captureId: capture.captureId, stills }),
         };
-      }
-      if (o.artifact) {
-        return { status: 200, etag, body: '', file: o.artifact };
       }
       // The collection route lists every kept check after a relaunch.
       return {
@@ -1167,6 +1183,12 @@ test('real clients reopen a kept check and upload camera-roll photos by identity
     ).toBeGreaterThan(0);
 
     await press(tree, 'Add close-up photos');
+    // The stored close-up's lookup rejects, so it's downloaded, then shown.
+    expect(
+      tree.root.findAll(
+        n => n.props.source?.uri === `file:///app/ScanMediaFiles/${'d'.repeat(8)}`,
+      ).length,
+    ).toBeGreaterThan(0);
     await press(tree, 'Choose a photo');
     expect(
       texts(tree).some(t => t.includes('1 photo wasn’t added: 1 is over 25 MB')),
@@ -1181,7 +1203,7 @@ test('real clients reopen a kept check and upload camera-roll photos by identity
       'mediaType',
       'sha256',
     ]);
-    expect(texts(tree)).toContain('1 of 24');
+    expect(texts(tree)).toContain('2 of 24');
   } finally {
     if (tree) await act(async () => tree.unmount());
     delete NativeModules.RetainedCaptureBridge;

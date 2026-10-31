@@ -102,6 +102,8 @@ export function CloseUpsScreen({
   const [drafts, setDrafts] = useState<Draft[]>([]);
   const [previews, setPreviews] = useState<Record<string, string>>({});
   const [viewing, setViewing] = useState<string | null>(null);
+  // Stills whose preview download failed, by still id; each can be retried.
+  const [previewFailed, setPreviewFailed] = useState<Record<string, true>>({});
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const ack = useRef<ProjectAcknowledgment | null>(null);
@@ -170,8 +172,15 @@ export function CloseUpsScreen({
         }
         tried.current.add(still.id);
         const step = (async () => {
-          let uri = (await client.imageUri?.(still)) ?? null;
+          let uri: string | null = null;
+          try {
+            uri = (await client.imageUri?.(still)) ?? null;
+          } catch {
+            // The iOS bridge rejects when the bytes aren't on this device
+            // yet: that's a cache miss, and the download below verifies them.
+          }
           if (!uri && client.download && ack.current) {
+            // A failure from here on is real and shown on the close-up.
             await client.download(projectId, captureId, ack.current, still);
             uri = (await client.imageUri?.(still)) ?? null;
           }
@@ -184,7 +193,9 @@ export function CloseUpsScreen({
             setPreviews(current => ({ ...current, [still.sha256]: uri }));
           }
         } catch {
-          // Keeps the numbered placeholder; View still opens the photo.
+          if (!cancelled) {
+            setPreviewFailed(current => ({ ...current, [still.id]: true }));
+          }
         } finally {
           if (media.current === step) media.current = null;
         }
@@ -193,7 +204,15 @@ export function CloseUpsScreen({
     return () => {
       cancelled = true;
     };
-  }, [phase.kind, stills, busy, services, projectId, captureId]);
+  }, [phase.kind, stills, busy, previewFailed, services, projectId, captureId]);
+  const retryPreview = (still: DetailStill) => {
+    tried.current.delete(still.id);
+    setPreviewFailed(current => {
+      const next = { ...current };
+      delete next[still.id];
+      return next;
+    });
+  };
 
   const room = LIMIT - stills.length - drafts.length;
   const full = stills.length >= LIMIT;
@@ -618,6 +637,18 @@ export function CloseUpsScreen({
                           style={styles.photo}
                         />
                       </Pressable>
+                    ) : previewFailed[still.id] ? (
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel={`Retry preview for close-up ${
+                          index + 1
+                        }`}
+                        disabled={busy}
+                        onPress={() => retryPreview(still)}
+                        style={[styles.photo, styles.placeholder, styles.retry]}
+                      >
+                        <Text style={styles.retryText}>↻</Text>
+                      </Pressable>
                     ) : (
                       <View style={[styles.photo, styles.placeholder]}>
                         <Text style={styles.placeholderText}>{index + 1}</Text>
@@ -632,6 +663,15 @@ export function CloseUpsScreen({
                         {megabytes(still.byteLength)} ·{' '}
                         {MEDIA_NAMES[still.mediaType]}
                       </Text>
+                      {previewFailed[still.id] && !previews[still.sha256] ? (
+                        <Text
+                          accessibilityLiveRegion="polite"
+                          style={styles.error}
+                        >
+                          The preview couldn’t be loaded. Tap it to try again,
+                          or use View.
+                        </Text>
+                      ) : null}
                     </View>
                   </View>
                   <View style={styles.actions}>
@@ -715,6 +755,8 @@ const styles = StyleSheet.create({
   },
   placeholder: { alignItems: 'center', justifyContent: 'center' },
   placeholderText: { ...type.heading, color: colors.muted },
+  retry: { borderWidth: 1.5, borderColor: colors.fail },
+  retryText: { ...type.heading, color: colors.fail },
   photoInfo: { flex: 1, gap: space.xs, alignItems: 'flex-start' },
   uploading: { flexDirection: 'row', gap: space.sm, alignItems: 'center' },
   error: { ...type.caption, color: colors.fail },

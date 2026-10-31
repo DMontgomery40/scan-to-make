@@ -421,3 +421,39 @@ test('thumbnails work with a client whose methods rely on this', async () => {
   ]);
   await act(async () => tree.unmount());
 });
+
+test('a close-up not on this device is downloaded when the cache lookup rejects', async () => {
+  const stored = stillFrom(syntheticPhoto(), 0, 'Hinge');
+  const { services, calls } = fakeScanServices({ stills: [stored] });
+  const { tree } = await render(services);
+  // The first lookup rejects (cache miss); the verified download follows.
+  expect(calls.filter(c => /still/.test(c))).toEqual([
+    'still uri 0',
+    'download still 0',
+    'still uri 0',
+  ]);
+  expect(tree.root.findAllByType(Image).map(i => i.props.source.uri)).toEqual([
+    `file:///synthetic/still-${stored.sha256.slice(-6)}.jpg`,
+  ]);
+  expect(texts(tree)).not.toContain('The preview couldn’t be loaded');
+  await act(async () => tree.unmount());
+});
+
+test('a failed preview download is shown and can be retried', async () => {
+  const stored = stillFrom(syntheticPhoto(), 0);
+  const { services, calls } = fakeScanServices({ stills: [stored] });
+  const download = services.stills.download!;
+  services.stills.download = async () => {
+    calls.push('download failed');
+    throw Error('Couldn’t reach your companion.');
+  };
+  const { tree } = await render(services);
+  expect(texts(tree)).toContain('The preview couldn’t be loaded.');
+  expect(tree.root.findAllByType(Image)).toHaveLength(0);
+  services.stills.download = download;
+  await press(tree, 'Retry preview for close-up 1');
+  expect(tree.root.findAllByType(Image)).toHaveLength(1);
+  expect(texts(tree)).not.toContain('The preview couldn’t be loaded.');
+  expect(calls.filter(c => c === 'download failed')).toHaveLength(1);
+  await act(async () => tree.unmount());
+});

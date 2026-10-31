@@ -319,9 +319,16 @@ export function fakeScanServices(
       },
       imageUri: async still => {
         calls.push(`still uri ${still.ordinal}`);
-        return cached.has(still.sha256)
-          ? `file:///synthetic/still-${still.sha256.slice(-6)}.jpg`
-          : null;
+        // Like the iOS bridge: a cache miss rejects rather than resolving null.
+        if (!cached.has(still.sha256)) {
+          throw Object.assign(
+            Error('The detail photo is not on this device.'),
+            {
+              code: 'verification-failed',
+            },
+          );
+        }
+        return `file:///synthetic/still-${still.sha256.slice(-6)}.jpg`;
       },
     },
     picker: {
