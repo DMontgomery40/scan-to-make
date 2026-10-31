@@ -59,6 +59,8 @@ def parser():
             s.add_argument("--sharp-angle-deg", type=float, default=30)
             s.add_argument("--target-faces", type=int)
             s.add_argument("--deviation-samples", type=int, default=10000)
+            s.add_argument("--orient", choices=("box","pca","keep"), default="box",
+                           help="output frame: minimum-volume box (default), vertex PCA, or input axes")
     return p
 
 

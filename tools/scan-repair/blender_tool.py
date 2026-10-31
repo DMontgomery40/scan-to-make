@@ -164,6 +164,9 @@ def stats(bm):
     nonmanifold = sum(not e.is_manifold for e in bm.edges)
     inconsistent = sum(e.is_manifold and not e.is_contiguous for e in bm.edges)
     closed = bool(bm.faces) and nonmanifold==0 and inconsistent==0
+    # Object Capture closes unseen sides with a few huge faces whose sparse vertices skew PCA.
+    areas = np.array([f.calc_area() for f in bm.faces])
+    coarse = areas > 10*np.median(areas)
     return {"vertices":len(bm.verts),"faces":len(bm.faces),"edges":len(bm.edges),
             "components":len(components(bm)),"boundaryEdges":boundary,
             "nonManifoldEdges":nonmanifold,"inconsistentWindingEdges":inconsistent,
@@ -172,6 +175,7 @@ def stats(bm):
             "principalExtentsMm":np.ptp(principal,axis=0).tolist(),
             "volumeMm3":abs(bm.calc_volume(signed=True)) if closed else None,
             "surfaceAreaMm2":sum(f.calc_area() for f in bm.faces),
+            "coarseFillFaces":int(coarse.sum()),"coarseFillAreaMm2":float(areas[coarse].sum()),
             **box_frame(coords, centre, basis)}
 
 
@@ -235,9 +239,22 @@ def deviation(original, repaired, count):
             "p95Mm":float(np.percentile(distances,95)),"maxMm":max(distances)}
 
 
-def orient(bm):
-    _, centre, basis = axes(bm)
-    rotation = Matrix(basis.T.tolist())
+ORIENT_METHODS = {
+    "box":"minimum-volume oriented box (boxRotation); long to short; ground Z=0; XY bbox centred",
+    "pca":"vertex-PCA descending eigenvalues; deterministic signs; ground Z=0; XY bbox centred",
+    "keep":"input frame; no rotation or translation"}
+
+
+def orient(bm, frame):
+    if frame == "keep":
+        return {"frame":"keep","method":ORIENT_METHODS["keep"],"rotation":np.eye(3).tolist(),
+                "inputCentreMm":[0.0,0.0,0.0],"translationMm":[0.0,0.0,0.0]}
+    coords, centre, basis = axes(bm)
+    if frame == "box":
+        box = box_frame(coords, centre, basis)
+        rotation, centre = Matrix(box["boxRotation"]), np.array(box["boxInputCentreMm"])
+    else:
+        rotation = Matrix(basis.T.tolist())
     for v in bm.verts:
         v.co = rotation @ (v.co-Vector(centre))
     coords = np.array([tuple(v.co) for v in bm.verts])
@@ -245,8 +262,8 @@ def orient(bm):
                     -(coords[:,1].min()+coords[:,1].max())/2,-coords[:,2].min()))
     for v in bm.verts:
         v.co += shift
-    return {"rotation":list(map(list,rotation)),"inputCentreMm":centre.tolist(),"translationMm":list(shift),
-            "method":"vertex-PCA descending eigenvalues; deterministic signs; ground Z=0; XY bbox centred"}
+    return {"frame":frame,"method":ORIENT_METHODS[frame],"rotation":list(map(list,rotation)),
+            "inputCentreMm":centre.tolist(),"translationMm":list(shift)}
 
 
 def export(bm,out):
@@ -332,7 +349,7 @@ def repair(obj,bm,a):
         raise ValueError("repair could not produce topologically watertight geometry; no successful report")
     dev = deviation(original,bm,a["deviation_samples"])
     original.free()
-    transform = orient(bm)
+    transform = orient(bm,a["orient"])
     ops.append({"name":"orient",**transform})
     out = Path(a["out"])
     out.mkdir(parents=True,exist_ok=True)
@@ -342,7 +359,7 @@ def repair(obj,bm,a):
             "outputUnits":"mm","outputSha256":{n:sha(out/n) for n in ("repaired.obj","repaired.stl")},
             "before":before,"after":stats(bm),"operations":ops,"deviation":dev,
             "limitations":["Topological watertightness does not detect self intersections or certify a valid solid.",
-                           "PCA is ambiguous for symmetric objects and does not infer semantic upright.",
+                           "Box and PCA frames are ambiguous for symmetric objects; neither infers semantic upright or print-bed placement.",
                            "One-sided sampled deviation can miss added geometry and unsampled defects."]}
 
 
@@ -362,7 +379,7 @@ def strip_png_metadata(path):
 
 def render(obj,bm,a):
     keep = a.get("keep_orientation", True)
-    transform = None if keep else orient(bm)
+    transform = None if keep else orient(bm,"pca")
     bm.to_mesh(obj.data)
     scene = bpy.context.scene
     scene.render.engine = "BLENDER_WORKBENCH"

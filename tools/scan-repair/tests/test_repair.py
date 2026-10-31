@@ -128,7 +128,7 @@ class RepairTests(unittest.TestCase):
                      ("--weld-mm","nan"),("--target-faces","0")]:
             self.run_cli("repair",p,"--units","mm","--out",self.base/"invalid",*args,ok=False)
 
-    def test_refined_box_rotated_five_degrees(self):
+    def rotated_box(self):
         # Uneven face tessellation tilts PCA even though the surface is a box.
         vertices = [(x*30.3,y*22.6,z*10.85) for x,y,z in CUBE]
         faces = list(FACES)
@@ -145,6 +145,10 @@ class RepairTests(unittest.TestCase):
                 v[i],v[j] = c*v[i]-sn*v[j],sn*v[i]+c*v[j]
                 turned.append(v)
             vertices = turned
+        return vertices, faces
+
+    def test_refined_box_rotated_five_degrees(self):
+        vertices, faces = self.rotated_box()
         p = self.mesh("rotated.obj",vertices,faces)
         result = self.run_cli("measure",p,"--units","mm")
         self.assertGreater(max(abs(a-b) for a,b in zip(result["principalExtentsMm"],
@@ -159,6 +163,40 @@ class RepairTests(unittest.TestCase):
             self.assertAlmostEqual(max(v[axis] for v in projected)-min(v[axis] for v in projected),
                                    span,delta=1e-4)
         self.assertEqual(result,self.run_cli("measure",p,"--units","mm"))
+
+    def test_repair_orients_by_box_frame(self):
+        vertices, faces = self.rotated_box()
+        p = self.mesh("rotated.obj",vertices,faces)
+        def output(name):
+            return [tuple(map(float,line.split()[1:])) for line in
+                    (self.base/name/"repaired.obj").read_text().splitlines() if line.startswith("v ")]
+        def errors(points):
+            return [max(axis)-min(axis)-true for axis,true in zip(zip(*points),(60.6,45.2,21.7))]
+        r = self.repair(p,name="box")
+        self.assertEqual(next(o for o in r["operations"] if o["name"]=="orient")["frame"],"box")
+        self.assertLess(max(map(abs,errors(output("box")))),.05)
+        self.assertAlmostEqual(r["after"]["bboxMm"]["min"][2],0,places=6)
+        self.assertEqual(r["before"]["coarseFillFaces"],0)
+        # PCA stays available, with the tessellation skew that motivated the box default.
+        self.repair(p,"--orient","pca",name="pca")
+        self.assertGreater(max(map(abs,errors(output("pca")))),.1)
+        keep = self.repair(p,"--orient","keep","--denoise-iterations","0",name="keep")
+        transform = next(o for o in keep["operations"] if o["name"]=="orient")
+        self.assertEqual((transform["frame"],transform["translationMm"]),("keep",[0,0,0]))
+        # Blender stores float32 coordinates.
+        for kept,source in zip(sorted(output("keep")),sorted(map(tuple,vertices)),strict=True):
+            for a,b in zip(kept,source):
+                self.assertAlmostEqual(a,b,delta=1e-4)
+
+    def test_coarse_fill_area(self):
+        # Object Capture closes unseen sides with a few huge faces among fine ones.
+        vertices = [(x,y,0) for y in range(11) for x in range(11)]
+        faces = [(y*11+x,y*11+x+1,(y+1)*11+x+1,(y+1)*11+x) for y in range(10) for x in range(10)]
+        vertices += [(20,0,0),(25,0,0),(25,4,0),(20,4,0)]
+        faces.append((121,122,123,124))
+        result = self.run_cli("measure",self.mesh("coarse.obj",vertices,faces),"--units","mm")
+        self.assertEqual(result["coarseFillFaces"],1)
+        self.assertAlmostEqual(result["coarseFillAreaMm2"],20,places=6)
 
     def test_planar_measure(self):
         p = self.mesh("plane.obj",[(0,0,0),(4,0,0),(4,2,0),(0,2,0)],[(0,1,2,3)])
