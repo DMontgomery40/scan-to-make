@@ -1,9 +1,11 @@
 import {spawn} from 'node:child_process';
-import {lstat,mkdir,readdir,writeFile} from 'node:fs/promises';
-import {isAbsolute,join} from 'node:path';
+import {access,lstat,mkdir,readdir,writeFile,readFile,copyFile} from 'node:fs/promises';
+import {constants} from 'node:fs';
+import {isAbsolute,join,resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import type {ScanReference} from '@scan-to-make/contracts/scan-processing';
 import {createScanRunner,type ScanRunner} from './scan-processing-runner.js';
+import type {PrinterMcpProcess} from '@scan-to-make/printer-handoff';
 
 export interface CleanupContext {
  source:string; imported:string; repaired:string; advice:string; corrected:string;
@@ -16,8 +18,16 @@ export interface CleanupRunner {
 export interface CleanupOptions {
  blender:string; toolPath:string; correctTool:string; python?:string; timeoutMs?:number;
  converterAdapter?:string; adapter?:CleanupRunner['adapter']; model?:string; baseUrl?:string; keyEnv?:string;
+ /** Host bootstrap enables post-correction printability. No printer credentials needed. */
+ printable?:{bambu?:PrinterMcpProcess};
 }
 const supervisor=fileURLToPath(new URL('../python/scan_job.py',import.meta.url));
+async function executable(name:string){
+ for(const candidate of isAbsolute(name)?[name]:(process.env.PATH??'').split(':').filter(isAbsolute).map(p=>join(p,name))){
+  try{await access(candidate,constants.X_OK);return candidate;}catch{/* next host PATH entry */}
+ }
+ throw Error('Required make-printable executable is not installed');
+}
 
 export async function checkCleanupDisk(root:string){
  let bytes=0,files=0;
@@ -94,6 +104,23 @@ export function createScanCleanupRunner(options:CleanupOptions):ScanRunner{
    }
   }
   // Every stage lives under the job directory; include source/still bytes in its budget.
-  return command(options.python??'python3',args,join(ctx.imported,'..'),options.blender,stageBudget+30000,ctx);
+  const result=await command(options.python??'python3',args,join(ctx.imported,'..'),options.blender,stageBudget+30000,ctx);
+  if(stage==='correct'&&options.printable){
+   const root=join(ctx.imported,'..'),out=join(root,'printable');
+   const report=JSON.parse(await readFile(join(ctx.corrected,'report.json'),'utf8'));
+   if(report.status!=='complete')throw Error('Incomplete correction');
+   const config=join(root,'printable-config.json');
+   await writeFile(config,JSON.stringify({input:ctx.corrected,output:out,hashes:report.outputs,
+    repairTool:resolve(options.toolPath),blender:options.blender,python:await executable(options.python??'python3'),
+    bambu:options.printable.bambu??{command:process.execPath,args:[await executable('bambu-printer-mcp')]}}),{flag:'wx',mode:0o600});
+   await command(options.python??'python3',[fileURLToPath(new URL('../python/scan_node.py',import.meta.url)),
+    process.execPath,fileURLToPath(new URL('./scan-printable-cli.js',import.meta.url)),config],root,options.blender,150000,ctx);
+   const printable=JSON.parse(await readFile(join(out,'printable.json'),'utf8'));
+   if(printable.status!=='ready')throw Error('Make-printable requires attention');
+   await copyFile(join(ctx.corrected,'tool-calls.jsonl'),join(out,'tool-calls.jsonl'));
+   await writeFile(join(out,'report.json'),JSON.stringify({...report,outputs:printable.outputs,makePrintable:printable}),{flag:'wx',mode:0o600});
+   ctx.corrected=out;
+  }
+  return result;
  }}};
 }

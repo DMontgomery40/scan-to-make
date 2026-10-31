@@ -238,14 +238,64 @@ record (older phone clients accept only its fixed artifact names):
 Both require `captures:read` and the saved project's current `If-Match` ETag.
 `model.entrypoint` is `repaired.obj`; `model.files` lists each basename, SHA-256,
 byte length and MIME type. Download and verify **all** files into the same local
-folder before presenting the OBJ: `mesh.mtl` and `mesh_basecolor_N.png` are its
+folder before presenting the OBJ: `mesh.mtl`, `mesh_basecolor_N.png` and optional
+`mesh_normal_N.png` are its
 relative dependencies. The manifest is retained inside hash-bound `report.json`;
 every request verifies the complete dependency graph. Missing or changed assets
 return 422, never an apparently successful partial textured model. Old untextured
 jobs expose an OBJ-only bundle. A failed job exposes no model bundle.
+
+### Make printable
+
+After correction (or the visual pick), the production cleanup runner calls
+`runMakePrintable` through a supervised local CLI. It snapshots the chosen
+millimetre bundle, runs an exact self-union without moving the model, fills open
+boundaries without moving captured vertices, and exports one closed manifold.
+Disconnected parts, remaining intersections or exterior/bounds changes above
+0.05 mm produce a diagnostic-only blocked result. No voxel remesh, smoothing,
+rescaling, orientation or invented connecting solid is used.
+
+This calls **bambu-printer-mcp**: `blender_mcp_status` discovers the private
+headless adapter, `blender_mcp_call` runs the UV-aware Blender operation, and
+`get_stl_info` independently checks the resulting STL. Every call uses a fresh
+factory-startup Blender; it cannot affect the user's open scene. The existing
+job supervisor owns cancellation, deadlines and descendant cleanup.
+`bambu-printer-mcp` must be installed on the trusted host PATH (the companion
+installers already install it). No printer connection or credentials are needed.
+
+The upstream `merge_vertices` operation welds STL vertices, which does not union
+overlapping solids. Its `blender_mcp_edit_model` helper performs exact unions but
+imports/exports STL only, so this textured operation uses the documented general
+Blender route. `extend_stl_base` translates geometry and adds a rectangular base;
+it cannot satisfy the unchanged-frame/surface requirement. `lay_flat` and
+`slice_stl` remain in printer handoff.
+
+`printable.json` is the commit marker and is embedded in the correction report
+as `makePrintable`. It records exact input/output hashes, topology, exterior
+samples, unchanged-frame checks, inferred fill area, per-shell signed boundary
+volume contributions and sampled thin regions. Boundary contributions are an
+additive volume accounting method, not independent closed regional volumes.
+Thickness samples are diagnostic, not a guaranteed minimum or nozzle-specific
+printability test. Prior AI trimming is not silently reconstructed: its evidence
+must be compared with the capture/photos before accepting the chosen result.
+
+The picked result's own base colour, normal maps and numeric PBR material values
+are retained. All texture references use hash-verified canonical basenames;
+capture import retains its narrower converter grammar. A pre-existing watertight,
+non-intersecting single shell keeps its exact OBJ bytes.
+
+Integration entry point: `runMakePrintable({input, output, hashes, bambu,
+blender, python, signal})`, where directories/executables are absolute trusted
+host paths and `output` must be fresh. `input/corrected.obj` and its material
+closure are in millimetres. A `ready` result provides `outputs`; `blocked` provides
+diagnostics only. The CLI accepts a private config-file path with those fields
+except `signal`. Chosen-attempt normalization belongs before this step and final
+measurement/rendering after it.
 
 A correction with no geometry edits exports the repaired millimetre OBJ unchanged,
 including UVs and material bindings. Edits export retained per-corner UVs and the
 original material files; loss of the captured UV layer makes export fail. Both the
 repair-only runner and full cleanup pipeline stage and publish texture files.
 Render PNGs remain geometry inspection views; the model bundle carries the texture.
+
+The make-printable Blender worker (`scan_printable.py`) and repair core are resolved beside the configured `SCAN_TO_MAKE_SCAN_REPAIR_TOOL`, in the independent cleanup installation. They are not part of the Mac app payload. The direct `runMakePrintable` interface takes that absolute `repairTool` path too.

@@ -38,7 +38,7 @@ export type ScanReference=z.infer<typeof ScanReferenceSchema>;
 export type ScanArtifactName=z.infer<typeof ScanArtifactNameSchema>;
 // Separate response: adding material keys to the job's strict artifact record
 // would prevent older phones from opening otherwise compatible jobs.
-export const ScanModelAssetNameSchema=z.string().regex(/^(?:repaired\.obj|mesh\.mtl|mesh_basecolor_[0-9]+\.png)$/);
+export const ScanModelAssetNameSchema=z.string().regex(/^(?:repaired\.obj|mesh\.mtl|mesh_(?:basecolor|normal)_[0-9]+\.png)$/);
 export const ScanModelAssetSchema=z.strictObject({name:ScanModelAssetNameSchema,sha256:z.string().regex(/^[a-f0-9]{64}$/),byteLength:z.number().int().positive().max(64*1024*1024),mediaType:z.enum(['model/obj','text/plain','image/png'])});
 export const ScanModelAssetsSchema=z.strictObject({schema:z.literal('scan-to-make.scan-model/0.1'),jobId:z.uuid(),entrypoint:z.literal('repaired.obj'),files:z.array(ScanModelAssetSchema).min(1).max(256)}).superRefine((model,ctx)=>{
  if(new Set(model.files.map(f=>f.name)).size!==model.files.length||!model.files.some(f=>f.name===model.entrypoint)||model.files.reduce((sum,f)=>sum+f.byteLength,0)>64*1024*1024)ctx.addIssue({code:'custom',message:'Invalid model bundle'});
