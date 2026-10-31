@@ -1,3 +1,5 @@
+import {ModelSizeStore} from './model-size.js';
+import {createModelSizeRunner,installedBambuProcess} from './model-size-runner.js';
 import {readFile} from 'node:fs/promises';
 import {ScanProcessingStore,createScanCleanupRunner} from './scan-processing.js';
 import {dirname,isAbsolute,join} from 'node:path';
@@ -38,7 +40,10 @@ const handoffConfigPath=process.env.SCAN_TO_MAKE_PRINTER_HANDOFF_CONFIG||undefin
 const handoffDirectory=process.env.SCAN_TO_MAKE_PRINTER_HANDOFF_DIR||undefined;
 if((handoffConfigPath===undefined)!==(handoffDirectory===undefined))throw new Error('Printer handoff requires both its config path and bundle directory');
 if(handoffConfigPath!==undefined&&(!remoteAuth||!isAbsolute(handoffConfigPath)||!isAbsolute(handoffDirectory!)))throw new Error('Printer handoff requires authentication and absolute config and directory paths');
-const printHandoff=handoffConfigPath===undefined?undefined:createPrintHandoffServices(await readPrinterHandoffConfig(handoffConfigPath),handoffDirectory!);
+const handoffConfig=handoffConfigPath===undefined?undefined:await readPrinterHandoffConfig(handoffConfigPath);
+const printHandoff=handoffConfig===undefined?undefined:createPrintHandoffServices(handoffConfig,handoffDirectory!);
+if(capture?.scanProcessing&&captureDirectory)capture.modelSize=new ModelSizeStore(capture.storage,capture.scanProcessing,join(captureDirectory,'captures'),
+ createModelSizeRunner(async()=>handoffConfig?.backend==='bambu-printer-mcp'?handoffConfig.process:installedBambuProcess()));
 // The port variable keeps its original name so existing operator setups still start.
 let lanTls;
 const certPath = process.env.SCAN_TO_MAKE_LAN_TLS_CERT;

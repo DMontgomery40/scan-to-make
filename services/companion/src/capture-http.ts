@@ -1,3 +1,5 @@
+import {ModelSizeRequestSchema,SizePlanError} from '@scan-to-make/contracts/model-size';
+import {ModelSizeStore,ModelSizeFailure} from './model-size.js';
 import {ScanProcessingStore,ScanProcessingFailure} from './scan-processing.js';
 import {ScanProcessingRequestSchema,ScanArtifactNameSchema} from '@scan-to-make/contracts/scan-processing';
 import type {IncomingMessage,ServerResponse} from 'node:http';
@@ -8,7 +10,7 @@ import {DetailStillStore,DetailStillFailure,sniffDetailStillMediaType} from './d
 import {MAX_DETAIL_STILL_BYTES} from '@scan-to-make/contracts/detail-still';
 import {RemoteAuthFailure,type RemoteScope} from './remote-auth.js';
 
-export interface CaptureServices {storage:FileSavedProjectStorage;captures?:CaptureStore;detailStills?:DetailStillStore;scanProcessing?:ScanProcessingStore}
+export interface CaptureServices {storage:FileSavedProjectStorage;captures?:CaptureStore;detailStills?:DetailStillStore;scanProcessing?:ScanProcessingStore;modelSize?:ModelSizeStore}
 class Failure extends Error {
  constructor(readonly status:number,readonly code:string){super(code);}
 }
@@ -51,8 +53,9 @@ export function createCaptureRoutes(services:CaptureServices){
     const stills=/^\/v1\/saved-projects\/([A-Za-z0-9][A-Za-z0-9_-]{0,127})\/captures\/([a-fA-F0-9-]{36})\/detail-stills(?:\/([a-fA-F0-9-]{36}))?$/.exec(url.pathname);
     const processing=/^\/v1\/saved-projects\/([A-Za-z0-9][A-Za-z0-9_-]{0,127})\/captures\/([a-fA-F0-9-]{36})\/scan-processing(?:\/([a-fA-F0-9-]{36})(?:\/artifacts\/([^/]+))?)?$/.exec(url.pathname);
     const modelAssets=/^\/v1\/saved-projects\/([A-Za-z0-9][A-Za-z0-9_-]{0,127})\/captures\/([a-fA-F0-9-]{36})\/scan-processing\/([a-fA-F0-9-]{36})\/model-assets(?:\/([^/]+))?$/.exec(url.pathname);
-    if(!match&&!stills&&!processing&&!modelAssets)throw new Failure(404,'not-found');
-    const id=(modelAssets??processing??stills??match)![1]!,captureId=match?.[2],kind=match?.[3] as 'original'|'derived'|'report'|undefined;
+    const size=/^\/v1\/saved-projects\/([A-Za-z0-9][A-Za-z0-9_-]{0,127})\/captures\/([a-fA-F0-9-]{36})\/scan-processing\/([a-fA-F0-9-]{36})\/size(?:\/artifacts\/([a-fA-F0-9-]{36}))?$/.exec(url.pathname);
+    if(!match&&!stills&&!processing&&!modelAssets&&!size)throw new Failure(404,'not-found');
+    const id=(size??modelAssets??processing??stills??match)![1]!,captureId=match?.[2],kind=match?.[3] as 'original'|'derived'|'report'|undefined;
     const stillCaptureId=stills?.[2]?.toLowerCase(),stillId=stills?.[3]?.toLowerCase();
     if(stillCaptureId&&!z.uuid().safeParse(stillCaptureId).success)throw new Failure(400,'invalid-request');
     if(stillId&&!z.uuid().safeParse(stillId).success)throw new Failure(400,'invalid-request');
@@ -61,16 +64,16 @@ export function createCaptureRoutes(services:CaptureServices){
     const captureRoute=!!match&&match[0]!==`/v1/saved-projects/${id}`;
     if(captureRoute&&!services.captures)throw new Failure(404,'not-found');
     const writing=request.method==='PUT'||request.method==='POST';
-    const scope:RemoteScope=modelAssets?'captures:read':processing?(writing||request.method==='DELETE'?'captures:import':'captures:read'):stills?(writing||request.method==='DELETE'?'captures:import':'captures:read'):captureRoute?(writing?'captures:import':'captures:read'):(writing?'projects:write':'projects:read');
+    const scope:RemoteScope=size?(writing?'captures:import':'captures:read'):modelAssets?'captures:read':processing?(writing||request.method==='DELETE'?'captures:import':'captures:read'):stills?(writing||request.method==='DELETE'?'captures:import':'captures:read'):captureRoute?(writing?'captures:import':'captures:read'):(writing?'projects:write':'projects:read');
     await authorize(scope);
-    if(modelAssets?request.method!=='GET':processing?(processing[3]?(processing[4]?request.method!=='GET':!['GET','DELETE'].includes(request.method??'')):!['GET','POST'].includes(request.method??'')):stills?(stillId?!['GET','DELETE'].includes(request.method??''):!['GET','POST'].includes(request.method??'')):captureRoute?(captureId?request.method!=='GET':request.method!=='POST'):!['GET','PUT'].includes(request.method??''))throw new Failure(405,'method-not-allowed');
+    if(size?(size[4]?request.method!=='GET':!['GET','POST'].includes(request.method??'')):modelAssets?request.method!=='GET':processing?(processing[3]?(processing[4]?request.method!=='GET':!['GET','DELETE'].includes(request.method??'')):!['GET','POST'].includes(request.method??'')):stills?(stillId?!['GET','DELETE'].includes(request.method??''):!['GET','POST'].includes(request.method??'')):captureRoute?(captureId?request.method!=='GET':request.method!=='POST'):!['GET','PUT'].includes(request.method??''))throw new Failure(405,'method-not-allowed');
     if(active)throw new Failure(429,'busy');
     const controller=new AbortController();active={controller,done:new Promise<void>(resolve=>finish=resolve)};
     disconnected=()=>{if(!response.writableEnded)controller.abort();};response.once('close',disconnected);
     const assertActive=()=>{if(controller.signal.aborted)throw new Failure(499,'cancelled');};
     const ifMatch=header('if-match'),ifNoneMatch=header('if-none-match');
     let revision=0,stillLabel:string|undefined;
-    if(captureRoute||stills||processing||modelAssets){
+    if(captureRoute||stills||processing||modelAssets||size){
      const keys=[...url.searchParams.keys()];const raw=url.searchParams.get('projectRevision');
      if((stillPost?(new Set(keys).size!==keys.length||keys.some(key=>!['projectRevision','label'].includes(key))):keys.length!==1||keys[0]!=='projectRevision')||raw===null||! /^(0|[1-9][0-9]*)$/.test(raw)||!Number.isSafeInteger(Number(raw)))throw new Failure(400,'invalid-request');
      if(stillPost)stillLabel=url.searchParams.get('label')??undefined;
@@ -80,7 +83,26 @@ export function createCaptureRoutes(services:CaptureServices){
      const current=await projects.get(id);
      if(current.etag!==ifMatch||current.project.revision!==revision)throw new Failure(412,'precondition-failed');
     }else if(url.search)throw new Failure(400,'invalid-request');
-    if(processing||modelAssets){
+    if(size){
+     if(!services.modelSize)throw new Failure(404,'not-found');
+     const cid=size[2]!.toLowerCase(),jid=size[3]!.toLowerCase();
+     if(![cid,jid,...(size[4]?[size[4].toLowerCase()]:[])].every(v=>z.uuid().safeParse(v).success))throw new Failure(400,'invalid-request');
+     const input={projectId:id,projectRevision:revision,captureId:cid,expectedProjectETag:ifMatch};
+     let result:unknown,artifact:Awaited<ReturnType<ModelSizeStore['artifact']>>|undefined;
+     if(size[4])artifact=await services.modelSize.artifact(input,jid,z.uuid().parse(size[4].toLowerCase()));
+     else if(request.method==='POST'){
+      if(!/^application\/json(?:;\s*charset=utf-8)?$/i.test(header('content-type')??'')||!['identity',undefined].includes(header('content-encoding')))throw new Failure(415,'unsupported-media-type');
+      const bytes=await body(request,controller.signal,4096);let value;
+      try{value=ModelSizeRequestSchema.parse(JSON.parse(bytes.toString('utf8')));}catch{throw new Failure(400,'invalid-request');}
+      result={size:await services.modelSize.apply(input,jid,value,controller.signal,()=>authorize(scope))};
+     }else result={size:await services.modelSize.get(input,jid)};
+     await services.storage.withCurrentProject(id,revision,async()=>{
+      await authorize(scope);assertActive();response.setHeader('ETag',ifMatch!);
+      if(artifact){response.setHeader('Content-Type',artifact.ref.mediaType);response.setHeader('X-Content-SHA256',artifact.ref.sha256);await send(response,artifact.bytes);}
+      else{response.setHeader('Content-Type','application/json');await send(response,JSON.stringify(result));}
+     },ifMatch);
+     return;
+    }else if(processing||modelAssets){
      if(!services.scanProcessing)throw new Failure(404,'not-found');
      const route=(modelAssets??processing)!,cid=route[2]!.toLowerCase(),jid=route[3]?.toLowerCase();
      if(!z.uuid().safeParse(cid).success||jid&&!z.uuid().safeParse(jid).success)throw new Failure(400,'invalid-request');
@@ -166,8 +188,8 @@ export function createCaptureRoutes(services:CaptureServices){
      const result=await projects.get(id);await authorize(scope);assertActive();response.setHeader('ETag',result.etag);await send(response,result.bytes);
     }
    }catch(error){
-    const failure=error instanceof Failure||error instanceof RemoteAuthFailure?error:error instanceof SavedProjectSyncFailure?new Failure(snapshotStatus[error.code],error.code):error instanceof ScanProcessingFailure?new Failure({'busy':429,'not-found':404,'processing-unavailable':422,'invalid-request':400}[error.code],error.code):error instanceof DetailStillFailure?new Failure({'not-found':404,'still-limit':409,'unsupported-media-type':415,'invalid-still':400,'payload-too-large':413,'still-unavailable':422}[error.code],error.code):['EACCES','EIO','ENOSPC','EROFS'].includes((error as NodeJS.ErrnoException)?.code??'')?new Failure(503,'storage-unavailable'):new Failure(422,'capture-unavailable');
-    if(!response.destroyed&&!response.headersSent){response.statusCode=failure.status;await send(response,JSON.stringify({error:{code:failure.code,message:failure.code}}));}
+    const failure=error instanceof Failure||error instanceof RemoteAuthFailure||error instanceof ModelSizeFailure?error:error instanceof SizePlanError?new Failure(422,error.code):error instanceof SavedProjectSyncFailure?new Failure(snapshotStatus[error.code],error.code):error instanceof ScanProcessingFailure?new Failure({'busy':429,'not-found':404,'processing-unavailable':422,'invalid-request':400}[error.code],error.code):error instanceof DetailStillFailure?new Failure({'not-found':404,'still-limit':409,'unsupported-media-type':415,'invalid-still':400,'payload-too-large':413,'still-unavailable':422}[error.code],error.code):['EACCES','EIO','ENOSPC','EROFS'].includes((error as NodeJS.ErrnoException)?.code??'')?new Failure(503,'storage-unavailable'):new Failure(422,'capture-unavailable');
+    if(!response.destroyed&&!response.headersSent){response.statusCode=failure.status;await send(response,JSON.stringify({error:{code:failure.code,message:error instanceof SizePlanError?error.message:failure.code}}));}
    }finally{
     if(disconnected)response.off('close',disconnected);
     if(finish){active=undefined;finish();}
