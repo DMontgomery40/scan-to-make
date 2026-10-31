@@ -70,7 +70,7 @@ The list has one obvious way to start. It opens on a box for instructions ("what
 - a **scan**: the LiDAR capture;
 - **photos**: a photo or two, or none when the instructions name a product with published dimensions.
 
-The instructions are used exactly as written.
+The instructions are used exactly as written. They can include product names, model numbers and pasted links ("a mount for this mic on this arm: <link> <link>"), which is how exact products get in when a shop blocks lookups.
 
 **Scan** opens the LiDAR capture. When the scan ends, the phone sends the model **and the photos Object Capture took** to the Mac by itself. There is no send button, photo step or size step. If sending can't happen, the phone says why and what to do.
 
