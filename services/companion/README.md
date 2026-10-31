@@ -111,7 +111,7 @@ one still), the 25 MiB and 24-per-capture limits, and error codes.
 
 ## Retained scan processing
 
-Host-configured Blender repair, measurement, ten canonical views and optional
-reference-dimension errors are available as preview-only capture jobs. See
+Host-configured capture import, Blender repair, close-up advice, correction,
+measurement and ten canonical views run as one preview-only capture job. See
 [SCAN-PROCESSING.md](SCAN-PROCESSING.md) for configuration, routes, retention,
 resource bounds and tests.

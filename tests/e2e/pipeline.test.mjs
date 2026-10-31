@@ -373,24 +373,6 @@ test(
 );
 
 test(
-  'companion scan-processing integrated advise stage (HTTP)',
-  {
-    skip:
-      'KAN-119 (Codex): companion scan-processing has no advise stage on main; only repair→measure→render (services/companion/SCAN-PROCESSING.md). TODO: assert POST/GET job stages when Codex lands advise in the companion pipeline.',
-  },
-  () => {}
-);
-
-test(
-  'companion scan-processing integrated scan-correct stage (HTTP)',
-  {
-    skip:
-      'KAN-119 (Codex): companion scan-processing has no scan-correct stage on main. TODO: drive scan-correct via companion HTTP with a fake model adapter when the pipeline stage lands.',
-  },
-  () => {}
-);
-
-test(
   'printer handoff package to fixture MCP server',
   {
     skip:

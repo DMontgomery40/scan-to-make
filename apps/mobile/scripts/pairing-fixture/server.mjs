@@ -120,7 +120,7 @@ if (captureEnabled || stillsProcessingEnabled) {
           for (const name of SCAN_VIEW_NAMES)
             await writeFile(join(output, name), fixturePng);
         return Buffer.from(
-          JSON.stringify({ principalExtentsMm: [62.9, 48.7, 21.7] }),
+          JSON.stringify({ principalExtentsMm: [62.9, 48.7, 21.7], boxExtentsMm: [62.9, 48.7, 21.7] }),
         );
       },
     };

@@ -24,7 +24,7 @@ static NSUInteger const CAP_LIMIT = 64 * 1024 * 1024;
 static NSUInteger const STILL_LIMIT = 25 * 1024 * 1024;
 static NSString *Context(NSDictionary *p) { return p ? [NSString stringWithFormat:@"%@|%@",p[@"baseUrl"],p[@"deviceId"]] : nil; }
 static NSURL *Root(NSString *name) { NSURL *u=[[[NSFileManager defaultManager] URLsForDirectory:NSApplicationSupportDirectory inDomains:NSUserDomainMask] firstObject];return [u URLByAppendingPathComponent:name isDirectory:YES]; }
-static NSString *Extension(NSString *type) { return [@{@"image/jpeg":@"jpg",@"image/heic":@"heic",@"image/png":@"png",@"model/stl":@"stl",@"model/obj":@"obj",@"application/json":@"json"} objectForKey:type]; }
+static NSString *Extension(NSString *type) { return [@{@"image/jpeg":@"jpg",@"image/heic":@"heic",@"image/png":@"png",@"model/stl":@"stl",@"model/obj":@"obj",@"application/json":@"json",@"application/x-ndjson":@"jsonl"} objectForKey:type]; }
 static BOOL IsStillMedia(NSString *type) { return [@[@"image/jpeg",@"image/heic",@"image/png"] containsObject:type]; }
 static NSURL *FileURL(NSDictionary *f) {
   if(![f isKindOfClass:NSDictionary.class])return nil;
@@ -156,7 +156,7 @@ RCT_REMAP_METHOD(request,requestOptions:(NSDictionary*)o resolve:(RCTPromiseReso
   BOOL stillItem=Matches(path,[NSString stringWithFormat:@"%@/detail-stills/%@%@",prefix,uuid,revision]);
   BOOL processingCollection=Matches(path,[NSString stringWithFormat:@"%@/scan-processing%@",prefix,revision]);
   BOOL processingJob=Matches(path,[NSString stringWithFormat:@"%@/scan-processing/%@%@",prefix,uuid,revision]);
-  BOOL processingArtifact=Matches(path,[NSString stringWithFormat:@"%@/scan-processing/%@/artifacts/(repaired\\.stl|repaired\\.obj|report\\.json|pos_x\\.png|pos_y\\.png|pos_z\\.png|neg_x\\.png|neg_y\\.png|neg_z\\.png|iso_pp\\.png|iso_np\\.png|iso_nn\\.png|iso_pn\\.png)%@",prefix,uuid,revision]);
+  BOOL processingArtifact=Matches(path,[NSString stringWithFormat:@"%@/scan-processing/%@/artifacts/(repaired\\.stl|repaired\\.obj|report\\.json|corrected\\.stl|corrected\\.obj|correction\\.json|correction-calls\\.jsonl|advice\\.json|advice-0[1-4]\\.png|pos_x\\.png|pos_y\\.png|pos_z\\.png|neg_x\\.png|neg_y\\.png|neg_z\\.png|iso_pp\\.png|iso_np\\.png|iso_nn\\.png|iso_pn\\.png)%@",prefix,uuid,revision]);
   BOOL download=stillItem||processingArtifact;
   BOOL validMethod=[method isKindOfClass:NSString.class]&&[@[@"GET",@"POST",@"DELETE"] containsObject:method];
   BOOL shape=validMethod&&[o[@"etag"] isKindOfClass:NSString.class]&&Matches(o[@"etag"],@"\"[a-f0-9]{64}\"")&&!o[@"create"]&&(

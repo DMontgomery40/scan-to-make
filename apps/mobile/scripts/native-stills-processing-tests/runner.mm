@@ -96,6 +96,16 @@ static void Require(BOOL ok,NSString *why){if(!ok){fprintf(stderr,"FAIL %s\n",wh
   dispatch_after(dispatch_time(DISPATCH_TIME_NOW,100*NSEC_PER_MSEC),dispatch_get_main_queue(),^{[self pollJob:n+1];});
  } attempt:0];
 }
+// The fixture's legacy job has none of these outputs: a 404 proves the native
+// path/media allowlist accepted the request and it reached the paired server.
+- (void)checkCleanupArtifactPaths:(NSUInteger)index {
+ NSArray *names=@[@"advice.json",@"advice-01.png",@"advice-02.png",@"advice-03.png",@"advice-04.png",@"corrected.obj",@"corrected.stl",@"correction.json",@"correction-calls.jsonl"];
+ if(index==names.count){[self deleteStill];return;}
+ NSString *name=names[index];NSString *type=[name hasSuffix:@".png"]?@"image/png":[name hasSuffix:@".obj"]?@"model/obj":[name hasSuffix:@".stl"]?@"model/stl":[name hasSuffix:@".jsonl"]?@"application/x-ndjson":@"application/json";
+ NSMutableDictionary *o=[self options:@"GET" path:[self path:[NSString stringWithFormat:@"/scan-processing/%@/artifacts/%@?",self.job[@"jobId"],name]]];
+ o[@"artifact"]=@{@"sha256":self.jpegFile[@"sha256"],@"byteLength":@1,@"mediaType":type};
+ [self request:o status:404 then:^(NSDictionary*r){[self checkCleanupArtifactPaths:index+1];} attempt:0];
+}
 - (void)downloadArtifacts {
  NSString *jobId=self.job[@"jobId"];
  NSDictionary *pngRef=self.job[@"artifacts"][@"pos_x.png"];
@@ -107,7 +117,7 @@ static void Require(BOOL ok,NSString *why){if(!ok){fprintf(stderr,"FAIL %s\n",wh
   [self requireImageUri:pngRef then:^{}];
   NSMutableDictionary *report=[self options:@"GET" path:[self path:[NSString stringWithFormat:@"/scan-processing/%@/artifacts/report.json?",jobId]]];report[@"artifact"]=self.job[@"artifacts"][@"report.json"];
   [self request:report status:200 then:^(NSDictionary*rr){
-   Require([rr[@"file"] isEqual:self.job[@"artifacts"][@"report.json"]],@"report download identity");[self deleteStill];
+   Require([rr[@"file"] isEqual:self.job[@"artifacts"][@"report.json"]],@"report download identity");[self checkCleanupArtifactPaths:0];
   } attempt:0];
  } attempt:0];
 }
