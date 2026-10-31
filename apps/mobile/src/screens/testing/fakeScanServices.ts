@@ -17,7 +17,10 @@ import {
   type ScanServices,
   type ScanTarget,
 } from '../scanServices';
-import { sessionHandoffMemory } from '../../printing/printerHandoff';
+import {
+  sessionHandoffMemory,
+  sessionPrinterChoice,
+} from '../../printing/printerHandoff';
 
 export const PROJECT_ID = 'synthetic-project';
 export const CAPTURE_ID = '6f0c1d52-9a4e-4b7a-8f3e-2d1c0b9a8e71';
@@ -346,6 +349,7 @@ export function fakeScanServices(
     },
     jobs: sessionJobMemory(),
     handoffs: sessionHandoffMemory(),
+    printerChoice: sessionPrinterChoice(),
     imageUri: async file => `file:///synthetic/${file.sha256.slice(0, 8)}.png`,
   };
   const advice = options.advice;

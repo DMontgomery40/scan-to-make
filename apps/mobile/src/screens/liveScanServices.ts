@@ -9,7 +9,14 @@ import {
   DetailStillsClient,
   type DetailStillNative,
 } from '../stills/detailStills';
-import { storedHandoffMemory } from '../printing/printerHandoff';
+import {
+  storedHandoffMemory,
+  storedPrinterChoice,
+} from '../printing/printerHandoff';
+import {
+  companionPrinterHandoff,
+  type PrinterHandoffNative,
+} from '../printing/companionPrinterHandoff';
 import {
   sessionJobMemory,
   unavailableScanServices,
@@ -69,6 +76,7 @@ export function liveScanServices(
   modules: {
     StillsProcessingBridge?: StillsBridge;
     RetainedCaptureBridge?: CaptureNative;
+    PrinterHandoffBridge?: PrinterHandoffNative;
   } = NativeModules,
 ): ScanServices {
   const bridge = modules.StillsProcessingBridge;
@@ -94,6 +102,11 @@ export function liveScanServices(
     jobs: sessionJobMemory(),
     // A sent print job outlives this screen and the app session.
     handoffs: storedHandoffMemory(captures),
+    printerChoice: storedPrinterChoice(captures),
+    // Present only in builds with the printer handoff transport.
+    ...(modules.PrinterHandoffBridge
+      ? { printing: companionPrinterHandoff(modules.PrinterHandoffBridge) }
+      : {}),
     imageUri: file => client.imageUri(file),
   };
 }

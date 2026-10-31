@@ -410,7 +410,10 @@ test('a cleaned-up scan offers Send to printer only when printing is set up', as
     expect(send).toHaveLength(onPrint ? 1 : 0);
     if (onPrint) {
       await press(tree, 'Send to printer');
-      expect(onPrint).toHaveBeenCalled();
+      // The finished check is what gets sent.
+      expect(onPrint).toHaveBeenCalledWith(
+        expect.objectContaining({ jobId: JOB_ID, status: 'succeeded' }),
+      );
     }
     await act(async () => tree.unmount());
   }

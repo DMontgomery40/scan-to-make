@@ -1,11 +1,17 @@
+import type { CaptureFile } from '../capture/retainedCaptures';
 import type { ProjectAcknowledgment } from '../screens/scanServices';
 
 /**
  * Hands a cleaned scan to a printer MCP server on the companion computer
- * (services/printer-handoff). The phone picks the backend and says what to
- * make; slicing and printing stay with that server.
+ * (services/printer-handoff). The phone picks the backend, sends the cleaned
+ * model and any request, and answers the printer server's confirmations;
+ * slicing and printing stay with that server.
  */
 export type PrinterBackend = 'bambu-printer-mcp' | 'mcp-3d-printer-server';
+export const PRINTER_BACKENDS: readonly PrinterBackend[] = [
+  'bambu-printer-mcp',
+  'mcp-3d-printer-server',
+];
 export type PrinterOption = {
   backend: PrinterBackend;
   /** The operator's defaults, e.g. `{ printerType: 'klipper' }`. */
@@ -17,22 +23,77 @@ export type HandoffStatus =
   | 'designed'
   | 'sliced'
   | 'printed'
+  /**
+   * The printer software has been asked to print. While the companion is
+   * still printing that is normal (its questions come now); once it stops
+   * without hearing back, the job may have started and is never resent.
+   */
+  | 'uncertain'
   | 'failed';
 export type Handoff = {
   id: string;
   backend: PrinterBackend;
   status: HandoffStatus;
   failure?: string;
+  /** The request saved with it; an agent on the computer acts on it. */
+  prompt?: string;
+  /** The companion is slicing or printing it right now. */
+  printing?: boolean;
 };
 
+/** A photo the printer server took just before asking, e.g. of the bed. */
+export type CameraSnapshot = {
+  mediaType: 'image/jpeg' | 'image/png';
+  base64: string;
+};
+/**
+ * A printer server's question (an MCP elicitation), relayed by the companion.
+ * Nothing prints until the person answers; an unanswered one expires as cancel.
+ */
+export type Confirmation = {
+  id: string;
+  mode: 'form' | 'url';
+  message: string;
+  requestedSchema?: unknown;
+  url?: string;
+  cameraSnapshot?: CameraSnapshot;
+  /** When the companion asked, on its clock. Missing from older companions. */
+  createdAtMs?: number;
+  /** When the companion stops waiting, on its clock. */
+  expiresAtMs: number;
+};
+
+/**
+ * When a question stops taking answers, on this phone's clock: the time it
+ * was first seen here plus how long the companion waits. That is never
+ * earlier than the companion's own deadline, whatever the two clocks say.
+ * Null when the companion doesn't say when it asked; then only the
+ * companion ends the question.
+ */
+export function confirmationDeadline(confirmation: Confirmation, firstSeenMs: number) {
+  return confirmation.createdAtMs === undefined
+    ? null
+    : firstSeenMs + Math.max(0, confirmation.expiresAtMs - confirmation.createdAtMs);
+}
+export type ConfirmationValue = string | number | boolean | string[];
+export type ConfirmationAnswer =
+  | { action: 'accept'; content: Record<string, ConfirmationValue> }
+  | { action: 'decline' | 'cancel' };
+
 export interface PrinterHandoff {
-  /** The backends the companion is set up to run, with their defaults. */
-  backends(ack: ProjectAcknowledgment): Promise<PrinterOption[]>;
+  /**
+   * The backends the companion is set up to run, with their defaults, or
+   * null when the companion doesn't say and uses its own configured one.
+   */
+  backends(ack: ProjectAcknowledgment): Promise<PrinterOption[] | null>;
+  /** The handoffs already on the companion, by id. */
+  bundleIds(ack: ProjectAcknowledgment): Promise<string[]>;
+  /** Sends the verified cleaned model; `backend` null leaves it to the companion. */
   create(
     projectId: string,
     captureId: string,
     ack: ProjectAcknowledgment,
-    request: { prompt: string; backend: PrinterBackend },
+    request: { prompt: string; backend: PrinterBackend | null; model: CaptureFile },
   ): Promise<Handoff>;
   status(
     projectId: string,
@@ -42,7 +103,7 @@ export interface PrinterHandoff {
   ): Promise<Handoff>;
   /**
    * The handoff a send whose reply was lost may have created: the same
-   * request, created no earlier than `since` (allowing for clock skew).
+   * request, and not one of the handoffs listed before that send began.
    * Null when the companion has none.
    */
   find(
@@ -51,13 +112,28 @@ export interface PrinterHandoff {
     ack: ProjectAcknowledgment,
     request: UncertainSend,
   ): Promise<Handoff | null>;
+  /** Starts slicing and printing; confirmations follow. */
+  print(handoffId: string): Promise<void>;
+  /** Stops a running handoff. False when the companion can't stop one. */
+  cancel(handoffId: string): Promise<boolean>;
+  /** Questions waiting for an answer, newest last. */
+  confirmations(): Promise<Confirmation[]>;
+  answer(confirmationId: string, answer: ConfirmationAnswer): Promise<void>;
 }
 
 /** A send whose outcome is unknown because its reply never arrived. */
 export type UncertainSend = {
   startedAtMs: number;
   prompt: string;
-  backend: PrinterBackend;
+  /** Null when the companion picks its own printer software. */
+  backend: PrinterBackend | null;
+  /** SHA-256 of the model sent. */
+  model: string;
+  /**
+   * The handoffs on the companion just before this send, so an earlier
+   * identical send is never mistaken for it. Missing from older records.
+   */
+  before?: string[];
 };
 /** What this phone keeps per scan: the job it sent, or a send it can't confirm. */
 export type HandoffRecord = { handoffId: string } | { uncertain: UncertainSend };
@@ -83,7 +159,7 @@ export interface HandoffMemory {
   ): Promise<void>;
 }
 const isBackend = (value: unknown): value is PrinterBackend =>
-  value === 'bambu-printer-mcp' || value === 'mcp-3d-printer-server';
+  PRINTER_BACKENDS.includes(value as PrinterBackend);
 function recordOf(value: unknown): HandoffRecord | null {
   const v = value as { handoffId?: unknown; uncertain?: Partial<UncertainSend> } | null;
   if (typeof v?.handoffId === 'string') return { handoffId: v.handoffId };
@@ -91,8 +167,21 @@ function recordOf(value: unknown): HandoffRecord | null {
   return u &&
     typeof u.startedAtMs === 'number' &&
     typeof u.prompt === 'string' &&
-    isBackend(u.backend)
-    ? { uncertain: { startedAtMs: u.startedAtMs, prompt: u.prompt, backend: u.backend } }
+    typeof u.model === 'string' &&
+    (u.backend === null || isBackend(u.backend))
+    ? {
+        uncertain: {
+          startedAtMs: u.startedAtMs,
+          prompt: u.prompt,
+          backend: u.backend,
+          model: u.model,
+          // An unreadable list falls back to matching by time; the lost send
+          // itself is never forgotten.
+          ...(Array.isArray(u.before) && u.before.every(id => typeof id === 'string')
+            ? { before: [...u.before] }
+            : {}),
+        },
+      }
     : null;
 }
 const memoryKey = (projectId: string, captureId: string) =>
@@ -143,6 +232,44 @@ export function storedHandoffMemory(native: {
   };
 }
 
+/**
+ * The printer software the person chose once (KAN-125). It is sent with each
+ * handoff and offered again only when the companion can't run it.
+ */
+export interface PrinterChoiceMemory {
+  load(): Promise<PrinterBackend | null>;
+  save(backend: PrinterBackend): Promise<void>;
+}
+const CHOICE_KEY = JSON.stringify(['printer-choice', 1]);
+
+export function sessionPrinterChoice(): PrinterChoiceMemory {
+  let chosen: PrinterBackend | null = null;
+  return {
+    load: async () => chosen,
+    save: async backend => {
+      chosen = backend;
+    },
+  };
+}
+
+export function storedPrinterChoice(native: {
+  read(key: string): Promise<string | null>;
+  write(key: string, body: string): Promise<void>;
+}): PrinterChoiceMemory {
+  return {
+    async load() {
+      const body = await native.read(CHOICE_KEY);
+      try {
+        const backend = body ? JSON.parse(body)?.backend : null;
+        return isBackend(backend) ? backend : null;
+      } catch {
+        return null;
+      }
+    },
+    save: backend => native.write(CHOICE_KEY, JSON.stringify({ backend })),
+  };
+}
+
 export const BACKEND_NAMES: Record<
   PrinterBackend,
   { title: string; detail: string }
@@ -164,8 +291,12 @@ export const STATUS_TEXT: Record<HandoffStatus, string> = {
   designed: 'The design is ready. Slicing comes next.',
   sliced: 'Sliced and ready for your printer.',
   printed: 'Sent to your printer.',
+  uncertain: 'This may already be printing. Check your printer.',
   failed: 'This didn’t reach your printer.',
 };
 
+/** Nothing more will happen: printed, failed, or uncertain once the companion stopped printing. */
 export const isFinished = (handoff: Handoff) =>
-  handoff.status === 'printed' || handoff.status === 'failed';
+  handoff.status === 'printed' ||
+  handoff.status === 'failed' ||
+  (handoff.status === 'uncertain' && handoff.printing === false);

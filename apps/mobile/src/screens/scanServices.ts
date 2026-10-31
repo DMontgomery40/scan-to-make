@@ -8,7 +8,9 @@ import type { CaptureFile, RetainedCapture } from '../capture/retainedCaptures';
 import type { CloseupTarget } from './closeupAdviceModel';
 import {
   sessionHandoffMemory,
+  sessionPrinterChoice,
   type HandoffMemory,
+  type PrinterChoiceMemory,
   type PrinterHandoff,
 } from '../printing/printerHandoff';
 
@@ -153,6 +155,8 @@ export type ScanServices = {
   printing?: PrinterHandoff;
   /** The handoff last sent for each scan, kept outside the print screen. */
   handoffs: HandoffMemory;
+  /** The printer software chosen once and sent with each handoff. */
+  printerChoice: PrinterChoiceMemory;
   /** A displayable URI for verified image bytes, when the platform has one. */
   imageUri?: (file: CaptureFile) => Promise<string | null>;
 };
@@ -240,5 +244,6 @@ export function unavailableScanServices(): ScanServices {
     picker: { pick: async () => unavailable(), discard: async () => {} },
     jobs: sessionJobMemory(),
     handoffs: sessionHandoffMemory(),
+    printerChoice: sessionPrinterChoice(),
   };
 }
