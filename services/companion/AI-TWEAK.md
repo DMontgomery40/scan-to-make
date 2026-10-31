@@ -187,6 +187,50 @@ logs, so sealed runs don't appear in the user's Claude Code history.
 tiny sealed call ("Reply with the single word OK.") through the same route and
 reports `ok` with the same outcome names.
 
+## Visual pick (KAN-184)
+
+`pickAiTweak(outDir, options)` chooses between the captured scan and the attempts in a `runAiTweak`
+output folder. It writes `outDir/pick.json` (`scan-to-make.ai-tweak-pick/0.1`). Any uncertainty
+keeps the captured scan.
+
+1. **Veto.** `tools/ai-tweak-judge/measure.py` measures each changed attempt against the captured
+   scan. An attempt whose median move is over 0.02 mm, either way, is rejected:
+   - from captured points to the attempt (smoothing, squashing);
+   - from the attempt's points back to the captured scan (an outward stretch).
+
+   The veto is named `smoothed`, `squashed-or-stretched`, `reshaped` or `unreadable`. It can reject
+   but never pick. On the KAN-177 attempts, every good one stayed at or below 0.0005 mm. The smoothed
+   one was at 0.06 mm and the uniformly squashed one at 1.7 mm. Edits to unseen areas, added parts and
+   texture-only edits are not vetoed; the judge decides those.
+2. **Render.** `render.py` renders the captured scan and every attempt that wasn't vetoed: 8 views
+   plus 8 ring views, textured and flat grey, all from cameras set from the captured scan's box. These
+   are fixed views, not each photo's own (photo-pose registration is KAN-190).
+3. **Blind labels.** The candidates, the captured scan among them, get shuffled letters. The judge's
+   sealed folder holds only:
+   - `photos/`, the upright stills;
+   - `candidates/<letter>/`, the renders;
+   - `compare/`, side-by-side sheets from `sheet.py`.
+
+   It never sees the manifest, meshes, transcripts or an attempt's own account of what it did.
+4. **Judge.** `runSealedTask` gives the judge the same sealing and ModelAccess as the AI step, but
+   through a separate entry point, so `runAiTweak` can only ever send David's sentence. The prompt is
+   `JUDGE_PROMPT`:
+   - keep the captured scan unless an edited candidate is clearly closer to the photos;
+   - reject smoothed detail, changed shape or proportions, invented parts, and washed-out or
+     mismatched colour.
+
+   The judge writes `verdict.json` with a letter and a reason.
+5. **Fallback.** The captured scan is kept, with the reason recorded, when:
+   - no attempt changed the scan;
+   - every attempt was vetoed;
+   - rendering fails;
+   - access is `none`;
+   - the judge fails, times out, or gives no valid letter or reason.
+
+```sh
+SCAN_TO_MAKE_AI_JUDGE_TOOL=/abs/tools/ai-tweak-judge node dist/ai-tweak-cli.js pick --dir /abs/out [--seed s]
+```
+
 ## Command line
 
 ```sh
@@ -199,7 +243,7 @@ Both read the settings above from the environment.
 
 ## Not done here
 
-- **Wiring into the cleanup job (KAN-184).**
+- **Wiring the AI step and the pick into the cleanup job.** This is KAN-184's PR B (companion job plus contract fields for the attempts, the pick and its reason). The phone's "see other attempts" door is PR C.
   - Today the job selects at most four stills for `scan-correct`. The AI step should get every retained photo, which changes the still selection and possibly the contract's cap.
   - Attempts take several minutes to about 20 each, which doesn't fit the job's 30-minute cap alongside the other stages.
   - Attempts in parallel can still collide in shared scratch paths that an agent hard-codes outside `TMPDIR`, such as `/tmp/scanwork`.
