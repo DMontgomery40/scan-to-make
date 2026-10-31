@@ -1,5 +1,6 @@
 import type { DetailStill } from '@scan-to-make/contracts';
 import {
+  adviceJob,
   distanceText,
   matchAdvice,
   parseCloseupAdvice,
@@ -8,6 +9,7 @@ import {
 import {
   stillFrom,
   syntheticAdvice,
+  syntheticJob,
   syntheticPhoto,
 } from '../src/screens/testing/fakeScanServices';
 
@@ -87,4 +89,25 @@ test('suggestions re-ranked by a new check keep their close-ups', () => {
     undefined,
     0,
   ]);
+});
+
+test('advice comes from the remembered job when it has some, else any job with advice', () => {
+  const file = {
+    sha256: 'd'.repeat(64),
+    byteLength: 10,
+    mediaType: 'application/json' as const,
+  };
+  const withAdvice = (jobId: string, status: 'succeeded' | 'failed') => ({
+    ...syntheticJob(status === 'succeeded' ? 'succeeded' : 'failed'),
+    jobId,
+    artifacts: { 'advice.json': file },
+  });
+  const plain = { ...syntheticJob('succeeded'), jobId: 'plain' };
+  const failedWithAdvice = withAdvice('failed-advice', 'failed');
+  const remembered = withAdvice('remembered', 'succeeded');
+  expect(adviceJob([plain, failedWithAdvice, remembered], 'remembered')).toBe(
+    remembered,
+  );
+  expect(adviceJob([plain, failedWithAdvice], 'plain')).toBe(failedWithAdvice);
+  expect(adviceJob([plain], null)).toBeNull();
 });

@@ -14,7 +14,12 @@ import type {
   ProjectAcknowledgment,
 } from '../capture/retainedCaptures';
 
-export type { ScanProcessingJob, ScanReference, ScanArtifactName, ProjectAcknowledgment };
+export type {
+  ScanProcessingJob,
+  ScanReference,
+  ScanArtifactName,
+  ProjectAcknowledgment,
+};
 export { SCAN_VIEW_NAMES };
 export type ScanArtifact = CaptureFile;
 
@@ -54,6 +59,8 @@ export interface ScanProcessingNative {
    * for already-downloaded image bytes, or null when unavailable.
    */
   imageUri?(file: CaptureFile): Promise<string | null>;
+  /** Text of a verified, already-downloaded JSON artifact. */
+  readJson?(file: CaptureFile): Promise<string>;
 }
 
 function failure(status: number, code?: string): never {
@@ -109,9 +116,15 @@ export class ScanProcessingClient {
     const collection = `/v1/saved-projects/${encodeURIComponent(
       projectId,
     )}/captures/${captureId.toLowerCase()}/scan-processing`;
-    return `${jobId ? `${collection}/${jobId.toLowerCase()}` : collection}?projectRevision=${revision}`;
+    return `${
+      jobId ? `${collection}/${jobId.toLowerCase()}` : collection
+    }?projectRevision=${revision}`;
   }
-  private checkIds(projectId: string, captureId: string, ack: ProjectAcknowledgment) {
+  private checkIds(
+    projectId: string,
+    captureId: string,
+    ack: ProjectAcknowledgment,
+  ) {
     safeId.parse(projectId);
     uuid.parse(captureId);
     etagSchema.parse(ack.etag);
@@ -338,10 +351,12 @@ export class ScanProcessingClient {
     const r = await this.get({
       context,
       method: 'GET',
-      path: this.base(projectId, captureId, project.revision, job.jobId).replace(
-        '?',
-        `/artifacts/${name}?`,
-      ),
+      path: this.base(
+        projectId,
+        captureId,
+        project.revision,
+        job.jobId,
+      ).replace('?', `/artifacts/${name}?`),
       etag: ack.etag,
       artifact,
     });

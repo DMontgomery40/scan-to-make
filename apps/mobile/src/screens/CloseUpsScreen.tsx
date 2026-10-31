@@ -617,6 +617,14 @@ export function CloseUpsScreen({
                       <Badge label="Ready to add" tone="pending" />
                     ) : null}
                   </View>
+                  {advised.imageUri ? (
+                    <Image
+                      source={{ uri: advised.imageUri }}
+                      style={styles.adviceImage}
+                      resizeMode="contain"
+                      accessibilityLabel={`Where to photograph: ${advised.label}`}
+                    />
+                  ) : null}
                   <Text style={type.body}>{reasonText(advised)}</Text>
                   <Text style={type.caption}>
                     {distanceText(advised)}. Move back a little if it won’t
@@ -881,6 +889,13 @@ const styles = StyleSheet.create({
   photoCard: { gap: space.md },
   suggestionHead: { flexDirection: 'row', alignItems: 'center', gap: space.md },
   grow: { flex: 1 },
+  adviceImage: {
+    width: '100%',
+    aspectRatio: 1,
+    maxHeight: 220,
+    borderRadius: radius.md,
+    backgroundColor: colors.background,
+  },
   photoRow: { flexDirection: 'row', gap: space.md, alignItems: 'center' },
   photo: {
     width: 72,

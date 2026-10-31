@@ -18,8 +18,17 @@ import {
   type PrinterHandoffNative,
 } from '../printing/companionPrinterHandoff';
 import {
+  SCAN_ADVICE_NAMES,
+  type ScanArtifactName,
+  type ScanProcessingJob,
+} from '@scan-to-make/contracts';
+import type { CaptureFile } from '../capture/retainedCaptures';
+import { adviceJob, parseCloseupAdvice } from './closeupAdviceModel';
+import {
   sessionJobMemory,
   unavailableScanServices,
+  type CloseupAdvice,
+  type ProjectAcknowledgment,
   type DetailStills,
   type PhotoPicker,
   type ScanProcessing,
@@ -86,6 +95,10 @@ export function liveScanServices(
   const client = new ScanProcessingClient(repository, bridge);
   const processing: ScanProcessing = client;
   const stills: DetailStills = new DetailStillsClient(repository, bridge);
+  // A fast path within a session; after a relaunch, processing.listJobs
+  // finds the jobs the companion kept.
+  const jobs = sessionJobMemory();
+  const readJson = bridge.readJson?.bind(bridge);
   return {
     async acknowledge(projectId) {
       const state = await sync.sync(projectId);
@@ -97,9 +110,7 @@ export function liveScanServices(
     processing,
     stills,
     picker: bridgePhotoPicker(bridge),
-    // A fast path within a session; after a relaunch, processing.listJobs
-    // finds the jobs the companion kept.
-    jobs: sessionJobMemory(),
+    jobs,
     // A sent print job outlives this screen and the app session.
     handoffs: storedHandoffMemory(captures),
     printerChoice: storedPrinterChoice(captures),
@@ -108,5 +119,85 @@ export function liveScanServices(
       ? { printing: companionPrinterHandoff(modules.PrinterHandoffBridge) }
       : {}),
     imageUri: file => client.imageUri(file),
+    ...(readJson
+      ? {
+          advice: closeupAdviceLoader({
+            listJobs: (p, c, a) => client.listJobs(p, c, a),
+            downloadArtifact: (p, c, a, job, name) =>
+              client.downloadArtifact(p, c, a, job, name),
+            readJson,
+            imageUri: file => client.imageUri(file),
+            remembered: (p, c) => jobs.load(p, c),
+          }),
+        }
+      : {}),
+  };
+}
+
+type AdviceSource = {
+  listJobs(
+    projectId: string,
+    captureId: string,
+    ack: ProjectAcknowledgment,
+  ): Promise<ScanProcessingJob[]>;
+  downloadArtifact(
+    projectId: string,
+    captureId: string,
+    ack: ProjectAcknowledgment,
+    job: ScanProcessingJob,
+    name: ScanArtifactName,
+  ): Promise<CaptureFile>;
+  readJson(file: CaptureFile): Promise<string>;
+  imageUri(file: CaptureFile): Promise<string | null>;
+  remembered(projectId: string, captureId: string): Promise<string | null>;
+};
+
+/**
+ * Close-up advice from the companion's cleanup job: `advice.json`, plus
+ * `advice-NN.png` showing the area for suggestion NN. A missing picture
+ * leaves that suggestion without one.
+ */
+export function closeupAdviceLoader(source: AdviceSource): CloseupAdvice {
+  return {
+    async load(projectId, captureId, ack) {
+      const jobs = await source.listJobs(projectId, captureId, ack);
+      const job = adviceJob(
+        jobs,
+        await source.remembered(projectId, captureId),
+      );
+      if (!job) return null;
+      const file = await source.downloadArtifact(
+        projectId,
+        captureId,
+        ack,
+        job,
+        'advice.json',
+      );
+      const targets = parseCloseupAdvice(
+        JSON.parse(await source.readJson(file)),
+      );
+      // Read inside the function: Metro's release inline requires.
+      const names = SCAN_ADVICE_NAMES;
+      // One picture at a time: the stills bridge serves a single request and
+      // rejects overlapping ones as busy.
+      for (const target of targets) {
+        const name = names[target.rank];
+        if (!name || !job.artifacts?.[name]) continue;
+        try {
+          const image = await source.downloadArtifact(
+            projectId,
+            captureId,
+            ack,
+            job,
+            name,
+          );
+          const uri = await source.imageUri(image);
+          if (uri) target.imageUri = uri;
+        } catch {
+          // The suggestion still shows without its picture.
+        }
+      }
+      return targets;
+    },
   };
 }

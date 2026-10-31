@@ -153,6 +153,23 @@ test('suggested close-ups are listed, and a photo chosen for one carries its lab
   await act(async () => tree.unmount());
 });
 
+test('a suggestion with the companion picture shows where to photograph', async () => {
+  const [back, bottom] = syntheticAdvice();
+  const { services } = fakeScanServices({
+    advice: [{ ...back!, imageUri: 'file:///cache/advice-01.png' }, bottom!],
+  });
+  const { tree } = await render(services);
+  const pictures = tree.root
+    .findAllByType(Image)
+    .filter(i => i.props.accessibilityLabel?.startsWith('Where to photograph'));
+  expect(
+    pictures.map(i => [i.props.accessibilityLabel, i.props.source.uri]),
+  ).toEqual([
+    ['Where to photograph: Back (hinge side)', 'file:///cache/advice-01.png'],
+  ]);
+  await act(async () => tree.unmount());
+});
+
 test('a close-up already labelled for a suggestion marks it added', async () => {
   const { services } = fakeScanServices({
     advice: syntheticAdvice(),
