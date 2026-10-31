@@ -25,6 +25,7 @@ lines.on('line',async line=>{
  if(mode==='wrong-plate')receipt.inspection.plateInternalPath='Metadata/plate_9.gcode';
  if(mode==='wrong-material')receipt.inspection.materials=['ABS'];
  if(mode==='authorized')receipt.dispatch_authorized=true;
+ if(mode==='nozzle-type')receipt.inspection.nozzleTypes=['stainless_steel'];
  if(mode==='large')receipt.extra='x'.repeat(1100000);
  return reply({content:[{type:'text',text:JSON.stringify(receipt)}],...(mode==='tool-error'?{isError:true}:{})});
 });

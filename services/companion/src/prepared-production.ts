@@ -8,11 +8,23 @@ export const PreparedProductionSchema=z.strictObject({
  requestSha256:digest, producerIdentity:digest, sourceArtifact:ArtifactRefSchema,
  settingsArtifact:ArtifactRefSchema, manifestArtifact:ArtifactRefSchema,
  slicer:z.strictObject({version:z.string().min(1).max(128),binarySha256:digest}),
+ // Present only on jobs produced through a configured printability gate;
+ // pre-gate retained jobs keep loading unchanged.
+ printability:z.strictObject({
+  profileId:z.string().min(1).max(128),
+  verdict:z.enum(['printable','printable-with-supports']),
+  allowSupports:z.boolean(),
+  reportArtifact:ArtifactRefSchema,
+ }).optional(),
 });
 export type PreparedProduction=z.infer<typeof PreparedProductionSchema>;
 export interface ProductionBytes {printable:Buffer;settings:Buffer;manifest:Buffer}
 /** Trusted host capability, configured at construction; never supplied by a remote request. */
-export interface PreparedProducer {readonly identity:string;produce(source:Buffer,signal?:AbortSignal):Promise<ProductionBytes>}
+export interface PreparedProducer {
+ readonly identity:string;
+ readonly nozzleType?: ProducerNozzleType;
+ produce(source:Buffer,overrides?:{enableSupport?:boolean},signal?:AbortSignal):Promise<ProductionBytes>;
+}
 export function productionHash(bytes:Uint8Array|string):string{return createHash('sha256').update(bytes).digest('hex');}
 export function productionRef(bytes:Buffer,mediaType:string){return {sha256:productionHash(bytes),byteLength:bytes.length,mediaType};}
 const outputRef=z.object({file:z.string(),sha256:digest,bytes:z.number().int().positive()});
@@ -43,17 +55,24 @@ import {mkdtemp, open, writeFile, rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join, isAbsolute} from 'node:path';
 
+export const producerBedTypeSchema = z.enum(['textured_plate', 'cool_plate', 'engineering_plate', 'hot_plate']);
+export type ProducerBedType = z.infer<typeof producerBedTypeSchema>;
+export const producerNozzleTypeSchema = z.enum(['stainless_steel', 'hardened_steel', 'tungsten_carbide', 'brass']);
+export type ProducerNozzleType = z.infer<typeof producerNozzleTypeSchema>;
 export interface PreparedProducerConfiguration {
   python: string; script: string; expectedScriptSha256: string; bundle: string;
   expectedVersion: string; expectedBinarySha256: string;
   machine: string; process: string; filament: string; timeoutSeconds?: number;
+  bedType?: ProducerBedType; nozzleType?: ProducerNozzleType; enableSupport?: boolean;
 }
-const configurationSchema = z.strictObject({
+export const preparedProducerConfigurationSchema = z.strictObject({
   python: z.string().refine(isAbsolute), script: z.string().refine(isAbsolute),
   expectedScriptSha256: digest, bundle: z.string().refine(isAbsolute),
   expectedVersion: z.string().min(1).max(128), expectedBinarySha256: digest,
   machine: z.string().min(1).max(256), process: z.string().min(1).max(256),
   filament: z.string().min(1).max(256), timeoutSeconds: z.number().int().min(1).max(120).default(45),
+  bedType: producerBedTypeSchema.optional(), nozzleType: producerNozzleTypeSchema.optional(),
+  enableSupport: z.boolean().optional(),
 });
 async function readProductionFile(path: string, maximum: number): Promise<Buffer> {
   const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
@@ -126,9 +145,9 @@ finally:
 
 /** Pinned operator configuration. Requests supply source bytes only. */
 export function createPreparedProducer(configuration: PreparedProducerConfiguration): PreparedProducer {
-  const config = configurationSchema.parse(configuration);
-  const identity = productionHash(JSON.stringify({adapterVersion: 1, ...config}));
-  return {identity, async produce(source, signal) {
+  const config = preparedProducerConfigurationSchema.parse(configuration);
+  const identity = productionHash(JSON.stringify({adapterVersion: 2, ...config}));
+  return {identity, nozzleType: config.nozzleType, async produce(source, overrides, signal) {
     if (process.platform !== 'darwin') throw new Error('Enforced slicer isolation requires macOS');
     if (signal?.aborted) throw new Error('Production cancelled');
     if (!Buffer.isBuffer(source) || !source.length || source.length > PRODUCTION_LIMITS.sourceBytes) throw new Error('Produced source byte limit exceeded');
@@ -146,6 +165,10 @@ export function createPreparedProducer(configuration: PreparedProducerConfigurat
         '--expected-binary-sha256', config.expectedBinarySha256,
         '--expected-input-sha256', productionHash(original), '--expected-input-bytes', String(original.length),
         '--timeout', String(config.timeoutSeconds)];
+      if (config.bedType) argv.push('--bed-type', config.bedType);
+      if (config.nozzleType) argv.push('--nozzle-type', config.nozzleType);
+      const enableSupport = overrides?.enableSupport ?? config.enableSupport;
+      if (enableSupport !== undefined) argv.push('--enable-support', enableSupport ? '1' : '0');
       if (signal?.aborted) throw new Error('Production cancelled');
       const child = spawn(config.python, argv, {cwd: folder, stdio: ['ignore', 'pipe', 'pipe', 'pipe'],
         env: {PATH: '/usr/bin:/bin', LANG: 'C', TMPDIR: folder}});

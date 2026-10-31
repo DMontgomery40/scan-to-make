@@ -7,9 +7,11 @@ import {readVerifiedStl} from './stl-export.js';
 import {PreparedProductionSchema, PRODUCTION_LIMITS, productionHash, productionRef, verifyProductionBytes, type PreparedProducer, type PreparedProduction, type ProductionBytes} from './prepared-production.js';
 import {z} from 'zod';
 import {ArtifactRefSchema, type ArtifactRef} from '@scan-to-make/contracts';
-import {FileSavedProjectStorage} from '@scan-to-make/project';
+import {FileSavedProjectStorage, savedProjectETag} from '@scan-to-make/project';
 import {PrintSelectionSchema} from './index.js';
 import {PreparedInspectionSchema, createPreparedFileInspector, printableFormat, type PreparedInspectionConfiguration} from './prepared-inspection.js';
+import {createPreparedPrintabilityGate, PreparedPrintabilityFailure, PrintabilityReportSchema, type PreparedPrintabilityConfiguration, type PreparedPrintabilityGate, type PrintabilitySummary} from './prepared-printability.js';
+export {PreparedPrintabilityFailure} from './prepared-printability.js';
 
 const digest = z.string().regex(/^[a-f0-9]{64}$/);
 const integer = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
@@ -56,7 +58,26 @@ const intentSchema = z.strictObject({
 });
 
 export class PreparedJobFailure extends Error {
-  constructor(readonly code: 'not-found' | 'job-conflict' | 'cancelled' | 'invalid-cursor' | 'cursor-stale' | 'discovery-unavailable') {super(code);}
+  constructor(readonly code: 'not-found' | 'job-conflict' | 'cancelled' | 'invalid-cursor' | 'cursor-stale' | 'discovery-unavailable' | 'busy' | 'not-available' | 'already-approved' | 'approval-mismatch' | 'approval-expired') {super(code);}
+}
+
+/** One producer at a time per prepared job, shared by the CLI and the listener. */
+export async function withJobProduceLock<T>(directory: string, jobId: string, operation: () => Promise<T>): Promise<T> {
+  await mkdir(directory, {recursive: true, mode: 0o700});
+  const root = join(directory, '.produce-locks');
+  await mkdir(root, {recursive: true, mode: 0o700});
+  const lock = join(root, jobId.toLowerCase());
+  try {
+    await mkdir(lock, {mode: 0o700});
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'EEXIST') throw new PreparedJobFailure('job-conflict');
+    throw error;
+  }
+  try {
+    return await operation();
+  } finally {
+    await rm(lock, {recursive: true, force: true});
+  }
 }
 
 const discoveryCursorFields = {version: z.literal(1), projectId, projectRevision: integer,
@@ -68,6 +89,34 @@ const DISCOVERY = {directoryEntries: 4096, records: 200, metadataBytes: 8 * 1024
 
 export type PreparedJob = z.infer<typeof PreparedJobSchema>;
 export type PreparedJobApproval = z.infer<typeof approvalSchema>;
+
+const printabilitySummarySchema = PrintabilityReportSchema.pick({verdict:true, reasonCodes:true, reasons:true, warnings:true, profile:true});
+const productionOperationSchema = z.strictObject({
+  schema: z.literal('scan-to-make.prepared-production-operation/0.1'),
+  jobId: z.uuid(), projectId, projectRevision: integer,
+  requestSha256: digest, sourceArtifact: ArtifactRefSchema, allowSupports: z.boolean(),
+  status: z.enum(['running', 'succeeded', 'failed']),
+  failure: z.strictObject({code: z.string().min(1).max(64), printability: printabilitySummarySchema.optional()}).optional(),
+  createdAtMs: integer, finishedAtMs: integer.optional(),
+});
+type ProductionOperation = z.infer<typeof productionOperationSchema>;
+const attemptLinkSchema = z.strictObject({
+  attemptId: z.uuid(), printerId: projectId, planSha256: digest,
+  outcome: z.enum(['started', 'unconfirmed', 'uncertain']).optional(),
+  resolution: z.enum(['finished', 'cancelled', 'rejected']).optional(),
+});
+export type PreparedAttemptLink = z.infer<typeof attemptLinkSchema>;
+export interface PreparedProductionView {
+  jobId: string;
+  status: 'running' | 'succeeded' | 'failed';
+  failure?: {code: string; printability?: PrintabilitySummary};
+  job?: {jobId: string; jobSha256: string; printableArtifact: ArtifactRef; selection: PreparedJob['selection']};
+  printability?: PrintabilitySummary;
+  gcodeSummary?: Record<string, unknown>;
+  profile: {displayName: string; nozzleDiameterMm: number; nozzleType?: string; bedType: string};
+}
+// Productions running in this process, across store instances on one directory.
+const activeProductions = new Map<string, {controller: AbortController; done?: Promise<void>}>();
 export type PreparedJobIntent = z.infer<typeof intentSchema>;
 export interface PreparedJobLimits {maxPrintableBytes?: number; maxMetadataBytes?: number}
 export const DEFAULT_PREPARED_JOB_LIMITS = {maxPrintableBytes: 64 * 1024 * 1024, maxMetadataBytes: 1024 * 1024};
@@ -122,30 +171,51 @@ export class PreparedJobStore {
   private readonly clock: () => number;
   private readonly production?: PreparedProducer;
   private readonly inspect?: ReturnType<typeof createPreparedFileInspector>;
+  private readonly printability?: PreparedPrintabilityGate;
+  private readonly appProduction?: {selection: z.infer<typeof producedSelectionSchema>; displayName: string};
   constructor(private readonly projects: FileSavedProjectStorage, private readonly directory: string,
-    options: PreparedJobLimits & {clock?: () => number; inspection?: PreparedInspectionConfiguration; production?: PreparedProducer} = {}) {
-    const {clock, inspection, production, ...byteLimits} = options;
-    if(production){digest.parse(production.identity);this.production={identity:production.identity,produce:production.produce.bind(production)};}
+    options: PreparedJobLimits & {clock?: () => number; inspection?: PreparedInspectionConfiguration; production?: PreparedProducer; printability?: PreparedPrintabilityConfiguration; appProduction?: {selection: unknown; displayName: string}} = {}) {
+    const {clock, inspection: inspectionOptions, production, printability, appProduction, ...byteLimits} = options;
+    if (appProduction) {
+      this.appProduction = {selection: producedSelectionSchema.parse(appProduction.selection),
+        displayName: z.string().trim().min(1).max(256).parse(appProduction.displayName)};
+    }
+    if(production){digest.parse(production.identity);this.production={identity:production.identity,nozzleType:production.nozzleType,produce:production.produce.bind(production)};}
+    // A declared producer nozzle type becomes an inspection expectation unless the operator pinned one explicitly.
+    const inspection = inspectionOptions && inspectionOptions.expectedNozzleType === undefined && production?.nozzleType !== undefined
+      ? {...inspectionOptions, expectedNozzleType: production.nozzleType} : inspectionOptions;
     this.inspect = inspection ? createPreparedFileInspector(inspection) : undefined;
+    this.printability = printability ? createPreparedPrintabilityGate(printability) : undefined;
     this.bound = limits(byteLimits);
     this.clock = clock ?? Date.now;
   }
 
   get inspectionEnabled(): boolean { return this.inspect !== undefined; }
   get maxPrintableBytes(): number { return this.bound.maxPrintableBytes; }
+  get appProductionEnabled(): boolean { return this.appProduction !== undefined && this.production !== undefined && this.inspect !== undefined; }
+
+  /** Abort and await any app-started production running for this directory. */
+  async close(): Promise<void> {
+    for (const [key, active] of activeProductions) {
+      if (!key.startsWith(`${this.directory}\0`)) continue;
+      active.controller.abort();
+      await active.done;
+    }
+  }
 
   /** Host-only production. Long slicing happens outside the project edit lock. */
-  async prepareProduced(input:{projectId:string;projectRevision:number;expectedProjectETag:string;jobId:string;source:Uint8Array;selection:unknown},
+  async prepareProduced(input:{projectId:string;projectRevision:number;expectedProjectETag:string;jobId:string;source:Uint8Array;selection:unknown;allowSupports?:boolean},
     signal?:AbortSignal,authorizeCommit?:()=>Promise<void>){
     const active=()=>{if(signal?.aborted)throw new PreparedJobFailure('cancelled');};active();
     if(!this.production||!this.inspect)throw new Error('Trusted production and inspection must be configured');
     const producer=this.production;
+    const allowSupports=input.allowSupports===undefined?false:z.boolean().parse(input.allowSupports);
     const request=z.strictObject({projectId,projectRevision:integer,expectedProjectETag:etag,jobId:z.uuid().transform(value => value.toLowerCase()),
       selection:producedSelectionSchema}).parse({projectId:input.projectId,projectRevision:input.projectRevision,
       expectedProjectETag:input.expectedProjectETag,jobId:input.jobId,selection:input.selection});
     if(!(input.source instanceof Uint8Array)||!input.source.length||input.source.length>PRODUCTION_LIMITS.sourceBytes)throw new Error('Produced source byte limit exceeded');
     const source=Buffer.from(input.source),sourceArtifact=productionRef(source,'model/stl');
-    const requestSha256=productionHash(JSON.stringify({...request,sourceArtifact,producerIdentity:producer.identity}));
+    const requestSha256=productionHash(JSON.stringify({...request,allowSupports,sourceArtifact,producerIdentity:producer.identity,printabilityIdentity:this.printability?.identity}));
     await this.projects.withCurrentProject(request.projectId,request.projectRevision,async project=>{
       if(!project.acceptedArtifact||!sameRef(project.acceptedArtifact.artifact,sourceArtifact))throw new Error('Produced source does not match accepted artifact');
     },request.expectedProjectETag);active();
@@ -159,15 +229,195 @@ export class PreparedJobStore {
     const temp=await mkdtemp(join(tmpdir(),'prepared-source-'));
     try{
       const path=join(temp,'source.stl');await writeSynced(path,source);await chmod(path,0o400);await readVerifiedStl(path,sourceArtifact);active();
-      const result=await producer.produce(Buffer.from(source),signal);active();
+      // Printability gate: after source verification, before any slicing.
+      const gated=this.printability?await this.printability.check(path,sourceArtifact,request.selection,allowSupports,signal):undefined;active();
+      const result=await producer.produce(Buffer.from(source),gated?.enableSupport?{enableSupport:true}:undefined,signal);active();
       for(const [bytes,max] of [[result.printable,this.bound.maxPrintableBytes],[result.settings,PRODUCTION_LIMITS.settingsBytes],[result.manifest,PRODUCTION_LIMITS.manifestBytes]] as const){
         if(!Buffer.isBuffer(bytes)||!bytes.length||bytes.length>max)throw new Error('Produced output byte limit exceeded');
       }
       const produced={printable:Buffer.from(result.printable),settings:Buffer.from(result.settings),manifest:Buffer.from(result.manifest)};
-      const production=PreparedProductionSchema.parse({...verifyProductionBytes(source,produced,this.bound.maxPrintableBytes),requestSha256,producerIdentity:producer.identity});
+      const production=PreparedProductionSchema.parse({...verifyProductionBytes(source,produced,this.bound.maxPrintableBytes),requestSha256,producerIdentity:producer.identity,
+        ...(gated?{printability:{profileId:gated.report.profile.id,verdict:gated.report.verdict,allowSupports,reportArtifact:productionRef(gated.reportBytes,'application/json')}}:{})});
       return await this.prepareInternal({...request,printable:produced.printable,printableArtifact:productionRef(produced.printable,'text/x.gcode'),
-        selection:{...request.selection,slicerSettingsSha256:production.settingsArtifact.sha256}},signal,authorizeCommit,{metadata:production,source,...produced});
+        selection:{...request.selection,slicerSettingsSha256:production.settingsArtifact.sha256}},signal,authorizeCommit,{metadata:production,source,...produced,...(gated?{printabilityReport:gated.reportBytes}:{})});
     }finally{await rm(temp,{recursive:true,force:true});}
+  }
+
+  private operationPath(jobId: string): string { return join(this.directory, '.production-operations', `${jobId}.json`); }
+  // Lock-free current-snapshot check for status reads: a running production
+  // holds the project lock across inspection, and polls must not fail on it.
+  private async assertCurrentSnapshot(request: {projectId: string; expectedProjectETag: string}): Promise<void> {
+    const snapshot = await this.projects.read(request.projectId);
+    if (snapshot === null) throw new PreparedJobFailure('not-found');
+    if (savedProjectETag(snapshot) !== request.expectedProjectETag) throw new Error('Saved project ETag mismatch');
+  }
+  private async readOperation(jobId: string): Promise<ProductionOperation | undefined> {
+    let bytes: Buffer;
+    try { bytes = await readBounded(this.operationPath(jobId), this.bound.maxMetadataBytes); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined; throw error; }
+    const operation = productionOperationSchema.parse(JSON.parse(new TextDecoder('utf-8', {fatal: true}).decode(bytes)));
+    if (operation.jobId !== jobId) throw new Error('Stored production operation identity mismatch');
+    // A running record with no live in-process owner is an interrupted attempt.
+    if (operation.status === 'running' && !activeProductions.has(`${this.directory}\0${jobId}`)) {
+      const interrupted: ProductionOperation = {...operation, status: 'failed', failure: {code: 'interrupted'}, finishedAtMs: integer.parse(this.clock())};
+      await this.writeOperation(interrupted);
+      return interrupted;
+    }
+    return operation;
+  }
+  private async writeOperation(operation: ProductionOperation): Promise<void> {
+    await mkdir(join(this.directory, '.production-operations'), {recursive: true, mode: 0o700});
+    const finalPath = this.operationPath(operation.jobId);
+    const temporary = `${finalPath}.${randomUUID()}.tmp`;
+    await writeSynced(temporary, Buffer.from(JSON.stringify(operation) + '\n'));
+    try { await rename(temporary, finalPath); } finally { await unlink(temporary).catch(() => undefined); }
+    await syncDirectory(join(this.directory, '.production-operations'));
+  }
+  private profileView(selection: {model: string; bedType: string; nozzleDiameters: readonly number[]}): PreparedProductionView['profile'] {
+    return {displayName: this.appProduction?.displayName ?? selection.model,
+      nozzleDiameterMm: selection.nozzleDiameters[0]!, bedType: selection.bedType,
+      ...(this.production?.nozzleType ? {nozzleType: this.production.nozzleType} : {})};
+  }
+  private async productionView(request: {projectId: string; projectRevision: number}, operation: ProductionOperation | undefined, job: PreparedJob | undefined): Promise<PreparedProductionView> {
+    const selection = job?.selection ?? this.appProduction?.selection;
+    if (!selection) throw new PreparedJobFailure('not-available');
+    const view: PreparedProductionView = {jobId: operation?.jobId ?? job!.id,
+      status: operation ? operation.status : 'succeeded', profile: this.profileView(selection)};
+    if (operation?.failure) view.failure = operation.failure;
+    if (job) {
+      view.job = {jobId: job.id, jobSha256: job.sha256, printableArtifact: job.printableArtifact, selection: job.selection};
+      if (job.production?.printability) {
+        const report = await readBounded(join(this.directory, job.id, 'printability.json'), 1024 * 1024);
+        const parsed = PrintabilityReportSchema.parse(JSON.parse(report.toString('utf8')));
+        view.printability = {verdict: parsed.verdict, reasonCodes: parsed.reasonCodes, reasons: parsed.reasons, warnings: parsed.warnings, profile: parsed.profile};
+      }
+      if (job.production) {
+        try {
+          const manifest = JSON.parse((await readBounded(join(this.directory, job.id, 'production.json'), PRODUCTION_LIMITS.manifestBytes)).toString('utf8'));
+          const summary = manifest?.outputs?.gcodeSummary;
+          if (summary && typeof summary === 'object' && !Array.isArray(summary)) view.gcodeSummary = summary;
+        } catch { /* summary is best-effort display data; verified bytes were already checked */ }
+      }
+    }
+    void request;
+    return view;
+  }
+
+  /**
+   * App-facing asynchronous production over the operator-pinned profile.
+   * Start is never replayed automatically: the same job id with the same
+   * request returns the retained operation, any other request conflicts.
+   */
+  async startPreparedProduction(input: {projectId: string; projectRevision: number; expectedProjectETag: string;
+      jobId: string; source: Uint8Array; allowSupports?: boolean},
+      authorizeCommit?: () => Promise<void>): Promise<{view: PreparedProductionView; created: boolean}> {
+    if (!this.appProductionEnabled || !this.appProduction) throw new PreparedJobFailure('not-available');
+    const allowSupports = input.allowSupports === undefined ? false : z.boolean().parse(input.allowSupports);
+    const request = z.strictObject({projectId, projectRevision: integer, expectedProjectETag: etag,
+      jobId: z.uuid().transform(value => value.toLowerCase())}).parse({projectId: input.projectId,
+      projectRevision: input.projectRevision, expectedProjectETag: input.expectedProjectETag, jobId: input.jobId});
+    if (!(input.source instanceof Uint8Array) || !input.source.length || input.source.length > PRODUCTION_LIMITS.sourceBytes) throw new Error('Produced source byte limit exceeded');
+    const source = Buffer.from(input.source), sourceArtifact = productionRef(source, 'model/stl');
+    const key = `${this.directory}\0${request.jobId}`;
+    const requestSha256 = productionHash(JSON.stringify({projectId: request.projectId, projectRevision: request.projectRevision,
+      jobId: request.jobId, sourceArtifact, allowSupports, selection: this.appProduction.selection,
+      producerIdentity: this.production!.identity, printabilityIdentity: this.printability?.identity}));
+    await this.projects.withCurrentProject(request.projectId, request.projectRevision, async project => {
+      if (!project.acceptedArtifact || !sameRef(project.acceptedArtifact.artifact, sourceArtifact)) throw new Error('Produced source does not match accepted artifact');
+    }, request.expectedProjectETag);
+    const existingOperation = await this.readOperation(request.jobId);
+    if (existingOperation) {
+      if (existingOperation.requestSha256 !== requestSha256) throw new PreparedJobFailure('job-conflict');
+      const job = existingOperation.status === 'succeeded' ? (await this.loadPreparedJob(request.jobId, request.expectedProjectETag)).job : undefined;
+      return {view: await this.productionView(request, existingOperation, job), created: false};
+    }
+    let existingJob: PreparedJob | undefined;
+    try { existingJob = await this.readJob(request.jobId); }
+    catch (error) { if (!(error instanceof PreparedJobFailure) || error.code !== 'not-found') throw error; }
+    if (existingJob) {
+      if (!existingJob.production || !sameRef(existingJob.designArtifact, sourceArtifact)) throw new PreparedJobFailure('job-conflict');
+      const loaded = await this.loadPreparedJob(request.jobId, request.expectedProjectETag);
+      return {view: await this.productionView(request, undefined, loaded.job), created: false};
+    }
+    if ([...activeProductions.keys()].some(activeKey => activeKey.startsWith(`${this.directory}\0`))) throw new PreparedJobFailure('busy');
+    const controller = new AbortController();
+    const entry: {controller: AbortController; done?: Promise<void>} = {controller};
+    activeProductions.set(key, entry);
+    const operation: ProductionOperation = {schema: 'scan-to-make.prepared-production-operation/0.1', jobId: request.jobId,
+      projectId: request.projectId, projectRevision: request.projectRevision, requestSha256, sourceArtifact,
+      allowSupports, status: 'running', createdAtMs: integer.parse(this.clock())};
+    try {
+      await mkdir(join(this.directory, '.production-operations'), {recursive: true, mode: 0o700});
+      const finalPath = this.operationPath(request.jobId), temporary = `${finalPath}.${randomUUID()}.tmp`;
+      await writeSynced(temporary, Buffer.from(JSON.stringify(operation) + '\n'));
+      try { await link(temporary, finalPath); }
+      catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'EEXIST') throw new PreparedJobFailure('job-conflict');
+        throw error;
+      } finally { await unlink(temporary).catch(() => undefined); }
+      await syncDirectory(join(this.directory, '.production-operations'));
+    } catch (error) { activeProductions.delete(key); throw error; }
+    const selection = structuredClone(this.appProduction.selection);
+    const done = (async () => {
+      let finished: ProductionOperation;
+      try {
+        await withJobProduceLock(this.directory, request.jobId, async () => {
+          await this.prepareProduced({...request, source, selection, allowSupports}, controller.signal, authorizeCommit);
+        });
+        finished = {...operation, status: 'succeeded', finishedAtMs: integer.parse(this.clock())};
+      } catch (error) {
+        const failure = error instanceof PreparedPrintabilityFailure
+          ? {code: error.code, ...(error.summary ? {printability: error.summary} : {})}
+          : error instanceof PreparedJobFailure ? {code: error.code} : {code: 'production-failed'};
+        finished = {...operation, status: 'failed', failure, finishedAtMs: integer.parse(this.clock())};
+      }
+      await this.writeOperation(finished).catch(() => undefined);
+    })().finally(() => { activeProductions.delete(key); });
+    entry.done = done;
+    void done.catch(() => undefined);
+    return {view: await this.productionView(request, operation, undefined), created: true};
+  }
+
+  async loadPreparedProduction(input: {projectId: string; projectRevision: number; expectedProjectETag: string; jobId: string}): Promise<{view: PreparedProductionView}> {
+    const request = z.strictObject({projectId, projectRevision: integer, expectedProjectETag: etag,
+      jobId: z.uuid().transform(value => value.toLowerCase())}).parse(input);
+    const operation = await this.readOperation(request.jobId);
+    if (operation && (operation.projectId !== request.projectId || operation.projectRevision !== request.projectRevision)) throw new PreparedJobFailure('not-found');
+    // A running or failed operation answers from its own record; the job
+    // directory may be mid-publication and must not be verified yet.
+    if (operation && operation.status !== 'succeeded') {
+      await this.assertCurrentSnapshot(request);
+      return {view: await this.productionView(request, operation, undefined)};
+    }
+    let job: PreparedJob | undefined;
+    try { job = await this.readJob(request.jobId); }
+    catch (error) { if (!(error instanceof PreparedJobFailure) || error.code !== 'not-found') throw error; }
+    if (job && (job.projectId !== request.projectId || job.projectRevision !== request.projectRevision)) throw new PreparedJobFailure('not-found');
+    if (!operation && !job) throw new PreparedJobFailure('not-found');
+    if (job) {
+      const loaded = await this.loadPreparedJob(request.jobId, request.expectedProjectETag);
+      return {view: await this.productionView(request, operation, loaded.job)};
+    }
+    await this.assertCurrentSnapshot(request);
+    return {view: await this.productionView(request, operation, undefined)};
+  }
+
+  /** Prepared intent plus the host executor's optional journal link projection. */
+  async loadAttemptStatus(input: {projectId: string; projectRevision: number; expectedProjectETag: string; jobId: string}) {
+    const request = z.strictObject({projectId, projectRevision: integer, expectedProjectETag: etag,
+      jobId: z.uuid().transform(value => value.toLowerCase())}).parse(input);
+    const loaded = await this.loadPreparedJob(request.jobId, request.expectedProjectETag);
+    if (loaded.job.projectId !== request.projectId || loaded.job.projectRevision !== request.projectRevision) throw new PreparedJobFailure('not-found');
+    let linkedAttempt: PreparedAttemptLink | null = null;
+    try {
+      const bytes = await readBounded(join(this.directory, loaded.job.id, 'attempt-link.json'), this.bound.maxMetadataBytes);
+      linkedAttempt = attemptLinkSchema.parse(JSON.parse(new TextDecoder('utf-8', {fatal: true}).decode(bytes)));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+    return {jobId: loaded.job.id,
+      intent: loaded.intent ? {intentId: loaded.intent.intentId, atMs: loaded.intent.atMs} : null,
+      linkedAttempt};
   }
 
   async prepare(input: {projectId: string; projectRevision: number; printable: Uint8Array;
@@ -179,7 +429,7 @@ export class PreparedJobStore {
 
   private async prepareInternal(input: {projectId: string; projectRevision: number; printable: Uint8Array;
       printableArtifact: unknown; selection: unknown; expectedProjectETag?: string; jobId?: string},
-      signal?: AbortSignal, authorizeCommit?: () => Promise<void>, produced?: ProductionBytes & {source:Buffer;metadata:PreparedProduction}):
+      signal?: AbortSignal, authorizeCommit?: () => Promise<void>, produced?: ProductionBytes & {source:Buffer;metadata:PreparedProduction;printabilityReport?:Buffer}):
       Promise<{jobId: string; job: PreparedJob; created: boolean}> {
     const assertActive = () => { if (signal?.aborted) throw new PreparedJobFailure('cancelled'); };
     assertActive();
@@ -242,6 +492,7 @@ export class PreparedJobStore {
           for(const [name,bytes] of [['source.stl',produced.source],['settings.json',produced.settings],['production.json',produced.manifest]] as const){
             await writeSynced(join(staging,name),bytes);await chmod(join(staging,name),0o400);
           }
+          if(produced.printabilityReport){await writeSynced(join(staging,'printability.json'),produced.printabilityReport);await chmod(join(staging,'printability.json'),0o400);}
         }
         const jobBytes = Buffer.from(JSON.stringify(job) + '\n');
         if (jobBytes.length > this.bound.maxMetadataBytes) throw new Error('Prepared job metadata byte limit exceeded');
@@ -433,6 +684,11 @@ export class PreparedJobStore {
         !sameRef(checked.sourceArtifact,job.production.sourceArtifact)||!sameRef(checked.settingsArtifact,job.production.settingsArtifact)||
         !sameRef(checked.manifestArtifact,job.production.manifestArtifact)||checked.slicer.version!==job.production.slicer.version||checked.slicer.binarySha256!==job.production.slicer.binarySha256)
         throw new Error('Retained production evidence identity mismatch');
+      if(job.production.printability){
+        const report=await readBounded(join(folder,'printability.json'),1024*1024);
+        if(!sameRef(refOf(report,'application/json'),job.production.printability.reportArtifact))
+          throw new Error('Retained printability evidence identity mismatch');
+      }
     }
     return bytes;
   }

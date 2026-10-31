@@ -114,6 +114,8 @@ config, project id/revision/ETag, job UUID, accepted STL path, and selection
 JSON. The CLI prints `{jobId, jobSha256, created}` and is the operator-host
 entrypoint for `prepareProduced`. CLI arguments and environment variables cannot
 override the producer or inspector identities pinned in those private files.
+The CLI also accepts an optional `--printability-config <path>` (private config,
+same reader) and a bare `--allow-supports` flag for the printability gate below.
 
 Source identity and STL structure are checked before slicing: the CLI reads the
 supplied STL and `prepareProduced` rejects it unless those bytes match the
@@ -127,6 +129,90 @@ project edit rejects the result. Retry the same job UUID and unchanged request
 after an ambiguous result: a persisted job is reverified and returned without
 slicing or inspecting again. A different request, producer configuration, or
 imported/produced identity rejects.
+
+## Printability gate and slicer overrides
+
+When the store is configured with `printability`, `prepareProduced` runs an
+operator-pinned printability gate after `readVerifiedStl` and before slicing.
+The private config pins the report CLI, its analyzer sibling, and the profiles
+file by SHA-256, plus the printer profile id; the gate invokes
+`python -I -B <script> analyze --stl <tmp> --profile <id> --report <tmp>` as a
+bounded detached subprocess and strictly validates the report (schema, input
+digest/length, and the profile's model, bed type, and nozzle diameter against
+the sealed selection). Verdict handling is fail-closed:
+
+- `not-printable` rejects with `printability-failed` (HTTP 422).
+- `printable-with-supports` rejects with `supports-required` (HTTP 409) unless
+  the caller passed an explicit `allowSupports`; when allowed, slicing runs
+  with `enableSupport: true`.
+- Any gate, pin, or report failure rejects with `printability-unavailable`
+  (HTTP 503). A failed gate never falls through to slicing.
+
+The sealed `production.printability` record
+(`{profileId, verdict, allowSupports, reportArtifact}`) binds the verdict into
+the job digest; the full report is retained as `printability.json` beside
+`production.json` and reverified on reopen. `requestSha256` also binds
+`allowSupports` and the gate identity, so changing either is a different
+request. Without a gate config, production behaves exactly as before; enabling
+the gate is an operator deployment choice.
+
+The producer config also accepts optional `bedType`, `nozzleType`, and
+`enableSupport`, passed to the slicer as `--bed-type`, `--nozzle-type`, and
+`--enable-support 1|0` and bound into `producer.identity` (`adapterVersion: 2`).
+Per-call overrides (for example the gate's `enableSupport`) are restricted to
+those three fields. When a strict inspector is configured and the store's
+producer config declares a `nozzleType`, the expected nozzle type is
+automatically cross-checked against the inspection's `nozzleTypes`; an
+explicit `expectedNozzleType` always wins over the auto-seeded value.
+
+## App-facing production, approval, and attempt routes
+
+When the listener is configured with `SCAN_TO_MAKE_PREPARED_PRODUCTION_CONFIG`
+(absolute private JSON: `{producer, printability?, selection, displayName}`),
+the store enables app production behind three authenticated routes under
+`/v1/saved-projects/:projectId/prepared-jobs/:jobId`. Without it, production
+routes return 404 `not-available` and behavior is unchanged. Printer, material,
+tray, and profile are operator-pinned in that config; the phone never picks
+hardware.
+
+- `POST .../production?projectRevision=N[&allowSupports=1]` (scope
+  `prepared-jobs:prepare`) runs `prepareProduced` as a background operation.
+  The body is the raw accepted `model/stl` bytes streamed by the native bridge
+  from the phone's verified cache; the companion checks them against the
+  project's accepted artifact digest before slicing. Returns 202 with the
+  production view, or 200 for an identical replay. An identical start returns
+  the retained operation instead of slicing again; a different request for the
+  same job id conflicts. Only one production runs per capture directory; a
+  concurrent start returns `busy`. `GET .../production` (scope
+  `prepared-jobs:read`) polls the view:
+  `{jobId, status, failure?, job{jobId, jobSha256, printableArtifact, selection}, printability, gcodeSummary?, profile{displayName, nozzleDiameterMm, nozzleType?, bedType}}`,
+  where `gcodeSummary` appears only if the producer manifest emits one.
+  Operation records are retained under `.production-operations/`; an operation
+  interrupted by a companion restart reads as failed with `interrupted`.
+- `POST .../intent?projectRevision=N` (new scope `prints:approve`, granted
+  only by an explicit `pair-print` invitation) records the user's approval.
+  The body is exactly `{jobSha256, confirmed: true}`. The approving actor is
+  derived from the authenticated pairing and the five-minute expiry is stamped
+  on the host clock; client-supplied actor or expiry values are rejected.
+  Returns 201 with `{intent}`, the full sealed intent record. The app's approval creates the intent only —
+  physical dispatch stays with the host's printer adapter and its own safety
+  gates.
+- `GET .../attempt?projectRevision=N` (scope `prepared-jobs:read`) returns
+  `{jobId, intent, linkedAttempt}`. `linkedAttempt` is populated only when the
+  host executor writes an `attempt-link.json` beside the job
+  (`{attemptId, printerId, planSha256, outcome?, resolution?}`, outcome one of
+  `started`/`unconfirmed`/`uncertain`, resolution one of
+  `finished`/`cancelled`/`rejected`). A null `linkedAttempt` means the intent
+  reached the companion only; it never means anything printed.
+
+Error codes clients branch on: `printability-failed`, `supports-required`,
+`approval-expired`, `already-approved`, `approval-mismatch`, `busy`,
+`not-available`, and `project-changed` (client mapping of a stale ETag).
+`printer-offline`, `printer-busy`, `already-sent`, and `ambiguous-send` are
+reserved for the host executor and are not emitted by these routes. Starts
+and approvals are never automatically replayed by the client: a transport
+failure surfaces as an explicit ambiguous code and the UI polls status
+instead.
 
 The optional `production` record is sealed in the job digest. The job retains
 `source.stl`, `settings.json`, and `production.json` alongside the printable and

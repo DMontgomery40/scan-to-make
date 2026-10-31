@@ -116,6 +116,15 @@ test('CLI arguments and environment cannot override pinned producer identity',as
  assert.throws(()=>parseProduceArgs([...argvOf(f.request),'--python','/tmp/evil-python']),/Invalid produce arguments/);
 });
 
+test('produce arguments accept the supports opt-in and printability config exactly once',async t=>{
+ const f=await setup(t);
+ const parsed=parseProduceArgs([...argvOf(f.request),'--allow-supports','--printability-config','/operator/printability.json']);
+ assert.equal(parsed.allowSupports,true);assert.equal(parsed.printabilityConfig,'/operator/printability.json');
+ assert.equal(parseProduceArgs(argvOf(f.request)).allowSupports,false);
+ assert.throws(()=>parseProduceArgs([...argvOf(f.request),'--allow-supports','--allow-supports']),/Invalid produce arguments/);
+ assert.throws(()=>parseProduceArgs([...argvOf(f.request),'--printability-config']),/Invalid produce arguments/);
+});
+
 test('overlapping same jobId fails closed without a second slice',async t=>{
  const f=await setup(t);let resolveProduce;const gate=new Promise(resolve=>{resolveProduce=resolve;});
  const producer={identity:f.producer.identity,async produce(input){f.producer.produce(input);await gate;return result(input);}};

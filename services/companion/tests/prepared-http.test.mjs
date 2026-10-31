@@ -56,7 +56,8 @@ test('authenticated inspected prepare/reopen/download survives restart and same 
  const replay=await retryBusy(()=>wire(f,route(id),post(f)));assert.equal(replay.status,200);assert.deepEqual(JSON.parse(replay.bytes),value);
  const calls=(await readFile(f.log,'utf8')).trim().split('\n').map(JSON.parse).filter(x=>x.method==='tools/call');assert.equal(calls.length,1);
  const changed=envelope();changed.selection={...selection,printerId:'different'};assert.equal((await retryBusy(()=>wire(f,route(id),post(f,changed)))).status,409);
- assert.equal((await wire(f,base(id)+'/intent?projectRevision=2',post(f))).status,404);
+ // The approval route exists but this pairing was never granted prints:approve.
+ assert.equal((await wire(f,base(id)+'/intent?projectRevision=2',post(f))).status,403);
 });
 
 test('old capture credentials, browser, stale and malformed requests cannot gain prepared authority',async t=>{

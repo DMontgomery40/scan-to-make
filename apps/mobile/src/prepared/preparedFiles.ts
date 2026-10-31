@@ -100,6 +100,15 @@ const ProductionSchema = z.strictObject({
     version: z.string().min(1).max(128),
     binarySha256: digest,
   }),
+  // Present only on jobs produced through a configured printability gate.
+  printability: z
+    .strictObject({
+      profileId: z.string().min(1).max(128),
+      verdict: z.enum(['printable', 'printable-with-supports']),
+      allowSupports: z.boolean(),
+      reportArtifact: productionRef('application/json', 1024 * 1024),
+    })
+    .optional(),
 });
 // Field order mirrors the sealed companion record used by its canonical digest.
 const JobSchema = z.strictObject({
@@ -122,10 +131,12 @@ export interface PreparedNative {
   hash(text: string): Promise<string>;
   request(options: {
     context: string;
-    method: 'GET';
+    method: 'GET' | 'POST';
     path: string;
     etag: string;
     artifact?: CaptureFile;
+    source?: CaptureFile;
+    body?: string;
   }): Promise<{
     status: number;
     body: string;
@@ -256,6 +267,91 @@ const PageSchema = z.strictObject({
   unreadable: integer,
   requiresVerifiedGet: z.literal(true),
 });
+const PrintabilitySummarySchema = z.strictObject({
+  verdict: z.enum(['printable', 'printable-with-supports', 'not-printable']),
+  reasonCodes: z.array(z.string().min(1).max(128)).max(64),
+  reasons: z.array(z.string().min(1).max(4096)).max(64),
+  warnings: z
+    .array(
+      z.strictObject({
+        code: z.string().min(1).max(128),
+        message: z.string().min(1).max(4096),
+      }),
+    )
+    .max(64),
+  profile: z.strictObject({
+    id: z.string().min(1).max(128),
+    bambuModel: z.string().min(1).max(128),
+    displayName: z.string().min(1).max(512),
+    bedMm: z.record(z.string(), z.unknown()),
+    excludeZonesMm: z.array(z.unknown()),
+    nozzleDiameterMm: z.number().positive(),
+    nozzleCount: z.number().int().positive(),
+    nozzleType: z.string().min(1).max(128),
+    bedType: z.string().min(1).max(128),
+  }),
+});
+export type PrintabilitySummary = z.infer<typeof PrintabilitySummarySchema>;
+const ProductionViewSchema = z.strictObject({
+  jobId: z.uuid(),
+  status: z.enum(['running', 'succeeded', 'failed']),
+  failure: z
+    .strictObject({
+      code: z.string().min(1).max(64),
+      printability: PrintabilitySummarySchema.optional(),
+    })
+    .optional(),
+  job: z
+    .strictObject({
+      jobId: z.uuid(),
+      jobSha256: digest,
+      printableArtifact: ArtifactRefSchema,
+      selection: PrintSelectionSchema,
+    })
+    .optional(),
+  printability: PrintabilitySummarySchema.optional(),
+  gcodeSummary: z.record(z.string(), z.unknown()).optional(),
+  profile: z.strictObject({
+    displayName: z.string().min(1).max(256),
+    nozzleDiameterMm: z.number().positive(),
+    nozzleType: z.string().min(1).max(128).optional(),
+    bedType: z.string().min(1).max(128),
+  }),
+});
+export type PreparedProductionView = z.infer<typeof ProductionViewSchema>;
+const IntentSchema = z.strictObject({
+  intentId: z.uuid(),
+  atMs: integer,
+});
+export type PreparedIntent = z.infer<typeof IntentSchema>;
+const IntentClaimSchema = z.strictObject({
+  kind: z.literal('intent'),
+  intentId: z.uuid(),
+  jobId: z.uuid(),
+  jobSha256: digest,
+  atMs: integer,
+  approval: z.strictObject({
+    jobSha256: digest,
+    actorId: z.string().min(1).max(128),
+    confirmed: z.literal(true),
+    expiresAtMs: integer,
+  }),
+});
+export type PreparedIntentClaim = z.infer<typeof IntentClaimSchema>;
+const AttemptStatusSchema = z.strictObject({
+  jobId: z.uuid(),
+  intent: IntentSchema.nullable(),
+  linkedAttempt: z
+    .strictObject({
+      attemptId: z.uuid(),
+      printerId: safeId,
+      planSha256: digest,
+      outcome: z.enum(['started', 'unconfirmed', 'uncertain']).optional(),
+      resolution: z.enum(['finished', 'cancelled', 'rejected']).optional(),
+    })
+    .nullable(),
+});
+export type PreparedAttemptStatus = z.infer<typeof AttemptStatusSchema>;
 export type DiscoveryMode = 'production-v1' | 'legacy';
 export type PreparedPage = z.infer<typeof PageSchema> & { mode: DiscoveryMode };
 export type ProjectAcknowledgment = { etag: string; snapshot: string };
@@ -284,6 +380,30 @@ export function preparedError(error: unknown): string {
   if (code === 'precondition-failed')
     return 'This project changed. Return to your saved projects and reopen it.';
   if (code === 'busy') return 'Your companion is busy. Try again shortly.';
+  if (code === 'printability-failed')
+    return 'This part is not printable as-is. Review the printability findings.';
+  if (code === 'supports-required')
+    return 'This part needs supports. Review it and allow supports to continue.';
+  if (code === 'approval-expired')
+    return 'The previous approval changed or expired. Review and approve again.';
+  if (code === 'already-approved')
+    return 'This print was already approved on the companion.';
+  if (code === 'approval-mismatch')
+    return 'The companion holds a different approval. Review the current job again.';
+  if (code === 'not-available')
+    return 'App print preparation is not set up on this companion yet.';
+  if (code === 'production-ambiguous')
+    return 'The companion did not confirm whether preparation started. Check its status; do not start it again.';
+  if (code === 'project-changed')
+    return 'This project changed. Return to your saved projects and reopen it.';
+  if (code === 'ambiguous-intent')
+    return 'The companion did not confirm your approval. Check its status; do not approve again yet.';
+  if (code === 'printer-offline' || code === 'printer-busy')
+    return 'The printer is not ready. Check it, then try again.';
+  if (code === 'already-sent')
+    return 'This print was already sent to the printer.';
+  if (code === 'ambiguous-send')
+    return 'We cannot tell whether the print reached the printer. Check the printer before sending again.';
   if (code === 'discovery-unavailable')
     return 'The companion could not load the file list. Try refreshing shortly.';
   return error instanceof Error
@@ -436,6 +556,214 @@ export class PreparedFilesClient {
     if ((await this.native.context()) !== context)
       throw Error('Companion connection changed.');
     return { job, context, path };
+  }
+  private async send(
+    options: Parameters<PreparedNative['request']>[0],
+    okStatuses: number[],
+    ambiguousCode: string,
+  ) {
+    // Starts and approvals are never replayed automatically: the companion
+    // may have started slicing (or claimed the intent) before the response
+    // was lost, and a replay with a changed request would conflict. Such
+    // failures surface as an explicit ambiguous code so the UI can poll
+    // status instead of reissuing the mutation.
+    let r: Awaited<ReturnType<PreparedNative['request']>>;
+    try {
+      r = await this.native.request(options);
+    } catch (error) {
+      throw Object.assign(
+        Error(`The companion did not confirm the request was received.`),
+        { code: ambiguousCode, cause: error },
+      );
+    }
+    if (!okStatuses.includes(r.status) || r.etag !== options.etag) {
+      let code =
+        r.status === 401
+          ? 'unauthorized'
+          : r.status === 403
+          ? 'forbidden'
+          : r.status === 404
+          ? 'not-available'
+          : r.status === 412
+          ? 'project-changed'
+          : r.status === 429
+          ? 'busy'
+          : 'unavailable';
+      let printability: PrintabilitySummary | undefined;
+      try {
+        const parsed = JSON.parse(r.body);
+        if (typeof parsed?.error?.code === 'string') code = parsed.error.code;
+        const summary = PrintabilitySummarySchema.safeParse(
+          parsed?.error?.printability,
+        );
+        if (summary.success) printability = summary.data;
+      } catch {
+        /* Opaque response still fails closed. */
+      }
+      if (r.status >= 500) code = ambiguousCode;
+      throw Object.assign(
+        Error(`The companion rejected the request (${r.status}).`),
+        { code, status: r.status, printability },
+      );
+    }
+    return r;
+  }
+  /**
+   * Starts (or replays) print preparation for the project's accepted model.
+   * Idempotent on the companion for an identical request; ambiguous
+   * transport failures never replay here — use productionStatus() instead.
+   * The native bridge streams the phone's verified accepted-STL cache file.
+   */
+  async startProduction(
+    projectId: string,
+    ack: ProjectAcknowledgment,
+    options: { jobId: string; allowSupports?: boolean },
+  ): Promise<PreparedProductionView> {
+    safeId.parse(projectId);
+    z.uuid().parse(options.jobId);
+    z.string()
+      .regex(/^"[a-f0-9]{64}"$/)
+      .parse(ack.etag);
+    const project = await this.current(projectId, ack.snapshot),
+      context = await this.native.context();
+    // current() already rejects projects without an accepted artifact.
+    const accepted = project.acceptedArtifact;
+    if (!accepted) throw Error('Project has no accepted model.');
+    const path =
+      `/v1/saved-projects/${projectId}/prepared-jobs/${options.jobId}/production` +
+      `?projectRevision=${project.revision}${
+        options.allowSupports ? '&allowSupports=1' : ''
+      }`;
+    const result = await this.send(
+      {
+        context,
+        method: 'POST',
+        path,
+        etag: ack.etag,
+        source: {
+          sha256: accepted.artifact.sha256,
+          byteLength: accepted.artifact.byteLength,
+          mediaType: accepted.artifact.mediaType,
+        },
+      },
+      [200, 202],
+      'production-ambiguous',
+    );
+    const view = z
+      .strictObject({ production: ProductionViewSchema })
+      .parse(JSON.parse(result.body)).production;
+    if (view.jobId !== options.jobId)
+      throw Error('Production identity mismatch.');
+    await this.current(projectId, ack.snapshot);
+    if ((await this.native.context()) !== context)
+      throw Error('Companion connection changed.');
+    return view;
+  }
+  async productionStatus(
+    projectId: string,
+    jobId: string,
+    ack: ProjectAcknowledgment,
+  ): Promise<PreparedProductionView> {
+    safeId.parse(projectId);
+    z.uuid().parse(jobId);
+    z.string()
+      .regex(/^"[a-f0-9]{64}"$/)
+      .parse(ack.etag);
+    const project = await this.current(projectId, ack.snapshot),
+      context = await this.native.context();
+    const result = await this.get({
+      context,
+      method: 'GET',
+      path:
+        `/v1/saved-projects/${projectId}/prepared-jobs/${jobId}` +
+        `/production?projectRevision=${project.revision}`,
+      etag: ack.etag,
+    });
+    const view = z
+      .strictObject({ production: ProductionViewSchema })
+      .parse(JSON.parse(result.body)).production;
+    if (view.jobId !== jobId) throw Error('Production identity mismatch.');
+    await this.current(projectId, ack.snapshot);
+    if ((await this.native.context()) !== context)
+      throw Error('Companion connection changed.');
+    return view;
+  }
+  /**
+   * Records the user's explicit print approval on the companion. The host
+   * derives the approving actor from this pairing and stamps the five-minute
+   * window on its own clock; the app's approval creates the intent only —
+   * physical dispatch stays with the host's printer adapter.
+   */
+  async claimIntent(
+    projectId: string,
+    jobId: string,
+    ack: ProjectAcknowledgment,
+    jobSha256: string,
+  ): Promise<PreparedIntentClaim> {
+    safeId.parse(projectId);
+    z.uuid().parse(jobId);
+    z.string()
+      .regex(/^"[a-f0-9]{64}"$/)
+      .parse(ack.etag);
+    digest.parse(jobSha256);
+    const project = await this.current(projectId, ack.snapshot),
+      context = await this.native.context();
+    const result = await this.send(
+      {
+        context,
+        method: 'POST',
+        path:
+          `/v1/saved-projects/${projectId}/prepared-jobs/${jobId}` +
+          `/intent?projectRevision=${project.revision}`,
+        etag: ack.etag,
+        body: JSON.stringify({ jobSha256, confirmed: true }),
+      },
+      [200, 201],
+      'ambiguous-intent',
+    );
+    const intent = z
+      .strictObject({ intent: IntentClaimSchema })
+      .parse(JSON.parse(result.body)).intent;
+    if (intent.jobId !== jobId || intent.jobSha256 !== jobSha256)
+      throw Error('Intent identity mismatch.');
+    await this.current(projectId, ack.snapshot);
+    if ((await this.native.context()) !== context)
+      throw Error('Companion connection changed.');
+    return intent;
+  }
+  /**
+   * Reads the recorded approval plus the host executor's linked attempt, if
+   * any. A null linkedAttempt means the intent reached the companion only;
+   * it does not mean anything printed.
+   */
+  async attemptStatus(
+    projectId: string,
+    jobId: string,
+    ack: ProjectAcknowledgment,
+  ): Promise<PreparedAttemptStatus> {
+    safeId.parse(projectId);
+    z.uuid().parse(jobId);
+    z.string()
+      .regex(/^"[a-f0-9]{64}"$/)
+      .parse(ack.etag);
+    const project = await this.current(projectId, ack.snapshot),
+      context = await this.native.context();
+    const result = await this.get({
+      context,
+      method: 'GET',
+      path:
+        `/v1/saved-projects/${projectId}/prepared-jobs/${jobId}` +
+        `/attempt?projectRevision=${project.revision}`,
+      etag: ack.etag,
+    });
+    const status = z
+      .strictObject({ attempt: AttemptStatusSchema })
+      .parse(JSON.parse(result.body)).attempt;
+    if (status.jobId !== jobId) throw Error('Attempt identity mismatch.');
+    await this.current(projectId, ack.snapshot);
+    if ((await this.native.context()) !== context)
+      throw Error('Companion connection changed.');
+    return status;
   }
   async export(
     projectId: string,

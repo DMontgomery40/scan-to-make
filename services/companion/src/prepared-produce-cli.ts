@@ -4,24 +4,14 @@ import {isAbsolute, join} from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {z} from 'zod';
 import {FileSavedProjectStorage} from '@scan-to-make/project';
-import {PreparedJobFailure, PreparedJobStore, createPreparedProducer} from './prepared-jobs.js';
-import {PRODUCTION_LIMITS, type PreparedProducer} from './prepared-production.js';
+import {PreparedJobFailure, PreparedJobStore, createPreparedProducer, withJobProduceLock} from './prepared-jobs.js';
+import {PRODUCTION_LIMITS, preparedProducerConfigurationSchema, type PreparedProducer} from './prepared-production.js';
+import {preparedPrintabilityConfigurationSchema} from './prepared-printability.js';
 import {inspectorProcessSchema, readPrivateConfig} from './private-config.js';
 
 const digest = z.string().regex(/^[a-f0-9]{64}$/);
 const absolutePath = z.string().refine(isAbsolute);
-const producerConfigSchema = z.strictObject({
-  python: absolutePath,
-  script: absolutePath,
-  expectedScriptSha256: digest,
-  bundle: absolutePath,
-  expectedVersion: z.string().min(1).max(128),
-  expectedBinarySha256: digest,
-  machine: z.string().min(1).max(256),
-  process: z.string().min(1).max(256),
-  filament: z.string().min(1).max(256),
-  timeoutSeconds: z.number().int().min(1).max(120).optional(),
-});
+const producerConfigSchema = preparedProducerConfigurationSchema;
 
 export interface ProduceRequest {
   captureDir: string;
@@ -33,6 +23,8 @@ export interface ProduceRequest {
   jobId: string;
   stlPath: string;
   selectionPath: string;
+  allowSupports: boolean;
+  printabilityConfig?: string;
 }
 
 const flags = [
@@ -48,14 +40,20 @@ const flags = [
 ] as const;
 
 export function parseProduceArgs(argv: string[]): ProduceRequest {
-  if (argv.length !== flags.length * 2) throw new Error('Invalid produce arguments');
   const values = new Map<string, string>();
-  for (let i = 0; i < argv.length; i += 2) {
+  let allowSupports = false;
+  for (let i = 0; i < argv.length; i++) {
     const flag = argv[i];
-    const value = argv[i + 1];
-    if (!flag?.startsWith('--') || value === undefined) throw new Error('Invalid produce arguments');
+    if (!flag?.startsWith('--')) throw new Error('Invalid produce arguments');
     const name = flag.slice(2);
-    if (!(flags as readonly string[]).includes(name) || values.has(name) || value.startsWith('--')) {
+    if (name === 'allow-supports') {
+      if (allowSupports) throw new Error('Invalid produce arguments');
+      allowSupports = true;
+      continue;
+    }
+    const value = argv[++i];
+    if (value === undefined) throw new Error('Invalid produce arguments');
+    if (!(flags as readonly string[]).includes(name) && name !== 'printability-config' || values.has(name) || value.startsWith('--')) {
       throw new Error('Invalid produce arguments');
     }
     values.set(name, value);
@@ -73,6 +71,8 @@ export function parseProduceArgs(argv: string[]): ProduceRequest {
     jobId: values.get('job-id')!,
     stlPath: values.get('stl')!,
     selectionPath: values.get('selection')!,
+    allowSupports,
+    printabilityConfig: values.get('printability-config'),
   };
 }
 
@@ -96,24 +96,6 @@ async function readAbsoluteBytes(path: string, maxBytes: number): Promise<Buffer
   }
 }
 
-async function withJobProduceLock<T>(directory: string, jobId: string, operation: () => Promise<T>): Promise<T> {
-  await mkdir(directory, {recursive: true, mode: 0o700});
-  const root = join(directory, '.produce-locks');
-  await mkdir(root, {recursive: true, mode: 0o700});
-  const lock = join(root, jobId.toLowerCase());
-  try {
-    await mkdir(lock, {mode: 0o700});
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'EEXIST') throw new PreparedJobFailure('job-conflict');
-    throw error;
-  }
-  try {
-    return await operation();
-  } finally {
-    await rm(lock, {recursive: true, force: true});
-  }
-}
-
 export async function runProduce(
   request: ProduceRequest,
   options: {producer?: PreparedProducer} = {},
@@ -125,13 +107,15 @@ export async function runProduce(
   }
   const inspection = await readPrivateConfig(request.inspectorConfig, inspectorProcessSchema, 'Inspector configuration');
   const producerConfig = await readPrivateConfig(request.producerConfig, producerConfigSchema, 'Producer configuration');
+  const printability = request.printabilityConfig === undefined ? undefined :
+    await readPrivateConfig(request.printabilityConfig, preparedPrintabilityConfigurationSchema, 'Printability configuration');
   const source = await readAbsoluteBytes(request.stlPath, PRODUCTION_LIMITS.sourceBytes);
   const selection = JSON.parse(new TextDecoder('utf-8', {fatal: true}).decode(await readAbsoluteBytes(request.selectionPath, 65536)));
   const production = options.producer ?? createPreparedProducer(producerConfig);
   const jobsDir = join(request.captureDir, 'prepared-jobs');
   return withJobProduceLock(jobsDir, jobId, async () => {
     const storage = new FileSavedProjectStorage(join(request.captureDir, 'projects'));
-    const store = new PreparedJobStore(storage, jobsDir, {inspection: {process: inspection}, production});
+    const store = new PreparedJobStore(storage, jobsDir, {inspection: {process: inspection}, production, printability});
     const result = await store.prepareProduced({
       projectId: request.projectId,
       projectRevision: request.projectRevision,
@@ -139,6 +123,7 @@ export async function runProduce(
       jobId,
       source,
       selection,
+      allowSupports: request.allowSupports,
     });
     return {jobId: result.jobId, jobSha256: result.job.sha256, created: result.created};
   });
