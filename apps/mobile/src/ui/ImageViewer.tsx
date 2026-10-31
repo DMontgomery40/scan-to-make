@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   Image,
   Modal,
@@ -28,8 +28,12 @@ export function ImageViewer({
   index: number;
   onClose: () => void;
 }) {
-  const { width } = useWindowDimensions();
+  // Pages are as wide as the pager itself, which safe areas can narrow
+  // below the window (an iPhone Duo's side system bar, for one).
+  const { width: windowWidth } = useWindowDimensions();
+  const [width, setWidth] = useState(windowWidth);
   const [page, setPage] = useState(index);
+  const pager = useRef<React.ComponentRef<typeof ScrollView>>(null);
   const current = images[page] ?? images[0];
   return (
     <Modal
@@ -57,7 +61,16 @@ export function ImageViewer({
           horizontal
           pagingEnabled
           showsHorizontalScrollIndicator={false}
-          contentOffset={{ x: index * width, y: 0 }}
+          ref={pager}
+          onLayout={event => {
+            const measured = event.nativeEvent.layout.width;
+            if (measured <= 0 || measured === width) return;
+            setWidth(measured);
+            // contentOffset only applies on mount: keep the page in view
+            // when the pager first measures, rotates or folds.
+            pager.current?.scrollTo({ x: page * measured, animated: false });
+          }}
+          contentOffset={{ x: page * width, y: 0 }}
           onMomentumScrollEnd={event =>
             setPage(
               Math.max(

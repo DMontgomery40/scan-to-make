@@ -18,6 +18,13 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, radius, space, type } from './theme';
 import { NativeActionButton } from './NativeActionButton';
 
+/**
+ * Screens read as one centred column at most this wide (points, before
+ * padding), so lines and buttons stay a readable size on iPad and an
+ * unfolded iPhone Duo.
+ */
+export const READABLE_WIDTH = 640;
+
 export function Screen({
   title,
   subtitle,
@@ -54,7 +61,7 @@ export function Screen({
       ]}
     >
       <ScrollView
-        contentContainerStyle={styles.content}
+        contentContainerStyle={[styles.column, styles.content]}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
         automaticallyAdjustKeyboardInsets={false}
@@ -96,7 +103,9 @@ export function Screen({
         ) : null}
       </ScrollView>
       {footer && !scrollFooter ? (
-        <View style={styles.footer}>{footer}</View>
+        <View style={styles.footer}>
+          <View style={[styles.column, styles.footerActions]}>{footer}</View>
+        </View>
       ) : null}
     </KeyboardAvoidingView>
   );
@@ -273,6 +282,11 @@ export function Field({
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.background },
+  column: {
+    width: '100%',
+    maxWidth: READABLE_WIDTH + space.xl * 2,
+    alignSelf: 'center',
+  },
   content: {
     paddingHorizontal: space.xl,
     paddingTop: space.sm,
@@ -301,14 +315,13 @@ const styles = StyleSheet.create({
   subtitle: { ...type.body, color: colors.muted, marginTop: space.sm },
   body: { marginTop: space.xl, gap: space.lg },
   footer: {
-    paddingHorizontal: space.xl,
     paddingTop: space.md,
     paddingBottom: space.lg,
-    gap: space.sm,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: colors.line,
     backgroundColor: colors.background,
   },
+  footerActions: { paddingHorizontal: space.xl, gap: space.sm },
   inlineFooter: { marginTop: space.lg, gap: space.sm },
   button: {
     minHeight: 56,
