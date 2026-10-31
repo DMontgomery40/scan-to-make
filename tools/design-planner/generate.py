@@ -10,6 +10,7 @@ import json
 import os
 from pathlib import Path
 import re
+import signal
 import subprocess
 import sys
 
@@ -56,6 +57,33 @@ def fitspec(catalog, template, params, plan_digest):
     return spec
 
 
+def _kill_group(pgid):
+    try:
+        os.killpg(pgid,signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+
+
+def run_template(command, cwd, env, timeout):
+    """Run a template as its own process-group leader and kill the whole group when it ends.
+
+    Mesh template wrappers launch Blender with their own unbounded subprocess call, so
+    killing only the direct child would leave Blender running past the budget.
+    Descendants that start their own session escape the group; templates must not do that.
+    """
+    with subprocess.Popen(command,cwd=cwd,env=env,stdout=subprocess.PIPE,stderr=subprocess.PIPE,
+                          text=True,start_new_session=True) as process:
+        try:
+            stdout, stderr = process.communicate(timeout=timeout)
+        except BaseException:
+            _kill_group(process.pid)
+            process.wait()
+            raise
+        finally:
+            _kill_group(process.pid)
+    return subprocess.CompletedProcess(command,process.returncode,stdout,stderr)
+
+
 def _output_stem(template):
     stems = [name[:-len('.manifest.json')] for name in template['outputs'] if name.endswith('.manifest.json')]
     if len(stems) != 1:
@@ -63,7 +91,7 @@ def _output_stem(template):
     return stems[0]
 
 
-def generate(plan, catalog, out, mesh=None, seconds=900, runner=subprocess.run):
+def generate(plan, catalog, out, mesh=None, seconds=900, runner=run_template):
     errors = validate_plan(plan,catalog)
     if errors:
         raise ValueError('plan cannot be generated: '+'; '.join(errors))
@@ -98,7 +126,7 @@ def generate(plan, catalog, out, mesh=None, seconds=900, runner=subprocess.run):
     else:
         raise ValueError(f'{template["id"]}: unsupported template input kind {kind!r}')
     try:
-        result = runner(command,cwd=catalog.repo,env=template_env(),capture_output=True,text=True,timeout=seconds)
+        result = runner(command,cwd=catalog.repo,env=template_env(),timeout=seconds)
     except subprocess.TimeoutExpired:
         raise ValueError(f'{template["id"]} exceeded the {seconds} s generation budget') from None
     if result.returncode:

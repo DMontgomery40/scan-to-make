@@ -125,7 +125,10 @@ The result is the template's manifest plus SHA-256 hashes of every output file.
 The plan is saved beside it as `design-plan.json`. Templates run with the
 repository as working directory, a time limit (`--max-seconds`, default 900,
 maximum 3600), and an environment with variables named like keys, tokens,
-secrets, passwords or credentials removed. Generated geometry is preview only:
+secrets, passwords or credentials removed. Each template runs as the leader of
+a new process group; when it exits or the time limit expires the whole group,
+including the Blender process a mesh template launches, is killed. Templates
+must not start descendants in a session of their own. Generated geometry is preview only:
 no slicing, printing or physical-fit claim happens here.
 
 Plans and generate outputs contain the user's request text and scan

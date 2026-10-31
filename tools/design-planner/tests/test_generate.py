@@ -6,8 +6,10 @@ import json
 import os
 from pathlib import Path
 import shlex
+import signal
 import sys
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 
@@ -15,6 +17,18 @@ from helpers import Catalog, ready_plan
 
 import planner
 from generate import cli_command, generate
+
+
+def process_alive(pid):
+    """Killed orphans may linger as zombies until init reaps them; those count as gone."""
+    try:
+        os.kill(pid,0)
+    except ProcessLookupError:
+        return False
+    try:
+        return Path(f'/proc/{pid}/stat').read_text().rpartition(')')[2].split()[0] != 'Z'
+    except OSError:
+        return True
 
 
 class GenerateTests(unittest.TestCase):
@@ -104,6 +118,25 @@ class GenerateTests(unittest.TestCase):
         self.assertEqual(receipt['manifest']['config']['notch_side'],'+Y')
         self.assertEqual(receipt['manifest']['config']['notch_position_mm'],-5.0)
         self.assertFalse(receipt['manifest']['config']['render'])
+
+    def test_timeout_kills_the_blender_the_template_launched(self):
+        pidfile = self.tmp/'blender.pid'
+        plan = ready_plan(self.catalog,'wall-mount',{},scan_name='case-correct-report.json')
+        started = time.monotonic()
+        with self.fake_blender_env(),patch.dict(os.environ,{'FAKE_BLENDER_HANG_PIDFILE':str(pidfile)}):
+            with self.assertRaisesRegex(ValueError,'exceeded the 1 s generation budget'):
+                generate(plan,self.catalog,self.tmp/'mount',mesh=self.mesh,seconds=1)
+        self.assertLess(time.monotonic()-started,30)
+        self.assertTrue(pidfile.is_file(),'the fake Blender grandchild never started')
+        blender = int(pidfile.read_text())
+        def kill_leftover():
+            with contextlib.suppress(ProcessLookupError):
+                os.kill(blender,signal.SIGKILL)
+        self.addCleanup(kill_leftover)
+        deadline = time.monotonic()+5
+        while process_alive(blender) and time.monotonic() < deadline:
+            time.sleep(.05)
+        self.assertFalse(process_alive(blender),'Blender outlived the generation budget')
 
     def test_refusals_before_any_template_runs(self):
         ran = []
