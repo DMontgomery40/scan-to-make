@@ -1,6 +1,7 @@
 import React from 'react';
 import Renderer, { act } from 'react-test-renderer';
 import { Alert, Image, Text, TextInput } from 'react-native';
+import type { DetailStill } from '@scan-to-make/contracts';
 import { CloseUpsScreen } from '../src/screens/CloseUpsScreen';
 import { unavailableScanServices } from '../src/screens/scanServices';
 import {
@@ -180,7 +181,7 @@ test('a lost upload reply is checked against the list before any retry', async (
   });
   const upload = services.stills.upload;
   services.stills.upload = async (_p, _c, _a, source) => {
-    if (source === landed) {
+    if (source.sha256 === landed.sha256) {
       stills.push(stillFrom(landed, 99));
     }
     calls.push('upload unconfirmed');
@@ -231,7 +232,10 @@ test('removing a close-up asks first and updates the list', async () => {
   const { tree } = await render(services);
   expect(texts(tree)).toContain('Power button');
   await press(tree, 'View close-up 1');
-  expect(calls.some(c => c.startsWith('view'))).toBe(true);
+  // A verified thumbnail opens inline; Quick Look stays the fallback.
+  expect(texts(tree)).toContain('Done');
+  expect(calls.some(c => c.startsWith('view'))).toBe(false);
+  await press(tree, 'Done');
   await press(tree, 'Remove close-up 1');
   expect(calls.some(c => c.startsWith('remove'))).toBe(false);
   await act(async () => {
@@ -329,5 +333,127 @@ test('a failed list check keeps an unconfirmed upload from being retried', async
   await press(tree, 'Add 1 photo to scan');
   expect(texts(tree)).toContain('1 of 24');
   expect(calls.filter(c => c.startsWith('upload'))).toHaveLength(1);
+  await act(async () => tree.unmount());
+});
+
+test('stored close-ups get verified thumbnails, downloading only uncached ones', async () => {
+  const onDevice = stillFrom(syntheticPhoto(), 0, 'USB-C port');
+  const remote = stillFrom(syntheticPhoto(), 1);
+  const { services, calls } = fakeScanServices({
+    stills: [onDevice, remote],
+    cachedStills: [onDevice.sha256],
+  });
+  const { tree } = await render(services);
+  expect(calls).toContain('still uri 0');
+  expect(calls).not.toContain('download still 0');
+  expect(calls).toEqual(
+    expect.arrayContaining(['still uri 1', 'download still 1']),
+  );
+  expect(tree.root.findAllByType(Image)).toHaveLength(2);
+  await act(async () => {
+    tree.root
+      .find(
+        n =>
+          n.props.accessibilityRole === 'imagebutton' &&
+          n.props.accessibilityLabel === 'Close-up 2' &&
+          typeof n.props.onPress === 'function',
+      )
+      .props.onPress();
+  });
+  expect(texts(tree)).toContain('Close-up 2 · 2 of 2');
+  await act(async () => tree.unmount());
+});
+
+test('a close-up without a display copy opens in Quick Look', async () => {
+  const { services, calls } = fakeScanServices({
+    stills: [stillFrom(syntheticPhoto(), 0)],
+  });
+  delete services.stills.imageUri;
+  const { tree } = await render(services);
+  expect(tree.root.findAllByType(Image)).toHaveLength(0);
+  await press(tree, 'View close-up 1');
+  expect(calls.some(c => c.startsWith('view'))).toBe(true);
+  await act(async () => tree.unmount());
+});
+
+test('choosing photos waits for a thumbnail request already in flight', async () => {
+  const { services, calls } = fakeScanServices({
+    stills: [stillFrom(syntheticPhoto(), 0)],
+    picks: [{ photos: [syntheticPhoto()], rejected: [] }],
+  });
+  let finish!: () => void;
+  const download = services.stills.download!;
+  services.stills.download = (...args) =>
+    new Promise(resolve => {
+      finish = () => resolve(download(...args));
+    });
+  const { tree } = await render(services);
+  await act(async () => {
+    buttons(tree, 'Choose a photo')[0].props.onPress();
+  });
+  // The companion serves one request at a time.
+  expect(calls.some(c => c.startsWith('pick'))).toBe(false);
+  await act(async () => finish());
+  expect(calls.some(c => c.startsWith('pick'))).toBe(true);
+  expect(texts(tree)).toContain('READY TO ADD');
+  await act(async () => tree.unmount());
+});
+
+test('thumbnails work with a client whose methods rely on this', async () => {
+  const stored = stillFrom(syntheticPhoto(), 0, 'USB-C port');
+  const { services } = fakeScanServices({ stills: [stored] });
+  const base = services.stills;
+  // Like DetailStillsClient: methods read instance state through `this`.
+  class ClientLikeStills {
+    private readonly root = 'file:///client/';
+    list = base.list;
+    upload = base.upload;
+    openFile = base.openFile;
+    remove = base.remove;
+    async imageUri(still: DetailStill) {
+      return `${this.root}${still.sha256.slice(-6)}.jpg`;
+    }
+  }
+  services.stills = new ClientLikeStills();
+  const { tree } = await render(services);
+  expect(tree.root.findAllByType(Image).map(i => i.props.source.uri)).toEqual([
+    `file:///client/${stored.sha256.slice(-6)}.jpg`,
+  ]);
+  await act(async () => tree.unmount());
+});
+
+test('a close-up not on this device is downloaded when the cache lookup rejects', async () => {
+  const stored = stillFrom(syntheticPhoto(), 0, 'Hinge');
+  const { services, calls } = fakeScanServices({ stills: [stored] });
+  const { tree } = await render(services);
+  // The first lookup rejects (cache miss); the verified download follows.
+  expect(calls.filter(c => /still/.test(c))).toEqual([
+    'still uri 0',
+    'download still 0',
+    'still uri 0',
+  ]);
+  expect(tree.root.findAllByType(Image).map(i => i.props.source.uri)).toEqual([
+    `file:///synthetic/still-${stored.sha256.slice(-6)}.jpg`,
+  ]);
+  expect(texts(tree)).not.toContain('The preview couldn’t be loaded');
+  await act(async () => tree.unmount());
+});
+
+test('a failed preview download is shown and can be retried', async () => {
+  const stored = stillFrom(syntheticPhoto(), 0);
+  const { services, calls } = fakeScanServices({ stills: [stored] });
+  const download = services.stills.download!;
+  services.stills.download = async () => {
+    calls.push('download failed');
+    throw Error('Couldn’t reach your companion.');
+  };
+  const { tree } = await render(services);
+  expect(texts(tree)).toContain('The preview couldn’t be loaded.');
+  expect(tree.root.findAllByType(Image)).toHaveLength(0);
+  services.stills.download = download;
+  await press(tree, 'Retry preview for close-up 1');
+  expect(tree.root.findAllByType(Image)).toHaveLength(1);
+  expect(texts(tree)).not.toContain('The preview couldn’t be loaded.');
+  expect(calls.filter(c => c === 'download failed')).toHaveLength(1);
   await act(async () => tree.unmount());
 });

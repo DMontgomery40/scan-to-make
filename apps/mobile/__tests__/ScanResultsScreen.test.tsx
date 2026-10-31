@@ -352,9 +352,10 @@ test('the view gallery shows each render and shares the model', async () => {
   expect(angle).toMatch(/^file:\/\/\/synthetic\//);
   await press(tree, 'Show Top view');
   expect(hero()).not.toBe(angle);
+  await press(tree, 'View 3D model');
   await press(tree, 'Share STL file');
+  expect(calls).toContain('open repaired.obj');
   expect(calls).toContain('share repaired.stl');
-  expect(hasButton(tree, 'View 3D model')).toBe(false);
   await act(async () => tree.unmount());
 });
 
@@ -475,5 +476,164 @@ test('an unconfirmed stop keeps following the check', async () => {
   expect(texts(tree)).toContain('We couldn’t confirm the check stopped.');
   await advance(1000);
   expect(texts(tree)).toContain('Ready');
+  await act(async () => tree.unmount());
+});
+
+const STOPPED_ID = 'aaaaaaaa-0000-4000-8000-000000000001';
+const DONE_ID = 'bbbbbbbb-0000-4000-8000-000000000002';
+const AIRPODS = {
+  dimensionsMm: [60.6, 45.2, 21.7] as [number, number, number],
+  productName: 'AirPods Pro 2 case',
+};
+
+test('after a relaunch the companion’s list reopens a finished check', async () => {
+  const { services, calls } = fakeScanServices({
+    listed: [
+      syntheticJob('failed', { failure: 'cancelled', jobId: STOPPED_ID }),
+      syntheticJob('succeeded', { jobId: DONE_ID, reference: AIRPODS }),
+    ],
+  });
+  const { tree } = await render(services);
+  expect(calls).toContain('list jobs');
+  expect(calls.some(c => c.startsWith('status'))).toBe(false);
+  let shown = texts(tree);
+  expect(shown).toContain('Ready');
+  expect(shown).toContain('HOW CLOSE IS IT?');
+  expect(shown).toContain('Other checks of this scan');
+  expect(shown).toContain('Stopped check');
+  expect(await services.jobs.load(PROJECT_ID, CAPTURE_ID)).toBe(DONE_ID);
+  await press(tree, 'Open Stopped check, Check aaaaaaaa');
+  shown = texts(tree);
+  expect(shown).toContain('You stopped this check');
+  expect(shown).toContain('Finished check');
+  expect(shown).toContain('Compared with AirPods Pro 2 case · Check bbbbbbbb');
+  expect(await services.jobs.load(PROJECT_ID, CAPTURE_ID)).toBe(STOPPED_ID);
+  await act(async () => tree.unmount());
+});
+
+test('a running check in the list is the one shown and followed', async () => {
+  const { services } = fakeScanServices({
+    listed: [
+      syntheticJob('succeeded', { jobId: DONE_ID }),
+      syntheticJob('running', { jobId: STOPPED_ID }),
+    ],
+  });
+  const { tree } = await render(services, { pollMs: 60000 });
+  const shown = texts(tree);
+  expect(shown).toContain('Step 2 of 3: measure it');
+  // Switching away from a running check isn't offered.
+  expect(shown).not.toContain('Other checks of this scan');
+  await act(async () => tree.unmount());
+});
+
+test('without the listing route the remembered check is reopened', async () => {
+  const { services, calls } = fakeScanServices({
+    listed: 'not-available',
+    jobs: [syntheticJob('succeeded')],
+  });
+  await services.jobs.save(PROJECT_ID, CAPTURE_ID, JOB_ID);
+  const { tree } = await render(services);
+  expect(calls.slice(0, 3)).toEqual([
+    'acknowledge',
+    'list jobs',
+    `status ${JOB_ID}`,
+  ]);
+  expect(texts(tree)).toContain('Ready');
+  await act(async () => tree.unmount());
+});
+
+test('a remembered check the companion no longer lists is explained', async () => {
+  const { services } = fakeScanServices({ listed: [] });
+  await services.jobs.save(PROJECT_ID, CAPTURE_ID, JOB_ID);
+  const { tree } = await render(services);
+  expect(texts(tree)).toContain(
+    'Your last check is no longer on your companion.',
+  );
+  expect(hasButton(tree, 'Check my scan')).toBe(true);
+  expect(await services.jobs.load(PROJECT_ID, CAPTURE_ID)).toBeNull();
+  await act(async () => tree.unmount());
+});
+
+test('the gallery opens each view full screen', async () => {
+  const { services } = fakeScanServices({
+    jobs: [syntheticJob('succeeded')],
+  });
+  await services.jobs.save(PROJECT_ID, CAPTURE_ID, JOB_ID);
+  const { tree } = await render(services);
+  await press(tree, 'Cleaned-up scan, Angle 1 view');
+  expect(texts(tree)).toContain('Angle 1 view · 1 of 10');
+  await press(tree, 'Done');
+  expect(texts(tree)).not.toContain('Angle 1 view · 1 of 10');
+  await act(async () => tree.unmount());
+});
+
+test('views without a display copy open one at a time instead', async () => {
+  const { services, calls } = fakeScanServices({
+    jobs: [syntheticJob('succeeded')],
+  });
+  services.imageUri = async () => null;
+  await services.jobs.save(PROJECT_ID, CAPTURE_ID, JOB_ID);
+  const { tree } = await render(services);
+  expect(texts(tree)).toContain('Some views couldn’t be loaded.');
+  await press(tree, 'Open Top view');
+  expect(calls).toContain('open pos_z.png');
+  await act(async () => tree.unmount());
+});
+
+test('switching checks never shows the previous check’s renders', async () => {
+  const first = 'aaaaaaaa-0000-4000-8000-0000000000aa';
+  const second = 'bbbbbbbb-0000-4000-8000-0000000000bb';
+  const { services } = fakeScanServices({
+    listed: [
+      syntheticJob('succeeded', { jobId: first }),
+      syntheticJob('succeeded', { jobId: second }),
+    ],
+  });
+  const download = services.processing.downloadArtifact;
+  services.processing.downloadArtifact = async (p, c, a, job, name) => {
+    if (job.jobId === second) throw Error('Couldn’t reach your companion.');
+    return download(p, c, a, job, name);
+  };
+  const { tree } = await render(services);
+  expect(tree.root.findAllByType(Image).length).toBeGreaterThan(0);
+  await press(tree, 'Open Finished check, No real size · Check bbbbbbbb');
+  // The second check's views failed, so none of the first one's may linger.
+  expect(tree.root.findAllByType(Image)).toHaveLength(0);
+  expect(texts(tree)).toContain('Some views couldn’t be loaded.');
+  await act(async () => tree.unmount());
+});
+
+test('viewing the model waits for a gallery download already in flight', async () => {
+  const { services, calls } = fakeScanServices({
+    jobs: [syntheticJob('succeeded')],
+  });
+  await services.jobs.save(PROJECT_ID, CAPTURE_ID, JOB_ID);
+  let inFlight = false;
+  let release!: () => void;
+  const download = services.processing.downloadArtifact;
+  let first = true;
+  services.processing.downloadArtifact = async (...args) => {
+    if (!first) return download(...args);
+    first = false;
+    inFlight = true;
+    await new Promise<void>(resolve => {
+      release = resolve;
+    });
+    inFlight = false;
+    return download(...args);
+  };
+  const open = services.processing.openArtifact;
+  services.processing.openArtifact = async (...args) => {
+    // The native bridge serves one request at a time.
+    if (inFlight) calls.push('open during download');
+    return open(...args);
+  };
+  const { tree } = await render(services);
+  expect(inFlight).toBe(true);
+  await press(tree, 'View 3D model');
+  expect(calls).not.toContain('open repaired.obj');
+  await act(async () => release());
+  expect(calls).toContain('open repaired.obj');
+  expect(calls).not.toContain('open during download');
   await act(async () => tree.unmount());
 });

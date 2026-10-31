@@ -48,6 +48,15 @@ export interface ScanProcessing {
     name: ScanArtifactName,
     share: boolean,
   ): Promise<unknown>;
+  /**
+   * Every retained job for the capture, in job-id order (not start order).
+   * Throws `code: 'not-available'` on companions without the listing route.
+   */
+  listJobs?(
+    projectId: string,
+    captureId: string,
+    ack: ProjectAcknowledgment,
+  ): Promise<ScanProcessingJob[]>;
 }
 
 export interface DetailStills {
@@ -76,6 +85,15 @@ export interface DetailStills {
     ack: ProjectAcknowledgment,
     stillId: string,
   ): Promise<void>;
+  /** Fetches and verifies a still's bytes so it can be displayed. */
+  download?(
+    projectId: string,
+    captureId: string,
+    ack: ProjectAcknowledgment,
+    still: DetailStill,
+  ): Promise<CaptureFile>;
+  /** A displayable URI for a still whose bytes are on this device, or null. */
+  imageUri?(still: DetailStill): Promise<string | null>;
 }
 
 /** A chosen photo kept by the app, identified by its exact bytes. */

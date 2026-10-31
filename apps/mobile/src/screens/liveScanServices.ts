@@ -1,10 +1,6 @@
 import { NativeModules } from 'react-native';
 import type { SavedProjects } from '@scan-to-make/contracts/saved-project';
-import {
-  CaptureClient,
-  type CaptureFile,
-  type CaptureNative,
-} from '../capture/retainedCaptures';
+import { CaptureClient, type CaptureNative } from '../capture/retainedCaptures';
 import {
   ScanProcessingClient,
   type ScanProcessingNative,
@@ -22,16 +18,27 @@ import {
   type ScanServices,
 } from './scanServices';
 
-type StillsBridge = ScanProcessingNative &
-  DetailStillNative & { pickImage?(): Promise<CaptureFile> };
+type StillsBridge = ScanProcessingNative & DetailStillNative;
+const REASONS = ['too-large', 'unsupported', 'unreadable'] as const;
 
 /**
- * One photo at a time from the bridge's picker. Its bytes stay in native
- * storage, identified by hash, where the upload reads them.
+ * The bridge's photo picker. Chosen bytes stay in native storage, identified
+ * by hash, where the upload reads them; each photo also has a display URI.
+ * Prefers the multi-select camera-roll picker, else one photo at a time.
  */
 export function bridgePhotoPicker(bridge: StillsBridge): PhotoPicker {
   return {
-    async pick() {
+    async pick(limit) {
+      if (bridge.pickImages) {
+        const result = await bridge.pickImages(limit);
+        return {
+          photos: result.photos,
+          rejected: result.rejected.map(r => ({
+            reason: REASONS.includes(r.reason) ? r.reason : 'unreadable',
+            ...(r.byteLength !== undefined ? { byteLength: r.byteLength } : {}),
+          })),
+        };
+      }
       if (!bridge.pickImage) {
         throw Error('Choosing photos isn’t available on this device.');
       }
@@ -67,10 +74,8 @@ export function liveScanServices(
   const captures = modules.RetainedCaptureBridge;
   if (!bridge || !captures) return unavailableScanServices();
   const sync = new CaptureClient(repository, captures);
-  const processing: ScanProcessing = new ScanProcessingClient(
-    repository,
-    bridge,
-  );
+  const client = new ScanProcessingClient(repository, bridge);
+  const processing: ScanProcessing = client;
   const stills: DetailStills = new DetailStillsClient(repository, bridge);
   return {
     async acknowledge(projectId) {
@@ -83,7 +88,9 @@ export function liveScanServices(
     processing,
     stills,
     picker: bridgePhotoPicker(bridge),
-    // TODO(KAN-89): persist started job IDs; the companion cannot list them.
+    // A fast path within a session; after a relaunch, processing.listJobs
+    // finds the jobs the companion kept.
     jobs: sessionJobMemory(),
+    imageUri: file => client.imageUri(file),
   };
 }

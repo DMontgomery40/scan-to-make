@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Alert,
   Image,
+  Pressable,
   StyleSheet,
   Text,
   View,
@@ -14,6 +15,7 @@ import {
 } from '@scan-to-make/contracts';
 import type { CaptureFile } from '../capture/retainedCaptures';
 import { Badge, Button, Card, Field, Notice, Screen } from '../ui/components';
+import { ImageViewer } from '../ui/ImageViewer';
 import { colors, radius, space, type } from '../ui/theme';
 import {
   failureOf,
@@ -99,11 +101,19 @@ export function CloseUpsScreen({
   const [stills, setStills] = useState<DetailStill[]>([]);
   const [drafts, setDrafts] = useState<Draft[]>([]);
   const [previews, setPreviews] = useState<Record<string, string>>({});
+  const [viewing, setViewing] = useState<string | null>(null);
+  // Stills whose preview download failed, by still id; each can be retried.
+  const [previewFailed, setPreviewFailed] = useState<Record<string, true>>({});
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const ack = useRef<ProjectAcknowledgment | null>(null);
   const staged = useRef<CaptureFile[]>([]);
   const running = useRef(false);
+  // Thumbnail work shares the companion's single request slot with actions.
+  const media = useRef<Promise<unknown> | null>(null);
+  const tried = useRef(new Set<string>());
+  const previewsRef = useRef(previews);
+  previewsRef.current = previews;
 
   const block = (error: unknown) => {
     const failure = failureOf(error);
@@ -147,6 +157,63 @@ export function CloseUpsScreen({
     [services],
   );
 
+  // Verified thumbnails for stored close-ups, one at a time, pausing for
+  // anything the user starts. Photos picked here already have a preview.
+  useEffect(() => {
+    // Called as methods: the real clients rely on `this`.
+    const client = services.stills;
+    if (phase.kind !== 'ready' || !client.imageUri || busy) return;
+    let cancelled = false;
+    (async () => {
+      for (const still of stills) {
+        if (cancelled || running.current) return;
+        if (previewsRef.current[still.sha256] || tried.current.has(still.id)) {
+          continue;
+        }
+        tried.current.add(still.id);
+        const step = (async () => {
+          let uri: string | null = null;
+          try {
+            uri = (await client.imageUri?.(still)) ?? null;
+          } catch {
+            // The iOS bridge rejects when the bytes aren't on this device
+            // yet: that's a cache miss, and the download below verifies them.
+          }
+          if (!uri && client.download && ack.current) {
+            // A failure from here on is real and shown on the close-up.
+            await client.download(projectId, captureId, ack.current, still);
+            uri = (await client.imageUri?.(still)) ?? null;
+          }
+          return uri;
+        })();
+        media.current = step;
+        try {
+          const uri = await step;
+          if (!cancelled && uri) {
+            setPreviews(current => ({ ...current, [still.sha256]: uri }));
+          }
+        } catch {
+          if (!cancelled) {
+            setPreviewFailed(current => ({ ...current, [still.id]: true }));
+          }
+        } finally {
+          if (media.current === step) media.current = null;
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [phase.kind, stills, busy, previewFailed, services, projectId, captureId]);
+  const retryPreview = (still: DetailStill) => {
+    tried.current.delete(still.id);
+    setPreviewFailed(current => {
+      const next = { ...current };
+      delete next[still.id];
+      return next;
+    });
+  };
+
   const room = LIMIT - stills.length - drafts.length;
   const full = stills.length >= LIMIT;
 
@@ -155,6 +222,7 @@ export function CloseUpsScreen({
     running.current = true;
     setBusy(true);
     try {
+      await media.current?.catch(() => undefined);
       await action();
     } finally {
       running.current = false;
@@ -227,11 +295,13 @@ export function CloseUpsScreen({
         update(sha, { state: 'uploading', message: undefined });
         try {
           const label = draft.label.trim();
+          // Only the exact-byte identity goes to the companion.
+          const { sha256, byteLength, mediaType } = draft.photo;
           const still = await services.stills.upload(
             projectId,
             captureId,
             ack.current,
-            draft.photo,
+            { sha256, byteLength, mediaType },
             label ? label : undefined,
           );
           setStills(current => [...current, still]);
@@ -556,11 +626,29 @@ export function CloseUpsScreen({
                 <Card key={still.id} style={styles.photoCard}>
                   <View style={styles.photoRow}>
                     {previews[still.sha256] ? (
-                      <Image
-                        source={{ uri: previews[still.sha256] }}
-                        style={styles.photo}
+                      <Pressable
+                        accessibilityRole="imagebutton"
                         accessibilityLabel={`Close-up ${index + 1}`}
-                      />
+                        accessibilityHint="Opens it full screen"
+                        onPress={() => setViewing(still.sha256)}
+                      >
+                        <Image
+                          source={{ uri: previews[still.sha256] }}
+                          style={styles.photo}
+                        />
+                      </Pressable>
+                    ) : previewFailed[still.id] ? (
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel={`Retry preview for close-up ${
+                          index + 1
+                        }`}
+                        disabled={busy}
+                        onPress={() => retryPreview(still)}
+                        style={[styles.photo, styles.placeholder, styles.retry]}
+                      >
+                        <Text style={styles.retryText}>↻</Text>
+                      </Pressable>
                     ) : (
                       <View style={[styles.photo, styles.placeholder]}>
                         <Text style={styles.placeholderText}>{index + 1}</Text>
@@ -575,6 +663,15 @@ export function CloseUpsScreen({
                         {megabytes(still.byteLength)} ·{' '}
                         {MEDIA_NAMES[still.mediaType]}
                       </Text>
+                      {previewFailed[still.id] && !previews[still.sha256] ? (
+                        <Text
+                          accessibilityLiveRegion="polite"
+                          style={styles.error}
+                        >
+                          The preview couldn’t be loaded. Tap it to try again,
+                          or use View.
+                        </Text>
+                      ) : null}
                     </View>
                   </View>
                   <View style={styles.actions}>
@@ -584,7 +681,11 @@ export function CloseUpsScreen({
                         accessibilityLabel={`View close-up ${index + 1}`}
                         variant="secondary"
                         disabled={busy}
-                        onPress={() => view(still)}
+                        onPress={() =>
+                          previews[still.sha256]
+                            ? setViewing(still.sha256)
+                            : view(still)
+                        }
                       />
                     </View>
                     <View style={styles.action}>
@@ -604,6 +705,24 @@ export function CloseUpsScreen({
           <Text style={type.caption}>
             Close-ups are only sent to your companion.
           </Text>
+          {viewing && previews[viewing] ? (
+            <ImageViewer
+              images={stills
+                .map((still, index) => ({
+                  sha256: still.sha256,
+                  uri: previews[still.sha256],
+                  label: still.label ?? `Close-up ${index + 1}`,
+                }))
+                .filter(image => !!image.uri)}
+              index={Math.max(
+                0,
+                stills
+                  .filter(still => previews[still.sha256])
+                  .findIndex(still => still.sha256 === viewing),
+              )}
+              onClose={() => setViewing(null)}
+            />
+          ) : null}
         </>
       ) : null}
     </Screen>
@@ -636,6 +755,8 @@ const styles = StyleSheet.create({
   },
   placeholder: { alignItems: 'center', justifyContent: 'center' },
   placeholderText: { ...type.heading, color: colors.muted },
+  retry: { borderWidth: 1.5, borderColor: colors.fail },
+  retryText: { ...type.heading, color: colors.fail },
   photoInfo: { flex: 1, gap: space.xs, alignItems: 'flex-start' },
   uploading: { flexDirection: 'row', gap: space.sm, alignItems: 'center' },
   error: { ...type.caption, color: colors.fail },

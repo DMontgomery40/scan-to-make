@@ -226,8 +226,13 @@ export function fakeScanServices(
     jobs?: ScanProcessingJob[];
     stills?: DetailStill[];
     picks?: { photos: PickedPhoto[]; rejected: RejectedPhoto[] }[];
+    /** Jobs the companion lists for the capture, or 'not-available'. */
+    listed?: ScanProcessingJob[] | 'not-available';
+    /** Stills whose bytes are already on the device (by sha256). */
+    cachedStills?: string[];
   } = {},
 ) {
+  const cached = new Set(options.cachedStills ?? []);
   const calls: string[] = [];
   const stills = [...(options.stills ?? [])];
   const queue = [...(options.jobs ?? [])];
@@ -265,6 +270,20 @@ export function fakeScanServices(
       openArtifact: async (_p, _c, _a, _j, name, share) => {
         calls.push(`${share ? 'share' : 'open'} ${name}`);
       },
+      ...(options.listed
+        ? {
+            listJobs: async () => {
+              calls.push('list jobs');
+              if (options.listed === 'not-available') {
+                throw Object.assign(Error('Not available'), {
+                  code: 'not-available',
+                  status: 405,
+                });
+              }
+              return [...options.listed!];
+            },
+          }
+        : {}),
     },
     stills: {
       list: async () => {
@@ -288,6 +307,28 @@ export function fakeScanServices(
           stills.findIndex(s => s.id === stillId),
           1,
         );
+      },
+      download: async (_p, _c, _a, still) => {
+        calls.push(`download still ${still.ordinal}`);
+        cached.add(still.sha256);
+        return {
+          sha256: still.sha256,
+          byteLength: still.byteLength,
+          mediaType: still.mediaType,
+        };
+      },
+      imageUri: async still => {
+        calls.push(`still uri ${still.ordinal}`);
+        // Like the iOS bridge: a cache miss rejects rather than resolving null.
+        if (!cached.has(still.sha256)) {
+          throw Object.assign(
+            Error('The detail photo is not on this device.'),
+            {
+              code: 'verification-failed',
+            },
+          );
+        }
+        return `file:///synthetic/still-${still.sha256.slice(-6)}.jpg`;
       },
     },
     picker: {
