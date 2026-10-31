@@ -197,9 +197,7 @@ def default_health_probe(port: int) -> dict[str, Any]:
         return {**invalid, "detail": "companion health response exceeded bound"}
     payload = _parse_json(body.decode("utf-8", errors="replace"))
     if (status != 200 or not payload or payload.get("status") != "ok"
-            or payload.get("protocolVersion") != "0.1.0"
-            or not isinstance(payload.get("templates"), list)
-            or not all(isinstance(t, str) and t for t in payload["templates"])):
+            or payload.get("protocolVersion") != "0.1.0"):
         return {**invalid, "detail": "listener did not return a supported companion health response"}
     return {
         **base,
@@ -207,7 +205,6 @@ def default_health_probe(port: int) -> dict[str, Any]:
         "state": "local-healthy",
         "httpStatus": status,
         "protocolVersion": payload.get("protocolVersion"),
-        "templates": payload.get("templates"),
         "detail": "Local companion health protocol responded; this does not authenticate "
         "the service or verify private phone connectivity.",
     }
@@ -344,7 +341,7 @@ def run_preflight(
         health_state = health.get("state")
         facts["companionHealth"] = {
             key: health.get(key)
-            for key in ("ok", "state", "httpStatus", "identityVerified", "protocolVersion", "templates")
+            for key in ("ok", "state", "httpStatus", "identityVerified", "protocolVersion")
             if key in health
         }
         checks.append(
@@ -360,7 +357,7 @@ def run_preflight(
                 else "Inspect the running listener's port, configuration and diagnostics; "
                 "it did not return supported health."
                 if health_state == "invalid-response"
-                else "Check that the companion loopback generation service is running on this port, "
+                else "Check that the companion loopback service is running on this port, "
                 "then re-run preflight.",
             )
         )

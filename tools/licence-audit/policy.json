@@ -102,56 +102,8 @@
     {
       "ecosystem": "tool",
       "licence": "UNKNOWN",
-      "name": "tools/characterization",
-      "reason": "Pending the repository licence decision (KAN-105). This folder contains no GPL code and will carry or inherit the chosen root licence once it is added.",
-      "scope": "server",
-      "version": "workspace"
-    },
-    {
-      "ecosystem": "tool",
-      "licence": "UNKNOWN",
-      "name": "tools/self-host-smoke",
-      "reason": "Pending the repository licence decision (KAN-105). This folder contains no GPL code and will carry or inherit the chosen root licence once it is added.",
-      "scope": "server",
-      "version": "workspace"
-    },
-    {
-      "ecosystem": "tool",
-      "licence": "UNKNOWN",
       "name": "tools/tailscale",
       "reason": "Pending the repository licence decision (KAN-105). This folder contains no GPL code and will carry or inherit the chosen root licence once it is added.",
-      "scope": "server",
-      "version": "workspace"
-    },
-    {
-      "ecosystem": "tool",
-      "licence": "UNKNOWN",
-      "name": "tools/templates/cup-holder-adapter",
-      "reason": "Pending the repository licence decision (KAN-105). This folder contains no GPL code and will carry or inherit the chosen root licence once it is added.",
-      "scope": "server",
-      "version": "workspace"
-    },
-    {
-      "ecosystem": "tool",
-      "licence": "UNKNOWN",
-      "name": "tools/templates/drawer-organizer",
-      "reason": "Pending the repository licence decision (KAN-105). This folder contains no GPL code and will carry or inherit the chosen root licence once it is added.",
-      "scope": "server",
-      "version": "workspace"
-    },
-    {
-      "ecosystem": "tool",
-      "licence": "UNKNOWN",
-      "name": "tools/templates/_catalog",
-      "reason": "Pending the repository licence decision (KAN-105). This folder contains no GPL code and will carry or inherit the chosen root licence once it is added.",
-      "scope": "server",
-      "version": "workspace"
-    },
-    {
-      "ecosystem": "tool",
-      "licence": "UNKNOWN",
-      "name": "tools/templates",
-      "reason": "Holds only catalog.json, the template catalog data. Pending the repository licence decision (KAN-105). This folder contains no GPL code and will carry or inherit the chosen root licence once it is added.",
       "scope": "server",
       "version": "workspace"
     }
@@ -163,12 +115,7 @@
     ],
     "folders": [
       "tools/scan-correct",
-      "tools/scan-repair",
-      "tools/templates/_fitted-core",
-      "tools/templates/edge-clip",
-      "tools/templates/protective-sleeve",
-      "tools/templates/scan-cradle",
-      "tools/templates/wall-mount"
+      "tools/scan-repair"
     ]
   },
   "schemaVersion": 1,
