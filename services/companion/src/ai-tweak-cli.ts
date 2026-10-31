@@ -1,8 +1,10 @@
 #!/usr/bin/env node
-import {accessSync,constants,statSync} from 'node:fs';
+import {accessSync,constants,realpathSync,statSync} from 'node:fs';
+import {spawn} from 'node:child_process';
 import {writeFile} from 'node:fs/promises';
-import {homedir} from 'node:os';
+import {homedir,userInfo} from 'node:os';
 import {isAbsolute,join} from 'node:path';
+import {fileURLToPath} from 'node:url';
 import {parseArgs} from 'node:util';
 import {ModelAccessEnvironment} from '@scan-to-make/contracts/model-access';
 import {checkModelAccess,modelAccessFromEnv,runAiTweak,type AiTweakOptions} from './ai-tweak.js';
@@ -23,6 +25,58 @@ export function findExecutable(name:'claude'|'codex',env:NodeJS.ProcessEnv=proce
  return undefined;
 }
 
+const PATH_MARK='__SCAN_TO_MAKE_PATH__';
+/** One PATH read: the child's own output between markers. Nothing else from the shell is kept. */
+function readPath(command:string,args:string[],env:NodeJS.ProcessEnv,timeoutMs:number){
+ return new Promise<string|undefined>(done=>{
+  let out='',settled=false;const child=spawn(command,args,{env,stdio:['ignore','pipe','ignore'],detached:true});
+  const finish=(value:string|undefined)=>{if(settled)return;settled=true;clearTimeout(timer);child.stdout.destroy();done(value);};
+  // A profile can leave a background job holding stdout open, so the timer settles on its own.
+  const timer=setTimeout(()=>{try{process.kill(-child.pid!,'SIGKILL');}catch{child.kill('SIGKILL');}finish(undefined);},timeoutMs);
+  child.stdout.setEncoding('utf8').on('data',(chunk:string)=>{if(out.length<65536)out+=chunk;});
+  child.on('error',()=>finish(undefined));
+  const marked=()=>{const parts=out.split(PATH_MARK),inner=parts[1]?.trim();return parts.length>=3&&inner?inner:undefined;};
+  child.on('exit',()=>{const path=marked();if(path)finish(path);});
+  child.on('close',()=>finish(marked()));
+ });
+}
+
+/**
+ * The user's PATH as their login shell builds it, the way T3 Code hydrates a GUI process: $SHELL, the
+ * account's shell, then /bin/zsh on macOS, then launchd's PATH. The first PATH that `accept`s wins, so a
+ * shell whose PATH lacks the CLI doesn't hide the later candidates. Only used when the usual places miss.
+ */
+export async function loginShellPath(env:NodeJS.ProcessEnv=process.env,timeoutMs=8000,accept:(path:string)=>boolean=()=>true):Promise<string|undefined>{
+ let account:{username:string;shell:string|null}|undefined;try{account=userInfo();}catch{/* no account record */}
+ const home=env.HOME||homedir(),user=env.USER||account?.username||'';
+ const shells=[env.SHELL,account?.shell??undefined,process.platform==='darwin'?'/bin/zsh':undefined].filter((s):s is string=>!!s&&isAbsolute(s));
+ for(const shell of [...new Set(shells)]){
+  // A minimal starting environment: the profile builds PATH; no inherited key is visible to it.
+  // printf and printenv read the same in sh, zsh, bash and fish (fish has no ${PATH} syntax).
+  const path=await readPath(shell,['-ilc',`printf '%s' ${PATH_MARK}; /usr/bin/printenv PATH; printf '%s' ${PATH_MARK}`],{HOME:home,USER:user,LOGNAME:user,SHELL:shell,PATH:'/usr/bin:/bin:/usr/sbin:/sbin',TERM:'dumb'},timeoutMs);
+  if(path&&accept(path))return path;
+ }
+ if(process.platform==='darwin'){
+  const path=await readPath('/bin/sh',['-c',`printf '%s' "${PATH_MARK}$(/bin/launchctl getenv PATH)${PATH_MARK}"`],{PATH:'/usr/bin:/bin'},timeoutMs);
+  if(path&&accept(path))return path;
+ }
+ return undefined;
+}
+
+/** optionsFromEnv, plus the login shell's PATH when the selected CLI isn't in the usual places. */
+export async function resolveOptions(env:NodeJS.ProcessEnv=process.env,
+ shellPath:(env:NodeJS.ProcessEnv,timeoutMs:number,accept:(path:string)=>boolean)=>Promise<string|undefined>=loginShellPath):Promise<AiTweakOptions>{
+ const options=optionsFromEnv(env),access=options.access;
+ if(access.kind==='none')return options;
+ const cli=access.kind==='claude-code'||access.kind==='api'&&access.provider==='anthropic'?'claude':'codex';
+ // An explicit operator path is never second-guessed.
+ if(env[cli==='claude'?'SCAN_TO_MAKE_CLAUDE_PATH':'SCAN_TO_MAKE_CODEX_PATH']||options[cli==='claude'?'claudePath':'codexPath'])return options;
+ const found=(path:string)=>findExecutable(cli,{HOME:env.HOME,PATH:path});
+ const path=await shellPath(env,8000,path=>!!found(path));
+ if(path){options[cli==='claude'?'claudePath':'codexPath']=found(path);options.searchPath=path;}
+ return options;
+}
+
 export function optionsFromEnv(env:NodeJS.ProcessEnv=process.env):AiTweakOptions{
  const number=(value:string|undefined)=>value===undefined||value===''?undefined:Number(value);
  return {access:modelAccessFromEnv(env),attempts:number(env.SCAN_TO_MAKE_AI_ATTEMPTS),timeoutMs:number(env.SCAN_TO_MAKE_AI_TIMEOUT_MS),
@@ -35,13 +89,13 @@ async function main(argv:string[]){
  if(command==='check'){
   const controller=new AbortController();
   for(const signal of ['SIGINT','SIGTERM'] as const)process.on(signal,()=>controller.abort());
-  const result=await checkModelAccess({...optionsFromEnv(),signal:controller.signal});
+  const result=await checkModelAccess({...await resolveOptions(),signal:controller.signal});
   process.stdout.write(JSON.stringify(result)+'\n');return result.ok?0:1;
  }
  if(command==='pick'){
   // Visual pick over a runAiTweak output folder; the judge uses the same SCAN_TO_MAKE_AI_* access.
   const {values}=parseArgs({args:rest,strict:true,options:{dir:{type:'string'},seed:{type:'string'}}});
-  const options=optionsFromEnv(),tool=process.env[ModelAccessEnvironment.judgeTool];
+  const options=await resolveOptions(),tool=process.env[ModelAccessEnvironment.judgeTool];
   if(!values.dir||!tool||!options.blender||!options.python)throw Error('pick needs --dir, SCAN_TO_MAKE_AI_JUDGE_TOOL, SCAN_TO_MAKE_SCAN_BLENDER and SCAN_TO_MAKE_CAPTURE_PYTHON');
   // Same cancellation as `run`: the judge is a detached sealed run that must not outlive the CLI.
   const controller=new AbortController();
@@ -61,7 +115,7 @@ async function main(argv:string[]){
  if(!values.mesh||!values.out)throw Error('--mesh and --out are required');
  const mmPerUnit=Number(values['mm-per-unit']??1000);
  if(values.export&&(!values.pick||!isAbsolute(values.export)||!(mmPerUnit>0)))throw Error('--export needs --pick and an absolute --export');
- const options=optionsFromEnv();
+ const options=await resolveOptions();
  if(values.attempts)options.attempts=Number(values.attempts);
  if(values['timeout-ms'])options.timeoutMs=Number(values['timeout-ms']);
  if(values['keep-workspaces'])options.keepWorkspaces=true;
@@ -93,4 +147,6 @@ async function main(argv:string[]){
  return 0;
 }
 
-main(process.argv.slice(2)).then(code=>{process.exitCode=code;},error=>{process.stderr.write(`${(error as Error).message}\n`);process.exitCode=2;});
+// Importable for tests: only the script itself runs main.
+const entry=process.argv[1];
+if(entry&&realpathSync(entry)===fileURLToPath(import.meta.url))main(process.argv.slice(2)).then(code=>{process.exitCode=code;},error=>{process.stderr.write(`${(error as Error).message}\n`);process.exitCode=2;});

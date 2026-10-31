@@ -2,10 +2,11 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {execFile} from 'node:child_process';
 import {chmod,mkdir,mkdtemp,readFile,readdir,rm,stat,writeFile} from 'node:fs/promises';
-import {tmpdir} from 'node:os';
+import {tmpdir,userInfo} from 'node:os';
 import {join} from 'node:path';
 import {promisify} from 'node:util';
-import {AI_TWEAK_PROMPT,aiTweakInternals,checkModelAccess,modelAccessFromEnv,runAiTweak} from '../dist/ai-tweak.js';
+import {AI_TWEAK_PROMPT,aiTweakInternals,checkModelAccess,claudeSignedIn,modelAccessFromEnv,runAiTweak} from '../dist/ai-tweak.js';
+import {findExecutable,loginShellPath,resolveOptions} from '../dist/ai-tweak-cli.js';
 
 const run=promisify(execFile);
 const python=process.env.CAPTURE_TEST_PYTHON??'python3';
@@ -22,12 +23,24 @@ async function fixture(t){
 }
 
 /** A stand-in CLI: records how it was started, then performs `action` in its working directory. */
-async function fakeCli(f,name,action,{claudeResult='done',exitCode=0}={}){
+async function fakeCli(f,name,action,{claudeResult='done',exitCode=0,authStatus}={}){
  const path=join(f.root,'bin',name);await mkdir(join(f.root,'bin'),{recursive:true});
  const body=`#!${process.execPath}
 const fs=require('node:fs'),path=require('node:path'),cp=require('node:child_process');
 const argv=process.argv.slice(2);
 if(argv[0]==='--version'){console.log('${name} 9.9.9 (fake)');process.exit(0);}
+// Like the real CLIs: Claude Code finds its keychain login by USER; Codex reads CODEX_HOME/auth.json.
+const authStatus=${JSON.stringify(authStatus??null)};
+if(argv[0]==='auth'&&argv[1]==='status'){
+ if(authStatus){process.stdout.write(authStatus.stdout);process.exit(authStatus.code);}
+ const ok=!!process.env.USER;console.log(JSON.stringify({loggedIn:ok,authMethod:ok?'claude.ai':'none',apiProvider:'firstParty'}));process.exit(ok?0:1);
+}
+if(argv[0]==='login'&&argv[1]==='status'){
+ if(authStatus){process.stderr.write(authStatus.stdout);process.exit(authStatus.code);}
+ if(fs.existsSync(path.join(process.env.CODEX_HOME,'auth.json'))){console.log('Logged in using ChatGPT');process.exit(0);}
+ console.error('Not logged in');process.exit(1);
+}
+if('${name}'==='claude'&&!process.env.USER&&!process.env.ANTHROPIC_API_KEY){console.log(JSON.stringify({type:'result',subtype:'success',is_error:true,result:'Not logged in · Please run /login'}));process.exit(1);}
 let stdin;try{stdin=fs.readFileSync(0).length;}catch(e){stdin='error:'+e.code;}
 const record={argv,env:process.env,cwd:process.cwd(),files:fs.readdirSync('.').sort(),stdin};
 if(process.env.CODEX_HOME){record.codexHome=fs.readdirSync(process.env.CODEX_HOME).sort();record.config=fs.readFileSync(path.join(process.env.CODEX_HOME,'config.toml'),'utf8');
@@ -296,6 +309,94 @@ test('model access parsing fails closed and the Connected check uses the same se
  const denied=await checkModelAccess(base(f,{access:{kind:'claude-code'},claudePath:await fakeCli(f,'claude','nothing',{claudeResult:'Not logged in · Please run /login',exitCode:1})}));
  assert.deepEqual([denied.ok,denied.outcome],[false,'auth-failed']);
  assert.deepEqual(await checkModelAccess(base(f,{access:{kind:'none'}})),{ok:false,outcome:'skipped'});
+});
+
+test('KAN-199: a launchd environment with no USER still finds the keychain login, and the CLI\'s own status decides signed out',async t=>{
+ const f=await fixture(t),me=userInfo().username;
+ // base() is the companion's worker environment: HOME and PATH, no USER, plus keys that must not leak.
+ const ok=await checkModelAccess(base(f,{access:{kind:'claude-code'},claudePath:await fakeCli(f,'claude','nothing',{claudeResult:'OK'})}));
+ assert.deepEqual([ok.ok,ok.outcome],[true,'unchanged']);
+ const r=await record(f);
+ assert.deepEqual([r.env.USER,r.env.LOGNAME],[me,me]);
+ for(const name of ['ANTHROPIC_API_KEY','OPENAI_API_KEY','MY_KEY'])assert.equal(r.env[name],undefined,name);
+ assert.equal(r.cwd.endsWith(join('','scan')),true);
+ // An operator-set USER is kept.
+ await checkModelAccess(base(f,{access:{kind:'claude-code'},claudePath:await fakeCli(f,'claude','nothing',{claudeResult:'OK'}),env:{...base(f).env,USER:'operator',LOGNAME:'operator'}}));
+ assert.deepEqual([(await record(f)).env.USER,(await record(f)).env.LOGNAME],['operator','operator']);
+ // Signed out per `claude auth status`: auth-failed before any prompt is sent.
+ await rm(join(f.root,'calls.log'),{force:true});
+ const out=await checkModelAccess(base(f,{access:{kind:'claude-code'},claudePath:await fakeCli(f,'claude','nothing',{claudeResult:'OK',authStatus:{stdout:'{"loggedIn":false,"authMethod":"none","apiProvider":"firstParty"}\n',code:1}})}));
+ assert.deepEqual([out.ok,out.outcome],[false,'auth-failed']);assert.match(out.reason,/isn't signed in/);
+ await assert.rejects(stat(join(f.root,'calls.log')));
+ // An unreadable status (an older CLI, a crash) falls through to the real call.
+ const garbled=await checkModelAccess(base(f,{access:{kind:'claude-code'},claudePath:await fakeCli(f,'claude','nothing',{claudeResult:'OK',authStatus:{stdout:'error: unknown command auth',code:2}})}));
+ assert.equal(garbled.ok,true);
+ // Codex: `codex login status` against the sealed CODEX_HOME.
+ await mkdir(join(f.home,'.codex'),{recursive:true});await writeFile(join(f.home,'.codex','auth.json'),'{"tokens":"t"}');
+ const codex=await checkModelAccess(base(f,{access:{kind:'codex-cli'},codexPath:await fakeCli(f,'codex','nothing',{claudeResult:'OK'})}));
+ assert.equal(codex.ok,true);assert.equal((await record(f)).env.USER,me);
+ const codexOut=await checkModelAccess(base(f,{access:{kind:'codex-cli'},codexPath:await fakeCli(f,'codex','nothing',{claudeResult:'OK',authStatus:{stdout:'Not logged in\n',code:1}})}));
+ assert.deepEqual([codexOut.ok,codexOut.outcome],[false,'auth-failed']);
+});
+
+test('claude auth status follows T3 Code\'s signed-in rule',()=>{
+ const yes=[{loggedIn:true},{loggedIn:false,apiProvider:'bedrock'},{authMethod:'claude.ai'},{tokenSource:'oauth'},{apiKeySource:'ANTHROPIC_API_KEY'},{email:'a@b.c'},{subscriptionType:'max'}];
+ for(const status of yes)assert.equal(claudeSignedIn(JSON.stringify(status)),true,JSON.stringify(status));
+ assert.equal(claudeSignedIn('{"loggedIn":false,"authMethod":"none","apiProvider":"firstParty"}'),false);
+ for(const text of ['','not json','[]','null','{"apiProvider":"firstParty"}'])assert.equal(claudeSignedIn(text),undefined,text);
+});
+
+test('KAN-199: a CLI outside the usual places is found through the login shell, which contributes PATH only',async t=>{
+ const f=await fixture(t),bin=join(f.root,'profile-bin');await mkdir(bin);
+ await writeFile(join(bin,'claude'),'#!/bin/sh\nexit 0\n',{mode:0o755});
+ // A login shell whose profile adds a directory, prints noise and exports a key.
+ const shell=join(f.root,'fake-shell');
+ await writeFile(shell,`#!/bin/sh\nPATH="${bin}:$PATH"; ANTHROPIC_API_KEY=sk-from-profile; export PATH ANTHROPIC_API_KEY\necho profile noise\n[ "$1" = "-ilc" ] || exit 9\nexec /bin/sh -c "$2"\n`,{mode:0o755});
+ const env={HOME:f.home,PATH:'/usr/bin:/bin',SHELL:shell,SCAN_TO_MAKE_AI_ACCESS:'claude-code'};
+ const path=await loginShellPath(env);
+ assert.equal(path.split(':')[0],bin);assert.ok(!path.includes('profile noise'));
+ const options=await resolveOptions(env);
+ if(!findExecutable('claude',{HOME:f.home,PATH:'/usr/bin:/bin'}))assert.equal(options.claudePath,join(bin,'claude'));
+ assert.equal(options.env,env);assert.equal(options.env.ANTHROPIC_API_KEY,undefined);
+ if(options.claudePath===join(bin,'claude'))assert.equal(options.searchPath,path);
+ // The discovered PATH follows the CLI into the sealed run, after the system directories, so a
+ // `#!/usr/bin/env node` CLI finds the profile's node; it adds no variable besides PATH.
+ const claudePath=await fakeCli(f,'claude','nothing',{claudeResult:'OK'});
+ assert.equal((await checkModelAccess(base(f,{access:{kind:'claude-code'},claudePath,searchPath:`${bin}:relative/dir`}))).ok,true);
+ const sealed=(await record(f)).env.PATH.split(':');
+ assert.equal(sealed.at(-1),bin);assert.ok(sealed.indexOf('/usr/bin')<sealed.indexOf(bin));assert.ok(!sealed.includes('relative/dir'));
+ // The shell runs only when needed, and never overrides an operator path.
+ let asked=0;const spy=async(_env,_timeout,accept)=>{asked++;return accept(bin)?bin:undefined;};
+ assert.equal((await resolveOptions({...env,SCAN_TO_MAKE_CLAUDE_PATH:'relative/claude'},spy)).claudePath,undefined);
+ assert.equal((await resolveOptions({...env,SCAN_TO_MAKE_CLAUDE_PATH:join(bin,'claude')},spy)).claudePath,join(bin,'claude'));
+ await resolveOptions({...env,SCAN_TO_MAKE_AI_ACCESS:'none'},spy);
+ assert.equal(asked,0);
+ // A profile that leaves a job holding stdout open cannot hold the lookup past its marker or its timer.
+ const lingering=join(f.root,'lingering-shell');
+ await writeFile(lingering,`#!/bin/sh\nsleep 30 &\nexec /bin/sh -c "$2"\n`,{mode:0o755});
+ const started=Date.now();assert.equal((await loginShellPath({...env,SHELL:lingering},3000)).split(':').includes('/usr/bin'),true);
+ assert.ok(Date.now()-started<2500);
+ // A profile that hangs is stopped at the timer, with its whole process group.
+ const hanging=join(f.root,'hanging-shell'),pidFile=join(f.root,'hanging.pid');
+ await writeFile(hanging,`#!/bin/sh\nsleep 30 &\necho $! > ${JSON.stringify(pidFile)}\nsleep 30\n`,{mode:0o755});
+ const before=Date.now();
+ assert.equal(await loginShellPath({HOME:f.home,SHELL:hanging,PATH:'/usr/bin:/bin'},500).then(p=>p===undefined||!p.includes('sleep')),true);
+ const hungPid=Number((await readFile(pidFile,'utf8')).trim());
+ await new Promise(r=>setTimeout(r,200));assert.equal(alive(hungPid),false);
+ assert.ok(Date.now()-before<20000);
+ // A shell whose PATH lacks the CLI doesn't hide the next candidate (here the account's own shell).
+ const plain=join(f.root,'plain-shell');await writeFile(plain,'#!/bin/sh\nexec /bin/sh -c "$2"\n',{mode:0o755});
+ const seen=[];
+ await loginShellPath({...env,SHELL:plain},3000,p=>{seen.push(p);return p.split(':')[0]===bin;});
+ assert.ok(seen.length>=1);assert.equal(seen[0].split(':')[0],'/usr/bin');
+ assert.equal(await loginShellPath({...env,SHELL:plain},3000,()=>false),undefined);
+ // A fish-style shell runs the probe without POSIX parameter syntax.
+ const fishy=join(f.root,'fishy-shell');
+ await writeFile(fishy,`#!/bin/sh\ncase "$2" in *'\${'*) echo "fish: Variables cannot be bracketed" >&2; exit 127;; esac\nPATH="${bin}:$PATH"; export PATH\nexec /bin/sh -c "$2"\n`,{mode:0o755});
+ assert.equal((await loginShellPath({...env,SHELL:fishy},3000)).split(':')[0],bin);
+ // A shell that prints no marked PATH yields nothing rather than a guess.
+ const quiet=join(f.root,'quiet-shell');await writeFile(quiet,'#!/bin/sh\necho hello\n',{mode:0o755});
+ assert.equal(await loginShellPath({HOME:f.home,SHELL:quiet},2000).then(p=>p===undefined||!p.includes('hello')),true);
 });
 
 test('ai-tweak-cli run --pick --export is the whole AI step of a cleanup job (KAN-184)',async t=>{

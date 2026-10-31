@@ -36,7 +36,7 @@ that it names. Keys are never written to disk or to the manifest.
   - `SCAN_TO_MAKE_AI_ATTEMPTS` (1–4, default 2);
   - `SCAN_TO_MAKE_AI_TIMEOUT_MS` (default and maximum 30 minutes per attempt).
 - **Executables:**
-  - `SCAN_TO_MAKE_CLAUDE_PATH` and `SCAN_TO_MAKE_CODEX_PATH`. Without them, the CLI looks on `PATH`, `~/.local/bin`, `/opt/homebrew/bin` and `/usr/local/bin`.
+  - `SCAN_TO_MAKE_CLAUDE_PATH` and `SCAN_TO_MAKE_CODEX_PATH`. Without them, the CLI looks on `PATH`, `~/.local/bin`, `/opt/homebrew/bin` and `/usr/local/bin`. If the selected CLI isn't in any of those, it reads the `PATH` the user's login shell builds (`$SHELL -ilc`, then the account's shell, then `/bin/zsh` on macOS, then `launchctl getenv PATH`), the way T3 Code finds CLIs from a GUI process. Only that `PATH` is kept; nothing else from the shell reaches a run.
   - `SCAN_TO_MAKE_SCAN_BLENDER` is exposed to the agent as `blender`.
   - `SCAN_TO_MAKE_CAPTURE_PYTHON` prepares the photos, and its `bin` directory is on the agent's `PATH`.
 - **Endpoints:** an endpoint must speak the OpenAI Responses API, because Codex 0.166 no longer accepts `wire_api = "chat"`.
@@ -96,8 +96,8 @@ needed, it happens there, once, and is written back; the manifest records it as
 
 **Both CLIs** get an environment built from scratch:
 
-- `HOME`, `USER`, `LANG`, `SHELL`;
-- a `PATH` holding `blender`, the CLI's own directory and the system directories;
+- `HOME`, `USER`, `LOGNAME`, `LANG`, `SHELL`. `USER` and `LOGNAME` come from the account database when the companion's environment lacks them, as a LaunchAgent's does: Claude Code finds its keychain login by account name, and reported "Not logged in" without it (KAN-199);
+- a `PATH` holding `blender`, the CLI's own directory and the system directories, followed by the login shell's `PATH` when the CLI was found only there (so a `#!/usr/bin/env node` CLI finds the profile's `node`);
 - a private `TMPDIR`;
 - `CLAUDE_CONFIG_DIR` if the user sets one;
 - the one key that the access kind needs.
@@ -113,6 +113,16 @@ stdin is closed. The prompt is passed as the argument and nowhere else.
 Attempts keep the experiment's permissions: no CLI sandbox, so an agent can run
 Blender and Python freely. Its writes are not confined to the folder. The sealing
 controls what the agent is *told*, not what it can reach.
+
+## Sign-in check
+
+Before the prompt, an attempt asks the subscription CLI itself, using the sealed
+run's environment and folder: `claude auth status` for `claude-code` and
+`codex login status` for `codex-cli`. Claude counts as signed in by T3 Code's
+rule: a provider other than first-party, a login method, a token or key source,
+an email or a subscription. An explicit "not signed in" ends the attempt as
+`auth-failed` and sends no prompt. Unreadable output falls through to the real
+call, which still has to answer `OK` for the Mac app to show Connected.
 
 ## GUI session
 

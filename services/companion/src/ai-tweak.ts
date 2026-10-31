@@ -3,7 +3,7 @@ import {execFile,spawn} from 'node:child_process';
 import {createHash,randomBytes} from 'node:crypto';
 import {createReadStream,createWriteStream,type WriteStream} from 'node:fs';
 import {chmod,copyFile,lstat,mkdir,mkdtemp,open,readdir,readFile,realpath,rename,rm,rmdir,stat,writeFile} from 'node:fs/promises';
-import {homedir,tmpdir} from 'node:os';
+import {homedir,tmpdir,userInfo} from 'node:os';
 import {dirname,isAbsolute,join,relative,resolve,sep} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {promisify} from 'node:util';
@@ -40,6 +40,8 @@ export interface AiTweakOptions {
  concurrency?:number;
  claudePath?:string;
  codexPath?:string;
+ /** The login shell's PATH when the CLI was found only there; appended so its runtime (nvm's node, say) resolves. */
+ searchPath?:string;
  /** Blender binary exposed to the agent as `blender` on PATH. */
  blender?:string;
  /** Python with Pillow (and pillow-heif for HEIC); its bin directory is also on the agent's PATH. */
@@ -133,11 +135,16 @@ function plan(access:Exclude<ModelAccess,{kind:'none'}>,options:AiTweakOptions,b
  const source=options.env??process.env,home=source.HOME||homedir();
  const cli=cliFor(access),executable=cli==='claude'?options.claudePath:options.codexPath;
  if(!executable||!isAbsolute(executable))throw Error(`No absolute ${cli} executable configured`);
- const path=[binDir,dirname(executable),...(options.python&&isAbsolute(options.python)?[dirname(options.python)]:[]),'/opt/homebrew/bin','/usr/local/bin','/usr/bin','/bin','/usr/sbin','/sbin'];
+ const path=[binDir,dirname(executable),...(options.python&&isAbsolute(options.python)?[dirname(options.python)]:[]),'/opt/homebrew/bin','/usr/local/bin','/usr/bin','/bin','/usr/sbin','/sbin',
+  ...(options.searchPath??'').split(':').filter(dir=>isAbsolute(dir))];
  // Built from scratch: an inherited ANTHROPIC_API_KEY would silently move a subscription run onto API billing.
  const env:Record<string,string>={HOME:home,PATH:[...new Set(path)].join(':'),TMPDIR:tmp+sep,LANG:source.LANG||'en_US.UTF-8',SHELL:source.SHELL||'/bin/zsh'};
  // The user's own sign-in location; a custom Claude config dir also names its keychain entry.
  for(const name of ['USER','LOGNAME','CLAUDE_CONFIG_DIR'] as const)if(source[name])env[name]=source[name]!;
+ // Claude Code finds its keychain login by account name. A launchd agent's environment has no USER
+ // (KAN-199: "Not logged in" while David was signed in), so take it from the account database.
+ const account=accountName();
+ if(account){env.USER??=account;env.LOGNAME??=account;}
  const key=(name:string)=>{const value=source[name];if(!value)throw new AccessFailure(`Key variable ${name} is empty`);return value;};
  if(cli==='claude'){
   Object.assign(env,{CLAUDE_CODE_DISABLE_CLAUDE_MDS:'1',ENABLE_CLAUDEAI_MCP_SERVERS:'false',CLAUDE_CODE_DISABLE_AUTO_MEMORY:'1'});
@@ -168,6 +175,35 @@ function plan(access:Exclude<ModelAccess,{kind:'none'}>,options:AiTweakOptions,b
   args:(last,prompt)=>['exec',prompt,'--dangerously-bypass-approvals-and-sandbox','--skip-git-repo-check','--json','-o',last]};
 }
 class AccessFailure extends Error {}
+
+function accountName(){try{return userInfo().username||undefined;}catch{return undefined;}}
+
+/**
+ * T3 Code's rule for Claude's init capabilities, applied to `claude auth status`: signed in through
+ * another provider, a token, a key, an email or a subscription. Only an explicit "no" counts as signed out.
+ */
+export function claudeSignedIn(stdout:string):boolean|undefined{
+ let status:Record<string,unknown>;
+ try{const value:unknown=JSON.parse(stdout.trim());if(!value||typeof value!=='object'||Array.isArray(value))return undefined;status=value as Record<string,unknown>;}
+ catch{return undefined;}
+ const set=(name:string)=>typeof status[name]==='string'&&status[name]!==''&&status[name]!=='none';
+ if(set('apiProvider')&&status.apiProvider!=='firstParty')return true;
+ if(status.loggedIn===true||set('authMethod')||set('tokenSource')||set('apiKeySource')||set('email')||set('subscriptionType'))return true;
+ return status.loggedIn===false?false:undefined;
+}
+
+/** The subscription CLI's own sign-in report, read with the sealed run's environment before any prompt. */
+async function signedIn(p:Plan,access:Exclude<ModelAccess,{kind:'none'}>,cwd:string):Promise<boolean|undefined>{
+ if(access.kind==='claude-code'){
+  const out=await run(p.executable,['auth','status'],{cwd,env:p.env,timeout:20000,maxBuffer:64*1024}).then(r=>r.stdout,(e:{stdout?:string})=>e.stdout??'');
+  return claudeSignedIn(out);
+ }
+ if(access.kind==='codex-cli'){
+  return run(p.executable,['login','status'],{cwd,env:p.env,timeout:20000,maxBuffer:64*1024}).then(()=>true,
+   (e:{code?:unknown;stdout?:string;stderr?:string})=>e.code===1&&/not logged in/i.test(`${e.stdout??''}${e.stderr??''}`)?false:undefined);
+ }
+ return undefined;
+}
 
 /** Claude Code's keychain login is unreadable from SSH/background sessions (KAN-177). */
 export async function inGuiSession():Promise<boolean>{
@@ -528,6 +564,8 @@ async function attempt(ctx:AttemptContext):Promise<AttemptResult>{
    }
   }
   base.cliVersion=await run(p.executable,['--version'],{timeout:20000,env:p.env}).then(r=>r.stdout.trim().slice(0,200),()=>undefined);
+  if(await signedIn(p,access,workspace)===false)
+   return finish({outcome:'auth-failed',reason:`${p.cli==='claude'?'Claude Code':'Codex'} reports that it isn't signed in for this user`});
   const result=await supervise(p,workspace,lastMessage,logs,options,ctx.prompt);
   base.exitCode=result.code;base.signal=result.signal;
   base.logs={transcript:relative(out,join(logs,'transcript.jsonl')),stderr:relative(out,join(logs,'stderr.log'))};
