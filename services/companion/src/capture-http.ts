@@ -42,9 +42,10 @@ function send(response:ServerResponse,bytes:Buffer|string):Promise<void>{
  */
 export function createCaptureRoutes(services:CaptureServices){
  const projects=new SavedProjectSync(services.storage);
- let active:{controller:AbortController;done:Promise<void>}|undefined;
+ let active:{controller:AbortController;response:ServerResponse;done:Promise<void>}|undefined;
+ let closing=false;
  return {
-  async close(){const pending=active;pending?.controller.abort();await pending?.done;await services.scanProcessing?.close();},
+  async close(){closing=true;const pending=active;pending?.controller.abort();await pending?.done;await services.scanProcessing?.close();},
   async handle(request:IncomingMessage,response:ServerResponse,authorize:(scope:RemoteScope)=>Promise<void>,header:(name:string)=>string|undefined){
    let finish:(()=>void)|undefined;let disconnected:(()=>void)|undefined;
    try {
@@ -68,8 +69,15 @@ export function createCaptureRoutes(services:CaptureServices){
     const scope:RemoteScope=size?(writing?'captures:import':'captures:read'):(modelAssets||makerSize)?'captures:read':processing?(writing||request.method==='DELETE'?'captures:import':'captures:read'):stills?(writing||request.method==='DELETE'?'captures:import':'captures:read'):captureRoute?(writing?'captures:import':'captures:read'):(writing?'projects:write':'projects:read');
     await authorize(scope);
     if(size?(size[4]?request.method!=='GET':!['GET','POST'].includes(request.method??'')):(modelAssets||makerSize)?request.method!=='GET':processing?(processing[3]?(processing[4]?request.method!=='GET':!['GET','DELETE'].includes(request.method??'')):!['GET','POST'].includes(request.method??'')):stills?(stillId?!['GET','DELETE'].includes(request.method??''):!['GET','POST'].includes(request.method??'')):captureRoute?(captureId?request.method!=='GET':request.method!=='POST'):!['GET','PUT'].includes(request.method??''))throw new Failure(405,'method-not-allowed');
+    // A client can receive the full response before withCurrentProject releases
+    // its filesystem lock. Its next request waits for that drain; releasing the
+    // slot at response finish would race the still-held project lock instead.
+    if(active?.response.writableFinished)await active.done;
+    if(response.destroyed)return;
+    if(closing)throw new Failure(503,'shutting-down');
+    // Concurrent requests still compete for one slot after a drain completes.
     if(active)throw new Failure(429,'busy');
-    const controller=new AbortController();active={controller,done:new Promise<void>(resolve=>finish=resolve)};
+    const controller=new AbortController();active={controller,response,done:new Promise<void>(resolve=>finish=resolve)};
     disconnected=()=>{if(!response.writableEnded)controller.abort();};response.once('close',disconnected);
     const assertActive=()=>{if(controller.signal.aborted)throw new Failure(499,'cancelled');};
     const ifMatch=header('if-match'),ifNoneMatch=header('if-none-match');
