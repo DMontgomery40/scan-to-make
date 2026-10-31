@@ -79,6 +79,7 @@ static NSDictionary *AdoptNativeCapture(NSString *runID) {
 @property NSURLSessionDataTask *task;
 @property NSMutableData *received;
 @property NSDictionary *pairing;
+@property BOOL pinRejected;
 @property NSDictionary *artifact;
 @property NSHTTPURLResponse *response;
 @property NSUInteger limit;
@@ -109,7 +110,7 @@ RCT_REMAP_METHOD(write,writeKey:(NSString*)key body:(NSString*)body resolve:(RCT
 }
 RCT_REMAP_METHOD(request,requestOptions:(NSDictionary*)o resolve:(RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject){
   if(self.task){reject(@"busy",@"A capture request is already running.",nil);return;}
-  NSError *e=nil;NSDictionary *p=STMReadPairing(&e);NSURL *base=p?STMCompanionBaseURL(p[@"baseUrl"]):nil;
+  NSError *e=nil;NSDictionary *p=STMReadPairing(&e);NSURL *base=p?STMPairingBaseURL(p):nil;
   if(e||!base||![Context(p) isEqual:o[@"context"]]||[p[@"expiresAt"] doubleValue]<=NSDate.date.timeIntervalSince1970*1000){reject(@"pairing-required",@"Connect to your companion again.",e);return;}
   NSString *path=o[@"path"],*method=o[@"method"];
   NSString *pattern=@"^/v1/saved-projects/[A-Za-z0-9_-]{1,128}(/captures(/[A-Za-z0-9_-]{1,128}(/artifacts/(original|derived|report))?)?\\?projectRevision=[0-9]+)?$";
@@ -124,7 +125,7 @@ RCT_REMAP_METHOD(request,requestOptions:(NSDictionary*)o resolve:(RCTPromiseReso
   self.artifact=o[@"artifact"];self.limit=self.artifact?MIN(CAP_LIMIT,[self.artifact[@"byteLength"] unsignedIntegerValue]):4*1024*1024;
   if(self.artifact&&(!FileURL(self.artifact)||self.limit<1||[self.artifact[@"byteLength"] unsignedIntegerValue]>CAP_LIMIT)){reject(@"invalid-artifact",@"Invalid capture identity.",nil);return;}
   NSURLSessionConfiguration *config=NSURLSessionConfiguration.ephemeralSessionConfiguration;config.URLCache=nil;config.HTTPShouldSetCookies=NO;config.timeoutIntervalForRequest=90;config.timeoutIntervalForResource=95;
-  self.pairing=p;self.resolve=resolve;self.reject=reject;self.received=[NSMutableData new];self.response=nil;
+  self.pairing=p;self.pinRejected=NO;self.resolve=resolve;self.reject=reject;self.received=[NSMutableData new];self.response=nil;
   self.session=[NSURLSession sessionWithConfiguration:config delegate:self delegateQueue:NSOperationQueue.mainQueue];self.task=[self.session dataTaskWithRequest:req];[self.task resume];
 }
 - (void)URLSession:(NSURLSession*)s task:(NSURLSessionTask*)t willPerformHTTPRedirection:(NSHTTPURLResponse*)r newRequest:(NSURLRequest*)q completionHandler:(void(^)(NSURLRequest*))done{done(nil);}
@@ -134,8 +135,11 @@ RCT_REMAP_METHOD(request,requestOptions:(NSDictionary*)o resolve:(RCTPromiseReso
   if(r.expectedContentLength>(long long)self.limit){done(NSURLSessionResponseCancel);[self fail:@"payload-too-large" message:@"Capture response exceeded its limit."];return;}done(NSURLSessionResponseAllow);
 }
 - (void)URLSession:(NSURLSession*)s dataTask:(NSURLSessionDataTask*)t didReceiveData:(NSData*)d{if(t!=self.task)return;if(d.length>self.limit-self.received.length){[self fail:@"payload-too-large" message:@"Capture response exceeded its limit."];return;}[self.received appendData:d];}
+- (void)URLSession:(NSURLSession*)s didReceiveChallenge:(NSURLAuthenticationChallenge*)c completionHandler:(void(^)(NSURLSessionAuthChallengeDisposition,NSURLCredential*))done{
+  if(STMPinnedTrust(c,self.pairing,done))self.pinRejected=YES;
+}
 - (void)URLSession:(NSURLSession*)s task:(NSURLSessionTask*)t didCompleteWithError:(NSError*)e{
-  if(t!=self.task)return;if(e){[self fail:STMTransportError(e) message:@"The companion response was interrupted."];return;}
+  if(t!=self.task)return;if(e){if(self.pinRejected){[self fail:@"certificate-changed" message:@"Your computer's companion presented a different certificate. Scan a new QR code from it."];return;}[self fail:STMTransportError(e) message:@"The companion response was interrupted."];return;}
   NSError *pe=nil;NSDictionary *p=STMReadPairing(&pe);if(pe||![p isEqual:self.pairing]){[self fail:@"pairing-changed" message:@"Companion connection changed."];return;}
   NSInteger status=self.response.statusCode;NSMutableDictionary *result=[@{@"status":@(status),@"etag":[self.response valueForHTTPHeaderField:@"ETag"]?:@"",@"body":@""} mutableCopy];
   if(self.artifact&&status==200){

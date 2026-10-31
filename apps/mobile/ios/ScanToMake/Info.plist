@@ -50,6 +50,8 @@
 	</dict>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Scan to Make connects to the companion on your computer over your local network.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Scan to Make uses the camera and LiDAR Scanner to scan the object you want to print.</string>
 	<key>RCTNewArchEnabled</key>

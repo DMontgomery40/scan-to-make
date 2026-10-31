@@ -123,6 +123,7 @@ static NSString *PickTypeIdentifier(NSItemProvider *provider) {
 @property NSURLSessionDataTask *task;
 @property NSMutableData *received;
 @property NSDictionary *pairing;
+@property BOOL pinRejected;
 @property NSDictionary *artifact;
 @property NSHTTPURLResponse *response;
 @property NSUInteger limit;
@@ -145,7 +146,7 @@ RCT_EXPORT_MODULE()
 RCT_REMAP_METHOD(context,contextResolve:(RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject){NSError *e=nil;NSDictionary *p=STMReadPairing(&e);if(e||!p||[p[@"expiresAt"] doubleValue]<=NSDate.date.timeIntervalSince1970*1000){reject(@"pairing-required",@"Connect to your companion with a capture invitation.",e);return;}resolve(Context(p));}
 RCT_REMAP_METHOD(request,requestOptions:(NSDictionary*)o resolve:(RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject){
   if(self.task){reject(@"busy",@"A scan request is already running.",nil);return;}
-  NSError *e=nil;NSDictionary *p=STMReadPairing(&e);NSURL *base=p?STMCompanionBaseURL(p[@"baseUrl"]):nil;
+  NSError *e=nil;NSDictionary *p=STMReadPairing(&e);NSURL *base=p?STMPairingBaseURL(p):nil;
   if(e||!base||![Context(p) isEqual:o[@"context"]]||[p[@"expiresAt"] doubleValue]<=NSDate.date.timeIntervalSince1970*1000){reject(@"pairing-required",@"Connect to your companion again.",e);return;}
   NSString *path=o[@"path"],*method=o[@"method"];
   NSString *uuid=@"[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}";
@@ -188,7 +189,7 @@ RCT_REMAP_METHOD(request,requestOptions:(NSDictionary*)o resolve:(RCTPromiseReso
   if(self.artifact){NSUInteger cap=IsStillMedia(self.artifact[@"mediaType"])?STILL_LIMIT:CAP_LIMIT;if(!FileIdentity(self.artifact,cap)){self.artifact=nil;reject(@"invalid-artifact",@"Invalid scan file identity.",nil);return;}self.limit=[self.artifact[@"byteLength"] unsignedIntegerValue];}
   else self.limit=1024*1024;
   NSURLSessionConfiguration *config=NSURLSessionConfiguration.ephemeralSessionConfiguration;config.URLCache=nil;config.HTTPShouldSetCookies=NO;config.timeoutIntervalForRequest=90;config.timeoutIntervalForResource=95;
-  self.pairing=p;self.resolve=resolve;self.reject=reject;self.received=[NSMutableData new];self.response=nil;
+  self.pairing=p;self.pinRejected=NO;self.resolve=resolve;self.reject=reject;self.received=[NSMutableData new];self.response=nil;
   self.session=[NSURLSession sessionWithConfiguration:config delegate:self delegateQueue:NSOperationQueue.mainQueue];self.task=[self.session dataTaskWithRequest:req];[self.task resume];
 }
 - (void)URLSession:(NSURLSession*)s task:(NSURLSessionTask*)t willPerformHTTPRedirection:(NSHTTPURLResponse*)r newRequest:(NSURLRequest*)q completionHandler:(void(^)(NSURLRequest*))done{done(nil);}
@@ -198,8 +199,11 @@ RCT_REMAP_METHOD(request,requestOptions:(NSDictionary*)o resolve:(RCTPromiseReso
   if(r.expectedContentLength>(long long)self.limit){done(NSURLSessionResponseCancel);[self fail:@"payload-too-large" message:@"Scan response exceeded its limit."];return;}done(NSURLSessionResponseAllow);
 }
 - (void)URLSession:(NSURLSession*)s dataTask:(NSURLSessionDataTask*)t didReceiveData:(NSData*)d{if(t!=self.task)return;if(d.length>self.limit-self.received.length){[self fail:@"payload-too-large" message:@"Scan response exceeded its limit."];return;}[self.received appendData:d];}
+- (void)URLSession:(NSURLSession*)s didReceiveChallenge:(NSURLAuthenticationChallenge*)c completionHandler:(void(^)(NSURLSessionAuthChallengeDisposition,NSURLCredential*))done{
+  if(STMPinnedTrust(c,self.pairing,done))self.pinRejected=YES;
+}
 - (void)URLSession:(NSURLSession*)s task:(NSURLSessionTask*)t didCompleteWithError:(NSError*)e{
-  if(t!=self.task)return;if(e){[self fail:STMTransportError(e) message:@"The companion response was interrupted."];return;}
+  if(t!=self.task)return;if(e){if(self.pinRejected){[self fail:@"certificate-changed" message:@"Your computer's companion presented a different certificate. Scan a new QR code from it."];return;}[self fail:STMTransportError(e) message:@"The companion response was interrupted."];return;}
   NSError *pe=nil;NSDictionary *p=STMReadPairing(&pe);if(pe||![p isEqual:self.pairing]){[self fail:@"pairing-changed" message:@"Companion connection changed."];return;}
   NSInteger status=self.response.statusCode;NSMutableDictionary *result=[@{@"status":@(status),@"etag":[self.response valueForHTTPHeaderField:@"ETag"]?:@"",@"body":@""} mutableCopy];
   if(self.artifact&&status==200){
