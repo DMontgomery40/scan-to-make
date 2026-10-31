@@ -203,6 +203,32 @@ test('runBundle prints a claimed bundle and records the sliced artifact back', a
   assert.equal(outcome.result.print.dispatch, 'started');
 });
 
+test('slicing the same bundle twice with different output bytes stays readable', async t => {
+  const f = await setup(t);
+  const store = new HandoffBundleStore(join(f.root, 'bundles-twice'));
+  const bundle = await store.create({stl, prompt: 'slice twice', backend: 'bambu-printer-mcp', selection});
+  const first = await f.runner.runBundle(store, bundle.id, {print: false});
+  assert.equal(first.manifest.status, 'sliced');
+  await store.writeDesignedStl(bundle.id, Buffer.concat([stl, Buffer.from(' ')]));
+  const second = await f.runner.runBundle(store, bundle.id, {print: false});
+  assert.equal(second.manifest.status, 'sliced');
+  assert.notEqual(second.manifest.artifacts.sliced.sha256, first.manifest.artifacts.sliced.sha256);
+  assert.equal((await store.read(bundle.id)).artifacts.sliced.sha256, second.manifest.artifacts.sliced.sha256);
+});
+
+test('aborting a run awaiting confirmation clears its pending elicitation', async t => {
+  const f = await setup(t, {answer: 'none', relayTimeoutMs: 60000});
+  const controller = new AbortController();
+  const run = f.runner.run({stlPath: f.stlPath, signal: controller.signal});
+  for (let attempt = 0; attempt < 200 && f.relay.pending().length === 0; attempt++) {
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+  assert.equal(f.relay.pending().length, 1);
+  controller.abort();
+  await assert.rejects(run);
+  assert.deepEqual(f.relay.pending(), []);
+});
+
 test('process_and_print_stl uses the generic server one-call pipeline', async t => {
   const f = await setup(t, {mode: 'generic', backend: 'mcp-3d-printer-server'});
   const outcome = await f.runner.processAndPrint({stlPath: f.stlPath, extensionInches: 0.5, material: 'PLA', selection: {printerType: 'klipper'}});

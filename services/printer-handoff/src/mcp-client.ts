@@ -57,6 +57,7 @@ export class PrinterMcpClient {
   readonly #validators = new Map<Tool, ValidateFunction>();
   readonly #ajv = new Ajv({strict: false});
   readonly #onStderr?: (chunk: string) => void;
+  readonly #outstandingElicitations = new Set<string>();
 
   constructor(config: PrinterHandoffConfig, options: PrinterMcpClientOptions = {}) {
     this.#config = structuredClone(config);
@@ -89,7 +90,15 @@ export class PrinterMcpClient {
     this.#client = client;
     if (this.#relay) {
       const relay = this.#relay;
-      client.setRequestHandler(ElicitRequestSchema, request => relay.request(request, this.#elicitationContext));
+      client.setRequestHandler(ElicitRequestSchema, request => {
+        // Registration is synchronous, so the new pending id is visible
+        // immediately; track it so close() can cancel this session's prompts.
+        const before = new Set(relay.pending().map(item => item.id));
+        const answer = relay.request(request, this.#elicitationContext);
+        const tracked = relay.pending().map(item => item.id).filter(id => !before.has(id));
+        for (const id of tracked) this.#outstandingElicitations.add(id);
+        return answer.finally(() => { for (const id of tracked) this.#outstandingElicitations.delete(id); });
+      });
     }
     const controller = new AbortController();
     const abort = () => controller.abort();
@@ -166,6 +175,12 @@ export class PrinterMcpClient {
     const client = this.#client, transport = this.#transport, pid = transport?.pid ?? null;
     this.#client = undefined; this.#transport = undefined; this.#catalog = undefined;
     this.#elicitationContext = {};
+    // Cancel this session's unanswered prompts so no stale confirmation (or
+    // its ref'd expiry timer) outlives the connection on abort/timeout.
+    for (const id of [...this.#outstandingElicitations]) {
+      try { this.#relay?.respond(id, {action: 'cancel'}); } catch { /* Already answered. */ }
+    }
+    this.#outstandingElicitations.clear();
     try { await client?.close(); } catch { /* Transport close below still runs. */ }
     try { await transport?.close(); } catch { /* Process check below still runs. */ }
     if (pid !== null && alive(pid)) {

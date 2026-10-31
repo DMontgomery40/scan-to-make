@@ -98,7 +98,7 @@ server.setRequestHandler(CallToolRequestSchema, async request => {
   }
   if (name === 'slice_stl') {
     const path = join(directory, mode === 'generic-gcode' ? 'sliced.gcode' : 'sliced.3mf');
-    writeFileSync(path, path.endsWith('.3mf') ? 'fixture 3mf' : '; fixture gcode\n');
+    writeFileSync(path, path.endsWith('.3mf') ? `fixture 3mf ${Date.now()}-${Math.random()}` : `; fixture gcode ${Date.now()}-${Math.random()}\n`);
     return text(path);
   }
   if (name === 'inspect_print_file') {

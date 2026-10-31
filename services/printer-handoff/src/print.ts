@@ -1,5 +1,6 @@
-import {readFile} from 'node:fs/promises';
-import {basename, isAbsolute} from 'node:path';
+import {copyFile, mkdtemp, readFile, rm} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {basename, isAbsolute, join} from 'node:path';
 import type {Tool} from '@modelcontextprotocol/sdk/types.js';
 import {
   printerHandoffConfigSchema,
@@ -224,17 +225,27 @@ export class PrinterHandoffRunner {
   async runBundle(store: HandoffBundleStore, id: string, options: {print?: boolean; signal?: AbortSignal} = {}) {
     const manifest = await store.read(id);
     if (manifest.backend !== this.#config.backend) fail('backend-mismatch');
-    let result: PrintRunResult;
+    // Slice in a throwaway per-run directory: backends write outputs beside
+    // the input STL, and a re-slice must never overwrite a manifest-owned
+    // artifact before the new one is recorded.
+    const workDirectory = await mkdtemp(join(tmpdir(), 'printer-handoff-run-'));
     try {
-      result = await this.run({stlPath: store.stlPath(manifest), selection: manifest.selection, print: options.print, signal: options.signal});
-    } catch (error) {
-      await store.setStatus(id, 'failed', error instanceof Error ? error.message : 'print failed').catch(() => undefined);
-      throw error;
+      const inputStl = join(workDirectory, basename(store.stlPath(manifest)));
+      await copyFile(store.stlPath(manifest), inputStl);
+      let result: PrintRunResult;
+      try {
+        result = await this.run({stlPath: inputStl, selection: manifest.selection, print: options.print, signal: options.signal});
+      } catch (error) {
+        await store.setStatus(id, 'failed', error instanceof Error ? error.message : 'print failed').catch(() => undefined);
+        throw error;
+      }
+      const sliced = await readFile(result.slicedPath);
+      let updated = await store.recordArtifact(id, 'sliced', basename(result.slicedPath), sliced);
+      updated = await store.setStatus(id, options.print === false ? 'sliced' : 'printed');
+      return {manifest: updated, result};
+    } finally {
+      await rm(workDirectory, {recursive: true, force: true}).catch(() => undefined);
     }
-    const sliced = await readFile(result.slicedPath);
-    let updated = await store.recordArtifact(id, 'sliced', basename(result.slicedPath), sliced);
-    updated = await store.setStatus(id, options.print === false ? 'sliced' : 'printed');
-    return {manifest: updated, result};
   }
 
   /** mcp-3D-printer-server's one-call extend-and-print pipeline. */
