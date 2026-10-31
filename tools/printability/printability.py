@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-"""CLI for deterministic STL printability checks and template-to-slice dry runs.
+"""CLI for deterministic STL printability checks.
 
 Commands:
   python3 tools/printability/printability.py profiles
   python3 tools/printability/printability.py check part.stl --profile p1s-0.4-hardened
-  python3 tools/printability/printability.py dry-run --template-dir <dir> --profile p1s-0.4-hardened --out <out>
 
+Slicing, orientation and dispatch belong to bambu-printer-mcp (slice_stl,
+lay_flat, inspect_print_file, print_3mf); see docs/print-path.md.
 Never contacts a printer or dispatches a print job.
 """
 
@@ -24,7 +25,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from analyzer import DEFAULT_OVERHANG_THRESHOLD_DEG, PrintabilityError, analyze_stl
-from dry_run import DEFAULT_DRY_RUN_TIMEOUT_S, DryRunError, producer, run_dry_run
 from profiles import ProfileError, load_catalog, resolve_profile
 
 
@@ -74,25 +74,6 @@ def build_parser() -> argparse.ArgumentParser:
     chk.add_argument("--allow-supports", action="store_true",
                      help="with --strict, accept printable-with-supports")
 
-    dr = sub.add_parser("dry-run", help="verify template STL+manifest, check printability, and slice offline")
-    dr.add_argument("--template-dir", type=Path, help="template output directory containing one STL + manifest")
-    dr.add_argument("--stl", type=Path, help="explicit template STL path")
-    dr.add_argument("--manifest", type=Path, help="explicit template manifest JSON path")
-    dr.add_argument("--profile", help="explicit bundled printer profile ID or alias, e.g. p1s-0.4-hardened")
-    dr.add_argument("--profile-file", type=Path, help="custom printer profile JSON file")
-    dr.add_argument("--out", required=True, type=Path, help="output directory (must not exist; published atomically)")
-    dr.add_argument("--material", help="material family override for filament density/selection")
-    dr.add_argument("--process", help="optional bundled BambuStudio process preset override")
-    dr.add_argument("--filament", help="optional bundled BambuStudio filament preset override")
-    dr.add_argument("--bundle", default=producer.DEFAULT_BUNDLE, help="BambuStudio.app bundle path")
-    dr.add_argument("--expected-version", default=producer.EXPECTED_VERSION, help="expected BambuStudio version")
-    dr.add_argument("--expected-binary-sha256", help="optional SHA-256 pin for Contents/MacOS/BambuStudio")
-    dr.add_argument("--allow-supports", action="store_true",
-                    help="permit slicing designs with verdict printable-with-supports (enables supports)")
-    dr.add_argument("--overhang-deg", type=float, default=DEFAULT_OVERHANG_THRESHOLD_DEG)
-    dr.add_argument("--timeout", type=int, default=DEFAULT_DRY_RUN_TIMEOUT_S)
-    dr.add_argument("--three-mf-name", default=producer.THREE_MF_NAME,
-                    help="sliced 3MF filename inside slice/ (must end in .3mf and never .gcode.3mf)")
     return ap
 
 
@@ -137,28 +118,6 @@ def main(argv: list[str] | None = None) -> int:
                     return 2
             return 0
 
-        if args.command == "dry-run":
-            result = run_dry_run(
-                out_dir=args.out,
-                profile_id=args.profile,
-                profile_file=args.profile_file,
-                template_dir=args.template_dir,
-                stl_path=args.stl,
-                manifest_path=args.manifest,
-                material=args.material,
-                process_preset=args.process,
-                filament_preset=args.filament,
-                bundle=args.bundle,
-                expected_version=args.expected_version,
-                expected_binary_sha256=args.expected_binary_sha256,
-                allow_supports=args.allow_supports,
-                overhang_threshold_deg=args.overhang_deg,
-                timeout=args.timeout,
-                three_mf_name=args.three_mf_name,
-            )
-            sys.stdout.write(json.dumps(result, indent=2, sort_keys=True, allow_nan=False) + "\n")
-            return 0
-
     except ProfileError as exc:
         sys.stderr.write(
             json.dumps({"error": {"stage": "profile", "message": str(exc), "evidence": {}}}, indent=2, sort_keys=True) + "\n"
@@ -167,15 +126,6 @@ def main(argv: list[str] | None = None) -> int:
     except PrintabilityError as exc:
         sys.stderr.write(
             json.dumps({"error": {"stage": exc.stage, "message": exc.detail, "evidence": {}}}, indent=2, sort_keys=True) + "\n"
-        )
-        return 2
-    except DryRunError as exc:
-        sys.stderr.write(
-            json.dumps(
-                {"error": {"stage": exc.stage, "message": exc.message, "evidence": exc.evidence}},
-                indent=2,
-                sort_keys=True,
-            ) + "\n"
         )
         return 2
     return 0

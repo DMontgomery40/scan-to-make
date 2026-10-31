@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-"""Synthetic-only unit and local BambuStudio integration tests for tools/printability."""
+"""Synthetic-only unit tests for tools/printability."""
 
 from __future__ import annotations
 
@@ -9,21 +9,17 @@ import hashlib
 import io
 import json
 import math
-import plistlib
 import struct
 import subprocess
 import sys
 import tempfile
 import unittest
-import zipfile
-from unittest import mock
 from pathlib import Path
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT_DIR))
 
 import analyzer  # noqa: E402
-import dry_run  # noqa: E402
 import printability  # noqa: E402
 import profiles  # noqa: E402
 
@@ -127,101 +123,6 @@ def synthetic_overhang_cantilever_stl() -> bytes:
         return False
 
     return build_rectilinear_solid(xs, ys, zs, occ)
-
-
-FAKE_SLICER_SCRIPT = r"""#!{py}
-import json, os, sys, zipfile
-a = sys.argv[1:]
-def opt(k): return a[a.index(k) + 1]
-out, settings_out, three_mf_name = opt("--outputdir"), opt("--export-settings"), opt("--export-3mf")
-mp, pp = opt("--load-settings").split(";")
-merged = dict(json.load(open(mp)))
-merged.update(json.load(open(pp)))
-merged.update(json.load(open(opt("--load-filaments"))))
-bed = merged.get("curr_bed_type", "Cool Plate")
-nozzle_t = ",".join(merged.get("nozzle_type", ["stainless_steel"]))
-sup = merged.get("enable_support", "0")
-density = {"PLA": 1.26, "PETG": 1.27}[merged["filament_type"][0]]
-gcode = (
-    "; HEADER_BLOCK_START\n"
-    "; BambuStudio 02.08.02.61\n"
-    "; model printing time: 18m 12s; total estimated time: 24m 30s\n"
-    "; total layer number: 100\n"
-    "; total filament length [mm] : 3120.50\n"
-    "; total filament volume [cm^3] : 7505.68\n"
-    f"; total filament weight [g] : {9.46 * density / 1.26:.2f}\n"
-    f"; filament_density: {density}\n"
-    "; filament_diameter: 1.75\n"
-    "; max_z_height: 20.00\n"
-    "; HEADER_BLOCK_END\n"
-    "; CONFIG_BLOCK_START\n"
-    f"; curr_bed_type = {bed}\n"
-    f"; nozzle_type = {nozzle_t}\n"
-    f"; enable_support = {sup}\n"
-    "; CONFIG_BLOCK_END\n"
-    "M620 S0A\n"
-    "G28\n"
-)
-with open(os.path.join(out, "plate_1.gcode"), "w") as f:
-    f.write(gcode)
-with zipfile.ZipFile(os.path.join(out, three_mf_name), "w", compression=zipfile.ZIP_DEFLATED) as zf:
-    zf.writestr("[Content_Types].xml", '<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"/>')
-    zf.writestr("3D/3dmodel.model", '<?xml version="1.0" encoding="UTF-8"?><model unit="millimeter"/>')
-    zf.writestr("Metadata/plate_1.gcode", gcode)
-    zf.writestr("Metadata/plate_1.json", json.dumps({"plate_index": 0, "bed_type": bed}))
-    zf.writestr("Metadata/slice_info.config", '<?xml version="1.0" encoding="UTF-8"?><config><plate><metadata key="index" value="1"/></plate></config>')
-with open(settings_out, "w") as f:
-    json.dump(merged, f, sort_keys=True)
-"""
-
-FAKE_SANDBOX_SCRIPT = r"""#!{py}
-import os, re, sys
-assert sys.argv[1] == "-f"
-prof = open(sys.argv[2]).read()
-assert "(deny network*)" in prof and "(deny mach-lookup)" in prof and "(deny signal)" in prof
-assert not re.search(r"\(\s*allow\s+mach-lookup\s*\)", prof)
-os.execv(sys.argv[3], sys.argv[3:])
-"""
-
-
-def make_fake_bambu_bundle(root: Path) -> tuple[Path, object]:
-    b = root / "FakeBambuStudio.app"
-    c = b / "Contents"
-    (c / "MacOS").mkdir(parents=True, exist_ok=True)
-    (c / "Info.plist").write_bytes(
-        plistlib.dumps({"CFBundleShortVersionString": "02.08.02.61", "CFBundleVersion": "02.08.02.61"})
-    )
-    exe = c / "MacOS" / "BambuStudio"
-    exe.write_text(FAKE_SLICER_SCRIPT.replace("{py}", sys.executable))
-    exe.chmod(0o755)
-
-    prof = c / "Resources" / "profiles"
-    (prof / "BBL" / "machine").mkdir(parents=True, exist_ok=True)
-    (prof / "BBL" / "process").mkdir(parents=True, exist_ok=True)
-    (prof / "BBL" / "filament").mkdir(parents=True, exist_ok=True)
-    (prof / "BBL.json").write_text('{"name": "BBL"}')
-    (prof / "BBL" / "cli_config.json").write_text('{"machine_limits": {}}')
-    (prof / "BBL/machine/Bambu Lab P1S 0.4 nozzle.json").write_text(
-        json.dumps({"printer_model": "Bambu Lab P1S", "nozzle_diameter": ["0.4"], "nozzle_type": ["stainless_steel", "stainless_steel"]})
-    )
-    (prof / "BBL/process/0.20mm Standard @BBL X1C.json").write_text(json.dumps({"layer_height": "0.2", "enable_support": "0"}))
-    (prof / "BBL/filament/Bambu PLA Basic @BBL P1S 0.4 nozzle.json").write_text(json.dumps({"filament_type": ["PLA"]}))
-
-    sb_path = root / "fake-sandbox-exec"
-    sb_path.write_text(FAKE_SANDBOX_SCRIPT.replace("{py}", sys.executable))
-    sb_path.chmod(0o755)
-
-    class _FakeSandbox:
-        path = str(sb_path)
-
-        def describe(self):
-            return {"kind": "macos-sandbox-exec", "path": "/usr/bin/sandbox-exec"}
-
-        def check(self):
-            if not sb_path.is_file():
-                raise RuntimeError("missing fake sandbox")
-
-    return b, _FakeSandbox()
 
 
 class PrintabilityGeometryTests(unittest.TestCase):
@@ -384,10 +285,10 @@ class PrintabilityGeometryTests(unittest.TestCase):
                 self.assertEqual(rep["topology"]["nonManifoldSharedEdgeCount"], 18)
                 self.assertIn("mesh-not-watertight", rep["reasonCodes"])
 
-    def test_degenerate_facets_rejected_in_check_and_dry_run(self) -> None:
+    def test_degenerate_facets_rejected_in_check(self) -> None:
         # Regression test for PR #79 review comment 4429096115: appending a zero-area
         # facet with a unit normal to an otherwise watertight 20 mm cube must block
-        # printability and dry-run rather than silently analyzing a cleaned subset.
+        # printability rather than silently analyzing a cleaned subset.
         cube = synthetic_cube_stl(20.0)
         count = struct.unpack_from("<I", cube, 80)[0]
         degen_facet = struct.pack(
@@ -407,36 +308,6 @@ class PrintabilityGeometryTests(unittest.TestCase):
                 self.assertFalse(rep["topology"]["watertight"])
                 self.assertEqual(rep["topology"]["degenerateFacetCount"], 1)
                 self.assertIn("degenerate-facets", rep["reasonCodes"])
-
-        # Dry-run must also refuse to slice before invoking BambuStudio
-        fake_bundle, fake_sandbox = make_fake_bambu_bundle(self.root / "degen-bundle")
-        tpl = self.root / "degen-tpl"
-        tpl.mkdir()
-        (tpl / "cradle.stl").write_bytes(cube_with_degen)
-        (tpl / "manifest.json").write_text(
-            json.dumps({
-                "schemaVersion": 1,
-                "units": "mm",
-                "previewOnly": True,
-                "provesPhysicalAccuracy": False,
-                "watertight": True,
-                "outputSha256": {"cradle.stl": hashlib.sha256(cube_with_degen).hexdigest()},
-            }) + "\n"
-        )
-        out_degen = self.root / "out-degen"
-        with mock.patch.object(dry_run.producer, "produce") as mocked_produce:
-            with self.assertRaises(dry_run.DryRunError) as cm:
-                dry_run.run_dry_run(
-                    template_dir=tpl,
-                    profile_id="p1s-0.4-hardened",
-                    out_dir=out_degen,
-                    bundle=str(fake_bundle),
-                    _sandbox=fake_sandbox,
-                )
-            mocked_produce.assert_not_called()
-        self.assertEqual(cm.exception.stage, "printability")
-        self.assertIn("degenerate-facets", cm.exception.evidence["reasonCodes"])
-        self.assertFalse(out_degen.exists())
 
     def test_open_mesh_and_zero_normals_rejected(self) -> None:
         # Open box (missing +Z face)
@@ -495,273 +366,13 @@ class PrintabilityGeometryTests(unittest.TestCase):
         self.assertEqual(rep_ascii["verdict"], "printable")
 
 
-class DryRunIntegrationTests(unittest.TestCase):
+class CliSubcommandTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.tmp = tempfile.TemporaryDirectory(prefix="stm-dryrun-test-")
+        self.tmp = tempfile.TemporaryDirectory(prefix="stm-printability-cli-")
         self.root = Path(self.tmp.name)
-        self.fake_bundle, self.fake_sandbox = make_fake_bambu_bundle(self.root)
 
     def tearDown(self) -> None:
         self.tmp.cleanup()
-
-    def make_scan_cradle_dir(self, name: str, stl_bytes: bytes) -> Path:
-        d = self.root / name
-        d.mkdir(parents=True, exist_ok=True)
-        stl_path = d / "cradle.stl"
-        stl_path.write_bytes(stl_bytes)
-        manifest = {
-            "schemaVersion": 1,
-            "units": "mm",
-            "previewOnly": True,
-            "provesPhysicalAccuracy": False,
-            "watertight": True,
-            "outputSha256": {"cradle.stl": hashlib.sha256(stl_bytes).hexdigest()},
-        }
-        (d / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
-        return d
-
-    def make_drawer_dir(self, name: str, stl_bytes: bytes) -> Path:
-        d = self.root / name
-        d.mkdir(parents=True, exist_ok=True)
-        stl_path = d / "drawer-tray.stl"
-        stl_path.write_bytes(stl_bytes)
-        manifest = {
-            "schemaVersion": "0.1.0",
-            "kind": "drawer-tray",
-            "status": "preview-geometry-not-print-authorized",
-            "artifact": {
-                "mediaType": "model/stl",
-                "byteLength": len(stl_bytes),
-                "sha256": hashlib.sha256(stl_bytes).hexdigest(),
-            },
-        }
-        (d / "drawer-tray.manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
-        return d
-
-    def test_source_swap_cannot_bypass_verified_unprintable_snapshot(self) -> None:
-        tpl = self.make_scan_cradle_dir("swap", synthetic_cube_stl(300.0))
-        original_verify = dry_run.verify_template_output
-
-        def swap_source(stl, manifest):
-            verified = original_verify(stl, manifest)
-            stl.write_bytes(synthetic_cube_stl())
-            return verified
-
-        out = self.root / "out-swap"
-        with mock.patch.object(dry_run, "verify_template_output", side_effect=swap_source), \
-                mock.patch.object(dry_run.producer, "produce") as produce:
-            with self.assertRaisesRegex(dry_run.DryRunError, "unprintable"):
-                dry_run.run_dry_run(template_dir=tpl, profile_id="p1s", out_dir=out,
-                                    bundle=str(self.fake_bundle), _sandbox=self.fake_sandbox)
-            produce.assert_not_called()
-        self.assertFalse(out.exists())
-
-    def test_printability_digest_mismatch_blocks_slicing(self) -> None:
-        tpl = self.make_scan_cradle_dir("digest", synthetic_cube_stl())
-        original_analyze = dry_run.analyze_stl
-
-        def wrong_digest(*args, **kwargs):
-            report = original_analyze(*args, **kwargs)
-            report["input"]["sha256"] = "0" * 64
-            return report
-
-        out = self.root / "out-digest"
-        with mock.patch.object(dry_run, "analyze_stl", side_effect=wrong_digest), \
-                mock.patch.object(dry_run.producer, "produce") as produce:
-            with self.assertRaisesRegex(dry_run.DryRunError, "digest mismatch"):
-                dry_run.run_dry_run(template_dir=tpl, profile_id="p1s", out_dir=out,
-                                    bundle=str(self.fake_bundle), _sandbox=self.fake_sandbox)
-            produce.assert_not_called()
-        self.assertFalse(out.exists())
-
-    def test_material_and_resolved_filament_must_agree(self) -> None:
-        tpl = self.make_scan_cradle_dir("material", synthetic_cube_stl())
-        petg = "Synthetic PETG"
-        preset = self.fake_bundle / "Contents/Resources/profiles/BBL/filament" / (petg + ".json")
-        preset.write_text(json.dumps({"filament_type": ["PETG"]}))
-        for label, options in (
-            ("petg-with-default-pla", {"material": "PETG"}),
-            ("pla-with-petg-override", {"material": "PLA", "filament_preset": petg}),
-            ("default-pla-with-petg-override", {"filament_preset": petg}),
-        ):
-            with self.subTest(label=label):
-                out = self.root / label
-                with mock.patch.object(dry_run.producer, "produce") as produce:
-                    with self.assertRaisesRegex(dry_run.DryRunError, "filament.*material"):
-                        dry_run.run_dry_run(template_dir=tpl, profile_id="p1s", out_dir=out,
-                                            bundle=str(self.fake_bundle), **options)
-                    produce.assert_not_called()
-                self.assertFalse(out.exists())
-
-    def test_matching_petg_override_binds_estimate_selection_and_preset(self) -> None:
-        tpl = self.make_scan_cradle_dir("matching-material", synthetic_cube_stl())
-        filament_dir = self.fake_bundle / "Contents/Resources/profiles/BBL/filament"
-        (filament_dir / "Synthetic PETG base.json").write_text(json.dumps({"filament_type": ["PETG"]}))
-        (filament_dir / "Synthetic PETG.json").write_text(json.dumps({"inherits": "Synthetic PETG base"}))
-        out = self.root / "out-matching-material"
-        result = dry_run.run_dry_run(
-            template_dir=tpl, profile_id="p1s", out_dir=out,
-            material="PETG", filament_preset="Synthetic PETG",
-            bundle=str(self.fake_bundle), _sandbox=self.fake_sandbox,
-        )
-        report = json.loads((out / "printability.json").read_text())
-        self.assertEqual(report["estimates"]["material"], "PETG")
-        self.assertEqual(report["estimates"]["densityGPerCm3"], 1.27)
-        self.assertEqual(result["companionPreparedSelectionCandidate"]["materials"][0]["material"], "PETG")
-        settings = json.loads((out / "slice/exported-settings.json").read_text())
-        self.assertEqual(settings["filament_type"], ["PETG"])
-
-    def test_fake_bundle_dry_run_for_cradle_and_drawer_templates(self) -> None:
-        cradle_dir = self.make_scan_cradle_dir("cradle-tpl", synthetic_pocketed_cradle_stl())
-        out_cradle = self.root / "out-cradle"
-        res = dry_run.run_dry_run(
-            template_dir=cradle_dir,
-            profile_id="p1s-0.4-hardened",
-            out_dir=out_cradle,
-            bundle=str(self.fake_bundle),
-            _sandbox=self.fake_sandbox,
-        )
-        self.assertFalse(res["dispatchAuthorized"])
-        self.assertFalse(res["printerContacted"])
-        self.assertEqual(res["printability"]["verdict"], "printable")
-        self.assertEqual(res["slice"]["overrides"]["bedType"], "textured_plate")
-        self.assertEqual(res["slice"]["overrides"]["nozzleType"], "hardened_steel")
-        self.assertIs(res["slice"]["overrides"]["enableSupport"], False)
-        settings_sha = hashlib.sha256((out_cradle / "slice" / "exported-settings.json").read_bytes()).hexdigest()
-        self.assertEqual(res["slice"]["slicerSettingsSha256"], settings_sha)
-        self.assertEqual(res["companionPreparedSelectionCandidate"]["slicerSettingsSha256"], settings_sha)
-        self.assertEqual(res["slice"]["summary"]["estimatedPrintSeconds"], 1470)
-        self.assertEqual(res["slice"]["summary"]["filamentWeightG"], 9.46)
-
-        three_mf_path = out_cradle / "slice" / "sliced-plate.3mf"
-        gcode_path = out_cradle / "slice" / "plate_1.gcode"
-        self.assertTrue(three_mf_path.is_file())
-        self.assertFalse(three_mf_path.name.lower().endswith(".gcode.3mf"))
-        three_mf_sha = hashlib.sha256(three_mf_path.read_bytes()).hexdigest()
-        gcode_sha = hashlib.sha256(gcode_path.read_bytes()).hexdigest()
-        self.assertEqual(res["slice"]["printableArtifact"]["file"], "slice/sliced-plate.3mf")
-        self.assertEqual(res["slice"]["printableArtifact"]["mediaType"], "model/3mf")
-        self.assertEqual(res["slice"]["printableArtifact"]["sha256"], three_mf_sha)
-        self.assertEqual(res["slice"]["threeMfArtifact"]["sha256"], three_mf_sha)
-        self.assertEqual(res["slice"]["threeMfArtifact"]["plateGcodeSha256"], gcode_sha)
-        self.assertEqual(res["slice"]["gcodeArtifact"]["sha256"], gcode_sha)
-        self.assertEqual(res["dispatchCandidate"]["artifact"]["file"], "slice/sliced-plate.3mf")
-        self.assertEqual(res["dispatchCandidate"]["artifact"]["mediaType"], "model/3mf")
-        self.assertEqual(res["dispatchCandidate"]["artifact"]["sha256"], three_mf_sha)
-        self.assertEqual(res["dispatchCandidate"]["plateGcodeSha256"], gcode_sha)
-        self.assertEqual(res["dispatchCandidate"]["tool"], "print_3mf")
-        self.assertEqual(
-            res["dispatchCandidate"]["argumentsTemplate"],
-            {
-                "three_mf_path": "slice/sliced-plate.3mf",
-                "bambu_model": "p1s",
-                "bed_type": "textured_plate",
-                "plate_index": 0,
-                "use_ams": True,
-                "ams_slots": None,
-            },
-        )
-        with zipfile.ZipFile(three_mf_path, "r") as zf:
-            self.assertEqual(hashlib.sha256(zf.read("Metadata/plate_1.gcode")).hexdigest(), gcode_sha)
-            self.assertIn("Metadata/plate_1.json", zf.namelist())
-            self.assertIn("Metadata/slice_info.config", zf.namelist())
-
-        # FitSpec drawer template output with custom non-.gcode.3mf project name
-        drawer_stl = synthetic_pocketed_cradle_stl(width=140.0, depth=100.0, height=30.0, wall=2.0, floor=2.0)
-        drawer_dir = self.make_drawer_dir("drawer-tpl", drawer_stl)
-        out_drawer = self.root / "out-drawer"
-        res_d = dry_run.run_dry_run(
-            template_dir=drawer_dir,
-            profile_id="p1s",
-            out_dir=out_drawer,
-            bundle=str(self.fake_bundle),
-            three_mf_name="drawer-tray-p1s.3mf",
-            _sandbox=self.fake_sandbox,
-        )
-        self.assertEqual(res_d["template"]["kind"], "drawer-tray")
-        self.assertEqual(res_d["printability"]["verdict"], "printable")
-        self.assertEqual(res_d["dispatchCandidate"]["artifact"]["file"], "slice/drawer-tray-p1s.3mf")
-        self.assertTrue((out_drawer / "slice" / "drawer-tray-p1s.3mf").is_file())
-
-        # Any *.gcode.3mf suffix is rejected fail-closed before slicing
-        for bad_name in ("plate_1.gcode.3mf", "STAND.GCODE.3MF"):
-            bad_out = self.root / f"out-bad-{bad_name}"
-            with mock.patch.object(dry_run.producer, "produce") as mocked_produce:
-                with self.assertRaises(dry_run.DryRunError) as bad_cm:
-                    dry_run.run_dry_run(
-                        template_dir=drawer_dir,
-                        profile_id="p1s",
-                        out_dir=bad_out,
-                        bundle=str(self.fake_bundle),
-                        three_mf_name=bad_name,
-                        _sandbox=self.fake_sandbox,
-                    )
-                mocked_produce.assert_not_called()
-            self.assertEqual(bad_cm.exception.stage, "input")
-            self.assertFalse(bad_out.exists())
-
-    def test_dry_run_gates_unprintable_supports_and_tampered_manifests(self) -> None:
-        # 1. Oversized drawer refused before slicing
-        big_stl = build_rectilinear_solid([0.0, 300.0], [0.0, 400.0], [0.0, 40.0], lambda *_: True)
-        big_dir = self.make_drawer_dir("big-drawer", big_stl)
-        with self.assertRaises(dry_run.DryRunError) as cm:
-            dry_run.run_dry_run(
-                template_dir=big_dir,
-                profile_id="p1s-0.4-hardened",
-                out_dir=self.root / "out-big",
-                bundle=str(self.fake_bundle),
-                _sandbox=self.fake_sandbox,
-            )
-        self.assertEqual(cm.exception.stage, "printability")
-        self.assertFalse((self.root / "out-big").exists())
-
-        # 2. Overhang piece refused without --allow-supports, accepted with allow_supports=True
-        oh_dir = self.make_scan_cradle_dir("oh-tpl", synthetic_overhang_cantilever_stl())
-        with self.assertRaises(dry_run.DryRunError) as cm2:
-            dry_run.run_dry_run(
-                template_dir=oh_dir,
-                profile_id="p1s-0.4-hardened",
-                out_dir=self.root / "out-oh-denied",
-                bundle=str(self.fake_bundle),
-                _sandbox=self.fake_sandbox,
-            )
-        self.assertEqual(cm2.exception.stage, "printability")
-        self.assertFalse((self.root / "out-oh-denied").exists())
-
-        res_oh = dry_run.run_dry_run(
-            template_dir=oh_dir,
-            profile_id="p1s-0.4-hardened",
-            out_dir=self.root / "out-oh-allowed",
-            bundle=str(self.fake_bundle),
-            allow_supports=True,
-            _sandbox=self.fake_sandbox,
-        )
-        self.assertEqual(res_oh["printability"]["verdict"], "printable-with-supports")
-        self.assertIs(res_oh["slice"]["overrides"]["enableSupport"], True)
-
-        # 3. Tampered STL fails template hash binding
-        tampered_dir = self.make_scan_cradle_dir("tampered", synthetic_cube_stl(20.0))
-        (tampered_dir / "cradle.stl").write_bytes(synthetic_cube_stl(25.0))
-        with self.assertRaises(dry_run.DryRunError) as cm3:
-            dry_run.run_dry_run(
-                template_dir=tampered_dir,
-                profile_id="p1s-0.4-hardened",
-                out_dir=self.root / "out-tampered",
-                bundle=str(self.fake_bundle),
-                _sandbox=self.fake_sandbox,
-            )
-        self.assertEqual(cm3.exception.stage, "template")
-
-        # 4. Missing explicit profile fails closed
-        with self.assertRaises(dry_run.DryRunError) as cm4:
-            dry_run.run_dry_run(
-                template_dir=oh_dir,
-                profile_id=None,
-                out_dir=self.root / "out-no-prof",
-                bundle=str(self.fake_bundle),
-                _sandbox=self.fake_sandbox,
-            )
-        self.assertEqual(cm4.exception.stage, "profile")
 
     def test_cli_check_and_profiles_subcommands(self) -> None:
         stl = self.root / "cube.stl"
@@ -784,81 +395,6 @@ class DryRunIntegrationTests(unittest.TestCase):
         )
         cat = json.loads(proc.stdout)
         self.assertEqual(cat["defaultOperatorProfile"], "p1s-0.4-hardened")
-
-    @unittest.skipUnless(
-        sys.platform == "darwin" and Path("/Applications/BambuStudio.app/Contents/MacOS/BambuStudio").is_file(),
-        "Real sandboxed BambuStudio slice runs on macOS hosts with /Applications/BambuStudio.app installed",
-    )
-    def test_real_bambustudio_slice_on_synthetic_cradle_and_overhang(self) -> None:
-        cradle_dir = self.make_scan_cradle_dir("real-cradle", synthetic_pocketed_cradle_stl())
-        out_cradle = self.root / "real-out-cradle"
-        proc = subprocess.run(
-            [
-                sys.executable,
-                str(ROOT_DIR / "printability.py"),
-                "dry-run",
-                "--template-dir",
-                str(cradle_dir),
-                "--profile",
-                "p1s-0.4-hardened",
-                "--out",
-                str(out_cradle),
-            ],
-            capture_output=True,
-            text=True,
-        )
-        self.assertEqual(proc.returncode, 0, msg=proc.stderr)
-        res = json.loads(proc.stdout)
-        self.assertEqual(res["printability"]["verdict"], "printable")
-        gcode_path = out_cradle / "slice" / "plate_1.gcode"
-        three_mf_path = out_cradle / "slice" / "sliced-plate.3mf"
-        settings_path = out_cradle / "slice" / "exported-settings.json"
-        self.assertTrue(gcode_path.is_file() and gcode_path.stat().st_size > 1000)
-        self.assertTrue(three_mf_path.is_file() and three_mf_path.stat().st_size > 1000)
-        self.assertFalse(three_mf_path.name.lower().endswith(".gcode.3mf"))
-        gcode_sha = hashlib.sha256(gcode_path.read_bytes()).hexdigest()
-        three_mf_sha = hashlib.sha256(three_mf_path.read_bytes()).hexdigest()
-        self.assertEqual(res["dispatchCandidate"]["artifact"]["file"], "slice/sliced-plate.3mf")
-        self.assertEqual(res["dispatchCandidate"]["artifact"]["sha256"], three_mf_sha)
-        self.assertEqual(res["dispatchCandidate"]["plateGcodeSha256"], gcode_sha)
-        with zipfile.ZipFile(three_mf_path, "r") as zf:
-            names = set(zf.namelist())
-            self.assertIn("Metadata/plate_1.gcode", names)
-            self.assertIn("Metadata/plate_1.json", names)
-            self.assertIn("Metadata/slice_info.config", names)
-            self.assertEqual(hashlib.sha256(zf.read("Metadata/plate_1.gcode")).hexdigest(), gcode_sha)
-        self.assertEqual(res["slice"]["slicerSettingsSha256"], hashlib.sha256(settings_path.read_bytes()).hexdigest())
-        summary = res["slice"]["summary"]
-        self.assertGreater(summary["estimatedPrintSeconds"], 0)
-        self.assertGreater(summary["filamentWeightG"], 0.0)
-        self.assertEqual(summary["bedType"], "Textured PEI Plate")
-        self.assertIn("hardened_steel", summary["nozzleType"])
-        self.assertIs(summary["enableSupport"], False)
-
-        # Also exercise real BambuStudio slice with supports enabled on the synthetic overhang piece
-        oh_dir = self.make_scan_cradle_dir("real-oh", synthetic_overhang_cantilever_stl())
-        out_oh = self.root / "real-out-oh"
-        proc_oh = subprocess.run(
-            [
-                sys.executable,
-                str(ROOT_DIR / "printability.py"),
-                "dry-run",
-                "--template-dir",
-                str(oh_dir),
-                "--profile",
-                "p1s-0.4-hardened",
-                "--allow-supports",
-                "--out",
-                str(out_oh),
-            ],
-            capture_output=True,
-            text=True,
-        )
-        self.assertEqual(proc_oh.returncode, 0, msg=proc_oh.stderr)
-        res_oh = json.loads(proc_oh.stdout)
-        self.assertEqual(res_oh["printability"]["verdict"], "printable-with-supports")
-        self.assertIs(res_oh["slice"]["summary"]["enableSupport"], True)
-        self.assertTrue((out_oh / "slice" / "sliced-plate.3mf").is_file())
 
 
 if __name__ == "__main__":

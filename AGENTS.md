@@ -10,7 +10,32 @@ UI design, copy, components, interactions and visual implementation are authored
 
 Claim a task and its file scope before editing. One owner per active scope. Preserve others' uncommitted work. Review observable defects and the agreed acceptance criteria; use one bounded review pass, then verify fixes. Keep speculative improvements in the backlog.
 
-`bambu-printer-mcp` remains the separate Bambu printer adapter at `/Users/davidmontgomery/bambu-printer-mcp`. Read its AGENTS.md before changing it; its existing safety and release rules still apply. New app work belongs here. Additional printer adapters belong behind the product contract, never inside the Bambu-only fork.
+## Read bambu-printer-mcp before you build
+
+`bambu-printer-mcp` ([GitHub](https://github.com/DMontgomery40/bambu-printer-mcp), `/Users/davidmontgomery/bambu-printer-mcp` on the Mac) is most of this product's working back end, not a side adapter. It already has:
+
+- slicing with exact machine presets, bed and nozzle types, auto-orient and sliced 3MF export (`slice_stl`, `slice_with_template`, `get_slice_settings`);
+- print-file inspection, the print safety core and AMS mapping (`inspect_print_file`, `src/safety/`, `resolve_3mf_ams_slots`);
+- mesh edits (`lay_flat`, `rotate_stl`, `scale_stl`, `center_model`, `extend_stl_base`, `merge_vertices`, `get_stl_info`) and Blender MCP (`blender_mcp_edit_model`);
+- every print route: direct LAN, the FULU `bambu_network` bridge (signed commands, no Developer Mode), X2D `bambu_native` and the Bambu Connect hand-off;
+- the product plan: the Made to Fit PRD and cost model in `docs/prd/`, covering pricing, licensing, hosting, print routes and the design runtime.
+
+Rules:
+
+- Before you build, plan, delegate or ask David about anything that touches printing, slicing, orientation, mesh editing, print safety, pricing, hosting or licensing, read the matching part of that repo: README, `docs/`, `docs/prd/scan-to-print-PRD.md`, its AGENTS.md, and its agent memory on the Mac (`~/.claude/projects/-Users-davidmontgomery-bambu-printer-mcp/memory/`). Search its session logs there too. Restore missing logs from Time Machine (SSH lacks Full Disk Access; run a `.command` script with `open -a Terminal`).
+- If it has the capability, call it through MCP. Don't reimplement it here. Preparation runs it as a separate process with no printer credentials (`PRINTER_HOST`, `BAMBU_SERIAL`, `BAMBU_TOKEN` absent) and an allowlist of file-only tools. Only the human-approved dispatch step uses a credentialed process.
+- Every PR here that touches those areas names the bambu-printer-mcp capability it uses, or says why none fits. Reviewers reject a PR that duplicates one.
+- Never record that something is missing, wiped or needs a rebuild until you have checked that repo's memory, its session logs and the backups.
+- Treat "separate" as "don't edit it casually". It never means "don't read it". Changes to it follow its own AGENTS.md safety and release rules. Additional printer adapters belong behind the product contract, never inside the Bambu-only fork.
+
+Why this rule exists: on 2026-10-30 this repo's lead treated bambu-printer-mcp as a sealed driver and never read it. As a result:
+
+- The repo gained a second BambuStudio slicing wrapper (`tools/slicer-producer`) and a printability dry-run slicer.
+- Two PRs duplicated existing tools: an orientation picker (#94, a copy of `lay_flat`) and companion slicer overrides (#97).
+- A working print harness was declared gone and replaced with a broken one.
+- Questions the PRD already answers were sent to the owner to decide.
+
+`slice_stl`, `lay_flat` and the harness were all documented beforehand. The owner had to find every one of these mistakes himself. The duplicates are being removed. Don't repeat this.
 
 Physical dispatch, hardware purchases and paid cloud deployments need the appropriate concrete user authorization. Use isolated fixtures for routine development. Printer operations retain exact artifact inspection, fresh observed identity/state, model/nozzle/material/plate checks, human approval and once-only dispatch.
 
