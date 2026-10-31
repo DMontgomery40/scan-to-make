@@ -6,6 +6,11 @@ import type {
 } from '@scan-to-make/contracts';
 import type { CaptureFile, RetainedCapture } from '../capture/retainedCaptures';
 import type { CloseupTarget } from './closeupAdviceModel';
+import {
+  sessionHandoffMemory,
+  type HandoffMemory,
+  type PrinterHandoff,
+} from '../printing/printerHandoff';
 
 /**
  * What the scan results, close-up and make screens need from the data layer.
@@ -144,6 +149,10 @@ export type ScanServices = {
   jobs: ScanJobMemory;
   /** Absent until the companion returns its scan check's advice. */
   advice?: CloseupAdvice;
+  /** Absent until the companion can hand a scan to a printer MCP server. */
+  printing?: PrinterHandoff;
+  /** The handoff last sent for each scan, kept outside the print screen. */
+  handoffs: HandoffMemory;
   /** A displayable URI for verified image bytes, when the platform has one. */
   imageUri?: (file: CaptureFile) => Promise<string | null>;
 };
@@ -230,5 +239,6 @@ export function unavailableScanServices(): ScanServices {
     },
     picker: { pick: async () => unavailable(), discard: async () => {} },
     jobs: sessionJobMemory(),
+    handoffs: sessionHandoffMemory(),
   };
 }

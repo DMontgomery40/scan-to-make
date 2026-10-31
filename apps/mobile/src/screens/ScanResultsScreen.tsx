@@ -77,6 +77,7 @@ export function ScanResultsScreen({
   onBack,
   onCompanion,
   onCloseUps,
+  onPrint,
   reference: keptReference = null,
   onReferenceChange,
 }: {
@@ -86,6 +87,7 @@ export function ScanResultsScreen({
   onBack: () => void;
   onCompanion: () => void;
   onCloseUps: () => void;
+  onPrint?: () => void;
   /** The user's real-size draft for this scan, kept while they navigate. */
   reference?: ReferenceDraft | null;
   onReferenceChange?: (draft: ReferenceDraft) => void;
@@ -654,6 +656,13 @@ export function ScanResultsScreen({
             variant="secondary"
             onPress={() => modelAction(succeeded, true)}
           />
+          {onPrint ? (
+            <Button
+              label="Send to printer"
+              variant="secondary"
+              onPress={onPrint}
+            />
+          ) : null}
         </Card>
       ) : null}
 

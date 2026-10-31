@@ -9,6 +9,7 @@ import {
   DetailStillsClient,
   type DetailStillNative,
 } from '../stills/detailStills';
+import { storedHandoffMemory } from '../printing/printerHandoff';
 import {
   sessionJobMemory,
   unavailableScanServices,
@@ -91,6 +92,8 @@ export function liveScanServices(
     // A fast path within a session; after a relaunch, processing.listJobs
     // finds the jobs the companion kept.
     jobs: sessionJobMemory(),
+    // A sent print job outlives this screen and the app session.
+    handoffs: storedHandoffMemory(captures),
     imageUri: file => client.imageUri(file),
   };
 }
