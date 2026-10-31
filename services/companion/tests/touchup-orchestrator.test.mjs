@@ -109,3 +109,19 @@ test('a lock left by a dead process is taken over', async () => {
   assert.ok(Date.now() - started < 500);
   await release();
 });
+
+test('many processes racing for the Blender lock never overlap', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'touchup-race-'));
+  const lockPath = join(dir, 'blender.lock'), logPath = join(dir, 'log');
+  const module = new URL('../dist/touchup/touchup.js', import.meta.url).href;
+  const script = `const {acquireBlenderLock} = await import(${JSON.stringify(module)});
+const {appendFileSync} = await import('node:fs');
+for (let i = 0; i < 8; i++) { const release = await acquireBlenderLock(${JSON.stringify(lockPath)}, {pollMs: 5});
+  appendFileSync(${JSON.stringify(logPath)}, 'in\\n'); await new Promise(r => setTimeout(r, 3)); appendFileSync(${JSON.stringify(logPath)}, 'out\\n'); await release(); }`;
+  const children = Array.from({length: 8}, () => spawn(process.execPath, ['--input-type=module', '-e', script], {stdio: 'inherit'}));
+  await Promise.all(children.map(child => new Promise(r => child.on('exit', r))));
+  const {readFile} = await import('node:fs/promises');
+  const lines = (await readFile(logPath, 'utf8')).trim().split('\n');
+  assert.equal(lines.length, 128);
+  for (let i = 0; i < lines.length; i += 2) assert.deepEqual([lines[i], lines[i + 1]], ['in', 'out'], `overlap at line ${i}`);
+});

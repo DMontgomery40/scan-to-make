@@ -1,6 +1,7 @@
 // Stands in for `claude -p ... --output-format stream-json` in the touch-up runner tests.
 // Usage: node fake-claude.mjs <scenario>; cwd is the pass folder.
 import {mkdirSync, writeFileSync, copyFileSync} from 'node:fs';
+import {spawn} from 'node:child_process';
 const scenario = process.argv[2];
 const emit = event => process.stdout.write(JSON.stringify(event) + '\n');
 const toolUse = (name = 'mcp__printer__blender_mcp_call') => emit({type: 'assistant', message: {content: [{type: 'tool_use', name, input: {}}]}});
@@ -63,6 +64,18 @@ switch (scenario) {
     writeFileSync('out/checkpoints/01.stl', stl);
     result({status: 'failed', summary: 'Blender crashed while merging the beads.'});
     break;
+  case 'truncatedstl':
+    toolUse();
+    writeFileSync('out/checkpoints/01.stl', stl);
+    writeFileSync('out/touched.stl', 'solid touched\nfacet normal 0 0 1\n');
+    result({status: 'done', summary: 'Saved.'});
+    break;
+  case 'stubborngrandchild': {
+    const child = spawn(process.execPath, ['-e', "process.on('SIGTERM',()=>{});setInterval(()=>{},1000)"], {stdio: 'ignore'});
+    writeFileSync('grandchild.pid', String(child.pid));
+    hang();
+    break;
+  }
   default:
     throw new Error(`unknown scenario ${scenario}`);
 }

@@ -129,3 +129,36 @@ test('the report records what the worker actually started with', async () => {
   assert.deepEqual(result.worker, {model: 'claude-opus-5-5', apiKeySource: 'none', tools: ['Read', 'WebSearch'],
     plugins: ['cc-plugin-telemetry@builtin'], mcpServers: ['printer:connected']});
 });
+
+test('a cut-off ASCII STL is not a model; the last checkpoint is used', async () => {
+  const {pass, inv} = await setup('truncatedstl');
+  const result = await runTouchupWorker(inv, pass);
+  assert.equal(result.model, join(pass.checkpointsDir, '01.stl'));
+});
+
+test('a binary STL with NaN coordinates is not valid', async () => {
+  const {isValidStl} = await import('../dist/touchup/runner.js');
+  const dir = await mkdtemp(join(tmpdir(), 'stl-'));
+  const bytes = Buffer.alloc(134); bytes.writeUInt32LE(1, 80);
+  for (let offset = 84; offset < 132; offset += 4) bytes.writeFloatLE(NaN, offset);
+  await writeFile(join(dir, 'nan.stl'), bytes);
+  assert.equal(await isValidStl(join(dir, 'nan.stl')), false);
+});
+
+test('a stopped worker leaves no process behind, even one that ignores SIGTERM', async () => {
+  const {pass, inv} = await setup('stubborngrandchild');
+  await runTouchupWorker(inv, pass, {timeoutMs: 500});
+  const pid = Number(await readFile(join(pass.dir, 'grandchild.pid'), 'utf8'));
+  await new Promise(r => setTimeout(r, 200));
+  assert.throws(() => process.kill(pid, 0), /ESRCH/);
+});
+
+test('a cancelled pass never starts the worker', async () => {
+  const {pass, inv} = await setup('hang');
+  const controller = new AbortController(); controller.abort();
+  const started = Date.now();
+  const result = await runTouchupWorker(inv, pass, {signal: controller.signal, timeoutMs: 5000});
+  assert.equal(result.status, 'failed');
+  assert.equal(result.reason, 'cancelled');
+  assert.ok(Date.now() - started < 1000);
+});

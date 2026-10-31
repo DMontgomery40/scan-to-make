@@ -1,7 +1,7 @@
 import {execFile} from 'node:child_process';
 import {randomUUID} from 'node:crypto';
 import {copyFile, mkdir} from 'node:fs/promises';
-import {basename, join} from 'node:path';
+import {basename, join, resolve} from 'node:path';
 import {promisify} from 'node:util';
 
 const run = promisify(execFile);
@@ -43,7 +43,8 @@ export async function prepareTouchupPass(input: {root: string; objectId: string;
   // Photos are optional only when the user's instructions say what to make.
   if (input.photos.length === 0 && input.requirePhotos !== false) throw new NoPhotosError();
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-  const dir = join(input.root, input.objectId, `${stamp}-${randomUUID().slice(0, 8)}`);
+  // The worker runs inside the pass folder, so every path it is given must be absolute.
+  const dir = join(resolve(input.root), input.objectId, `${stamp}-${randomUUID().slice(0, 8)}`);
   const scanDir = join(dir, 'scan'), photosDir = join(dir, 'photos'), outDir = join(dir, 'out'), checkpointsDir = join(outDir, 'checkpoints');
   for (const folder of [scanDir, photosDir, checkpointsDir]) await mkdir(folder, {recursive: true});
   const scanPaths: string[] = [];

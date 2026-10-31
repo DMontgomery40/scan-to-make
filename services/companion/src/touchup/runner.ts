@@ -31,16 +31,26 @@ interface ResultEvent {
   structured_output?: {status?: string; closeup?: string; summary?: string};
 }
 
-/** A printable STL: binary with at least one triangle and the exact size, or ASCII with at least one facet. */
+/** A printable STL: every triangle complete and every vertex coordinate finite. Cut-off or corrupt exports fail. */
 export async function isValidStl(path: string): Promise<boolean> {
   let bytes: Buffer;
   try { bytes = await readFile(path); } catch { return false; }
   if (bytes.length >= 84) {
     const triangles = bytes.readUInt32LE(80);
-    if (triangles > 0 && bytes.length === 84 + 50 * triangles) return true;
+    if (triangles > 0 && bytes.length === 84 + 50 * triangles) {
+      for (let t = 0; t < triangles; t++) {
+        const base = 84 + 50 * t + 12;
+        for (let k = 0; k < 9; k++) if (!Number.isFinite(bytes.readFloatLE(base + 4 * k))) return false;
+      }
+      return true;
+    }
   }
-  const head = bytes.subarray(0, 512).toString('latin1').trimStart();
-  return head.startsWith('solid') && bytes.toString('latin1').includes('facet');
+  const text = bytes.toString('latin1');
+  if (!text.trimStart().startsWith('solid') || !/\bendsolid\b/.test(text)) return false;
+  const vertices = [...text.matchAll(/\bvertex\s+(\S+)\s+(\S+)\s+(\S+)/g)];
+  const facets = (text.match(/\bendfacet\b/g) ?? []).length;
+  if (vertices.length < 3 || vertices.length !== facets * 3) return false;
+  return vertices.every(match => [match[1], match[2], match[3]].every(value => Number.isFinite(Number(value))));
 }
 async function list(dir: string, extension: string): Promise<string[]> {
   try { return (await readdir(dir)).filter(name => name.toLowerCase().endsWith(extension)).sort().map(name => join(dir, name)); }
@@ -57,6 +67,8 @@ export async function runTouchupWorker(inv: TouchupInvocation, pass: TouchupPass
   onProgress?: (progress: TouchupProgress) => void; signal?: AbortSignal;
 } = {}): Promise<TouchupResult> {
   const spawn = opts.spawn ?? nodeSpawn;
+  const started0 = Date.now();
+  if (opts.signal?.aborted) return {status: 'failed', reason: 'cancelled', renders: [], checkpoints: [], stats: {seconds: Math.round((Date.now() - started0) / 1000), toolCalls: 0}};
   const timeoutMs = opts.timeoutMs ?? TOUCHUP_TIMEOUT_MS, maxToolCalls = opts.maxToolCalls ?? TOUCHUP_MAX_TOOL_CALLS;
   const started = Date.now();
   const seconds = () => Math.round((Date.now() - started) / 1000);
@@ -109,6 +121,8 @@ export async function runTouchupWorker(inv: TouchupInvocation, pass: TouchupPass
   const exitCode = ended.code;
   clearTimeout(timer);
   clearTimeout(killTimer);
+  // A stopped worker's helpers (MCP servers, Blender bridges) may ignore SIGTERM: leave nothing behind.
+  if (stopReason !== undefined && child.pid) { try { process.kill(-child.pid, 'SIGKILL'); } catch { /* group already gone */ } }
   opts.signal?.removeEventListener('abort', onAbort);
 
   const touched = join(pass.outDir, 'touched.stl');

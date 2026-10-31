@@ -76,3 +76,11 @@ test('photos are optional when the user gave instructions', async () => {
   assert.deepEqual(pass.photoPaths, []);
   assert.deepEqual(pass.scanPaths, []);
 });
+
+test('a relative root still gives absolute pass paths', async () => {
+  const {relative} = await import('node:path');
+  const root = await temp('touchup-root-');
+  const pass = await prepareTouchupPass({root: relative(process.cwd(), root), objectId: 'obj-6', scan: [fixture('scan.obj')], photos: [fixture('photo.jpg')]});
+  assert.ok(pass.dir.startsWith('/'));
+  assert.ok(pass.scanPaths.every(path => path.startsWith('/')));
+});

@@ -1,5 +1,6 @@
 import {createHash} from 'node:crypto';
-import {mkdir, open, readFile, unlink} from 'node:fs/promises';
+import {link, mkdir, readFile, rename, unlink, writeFile} from 'node:fs/promises';
+import {randomUUID} from 'node:crypto';
 import {homedir} from 'node:os';
 import {dirname, join} from 'node:path';
 import {PrinterMcpClient, type PrinterHandoffConfig} from '@scan-to-make/printer-handoff';
@@ -41,24 +42,38 @@ function alive(pid: number): boolean {
   try { process.kill(pid, 0); return true; } catch (error) { return (error as NodeJS.ErrnoException).code === 'EPERM'; }
 }
 
-/** Holds the Mac's Blender for one touch-up. A lock left by a dead process is taken over. */
+/**
+ * Holds the Mac's Blender for one touch-up. The lock file appears atomically with its owner's pid in it
+ * (written aside, then hard-linked into place), so a contender never sees it half-written. A lock left by a
+ * dead process is moved aside and checked before it's dropped, so a fresh lock is never taken over.
+ */
 export async function acquireBlenderLock(lockPath = BLENDER_LOCK_PATH, opts: {pollMs?: number} = {}): Promise<() => Promise<void>> {
   await mkdir(dirname(lockPath), {recursive: true});
+  const mine = String(process.pid);
   for (;;) {
+    const staged = `${lockPath}.${mine}.${randomUUID()}`;
+    await writeFile(staged, mine);
     try {
-      const handle = await open(lockPath, 'wx');
-      await handle.writeFile(String(process.pid));
-      await handle.close();
+      await link(staged, lockPath);
+      await unlink(staged).catch(() => undefined);
       return async () => {
-        const holder = Number(await readFile(lockPath, 'utf8').catch(() => ''));
-        if (holder === process.pid) await unlink(lockPath).catch(() => undefined);
+        if ((await readFile(lockPath, 'utf8').catch(() => '')) === mine) await unlink(lockPath).catch(() => undefined);
       };
     } catch (error) {
+      await unlink(staged).catch(() => undefined);
       if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-      const holder = Number(await readFile(lockPath, 'utf8').catch(() => ''));
-      if (!holder || !alive(holder)) { await unlink(lockPath).catch(() => undefined); continue; }
-      await new Promise(resolve => setTimeout(resolve, opts.pollMs ?? 1000));
     }
+    const holder = Number(await readFile(lockPath, 'utf8').catch(() => ''));
+    if (holder && !alive(holder)) {
+      const aside = `${lockPath}.stale.${mine}.${randomUUID()}`;
+      try {
+        await rename(lockPath, aside);
+        if (Number(await readFile(aside, 'utf8').catch(() => '')) === holder) await unlink(aside).catch(() => undefined);
+        else await link(aside, lockPath).catch(() => undefined).finally(() => unlink(aside).catch(() => undefined));
+      } catch { /* someone else moved it first */ }
+      continue;
+    }
+    await new Promise(resolve => setTimeout(resolve, opts.pollMs ?? 1000));
   }
 }
 
