@@ -68,11 +68,29 @@ npm test --prefix services/printer-handoff
 ```
 
 The default suite runs both sequences against fixture MCP servers that record
-every call and elicit like the real servers. One opt-in test connects to a
-real installed bambu-printer-mcp and only lists tools — it calls nothing:
+every call and elicit like the real servers.
+
+Opt-in tests connect to real installed MCP server processes (skipped unless
+enabled):
+
+**bambu-printer-mcp** — discovery only; calls no tools:
 
 ```sh
 PRINTER_HANDOFF_REAL_BAMBU=1 \
 PRINTER_HANDOFF_BAMBU_ENTRY=/path/to/bambu-printer-mcp/dist/index.js \
 node --test services/printer-handoff/tests/real-bambu.test.mjs
 ```
+
+**mcp-3D-printer-server** — full `lay_flat` → `slice_stl` →
+`confirm_temperatures` → `upload_gcode` flow against a loopback OctoPrint or
+Moonraker stub and the real server process (slicing is stubbed in-process so
+no slicer install is required):
+
+```sh
+PRINTER_HANDOFF_REAL_MCP_3D=1 \
+PRINTER_HANDOFF_MCP_3D_ENTRY=/path/to/mcp-3D-printer-server/dist/index.js \
+npm test --prefix services/printer-handoff -- tests/real-mcp-3d-printer-server.test.mjs
+```
+
+Optional: `PRINTER_HANDOFF_MCP_3D_ROOT` if `sample_cube.stl` is not under
+the parent of `dist/`.
