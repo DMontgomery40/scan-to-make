@@ -29,7 +29,8 @@ export interface StmObject {
   passes: ObjectPass[];
   current?: {model: string; renders: string[]; sizeMm?: [number, number, number]; summary?: string};
   question?: {closeup: string};
-  plate?: {item: string};
+  /** Set while a print waits for the user: something is on the plate, or the printer has no camera. */
+  plate?: {item?: string; noCamera?: boolean};
   failure?: string;
   print?: {bundleId: string};
 }
@@ -44,6 +45,8 @@ export class ObjectNotFoundError extends Error {
 /** Objects on this Mac, one folder each: object.json plus scan/, photos/, current/ and passes/. */
 export class ObjectStore {
   readonly #root: string;
+  /** Read-modify-write of one object is serialized, so simultaneous changes never overwrite each other. */
+  readonly #queues = new Map<string, Promise<unknown>>();
   constructor(root: string) { this.#root = root; }
 
   dir(id: string): string {
@@ -73,9 +76,15 @@ export class ObjectStore {
     return objects.sort((a, b) => b.createdAtMs - a.createdAtMs);
   }
 
-  async update(id: string, change: (object: StmObject) => StmObject): Promise<StmObject> {
-    const next = {...change(await this.get(id)), id, updatedAtMs: Date.now()};
-    await this.#write(next);
+  update(id: string, change: (object: StmObject) => StmObject): Promise<StmObject> {
+    const previous = this.#queues.get(id) ?? Promise.resolve();
+    const next = previous.catch(() => undefined).then(async () => {
+      const updated = {...change(await this.get(id)), id, updatedAtMs: Date.now()};
+      await this.#write(updated);
+      return updated;
+    });
+    this.#queues.set(id, next);
+    void next.finally(() => { if (this.#queues.get(id) === next) this.#queues.delete(id); }).catch(() => undefined);
     return next;
   }
 
@@ -99,7 +108,7 @@ export class ObjectStore {
   }
 
   async #write(object: StmObject): Promise<void> {
-    const path = join(this.dir(object.id), 'object.json'), temp = `${path}.${process.pid}.tmp`;
+    const path = join(this.dir(object.id), 'object.json'), temp = `${path}.${process.pid}.${randomUUID()}.tmp`;
     await writeFile(temp, JSON.stringify(object, null, 2));
     await rename(temp, path);
   }

@@ -1,6 +1,7 @@
-import {copyFile, mkdir, rm} from 'node:fs/promises';
+import {copyFile, mkdir, readFile, rm} from 'node:fs/promises';
 import {basename, join} from 'node:path';
-import type {PrinterHandoffConfig} from '@scan-to-make/printer-handoff';
+import type {ElicitationRelay, HandoffBundleStore, PendingElicitation, PrinterHandoffConfig, PrinterHandoffRunner} from '@scan-to-make/printer-handoff';
+import type {PlateVerdict} from './bedcheck.js';
 import type {TouchupInput} from '../touchup/touchup.js';
 import type {TouchupResult} from '../touchup/runner.js';
 import {ObjectStore, type StmObject} from './store.js';
@@ -21,6 +22,18 @@ export interface ObjectServiceDeps {
   claudePath: string;
   handoff: PrinterHandoffConfig;
   onChange?: (object: StmObject) => void;
+  print?: {
+    services: {store: HandoffBundleStore; relay: ElicitationRelay; runner: Pick<PrinterHandoffRunner, 'runBundle' | 'backend'>; selection?: PrinterHandoffConfig['selection']};
+    judgePlate: (photoBase64: string) => Promise<PlateVerdict>;
+  };
+}
+
+/** The printer MCP's own confirmation is a form of booleans; answering it means setting each to true. */
+function confirmAnswer(schema: unknown): Record<string, boolean> | undefined {
+  const properties = (schema as {properties?: Record<string, {type?: string}>} | undefined)?.properties;
+  if (!properties || !Object.keys(properties).length) return {};
+  if (!Object.values(properties).every(property => property.type === 'boolean')) return undefined;
+  return Object.fromEntries(Object.keys(properties).map(key => [key, true]));
 }
 
 /** Evenly spread picks from first to last, so every side of the object stays represented. */
@@ -33,6 +46,7 @@ export function spreadPick<T>(items: T[], count: number): T[] {
 export class ObjectService {
   readonly #deps: ObjectServiceDeps;
   readonly #running = new Map<string, Promise<StmObject>>();
+  readonly #confirmations = new Map<string, PendingElicitation>();
   constructor(deps: ObjectServiceDeps) { this.#deps = deps; }
 
   create(instructions?: string) { return this.#deps.store.create(instructions).then(o => this.#changed(o)); }
@@ -75,7 +89,52 @@ export class ObjectService {
     return this.#pass(object, answer.bestGuess ? {note: BEST_GUESS_NOTE} : {});
   }
 
-  /** Resolves when the object's current touch-up (if any) has finished. */
+  /** Prints the current model through the user's printer MCP. The plate is checked in the background. */
+  async print(id: string): Promise<StmObject> {
+    const object = await this.get(id);
+    if (!object.current) throw new InvalidStateError('There is no model to print yet.');
+    if (object.state === 'touching-up' || object.state === 'printing') throw new InvalidStateError('Wait until the current step finishes.');
+    const printing = this.#deps.print;
+    if (!printing) throw new InvalidStateError('Printing is not set up on this Mac.');
+    const {store: bundles, relay, runner, selection} = printing.services;
+    const stl = await readFile(join(this.#deps.store.dir(id), object.current.model));
+    const manifest = await bundles.create({stl, prompt: '', backend: runner.backend, ...(selection ? {selection} : {})});
+    const started = await this.#deps.store.update(id, o => ({...o, state: 'printing', print: {bundleId: manifest.id}, plate: undefined, failure: undefined}));
+    const unsubscribe = relay.subscribe(pending => { void this.#confirm(id, pending); });
+    const work = runner.runBundle(bundles, manifest.id, {print: true})
+      .then(() => this.#deps.store.update(id, o => ({...o, state: 'printed', plate: undefined})),
+        error => this.#deps.store.update(id, o => ({...o, state: 'failed', plate: undefined, failure: error instanceof Error ? error.message : String(error)})))
+      .then(o => this.#changed(o))
+      .finally(() => { unsubscribe(); this.#running.delete(id); this.#confirmations.delete(id); });
+    this.#running.set(id, work);
+    return this.#changed(started);
+  }
+
+  /** The user says the plate is clear (no camera, or the check saw something that isn't really there). */
+  async answerPlate(id: string, answer: {clear: true}): Promise<StmObject> {
+    const pending = this.#confirmations.get(id), content = pending && confirmAnswer(pending.requestedSchema);
+    if (!answer.clear || !pending || !content) throw new InvalidStateError('Nothing is waiting for the plate.');
+    this.#deps.print!.services.relay.respond(pending.id, {action: 'accept', content});
+    this.#confirmations.delete(id);
+    return this.#changed(await this.#deps.store.update(id, o => ({...o, plate: undefined})));
+  }
+
+  async #confirm(id: string, pending: PendingElicitation): Promise<void> {
+    this.#confirmations.set(id, pending);
+    const content = confirmAnswer(pending.requestedSchema);
+    if (!pending.cameraSnapshot) { this.#changed(await this.#deps.store.update(id, o => ({...o, plate: {noCamera: true}}))); return; }
+    let verdict: PlateVerdict;
+    try { verdict = await this.#deps.print!.judgePlate(pending.cameraSnapshot.base64); }
+    catch { verdict = {clear: false, item: 'something'}; }
+    if (verdict.clear && content) {
+      this.#deps.print!.services.relay.respond(pending.id, {action: 'accept', content});
+      this.#confirmations.delete(id);
+      return;
+    }
+    this.#changed(await this.#deps.store.update(id, o => ({...o, plate: {item: verdict.item?.trim() || 'something'}})));
+  }
+
+  /** Resolves when the object's current touch-up or print (if any) has finished. */
   async settled(id: string): Promise<StmObject> {
     return (await this.#running.get(id)) ?? this.get(id);
   }

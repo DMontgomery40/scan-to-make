@@ -55,3 +55,10 @@ test('work interrupted by a restart is marked failed, never left running', async
   assert.equal((await s.get(printing.id)).state, 'failed');
   assert.equal((await s.get(ready.id)).state, 'ready');
 });
+
+test('simultaneous updates to one object all land, none lost', async () => {
+  const s = await store();
+  const object = await s.create();
+  await Promise.all(Array.from({length: 20}, (_, i) => s.update(object.id, o => ({...o, photos: [...o.photos, `p${i}.jpg`]}))));
+  assert.equal((await s.get(object.id)).photos.length, 20);
+});
