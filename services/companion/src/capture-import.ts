@@ -6,6 +6,7 @@ import {isDeepStrictEqual} from 'node:util';
 import {z} from 'zod';
 import {FileSavedProjectStorage} from '@scan-to-make/project';
 import {CaptureReceiptSchema,CaptureBindingSchema,validateCaptureBinding,type CaptureReceipt,type CaptureBinding} from '@scan-to-make/contracts/capture';
+import {materialLibrary,meshTextLines,textureMap} from './mesh-materials.js';
 
 export interface CaptureConverter {
   /** Trusted host configuration only; never supplied by an import request. */
@@ -58,13 +59,6 @@ export function captureMaterialManifest(reportBytes:Buffer) {
  if(obj&&(obj.sha256!==report.output?.sha256||obj.bytes!==report.output?.bytes))throw new Error('Inconsistent converter OBJ identity');
  return outputs.filter(item=>item.path!=='mesh.obj');
 }
-function* captureArtifactLines(bytes?:Buffer) {
- // Match Python splitlines() boundaries used by the mesh tools. Iterate rather
- // than allocating an array containing every line of a large OBJ.
- for(const [raw] of (bytes?.toString('utf8')??'').matchAll(/[^\r\n\v\f\u001c-\u001e\u0085\u2028\u2029]+/g)){
-  const line=raw.trim();if(line&&!line.startsWith('#'))yield line;
- }
-}
 export function snapshotCaptureMaterials(derived:Buffer,report:Buffer,assets:Record<string,Buffer>={},maxBytes:number=DEFAULT_CAPTURE_LIMITS.maxDerivedBytes) {
  const manifest=captureMaterialManifest(report),result:Record<string,Buffer>={};
  if(Object.keys(assets).length!==manifest.length)throw new Error('Converter material bundle is incomplete');
@@ -77,17 +71,19 @@ export function snapshotCaptureMaterials(derived:Buffer,report:Buffer,assets:Rec
   if(copy.length!==item.bytes||ref(copy,'application/octet-stream').sha256!==item.sha256)throw new Error('Converter material identity mismatch');
   result[item.path]=copy;
  }
- for(const line of captureArtifactLines(derived)){
-  const library=/^mtllib(?:\s+(.*))?$/.exec(line);
-  if(library&&(library[1]!=='mesh.mtl'||!result['mesh.mtl']))throw new Error('Missing referenced material library');
+ for(const line of meshTextLines(derived)){
+  const library=materialLibrary(line);
+  if(library!==undefined&&(library!=='mesh.mtl'||!result['mesh.mtl']))throw new Error('Missing referenced material library');
  }
- for(const line of captureArtifactLines(result['mesh.mtl'])){
-  const [directive,...args]=line.split(/\s+/);
+ for(const line of meshTextLines(result['mesh.mtl'])){
+  const [directive]=line.split(/\s+/);
   // The trusted converter emits only base colour materials. Reject other MTL
   // directives instead of silently accepting an unchecked map/bump/refl path.
   if(directive==='newmtl'||directive==='Kd')continue;
   if(directive!=='map_Kd')throw new Error('Unsupported converter material directive');
-  const texture=/^(?:-clamp (?:on|off) )?(mesh_basecolor_[0-9]+\.png)$/.exec(args.join(' '))?.[1];
+  const map=textureMap(line);
+  const clampOnly=map&&(map.options.length===0||map.options.length===2&&map.options[0]==='-clamp'&&/^(on|off)$/.test(map.options[1]!));
+  const texture=clampOnly&&/^mesh_basecolor_[0-9]+\.png$/.test(map.file)?map.file:undefined;
   if(!texture||!result[texture])throw new Error('Missing referenced material texture');
  }
  return result;
