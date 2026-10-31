@@ -77,6 +77,30 @@ async function createBundle(f, prompt = 'make a hook that fits') {
   return json(created).bundle;
 }
 
+async function finishPrintOverHttp(f, path, action = 'accept') {
+  const deadline = Date.now() + 20000;
+  let confirmations = 0;
+  while (Date.now() < deadline) {
+    const pending = await wire(f, '/v1/printer-handoff/elicitations');
+    assert.equal(pending.status, 200, pending.bytes.toString());
+    for (const item of json(pending).elicitations) {
+      assert.equal(item.requestedSchema.properties.confirmed.type, 'boolean');
+      const answer = action === 'accept' ? {action, content: {confirmed: true}} : {action};
+      const responded = await wire(f, `/v1/printer-handoff/elicitations/${item.id}/respond`, {
+        method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify(answer),
+      });
+      assert.equal(responded.status, 200, responded.bytes.toString());
+      confirmations++;
+    }
+    const status = await wire(f, path);
+    assert.equal(status.status, 200, status.bytes.toString());
+    const result = json(status);
+    if (!result.printing) return {...result, confirmations};
+    await new Promise(resolve => setTimeout(resolve, 20));
+  }
+  assert.fail('Fixture print did not finish within 20 seconds');
+}
+
 test('handoff routes require the printer-handoff scope', async t => {
   const f = await fixture(t, ['generation:health']);
   assert.equal((await wire(f, '/v1/printer-handoff/bundles')).status, 403);
@@ -484,4 +508,74 @@ test('a retained uncertain dispatch is visible and cannot be printed again', asy
   assert.equal(retry.status, 409);
   assert.equal(json(retry).error.code, 'dispatch-uncertain');
   assert.equal((await f.calls()).length, 0);
+});
+
+for (const dispatch of ['crash', 'timeout']) {
+  test(`HTTP fixture ${dispatch} leaves an uncertain bundle that cannot replay after restart`, {timeout: 30000}, async t => {
+    const servicesFor = root => createPrintHandoffServices({
+      backend: 'bambu-printer-mcp',
+      process: {
+        command: process.execPath, args: [fixtureServer, 'bambu', join(root, 'calls.jsonl')], cwd: root,
+        env: {HANDOFF_FIXTURE_DISPATCH: dispatch},
+      },
+      selection,
+      timeouts: {connectMs: 5000, toolMs: 5000, elicitationMs: 10000},
+    }, join(root, 'bundles'));
+    const f = await fixture(t, ['printer-handoff:use'], servicesFor);
+    const bundle = await createBundle(f);
+    const path = `/v1/printer-handoff/bundles/${bundle.id}`;
+    assert.equal((await wire(f, `${path}/print`, {method: 'POST'})).status, 202);
+    const final = await finishPrintOverHttp(f, path);
+    assert.equal(final.confirmations, 1);
+    assert.equal(final.bundle.status, 'uncertain');
+    assert.equal(final.bundle.failure, 'dispatch-uncertain');
+    assert.deepEqual((await f.calls()).filter(item => item.tool).map(item => item.tool),
+      ['lay_flat', 'slice_stl', 'inspect_print_file', 'camera_snapshot', 'print_3mf']);
+    assert.deepEqual((await f.calls()).filter(item => item.elicitation).map(item => item.elicitation),
+      [{action: 'accept', content: {confirmed: true}}]);
+    for (const restart of [false, true]) {
+      let client = f;
+      if (restart) {
+        await f.server.close();
+        const server = await startCompanionServer({port: 0,
+          remoteAuth: await RemoteAuthStore.open(join(f.root, 'auth')), printHandoff: servicesFor(f.root)});
+        t.after(() => server.close());
+        client = {...f, server};
+      }
+      const status = json(await wire(client, path));
+      assert.equal(status.printing, false);
+      assert.equal(status.bundle.status, 'uncertain');
+      assert.equal(status.bundle.failure, 'dispatch-uncertain');
+      const retry = await wire(client, `${path}/print`, {method: 'POST'});
+      assert.equal(retry.status, 409);
+      assert.equal(json(retry).error.code, 'dispatch-uncertain');
+    }
+    assert.equal((await f.calls()).filter(item => item.tool === 'print_3mf').length, 1);
+  });
+}
+
+test('HTTP successful retry of a declined print clears its persisted failure', {timeout: 30000}, async t => {
+  const f = await fixture(t);
+  const bundle = await createBundle(f);
+  const path = `/v1/printer-handoff/bundles/${bundle.id}`;
+  assert.equal((await wire(f, `${path}/print`, {method: 'POST'})).status, 202);
+  const declined = await finishPrintOverHttp(f, path, 'decline');
+  assert.equal(declined.confirmations, 1);
+  assert.equal(declined.bundle.status, 'failed');
+  assert.equal(declined.bundle.failure, 'tool-failed');
+  assert.equal((await wire(f, `${path}/print`, {method: 'POST'})).status, 202);
+  const retried = await finishPrintOverHttp(f, path);
+  assert.equal(retried.confirmations, 1);
+  assert.equal(retried.bundle.status, 'printed');
+  assert.equal(Object.hasOwn(retried.bundle, 'failure'), false);
+  assert.ok(retried.bundle.artifacts.sliced);
+  assert.ok(retried.bundle.artifacts.oriented);
+  const listed = json(await wire(f, '/v1/printer-handoff/bundles')).bundles.find(item => item.id === bundle.id);
+  assert.equal(listed.status, 'printed');
+  assert.equal(Object.hasOwn(listed, 'failure'), false);
+  assert.deepEqual((await f.calls()).filter(item => item.elicitation).map(item => item.elicitation.action), ['decline', 'accept']);
+  const replay = await wire(f, `${path}/print`, {method: 'POST'});
+  assert.equal(replay.status, 409);
+  assert.equal(json(replay).error.code, 'already-printed');
+  assert.equal((await f.calls()).filter(item => item.tool === 'print_3mf').length, 2);
 });

@@ -171,6 +171,8 @@ test('material references cannot escape the retained bundle or hide in other map
  for(const invalid of [
   {obj:'  mtllib outside.mtl\n'+derived},
   {obj:'mtllib mesh.mtl outside.mtl\n'+derived},
+  {obj:'mtllib mesh .mtl\n'+derived},
+  {obj:'mtllib mesh.\tmtl\n'+derived},
   {obj:'mtllib\n'+derived},
   {mtl:'newmtl skin\n  map_Kd ../outside.png\n'},
   {mtl:'newmtl skin\nmap_Kd mesh_basecolor_9.png\n'},
@@ -189,6 +191,19 @@ test('material references cannot escape the retained bundle or hide in other map
  const store=new CaptureStore(f.storage,join(f.root,'captures'),{convert:async()=>valid});
  const saved=await store.importCapture(request());
  await store.loadCapture('test',0,saved.captureId);
+});
+
+test('material library spacing preserves the exact retained filename on import and reopen',async t=>{
+ const f=await fixture(t);
+ for(const line of ['mtllib    mesh.mtl','  mtllib \t  mesh.mtl \t','\tmtllib\t\tmesh.mtl  ']){
+  const next=texturedOutput({obj:line+'\r\n'+derived});
+  const store=new CaptureStore(f.storage,join(f.root,'captures'),{convert:async()=>next});
+  const saved=await store.importCapture(request());
+  const fresh=new CaptureStore(f.storage,join(f.root,'captures'),{convert:async()=>{throw new Error('Reopen must use retained bytes');}});
+  const loaded=await fresh.loadCapture('test',0,saved.captureId);
+  assert.deepEqual(loaded.derived,next.derived);
+  assert.deepEqual(await readFile(join(f.root,'captures',saved.captureId,'mesh.mtl')),next.assets['mesh.mtl']);
+ }
 });
 
 test('reopen applies the combined derived material byte budget',async t=>{
