@@ -1,10 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {mkdtemp, writeFile} from 'node:fs/promises';
+import {mkdtempSync} from 'node:fs';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {fileURLToPath} from 'node:url';
-import {runTouchup} from '../dist/touchup/touchup.js';
+import {runTouchup, acquireBlenderLock} from '../dist/touchup/touchup.js';
+import {spawn} from 'node:child_process';
 import {prepareTouchupPass} from '../dist/touchup/inputs.js';
 import {BlenderBridgeUnavailableError} from '../dist/touchup/blender.js';
 
@@ -18,6 +20,7 @@ async function input(extra = {}) {
 }
 function recorder(log, runDelayMs = 0) {
   return {
+    lockPath: join(mkdtempSync(join(tmpdir(), 'touchup-orch-lock-')), 'blender.lock'),
     ensureBlender: async () => { log.push('ensureBlender'); return 'already-running'; },
     resetScene: async () => { log.push('resetScene'); },
     client: () => ({}),
@@ -76,4 +79,33 @@ test('making something from instructions needs no scan or photos', async () => {
   const deps = {...recorder(log), run: async (inv, pass) => { seenPrompt = inv.args.at(-1); return done(pass); }};
   await runTouchup(await input({scan: [], photos: [], instructions: 'A hook for a 25 mm handle.'}), deps);
   assert.ok(seenPrompt.startsWith('A hook for a 25 mm handle.'));
+});
+
+test('a correction on an instructions-only job needs no photos', async () => {
+  const log = [];
+  const previous = join(await mkdtemp(join(tmpdir(), 'touchup-prev-')), 'touched.stl');
+  await writeFile(previous, 'solid previous\nendsolid previous\n');
+  let seenPrompt;
+  const deps = {...recorder(log), run: async (inv, pass) => { seenPrompt = inv.args.at(-1); return done(pass); }};
+  await runTouchup(await input({scan: [previous], photos: [], instructions: 'A hook.', note: 'thicker', summary: 'Made it.'}), deps);
+  assert.ok(seenPrompt.includes('A hook.'));
+});
+
+test('another process holding Blender makes this one wait', async () => {
+  const lockPath = join(await mkdtemp(join(tmpdir(), 'touchup-lock-')), 'blender.lock');
+  const holder = spawn('/bin/sleep', ['1']);
+  await writeFile(lockPath, String(holder.pid));
+  const started = Date.now();
+  const release = await acquireBlenderLock(lockPath, {pollMs: 50});
+  assert.ok(Date.now() - started >= 800, 'waited for the live holder');
+  await release();
+});
+
+test('a lock left by a dead process is taken over', async () => {
+  const lockPath = join(await mkdtemp(join(tmpdir(), 'touchup-lock-')), 'blender.lock');
+  await writeFile(lockPath, '999999');
+  const started = Date.now();
+  const release = await acquireBlenderLock(lockPath, {pollMs: 50});
+  assert.ok(Date.now() - started < 500);
+  await release();
 });

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createServer} from 'node:net';
-import {ensureBlenderMcp, resetBlenderScene, BlenderNotReadyError, BlenderBridgeUnavailableError} from '../dist/touchup/blender.js';
+import {ensureBlenderMcp, resetBlenderScene, defaultBlenderLaunch, BlenderNotReadyError, BlenderBridgeUnavailableError, BlenderNotInstalledError} from '../dist/touchup/blender.js';
 
 const listen = (port = 0) => new Promise(resolve => {
   const server = createServer(socket => socket.end());
@@ -52,7 +52,8 @@ test('reset goes through the bridge', async () => {
   assert.deepEqual(calls[0][1], {connect: true});
   assert.equal(calls[1][1].tool_name, 'execute_blender_code');
   assert.equal(calls[1][1].arguments.user_prompt, 'Start a fresh, empty scene for a scan touch-up');
-  assert.match(calls[1][1].arguments.code, /bpy\.data\.objects\.remove/);
+  assert.match(calls[1][1].arguments.code, /scenes\.new/);
+  assert.doesNotMatch(calls[1][1].arguments.code, /objects\.remove/, "the user's own Blender work is never deleted");
   assert.equal(client.connected, 1);
   assert.equal(client.closed, 1);
 });
@@ -76,4 +77,19 @@ test('a failed scene reset is an error, not a silent pass', async () => {
   const {client} = fakeClient({call: toolError('Blender is in Edit Mode')});
   await assert.rejects(resetBlenderScene(client), /Blender is in Edit Mode/);
   assert.equal(client.closed, 1);
+});
+
+test('a bridge that is set up but failing shows the MCP\'s own reason', async () => {
+  const {client} = fakeClient({status: toolError('Blender MCP timed out during connect. Check the configured server command and Blender addon connection.')});
+  await assert.rejects(resetBlenderScene(client), error => !(error instanceof BlenderBridgeUnavailableError) && /timed out during connect/.test(error.message));
+});
+
+test('the timeout names the Blender MCP addon', async () => {
+  const port = await freePort();
+  await assert.rejects(ensureBlenderMcp({port, timeoutMs: 300, launch: async () => {}}), /Blender MCP addon/);
+});
+
+test('Blender not installed says how to fix it', async () => {
+  await assert.rejects(defaultBlenderLaunch('org.example.not-installed-blender')(), error =>
+    error instanceof BlenderNotInstalledError && /blender\.org/.test(error.message));
 });

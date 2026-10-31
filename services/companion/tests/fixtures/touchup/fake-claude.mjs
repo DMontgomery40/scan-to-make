@@ -42,6 +42,22 @@ switch (scenario) {
     writeFileSync('out/touched.stl', '');
     result({status: 'done', summary: 'Saved.'});
     break;
+  case 'brokenstl':
+    toolUse();
+    writeFileSync('out/checkpoints/01.stl', stl);
+    { const header = Buffer.alloc(84); writeFileSync('out/touched.stl', header); }
+    result({status: 'done', summary: 'Saved.'});
+    break;
+  case 'junkstl':
+    toolUse();
+    writeFileSync('out/touched.stl', 'junk');
+    result({status: 'done', summary: 'Saved.'});
+    break;
+  case 'nocheckpoint':
+    toolUse();
+    writeFileSync('out/touched.stl', stl);
+    result({status: 'done', summary: 'Looked fine, exported.'});
+    break;
   default:
     throw new Error(`unknown scenario ${scenario}`);
 }

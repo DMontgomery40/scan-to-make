@@ -1,5 +1,7 @@
 import {createHash} from 'node:crypto';
-import {readFile} from 'node:fs/promises';
+import {mkdir, open, readFile, unlink} from 'node:fs/promises';
+import {homedir} from 'node:os';
+import {dirname, join} from 'node:path';
 import {PrinterMcpClient, type PrinterHandoffConfig} from '@scan-to-make/printer-handoff';
 import {defaultBlenderLaunch, ensureBlenderMcp, resetBlenderScene} from './blender.js';
 import {prepareTouchupPass, type TouchupPass} from './inputs.js';
@@ -28,10 +30,37 @@ export interface TouchupDeps {
   client?: (handoff: PrinterHandoffConfig) => Pick<PrinterMcpClient, 'connect' | 'callTool' | 'close' | 'hasTool'>;
   prepare?: typeof prepareTouchupPass;
   run?: (inv: TouchupInvocation, pass: TouchupPass, opts: Parameters<typeof runTouchupWorker>[2]) => Promise<TouchupResult>;
+  lockPath?: string;
 }
 
-/** One Blender, one scene: touch-ups on this Mac run strictly one at a time. */
+/** One Blender, one scene: touch-ups run strictly one at a time, within this process (queue) and across processes (lock file). */
 let queue: Promise<unknown> = Promise.resolve();
+export const BLENDER_LOCK_PATH = join(homedir(), 'Library', 'Caches', 'scan-to-make', 'blender.lock');
+
+function alive(pid: number): boolean {
+  try { process.kill(pid, 0); return true; } catch (error) { return (error as NodeJS.ErrnoException).code === 'EPERM'; }
+}
+
+/** Holds the Mac's Blender for one touch-up. A lock left by a dead process is taken over. */
+export async function acquireBlenderLock(lockPath = BLENDER_LOCK_PATH, opts: {pollMs?: number} = {}): Promise<() => Promise<void>> {
+  await mkdir(dirname(lockPath), {recursive: true});
+  for (;;) {
+    try {
+      const handle = await open(lockPath, 'wx');
+      await handle.writeFile(String(process.pid));
+      await handle.close();
+      return async () => {
+        const holder = Number(await readFile(lockPath, 'utf8').catch(() => ''));
+        if (holder === process.pid) await unlink(lockPath).catch(() => undefined);
+      };
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+      const holder = Number(await readFile(lockPath, 'utf8').catch(() => ''));
+      if (!holder || !alive(holder)) { await unlink(lockPath).catch(() => undefined); continue; }
+      await new Promise(resolve => setTimeout(resolve, opts.pollMs ?? 1000));
+    }
+  }
+}
 
 async function stlSha256(scan: string[]): Promise<string | undefined> {
   if (scan.length !== 1 || !scan[0]!.toLowerCase().endsWith('.stl')) return undefined;
@@ -39,11 +68,17 @@ async function stlSha256(scan: string[]): Promise<string | undefined> {
 }
 
 async function touchUp(input: TouchupInput, deps: TouchupDeps): Promise<TouchupResult & {passDir: string}> {
+  const release = await acquireBlenderLock(deps.lockPath);
+  try { return await touchUpLocked(input, deps); }
+  finally { await release(); }
+}
+
+async function touchUpLocked(input: TouchupInput, deps: TouchupDeps): Promise<TouchupResult & {passDir: string}> {
   await (deps.ensureBlender ?? (() => ensureBlenderMcp({launch: defaultBlenderLaunch()})))();
   const client = (deps.client ?? (handoff => new PrinterMcpClient(handoff)))(input.handoff);
   await (deps.resetScene ?? resetBlenderScene)(client, input.signal);
   const pass = await (deps.prepare ?? prepareTouchupPass)({root: input.root, objectId: input.objectId, scan: input.scan, photos: input.photos,
-    requirePhotos: !input.instructions?.trim()});
+    requirePhotos: !(input.instructions?.trim() || input.note?.trim())});
   const inv = buildTouchupInvocation({pass, printer: input.handoff.process, claudePath: input.claudePath,
     ...(input.instructions !== undefined ? {instructions: input.instructions} : {}),
     ...(input.note !== undefined ? {note: input.note} : {}), ...(input.summary !== undefined ? {summary: input.summary} : {})});

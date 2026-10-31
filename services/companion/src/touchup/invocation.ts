@@ -71,7 +71,10 @@ function workerEnv(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
 
 function prompt(pass: TouchupPass, instructions?: string, note?: string, summary?: string): string {
   const opening = note !== undefined
-    ? `This is the current model. ${summary ?? ''}`.trimEnd() + `\n\nChange requested: ${note}`
+    ? [`This is the current model. ${summary ?? ''}`.trimEnd(),
+       ...(instructions?.trim() ? [`Original request: ${instructions.trim()}`] : []),
+       `Change requested: ${note}`,
+       'The current model is an STL already in millimetres: import and export it at scale 1.'].join('\n\n')
     : instructions?.trim() || TOUCHUP_INSTRUCTION;
   const files = [
     ...(pass.scanPaths.length ? [`- Scan: ${pass.scanPaths.join(', ')}`] : []),
@@ -97,6 +100,7 @@ export function buildTouchupInvocation(input: {pass: TouchupPass; printer: Print
     '--tools', 'Read,WebSearch,WebFetch',
     '--allowedTools', 'Read,WebSearch,WebFetch,mcp__printer',
     '--disable-slash-commands',
+    '--setting-sources', '',
     '--settings', '{"disableAllHooks":true}',
     '--append-system-prompt', TOUCHUP_SYSTEM_RULES,
     '--json-schema', JSON.stringify(TOUCHUP_RESULT_SCHEMA),

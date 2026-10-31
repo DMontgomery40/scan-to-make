@@ -67,7 +67,7 @@ test('auth failure', async () => {
 
 test('unchanged', async () => {
   const {pass, inv} = await setup('unchanged');
-  const input = await readFile(join(fixtures, 'scan.obj'));
+  const input = Buffer.from('solid input\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 1 0 0\nvertex 0 1 0\nendloop\nendfacet\nendsolid input\n');
   await writeFile(join(pass.scanDir, 'input.stl'), input);
   const result = await runTouchupWorker(inv, pass, {inputStlSha256: createHash('sha256').update(input).digest('hex')});
   assert.equal(result.status, 'unchanged');
@@ -79,4 +79,30 @@ test('invalid output', async () => {
   assert.equal(result.status, 'failed');
   assert.equal(result.reason, 'no model was saved');
   assert.equal(result.model, undefined);
+});
+
+test('a missing claude is a failed result, not a crash', async () => {
+  const {pass, inv} = await setup('done');
+  const result = await runTouchupWorker({...inv, command: '/nonexistent/claude'}, pass);
+  assert.equal(result.status, 'failed');
+  assert.match(result.reason, /Claude Code wasn't found/);
+});
+
+test('a broken final STL falls back to the last valid checkpoint', async () => {
+  const {pass, inv} = await setup('brokenstl');
+  const result = await runTouchupWorker(inv, pass);
+  assert.equal(result.model, join(pass.checkpointsDir, '01.stl'));
+});
+
+test('junk is never a model', async () => {
+  const {pass, inv} = await setup('junkstl');
+  const result = await runTouchupWorker(inv, pass);
+  assert.equal(result.status, 'failed');
+  assert.equal(result.reason, 'no model was saved');
+});
+
+test('done with no checkpoint saved means nothing was fixed', async () => {
+  const {pass, inv} = await setup('nocheckpoint');
+  const result = await runTouchupWorker(inv, pass);
+  assert.equal(result.status, 'unchanged');
 });

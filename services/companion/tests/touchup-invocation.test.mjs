@@ -115,3 +115,17 @@ test('the rules ask for the fixes the photos show, not just caution', () => {
   assert.match(TOUCHUP_SYSTEM_RULES, /Keep real surface detail the photos confirm/);
   assert.equal(/never smooth captured surface/.test(TOUCHUP_SYSTEM_RULES), false, 'a lumpy surface the photos show flat must be fixable');
 });
+
+test('the worker loads none of the user\'s personal Claude settings', async () => {
+  const inv = buildTouchupInvocation({pass: await pass(), printer, claudePath: '/c', sourceEnv});
+  assert.equal(valueOf(inv.args, '--setting-sources'), '');
+});
+
+test('a correction keeps the original instructions and says the model is already in millimetres', async () => {
+  const inv = buildTouchupInvocation({pass: await pass(), printer, claudePath: '/c', sourceEnv,
+    instructions: 'A hook for a 25 mm handle.', note: 'make it 2 mm thicker', summary: 'Made the hook.'});
+  const prompt = inv.args.at(-1);
+  assert.ok(prompt.includes('A hook for a 25 mm handle.'));
+  assert.ok(prompt.includes('Change requested: make it 2 mm thicker'));
+  assert.match(prompt, /already in millimetres/);
+});

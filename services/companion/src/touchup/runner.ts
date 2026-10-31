@@ -1,6 +1,6 @@
 import {spawn as nodeSpawn} from 'node:child_process';
 import {createHash} from 'node:crypto';
-import {readdir, readFile, stat} from 'node:fs/promises';
+import {readdir, readFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {createInterface} from 'node:readline';
 import type {TouchupPass} from './inputs.js';
@@ -29,8 +29,16 @@ interface ResultEvent {
   structured_output?: {status?: string; closeup?: string; summary?: string};
 }
 
-async function nonEmpty(path: string): Promise<boolean> {
-  try { return (await stat(path)).size > 0; } catch { return false; }
+/** A printable STL: binary with at least one triangle and the exact size, or ASCII with at least one facet. */
+export async function isValidStl(path: string): Promise<boolean> {
+  let bytes: Buffer;
+  try { bytes = await readFile(path); } catch { return false; }
+  if (bytes.length >= 84) {
+    const triangles = bytes.readUInt32LE(80);
+    if (triangles > 0 && bytes.length === 84 + 50 * triangles) return true;
+  }
+  const head = bytes.subarray(0, 512).toString('latin1').trimStart();
+  return head.startsWith('solid') && bytes.toString('latin1').includes('facet');
 }
 async function list(dir: string, extension: string): Promise<string[]> {
   try { return (await readdir(dir)).filter(name => name.toLowerCase().endsWith(extension)).sort().map(name => join(dir, name)); }
@@ -81,7 +89,14 @@ export async function runTouchupWorker(inv: TouchupInvocation, pass: TouchupPass
     }
   });
 
-  const exitCode = await new Promise<number | null>(resolve => child.once('close', code => resolve(code)));
+  // Node may emit 'error' without 'close' when the executable can't start, so settle on whichever comes first.
+  const ended = await new Promise<{code: number | null; error?: NodeJS.ErrnoException}>(resolve => {
+    let settled = false;
+    const settle = (value: {code: number | null; error?: NodeJS.ErrnoException}) => { if (!settled) { settled = true; resolve(value); } };
+    child.once('error', error => settle({code: null, error}));
+    child.once('close', code => settle({code}));
+  });
+  const exitCode = ended.code;
   clearTimeout(timer);
   clearTimeout(killTimer);
   opts.signal?.removeEventListener('abort', onAbort);
@@ -89,15 +104,21 @@ export async function runTouchupWorker(inv: TouchupInvocation, pass: TouchupPass
   const touched = join(pass.outDir, 'touched.stl');
   const checkpoints = await list(pass.checkpointsDir, '.stl');
   const renders = await list(pass.outDir, '.png');
+  const validCheckpoints: string[] = [];
+  for (const checkpoint of checkpoints) if (await isValidStl(checkpoint)) validCheckpoints.push(checkpoint);
   let model: string | undefined;
-  if (await nonEmpty(touched)) model = touched;
-  else for (const checkpoint of [...checkpoints].reverse()) if (await nonEmpty(checkpoint)) { model = checkpoint; break; }
+  if (await isValidStl(touched)) model = touched;
+  else model = validCheckpoints.at(-1);
 
   const base = {renders, checkpoints, stats: {seconds: seconds(), toolCalls, ...(resultEvent?.total_cost_usd !== undefined ? {costUsd: resultEvent.total_cost_usd} : {})}};
   const withModel = model ? {model} : {};
   const answer = resultEvent?.structured_output;
   const summary = answer?.summary ? {summary: answer.summary} : {};
 
+  if (ended.error) {
+    const reason = ended.error.code === 'ENOENT' ? `Claude Code wasn't found at ${inv.command}. Install it or sign in.` : `Claude Code couldn't start: ${ended.error.message}`;
+    return {status: 'failed', reason, ...base};
+  }
   if (stopReason === 'cancelled') return {status: 'failed', reason: 'cancelled', ...withModel, ...base};
   if (stopReason !== undefined) return {status: 'capped', reason: stopReason, ...withModel, ...base};
   if (!resultEvent || resultEvent.is_error || !answer) {
@@ -106,6 +127,8 @@ export async function runTouchupWorker(inv: TouchupInvocation, pass: TouchupPass
   }
   if (answer.status === 'needs_closeup') return {status: 'needs_closeup', closeup: answer.closeup ?? 'a part of the object', ...summary, ...withModel, ...base};
   if (!model) return {status: 'failed', reason: 'no model was saved', ...summary, ...base};
+  // The rules require a checkpoint after every fix: none saved means nothing was fixed.
+  if (validCheckpoints.length === 0) return {status: 'unchanged', ...summary, model, ...base};
   if (opts.inputStlSha256 && await sha256(model) === opts.inputStlSha256) return {status: 'unchanged', ...summary, model, ...base};
   return {status: 'done', ...summary, model, ...base};
 }
