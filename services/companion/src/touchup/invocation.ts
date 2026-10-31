@@ -15,9 +15,9 @@ export const TOUCHUP_INSTRUCTION = 'Look at the pictures of this, and then tweak
 export const TOUCHUP_RESULT_SCHEMA = {
   type: 'object', additionalProperties: false, required: ['status', 'summary'],
   properties: {
-    status: {enum: ['done', 'needs_closeup']},
+    status: {enum: ['done', 'needs_closeup', 'failed']},
     closeup: {type: 'string', description: 'What to photograph, in a few plain words'},
-    summary: {type: 'string', description: 'What was changed, one short paragraph'},
+    summary: {type: 'string', description: 'What was changed, one short paragraph. When status is failed: what went wrong, in one sentence.'},
   },
 } as const;
 
@@ -30,7 +30,8 @@ export const TOUCHUP_SYSTEM_RULES = `You are making a 3D model the user will pri
 - Scans from the phone are in metres. Export every STL in millimetres, the unit printers use.
 - After each fix, export the whole model as an STL to the checkpoints folder (01.stl, 02.stl, …).
 - Make one pass, then stop. Export the final model to out/touched.stl and a few PNG renders to out/.
-- If you can't see a part well enough to fix it, set status to needs_closeup and say what to photograph.`;
+- If you can't see a part well enough to fix it, set status to needs_closeup and say what to photograph.
+- If something breaks and you can't finish (for example Blender stops responding), set status to failed and say what happened.`;
 
 /** Only what Claude Code needs to find the user's own login. Never printer tokens or provider keys. */
 const ENV_ALLOWLIST = ['HOME', 'USER', 'LOGNAME', 'PATH', 'TMPDIR', 'LANG', 'SHELL', 'CLAUDE_CONFIG_DIR'] as const;

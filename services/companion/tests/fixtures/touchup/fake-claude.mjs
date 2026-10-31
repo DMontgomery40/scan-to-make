@@ -58,6 +58,11 @@ switch (scenario) {
     writeFileSync('out/touched.stl', stl);
     result({status: 'done', summary: 'Looked fine, exported.'});
     break;
+  case 'selffailed':
+    toolUse();
+    writeFileSync('out/checkpoints/01.stl', stl);
+    result({status: 'failed', summary: 'Blender crashed while merging the beads.'});
+    break;
   default:
     throw new Error(`unknown scenario ${scenario}`);
 }

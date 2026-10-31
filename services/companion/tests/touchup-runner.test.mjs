@@ -106,3 +106,11 @@ test('done with no checkpoint saved means nothing was fixed', async () => {
   const result = await runTouchupWorker(inv, pass);
   assert.equal(result.status, 'unchanged');
 });
+
+test('the worker can say it failed, and the last checkpoint is kept', async () => {
+  const {pass, inv} = await setup('selffailed');
+  const result = await runTouchupWorker(inv, pass);
+  assert.equal(result.status, 'failed');
+  assert.equal(result.reason, 'Blender crashed while merging the beads.');
+  assert.equal(result.model, join(pass.checkpointsDir, '01.stl'));
+});

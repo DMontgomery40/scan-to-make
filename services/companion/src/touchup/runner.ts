@@ -125,6 +125,7 @@ export async function runTouchupWorker(inv: TouchupInvocation, pass: TouchupPass
     const reason = resultEvent?.result?.trim() || stderrTail.trim().split('\n').at(-1) || `the worker exited with code ${exitCode}`;
     return {status: 'failed', reason, ...withModel, ...base};
   }
+  if (answer.status === 'failed') return {status: 'failed', reason: answer.summary?.trim() || 'the worker could not finish', ...withModel, ...base};
   if (answer.status === 'needs_closeup') return {status: 'needs_closeup', closeup: answer.closeup ?? 'a part of the object', ...summary, ...withModel, ...base};
   if (!model) return {status: 'failed', reason: 'no model was saved', ...summary, ...base};
   // The rules require a checkpoint after every fix: none saved means nothing was fixed.

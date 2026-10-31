@@ -129,3 +129,7 @@ test('a correction keeps the original instructions and says the model is already
   assert.ok(prompt.includes('Change requested: make it 2 mm thicker'));
   assert.match(prompt, /already in millimetres/);
 });
+
+test('the answer can report a failure', () => {
+  assert.deepEqual(TOUCHUP_RESULT_SCHEMA.properties.status.enum, ['done', 'needs_closeup', 'failed']);
+});
