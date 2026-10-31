@@ -133,28 +133,55 @@ export class DetailStillStore {
     return join(this.captureDirectory, request.captureId, 'detail-stills');
   }
 
-  /** The capture must already be retained for this exact project revision. */
-  private async verifyCapture(request: StillRequest): Promise<void> {
+  private async readBinding(captureId: string): Promise<{ projectId: string; projectRevision: number }> {
     let bindingBytes: Buffer;
     try {
       bindingBytes = await readBoundedCaptureFile(
-        join(this.captureDirectory, request.captureId, 'binding.json'),
+        join(this.captureDirectory, captureId, 'binding.json'),
         MAX_BINDING_BYTES
       );
     } catch (error) {
       if (isMissing(error)) throw new DetailStillFailure('not-found');
       throw new DetailStillFailure('still-unavailable');
     }
-    let binding: unknown;
     try {
-      binding = CaptureBindingSchema.parse(JSON.parse(bindingBytes.toString('utf8')));
+      return CaptureBindingSchema.parse(JSON.parse(bindingBytes.toString('utf8')));
     } catch {
       throw new DetailStillFailure('still-unavailable');
     }
-    const parsed = binding as { projectId: string; projectRevision: number };
+  }
+
+  /** The capture must already be retained for this exact project revision. */
+  private async verifyCapture(request: StillRequest): Promise<void> {
+    const parsed = await this.readBinding(request.captureId);
     if (parsed.projectId !== request.projectId || parsed.projectRevision !== request.projectRevision) {
       throw new DetailStillFailure('not-found');
     }
+  }
+
+  /** The still request implied by the capture's retained binding. */
+  private async retainedRequest(projectId: string, captureId: string): Promise<StillRequest> {
+    const binding = await this.readBinding(captureId);
+    if (binding.projectId !== projectId) throw new DetailStillFailure('not-found');
+    return requestSchema.parse({ projectId, projectRevision: binding.projectRevision, captureId });
+  }
+
+  private async readStillBytes(request: StillRequest, stillId: string): Promise<{ still: DetailStill; bytes: Buffer }> {
+    const still = await this.readRecord(request, stillId);
+    let bytes: Buffer;
+    try {
+      bytes = await readBoundedCaptureFile(join(this.folder(request), `${stillId}.img`), MAX_DETAIL_STILL_BYTES);
+    } catch {
+      throw new DetailStillFailure('still-unavailable');
+    }
+    if (
+      bytes.length !== still.byteLength ||
+      sha256(bytes) !== still.sha256 ||
+      sniffDetailStillMediaType(bytes) !== still.mediaType
+    ) {
+      throw new DetailStillFailure('still-unavailable');
+    }
+    return { still, bytes };
   }
 
   private async readRecord(request: StillRequest, stillId: string): Promise<DetailStill> {
@@ -183,7 +210,12 @@ export class DetailStillStore {
   }
 
   /** Validated records in attachment order. Orphan bytes without a record are never served. */
-  private async readAll(request: StillRequest): Promise<DetailStill[]> {
+  /**
+   * `tolerateDeletion` is for the unlocked snapshot a cleanup job takes: a still
+   * deleted while it is being listed is simply absent, as after the deletion.
+   * Locked listings stay strict.
+   */
+  private async readAll(request: StillRequest, tolerateDeletion = false): Promise<DetailStill[]> {
     let names: string[];
     try {
       names = await readdir(this.folder(request));
@@ -196,7 +228,13 @@ export class DetailStillStore {
       if (name.startsWith('.')) continue;
       const match = /^([0-9a-fA-F-]{36})\.(json|img)$/.exec(name);
       if (!match) throw new DetailStillFailure('still-unavailable');
-      if (match[2] === 'json') records.push(await this.readRecord(request, match[1]!));
+      if (match[2] !== 'json') continue;
+      try {
+        records.push(await this.readRecord(request, match[1]!));
+      } catch (error) {
+        if (tolerateDeletion && error instanceof DetailStillFailure && error.code === 'not-found') continue;
+        throw error;
+      }
     }
     records.sort((a, b) => a.ordinal - b.ordinal);
     let validated: DetailStill[];
@@ -205,17 +243,22 @@ export class DetailStillStore {
     } catch {
       throw new DetailStillFailure('still-unavailable');
     }
+    const deleted = new Set<string>();
     for (const still of validated) {
       let size: number;
       try {
         size = await fileSize(join(this.folder(request), `${still.id}.img`));
       } catch (error) {
+        if (tolerateDeletion && isMissing(error)) {
+          deleted.add(still.id);
+          continue;
+        }
         if (error instanceof DetailStillFailure) throw error;
         throw new DetailStillFailure('still-unavailable');
       }
       if (size !== still.byteLength) throw new DetailStillFailure('still-unavailable');
     }
-    return validated;
+    return validated.filter(still => !deleted.has(still.id));
   }
 
   private checkETag(expectedProjectETag?: string): void {
@@ -326,22 +369,27 @@ export class DetailStillStore {
     this.checkETag(expectedProjectETag);
     return this.projects.withCurrentProject(projectId, projectRevision, async () => {
       await this.verifyCapture(request);
-      const still = await this.readRecord(request, stillId);
-      let bytes: Buffer;
-      try {
-        bytes = await readBoundedCaptureFile(join(this.folder(request), `${stillId}.img`), MAX_DETAIL_STILL_BYTES);
-      } catch {
-        throw new DetailStillFailure('still-unavailable');
-      }
-      if (
-        bytes.length !== still.byteLength ||
-        sha256(bytes) !== still.sha256 ||
-        sniffDetailStillMediaType(bytes) !== still.mediaType
-      ) {
-        throw new DetailStillFailure('still-unavailable');
-      }
-      return { still, bytes };
+      return this.readStillBytes(request, stillId);
     }, expectedProjectETag);
+  }
+
+  /** Retained stills for a cleanup job snapshot, keyed by the capture binding
+   * rather than the project's current revision, so queued jobs keep working
+   * after later project edits. Attachment order, hash-verified on load.
+   */
+  async listRetainedDetailStills(
+    projectId: string, captureId: string
+  ): Promise<{ captureId: string; stills: DetailStill[] }> {
+    const request = await this.retainedRequest(projectId, captureId);
+    return { captureId, stills: await this.readAll(request, true) };
+  }
+
+  async loadRetainedDetailStill(
+    projectId: string, captureId: string, stillId: string
+  ): Promise<{ still: DetailStill; bytes: Buffer }> {
+    stillIdSchema.parse(stillId);
+    const request = await this.retainedRequest(projectId, captureId);
+    return this.readStillBytes(request, stillId);
   }
 
   async deleteDetailStill(

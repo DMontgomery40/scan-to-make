@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {compareScanDimensions,ScanProcessingRequestSchema,ScanProcessingJobSchema} from '../dist/scan-processing.js';
+import {compareScanDimensions,ScanProcessingRequestSchema,ScanProcessingJobSchema,SCAN_CLEANUP_STAGES,SCAN_CLEANUP_STAGE_LABELS} from '../dist/scan-processing.js';
 test('principal extents match reference by descending size, errors are measured minus reference',()=>{
  const comparison=compareScanDimensions([21.7,62.9,48.7],[45.2,21.7,60.6]);assert.equal(comparison.matching,'sorted-descending');assert.deepEqual(comparison.errorMm.map(x=>+x.toFixed(2)),[2.3,3.5,0]);
 });
@@ -36,4 +36,30 @@ test('cleanup success requires final geometry, advice, box measurement and compl
  // On terminal failure, queued denotes work never started, not a retry scheduled by the server.
  const failed=structuredClone(job);failed.status='failed';failed.failure='processing-failed';failed.pipelineStages[3].status='failed';failed.pipelineStages[4].status='queued';failed.pipelineStages[5].status='queued';
  assert(ScanProcessingJobSchema.safeParse(failed).success);
+});
+
+test('stage names map to the journey §3.5 phone labels',()=>{
+ assert.deepEqual(SCAN_CLEANUP_STAGE_LABELS,{
+  import:'Getting your scan',repair:'Filling holes',advise:'Looking for weak spots',
+  correct:'Fixing details from your close-ups',measure:'Measuring',render:'Almost done'});
+ assert.deepEqual(Object.keys(SCAN_CLEANUP_STAGE_LABELS),[...SCAN_CLEANUP_STAGES]);
+});
+
+test('jobs record capture SHA-256, trigger and per-stage timestamps; pre-BE-2 records still load',()=>{
+ const params={weldMm:.01,componentFraction:.01,componentMetric:'area',holeMaxEdges:0,voxelSizeMm:.3,forceVoxel:false,denoiseIterations:15,denoiseFactor:.5,denoiseMu:-.53,denoiseMaxMm:.35,sharpAngleDeg:30,deviationSamples:10000};
+ const base={schema:'scan-to-make.scan-processing/0.1',jobId:'44444444-4444-4444-8444-444444444444',projectId:'one',captureId:'11111111-1111-4111-8111-111111111111',projectRevision:0,status:'running',previewOnly:true,
+  stages:[{kind:'repair',status:'succeeded',params},{kind:'measure',status:'running',params:{units:'mm'}},{kind:'render',status:'queued',params:{units:'mm',resolution:512}}],
+  pipelineStages:['import','repair','advise','correct','measure','render'].map(kind=>({kind,status:'queued'}))};
+ // A retained record from before BE-2 carries none of the new fields.
+ assert(ScanProcessingJobSchema.safeParse(base).success);
+ const stamped=structuredClone(base);
+ stamped.captureSha256='b'.repeat(64);stamped.trigger='capture-import';
+ stamped.createdAtMs=1793430000000;
+ stamped.enqueuedAt='2026-10-31T07:00:00.000Z';stamped.startedAt='2026-10-31T07:00:01.000Z';
+ stamped.stages[0].startedAt='2026-10-31T07:00:01.000Z';stamped.stages[0].finishedAt='2026-10-31T07:00:31.000Z';
+ stamped.pipelineStages[0].startedAt='2026-10-31T07:00:01.000Z';stamped.pipelineStages[0].finishedAt='2026-10-31T07:00:02.000Z';
+ assert(ScanProcessingJobSchema.safeParse(stamped).success);
+ for(const mutate of [j=>j.captureSha256='xyz',j=>j.enqueuedAt='last night',j=>j.trigger='cron',j=>j.pipelineStages[0].startedAt=42,j=>j.createdAtMs=-1,j=>j.createdAtMs=1.5,j=>j.createdAtMs='1793430000000']){
+  const invalid=structuredClone(stamped);mutate(invalid);assert(!ScanProcessingJobSchema.safeParse(invalid).success);
+ }
 });

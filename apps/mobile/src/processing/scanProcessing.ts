@@ -155,13 +155,14 @@ export class ScanProcessingClient {
     job: ScanProcessingJob,
     projectId: string,
     captureId: string,
-    revision: number,
     jobId?: string,
   ): ScanProcessingJob {
+    // `projectRevision` is the revision resolved when the job was enqueued,
+    // so retained jobs legitimately differ from the current revision after
+    // a project edit; only the project/capture/job identity is checked.
     if (
       job.projectId !== projectId ||
       job.captureId !== captureId.toLowerCase() ||
-      job.projectRevision !== revision ||
       (jobId !== undefined && job.jobId !== jobId.toLowerCase())
     )
       throw Error('Scan job belongs to a different project version.');
@@ -171,13 +172,12 @@ export class ScanProcessingClient {
     body: string,
     projectId: string,
     captureId: string,
-    revision: number,
     jobId?: string,
   ): ScanProcessingJob {
     const job = z
       .strictObject({ job: ScanProcessingJobSchema })
       .parse(JSON.parse(body)).job;
-    return this.validate(job, projectId, captureId, revision, jobId);
+    return this.validate(job, projectId, captureId, jobId);
   }
   /**
    * Starts one preview-only repair/measure/render job, optionally with
@@ -217,15 +217,16 @@ export class ScanProcessingClient {
       });
     if (r.status !== 202 || r.etag !== ack.etag)
       failure(r.status, serverCode(r.body));
-    const job = this.job(r.body, projectId, captureId, project.revision);
+    const job = this.job(r.body, projectId, captureId);
     if (JSON.stringify(job.reference) !== JSON.stringify(request.reference))
       throw Error('Scan job reference mismatch.');
     await this.settle(projectId, ack, context);
     return job;
   }
   /**
-   * Every retained job for this capture at the current revision, in
-   * ascending job-id order. This is the relaunch recovery path: a finished
+   * Every retained job for this capture, including jobs pinned at earlier
+   * project revisions, in ascending job-id order (use `createdAtMs` for
+   * start order). This is the relaunch recovery path: a finished
    * check can be reopened without the app having kept its job id.
    * Older companions without the listing route fail with
    * `code: 'not-available'` so callers can fall back to a kept id.
@@ -259,7 +260,7 @@ export class ScanProcessingClient {
       .parse(JSON.parse(r.body)).jobs;
     for (let i = 0; i < jobs.length; i++) {
       const job = jobs[i]!;
-      this.validate(job, projectId, captureId, project.revision);
+      this.validate(job, projectId, captureId);
       if (
         job.jobId !== job.jobId.toLowerCase() ||
         (i > 0 && jobs[i - 1]!.jobId >= job.jobId)
@@ -286,7 +287,7 @@ export class ScanProcessingClient {
       path: this.base(projectId, captureId, project.revision, jobId),
       etag: ack.etag,
     });
-    const job = this.job(r.body, projectId, captureId, project.revision, jobId);
+    const job = this.job(r.body, projectId, captureId, jobId);
     await this.settle(projectId, ack, context);
     return job;
   }
@@ -320,7 +321,7 @@ export class ScanProcessingClient {
       });
     if (r.status !== 200 || r.etag !== ack.etag)
       failure(r.status, serverCode(r.body));
-    const job = this.job(r.body, projectId, captureId, project.revision, jobId);
+    const job = this.job(r.body, projectId, captureId, jobId);
     await this.settle(projectId, ack, context);
     return job;
   }
@@ -339,11 +340,9 @@ export class ScanProcessingClient {
     this.checkIds(projectId, captureId, ack);
     ScanArtifactNameSchema.parse(name);
     const project = await this.current(projectId, ack);
-    if (
-      job.projectId !== projectId ||
-      job.captureId !== captureId.toLowerCase() ||
-      job.projectRevision !== project.revision
-    )
+    // Like status and listing: a retained job keeps the revision it was
+    // enqueued at, so only its project/capture identity is checked here.
+    if (job.projectId !== projectId || job.captureId !== captureId.toLowerCase())
       throw Error('Scan job belongs to a different project version.');
     const artifact = job.artifacts?.[name];
     if (!artifact) throw Error('That scan output is not available yet.');

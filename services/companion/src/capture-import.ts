@@ -155,19 +155,36 @@ export class CaptureStore {
   } finally {await rm(staging,{recursive:true,force:true});}
  }
 
+ private async readRetainedBundle(projectId:string,captureId:string) {
+  const folder=join(this.directory,captureId);
+  const original=await readBoundedCaptureFile(join(folder,'original.usdz'),this.bound.maxSourceBytes);
+  const derived=await readBoundedCaptureFile(join(folder,'mesh.obj'),this.bound.maxDerivedBytes);
+  const report=await readBoundedCaptureFile(join(folder,'conversion.json'),this.bound.maxReportBytes);
+  const bindingBytes=await readBoundedCaptureFile(join(folder,'binding.json'),this.bound.maxReportBytes);
+  const binding=CaptureBindingSchema.parse(JSON.parse(bindingBytes.toString('utf8')));
+  if(binding.projectId!==projectId)throw new Error('Capture binding does not match the project');
+  const capture=receiptFromConvertedBytes(original,derived,report);
+  validateCaptureBinding(binding,{projectId,projectRevision:binding.projectRevision,original:capture.original,derived:capture.derived,conversionReport:capture.conversionReport});
+  if(!isDeepStrictEqual(capture,binding.capture))throw new Error('Capture provenance does not match retained report');
+  await readCaptureMaterials(folder,derived,report,this.bound.maxDerivedBytes);
+  return {captureId,binding,original,derived,report};
+ }
+
  async loadCapture(projectId:string,projectRevision:number,captureId:string,expectedProjectETag?:string) {
   requestSchema.parse({projectId,projectRevision});captureIdSchema.parse(captureId);
   return this.projects.withCurrentProject(projectId,projectRevision,async project=>{
-   const folder=join(this.directory,captureId);
-   const original=await readBoundedCaptureFile(join(folder,'original.usdz'),this.bound.maxSourceBytes);
-   const derived=await readBoundedCaptureFile(join(folder,'mesh.obj'),this.bound.maxDerivedBytes);
-   const report=await readBoundedCaptureFile(join(folder,'conversion.json'),this.bound.maxReportBytes);
-   const bindingBytes=await readBoundedCaptureFile(join(folder,'binding.json'),this.bound.maxReportBytes);
-   const capture=receiptFromConvertedBytes(original,derived,report);
-   const binding=validateCaptureBinding(JSON.parse(bindingBytes.toString('utf8')),{projectId,projectRevision,original:capture.original,derived:capture.derived,conversionReport:capture.conversionReport});
-   if(!isDeepStrictEqual(capture,binding.capture))throw new Error('Capture provenance does not match retained report');
-   await readCaptureMaterials(folder,derived,report,this.bound.maxDerivedBytes);
-   return {captureId,project,binding,original,derived,report};
+   const bundle=await this.readRetainedBundle(projectId,captureId);
+   if(bundle.binding.projectRevision!==projectRevision)throw new Error('Capture binding does not match the current project revision');
+   return {...bundle,project};
   },expectedProjectETag);
+ }
+
+ /** Hash-verified bundle keyed by its retained binding, with no current-revision
+  * gate. Cleanup jobs resolve the project revision at enqueue and must keep
+  * working after later project edits, so they load captures this way.
+  */
+ async loadRetainedCapture(projectId:string,captureId:string) {
+  z.object({projectId:requestSchema.shape.projectId}).parse({projectId});captureIdSchema.parse(captureId);
+  return this.readRetainedBundle(projectId,captureId);
  }
 }
