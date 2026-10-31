@@ -91,6 +91,13 @@ final class ControlClientTests: XCTestCase {
         XCTAssertFalse(result.connected); withExtendedLifetime(server) {}
     }
 
+    func testModelCheckOutcomesDecodeIncludingOutdatedCLI() throws {
+        let ids = (UUID().uuidString, UUID().uuidString)
+        for (wire, outcome) in [("auth-failed", ModelAccessCheck.Outcome.authFailed), ("cli-outdated", .cliOutdated), ("needs-gui-session", .needsGUISession)] {
+            let json = #"{"id":"\#(ids.0)","revision":"\#(ids.1)","state":"failed","outcome":"\#(wire)"}"#
+            XCTAssertEqual(try JSONDecoder().decode(ModelAccessCheck.self, from: Data(json.utf8)).outcome, outcome)
+        }
+    }
     func testMissingEndpointIsUnavailableBeforeAnyRequestIsSent() async throws {
         let client = try ControlClient(socketPath: "/tmp/stm-absent-\(UUID().uuidString).sock", timeout: 1)
         do { try await client.removeDevice(UUID().uuidString); XCTFail("Missing endpoint accepted") }

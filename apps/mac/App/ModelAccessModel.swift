@@ -193,6 +193,7 @@ extension ModelAccessChoice {
             if choice.usesLogin { return "Sign in to \(name) on this Mac, then check again." }
             return choice.isEndpoint ? "That address turned the key down." : "That key didn't work."
         case .needsGUISession?: return "\(name) only works while you're logged in at this Mac."
+        case .cliOutdated?: return "Update \(name) on this Mac, then check again."
         case .timedOut?: return "\(name) didn't answer in time."
         default:
             if choice.usesLogin { return "Couldn't run \(name) on this Mac. Is it installed?" }

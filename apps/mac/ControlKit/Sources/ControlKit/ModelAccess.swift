@@ -16,7 +16,7 @@ public struct ModelAccessSnapshot: Decodable, Sendable, Equatable {
 public struct ModelAccessCheck: Decodable, Sendable, Equatable {
     public enum State: String, Decodable, Sendable { case checking, connected, failed, skipped }
     public enum Outcome: String, Decodable, Sendable {
-        case authFailed = "auth-failed", needsGUISession = "needs-gui-session", timedOut = "timed-out"
+        case authFailed = "auth-failed", needsGUISession = "needs-gui-session", cliOutdated = "cli-outdated", timedOut = "timed-out"
         case cancelled, failed, skipped
     }
     public let id: UUID

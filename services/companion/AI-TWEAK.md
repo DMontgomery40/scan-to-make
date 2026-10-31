@@ -36,7 +36,7 @@ that it names. Keys are never written to disk or to the manifest.
   - `SCAN_TO_MAKE_AI_ATTEMPTS` (1–4, default 2);
   - `SCAN_TO_MAKE_AI_TIMEOUT_MS` (default and maximum 30 minutes per attempt).
 - **Executables:**
-  - `SCAN_TO_MAKE_CLAUDE_PATH` and `SCAN_TO_MAKE_CODEX_PATH`. Without them, the CLI looks on `PATH`, `~/.local/bin`, `/opt/homebrew/bin` and `/usr/local/bin`. If the selected CLI isn't in any of those, it reads the `PATH` the user's login shell builds (`$SHELL -ilc`, then the account's shell, then `/bin/zsh` on macOS, then `launchctl getenv PATH`), the way T3 Code finds CLIs from a GUI process. Only that `PATH` is kept; nothing else from the shell reaches a run.
+  - `SCAN_TO_MAKE_CLAUDE_PATH` and `SCAN_TO_MAKE_CODEX_PATH`. Without them, the CLI looks on `PATH`, `~/.local/bin`, `/opt/homebrew/bin` and `/usr/local/bin`. For Codex it also looks in each nvm Node version (`~/.nvm/versions/node/*/bin`) and, when it finds several installs, uses the newest by `codex --version`; a stale global Codex can't run current models (KAN-199/KAN-201). If the selected CLI isn't in any of those, it reads the `PATH` the user's login shell builds (`$SHELL -ilc`, then the account's shell, then `/bin/zsh` on macOS, then `launchctl getenv PATH`), the way T3 Code finds CLIs from a GUI process. Only that `PATH` is kept; nothing else from the shell reaches a run.
   - `SCAN_TO_MAKE_SCAN_BLENDER` is exposed to the agent as `blender`.
   - `SCAN_TO_MAKE_CAPTURE_PYTHON` prepares the photos, and its `bin` directory is on the agent's `PATH`.
 - **Endpoints:** an endpoint must speak the OpenAI Responses API, because Codex 0.166 no longer accepts `wire_api = "chat"`.
@@ -179,6 +179,7 @@ when the bundle is copied.
 | `invalid-output` | its OBJ bundle referenced missing files or files outside the workspace |
 | `failed` | the CLI is missing or exited with an error |
 | `auth-failed` | not signed in, or the key was rejected |
+| `failed` with reason "This CLI version is too old for the model; update it" | the provider refused the model for this CLI version; the Mac app's Connected check reports it as `cli-outdated` and says "Update Codex" (or Claude Code) |
 | `needs-gui-session` | see above |
 | `timed-out` | the attempt hit its time limit |
 | `cancelled` | the attempt was cancelled |

@@ -6,7 +6,7 @@ import {tmpdir,userInfo} from 'node:os';
 import {join} from 'node:path';
 import {promisify} from 'node:util';
 import {AI_TWEAK_PROMPT,aiTweakInternals,checkModelAccess,claudeSignedIn,modelAccessFromEnv,runAiTweak} from '../dist/ai-tweak.js';
-import {findExecutable,loginShellPath,resolveOptions} from '../dist/ai-tweak-cli.js';
+import {findExecutable,findExecutables,loginShellPath,newestExecutable,resolveOptions} from '../dist/ai-tweak-cli.js';
 
 const run=promisify(execFile);
 const python=process.env.CAPTURE_TEST_PYTHON??'python3';
@@ -69,6 +69,7 @@ else if(action==='absolute-refs'){const here=process.cwd();write('tweaked/mesh_b
 else if(action==='spaced-names'){write('tweaked/my scan.obj','mtllib my scan.mtl\\nv 0 0 0\\nv 1 0 0\\nv 0 1 0\\nf 1 2 3\\n');write('tweaked/my scan.mtl','newmtl m\\nmap_Kd -clamp off base color.png\\nmap_Bump -bm 1.0 normal map.png\\n');write('tweaked/base color.png',Buffer.from([137,80,78,71,13,10,26,10,5]));write('tweaked/normal map.png',Buffer.from([137,80,78,71,13,10,26,10,6]));write('tweaked/color.png','decoy');}
 else if(action==='leftover-pipe'){const child=cp.spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{detached:true,stdio:['ignore','inherit','inherit']});child.unref();record.grandchild=child.pid;}
 else if(action==='big-transcript'){const pad='x'.repeat(1024*1024);for(let i=0;i<24;i++)console.log(JSON.stringify({type:'assistant',pad}));}
+else if(action==='outdated'){console.log(JSON.stringify({type:'error',message:'{"type":"error","status":400,"error":{"type":"invalid_request_error","message":"The gpt-6-astra model requires a newer version of Codex. Please upgrade to the latest app or CLI and try again."}}'}));}
 else if(action==='escape'){write('evil.obj','mtllib ../../../../etc/hosts\\nv 0 0 0\\n');}
 else if(action==='hang'||action==='leftover'){
  const child=cp.spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{detached:true,stdio:'ignore'});child.unref();record.grandchild=child.pid;
@@ -397,6 +398,40 @@ test('KAN-199: a CLI outside the usual places is found through the login shell, 
  // A shell that prints no marked PATH yields nothing rather than a guess.
  const quiet=join(f.root,'quiet-shell');await writeFile(quiet,'#!/bin/sh\necho hello\n',{mode:0o755});
  assert.equal(await loginShellPath({HOME:f.home,SHELL:quiet},2000).then(p=>p===undefined||!p.includes('hello')),true);
+});
+
+test('KAN-201: the newest Codex install is used, and a Codex too old for the model says so',async t=>{
+ const f=await fixture(t),{symlink}=await import('node:fs/promises');
+ const codex=async(dir,body)=>{await mkdir(dir,{recursive:true});await writeFile(join(dir,'codex'),`#!/bin/sh\n${body}\n`,{mode:0o755});return join(dir,'codex');};
+ // Versions far above any real install, so a codex on the test host never wins.
+ const older=await codex(join(f.root,'a'),'echo "codex-cli 99.0.5"'),broken=await codex(join(f.root,'c'),'echo "Error: spawn ENOENT" >&2; exit 1');
+ const newer=await codex(join(f.root,'b'),'echo "codex-cli 99.1.0"'),nvm=await codex(join(f.home,'.nvm','versions','node','v22.22.0','bin'),'echo "codex-cli 99.2.0"');
+ await mkdir(join(f.root,'d'));await symlink(older,join(f.root,'d','codex'));
+ const env={HOME:f.home,PATH:[join(f.root,'a'),join(f.root,'d'),join(f.root,'c'),join(f.root,'b')].join(':'),SCAN_TO_MAKE_AI_ACCESS:'codex-cli'};
+ const all=findExecutables('codex',env);
+ assert.deepEqual(all.slice(0,3),[older,broken,newer]);assert.ok(all.includes(nvm));assert.ok(!all.includes(join(f.root,'d','codex')));
+ assert.equal(findExecutable('codex',env),older);
+ assert.equal((await resolveOptions(env)).codexPath,nvm);
+ assert.equal(await newestExecutable([older,broken,newer],f.home),newer);
+ assert.equal(await newestExecutable([broken,older],f.home),older);
+ assert.equal(await newestExecutable([older],f.home),older);
+ // The probe searches the run's directories: a newest install whose runtime lives there still wins.
+ const runtime=join(f.root,'runtime');await mkdir(runtime);
+ await writeFile(join(runtime,'fake-node'),'#!/bin/sh\necho "codex-cli 99.3.0"\n',{mode:0o755});
+ const npmStyle=await codex(join(f.root,'npm'),'fake-node');
+ assert.equal(await newestExecutable([older,npmStyle],f.home,5000,[runtime,'/usr/bin','/bin']),npmStyle);
+ assert.equal(await newestExecutable([older,npmStyle],f.home,5000,['/usr/bin','/bin']),older);
+ // An operator path is kept, even when older.
+ assert.equal((await resolveOptions({...env,SCAN_TO_MAKE_CODEX_PATH:older})).codexPath,older);
+ // Claude Code keeps the first install.
+ assert.equal(findExecutables('claude',env).length,findExecutables('claude',{HOME:f.home,PATH:''}).length);
+ // Outdated: the check names it; a cleanup attempt stays `failed` (the job record contract is unchanged).
+ await mkdir(join(f.home,'.codex'),{recursive:true});await writeFile(join(f.home,'.codex','auth.json'),'{"tokens":"t"}');
+ const stale=await fakeCli(f,'codex','outdated',{exitCode:1});
+ const check=await checkModelAccess(base(f,{access:{kind:'codex-cli'},codexPath:stale}));
+ assert.deepEqual([check.ok,check.outcome],[false,'cli-outdated']);assert.match(check.reason,/too old/);
+ const manifest=await runAiTweak({mesh:f.mesh,usdz:f.usdz,stills:[]},join(f.root,'stale-run'),base(f,{access:{kind:'codex-cli'},codexPath:stale}));
+ assert.deepEqual([manifest.attempts[0].outcome,manifest.attempts[0].reason],['failed','This CLI version is too old for the model; update it']);
 });
 
 test('ai-tweak-cli run --pick --export is the whole AI step of a cleanup job (KAN-184)',async t=>{

@@ -1,9 +1,9 @@
 #!/usr/bin/env node
-import {accessSync,constants,realpathSync,statSync} from 'node:fs';
-import {spawn} from 'node:child_process';
+import {accessSync,constants,readdirSync,realpathSync,statSync} from 'node:fs';
+import {execFile,spawn} from 'node:child_process';
 import {writeFile} from 'node:fs/promises';
 import {homedir,userInfo} from 'node:os';
-import {isAbsolute,join} from 'node:path';
+import {dirname,isAbsolute,join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {parseArgs} from 'node:util';
 import {ModelAccessEnvironment} from '@scan-to-make/contracts/model-access';
@@ -16,13 +16,56 @@ import {lookupMakerSize} from './maker-size-lookup.js';
 export function findExecutable(name:'claude'|'codex',env:NodeJS.ProcessEnv=process.env):string|undefined{
  const configured=env[name==='claude'?'SCAN_TO_MAKE_CLAUDE_PATH':'SCAN_TO_MAKE_CODEX_PATH'];
  if(configured)return isAbsolute(configured)?configured:undefined;
- const home=env.HOME||homedir();
- for(const dir of [...(env.PATH??'').split(':'),join(home,'.local','bin'),'/opt/homebrew/bin','/usr/local/bin']){
+ return findExecutables(name,env)[0];
+}
+
+/**
+ * Every install of the CLI in the usual places, in preference order, one per real file. Codex is also
+ * looked for in each nvm Node version, where `npm i -g @openai/codex` puts it.
+ */
+export function findExecutables(name:'claude'|'codex',env:NodeJS.ProcessEnv=process.env):string[]{
+ const home=env.HOME||homedir(),dirs=[...(env.PATH??'').split(':'),join(home,'.local','bin'),'/opt/homebrew/bin','/usr/local/bin'];
+ if(name==='codex'){
+  const nvm=join(home,'.nvm','versions','node');
+  try{dirs.push(...readdirSync(nvm).sort().reverse().map(version=>join(nvm,version,'bin')));}catch{/* no nvm */}
+ }
+ const found:string[]=[],seen=new Set<string>();
+ for(const dir of dirs){
   if(!isAbsolute(dir))continue;
   const path=join(dir,name);
-  try{if(statSync(path).isFile()){accessSync(path,constants.X_OK);return path;}}catch{/* keep looking */}
+  try{
+   if(!statSync(path).isFile())continue;accessSync(path,constants.X_OK);
+   const real=realpathSync(path);if(seen.has(real))continue;seen.add(real);found.push(path);
+  }catch{/* keep looking */}
  }
- return undefined;
+ return found;
+}
+
+/** `codex-cli 0.166.0` → [0,166,0]; anything unreadable sorts last. */
+/** The run's own search directories after the CLI's (ai-tweak.ts plan()), so a probe resolves what the run would. */
+const RUN_DIRS=['/opt/homebrew/bin','/usr/local/bin','/usr/bin','/bin','/usr/sbin','/sbin'];
+function versionOf(path:string,home:string,timeoutMs:number,dirs:string[]):Promise<number[]|undefined>{
+ return new Promise(done=>{
+  // Its own directory first: an npm install's `#!/usr/bin/env node` finds the Node it was installed with.
+  execFile(path,['--version'],{timeout:timeoutMs,maxBuffer:64*1024,env:{HOME:home,PATH:[dirname(path),...dirs].join(':')}},(error,stdout)=>{
+   const match=error?undefined:/(\d+)\.(\d+)\.(\d+)/.exec(String(stdout));
+   done(match?match.slice(1,4).map(Number):undefined);
+  });
+ });
+}
+
+/** The newest of several installs (KAN-201: a stale global Codex can't run current models). Ties keep the earlier one. */
+export async function newestExecutable(paths:string[],home:string=homedir(),timeoutMs=10000,dirs:string[]=RUN_DIRS):Promise<string|undefined>{
+ if(paths.length<2)return paths[0];
+ const versions=await Promise.all(paths.map(path=>versionOf(path,home,timeoutMs,dirs)));
+ let best=0;
+ const newer=(a:number[]|undefined,b:number[]|undefined)=>{
+  if(!a)return false;if(!b)return true;
+  for(let i=0;i<3;i++)if(a[i]!==b[i])return a[i]!>b[i]!;
+  return false;
+ };
+ for(let i=1;i<paths.length;i++)if(newer(versions[i],versions[best]))best=i;
+ return paths[best];
 }
 
 const PATH_MARK='__SCAN_TO_MAKE_PATH__';
@@ -70,7 +113,9 @@ export async function resolveOptions(env:NodeJS.ProcessEnv=process.env,
  if(access.kind==='none')return options;
  const cli=access.kind==='claude-code'||access.kind==='api'&&access.provider==='anthropic'?'claude':'codex';
  // An explicit operator path is never second-guessed.
- if(env[cli==='claude'?'SCAN_TO_MAKE_CLAUDE_PATH':'SCAN_TO_MAKE_CODEX_PATH']||options[cli==='claude'?'claudePath':'codexPath'])return options;
+ if(env[cli==='claude'?'SCAN_TO_MAKE_CLAUDE_PATH':'SCAN_TO_MAKE_CODEX_PATH'])return options;
+ if(cli==='codex'&&options.codexPath)options.codexPath=await newestExecutable(findExecutables('codex',env),env.HOME||homedir());
+ if(options[cli==='claude'?'claudePath':'codexPath'])return options;
  const found=(path:string)=>findExecutable(cli,{HOME:env.HOME,PATH:path});
  const path=await shellPath(env,8000,path=>!!found(path));
  if(path){options[cli==='claude'?'claudePath':'codexPath']=found(path);options.searchPath=path;}

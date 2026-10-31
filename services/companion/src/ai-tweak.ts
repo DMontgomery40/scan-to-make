@@ -90,6 +90,9 @@ const SAFE_NAME=/^[A-Za-z0-9][A-Za-z0-9._ -]{0,127}$/;
 const MESH_EXT=/\.(glb|gltf|usdz|usd|usdc|usda|ply|stl|fbx|3mf)$/i;
 const AUTH_FAILURE=/not logged in|please run \/login|invalid api key|invalid x-api-key|authentication_error|unauthorized|\b401\b|login required|please log in|no auth credentials|sign in again|token (?:is )?expired/i;
 const DEFAULT_TIMEOUT=1800000;
+/** The provider refused the model for this CLI version (KAN-201: Codex 0.144 and gpt-6-astra). */
+const OUTDATED=/requires a newer version of (?:codex|claude)|upgrade to the latest (?:app or )?(?:cli|version)|please update (?:codex|claude code)/i;
+const OUTDATED_REASON='This CLI version is too old for the model; update it';
 
 const sha256File=(path:string)=>new Promise<string>((ok,fail)=>{
  const hash=createHash('sha256');createReadStream(path).on('error',fail).on('data',chunk=>hash.update(chunk)).on('end',()=>ok(hash.digest('hex')));
@@ -592,6 +595,7 @@ async function attempt(ctx:AttemptContext):Promise<AttemptResult>{
   if(result.cancelled)return finish({outcome:'cancelled'});
   if(result.timedOut)return finish({outcome:'timed-out',reason:'Attempt reached its time limit'});
   if(result.limit)return finish({outcome:'failed',reason:result.limit});
+  if(failed&&OUTDATED.test(failedText))return finish({outcome:'failed',reason:OUTDATED_REASON});
   if(failed)return finish({outcome:AUTH_FAILURE.test(failedText)?'auth-failed':'failed',reason:AUTH_FAILURE.test(failedText)?'The CLI is not signed in or the key was rejected':'The CLI exited with an error'});
   return finish({outcome:collected?.outcome??'unchanged'});
  }finally{
@@ -721,14 +725,16 @@ export async function runSealedTask(task:{access:ModelAccess;prompt:string;input
 }
 
 /** The Mac app's "Connected" check: one tiny sealed call through the same route, no scan involved. */
-export async function checkModelAccess(options:AiTweakOptions):Promise<{ok:boolean;outcome:AttemptOutcome|'skipped';reason?:string;cliVersion?:string;seal?:Record<string,unknown>}>{
+export async function checkModelAccess(options:AiTweakOptions):Promise<{ok:boolean;outcome:AttemptOutcome|'skipped'|'cli-outdated';reason?:string;cliVersion?:string;seal?:Record<string,unknown>}>{
  validateAccess(options.access);
  if(options.access.kind==='none')return {ok:false,outcome:'skipped'};
  const out=await mkdtemp(join(tmpdir(),'stm-ai-check-'));
  try{
   const result=await attempt({index:1,access:options.access,options:{...options,timeoutMs:Math.min(options.timeoutMs??120000,300000)},inputsDir:out,inputs:{},inputObj:'',out,prompt:CHECK_PROMPT,collectResult:false});
   const ok=result.exitCode===0&&/\bOK\b/i.test(result.finalMessage??'')&&!['auth-failed','needs-gui-session','timed-out','cancelled','failed'].includes(result.outcome);
-  return {ok,outcome:result.outcome,reason:result.reason,cliVersion:result.cliVersion,seal:result.seal};
+  // Its own outcome only here, so the Mac app can say "Update Codex"; job records keep `failed`.
+  const outcome=!ok&&result.reason===OUTDATED_REASON?'cli-outdated':result.outcome;
+  return {ok,outcome,reason:result.reason,cliVersion:result.cliVersion,seal:result.seal};
  }finally{await rm(out,{recursive:true,force:true});}
 }
 

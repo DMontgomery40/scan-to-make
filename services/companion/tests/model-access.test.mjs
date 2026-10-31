@@ -46,6 +46,9 @@ test('check is immediate, deduplicated, sanitized and bound to revision; set can
  finish({exitCode:0,stdout:JSON.stringify({ok:true,reason:'SECRET',seal:{token:'SECRET'}})});await tick();assert.equal(service.get().check,null);
  const again=service.startCheck(service.get().revision);finish({exitCode:1,stdout:JSON.stringify({ok:false,outcome:'auth-failed',reason:'SECRET'})});await tick();
  assert.equal(service.get().check.state,'failed');assert.equal(service.get().check.outcome,'auth-failed');assert(!JSON.stringify(service.get()).includes('SECRET'));
+ // KAN-201: a CLI too old for the model has its own outcome, so the app can say "Update Codex".
+ service.startCheck(service.get().revision);finish({exitCode:1,stdout:JSON.stringify({ok:false,outcome:'cli-outdated'})});await tick();
+ assert.deepEqual([service.get().check.state,service.get().check.outcome],['failed','cli-outdated']);
  assert.throws(()=>service.startCheck(start.revision),e=>e.code==='conflict');assert.equal(again.revision,service.get().revision);
 });
 

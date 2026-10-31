@@ -75,7 +75,7 @@ export class ModelAccessService {
       const response = value as {ok?:unknown;outcome?:unknown};
       check.state = result.exitCode === 0 && response?.ok === true ? 'connected' : 'failed';
       if (check.state === 'failed') {
-        const outcomes = ['auth-failed','needs-gui-session','timed-out','cancelled','failed'] as const;
+        const outcomes = ['auth-failed','needs-gui-session','cli-outdated','timed-out','cancelled','failed'] as const;
         check.outcome = outcomes.find(value => value === response?.outcome) ?? 'failed';
       }
     }).catch(() => { if (this.check === check && !controller.signal.aborted) { check.state = 'failed'; check.outcome = 'failed'; } });
