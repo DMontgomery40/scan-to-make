@@ -29,12 +29,14 @@ import ControlKit
 struct ScanToMakeApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     @StateObject private var model = CompanionModel.shared
+    @StateObject private var nearby = NearbyModel.shared
     @State private var isInserted = true
     var body: some Scene {
         MenuBarExtra(isInserted:$isInserted) {
-            MenuBarPopover(model:model)
+            MenuBarPopover(model:model, nearby:nearby)
         } label: {
-            Image(nsImage:.menuBarCube)
+            // A dot on the cube while a phone waits for Allow, so the request is seen with the popover closed.
+            Image(nsImage:nearby.requests.isEmpty ? .menuBarCube : .menuBarCubeWaiting)
         }.menuBarExtraStyle(.window)
     }
 }
@@ -91,8 +93,17 @@ struct PairingWindowContent: View {
 /// The app has no Dock icon or main menu, so this is the only ordinary way to quit it.
 struct MenuBarPopover: View {
     @ObservedObject var model: CompanionModel
+    @ObservedObject var nearby: NearbyModel
     var body: some View {
         VStack(spacing:0) {
+            // A phone waiting to pair stays at the top until it is answered or expires.
+            if !nearby.requests.isEmpty {
+                VStack(spacing:8) {
+                    ForEach(nearby.requests) { NearbyRequestCard(request:$0, model:nearby) }
+                }
+                .padding(10)
+                Divider()
+            }
             PairingView(model:model,side:292)
                 .padding(40)
                 .background(Color.white)
@@ -117,7 +128,10 @@ struct MenuBarPopover: View {
 
 extension NSImage {
     /// Mockup 08's `logo-mono` cube (24-unit viewBox), drawn as a template so the menu bar tints it.
-    static let menuBarCube: NSImage = {
+    static let menuBarCube = cube(dot:false)
+    /// The same cube with a dot cut into its corner while a phone waits for Allow.
+    static let menuBarCubeWaiting = cube(dot:true)
+    private static func cube(dot: Bool) -> NSImage {
         let image = NSImage(size:NSSize(width:18,height:18), flipped:true) { _ in
             let scale: CGFloat = 18.0 / 24.0
             func point(_ x: CGFloat, _ y: CGFloat) -> NSPoint { NSPoint(x:x * scale, y:y * scale) }
@@ -130,12 +144,19 @@ extension NSImage {
             path.lineJoinStyle = .round
             NSColor.black.setStroke()
             path.stroke()
+            if dot {
+                NSGraphicsContext.current?.compositingOperation = .clear
+                NSBezierPath(ovalIn:NSRect(x:11.75, y:-0.25, width:7, height:7)).fill()
+                NSGraphicsContext.current?.compositingOperation = .sourceOver
+                NSColor.black.setFill()
+                NSBezierPath(ovalIn:NSRect(x:13, y:1, width:4.5, height:4.5)).fill()
+            }
             return true
         }
         image.isTemplate = true
-        image.accessibilityDescription = "Scan to Make"
+        image.accessibilityDescription = dot ? "Scan to Make, a phone is waiting to pair" : "Scan to Make"
         return image
-    }()
+    }
 }
 
 @MainActor final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
@@ -167,8 +188,26 @@ extension NSImage {
         let event = NSAppleEventManager.shared().currentAppleEvent
         let loginLaunch = event?.eventID == kAEOpenApplication
             && event?.paramDescriptor(forKeyword:keyAEPropData)?.enumCodeValue == keyAELaunchedAsLogInItem
+        NearbyModel.shared.start()
         if !loginLaunch { showPairing() }
+        #if DEBUG
+        // Design QA only: computer-use can't open menu-bar extras, so show the popover's content in a window.
+        if ProcessInfo.processInfo.environment["SCAN_TO_MAKE_QA_POPOVER_WINDOW"] == "1" { showPopoverForQA() }
+        #endif
     }
+    #if DEBUG
+    private var popoverQAWindow: NSWindow?
+    private func showPopoverForQA() {
+        let window = NSWindow(contentRect:NSRect(x:0, y:0, width:372, height:520), styleMask:[.titled, .closable],
+                              backing:.buffered, defer:false)
+        window.title = "Popover (QA)"
+        window.isReleasedWhenClosed = false
+        window.contentView = NSHostingView(rootView:MenuBarPopover(model:CompanionModel.shared, nearby:NearbyModel.shared))
+        window.setFrameTopLeftPoint(NSPoint(x:80, y:(NSScreen.main?.visibleFrame.maxY ?? 900) - 40))
+        window.makeKeyAndOrderFront(nil)
+        popoverQAWindow = window
+    }
+    #endif
     func windowWillClose(_ notification: Notification) {
         phoneWatch?.cancel()
         showingSetup = false
