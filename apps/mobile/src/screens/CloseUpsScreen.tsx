@@ -16,6 +16,7 @@ import {
 import type { CaptureFile } from '../capture/retainedCaptures';
 import { Badge, Button, Card, Field, Notice, Screen } from '../ui/components';
 import { ImageViewer } from '../ui/ImageViewer';
+import { useRequestGate } from './requestGate';
 import { colors, radius, space, type } from '../ui/theme';
 import {
   failureOf,
@@ -80,6 +81,10 @@ function rejectedSummary(rejected: RejectedPhoto[]) {
   } added: ${parts.join(', ')}.`;
 }
 
+// Waits before retrying a thumbnail the companion was too busy for. After the
+// last one the close-up shows its Retry button instead.
+export const PREVIEW_RETRY_MS = [1500, 4000, 10000];
+
 export function CloseUpsScreen({
   target,
   services,
@@ -109,11 +114,30 @@ export function CloseUpsScreen({
   const ack = useRef<ProjectAcknowledgment | null>(null);
   const staged = useRef<CaptureFile[]>([]);
   const running = useRef(false);
-  // Thumbnail work shares the companion's single request slot with actions.
+  // Every companion call queues through the app's shared request gate.
+  const gate = useRequestGate();
+  // The thumbnail step in flight; user actions wait for it to finish.
   const media = useRef<Promise<unknown> | null>(null);
-  const tried = useRef(new Set<string>());
+  // Thumbnail bookkeeping: attempts running now, and stills with no preview
+  // to show. An interrupted attempt is neither, so it stays eligible.
+  const inFlight = useRef(new Set<string>());
+  const noPreview = useRef(new Set<string>());
+  const retries = useRef(new Map<string, number>());
+  const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [previewRetry, setPreviewRetry] = useState(0);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      if (retryTimer.current) clearTimeout(retryTimer.current);
+      retryTimer.current = null;
+    };
+  }, []);
   const previewsRef = useRef(previews);
   previewsRef.current = previews;
+  const failedRef = useRef(previewFailed);
+  failedRef.current = previewFailed;
 
   const block = (error: unknown) => {
     const failure = failureOf(error);
@@ -129,21 +153,24 @@ export function CloseUpsScreen({
   };
   const refresh = useCallback(async () => {
     if (!ack.current) return [];
-    const list = await services.stills.list(projectId, captureId, ack.current);
+    const current = ack.current;
+    const list = await gate(() =>
+      services.stills.list(projectId, captureId, current),
+    );
     setStills(list);
     return list;
-  }, [services, projectId, captureId]);
+  }, [services, projectId, captureId, gate]);
   const load = useCallback(async () => {
     setPhase({ kind: 'loading' });
     setNotice(null);
     try {
-      ack.current = await services.acknowledge(projectId);
+      ack.current = await gate(() => services.acknowledge(projectId));
       await refresh();
       setPhase({ kind: 'ready' });
     } catch (error) {
       block(error);
     }
-  }, [services, projectId, refresh]);
+  }, [services, projectId, refresh, gate]);
   useEffect(() => {
     load();
   }, [load]);
@@ -167,36 +194,66 @@ export function CloseUpsScreen({
     (async () => {
       for (const still of stills) {
         if (cancelled || running.current) return;
-        if (previewsRef.current[still.sha256] || tried.current.has(still.id)) {
+        if (
+          previewsRef.current[still.sha256] ||
+          failedRef.current[still.id] ||
+          inFlight.current.has(still.id) ||
+          noPreview.current.has(still.id)
+        ) {
           continue;
         }
-        tried.current.add(still.id);
+        inFlight.current.add(still.id);
         const step = (async () => {
           let uri: string | null = null;
           try {
-            uri = (await client.imageUri?.(still)) ?? null;
+            uri = (await gate(() => client.imageUri!(still))) ?? null;
           } catch {
             // The iOS bridge rejects when the bytes aren't on this device
             // yet: that's a cache miss, and the download below verifies them.
           }
-          if (!uri && client.download && ack.current) {
+          const acked = ack.current;
+          if (!uri && client.download && acked) {
             // A failure from here on is real and shown on the close-up.
-            await client.download(projectId, captureId, ack.current, still);
-            uri = (await client.imageUri?.(still)) ?? null;
+            await gate(() =>
+              client.download!(projectId, captureId, acked, still),
+            );
+            uri = (await gate(() => client.imageUri!(still))) ?? null;
           }
           return uri;
         })();
         media.current = step;
         try {
+          // Kept even if the user started something meanwhile: the bytes
+          // are verified either way.
           const uri = await step;
-          if (!cancelled && uri) {
+          if (!mounted.current) return;
+          retries.current.delete(still.id);
+          if (uri) {
             setPreviews(current => ({ ...current, [still.sha256]: uri }));
+          } else {
+            noPreview.current.add(still.id);
           }
-        } catch {
-          if (!cancelled) {
+        } catch (error) {
+          const f = failureOf(error);
+          const interrupted =
+            f.code === 'busy' || f.code === 'cancelled' || f.status === 429;
+          // An interrupted attempt is retried a few times on its own; a real
+          // failure, or one that keeps being interrupted, shows Retry.
+          const attempt = retries.current.get(still.id) ?? 0;
+          if (mounted.current && interrupted && attempt < PREVIEW_RETRY_MS.length) {
+            retries.current.set(still.id, attempt + 1);
+            if (!retryTimer.current) {
+              retryTimer.current = setTimeout(() => {
+                retryTimer.current = null;
+                if (mounted.current) setPreviewRetry(n => n + 1);
+              }, PREVIEW_RETRY_MS[attempt]);
+            }
+          } else if (mounted.current) {
+            retries.current.delete(still.id);
             setPreviewFailed(current => ({ ...current, [still.id]: true }));
           }
         } finally {
+          inFlight.current.delete(still.id);
           if (media.current === step) media.current = null;
         }
       }
@@ -204,9 +261,18 @@ export function CloseUpsScreen({
     return () => {
       cancelled = true;
     };
-  }, [phase.kind, stills, busy, previewFailed, services, projectId, captureId]);
+  }, [
+    phase.kind,
+    stills,
+    busy,
+    previewFailed,
+    previewRetry,
+    services,
+    projectId,
+    captureId,
+    gate,
+  ]);
   const retryPreview = (still: DetailStill) => {
-    tried.current.delete(still.id);
     setPreviewFailed(current => {
       const next = { ...current };
       delete next[still.id];
@@ -297,12 +363,15 @@ export function CloseUpsScreen({
           const label = draft.label.trim();
           // Only the exact-byte identity goes to the companion.
           const { sha256, byteLength, mediaType } = draft.photo;
-          const still = await services.stills.upload(
-            projectId,
-            captureId,
-            ack.current,
-            { sha256, byteLength, mediaType },
-            label ? label : undefined,
+          const acked = ack.current;
+          const still = await gate(() =>
+            services.stills.upload(
+              projectId,
+              captureId,
+              acked,
+              { sha256, byteLength, mediaType },
+              label ? label : undefined,
+            ),
           );
           setStills(current => [...current, still]);
           setDrafts(current => current.filter(d => d.photo.sha256 !== sha));
@@ -390,11 +459,9 @@ export function CloseUpsScreen({
               if (!ack.current) return;
               setNotice(null);
               try {
-                await services.stills.remove(
-                  projectId,
-                  captureId,
-                  ack.current,
-                  still.id,
+                const acked = ack.current;
+                await gate(() =>
+                  services.stills.remove(projectId, captureId, acked, still.id),
                 );
                 setStills(current => current.filter(s => s.id !== still.id));
               } catch (error) {
@@ -415,12 +482,9 @@ export function CloseUpsScreen({
     exclusive(async () => {
       if (!ack.current) return;
       try {
-        await services.stills.openFile(
-          projectId,
-          captureId,
-          ack.current,
-          still,
-          false,
+        const acked = ack.current;
+        await gate(() =>
+          services.stills.openFile(projectId, captureId, acked, still, false),
         );
       } catch (error) {
         setNotice(failureOf(error).message);

@@ -1210,3 +1210,71 @@ test('real clients reopen a kept check and upload camera-roll photos by identity
     delete NativeModules.StillsProcessingBridge;
   }
 });
+
+test('opening close-ups waits for a gallery download the results screen left running', async () => {
+  const { NativeModules } = require('react-native');
+  const store = testStore();
+  await store.create({
+    id: PROJECT_ID,
+    brief: { object: 'Synthetic case', context: 'Desk', addition: 'Stand' },
+    fit: null,
+  });
+  NativeModules.RetainedCaptureBridge = {
+    context: async () => 'host|device',
+    read: async () => JSON.stringify({ captures: [syntheticTarget().capture] }),
+    cancel: async () => {},
+  };
+  const { services } = fakeScanServices({ jobs: [syntheticJob('succeeded')] });
+  await services.jobs.save(
+    PROJECT_ID,
+    syntheticTarget().capture.captureId,
+    JOB_ID,
+  );
+  // The native bridge serves one request at a time: record any overlap.
+  let active = 0;
+  const overlaps: string[] = [];
+  const track =
+    <A extends unknown[], R>(name: string, call: (...a: A) => Promise<R>) =>
+    async (...args: A) => {
+      if (active) overlaps.push(name);
+      active++;
+      try {
+        return await call(...args);
+      } finally {
+        active--;
+      }
+    };
+  let release!: () => void;
+  let held = false;
+  const download = services.processing.downloadArtifact;
+  services.processing.downloadArtifact = track('download', (...args) => {
+    if (held) return download(...args);
+    held = true;
+    return new Promise(resolve => {
+      release = () => resolve(download(...args));
+    });
+  });
+  services.acknowledge = track('acknowledge', services.acknowledge);
+  services.processing.status = track('status', services.processing.status);
+  services.stills.list = track('list stills', services.stills.list);
+  let tree!: ReactTestRenderer.ReactTestRenderer;
+  try {
+    await act(async () => {
+      tree = ReactTestRenderer.create(
+        <App repository={store} scanServices={services} />,
+      );
+    });
+    await press(tree, 'Your saved projects');
+    await press(tree, 'Project captures');
+    await press(tree, 'See scan results for capture 1');
+    expect(held).toBe(true);
+    await press(tree, 'Add close-up photos');
+    expect(overlaps).toEqual([]);
+    await act(async () => release());
+    expect(overlaps).toEqual([]);
+    expect(texts(tree)).toContain('0 of 24');
+  } finally {
+    if (tree) await act(async () => tree.unmount());
+    delete NativeModules.RetainedCaptureBridge;
+  }
+});
