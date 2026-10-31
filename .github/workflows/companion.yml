@@ -9,6 +9,7 @@ on:
       - 'tools/scan-repair/**'
       - 'tools/scan-correct/**'
       - 'services/project/**'
+      - 'services/printer-handoff/**'
       - 'packages/contracts/**'
       - '.github/workflows/companion.yml'
   push:
@@ -20,6 +21,7 @@ on:
       - 'tools/scan-repair/**'
       - 'tools/scan-correct/**'
       - 'services/project/**'
+      - 'services/printer-handoff/**'
       - 'packages/contracts/**'
       - '.github/workflows/companion.yml'
 permissions:
@@ -42,6 +44,7 @@ jobs:
           cache-dependency-path: |
             packages/contracts/package-lock.json
             services/project/package-lock.json
+            services/printer-handoff/package-lock.json
             services/companion/package-lock.json
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
@@ -78,6 +81,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libegl1 libgl1 libxkbcommon0 libsm6 libxi6 libxrender1 xvfb xauth libseccomp2
       - run: npm ci --prefix packages/contracts --ignore-scripts
       - run: npm ci --prefix services/project --ignore-scripts
+      - run: npm ci --prefix services/printer-handoff --ignore-scripts
       - run: npm ci --prefix services/companion --ignore-scripts
       - run: npm test --prefix packages/contracts
       - run: xvfb-run -a npm test --prefix services/companion

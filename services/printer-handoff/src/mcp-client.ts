@@ -54,6 +54,7 @@ export class PrinterMcpClient {
   #transport?: StdioClientTransport;
   #catalog?: PrinterToolCatalog;
   #elicitationContext: ElicitationContext = {};
+  #declinedElicitations = 0;
   readonly #validators = new Map<Tool, ValidateFunction>();
   readonly #ajv = new Ajv({strict: false});
   readonly #onStderr?: (chunk: string) => void;
@@ -97,7 +98,10 @@ export class PrinterMcpClient {
         const answer = relay.request(request, this.#elicitationContext);
         const tracked = relay.pending().map(item => item.id).filter(id => !before.has(id));
         for (const id of tracked) this.#outstandingElicitations.add(id);
-        return answer.finally(() => { for (const id of tracked) this.#outstandingElicitations.delete(id); });
+        return answer.then(result => {
+          if (result.action !== 'accept') this.#declinedElicitations++;
+          return result;
+        }).finally(() => { for (const id of tracked) this.#outstandingElicitations.delete(id); });
       });
     }
     const controller = new AbortController();
@@ -154,19 +158,29 @@ export class PrinterMcpClient {
     if (!compiled(args)) fail('invalid-tool-arguments');
   }
 
-  async callTool(name: string, args: Record<string, unknown> = {}, options: {signal?: AbortSignal; timeoutMs?: number} = {}): Promise<CallToolResult> {
+  async callTool(name: string, args: Record<string, unknown> = {}, options: {signal?: AbortSignal; timeoutMs?: number; dispatchSensitive?: boolean; beforeDispatch?: () => Promise<void>} = {}): Promise<CallToolResult> {
     if (!this.#client || !this.#catalog) fail('not-connected');
     const tool = this.getTool(name);
     this.#validate(tool, args);
     const timeout = options.timeoutMs ?? timeoutsFor(this.#config).toolMs;
+    const declinedBefore = this.#declinedElicitations;
+    if (options.signal?.aborted) fail('cancelled');
+    await options.beforeDispatch?.();
+    if (options.signal?.aborted) fail('cancelled');
     let result: CallToolResult;
     try {
       result = await this.#client.callTool({name, arguments: args}, undefined, {
         signal: options.signal, timeout, maxTotalTimeout: timeout, resetTimeoutOnProgress: true,
       }) as CallToolResult;
     } catch (error) {
-      fail(options.signal?.aborted ? 'cancelled' : 'tool-failed', error);
+      fail(options.dispatchSensitive && this.#declinedElicitations === declinedBefore
+        ? 'dispatch-uncertain' : options.signal?.aborted ? 'cancelled' : 'tool-failed', error);
     }
+    // Unstructured tool errors can include a lost post-dispatch acknowledgement.
+    // A declined confirmation is known not to dispatch; other ambiguous results
+    // must be reconciled at the printer before another print is attempted.
+    if (options.dispatchSensitive && this.#declinedElicitations === declinedBefore
+      && (result.isError || Buffer.byteLength(JSON.stringify(result)) > MAX_RESULT_BYTES)) fail('dispatch-uncertain');
     if (Buffer.byteLength(JSON.stringify(result)) > MAX_RESULT_BYTES) fail('result-limit');
     return structuredClone(result);
   }

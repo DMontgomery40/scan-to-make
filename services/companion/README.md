@@ -1,6 +1,6 @@
 # Companion
 
-The companion runs on the user's own computer. It receives LiDAR captures and close-up stills from the phone, converts captures to meshes and runs scan cleanup (`tools/scan-repair`) as retained jobs. It has no printer routes: slicing and printing belong to [bambu-printer-mcp](https://github.com/DMontgomery40/bambu-printer-mcp) or [mcp-3D-printer-server](https://github.com/DMontgomery40/mcp-3D-printer-server).
+The companion runs on the user's own computer. It receives LiDAR captures and close-up stills from the phone, converts captures to meshes and runs scan cleanup (`tools/scan-repair`) as retained jobs. With the optional printer-handoff configuration it can also hand a clean mesh to the operator-installed [bambu-printer-mcp](https://github.com/DMontgomery40/bambu-printer-mcp) or [mcp-3D-printer-server](https://github.com/DMontgomery40/mcp-3D-printer-server) for slicing and printing, relaying that server's confirmations to the phone (see Printer handoff below).
 
 ```sh
 npm ci --prefix packages/contracts --ignore-scripts
@@ -23,6 +23,7 @@ npm run serve --prefix services/companion
 | `SCAN_TO_MAKE_CAPTURE_DIR` | Saved-project sync, capture import and detail stills; requires authentication |
 | `SCAN_TO_MAKE_CAPTURE_PYTHON` | The Python 3.12 environment with `usd-core==26.8` used for conversion and cleanup |
 | `SCAN_TO_MAKE_SCAN_REPAIR_TOOL`, `SCAN_TO_MAKE_SCAN_BLENDER` | Scan processing (see [SCAN-PROCESSING.md](SCAN-PROCESSING.md)) |
+| `SCAN_TO_MAKE_PRINTER_HANDOFF_CONFIG`, `SCAN_TO_MAKE_PRINTER_HANDOFF_DIR` | Printer handoff bundles and elicitation relay (below); both required together, and authentication |
 
 ## Authenticated private Serve transport
 
@@ -115,3 +116,51 @@ Host-configured capture import, Blender repair, close-up advice, correction,
 measurement and ten canonical views run as one preview-only capture job. See
 [SCAN-PROCESSING.md](SCAN-PROCESSING.md) for configuration, routes, retention,
 resource bounds and tests.
+
+## Printer handoff
+
+Optional routes hand a clean STL to the operator-installed printer MCP
+server (bambu-printer-mcp or mcp-3D-printer-server) through the
+`@scan-to-make/printer-handoff` client. The backend, MCP process command and
+printer selection come only from the operator config file named by
+`SCAN_TO_MAKE_PRINTER_HANDOFF_CONFIG` (see that package's README for its
+schema); bundles are stored under `SCAN_TO_MAKE_PRINTER_HANDOFF_DIR`. The
+phone never chooses the backend, process or printer. Every route requires
+the `printer-handoff:use` scope, granted explicitly by host-local
+`remote-auth-cli.js pair-printer-handoff <auth-directory> <login>`, which
+grants only that scope plus health (capture pairings do not gain it, and a
+handoff pairing does not gain capture access).
+For a phone that captures and hands off with its single companion credential,
+use `remote-auth-cli.js pair-capture-and-printer-handoff <auth-directory> <login>`
+to explicitly grant both sets of scopes in one invitation.
+
+| Route | Behaviour |
+| --- | --- |
+| `POST /v1/printer-handoff/bundles` | Raw `model/stl` body (64 MiB bound); optional percent-encoded `x-handoff-prompt` header. Returns `201 {bundle}` in the configured backend/selection |
+| `GET /v1/printer-handoff/bundles` | `{bundles}` manifests, verified on read |
+| `GET /v1/printer-handoff/bundles/:id` | `{bundle, printing}` |
+| `POST /v1/printer-handoff/bundles/:id/print` | Starts the slice, inspect and print run; `202 {bundleId, printing:true}`. One print at a time (`409 print-busy`); poll the bundle for `sliced`/`printed`/`failed` |
+| `GET /v1/printer-handoff/elicitations` | `{elicitations}` pending printer-server confirmations, including any camera snapshot |
+| `POST /v1/printer-handoff/elicitations/:id/respond` | JSON `{action:"accept",content}` or `{action:"decline"\|"cancel"}`. `404 elicitation-not-pending` once answered or expired |
+
+Use bundle and elicitation IDs exactly as returned (lowercase UUIDs).
+`printed` records a successful printer MCP call, not physical print completion.
+If saving the resulting artifacts fails, the bundle retains `printed` with a
+sanitized `failure` code and rejects another print with `409 already-printed`.
+If even the manifest cannot be saved, that dispatch status and retry guard
+remain in memory for the companion process lifetime; they are not a durable
+receipt across a restart while storage is unavailable.
+
+Confirmations are never answered by the companion itself: an unanswered
+prompt expires as cancel. A desktop agent with filesystem access to the
+bundle directory may claim a bundle and add a designed STL locally; the
+companion then runs the final slice and print so elicitation still reaches
+the phone.
+
+A bundle is durably marked `uncertain` immediately before the printer tool call.
+A lost response, server crash, or timeout leaves `failure: dispatch-uncertain`;
+`POST .../print` refuses that bundle with HTTP 409, including after restart.
+Check the printer before preparing another handoff. Pre-call failures and declined
+confirmations remain `failed` and retryable. A successful retry clears its old
+failure code. `printed` with a failure code means dispatch succeeded but saving
+outputs failed; it is also not retryable.

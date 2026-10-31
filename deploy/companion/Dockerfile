@@ -21,15 +21,16 @@ RUN npm install --global --prefix /opt/printers/bambu bambu-printer-mcp@1.1.42 \
 WORKDIR /app
 COPY packages/contracts packages/contracts
 COPY services/project services/project
+COPY services/printer-handoff services/printer-handoff
 COPY services/companion services/companion
 COPY tools/capture-mesh-convert tools/capture-mesh-convert
 COPY tools/capture-pipeline tools/capture-pipeline
 COPY tools/capture-fit-eval tools/capture-fit-eval
 COPY tools/scan-repair tools/scan-repair
 COPY tools/scan-correct tools/scan-correct
-RUN for package in packages/contracts services/project services/companion; do npm ci --prefix "$package"; done \
+RUN for package in packages/contracts services/project services/printer-handoff services/companion; do npm ci --prefix "$package"; done \
     && npm run build --prefix services/companion \
-    && for package in packages/contracts services/project services/companion; do npm prune --omit=dev --prefix "$package"; done \
+    && for package in packages/contracts services/project services/printer-handoff services/companion; do npm prune --omit=dev --prefix "$package"; done \
     && npm cache clean --force
 RUN python3 -m venv /opt/python \
     && /opt/python/bin/pip install --no-cache-dir \

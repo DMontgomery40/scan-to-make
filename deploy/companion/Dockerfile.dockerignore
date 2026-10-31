@@ -7,6 +7,8 @@
 !services/project/**
 !services/companion/
 !services/companion/**
+!services/printer-handoff/
+!services/printer-handoff/**
 !tools/
 !tools/capture-mesh-convert/
 !tools/capture-mesh-convert/**
