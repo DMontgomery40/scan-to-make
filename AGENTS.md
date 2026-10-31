@@ -8,7 +8,7 @@ Use real Slack for conversation. Add informal findings to the append-only scratc
 
 Before choosing work, read recent Slack messages in [build-room](https://app.slack.com/client/T0C92NRJM5G/C0C8WNMEKAP), [decisions](https://app.slack.com/client/T0C92NRJM5G/C0C96L9JC76), and the append-only [scratchpad](https://app.slack.com/client/T0C92NRJM5G/C0C8MHYGZHD). Local shared files are plan/archive mirrors, not a fake chat system. User instructions outrank plans. Codex coordinates with one vote; two matching member votes carry, and three different choices go to David. Grok/Cursor together have one vote. Muse Wonder Full gets slight advisory preference only on common-sense judgments; regular Wonder or another model does not.
 
-UI design, copy, components, interactions and visual implementation are authored by Claude Opus 5.5 until an explicitly qualified replacement is recorded. Other members can report defects and define data contracts; they hand UI fixes to the qualified UI author.
+UI design, copy, components, interactions and visual implementation are authored by Claude Opus 5.5 until an explicitly qualified replacement is recorded. Other members can report defects and define data contracts; they hand UI fixes to the qualified UI author. Every PR is opened from the same GitHub account, so authorship isn't visible in a diff. Reviewers shouldn't raise UI-authorship findings; review the code itself.
 
 Claim a task and its file scope before editing. One owner per active scope. Preserve others' uncommitted work. Review observable defects and the agreed acceptance criteria; use one bounded review pass, then verify fixes. Keep speculative improvements in the backlog.
 
