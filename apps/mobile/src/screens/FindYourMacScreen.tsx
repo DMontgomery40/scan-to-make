@@ -22,6 +22,7 @@ import {
 import { parsePairingQR } from '../companion/pairingLink';
 import { QRViewfinder, type ViewfinderState } from '../companion/QRViewfinder';
 import { Button, READABLE_WIDTH } from '../ui/components';
+import { useRequestGate } from './requestGate';
 import { colors, radius, space, type } from '../ui/theme';
 
 /** What to open once this phone is paired; 'back' returns to where it began. */
@@ -37,6 +38,8 @@ type Phase =
 
 const DEVICE_NAME = 'My phone';
 const OUT_OF_REACH = new Set(['network', 'timeout']);
+// Your Mac no longer accepts this phone's credential.
+const TURNED_AWAY = new Set(['unauthorized', 'forbidden', 'pairing-required']);
 // A check that ends like this says nothing about the pairing itself.
 const NOT_ANSWERING = new Set([
   ...OUT_OF_REACH,
@@ -74,6 +77,7 @@ export function FindYourMacScreen({
   onLinkUsed?: () => void;
 }) {
   const insets = useSafeAreaInsets();
+  const gate = useRequestGate();
   const { height } = useWindowDimensions();
   const [status, setStatus] = useState<PairingStatus | null>(null);
   const [readFailed, setReadFailed] = useState(false);
@@ -102,10 +106,15 @@ export function FindYourMacScreen({
       return null;
     }
   };
+  // False once the screen has closed: a request still waiting its turn in
+  // the queue then never starts (native.cancel() stops only a running one).
+  const open = useRef(true);
   useEffect(() => {
     if (!native) return;
+    open.current = true;
     readStatus();
     return () => {
+      open.current = false;
       native.cancel().catch(() => {});
     };
   }, [native]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -115,8 +124,8 @@ export function FindYourMacScreen({
   useEffect(() => {
     if (!native || !paired || phase.kind === 'connected') return;
     let live = true;
-    native
-      .check()
+    // In the app's one queue, so it never meets a refresh as "busy".
+    gate(() => native.check())
       .then(() => {
         if (!live) return;
         setReachable(true);
@@ -127,7 +136,12 @@ export function FindYourMacScreen({
         setReachable(false);
         const code = (error as { code?: string })?.code ?? '';
         setRefused(
-          NOT_ANSWERING.has(code) ? null : pairingError(error) ?? null,
+          NOT_ANSWERING.has(code)
+            ? null
+            : // Revoked, or its credential ran out: pair again (KAN-182).
+            TURNED_AWAY.has(code)
+            ? pairingError({ code: 'pairing-required' }) ?? null
+            : pairingError(error) ?? null,
         );
       });
     return () => {
@@ -140,12 +154,18 @@ export function FindYourMacScreen({
     setPhase({ kind: 'pairing' });
     try {
       const parsed = parsePairingQR(value);
-      const result = await native.pair(
-        parsed.baseUrl,
-        parsed.code,
-        DEVICE_NAME,
-        parsed.certificateSha256 ?? null,
-      );
+      // Queued like every other request, so a refresh waiting its turn
+      // can't take the phone's one request first.
+      const result = await gate(() => {
+        if (!open.current)
+          throw Object.assign(Error('Closed'), { code: 'cancelled' });
+        return native.pair(
+          parsed.baseUrl,
+          parsed.code,
+          DEVICE_NAME,
+          parsed.certificateSha256 ?? null,
+        );
+      });
       setStatus(result);
       setReplacing(false);
       setReachable(true);

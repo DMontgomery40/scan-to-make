@@ -80,6 +80,14 @@ static BOOL ValidRecord(NSDictionary *r) {
     Matches(r[@"token"], @"[A-Za-z0-9_-]{43}") && [r[@"expiresAt"] isKindOfClass:NSNumber.class] &&
     [r[@"expiresAt"] doubleValue] > 0 && ValidScopes(r[@"scopes"]);
 }
+BOOL STMSamePairing(NSDictionary *a, NSDictionary *b) {
+  if (![a isKindOfClass:NSDictionary.class] || ![b isKindOfClass:NSDictionary.class]) return NO;
+  for (NSString *key in @[@"baseUrl", @"deviceId", @"token", @"protocolVersion", @"certificateSha256"]) {
+    id x = a[key], y = b[key];
+    if (x != y && ![x isEqual:y]) return NO;
+  }
+  return YES;
+}
 NSDictionary *STMReadPairing(NSError **error) {
   NSMutableDictionary *q = [Query() mutableCopy]; q[(__bridge id)kSecReturnData] = @YES;
   CFTypeRef value = NULL; OSStatus status = SecItemCopyMatching((__bridge CFDictionaryRef)q, &value);
@@ -110,6 +118,8 @@ NSString *STMTransportError(NSError *error) {
 @property NSDictionary *snapshot;
 @property NSInteger status;
 @property BOOL pairing;
+// A credential refresh: the reply only moves the stored expiry on.
+@property BOOL refreshing;
 @property BOOL pinRejected;
 @property (copy) RCTPromiseResolveBlock resolve;
 @property (copy) RCTPromiseRejectBlock reject;
@@ -152,7 +162,7 @@ RCT_REMAP_METHOD(pair, pairURL:(NSString *)baseUrl code:(NSString *)code deviceN
   BOOL pinned = [pin isKindOfClass:NSString.class];
   NSURL *url = pinned ? STMPinnedBaseURL(baseUrl, pin) : STMCompanionBaseURL(baseUrl);
   if (!url || !Matches(code, @"[A-Za-z0-9_-]{32}") || !Matches(name, @"[^\\x00-\\x1f\\x7f]{1,80}")) { reject(@"invalid-invitation", @"Check the companion address and pairing invitation.", nil); return; }
-  self.pairing = YES;
+  self.pairing = YES; self.refreshing = NO;
   self.pending = pinned ? @{ @"baseUrl":url.absoluteString, @"certificateSha256":pin } : @{ @"baseUrl":url.absoluteString };
   NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:[url URLByAppendingPathComponent:@"v1/pair"]];
   request.HTTPMethod = @"POST";
@@ -164,8 +174,21 @@ RCT_REMAP_METHOD(check, checkResolve:(RCTPromiseResolveBlock)resolve reject:(RCT
   if (self.task) { reject(@"busy", @"A connection check is already running.", nil); return; }
   NSError *error = nil; NSDictionary *r = STMReadPairing(&error);
   if (error || !r || [r[@"expiresAt"] doubleValue] <= NSDate.date.timeIntervalSince1970*1000) { reject(error ? @"secure-storage" : @"pairing-required", @"Connect this device to a companion.", nil); return; }
-  self.pairing = NO; self.snapshot = r;
+  self.pairing = NO; self.refreshing = NO; self.snapshot = r;
   NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:[STMPairingBaseURL(r) URLByAppendingPathComponent:@"healthz"]];
+  [request setValue:[@"Bearer " stringByAppendingString:r[@"token"]] forHTTPHeaderField:@"Authorization"];
+  [request setValue:r[@"deviceId"] forHTTPHeaderField:@"X-Scan-Device"];
+  [self start:request resolve:resolve reject:reject];
+}
+// Rolling refresh (POST /v1/auth/refresh, companion #147): the same token,
+// valid for another full lifetime. No body; the token never reaches JS.
+RCT_REMAP_METHOD(refresh, refreshResolve:(RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject) {
+  if (self.task) { reject(@"busy", @"A connection check is already running.", nil); return; }
+  NSError *error = nil; NSDictionary *r = STMReadPairing(&error);
+  if (error || !r || [r[@"expiresAt"] doubleValue] <= NSDate.date.timeIntervalSince1970*1000) { reject(error ? @"secure-storage" : @"pairing-required", @"Connect this device to a companion.", nil); return; }
+  self.pairing = NO; self.refreshing = YES; self.snapshot = r;
+  NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:[STMPairingBaseURL(r) URLByAppendingPathComponent:@"v1/auth/refresh"]];
+  request.HTTPMethod = @"POST"; request.HTTPBody = [NSData data];
   [request setValue:[@"Bearer " stringByAppendingString:r[@"token"]] forHTTPHeaderField:@"Authorization"];
   [request setValue:r[@"deviceId"] forHTTPHeaderField:@"X-Scan-Device"];
   [self start:request resolve:resolve reject:reject];
@@ -205,6 +228,24 @@ RCT_REMAP_METHOD(check, checkResolve:(RCTPromiseResolveBlock)resolve reject:(RCT
     if (status == errSecItemNotFound) { NSMutableDictionary *q = [Query() mutableCopy]; [q addEntriesFromDictionary:attrs]; status = SecItemAdd((__bridge CFDictionaryRef)q, NULL); }
     if (status != errSecSuccess) { [self fail:@"secure-storage"]; return; }
       [[NSNotificationCenter defaultCenter] postNotificationName:STMPairingChanged object:nil];
+    result = STMPairingMetadata(r);
+  } else if (self.refreshing) {
+    NSError *readError = nil; NSDictionary *current = STMReadPairing(&readError);
+    if (readError || ![current isEqual:self.snapshot]) { [self fail:@"pairing-changed"]; return; }
+    // The same credential back, with a later expiry no more than one
+    // lifetime away; only the expiry and scopes are taken from it.
+    double now = NSDate.date.timeIntervalSince1970*1000;
+    NSMutableDictionary *r = [current mutableCopy]; r[@"expiresAt"] = json[@"expiresAt"]; r[@"scopes"] = json[@"scopes"];
+    if (![json[@"protocolVersion"] isEqual:current[@"protocolVersion"]] || ![json[@"deviceId"] isEqual:current[@"deviceId"]] ||
+        ![json[@"token"] isEqual:current[@"token"]] || !ValidRecord(r) ||
+        [r[@"expiresAt"] doubleValue] <= now || [r[@"expiresAt"] doubleValue] > now+31.0*86400000) { [self fail:@"invalid-response"]; return; }
+    NSData *data = [NSJSONSerialization dataWithJSONObject:r options:0 error:nil];
+    NSDictionary *attrs = @{(__bridge id)kSecValueData:data, (__bridge id)kSecAttrAccessible:(__bridge id)kSecAttrAccessibleWhenUnlockedThisDeviceOnly};
+    OSStatus status = SecItemUpdate((__bridge CFDictionaryRef)Query(), (__bridge CFDictionaryRef)attrs);
+    if (status == errSecItemNotFound) { [self fail:@"pairing-changed"]; return; }
+    if (status != errSecSuccess) { [self fail:@"secure-storage"]; return; }
+    // Still the same pairing (STMSamePairing), so no STMPairingChanged:
+    // uploads and checks in flight carry on.
     result = STMPairingMetadata(r);
   } else {
     NSError *readError = nil; NSDictionary *current = STMReadPairing(&readError);

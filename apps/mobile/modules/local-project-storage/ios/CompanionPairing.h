@@ -15,3 +15,7 @@ FOUNDATION_EXPORT BOOL STMPinnedTrust(NSURLAuthenticationChallenge *challenge, N
 FOUNDATION_EXPORT BOOL STMFixtureURL(NSURL *url);
 FOUNDATION_EXPORT NSString *STMTransportError(NSError *error);
 FOUNDATION_EXPORT NSString * const STMPairingChanged;
+// The same pairing: same Mac, device, token, protocol and certificate pin. A
+// renewed expiry (POST /v1/auth/refresh) or scope list is still the same one,
+// so requests in flight carry on.
+FOUNDATION_EXPORT BOOL STMSamePairing(NSDictionary *a, NSDictionary *b);

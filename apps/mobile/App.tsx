@@ -21,6 +21,7 @@ import {
 import { companionNative } from './src/companion/pairing';
 import { objectCaptureNative } from './src/capture/nativeObjectCapture';
 import { isPairingLink } from './src/companion/pairingLink';
+import { KeepPairingFresh } from './src/companion/keepPairingFresh';
 import { ProjectsHomeScreen } from './src/screens/ProjectsHomeScreen';
 import { SettingsScreen } from './src/screens/SettingsScreen';
 import { RetainedCapturesScreen } from './src/screens/RetainedCapturesScreen';
@@ -307,6 +308,8 @@ function App({
     <SafeAreaProvider>
       {/* One queue for every companion call, across screens. */}
       <RequestGateProvider>
+        {/* Keeps the paired Mac's credential alive, in the same queue. */}
+        <KeepPairingFresh onPairAgain={() => setPairingKey(key => key + 1)} />
         <StatusBar
           barStyle={
             Platform.OS === 'ios' && scheme === 'dark'

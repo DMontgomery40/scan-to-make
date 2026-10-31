@@ -16,6 +16,11 @@ export interface CompanionNative {
     certificateSha256: string | null,
   ): Promise<PairingStatus>;
   check(): Promise<PairingStatus>;
+  /**
+   * POST /v1/auth/refresh: the same credential for another full lifetime.
+   * Absent from builds before KAN-182.
+   */
+  refresh?(): Promise<PairingStatus>;
   disconnect(): Promise<PairingStatus>;
   cancel(): Promise<void>;
 }
