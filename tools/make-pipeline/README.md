@@ -129,7 +129,7 @@ Existing geometry tools retain their tighter operation/work bounds. No retries
 or arbitrary executable/model-written-code interface exists.
 
 Input caps: 128 MiB/file; OBJ graph 32 assets / 256 MiB; USDZ 256 members /
-256 MiB declared expanded bytes; stills 16 MiB each; scripts 1 MiB; tool JSON
+256 MiB declared expanded bytes; stills 8 MiB each (scan-correct's limit); scripts 1 MiB; tool JSON
 stdout 16 MiB before parsing. OBJ materials are fully validated and snapshotted
 before any Blender import: no non-`.mtl` material references, absolute/parent
 asset paths, escaping symlinks or unsupported directives. These are work caps,

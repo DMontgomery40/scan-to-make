@@ -24,6 +24,17 @@ class PipelineContracts(unittest.TestCase):
                 with self.assertRaises(ValueError):Pipeline(args)
                 self.assertFalse((base/'out').exists())
 
+    def test_oversized_still_rejected_at_intake(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base=Path(tmp);src=base/'src';src.mkdir();stills=base/'stills';stills.mkdir()
+            (src/'input.obj').write_text('v 0 0 0\n')
+            (stills/'big.png').write_bytes(b'\x89PNG'+b'\0'*(8*1024*1024-3))
+            args=parser().parse_args([str(src/'input.obj'),'--units','mm','--make','scan-cradle','--profile','p1s',
+                                      '--stills',str(stills),'--out',str(base/'out')])
+            with self.assertRaises(StageError):Pipeline(args).run()
+            result=json.loads((base/'out/pipeline-report.json').read_text())
+            self.assertEqual(result['error']['stage'],'intake')
+
     def test_material_escapes_rejected_before_any_subprocess(self):
         with tempfile.TemporaryDirectory() as tmp:
             base=Path(tmp);src=base/'src';src.mkdir();outside=base/'private.png';outside.write_bytes(b'private')

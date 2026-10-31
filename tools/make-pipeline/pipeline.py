@@ -12,6 +12,8 @@ import time
 import zipfile
 
 from staging import bounded_bytes, snapshot_obj
+# Same cap as tools/scan-correct adapters.image_data, so an oversized still fails at intake, not after repair.
+STILL_CAP=8*1024*1024
 
 TOOLS=Path(__file__).resolve().parents[1]
 TEMPLATES={'scan-cradle':'cradle.py','wall-mount':'mount.py','protective-sleeve':'sleeve.py','edge-clip':'clip.py'}
@@ -206,7 +208,7 @@ class Pipeline:
                 if not 1<=len(images)<=4:raise ValueError('stills directory must contain 1..4 supported images')
                 for i,path in enumerate(images,1):
                     if not path.resolve().is_relative_to(a.stills.resolve()):raise ValueError('still escapes selected directory')
-                    stills.append(self.snapshot(path,f'inputs/still-{i}{path.suffix.lower()}',16*1024*1024))
+                    stills.append(self.snapshot(path,f'inputs/still-{i}{path.suffix.lower()}',STILL_CAP))
             script=self.snapshot(a.script,'inputs/correction-script.json',1024*1024) if a.script else None
             planner_script=self.snapshot(a.planner_script,'inputs/planner-script.json',1024*1024) if a.planner_script else None
             params={}
