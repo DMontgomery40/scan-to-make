@@ -7,10 +7,10 @@ import {createServer, request as httpRequest} from 'node:http';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {fileURLToPath} from 'node:url';
-import {RemoteAuthStore} from '../dist/remote-auth.js';
+import {RemoteAuthFailure, RemoteAuthStore} from '../dist/remote-auth.js';
 import {startCompanionServer} from '../dist/server.js';
 import {createPrintHandoffRoutes, createPrintHandoffServices} from '../dist/print-handoff-http.js';
-import {HandoffBundleStore, InMemoryElicitationRelay} from '@scan-to-make/printer-handoff';
+import {DispatchedPrintError, HandoffBundleStore, InMemoryElicitationRelay} from '@scan-to-make/printer-handoff';
 
 const forwarded = JSON.parse(await readFile(new URL('./fixtures/tailscale-serve-v1.94.2.json', import.meta.url), 'utf8')).expected;
 const fixtureServer = fileURLToPath(new URL('../../printer-handoff/tests/fixtures/fixture-printer-server.mjs', import.meta.url));
@@ -255,6 +255,91 @@ for (const failedWrites of [2, Infinity]) {
     assert.equal(retry.status, 409);
     assert.equal(json(retry).error.code, 'already-printed');
     assert.equal((await f.calls()).filter(item => item.tool === 'print_3mf').length, 1);
+  });
+}
+
+for (const [pauseAt, outputFailure, revokeOnRetry] of [
+  ['authorization', true, false],
+  ['storage', false, false],
+  ['authorization', false, true],
+]) {
+  test(`status read overlapping completion stays consistent (${pauseAt}, output failure=${outputFailure}, revoked=${revokeOnRetry})`, {timeout: 5000}, async t => {
+    const root = await mkdtemp(join(tmpdir(), 'print-status-race-'));
+    const store = new HandoffBundleStore(root);
+    const bundle = await store.create({stl, prompt: 'one dispatch', backend: 'bambu-printer-mcp'});
+    const dispatch = Promise.withResolvers();
+    const finishDispatch = Promise.withResolvers();
+    const pausedRead = Promise.withResolvers();
+    const finishRead = Promise.withResolvers();
+    const routes = createPrintHandoffRoutes({
+      store, relay: new InMemoryElicitationRelay(),
+      runner: {backend: 'bambu-printer-mcp', async runBundle(store, id) {
+        await store.setStatus(id, 'uncertain', 'dispatch-uncertain');
+        dispatch.resolve();
+        await finishDispatch.promise;
+        if (outputFailure) throw new DispatchedPrintError(new Error('fixture output persistence failed'));
+        await store.setStatus(id, 'printed');
+      }},
+    });
+    let pauseStatusRead = true;
+    let pauseStorage = false;
+    const read = store.read.bind(store);
+    store.read = async (...args) => {
+      const manifest = await read(...args);
+      if (pauseStorage) {
+        pauseStorage = false;
+        pausedRead.resolve();
+        await finishRead.promise;
+      }
+      return manifest;
+    };
+    const server = createServer(async (request, response) => {
+      let checks = 0;
+      await routes.handle(request, response, async () => {
+        if (request.method !== 'GET') return;
+        checks++;
+        if (checks > 2 && revokeOnRetry) throw new RemoteAuthFailure('forbidden');
+        if (checks === 2 && pauseAt === 'authorization' && pauseStatusRead) {
+          pauseStatusRead = false;
+          pausedRead.resolve();
+          await finishRead.promise;
+        }
+      }, () => undefined);
+    });
+    t.after(async () => {
+      finishDispatch.resolve();
+      finishRead.resolve();
+      await routes.close();
+      server.closeAllConnections();
+      await new Promise(resolve => server.close(resolve));
+      await rm(root, {recursive: true, force: true});
+    });
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+    const f = {server: {url: `http://127.0.0.1:${server.address().port}`}, headers: {}};
+    const path = `/v1/printer-handoff/bundles/${bundle.id}`;
+    assert.equal((await wire(f, `${path}/print`, {method: 'POST'})).status, 202);
+    await dispatch.promise;
+    pauseStorage = pauseAt === 'storage';
+    const staleRead = wire(f, path);
+    await pausedRead.promise;
+    finishDispatch.resolve();
+    // close waits for terminal persistence and the in-memory dispatch fallback
+    // to be cleared. The already-authorized GET remains paused with its old read.
+    await routes.close();
+    assert.equal((await store.read(bundle.id)).status, 'printed');
+    finishRead.resolve();
+    const response = await staleRead;
+    if (revokeOnRetry) {
+      assert.equal(response.status, 403);
+      assert.equal(json(response).error.code, 'forbidden');
+      assert.equal(json(response).bundle, undefined);
+      return;
+    }
+    assert.equal(response.status, 200);
+    const result = json(response);
+    assert.equal(result.printing, false);
+    assert.equal(result.bundle.status, 'printed');
+    assert.equal(result.bundle.failure, outputFailure ? 'print-failed' : undefined);
   });
 }
 
