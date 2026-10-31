@@ -42,6 +42,6 @@ tools/self-host-smoke/auth-smoke.sh
 
 `smoke.sh` bootstraps the venv and runs the tests and synthetic repros for `tools/capture-mesh-convert`, `tools/capture-fit-eval` and `tools/capture-pipeline` (pipeline and duplicate). It does not start the companion listener.
 
-`auth-smoke.sh` installs the checkout's companion/project/contracts packages, starts the authenticated generation/capture listener with isolated fixture auth only (no live tailnet or device changes), then exercises portable-project sync → real USDZ import → listener restart against the same storage → verified reopen and exact original download. Wrong-scope and stale `If-Match` requests must fail closed. The checkout is left clean (`git status --porcelain` empty).
+`auth-smoke.sh` installs the checkout's companion/project/contracts packages, starts the authenticated generation/capture listener with isolated fixture auth only (no live tailnet or device changes), then exercises portable-project sync → real USDZ import → listener restart against the same storage → verified reopen and exact original download. Wrong-scope and stale `If-Match` requests are rejected. The checkout is left clean (`git status --porcelain` empty).
 
 Each command prints a PASS/FAIL summary and exits nonzero on any failure. A passing authenticated run is the HTTP path only; it does not claim native review, export, or physical-fit validation. See [`tools/self-host-smoke/README.md`](tools/self-host-smoke/README.md).
