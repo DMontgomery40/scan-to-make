@@ -1,8 +1,14 @@
 import React, { useState } from 'react';
 import ReactTestRenderer, { act } from 'react-test-renderer';
-import { KeyboardAvoidingView, StyleSheet, TextInput } from 'react-native';
+import {
+  KeyboardAvoidingView,
+  ScrollView,
+  StyleSheet,
+  TextInput,
+  View,
+} from 'react-native';
 import { SafeAreaInsetsContext } from 'react-native-safe-area-context';
-import { Button, Screen } from '../src/ui/components';
+import { Button, READABLE_WIDTH, Screen } from '../src/ui/components';
 
 function Draft() {
   const [text, setText] = useState('');
@@ -127,4 +133,34 @@ test('short iOS windows keep actions in the scrollable form without resetting a 
     }
     dimensions.mockRestore();
   }
+});
+
+test('content and actions stay in one readable, centred column on wide windows', async () => {
+  let tree!: ReactTestRenderer.ReactTestRenderer;
+  await act(async () => {
+    tree = ReactTestRenderer.create(
+      <Screen title="Wide" footer={<Button label="Save" onPress={() => {}} />}>
+        <Draft />
+      </Screen>,
+    );
+  });
+  const column = {
+    width: '100%',
+    maxWidth: READABLE_WIDTH + 48,
+    alignSelf: 'center',
+  };
+  expect(
+    StyleSheet.flatten(
+      tree.root.findByType(ScrollView).props.contentContainerStyle,
+    ),
+  ).toMatchObject(column);
+  const actions = tree.root
+    .findAllByType(View)
+    .filter(
+      v =>
+        StyleSheet.flatten(v.props.style)?.maxWidth === READABLE_WIDTH + 48 &&
+        v.findAll(n => n.props.accessibilityLabel === 'Save').length > 0,
+    );
+  expect(actions.length).toBeGreaterThan(0);
+  await act(async () => tree.unmount());
 });

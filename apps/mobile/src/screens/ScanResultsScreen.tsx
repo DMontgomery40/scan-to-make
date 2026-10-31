@@ -12,7 +12,15 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import type { ScanProcessingJob } from '@scan-to-make/contracts';
-import { Badge, Button, Card, Field, Notice, Screen } from '../ui/components';
+import {
+  Badge,
+  Button,
+  Card,
+  Field,
+  Notice,
+  READABLE_WIDTH,
+  Screen,
+} from '../ui/components';
 import { ImageViewer } from '../ui/ImageViewer';
 import { useRequestGate } from './requestGate';
 import { colors, radius, space, type } from '../ui/theme';
@@ -768,7 +776,12 @@ function Gallery({
   ack: ProjectAcknowledgment | null;
   gate: <T>(task: () => Promise<T>) => Promise<T>;
 }) {
-  const { width } = useWindowDimensions();
+  // Sized from the gallery's own width: the window can be wider than the
+  // column (iPad, unfolded Duo) or than the safe area (Duo side bars).
+  const { width: windowWidth } = useWindowDimensions();
+  const [width, setWidth] = useState(
+    Math.min(windowWidth, READABLE_WIDTH) - space.xl * 2,
+  );
   const [selected, setSelected] = useState<ViewName>(VIEW_ORDER[0]);
   const [uris, setUris] = useState<Partial<Record<ViewName, string>>>({});
   const [failed, setFailed] = useState(false);
@@ -826,14 +839,20 @@ function Gallery({
     }
   };
   const hero = uris[selected];
-  const size = Math.min(width - space.xl * 2, 520);
+  const size = Math.min(width, 520);
   const shown = VIEW_ORDER.filter(name => uris[name]);
   const images = shown.map(name => ({
     uri: uris[name]!,
     label: `${VIEW_LABELS[name]} view`,
   }));
   return (
-    <View style={styles.gallery}>
+    <View
+      style={styles.gallery}
+      onLayout={event => {
+        const measured = event.nativeEvent.layout.width;
+        if (measured > 0) setWidth(measured);
+      }}
+    >
       <Text style={type.heading}>Your scan from every side</Text>
       {resolve ? (
         <>

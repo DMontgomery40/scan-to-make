@@ -28,7 +28,10 @@ export function ImageViewer({
   index: number;
   onClose: () => void;
 }) {
-  const { width } = useWindowDimensions();
+  // Pages are as wide as the pager itself, which safe areas can narrow
+  // below the window (an iPhone Duo's side system bar, for one).
+  const { width: windowWidth } = useWindowDimensions();
+  const [width, setWidth] = useState(windowWidth);
   const [page, setPage] = useState(index);
   const current = images[page] ?? images[0];
   return (
@@ -57,7 +60,11 @@ export function ImageViewer({
           horizontal
           pagingEnabled
           showsHorizontalScrollIndicator={false}
-          contentOffset={{ x: index * width, y: 0 }}
+          onLayout={event => {
+            const measured = event.nativeEvent.layout.width;
+            if (measured > 0) setWidth(measured);
+          }}
+          contentOffset={{ x: page * width, y: 0 }}
           onMomentumScrollEnd={event =>
             setPage(
               Math.max(
