@@ -21,7 +21,7 @@ Native review/export is demonstrated on an isolated iOS Simulator only. Physical
 | Object Capture eval | Isolated LiDAR Object Capture evaluation app (not the consumer UI) | [`apps/mobile/modules/object-capture/`](apps/mobile/modules/object-capture/), [`EVALUATION.md`](apps/mobile/modules/object-capture/EVALUATION.md) |
 | RoomPlan / depth | RoomPlan suitability notes for drawer interiors; bounded ARKit depth/mesh evidence collector | [`apps/mobile/modules/room-capture/`](apps/mobile/modules/room-capture/), [`apps/mobile/modules/depth-capture/`](apps/mobile/modules/depth-capture/) |
 | Consumer capture | Support check and manual sizes; developer AR probe is separate from consumer scan-to-mesh | [`apps/mobile/src/screens/CaptureScreen.tsx`](apps/mobile/src/screens/CaptureScreen.tsx), [`apps/mobile/modules/scan-capture/`](apps/mobile/modules/scan-capture/) |
-| Local workers | Filesystem project store; companion generation, capture import, pairing, and print-intent journal (no printer dispatch) | [`services/project/`](services/project/), [`services/companion/`](services/companion/) |
+| Local workers | Filesystem project store; companion generation, capture import, pairing, and print-intent journal | [`services/project/`](services/project/), [`services/companion/`](services/companion/) |
 | Private companion path | Read-only Tailscale preflight and setup notes | [`tools/tailscale/`](tools/tailscale/), [`docs/tailscale-setup.md`](docs/tailscale-setup.md) |
 
 ## Still OPEN
