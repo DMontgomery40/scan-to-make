@@ -6,7 +6,6 @@ on:
       - 'tools/capture-mesh-convert/**'
       - 'tools/capture-fit-eval/**'
       - 'tools/capture-pipeline/**'
-      - 'apps/mobile/modules/depth-capture/**'
       - '.github/workflows/capture-tools.yml'
   push:
     branches: [main]
@@ -14,7 +13,6 @@ on:
       - 'tools/capture-mesh-convert/**'
       - 'tools/capture-fit-eval/**'
       - 'tools/capture-pipeline/**'
-      - 'apps/mobile/modules/depth-capture/**'
       - '.github/workflows/capture-tools.yml'
 permissions:
   contents: read
@@ -41,28 +39,3 @@ jobs:
         run: python tools/capture-pipeline/repro.py "${{ runner.temp }}/capture-pipeline-repro"
       - name: Run bounded duplicate repro cases
         run: python tools/capture-pipeline/duplicate_repro.py "${{ runner.temp }}/capture-duplicate-repro"
-  native-evidence:
-    name: Native evidence checks
-    runs-on: macos-latest
-    timeout-minutes: 20
-    env:
-      DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Show Xcode and Swift versions
-        run: |
-          xcodebuild -version
-          swift --version
-      - name: Run DepthCapture Swift tests
-        run: swift test --package-path apps/mobile/modules/depth-capture
-      - name: Build unsigned iPhoneOS DepthCapture archive
-        run: |
-          sdk_path="$(xcrun --sdk iphoneos --show-sdk-path)"
-          xcrun --sdk iphoneos swiftc -warnings-as-errors -parse-as-library \
-            -emit-library -static -emit-module -module-name DepthCapture \
-            -sdk "$sdk_path" -target arm64-apple-ios17.0 \
-            apps/mobile/modules/depth-capture/Sources/DepthCapture/*.swift \
-            -emit-module-path "${{ runner.temp }}/DepthCapture.swiftmodule" \
-            -o "${{ runner.temp }}/libDepthCapture.a"

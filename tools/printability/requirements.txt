@@ -1,2 +1,0 @@
-# Optional BSD-3-Clause vectorised backend (analyzer.py has an identical stdlib fallback)
-numpy==2.3.*
