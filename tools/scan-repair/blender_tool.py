@@ -199,7 +199,70 @@ def apply_modifier(obj,bm,kind, **params):
     return bm
 
 
-def denoise(bm,a):
+def umbrella(bm):
+    """Per-vertex offset along the normal from the inverse-length weighted one-ring average (mm)."""
+    bm.verts.index_update()
+    co = np.array([tuple(v.co) for v in bm.verts]).reshape(-1,3)
+    pairs = np.array([[v.index for v in e.verts] for e in bm.edges],dtype=np.int64).reshape(-1,2)
+    i, j = np.concatenate([pairs[:,0],pairs[:,1]]), np.concatenate([pairs[:,1],pairs[:,0]])
+    weight = 1/np.maximum(np.linalg.norm(co[j]-co[i],axis=1),1e-9)
+    mean = np.stack([np.bincount(i,weight*co[j,k],len(co)) for k in range(3)],axis=1)
+    mean /= np.maximum(np.bincount(i,weight,len(co)),1e-300)[:,None]
+    normal = np.array([tuple(v.normal) for v in bm.verts]).reshape(-1,3)
+    return ((co-mean)*normal).sum(axis=1), mean
+
+
+OUTLIER_RATIO = 8
+OUTLIER_FLOOR = .25
+
+
+def drop_outliers(bm, movable, enabled=True):
+    """Pull isolated single-vertex outliers on captured surface back to their one-ring average.
+
+    A vertex is an outlier only when its offset is OUTLIER_RATIO times the median offset of the
+    ring beyond its neighbours, at least OUTLIER_FLOOR of the median edge length, and three times
+    its tallest neighbour's. Repeated relief (stitches, knurling, text) raises that outer ring, so
+    it stays. Vertices on open boundaries or non-manifold edges are never pulled. Disabled, it
+    reports the same fields with nothing removed."""
+    offset, mean = umbrella(bm)
+    size = abs(offset)
+    floor = OUTLIER_FLOOR*float(np.median([e.calc_length() for e in bm.edges]))
+    moved = []
+    for v in bm.verts if enabled else ():
+        k = v.index
+        if movable[k] or size[k] < floor or not v.is_manifold or any(not e.is_manifold for e in v.link_edges):
+            continue
+        ring = {e.other_vert(v) for e in v.link_edges}
+        if size[k] < 3*max(size[u.index] for u in ring):
+            continue
+        outer = {e.other_vert(u) for u in ring for e in u.link_edges}-ring-{v}
+        if outer and size[k] > OUTLIER_RATIO*float(np.median([size[u.index] for u in outer])):
+            moved.append((v,float(size[k])))
+    spots = [[float(c) for c in v.co] for v,_ in moved]
+    touched = np.zeros(len(size),dtype=bool)
+    for v,_ in moved:
+        touched[[v.index]+[e.other_vert(v).index for e in v.link_edges]] = True
+    for v,_ in moved:
+        v.co = Vector(mean[v.index])
+    normals(bm)
+    return {"ratio":OUTLIER_RATIO,"floorMm":floor,"removed":len(moved),
+            "maxOffsetMm":max((m for _,m in moved),default=0.0),
+            "inputPositionsMm":spots}, touched
+
+
+def filled_vertices(bm):
+    """Vertices of filled faces (hole fills and coarse refills), including their rim: the seam
+    they share with captured faces."""
+    bm.verts.index_update()
+    marks = [l for l in (bm.faces.layers.int.get(INFERRED),bm.faces.layers.int.get(FILLED)) if l is not None]
+    filled = np.zeros(len(bm.verts),dtype=bool)
+    for f in bm.faces:
+        if any(f[l] > 0 for l in marks):
+            filled[[v.index for v in f.verts]] = True
+    return filled
+
+
+def denoise(bm,a,region):
     # Taubin lambda|mu cycles: the negative mu pass undoes the shrinkage of each lambda pass.
     bm.verts.index_update()
     co = np.array([tuple(v.co) for v in bm.verts]).reshape(-1,3)
@@ -210,7 +273,7 @@ def denoise(bm,a):
     locked[np.array([v.index for e in bm.edges if not e.is_manifold or e.calc_face_angle(0)>sharp
                      for v in e.verts],dtype=np.int64)] = True
     i, j = np.concatenate([pairs[:,0],pairs[:,1]]), np.concatenate([pairs[:,1],pairs[:,0]])
-    free = ~locked & (np.bincount(i,minlength=len(co)) > 0)
+    free = ~locked & (np.bincount(i,minlength=len(co)) > 0) & region
     for _ in range(a["denoise_iterations"]):
         moved = co.copy()
         for step in (a["denoise_factor"],a["denoise_mu"]):
@@ -230,6 +293,7 @@ def denoise(bm,a):
 
 
 INFERRED = "stm_inferred"
+FILLED = "stm_hole_filled"
 
 
 def coarse_regions(bm, crease, limit, layer):
@@ -635,7 +699,11 @@ def repair(obj,bm,a):
             bmesh.ops.delete(bm,geom=list(group),context="VERTS")
             removed += 1
     ops.append({"name":"dropComponents","metric":a["component_metric"],"fractionOfLargest":a["component_fraction"],"removed":removed})
+    # The layer precedes the fill: adding a layer invalidates element references.
+    holes = bm.faces.layers.int.get(FILLED) or bm.faces.layers.int.new(FILLED)
     filled = bmesh.ops.holes_fill(bm,edges=[e for e in bm.edges if e.is_boundary],sides=a["hole_max_edges"])
+    for f in filled["faces"]:
+        f[holes] = 1
     normals(bm)
     ops.append({"name":"fillHoles","maxEdges":a["hole_max_edges"],"facesAdded":len(filled["faces"])})
     if a["coarse_fill"] == "refill":
@@ -656,10 +724,28 @@ def repair(obj,bm,a):
         bm.from_mesh(obj.data)
         normals(bm)
     ops.append({"name":"voxelRemesh","applied":fallback,"forced":a["force_voxel"],"voxelSizeMm":a["voxel_size_mm"],"adaptivity":0})
-    denoise(bm,a)
+    # Captured surface is measurement: by default only filled faces and their rim move.
+    # A voxel remesh has already rebuilt every face, so then the whole surface is smoothed.
+    captured = ~filled_vertices(bm)
+    region = np.ones(len(captured),dtype=bool) if a["denoise_scope"] == "all" or fallback else ~captured
+    relief, _ = umbrella(bm)
+    start = np.array([tuple(v.co) for v in bm.verts]).reshape(-1,3)
+    outliers, touched = drop_outliers(bm,region,enabled=a["denoise_iterations"] > 0)
+    denoise(bm,a,region)
+    after, _ = umbrella(bm)
+    moved = np.linalg.norm(np.array([tuple(v.co) for v in bm.verts]).reshape(-1,3)-start,axis=1)
+    # Relief is compared on captured vertices away from removed outliers, whose spikes would dominate it.
+    kept = captured & ~touched
+    rms = lambda x: float(np.sqrt(np.mean(x[kept]**2))) if kept.any() else 0.0
     ops.append({"name":"denoise","method":"Taubin lambda|mu cycles; inverse edge-length weights",
+                "scope":"all" if region.all() else "filled","rebuiltByVoxelRemesh":fallback,
                 "iterations":a["denoise_iterations"],"factor":a["denoise_factor"],"mu":a["denoise_mu"],
-                "maxDisplacementMm":a["denoise_max_mm"],"sharpAngleDeg":a["sharp_angle_deg"]})
+                "maxDisplacementMm":a["denoise_max_mm"],"sharpAngleDeg":a["sharp_angle_deg"],
+                "movableVertices":int(region.sum()),"outliers":outliers,
+                # Detail kept on captured surface: one-ring relief RMS before and after this step.
+                "capturedRelief":{"vertices":int(kept.sum()),"rmsBeforeMm":rms(relief),"rmsAfterMm":rms(after),
+                                  "ratio":rms(after)/rms(relief) if rms(relief) else 1.0,
+                                  "maxMoveMm":float(moved[kept].max()) if kept.any() else 0.0}})
     bmesh.ops.triangulate(bm,faces=list(bm.faces))
     ops.append({"name":"triangulate","quadMethod":"BEAUTY","ngonMethod":"BEAUTY"})
     target = a["target_faces"]

@@ -146,10 +146,10 @@ class RepairTests(unittest.TestCase):
         self.assertLess(r["deviation"]["maxMm"], 1e-5)
         self.assertEqual(r["after"]["vertices"], 8)
 
-    def test_default_denoise_smooths_without_shrinking(self):
+    def test_scope_all_denoise_smooths_without_shrinking(self):
         # Seeded radial noise on a sphere: plain Laplacian steps shrink it; Taubin must not.
         vertices, faces = icosphere(20, 4, noise=.05, seed=7)
-        r = self.repair(self.mesh("noisy-sphere.obj", vertices, faces))
+        r = self.repair(self.mesh("noisy-sphere.obj", vertices, faces), "--denoise-scope", "all")
         repaired = [tuple(map(float, line.split()[1:])) for line in
                     (self.base/"out"/"repaired.obj").read_text().splitlines() if line.startswith("v ")]
         self.assertLess(radial_roughness(repaired), radial_roughness(vertices)*.5)
@@ -160,6 +160,69 @@ class RepairTests(unittest.TestCase):
         denoise = next(o for o in r["operations"] if o["name"]=="denoise")
         self.assertEqual((denoise["iterations"], denoise["factor"], denoise["mu"], denoise["maxDisplacementMm"]),
                          (15, .5, -.53, .35))
+        self.assertEqual(denoise["scope"], "all")
+        self.assertLess(denoise["capturedRelief"]["ratio"], .95)
+
+    def test_default_keeps_captured_relief_and_drops_only_isolated_outliers(self):
+        # Knurl-like repeated relief, 0.3 mm deep, with one 1.5 mm spike. By default captured
+        # surface is measurement: the relief survives vertex for vertex and only the spike goes.
+        vertices, faces = icosphere(20, 4)
+        def relief(x, y, z):
+            r = math.hypot(x, y, z)
+            bump = .3*math.cos(9*math.atan2(y, x))*math.cos(9*math.asin(z/r))
+            return tuple(c/r*(20+bump) for c in (x, y, z))
+        vertices = [relief(*v) for v in vertices]
+        vertices[0] = tuple(c*21.5/20 for c in vertices[0])
+        r = self.repair(self.mesh("knurl.obj", vertices, faces), "--orient", "keep", name="knurl")
+        denoise = next(o for o in r["operations"] if o["name"]=="denoise")
+        self.assertEqual((denoise["scope"], denoise["movableVertices"], denoise["outliers"]["removed"]), ("filled", 0, 1))
+        for actual, spot in zip(denoise["outliers"]["inputPositionsMm"], [vertices[0]]):
+            self.assertLess(math.dist(actual, spot), 1e-3)
+        self.assertAlmostEqual(denoise["capturedRelief"]["ratio"], 1, delta=.03)
+        out = [tuple(map(float, line.split()[1:4])) for line in
+               (self.base/"knurl"/"repaired.obj").read_text().splitlines() if line.startswith("v ")]
+        self.assertLess(math.hypot(*out[0]), 20.6)
+        self.assertLess(max(math.dist(a, b) for a, b in zip(out[1:], vertices[1:])), 1e-4)
+        # Smoothing everything, as before, erases the relief the default keeps.
+        smoothed = self.repair(self.mesh("knurl.obj", vertices, faces), "--denoise-scope", "all", name="knurl-all")
+        self.assertLess(next(o for o in smoothed["operations"] if o["name"]=="denoise")["capturedRelief"]["ratio"], .9)
+
+    def test_default_smooths_only_filled_faces_and_their_rim(self):
+        # A noisy sphere with an open cap: the hole is filled, then re-filled as a faired patch.
+        # Taubin may move that patch and its rim; every other captured vertex keeps its place.
+        # The cap is small enough that its rim (about 26 degrees) is not a sharp crease.
+        vertices, faces = icosphere(20, 4, noise=.05, seed=11)
+        faces = [f for f in faces if not all(vertices[i][2] > 18 for i in f)]
+        used = sorted({i for f in faces for i in f})
+        index = {i: n for n, i in enumerate(used)}
+        vertices, faces = [vertices[i] for i in used], [tuple(index[i] for i in f) for f in faces]
+        directed = {(f[k], f[(k+1)%3]) for f in faces for k in range(3)}
+        rim = {i for a,b in directed if (b,a) not in directed for i in (a,b)}
+        r = self.repair(self.mesh("open-cap.obj", vertices, faces), "--orient", "keep", name="open-cap")
+        self.assertGreater(next(o for o in r["operations"] if o["name"]=="fillHoles")["facesAdded"], 0)
+        self.assertEqual(next(o for o in r["operations"] if o["name"]=="refillCoarse")["refilled"], 1)
+        denoise = next(o for o in r["operations"] if o["name"]=="denoise")
+        self.assertEqual(denoise["scope"], "filled")
+        self.assertGreater(denoise["movableVertices"], len(rim))
+        self.assertLess(denoise["capturedRelief"]["maxMoveMm"], 1e-4)
+        self.assertEqual((denoise["outliers"]["removed"], denoise["outliers"]["inputPositionsMm"]), (0, []))
+        out = [tuple(map(float, line.split()[1:4])) for line in
+               (self.base/"open-cap"/"repaired.obj").read_text().splitlines() if line.startswith("v ")]
+        moves = [math.dist(a, b) for a, b in zip(out, vertices, strict=False)]
+        self.assertLess(max(m for i, m in enumerate(moves) if i not in rim), 1e-4)
+        self.assertGreater(max(moves[i] for i in rim), 1e-3)
+        self.assertLessEqual(max(moves), .35+1e-4)
+        # The faired patch itself moves too: compare it with the same repair without cycles.
+        off = self.repair(self.mesh("open-cap.obj", vertices, faces), "--orient", "keep",
+                          "--denoise-iterations", "0", name="open-cap-off")
+        patch = [tuple(map(float, line.split()[1:4])) for line in
+                 (self.base/"open-cap-off"/"repaired.obj").read_text().splitlines() if line.startswith("v ")]
+        self.assertEqual(len(patch), len(out))
+        self.assertGreater(max(math.dist(a, b) for a, b in zip(out[len(vertices):], patch[len(vertices):])), 1e-3)
+        # Without denoise cycles the outlier report keeps its shape.
+        outliers = next(o for o in off["operations"] if o["name"]=="denoise")["outliers"]
+        self.assertEqual(sorted(outliers), ["floorMm", "inputPositionsMm", "maxOffsetMm", "ratio", "removed"])
+        self.assertEqual((outliers["removed"], outliers["inputPositionsMm"]), (0, []))
 
     def test_rejects_amplifying_taubin_pair(self):
         # Lambda .1 with the default mu has pass-band 8.1: every frequency grows, so noise is amplified.
@@ -171,7 +234,7 @@ class RepairTests(unittest.TestCase):
         # A different smoothing pair inside the pass-band bound is accepted and smooths.
         vertices, faces = icosphere(20, 3, noise=.05, seed=3)
         self.repair(self.mesh("pair-sphere.obj", vertices, faces), "--denoise-factor", ".33",
-                    "--denoise-mu=-.34", name="pair-ok")
+                    "--denoise-mu=-.34", "--denoise-scope", "all", name="pair-ok")
         repaired = [tuple(map(float, line.split()[1:])) for line in
                     (self.base/"pair-ok"/"repaired.obj").read_text().splitlines() if line.startswith("v ")]
         self.assertLess(radial_roughness(repaired), radial_roughness(vertices)*.7)
