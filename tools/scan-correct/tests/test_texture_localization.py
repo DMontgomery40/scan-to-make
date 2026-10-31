@@ -105,3 +105,38 @@ class BoundsTests(unittest.TestCase):
     def test_invalid_region_is_rejected_before_worker(self):
         with self.assertRaisesRegex(ValueError,'region'):
             validate('sample_texture_region',{'count':100,'seed':0,'min_mm':[1,0,0],'max_mm':[0,1,1]})
+
+
+@unittest.skipUnless(os.environ.get('BLENDER'),'set BLENDER=Blender 5.0.1')
+class FeatureRenderAdapterTests(unittest.TestCase):
+    def test_feature_image_reaches_model_adapter(self):
+        import argparse
+        import base64
+        from unittest.mock import patch
+        from adapters import Scripted
+        from runner import run_job
+        with tempfile.TemporaryDirectory() as tmp:
+            base=Path(tmp);mesh=textured_box(base);seen=[]
+            class RecordingScripted(Scripted):
+                def next(self,events,context,images,seconds):
+                    for event in events[-1:]:
+                        if event['type']=='results':
+                            seen.extend(item for item in event['items']
+                                        if item['result'].get('operation')=='render_features')
+                    return super().next(events,context,images,seconds)
+            script=base/'sequence.json'
+            script.write_text(json.dumps([
+                {'name':'sample_texture','arguments':{'count':1000,'seed':0}},
+                {'name':'find_features','arguments':{'threshold':.1,'link_mm':.7,'min_samples':3}},
+                {'name':'render_features','arguments':{'feature_ids':[0],'view_direction':[0,0,1],'resolution':128}},
+            ]))
+            args=argparse.Namespace(mesh=str(mesh),units='mm',texture=None,still=[],reference_mm=None,
+                product='synthetic',adapter='scripted',script=str(script),model=None,base_url=None,key_env=None,
+                out=str(base/'out'),max_steps=5,max_seconds=60,max_faces=200000)
+            with patch('runner.Scripted',RecordingScripted):run_job(args)
+            self.assertEqual(len(seen),1)
+            self.assertEqual(len(seen[0]['images']),1)
+            mime,encoded=seen[0]['images'][0]
+            self.assertEqual(mime,'image/png')
+            relative=next(iter(seen[0]['result']['data']['artifacts']))
+            self.assertEqual(base64.b64decode(encoded),(base/'out/work'/relative).read_bytes())

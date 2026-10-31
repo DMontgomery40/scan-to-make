@@ -4,6 +4,7 @@ import json
 import base64
 import hashlib
 import math
+import re
 from pathlib import Path
 import shutil
 import time
@@ -118,7 +119,9 @@ def run_job(args):
                 rendered = []
                 if not error and call['name'] in ('render','render_features'):
                     for relative in result['data']['artifacts']:
-                        if Path(relative).name in ('pos_x.png','pos_y.png','pos_z.png','iso_pp.png'):
+                        filename=Path(relative).name
+                        if (filename in ('pos_x.png','pos_y.png','pos_z.png','iso_pp.png') or
+                            (call['name']=='render_features' and re.fullmatch(r'feature-view-[0-9]{4}\.png',filename))):
                             image = worker.directory/relative
                             if not image.resolve().is_relative_to(worker.directory):
                                 raise ValueError('worker render escaped job directory')
