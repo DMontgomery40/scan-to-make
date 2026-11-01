@@ -1,0 +1,43 @@
+name: CounterpartMock
+options:
+  bundleIdPrefix: com.dtmont.counterpartmock
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    GENERATE_INFOPLIST_FILE: YES
+    MARKETING_VERSION: "2.0"
+    CURRENT_PROJECT_VERSION: "1"
+targets:
+  MockPhone:
+    type: application
+    platform: iOS
+    deploymentTarget: "27.0"
+    sources:
+      - Shared
+      - iOS
+      - path: assets
+        buildPhase: resources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.dtmont.counterpartmock.phone
+        PRODUCT_NAME: Counterpart
+        TARGETED_DEVICE_FAMILY: "1,2"
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
+        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
+        CODE_SIGNING_ALLOWED: NO
+  MockMac:
+    type: application
+    platform: macOS
+    deploymentTarget: "27.0"
+    sources:
+      - Shared
+      - Mac
+      - path: assets
+        buildPhase: resources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.dtmont.counterpartmock.mac
+        PRODUCT_NAME: Counterpart Mock
+        CODE_SIGN_IDENTITY: "-"
+        CODE_SIGN_STYLE: Manual

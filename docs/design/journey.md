@@ -1,5 +1,7 @@
 # Scan to Make: the consumer journey
 
+> **Superseded in part (2026-11-01).** [overhaul/PRD.md](overhaul/PRD.md) replaces the screen specs in §5–§9. The decisions in §3 (pairing, the companion, model sign-in) still stand unless the PRD changes them.
+
 From "open the app" to "part on the print bed", on iPhone, iPhone Duo, iPad and the Mac.
 
 2026-10-31. Scope is the accepted 2026-10-31 decision: LiDAR scan + defect cleanup + hand-off to bambu-printer-mcp or mcp-3D-printer-server, selectable from the start. That decision supersedes D002 and the template/design scope. Mockups are in [`mockups/`](mockups/); open [`mockups/index.html`](mockups/index.html).
