@@ -56,6 +56,17 @@ import ModelIO
                 let row = table.numberOfRows > 0 && table.rowView(atRow:0, makeIfNecessary:false) != nil
                 FileHandle.standardError.write(Data("\(shot.name): rows \(table.numberOfRows), row view \(row), visible \(table.visibleRect), on screen \(window.occlusionState.contains(.visible))\n".utf8))
             }
+            // Stability: relayout again and again, as hovering does, and watch the window. Any movement of
+            // its frame or minimum size after it has settled is a resize loop: a shaking window.
+            var frames = Set<String>(), minimums = Set<String>()
+            for _ in 0..<40 {
+                window.contentView?.needsLayout = true
+                window.contentView?.layoutSubtreeIfNeeded()
+                try await Task.sleep(for:.milliseconds(40))
+                frames.insert(NSStringFromRect(window.frame)); minimums.insert(NSStringFromSize(window.contentMinSize))
+            }
+            let steady = frames.count == 1 && minimums.count == 1
+            FileHandle.standardError.write(Data("stability \(shot.name): \(steady ? "steady" : "UNSTABLE") frames \(frames.count) minimums \(minimums.count)\n".utf8))
             try png(of:window, to:output.appendingPathComponent(shot.name + ".png"))
             // The live SCNView draws through Metal, which the window capture can't see: ask it directly.
             if shot.threeD, let live = findSceneView(window.contentView!) {
