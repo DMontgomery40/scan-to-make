@@ -341,3 +341,13 @@ test('live printer status identifies its own job and omits stale progress for a 
   assert.equal(loaded.print.printerStatus.percent,undefined);
   assert.equal(loaded.print.printerStatus.remainingMinutes,undefined);
 });
+
+
+test('Bambu live timeRemaining is shown for its running printer job', async () => {
+ const report={connected:true,status:'RUNNING',raw:{gcode_state:'RUNNING'},print:{filename:'Checked mount',progress:3,timeRemaining:42}};
+ const {service,store,object}=await setup({printerReport:report});
+ await store.update(object.id,o=>({...o,print:{bundleId:'00000000-0000-4000-8000-000000000001'}}));
+ const loaded=await service.get(object.id);
+ assert.equal(loaded.print.printerStatus.percent,3);
+ assert.equal(loaded.print.printerStatus.remainingMinutes,42);
+});

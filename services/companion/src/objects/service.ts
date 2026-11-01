@@ -151,7 +151,7 @@ export class ObjectService {
           const job = record(value.print) ? value.print.filename : raw.subtask_name;
           const active = ['RUNNING','PREPARE','PAUSE','SLICING'].includes(state.toUpperCase());
           const percent = record(value.print) ? value.print.progress : undefined;
-          const remaining = record(value.print) ? value.print.remaining : undefined;
+          const remaining = record(value.print) ? (value.print.timeRemaining ?? value.print.remaining) : undefined;
           return {...(active && typeof percent === 'number' && percent >= 0 && percent <= 100 ? {percent} : {}),
             ...(active && typeof remaining === 'number' && remaining >= 0 ? {remainingMinutes:remaining} : {}), state:state.slice(0,40), ...(typeof job === "string" && job ? {job:job.slice(0,160)} : {}), checkedAtMs:Date.now()};
         }).catch(() => undefined)};
