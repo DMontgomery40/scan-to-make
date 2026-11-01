@@ -53,6 +53,7 @@ targets:
       - AppTests
       - App/ModelAccessModel.swift
       - App/NearbyModel.swift
+      - App/ObjectsModel.swift
       - ControlKit/Sources/ControlKit
     dependencies:
       - target: AgentKit
