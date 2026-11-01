@@ -32,6 +32,14 @@ public func loadSample(_ url: URL) throws -> PhotogrammetrySample {
     return sample
 }
 
+/// EXIF orientations that flip the picture (2, 4, 5, 7). A mirrored photo set rebuilds a mirror-image object,
+/// so the phone must never send one; the front camera's preview is mirrored, its photos must not be.
+public func isMirrored(orientation: Int) -> Bool { [2, 4, 5, 7].contains(orientation) }
+
+public func orientation(of sample: PhotogrammetrySample) -> Int {
+    (sample.metadata["Orientation"] as? Int) ?? ((sample.metadata["{TIFF}"] as? [String: Any])?["Orientation"] as? Int) ?? 1
+}
+
 private let idLock = NSLock()
 nonisolated(unsafe) private var idCounter = 1_000_000
 private func nextSampleID() -> Int { idLock.lock(); defer { idLock.unlock() }; idCounter += 1; return idCounter }

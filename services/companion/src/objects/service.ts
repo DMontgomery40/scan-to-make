@@ -5,6 +5,7 @@ import type {PlateVerdict} from './bedcheck.js';
 import type {TouchupInput} from '../touchup/touchup.js';
 import type {TouchupResult} from '../touchup/runner.js';
 import {ObjectStore, type StmObject} from './store.js';
+import {macReconstructRunner, type Reconstruct} from './reconstruct.js';
 
 /** How many of an object's photos go to one touch-up pass. More only costs time. */
 export const PHOTOS_PER_PASS = 24;
@@ -23,6 +24,8 @@ export interface ObjectServiceDeps {
   claudePath: string;
   handoff: PrinterHandoffConfig;
   onChange?: (object: StmObject) => void;
+  /** Rebuilds a handheld scan from its photos (`mac-reconstruct samples`). Defaults to the bundled tool. */
+  reconstruct?: Reconstruct;
   print?: {
     services: {store: HandoffBundleStore; relay: ElicitationRelay; runner: Pick<PrinterHandoffRunner, 'runBundle' | 'backend'>; selection?: PrinterHandoffConfig['selection']};
     judgePlate: (photoBase64: string) => Promise<PlateVerdict>;
@@ -83,6 +86,17 @@ export class ObjectService {
     return this.#changed(await this.#deps.store.update(id, o => ({...o, scan: name})));
   }
 
+  /** One photo of a handheld scan (the object turned in front of a still phone). */
+  async addCapturePhoto(id: string, name: string, bytes: Buffer): Promise<StmObject> {
+    const object = await this.get(id);
+    if (object.state !== 'new' || object.scan) throw new InvalidStateError('The scan can only be added before the touch-up starts.');
+    await this.#deps.store.addFile(id, 'capture', name, bytes);
+    return this.#changed(await this.#deps.store.update(id, o => {
+      const capture = o.capture ?? [];
+      return {...o, capture: capture.includes(name) ? capture : [...capture, name]};
+    }));
+  }
+
   async addPhoto(id: string, name: string, bytes: Buffer): Promise<StmObject> {
     const object = await this.get(id);
     if (object.state !== 'new' && object.state !== 'needs-closeup') throw new InvalidStateError('Photos can only be added before the touch-up starts, or when a close-up was asked for.');
@@ -95,7 +109,7 @@ export class ObjectService {
   async #start(id: string): Promise<StmObject> {
     const object = await this.get(id);
     // Photos only show what something looks like; without a scan, the description says what to make.
-    if (!object.scan && !object.instructions?.trim() && object.state === 'new')
+    if (!object.scan && !object.capture?.length && !object.instructions?.trim() && object.state === 'new')
       throw new InvalidStateError('Describe what to make, or add a scan.');
     if (object.state === 'touching-up') return object;
     if (object.state === 'needs-closeup') return this.#pass(object, {});
@@ -201,22 +215,48 @@ export class ObjectService {
   async #pass(object: StmObject, opts: {note?: string}): Promise<StmObject> {
     const store = this.#deps.store, dir = store.dir(object.id);
     const fromCurrent = opts.note !== undefined && object.current !== undefined;
-    const scan = fromCurrent ? [join(dir, object.current!.model)] : object.scan ? [join(dir, 'scan', object.scan)] : [];
-    const photos = spreadPick(object.photos, PHOTOS_PER_PASS).map(name => join(dir, 'photos', name));
+    // A handheld scan is rebuilt into scan/scan.usdz first, once; its photos also show the touch-up the object.
+    const build = !fromCurrent && !object.scan && (object.capture?.length ?? 0) > 0;
+    const capturePhotos = (object.capture ?? []).map(name => join(dir, 'capture', name));
+    const photos = spreadPick([...object.photos.map(name => join(dir, 'photos', name)), ...capturePhotos], PHOTOS_PER_PASS);
     const startedAtMs = Date.now();
     const running = await store.update(object.id, o => ({...o, state: 'touching-up', question: undefined, failure: undefined,
+      ...(build ? {progress: 'Building the model from your photos.'} : {progress: undefined}),
       passes: [...o.passes, {startedAtMs, ...(opts.note ? {note: opts.note} : {})}]}));
     this.#changed(running);
-    const input: TouchupInput = {root: join(dir, 'passes'), objectId: 'pass', scan, photos, handoff: this.#deps.handoff, claudePath: this.#deps.claudePath,
-      ...(object.instructions ? {instructions: object.instructions} : {}),
-      ...(opts.note !== undefined ? {note: opts.note, ...(object.current?.summary ? {summary: object.current.summary} : {})} : {})};
     const controller = new AbortController();
     this.#controllers.set(object.id, controller);
-    const work = this.#deps.runTouchup({...input, signal: controller.signal})
+    const work = (async () => {
+      let scanName = object.scan;
+      if (build) scanName = await this.#build(object.id, dir, controller.signal);
+      const scan = fromCurrent ? [join(dir, object.current!.model)] : scanName ? [join(dir, 'scan', scanName)] : [];
+      const input: TouchupInput = {root: join(dir, 'passes'), objectId: 'pass', scan, photos, handoff: this.#deps.handoff, claudePath: this.#deps.claudePath,
+        ...(object.instructions ? {instructions: object.instructions} : {}),
+        ...(opts.note !== undefined ? {note: opts.note, ...(object.current?.summary ? {summary: object.current.summary} : {})} : {})};
+      return this.#deps.runTouchup({...input, signal: controller.signal});
+    })()
       .then(result => this.#finish(object.id, startedAtMs, result), error => this.#fail(object.id, startedAtMs, error))
       .finally(() => { this.#running.delete(object.id); this.#controllers.delete(object.id); });
     this.#running.set(object.id, work);
     return running;
+  }
+
+  /** Rebuilds a handheld scan on this Mac, showing progress in words, and records it as the object's scan. */
+  async #build(id: string, dir: string, signal: AbortSignal): Promise<string> {
+    const reconstruct = this.#deps.reconstruct ?? macReconstructRunner();
+    const store = this.#deps.store;
+    let shownAt = 0, pending: string | undefined, writing = Promise.resolve();
+    const show = (words: string) => {
+      pending = words;
+      if (Date.now() - shownAt < 1000) return;   // at most one update a second
+      shownAt = Date.now();
+      writing = writing.then(async () => { this.#changed(await store.update(id, o => ({...o, progress: pending}))); }).catch(() => undefined);
+    };
+    await mkdir(join(dir, 'scan'), {recursive: true});
+    await reconstruct({photosDir: join(dir, 'capture'), output: join(dir, 'scan', 'scan.usdz'), masksDir: join(dir, 'capture-masks'), signal, onProgress: show});
+    await writing;
+    this.#changed(await store.update(id, o => ({...o, scan: 'scan.usdz', progress: undefined})));
+    return 'scan.usdz';
   }
 
   async #finish(id: string, startedAtMs: number, result: TouchupResult & {passDir: string}): Promise<StmObject> {
@@ -240,7 +280,7 @@ export class ObjectService {
     }
     const state: StmObject['state'] = result.status === 'needs_closeup' ? 'needs-closeup'
       : current && result.status !== 'failed' ? 'ready' : 'failed';
-    const updated = await store.update(id, o => ({...o, state,
+    const updated = await store.update(id, o => ({...o, state, progress: undefined,
       ...(current ? {current} : {}),
       ...(state === 'needs-closeup' ? {question: {closeup: result.closeup ?? 'a part of the object'}} : {}),
       ...(state === 'failed' ? {failure: result.reason ?? 'The touch-up stopped without a model.'} : {}),
@@ -252,7 +292,7 @@ export class ObjectService {
 
   async #fail(id: string, startedAtMs: number, error: unknown): Promise<StmObject> {
     const message = error instanceof Error ? error.message : String(error);
-    const updated = await this.#deps.store.update(id, o => ({...o, state: 'failed', failure: message,
+    const updated = await this.#deps.store.update(id, o => ({...o, state: 'failed', failure: message, progress: undefined,
       passes: o.passes.map(p => p.startedAtMs !== startedAtMs ? p : {...p, endedAtMs: Date.now(), status: 'failed'})}));
     return this.#changed(updated);
   }

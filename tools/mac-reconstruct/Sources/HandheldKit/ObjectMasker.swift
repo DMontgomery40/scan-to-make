@@ -25,6 +25,21 @@ public final class ObjectMasker {
 
     public init() {}
 
+    /// Whether this Mac can make masks (Vision's promptable segmentation is new in macOS 27).
+    public static var isSupported: Bool { if #available(macOS 27.0, iOS 27.0, *) { return true } else { return false } }
+
+    /// Whether Vision still has to download its segmentation model (once, on first use).
+    public static func needsDownload() async -> Bool {
+        guard #available(macOS 27.0, iOS 27.0, *) else { return false }
+        if case .ready = await GenerateIterativeSegmentationRequest(seedPoint: NormalizedPoint(x: 0.5, y: 0.5)).assetStatus { return false }
+        return true
+    }
+
+    public static func download() async throws {
+        guard #available(macOS 27.0, iOS 27.0, *) else { return }
+        try await GenerateIterativeSegmentationRequest(seedPoint: NormalizedPoint(x: 0.5, y: 0.5)).downloadAssets()
+    }
+
     public func mask(image original: CVPixelBuffer, depth: DepthImage?) async throws -> Result {
         let image = try ioSurfaceBacked(original)   // for the Metal-backed promptable request
         let width = CVPixelBufferGetWidth(image), height = CVPixelBufferGetHeight(image)
@@ -96,6 +111,11 @@ public final class ObjectMasker {
             guard let point = component.deepestInteriorPoint() else { continue }
             let u = (Double(point.x) + 0.5) / Double(cw), v = (Double(point.y) + 0.5) / Double(ch)
             var score = Double(point.depth) * exp(-3 * hypot(u - 0.5, v - 0.5))
+            // The held object is the nearest blob: a face or body further back loses even when it is bigger.
+            if let depth, let nearest {
+                let d = depth.at(u: u, v: v)
+                if d > 0 { score *= exp(-Double(max(0, d - nearest)) / 0.08) }
+            }
             if wrists.contains(where: { component.touches(u: $0.u, v: $0.v, radius: radius * 2) }) { score *= 0.25 }
             if let last = lastSeed, component.touches(u: last.u, v: last.v, radius: radius) { score *= 2 }
             if score > bestScore { bestScore = score; seed = (u, v); seedBox = component.bounds(scaledTo: (cw, ch), grownBy: 0.15) }

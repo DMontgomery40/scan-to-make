@@ -26,6 +26,10 @@ export interface StmObject {
   scan?: string;
   /** File names under photos/, in upload order. */
   photos: string[];
+  /** A handheld scan: its photos under capture/ (with depth), rebuilt into scan/scan.usdz on this Mac. */
+  capture?: string[];
+  /** What the Mac is doing right now, in words, while it is longer than a moment (building a handheld scan). */
+  progress?: string;
   passes: ObjectPass[];
   current?: {model: string; renders: string[]; sizeMm?: [number, number, number]; summary?: string};
   question?: {closeup: string};
@@ -90,7 +94,7 @@ export class ObjectStore {
   }
 
   /** Stores an uploaded file under the object; the name must be a plain file name. */
-  async addFile(id: string, kind: 'scan' | 'photos', name: string, bytes: Buffer): Promise<string> {
+  async addFile(id: string, kind: 'scan' | 'photos' | 'capture', name: string, bytes: Buffer): Promise<string> {
     if (!FILE_NAME.test(name) || name.includes('..')) throw new Error('Invalid file name');
     const folder = join(this.dir(id), kind);
     await mkdir(folder, {recursive: true});

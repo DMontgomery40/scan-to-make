@@ -62,9 +62,14 @@ let started = Date()
 /// Object masks for handheld photos, written as PNGs next to nothing else, so a run can be checked afterwards.
 func prepareMasks(for files: [URL], in folder: URL) async throws {
     try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    if maskFolder == nil {
+        guard ObjectMasker.isSupported else { emit(["error": "needs-macos-27"]); exit(3) }
+        if await ObjectMasker.needsDownload() { emit(["stage": "downloading"]); try await ObjectMasker.download() }
+    }
     let masker = ObjectMasker()
     for (index, file) in files.enumerated() {
         let sample = try loadSample(file)
+        if isMirrored(orientation: orientation(of: sample)) { emit(["error": "mirrored-photos", "file": file.lastPathComponent]); exit(4) }
         let width = CVPixelBufferGetWidth(sample.image), height = CVPixelBufferGetHeight(sample.image)
         let target = folder.appendingPathComponent(file.deletingPathExtension().lastPathComponent + ".png")
         var note: [String: Any] = ["stage": "masking", "done": index + 1, "total": files.count]

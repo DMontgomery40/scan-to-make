@@ -30,6 +30,21 @@ final class HandheldKitTests: XCTestCase {
         XCTAssertEqual(try XCTUnwrap(exif["FocalLength"] as? Double), 50 * 9.30 / 64, accuracy: 0.01)
     }
 
+    /// A mirrored photo set would rebuild a mirror-image part: the samples mode refuses mirrored orientations.
+    func testMirroredOrientations() throws {
+        XCTAssertEqual((1...8).filter { isMirrored(orientation: $0) }, [2, 4, 5, 7])
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("handheldkit-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let ctx = CGContext(data: nil, width: 8, height: 6, bitsPerComponent: 8, bytesPerRow: 0,
+                            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue)!
+        for tag in [1, 5, 6] {
+            let url = dir.appendingPathComponent("\(tag).heic")
+            try writePhoto(ctx.makeImage()!, depth: nil, camera: PhotoCamera(focalPixels: 6, orientation: UInt32(tag)), to: url)
+            XCTAssertEqual(orientation(of: try loadSample(url)), tag)
+        }
+    }
+
     func testMaskHelpers() {
         var mask = GrayImage(width: 20, height: 10)
         for y in 2..<8 { for x in 2..<8 { mask[x, y] = 255 } }       // big blob

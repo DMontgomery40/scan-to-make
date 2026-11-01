@@ -7,7 +7,7 @@ import {ObjectNotFoundError, type StmObject} from './store.js';
 
 const READ: RemoteScope = 'projects:read', WRITE: RemoteScope = 'captures:import', PRINT: RemoteScope = 'printer-handoff:use';
 const MAX_SCAN = 64 * 1024 * 1024, MAX_PHOTO = 25 * 1024 * 1024, MAX_JSON = 16 * 1024;
-const PATH = /^\/v1\/objects(?:\/([0-9a-f-]{36})(?:\/(scan|photos|start|corrections|closeup|print|plate\.jpg|plate|model\.stl|renders\/[^/]+))?)?$/;
+const PATH = /^\/v1\/objects(?:\/([0-9a-f-]{36})(?:\/(scan|photos|capture|start|corrections|closeup|print|plate\.jpg|plate|model\.stl|renders\/[^/]+))?)?$/;
 
 class HttpFailure extends Error {
   constructor(readonly status: number, readonly code: string, message = code) { super(message); }
@@ -98,10 +98,12 @@ export function createObjectRoutes(service: ObjectService) {
         let object: StmObject;
         switch (action) {
           case 'scan': object = await service.addScan(id, 'scan.usdz', await body(request, MAX_SCAN)); break;
-          case 'photos': {
+          case 'photos':
+          case 'capture': {
             const name = url.searchParams.get('name') ?? '';
             if (!/^[A-Za-z0-9][A-Za-z0-9._ -]{0,127}$/.test(name) || name.includes('..')) throw new HttpFailure(400, 'invalid-name');
-            object = await service.addPhoto(id, name, await body(request, MAX_PHOTO));
+            const bytes = await body(request, MAX_PHOTO);
+            object = action === 'capture' ? await service.addCapturePhoto(id, name, bytes) : await service.addPhoto(id, name, bytes);
             break;
           }
           case 'start': object = await service.start(id); break;
