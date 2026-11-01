@@ -61,6 +61,11 @@ export function createObjectRoutes(service: ObjectService) {
           throw new HttpFailure(405, 'method-not-allowed');
         }
         if (!action) {
+          if (method === 'DELETE') {
+            await authorize(WRITE);
+            await service.delete(id);
+            return send(response, 200, {deleted: true});
+          }
           if (method !== 'GET') throw new HttpFailure(405, 'method-not-allowed');
           await authorize(READ);
           return send(response, 200, {object: publicObject(await service.get(id))});

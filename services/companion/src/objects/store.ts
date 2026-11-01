@@ -1,5 +1,5 @@
 import {randomUUID} from 'node:crypto';
-import {mkdir, readdir, readFile, rename, writeFile} from 'node:fs/promises';
+import {mkdir, readdir, readFile, rename, rm, writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 
 export type ObjectState = 'new' | 'touching-up' | 'needs-closeup' | 'ready' | 'printing' | 'printed' | 'failed';
@@ -100,6 +100,12 @@ export class ObjectStore {
   }
 
   /** After a restart nothing is still running: mark interrupted work failed so it can be started again. */
+  /** Removes the object and every file it has. */
+  async remove(id: string): Promise<void> {
+    await this.get(id);
+    await rm(this.dir(id), {recursive: true, force: true});
+  }
+
   async recoverInterrupted(): Promise<void> {
     for (const object of await this.list()) {
       if (object.state === 'touching-up' || object.state === 'printing') {
