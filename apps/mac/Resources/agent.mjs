@@ -105,7 +105,10 @@ if (mode === 'configure') {
   const child = spawn(process.execPath,args,{cwd:source,env,stdio:['ignore','inherit','ignore']});
   child.on('exit', code => process.exit(code ?? 1));
 } else if (mode === 'health') {
-  for (let attempt=0; attempt<5; attempt++) {
+  // Cold startup includes the bounded login-shell lookup. Immediate connection
+  // refusals must not exhaust readiness before that startup can finish.
+  const deadline = Date.now() + 15000;
+  while (Date.now() < deadline) {
     const status = await new Promise(resolve=>{
       const child=spawn(process.execPath,[join(source,'deploy/companion/healthcheck.mjs')],{env,cwd:source,stdio:'ignore'});
       child.on('error',()=>resolve(1)); child.on('exit',code=>resolve(code));

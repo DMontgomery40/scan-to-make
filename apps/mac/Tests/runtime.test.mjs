@@ -182,3 +182,16 @@ test('pairing activity uses the selected module and private stdin without printi
   assert.equal(invalid.stdout,'');
   assert.equal(invalid.stderr,'');
 });
+
+test('startup health waits for the companion rather than failing after five immediate connection refusals', async t => {
+  const root=await realpath(await mkdtemp(join(tmpdir(),'stm-health-')));
+  t.after(()=>rm(root,{recursive:true,force:true}));
+  const resources=join(root,'Resources'),state=join(root,'state');
+  const probes=join(resources,'Payload/source/deploy/companion');
+  await mkdir(probes,{recursive:true});await mkdir(state);
+  await copyFile(new URL('../Resources/agent.mjs',import.meta.url),join(resources,'agent.mjs'));
+  await writeFile(join(probes,'healthcheck.mjs'),`import fs from 'node:fs';import path from 'node:path';const file=path.join(process.env.STM_STATE,'attempts');const n=fs.existsSync(file)?Number(fs.readFileSync(file)):0;fs.writeFileSync(file,String(n+1));process.exit(n<5?1:0);`);
+  const result=spawnSync(process.execPath,[join(resources,'agent.mjs'),'health'],{env:{STM_STATE:state,HOME:root,PATH:process.env.PATH},timeout:20000,encoding:'utf8'});
+  assert.equal(result.status,0,'a background companion may take longer than five immediate connection refusals to start');
+  assert.equal(Number(await readFile(join(state,'attempts'),'utf8')),6);
+});
