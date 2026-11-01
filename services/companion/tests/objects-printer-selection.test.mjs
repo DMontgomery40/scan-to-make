@@ -118,6 +118,12 @@ test('unknown printers and changes during a touch-up are rejected without changi
   assert.equal((await service.get(object.id)).printerDestinationId, undefined);
 });
 
+test('a printer without an inventory explains that material must be chosen in its slicer', async t => {
+  const {service, object} = await fixture(t);
+  await service.selectPrinter(object.id, 'second');
+  await assert.rejects(service.filaments(object.id), /Open the model in your slicer/);
+});
+
 test('the phone and local control expose the same destination ids without MCP configuration or credentials', async t => {
   const {service, object, catalog} = await fixture(t);
   const dispatch = createControlDispatcher({auth: {}, companionVersion: 'test', objects: service});
