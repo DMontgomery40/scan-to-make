@@ -443,7 +443,7 @@ struct ObjectPage: View {
                         if let job = report.job { Text("Reported job: \(job)").foregroundStyle(.secondary) }
                         if let percent = report.percent { ProgressView(value:percent,total:100); Text("\(Int(percent))% of reported printer job").monospacedDigit() }
                         if let remaining = report.remainingMinutes { Text("\(Int(remaining)) min remaining").monospacedDigit() }
-                        if report.state == "FAILED" { Text("The printer service blocks a new print while the printer reports this failed job.").foregroundStyle(.orange) }
+                        if report.state == "FAILED" { Text("The previous printer job failed. Inspect the printer and clear the plate before confirming a new print.").foregroundStyle(.orange) }
                     }.textSelection(.enabled)
                 }
                 if object.modelURL != nil { editorActions }
@@ -567,9 +567,9 @@ struct ObjectPage: View {
                     ForEach(catalog.destinations) { Text($0.name).tag($0.id) }
                 } label: { Label("Printer", systemImage:"printer") }
                 .frame(maxWidth:360)
-                .disabled(working || object.state == .touchingUp || object.state == .printing || object.print?.uncertain == true)
+                .disabled(working || object.state == .touchingUp || object.state == .printing)
                 if let destination = object.print?.destination {
-                    Text("Last print: \(destination.name)").font(.caption).foregroundStyle(.secondary)
+                    Text(object.print?.uncertain == true ? "Last attempt: \(destination.name)" : "Last print: \(destination.name)").font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer(minLength:0)
             }

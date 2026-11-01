@@ -970,7 +970,7 @@ struct ObjectDetailView: View {
                         }
                         if let remaining = report.remainingMinutes { Text("\(Int(remaining)) min remaining").font(.subheadline).monospacedDigit() }
                         if report.state == "FAILED" {
-                            Text("The printer reports a failed previous job. The printer service blocks a new print in this state.")
+                            Text("The previous printer job failed. Inspect the printer and clear the plate before confirming a new print.")
                                 .font(.subheadline).foregroundStyle(.orange)
                         }
                         Text("Checked \(Date(timeIntervalSince1970: report.checkedAtMs / 1000), format: .dateTime.hour().minute().second())")
