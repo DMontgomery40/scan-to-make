@@ -1,9 +1,19 @@
 import Foundation
 import RealityKit
+import CoreVideo
+import HandheldKit
 
-// Rebuilds a model from an Object Capture photo folder with Apple's PhotogrammetrySession on the Mac,
-// where detail levels above the iPhone's `.reduced` are available (WWDC23 10191, WWDC24 10107).
-// Usage: mac-reconstruct <images-folder> <output.usdz> [reduced|medium|full|raw]
+// Rebuilds a model with Apple's PhotogrammetrySession on the Mac, where detail levels above the iPhone's
+// `.reduced` are available (WWDC23 10191, WWDC24 10107).
+//
+//   mac-reconstruct <images-folder> <output.usdz> [reduced|medium|full|raw]
+//       An Object Capture photo folder (walk-around scan).
+//   mac-reconstruct samples <images-folder> <output.usdz> [reduced|medium|full|raw]
+//                   [--masks <dir> | --no-masks] [--save-masks <dir> [--masks-only]]
+//       Handheld photos: the camera stays still and the object turns in the hand. Each photo becomes a
+//       PhotogrammetrySample with its embedded depth and EXIF, no gravity, and an object mask. Masks come from
+//       <dir>/<photo-name>.png when given, otherwise from Vision on this Mac (the object without the hand or room).
+//
 // Prints one JSON line per progress step and a final {"done":…} or {"error":…} line.
 
 func emit(_ value: [String: Any]) {
@@ -12,26 +22,106 @@ func emit(_ value: [String: Any]) {
     }
 }
 
-let args = CommandLine.arguments
-guard args.count >= 3 else {
-    FileHandle.standardError.write(Data("usage: mac-reconstruct <images-folder> <output.usdz> [reduced|medium|full|raw]\n".utf8))
-    exit(2)
-}
-let input = URL(fileURLWithPath: args[1], isDirectory: true)
-let output = URL(fileURLWithPath: args[2])
-let details: [String: PhotogrammetrySession.Request.Detail] = ["reduced": .reduced, "medium": .medium, "full": .full, "raw": .raw]
-let detail = details[args.count > 3 ? args[3] : "full"] ?? .full
+func fail(_ message: String) -> Never { emit(["error": message]); exit(1) }
 
-guard PhotogrammetrySession.isSupported else { emit(["error": "Photogrammetry isn't supported on this Mac."]); exit(1) }
+let usage = """
+usage: mac-reconstruct <images-folder> <output.usdz> [reduced|medium|full|raw]
+       mac-reconstruct samples <images-folder> <output.usdz> [reduced|medium|full|raw] [--masks <dir> | --no-masks] [--save-masks <dir> [--masks-only]]
+
+"""
+var args = Array(CommandLine.arguments.dropFirst())
+let samplesMode = args.first == "samples"
+if samplesMode { args.removeFirst() }
+func option(_ name: String) -> String? {
+    guard let i = args.firstIndex(of: name), i + 1 < args.count else { return nil }
+    let value = args[i + 1]; args.removeSubrange(i...(i + 1)); return value
+}
+let maskFolder = option("--masks").map { URL(fileURLWithPath: $0, isDirectory: true) }
+let saveMasks = option("--save-masks").map { URL(fileURLWithPath: $0, isDirectory: true) }
+let noMasks = args.contains("--no-masks"); args.removeAll { $0 == "--no-masks" }
+let masksOnly = args.contains("--masks-only"); args.removeAll { $0 == "--masks-only" }
+// Diagnostics for tests: switch off Apple's own object masking, or drop the photos' depth.
+let noObjectMasking = args.contains("--no-object-masking"); args.removeAll { $0 == "--no-object-masking" }
+let noDepth = args.contains("--no-depth"); args.removeAll { $0 == "--no-depth" }
+guard args.count >= 2 else { FileHandle.standardError.write(Data(usage.utf8)); exit(2) }
+
+let input = URL(fileURLWithPath: args[0], isDirectory: true)
+let output = URL(fileURLWithPath: args[1])
+let details: [String: PhotogrammetrySession.Request.Detail] = ["reduced": .reduced, "medium": .medium, "full": .full, "raw": .raw]
+let detail = details[args.count > 2 ? args[2] : "full"] ?? .full
+
+guard PhotogrammetrySession.isSupported else { fail("Photogrammetry isn't supported on this Mac.") }
 
 var configuration = PhotogrammetrySession.Configuration()
-configuration.sampleOrdering = .sequential      // Object Capture photos are in capture order
+configuration.sampleOrdering = .sequential      // photos are in capture order
 configuration.featureSensitivity = .normal
-configuration.isObjectMaskingEnabled = true    // the object, not the table it stands on
+configuration.isObjectMaskingEnabled = !noObjectMasking   // the object, not what's around it
 
 let started = Date()
+
+/// Object masks for handheld photos, written as PNGs next to nothing else, so a run can be checked afterwards.
+func prepareMasks(for files: [URL], in folder: URL) async throws {
+    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    let masker = ObjectMasker()
+    for (index, file) in files.enumerated() {
+        let sample = try loadSample(file)
+        let width = CVPixelBufferGetWidth(sample.image), height = CVPixelBufferGetHeight(sample.image)
+        let target = folder.appendingPathComponent(file.deletingPathExtension().lastPathComponent + ".png")
+        var note: [String: Any] = ["stage": "masking", "done": index + 1, "total": files.count]
+        if let maskFolder {
+            let supplied = maskFolder.appendingPathComponent(file.deletingPathExtension().lastPathComponent + ".png")
+            let mask = try GrayImage(contentsOf: supplied).resized(width: width, height: height).thresholded()
+            try mask.writePNG(to: target)
+        } else {
+            let depth = sample.depthDataMap.flatMap { DepthImage(buffer: $0) }
+            let result = try await masker.mask(image: sample.image, depth: depth)
+            try result.mask.writePNG(to: target)
+            note["method"] = result.method; note["handJoints"] = result.handJoints; note["excluded"] = result.excludedPoints
+            note["coverage"] = (Double(result.mask.onCount) / Double(width * height) * 1000).rounded() / 1000
+            if result.mask.onCount == 0 { note["empty"] = file.lastPathComponent }
+        }
+        emit(note)
+    }
+}
+
 do {
-    let session = try PhotogrammetrySession(input: input, configuration: configuration)
+    let session: PhotogrammetrySession
+    if samplesMode {
+        let files = try photos(in: input)
+        guard !files.isEmpty else { fail("No photos in \(input.path).") }
+        var masks: URL? = nil
+        if !noMasks {
+            let folder = saveMasks ?? FileManager.default.temporaryDirectory.appendingPathComponent("mac-reconstruct-masks-\(UUID().uuidString)")
+            try await prepareMasks(for: files, in: folder)
+            masks = folder
+            if masksOnly { emit(["done": folder.path, "seconds": Int(Date().timeIntervalSince(started))]); exit(0) }
+        }
+        emit(["samples": files.count, "masked": masks != nil, "stage": "reconstructing"])
+        // Loaded lazily: a few hundred full-resolution photos don't need to sit in memory together.
+        let samples = AnySequence<PhotogrammetrySample> {
+            var iterator = files.makeIterator()
+            return AnyIterator<PhotogrammetrySample> {
+                while let file = iterator.next() {
+                    do {
+                        var sample = try loadSample(file)
+                        if noDepth { sample.depthDataMap = nil }
+                        if let masks {
+                            let mask = try GrayImage(contentsOf: masks.appendingPathComponent(file.deletingPathExtension().lastPathComponent + ".png"))
+                            if mask.onCount == 0 { emit(["skipped": file.lastPathComponent, "reason": "no object found"]); continue }
+                            sample.objectMask = mask.pixelBuffer()
+                        }
+                        return sample
+                    } catch {
+                        emit(["skipped": file.lastPathComponent, "reason": String(describing: error)])
+                    }
+                }
+                return nil
+            }
+        }
+        session = try PhotogrammetrySession(input: samples, configuration: configuration)
+    } else {
+        session = try PhotogrammetrySession(input: input, configuration: configuration)
+    }
     try session.process(requests: [.modelFile(url: output, detail: detail)])
     for try await out in session.outputs {
         switch out {
@@ -40,19 +130,19 @@ do {
         case .requestComplete(_, .modelFile(let url)):
             emit(["done": url.path, "seconds": Int(Date().timeIntervalSince(started))])
         case .requestError(_, let error):
-            emit(["error": String(describing: error)])
-            exit(1)
+            fail(String(describing: error))
         case .processingComplete:
             exit(0)
         case .invalidSample(let id, let reason):
             emit(["skipped": id, "reason": reason])
+        case .skippedSample(let id):
+            emit(["skipped": id, "reason": "not used"])
         case .processingCancelled:
-            emit(["error": "cancelled"]); exit(1)
+            fail("cancelled")
         default:
             break
         }
     }
 } catch {
-    emit(["error": String(describing: error)])
-    exit(1)
+    fail(String(describing: error))
 }
