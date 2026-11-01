@@ -10,10 +10,11 @@ import ControlKit
 // only on the primary action. All object copy comes from ObjectWords.
 
 enum ObjectsStyle {
-    /// The one tint, the same cobalt as the iPhone app: the primary action only.
+    /// The one tint, the same cobalt as the iPhone app: the primary action only. It fills a button under a
+    /// white label, so both variants keep 4.5:1 with white (light #2448D8 about 7:1, dark #3A63F2 about 4.9:1).
     static let accent = Color(nsColor:NSColor(name:nil) { appearance in
         appearance.bestMatch(from:[.aqua, .darkAqua]) == .darkAqua
-            ? NSColor(red:0x7B/255, green:0x95/255, blue:0xFF/255, alpha:1)
+            ? NSColor(red:0x3A/255, green:0x63/255, blue:0xF2/255, alpha:1)
             : NSColor(red:0x24/255, green:0x48/255, blue:0xD8/255, alpha:1)
     })
     /// The model's stage: the iPhone's dark build plate, which the touch-up's renders sit on.
@@ -26,13 +27,45 @@ enum ObjectsStyle {
 
 extension View {
     /// The one prominent button on a page: Liquid Glass in cobalt on macOS 26 and later.
-    @ViewBuilder func primaryAction() -> some View {
-        if #available(macOS 26, *) { buttonStyle(.glassProminent).tint(ObjectsStyle.accent) }
-        else { buttonStyle(.borderedProminent).tint(ObjectsStyle.accent) }
-    }
+    func primaryAction() -> some View { modifier(ActionStyle(prominent:true)) }
     /// Every other button that stands on its own on a page.
-    @ViewBuilder func secondaryAction() -> some View {
-        if #available(macOS 26, *) { buttonStyle(.glass) } else { buttonStyle(.bordered) }
+    func secondaryAction() -> some View { modifier(ActionStyle(prominent:false)) }
+}
+
+private struct ActionStyle: ViewModifier {
+    let prominent: Bool
+    @Environment(\.solidMaterialStandIns) private var standIns
+    func body(content: Content) -> some View {
+        if standIns {
+            content.buttonStyle(SolidStandIn(prominent:prominent))
+        } else if #available(macOS 26, *) {
+            if prominent { content.buttonStyle(.glassProminent).tint(ObjectsStyle.accent) } else { content.buttonStyle(.glass) }
+        } else {
+            if prominent { content.buttonStyle(.borderedProminent).tint(ObjectsStyle.accent) } else { content.buttonStyle(.bordered) }
+        }
+    }
+}
+
+private struct SolidMaterialStandInsKey: EnvironmentKey { static let defaultValue = false }
+extension EnvironmentValues {
+    /// Debug design renders only. An offscreen capture can't draw Liquid Glass (the window server composites
+    /// it), so the renderer can ask for solid stand-ins in the same colours: a cobalt capsule with a white
+    /// label for glass-prominent, a light capsule with the primary label colour for glass.
+    var solidMaterialStandIns: Bool {
+        get { self[SolidMaterialStandInsKey.self] }
+        set { self[SolidMaterialStandInsKey.self] = newValue }
+    }
+}
+
+/// The render-only stand-in for the glass button styles. Never used outside `solidMaterialStandIns`.
+private struct SolidStandIn: ButtonStyle {
+    let prominent: Bool
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .padding(.horizontal, 14).padding(.vertical, 7)
+            .foregroundStyle(prominent ? Color.white : Color.primary)
+            .background(Capsule().fill(prominent ? ObjectsStyle.accent : Color.primary.opacity(0.1)))
+            .overlay(Capsule().strokeBorder(Color.primary.opacity(prominent ? 0 : 0.12), lineWidth:0.5))
     }
 }
 

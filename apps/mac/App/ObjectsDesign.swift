@@ -4,6 +4,7 @@ import AppKit
 import SceneKit
 import simd
 import ModelIO
+import Vision
 import CoreImage
 
 /// Design QA only (Debug builds): `Scan to Make --render-objects-design <folder>` draws the objects
@@ -32,6 +33,8 @@ import CoreImage
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("stm-objects-design-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at:root) }
         let objects = try fixtures(in:root, stills:output)
+        // STM_DESIGN_SOLID=1: solid stand-ins for what the capture can't draw (glass buttons, the sidebar's material).
+        let solid = ProcessInfo.processInfo.environment["STM_DESIGN_SOLID"] == "1"
         let byName = Dictionary(uniqueKeysWithValues:zip(["hook", "bracket", "mug", "clip", "arriving", "knob", "spacer", "noCamera"], objects))
         let list = objects.filter { $0.id != byName["noCamera"]!.id }
         let shots = [
@@ -51,7 +54,7 @@ import CoreImage
             let model = ObjectsModel(companion:FixtureObjects(items:shot.objects))
             await model.refresh()
             model.selection = shot.selection
-            let window = ObjectsWindow.make(model:model, startWith3D:shot.threeD)
+            let window = ObjectsWindow.make(model:model, startWith3D:shot.threeD, standIns:solid)
             window.appearance = NSAppearance(named:shot.dark ? .darkAqua : .aqua)
             if let size = shot.size { window.setContentSize(size) }
             window.alphaValue = 0 // drawn for the PNG only, never seen on screen
@@ -62,7 +65,12 @@ import CoreImage
                 let row = table.numberOfRows > 0 && table.rowView(atRow:0, makeIfNecessary:false) != nil
                 FileHandle.standardError.write(Data("\(shot.name): rows \(table.numberOfRows), row view \(row), visible \(table.visibleRect), on screen \(window.occlusionState.contains(.visible))\n".utf8))
             }
-            try png(of:window, to:output.appendingPathComponent(shot.name + ".png"))
+            dumpSidebar(window, name:shot.name)
+            let sidebar = try sidebarDrawing(window, name:shot.name, to:output)
+            if let sidebar {
+                FileHandle.standardError.write(Data(("sidebar text \(shot.name): " + sidebar.1.joined(separator:" / ") + "\n").utf8))
+            }
+            try png(of:window, to:output.appendingPathComponent(shot.name + ".png"), sidebar:solid ? sidebar?.0 : nil)
             // The live SCNView draws through Metal, which the window capture can't see: ask it directly.
             if shot.threeD, let live = findSceneView(window.contentView!) {
                 try write(live.snapshot(), to:output.appendingPathComponent(shot.name + "-scnview.png"))
@@ -184,7 +192,65 @@ import CoreImage
         return nil
     }
 
-    private static func png(of window: NSWindow, to url: URL) throws {
+    /// The sidebar list's rows as the table has them (their words are read from `sidebarDrawing`'s pixels:
+    /// SwiftUI builds no accessibility tree in a window nobody can see).
+    private static func dumpSidebar(_ window: NSWindow, name: String) {
+        guard let table = findTable(window.contentView!) else {
+            FileHandle.standardError.write(Data("sidebar \(name): no list\n".utf8)); return
+        }
+        let heights = (0..<table.numberOfRows).map { row in table.rowView(atRow:row, makeIfNecessary:true).map { "\(Int($0.frame.height))" } ?? "none" }
+        FileHandle.standardError.write(Data("sidebar \(name): \(table.numberOfRows) rows (heights \(heights.joined(separator:","))), selected \(Array(table.selectedRowIndexes))\n".utf8))
+    }
+
+    /// The sidebar list drawn on its own by AppKit (`cacheDisplay`), which does draw its rows: the window
+    /// capture can't, because the sidebar sits in a material only the window server composites. The selected
+    /// row's selection is a material too, so it is drawn in the system's selection colour instead. Sidebar text
+    /// is vibrant (blended against the material by the window server), so its colours here are not the real
+    /// ones: this proves the rows and their words, not their text colour. Returns
+    /// the drawing (also written as sidebar-<shot>.png) and the text read back from its pixels.
+    private static func sidebarDrawing(_ window: NSWindow, name: String, to output: URL) throws -> (NSBitmapImageRep, [String])? {
+        guard let table = findTable(window.contentView!), table.numberOfRows > 0,
+              let rep = table.bitmapImageRepForCachingDisplay(in:table.bounds) else { return nil }
+        var hidden: [NSView] = []
+        for row in table.selectedRowIndexes {
+            guard let view = table.rowView(atRow:row, makeIfNecessary:false) else { continue }
+            for effect in view.subviews.compactMap({ $0 as? NSVisualEffectView }) where !effect.isHidden { effect.isHidden = true; hidden.append(effect) }
+        }
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep:rep)
+        (window.appearance ?? NSAppearance.currentDrawing()).performAsCurrentDrawingAppearance {
+            NSColor.underPageBackgroundColor.setFill()
+            NSRect(origin:.zero, size:rep.size).fill()
+        }
+        NSGraphicsContext.restoreGraphicsState()
+        (window.appearance ?? NSAppearance.currentDrawing()).performAsCurrentDrawingAppearance {
+            // Selection fills under the rows, then the rows themselves.
+            for row in table.selectedRowIndexes {
+                let rect = table.rect(ofRow:row).insetBy(dx:10, dy:1)
+                NSGraphicsContext.saveGraphicsState()
+                NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep:rep)
+                let flipped = NSRect(x:rect.minX, y:table.bounds.height - rect.maxY, width:rect.width, height:rect.height)
+                // Unemphasized: the drawing's text colours are the inactive window's, so its selection is too.
+                NSColor.unemphasizedSelectedContentBackgroundColor.setFill()
+                NSBezierPath(roundedRect:flipped, xRadius:8, yRadius:8).fill()
+                NSGraphicsContext.restoreGraphicsState()
+            }
+            table.cacheDisplay(in:table.bounds, to:rep)
+        }
+        hidden.forEach { $0.isHidden = false }
+        try rep.representation(using:.png, properties:[:])?.write(to:output.appendingPathComponent("sidebar-\(name).png"))
+        var lines: [String] = []
+        if let image = rep.cgImage {
+            let request = VNRecognizeTextRequest()
+            request.recognitionLevel = .accurate
+            request.usesLanguageCorrection = false
+            try VNImageRequestHandler(cgImage:image).perform([request])
+            lines = (request.results ?? []).sorted { $0.boundingBox.minY > $1.boundingBox.minY }.compactMap { $0.topCandidates(1).first?.string }
+        }
+        return (rep, lines)
+    }
+
+    private static func png(of window: NSWindow, to url: URL, sidebar: NSBitmapImageRep? = nil) throws {
         // The frame view (with the title bar) when it has a layer; a borderless window has only its content's.
         let view = [window.contentView!.superview, window.contentView].compactMap { $0 }.first { $0.layer != nil } ?? window.contentView!
         view.layoutSubtreeIfNeeded()
@@ -204,7 +270,19 @@ import CoreImage
         context.fill(CGRect(x:0, y:0, width:width, height:height))
         context.scaleBy(x:scale, y:scale)
         if layer.isGeometryFlipped == false && view.isFlipped == false {} // AppKit layers draw bottom-up like CG
-        (window.appearance ?? NSAppearance.currentDrawing()).performAsCurrentDrawingAppearance { layer.render(in:context) }
+        (window.appearance ?? NSAppearance.currentDrawing()).performAsCurrentDrawingAppearance {
+            layer.render(in:context)
+            // Solid stand-in: the sidebar's material hides the list from this capture, so lay AppKit's own
+            // drawing of the list over it, on a solid sidebar colour, where the window shows it.
+            if let sidebar, let table = findTable(window.contentView!), let list = table.enclosingScrollView {
+                NSGraphicsContext.saveGraphicsState()
+                NSGraphicsContext.current = NSGraphicsContext(cgContext:context, flipped:false)
+                NSColor.underPageBackgroundColor.setFill()
+                list.convert(list.bounds, to:nil).fill()
+                sidebar.draw(in:table.convert(table.bounds, to:nil))
+                NSGraphicsContext.restoreGraphicsState()
+            }
+        }
         guard let image = context.makeImage() else { throw CocoaError(.fileWriteUnknown) }
         try NSBitmapImageRep(cgImage:image).representation(using:.png, properties:[:])!.write(to:url)
     }
