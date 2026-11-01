@@ -26,14 +26,18 @@ enum HandheldCapture {
         #endif
     }
 
-    #if targetEnvironment(simulator)
-    /// Simulator only: `-STMHandheldPreview ready|capturing` opens the capture screen at launch, for screenshots.
+    /// Launched with `-STMHandheldPreview ready` the capture screen opens at once, so a build can be checked on a
+    /// device or the Simulator without tapping through. `capturing` (Simulator only) shows the capturing layout.
     @MainActor static func previewIfAsked() {
         guard let state = UserDefaults.standard.string(forKey: "STMHandheldPreview") else { return }
         UserDefaults.standard.removeObject(forKey: "STMHandheldPreview")
-        Task { _ = await run(objectId: UUID().uuidString.lowercased(), preview: state == "capturing") }
+        #if targetEnvironment(simulator)
+        let preview = state == "capturing"
+        #else
+        let preview = false
+        #endif
+        Task { _ = await run(objectId: UUID().uuidString.lowercased(), preview: preview) }
     }
-    #endif
 
     /// One folder per object: Documents/HandheldCaptures/<object id>/0000.heic … plus `finished` when complete.
     static func folder(_ objectId: String) -> URL {
@@ -178,6 +182,10 @@ private let analysisGate = AnalysisGate()
             session.commitConfiguration()
             videoOutput.setSampleBufferDelegate(self, queue: self?.analysis)
             if !session.isRunning { session.startRunning() }
+            let photo = photoOutput.connection(with: .video)
+            print("handheld: \(device.localizedName) running=\(session.isRunning) depth=\(photoOutput.isDepthDataDeliveryEnabled)",
+                  "mirrored=\(photo?.isVideoMirrored ?? false) rotation=\(photo?.videoRotationAngle ?? -1)",
+                  "photo=\(photoOutput.maxPhotoDimensions.width)x\(photoOutput.maxPhotoDimensions.height)")
         }
     }
 

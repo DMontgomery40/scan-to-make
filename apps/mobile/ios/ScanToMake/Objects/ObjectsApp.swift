@@ -286,9 +286,7 @@ struct ObjectsRootView: View {
         }
         .sheet(isPresented: $settings) { SettingsView(store: store) }
         .task(id: pairingKey) {
-            #if targetEnvironment(simulator)
             HandheldCapture.previewIfAsked()
-            #endif
             async let scan = store.mac.canScan()
             await store.refreshConnection()
             await store.load()
