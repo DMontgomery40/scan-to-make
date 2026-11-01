@@ -36,8 +36,8 @@ public final class STMActionButton: UIView {
   /// The clay fill for primary actions (theme.ts `clay`). White text on it is 4.6:1.
   private static let accent = UIColor { traits in
     traits.userInterfaceStyle == .dark
-      ? UIColor(red: 0xF0 / 255, green: 0x8A / 255, blue: 0x63 / 255, alpha: 1)
-      : UIColor(red: 0xC4 / 255, green: 0x51 / 255, blue: 0x2B / 255, alpha: 1)
+      ? UIColor(red: 0x7B / 255, green: 0x95 / 255, blue: 0xFF / 255, alpha: 1)
+      : UIColor(red: 0x24 / 255, green: 0x48 / 255, blue: 0xD8 / 255, alpha: 1)
   }
 
   private var iconOnly: Bool { buttonTitle.isEmpty && systemImage != nil }
@@ -66,7 +66,7 @@ public final class STMActionButton: UIView {
       : NSDirectionalEdgeInsets(top: compact ? 8 : 14, leading: compact ? 12 : 20,
                                 bottom: compact ? 8 : 14, trailing: compact ? 12 : 20)
     control.configuration = config
-    // Primary actions use the app's clay accent (theme.ts `accent`), not system blue.
+    // Primary actions use the app's cobalt (theme.ts `accent`): the one colour for moving something forward.
     control.tintColor = primary ? Self.accent : nil
     control.isEnabled = !disabled
     control.titleLabel?.numberOfLines = 0

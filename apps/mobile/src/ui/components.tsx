@@ -88,7 +88,7 @@ export function Screen({
               <Text style={styles.backText}>‹ Back</Text>
             </Pressable>
           ) : (
-            <Text style={styles.brand}>SCAN TO MAKE</Text>
+            <Text style={styles.brand}>Scan to Make</Text>
           )}
           {accessory}
         </View>
@@ -303,7 +303,7 @@ const styles = StyleSheet.create({
     minHeight: 52,
     marginBottom: space.lg,
   },
-  brand: { ...type.label, color: colors.ink, letterSpacing: 2 },
+  brand: { ...type.body, fontWeight: '600', color: colors.muted },
   eyebrow: { ...type.label, color: colors.accent, marginBottom: space.md },
   back: {
     alignSelf: 'flex-start',

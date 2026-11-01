@@ -17,7 +17,7 @@ export const TOUCHUP_RESULT_SCHEMA = {
   properties: {
     status: {enum: ['done', 'needs_closeup', 'failed']},
     closeup: {type: 'string', description: 'What to photograph, in a few plain words'},
-    summary: {type: 'string', description: 'What was changed, one short paragraph. When status is failed: what went wrong, in one sentence.'},
+    summary: {type: 'string', description: 'What you changed, in one or two plain sentences the person will read: no file names, tool or Blender details. When status is failed: what went wrong, in one sentence.'},
   },
 } as const;
 
@@ -29,7 +29,7 @@ export const TOUCHUP_SYSTEM_RULES = `You are making a 3D model the user will pri
 - Don't do print preparation: no flat bases, re-orientation or supports.
 - Scans from the phone are in metres. Export every STL in millimetres, the unit printers use.
 - After each fix, export the whole model as an STL to the checkpoints folder (01.stl, 02.stl, …).
-- Make one pass, then stop. Export the final model to out/touched.stl and a few PNG renders to out/.
+- Make one pass, then stop. Export the final model to out/touched.stl and a few square PNG renders to out/, named so the clearest overall view sorts first (for example 1_overview.png).
 - If you can't see a part well enough to fix it, set status to needs_closeup and say what to photograph.
 - If something breaks and you can't finish (for example Blender stops responding), set status to failed and say what happened.`;
 

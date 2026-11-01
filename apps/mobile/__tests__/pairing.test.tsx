@@ -129,7 +129,7 @@ it('Find your Mac opens on the viewfinder: point at the code and it pairs', asyn
     null,
   );
   expect(text(tree)).toContain('Connected to your Mac');
-  await press(tree, 'Open projects');
+  await press(tree, 'See your things');
   expect(onDone).toHaveBeenCalledWith('projects');
   await act(async () => tree.unmount());
 });
@@ -432,7 +432,7 @@ it('a link that comes in while pairing or on Connected asks before replacing the
   await show(link);
   await act(async () => finish(paired));
   expect(text(tree)).toContain('Pair with another Mac?');
-  expect(hasButton(tree, 'Open projects')).toBe(false);
+  expect(hasButton(tree, 'See your things')).toBe(false);
   await press(tree, 'Keep this Mac');
   expect(text(tree)).toContain('Connected to your Mac');
   expect(native.pair).toHaveBeenCalledTimes(1);

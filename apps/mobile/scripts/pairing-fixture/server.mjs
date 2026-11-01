@@ -35,8 +35,7 @@ if (captureEnabled || stillsProcessingEnabled) {
   // The stills/processing fixture seeds its capture with the same synthetic
   // converter as the companion scan-processing tests, so it needs no USD
   // toolchain. Other modes keep the real converter.
-  const fixtureHash = bytes =>
-    createHash('sha256').update(bytes).digest('hex');
+  const fixtureHash = bytes => createHash('sha256').update(bytes).digest('hex');
   const fixtureCube = Buffer.from(
     'v 0 0 0\nv .06 0 0\nv .06 .04 0\nv 0 .04 0\nv 0 0 .02\nv .06 0 .02\nv .06 .04 .02\nv 0 .04 .02\nf 1 4 3 2\nf 5 6 7 8\nf 1 2 6 5\nf 2 3 7 6\nf 3 4 8 7\nf 4 1 5 8\n',
   );
@@ -120,7 +119,10 @@ if (captureEnabled || stillsProcessingEnabled) {
           for (const name of SCAN_VIEW_NAMES)
             await writeFile(join(output, name), fixturePng);
         return Buffer.from(
-          JSON.stringify({ principalExtentsMm: [62.9, 48.7, 21.7], boxExtentsMm: [62.9, 48.7, 21.7] }),
+          JSON.stringify({
+            principalExtentsMm: [62.9, 48.7, 21.7],
+            boxExtentsMm: [62.9, 48.7, 21.7],
+          }),
         );
       },
     };
@@ -166,10 +168,75 @@ if (captureEnabled || stillsProcessingEnabled) {
     );
   }
 }
+// Objects (KAN-204): a real object service whose touch-up is a fixture that
+// writes a known model and render, so the phone's objects bridge can be
+// proven end to end without Claude, Blender or a printer.
+let objects;
+if (process.env.SCAN_OBJECTS_FIXTURE === '1') {
+  const { ObjectStore } = await import(
+    '../../../../services/companion/dist/objects/store.js'
+  );
+  const { ObjectService } = await import(
+    '../../../../services/companion/dist/objects/service.js'
+  );
+  const fixtureStl =
+    'solid fixture\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 10 0 0\nvertex 0 10 0\nendloop\nendfacet\nendsolid fixture\n';
+  // A real picture for looking at the app; the native test uses the default bytes.
+  const fixtureRender = process.env.SCAN_OBJECTS_FIXTURE_RENDER
+    ? await readFile(process.env.SCAN_OBJECTS_FIXTURE_RENDER)
+    : Buffer.from('fixture render png');
+  const sha = bytes => createHash('sha256').update(bytes).digest('hex');
+  let passes = 0;
+  objects = new ObjectService({
+    store: new ObjectStore(join(root, 'objects')),
+    claudePath: '/fixture/claude',
+    handoff: {
+      backend: 'bambu-printer-mcp',
+      process: { command: '/usr/bin/true' },
+    },
+    stlInfo: async () => [10, 10, 0],
+    runTouchup: async input => {
+      const passDir = join(root, 'passes', String(++passes)),
+        out = join(passDir, 'out');
+      await mkdir(out, { recursive: true });
+      await writeFile(join(out, 'model.stl'), fixtureStl);
+      await writeFile(join(out, 'render_front.png'), fixtureRender);
+      await writeFile(
+        join(root, `pass-${passes}.json`),
+        JSON.stringify({
+          scan: input.scan.length,
+          photos: input.photos.length,
+          note: input.note ?? null,
+        }),
+      );
+      return {
+        status: 'done',
+        summary: 'Fixture touch-up.',
+        model: join(out, 'model.stl'),
+        renders: [join(out, 'render_front.png')],
+        checkpoints: [],
+        stats: { seconds: 0, toolCalls: 0 },
+        passDir,
+      };
+    },
+  });
+  await writeFile(
+    join(root, 'objects.json'),
+    JSON.stringify({
+      stl: {
+        sha256: sha(Buffer.from(fixtureStl)),
+        byteLength: Buffer.byteLength(fixtureStl),
+      },
+      render: { sha256: sha(fixtureRender), byteLength: fixtureRender.length },
+    }),
+    { mode: 0o600 },
+  );
+}
 const backend = await startCompanionServer({
   port: 0,
   remoteAuth: auth,
   capture,
+  ...(objects ? { objects } : {}),
 });
 await writeFile(join(root, 'mode'), 'ok', { mode: 0o600 });
 async function invite() {
