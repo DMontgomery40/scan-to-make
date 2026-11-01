@@ -256,6 +256,10 @@ private struct PrintConfirmationForm: View {
                 VStack(alignment:.leading, spacing:14) {
                     Text("Waiting for Your Print Confirmation").font(.headline)
                     Text(verbatim:question.message).textSelection(.enabled).fixedSize(horizontal:false, vertical:true)
+                    if let item = object.plate?.item, !item.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty {
+                        Label("The camera check saw \(item) on the plate. Check and clear it before confirming.", systemImage:"exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange).fixedSize(horizontal:false, vertical:true)
+                    }
                     if let photo = object.platePhotoURL {
                         FileImage(url:photo, version:object.updatedAtMs, contentMode:.fit)
                             .frame(maxWidth:320, maxHeight:220)

@@ -925,6 +925,10 @@ struct ObjectDetailView: View {
                         answerPrintConfirmation(confirmation.id, action: action, content: content)
                     }
                     .id(confirmation.id)
+                    if let item = object.plate?.item, !item.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Label("The camera check saw \(item) on the plate. Check and clear it before confirming.", systemImage: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
+                    }
                 }
                 if object.plate?.photo == true, let plateImage {
                     Image(uiImage: plateImage).resizable().scaledToFit()
