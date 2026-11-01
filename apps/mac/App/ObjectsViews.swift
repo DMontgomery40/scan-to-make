@@ -39,7 +39,8 @@ extension View {
 struct ObjectsWindowView: View {
     @ObservedObject var model: ObjectsModel
     var startWith3D = false
-    @State private var confirmingDelete = false
+    /// The object the Delete dialog is about, fixed when it opens: the selection can move underneath it.
+    @State private var deleting: StmObject?
 
     var body: some View {
         NavigationSplitView {
@@ -48,7 +49,7 @@ struct ObjectsWindowView: View {
             }
             .listStyle(.sidebar)
             .navigationSplitViewColumnWidth(min:220, ideal:264, max:340)
-            .onDeleteCommand { if model.selected != nil { confirmingDelete = true } }
+            .onDeleteCommand { deleting = model.selected }
         } detail: {
             detail
         }
@@ -59,7 +60,7 @@ struct ObjectsWindowView: View {
             ToolbarItemGroup(placement:.primaryAction) {
                 Button { Task { await model.refresh() } } label: { Label("Refresh", systemImage:"arrow.clockwise") }
                     .help("Refresh")
-                Button { confirmingDelete = true } label: { Label("Delete", systemImage:"trash") }
+                Button { deleting = model.selected } label: { Label("Delete", systemImage:"trash") }
                     .help("Delete")
                     .disabled(model.selected == nil || model.selected.map { model.working.contains($0.id) } == true)
             }
@@ -68,8 +69,9 @@ struct ObjectsWindowView: View {
                     .help("Settings")
             }
         }
-        .confirmationDialog(model.selected.map { "Delete “\($0.words.title)”?" } ?? "Delete?", isPresented:$confirmingDelete,
-                            titleVisibility:.visible, presenting:model.selected) { object in
+        .confirmationDialog(deleting.map { "Delete “\($0.words.title)”?" } ?? "Delete?",
+                            isPresented:Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
+                            titleVisibility:.visible, presenting:deleting) { object in
             Button("Delete", role:.destructive) { Task { await model.delete(object.id) } }
             Button("Cancel", role:.cancel) {}
         } message: { _ in
@@ -94,7 +96,7 @@ struct ObjectsWindowView: View {
         case .notSetUp:
             QuietMessage(title:"Not Set Up Yet", text:"Scan to Make needs Claude Code and your printer set up on this Mac first.")
         case .notRunning:
-            QuietMessage(title:"Not Running", text:"Scan to Make couldn’t start in the background. Quit it from the menu bar and open it again.")
+            QuietMessage(title:"Not Running", text:"Scan to Make couldn’t start in the background.")
         default:
             if let object = model.selected {
                 ObjectPage(object:object, model:model, startWith3D:startWith3D).id(object.id)
@@ -226,17 +228,27 @@ struct ObjectPage: View {
         }
     }
 
-    // The title, where it is, and the one thing to do about it.
+    // The title, where it is, and the one thing to do about it: beside the title when the title fits on
+    // one line, else under it, so a long title is never squeezed into a narrow column.
     private var header: some View {
-        HStack(alignment:.center, spacing:16) {
-            VStack(alignment:.leading, spacing:6) {
-                Text(words.title).font(.title.weight(.semibold)).textSelection(.enabled)
-                    .fixedSize(horizontal:false, vertical:true)
-                if words.tone != .accent { statusLine }
+        ViewThatFits(in:.horizontal) {
+            HStack(alignment:.center, spacing:16) {
+                titleAndStatus
+                Spacer(minLength:16)
+                primaryButton
             }
-            .frame(maxWidth:.infinity, alignment:.leading)
-            .layoutPriority(1)
-            primaryButton
+            VStack(alignment:.leading, spacing:14) {
+                titleAndStatus
+                primaryButton
+            }
+        }
+    }
+
+    private var titleAndStatus: some View {
+        VStack(alignment:.leading, spacing:6) {
+            Text(words.title).font(.title.weight(.semibold)).textSelection(.enabled)
+                .fixedSize(horizontal:false, vertical:true)
+            if words.tone != .accent { statusLine }
         }
     }
 
@@ -335,8 +347,7 @@ struct ObjectPage: View {
                 }
             }
             HStack(alignment:.center, spacing:12) {
-                if object.modelURL != nil || object.renderURLs.count > 1 { strip }
-                Spacer(minLength:0)
+                if object.modelURL != nil || object.renderURLs.count > 1 { strip } else { Spacer(minLength:0) }
                 if let size = object.current?.sizeMm, size.count == 3 {
                     Label(ObjectWords.formatSize(size), systemImage:"ruler").foregroundStyle(.secondary)
                         .labelStyle(.titleAndIcon).textSelection(.enabled)
@@ -347,8 +358,9 @@ struct ObjectPage: View {
         }
     }
 
+    /// In its own horizontal scroll (no indicators, so it takes no room): any number of renders fits any width.
     private var strip: some View {
-        HStack(spacing:8) {
+        ScrollView(.horizontal, showsIndicators:false) { HStack(spacing:8) {
             if object.modelURL != nil {
                 tile(.model) {
                     VStack(spacing:2) {
@@ -364,7 +376,7 @@ struct ObjectPage: View {
                     .accessibilityLabel("Picture \(index + 1)")
             }
         }
-        .padding(2)
+        .padding(2) }
     }
 
     private func tile<Content: View>(_ view: Showing, @ViewBuilder content: () -> Content) -> some View {

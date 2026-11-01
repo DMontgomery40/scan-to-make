@@ -24,7 +24,7 @@ import CoreImage
         return steady
     }
 
-    private struct Shot { let name: String; let objects: [StmObject]?; let selection: String?; var dark = false; var threeD = false }
+    private struct Shot { let name: String; let objects: [StmObject]?; let selection: String?; var dark = false; var threeD = false; var size: NSSize? }
 
     private static func renderAll(to output: URL) async throws -> Bool {
         var stability: [DesignStability.Result] = []
@@ -43,6 +43,7 @@ import CoreImage
             Shot(name:"window-plate-light", objects:list, selection:byName["clip"]!.id),
             Shot(name:"window-plate-no-camera-dark", objects:[byName["noCamera"]!] + list, selection:byName["noCamera"]!.id, dark:true),
             Shot(name:"window-uncertain-light", objects:list, selection:byName["knob"]!.id),
+            Shot(name:"window-smallest-light", objects:list, selection:byName["knob"]!.id, size:ObjectsWindow.minimumSize),
             Shot(name:"window-empty-light", objects:[], selection:nil),
             Shot(name:"window-not-set-up-dark", objects:nil, selection:nil, dark:true),
         ]
@@ -52,6 +53,7 @@ import CoreImage
             model.selection = shot.selection
             let window = ObjectsWindow.make(model:model, startWith3D:shot.threeD)
             window.appearance = NSAppearance(named:shot.dark ? .darkAqua : .aqua)
+            if let size = shot.size { window.setContentSize(size) }
             window.alphaValue = 0 // drawn for the PNG only, never seen on screen
             window.ignoresMouseEvents = true
             window.orderFrontRegardless()
