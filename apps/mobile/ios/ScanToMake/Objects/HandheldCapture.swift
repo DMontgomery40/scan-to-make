@@ -9,6 +9,16 @@ import Vision
 // of the phone; reconstruction must estimate object-relative poses. These are measured inputs, not a claim
 // that a photo count constitutes complete coverage. The separate Object Capture scanner is unchanged.
 
+enum HandheldDiagnosticOptions {
+    static func seconds(arguments: [String], previewState: String) -> Int? {
+        let key = "-STMHandheldDiagnosticSeconds"
+        guard previewState == "ready", arguments.filter({ $0 == key }).count == 1,
+              let index = arguments.firstIndex(of: key), index + 1 < arguments.count,
+              let value = Int(arguments[index + 1]), (3...15).contains(value) else { return nil }
+        return value
+    }
+}
+
 enum HandheldCapture {
     static let minimumPhotos = 24
 
@@ -28,10 +38,14 @@ enum HandheldCapture {
         UserDefaults.standard.removeObject(forKey: "STMHandheldPreview")
         #if targetEnvironment(simulator)
         let preview = state == "capturing"
+        let diagnosticSeconds: Int? = nil
         #else
         let preview = false
+        let diagnosticSeconds = HandheldDiagnosticOptions.seconds(arguments: CommandLine.arguments, previewState: state)
         #endif
-        Task { _ = await run(objectId: UUID().uuidString.lowercased(), preview: preview) }
+        // This launch-only path has no companion/project uploader. The random object's files stay local.
+        Task { _ = await run(objectId: UUID().uuidString.lowercased(), preview: preview,
+                             diagnosticSeconds: diagnosticSeconds, keepAwake: true) }
     }
 
     /// One folder per object: Documents/HandheldCaptures/<object id>/0000.heic … plus `finished` when complete.
@@ -44,12 +58,13 @@ enum HandheldCapture {
     }
 
     /// Shows the capture full screen. True when photos were taken and finished; false when cancelled.
-    @MainActor static func run(objectId: String, preview: Bool = false) async -> Bool {
+    @MainActor static func run(objectId: String, preview: Bool = false, diagnosticSeconds: Int? = nil, keepAwake: Bool = false) async -> Bool {
         guard let presenter = topViewController() else { return false }
         return await withCheckedContinuation { continuation in
             var resumed = false
             let host = UIHostingController(rootView: AnyView(EmptyView()))
-            host.rootView = AnyView(HandheldCaptureView(folder: folder(objectId), preview: preview) { done in
+            host.rootView = AnyView(HandheldCaptureView(folder: folder(objectId), preview: preview,
+                                                      diagnosticSeconds: diagnosticSeconds, keepAwake: keepAwake) { done in
                 host.dismiss(animated: true)
                 guard !resumed else { return }
                 resumed = true
@@ -125,6 +140,7 @@ private let depthReadinessGate = AnalysisGate()
     var previewSize = CGSize.zero
     var legacyCapture = false
     var recordingLimitReached = false
+    var diagnosticOutcome: String?
 
     let session = AVCaptureSession()
     let folder: URL
@@ -134,6 +150,7 @@ private let depthReadinessGate = AnalysisGate()
     private var recorder: HandheldDepthRecorder?
     private var countdownTask: Task<Void, Never>?
     private var watchdog: Timer?
+    private var diagnosticsTask: Task<Void, Never>?
     private var closed = false
     private var finishInProgress = false
     private var didFinish = false
@@ -153,16 +170,43 @@ private let depthReadinessGate = AnalysisGate()
     }
 
     private func recordDiagnostics(_ event: String) {
+        let now = ProcessInfo.processInfo.systemUptime
+        func number(_ value: Double?) -> Any {
+            guard let value, value.isFinite else { return NSNull() }
+            return value
+        }
         let report: [String: Any] = [
             "event": event, "at": ISO8601DateFormatter().string(from: Date()),
             "captureMethod": "synchronized-rear-lidar", "sessionRunning": session.isRunning,
             "previewRendering": previewRendering, "previewWidth": previewSize.width,
             "previewHeight": previewSize.height, "framesSaved": taken, "bytesSaved": bytesSaved,
             "rgbReceived": lastVideoFrameAt != nil, "depthReceived": lastDepthFrameAt != nil,
+            "secondsSinceRGB": number(lastVideoFrameAt.map { now - $0 }),
+            "secondsSinceDepth": number(lastDepthFrameAt.map { now - $0 }),
+            "exposureSeconds": number(device.map { CMTimeGetSeconds($0.exposureDuration) }),
+            "iso": number(device.map { Double($0.iso) }), "canStart": canStart,
+            "sessionInterrupted": session.isInterrupted, "phase": String(describing: phase),
+            "diagnosticOutcome": diagnosticOutcome ?? "",
             "failure": failure ?? "", "notice": notice ?? ""
         ]
         if let data = try? JSONSerialization.data(withJSONObject: report, options: [.sortedKeys]) {
             try? data.write(to: folder.appending(path: "capture-ui-diagnostics.json"), options: .atomic)
+        }
+    }
+
+    private func observeStream() {
+        diagnosticsTask?.cancel()
+        diagnosticsTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                guard let self, !self.closed else { return }
+                if let snapshot = await self.recorder?.diagnosticSnapshot(), !self.closed, !Task.isCancelled,
+                   let data = try? JSONEncoder().encode(snapshot) {
+                    try? data.write(to: self.folder.appending(path: "capture-stream-diagnostics.json"), options: .atomic)
+                }
+                guard !self.closed, !Task.isCancelled else { return }
+                self.recordDiagnostics("live")
+                do { try await Task.sleep(for: .seconds(1)) } catch { return }
+            }
         }
     }
 
@@ -253,11 +297,46 @@ private let depthReadinessGate = AnalysisGate()
         if closed { let session = session; queue.async { session.stopRunning() }; return }
         if let error { failure = "The depth camera couldn't start: \(error)" }
         recordDiagnostics("configured")
+        observeStream()
     }
 
     private enum CaptureSetupError: LocalizedError {
         case input, output
         var errorDescription: String? { "The camera does not support this capture configuration." }
+    }
+
+    /// Explicit launch argument only. Readiness, countdown, admission and finish use the production flow.
+    func diagnosticCapture(seconds: Int) async -> Bool {
+        guard (3...15).contains(seconds), !closed else { return false }
+        diagnosticOutcome = "waiting-for-readiness"
+        notice = "Diagnostic capture: waiting for camera and LiDAR, then recording for \(seconds) seconds."
+        let readyDeadline = ProcessInfo.processInfo.systemUptime + 30
+        while !canStart {
+            guard !closed, !Task.isCancelled, failure == nil, ProcessInfo.processInfo.systemUptime < readyDeadline else {
+                diagnosticOutcome = "not-ready"
+                notice = "Diagnostic capture did not start. Camera readiness details are saved on this phone."
+                recordDiagnostics("diagnostic-not-ready"); return false
+            }
+            do { try await Task.sleep(for: .milliseconds(100)) } catch { return false }
+        }
+        start()
+        let startDeadline = ProcessInfo.processInfo.systemUptime + 6
+        while phase != .capturing {
+            guard !closed, !Task.isCancelled, failure == nil, ProcessInfo.processInfo.systemUptime < startDeadline else {
+                countdownTask?.cancel(); diagnosticOutcome = "start-failed"
+                recordDiagnostics("diagnostic-start-failed"); return false
+            }
+            do { try await Task.sleep(for: .milliseconds(100)) } catch { countdownTask?.cancel(); return false }
+        }
+        diagnosticOutcome = "recording-\(seconds)-seconds"
+        recordDiagnostics("diagnostic-recording")
+        do { try await Task.sleep(for: .seconds(seconds)) }
+        catch { await pause(); diagnosticOutcome = "cancelled"; return false }
+        guard !closed, !Task.isCancelled else { return false }
+        let saved = await finish()
+        diagnosticOutcome = saved ? "saved-locally" : "stopped-with-retained-frames"
+        recordDiagnostics("diagnostic-stopped")
+        return saved
     }
 
     func start() {
@@ -344,6 +423,7 @@ private let depthReadinessGate = AnalysisGate()
     func close() {
         guard !closed else { return }
         closed = true; countdownTask?.cancel(); watchdog?.invalidate(); watchdog = nil
+        diagnosticsTask?.cancel(); diagnosticsTask = nil
         let recorder = recorder, session = session, queue = queue
         Task { _ = await recorder?.stop(); queue.async { session.stopRunning() } }
     }
@@ -383,12 +463,17 @@ struct HandheldCaptureView: View {
     let folder: URL
     let done: (Bool) -> Void
     private let preview: Bool
+    private let diagnosticSeconds: Int?
+    private let keepAwake: Bool
     @State private var camera: HandheldCamera
+    @State private var previousIdleTimerDisabled: Bool?
 
-    fileprivate init(folder: URL, preview: Bool = false, done: @escaping (Bool) -> Void) {
+    fileprivate init(folder: URL, preview: Bool = false, diagnosticSeconds: Int? = nil, keepAwake: Bool = false, done: @escaping (Bool) -> Void) {
         self.folder = folder
         self.done = done
         self.preview = preview
+        self.diagnosticSeconds = diagnosticSeconds
+        self.keepAwake = keepAwake
         let camera = HandheldCamera(folder: folder)
         if preview { camera.phase = .capturing; camera.taken = 52 }
         _camera = State(initialValue: camera)
@@ -439,7 +524,7 @@ struct HandheldCaptureView: View {
                         .buttonStyle(.glass)
                         .controlSize(.large)
                     Spacer()
-                    Label(camera.legacyCapture ? "Saved Capture" : "Handheld LiDAR", systemImage: "viewfinder")
+                    Label(diagnosticSeconds != nil ? "Diagnostic Capture" : camera.legacyCapture ? "Saved Capture" : "Handheld LiDAR", systemImage: "viewfinder")
                         .font(.headline).padding(12).glassEffect(.regular, in: .capsule)
                 }
                 Text(camera.failure ?? (camera.phase == .ready && !camera.canStart ? "Waiting for the camera and LiDAR." : instruction))
@@ -496,8 +581,22 @@ struct HandheldCaptureView: View {
             .padding(20)
         }
         .tint(cobalt)
-        .task { if !preview { await camera.open() } }
-        .onDisappear { camera.close() }
+        .task {
+            if !preview {
+                await camera.open()
+                if let diagnosticSeconds, await camera.diagnosticCapture(seconds: diagnosticSeconds) { done(true) }
+            }
+        }
+        .onAppear {
+            if keepAwake, previousIdleTimerDisabled == nil {
+                previousIdleTimerDisabled = UIApplication.shared.isIdleTimerDisabled
+                UIApplication.shared.isIdleTimerDisabled = true
+            }
+        }
+        .onDisappear {
+            camera.close()
+            if let previousIdleTimerDisabled { UIApplication.shared.isIdleTimerDisabled = previousIdleTimerDisabled }
+        }
     }
 }
 

@@ -22,6 +22,7 @@ def extract(marker):
     return source[start:end]
 
 markers = {
+    '// DIAGNOSTIC_OPTIONS': 'enum HandheldDiagnosticOptions {',
     '// QUALITY_POLICY': 'enum HandheldCaptureQuality {',
     '// CAMERA_PHASE': 'enum Phase: Equatable {',
     '// CAN_START': 'var canStart: Bool {',
@@ -33,9 +34,14 @@ fixture = (HERE / 'HandheldQualityTests.swift').read_text()
 methods = {placeholder: extract(marker) for placeholder, marker in markers.items()}
 for placeholder, method in methods.items():
     fixture = fixture.replace(placeholder, method.replace('private func ', 'func ', 1))
+recorder_source = (HERE.parents[1] / 'ios/ScanToMake/Objects/HandheldDepthRecorder.swift').read_text()
+callback_start = recorder_source.index('    func dataOutputSynchronizer(')
+callback_end = recorder_source.index('        guard recording else { return }', callback_start)
+callback_prefix = recorder_source[callback_start:callback_end] + '    }'
+fixture = fixture.replace('// RECORDER_CALLBACK_PREFIX', callback_prefix)
 (args.evidence / 'production-methods.json').write_text(json.dumps({
     markers[key]: hashlib.sha256(value.encode()).hexdigest() for key, value in methods.items()
-}, indent=2) + '\n')
+} | {'recorder pre-recording callback': hashlib.sha256(callback_prefix.encode()).hexdigest()}, indent=2) + '\n')
 fixture_path = args.evidence / 'HandheldQualityFixture.swift'
 fixture_path.write_text(fixture)
 with tempfile.TemporaryDirectory(prefix='native-handheld-quality-') as directory:

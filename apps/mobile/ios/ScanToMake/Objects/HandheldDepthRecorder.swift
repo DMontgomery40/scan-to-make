@@ -230,6 +230,28 @@ final class HandheldDepthRecorder: NSObject, AVCaptureDataOutputSynchronizerDele
         let failure: String?
         let limitReached: Bool
     }
+    struct DiagnosticSnapshot: Codable, Sendable {
+        struct Format: Codable, Sendable {
+            let fourCC: String
+            let width: Int32, height: Int32
+            let binned: Bool
+            let unsupportedOutputs: [String]
+        }
+        struct Connection: Codable, Sendable {
+            let present: Bool, enabled: Bool, active: Bool
+        }
+        let summary: Summary
+        let synchronizedCallbacks: Int
+        let events: [String: Int]
+        let secondsSinceVideo: Double?, secondsSinceDepth: Double?
+        let lastRGBTimestamp: Double?, lastDepthTimestamp: Double?
+        let recording: Bool, writerBusy: Bool
+        let sessionRunning: Bool, sessionInterrupted: Bool
+        let videoFormat: Format, depthFormat: Format?
+        let availableVideoPixelFormats: [String]
+        let requestedVideoPixelFormat: String?
+        let videoConnection: Connection, depthConnection: Connection
+    }
     enum Drop: String, Codable, Sendable {
         case videoDropped, depthDropped, missingDepth, invalidTimestamp, missingCalibration
         case backpressure, cadence, storageLimit
@@ -274,6 +296,7 @@ final class HandheldDepthRecorder: NSObject, AVCaptureDataOutputSynchronizerDele
     private let videoOutput: AVCaptureVideoDataOutput
     private let depthOutput = AVCaptureDepthDataOutput()
     private var synchronizer: AVCaptureDataOutputSynchronizer?
+    private weak var captureSession: AVCaptureSession?
     private let folder: URL
     private let callbacks: Callbacks
     private let configuration: Configuration
@@ -291,6 +314,10 @@ final class HandheldDepthRecorder: NSObject, AVCaptureDataOutputSynchronizerDele
     private var failure: String?
     private var limitReached = false
     private var drains: [CheckedContinuation<Summary, Never>] = []
+    private var synchronizedCallbacks = 0
+    private var diagnosticEvents: [String: Int] = [:]
+    private var lastVideoAt: TimeInterval?, lastDepthAt: TimeInterval?
+    private var lastRGBTimestamp: Double?, lastDepthTimestamp: Double?
 
     init(device: AVCaptureDevice, videoOutput: AVCaptureVideoDataOutput, folder: URL,
          callbacks: Callbacks, configuration: Configuration = .init()) {
@@ -302,6 +329,7 @@ final class HandheldDepthRecorder: NSObject, AVCaptureDataOutputSynchronizerDele
 
     /// Call only on the owner's session queue, between beginConfiguration and commitConfiguration.
     func install(in session: AVCaptureSession) throws {
+        captureSession = session
         guard device.position == .back, device.deviceType == .builtInLiDARDepthCamera else {
             throw HandheldDepthFrameCodec.RecorderError("Photo capture needs the rear LiDAR camera.")
         }
@@ -445,16 +473,58 @@ final class HandheldDepthRecorder: NSObject, AVCaptureDataOutputSynchronizerDele
         }
     }
 
+    /// Observe the stream without changing admission or waiting for the writer to drain.
+    func diagnosticSnapshot() async -> DiagnosticSnapshot {
+        await withCheckedContinuation { continuation in
+            eventQueue.async {
+                let now = ProcessInfo.processInfo.systemUptime
+                func fourCC(_ value: OSType) -> String {
+                    let bytes = stride(from: 24, through: 0, by: -8).map { UInt8((value >> $0) & 0xff) }
+                    return String(bytes: bytes, encoding: .ascii) ?? String(format: "0x%08x", value)
+                }
+                func format(_ value: AVCaptureDevice.Format) -> DiagnosticSnapshot.Format {
+                    let size = CMVideoFormatDescriptionGetDimensions(value.formatDescription)
+                    return .init(fourCC: fourCC(CMFormatDescriptionGetMediaSubType(value.formatDescription)),
+                                 width: size.width, height: size.height, binned: value.isVideoBinned,
+                                 unsupportedOutputs: value.unsupportedCaptureOutputClasses.map { NSStringFromClass($0) })
+                }
+                func connection(_ value: AVCaptureConnection?) -> DiagnosticSnapshot.Connection {
+                    .init(present: value != nil, enabled: value?.isEnabled ?? false, active: value?.isActive ?? false)
+                }
+                let requested = (self.videoOutput.videoSettings?[kCVPixelBufferPixelFormatTypeKey as String] as? NSNumber)?.uint32Value
+                continuation.resume(returning: DiagnosticSnapshot(
+                    summary: self.summary(), synchronizedCallbacks: self.synchronizedCallbacks, events: self.diagnosticEvents,
+                    secondsSinceVideo: self.lastVideoAt.map { now - $0 }, secondsSinceDepth: self.lastDepthAt.map { now - $0 },
+                    lastRGBTimestamp: self.lastRGBTimestamp, lastDepthTimestamp: self.lastDepthTimestamp,
+                    recording: self.recording, writerBusy: self.writerBusy,
+                    sessionRunning: self.captureSession?.isRunning ?? false, sessionInterrupted: self.captureSession?.isInterrupted ?? false,
+                    videoFormat: format(self.device.activeFormat), depthFormat: self.device.activeDepthDataFormat.map(format),
+                    availableVideoPixelFormats: self.videoOutput.availableVideoPixelFormatTypes.map(fourCC),
+                    requestedVideoPixelFormat: requested.map(fourCC),
+                    videoConnection: connection(self.videoOutput.connection(with: .video)),
+                    depthConnection: connection(self.depthOutput.connection(with: .depthData))))
+            }
+        }
+    }
+
     func dataOutputSynchronizer(_ synchronizer: AVCaptureDataOutputSynchronizer,
                                 didOutput collection: AVCaptureSynchronizedDataCollection) {
-        guard let video = collection.synchronizedData(for: videoOutput) as? AVCaptureSynchronizedSampleBufferData else { return }
-        guard !video.sampleBufferWasDropped else { if recording { dropped(.videoDropped, sensorReason: video.droppedReason.rawValue) }; return }
+        synchronizedCallbacks += 1
+        func observed(_ reason: String) { diagnosticEvents[reason, default: 0] += 1 }
+        guard let video = collection.synchronizedData(for: videoOutput) as? AVCaptureSynchronizedSampleBufferData else { observed("missingVideo"); return }
+        guard !video.sampleBufferWasDropped else { observed("videoDropped:\(video.droppedReason.rawValue)"); if recording { dropped(.videoDropped, sensorReason: video.droppedReason.rawValue) }; return }
+        observed("videoReceived")
+        lastVideoAt = ProcessInfo.processInfo.systemUptime
+        if CMSampleBufferGetImageBuffer(video.sampleBuffer) == nil { observed("videoWithoutImageBuffer") }
         callbacks.onVideo(video.sampleBuffer) // Preview/readiness continue before Start and after Stop.
-        guard let depth = collection.synchronizedData(for: depthOutput) as? AVCaptureSynchronizedDepthData else { if recording { dropped(.missingDepth) }; return }
-        guard !depth.depthDataWasDropped else { if recording { dropped(.depthDropped, sensorReason: depth.droppedReason.rawValue) }; return }
-        guard depth.depthData.cameraCalibrationData != nil else { if recording { dropped(.missingCalibration) }; return }
+        guard let depth = collection.synchronizedData(for: depthOutput) as? AVCaptureSynchronizedDepthData else { observed("missingDepth"); if recording { dropped(.missingDepth) }; return }
+        guard !depth.depthDataWasDropped else { observed("depthDropped:\(depth.droppedReason.rawValue)"); if recording { dropped(.depthDropped, sensorReason: depth.droppedReason.rawValue) }; return }
+        observed("depthReceived")
+        guard depth.depthData.cameraCalibrationData != nil else { observed("missingCalibration"); if recording { dropped(.missingCalibration) }; return }
         let rgbPTS = CMTimeGetSeconds(video.timestamp), depthPTS = CMTimeGetSeconds(depth.timestamp)
-        guard rgbPTS.isFinite, depthPTS.isFinite else { if recording { dropped(.invalidTimestamp) }; return }
+        guard rgbPTS.isFinite, depthPTS.isFinite else { observed("invalidTimestamp"); if recording { dropped(.invalidTimestamp) }; return }
+        observed("calibratedPair")
+        lastDepthAt = ProcessInfo.processInfo.systemUptime; lastRGBTimestamp = rgbPTS; lastDepthTimestamp = depthPTS
         callbacks.onDepthReady()
         guard recording else { return }
         guard !writerBusy else { dropped(.backpressure); return }
