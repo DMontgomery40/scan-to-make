@@ -7,7 +7,24 @@ reuses the current invitation while it remains unexpired and unused. At expiry,
 the companion retires the expired code and mints another. Each presentation and
 retry checks service/listener readiness before showing a QR, including a cached
 one. A failure replaces the QR with one sentence and Retry.
-Login-item launches stay in the menu bar; a manual launch or reopen shows the QR.
+Login-item launches stay in the menu bar. Until a phone has been paired and set up,
+a manual launch or reopen shows the QR, then setup.
+
+After that, a manual launch or reopen opens the objects window, and the QR stays in
+the popover for pairing more phones. The popover's **Open Scan to Make** opens the
+window at any time. The window shows the same object list and pages as the iPhone app
+(the spec's §5.1, §5.3–5.6), and the app has a Dock icon while it is open. It reads
+`objects.list` over the control socket, every 3 s while something is touching up or
+printing and every 15 s otherwise, and only while the window is on screen. Renders,
+the plate photo and the STL (turnable in SceneKit) are read from the object's
+`directory`. A companion without objects shows one sentence.
+
+The companion turns objects on only when it knows the user's own `claude` CLI. When
+serving, `agent.mjs` passes `SCAN_TO_MAKE_CLAUDE_PATH`. An explicit absolute path in
+`companion.env` wins. Otherwise it takes the login shell's `command -v claude`, then
+`~/.local/bin/claude`, `~/.claude/local/claude`, `/opt/homebrew/bin/claude` and
+`/usr/local/bin/claude`. If none is found it sets nothing. The printer config is
+inherited as is.
 
 The app uses `getifaddrs` to detect active LAN IPv4 addresses, skipping loopback
 and link-local addresses, and collects the `.local` hostname and Tailscale IPv4
@@ -22,11 +39,14 @@ contract; multi-address invitations and certificate renewal are separate follow-
 ## Build and test
 
 `ScanToMake.xcodeproj` is checked in. `project.yml` is its XcodeGen source.
+`--render-objects-design` (Debug builds only) draws the objects window with generic
+fixture objects to PNGs and exits, without registering, pairing or probing the network.
 
 ```sh
 swift test --package-path apps/mac
 xcodebuild -project apps/mac/ScanToMake.xcodeproj -scheme ScanToMake \
   -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO test
+"<Debug build>/Scan to Make.app/Contents/MacOS/Scan to Make" --render-objects-design /tmp/objects-design
 bash apps/mac/scripts/prepare-payload.sh
 xcodebuild -project apps/mac/ScanToMake.xcodeproj -scheme ScanToMake \
   -configuration Debug -derivedDataPath apps/mac/build \

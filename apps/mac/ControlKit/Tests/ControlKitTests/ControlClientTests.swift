@@ -3,7 +3,7 @@ import Foundation
 import Darwin
 @testable import ControlKit
 
-private final class UnixFixture {
+final class UnixFixture {
     let path = "/tmp/stm-control-\(UUID().uuidString).sock"
     private let descriptor: Int32
     init(_ handler: @escaping ([String: Any]) throws -> [Data]) throws {
@@ -57,7 +57,7 @@ private final class UnixFixture {
     }
     deinit { shutdown(descriptor, SHUT_RDWR); Darwin.close(descriptor); unlink(path) }
 }
-private func reply(_ request: [String: Any], result: Any) throws -> Data {
+func reply(_ request: [String: Any], result: Any) throws -> Data {
     var data = try JSONSerialization.data(withJSONObject: ["v": 1, "id": request["id"]!, "result": result])
     data.append(10); return data
 }

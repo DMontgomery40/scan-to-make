@@ -1,7 +1,8 @@
 // Invoked only through the signed app's executable. No invitation or env secrets
 // are written to stdout/stderr; auth CLI stdout is consumed by the app in memory.
-import {existsSync, readFileSync, mkdirSync,writeFileSync,openSync,closeSync} from 'node:fs';
-import {join, dirname} from 'node:path';
+import {existsSync, readFileSync, mkdirSync,writeFileSync,openSync,closeSync,statSync,accessSync,constants} from 'node:fs';
+import {join, dirname, isAbsolute} from 'node:path';
+import {homedir, userInfo} from 'node:os';
 import {fileURLToPath} from 'node:url';
 import {spawn, spawnSync} from 'node:child_process';
 const resources = dirname(fileURLToPath(import.meta.url));
@@ -35,6 +36,53 @@ for (const key of ['BLENDER','SCAN_TO_MAKE_SCAN_BLENDER','SCAN_TO_MAKE_SCAN_REPA
   if (!env[key] && legacy.workerEnvironment?.[key]) env[key] = legacy.workerEnvironment[key];
 }
 const cli = join(source,'services/companion/dist/remote-auth-cli.js');
+
+/** An executable file. Symlinks are kept as is: Claude's updater repoints ~/.local/bin/claude at each version. */
+function runnable(path) {
+  try { return isAbsolute(path) && statSync(path).isFile() && (accessSync(path, constants.X_OK), true); } catch { return false; }
+}
+/**
+ * `command -v claude` in the user's login shell, as their Terminal would answer it. The shell starts
+ * from a minimal environment (companion.env credentials never reach a profile), in its own process
+ * group so a profile's background job can't hold it open past the deadline. Mirrors the companion's
+ * loginShellPath (ai-tweak-cli.ts) instead of importing it: this runs before the companion, from
+ * the app's own resources, and must keep working whatever the companion's internals look like.
+ */
+function loginShellClaude(home, timeoutMs = 5000) {
+  let account; try { account = userInfo(); } catch { /* no account record */ }
+  const shell = [env.SHELL, account?.shell, '/bin/zsh'].find(value => value && isAbsolute(value));
+  const user = env.USER || account?.username || '';
+  const mark = '__SCAN_TO_MAKE_CLAUDE__';
+  return new Promise(resolve => {
+    let out = '', settled = false, child;
+    const finish = () => {
+      if (settled) return; settled = true; clearTimeout(timer); child?.stdout?.destroy(); child?.unref();
+      const parts = out.split(mark);
+      resolve(parts.length >= 3 ? parts[1].trim() : undefined);
+    };
+    const timer = setTimeout(() => { try { process.kill(-child.pid, 'SIGKILL'); } catch { /* already gone */ } finish(); }, timeoutMs);
+    try {
+      child = spawn(shell, ['-ilc', `printf '%s' ${mark}; command -v claude; printf '%s' ${mark}`], {detached:true,
+        env:{HOME:home, USER:user, LOGNAME:user, SHELL:shell, PATH:'/usr/bin:/bin:/usr/sbin:/sbin', TERM:'dumb'}, stdio:['ignore','pipe','ignore']});
+    } catch { finish(); return; }
+    child.stdout.setEncoding('utf8').on('data', chunk => { if (out.length < 65536) out += chunk; if (out.split(mark).length >= 3) finish(); });
+    child.on('error', finish); child.on('close', finish);
+  });
+}
+/**
+ * Objects (touch-ups and the plate check) run the user's own Claude Code login, and the companion
+ * turns them on only with an absolute SCAN_TO_MAKE_CLAUDE_PATH. An explicit absolute path from
+ * companion.env wins; a relative one would stop the companion starting, so it is replaced. Otherwise:
+ * the login shell's claude, then the usual install places. Nothing found leaves objects off.
+ */
+async function findClaude() {
+  if (env.SCAN_TO_MAKE_CLAUDE_PATH && isAbsolute(env.SCAN_TO_MAKE_CLAUDE_PATH)) return;
+  delete env.SCAN_TO_MAKE_CLAUDE_PATH;
+  const home = env.HOME || homedir();
+  const places = [await loginShellClaude(home), join(home,'.local/bin/claude'), join(home,'.claude/local/claude'), '/opt/homebrew/bin/claude', '/usr/local/bin/claude'];
+  const found = places.find(path => path && runnable(path));
+  if (found) env.SCAN_TO_MAKE_CLAUDE_PATH = found;
+}
 if (mode === 'configure') {
   if (existsSync(join(state,'auth'))) process.exit(1);
   mkdirSync(state,{recursive:true,mode:0o700});
@@ -70,6 +118,7 @@ if (mode === 'configure') {
   // Registration may happen before approval/migration. Never bind until activated.
   while (!existsSync(join(state, 'app-agent-enabled'))) await new Promise(r=>setTimeout(r,500));
   mkdirSync(join(state,'logs'), {recursive:true,mode:0o700});
+  await findClaude();
   const out=openSync(join(state,'logs/companion.log'),'a',0o600);
   const err=openSync(join(state,'logs/companion-error.log'),'a',0o600);
   const child = spawn(process.execPath,[join(source,'services/companion/dist/server-cli.js')],{cwd:source,env,stdio:['ignore',out,err]});

@@ -33,3 +33,11 @@ test('an unknown object and a wrong state come back as plain control errors', as
   const object = await objects.create();
   await assert.rejects(dispatch('objects.print', {id: object.id}), error => error.code === 'conflict');
 });
+
+test('the Mac app can start a touch-up again, and a refusal says why in plain words', async () => {
+  const {dispatch, objects} = await dispatcher();
+  const object = await objects.create('A hook.');
+  await assert.rejects(dispatch('objects.print', {id: object.id}), error => error.code === 'conflict' && error.message === 'There is no model to print yet.');
+  assert.equal((await dispatch('objects.start', {id: object.id})).object.state, 'touching-up');
+  await objects.settled(object.id);
+});

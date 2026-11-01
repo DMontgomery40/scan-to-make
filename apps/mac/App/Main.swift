@@ -9,6 +9,13 @@ import ControlKit
 @main enum EntryPoint {
     static func main() {
         if CommandLine.arguments.dropFirst().first == "--model-worker" { launchModelWorker(Installation(bundle:.main)) }
+        #if DEBUG
+        // Design QA only: draws the objects window with fixture objects to PNGs, then exits.
+        if let index = CommandLine.arguments.firstIndex(of:"--render-objects-design"), index + 1 < CommandLine.arguments.count {
+            MainActor.assumeIsolated { ObjectsDesign.render(to:URL(fileURLWithPath:CommandLine.arguments[index + 1])) }
+            exit(0)
+        }
+        #endif
         if CommandLine.arguments.contains("--companion-agent") { launchAgent(Installation(bundle:.main)) }
         if CommandLine.arguments.contains("--unregister-agent") {
             do { try Installation(bundle:.main).service.unregister(); exit(0) }
@@ -108,21 +115,32 @@ struct MenuBarPopover: View {
                 .padding(40)
                 .background(Color.white)
             Divider()
-            HStack {
-                Button { SettingsWindow.shared.show() } label: { Label("Settings…", systemImage:"gearshape") }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.secondary)
-                    .keyboardShortcut(",")
-                Spacer()
-                Button("Quit") { NSApp.terminate(nil) }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.secondary)
-                    .keyboardShortcut("q")
-            }
-            .font(.system(size:12.5))
-            .padding(EdgeInsets(top:11,leading:12,bottom:13,trailing:12))
+            PopoverFooter()
         }
         .frame(width:372)
+    }
+}
+
+/// The popover's footer: the objects window, Settings and Quit.
+struct PopoverFooter: View {
+    var body: some View {
+        HStack(spacing:16) {
+            Button { ObjectsWindow.shared.show() } label: { Label("Open Scan to Make", systemImage:"macwindow") }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .keyboardShortcut("o")
+            Button { SettingsWindow.shared.show() } label: { Label("Settings…", systemImage:"gearshape") }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .keyboardShortcut(",")
+            Spacer()
+            Button("Quit") { NSApp.terminate(nil) }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .keyboardShortcut("q")
+        }
+        .font(.system(size:12.5))
+        .padding(EdgeInsets(top:11,leading:12,bottom:13,trailing:12))
     }
 }
 
@@ -189,7 +207,7 @@ extension NSImage {
         let loginLaunch = event?.eventID == kAEOpenApplication
             && event?.paramDescriptor(forKeyword:keyAEPropData)?.enumCodeValue == keyAELaunchedAsLogInItem
         NearbyModel.shared.start()
-        if !loginLaunch { showPairing() }
+        if !loginLaunch { showMain() }
         #if DEBUG
         // Design QA only: computer-use can't open menu-bar extras, so show the popover's content in a window.
         if ProcessInfo.processInfo.environment["SCAN_TO_MAKE_QA_POPOVER_WINDOW"] == "1" { showPopoverForQA() }
@@ -214,7 +232,13 @@ extension NSImage {
         window?.contentView = nil
     }
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        showPairing(); return true
+        showMain(); return true
+    }
+    /// Until a phone has been paired and set up, opening the app shows the pairing code (and then
+    /// setup); after that it opens the objects window. The popover always keeps the code for more phones.
+    private func showMain() {
+        if UserDefaults.standard.bool(forKey:"setupFinished") && !showingSetup { ObjectsWindow.shared.show() }
+        else { showPairing() }
     }
     /// Mockup 09: once a phone connects, the QR window becomes the setup questions (first run only).
     private func watchForPhone() {
@@ -236,13 +260,14 @@ extension NSImage {
     }
     private func phoneConnected() {
         guard let window, window.isVisible else { return }
-        guard !UserDefaults.standard.bool(forKey:"setupFinished") else { window.close(); return }
+        guard !UserDefaults.standard.bool(forKey:"setupFinished") else { window.close(); ObjectsWindow.shared.show(); return }
         showingSetup = true
         window.backgroundColor = .windowBackgroundColor
         window.appearance = nil
         window.contentView = NSHostingView(rootView:SetupView(model:setupModel) { [weak self] in
             UserDefaults.standard.set(true, forKey:"setupFinished")
             self?.window?.close()
+            ObjectsWindow.shared.show()
         })
         // Mockup 09: setup is 720 × 520. Grow from the code's window around its centre; the hosting
         // view alone doesn't resize a window whose content was swapped after it was shown.
