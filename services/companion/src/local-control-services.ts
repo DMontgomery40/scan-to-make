@@ -190,13 +190,14 @@ export function createControlDispatcher(services: ControlServices) {
           return {answered:true};
         }
         case 'doors.prepare': return await prepareDoor(parameters[method].parse(raw));
-        case 'objects.list': case 'objects.get': case 'objects.start': case 'objects.delete': case 'objects.correct': case 'objects.answerCloseup': case 'objects.print': case 'objects.answerPlate': {
+        case 'objects.list': case 'objects.get': case 'objects.start': case 'objects.delete': case 'objects.correct': case 'objects.answerCloseup': case 'objects.print': case 'objects.answerPlate': case 'objects.printCaliper': {
           const objects = services.objects;
           if (!objects) throw new ControlFailure('unavailable');
           try {
             // The Mac app is on this Mac: it gets each object's folder to read the renders and model from.
             const local = (o: Awaited<ReturnType<typeof objects.get>>) => ({...publicObject(o), directory: objects.dir(o.id)});
             if (method === 'objects.list') return {objects: (await objects.list()).map(local)};
+            if (method === 'objects.printCaliper') return {object: local(await objects.printCaliper())};
             if (method === 'objects.delete') { await objects.delete((parameters[method].parse(raw) as {id: string}).id); return {deleted: true}; }
             const params = parameters[method].parse(raw) as {id: string; note?: string; bestGuess?: boolean; checked?: boolean};
             const object = method === 'objects.get' ? await objects.get(params.id)

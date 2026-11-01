@@ -1,6 +1,7 @@
 import {randomUUID} from 'node:crypto';
 import {mkdir, readdir, readFile, rename, rm, writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
+import type {TouchupMeasurement} from '../touchup/invocation.js';
 
 export type ObjectState = 'new' | 'touching-up' | 'needs-closeup' | 'ready' | 'printing' | 'printed' | 'failed';
 
@@ -27,7 +28,11 @@ export interface StmObject {
   /** File names under photos/, in upload order. */
   photos: string[];
   passes: ObjectPass[];
-  current?: {model: string; renders: string[]; sizeMm?: [number, number, number]; summary?: string};
+  current?: {model: string; renders: string[]; sizeMm?: [number, number, number]; summary?: string;
+    /** Dimensions the touch-up used and where each came from (a caliper reading outranks a ruler, the scan or the description). */
+    measurements?: TouchupMeasurement[]};
+  /** Set on the Counterpart caliper, which prints from its own prepared project instead of the model. */
+  kind?: 'caliper';
   question?: {closeup: string};
   /** Set while a print waits for the user: something is on the plate, or the printer has no camera. */
   plate?: {item?: string; noCamera?: boolean; photo?: boolean};

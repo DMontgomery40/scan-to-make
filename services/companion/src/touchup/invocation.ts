@@ -18,8 +18,35 @@ export const TOUCHUP_RESULT_SCHEMA = {
     status: {enum: ['done', 'needs_closeup', 'failed']},
     closeup: {type: 'string', description: 'What to photograph, in a few plain words'},
     summary: {type: 'string', description: 'What you changed, in one or two plain sentences the person will read: no file names, tool or Blender details. When status is failed: what went wrong, in one sentence.'},
+    measurements: {
+      type: 'array',
+      description: 'Dimensions you used: read from a caliper or ruler in the photos, or taken from the scan or the description',
+      items: {
+        type: 'object', additionalProperties: false, required: ['what', 'mm', 'source'],
+        properties: {
+          what: {type: 'string', description: 'What was measured, in a few plain words, such as "across the top"'},
+          mm: {type: 'number', description: 'Millimetres'},
+          source: {enum: ['caliper', 'ruler', 'scan', 'description']},
+        },
+      },
+    },
   },
 } as const;
+
+/** One dimension the touch-up used, and where it came from. A caliper reading outranks a ruler, the scan or the description. */
+export interface TouchupMeasurement {what: string; mm: number; source: 'caliper' | 'ruler' | 'scan' | 'description'}
+const SOURCES = new Set(['caliper', 'ruler', 'scan', 'description']);
+
+/** Keeps only well-formed measurements from the worker's answer: never trust its shape. */
+export function cleanMeasurements(value: unknown): TouchupMeasurement[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap(item => {
+    const {what, mm, source} = (item ?? {}) as Record<string, unknown>;
+    if (typeof what !== 'string' || !what.trim() || typeof mm !== 'number' || !Number.isFinite(mm) || mm <= 0 || mm > 10000
+      || typeof source !== 'string' || !SOURCES.has(source)) return [];
+    return [{what: what.trim().slice(0, 120), mm: Math.round(mm * 100) / 100, source: source as TouchupMeasurement['source']}];
+  }).slice(0, 20);
+}
 
 export const TOUCHUP_SYSTEM_RULES = `You are making a 3D model the user will print: either touching up their scan so it matches the real object in the photos, or making what their instructions describe so it fits the real things it goes with.
 - Reach Blender only through the printer MCP's blender_mcp_* tools. Start in the empty scene you are given, and work only with objects in the current scene (bpy.context.scene.objects).
@@ -31,7 +58,9 @@ export const TOUCHUP_SYSTEM_RULES = `You are making a 3D model the user will pri
 - After each fix, export the whole model as an STL to the checkpoints folder (01.stl, 02.stl, …).
 - Make one pass, then stop. Export the final model to out/touched.stl and a few square PNG renders to out/, named so the clearest overall view sorts first (for example 1_overview.png).
 - If you can't see a part well enough to fix it, set status to needs_closeup and say what to photograph.
-- If something breaks and you can't finish (for example Blender stops responding), set status to failed and say what happened.`;
+- If something breaks and you can't finish (for example Blender stops responding), set status to failed and say what happened.
+- If a caliper (best) or any ruler shows in a photo, read it and put each reading in measurements. For a vernier caliper, take the whole millimetres from the main scale at the vernier's 0 line, then add the vernier line that lines up best. A caliper reading is the authority for that dimension, over the scan and over your own estimate. A ruler reading is an estimate. If the dimension matters and you can't make out the scale, ask for a close-up of it (needs_closeup).
+- Also put in measurements the main dimensions you took from the scan or the description, with that source.`;
 
 /** Only what Claude Code needs to find the user's own login. Never printer tokens or provider keys. */
 const ENV_ALLOWLIST = ['HOME', 'USER', 'LOGNAME', 'PATH', 'TMPDIR', 'LANG', 'SHELL', 'CLAUDE_CONFIG_DIR'] as const;

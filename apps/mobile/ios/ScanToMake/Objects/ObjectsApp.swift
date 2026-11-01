@@ -99,6 +99,7 @@ private func native(_ name: String) -> NSObject? { (NSClassFromString(name) as? 
     func closeup(_ id: String, bestGuess: Bool) async throws -> StmObject { try await request("POST", "/v1/objects/\(id)/closeup", ["bestGuess": bestGuess], as: ObjectReply.self).object }
     func print(_ id: String, checked: Bool) async throws -> StmObject { try await request("POST", "/v1/objects/\(id)/print", checked ? ["checked": true] : nil, as: ObjectReply.self).object }
     func plateClear(_ id: String) async throws -> StmObject { try await request("POST", "/v1/objects/\(id)/plate", ["clear": true], as: ObjectReply.self).object }
+    func printCaliper() async throws -> StmObject { try await request("POST", "/v1/objects/caliper", as: ObjectReply.self).object }
     func delete(_ id: String) async throws { _ = try await request("DELETE", "/v1/objects/\(id)", as: Deleted.self) }
 
     /// Photos picked for a new object; they stay on this phone until sent.
@@ -310,6 +311,7 @@ struct ObjectsListView: View {
                     Label(refusal, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red)
                 }
             }
+            CaliperSetupCard(store: store)
             if store.objects.isEmpty, store.loaded, store.error == nil {
                 Section {
                     ContentUnavailableView {
@@ -676,6 +678,7 @@ struct ObjectDetailView: View {
                 }
                 if let problem = problem ?? fetchProblem { Label(problem, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red) }
             }
+            MeasurementsSection(object: object)
             if !words.actions.filter({ $0 != .correct }).isEmpty {
                 Section { actions(object, words) }
                     .listRowBackground(Color.clear)
@@ -876,6 +879,7 @@ struct SettingsView: View {
                     Label("Check the size and pictures, fix anything, then tap Print.", systemImage: "printer")
                 }
                 Section("Help") {
+                    CaliperPrintButton(store: store)
                     Link(destination: URL(string: "https://counterpart.dtmont.com/")!) {
                         Label("Counterpart Website", systemImage: "safari")
                     }

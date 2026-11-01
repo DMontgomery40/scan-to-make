@@ -10,7 +10,13 @@ struct StmObject: Codable, Identifiable, Equatable, Sendable {
         }
     }
     struct Pass: Codable, Equatable, Sendable { var startedAtMs: Double; var endedAtMs: Double?; var note: String?; var status: String?; var summary: String? }
-    struct Current: Codable, Equatable, Sendable { var model: String; var renders: [String]; var sizeMm: [Double]?; var summary: String? }
+    struct Current: Codable, Equatable, Sendable {
+        var model: String; var renders: [String]; var sizeMm: [Double]?; var summary: String?
+        /// Dimensions the touch-up used and where each came from.
+        var measurements: [Measurement]?
+    }
+    /// One dimension: `source` is caliper, ruler, scan or description (a newer Mac may send others).
+    struct Measurement: Codable, Equatable, Sendable { var what: String; var mm: Double; var source: String }
     struct Question: Codable, Equatable, Sendable { var closeup: String? }
     struct Plate: Codable, Equatable, Sendable { var item: String?; var noCamera: Bool?; var photo: Bool? }
     struct Print: Codable, Equatable, Sendable { var bundleId: String; var uncertain: Bool? }
@@ -28,6 +34,8 @@ struct StmObject: Codable, Identifiable, Equatable, Sendable {
     var plate: Plate?
     var failure: String?
     var print: Print?
+    /// "caliper" for the printable caliper the Mac ships.
+    var kind: String?
 }
 
 /// What the object page and the list can offer for an object right now.
@@ -59,6 +67,28 @@ struct ObjectWords: Equatable, Sendable {
         let cut = String(first.prefix(43))
         let word = cut.range(of: " ", options: .backwards).map { String(cut[..<$0.lowerBound]) } ?? cut
         return word.trimmingCharacters(in: .whitespaces) + "…"
+    }
+
+    /// "62.3 mm across the top, read from the caliper". A ruler reading says it's an estimate.
+    static func measurement(_ m: StmObject.Measurement) -> String {
+        let value = m.mm.rounded() == m.mm ? String(Int(m.mm)) : String(format: "%.1f", m.mm)
+        let what = m.what.trimmingCharacters(in: .whitespacesAndNewlines)
+        let size = what.isEmpty ? "\(value) mm" : "\(value) mm \(what)"
+        switch m.source {
+        case "caliper": return "\(size), read from the caliper"
+        case "ruler": return "About \(size), read from a ruler (an estimate)"
+        case "scan": return "\(size), from the scan"
+        case "description": return "\(size), from what you asked for"
+        default: return size
+        }
+    }
+
+    /// Caliper readings first: they're the most exact.
+    static func measurements(_ object: StmObject) -> [String] {
+        let rank = ["caliper": 0, "ruler": 1, "description": 2, "scan": 3]
+        return (object.current?.measurements ?? []).enumerated()
+            .sorted { (rank[$0.element.source] ?? 4, $0.offset) < (rank[$1.element.source] ?? 4, $1.offset) }
+            .map { measurement($0.element) }
     }
 
     static func formatSize(_ size: [Double]) -> String? {

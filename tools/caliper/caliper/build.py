@@ -81,6 +81,8 @@ def write(out: Path, params: Params = Params()) -> dict:
     for role in (BODY, MARKING):
         save(f'caliper-{role}.stl', stl_bytes([part for part, v in zip(card_parts + slider_parts, design.card + design.slider) if v.role == role]))
     meta = dict(design.meta)
+    closed = Manifold.batch_boolean([v.solid for v in design.card + design.slider], __import__('manifold3d').OpType.Add).bounding_box()
+    meta['assembled_size_mm'] = [round(closed[3] - closed[0], 1), round(closed[4] - closed[1], 1), round(closed[5] - closed[2], 1)]
     meta['plate'] = {**layout, 'bed_centre': list(BED_CENTRE),
                      'note': 'Positions are plate coordinates of each object origin; the slider is turned face down.'}
     meta['filament_slots'] = {'1': BODY, '2': MARKING}

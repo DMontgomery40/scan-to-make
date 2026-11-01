@@ -52,6 +52,7 @@ export const parameters = {
   'objects.answerCloseup': z.strictObject({id: z.uuid(), bestGuess: z.boolean()}),
   'objects.print': z.strictObject({id: z.uuid(), checked: z.boolean().optional()}),
   'objects.answerPlate': z.strictObject({id: z.uuid()}),
+  'objects.printCaliper': empty,
 };
 export type ControlMethod = keyof typeof parameters;
 export type DoorParameters = z.infer<typeof parameters['doors.prepare']>;

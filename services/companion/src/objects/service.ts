@@ -5,6 +5,8 @@ import type {PlateVerdict} from './bedcheck.js';
 import type {TouchupInput} from '../touchup/touchup.js';
 import type {TouchupResult} from '../touchup/runner.js';
 import {ObjectStore, type StmObject} from './store.js';
+import {caliperObject} from './caliper.js';
+import {cleanMeasurements} from '../touchup/invocation.js';
 
 /** How many of an object's photos go to one touch-up pass. More only costs time. */
 export const PHOTOS_PER_PASS = 24;
@@ -22,6 +24,8 @@ export interface ObjectServiceDeps {
   stlInfo: (stlPath: string) => Promise<[number, number, number] | undefined>;
   claudePath: string;
   handoff: PrinterHandoffConfig;
+  /** Where the shipped caliper files are (tests point this elsewhere). */
+  caliperAssets?: string;
   onChange?: (object: StmObject) => void;
   print?: {
     services: {store: HandoffBundleStore; relay: ElicitationRelay; runner: Pick<PrinterHandoffRunner, 'runBundle' | 'backend'>; selection?: PrinterHandoffConfig['selection']};
@@ -72,6 +76,12 @@ export class ObjectService {
   }
 
   create(instructions?: string) { return this.#deps.store.create(instructions).then(o => this.#changed(o)); }
+
+  /** The caliper as a ready object (reused if there is one), then printed through the normal print path. */
+  printCaliper(): Promise<StmObject> {
+    return this.#gate('caliper', async () => this.#changed(await caliperObject(this.#deps.store, this.#deps.caliperAssets)))
+      .then(object => this.print(object.id));
+  }
   list() { return this.#deps.store.list(); }
   get(id: string) { return this.#deps.store.get(id); }
   dir(id: string) { return this.#deps.store.dir(id); }
@@ -236,12 +246,15 @@ export class ObjectService {
       const summary = result.status === 'unchanged' ? result.summary ?? 'Nothing needed changing.'
         : result.status === 'capped' ? `Stopped at the ${result.reason?.includes('time') ? 'time limit' : 'step limit'}; this is the last saved version.${result.summary ? ' ' + result.summary : ''}`
         : result.summary;
-      current = {model: join('current', 'model.stl'), renders, ...(sizeMm ? {sizeMm} : {}), ...(summary ? {summary} : {})};
+      const measurements = cleanMeasurements((result as {measurements?: unknown}).measurements);
+      current = {model: join('current', 'model.stl'), renders, ...(sizeMm ? {sizeMm} : {}), ...(summary ? {summary} : {}),
+        ...(measurements.length ? {measurements} : {})};
     }
     const state: StmObject['state'] = result.status === 'needs_closeup' ? 'needs-closeup'
       : current && result.status !== 'failed' ? 'ready' : 'failed';
     const updated = await store.update(id, o => ({...o, state,
-      ...(current ? {current} : {}),
+      // A correction that read nothing new keeps the readings from earlier passes.
+      ...(current ? {current: current.measurements || !o.current?.measurements ? current : {...current, measurements: o.current.measurements}} : {}),
       ...(state === 'needs-closeup' ? {question: {closeup: result.closeup ?? 'a part of the object'}} : {}),
       ...(state === 'failed' ? {failure: result.reason ?? 'The touch-up stopped without a model.'} : {}),
       passes: o.passes.map(p => p.startedAtMs !== startedAtMs ? p : {...p, endedAtMs: Date.now(), status: result.status,

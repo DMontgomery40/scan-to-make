@@ -47,6 +47,12 @@ export function createObjectRoutes(service: ObjectService) {
       const url = new URL(request.url ?? '/', 'http://localhost');
       const match = PATH.exec(url.pathname);
       try {
+        if (url.pathname === '/v1/objects/caliper') {
+          // Settings > Help and the first-run card: make the caliper object and print it.
+          if (request.method !== 'POST') throw new HttpFailure(405, 'method-not-allowed');
+          await authorize(PRINT);
+          return send(response, 201, {object: publicObject(await service.printCaliper())});
+        }
         if (!match) throw new HttpFailure(404, 'not-found');
         const [, id, action] = match;
         const method = request.method ?? 'GET';
