@@ -222,7 +222,6 @@ struct ObjectsRootView: View {
     @State private var path: [String] = []
     @State private var creating = false
     @State private var settings = false
-    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -256,12 +255,12 @@ struct ObjectsRootView: View {
             await store.load()
             store.canScan = await scan
         }
-        // While something is touching up or printing, keep the list current.
-        .task(id: store.anyBusy && scenePhase == .active) {
-            guard store.anyBusy, scenePhase == .active else { return }
+        // While something is touching up or printing, keep the list current (not while in the background).
+        .task(id: store.anyBusy) {
+            guard store.anyBusy else { return }
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(3))
-                await store.load()
+                if UIApplication.shared.applicationState != .background { await store.load() }
             }
         }
     }
@@ -543,7 +542,7 @@ struct ObjectDetailView: View {
     @State private var problem: String?
     @State private var confirmDelete = false
     @State private var plateImage: UIImage?
-    @Environment(\.scenePhase) private var scenePhase
+    @FocusState private var writing: Bool
     private var object: StmObject? { store.objects.first { $0.id == id } }
 
     var body: some View {
@@ -552,11 +551,11 @@ struct ObjectDetailView: View {
         }
         .navigationBarTitleDisplayMode(.inline)
         .task(id: id) { await reload() }
-        .task(id: (object.map { ObjectWords($0).busy } ?? false) && scenePhase == .active) {
-            guard let object, ObjectWords(object).busy, scenePhase == .active else { return }
+        .task(id: object.map { ObjectWords($0).busy } ?? false) {
+            guard let object, ObjectWords(object).busy else { return }
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(3))
-                await reload()
+                if UIApplication.shared.applicationState != .background { await reload() }
             }
         }
     }
@@ -618,12 +617,24 @@ struct ObjectDetailView: View {
             }
             if words.actions.contains(.correct) {
                 Section {
-                    TextField("Say what's wrong, like a size or a missing part", text: $note, axis: .vertical).lineLimit(2...6)
-                    Button("Send Changes") {
-                        let text = note.trimmingCharacters(in: .whitespacesAndNewlines)
-                        act { let next = try await store.mac.correct(object.id, text); note = ""; return next }
+                    // Like Messages: the send button sits beside the text, so it stays above the keyboard.
+                    HStack(alignment: .bottom, spacing: 10) {
+                        TextField("Say what's wrong, like a size or a missing part", text: $note, axis: .vertical)
+                            .lineLimit(1...6)
+                            .focused($writing)
+                        Button {
+                            let text = note.trimmingCharacters(in: .whitespacesAndNewlines)
+                            writing = false
+                            act { let next = try await store.mac.correct(object.id, text); note = ""; return next }
+                        } label: {
+                            Image(systemName: "arrow.up").font(.body.weight(.semibold))
+                        }
+                        .buttonStyle(.glassProminent)
+                        .buttonBorderShape(.circle)
+                        .disabled(working || note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        .accessibilityLabel("Send Changes")
                     }
-                    .disabled(working || note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .id("fix")
                 } header: { Text("Anything to Fix?") } footer: { Text("It goes back to your Mac for another touch-up.") }
             }
             Section("What You Asked For") {
@@ -632,7 +643,11 @@ struct ObjectDetailView: View {
             }
         }
         .navigationTitle(words.title)
+        .scrollDismissesKeyboard(.interactively)
         .toolbar {
+            if writing {
+                ToolbarItem(placement: .confirmationAction) { Button("Done") { writing = false } }
+            }
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
                     if object.current != nil {
