@@ -43,6 +43,12 @@ export const parameters = {
   'confirmations.answer': z.strictObject({id: z.uuid(), answer}),
   'doors.prepare': z.strictObject({projectId: projectId.optional(), handoffId: z.uuid().optional(), door: z.enum(['finder', 'blender', 'bambu-studio', 'orca'])})
     .refine(p => (p.projectId === undefined) !== (p.handoffId === undefined)),
+  'objects.list': empty,
+  'objects.get': z.strictObject({id: z.uuid()}),
+  'objects.correct': z.strictObject({id: z.uuid(), note: z.string().trim().min(1).max(4000)}),
+  'objects.answerCloseup': z.strictObject({id: z.uuid(), bestGuess: z.boolean()}),
+  'objects.print': z.strictObject({id: z.uuid(), checked: z.boolean().optional()}),
+  'objects.answerPlate': z.strictObject({id: z.uuid()}),
 };
 export type ControlMethod = keyof typeof parameters;
 export type DoorParameters = z.infer<typeof parameters['doors.prepare']>;

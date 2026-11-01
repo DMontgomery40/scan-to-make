@@ -21,12 +21,15 @@ export interface PendingElicitation {
   url?: string;
   elicitationId?: string;
   cameraSnapshot?: CameraSnapshotContext;
+  /** The handoff bundle whose print asked, so each answer reaches its own print. */
+  bundleId?: string;
   createdAtMs: number;
   expiresAtMs: number;
 }
 
 export interface ElicitationContext {
   cameraSnapshot?: CameraSnapshotContext;
+  bundleId?: string;
 }
 
 export interface ElicitationRelay {
@@ -80,6 +83,7 @@ export class InMemoryElicitationRelay implements ElicitationRelay {
       ...(params.url === undefined ? {} : {url: params.url}),
       ...(params.elicitationId === undefined ? {} : {elicitationId: params.elicitationId}),
       ...(context.cameraSnapshot === undefined ? {} : {cameraSnapshot: context.cameraSnapshot}),
+      ...(context.bundleId === undefined ? {} : {bundleId: context.bundleId}),
       createdAtMs: now,
       expiresAtMs: now + this.#timeoutMs,
     };

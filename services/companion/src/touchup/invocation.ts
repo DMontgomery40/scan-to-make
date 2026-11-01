@@ -58,7 +58,8 @@ function printerServer(printer: PrinterMcpProcess): McpServerEntry {
   return entry;
 }
 
-function workerEnv(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+/** The env for any Claude Code call the companion makes: the user's login, none of their personal setup, no secrets. */
+export function isolatedClaudeEnv(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {};
   for (const name of ENV_ALLOWLIST) if (source[name]) env[name] = source[name];
   // A launchd agent has no USER; Claude Code needs it to find the signed-in Keychain login.
@@ -109,5 +110,5 @@ export function buildTouchupInvocation(input: {pass: TouchupPass; printer: Print
     '--verbose',
     prompt(pass, input.instructions, input.note, input.summary),
   ];
-  return {command: input.claudePath, args, env: workerEnv(input.sourceEnv ?? process.env), cwd: pass.dir, mcpConfigPath, mcpConfig};
+  return {command: input.claudePath, args, env: isolatedClaudeEnv(input.sourceEnv ?? process.env), cwd: pass.dir, mcpConfigPath, mcpConfig};
 }

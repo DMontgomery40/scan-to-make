@@ -1,6 +1,7 @@
 import {execFile} from 'node:child_process';
 import {randomUUID} from 'node:crypto';
-import {copyFile, mkdir} from 'node:fs/promises';
+import {existsSync} from 'node:fs';
+import {copyFile, mkdir, readFile} from 'node:fs/promises';
 import {basename, join, resolve} from 'node:path';
 import {promisify} from 'node:util';
 
@@ -28,10 +29,30 @@ async function longestEdge(path: string): Promise<number> {
   return Math.max(...[...stdout.matchAll(/pixel(?:Width|Height): (\d+)/g)].map(match => Number(match[1])));
 }
 
-/** Converts any photo the phone sends (HEIC included) to a JPEG the model can read, never upscaling it. */
-async function writePhoto(source: string, target: string): Promise<void> {
+/** macOS converts photos with sips; elsewhere (a Linux companion) JPEG and PNG are used as they are. */
+export type PhotoTool = 'sips' | 'copy';
+const DEFAULT_PHOTO_TOOL: PhotoTool = existsSync(SIPS) ? 'sips' : 'copy';
+
+function photoKind(bytes: Buffer): 'jpg' | 'png' | undefined {
+  if (bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return 'jpg';
+  if (bytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return 'png';
+  return undefined;
+}
+
+/**
+ * Converts any photo the phone sends (HEIC included) to a JPEG the model can read, never upscaling it.
+ * Returns the path written; without sips the photo keeps its own format and size.
+ */
+async function writePhoto(source: string, targetBase: string, tool: PhotoTool): Promise<string> {
+  if (tool === 'copy') {
+    const kind = photoKind(await readFile(source));
+    if (!kind) throw new Error('This photo needs a Mac to convert (HEIC or another format). Send it as a JPEG or PNG instead.');
+    await copyFile(source, `${targetBase}.${kind}`);
+    return `${targetBase}.${kind}`;
+  }
   const resize = await longestEdge(source) > MAX_PHOTO_EDGE ? ['-Z', String(MAX_PHOTO_EDGE)] : [];
-  await run(SIPS, ['-s', 'format', 'jpeg', ...resize, source, '--out', target]);
+  await run(SIPS, ['-s', 'format', 'jpeg', ...resize, source, '--out', `${targetBase}.jpg`]);
+  return `${targetBase}.jpg`;
 }
 
 /**
@@ -39,7 +60,7 @@ async function writePhoto(source: string, target: string): Promise<void> {
  * The model's Blender session can read any file on disk, so nothing else may
  * sit next to its inputs.
  */
-export async function prepareTouchupPass(input: {root: string; objectId: string; scan: string[]; photos: string[]; requirePhotos?: boolean}): Promise<TouchupPass> {
+export async function prepareTouchupPass(input: {root: string; objectId: string; scan: string[]; photos: string[]; requirePhotos?: boolean; photoTool?: PhotoTool}): Promise<TouchupPass> {
   // Photos are optional only when the user's instructions say what to make.
   if (input.photos.length === 0 && input.requirePhotos !== false) throw new NoPhotosError();
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
@@ -55,9 +76,7 @@ export async function prepareTouchupPass(input: {root: string; objectId: string;
   }
   const photoPaths: string[] = [];
   for (const [index, file] of input.photos.entries()) {
-    const target = join(photosDir, `photo-${String(index + 1).padStart(2, '0')}.jpg`);
-    await writePhoto(file, target);
-    photoPaths.push(target);
+    photoPaths.push(await writePhoto(file, join(photosDir, `photo-${String(index + 1).padStart(2, '0')}`), input.photoTool ?? DEFAULT_PHOTO_TOOL));
   }
   return {dir, scanDir, scanPaths, photosDir, photoPaths, outDir, checkpointsDir};
 }

@@ -42,7 +42,9 @@ test('copies only the given files', async () => {
   assert.equal(pass.checkpointsDir, join(pass.outDir, 'checkpoints'));
 });
 
-test('converts HEIC and caps size', async () => {
+const HAS_SIPS = existsSync('/usr/bin/sips');
+
+test('converts HEIC and caps size', {skip: !HAS_SIPS && 'needs macOS sips'}, async () => {
   const source = await temp('touchup-src-'), root = await temp('touchup-root-');
   const wide = join(source, 'wide.jpg');
   execFileSync('/usr/bin/sips', ['-z', '300', '4000', fixture('photo.jpg'), '--out', wide], {stdio: 'ignore'});
@@ -83,4 +85,11 @@ test('a relative root still gives absolute pass paths', async () => {
   const pass = await prepareTouchupPass({root: relative(process.cwd(), root), objectId: 'obj-6', scan: [fixture('scan.obj')], photos: [fixture('photo.jpg')]});
   assert.ok(pass.dir.startsWith('/'));
   assert.ok(pass.scanPaths.every(path => path.startsWith('/')));
+});
+
+test('without sips (Linux), JPEG and PNG photos are used as they are and HEIC says it needs a Mac', async () => {
+  const root = await temp('touchup-root-');
+  const pass = await prepareTouchupPass({root, objectId: 'obj-7', scan: [fixture('scan.obj')], photos: [fixture('photo.jpg'), fixture('scan_tex.png')], photoTool: 'copy'});
+  assert.deepEqual((await readdir(pass.photosDir)).sort(), ['photo-01.jpg', 'photo-02.png']);
+  await assert.rejects(prepareTouchupPass({root, objectId: 'obj-8', scan: [fixture('scan.obj')], photos: [fixture('photo.heic')], photoTool: 'copy'}), /needs a Mac/);
 });

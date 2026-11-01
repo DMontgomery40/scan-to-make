@@ -237,6 +237,16 @@ test('slicing the same bundle twice with different output bytes stays readable',
   assert.equal((await store.read(bundle.id)).artifacts.sliced.sha256, second.manifest.artifacts.sliced.sha256);
 });
 
+test('runBundle tags every printer question with its own bundle, so answers reach the right print', async t => {
+  const f = await setup(t);
+  const store = new HandoffBundleStore(join(f.root, 'bundles'));
+  const bundle = await store.create({stl, prompt: '', backend: 'bambu-printer-mcp', selection});
+  await f.runner.runBundle(store, bundle.id);
+  assert.ok(f.seen.length > 0);
+  for (const pending of f.seen) assert.equal(pending.bundleId, bundle.id);
+  assert.equal(f.seen.at(-1).cameraSnapshot.base64, 'ZmFrZQ==');
+});
+
 test('runBundle stores only a bare failure code on the bundle', async t => {
   const f = await setup(t, {answer: 'decline'});
   const store = new HandoffBundleStore(join(f.root, 'bundles-failcode'));
