@@ -17,9 +17,8 @@ import AgentKit
                               styleMask:[.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
                               backing:.buffered, defer:false)
         window.title = "Scan to Make"
-        // No toolbar: the sidebar runs the full height and the page starts under the traffic lights.
-        window.titleVisibility = .hidden
-        window.titlebarAppearsTransparent = true
+        // The standard unified toolbar: the sidebar and toolbar are the system's Liquid Glass.
+        window.toolbarStyle = .unified
         window.isReleasedWhenClosed = false
         let content = NSHostingController(rootView:ObjectsWindowView(model:model, startWith3D:startWith3D))
         // The window owns its size. A minimum that follows SwiftUI's layout can push the window back

@@ -4,68 +4,102 @@ import AppKit
 import ControlKit
 #endif
 
-// The objects window (spec §5.1, §5.3–5.6): the same list and object pages as the iPhone app.
-// A sidebar of cards, and a page that leads with what the object needs from the user, then the
-// model itself, then Print and the corrections box. All copy comes from ObjectWords.
+// The objects window (spec §5.1, §5.3–5.6): the same list and object pages as the iPhone app, as a
+// standard macOS 27 window. The sidebar, toolbar and dialogs are the system's own, so they take on
+// Liquid Glass by themselves; the page adds no backgrounds of its own. Cobalt is the one tint, and
+// only on the primary action. All object copy comes from ObjectWords.
 
 enum ObjectsStyle {
-    /// The one action colour, the same cobalt as the iPhone app: Print, and what the object needs.
+    /// The one tint, the same cobalt as the iPhone app: the primary action only.
     static let accent = Color(nsColor:NSColor(name:nil) { appearance in
         appearance.bestMatch(from:[.aqua, .darkAqua]) == .darkAqua
             ? NSColor(red:0x7B/255, green:0x95/255, blue:0xFF/255, alpha:1)
             : NSColor(red:0x24/255, green:0x48/255, blue:0xD8/255, alpha:1)
     })
-    /// Accent for text; cobalt keeps 4.5:1 on both window backgrounds.
-    static let accentText = accent
     /// The model's stage: the iPhone's dark build plate, which the touch-up's renders sit on.
     static let stage = Color(nsColor:NSColor(name:nil) { appearance in
         appearance.bestMatch(from:[.aqua, .darkAqua]) == .darkAqua
             ? NSColor(red:0x0E/255, green:0x10/255, blue:0x13/255, alpha:1)
             : NSColor(red:0x2C/255, green:0x31/255, blue:0x38/255, alpha:1)
     })
-    static func color(_ tone: ObjectWords.Tone) -> Color {
-        switch tone {
-        case .pass: return Color(nsColor:.systemGreen)
-        case .fail: return Color(nsColor:.systemRed)
-        case .accent: return accent
-        case .pending, .neutral: return Color(nsColor:.tertiaryLabelColor)
-        }
+}
+
+extension View {
+    /// The one prominent button on a page: Liquid Glass in cobalt on macOS 26 and later.
+    @ViewBuilder func primaryAction() -> some View {
+        if #available(macOS 26, *) { buttonStyle(.glassProminent).tint(ObjectsStyle.accent) }
+        else { buttonStyle(.borderedProminent).tint(ObjectsStyle.accent) }
+    }
+    /// Every other button that stands on its own on a page.
+    @ViewBuilder func secondaryAction() -> some View {
+        if #available(macOS 26, *) { buttonStyle(.glass) } else { buttonStyle(.bordered) }
     }
 }
 
 struct ObjectsWindowView: View {
     @ObservedObject var model: ObjectsModel
     var startWith3D = false
+    @State private var confirmingDelete = false
+
     var body: some View {
-        Group {
-            switch model.availability {
-            case .loading where model.objects.isEmpty:
-                ProgressView().controlSize(.small).frame(maxWidth:.infinity, maxHeight:.infinity)
-            case .notSetUp:
-                QuietMessage(text:"Scan to Make needs Claude Code and your printer set up on this Mac first.")
-            case .notRunning:
-                QuietMessage(text:"Scan to Make couldn’t start in the background.")
-            default:
-                if model.objects.isEmpty {
-                    QuietMessage(title:"Nothing here yet",
-                                 text:"Scan something, or say what you want made, on your iPhone. It shows up here.")
-                } else {
-                    split
-                }
-            }
-        }
-        .frame(minWidth:760, minHeight:520)
-    }
-    private var split: some View {
         NavigationSplitView {
             List(selection:$model.selection) {
                 ForEach(model.objects) { ObjectCard(object:$0).tag($0.id) }
             }
             .listStyle(.sidebar)
-            .navigationSplitViewColumnWidth(min:240, ideal:280, max:360)
+            .navigationSplitViewColumnWidth(min:220, ideal:264, max:340)
+            .onDeleteCommand { if model.selected != nil { confirmingDelete = true } }
         } detail: {
+            detail
+        }
+        .navigationTitle("Scan to Make")
+        .navigationSubtitle(subtitle)
+        .frame(minWidth:ObjectsWindow.minimumSize.width, minHeight:ObjectsWindow.minimumSize.height)
+        .toolbar {
+            ToolbarItemGroup(placement:.primaryAction) {
+                Button { Task { await model.refresh() } } label: { Label("Refresh", systemImage:"arrow.clockwise") }
+                    .help("Refresh")
+                Button { confirmingDelete = true } label: { Label("Delete", systemImage:"trash") }
+                    .help("Delete")
+                    .disabled(model.selected == nil || model.selected.map { model.working.contains($0.id) } == true)
+            }
+            ToolbarItem(placement:.primaryAction) {
+                Button { SettingsWindow.shared.show() } label: { Label("Settings", systemImage:"gearshape") }
+                    .help("Settings")
+            }
+        }
+        .confirmationDialog(model.selected.map { "Delete “\($0.words.title)”?" } ?? "Delete?", isPresented:$confirmingDelete,
+                            titleVisibility:.visible, presenting:model.selected) { object in
+            Button("Delete", role:.destructive) { Task { await model.delete(object.id) } }
+            Button("Cancel", role:.cancel) {}
+        } message: { _ in
+            Text("Its scan, pictures and model are removed from this Mac. This can’t be undone.")
+        }
+    }
+
+    /// Under the window's title: whether Scan to Make is answering on this Mac, and how much is here.
+    private var subtitle: String {
+        switch model.availability {
+        case .loading: return ""
+        case .notSetUp: return "Not set up"
+        case .notRunning: return "Not running"
+        case .ready: return model.objects.count == 1 ? "1 object" : "\(model.objects.count) objects"
+        }
+    }
+
+    @ViewBuilder private var detail: some View {
+        switch model.availability {
+        case .loading where model.objects.isEmpty:
+            ProgressView().controlSize(.small).frame(maxWidth:.infinity, maxHeight:.infinity)
+        case .notSetUp:
+            QuietMessage(title:"Not Set Up Yet", text:"Scan to Make needs Claude Code and your printer set up on this Mac first.")
+        case .notRunning:
+            QuietMessage(title:"Not Running", text:"Scan to Make couldn’t start in the background. Quit it from the menu bar and open it again.")
+        default:
             if let object = model.selected {
                 ObjectPage(object:object, model:model, startWith3D:startWith3D).id(object.id)
+            } else if model.objects.isEmpty {
+                QuietMessage(title:"Nothing Here Yet", text:"Scan something, or say what you want made, in Scan to Make on your iPhone. It shows up here.")
             } else {
                 QuietMessage(text:"Choose something on the left.")
             }
@@ -73,41 +107,49 @@ struct ObjectsWindowView: View {
     }
 }
 
-/// One calm sentence in the middle of the window, for the states that have nothing else to show.
+/// The app's mark, a title and one calm sentence, for the states that have nothing else to show.
 struct QuietMessage: View {
     var title: String?
     let text: String
     var body: some View {
         VStack(spacing:10) {
-            Image(nsImage:.menuBarCube).resizable().renderingMode(.template).frame(width:34, height:34)
-                .foregroundStyle(.tertiary).padding(.bottom, 4).accessibilityHidden(true)
-            if let title { Text(title).font(.system(size:17, weight:.semibold)) }
-            Text(text).font(.system(size:13)).foregroundStyle(.secondary)
+            AppMark(size:64).padding(.bottom, 4)
+            if let title { Text(title).font(.title3.weight(.semibold)) }
+            Text(text).font(.body).foregroundStyle(.secondary)
                 .multilineTextAlignment(.center).fixedSize(horizontal:false, vertical:true)
         }
-        .frame(maxWidth:340)
+        .frame(maxWidth:360)
         .frame(maxWidth:.infinity, maxHeight:.infinity)
         .padding(24)
     }
 }
 
+/// The app icon, as the app's name and mark wherever it introduces itself.
+struct AppMark: View {
+    let size: CGFloat
+    var body: some View {
+        Image(nsImage:NSApp?.applicationIconImage ?? NSImage(named:NSImage.applicationIconName) ?? NSImage())
+            .resizable().interpolation(.high).frame(width:size, height:size)
+            .accessibilityHidden(true)
+    }
+}
+
 // MARK: - The list
 
+/// One row of the sidebar: the first render, the title and where it is, each on one line so a row's
+/// height never depends on the sidebar's width.
 struct ObjectCard: View {
     let object: StmObject
     var body: some View {
         let words = object.words
-        HStack(spacing:11) {
-            Thumbnail(object:object, busy:words.busy).frame(width:46, height:46)
-            VStack(alignment:.leading, spacing:3) {
-                Text(words.title).font(.system(size:13, weight:.semibold)).lineLimit(1)
-                HStack(alignment:.firstTextBaseline, spacing:6) {
-                    Circle().fill(ObjectsStyle.color(words.tone)).frame(width:6, height:6).alignmentGuide(.firstTextBaseline) { $0[.bottom] - 0.5 }
-                    Text(words.headline).font(.system(size:12)).foregroundStyle(.secondary).lineLimit(2)
-                }
+        HStack(spacing:10) {
+            Thumbnail(object:object, busy:words.busy).frame(width:40, height:40)
+            VStack(alignment:.leading, spacing:2) {
+                Text(words.title).font(.body.weight(.medium)).lineLimit(1)
+                Text(words.headline).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
             }
         }
-        .padding(.vertical, 5)
+        .padding(.vertical, 3)
         .accessibilityElement(children:.combine)
     }
 }
@@ -124,12 +166,11 @@ private struct Thumbnail: View {
             } else if busy {
                 ProgressView().controlSize(.small)
             } else {
-                Image(systemName:"cube").font(.system(size:17, weight:.light)).foregroundStyle(.tertiary)
+                Image(systemName:"cube").font(.system(size:16, weight:.light)).foregroundStyle(.tertiary)
             }
         }
         .environment(\.colorScheme, .dark)  // The stage is always the dark plate.
-        .clipShape(RoundedRectangle(cornerRadius:9, style:.continuous))
-        .overlay(RoundedRectangle(cornerRadius:9, style:.continuous).strokeBorder(Color(nsColor:.separatorColor), lineWidth:0.5))
+        .clipShape(RoundedRectangle(cornerRadius:8, style:.continuous))
     }
 }
 
@@ -161,108 +202,111 @@ struct ObjectPage: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment:.leading, spacing:20) {
+            VStack(alignment:.leading, spacing:24) {
                 header
                 if let problem = model.problem, problem.id == object.id {
-                    Label(problem.text, systemImage:"exclamationmark.circle")
-                        .font(.system(size:12.5)).foregroundStyle(Color(nsColor:.systemRed))
+                    Label(problem.text, systemImage:"exclamationmark.circle.fill")
+                        .foregroundStyle(Color(nsColor:.systemRed)).textSelection(.enabled)
                 }
+                if words.tone == .accent { ask }
                 stage
-                if words.actions.contains(.correct) {
-                    Divider().padding(.top, 2)
-                    corrections
+                if let instructions = object.instructions?.trimmingCharacters(in:.whitespacesAndNewlines), !instructions.isEmpty {
+                    section("What You Asked For") {
+                        Text(instructions).textSelection(.enabled).fixedSize(horizontal:false, vertical:true)
+                    }
                 }
+                if words.actions.contains(.correct) { corrections }
             }
-            .padding(EdgeInsets(top:8, leading:32, bottom:32, trailing:32))
-            .frame(maxWidth:860, alignment:.leading)
+            .padding(EdgeInsets(top:20, leading:28, bottom:32, trailing:28))
+            .frame(maxWidth:820, alignment:.leading)
             .frame(maxWidth:.infinity)
             .keepsScrollerRoom()
         }
     }
 
-    // The title, what's happening, and the one thing to do about it.
+    // The title, where it is, and the one thing to do about it.
     private var header: some View {
-        VStack(alignment:.leading, spacing:12) {
-            HStack(alignment:.firstTextBaseline, spacing:16) {
-                Text(words.title).font(.system(size:22, weight:.semibold)).textSelection(.enabled)
+        HStack(alignment:.center, spacing:16) {
+            VStack(alignment:.leading, spacing:6) {
+                Text(words.title).font(.title.weight(.semibold)).textSelection(.enabled)
                     .fixedSize(horizontal:false, vertical:true)
-                Spacer(minLength:0)
-                printButton.alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 7 }
+                if words.tone != .accent { statusLine }
             }
-            if words.tone == .accent {
-                ask
-            } else {
-                VStack(alignment:.leading, spacing:4) {
-                    // Ready says its size and "ready to print" in one line, rather than twice.
-                    statusLine(object.state == .ready ? (words.size ?? words.status) : words.status)
-                    if object.state != .ready, let size = words.size {
-                        Text(size).font(.system(size:12.5)).foregroundStyle(.secondary).padding(.leading, 14)
-                    }
-                }
-            }
+            .frame(maxWidth:.infinity, alignment:.leading)
+            .layoutPriority(1)
+            primaryButton
         }
     }
 
-    private func statusLine(_ text: String) -> some View {
-        HStack(alignment:.firstTextBaseline, spacing:8) {
+    private var statusLine: some View {
+        HStack(alignment:.firstTextBaseline, spacing:6) {
             if words.busy {
-                ProgressView().controlSize(.mini).frame(width:8, height:8).alignmentGuide(.firstTextBaseline) { $0[.bottom] - 1 }
-            } else {
-                Circle().fill(ObjectsStyle.color(words.tone)).frame(width:7, height:7).alignmentGuide(.firstTextBaseline) { $0[.bottom] - 0.5 }
+                ProgressView().controlSize(.mini)
+            } else if words.tone == .pass {
+                Image(systemName:"checkmark.circle.fill").foregroundStyle(Color(nsColor:.systemGreen))
+            } else if words.tone == .fail {
+                Image(systemName:"exclamationmark.triangle.fill").foregroundStyle(Color(nsColor:.systemRed))
             }
-            Text(text).font(.system(size:13.5)).foregroundStyle(words.tone == .fail ? Color.primary : Color.secondary)
+            Text(words.status).foregroundStyle(words.tone == .fail ? Color.primary : Color.secondary)
                 .fixedSize(horizontal:false, vertical:true).textSelection(.enabled)
         }
+        .font(.body)
     }
 
-    @ViewBuilder private var printButton: some View {
+    @ViewBuilder private var primaryButton: some View {
         let action: ObjectAction? = words.actions.contains(.printChecked) ? .printChecked : words.actions.contains(.print) ? .print
             : words.actions.contains(.retry) ? .retry : nil
         if let action {
             HStack(spacing:10) {
                 if working { ProgressView().controlSize(.small) }
-                Button(action == .printChecked ? "I checked. Print again" : action == .retry ? "Try again" : "Print") { run(action) }
-                    // No keyboard shortcut: Print starts the printer, so it is always a deliberate click.
-                    .buttonStyle(.borderedProminent).controlSize(.large).tint(ObjectsStyle.accent)
-                    .disabled(working)
-                    .help(action == .printChecked ? "Only if the printer isn’t already printing this" : "")
+                // No keyboard shortcut: Print starts the printer, so it is always a deliberate click.
+                Button { run(action) } label: {
+                    Label(action == .printChecked ? "I Checked. Print Again" : action == .retry ? "Try Again" : "Print",
+                          systemImage:action == .retry ? "arrow.clockwise" : "printer")
+                }
+                .primaryAction().controlSize(.large)
+                .disabled(working)
+                .help(action == .printChecked ? "Only if the printer isn’t already printing this" : "")
             }
         }
     }
 
-    /// The question (a close-up, or what's on the plate), with the photo and the answer this Mac can give.
+    /// What the object needs from the person (a close-up, or what's on the plate), with the printer
+    /// camera's photo and the answer this Mac can give.
     private var ask: some View {
-        HStack(alignment:.top, spacing:16) {
-            if let photo = object.platePhotoURL {
-                FileImage(url:photo, version:object.updatedAtMs, contentMode:.fill)
-                    .frame(width:200, height:150)
-                    .clipShape(RoundedRectangle(cornerRadius:8, style:.continuous))
-                    .accessibilityLabel("The printer camera’s photo of the plate")
-            }
-            VStack(alignment:.leading, spacing:10) {
-                Text(words.status).font(.system(size:14, weight:.medium)).fixedSize(horizontal:false, vertical:true)
-                if words.actions.contains(.bestGuess) {
-                    Text("Send a close-up from your iPhone, or let me guess.").font(.system(size:12.5)).foregroundStyle(.secondary)
-                    answer("Make your best guess", .bestGuess)
+        GroupBox {
+            HStack(alignment:.top, spacing:16) {
+                if let photo = object.platePhotoURL {
+                    FileImage(url:photo, version:object.updatedAtMs, contentMode:.fill)
+                        .frame(width:200, height:150)
+                        .clipShape(RoundedRectangle(cornerRadius:10, style:.continuous))
+                        .accessibilityLabel("The printer camera’s photo of the plate")
                 }
-                if words.actions.contains(.plateClear) { answer("It's actually clear", .plateClear) }
+                VStack(alignment:.leading, spacing:10) {
+                    Text(words.status).font(.body.weight(.medium)).fixedSize(horizontal:false, vertical:true)
+                    if words.actions.contains(.bestGuess) {
+                        Text("Send a close-up from your iPhone, or let me guess.").foregroundStyle(.secondary)
+                        answer("Make Your Best Guess", .bestGuess)
+                    }
+                    if words.actions.contains(.plateClear) {
+                        answer(object.plate?.noCamera == true ? "The Plate Is Clear" : "It’s Actually Clear", .plateClear)
+                    }
+                }
+                Spacer(minLength:0)
             }
-            Spacer(minLength:0)
+            .padding(8)
         }
-        .padding(16)
-        .background(RoundedRectangle(cornerRadius:12, style:.continuous).fill(ObjectsStyle.accent.opacity(0.07)))
-        .overlay(RoundedRectangle(cornerRadius:12, style:.continuous).strokeBorder(ObjectsStyle.accent.opacity(0.24), lineWidth:1))
     }
 
     private func answer(_ title: String, _ action: ObjectAction) -> some View {
         HStack(spacing:10) {
-            Button(title) { run(action) }.controlSize(.large).disabled(working)
+            Button(title) { run(action) }.secondaryAction().controlSize(.large).disabled(working)
             if working { ProgressView().controlSize(.small) }
         }
         .padding(.top, 2)
     }
 
-    // The model: the chosen render or the turnable STL, with a strip to switch between them.
+    // The model: the chosen render or the turnable STL, a strip to switch between them, and its size.
     private var stage: some View {
         VStack(alignment:.leading, spacing:10) {
             ZStack {
@@ -280,37 +324,44 @@ struct ObjectPage: View {
             .environment(\.colorScheme, .dark)  // The stage is always the dark plate.
             // A fixed height: a stage whose height follows its width makes the page's height follow the window's width.
             .frame(maxWidth:.infinity)
-            .frame(height:420)
-            .clipShape(RoundedRectangle(cornerRadius:14, style:.continuous))
+            .frame(height:400)
+            .clipShape(RoundedRectangle(cornerRadius:16, style:.continuous))
             .overlay(alignment:.bottomLeading) {
                 if shown == .model {
-                    Text("Drag to turn it").font(.system(size:11)).foregroundStyle(Color.white.opacity(0.72)).padding(12).allowsHitTesting(false)
+                    Text("Drag to turn it").font(.caption).foregroundStyle(Color.white.opacity(0.72)).padding(12).allowsHitTesting(false)
                 }
             }
-            if object.modelURL != nil || object.renderURLs.count > 1 { strip }
+            HStack(alignment:.center, spacing:12) {
+                if object.modelURL != nil || object.renderURLs.count > 1 { strip }
+                Spacer(minLength:0)
+                if let size = object.current?.sizeMm, size.count == 3 {
+                    Label(ObjectWords.formatSize(size), systemImage:"ruler").foregroundStyle(.secondary)
+                        .labelStyle(.titleAndIcon).textSelection(.enabled)
+                        .accessibilityLabel("Size \(ObjectWords.formatSize(size))")
+                        .fixedSize()
+                }
+            }
         }
     }
 
     private var strip: some View {
-        ScrollView(.horizontal, showsIndicators:false) {
-            HStack(spacing:8) {
-                if object.modelURL != nil {
-                    tile(.model) {
-                        VStack(spacing:3) {
-                            Image(systemName:"rotate.3d").font(.system(size:17, weight:.regular))
-                            Text("3D").font(.system(size:10.5, weight:.semibold))
-                        }
-                        .foregroundStyle(.secondary)
+        HStack(spacing:8) {
+            if object.modelURL != nil {
+                tile(.model) {
+                    VStack(spacing:2) {
+                        Image(systemName:"rotate.3d").font(.system(size:16))
+                        Text("3D").font(.system(size:10, weight:.semibold))
                     }
-                    .accessibilityLabel("Turn the model in 3D")
+                    .foregroundStyle(.secondary)
                 }
-                ForEach(Array(object.renderURLs.enumerated()), id:\.offset) { index, url in
-                    tile(.render(index)) { FileImage(url:url, version:object.updatedAtMs, contentMode:.fill) }
-                        .accessibilityLabel("Picture \(index + 1)")
-                }
+                .accessibilityLabel("Turn the model in 3D")
             }
-            .padding(2)
+            ForEach(Array(object.renderURLs.enumerated()), id:\.offset) { index, url in
+                tile(.render(index)) { FileImage(url:url, version:object.updatedAtMs, contentMode:.fill) }
+                    .accessibilityLabel("Picture \(index + 1)")
+            }
         }
+        .padding(2)
     }
 
     private func tile<Content: View>(_ view: Showing, @ViewBuilder content: () -> Content) -> some View {
@@ -318,26 +369,33 @@ struct ObjectPage: View {
         return Button { showing = view } label: {
             ZStack { ObjectsStyle.stage; content() }
                 .environment(\.colorScheme, .dark)
-                .frame(width:72, height:54)
+                .frame(width:64, height:48)
                 .clipShape(RoundedRectangle(cornerRadius:8, style:.continuous))
                 .overlay(RoundedRectangle(cornerRadius:8, style:.continuous)
-                    .strokeBorder(selected ? ObjectsStyle.accent : Color(nsColor:.separatorColor), lineWidth:selected ? 2 : 0.5))
+                    .strokeBorder(selected ? Color.primary : Color(nsColor:.separatorColor), lineWidth:selected ? 2 : 0.5))
         }
         .buttonStyle(.plain)
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
-    // "Anything to fix?": the note goes back to the touch-up, which starts again from this model.
+    // "Anything to Fix?": the note goes back to the touch-up, which starts again from this model.
     private var corrections: some View {
-        VStack(alignment:.leading, spacing:8) {
-            Text("Anything to fix?").font(.system(size:14, weight:.semibold))
+        section("Anything to Fix?") {
             HStack(alignment:.bottom, spacing:10) {
-                TextField("For example: you missed the clip on the side, or it's 70 mm long.", text:$note, axis:.vertical)
-                    .textFieldStyle(.roundedBorder).lineLimit(2...6).font(.system(size:13))
+                TextField("For example: you missed the clip on the side, or it’s 70 mm long.", text:$note, axis:.vertical)
+                    .textFieldStyle(.roundedBorder).lineLimit(2...6)
                     .onSubmit(send)
-                Button("Send", action:send).controlSize(.large)
+                Button("Send", action:send).secondaryAction().controlSize(.large)
                     .keyboardShortcut(.return, modifiers:.command)
                     .disabled(working || note.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty)
             }
+        }
+    }
+
+    private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment:.leading, spacing:8) {
+            Text(title).font(.headline).accessibilityAddTraits(.isHeader)
+            content()
         }
     }
 
