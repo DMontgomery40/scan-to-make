@@ -1,11 +1,13 @@
 import {copyFile, mkdir, readFile, rm, writeFile} from 'node:fs/promises';
 import {basename, join} from 'node:path';
-import {DispatchedPrintError, type ElicitationRelay, type HandoffBundleStore, type PendingElicitation, type PrinterHandoffConfig, type PrinterHandoffRunner} from '@scan-to-make/printer-handoff';
+import {DispatchedPrintError, type PendingElicitation, type PrinterHandoffConfig} from '@scan-to-make/printer-handoff';
+import type {PrintHandoffServices} from '../print-handoff-http.js';
 import type {PlateVerdict} from './bedcheck.js';
 import type {TouchupInput} from '../touchup/touchup.js';
-import type {TouchupResult} from '../touchup/runner.js';
-import {ObjectStore, type StmObject} from './store.js';
+import {publicTouchupText, type TouchupActivity, type TouchupResult} from '../touchup/runner.js';
+import {ObjectNotFoundError, ObjectStore, type StmObject} from './store.js';
 import {macReconstructRunner, type Reconstruct} from './reconstruct.js';
+import type {PrinterCatalog} from './printers.js';
 
 /** How many of an object's photos go to one touch-up pass. More only costs time. */
 export const PHOTOS_PER_PASS = 24;
@@ -23,11 +25,14 @@ export interface ObjectServiceDeps {
   stlInfo: (stlPath: string) => Promise<[number, number, number] | undefined>;
   claudePath: string;
   handoff: PrinterHandoffConfig;
+  printerCatalog?: PrinterCatalog;
   onChange?: (object: StmObject) => void;
   /** Rebuilds a handheld scan from its photos (`mac-reconstruct samples`). Defaults to the bundled tool. */
   reconstruct?: Reconstruct;
   print?: {
-    services: {store: HandoffBundleStore; relay: ElicitationRelay; runner: Pick<PrinterHandoffRunner, 'runBundle' | 'backend'>; selection?: PrinterHandoffConfig['selection']};
+    services: PrintHandoffServices;
+    /** Built once from each catalog entry's entire MCP config, never a host override. */
+    destinations?: ReadonlyMap<string, PrintHandoffServices>;
     judgePlate: (photoBase64: string) => Promise<PlateVerdict>;
   };
 }
@@ -38,6 +43,12 @@ function confirmAnswer(schema: unknown): Record<string, boolean> | undefined {
   if (!properties || !Object.keys(properties).length) return {};
   if (!Object.values(properties).every(property => property.type === 'boolean')) return undefined;
   return Object.fromEntries(Object.keys(properties).map(key => [key, true]));
+}
+
+function toolProgress(name: string): string {
+  if (['Read', 'WebSearch', 'WebFetch'].includes(name)) return 'Checking the reference material.';
+  if (name.toLowerCase().includes('blender')) return 'Working on the model in Blender.';
+  return 'Working on your project.';
 }
 
 /** Evenly spread picks from first to last, so every side of the object stays represented. */
@@ -51,7 +62,7 @@ export class ObjectService {
   readonly #deps: ObjectServiceDeps;
   readonly #running = new Map<string, Promise<StmObject>>();
   readonly #controllers = new Map<string, AbortController>();
-  readonly #confirmations = new Map<string, PendingElicitation>();
+  readonly #confirmations = new Map<string, {pending: PendingElicitation; printing: NonNullable<ObjectServiceDeps['print']>}>();
   /** One action at a time per object, so a double tap can't start the same work twice. */
   readonly #gates = new Map<string, Promise<unknown>>();
   #closed = false;
@@ -78,6 +89,37 @@ export class ObjectService {
   list() { return this.#deps.store.list(); }
   get(id: string) { return this.#deps.store.get(id); }
   dir(id: string) { return this.#deps.store.dir(id); }
+
+  async passActivity(id: string, index: number): Promise<TouchupActivity[]> {
+    if (!Number.isSafeInteger(index) || index < 0) throw new ObjectNotFoundError();
+    const pass = (await this.get(id)).passes[index];
+    if (!pass) throw new ObjectNotFoundError();
+    return pass.activity ?? [];
+  }
+
+  printers(): {defaultDestinationId?: string; destinations: PrinterCatalog['destinations']} {
+    const catalog = this.#deps.printerCatalog;
+    return {defaultDestinationId: catalog?.defaultDestinationId, destinations: catalog?.destinations.map(({id, name, backend, model, address, source}) =>
+      ({id, name, backend, ...(model ? {model} : {}), ...(address ? {address} : {}), source})) ?? []};
+  }
+
+  selectPrinter(id: string, destinationId: string): Promise<StmObject> {
+    return this.#gate(id, async () => {
+      const object = await this.get(id), catalog = this.#deps.printerCatalog;
+      if (object.state === 'touching-up' || object.state === 'printing') throw new InvalidStateError('Wait until the current step finishes before changing printers.');
+      if (!catalog?.destinations.some(destination => destination.id === destinationId) || !catalog.resolve(destinationId))
+        throw new InvalidStateError('That printer is no longer available. Choose another printer.');
+      return this.#changed(await this.#deps.store.update(id, o => ({...o, printerDestinationId: destinationId})));
+    });
+  }
+
+  /** An unsent draft may change; once a pass starts its original request is part of the history. */
+  updateInstructions(id: string, instructions: string): Promise<StmObject> {
+    return this.#gate(id, async () => {
+      if ((await this.get(id)).state !== 'new') throw new InvalidStateError('The description cannot change after work starts. Send a correction instead.');
+      return this.#changed(await this.#deps.store.update(id, object => ({...object, instructions: instructions.trim() || undefined})));
+    });
+  }
 
   async addScan(id: string, name: string, bytes: Buffer): Promise<StmObject> {
     const object = await this.get(id);
@@ -120,8 +162,8 @@ export class ObjectService {
   correct(id: string, note: string): Promise<StmObject> { return this.#gate(id, () => this.#correct(id, note)); }
   async #correct(id: string, note: string): Promise<StmObject> {
     const object = await this.get(id);
-    if (!object.current) throw new InvalidStateError('There is no model to correct yet.');
     if (object.state === 'touching-up' || object.state === 'printing') throw new InvalidStateError('Wait until the current step finishes.');
+    if (!object.current && object.state !== 'failed') throw new InvalidStateError('There is no model to correct yet.');
     return this.#pass(object, {note: note.trim()});
   }
 
@@ -151,14 +193,25 @@ export class ObjectService {
     if (!object.current) throw new InvalidStateError('There is no model to print yet.');
     if (object.state === 'touching-up' || object.state === 'printing') throw new InvalidStateError('Wait until the current step finishes.');
     if (object.print?.uncertain && !options.checked) throw new InvalidStateError("The printer may already be printing this. Check the printer, then print again if it isn't.");
-    const printing = this.#deps.print;
-    if (!printing) throw new InvalidStateError('Printing is not set up on this Mac.');
+    const configured = this.#deps.print;
+    if (!configured) throw new InvalidStateError('Printing is not set up on this Mac.');
+    const catalog = this.#deps.printerCatalog;
+    const destinationId = object.printerDestinationId ?? catalog?.defaultDestinationId;
+    const destination = catalog?.destinations.find(item => item.id === destinationId);
+    const config = destinationId ? catalog?.resolve(destinationId) : undefined;
+    if (destinationId && (!destination || !config)) throw new InvalidStateError('That printer is no longer available. Choose another printer.');
+    const services = destinationId ? configured.destinations?.get(destinationId) : configured.services;
+    if (!services || (config && services.runner.backend !== config.backend)) throw new InvalidStateError('Printing is not set up for this printer.');
+    // Keep the exact route and identity for this dispatch and every later confirmation.
+    const printing = {...configured, services};
+    const printDestination = destination ? {id: destination.id, name: destination.name} : undefined;
     const {store: bundles, relay, runner, selection} = printing.services;
     const stl = await readFile(join(this.#deps.store.dir(id), object.current.model));
     const manifest = await bundles.create({stl, prompt: '', backend: runner.backend, ...(selection ? {selection} : {})});
-    const started = await this.#deps.store.update(id, o => ({...o, state: 'printing', print: {bundleId: manifest.id}, plate: undefined, failure: undefined}));
+    const print = {bundleId: manifest.id, ...(printDestination ? {destination: printDestination} : {})};
+    const started = await this.#deps.store.update(id, o => ({...o, state: 'printing', print, plate: undefined, failure: undefined}));
     // Only this print's questions: other prints share the relay.
-    const unsubscribe = relay.subscribe(pending => { if (pending.bundleId === manifest.id) void this.#confirm(id, pending); });
+    const unsubscribe = relay.subscribe(pending => { if (pending.bundleId === manifest.id) void this.#confirm(id, pending, printing); });
     const controller = new AbortController();
     this.#controllers.set(id, controller);
     const work = runner.runBundle(bundles, manifest.id, {print: true, signal: controller.signal})
@@ -168,7 +221,7 @@ export class ObjectService {
           // Once the printer has the job it is printing, whatever went wrong afterwards (as the phone's print route does).
           if (error instanceof DispatchedPrintError || status === 'printed') return this.#deps.store.update(id, o => ({...o, state: 'printed', plate: undefined}));
           // It may have reached the printer: never send it again by itself.
-          if (status === 'uncertain') return this.#deps.store.update(id, o => ({...o, state: 'failed', plate: undefined, failure: UNCERTAIN, print: {bundleId: manifest.id, uncertain: true}}));
+          if (status === 'uncertain') return this.#deps.store.update(id, o => ({...o, state: 'failed', plate: undefined, failure: UNCERTAIN, print: {...print, uncertain: true}}));
           return this.#deps.store.update(id, o => ({...o, state: 'failed', plate: undefined, failure: error instanceof Error ? error.message : String(error)}));
         })
       .then(o => this.#changed(o))
@@ -183,22 +236,22 @@ export class ObjectService {
   /** The user says the plate is clear (no camera, or the check saw something that isn't really there). */
   answerPlate(id: string, answer: {clear: true}): Promise<StmObject> { return this.#gate(id, () => this.#answerPlate(id, answer)); }
   async #answerPlate(id: string, answer: {clear: true}): Promise<StmObject> {
-    const pending = this.#confirmations.get(id), content = pending && confirmAnswer(pending.requestedSchema);
-    if (!answer.clear || !pending || !content) throw new InvalidStateError('Nothing is waiting for the plate.');
-    this.#deps.print!.services.relay.respond(pending.id, {action: 'accept', content});
+    const confirmation = this.#confirmations.get(id), content = confirmation && confirmAnswer(confirmation.pending.requestedSchema);
+    if (!answer.clear || !confirmation || !content) throw new InvalidStateError('Nothing is waiting for the plate.');
+    confirmation.printing.services.relay.respond(confirmation.pending.id, {action: 'accept', content});
     this.#confirmations.delete(id);
     return this.#changed(await this.#deps.store.update(id, o => ({...o, plate: undefined})));
   }
 
-  async #confirm(id: string, pending: PendingElicitation): Promise<void> {
-    this.#confirmations.set(id, pending);
+  async #confirm(id: string, pending: PendingElicitation, printing: NonNullable<ObjectServiceDeps['print']>): Promise<void> {
+    this.#confirmations.set(id, {pending, printing});
     const content = confirmAnswer(pending.requestedSchema);
     if (!pending.cameraSnapshot) { this.#changed(await this.#deps.store.update(id, o => ({...o, plate: {noCamera: true}}))); return; }
     let verdict: PlateVerdict;
-    try { verdict = await this.#deps.print!.judgePlate(pending.cameraSnapshot.base64); }
+    try { verdict = await printing.judgePlate(pending.cameraSnapshot.base64); }
     catch { verdict = {clear: false, item: 'something'}; }
     if (verdict.clear && content) {
-      this.#deps.print!.services.relay.respond(pending.id, {action: 'accept', content});
+      printing.services.relay.respond(pending.id, {action: 'accept', content});
       this.#confirmations.delete(id);
       return;
     }
@@ -226,14 +279,29 @@ export class ObjectService {
     this.#changed(running);
     const controller = new AbortController();
     this.#controllers.set(object.id, controller);
+    let writing = Promise.resolve();
+    const onProgress: NonNullable<TouchupInput['onProgress']> = progress => {
+      if (!progress.activity?.length) return;
+      const entries = this.#activity([], progress.activity);
+      if (!entries.length) return;
+      writing = writing.then(async () => {
+        this.#changed(await store.update(object.id, o => ({...o,
+          progress: entries.at(-1)!.kind === 'tool' ? toolProgress(entries.at(-1)!.text) : entries.at(-1)!.text,
+          passes: o.passes.map(p => p.startedAtMs !== startedAtMs ? p : {...p, activity: this.#activity(p.activity, entries)}),
+        })));
+      });
+      // The worker callback is synchronous; the pass awaits this chain before its final state.
+      void writing.catch(() => undefined);
+    };
     const work = (async () => {
       let scanName = object.scan;
       if (build) scanName = await this.#build(object.id, dir, controller.signal);
       const scan = fromCurrent ? [join(dir, object.current!.model)] : scanName ? [join(dir, 'scan', scanName)] : [];
-      const input: TouchupInput = {root: join(dir, 'passes'), objectId: 'pass', scan, photos, handoff: this.#deps.handoff, claudePath: this.#deps.claudePath,
+      const input: TouchupInput = {root: join(dir, 'passes'), objectId: 'pass', scan, photos, currentModel: fromCurrent, handoff: this.#deps.handoff, claudePath: this.#deps.claudePath,
         ...(object.instructions ? {instructions: object.instructions} : {}),
         ...(opts.note !== undefined ? {note: opts.note, ...(object.current?.summary ? {summary: object.current.summary} : {})} : {})};
-      return this.#deps.runTouchup({...input, signal: controller.signal});
+      try { return await this.#deps.runTouchup({...input, signal: controller.signal, onProgress}); }
+      finally { await writing; }
     })()
       .then(result => this.#finish(object.id, startedAtMs, result), error => this.#fail(object.id, startedAtMs, error))
       .finally(() => { this.#running.delete(object.id); this.#controllers.delete(object.id); });
@@ -261,6 +329,10 @@ export class ObjectService {
 
   async #finish(id: string, startedAtMs: number, result: TouchupResult & {passDir: string}): Promise<StmObject> {
     const store = this.#deps.store, dir = store.dir(id);
+    result = {...result,
+      summary: result.summary === undefined ? undefined : this.#publicText(result.summary),
+      reason: result.reason === undefined ? undefined : this.#publicText(result.reason),
+      closeup: result.closeup === undefined ? undefined : this.#publicText(result.closeup)};
     let current: StmObject['current'] | undefined;
     if (result.model) {
       const currentDir = join(dir, 'current'), rendersDir = join(currentDir, 'renders');
@@ -285,17 +357,28 @@ export class ObjectService {
       ...(state === 'needs-closeup' ? {question: {closeup: result.closeup ?? 'a part of the object'}} : {}),
       ...(state === 'failed' ? {failure: result.reason ?? 'The touch-up stopped without a model.'} : {}),
       passes: o.passes.map(p => p.startedAtMs !== startedAtMs ? p : {...p, endedAtMs: Date.now(), status: result.status,
+        ...(state === 'failed' ? {activity: this.#activity(p.activity, [{atMs: Date.now(), kind: 'message', text: result.reason ?? 'The touch-up stopped without a model.'}])} : {}),
         ...(result.summary ? {summary: result.summary} : {}), seconds: result.stats.seconds,
         ...(result.stats.costUsd !== undefined ? {costUsd: result.stats.costUsd} : {}), dir: result.passDir})}));
     return this.#changed(updated);
   }
 
   async #fail(id: string, startedAtMs: number, error: unknown): Promise<StmObject> {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = this.#publicText(error instanceof Error ? error.message : String(error));
     const updated = await this.#deps.store.update(id, o => ({...o, state: 'failed', failure: message, progress: undefined,
-      passes: o.passes.map(p => p.startedAtMs !== startedAtMs ? p : {...p, endedAtMs: Date.now(), status: 'failed'})}));
+      passes: o.passes.map(p => p.startedAtMs !== startedAtMs ? p : {...p, endedAtMs: Date.now(), status: 'failed',
+        activity: this.#activity(p.activity, [{atMs: Date.now(), kind: 'message', text: message}])})}));
     return this.#changed(updated);
   }
+
+  #activity(previous: TouchupActivity[] = [], entries: TouchupActivity[]): TouchupActivity[] {
+    const clean = entries.filter(entry => (entry.kind === 'message' || entry.kind === 'tool') && Number.isFinite(entry.atMs) && typeof entry.text === 'string')
+      .map(entry => ({atMs: entry.atMs, kind: entry.kind, text: this.#publicText(entry.text)}))
+      .filter(entry => entry.text.length > 0);
+    return [...previous, ...clean].slice(-200);
+  }
+
+  #publicText(text: string): string { return publicTouchupText(text, {...process.env, ...this.#deps.handoff.process.env}); }
 
   #changed(object: StmObject): StmObject { this.#deps.onChange?.(object); return object; }
 }

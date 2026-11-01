@@ -22,7 +22,26 @@ export interface TouchupResult {
   /** What the worker actually started with, from Claude Code's init event: proof of isolation. */
   worker?: {model?: string; apiKeySource?: string; tools: string[]; plugins: string[]; mcpServers: string[]};
 }
-export interface TouchupProgress {seconds: number; toolCalls: number; lastText?: string}
+export interface TouchupActivity {atMs: number; kind: 'message' | 'tool'; text: string}
+export interface TouchupProgress {
+  seconds: number;
+  toolCalls: number;
+  lastText?: string;
+  /** New public events only, in stream order. Never thinking, tool input or tool output. */
+  activity?: TouchupActivity[];
+}
+
+/** Public progress must not echo configured credentials, even if the worker mentions one. */
+export function publicTouchupText(text: string, env: NodeJS.ProcessEnv = {}): string {
+  let safe = text;
+  for (const [name, value] of Object.entries(env)) {
+    if (value && value.length >= 4 && /key|token|password|secret|credential|access.?code/i.test(name)) safe = safe.split(value).join('[redacted]');
+  }
+  return safe.replace(/\b(Bearer\s+)[A-Za-z0-9._~+\/-]+=*/gi, '$1[redacted]')
+    .replace(/\b((?:api[_ -]?key|access[_ -]?code|token|password|secret)\s*[:=]\s*)["']?[^\s,"';]+["']?/gi, '$1[redacted]')
+    .replace(/\bsk-[A-Za-z0-9_-]{16,}\b/g, '[redacted]')
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '').trim().slice(0, 2000);
+}
 
 interface ResultEvent {
   is_error?: boolean;
@@ -72,6 +91,7 @@ export async function runTouchupWorker(inv: TouchupInvocation, pass: TouchupPass
   const timeoutMs = opts.timeoutMs ?? TOUCHUP_TIMEOUT_MS, maxToolCalls = opts.maxToolCalls ?? TOUCHUP_MAX_TOOL_CALLS;
   const started = Date.now();
   const seconds = () => Math.round((Date.now() - started) / 1000);
+  const publicText = (text: string) => publicTouchupText(text, {...inv.env, ...inv.mcpConfig.mcpServers.printer?.env});
   const child = spawn(inv.command, inv.args, {cwd: inv.cwd, env: inv.env, detached: true, stdio: ['ignore', 'pipe', 'pipe']});
   let toolCalls = 0, lastText: string | undefined, resultEvent: ResultEvent | undefined, stopReason: string | undefined, stderrTail = '';
   let worker: TouchupResult['worker'];
@@ -90,7 +110,7 @@ export async function runTouchupWorker(inv: TouchupInvocation, pass: TouchupPass
 
   const lines = createInterface({input: child.stdout!});
   lines.on('line', line => {
-    let event: {type?: string; message?: {content?: {type?: string; text?: string}[]}} & ResultEvent;
+    let event: {type?: string; message?: {content?: {type?: string; text?: string; name?: string}[]}} & ResultEvent;
     try { event = JSON.parse(line); } catch { return; }
     if (event.type === 'system' && (event as {subtype?: string}).subtype === 'init') {
       const init = event as {model?: string; apiKeySource?: string; tools?: string[]; plugins?: {name?: string; source?: string}[]; mcp_servers?: {name?: string; status?: string}[]};
@@ -100,11 +120,18 @@ export async function runTouchupWorker(inv: TouchupInvocation, pass: TouchupPass
         mcpServers: (init.mcp_servers ?? []).map(server => `${server.name}:${server.status}`),
       };
     } else if (event.type === 'assistant') {
+      const activity: TouchupActivity[] = [];
       for (const block of event.message?.content ?? []) {
-        if (block.type === 'tool_use') toolCalls++;
-        else if (block.type === 'text' && block.text?.trim()) lastText = block.text.trim();
+        if (block.type === 'tool_use') {
+          toolCalls++;
+          if (typeof block.name === 'string' && /^[A-Za-z0-9_.:-]{1,200}$/.test(block.name))
+            activity.push({atMs: Date.now(), kind: 'tool', text: publicText(block.name)});
+        } else if (block.type === 'text' && typeof block.text === 'string' && block.text.trim()) {
+          lastText = publicText(block.text);
+          activity.push({atMs: Date.now(), kind: 'message', text: lastText});
+        }
       }
-      opts.onProgress?.({seconds: seconds(), toolCalls, lastText});
+      opts.onProgress?.({seconds: seconds(), toolCalls, lastText, activity});
       if (toolCalls > maxToolCalls) stop(`stopped at the ${maxToolCalls} tool calls limit`);
     } else if (event.type === 'result') {
       resultEvent = event;

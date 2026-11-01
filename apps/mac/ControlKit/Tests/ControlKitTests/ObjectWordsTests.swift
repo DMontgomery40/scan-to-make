@@ -16,15 +16,15 @@ private let readyFields: [String: Any] = [
                 "summary": "Added the two eyes."],
 ]
 private func ready(_ fields: [String: Any] = [:]) -> StmObject { object(readyFields.merging(fields) { $1 }) }
-private let waitLine = " This can take a few minutes. We'll let you know when it's ready."
+private let waitLine = " You can leave this project and return to it while your Mac works."
 
 final class ObjectWordsTests: XCTestCase {
     func testNamesAnObjectByItsInstructionsOrAsACopyOfAScan() {
         XCTAssertEqual(object(["instructions": "A hook for a 25 mm tube. It should hold a cup."]).words.title,
                        "A hook for a 25 mm tube")
         XCTAssertEqual(object(["scan": "scan.usdz"]).words.title, "Copy of your scan")
-        XCTAssertEqual(object([:]).words.title, "Something new")
-        XCTAssertEqual(object(["instructions": "   "]).words.title, "Something new")
+        XCTAssertEqual(object([:]).words.title, "Unfinished project")
+        XCTAssertEqual(object(["instructions": "   "]).words.title, "Unfinished project")
         XCTAssertEqual(object(["instructions": "a bracket, 3 mm thick, with two holes, for the shelf"]).words.title,
                        "a bracket, 3 mm thick, with two holes", "two clauses at most; a comma before a number isn't a clause")
         XCTAssertEqual(object(["instructions": "A wall bracket\nfor the router"]).words.title, "A wall bracket")
@@ -34,9 +34,9 @@ final class ObjectWordsTests: XCTestCase {
     }
 
     func testSaysWhatIsHappeningInPlainWordsForEveryState() {
-        XCTAssertEqual(object(["scan": "scan.usdz"]).words.status, "Sending to your Mac…")
-        XCTAssertEqual(object(["photos": ["one.heic"]]).words.status, "Sending to your Mac…")
-        XCTAssertEqual(object(["instructions": "A hook"]).words.status, "Waiting for a scan or photos.",
+        XCTAssertEqual(object(["scan": "scan.usdz"]).words.status, "Draft saved. Continue on your iPhone.")
+        XCTAssertEqual(object(["photos": ["one.heic"]]).words.status, "Draft saved. Continue on your iPhone.")
+        XCTAssertEqual(object(["instructions": "A hook"]).words.status, "Draft saved. Continue on your iPhone.",
                        "nothing has arrived from the phone yet")
         XCTAssertEqual(object(["scan": "scan.usdz", "state": "touching-up"]).words.status, "Touching up your scan." + waitLine)
         XCTAssertEqual(object(["instructions": "A hook", "state": "touching-up"]).words.status, "Making it." + waitLine)
@@ -81,7 +81,7 @@ final class ObjectWordsTests: XCTestCase {
     func testAFailureSaysWhyAndOffersWhatFixesIt() {
         let touchUp = object(["scan": "scan.usdz", "state": "failed", "failure": "Blender is not open on your Mac."]).words
         XCTAssertEqual(touchUp.status, "Blender is not open on your Mac.")
-        XCTAssertEqual(touchUp.actions, [.retry], "a touch-up that failed with no model can start again")
+        XCTAssertEqual(touchUp.actions, [.retry, .correct], "a touch-up that failed with no model can start again")
         let print = ready(["state": "failed", "failure": "The printer is busy."]).words
         XCTAssertEqual(print.status, "The printer is busy.")
         XCTAssertEqual(print.actions, [.print, .correct])
@@ -99,7 +99,7 @@ final class ObjectWordsTests: XCTestCase {
     }
 
     func testBusyStatesAreMarkedSoThePageKeepsItselfUpToDate() {
-        XCTAssertTrue(object([:]).words.busy)
+        XCTAssertFalse(object([:]).words.busy)
         XCTAssertTrue(object(["state": "touching-up"]).words.busy)
         XCTAssertTrue(ready(["state": "printing"]).words.busy)
         XCTAssertFalse(ready().words.busy)
@@ -111,8 +111,8 @@ final class ObjectWordsTests: XCTestCase {
         XCTAssertEqual(ready(["state": "printing", "plate": ["item": "a printed part"]]).words.headline,
                        "Looks like there's a printed part on your plate.")
         XCTAssertEqual(ready().words.headline, "Ready to print")
-        XCTAssertEqual(object(["state": "new", "scan": "scan.usdz"]).words.headline, "Sending to your Mac…")
-        XCTAssertEqual(object(["state": "new"]).words.headline, "Waiting for a scan or photos.")
+        XCTAssertEqual(object(["state": "new", "scan": "scan.usdz"]).words.headline, "Draft saved.")
+        XCTAssertEqual(object(["state": "new"]).words.headline, "Draft saved.")
     }
 
     func testAStateThisAppDoesNotKnowAsksForAnUpdate() {

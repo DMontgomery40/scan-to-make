@@ -3,6 +3,9 @@
 #import <React/RCTBridgeModule.h>
 #import <Security/Security.h>
 #import <TargetConditionals.h>
+#if TARGET_OS_IOS
+#import <UIKit/UIKit.h>
+#endif
 
 NSString * const STMPairingChanged = @"STMPairingChanged";
 static NSDictionary *Query(void) {
@@ -12,6 +15,59 @@ static NSDictionary *Query(void) {
 }
 static BOOL Matches(id value, NSString *pattern) {
   return [value isKindOfClass:NSString.class] && [[NSPredicate predicateWithFormat:@"SELF MATCHES %@", pattern] evaluateWithObject:value];
+}
+// This identity is independent of the current Mac credential. Forgetting a Mac
+// must not make the next pairing look like a different phone. It cannot sync or
+// migrate to another device, and only its hash is stored by a companion.
+static NSString *InstallationKey(NSError **error) {
+  NSMutableDictionary *query = [Query() mutableCopy];
+  query[(__bridge id)kSecAttrAccount] = @"installation";
+  NSMutableDictionary *read = [query mutableCopy]; read[(__bridge id)kSecReturnData] = @YES;
+  CFTypeRef value = NULL;
+  OSStatus status = SecItemCopyMatching((__bridge CFDictionaryRef)read, &value);
+  if (status == errSecSuccess) {
+    NSData *data = CFBridgingRelease(value);
+    NSString *key = data.length == 43 ? [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] : nil;
+    if (Matches(key, @"[A-Za-z0-9_-]{43}")) return key;
+    status = errSecDecode;
+  } else if (status == errSecItemNotFound) {
+    uint8_t bytes[32];
+    status = SecRandomCopyBytes(kSecRandomDefault, sizeof bytes, bytes);
+    if (status == errSecSuccess) {
+      NSString *key = [[NSData dataWithBytes:bytes length:sizeof bytes] base64EncodedStringWithOptions:0];
+      key = [[[key stringByReplacingOccurrencesOfString:@"+" withString:@"-"] stringByReplacingOccurrencesOfString:@"/" withString:@"_"] stringByReplacingOccurrencesOfString:@"=" withString:@""];
+      query[(__bridge id)kSecValueData] = [key dataUsingEncoding:NSUTF8StringEncoding];
+      query[(__bridge id)kSecAttrAccessible] = (__bridge id)kSecAttrAccessibleWhenUnlockedThisDeviceOnly;
+      status = SecItemAdd((__bridge CFDictionaryRef)query, NULL);
+      if (status == errSecSuccess) return key;
+      if (status == errSecDuplicateItem) return InstallationKey(error);
+    }
+  }
+  if (error) *error = [NSError errorWithDomain:@"CompanionSecureStorage" code:status userInfo:nil];
+  return nil;
+}
+static NSString *DeviceName(NSString *installationKey) {
+  NSString *chosen = [NSUserDefaults.standardUserDefaults stringForKey:@"CounterpartDeviceName"];
+  if (Matches(chosen, @"[^\\x00-\\x1f\\x7f]{1,80}")) return chosen;
+#if TARGET_OS_IOS
+  NSString *name = UIDevice.currentDevice.name;
+#else
+  NSString *name = @"iPhone";
+#endif
+  // iOS normally returns a generic name without Apple's device-name entitlement.
+  // A short hash makes that default distinguishable; the person can rename it.
+  if (!Matches(name, @"[^\\x00-\\x1f\\x7f]{1,70}")) name = @"iPhone";
+  if ([@[@"iPhone", @"iPad", @"iPod touch"] containsObject:name])
+    return [NSString stringWithFormat:@"%@ (%@)", name, [[STMHash([installationKey dataUsingEncoding:NSUTF8StringEncoding]) substringToIndex:4] uppercaseString]];
+  return name;
+}
+static BOOL SameCompanion(NSDictionary *previous, NSDictionary *invitation) {
+  if (!previous) return NO;
+  if (invitation[@"publicKeySha256"] || previous[@"publicKeySha256"])
+    return previous[@"publicKeySha256"] && [previous[@"publicKeySha256"] isEqual:invitation[@"publicKeySha256"]];
+  if (invitation[@"certificateSha256"] || previous[@"certificateSha256"])
+    return previous[@"certificateSha256"] && [previous[@"certificateSha256"] isEqual:invitation[@"certificateSha256"]];
+  return [previous[@"baseUrl"] isEqual:invitation[@"baseUrl"]];
 }
 BOOL STMFixtureURL(NSURL *url) {
 #if TARGET_OS_SIMULATOR
@@ -191,6 +247,7 @@ NSString *STMTransportError(NSError *error) {
 @property NSString *failure;
 @property NSString *pairCode;
 @property NSString *pairName;
+@property NSString *installationKey;
 @property NSInteger status;
 @property BOOL pairing;
 // A credential refresh: the reply only moves the stored expiry on.
@@ -209,7 +266,7 @@ RCT_EXPORT_MODULE()
 - (void)clear {
   [self retire];
   self.bytes = nil; self.pending = nil; self.snapshot = nil; self.resolve = nil; self.reject = nil;
-  self.remaining = nil; self.active = nil; self.failure = nil; self.pairCode = nil; self.pairName = nil;
+  self.remaining = nil; self.active = nil; self.failure = nil; self.pairCode = nil; self.pairName = nil; self.installationKey = nil;
 }
 - (void)fail:(NSString *)code {
   RCTPromiseRejectBlock reject = self.reject; [self clear];
@@ -219,6 +276,17 @@ RCT_REMAP_METHOD(status, statusResolve:(RCTPromiseResolveBlock)resolve reject:(R
   NSError *error = nil; NSDictionary *r = STMReadPairing(&error);
   if (error) reject(@"secure-storage", @"Unlock this device and try again. Stored pairing could not be read.", nil);
   else resolve(STMPairingMetadata(r));
+}
+RCT_REMAP_METHOD(deviceName, deviceNameResolve:(RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject) {
+  NSError *error = nil; NSString *key = InstallationKey(&error);
+  if (error) reject(@"secure-storage", @"Unlock this device and try again.", nil);
+  else resolve(DeviceName(key));
+}
+RCT_REMAP_METHOD(setDeviceName, setDeviceName:(NSString *)name resolve:(RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject) {
+  NSString *trimmed = [name isKindOfClass:NSString.class] ? [name stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet] : nil;
+  if (!Matches(trimmed, @"[^\\x00-\\x1f\\x7f]{1,80}")) { reject(@"invalid-device-name", @"Choose a name between 1 and 80 characters.", nil); return; }
+  [NSUserDefaults.standardUserDefaults setObject:trimmed forKey:@"CounterpartDeviceName"];
+  resolve(trimmed);
 }
 RCT_REMAP_METHOD(cancel, cancelResolve:(RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject) { [self fail:@"cancelled"]; resolve(nil); }
 RCT_REMAP_METHOD(disconnect, disconnectResolve:(RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject) {
@@ -236,23 +304,42 @@ RCT_REMAP_METHOD(disconnect, disconnectResolve:(RCTPromiseResolveBlock)resolve r
   self.session = [NSURLSession sessionWithConfiguration:config delegate:self delegateQueue:NSOperationQueue.mainQueue];
   self.task = [self.session dataTaskWithRequest:request]; [self.task resume];
 }
+- (BOOL)preparePairing:(RCTPromiseRejectBlock)reject {
+  NSError *error = nil;
+  self.installationKey = InstallationKey(&error);
+  if (!error) self.snapshot = STMReadPairing(&error);
+  if (!error) return YES;
+  [self clear]; reject(@"secure-storage", @"Unlock this device and try again.", nil); return NO;
+}
+- (NSMutableURLRequest *)pairRequest:(NSURL *)base code:(NSString *)code name:(NSString *)name {
+  NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:[base URLByAppendingPathComponent:@"v1/pair"]];
+  request.HTTPMethod = @"POST";
+  request.HTTPBody = [NSJSONSerialization dataWithJSONObject:@{@"code":code, @"deviceName":name, @"installationKey":self.installationKey} options:0 error:nil];
+  [request setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
+  // The previous token only goes to the same trusted Mac. It can adopt that
+  // phone's legacy row; its public device id alone is never replacement proof.
+  if (SameCompanion(self.snapshot, self.pending)) {
+    [request setValue:[@"Bearer " stringByAppendingString:self.snapshot[@"token"]] forHTTPHeaderField:@"Authorization"];
+    [request setValue:self.snapshot[@"deviceId"] forHTTPHeaderField:@"X-Scan-Device"];
+  }
+  return request;
+}
 RCT_REMAP_METHOD(pair, pairURL:(NSString *)baseUrl code:(NSString *)code deviceName:(NSString *)name certificateSha256:(NSString *)pin resolve:(RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject) {
   if (self.task) { reject(@"busy", @"A connection check is already running.", nil); return; }
   BOOL pinned = [pin isKindOfClass:NSString.class];
   NSURL *url = pinned ? STMPinnedBaseURL(baseUrl, pin) : STMCompanionBaseURL(baseUrl);
   if (!url || !Matches(code, @"[A-Za-z0-9_-]{32}") || !Matches(name, @"[^\\x00-\\x1f\\x7f]{1,80}")) { reject(@"invalid-invitation", @"Check the companion address and pairing invitation.", nil); return; }
+  if (![self preparePairing:reject]) return;
   self.pairing = YES; self.refreshing = NO;
   self.pending = pinned ? @{ @"baseUrl":url.absoluteString, @"certificateSha256":pin } : @{ @"baseUrl":url.absoluteString };
-  NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:[url URLByAppendingPathComponent:@"v1/pair"]];
-  request.HTTPMethod = @"POST";
-  request.HTTPBody = [NSJSONSerialization dataWithJSONObject:@{@"code":code,@"deviceName":name} options:0 error:nil];
-  [request setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
+  NSMutableURLRequest *request = [self pairRequest:url code:code name:name];
   [self start:request resolve:resolve reject:reject];
 }
 RCT_REMAP_METHOD(pairAddresses, pairAddresses:(NSArray *)addresses code:(NSString *)code deviceName:(NSString *)name publicKeySha256:(NSString *)pin resolve:(RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject) {
   if (self.task) { reject(@"busy", @"A connection check is already running.", nil); return; }
   NSArray *list = ValidPin(pin) ? STMPinnedAddresses(addresses, pin) : nil;
   if (!list || !Matches(code, @"[A-Za-z0-9_-]{32}") || !Matches(name, @"[^\\x00-\\x1f\\x7f]{1,80}")) { reject(@"invalid-invitation", @"Check the companion address and pairing invitation.", nil); return; }
+  if (![self preparePairing:reject]) return;
   self.pairing = YES; self.refreshing = NO; self.resolve = resolve; self.reject = reject;
   self.remaining = list; self.pairCode = code; self.pairName = name;
   self.active = @{ @"addresses":list, @"publicKeySha256":pin };
@@ -280,10 +367,7 @@ RCT_REMAP_METHOD(check, checkResolve:(RCTPromiseResolveBlock)resolve reject:(RCT
   if (self.pairing) self.pending = record; else self.active = record;
   NSMutableURLRequest *request;
   if (self.pairing) {
-    request = [NSMutableURLRequest requestWithURL:[base URLByAppendingPathComponent:@"v1/pair"]];
-    request.HTTPMethod = @"POST";
-    request.HTTPBody = [NSJSONSerialization dataWithJSONObject:@{@"code":self.pairCode,@"deviceName":self.pairName} options:0 error:nil];
-    [request setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
+    request = [self pairRequest:base code:self.pairCode name:self.pairName];
   } else {
     request = [NSMutableURLRequest requestWithURL:[base URLByAppendingPathComponent:@"healthz"]];
     [request setValue:[@"Bearer " stringByAppendingString:record[@"token"]] forHTTPHeaderField:@"Authorization"];

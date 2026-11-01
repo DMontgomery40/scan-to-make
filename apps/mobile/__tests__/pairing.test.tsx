@@ -1,6 +1,6 @@
 import React from 'react';
 import Renderer, { act } from 'react-test-renderer';
-import { Alert, Linking, Text } from 'react-native';
+import { Alert, Linking, Text, TextInput } from 'react-native';
 import { FindYourMacScreen } from '../src/screens/FindYourMacScreen';
 import {
   EXPIRED,
@@ -27,6 +27,8 @@ function nativeMock(): CompanionNative {
     check: jest.fn(async () => paired),
     disconnect: jest.fn(async () => ({ state: 'disconnected' as const })),
     cancel: jest.fn(async () => {}),
+    deviceName: jest.fn(async () => 'Kitchen iPhone'),
+    setDeviceName: jest.fn(async (name: string) => name.trim()),
   };
 }
 type Tree = Renderer.ReactTestRenderer;
@@ -125,7 +127,7 @@ it('Find your Mac opens on the viewfinder: point at the code and it pairs', asyn
   expect(native.pair).toHaveBeenCalledWith(
     paired.baseUrl,
     qrCode,
-    'My phone',
+    'Kitchen iPhone',
     null,
   );
   expect(text(tree)).toContain('Connected to your Mac');
@@ -150,12 +152,33 @@ it('a v2 code pairs through every address with the public-key pin', async () => 
   expect(native.pairAddresses).toHaveBeenCalledWith(
     addresses,
     qrCode,
-    'My phone',
+    'Kitchen iPhone',
     key,
   );
   expect(native.pair).not.toHaveBeenCalled();
   expect(text(tree)).toContain('Connected to your Mac');
   await act(async () => tree.unmount());
+});
+
+it('the phone label can be changed before scanning and is retained for later pairings', async () => {
+  const { tree, native } = await unpaired();
+  const input = tree.root.findByType(TextInput);
+  expect(input.props.value).toBe('Kitchen iPhone');
+  await act(async () => input.props.onChangeText('  David’s iPhone  '));
+  await scanned(tree, qrLink());
+  expect(native.setDeviceName).toHaveBeenCalledWith('David’s iPhone');
+  expect(native.pair).toHaveBeenCalledWith(paired.baseUrl, qrCode, 'David’s iPhone', null);
+  await act(async () => tree.unmount());
+});
+
+it('closing pairing while its label is being saved never starts a network request', async () => {
+  const { tree, native } = await unpaired();
+  let finish!: (name: string) => void;
+  (native.setDeviceName as jest.Mock).mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+  await scanned(tree, qrLink());
+  await act(async () => tree.unmount());
+  await act(async () => finish('Kitchen iPhone'));
+  expect(native.pair).not.toHaveBeenCalled();
 });
 
 it('pairWithInvitation uses the address list and key pin for v2, and the single address for v1', async () => {
@@ -201,7 +224,7 @@ it('the first code for a Mac on this Wi-Fi explains the local network question f
   expect(native.pair).toHaveBeenCalledWith(
     'https://192.168.1.20:9077',
     qrCode,
-    'My phone',
+    'Kitchen iPhone',
     pin,
   );
   await act(async () => tree.unmount());
@@ -228,7 +251,7 @@ it('the first v2 code also explains the local network question first', async () 
   expect(native.pairAddresses).toHaveBeenCalledWith(
     addresses,
     qrCode,
-    'My phone',
+    'Kitchen iPhone',
     key,
   );
   await act(async () => tree.unmount());

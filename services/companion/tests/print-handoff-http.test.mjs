@@ -227,9 +227,10 @@ test('a failure after slicing persists a sanitized failed status instead of runn
   assert.ok(!String(final.bundle.failure).includes('/private'));
 });
 
-test('an output persistence failure after dispatch cannot make a bundle printable again', async t => {
+test('an output persistence failure prevents dispatch and permits an explicit retry after storage recovers', async t => {
   const f = await fixture(t);
   const bundle = await createBundle(f);
+  const recordArtifact = f.printHandoff.store.recordArtifact.bind(f.printHandoff.store);
   f.printHandoff.store.recordArtifact = async () => {
     throw Object.assign(new Error('/private/operator/output failed'), {code: 'record-failed'});
   };
@@ -242,11 +243,19 @@ test('an output persistence failure after dispatch cannot make a bundle printabl
     await new Promise(resolve => setTimeout(resolve, 10));
   }
   assert.equal(final.printing, false);
-  assert.equal(final.bundle.status, 'printed');
+  assert.equal(final.bundle.status, 'failed');
   assert.equal(final.bundle.failure, 'record-failed');
+  assert.equal((await f.calls()).filter(item => item.tool === 'print_3mf').length, 0);
+  f.printHandoff.store.recordArtifact = recordArtifact;
   const retry = await wire(f, `/v1/printer-handoff/bundles/${bundle.id}/print`, {method: 'POST'});
-  assert.equal(retry.status, 409);
-  assert.equal(json(retry).error.code, 'already-printed');
+  assert.equal(retry.status, 202);
+  for (let attempt = 0; attempt < 200; attempt++) {
+    final = json(await wire(f, `/v1/printer-handoff/bundles/${bundle.id}`));
+    if (!final.printing) break;
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+  assert.equal(final.bundle.status, 'printed');
+  assert.equal(final.bundle.failure, undefined);
   assert.equal((await f.calls()).filter(item => item.tool === 'print_3mf').length, 1);
 });
 

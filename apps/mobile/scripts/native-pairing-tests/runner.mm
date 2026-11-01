@@ -3,20 +3,42 @@
 #import <Foundation/Foundation.h>
 #import <Security/Security.h>
 static NSData *stored;
+static NSData *storedInstallation;
 static OSStatus keychainStatus = errSecSuccess;
+static BOOL Installation(CFDictionaryRef query) {
+  return [((__bridge NSDictionary *)query)[(__bridge id)kSecAttrAccount] isEqual:@"installation"];
+}
 static OSStatus Read(CFDictionaryRef query, CFTypeRef *result) {
   if (keychainStatus != errSecSuccess) return keychainStatus;
-  if (!stored) return errSecItemNotFound;
-  *result = CFBridgingRetain(stored); return errSecSuccess;
+  NSData *value = Installation(query) ? storedInstallation : stored;
+  if (!value) return errSecItemNotFound;
+  *result = CFBridgingRetain(value); return errSecSuccess;
 }
 static OSStatus Delete(CFDictionaryRef query) {
   if (keychainStatus != errSecSuccess) return keychainStatus;
-  stored = nil; return errSecSuccess;
+  if (Installation(query)) storedInstallation = nil; else stored = nil;
+  return errSecSuccess;
+}
+static OSStatus Add(CFDictionaryRef attributes, CFTypeRef *result) {
+  if (keychainStatus != errSecSuccess) return keychainStatus;
+  NSDictionary *attrs = (__bridge NSDictionary *)attributes;
+  NSCAssert([attrs[(__bridge id)kSecAttrSynchronizable] isEqual:@NO], @"identity never syncs between phones");
+  NSCAssert([attrs[(__bridge id)kSecAttrAccessible] isEqual:(__bridge id)kSecAttrAccessibleWhenUnlockedThisDeviceOnly], @"identity stays on this device");
+  if (Installation(attributes)) storedInstallation = attrs[(__bridge id)kSecValueData];
+  else stored = attrs[(__bridge id)kSecValueData];
+  return errSecSuccess;
 }
 #define SecItemCopyMatching Read
 #define SecItemDelete Delete
+#define SecItemAdd Add
 #import "../../modules/local-project-storage/ios/CompanionPairing.mm"
 #import "../../modules/local-project-storage/ios/NearbyPairing.mm"
+@interface STMPairingRequestCapture : CompanionPairing
+@property NSMutableURLRequest *captured;
+@end
+@implementation STMPairingRequestCapture
+- (void)start:(NSMutableURLRequest *)request resolve:(RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject { self.captured = request; }
+@end
 // A protection space carrying a chosen server trust, as URLSession would hand it over.
 @interface STMTestSpace : NSURLProtectionSpace
 @property (assign) SecTrustRef trustRef;
@@ -66,6 +88,32 @@ int main(int argc, char **argv) { @autoreleasepool {
   keychainStatus = errSecSuccess;
   [bridge disconnectResolve:^(id x) { NSCAssert([x[@"state"] isEqual:@"disconnected"], @"disconnect"); } reject:^(NSString *c, NSString *m, NSError *e) { abort(); }];
   NSCAssert(stored == nil, @"credential deleted");
+  // Pair a single installation, forget its current Mac, then pair again. The
+  // actual native request builder must keep its identity, but not another phone's.
+  STMPairingRequestCapture *capture = [STMPairingRequestCapture new];
+  NSString *invitation = [@"" stringByPaddingToLength:32 withString:@"a" startingAtIndex:0];
+  [capture pairURL:@"https://host.example.ts.net" code:invitation deviceName:@"Kitchen iPhone" certificateSha256:nil resolve:^(id result) {} reject:^(NSString *c, NSString *m, NSError *e) { abort(); }];
+  NSDictionary *firstRequest = [NSJSONSerialization JSONObjectWithData:capture.captured.HTTPBody options:0 error:nil];
+  NSString *installationKey = firstRequest[@"installationKey"];
+  NSCAssert(installationKey.length == 43 && storedInstallation, @"pairing carries a persisted installation secret");
+  [capture disconnectResolve:^(id result) {} reject:^(NSString *c, NSString *m, NSError *e) { abort(); }];
+  NSCAssert(storedInstallation, @"forgetting a Mac preserves installation identity");
+  [capture pairURL:@"https://host.example.ts.net" code:invitation deviceName:@"Renamed iPhone" certificateSha256:nil resolve:^(id result) {} reject:^(NSString *c, NSString *m, NSError *e) { abort(); }];
+  NSDictionary *againRequest = [NSJSONSerialization JSONObjectWithData:capture.captured.HTTPBody options:0 error:nil];
+  NSCAssert([againRequest[@"installationKey"] isEqual:installationKey], @"re-pair uses the same secret");
+  storedInstallation = nil;
+  [capture pairURL:@"https://host.example.ts.net" code:invitation deviceName:@"Kitchen iPhone" certificateSha256:nil resolve:^(id result) {} reject:^(NSString *c, NSString *m, NSError *e) { abort(); }];
+  NSDictionary *otherRequest = [NSJSONSerialization JSONObjectWithData:capture.captured.HTTPBody options:0 error:nil];
+  NSCAssert(![otherRequest[@"installationKey"] isEqual:installationKey], @"a separate installation gets a different identity even with the same name");
+  stored = [NSJSONSerialization dataWithJSONObject:r options:0 error:nil];
+  [capture pairURL:@"https://host.example.ts.net" code:invitation deviceName:@"Kitchen iPhone" certificateSha256:nil resolve:^(id result) {} reject:^(NSString *c, NSString *m, NSError *e) { abort(); }];
+  NSCAssert([[capture.captured valueForHTTPHeaderField:@"X-Scan-Device"] isEqual:r[@"deviceId"]] && [[capture.captured valueForHTTPHeaderField:@"Authorization"] isEqual:[@"Bearer " stringByAppendingString:r[@"token"]]], @"same Mac receives existing credential to upgrade the legacy row");
+  [capture pairURL:@"https://other.example.ts.net" code:invitation deviceName:@"Kitchen iPhone" certificateSha256:nil resolve:^(id result) {} reject:^(NSString *c, NSString *m, NSError *e) { abort(); }];
+  NSCAssert(![capture.captured valueForHTTPHeaderField:@"Authorization"] && ![capture.captured valueForHTTPHeaderField:@"X-Scan-Device"], @"other Mac never receives previous credential");
+  keychainStatus = errSecInteractionNotAllowed; capture.captured = nil; failed = NO;
+  [capture pairURL:@"https://host.example.ts.net" code:invitation deviceName:@"Kitchen iPhone" certificateSha256:nil resolve:^(id result) { abort(); } reject:^(NSString *c, NSString *m, NSError *e) { failed = [c isEqual:@"secure-storage"]; }];
+  NSCAssert(failed && !capture.captured, @"locked installation storage sends no pairing request");
+  keychainStatus = errSecSuccess;
   r[@"deviceId"] = @42; stored = [NSJSONSerialization dataWithJSONObject:r options:0 error:nil];
   NSError *error = nil; NSCAssert(!STMReadPairing(&error) && error, @"corrupt credential fails closed");
   // Pinned companions: only addresses iOS lets a private certificate use.
@@ -126,6 +174,11 @@ int main(int argc, char **argv) { @autoreleasepool {
   [record addEntriesFromDictionary:keyed];
   stored = [NSJSONSerialization dataWithJSONObject:record options:0 error:nil];
   error = nil; NSCAssert(STMReadPairing(&error) && !error, @"v2 record valid");
+  [capture pairAddresses:addresses code:invitation deviceName:@"Kitchen iPhone" publicKeySha256:keyPin resolve:^(id result) {} reject:^(NSString *c, NSString *m, NSError *e) { abort(); }];
+  NSDictionary *v2Request = [NSJSONSerialization JSONObjectWithData:capture.captured.HTTPBody options:0 error:nil];
+  NSCAssert([v2Request[@"installationKey"] isEqual:otherRequest[@"installationKey"]] && [[capture.captured valueForHTTPHeaderField:@"X-Scan-Device"] isEqual:record[@"deviceId"]], @"v2 pairing carries the same installation key and legacy proof");
+  [capture pairAddresses:addresses code:invitation deviceName:@"Kitchen iPhone" publicKeySha256:pin resolve:^(id result) {} reject:^(NSString *c, NSString *m, NSError *e) { abort(); }];
+  NSCAssert(![capture.captured valueForHTTPHeaderField:@"Authorization"], @"same address with another public key does not receive old credential");
   NSCAssert([STMPairingBaseURL(record).absoluteString isEqual:@"https://192.168.1.20:9077"], @"v2 base URL");
   NSMutableDictionary *moved = [record mutableCopy]; moved[@"activeUrl"] = @"https://100.101.102.103:9077";
   stored = [NSJSONSerialization dataWithJSONObject:moved options:0 error:nil];

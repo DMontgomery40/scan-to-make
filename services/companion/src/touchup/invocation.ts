@@ -21,15 +21,17 @@ export const TOUCHUP_RESULT_SCHEMA = {
   },
 } as const;
 
-export const TOUCHUP_SYSTEM_RULES = `You are making a 3D model the user will print: either touching up their scan so it matches the real object in the photos, or making what their instructions describe so it fits the real things it goes with.
+export const TOUCHUP_SYSTEM_RULES = `You are making a useful 3D object for a person. Understand what they want it to do, the things it must fit, and how they will assemble and use it. Deliver a complete model that answers that request.
 - Reach Blender only through the printer MCP's blender_mcp_* tools. Start in the empty scene you are given, and work only with objects in the current scene (bpy.context.scene.objects).
-- Fix what the photos show the scan got wrong, with targeted edits: remove anything that came from the table, raise features that are missing or too faint, and flatten or smooth surfaces the photos show are flat or smooth but the scan made lumpy.
-- Keep real surface detail the photos confirm, such as texture, stitches and edges. Don't smooth that away, and leave alone what the photos don't show is wrong.
-- Use Blender's own tools (sculpt brushes, modifiers limited to a region, primitives). Don't write your own geometry algorithms.
+- Read every supplied reference photo and the user's request before modeling. Identify the functional interfaces: what holds what, contact surfaces, clearances, access, and how the part attaches without obstructing the real objects.
+- For a new design, construct the complete functional geometry using Blender through MCP. Procedural modeling, profiles, booleans, curves, modifiers and multiple iterations are available. A collection of rough primitives is a starting sketch, not a finished mount, clip, bracket or enclosure.
+- For a captured object, fix defects supported by the photos with targeted edits: raise features that are missing or too faint, and flatten or smooth surfaces the photos show are flat or smooth. Keep real surface detail the photos confirm, including texture, stitches and edges. Use Blender's existing sculpt and modifier tools for that cleanup.
+- Use measured or published dimensions when available. Distinguish measurements from estimates. Make reasonable choices for noncritical details; ask for a close-up or measurement when a missing interface dimension prevents a useful fit.
 - Don't do print preparation: no flat bases, re-orientation or supports.
-- Scans from the phone are in metres. Export every STL in millimetres, the unit printers use.
+- Scans from the phone are in metres. A current-model STL supplied for revision is already in millimetres. Build new designs in millimetres and export every STL in millimetres, the unit printers use.
 - After each fix, export the whole model as an STL to the checkpoints folder (01.stl, 02.stl, …).
-- Make one pass, then stop. Export the final model to out/touched.stl and a few square PNG renders to out/, named so the clearest overall view sorts first (for example 1_overview.png).
+- Render and inspect the candidate from useful angles against the request and reference photos. Check the attachment interfaces, assembly path and dimensions; revise defects you can see. Successful export alone does not establish that the design works.
+- Export the final model to out/touched.stl and clear PNG renders to out/, named so the clearest overall view sorts first (for example 1_overview.png). Explain what the part does and any remaining fit assumptions in the final summary.
 - If you can't see a part well enough to fix it, set status to needs_closeup and say what to photograph.
 - If something breaks and you can't finish (for example Blender stops responding), set status to failed and say what happened.`;
 
@@ -71,12 +73,12 @@ export function isolatedClaudeEnv(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv 
   return env;
 }
 
-function prompt(pass: TouchupPass, instructions?: string, note?: string, summary?: string): string {
+function prompt(pass: TouchupPass, instructions?: string, note?: string, summary?: string, currentModel = false): string {
   const opening = note !== undefined
-    ? [`This is the current model. ${summary ?? ''}`.trimEnd(),
+    ? [...(currentModel ? [`This is the current model. ${summary ?? ''}`.trimEnd()] : ['Continue this project using the original inputs and the additional request below. No completed model is available yet.']),
        ...(instructions?.trim() ? [`Original request: ${instructions.trim()}`] : []),
        `Change requested: ${note}`,
-       'The current model is an STL already in millimetres: import and export it at scale 1.'].join('\n\n')
+       ...(currentModel ? ['The current model is an STL already in millimetres: import and export it at scale 1.'] : [])].join('\n\n')
     : instructions?.trim() || TOUCHUP_INSTRUCTION;
   const files = [
     ...(pass.scanPaths.length ? [`- Scan: ${pass.scanPaths.join(', ')}`] : []),
@@ -88,7 +90,7 @@ function prompt(pass: TouchupPass, instructions?: string, note?: string, summary
 }
 
 /** The lean, isolated `claude -p` call for one touch-up pass. Writes the pass's MCP config file. */
-export function buildTouchupInvocation(input: {pass: TouchupPass; printer: PrinterMcpProcess; claudePath: string; instructions?: string; note?: string; summary?: string; sourceEnv?: NodeJS.ProcessEnv}): TouchupInvocation {
+export function buildTouchupInvocation(input: {pass: TouchupPass; printer: PrinterMcpProcess; claudePath: string; instructions?: string; note?: string; summary?: string; currentModel?: boolean; sourceEnv?: NodeJS.ProcessEnv}): TouchupInvocation {
   const {pass} = input;
   const mcpConfig = {mcpServers: {printer: printerServer(input.printer)}};
   const mcpConfigPath = join(pass.dir, 'mcp.json');
@@ -108,7 +110,7 @@ export function buildTouchupInvocation(input: {pass: TouchupPass; printer: Print
     '--json-schema', JSON.stringify(TOUCHUP_RESULT_SCHEMA),
     '--output-format', 'stream-json',
     '--verbose',
-    prompt(pass, input.instructions, input.note, input.summary),
+    prompt(pass, input.instructions, input.note, input.summary, input.currentModel),
   ];
   return {command: input.claudePath, args, env: isolatedClaudeEnv(input.sourceEnv ?? process.env), cwd: pass.dir, mcpConfigPath, mcpConfig};
 }

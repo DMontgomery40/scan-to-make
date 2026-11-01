@@ -25,6 +25,7 @@ import {ObjectService} from './objects/service.js';
 import {judgePlate} from './objects/bedcheck.js';
 import {printerStlSize} from './objects/stl-size.js';
 import {runTouchup} from './touchup/touchup.js';
+import {loadPrinterCatalog} from './objects/printers.js';
 
 // Presence is explicit opt-in. Invalid/empty configuration must fail, never fall back.
 const directory = process.env.SCAN_TO_MAKE_REMOTE_AUTH_DIR;
@@ -61,9 +62,14 @@ let objects:ObjectService|undefined;
 if(handoffConfig&&printHandoff&&captureDirectory&&claudePath){
   const objectStore=new ObjectStore(join(captureDirectory,'objects'));
   await objectStore.recoverInterrupted();
-  objects=new ObjectService({store:objectStore,runTouchup:input=>runTouchup(input),claudePath,handoff:handoffConfig,
+  const printerCatalog=await loadPrinterCatalog(handoffConfig);
+  const destinations=new Map(printerCatalog.destinations.map(destination=>{
+    const config=printerCatalog.resolve(destination.id)!;
+    return [destination.id,destination.id===printerCatalog.defaultDestinationId?printHandoff:createPrintHandoffServices(config,handoffDirectory!)] as const;
+  }));
+  objects=new ObjectService({store:objectStore,runTouchup:input=>runTouchup(input),claudePath,handoff:handoffConfig,printerCatalog,
     stlInfo:path=>printerStlSize(handoffConfig,path),
-    print:{services:printHandoff,judgePlate:photo=>judgePlate(photo,claudePath)}});
+    print:{services:printHandoff,destinations,judgePlate:photo=>judgePlate(photo,claudePath)}});
 }
 if(capture?.scanProcessing&&captureDirectory)capture.modelSize=new ModelSizeStore(capture.storage,capture.scanProcessing,join(captureDirectory,'captures'),
  createModelSizeRunner(async()=>handoffConfig?.backend==='bambu-printer-mcp'?handoffConfig.process:installedBambuProcess()));

@@ -1,6 +1,7 @@
 import {randomUUID} from 'node:crypto';
 import {mkdir, readdir, readFile, rename, rm, writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
+import type {TouchupActivity} from '../touchup/runner.js';
 
 export type ObjectState = 'new' | 'touching-up' | 'needs-closeup' | 'ready' | 'printing' | 'printed' | 'failed';
 
@@ -13,6 +14,8 @@ export interface ObjectPass {
   seconds?: number;
   costUsd?: number;
   dir?: string;
+  /** The most recent public worker messages and tool names, in stream order. */
+  activity?: TouchupActivity[];
 }
 
 /** One thing the user scanned or asked to have made, as the phone and the Mac app both show it. */
@@ -21,6 +24,8 @@ export interface StmObject {
   createdAtMs: number;
   updatedAtMs: number;
   instructions?: string;
+  /** A configured destination id; process settings and credentials stay in the companion. */
+  printerDestinationId?: string;
   state: ObjectState;
   /** File name under scan/. */
   scan?: string;
@@ -37,7 +42,7 @@ export interface StmObject {
   plate?: {item?: string; noCamera?: boolean; photo?: boolean};
   failure?: string;
   /** The last print; `uncertain` when it may have reached the printer and must not be sent again by itself. */
-  print?: {bundleId: string; uncertain?: boolean};
+  print?: {bundleId: string; uncertain?: boolean; destination?: {id: string; name: string}};
 }
 
 const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -103,17 +108,23 @@ export class ObjectStore {
     return path;
   }
 
-  /** After a restart nothing is still running: mark interrupted work failed so it can be started again. */
   /** Removes the object and every file it has. */
   async remove(id: string): Promise<void> {
     await this.get(id);
     await rm(this.dir(id), {recursive: true, force: true});
   }
 
+  /** After a restart nothing is still running: record interruption, never successful completion. */
   async recoverInterrupted(): Promise<void> {
     for (const object of await this.list()) {
       if (object.state === 'touching-up' || object.state === 'printing') {
-        await this.update(object.id, o => ({...o, state: 'failed', failure: 'interrupted when your Mac restarted the app'}));
+        const atMs = Date.now(), failure = 'interrupted when your Mac restarted the app';
+        await this.update(object.id, o => ({...o, state: 'failed', failure, progress: undefined,
+          passes: o.state !== 'touching-up' ? o.passes : o.passes.map((pass, index) => index !== o.passes.length - 1 || pass.endedAtMs !== undefined ? pass : {
+            ...pass, endedAtMs: atMs, status: 'interrupted',
+            activity: [...(pass.activity ?? []), {atMs, kind: 'message' as const, text: failure}].slice(-200),
+          }),
+        }));
       }
     }
   }

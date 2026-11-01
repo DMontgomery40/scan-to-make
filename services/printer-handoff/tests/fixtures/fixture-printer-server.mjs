@@ -3,8 +3,15 @@
 import {Server} from '@modelcontextprotocol/sdk/server/index.js';
 import {StdioServerTransport} from '@modelcontextprotocol/sdk/server/stdio.js';
 import {CallToolRequestSchema, ListToolsRequestSchema} from '@modelcontextprotocol/sdk/types.js';
-import {appendFileSync, writeFileSync} from 'node:fs';
+import {appendFileSync, writeFileSync, mkdtempSync, rmSync} from 'node:fs';
 import {basename, dirname, join} from 'node:path';
+import {tmpdir} from 'node:os';
+
+const ephemeral = process.env.HANDOFF_FIXTURE_EPHEMERAL === '1' ? mkdtempSync(join(tmpdir(), 'fixture-printer-output-')) : undefined;
+if (ephemeral) {
+  process.once('exit', () => rmSync(ephemeral, {recursive: true, force: true}));
+  process.once('SIGTERM', () => process.exit(0));
+}
 
 const [mode, log] = process.argv.slice(2);
 const record = entry => appendFileSync(log, JSON.stringify(entry) + '\n');
@@ -90,7 +97,7 @@ server.setRequestHandler(CallToolRequestSchema, async request => {
   let args = request.params.arguments ?? {};
   if ((name === 'slice_stl' || name === 'print_3mf') && !args.bambu_model) args = await elicitModel(args);
   record({tool: name, arguments: args});
-  const directory = dirname(args.stl_path ?? args.three_mf_path ?? args.gcode_path ?? process.cwd());
+  const directory = ephemeral ?? dirname(args.stl_path ?? args.three_mf_path ?? args.gcode_path ?? process.cwd());
   if (name === 'lay_flat') {
     const path = join(directory, `${basename(args.stl_path, '.stl')}_flat.stl`);
     writeFileSync(path, 'solid flat\nendsolid flat\n');

@@ -81,6 +81,15 @@ test('making something from instructions needs no scan or photos', async () => {
   assert.ok(seenPrompt.startsWith('A hook for a 25 mm handle.'));
 });
 
+test('explicit original-input recovery does not treat an STL as a completed model', async () => {
+  const previous = join(await mkdtemp(join(tmpdir(), 'touchup-prev-')), 'original.stl');
+  await writeFile(previous, 'solid original\nendsolid original\n');
+  let seenPrompt;
+  await runTouchup(await input({scan: [previous], note: 'Please try the saved inputs again.', currentModel: false}),
+    {...recorder([]), run: async (inv, pass) => { seenPrompt = inv.args.at(-1); return done(pass); }});
+  assert.match(seenPrompt, /No completed model is available yet/);
+});
+
 test('a correction on an instructions-only job needs no photos', async () => {
   const log = [];
   const previous = join(await mkdtemp(join(tmpdir(), 'touchup-prev-')), 'touched.stl');

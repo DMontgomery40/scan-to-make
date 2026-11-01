@@ -85,13 +85,19 @@ struct ObjectsWindowView: View {
     var startWith3D = false
     /// The object the Delete dialog is about, fixed when it opens: the selection can move underneath it.
     @State private var deleting: StmObject?
+    @State private var search = ""
 
     var body: some View {
         NavigationSplitView {
             List(selection:$model.selection) {
-                ForEach(model.objects) { ObjectCard(object:$0).tag($0.id) }
+                Section("Projects") {
+                    ForEach(model.objects.filter { search.isEmpty || ($0.instructions ?? $0.words.title).localizedCaseInsensitiveContains(search) }) {
+                        ObjectCard(object:$0).tag($0.id)
+                    }
+                }
             }
             .listStyle(.sidebar)
+            .searchable(text:$search, prompt:"Find a project")
             .navigationSplitViewColumnWidth(min:220, ideal:264, max:340)
             .onDeleteCommand { deleting = model.selected }
         } detail: {
@@ -129,7 +135,7 @@ struct ObjectsWindowView: View {
         case .loading: return ""
         case .notSetUp: return "Not set up"
         case .notRunning: return "Not running"
-        case .ready: return model.objects.isEmpty ? "" : model.objects.count == 1 ? "1 object" : "\(model.objects.count) objects"
+        case .ready: return model.objects.isEmpty ? "" : model.objects.count == 1 ? "1 project" : "\(model.objects.count) projects"
         }
     }
 
@@ -193,8 +199,12 @@ struct ObjectCard: View {
         HStack(spacing:10) {
             Thumbnail(object:object, busy:words.busy).frame(width:40, height:40)
             VStack(alignment:.leading, spacing:2) {
-                Text(words.title).font(.body.weight(.medium)).lineLimit(1)
-                Text(words.headline).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
+                Text(words.title).font(.body.weight(.medium)).lineLimit(2)
+                Label(object.state == .failed ? "Needs attention" : words.headline,
+                      systemImage:object.state == .failed ? "exclamationmark.circle" : "circle.fill")
+                    .font(.caption).foregroundStyle(object.state == .failed ? Color.orange : Color.secondary).lineLimit(1)
+                Text(Date(timeIntervalSince1970:object.createdAtMs / 1000), format:.dateTime.month(.abbreviated).day().hour().minute())
+                    .font(.caption2).foregroundStyle(.tertiary)
             }
         }
         .padding(.vertical, 3)
@@ -210,6 +220,8 @@ private struct Thumbnail: View {
         ZStack {
             ObjectsStyle.stage
             if let url = object.renderURLs.first {
+                FileImage(url:url, version:object.updatedAtMs, contentMode:.fill)
+            } else if let url = object.photoURLs.first ?? object.captureURLs.first {
                 FileImage(url:url, version:object.updatedAtMs, contentMode:.fill)
             } else if busy {
                 ProgressView().controlSize(.small)
@@ -229,12 +241,14 @@ struct ObjectPage: View {
     @ObservedObject var model: ObjectsModel
     @State private var showing: Showing?
     @State private var note = ""
+    @State private var projectSection = MacProjectSection.model
     enum Showing: Hashable { case model, render(Int) }
 
     init(object: StmObject, model: ObjectsModel, startWith3D: Bool = false) {
         self.object = object
         self.model = model
-        _showing = State(initialValue:startWith3D && object.modelURL != nil ? .model : nil)
+        _showing = State(initialValue:object.modelURL != nil ? .model : nil)
+        _projectSection = State(initialValue:object.state == .touchingUp ? .activity : object.current == nil ? .inputs : .model)
     }
 
     private var words: ObjectWords { object.words }
@@ -257,18 +271,68 @@ struct ObjectPage: View {
                         .foregroundStyle(Color(nsColor:.systemRed)).textSelection(.enabled)
                 }
                 if words.tone == .accent { ask }
-                stage
-                if let instructions = object.instructions?.trimmingCharacters(in:.whitespacesAndNewlines), !instructions.isEmpty {
-                    section("What You Asked For") {
-                        Text(instructions).textSelection(.enabled).fixedSize(horizontal:false, vertical:true)
+                printerSelection
+                Picker("Project section", selection:$projectSection) {
+                    ForEach(MacProjectSection.allCases, id:\.self) { Text($0.rawValue).tag($0) }
+                }
+                .pickerStyle(.segmented).frame(maxWidth:420)
+                switch projectSection {
+                case .model:
+                    if object.modelURL != nil || !object.renderURLs.isEmpty {
+                        stage
+                        if let summary = object.current?.summary { Text(summary).textSelection(.enabled) }
+                    } else {
+                        QuietMessage(title:words.busy ? "Your Mac Is Working" : "No Model Yet",
+                                     text:"Your request and source photos are saved in Inputs. Follow Activity to see each pass.")
+                            .frame(minHeight:220)
                     }
+                    if !object.photoURLs.isEmpty {
+                        section("Reference Photos") { MacProjectPhotos(object:object, photos:object.photoURLs) }
+                    }
+                case .inputs:
+                    section("Your Request") {
+                        Text(object.instructions?.isEmpty == false ? object.instructions! : object.scan != nil || !(object.capture ?? []).isEmpty ? "A copy of the scanned object." : "No description was saved with this project.")
+                            .textSelection(.enabled).fixedSize(horizontal:false, vertical:true)
+                    }
+                    if !object.photoURLs.isEmpty {
+                        section("Reference Photos") { MacProjectPhotos(object:object, photos:object.photoURLs) }
+                    }
+                    if !object.captureURLs.isEmpty {
+                        DisclosureGroup("Scan Images (\(object.captureURLs.count))") {
+                            MacProjectPhotos(object:object, photos:object.captureURLs)
+                        }
+                    }
+                    if object.scan != nil { Label("Original scan saved with this project", systemImage:"viewfinder").foregroundStyle(.secondary) }
+                case .activity:
+                    MacProjectActivity(object:object, model:model)
                 }
                 if words.actions.contains(.correct) { corrections }
             }
             .padding(EdgeInsets(top:20, leading:28, bottom:32, trailing:28))
-            .frame(maxWidth:820, alignment:.leading)
+            .frame(maxWidth:1000, alignment:.leading)
             .frame(maxWidth:.infinity)
             .keepsScrollerRoom()
+        }
+    }
+
+    @ViewBuilder private var printerSelection: some View {
+        if let catalog = model.printerCatalog, !catalog.destinations.isEmpty {
+            HStack(spacing:16) {
+                Picker(selection:Binding(get:{ object.printerDestinationId ?? catalog.defaultDestinationId }, set:{ destination in
+                    Task { await model.selectPrinter(object.id, destinationId:destination) }
+                })) {
+                    ForEach(catalog.destinations) { Text($0.name).tag($0.id) }
+                } label: { Label("Printer", systemImage:"printer") }
+                .frame(maxWidth:360)
+                .disabled(working || object.state == .touchingUp || object.state == .printing || object.print?.uncertain == true)
+                if let destination = object.print?.destination {
+                    Text("Last print: \(destination.name)").font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer(minLength:0)
+            }
+        } else {
+            Label("Printer information is unavailable. Check the companion connection in Settings.", systemImage:"printer")
+                .font(.callout).foregroundStyle(.secondary)
         }
     }
 
@@ -290,7 +354,8 @@ struct ObjectPage: View {
 
     private var titleAndStatus: some View {
         VStack(alignment:.leading, spacing:6) {
-            Text(words.title).font(.title.weight(.semibold)).textSelection(.enabled)
+            Text(object.instructions?.isEmpty == false ? object.instructions! : words.title).font(.title2.weight(.semibold)).textSelection(.enabled)
+                .lineLimit(3)
                 .fixedSize(horizontal:false, vertical:true)
             if words.tone != .accent { statusLine }
         }
@@ -323,7 +388,7 @@ struct ObjectPage: View {
                           systemImage:action == .retry ? "arrow.clockwise" : "printer")
                 }
                 .primaryAction().controlSize(.large)
-                .disabled(working)
+                .disabled(working || (action != .retry && model.printer(for:object) == nil))
                 .help(action == .printChecked ? "Only if the printer isn’t already printing this" : "")
             }
             .fixedSize() // never squeezed by the title beside it
@@ -439,7 +504,11 @@ struct ObjectPage: View {
 
     // "Anything to Fix?": the note goes back to the touch-up, which starts again from this model.
     private var corrections: some View {
-        section("Anything to Fix?") {
+        section(object.current == nil ? "Revise Your Request" : "Refine This Version") {
+            if object.current == nil {
+                Text("Explain what you want made from these photos, or clarify what went wrong. Your existing photos stay with the project.")
+                    .font(.callout).foregroundStyle(.secondary)
+            }
             HStack(alignment:.bottom, spacing:10) {
                 TextField("For example: you missed the clip on the side, or it’s 70 mm long.", text:$note, axis:.vertical)
                     .textFieldStyle(.roundedBorder).lineLimit(2...6)
@@ -461,9 +530,117 @@ struct ObjectPage: View {
     private func send() {
         let text = note.trimmingCharacters(in:.whitespacesAndNewlines)
         guard !text.isEmpty, !working else { return }
-        Task { if await model.perform(.correct, on:object.id, note:text) { note = "" } }
+        Task { if await model.perform(.correct, on:object.id, note:text) { note = ""; projectSection = .activity } }
     }
     private func run(_ action: ObjectAction) { Task { await model.perform(action, on:object.id) } }
+}
+
+enum MacProjectSection: String, CaseIterable { case model = "Model", inputs = "Inputs", activity = "Activity" }
+
+struct MacProjectPhotos: View {
+    let object: StmObject
+    let photos: [URL]
+    @State private var selected: URL?
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators:false) {
+            HStack(spacing:12) {
+                ForEach(Array(photos.enumerated()), id:\.element) { index, url in
+                    Button { selected = url } label: {
+                        FileImage(url:url, version:object.updatedAtMs, contentMode:.fill)
+                            .frame(width:160, height:130).clipped()
+                            .clipShape(RoundedRectangle(cornerRadius:12))
+                    }
+                    .buttonStyle(.plain).help("Open reference photo \(index + 1)")
+                    .accessibilityLabel("Reference photo \(index + 1)")
+                }
+            }.padding(.vertical, 4)
+        }
+        .sheet(isPresented:Binding(get:{ selected != nil }, set:{ if !$0 { selected = nil } })) {
+            VStack(spacing:16) {
+                if let selected { FileImage(url:selected, version:object.updatedAtMs).frame(maxWidth:.infinity, maxHeight:.infinity) }
+                Button("Done") { selected = nil }.keyboardShortcut(.cancelAction)
+            }.padding(20).frame(minWidth:600, minHeight:500)
+        }
+    }
+}
+
+struct MacProjectActivity: View {
+    let object: StmObject
+    let model: ObjectsModel
+    var body: some View {
+        VStack(alignment:.leading, spacing:18) {
+            Label("Project Created", systemImage:"plus.circle.fill").font(.headline)
+            Text(Date(timeIntervalSince1970:object.createdAtMs / 1000), format:.dateTime.month().day().hour().minute())
+                .font(.caption).foregroundStyle(.secondary)
+            ForEach(Array(object.passes.enumerated()), id:\.offset) { index, pass in
+                VStack(alignment:.leading, spacing:10) {
+                    Divider()
+                    HStack {
+                        Label("Pass \(index + 1)", systemImage:pass.endedAtMs == nil ? "sparkles" : "clock.arrow.circlepath")
+                            .font(.headline)
+                        Spacer()
+                        Text(pass.status?.replacingOccurrences(of:"_", with:" ").capitalized ?? "In progress")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    Text(Date(timeIntervalSince1970:pass.startedAtMs / 1000), format:.dateTime.month(.abbreviated).day().hour().minute())
+                        .font(.caption).foregroundStyle(.secondary)
+                    if let note = pass.note, !note.isEmpty {
+                        Text("Your change").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                        Text(note).textSelection(.enabled)
+                    }
+                    if let summary = pass.summary, !summary.isEmpty { Text(summary).textSelection(.enabled) }
+                    if (pass.activityCount ?? pass.activity?.count ?? 0) > 0 {
+                        MacPassActivity(object:object, model:model, index:index, count:pass.activityCount ?? pass.activity?.count ?? 0)
+                    } else if pass.endedAtMs != nil {
+                        Text("Detailed activity wasn't recorded for this earlier pass.").font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            }
+            if object.passes.isEmpty { Text("Work will appear here when you send this project from your iPhone.").foregroundStyle(.secondary) }
+        }
+    }
+}
+
+struct MacPassActivity: View {
+    let object: StmObject
+    let model: ObjectsModel
+    let index: Int
+    let count: Int
+    @State private var expanded = false
+    @State private var entries: [StmObject.Activity] = []
+    @State private var failed = false
+    @State private var loading = false
+
+    var body: some View {
+        DisclosureGroup("Model Activity (\(count))", isExpanded:$expanded) {
+            VStack(alignment:.leading, spacing:12) {
+                if failed {
+                    Button("Couldn't load this pass. Try again.") { Task { await load() } }
+                } else if loading && entries.isEmpty { ProgressView().controlSize(.small) }
+                ForEach(Array(entries.enumerated()), id:\.offset) { _, entry in
+                    HStack(alignment:.top, spacing:12) {
+                        Image(systemName:entry.kind == "tool" ? "wrench.and.screwdriver" : "text.bubble")
+                            .foregroundStyle(.secondary).frame(width:20)
+                        VStack(alignment:.leading, spacing:4) {
+                            Text(entry.text).textSelection(.enabled)
+                            Text(Date(timeIntervalSince1970:entry.atMs / 1000), format:.dateTime.hour().minute().second())
+                                .font(.caption2).foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }.padding(.top,12)
+        }
+        .task(id:expanded ? object.updatedAtMs : -1) { if expanded { await load() } }
+    }
+    private func load() async {
+        loading = true
+        defer { loading = false }
+        do {
+            let activity = try await model.passActivity(object.id, index:index)
+            guard !Task.isCancelled else { return }
+            entries = activity; failed = false
+        } catch { if !Task.isCancelled { failed = true } }
+    }
 }
 
 // MARK: - Steady scrolling

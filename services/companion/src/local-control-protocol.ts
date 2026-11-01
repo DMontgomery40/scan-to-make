@@ -45,7 +45,10 @@ export const parameters = {
   'doors.prepare': z.strictObject({projectId: projectId.optional(), handoffId: z.uuid().optional(), door: z.enum(['finder', 'blender', 'bambu-studio', 'orca'])})
     .refine(p => (p.projectId === undefined) !== (p.handoffId === undefined)),
   'objects.list': empty,
+  'objects.printers': empty,
+  'objects.selectPrinter': z.strictObject({id: z.uuid(), destinationId: z.string().min(1).max(256)}),
   'objects.get': z.strictObject({id: z.uuid()}),
+  'objects.passActivity': z.strictObject({id: z.uuid(), index: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER)}),
   'objects.start': z.strictObject({id: z.uuid()}),
   'objects.delete': z.strictObject({id: z.uuid()}),
   'objects.correct': z.strictObject({id: z.uuid(), note: z.string().trim().min(1).max(4000)}),

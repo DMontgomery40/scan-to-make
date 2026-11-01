@@ -24,11 +24,13 @@ static BOOL STMObjectsMatches(id value, NSString *pattern) {
 static NSString *STMObjectsPath(NSString *path, NSString *method) {
   // Only the objects routes, each with its own method.
   NSString *one = [NSString stringWithFormat:@"/v1/objects/%@", STMObjectsUUID];
-  if ([method isEqual:@"GET"] && (STMObjectsMatches(path, @"/v1/objects") || STMObjectsMatches(path, one))) return @"projects:read";
+  if ([method isEqual:@"GET"] && (STMObjectsMatches(path, @"/v1/objects(?:/printers)?") || STMObjectsMatches(path, one))) return @"projects:read";
+  if ([method isEqual:@"GET"] && STMObjectsMatches(path, [one stringByAppendingString:@"/passes/(0|[1-9][0-9]{0,15})/activity"])) return @"projects:read";
+  if ([method isEqual:@"PATCH"] && STMObjectsMatches(path, one)) return @"captures:import";
   if ([method isEqual:@"DELETE"] && STMObjectsMatches(path, one)) return @"captures:import";
   if ([method isEqual:@"POST"] && STMObjectsMatches(path, @"/v1/objects")) return @"captures:import";
   if ([method isEqual:@"POST"] && STMObjectsMatches(path, [one stringByAppendingString:@"/(start|corrections|closeup)"])) return @"captures:import";
-  if ([method isEqual:@"POST"] && STMObjectsMatches(path, [one stringByAppendingString:@"/(print|plate)"])) return @"printer-handoff:use";
+  if ([method isEqual:@"POST"] && STMObjectsMatches(path, [one stringByAppendingString:@"/(print|plate|printer)"])) return @"printer-handoff:use";
   return nil;
 }
 /** The record, if it is current: unexpired and holding the scope. */
@@ -395,7 +397,7 @@ RCT_REMAP_METHOD(sendChosen, sendChosenOptions:(NSDictionary *)o resolve:(RCTPro
 
 RCT_REMAP_METHOD(download, downloadOptions:(NSDictionary *)o resolve:(RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject) {
   NSString *objectId = o[@"objectId"], *name = o[@"name"];
-  if (!STMObjectsMatches(objectId, STMObjectsUUID) || !STMObjectsMatches(name, @"model\\.stl|plate\\.jpg|renders/[A-Za-z0-9][A-Za-z0-9._-]{0,120}\\.png") || [name containsString:@".."]) {
+  if (!STMObjectsMatches(objectId, STMObjectsUUID) || !STMObjectsMatches(name, @"model\\.stl|plate\\.jpg|renders/[A-Za-z0-9][A-Za-z0-9._-]{0,120}\\.png|(?:photos|capture)/[A-Za-z0-9][A-Za-z0-9._ -]{0,127}") || [name containsString:@".."]) {
     reject(@"invalid-request", STMObjectsMessage(@"invalid-request"), nil); return;
   }
   [self fetch:objectId name:name version:[NSString stringWithFormat:@"%lld", [o[@"version"] longLongValue]] done:^(NSURL *url, NSString *code) {

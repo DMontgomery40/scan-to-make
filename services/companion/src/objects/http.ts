@@ -3,11 +3,11 @@ import {readFile} from 'node:fs/promises';
 import {basename, join} from 'node:path';
 import type {RemoteScope} from '../remote-auth.js';
 import {InvalidStateError, type ObjectService} from './service.js';
-import {ObjectNotFoundError, type StmObject} from './store.js';
+import {ObjectNotFoundError, type ObjectPass, type StmObject} from './store.js';
 
 const READ: RemoteScope = 'projects:read', WRITE: RemoteScope = 'captures:import', PRINT: RemoteScope = 'printer-handoff:use';
 const MAX_SCAN = 64 * 1024 * 1024, MAX_PHOTO = 25 * 1024 * 1024, MAX_JSON = 16 * 1024;
-const PATH = /^\/v1\/objects(?:\/([0-9a-f-]{36})(?:\/(scan|photos|capture|start|corrections|closeup|print|plate\.jpg|plate|model\.stl|renders\/[^/]+))?)?$/;
+const PATH = /^\/v1\/objects(?:\/([0-9a-f-]{36})(?:\/(scan|photos|capture|start|corrections|closeup|print|printer|plate\.jpg|plate|model\.stl|passes\/[^/]+\/activity|(?:renders|photos|capture)\/[^/]+))?)?$/;
 
 class HttpFailure extends Error {
   constructor(readonly status: number, readonly code: string, message = code) { super(message); }
@@ -29,9 +29,11 @@ async function json<T>(request: IncomingMessage): Promise<T> {
   try { return JSON.parse(bytes.toString('utf8')) as T; } catch { throw new HttpFailure(400, 'invalid-request'); }
 }
 
-/** What the phone sees: no Mac file paths. */
-export function publicObject(object: StmObject): StmObject {
-  return {...object, passes: object.passes.map(({dir: _dir, ...pass}) => pass)};
+export type PublicObject = Omit<StmObject, 'passes'> & {passes: (Omit<ObjectPass, 'dir' | 'activity'> & {activityCount: number})[]};
+
+/** Project metadata stays small; retained activity is read one pass at a time. */
+export function publicObject(object: StmObject): PublicObject {
+  return {...object, passes: object.passes.map(({dir: _dir, activity, ...pass}) => ({...pass, activityCount: activity?.length ?? 0}))};
 }
 
 function send(response: ServerResponse, status: number, value: unknown): void {
@@ -47,6 +49,11 @@ export function createObjectRoutes(service: ObjectService) {
       const url = new URL(request.url ?? '/', 'http://localhost');
       const match = PATH.exec(url.pathname);
       try {
+        if (url.pathname === '/v1/objects/printers') {
+          if (request.method !== 'GET') throw new HttpFailure(405, 'method-not-allowed');
+          await authorize(READ);
+          return send(response, 200, service.printers());
+        }
         if (!match) throw new HttpFailure(404, 'not-found');
         const [, id, action] = match;
         const method = request.method ?? 'GET';
@@ -61,6 +68,12 @@ export function createObjectRoutes(service: ObjectService) {
           throw new HttpFailure(405, 'method-not-allowed');
         }
         if (!action) {
+          if (method === 'PATCH') {
+            await authorize(WRITE);
+            const {instructions} = await json<{instructions?: unknown}>(request);
+            if (typeof instructions !== 'string' || instructions.length > 8000) throw new HttpFailure(400, 'invalid-request');
+            return send(response, 200, {object: publicObject(await service.updateInstructions(id, instructions))});
+          }
           if (method === 'DELETE') {
             await authorize(WRITE);
             await service.delete(id);
@@ -69,6 +82,33 @@ export function createObjectRoutes(service: ObjectService) {
           if (method !== 'GET') throw new HttpFailure(405, 'method-not-allowed');
           await authorize(READ);
           return send(response, 200, {object: publicObject(await service.get(id))});
+        }
+        if (action.startsWith('passes/')) {
+          if (method !== 'GET') throw new HttpFailure(405, 'method-not-allowed');
+          await authorize(READ);
+          const value = action.split('/')[1]!, index = Number(value);
+          if (!/^(0|[1-9][0-9]*)$/.test(value) || !Number.isSafeInteger(index)) throw new HttpFailure(400, 'invalid-request');
+          return send(response, 200, {activity: await service.passActivity(id, index)});
+        }
+        if (action.startsWith('photos/') || action.startsWith('capture/')) {
+          if (method !== 'GET') throw new HttpFailure(405, 'method-not-allowed');
+          await authorize(READ);
+          const kind = action.startsWith('photos/') ? 'photos' : 'capture';
+          let name: string;
+          try { name = decodeURIComponent(action.slice(kind.length + 1)); }
+          catch { throw new HttpFailure(404, 'not-found'); }
+          if (!/^[A-Za-z0-9][A-Za-z0-9._ -]{0,127}$/.test(name) || name.includes('..')) throw new HttpFailure(404, 'not-found');
+          const extension = name.split('.').at(-1)?.toLowerCase();
+          const type = extension === 'jpg' || extension === 'jpeg' ? 'image/jpeg'
+            : extension === 'png' ? 'image/png' : extension === 'heic' ? 'image/heic' : undefined;
+          if (!type || !(await service.get(id))[kind]?.includes(name)) throw new HttpFailure(404, 'not-found');
+          const bytes = await readFile(join(service.dir(id), kind, name)).catch(() => { throw new HttpFailure(404, 'not-found'); });
+          response.statusCode = 200;
+          response.setHeader('content-type', type);
+          response.setHeader('x-content-type-options', 'nosniff');
+          response.setHeader('cache-control', 'private, no-store');
+          response.end(bytes);
+          return;
         }
         if (action === 'plate.jpg') {
           if (method !== 'GET') throw new HttpFailure(405, 'method-not-allowed');
@@ -94,7 +134,7 @@ export function createObjectRoutes(service: ObjectService) {
           return;
         }
         if (method !== (action === 'scan' ? 'PUT' : 'POST')) throw new HttpFailure(405, 'method-not-allowed');
-        await authorize(action === 'print' || action === 'plate' ? PRINT : WRITE);
+        await authorize(action === 'print' || action === 'printer' || action === 'plate' ? PRINT : WRITE);
         let object: StmObject;
         switch (action) {
           case 'scan': object = await service.addScan(id, 'scan.usdz', await body(request, MAX_SCAN)); break;
@@ -107,6 +147,12 @@ export function createObjectRoutes(service: ObjectService) {
             break;
           }
           case 'start': object = await service.start(id); break;
+          case 'printer': {
+            const {destinationId} = await json<{destinationId?: unknown}>(request);
+            if (typeof destinationId !== 'string' || !destinationId.length || destinationId.length > 256) throw new HttpFailure(400, 'invalid-request');
+            object = await service.selectPrinter(id, destinationId);
+            break;
+          }
           case 'corrections': {
             const {note} = await json<{note?: unknown}>(request);
             if (typeof note !== 'string' || !note.trim() || note.length > 4000) throw new HttpFailure(400, 'invalid-request');

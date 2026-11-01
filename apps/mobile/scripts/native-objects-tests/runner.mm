@@ -39,7 +39,9 @@ static NSDictionary *Json(NSString *text){id v=[NSJSONSerialization JSONObjectWi
  NSURL *images=[root URLByAppendingPathComponent:@"Images" isDirectory:YES],*models=[root URLByAppendingPathComponent:@"Models" isDirectory:YES];
  Require([NSFileManager.defaultManager createDirectoryAtURL:images withIntermediateDirectories:YES attributes:nil error:nil]&&[NSFileManager.defaultManager createDirectoryAtURL:models withIntermediateDirectories:YES attributes:nil error:nil],@"capture folders");
  if(model)Require([[@"fixture usdz bytes" dataUsingEncoding:NSUTF8StringEncoding] writeToURL:[models URLByAppendingPathComponent:@"model-mobile.usdz"] atomically:YES],@"model file");
- for(NSUInteger i=0;i<count;i++)Require([[[NSString stringWithFormat:@"heic %lu",(unsigned long)i] dataUsingEncoding:NSUTF8StringEncoding] writeToURL:[images URLByAppendingPathComponent:[NSString stringWithFormat:@"%05lu.%09lu.HEIC",(unsigned long)i,(unsigned long)i*7]] atomically:YES],@"image file");
+ UIGraphicsImageRenderer *renderer=[[UIGraphicsImageRenderer alloc] initWithSize:CGSizeMake(4,4)];
+ NSData *image=UIImagePNGRepresentation([renderer imageWithActions:^(UIGraphicsImageRendererContext *ctx){[UIColor.redColor setFill];[ctx fillRect:CGRectMake(0,0,4,4)];}]);
+ for(NSUInteger i=0;i<count;i++)Require([image writeToURL:[images URLByAppendingPathComponent:[NSString stringWithFormat:@"%05lu.%09lu.HEIC",(unsigned long)i,(unsigned long)i*7]] atomically:YES],@"image file");
  // Not a photo: never sent.
  Require([[@"x" dataUsingEncoding:NSUTF8StringEncoding] writeToURL:[images URLByAppendingPathComponent:@"notes.txt"] atomically:YES],@"stray file");
  return run;
@@ -50,16 +52,34 @@ static NSDictionary *Json(NSString *text){id v=[NSJSONSerialization JSONObjectWi
  [self rejects:@{@"method":@"POST",@"path":[one stringByAppendingString:@"/scan"]} code:@"invalid-request"];
  [self rejects:@{@"method":@"POST",@"path":[one stringByAppendingString:@"/photos?name=x.jpg"]} code:@"invalid-request"];
  [self rejects:@{@"method":@"GET",@"path":@"/v1/objects",@"json":@{@"x":@1}} code:@"invalid-request"];
- [self rejects:@{@"method":@"DELETE",@"path":one} code:@"invalid-request"];
+ [self rejects:@{@"method":@"DELETE",@"path":[one stringByAppendingString:@"/start"]} code:@"invalid-request"];
  [self rejects:@{@"method":@"GET",@"path":[one stringByAppendingString:@"/../../healthz"]} code:@"invalid-request"];
+ for(NSString *index in @[@"-1",@"1.5",@"01",@"1e1"]) [self rejects:@{@"method":@"GET",@"path":[one stringByAppendingFormat:@"/passes/%@/activity",index]} code:@"invalid-request"];
+ [self rejects:@{@"method":@"POST",@"path":[one stringByAppendingString:@"/passes/0/activity"]} code:@"invalid-request"];
  __block BOOL badName=NO;
  [self.bridge downloadOptions:@{@"objectId":self.objectId,@"name":@"renders/../object.json",@"version":@1} resolve:^(id r){Require(NO,@"bad download name accepted");} reject:^(NSString*c,NSString*m,NSError*e){badName=[c isEqual:@"invalid-request"];}];
  Require(badName,@"download name allowlist");
+ badName=NO;
+ [self.bridge downloadOptions:@{@"objectId":self.objectId,@"name":@"photos/../auth.json",@"version":@1} resolve:^(id r){Require(NO,@"media folder traversal accepted");} reject:^(NSString*c,NSString*m,NSError*e){badName=[c isEqual:@"invalid-request"];}];
+ Require(badName,@"media folder traversal is refused");
 }
 - (void)phaseOne {
  [self call:@"POST" path:@"/v1/objects" json:@{@"instructions":@"A hook for a 25 mm handle."} status:201 then:^(NSDictionary *created){
   self.objectId=created[@"object"][@"id"];Require(self.objectId.length==36,@"object id");
   [self negatives];
+  [self call:@"PATCH" path:[@"/v1/objects/" stringByAppendingString:self.objectId] json:@{@"instructions":@"A revised hook for a 25 mm handle."} status:200 then:^(NSDictionary *draft){
+   Require([draft[@"object"][@"instructions"] isEqual:@"A revised hook for a 25 mm handle."],@"revised draft description saved");
+   [self call:@"GET" path:@"/v1/objects/printers" json:nil status:200 then:^(NSDictionary *catalog){
+    Require([catalog[@"destinations"] isKindOfClass:NSArray.class],@"printer catalog reaches native caller");
+    [self call:@"POST" path:[NSString stringWithFormat:@"/v1/objects/%@/printer",self.objectId] json:@{@"destinationId":@"missing"} status:409 then:^(NSDictionary *refused){
+     Require([refused[@"error"][@"code"] isEqual:@"invalid-state"],@"unconfigured printer selection refused by service");
+     [self capturePhase];
+    }];
+   }];
+  }];
+ }];
+}
+- (void)capturePhase {
   self.runID=[self captureWithModel:YES photos:30];
   [self.bridge sendCaptureOptions:@{@"objectId":self.objectId,@"runID":self.runID,@"maxPhotos":@24} resolve:^(id sent){
    Require([sent[@"scanSent"] boolValue]&&[sent[@"photosSent"] integerValue]==24,@"scan and 24 photos sent");
@@ -83,7 +103,6 @@ static NSDictionary *Json(NSString *text){id v=[NSJSONSerialization JSONObjectWi
     } reject:^(NSString*c,NSString*m,NSError*e){Require(NO,[@"resend " stringByAppendingString:c]);}];
    }];
   } reject:^(NSString*c,NSString*m,NSError*e){Require(NO,[@"sendCapture " stringByAppendingString:c]);}];
- }];
 }
 - (void)poll:(NSUInteger)n {
  Require(n<100,@"touch-up finishes within bound");
@@ -91,15 +110,25 @@ static NSDictionary *Json(NSString *text){id v=[NSJSONSerialization JSONObjectWi
   NSDictionary *o=got[@"object"];
   if(![o[@"state"] isEqual:@"ready"]){Require(![o[@"state"] isEqual:@"failed"],@"touch-up succeeds");dispatch_after(dispatch_time(DISPATCH_TIME_NOW,100*NSEC_PER_MSEC),dispatch_get_main_queue(),^{[self poll:n+1];});return;}
   Require([o[@"current"][@"renders"] count]==1,@"one render");
+  Require(o[@"passes"][0][@"activity"]==nil&&[o[@"passes"][0][@"activityCount"] isKindOfClass:NSNumber.class],@"project has activity metadata only");
+  [self call:@"GET" path:[NSString stringWithFormat:@"/v1/objects/%@/passes/0/activity",self.objectId] json:nil status:200 then:^(NSDictionary *history){
+   Require([history[@"activity"] isKindOfClass:NSArray.class],@"pass activity loads through native read route");
+   [self downloadsAfterActivity:o];
+  }];
+ }];
+}
+- (void)downloadsAfterActivity:(NSDictionary*)o {
   NSNumber *version=o[@"updatedAtMs"];
   // The page loads every render at once: simultaneous downloads must all survive.
-  __block NSUInteger pending=2;__block NSMutableArray *uris=[NSMutableArray array];
+  __block NSUInteger pending=3;__block NSMutableArray *uris=[NSMutableArray array];
   void (^both)(id)=^(id r){[uris addObject:r[@"uri"]];if(--pending)return;
    for(NSString *uri in uris)Require([NSFileManager.defaultManager fileExistsAtPath:[NSURL URLWithString:uri].path],@"simultaneous downloads all kept");
    [self downloadsFrom:o version:version];};
   [self.bridge downloadOptions:@{@"objectId":self.objectId,@"name":@"model.stl",@"version":version} resolve:both reject:^(NSString*c,NSString*m,NSError*e){Require(NO,[@"concurrent model " stringByAppendingString:c]);}];
   [self.bridge downloadOptions:@{@"objectId":self.objectId,@"name":@"renders/render_front.png",@"version":version} resolve:both reject:^(NSString*c,NSString*m,NSError*e){Require(NO,[@"concurrent render " stringByAppendingString:c]);}];
- }];
+  [self.bridge downloadOptions:@{@"objectId":self.objectId,@"name":[@"photos/" stringByAppendingString:o[@"photos"][0]],@"version":version} resolve:^(id r){
+   Require([UIImage imageWithContentsOfFile:[NSURL URLWithString:r[@"uri"]].path]!=nil,@"retained photo decodes for the project gallery");both(r);
+  } reject:^(NSString*c,NSString*m,NSError*e){Require(NO,[@"retained photo " stringByAppendingString:c]);}];
 }
 - (void)downloadsFrom:(NSDictionary*)o version:(NSNumber*)version {
  {

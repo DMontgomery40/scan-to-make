@@ -53,18 +53,19 @@ struct GeneralSettings: View {
                 }
                 .padding(.vertical, 4)
             }
-            Section("Your iPhone") {
+            Section("Paired Devices") {
                 if mac.devices.isEmpty {
                     Text(mac.connection == .notRunning ? "Your iPhones show here while Counterpart is running." : "No iPhone is paired yet.")
                         .foregroundStyle(.secondary)
                 }
-                ForEach(mac.devices) { device in
+                ForEach(mac.devices.sorted { $0.lastRefreshedAt > $1.lastRefreshedAt }) { device in
                     LabeledContent {
                         Button("Remove…") { removing = device }
                     } label: {
                         Label {
                             Text(device.deviceName)
-                            Text("Paired \(Date(timeIntervalSince1970:device.pairedAt / 1000).formatted(date:.abbreviated, time:.omitted))")
+                            Text("Paired \(Date(timeIntervalSince1970:device.pairedAt / 1000).formatted(date:.abbreviated, time:.shortened))")
+                            Text("Connection \(device.deviceId.suffix(6))").font(.caption2).foregroundStyle(.tertiary)
                         } icon: {
                             Image(systemName:"iphone")
                         }
@@ -131,11 +132,21 @@ struct ConnectionLabel: View {
 /// The pairing code in a sheet, for one more iPhone.
 private struct PairAnotherIPhone: View {
     @Environment(\.dismiss) private var dismiss
+    @ObservedObject private var model = CompanionModel.shared
+    @State private var copied = false
     var body: some View {
         VStack(spacing:16) {
             Text("Pair Another iPhone").font(.headline)
             Text("Scan this code with your iPhone.").foregroundStyle(.secondary)
             QRTile { PairingView(model:CompanionModel.shared, side:240) }
+            Button(copied ? "Link Copied" : "Copy Pairing Link") {
+                guard let link = model.invitation?.qrPayload else { return }
+                NSPasteboard.general.clearContents()
+                copied = NSPasteboard.general.setString(link, forType:.string)
+            }
+            .disabled(model.invitation?.qrPayload.hasPrefix("scantomake://") != true)
+            Text("Open the link on your iPhone if you can't scan the code. It expires after five minutes.")
+                .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
             Button("Done") { dismiss() }.keyboardShortcut(.defaultAction)
         }
         .padding(24)

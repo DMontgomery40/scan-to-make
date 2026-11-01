@@ -54,6 +54,51 @@ const exchange = async (s, login = 'alice@example.test', scopes = LEGACY_SCOPES)
   return s.exchange(login, { code: invite.code, deviceName: 'Test phone' });
 };
 
+test('re-pairing the same installation replaces its credential while equal names on separate phones remain separate', async (t) => {
+  const { store, directory, clock } = await fixture(t);
+  const installationKey = 'a'.repeat(43);
+  const pair = async (key, name = 'Kitchen iPhone') => {
+    const { code } = await store.createPairing('alice@example.test');
+    return store.exchange('alice@example.test', { code, deviceName: name, installationKey: key });
+  };
+  const first = await pair(installationKey);
+  const secondPhone = await pair('b'.repeat(43));
+  let current = first;
+  for (let i = 0; i < 5; i++) current = await pair(installationKey, 'David’s iPhone');
+  assert.equal(current.deviceId, first.deviceId);
+  assert.notEqual(current.token, first.token);
+  const devices = await store.listDevices();
+  assert.equal(devices.length, 2);
+  assert.equal(devices.find(d => d.deviceId === first.deviceId).deviceName, 'David’s iPhone');
+  assert.ok(devices.every(d => !('installationKeyHash' in d) && !('installationKey' in d)));
+  assert.ok(!(await readFile(join(directory, 'auth.json'), 'utf8')).includes(installationKey));
+  const reopened = await authModule.RemoteAuthStore.open(directory, clock);
+  await denied(() => reopened.authorize('alice@example.test', first.deviceId, first.token, 'generation:health'));
+  await reopened.authorize('alice@example.test', current.deviceId, current.token, 'generation:health');
+  await reopened.authorize('alice@example.test', secondPhone.deviceId, secondPhone.token, 'generation:health');
+});
+
+test('a legacy row joins an installation only with its existing token, never its public id or shared name', async (t) => {
+  const { store } = await fixture(t);
+  const legacy = await exchange(store);
+  const otherLegacy = await exchange(store);
+  const pair = async (installationKey, previous) => {
+    const { code } = await store.createPairing('alice@example.test');
+    return store.exchange('alice@example.test', { code, deviceName: 'Test phone', installationKey }, previous);
+  };
+  const attacker = await pair('c'.repeat(43), { deviceId: legacy.deviceId, token: 'x'.repeat(43) });
+  assert.notEqual(attacker.deviceId, legacy.deviceId);
+  const upgraded = await pair('d'.repeat(43), { deviceId: legacy.deviceId, token: legacy.token });
+  assert.equal(upgraded.deviceId, legacy.deviceId);
+  assert.equal((await store.listDevices()).length, 3);
+  await denied(() => store.authorize('alice@example.test', legacy.deviceId, legacy.token, 'generation:health'));
+  await store.authorize('alice@example.test', otherLegacy.deviceId, otherLegacy.token, 'generation:health');
+  // A credential does not let a different installation silently take ownership of an already-keyed row.
+  const distinct = await pair('e'.repeat(43), { deviceId: upgraded.deviceId, token: upgraded.token });
+  assert.notEqual(distinct.deviceId, upgraded.deviceId);
+  await store.authorize('alice@example.test', upgraded.deviceId, upgraded.token, 'generation:health');
+});
+
 test('single-use code is login bound, expires within five minutes and never survives reuse', async (t) => {
   const { store, advance } = await fixture(t);
   const invite = await store.createPairing('alice@example.test');
@@ -225,6 +270,23 @@ async function httpFixture(t) {
   t.after(() => server.close());
   return { ...f, server };
 }
+
+test('HTTP pairing upgrades a legacy credential using native authorization headers', async (t) => {
+  const { store, server } = await httpFixture(t);
+  const original = await exchange(store);
+  const { code } = await store.createPairing('alice@example.test');
+  const response = await wire(server, '/v1/pair', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${original.token}`, 'x-scan-device': original.deviceId },
+    body: JSON.stringify({ code, deviceName: 'David’s iPhone', installationKey: 'f'.repeat(43) }),
+  });
+  assert.equal(response.status, 200);
+  const upgraded = response.body;
+  assert.equal(upgraded.deviceId, original.deviceId);
+  assert.notEqual(upgraded.token, original.token);
+  assert.equal((await store.listDevices()).length, 1);
+  await denied(() => store.authorize('alice@example.test', original.deviceId, original.token, 'generation:health'));
+});
 function wire(
   server,
   path = '/healthz',

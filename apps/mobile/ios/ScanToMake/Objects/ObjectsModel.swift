@@ -9,11 +9,17 @@ struct StmObject: Codable, Identifiable, Equatable, Sendable {
             self = State(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .unknown
         }
     }
-    struct Pass: Codable, Equatable, Sendable { var startedAtMs: Double; var endedAtMs: Double?; var note: String?; var status: String?; var summary: String? }
+    struct Activity: Codable, Equatable, Sendable { var atMs: Double; var kind: String; var text: String }
+    struct Pass: Codable, Equatable, Sendable {
+        var startedAtMs: Double; var endedAtMs: Double?; var note: String?; var status: String?; var summary: String?
+        var activity: [Activity]? = nil
+        var activityCount: Int? = nil
+    }
     struct Current: Codable, Equatable, Sendable { var model: String; var renders: [String]; var sizeMm: [Double]?; var summary: String? }
     struct Question: Codable, Equatable, Sendable { var closeup: String? }
     struct Plate: Codable, Equatable, Sendable { var item: String?; var noCamera: Bool?; var photo: Bool? }
-    struct Print: Codable, Equatable, Sendable { var bundleId: String; var uncertain: Bool? }
+    struct PrintDestination: Codable, Equatable, Sendable { var id: String; var name: String }
+    struct Print: Codable, Equatable, Sendable { var bundleId: String; var uncertain: Bool?; var destination: PrintDestination? = nil }
 
     var id: String
     var createdAtMs: Double
@@ -32,6 +38,11 @@ struct StmObject: Codable, Identifiable, Equatable, Sendable {
     var plate: Plate?
     var failure: String?
     var print: Print?
+    var printerDestinationId: String? = nil
+
+    /// Progress updates do not change saved media. A finished pass can replace the model and
+    /// renders at the same paths, so expire their shared cache only when a pass finishes.
+    var mediaVersion: Double { passes.last(where: { $0.endedAtMs != nil })?.endedAtMs ?? createdAtMs }
 }
 
 /// What the object page and the list can offer for an object right now.
@@ -51,11 +62,14 @@ struct ObjectWords: Equatable, Sendable {
     let size: String?
     let actions: [ObjectAction]
 
-    static let wait = "This can take a few minutes. We'll let you know when it's ready."
+    static let wait = "You can leave this project and return to it while your Mac works."
 
     static func title(_ object: StmObject) -> String {
         let text = (object.instructions ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return object.scan == nil && (object.capture ?? []).isEmpty ? "Something new" : "Copy of your scan" }
+        guard !text.isEmpty else {
+            if object.scan != nil || !(object.capture ?? []).isEmpty { return "Copy of your scan" }
+            return object.photos.isEmpty ? "Unfinished project" : "Photo project"
+        }
         // The first sentence, without its full stop, cut at a word if it is long.
         var first = text.components(separatedBy: "\n")[0]
         if let end = first.range(of: #"[.!?](\s|$)"#, options: .regularExpression) { first = String(first[..<end.lowerBound]) }
@@ -89,7 +103,7 @@ struct ObjectWords: Equatable, Sendable {
         switch object.state {
         case .new:
             if object.scan != nil || !object.photos.isEmpty || !(object.capture ?? []).isEmpty {
-                (status, tone, busy, actions) = ("Sending to your Mac…", .pending, true, [.finishSending])
+                (status, tone, busy, actions) = ("Draft saved. Finish sending to begin.", .neutral, false, [.finishSending])
             } else {
                 let described = !(object.instructions ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 (status, tone, busy, actions) = ("Waiting for a scan or photos.", .neutral, false,
@@ -122,9 +136,22 @@ struct ObjectWords: Equatable, Sendable {
         case .failed:
             let failure = (object.failure ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             (status, tone, busy, actions) = (failure.isEmpty ? "Something went wrong on your Mac." : failure, .fail, false,
-                                             made.isEmpty ? [.retry] : made)
+                                             made.isEmpty ? [.retry, .correct] : made)
         case .unknown:
             (status, tone, busy, actions) = ("Update Counterpart to see this one.", .neutral, false, [])
         }
     }
+}
+
+struct PrinterDestination: Codable, Identifiable, Equatable, Sendable {
+    var id: String
+    var name: String
+    var backend: String
+    var model: String?
+    var address: String?
+    var source: String
+}
+struct PrinterCatalog: Codable, Equatable, Sendable {
+    var destinations: [PrinterDestination]
+    var defaultDestinationId: String
 }

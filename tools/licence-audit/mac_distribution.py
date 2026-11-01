@@ -16,10 +16,12 @@ import re
 import sys
 
 from inventory import inventory_workspace_npm
-from spdx import evaluate_expression, normalize_expression
+from spdx import classify_licence_text, evaluate_expression, normalize_expression
 
 MANIFEST = Path("apps/mac/distribution.json")
 NOTICES = Path("apps/mac/THIRD_PARTY_NOTICES.md")
+RECONSTRUCTION_HELPER = dict(name="mac-reconstruct", path="bin/mac-reconstruct",
+    sourcePath="tools/mac-reconstruct", licence="MIT", licencePath="tools/mac-reconstruct/LICENSE")
 
 
 def sha256(path: Path) -> str:
@@ -28,6 +30,18 @@ def sha256(path: Path) -> str:
 
 def load_manifest(root: Path) -> dict:
     return json.loads((root / MANIFEST).read_text())
+
+
+def first_party_executables(root: Path, manifest: dict) -> list[dict]:
+    helpers = manifest.get("firstPartyExecutables")
+    if helpers != [RECONSTRUCTION_HELPER]:
+        raise ValueError("Unapproved first-party executable manifest")
+    for helper in helpers:
+        if helper["sourcePath"] not in manifest["sourcePaths"]:
+            raise ValueError("First-party executable source is absent from the payload manifest")
+        if classify_licence_text((root / helper["licencePath"]).read_text()) != helper["licence"]:
+            raise ValueError("First-party executable source licence differs from its declaration")
+    return helpers
 
 
 def inventory_mac(root: Path, workspace: list[dict]) -> tuple[list[dict], list[dict]]:
@@ -65,6 +79,10 @@ def inventory_mac(root: Path, workspace: list[dict]) -> tuple[list[dict], list[d
             records.append(dict(ecosystem="mac", name=name, version=component["version"], scope="mac",
                                 licence=normalize_expression(component["licence"]), sourceUrl=component["sourceUrl"],
                                 evidence=str(MANIFEST), notices=component["notices"]))
+        for helper in first_party_executables(root, manifest):
+            records.append(dict(ecosystem="mac", name=helper["name"], version="source", scope="mac",
+                                licence=helper["licence"], firstParty=True,
+                                evidence=helper["licencePath"], sourceUrl=helper["sourcePath"]))
         sparkle = next(c for c in components if c["name"] == "Sparkle")
         lock = json.loads((root / "apps/mac/ScanToMake.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved").read_text())
         if len(lock["pins"]) != 1 or lock["pins"][0]["identity"] != "sparkle" or lock["pins"][0]["state"] != dict(version=sparkle["version"], revision=sparkle["revision"]):
@@ -113,6 +131,12 @@ def render_notices(root: Path, manifest: dict, records: list[dict]) -> str:
         if c.get("noticeArchiveUrl"):
             lines += ["", f"Python library notices were extracted from the [matching full distribution]({c['noticeArchiveUrl']})",
                       f"(SHA-256 `{c['noticeArchiveSha256']}`)."]
+    for helper in manifest.get("firstPartyExecutables", []):
+        lines += ["", f"## Bundled first-party executable: {helper['name']}", "",
+                  f"Built from `{helper['sourcePath']}` in the same source archive as the companion.",
+                  f"Licence: {helper['licence']}. The source and licence ship in `Payload/source/{helper['sourcePath']}`.",
+                  "Uses Apple's system frameworks; no third-party Swift package is bundled with this helper.",
+                  "", "~~~~", (root / helper['licencePath']).read_text().strip(), "~~~~"]
     lines += ["", "## Companion npm production dependencies", "",
               "Development dependencies, npm itself, pip and ensurepip are not shipped.", ""]
     seen = set()
@@ -130,14 +154,28 @@ def render_notices(root: Path, manifest: dict, records: list[dict]) -> str:
 def verify_payload(root: Path, payload: Path) -> None:
     """Fail closed on stale/extra worker trees, wheels, or package-manager payloads."""
     manifest = load_manifest(root)
+    helpers = first_party_executables(root, manifest)
     policy = json.loads((root / "tools/licence-audit/policy.json").read_text())
     allow, denied = set(policy["allowlists"]["mac"]), set(policy["denied"]["mac"])
     expected_tools = {Path(p).name for p in manifest["sourcePaths"] if p.startswith("tools/")}
     actual_tools = {p.name for p in (payload / "source/tools").iterdir()}
     if actual_tools != expected_tools:
         raise ValueError("Payload tool folders differ from audited source manifest")
-    if {p.name for p in payload.iterdir()} != {"node", "python", "source"}:
+    if {p.name for p in payload.iterdir()} != {"node", "python", "source", "bin"}:
         raise ValueError("Unapproved top-level runtime payload")
+    binary_directory = payload / "bin"
+    if binary_directory.is_symlink() or {p.name for p in binary_directory.iterdir()} != {"mac-reconstruct"}:
+        raise ValueError("Unapproved first-party executable directory")
+    for helper in helpers:
+        binary = payload / helper["path"]
+        if binary.is_symlink() or not binary.is_file() or not binary.stat().st_mode & 0o111:
+            raise ValueError("Missing or invalid first-party executable: " + helper["name"])
+        with binary.open("rb") as stream:
+            magic = stream.read(4)
+        if magic not in [b'\xfe\xed\xfa\xce', b'\xce\xfa\xed\xfe', b'\xfe\xed\xfa\xcf', b'\xcf\xfa\xed\xfe', b'\xca\xfe\xba\xbe', b'\xbe\xba\xfe\xca']:
+            raise ValueError("First-party executable is not a Mach-O binary: " + helper["name"])
+        if sha256(payload / "source" / helper["licencePath"]) != sha256(root / helper["licencePath"]):
+            raise ValueError("First-party executable source licence differs from retained licence")
     # Superset upstream notices mention these source/build-only licences; their
     # code is not in the approved binary distributions and is never allowlisted.
     if any(p.name in {"jsonchecker", "aclocal.m4", "config.guess"} for p in payload.rglob("*")):

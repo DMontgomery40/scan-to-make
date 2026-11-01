@@ -11,10 +11,17 @@ public struct StmObject: Decodable, Sendable, Identifiable, Equatable {
             self = State(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .unknown
         }
     }
+    public struct Activity: Decodable, Sendable, Equatable {
+        public let atMs: Double
+        public let kind: String
+        public let text: String
+    }
     public struct Pass: Decodable, Sendable, Equatable {
         public let startedAtMs: Double
         public let endedAtMs: Double?
         public let note: String?, status: String?, summary: String?
+        public let activity: [Activity]?
+        public let activityCount: Int?
     }
     public struct Current: Decodable, Sendable, Equatable {
         /// Relative to `directory`, like `renders`.
@@ -41,9 +48,11 @@ public struct StmObject: Decodable, Sendable, Identifiable, Equatable {
         public let photo: Bool?
     }
     /// The last print. `uncertain`: it may have reached the printer, so it is only sent again with `checked`.
+    public struct PrintDestination: Decodable, Sendable, Equatable { public let id: String; public let name: String }
     public struct Print: Decodable, Sendable, Equatable {
         public let bundleId: String?
         public let uncertain: Bool?
+        public let destination: PrintDestination?
     }
 
     public let id: String
@@ -52,17 +61,20 @@ public struct StmObject: Decodable, Sendable, Identifiable, Equatable {
     public let state: State
     public let scan: String?
     public let photos: [String]
+    public let capture: [String]?
+    public let progress: String?
     public let passes: [Pass]
     public let current: Current?
     public let question: Question?
     public let plate: Plate?
     public let failure: String?
     public let print: Print?
+    public let printerDestinationId: String?
     /// The object's folder on this Mac (absolute).
     public let directory: String
 
     private enum CodingKeys: String, CodingKey {
-        case id, createdAtMs, updatedAtMs, instructions, state, scan, photos, passes, current, question, plate, failure, print, directory
+        case id, createdAtMs, updatedAtMs, instructions, state, scan, photos, capture, progress, passes, current, question, plate, failure, print, printerDestinationId, directory
     }
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
@@ -73,12 +85,15 @@ public struct StmObject: Decodable, Sendable, Identifiable, Equatable {
         state = try values.decodeIfPresent(State.self, forKey: .state) ?? .unknown
         scan = try values.decodeIfPresent(String.self, forKey: .scan)
         photos = try values.decodeIfPresent([String].self, forKey: .photos) ?? []
+        capture = try values.decodeIfPresent([String].self, forKey: .capture)
+        progress = try values.decodeIfPresent(String.self, forKey: .progress)
         passes = try values.decodeIfPresent([Pass].self, forKey: .passes) ?? []
         current = try values.decodeIfPresent(Current.self, forKey: .current)
         question = try values.decodeIfPresent(Question.self, forKey: .question)
         plate = try values.decodeIfPresent(Plate.self, forKey: .plate)
         failure = try values.decodeIfPresent(String.self, forKey: .failure)
         print = try values.decodeIfPresent(Print.self, forKey: .print)
+        printerDestinationId = try values.decodeIfPresent(String.self, forKey: .printerDestinationId)
         directory = try values.decode(String.self, forKey: .directory)
     }
 
@@ -92,6 +107,8 @@ public struct StmObject: Decodable, Sendable, Identifiable, Equatable {
     /// The current model's STL: exactly what will print.
     public var modelURL: URL? { current.flatMap { file($0.model) } }
     public var renderURLs: [URL] { current?.renders.compactMap(file) ?? [] }
+    public var photoURLs: [URL] { photos.compactMap { file("photos/\($0)") } }
+    public var captureURLs: [URL] { (capture ?? []).compactMap { file("capture/\($0)") } }
     /// The printer camera's photo of the plate, while the print waits on what it shows.
     public var platePhotoURL: URL? { plate?.photo == true ? file("plate.jpg") : nil }
 }
@@ -99,13 +116,23 @@ public struct StmObject: Decodable, Sendable, Identifiable, Equatable {
 public extension ControlClient {
     private struct ObjectList: Decodable { let objects: [StmObject] }
     private struct ObjectReply: Decodable { let object: StmObject }
+    private struct PassActivityReply: Decodable { let activity: [StmObject.Activity] }
 
+    func printers() async throws -> PrinterCatalog { try await call("objects.printers") }
+    func selectPrinter(_ id: String, destinationId: String) async throws -> StmObject {
+        let result: ObjectReply = try await call("objects.selectPrinter", ["id": .string(id), "destinationId": .string(destinationId)])
+        return result.object
+    }
     /// Every object on this Mac, newest first. Refused with `unavailable` when objects aren't set up here.
     func objects() async throws -> [StmObject] {
         let result: ObjectList = try await call("objects.list"); return result.objects
     }
     func object(_ id: String) async throws -> StmObject {
         let result: ObjectReply = try await call("objects.get", ["id": .string(id)]); return result.object
+    }
+    func passActivity(_ id: String, index: Int) async throws -> [StmObject.Activity] {
+        let result: PassActivityReply = try await call("objects.passActivity", ["id": .string(id), "index": .number(Double(index))])
+        return result.activity
     }
     /// Starts the touch-up again, after one that failed without a model.
     func startObject(_ id: String) async throws -> StmObject {
@@ -136,4 +163,17 @@ public extension ControlClient {
     func answerPlate(_ id: String) async throws -> StmObject {
         let result: ObjectReply = try await call("objects.answerPlate", ["id": .string(id)]); return result.object
     }
+}
+
+public struct PrinterDestination: Decodable, Sendable, Identifiable, Equatable {
+    public let id: String
+    public let name: String
+    public let backend: String
+    public let model: String?
+    public let address: String?
+    public let source: String
+}
+public struct PrinterCatalog: Decodable, Sendable, Equatable {
+    public let destinations: [PrinterDestination]
+    public let defaultDestinationId: String
 }

@@ -293,7 +293,7 @@ export async function startCompanionServer(
       if (request.method !== 'POST')
         throw new ServerFailure('method-not-allowed');
       await auth.reservePairAttempt(login);
-      response.end(JSON.stringify(await auth.exchange(login, await pairBody())));
+      response.end(JSON.stringify(await auth.exchange(login, await pairBody(), credential())));
     } catch (error) {
       const failure =
         error instanceof ServerFailure || error instanceof RemoteAuthFailure

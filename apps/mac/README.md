@@ -64,6 +64,7 @@ This shell does not install printer tools or reimplement cleanup/slicing/printin
 credentials. Include `packages/contracts`, `services/project`,
 `services/printer-handoff`, `services/companion`, `tools/capture-mesh-convert`,
 `tools/capture-pipeline`, `tools/capture-fit-eval`,
+`tools/mac-reconstruct`,
 `deploy/companion/generate-lan-tls.py`, and
 `deploy/companion/healthcheck.mjs`. These LAN helpers must be present in the source
 revision. Supplied archives are filtered to the manifest's exact paths. CI builds the shell without downloading runtimes; a runnable fresh

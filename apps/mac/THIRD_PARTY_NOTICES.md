@@ -75,6 +75,36 @@ Composite licence for the wheel: OpenUSD (TOST-1.0); RapidJSON binary, libdeflat
 
 - [Licenses/OpenUSD.txt](Licenses/OpenUSD.txt) — [upstream](https://github.com/PixarAnimationStudios/OpenUSD/tree/v26.08), SHA-256 `4d6e8e3a9bd0104e10c48e3bc6af2f0976448a70a377d20cef674740f96f4452`.
 
+## Bundled first-party executable: mac-reconstruct
+
+Built from `tools/mac-reconstruct` in the same source archive as the companion.
+Licence: MIT. The source and licence ship in `Payload/source/tools/mac-reconstruct`.
+Uses Apple's system frameworks; no third-party Swift package is bundled with this helper.
+
+~~~~
+MIT License
+
+Copyright (c) 2026 Scan to Make contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+~~~~
+
 ## Companion npm production dependencies
 
 Development dependencies, npm itself, pip and ensurepip are not shipped.

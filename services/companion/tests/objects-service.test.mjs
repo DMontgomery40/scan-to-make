@@ -112,7 +112,34 @@ test('a correction runs from the current model with the note, the last summary a
   assert.equal(calls[1].note, 'make it 2 mm thicker');
   assert.equal(calls[1].summary, 'Fixed the card.');
   assert.equal(calls[1].instructions, 'A hook for a 25 mm handle.');
+  assert.equal(calls[1].currentModel, true);
   assert.equal(settled.passes.length, 2);
+});
+
+test('a failed photo-only project accepts a new request without losing retained inputs or history', async () => {
+  const {service, calls, store} = await setup(undefined, {delayMs: 50});
+  const history = [{startedAtMs: 10, endedAtMs: 20, status: 'failed', activity: [{atMs: 19, kind: 'message', text: 'The earlier attempt stopped.'}]}];
+  for (const instructions of [undefined, 'Make the object in these photos.']) {
+    const object = await service.create(instructions);
+    await service.addPhoto(object.id, 'reference.jpg', Buffer.from('retained-photo'));
+    await store.update(object.id, o => ({...o, state: 'failed', failure: 'Missing description.', passes: history}));
+    await service.correct(object.id, '  Make a hook for a 25 mm handle.  ');
+    await assert.rejects(service.correct(object.id, 'Another request while busy.'), InvalidStateError);
+    const result = await service.settled(object.id), input = calls.at(-1);
+    assert.equal(result.state, 'ready');
+    assert.equal(result.instructions, instructions);
+    assert.equal(input.instructions, instructions);
+    assert.equal(input.note, 'Make a hook for a 25 mm handle.');
+    assert.deepEqual(input.scan, []);
+    assert.equal(input.currentModel, false);
+    assert.deepEqual(input.photos, [join(store.dir(object.id), 'photos', 'reference.jpg')]);
+    assert.equal(await readFile(input.photos[0], 'utf8'), 'retained-photo');
+    assert.deepEqual(result.passes[0], history[0]);
+    assert.equal(result.passes[1].note, input.note);
+    assert.equal(result.passes.length, 2);
+  }
+  const unsent = await service.create('A draft.');
+  await assert.rejects(service.correct(unsent.id, 'Start early.'), InvalidStateError);
 });
 
 test('make your best guess runs a pass that fills in what it could not see', async () => {

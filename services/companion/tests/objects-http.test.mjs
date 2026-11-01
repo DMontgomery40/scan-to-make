@@ -7,6 +7,7 @@ import {tmpdir} from 'node:os';
 import {ObjectStore} from '../dist/objects/store.js';
 import {ObjectService} from '../dist/objects/service.js';
 import {createObjectRoutes} from '../dist/objects/http.js';
+import {createControlDispatcher} from '../dist/local-control-services.js';
 
 const STL = 'solid m\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 1 0 0\nvertex 0 1 0\nendloop\nendfacet\nendsolid m\n';
 
@@ -33,7 +34,7 @@ async function fixture(t, {denied = []} = {}) {
     const response = await fetch(base + path, {method, ...(body !== undefined ? {body: typeof body === 'string' || Buffer.isBuffer(body) ? body : JSON.stringify(body), headers: {'content-type': type}} : {})});
     const bytes = Buffer.from(await response.arrayBuffer());
     let json; try { json = JSON.parse(bytes.toString()); } catch {}
-    return {status: response.status, json, bytes};
+    return {status: response.status, json, bytes, type: response.headers.get('content-type')};
   };
   return {call, scopes, service, store};
 }
@@ -118,4 +119,123 @@ test('DELETE removes an object', async t => {
   const deleted = await call('DELETE', `/v1/objects/${id}`);
   assert.equal(deleted.status, 200);
   assert.equal((await call('GET', `/v1/objects/${id}`)).status, 404);
+});
+
+test('retained photos and capture images download with their image types and read scope', async t => {
+  const {call, service, scopes} = await fixture(t);
+  const object = await service.create('A hook.');
+  for (const [kind, name, type] of [
+    ['photos', 'front view.JPEG', 'image/jpeg'], ['photos', 'side.png', 'image/png'],
+    ['capture', '0001.HEIC', 'image/heic'],
+  ]) {
+    const bytes = Buffer.from(`${kind}:${name}`);
+    if (kind === 'photos') await service.addPhoto(object.id, name, bytes);
+    else await service.addCapturePhoto(object.id, name, bytes);
+    const reply = await call('GET', `/v1/objects/${object.id}/${kind}/${encodeURIComponent(name)}`);
+    assert.equal(reply.status, 200);
+    assert.deepEqual(reply.bytes, bytes);
+    assert.equal(reply.type, type);
+  }
+  assert.deepEqual(scopes, ['projects:read', 'projects:read', 'projects:read']);
+});
+
+test('retained images require authorization, including capture images', async t => {
+  const {call, service} = await fixture(t, {denied: ['projects:read']});
+  const object = await service.create('A hook.');
+  await service.addPhoto(object.id, 'front.jpg', Buffer.from('private photo'));
+  await service.addCapturePhoto(object.id, '0001.heic', Buffer.from('private capture'));
+  for (const path of ['photos/front.jpg', 'capture/0001.heic']) {
+    const reply = await call('GET', `/v1/objects/${object.id}/${path}`);
+    assert.equal(reply.status, 403);
+    assert.equal(reply.bytes.includes(Buffer.from('private')), false);
+  }
+});
+
+test('image routes deny traversal, unlisted files and non-image files', async t => {
+  const {call, service, store} = await fixture(t);
+  const object = await service.create('A hook.');
+  await service.addPhoto(object.id, 'front.jpg', Buffer.from('photo'));
+  await store.addFile(object.id, 'photos', 'unlisted.jpg', Buffer.from('private'));
+  await service.addPhoto(object.id, 'page.html', Buffer.from('<script>private</script>'));
+  for (const suffix of ['photos/unlisted.jpg', 'capture/front.jpg', 'photos/page.html',
+    'photos/..%2Fobject.json', 'photos/%2Fobject.json', 'photos/%252e%252e%252fobject.json', 'photos/%ZZ']) {
+    assert.equal((await call('GET', `/v1/objects/${object.id}/${suffix}`)).status, 404, suffix);
+  }
+});
+
+test('editing an unsent prompt persists it, but starting makes the prompt immutable', async t => {
+  const {call, service, scopes} = await fixture(t);
+  const object = await service.create('Original request.');
+  const path = `/v1/objects/${object.id}`;
+  assert.equal((await call('PATCH', path, {instructions: '  Edited request.  '})).status, 200);
+  assert.equal((await service.get(object.id)).instructions, 'Edited request.');
+  assert.equal(scopes.at(-1), 'captures:import');
+  assert.equal((await call('PATCH', path, {instructions: 'x'.repeat(8001)})).status, 400);
+  assert.equal((await call('PATCH', path, {})).status, 400);
+  await service.start(object.id);
+  assert.equal((await call('PATCH', path, {instructions: 'Too late.'})).status, 409);
+  await service.settled(object.id);
+  assert.equal((await call('PATCH', path, {instructions: 'Still too late.'})).status, 409);
+  assert.equal((await service.get(object.id)).instructions, 'Edited request.');
+});
+
+test('large activity histories stay out of list and detail replies and every pass remains readable', async t => {
+  const {call, service, store, scopes} = await fixture(t);
+  const dispatch = createControlDispatcher({auth: {}, companionVersion: 'test', objects: service});
+  const passes = Array.from({length: 11}, (_, index) => ({startedAtMs: index + 1, endedAtMs: index + 2,
+    status: 'done', summary: `Pass ${index}`, note: `Request ${index}`, dir: `/private/passes/${index}`,
+    activity: Array.from({length: 200}, (_, entry) => ({atMs: entry + 1, kind: entry % 2 ? 'tool' : 'message',
+      text: `${index}/${entry}: `.padEnd(2000, 'x')}))}));
+  passes.push({startedAtMs: 20, status: 'failed', summary: 'Legacy pass without recorded activity.'});
+  const ids = [];
+  for (let project = 0; project < 2; project++) {
+    const object = await service.create(`Project ${project}`); ids.push(object.id);
+    await store.update(object.id, o => ({...o, state: 'ready', passes}));
+    assert.ok(Buffer.byteLength(JSON.stringify(await service.get(object.id))) > 4 * 1024 * 1024);
+    const detail = await call('GET', `/v1/objects/${object.id}`);
+    const local = await dispatch('objects.get', {id: object.id});
+    for (const reply of [detail.json, local]) {
+      assert.ok(Buffer.byteLength(JSON.stringify(reply)) < 4 * 1024 * 1024);
+      assert.equal(reply.object.passes[0].activity, undefined);
+      assert.equal(reply.object.passes[0].activityCount, 200);
+      assert.equal(reply.object.passes[0].summary, 'Pass 0');
+      assert.equal(reply.object.passes.at(-1).activityCount, 0);
+    }
+    for (let index = 0; index < passes.length; index++) {
+      const reply = await call('GET', `/v1/objects/${object.id}/passes/${index}/activity`);
+      assert.equal(reply.status, 200);
+      assert.equal(scopes.at(-1), 'projects:read');
+      assert.ok(reply.bytes.length < 4 * 1024 * 1024);
+      assert.deepEqual(reply.json.activity, passes[index].activity ?? []);
+      assert.deepEqual(await dispatch('objects.passActivity', {id: object.id, index}), reply.json);
+    }
+    assert.deepEqual((await service.get(object.id)).passes, passes, 'reads must not discard stored history');
+  }
+  for (const list of [(await call('GET', '/v1/objects')).json, await dispatch('objects.list', {})]) {
+    assert.equal(list.objects.length, ids.length);
+    assert.ok(Buffer.byteLength(JSON.stringify(list)) < 4 * 1024 * 1024);
+    assert.ok(list.objects.every(object => object.passes.every(pass => pass.activity === undefined)));
+  }
+});
+
+test('per-pass activity requires read scope and refuses malformed or unknown indexes', async t => {
+  const {call, service} = await fixture(t);
+  const object = await service.create('A hook.');
+  for (const index of ['-1', '1.5', '01', '1e1', '9007199254740992', 'NaN']) {
+    assert.equal((await call('GET', `/v1/objects/${object.id}/passes/${index}/activity`)).status, 400, index);
+  }
+  assert.equal((await call('GET', `/v1/objects/${object.id}/passes/0/activity`)).status, 404);
+  assert.equal((await call('GET', '/v1/objects/00000000-0000-4000-8000-000000000000/passes/0/activity')).status, 404);
+  assert.equal((await call('POST', `/v1/objects/${object.id}/passes/0/activity`)).status, 405);
+  const denied = await fixture(t, {denied: ['projects:read']});
+  const privateObject = await denied.service.create('Private.');
+  await denied.store.update(privateObject.id, o => ({...o, passes: [{startedAtMs: 1, activity: [{atMs: 2, kind: 'message', text: 'private activity'}]}]}));
+  const reply = await denied.call('GET', `/v1/objects/${privateObject.id}/passes/0/activity`);
+  assert.equal(reply.status, 403);
+  assert.equal(reply.bytes.includes(Buffer.from('private activity')), false);
+  const dispatch = createControlDispatcher({auth: {}, companionVersion: 'test', objects: service});
+  for (const index of [-1, 1.5, '0', Number.MAX_SAFE_INTEGER + 1]) {
+    await assert.rejects(dispatch('objects.passActivity', {id: object.id, index}), error => error.code === 'invalid-request');
+  }
+  await assert.rejects(dispatch('objects.passActivity', {id: object.id, index: 0}), error => error.code === 'not-found');
 });

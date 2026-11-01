@@ -105,6 +105,9 @@ const deviceSchema = z.strictObject({
   deviceId: z.uuid(),
   deviceName: z.string().min(1).max(80),
   tokenHash: digestSchema,
+  // A native installation secret proves continuity across disconnect/re-pair.
+  // Optional for existing stores and older phones; never returned in device lists.
+  installationKeyHash: digestSchema.optional(),
   scopes: scopesSchema,
   pairedAt: timeSchema,
   lastRefreshedAt: timeSchema,
@@ -149,6 +152,7 @@ function migrateV1(state: z.infer<typeof v1StateSchema>): State {
 }
 const exchangeSchema = z.strictObject({
   code: z.string().regex(/^[A-Za-z0-9_-]{32}$/),
+  installationKey: z.string().regex(/^[A-Za-z0-9_-]{43}$/).optional(),
   deviceName: z
     .string()
     .trim()
@@ -451,7 +455,11 @@ export class RemoteAuthStore {
       } else state.attempts.push({ login, startedAt: now, count: 1 });
     });
   }
-  async exchange(login: string, input: unknown): Promise<DeviceCredential> {
+  async exchange(
+    login: string,
+    input: unknown,
+    previous?: { deviceId?: string; token?: string }
+  ): Promise<DeviceCredential> {
     const parsed = exchangeSchema.safeParse(input);
     if (!parsed.success || !this.allowsLogin(login))
       throw new RemoteAuthFailure('unauthorized');
@@ -461,22 +469,35 @@ export class RemoteAuthStore {
       );
       const code = state.codes[index];
       if (!code) throw new RemoteAuthFailure('unauthorized');
-      if (state.devices.length >= 64)
+      const installationKeyHash = parsed.data.installationKey ? hash(parsed.data.installationKey) : undefined;
+      let existing = installationKeyHash
+        ? state.devices.find((device) => device.installationKeyHash === installationKeyHash)
+        : undefined;
+      // Upgrade only the legacy record whose current credential the phone proves.
+      // A name or public device id never proves which installation is returning.
+      if (!existing && installationKeyHash && previous?.deviceId && previous.token) {
+        const legacy = state.devices.find((device) => device.deviceId === previous.deviceId && !device.installationKeyHash);
+        if (legacy && /^[A-Za-z0-9_-]{43}$/.test(previous.token) && matches(previous.token, legacy.tokenHash)) existing = legacy;
+      }
+      if (!existing && state.devices.length >= 64)
         throw new RemoteAuthFailure('rate-limited');
       const token = randomBytes(32).toString('base64url'),
-        deviceId = randomUUID(),
+        deviceId = existing?.deviceId ?? randomUUID(),
         expiresAt = now + TOKEN_LIFETIME;
       state.codes.splice(index, 1);
-      state.devices.push({
+      const device = {
         deviceId,
         deviceName: parsed.data.deviceName,
         tokenHash: hash(token),
+        ...(installationKeyHash ? { installationKeyHash } : {}),
         scopes: code.scopes,
         pairedAt: now,
         lastRefreshedAt: now,
         expiresAt,
         pairedVia: { transport: this.transport, login },
-      });
+      };
+      if (existing) state.devices[state.devices.indexOf(existing)] = device;
+      else state.devices.push(device);
       return DeviceCredentialSchema.parse({
         protocolVersion: DEVICE_AUTH_PROTOCOL_VERSION,
         deviceId,
@@ -556,7 +577,7 @@ export class RemoteAuthStore {
   }
   async listDevices() {
     return this.mutate((state) =>
-      state.devices.map(({ tokenHash: _secret, ...device }) => device)
+      state.devices.map(({ tokenHash: _secret, installationKeyHash: _installation, ...device }) => device)
     );
   }
   async revoke(deviceId: string) {

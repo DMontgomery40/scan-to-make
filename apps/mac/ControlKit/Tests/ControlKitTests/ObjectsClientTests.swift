@@ -23,6 +23,34 @@ private func failure(_ request: [String: Any], _ code: String) throws -> Data {
 }
 
 final class ObjectsClientTests: XCTestCase {
+    func testPassActivityLoadsSeparatelyByObjectAndIndex() async throws {
+        let server = try UnixFixture { request in
+            XCTAssertEqual(request["method"] as? String, "objects.passActivity")
+            let params = request["params"] as! [String: Any]
+            XCTAssertEqual(params["id"] as? String, id)
+            XCTAssertEqual(params["index"] as? Int, 7)
+            XCTAssertEqual(params.count, 2)
+            return [try reply(request, result: ["activity": [["atMs": 120, "kind": "message", "text": "Checking the reference."]]])]
+        }
+        let activity = try await ControlClient(socketPath: server.path).passActivity(id, index: 7)
+        XCTAssertEqual(activity.count, 1)
+        XCTAssertEqual(activity[0].atMs, 120)
+        XCTAssertEqual(activity[0].kind, "message")
+        XCTAssertEqual(activity[0].text, "Checking the reference.")
+        withExtendedLifetime(server) {}
+    }
+
+    func testPassActivityCountsDecodeWithoutInlineMessagesAndRemainOptionalForOlderCompanions() throws {
+        let legacy = try JSONDecoder().decode(StmObject.self, from: JSONSerialization.data(withJSONObject: ready))
+        XCTAssertNil(legacy.passes[0].activityCount)
+        var object = ready
+        object["passes"] = [["startedAtMs": 1, "status": "done", "activityCount": 200], ["startedAtMs": 2, "activityCount": 0]]
+        let metadata = try JSONDecoder().decode(StmObject.self, from: JSONSerialization.data(withJSONObject: object))
+        XCTAssertEqual(metadata.passes[0].activityCount, 200)
+        XCTAssertEqual(metadata.passes[1].activityCount, 0)
+        XCTAssertNil(metadata.passes[0].activity)
+    }
+
     func testListSendsNoParamsAndReadsEveryObject() async throws {
         let server = try UnixFixture { request in
             XCTAssertEqual(request["method"] as? String, "objects.list")

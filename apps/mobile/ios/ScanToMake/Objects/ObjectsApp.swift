@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import ImageIO
 import React
 
 // The phone's app UI, in SwiftUI so it is the system's own iOS 27 design (Liquid Glass bars, toolbars,
@@ -89,11 +90,22 @@ private func native(_ name: String) -> NSObject? { (NSClassFromString(name) as? 
     private struct ListReply: Decodable { var objects: [StmObject] }
     private struct Deleted: Decodable { var deleted: Bool }
 
+    func printers() async throws -> PrinterCatalog { try await request("GET", "/v1/objects/printers", as: PrinterCatalog.self) }
+    private struct ActivityReply: Decodable { var activity: [StmObject.Activity] }
+    func passActivity(_ id: String, index: Int) async throws -> [StmObject.Activity] {
+        try await request("GET", "/v1/objects/\(id)/passes/\(index)/activity", as: ActivityReply.self).activity
+    }
+    func selectPrinter(_ id: String, destinationId: String) async throws -> StmObject {
+        try await request("POST", "/v1/objects/\(id)/printer", ["destinationId": destinationId], as: ObjectReply.self).object
+    }
     func list() async throws -> [StmObject] { try await request("GET", "/v1/objects", as: ListReply.self).objects }
     func get(_ id: String) async throws -> StmObject { try await request("GET", "/v1/objects/\(id)", as: ObjectReply.self).object }
     func create(_ instructions: String) async throws -> StmObject {
         let text = instructions.trimmingCharacters(in: .whitespacesAndNewlines)
         return try await request("POST", "/v1/objects", text.isEmpty ? [:] : ["instructions": text], as: ObjectReply.self).object
+    }
+    func updateDraft(_ id: String, instructions: String) async throws -> StmObject {
+        try await request("PATCH", "/v1/objects/\(id)", ["instructions": instructions], as: ObjectReply.self).object
     }
     func start(_ id: String) async throws -> StmObject { try await request("POST", "/v1/objects/\(id)/start", as: ObjectReply.self).object }
     func correct(_ id: String, _ note: String) async throws -> StmObject { try await request("POST", "/v1/objects/\(id)/corrections", ["note": note], as: ObjectReply.self).object }
@@ -128,13 +140,13 @@ private func native(_ name: String) -> NSObject? { (NSClassFromString(name) as? 
     func download(_ object: StmObject, _ name: String) async throws -> URL? {
         let bridge = try require(bridge)
         let reply = try await promise {
-            bridge.download(["objectId": object.id, "name": name, "version": object.updatedAtMs] as NSDictionary, resolve: $0, reject: $1)
+            bridge.download(["objectId": object.id, "name": name, "version": object.mediaVersion] as NSDictionary, resolve: $0, reject: $1)
         } as? [String: Any]
         return (reply?["uri"] as? String).flatMap(URL.init(string:))
     }
     func showModel(_ object: StmObject) async throws {
         let bridge = try require(bridge)
-        _ = try await promise { bridge.showModel(["objectId": object.id, "version": object.updatedAtMs] as NSDictionary, resolve: $0, reject: $1) }
+        _ = try await promise { bridge.showModel(["objectId": object.id, "version": object.mediaVersion] as NSDictionary, resolve: $0, reject: $1) }
     }
 
     // LiDAR capture: the native Object Capture flow, with the object's id as its origin, so a finished
@@ -197,21 +209,51 @@ struct ChosenPhoto: Identifiable, Equatable { var id: String; var url: URL }
     var onPair: () -> Void = {}
 
     func load() async {
-        do { objects = try await mac.list(); error = nil }
-        catch let failure as MacError { error = failure }
-        catch { self.error = .unreachable }
+        do {
+            let latest = try await mac.list()
+            guard !Task.isCancelled else { return }
+            objects = latest; error = nil
+        }
+        catch let failure as MacError { if !Task.isCancelled { error = failure } }
+        catch { if !Task.isCancelled { self.error = .unreachable } }
+        guard !Task.isCancelled else { return }
         loaded = true
     }
     func replace(_ object: StmObject) {
         if let index = objects.firstIndex(where: { $0.id == object.id }) { objects[index] = object } else { objects.insert(object, at: 0) }
     }
     func remove(_ id: String) { objects.removeAll { $0.id == id } }
+    var printerCatalog: PrinterCatalog?
+    var printerProblem: String?
+    private var printerRead = 0
+    func resetPrinters() {
+        printerRead += 1
+        printerCatalog = nil
+        printerProblem = nil
+    }
+    func loadPrinters() async {
+        guard !Task.isCancelled else { return }
+        resetPrinters()
+        let read = printerRead
+        do {
+            let catalog = try await mac.printers()
+            guard read == printerRead, !Task.isCancelled else { return }
+            printerCatalog = catalog
+        } catch {
+            guard read == printerRead, !Task.isCancelled else { return }
+            printerProblem = "Couldn't read the printers configured on your Mac."
+        }
+    }
+    func printer(for object: StmObject) -> PrinterDestination? {
+        guard let catalog = printerCatalog else { return nil }
+        return catalog.destinations.first { $0.id == (object.printerDestinationId ?? catalog.defaultDestinationId) }
+    }
     var anyBusy: Bool { objects.contains { ObjectWords($0).busy } }
     func refreshConnection(check: Bool = false) async { connection = await mac.pairing(check: check) }
 }
 
 let cobalt = Color(uiColor: UIColor { $0.userInterfaceStyle == .dark
-    ? UIColor(red: 0x7B / 255, green: 0x95 / 255, blue: 0xFF / 255, alpha: 1)
+    ? UIColor(red: 0x3A / 255, green: 0x63 / 255, blue: 0xF2 / 255, alpha: 1)
     : UIColor(red: 0x24 / 255, green: 0x48 / 255, blue: 0xD8 / 255, alpha: 1) })
 
 private extension ObjectWords.Tone {
@@ -242,9 +284,16 @@ struct ObjectsRootView: View {
         ToolbarItem(placement: .topBarLeading) {
             Button { settings = true } label: { Label("Settings", systemImage: "gearshape") }
         }
-        ToolbarItem(placement: .topBarTrailing) {
-            Button { creating = true } label: { Label("New", systemImage: "plus") }
+        ToolbarItem(placement: .bottomBar) {
+            Button { creating = true } label: {
+                Label("New Project", systemImage: "plus")
+                    .font(.headline)
+                    .padding(.horizontal, 24)
+                    .padding(.vertical, 6)
+            }
                 .buttonStyle(.glassProminent)
+                .labelStyle(.titleAndIcon)
+                .accessibilityIdentifier("new-project")
         }
     }
 
@@ -254,21 +303,21 @@ struct ObjectsRootView: View {
                 // iPad and an unfolded Duo: the list and the page side by side.
                 NavigationSplitView {
                     ObjectsListView(store: store, startNew: { creating = true }, selection: $selected)
-                        .navigationTitle("Counterpart")
+                        .navigationTitle("Projects")
                         .toolbar { listToolbar }
                 } detail: {
                     if let selected {
                         NavigationStack { ObjectDetailView(store: store, id: selected, close: { self.selected = nil }) }
                             .id(selected)
                     } else {
-                        ContentUnavailableView("Choose Something", systemImage: "cube",
-                                               description: Text("Pick something from the list, or tap + to make something new."))
+                        ContentUnavailableView("Your Project Workspace", systemImage: "cube",
+                                               description: Text("Choose a project to see its model, reference images and activity, or start a new one."))
                     }
                 }
             } else {
                 NavigationStack(path: $path) {
                     ObjectsListView(store: store, startNew: { creating = true })
-                        .navigationTitle("Counterpart")
+                        .navigationTitle("Projects")
                         .toolbar { listToolbar }
                         .navigationDestination(for: String.self) { id in
                             ObjectDetailView(store: store, id: id, close: { path.removeAll() })
@@ -286,10 +335,13 @@ struct ObjectsRootView: View {
         }
         .sheet(isPresented: $settings) { SettingsView(store: store) }
         .task(id: pairingKey) {
+            store.resetPrinters()
+            store.objects = []; store.loaded = false; store.error = nil
             HandheldCapture.previewIfAsked()
             async let scan = store.mac.canScan()
             await store.refreshConnection()
             await store.load()
+            await store.loadPrinters()
             store.canScan = await scan
         }
         // While something is touching up or printing, keep the list current (not while in the background).
@@ -310,6 +362,7 @@ struct ObjectsListView: View {
     var selection: Binding<String?>? = nil
     @State private var deleting: StmObject?
     @State private var refusal: String?
+    @State private var search = ""
 
     var body: some View {
         List(selection: selection) {
@@ -330,8 +383,8 @@ struct ObjectsListView: View {
                     }
                 }
             } else if !store.objects.isEmpty {
-                Section("Your Things") {
-                    ForEach(store.objects) { object in
+                Section("Your Projects") {
+                    ForEach(store.objects.filter { search.isEmpty || ($0.instructions ?? ObjectWords.title($0)).localizedCaseInsensitiveContains(search) }) { object in
                         NavigationLink(value: object.id) { ObjectRow(store: store, object: object) }
                             .swipeActions {
                                 Button("Delete", systemImage: "trash", role: .destructive) { deleting = object }
@@ -343,7 +396,8 @@ struct ObjectsListView: View {
                 }
             }
         }
-        .refreshable { await store.load() }
+        .searchable(text: $search, prompt: "Find a project")
+        .refreshable { await store.load(); await store.loadPrinters() }
         .confirmationDialog("Delete this from your Mac?", isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
                             titleVisibility: .visible, presenting: deleting) { object in
             Button("Delete", role: .destructive) {
@@ -392,7 +446,7 @@ struct ObjectRow: View {
     var body: some View {
         let words = ObjectWords(object)
         HStack(spacing: 14) {
-            RenderImage(store: store, object: object, render: object.current?.renders.first)
+            ProjectThumbnail(store: store, object: object)
                 .frame(width: 60, height: 60)
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             VStack(alignment: .leading, spacing: 3) {
@@ -404,9 +458,44 @@ struct ObjectRow: View {
                         .foregroundStyle(prominence == .increased ? Color.white.opacity(0.9) : words.tone.color)
                         .lineLimit(2)
                 }
+                Text(Date(timeIntervalSince1970: object.createdAtMs / 1000), format: .dateTime.month(.abbreviated).day().hour().minute())
+                    .font(.caption2).foregroundStyle(.secondary)
             }
         }
         .padding(.vertical, 2)
+    }
+}
+
+/// Decode only the pixels a thumbnail can display, without first expanding a full capture.
+enum ProjectImageLoader {
+    static func thumbnail(at url: URL, maxPixelSize: Int) -> UIImage? {
+        guard let source = CGImageSourceCreateWithURL(url as CFURL,
+            [kCGImageSourceShouldCache: false] as CFDictionary),
+              let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceCreateThumbnailWithTransform: true,
+                kCGImageSourceThumbnailMaxPixelSize: maxPixelSize,
+                kCGImageSourceShouldCacheImmediately: true
+              ] as CFDictionary) else { return nil }
+        return UIImage(cgImage: image)
+    }
+}
+
+struct ProjectThumbnail: View {
+    let store: ObjectsStore
+    let object: StmObject
+    @State private var photo: UIImage?
+    var body: some View {
+        Group {
+            if let photo { Image(uiImage: photo).resizable().scaledToFill() }
+            else { RenderImage(store: store, object: object, render: object.current?.renders.first) }
+        }
+        .task(id: "\(object.id)#\(object.current == nil)") {
+            guard object.current == nil,
+                  let path = object.photos.first.map({ "photos/\($0)" }) ?? object.capture?.first.map({ "capture/\($0)" }),
+                  let url = try? await store.mac.download(object, path) else { photo = nil; return }
+            photo = ProjectImageLoader.thumbnail(at: url, maxPixelSize: 180)
+        }
     }
 }
 
@@ -422,7 +511,7 @@ struct RenderImage: View {
             if let image { Image(uiImage: image).resizable().scaledToFit() }
             else if render == nil { Image(systemName: "cube").font(.title2).foregroundStyle(.white.opacity(0.5)) }
         }
-        .task(id: "\(object.id)#\(object.updatedAtMs)#\(render ?? "")") {
+        .task(id: "\(object.id)#\(object.mediaVersion)#\(render ?? "")") {
             guard let render, let name = render.split(separator: "/").last else { image = nil; return }
             if let url = try? await store.mac.download(object, "renders/\(name)"), let data = try? Data(contentsOf: url) { image = UIImage(data: data) }
         }
@@ -441,6 +530,8 @@ struct NewObjectView: View {
     @State private var askedForDescription = false
     @State private var created: StmObject?
     @State private var photosSent = false
+    @State private var photosLocked = false
+    @State private var photoPreviews: [String: UIImage] = [:]
     @FocusState private var describing: Bool
     @Environment(\.dismiss) private var dismiss
     private var described: Bool { !instructions.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
@@ -448,24 +539,75 @@ struct NewObjectView: View {
     var body: some View {
         NavigationStack {
             Form {
+                Section("Start With What You Have") {
+                    if store.canScan {
+                        Button { Task { await scan(handheld: false) } } label: {
+                            Label {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("Scan with LiDAR").font(.headline)
+                                    Text("Walk around the object to capture its shape and size").font(.subheadline).foregroundStyle(.secondary)
+                                }
+                            } icon: { Image(systemName: "viewfinder").font(.title2) }
+                            .padding(.vertical, 6)
+                        }
+                        .disabled(working != nil)
+                        .accessibilityIdentifier("scan-object")
+                    }
+                    if HandheldCapture.isAvailable {
+                        Button { Task { await scan(handheld: true) } } label: {
+                            Label {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("Capture with Photos").font(.headline)
+                                    Text("Hold and turn the object. Your Mac builds a model from the photos.")
+                                        .font(.subheadline).foregroundStyle(.secondary)
+                                }
+                            } icon: { Image(systemName: "hand.raised").font(.title2) }
+                            .padding(.vertical, 6)
+                        }
+                        .disabled(working != nil)
+                        .accessibilityIdentifier("capture-photos")
+                    }
+                    Button { Task { await addPhotos() } } label: {
+                        Label {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Add Reference Photos").font(.headline)
+                                Text("Show what your part needs to fit").font(.subheadline).foregroundStyle(.secondary)
+                            }
+                        } icon: { Image(systemName: "photo.on.rectangle.angled").font(.title2) }
+                        .padding(.vertical, 6)
+                    }
+                    .disabled(working != nil || photosLocked || photos.count >= 12)
+                }
                 Section {
                     TextField("A clip that holds a 6 mm cable to the edge of my desk", text: $instructions, axis: .vertical)
                         .lineLimit(3...10)
                         .focused($describing)
                 } header: {
-                    Text("Describe It")
+                    Text("What Would You Like to Make?")
                 } footer: {
                     Text(askedForDescription && !described
                          ? "Describe what you want made first. Photos only show what it goes with."
                          : "What it is, what it fits or attaches to, and any sizes. Product names, model numbers and links all help.")
                         .foregroundStyle(askedForDescription && !described ? .red : .secondary)
                 }
-                Section {
+                if !photos.isEmpty { Section {
                     if !photos.isEmpty {
                         ScrollView(.horizontal, showsIndicators: false) {
                             HStack(spacing: 10) {
                                 ForEach(photos) { photo in
-                                    ChosenThumbnail(photo: photo) { photos.removeAll { $0.id == photo.id } }
+                                    if photosLocked {
+                                        Group {
+                                            if let image = photoPreviews[photo.id] {
+                                                Image(uiImage: image).resizable().scaledToFill()
+                                            } else { Color.secondary.opacity(0.2) }
+                                        }
+                                        .frame(width: 84, height: 84)
+                                        .clipShape(RoundedRectangle(cornerRadius: 14))
+                                        .accessibilityLabel("Selected reference photo")
+                                    } else {
+                                        ChosenThumbnail(photo: photo) { photos.removeAll { $0.id == photo.id } }
+                                            .disabled(working != nil)
+                                    }
                                 }
                             }
                             .padding(.vertical, 6)
@@ -474,12 +616,16 @@ struct NewObjectView: View {
                     Button { Task { await addPhotos() } } label: {
                         Label(photos.isEmpty ? "Add Photos" : "Add More Photos", systemImage: "photo.badge.plus")
                     }
-                    .disabled(working != nil || photos.count >= 12)
+                    .disabled(working != nil || photosLocked || photos.count >= 12)
                 } header: {
                     Text("Photos")
                 } footer: {
-                    Text("Optional. Show the thing it goes with, from a couple of angles.")
-                }
+                    Text(photosLocked
+                         ? (photos.isEmpty ? "This submission has no photos. Finish creating the project before starting another with different inputs."
+                            : photosSent ? "These photos are saved on your Mac. Finish creating the project to see them in Inputs."
+                            : "The photo selection is fixed for this submission. Retry sends these same photos.")
+                         : "Optional. Show the thing it goes with, from a couple of angles.")
+                } }
                 if !store.canScan {
                     Section { } footer: { Text("Scanning needs an iPhone or iPad with LiDAR.") }
                 }
@@ -487,7 +633,7 @@ struct NewObjectView: View {
                     Section { Label(problem, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red) }
                 }
             }
-            .navigationTitle("Make Something")
+            .navigationTitle("New Project")
             .navigationBarTitleDisplayMode(.inline)
             .scrollDismissesKeyboard(.interactively)
             // The actions stay in view above the form, and above the keyboard while typing.
@@ -501,16 +647,6 @@ struct NewObjectView: View {
                     .controlSize(.extraLarge)
                     .disabled(working != nil)
                     .accessibilityLabel(working == "make" ? "Sending to your Mac" : "Make It")
-                    if (store.canScan || HandheldCapture.isAvailable) && !describing {
-                        Menu { ScanChoices(walkAround: store.canScan) { handheld in Task { await scan(handheld: handheld) } } } label: {
-                            Label(working == "scan" ? "Sending to Your Mac…" : "Scan It Instead", systemImage: "viewfinder")
-                                .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(.glass)
-                        .controlSize(.extraLarge)
-                        .disabled(working != nil)
-                        .accessibilityLabel(working == "scan" ? "Sending to your Mac" : "Scan It Instead")
-                    }
                 }
                 .padding(.horizontal, 20)
                 .padding(.vertical, 10)
@@ -524,7 +660,6 @@ struct NewObjectView: View {
             .interactiveDismissDisabled(working != nil)
         }
         .tint(cobalt)
-        .onAppear { describing = true }
     }
 
     private func run(_ kind: String, _ body: () async throws -> Void) async {
@@ -544,7 +679,18 @@ struct NewObjectView: View {
     }
     /// The object this form made, kept so a retry finishes it instead of making another.
     private func object() async throws -> StmObject {
-        if let created { return created }
+        if let created {
+            let latest = try await store.mac.get(created.id)
+            // Start may have succeeded even when its reply was lost. The saved
+            // project is the result; never PATCH its now-immutable description.
+            guard latest.state == .new else { return latest }
+            do { return try await store.mac.updateDraft(created.id, instructions: instructions) }
+            catch {
+                // Another screen can start it between the GET and PATCH.
+                if let current = try? await store.mac.get(created.id), current.state != .new { return current }
+                throw error
+            }
+        }
         let object = try await store.mac.create(instructions)
         created = object
         return object
@@ -552,6 +698,14 @@ struct NewObjectView: View {
     /// Sends the chosen photos once; they leave this phone's cache when the Mac has them.
     private func sendPhotos(_ id: String) async throws {
         guard !photosSent else { return }
+        if !photosLocked {
+            // sendChosen removes the original cache files only after every
+            // upload succeeds. Keep small previews for a later start retry.
+            for photo in photos {
+                photoPreviews[photo.id] = ProjectImageLoader.thumbnail(at: photo.url, maxPixelSize: 252)
+            }
+            photosLocked = true
+        }
         try await store.mac.sendChosen(id, photos)
         photosSent = true
     }
@@ -560,13 +714,34 @@ struct NewObjectView: View {
         describing = false
         await run("make") {
             let object = try await object()
+            guard object.state == .new else { started(object); return }
+            if let sent = try await sendSavedCapture(object.id) { started(sent); return }
             try await sendPhotos(object.id)
             started(try await store.mac.start(object.id))
         }
     }
+    /// A retry keeps the original capture, even if a different scan mode was chosen. Reopening
+    /// capture would reuse filenames the Mac already has and combine two different photo sets.
+    private func sendSavedCapture(_ id: String) async throws -> StmObject? {
+        if HandheldCapture.finished(id) {
+            try await sendPhotos(id)
+            return try await store.mac.sendHandheld(id)
+        }
+        if let run = await store.mac.finishedScan(id) {
+            try await store.mac.sendCapture(id, run: run)
+            try await sendPhotos(id)
+            return try await store.mac.start(id)
+        }
+        return nil
+    }
     private func scan(handheld: Bool) async {
         await run("scan") {
             let object = try await object()
+            guard object.state == .new else { started(object); return }
+            if let sent = try await sendSavedCapture(object.id) { started(sent); return }
+            guard object.scan == nil, (object.capture ?? []).isEmpty else {
+                throw MacError(code: "missing-capture", message: "This project's saved scan is no longer on this phone. Start a new project to scan it again.")
+            }
             if handheld {
                 guard await HandheldCapture.run(objectId: object.id) else { started(object); return }
                 try await sendPhotos(object.id)
@@ -584,10 +759,11 @@ struct NewObjectView: View {
 struct ChosenThumbnail: View {
     let photo: ChosenPhoto
     let remove: () -> Void
+    @State private var image: UIImage?
     var body: some View {
         ZStack(alignment: .topTrailing) {
             Group {
-                if let image = UIImage(contentsOfFile: photo.url.path) { Image(uiImage: image).resizable().scaledToFill() }
+                if let image { Image(uiImage: image).resizable().scaledToFill() }
                 else { Color.secondary.opacity(0.2) }
             }
             .frame(width: 84, height: 84)
@@ -600,6 +776,7 @@ struct ChosenThumbnail: View {
             .accessibilityLabel("Remove this photo")
             .offset(x: 6, y: -6)
         }
+        .task(id: photo.url) { image = ProjectImageLoader.thumbnail(at: photo.url, maxPixelSize: 252) }
     }
 }
 
@@ -617,6 +794,7 @@ struct ObjectDetailView: View {
     @State private var resumed = false
     @State private var confirmDelete = false
     @State private var plateImage: UIImage?
+    @State private var section = ProjectSection.model
     @FocusState private var writing: Bool
     private var object: StmObject? { store.objects.first { $0.id == id } }
 
@@ -627,10 +805,10 @@ struct ObjectDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .task(id: id) {
             await reload()
-            // A scan that finished on this phone but never reached the Mac (the app closed) goes now.
-            guard !resumed, let object, object.state == .new, object.scan == nil else { return }
-            resumed = true
-            if let run = await store.mac.finishedScan(object.id) { act { try await store.mac.sendScan(object.id, run: run) } }
+            if let object, object.current == nil {
+                section = object.state == .touchingUp ? .activity : .inputs
+            }
+            await resumeSavedCapture()
         }
         .task(id: object.map { ObjectWords($0).busy } ?? false) {
             guard let object, ObjectWords(object).busy else { return }
@@ -645,6 +823,38 @@ struct ObjectDetailView: View {
         do { store.replace(try await store.mac.get(id)); fetchProblem = nil }
         catch let failure as MacError { fetchProblem = failure.message }
         catch { fetchProblem = MacError.unreachable.message }
+    }
+
+    /// Resume after relaunch even when the model or some photos already reached the Mac.
+    private func resumeSavedCapture() async {
+        guard !resumed, let object, object.state == .new else { return }
+        resumed = true
+        if HandheldCapture.finished(object.id) {
+            act { try await store.mac.sendHandheld(object.id) }
+        } else if let run = await store.mac.finishedScan(object.id) {
+            act { try await store.mac.sendScan(object.id, run: run) }
+        }
+    }
+
+    private func sendSavedCapture(_ id: String) async throws -> StmObject? {
+        if HandheldCapture.finished(id) { return try await store.mac.sendHandheld(id) }
+        if let run = await store.mac.finishedScan(id) { return try await store.mac.sendScan(id, run: run) }
+        return nil
+    }
+
+    private func finishSending(_ object: StmObject) async throws -> StmObject {
+        if let sent = try await sendSavedCapture(object.id) { return sent }
+        return try await store.mac.start(object.id)
+    }
+
+    private func scan(_ object: StmObject, handheld: Bool) async throws -> StmObject? {
+        if let sent = try await sendSavedCapture(object.id) { return sent }
+        guard object.scan == nil, (object.capture ?? []).isEmpty else {
+            throw MacError(code: "missing-capture", message: "This project's saved scan is no longer on this phone. Start a new project to scan it again.")
+        }
+        if handheld { return await HandheldCapture.run(objectId: object.id) ? try await store.mac.sendHandheld(object.id) : nil }
+        guard let run = try await store.mac.scan(object.id) else { return nil }
+        return try await store.mac.sendScan(object.id, run: run)
     }
 
     private func act(_ body: @escaping () async throws -> StmObject?) {
@@ -663,89 +873,121 @@ struct ObjectDetailView: View {
 
     @ViewBuilder private func page(_ object: StmObject) -> some View {
         let words = ObjectWords(object)
-        List {
-            if object.current != nil || words.busy {
-                Section {
-                    Renders(store: store, object: object)
-                        .listRowInsets(EdgeInsets())
+        ScrollView {
+            VStack(alignment: .leading, spacing: 24) {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text(words.title).font(.title2.bold()).textSelection(.enabled)
+                    HStack(alignment: .top, spacing: 8) {
+                        if words.busy { ProgressView().padding(.top, 3) }
+                        Text(words.status).font(.subheadline).foregroundStyle(words.tone.color)
+                    }
+                    Text(Date(timeIntervalSince1970: object.createdAtMs / 1000), format: .dateTime.month(.abbreviated).day().hour().minute())
+                        .font(.caption).foregroundStyle(.secondary)
                 }
-            }
-            Section {
-                VStack(alignment: .leading, spacing: 6) {
-                    if let size = words.size {
-                        Text(size).font(.system(size: 34, weight: .bold, design: .rounded)).monospacedDigit()
-                    }
-                    HStack(spacing: 8) {
-                        if words.busy { ProgressView() }
-                        Text(words.status).font(.body.weight(.semibold)).foregroundStyle(words.tone.color)
-                    }
-                    if let summary = object.current?.summary, !words.busy {
-                        Text(summary).font(.subheadline).foregroundStyle(.secondary)
-                    }
+                if let problem = problem ?? fetchProblem {
+                    Label(problem, systemImage: "exclamationmark.triangle.fill")
+                        .font(.subheadline).foregroundStyle(.red)
                 }
-                .padding(.vertical, 4)
                 if object.plate?.photo == true, let plateImage {
                     Image(uiImage: plateImage).resizable().scaledToFit()
-                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .clipShape(RoundedRectangle(cornerRadius: 16))
                         .accessibilityLabel("The printer camera's view of the plate")
                 }
-                if let problem = problem ?? fetchProblem { Label(problem, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red) }
-            }
-            if !words.actions.filter({ $0 != .correct }).isEmpty {
-                Section { actions(object, words) }
-                    .listRowBackground(Color.clear)
-                    .listRowInsets(EdgeInsets())
-            }
-            if words.actions.contains(.correct) {
-                Section {
-                    // Like Messages: the send button sits beside the text, so it stays above the keyboard.
-                    HStack(alignment: .bottom, spacing: 10) {
-                        TextField("Say what's wrong, like a size or a missing part", text: $note, axis: .vertical)
-                            .lineLimit(1...6)
-                            .focused($writing)
-                        Button {
-                            let text = note.trimmingCharacters(in: .whitespacesAndNewlines)
-                            writing = false
-                            act { let next = try await store.mac.correct(object.id, text); note = ""; return next }
-                        } label: {
-                            Image(systemName: "arrow.up").font(.body.weight(.semibold))
+                if !words.actions.contains(.print) && !words.actions.contains(.printChecked) {
+                    actions(object, words)
+                }
+                printerSelection(object)
+                Picker("Project section", selection: $section) {
+                    ForEach(ProjectSection.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                switch section {
+                case .model:
+                    if object.current != nil {
+                        VStack(alignment: .leading, spacing: 14) {
+                            Renders(store: store, object: object).clipShape(RoundedRectangle(cornerRadius: 20))
+                            HStack {
+                                Button { act { try await store.mac.showModel(object); return nil } } label: {
+                                    Label("Explore in 3D", systemImage: "rotate.3d")
+                                }.buttonStyle(.glass)
+                                Spacer()
+                                if let size = words.size {
+                                    Label(size, systemImage: "ruler").font(.caption).monospacedDigit()
+                                        .foregroundStyle(.secondary).textSelection(.enabled)
+                                }
+                            }
+                            if let summary = object.current?.summary {
+                                Text(summary).font(.body).textSelection(.enabled)
+                            }
                         }
-                        .buttonStyle(.glassProminent)
-                        .buttonBorderShape(.circle)
-                        .disabled(working || note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                        .accessibilityLabel("Send Changes")
+                    } else {
+                        ContentUnavailableView {
+                            Label(words.busy ? "Your Mac Is Working" : "No Model Yet", systemImage: words.busy ? "sparkles" : "cube")
+                        } description: {
+                            Text(words.busy ? "Follow Activity to see the work as it happens. Your request and photos are saved in Inputs." : "Your request and source images stay with this project. You can return to them at any time.")
+                        } actions: {
+                            Button("View \(words.busy ? "Activity" : "Inputs")") { section = words.busy ? .activity : .inputs }
+                        }
                     }
-                    .id("fix")
-                } header: { Text("Anything to Fix?") } footer: { Text("It goes back to your Mac for another touch-up.") }
+                case .inputs:
+                    ProjectInputs(store: store, object: object)
+                case .activity:
+                    ProjectActivity(store: store, object: object)
+                }
+                if words.actions.contains(.correct) {
+                    Divider()
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text(object.current == nil ? "Revise Your Request" : "Refine This Version").font(.headline)
+                        Text(object.current == nil ? "Explain what you want made from these photos, or clarify what went wrong. Your existing photos stay with the project." : "Describe the change you need. Your request and the next pass will stay in Activity.")
+                            .font(.subheadline).foregroundStyle(.secondary)
+                        HStack(alignment: .bottom, spacing: 10) {
+                            TextField("What would you like to change?", text: $note, axis: .vertical)
+                                .lineLimit(2...6).focused($writing)
+                                .padding(12).background(.background, in: RoundedRectangle(cornerRadius: 14))
+                            Button {
+                                let text = note.trimmingCharacters(in: .whitespacesAndNewlines)
+                                writing = false
+                                act {
+                                    let next = try await store.mac.correct(object.id, text)
+                                    note = ""; section = .activity
+                                    return next
+                                }
+                            } label: { Image(systemName: "arrow.up").font(.body.weight(.semibold)) }
+                            .buttonStyle(.glassProminent).buttonBorderShape(.circle)
+                            .disabled(working || note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                            .accessibilityLabel("Send Changes")
+                        }
+                    }
+                }
             }
-            Section("What You Asked For") {
-                Text((object.instructions ?? "").isEmpty ? "A copy of what you scanned." : object.instructions!)
-                LabeledContent("Sent", value: ObjectWords.sent(object))
+            .padding(20)
+        }
+        .background(Color(uiColor: .systemGroupedBackground))
+        .navigationTitle("Project")
+        .scrollDismissesKeyboard(.interactively)
+        .safeAreaBar(edge: .bottom) {
+            if words.actions.contains(.print) || words.actions.contains(.printChecked) {
+                actions(object, words).padding(.horizontal, 20).padding(.vertical, 8)
             }
         }
-        .navigationTitle(words.title)
-        .scrollDismissesKeyboard(.interactively)
         .toolbar {
             if writing {
                 ToolbarItem(placement: .confirmationAction) { Button("Done") { writing = false } }
             }
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
-                    if object.current != nil {
-                        Button("Turn It Around", systemImage: "rotate.3d") { act { try await store.mac.showModel(object); return nil } }
-                    }
-                    Button("Delete", systemImage: "trash", role: .destructive) { confirmDelete = true }
+                    Button("Delete Project", systemImage: "trash", role: .destructive) { confirmDelete = true }
                 } label: { Label("More", systemImage: "ellipsis") }
             }
         }
-        .confirmationDialog("Delete this from your Mac?", isPresented: $confirmDelete, titleVisibility: .visible) {
-            Button("Delete", role: .destructive) {
+        .confirmationDialog("Delete this project from your Mac?", isPresented: $confirmDelete, titleVisibility: .visible) {
+            Button("Delete Project", role: .destructive) {
                 Task {
                     do { try await store.mac.delete(object.id); store.remove(object.id); close() }
                     catch let failure as MacError { problem = failure.message }
                 }
             }
-        } message: { Text("Its model, photos and renders are removed from your Mac.") }
+        } message: { Text("Its model, photos and activity will be removed from your Mac.") }
         .task(id: "\(object.updatedAtMs)#\(object.plate?.photo == true)") {
             guard object.plate?.photo == true, let url = try? await store.mac.download(object, "plate.jpg"),
                   let data = try? Data(contentsOf: url) else { plateImage = nil; return }
@@ -753,14 +995,44 @@ struct ObjectDetailView: View {
         }
     }
 
+    @ViewBuilder private func printerSelection(_ object: StmObject) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let catalog = store.printerCatalog, !catalog.destinations.isEmpty {
+                Picker(selection: Binding(get: { object.printerDestinationId ?? catalog.defaultDestinationId }, set: { selected in
+                    act { try await store.mac.selectPrinter(object.id, destinationId: selected) }
+                })) {
+                    ForEach(catalog.destinations) { destination in Text(destination.name).tag(destination.id) }
+                } label: { Label("Printer", systemImage: "printer") }
+                .disabled(working || object.state == .touchingUp || object.state == .printing || object.print?.uncertain == true)
+                if let destination = store.printer(for: object) {
+                    Text(destination.backend == "bambu-printer-mcp" ? "Uses your Bambu MCP settings on this Mac" : "Uses your printer MCP settings on this Mac")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            } else {
+                Label(store.printerProblem ?? "Reading your Mac's printers…", systemImage: "printer")
+                    .font(.subheadline).foregroundStyle(.secondary)
+                if store.printerProblem != nil {
+                    Button("Try Again") { Task { await store.loadPrinters() } }
+                }
+            }
+            if let destination = object.print?.destination {
+                Text("Last print sent to \(destination.name)").font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .padding(14).frame(maxWidth: .infinity, alignment: .leading)
+        .background(.background, in: RoundedRectangle(cornerRadius: 16))
+    }
+
     @ViewBuilder private func actions(_ object: StmObject, _ words: ObjectWords) -> some View {
         VStack(spacing: 10) {
             ForEach(Array(words.actions.enumerated()), id: \.offset) { _, action in
                 switch action {
                 case .print:
-                    big("Print", "printer.fill", prominent: true) { try await store.mac.print(object.id, checked: false) }
+                    big(store.printer(for: object).map { "Print on \($0.name)" } ?? "Print", "printer.fill", prominent: true) { try await store.mac.print(object.id, checked: false) }
+                        .disabled(store.printer(for: object) == nil)
                 case .printChecked:
                     big("It Isn't Printing, Print Again", "printer.fill", prominent: true) { try await store.mac.print(object.id, checked: true) }
+                        .disabled(store.printer(for: object) == nil)
                 case .plateClear:
                     big("It's Actually Clear", "checkmark.circle", prominent: true) { try await store.mac.plateClear(object.id) }
                 case .openCamera:
@@ -781,28 +1053,16 @@ struct ObjectDetailView: View {
                 case .retry:
                     big("Try Again", "arrow.clockwise", prominent: true) { try await store.mac.start(object.id) }
                 case .finishSending:
-                    big("Finish Sending", "arrow.up.circle", prominent: false) {
-                        if HandheldCapture.finished(object.id) { return try await store.mac.sendHandheld(object.id) }
-                        if let run = await store.mac.finishedScan(object.id) { return try await store.mac.sendScan(object.id, run: run) }
-                        return try await store.mac.start(object.id)
-                    }
+                    big("Finish Sending", "arrow.up.circle", prominent: false) { try await finishSending(object) }
                 case .scan:
-                    if store.canScan || HandheldCapture.isAvailable {
-                        Menu {
-                            ScanChoices(walkAround: store.canScan) { handheld in
-                                act {
-                                    if handheld { return await HandheldCapture.run(objectId: object.id) ? try await store.mac.sendHandheld(object.id) : nil }
-                                    guard let run = try await store.mac.scan(object.id) else { return nil }
-                                    return try await store.mac.sendScan(object.id, run: run)
-                                }
-                            }
-                        } label: { Label("Scan It", systemImage: "viewfinder").frame(maxWidth: .infinity) }
-                        .buttonStyle(.glassProminent)
-                        .controlSize(.large)
-                        .disabled(working)
+                    if store.canScan {
+                        big("Scan with LiDAR", "viewfinder", prominent: true) { try await scan(object, handheld: false) }
+                    }
+                    if HandheldCapture.isAvailable {
+                        big("Capture with Photos", "hand.raised", prominent: false) { try await scan(object, handheld: true) }
                     }
                 case .makeIt:
-                    big("Make It From the Description", "wand.and.sparkles", prominent: false) { try await store.mac.start(object.id) }
+                    big("Make It From the Description", "wand.and.sparkles", prominent: false) { try await finishSending(object) }
                 case .correct:
                     EmptyView()
                 }
@@ -822,6 +1082,183 @@ struct ObjectDetailView: View {
         .controlSize(.large)
         .disabled(working)
         .accessibilityLabel(title)
+    }
+}
+
+enum ProjectSection: String, CaseIterable { case model = "Model", inputs = "Inputs", activity = "Activity" }
+
+struct ProjectInputs: View {
+    let store: ObjectsStore
+    let object: StmObject
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Your Request").font(.headline)
+                Text(object.instructions?.isEmpty == false ? object.instructions! : object.scan != nil || !(object.capture ?? []).isEmpty ? "A copy of the scanned object." : "No description was saved with this project.")
+                    .textSelection(.enabled)
+            }
+            if !object.photos.isEmpty {
+                Text("Reference Photos").font(.headline)
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 130))], spacing: 12) {
+                    ForEach(Array(object.photos.enumerated()), id: \.element) { index, name in
+                        ProjectPhoto(store: store, object: object, path: "photos/\(name)", label: "Reference photo \(index + 1)")
+                    }
+                }
+            }
+            if let capture = object.capture, !capture.isEmpty {
+                DisclosureGroup("Scan Images (\(capture.count))") {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 100))], spacing: 10) {
+                        ForEach(Array(capture.enumerated()), id: \.element) { index, name in
+                            ProjectPhoto(store: store, object: object, path: "capture/\(name)", label: "Scan image \(index + 1)")
+                        }
+                    }.padding(.top, 10)
+                }
+            }
+            if object.scan != nil {
+                Label("Original scan saved on your Mac", systemImage: "viewfinder").foregroundStyle(.secondary)
+            }
+            if object.photos.isEmpty && (object.capture ?? []).isEmpty {
+                Label("No reference photos in this project", systemImage: "photo").foregroundStyle(.secondary)
+            }
+        }
+    }
+}
+
+struct ProjectPhoto: View {
+    let store: ObjectsStore
+    let object: StmObject
+    let path: String
+    let label: String
+    @State private var image: UIImage?
+    @State private var imageURL: URL?
+    @State private var failure: String?
+    @State private var fullSize = false
+    var body: some View {
+        Button { if image != nil { fullSize = true } else { Task { await load() } } } label: {
+            ZStack {
+                Color(uiColor: .secondarySystemGroupedBackground)
+                if let image { Image(uiImage: image).resizable().scaledToFill() }
+                else if failure != nil { Image(systemName: "arrow.clockwise").foregroundStyle(.secondary) }
+                else { ProgressView() }
+            }
+            .frame(height: 145).frame(maxWidth: .infinity)
+            .clipped().clipShape(RoundedRectangle(cornerRadius: 14))
+        }
+        .buttonStyle(.plain).accessibilityLabel(failure == nil ? label : "Retry loading \(label)")
+        .task(id: "\(object.id)/\(path)") { await load() }
+        .sheet(isPresented: $fullSize) {
+            if let imageURL { ProjectPhotoViewer(url: imageURL, label: label) }
+        }
+    }
+    private func load() async {
+        failure = nil
+        do {
+            guard let url = try await store.mac.download(object, path),
+                  let decoded = ProjectImageLoader.thumbnail(at: url, maxPixelSize: 600) else {
+                failure = "Couldn't open this photo"; return
+            }
+            imageURL = url
+            image = decoded
+        } catch { failure = "Couldn't load this photo" }
+    }
+}
+
+/// The original is owned only by the presented viewer, never by a gallery tile.
+private struct ProjectPhotoViewer: View {
+    let url: URL
+    let label: String
+    @State private var image: UIImage?
+    @Environment(\.dismiss) private var dismiss
+    var body: some View {
+        NavigationStack {
+            Group { if let image { Image(uiImage: image).resizable().scaledToFit() } }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color.black).navigationTitle(label).navigationBarTitleDisplayMode(.inline)
+                .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+        }
+        .task(id: url) { image = UIImage(contentsOfFile: url.path) }
+        .onDisappear { image = nil }
+    }
+}
+
+struct ProjectActivity: View {
+    let store: ObjectsStore
+    let object: StmObject
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            Label("Project Created", systemImage: "plus.circle.fill").font(.headline)
+            Text(Date(timeIntervalSince1970: object.createdAtMs / 1000), format: .dateTime.month().day().hour().minute())
+                .font(.caption).foregroundStyle(.secondary)
+            ForEach(Array(object.passes.enumerated()), id: \.offset) { index, pass in
+                VStack(alignment: .leading, spacing: 10) {
+                    Divider()
+                    HStack {
+                        Label("Pass \(index + 1)", systemImage: pass.endedAtMs == nil ? "sparkles" : ["failed", "interrupted"].contains(pass.status ?? "") ? "exclamationmark.circle" : "checkmark.circle")
+                            .font(.headline)
+                        Spacer()
+                        Text(pass.status?.replacingOccurrences(of: "_", with: " ").capitalized ?? "In progress")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    Text(Date(timeIntervalSince1970: pass.startedAtMs / 1000), format: .dateTime.month(.abbreviated).day().hour().minute())
+                        .font(.caption).foregroundStyle(.secondary)
+                    if let note = pass.note, !note.isEmpty {
+                        Text("Your change").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                        Text(note).textSelection(.enabled)
+                    }
+                    if let summary = pass.summary, !summary.isEmpty { Text(summary).textSelection(.enabled) }
+                    if (pass.activityCount ?? pass.activity?.count ?? 0) > 0 {
+                        PassActivityView(store: store, object: object, index: index, count: pass.activityCount ?? pass.activity?.count ?? 0)
+                    } else if pass.endedAtMs != nil {
+                        Text("Detailed activity wasn't recorded for this earlier pass.").font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            }
+            if object.passes.isEmpty {
+                Text("Work will appear here after you send the project to your Mac.").foregroundStyle(.secondary)
+            }
+        }
+    }
+}
+
+struct PassActivityView: View {
+    let store: ObjectsStore
+    let object: StmObject
+    let index: Int
+    let count: Int
+    @State private var expanded = false
+    @State private var entries: [StmObject.Activity] = []
+    @State private var loading = false
+    @State private var failed = false
+
+    var body: some View {
+        DisclosureGroup("Model Activity (\(count))", isExpanded: $expanded) {
+            VStack(alignment: .leading, spacing: 12) {
+                if failed {
+                    Button("Couldn't load this pass. Try again.") { Task { await load() } }
+                } else if loading && entries.isEmpty { ProgressView() }
+                ForEach(Array(entries.enumerated()), id: \.offset) { _, entry in
+                    HStack(alignment: .top, spacing: 10) {
+                        Image(systemName: entry.kind == "tool" ? "wrench.and.screwdriver" : "text.bubble")
+                            .foregroundStyle(.secondary).frame(width: 20)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(entry.text).font(.subheadline).textSelection(.enabled)
+                            Text(Date(timeIntervalSince1970: entry.atMs / 1000), format: .dateTime.hour().minute().second())
+                                .font(.caption2).foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }.padding(.top, 10)
+        }
+        .task(id: expanded ? object.updatedAtMs : -1) { if expanded { await load() } }
+    }
+    private func load() async {
+        loading = true
+        defer { loading = false }
+        do {
+            let activity = try await store.mac.passActivity(object.id, index: index)
+            guard !Task.isCancelled else { return }
+            entries = activity; failed = false
+        } catch { if !Task.isCancelled { failed = true } }
     }
 }
 
@@ -847,7 +1284,7 @@ struct Renders: View {
                 .tabViewStyle(.page(indexDisplayMode: renders.count > 1 ? .always : .never))
             }
         }
-        .aspectRatio(1, contentMode: .fit)
+        .aspectRatio(4 / 3, contentMode: .fit)
     }
 }
 

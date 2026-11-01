@@ -6,6 +6,9 @@ import ControlKit
 
 /// What the objects window needs from the companion: local-control's `objects.*` methods.
 protocol ObjectsCompanion: Sendable {
+    func printers() async throws -> PrinterCatalog
+    func passActivity(_ id: String, index: Int) async throws -> [StmObject.Activity]
+    func selectPrinter(_ id: String, destinationId: String) async throws -> StmObject
     func objects() async throws -> [StmObject]
     func correct(_ id: String, note: String) async throws -> StmObject
     func answerCloseup(_ id: String, bestGuess: Bool) async throws -> StmObject
@@ -15,9 +18,18 @@ protocol ObjectsCompanion: Sendable {
     func delete(_ id: String) async throws
 }
 
+extension ObjectsCompanion {
+    func passActivity(_ id: String, index: Int) async throws -> [StmObject.Activity] { throw ControlClientError.unavailable }
+    func printers() async throws -> PrinterCatalog { throw ControlClientError.unavailable }
+    func selectPrinter(_ id: String, destinationId: String) async throws -> StmObject { throw ControlClientError.unavailable }
+}
+
 /// The control socket. A fresh client per call, so a missing socket fails that call, not the model.
 struct SocketObjects: ObjectsCompanion {
     let path: String
+    func passActivity(_ id: String, index: Int) async throws -> [StmObject.Activity] { try await ControlClient(socketPath:path).passActivity(id, index:index) }
+    func printers() async throws -> PrinterCatalog { try await ControlClient(socketPath:path).printers() }
+    func selectPrinter(_ id: String, destinationId: String) async throws -> StmObject { try await ControlClient(socketPath:path).selectPrinter(id, destinationId:destinationId) }
     func objects() async throws -> [StmObject] { try await ControlClient(socketPath:path).objects() }
     func correct(_ id: String, note: String) async throws -> StmObject { try await ControlClient(socketPath:path).correctObject(id, note:note) }
     func answerCloseup(_ id: String, bestGuess: Bool) async throws -> StmObject { try await ControlClient(socketPath:path).answerCloseup(id, bestGuess:bestGuess) }
@@ -44,6 +56,7 @@ struct SocketObjects: ObjectsCompanion {
     static let busyDelay: Double = 3, idleDelay: Double = 15
 
     @Published private(set) var objects: [StmObject] = []
+    @Published private(set) var printerCatalog: PrinterCatalog?
     @Published private(set) var availability = Availability.loading
     @Published var selection: String?
     @Published private(set) var working: Set<String> = []
@@ -57,12 +70,32 @@ struct SocketObjects: ObjectsCompanion {
     var selected: StmObject? { objects.first { $0.id == selection } }
     var isPolling: Bool { loop != nil }
 
+    func passActivity(_ id: String, index: Int) async throws -> [StmObject.Activity] {
+        try await companion.passActivity(id, index:index)
+    }
+
+    func printer(for object: StmObject) -> PrinterDestination? {
+        guard let catalog = printerCatalog else { return nil }
+        return catalog.destinations.first { $0.id == (object.printerDestinationId ?? catalog.defaultDestinationId) }
+    }
+    func selectPrinter(_ id: String, destinationId: String) async {
+        guard !working.contains(id) else { return }
+        working.insert(id)
+        defer { working.remove(id) }
+        do {
+            let updated = try await companion.selectPrinter(id, destinationId:destinationId)
+            if let index = objects.firstIndex(where:{ $0.id == id }) { objects[index] = updated }
+            problem = nil
+        } catch { problem = Problem(id:id, text:Self.sentence(for:error)) }
+    }
+
     /// Reads the list once and returns the seconds until the next read.
     @discardableResult func refresh() async -> Double {
         do {
             let list = try await companion.objects()
             failures = 0
             objects = list
+            printerCatalog = try? await companion.printers()
             availability = .ready
             if !list.contains(where: { $0.id == selection }) { selection = list.first?.id }
             if let problem, !list.contains(where: { $0.id == problem.id }) { self.problem = nil }

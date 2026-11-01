@@ -14,6 +14,7 @@ modified except for code signing; compiled bytecode is prepared before signing.
 | OpenUSD 26.8 | Exact cp312 macOS universal2 wheel; Tomorrow Open Source Technology License 1.0 (`LicenseRef-TOST-1.0`), not plain Apache-2.0. The full wheel licence retains its embedded third-party notices. Used by the companion's separate Python conversion process. |
 | Companion npm packages | Production lockfile closure only, validated by the repository's existing npm inventory. Each package's real licence text and source URL are included in generated notices. |
 | Capture conversion/pipeline/fit tools | First-party repository sources from the same committed snapshot; preserve their source and existing repository licence treatment. No cleanup worker is copied. |
+| mac-reconstruct | First-party MIT-licensed Swift helper, built from the same extracted source archive as the companion. Its source and licence ship under `Payload/source/tools/mac-reconstruct`; `bin/mac-reconstruct` is the only permitted helper executable. It uses Apple's system frameworks. |
 
 Composite expressions include bundled libraries, not only the wrapper licence.
 Node selects BSD-2-Clause for HdrHistogram and MIT for ada/simdutf. Pillow selects

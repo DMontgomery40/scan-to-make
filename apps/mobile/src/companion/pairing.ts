@@ -8,6 +8,9 @@ export interface PairingStatus {
 }
 export interface CompanionNative {
   status(): Promise<PairingStatus>;
+  /** Friendly local label; the installation key stays native and is never metadata. */
+  deviceName?(): Promise<string>;
+  setDeviceName?(name: string): Promise<string>;
   pair(
     baseUrl: string,
     code: string,
@@ -97,6 +100,7 @@ const errors: Record<string, string> = {
   'pairing-changed': 'Your Mac changed while this was running. Try again.',
   'invalid-response':
     'Your Mac answered in a way this app doesn’t understand. Update Counterpart on both, then pair again.',
+  'invalid-device-name': 'Give this phone a name between 1 and 80 characters.',
   // Nearby pairing (MAC-5).
   'nearby-denied':
     'Your Mac said no to this phone. If that was a mistake, try again and click Allow on your Mac.',
