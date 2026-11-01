@@ -12,6 +12,7 @@ protocol ObjectsCompanion: Sendable {
     func print(_ id: String, checked: Bool) async throws -> StmObject
     func answerPlate(_ id: String) async throws -> StmObject
     func start(_ id: String) async throws -> StmObject
+    func delete(_ id: String) async throws
 }
 
 /// The control socket. A fresh client per call, so a missing socket fails that call, not the model.
@@ -23,6 +24,7 @@ struct SocketObjects: ObjectsCompanion {
     func print(_ id: String, checked: Bool) async throws -> StmObject { try await ControlClient(socketPath:path).printObject(id, checked:checked) }
     func answerPlate(_ id: String) async throws -> StmObject { try await ControlClient(socketPath:path).answerPlate(id) }
     func start(_ id: String) async throws -> StmObject { try await ControlClient(socketPath:path).startObject(id) }
+    func delete(_ id: String) async throws { try await ControlClient(socketPath:path).deleteObject(id) }
 }
 
 /// The objects window's list and the object it shows (spec §5.1, §5.6). It reads the list only while the
@@ -121,6 +123,27 @@ struct SocketObjects: ObjectsCompanion {
             problem = Problem(id:id, text:Self.sentence(for:error))
             // A refusal usually means the object moved on (another device, or a finished step): show where it is now.
             await refresh()
+            return false
+        }
+    }
+
+    /// Deletes one object from this Mac. The page moves to the next object (or the one before the last).
+    /// Returns whether it went through; if not, the object stays and its page says why.
+    @discardableResult func delete(_ id: String) async -> Bool {
+        guard !working.contains(id) else { return false }
+        working.insert(id)
+        defer { working.remove(id) }
+        if problem?.id == id { problem = nil }
+        do {
+            try await companion.delete(id)
+            if let index = objects.firstIndex(where: { $0.id == id }) {
+                objects.remove(at:index)
+                if selection == id { selection = objects.isEmpty ? nil : objects[min(index, objects.count - 1)].id }
+            }
+            wake()
+            return true
+        } catch {
+            problem = Problem(id:id, text:Self.sentence(for:error))
             return false
         }
     }

@@ -150,6 +150,7 @@ import ModelIO
         func print(_ id: String, checked: Bool) async throws -> StmObject { try refuse() }
         func answerPlate(_ id: String) async throws -> StmObject { try refuse() }
         func start(_ id: String) async throws -> StmObject { try refuse() }
+        func delete(_ id: String) async throws { _ = try refuse() }
     }
 
     private static func fixtures(in root: URL, stills: URL) throws -> [StmObject] {
