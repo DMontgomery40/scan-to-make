@@ -68,15 +68,15 @@ export function pairWithInvitation(
 }
 // Plain words only: what happened, and the one thing to do about it.
 export const EXPIRED =
-  'That code expired. Show a new one on your Mac: click the Scan to Make icon in the menu bar → Add a phone.';
+  'That code expired. Show a new one on your Mac: click the Counterpart icon in the menu bar → Add a phone.';
 export const UNREACHABLE =
   'Your phone can’t reach your Mac. Are they on the same Wi-Fi, or is your VPN on?';
 const errors: Record<string, string> = {
   'invalid-invitation':
-    'That isn’t a Scan to Make code. Point at the code in Scan to Make on your Mac.',
+    'That isn’t a Counterpart code. Point at the code in Counterpart on your Mac.',
   'expired-invitation': EXPIRED,
   'unsupported-invitation':
-    'That code is from a newer Scan to Make. Update the app on this phone, then scan it again.',
+    'That code is from a newer Counterpart. Update the app on this phone, then scan it again.',
   unauthorized:
     'Your Mac turned this phone down, or the code was already used. Show a new code on your Mac and scan it.',
   forbidden: 'Your Mac turned this phone down. Show a new code and scan it.',
@@ -96,14 +96,14 @@ const errors: Record<string, string> = {
   'pairing-required': 'Pair this phone with your Mac again.',
   'pairing-changed': 'Your Mac changed while this was running. Try again.',
   'invalid-response':
-    'Your Mac answered in a way this app doesn’t understand. Update Scan to Make on both, then pair again.',
+    'Your Mac answered in a way this app doesn’t understand. Update Counterpart on both, then pair again.',
   // Nearby pairing (MAC-5).
   'nearby-denied':
     'Your Mac said no to this phone. If that was a mistake, try again and click Allow on your Mac.',
   'nearby-expired':
     'That took too long, so nothing was paired. Try again, then click Allow on your Mac.',
   'local-network':
-    'Scan to Make can’t look on your Wi-Fi. Turn on Local Network for Scan to Make in Settings.',
+    'Counterpart can’t look on your Wi-Fi. Turn on Local Network for Counterpart in Settings.',
   cancelled: 'Cancelled. Nothing changed.',
   busy: 'Still working on the last request. Try again in a moment.',
 };

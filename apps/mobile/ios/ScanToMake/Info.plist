@@ -7,7 +7,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleDisplayName</key>
-	<string>Scan to Make</string>
+	<string>Counterpart</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -51,13 +51,13 @@
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>To find your Mac, Scan to Make needs to look on your Wi-Fi.</string>
+	<string>To find your Mac, Counterpart needs to look on your Wi-Fi.</string>
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_scantomake._tcp</string>
 	</array>
 	<key>NSCameraUsageDescription</key>
-	<string>Scan to Make uses the camera and LiDAR Scanner to scan the object you want to print, and to read the code on your Mac when you pair.</string>
+	<string>Counterpart uses the camera and LiDAR Scanner to scan the object you want to print, and to read the code on your Mac when you pair.</string>
 	<key>RCTNewArchEnabled</key>
 	<true/>
 	<key>UIApplicationSceneManifest</key>

@@ -56,7 +56,7 @@ export class ObjectService {
 
   #gate<T>(id: string, action: () => Promise<T>): Promise<T> {
     const next = (this.#gates.get(id) ?? Promise.resolve()).catch(() => undefined).then(() => {
-      if (this.#closed) throw new InvalidStateError('Scan to Make is shutting down on this Mac.');
+      if (this.#closed) throw new InvalidStateError('Counterpart is shutting down on this Mac.');
       return action();
     });
     this.#gates.set(id, next);

@@ -119,7 +119,7 @@ it('recovery copy never repeats what your Mac sent, and says what to do', () => 
 it('Find your Mac opens on the viewfinder: point at the code and it pairs', async () => {
   const { tree, native, onDone } = await unpaired();
   expect(text(tree)).toContain('Find your Mac');
-  expect(text(tree)).toContain('Point at the code in Scan to Make on your Mac');
+  expect(text(tree)).toContain('Point at the code in Counterpart on your Mac');
   expect(viewfinder(tree).props.active).toBe(true);
   await scanned(tree, qrLink());
   expect(native.pair).toHaveBeenCalledWith(
@@ -169,7 +169,7 @@ it('pairWithInvitation uses the address list and key pin for v2, and the single 
   await pairWithInvitation(native, { baseUrl: addresses[0], code, addresses, publicKeySha256: 'b'.repeat(64) }, 'Phone');
   expect(native.pairAddresses).toHaveBeenCalledWith(addresses, code, 'Phone', 'b'.repeat(64));
   expect(native.pair).toHaveBeenCalledTimes(2);
-  expect(pairingError({ code: 'unsupported-invitation' })).toMatch(/newer Scan to Make/);
+  expect(pairingError({ code: 'unsupported-invitation' })).toMatch(/newer Counterpart/);
 });
 
 it('a code the camera sees many times is used once', async () => {
@@ -195,7 +195,7 @@ it('the first code for a Mac on this Wi-Fi explains the local network question f
   await scanned(tree, qrLink({ lan: true }));
   expect(native.pair).not.toHaveBeenCalled();
   expect(text(tree)).toContain(
-    'To find your Mac, Scan to Make needs to look on your Wi-Fi.',
+    'To find your Mac, Counterpart needs to look on your Wi-Fi.',
   );
   await press(tree, 'Continue');
   expect(native.pair).toHaveBeenCalledWith(
@@ -222,7 +222,7 @@ it('the first v2 code also explains the local network question first', async () 
   expect(native.pairAddresses).not.toHaveBeenCalled();
   expect(native.pair).not.toHaveBeenCalled();
   expect(text(tree)).toContain(
-    'To find your Mac, Scan to Make needs to look on your Wi-Fi.',
+    'To find your Mac, Counterpart needs to look on your Wi-Fi.',
   );
   await press(tree, 'Continue');
   expect(native.pairAddresses).toHaveBeenCalledWith(
@@ -268,7 +268,7 @@ it('a refused camera points to Settings', async () => {
   await act(async () =>
     viewfinder(tree).props.onState({ nativeEvent: { state: 'denied' } }),
   );
-  expect(text(tree)).toContain('Scan to Make can’t use the camera.');
+  expect(text(tree)).toContain('Counterpart can’t use the camera.');
   await press(tree, 'Open Settings');
   expect(open).toHaveBeenCalled();
   open.mockRestore();

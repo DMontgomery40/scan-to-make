@@ -1,4 +1,6 @@
-# Scan to Make
+# Counterpart
+
+The app's name is Counterpart (formerly Scan to Make; internal identifiers such as the bundle id and folders keep the old name). Docs: https://counterpart.dtmont.com/
 
 An open-source iPhone and iPad app that scans a real object with LiDAR and cleans up the scan's defects. Product scope: "this app is so you can scan an object USING LIDAR on iphone. and then smooth out defects and such. but really anything after that is already built and downloaded by 10k people a month and it's my bambu mcp. later we may add mcp 3d printer. actually, may as well just have that be an option from the get go."
 
@@ -17,6 +19,7 @@ The app requires iOS 27. Scanning needs a device with LiDAR (iPhone Pro or iPad 
 | Capture conversion | Offline USDZ → OBJ with authored-unit provenance, input checks and bounds evaluation | [`tools/capture-mesh-convert/`](tools/capture-mesh-convert/), [`tools/capture-pipeline/`](tools/capture-pipeline/), [`tools/capture-fit-eval/`](tools/capture-fit-eval/) |
 | Scan cleanup | Headless Blender repair, measurement and views; close-up-guided correction | [`tools/scan-repair/`](tools/scan-repair/), [`tools/scan-correct/`](tools/scan-correct/) |
 | Private companion path | Read-only Tailscale preflight and setup notes | [`tools/tailscale/`](tools/tailscale/), [`docs/tailscale-setup.md`](docs/tailscale-setup.md) |
+| Docs site | Public docs at counterpart.dtmont.com, served by a Cloudflare Worker | [`site/`](site/) (`npx wrangler@4 deploy --config site/wrangler.jsonc`) |
 | Licence audit | Dependency licence allowlist and mobile third-party notices | [`tools/licence-audit/`](tools/licence-audit/) |
 
 ## Still open

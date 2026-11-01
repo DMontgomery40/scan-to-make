@@ -61,6 +61,6 @@ final class ObjectWordsTests: XCTestCase {
     }
 
     func testUnknownStatesFromANewerMacStillDecode() {
-        XCTAssertEqual(ObjectWords(object(["state": "something-new"])).status, "Update Scan to Make to see this one.")
+        XCTAssertEqual(ObjectWords(object(["state": "something-new"])).status, "Update Counterpart to see this one.")
     }
 }

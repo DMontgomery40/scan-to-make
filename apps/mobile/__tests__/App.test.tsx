@@ -24,7 +24,7 @@ test('the shell shows the native app, and says what it needs where there is none
   jest.spyOn(Linking, 'getInitialURL').mockResolvedValue(null);
   const tree = await render();
   // Jest has no native SwiftUI view, so the shell's fallback shows.
-  expect(texts(tree)).toContain('Scan to Make needs an iPhone or iPad.');
+  expect(texts(tree)).toContain('Counterpart needs an iPhone or iPad.');
   expect(tree.root.findAllByType(Modal)).toHaveLength(0);
   await act(async () => tree.unmount());
 });

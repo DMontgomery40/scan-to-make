@@ -44,7 +44,7 @@ function ObjectsApp(props: ObjectsAppProps) {
   if (NativeObjectsApp) return <NativeObjectsApp {...props} />;
   return (
     <View style={[props.style, styles.unavailable]}>
-      <Text style={type.body}>Scan to Make needs an iPhone or iPad.</Text>
+      <Text style={type.body}>Counterpart needs an iPhone or iPad.</Text>
     </View>
   );
 }
