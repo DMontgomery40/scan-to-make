@@ -1,11 +1,26 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp, mkdir, copyFile, writeFile, readFile, realpath, rm} from 'node:fs/promises';
+import {mkdtemp, mkdir, copyFile, writeFile, readFile, realpath, rm, chmod} from 'node:fs/promises';
+import {existsSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {spawnSync} from 'node:child_process';
 
-async function runAgent(t, workerEnvironment = {}, configuration = '') {
+/** A login shell whose PATH is `path`, running the agent's own command (`-ilc <script>`) after `before`. */
+async function fakeShell(root, path, before = '') {
+  const shell = join(root, 'fake-shell');
+  await writeFile(shell, `#!/bin/sh\nPATH='${path}'; export PATH\nexec /bin/sh -c "${before}$2"\n`);
+  await chmod(shell, 0o755);
+  return shell;
+}
+async function fakeClaude(path) {
+  await mkdir(join(path, '..'), {recursive:true});
+  await writeFile(path, '#!/bin/sh\n');
+  await chmod(path, 0o755);
+  return path;
+}
+
+async function runAgent(t, workerEnvironment = {}, configuration = '', prepare = async () => ({})) {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'stm-runtime-')));
   t.after(() => rm(root, {recursive:true, force:true}));
   const resources = join(root, 'Resources');
@@ -22,11 +37,15 @@ async function runAgent(t, workerEnvironment = {}, configuration = '') {
       JSON.stringify(Object.fromEntries(Object.entries(process.env).filter(([key]) =>
         key.startsWith('SCAN_TO_MAKE_') || key === 'BLENDER'))));
   `);
+  // Hermetic: this Mac's own HOME, login shell and Claude never leak into the result.
+  const home = join(root, 'home');
+  await mkdir(home);
+  const extra = {SHELL:await fakeShell(root, join(root, 'empty')), ...await prepare({root, home})};
   const result = spawnSync(process.execPath, [join(resources, 'agent.mjs'), 'serve'], {
-    env:{STM_STATE:state, PATH:process.env.PATH}, timeout:5000, encoding:'utf8',
+    env:{STM_STATE:state, PATH:process.env.PATH, HOME:home, ...extra}, timeout:10000, encoding:'utf8',
   });
   assert.equal(result.status, 0, result.stderr);
-  return {env:JSON.parse(await readFile(join(state, 'receipt.json'), 'utf8')), resources, state};
+  return {env:JSON.parse(await readFile(join(state, 'receipt.json'), 'utf8')), resources, state, root, home};
 }
 
 test('fresh agent uses bundled Python without inventing optional worker paths', async t => {
@@ -60,6 +79,50 @@ test('explicit companion configuration overrides migrated worker paths', async t
   }, 'SCAN_TO_MAKE_CAPTURE_PYTHON=/chosen/python3\nSCAN_TO_MAKE_SCAN_REPAIR_TOOL=/chosen/repair.py\n');
   assert.equal(env.SCAN_TO_MAKE_CAPTURE_PYTHON, '/chosen/python3');
   assert.equal(env.SCAN_TO_MAKE_SCAN_REPAIR_TOOL, '/chosen/repair.py');
+});
+
+test('objects get the Claude Code the user runs in their login shell', async t => {
+  let claude;
+  const {env} = await runAgent(t, {}, '', async ({root, home}) => {
+    claude = await fakeClaude(join(root, 'shell bin/claude'));
+    await fakeClaude(join(home, '.local/bin/claude'));
+    return {SHELL:await fakeShell(root, join(root, 'shell bin'))};
+  });
+  assert.equal(env.SCAN_TO_MAKE_CLAUDE_PATH, claude, 'the shell decides which installed claude is the user\'s');
+});
+
+for (const place of ['.local/bin/claude', '.claude/local/claude']) {
+  test(`objects find Claude Code in ~/${place} when the login shell has none`, async t => {
+    let claude;
+    const {env} = await runAgent(t, {}, '', async ({root, home}) => {
+      claude = await fakeClaude(join(home, place));
+      // An alias is not a path the companion can run.
+      return {SHELL:await fakeShell(root, join(root, 'empty'), "alias claude='npx claude'; ")};
+    });
+    assert.equal(env.SCAN_TO_MAKE_CLAUDE_PATH, claude);
+  });
+}
+
+test('an explicit absolute Claude path wins; a relative one is never passed on', async t => {
+  const chosen = await runAgent(t, {}, 'SCAN_TO_MAKE_CLAUDE_PATH=/chosen/claude\n', async ({home}) => {
+    await fakeClaude(join(home, '.local/bin/claude'));
+    return {};
+  });
+  assert.equal(chosen.env.SCAN_TO_MAKE_CLAUDE_PATH, '/chosen/claude');
+  const relative = await runAgent(t, {}, 'SCAN_TO_MAKE_CLAUDE_PATH=claude\n', async ({home}) => {
+    await fakeClaude(join(home, '.local/bin/claude'));
+    return {};
+  });
+  assert.equal(relative.env.SCAN_TO_MAKE_CLAUDE_PATH, join(relative.home, '.local/bin/claude'));
+});
+
+test('without Claude Code installed, objects stay off instead of getting a broken path', async t => {
+  if (['/opt/homebrew/bin/claude', '/usr/local/bin/claude'].some(path => existsSync(path))) {
+    t.skip('this Mac has a system-wide claude');
+    return;
+  }
+  const {env} = await runAgent(t);
+  assert.equal(env.SCAN_TO_MAKE_CLAUDE_PATH, undefined);
 });
 
 for (const transport of ['tailscale', undefined, 'lan']) {
