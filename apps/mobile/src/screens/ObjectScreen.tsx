@@ -6,7 +6,6 @@ import {
   StyleSheet,
   Text,
   View,
-  useWindowDimensions,
 } from 'react-native';
 import { Button, Field, Screen } from '../ui/components';
 import { colors, radius, space, type } from '../ui/theme';
@@ -29,7 +28,7 @@ const TONE = {
 };
 
 /** Keeps one object up to date: polls while it is busy and the app is in front. */
-export function useObject(client: ObjectsClient, id: string) {
+export function useObject(client: ObjectsClient, id: string, refreshKey = 0) {
   const [object, setObject] = useState<StmObject | null>(null);
   const [error, setError] = useState<ObjectsError | null>(null);
   const load = useCallback(async () => {
@@ -42,12 +41,12 @@ export function useObject(client: ObjectsClient, id: string) {
   }, [client, id]);
   useEffect(() => {
     load();
-  }, [load]);
+  }, [load, refreshKey]);
   const busy = object ? describeObject(object).busy : false;
   useEffect(() => {
     if (!busy) return;
     const timer = setInterval(() => {
-      if (AppState.currentState === 'active') load();
+      if (AppState.currentState !== 'background') load();
     }, POLL_MS);
     return () => clearInterval(timer);
   }, [busy, load]);
@@ -62,7 +61,8 @@ function Renders({
   object: StmObject;
 }) {
   const [uris, setUris] = useState<string[]>([]);
-  const { width } = useWindowDimensions();
+  // The space this page actually has (one pane of two on a wide screen).
+  const [size, setSize] = useState(0);
   const renders = object.current?.renders ?? [];
   const key = `${object.id}:${object.updatedAtMs}:${renders.join()}`;
   useEffect(() => {
@@ -76,10 +76,15 @@ function Renders({
     // The key covers the object version and its renders.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]);
-  const size = Math.min(width - space.xl * 2, 560);
   return (
-    <View style={[styles.plate, { height: size }]}>
-      {uris.length ? (
+    <View
+      testID="render-plate"
+      onLayout={event =>
+        setSize(Math.round(Math.min(event.nativeEvent.layout.width, 560)))
+      }
+      style={[styles.plate, size ? { height: size } : styles.plateUnmeasured]}
+    >
+      {uris.length && size ? (
         <ScrollView
           horizontal
           pagingEnabled
@@ -92,6 +97,7 @@ function Renders({
               source={{ uri }}
               resizeMode="contain"
               accessibilityIgnoresInvertColors
+              testID="render-image"
               style={{ width: size, height: size }}
             />
           ))}
@@ -145,15 +151,21 @@ export function ObjectScreen({
   id,
   onBack,
   onPair,
+  onChanged,
+  refreshKey = 0,
 }: {
   client: ObjectsClient;
   capture: ObjectCapture;
   id: string;
+  /** Called after an action changes the object, so the list can follow. */
+  onChanged?: () => void;
+  /** Bumped by the app after pairing again, to load afresh. */
+  refreshKey?: number;
   /** Absent in the two-pane layout, where the list stays on screen. */
   onBack?: () => void;
   onPair: () => void;
 }) {
-  const { object, setObject, error, load } = useObject(client, id);
+  const { object, setObject, error, load } = useObject(client, id, refreshKey);
   const [working, setWorking] = useState<ObjectAction | 'turn' | null>(null);
   const [problem, setProblem] = useState<ObjectsError | null>(null);
   const [note, setNote] = useState('');
@@ -177,6 +189,7 @@ export function ObjectScreen({
       const next = await work();
       if (next) setObject(next);
       else await load();
+      onChanged?.();
     } catch (e) {
       setProblem(e instanceof ObjectsError ? e : new ObjectsError('failed'));
     } finally {
@@ -188,7 +201,8 @@ export function ObjectScreen({
   // A scan that finished but wasn't sent (the app was closed) goes now.
   useEffect(() => {
     if (!object || resumed.current) return;
-    if (object.state !== 'new' || object.scan || object.photos.length) return;
+    // Any new object: the bridge sends only what the Mac doesn't have yet.
+    if (object.state !== 'new') return;
     resumed.current = true;
     capture.finished(object.id).then(runID => {
       if (runID) run('scan', () => client.sendCapture(object.id, runID));
@@ -310,6 +324,26 @@ export function ObjectScreen({
         }
       />
     ) : null,
+    finishSending: (
+      <Button
+        key="finishSending"
+        label={
+          working === 'finishSending'
+            ? 'Sending to your Mac…'
+            : 'Finish sending'
+        }
+        variant="secondary"
+        disabled={!!working}
+        onPress={() =>
+          run('finishSending', async () => {
+            const runID = await capture.finished(object.id);
+            return runID
+              ? client.sendCapture(object.id, runID)
+              : client.start(object.id);
+          })
+        }
+      />
+    ),
     makeIt: (
       <Button
         key="makeIt"
@@ -350,11 +384,13 @@ export function ObjectScreen({
           {object.current.summary}
         </Text>
       ) : null}
-      {problem ? (
+      {problem || error ? (
         <View accessibilityLiveRegion="assertive" style={styles.problem}>
-          <Text style={styles.problemText}>{problem.message}</Text>
-          {problem.kind === 'pairing' ? (
+          <Text style={styles.problemText}>{(problem ?? error)!.message}</Text>
+          {(problem ?? error)!.kind === 'pairing' ? (
             <Button label="Connect to your Mac" onPress={onPair} />
+          ) : !problem ? (
+            <Button label="Try again" variant="secondary" onPress={load} />
           ) : null}
         </View>
       ) : null}
@@ -404,6 +440,7 @@ export function ObjectScreen({
 }
 
 const styles = StyleSheet.create({
+  plateUnmeasured: { aspectRatio: 1 },
   plate: {
     backgroundColor: colors.viewport,
     borderRadius: radius.lg,

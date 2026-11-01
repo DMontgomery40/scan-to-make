@@ -96,7 +96,7 @@ export function ObjectsScreen({
   useEffect(() => {
     if (!busy) return;
     const timer = setInterval(() => {
-      if (AppState.currentState === 'active') load();
+      if (AppState.currentState !== 'background') load();
     }, POLL_MS);
     return () => clearInterval(timer);
   }, [busy, load]);

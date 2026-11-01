@@ -1,6 +1,7 @@
 import type { StmObject } from './types';
 
 export type ObjectAction =
+  | 'finishSending'
   | 'scan'
   | 'makeIt'
   | 'printChecked'
@@ -57,8 +58,9 @@ export function describeObject(object: StmObject): ObjectView {
   ): ObjectView => ({ title, status, tone, actions, busy, size });
   switch (object.state) {
     case 'new':
+      // A send that stopped part way can always be finished from here.
       if (object.scan || object.photos.length)
-        return view('Sending to your Mac…', 'pending', [], true);
+        return view('Sending to your Mac…', 'pending', ['finishSending'], true);
       return view(
         'Waiting for a scan or photos.',
         'neutral',

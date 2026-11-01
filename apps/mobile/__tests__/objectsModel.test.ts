@@ -162,3 +162,9 @@ it('a print that may already have started asks the user to check the printer fir
   });
   expect(view.actions).toEqual(['printChecked', 'correct']);
 });
+
+it('a send that stopped part way can be finished', () => {
+  expect(describeObject({ ...base, scan: 'scan.usdz' }).actions).toEqual([
+    'finishSending',
+  ]);
+});

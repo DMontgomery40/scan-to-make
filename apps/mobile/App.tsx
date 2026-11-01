@@ -162,6 +162,8 @@ function App({
       id={id}
       onBack={back}
       onPair={pair}
+      refreshKey={pairingKey}
+      onChanged={() => setRefreshKey(key => key + 1)}
     />
   );
 

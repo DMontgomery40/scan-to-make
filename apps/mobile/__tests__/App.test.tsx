@@ -369,3 +369,119 @@ test('a wide window shows the list and the page side by side', async () => {
   expect(shown).toContain('62 × 75 × 49 mm');
   expect(shown).not.toContain('‹ Back');
 });
+
+test('a scan that only partly reached the Mac finishes sending by itself', async () => {
+  const mac = fakeMac([{ id: ID, scan: 'scan.usdz', state: 'new' }]);
+  const capture = fakeCapture();
+  (capture.finished as jest.Mock).mockResolvedValue(
+    '11111111-2222-4333-8444-555555555555',
+  );
+  const tree = await render(<App objects={mac.client} capture={capture} />);
+  await press(tree, 'Copy of your scan. Sending to your Mac…');
+  expect(mac.native.sendCapture).toHaveBeenCalledWith(
+    expect.objectContaining({ objectId: ID }),
+  );
+  expect(mac.calls).toContain(`POST /v1/objects/${ID}/start`);
+});
+
+test('a stuck send offers to finish sending when the scan is not on this phone', async () => {
+  const mac = fakeMac([{ id: ID, scan: 'scan.usdz', state: 'new' }]);
+  const tree = await render(
+    <App objects={mac.client} capture={fakeCapture()} />,
+  );
+  await press(tree, 'Copy of your scan. Sending to your Mac…');
+  await press(tree, 'Finish sending');
+  expect(mac.calls).toContain(`POST /v1/objects/${ID}/start`);
+});
+
+test('when the Mac stops answering, the page says so next to what it last showed', async () => {
+  jest.useFakeTimers({
+    doNotFake: ['nextTick', 'setImmediate', 'queueMicrotask'],
+  });
+  try {
+    const mac = fakeMac([{ ...ready, state: 'touching-up' }]);
+    const tree = await render(
+      <App objects={mac.client} capture={fakeCapture()} />,
+    );
+    await press(
+      tree,
+      "Copy of your scan. Touching up your scan. This can take a few minutes. We'll let you know when it's ready.",
+    );
+    (mac.native.call as jest.Mock).mockRejectedValue(
+      Object.assign(new Error('x'), { code: 'unreachable' }),
+    );
+    await act(async () => {
+      jest.advanceTimersByTime(3100);
+    });
+    const shown = texts(tree);
+    expect(shown).toContain(
+      "Your Mac isn't answering. Check it's on and awake, then try again.",
+    );
+    expect(shown).toContain('62 × 75 × 49 mm');
+  } finally {
+    jest.useRealTimers();
+  }
+});
+
+test('in the wide layout the list follows what happens on the page', async () => {
+  mockWindowWidth = 900;
+  const mac = fakeMac([ready]);
+  const tree = await render(
+    <App objects={mac.client} capture={fakeCapture()} />,
+  );
+  await press(tree, 'Copy of your scan. Ready to print');
+  await press(tree, 'Print');
+  const rows = buttons(tree)
+    .map(n => n.props.accessibilityLabel)
+    .filter(Boolean);
+  expect(rows).toContain('Copy of your scan. Printing');
+});
+
+test('renders fit the space they are given, not the whole window', async () => {
+  mockWindowWidth = 900;
+  const mac = fakeMac([ready]);
+  const tree = await render(
+    <App objects={mac.client} capture={fakeCapture()} />,
+  );
+  await press(tree, 'Copy of your scan. Ready to print');
+  const plate = tree.root.find(n => n.props.testID === 'render-plate');
+  await act(async () =>
+    plate.props.onLayout({
+      nativeEvent: { layout: { width: 420, height: 420 } },
+    }),
+  );
+  const image = tree.root.find(n => n.props.testID === 'render-image');
+  expect(image.props.style).toMatchObject({ width: 420, height: 420 });
+});
+
+test('after connecting again, an open page loads by itself', async () => {
+  const { ObjectScreen } = require('../src/screens/ObjectScreen');
+  const mac = fakeMac([ready], { failWith: 'pairing-required' });
+  const capture = fakeCapture();
+  const tree = await render(
+    <ObjectScreen
+      client={mac.client}
+      capture={capture}
+      id={ID}
+      onPair={() => {}}
+      refreshKey={0}
+    />,
+  );
+  expect(texts(tree)).toContain('Connect to your Mac again.');
+  (mac.native.call as jest.Mock).mockImplementation(async () => ({
+    status: 200,
+    body: JSON.stringify({ object: mac.objects.get(ID) }),
+  }));
+  await act(async () =>
+    tree.update(
+      <ObjectScreen
+        client={mac.client}
+        capture={capture}
+        id={ID}
+        onPair={() => {}}
+        refreshKey={1}
+      />,
+    ),
+  );
+  expect(texts(tree)).toContain('62 × 75 × 49 mm');
+});
