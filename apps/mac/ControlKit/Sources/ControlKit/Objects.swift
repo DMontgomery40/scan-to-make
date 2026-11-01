@@ -40,6 +40,22 @@ public struct StmObject: Decodable, Sendable, Identifiable, Equatable {
         }
     }
     public struct Question: Decodable, Sendable, Equatable { public let closeup: String? }
+    /// The printer MCP's original human confirmation, tied to one pending request.
+    public struct PrintConfirmation: Decodable, Sendable, Equatable, Identifiable {
+        public struct Field: Decodable, Sendable, Equatable {
+            public let name: String, title: String
+            public let description: String?
+            public let required: Bool
+        }
+        public let id: String, message: String
+        public let expiresAtMs: Double
+        public let fields: [Field]
+        public let supported: Bool
+
+        public func canAccept(_ content: [String: Bool], at nowMs: Double) -> Bool {
+            supported && expiresAtMs > nowMs && fields.allSatisfy { !$0.required || content[$0.name] == true }
+        }
+    }
     /// Set while a print waits for the user: something is on the plate, or the printer has no camera.
     public struct Plate: Decodable, Sendable, Equatable {
         public let item: String?
@@ -67,6 +83,7 @@ public struct StmObject: Decodable, Sendable, Identifiable, Equatable {
     public let current: Current?
     public let question: Question?
     public let plate: Plate?
+    public let printConfirmation: PrintConfirmation?
     public let failure: String?
     public let print: Print?
     public let printerDestinationId: String?
@@ -74,7 +91,7 @@ public struct StmObject: Decodable, Sendable, Identifiable, Equatable {
     public let directory: String
 
     private enum CodingKeys: String, CodingKey {
-        case id, createdAtMs, updatedAtMs, instructions, state, scan, photos, capture, progress, passes, current, question, plate, failure, print, printerDestinationId, directory
+        case id, createdAtMs, updatedAtMs, instructions, state, scan, photos, capture, progress, passes, current, question, plate, printConfirmation, failure, print, printerDestinationId, directory
     }
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
@@ -91,6 +108,7 @@ public struct StmObject: Decodable, Sendable, Identifiable, Equatable {
         current = try values.decodeIfPresent(Current.self, forKey: .current)
         question = try values.decodeIfPresent(Question.self, forKey: .question)
         plate = try values.decodeIfPresent(Plate.self, forKey: .plate)
+        printConfirmation = try values.decodeIfPresent(PrintConfirmation.self, forKey: .printConfirmation)
         failure = try values.decodeIfPresent(String.self, forKey: .failure)
         print = try values.decodeIfPresent(Print.self, forKey: .print)
         printerDestinationId = try values.decodeIfPresent(String.self, forKey: .printerDestinationId)
@@ -162,6 +180,32 @@ public extension ControlClient {
     /// The user says the plate is clear: the printer has no camera, or the check saw something that isn't there.
     func answerPlate(_ id: String) async throws -> StmObject {
         let result: ObjectReply = try await call("objects.answerPlate", ["id": .string(id)]); return result.object
+    }
+    func answerPrintConfirmation(_ id: String, confirmationId: String, answer: PrintConfirmationAnswer) async throws -> StmObject {
+        var value: [String: JSONValue] = ["action": .string(answer.action.rawValue)]
+        if let content = answer.content { value["content"] = .object(content.mapValues(JSONValue.bool)) }
+        let result: ObjectReply = try await call("objects.answerPrintConfirmation", [
+            "id": .string(id), "confirmationId": .string(confirmationId), "answer": .object(value)
+        ])
+        return result.object
+    }
+}
+
+public struct PrintConfirmationAnswer: Sendable, Equatable {
+    public enum Action: String, Sendable { case accept, decline, cancel }
+    public let action: Action
+    public let content: [String: Bool]?
+    public init(action: Action, content: [String: Bool]? = nil) { self.action = action; self.content = content }
+}
+
+/// Local checkbox state belongs to one question; camera analysis never populates it.
+public struct PrintConfirmationDraft: Sendable, Equatable {
+    public let confirmationId: String
+    public var values: [String: Bool] = [:]
+    public init(_ question: StmObject.PrintConfirmation) { confirmationId = question.id }
+    public func answer(for question: StmObject.PrintConfirmation, at nowMs: Double) -> PrintConfirmationAnswer? {
+        guard question.id == confirmationId, question.canAccept(values, at:nowMs) else { return nil }
+        return PrintConfirmationAnswer(action:.accept, content:question.fields.reduce(into:[:]) { $0[$1.name] = values[$1.name] ?? false })
     }
 }
 

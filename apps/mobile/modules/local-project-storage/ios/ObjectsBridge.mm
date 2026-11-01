@@ -30,7 +30,7 @@ static NSString *STMObjectsPath(NSString *path, NSString *method) {
   if ([method isEqual:@"DELETE"] && STMObjectsMatches(path, one)) return @"captures:import";
   if ([method isEqual:@"POST"] && STMObjectsMatches(path, @"/v1/objects")) return @"captures:import";
   if ([method isEqual:@"POST"] && STMObjectsMatches(path, [one stringByAppendingString:@"/(start|corrections|closeup)"])) return @"captures:import";
-  if ([method isEqual:@"POST"] && STMObjectsMatches(path, [one stringByAppendingString:@"/(print|plate|printer)"])) return @"printer-handoff:use";
+  if ([method isEqual:@"POST"] && STMObjectsMatches(path, [one stringByAppendingString:@"/(print|plate|printer|print-confirmation)"])) return @"printer-handoff:use";
   return nil;
 }
 /** The record, if it is current: unexpired and holding the scope. */

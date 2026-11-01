@@ -190,7 +190,7 @@ export function createControlDispatcher(services: ControlServices) {
           return {answered:true};
         }
         case 'doors.prepare': return await prepareDoor(parameters[method].parse(raw));
-        case 'objects.list': case 'objects.printers': case 'objects.selectPrinter': case 'objects.get': case 'objects.passActivity': case 'objects.start': case 'objects.delete': case 'objects.correct': case 'objects.answerCloseup': case 'objects.print': case 'objects.answerPlate': {
+        case 'objects.list': case 'objects.printers': case 'objects.selectPrinter': case 'objects.get': case 'objects.passActivity': case 'objects.start': case 'objects.delete': case 'objects.correct': case 'objects.answerCloseup': case 'objects.print': case 'objects.answerPlate': case 'objects.answerPrintConfirmation': {
           const objects = services.objects;
           if (!objects) throw new ControlFailure('unavailable');
           try {
@@ -203,6 +203,10 @@ export function createControlDispatcher(services: ControlServices) {
               return {activity: await objects.passActivity(id, index)};
             }
             if (method === 'objects.delete') { await objects.delete((parameters[method].parse(raw) as {id: string}).id); return {deleted: true}; }
+            if (method === 'objects.answerPrintConfirmation') {
+              const {id, confirmationId, answer} = parameters[method].parse(raw);
+              return {object: local(await objects.answerPrintConfirmation(id, confirmationId, answer))};
+            }
             const params = parameters[method].parse(raw) as {id: string; destinationId?: string; note?: string; bestGuess?: boolean; checked?: boolean};
             const object = method === 'objects.get' ? await objects.get(params.id)
               : method === 'objects.selectPrinter' ? await objects.selectPrinter(params.id, params.destinationId!)

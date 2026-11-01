@@ -6,7 +6,7 @@ import type {PrintHandoffServices} from '../print-handoff-http.js';
 import type {PlateVerdict} from './bedcheck.js';
 import type {TouchupInput} from '../touchup/touchup.js';
 import {publicTouchupText, type TouchupActivity, type TouchupResult} from '../touchup/runner.js';
-import {ObjectNotFoundError, ObjectStore, type StmObject} from './store.js';
+import {ObjectNotFoundError, ObjectStore, type ObjectPrintConfirmation, type StmObject} from './store.js';
 import {macReconstructRunner, type Reconstruct} from './reconstruct.js';
 import type {PrinterCatalog} from './printers.js';
 
@@ -60,12 +60,29 @@ export interface ObjectServiceDeps {
   };
 }
 
-/** The printer MCP's own confirmation is a form of booleans; answering it means setting each to true. */
-function confirmAnswer(schema: unknown): Record<string, boolean> | undefined {
-  const properties = (schema as {properties?: Record<string, {type?: string}>} | undefined)?.properties;
-  if (!properties || !Object.keys(properties).length) return {};
-  if (!Object.values(properties).every(property => property.type === 'boolean')) return undefined;
-  return Object.fromEntries(Object.keys(properties).map(key => [key, true]));
+export type ObjectPrintAnswer = {action: 'accept'; content: Record<string, boolean>} | {action: 'decline' | 'cancel'; content?: never};
+const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
+
+/** Preserve the question; support only the boolean form we can faithfully show and answer. */
+function printQuestion(pending: PendingElicitation): ObjectPrintConfirmation {
+  const question: ObjectPrintConfirmation = {id: pending.id, message: pending.message, expiresAtMs: pending.expiresAtMs, fields: [], supported: false};
+  const schema = pending.requestedSchema;
+  if (pending.mode !== 'form' || !record(schema) || schema.type !== 'object' || !record(schema.properties)
+      || Object.keys(schema).some(key => !['type', 'properties', 'required', 'additionalProperties', 'title', 'description'].includes(key))
+      || (schema.additionalProperties !== undefined && typeof schema.additionalProperties !== 'boolean')) return question;
+  const required = schema.required ?? [];
+  if (!Array.isArray(required) || required.some(key => typeof key !== 'string' || !Object.hasOwn(schema.properties as object, key))) return question;
+  const fields: ObjectPrintConfirmation['fields'] = [];
+  for (const [name, property] of Object.entries(schema.properties)) {
+    if (!name.length || name.length > 128 || !record(property) || property.type !== 'boolean'
+        || Object.keys(property).some(key => !['type', 'title', 'description', 'default'].includes(key))
+        || (property.title !== undefined && typeof property.title !== 'string')
+        || (property.description !== undefined && typeof property.description !== 'string')
+        || (property.default !== undefined && typeof property.default !== 'boolean')) return question;
+    fields.push({name, title: typeof property.title === 'string' ? property.title : name,
+      ...(typeof property.description === 'string' ? {description: property.description} : {}), required: required.includes(name)});
+  }
+  return fields.length ? {...question, fields, supported: true} : question;
 }
 
 function toolProgress(name: string): string {
@@ -85,7 +102,8 @@ export class ObjectService {
   readonly #deps: ObjectServiceDeps;
   readonly #running = new Map<string, Promise<StmObject>>();
   readonly #controllers = new Map<string, AbortController>();
-  readonly #confirmations = new Map<string, {pending: PendingElicitation; printing: NonNullable<ObjectServiceDeps['print']>}>();
+  readonly #confirmations = new Map<string, {pending: PendingElicitation; printing: NonNullable<ObjectServiceDeps['print']>; timer: ReturnType<typeof setTimeout>}>();
+  readonly #cancelledPrints = new Set<string>();
   /** One action at a time per object, so a double tap can't start the same work twice. */
   readonly #gates = new Map<string, Promise<unknown>>();
   #closed = false;
@@ -105,6 +123,7 @@ export class ObjectService {
   async close(): Promise<void> {
     this.#closed = true;
     for (const controller of this.#controllers.values()) controller.abort();
+    for (const confirmation of this.#confirmations.values()) confirmation.printing.services.relay.respond(confirmation.pending.id, {action: 'cancel'});
     await Promise.allSettled([...this.#gates.values(), ...this.#running.values()]);
   }
 
@@ -290,55 +309,103 @@ export class ObjectService {
     const stl = await readFile(join(this.#deps.store.dir(id), object.current.model));
     const manifest = await bundles.create({stl, prompt: '', backend: runner.backend, ...(selection ? {selection} : {})});
     const print = {bundleId: manifest.id, ...(printDestination ? {destination: printDestination} : {})};
-    const started = await this.#deps.store.update(id, o => ({...o, state: 'printing', print, plate: undefined, failure: undefined}));
+    const started = await this.#deps.store.update(id, o => ({...o, state: 'printing', print, plate: undefined, printConfirmation: undefined, failure: undefined}));
     // Only this print's questions: other prints share the relay.
-    const unsubscribe = relay.subscribe(pending => { if (pending.bundleId === manifest.id) void this.#confirm(id, pending, printing); });
+    const unsubscribe = relay.subscribe(pending => {
+      if (pending.bundleId === manifest.id) void this.#confirm(id, pending, printing).catch(() => { relay.respond(pending.id, {action: 'cancel'}); });
+    });
     const controller = new AbortController();
     this.#controllers.set(id, controller);
     const work = runner.runBundle(bundles, manifest.id, {print: true, signal: controller.signal})
-      .then(() => this.#deps.store.update(id, o => ({...o, state: 'printed', plate: undefined})),
+      .then(() => this.#deps.store.update(id, o => ({...o, state: 'printed', plate: undefined, printConfirmation: undefined})),
         async error => {
           const status = (await bundles.read(manifest.id).catch(() => undefined))?.status;
           // Once the printer has the job it is printing, whatever went wrong afterwards (as the phone's print route does).
-          if (error instanceof DispatchedPrintError || status === 'printed') return this.#deps.store.update(id, o => ({...o, state: 'printed', plate: undefined}));
+          if (error instanceof DispatchedPrintError || status === 'printed') return this.#deps.store.update(id, o => ({...o, state: 'printed', plate: undefined, printConfirmation: undefined}));
           // It may have reached the printer: never send it again by itself.
-          if (status === 'uncertain') return this.#deps.store.update(id, o => ({...o, state: 'failed', plate: undefined, failure: UNCERTAIN, print: {...print, uncertain: true}}));
-          return this.#deps.store.update(id, o => ({...o, state: 'failed', plate: undefined, failure: error instanceof Error ? error.message : String(error)}));
+          if (status === 'uncertain') return this.#deps.store.update(id, o => ({...o, state: 'failed', plate: undefined, printConfirmation: undefined, failure: UNCERTAIN, print: {...print, uncertain: true}}));
+          if (this.#cancelledPrints.has(id)) return this.#deps.store.update(id, o => ({...o, state: 'ready', plate: undefined, printConfirmation: undefined, failure: undefined}));
+          return this.#deps.store.update(id, o => ({...o, state: 'failed', plate: undefined, printConfirmation: undefined, failure: error instanceof Error ? error.message : String(error)}));
         })
       .then(o => this.#changed(o))
       .finally(() => {
-        unsubscribe(); this.#running.delete(id); this.#controllers.delete(id); this.#confirmations.delete(id);
+        unsubscribe(); this.#running.delete(id); this.#controllers.delete(id);
+        clearTimeout(this.#confirmations.get(id)?.timer); this.#confirmations.delete(id);
+        this.#cancelledPrints.delete(id);
         void rm(join(this.#deps.store.dir(id), 'plate.jpg'), {force: true}).catch(() => undefined);
       });
     this.#running.set(id, work);
     return this.#changed(started);
   }
 
-  /** The user says the plate is clear (no camera, or the check saw something that isn't really there). */
-  answerPlate(id: string, answer: {clear: true}): Promise<StmObject> { return this.#gate(id, () => this.#answerPlate(id, answer)); }
-  async #answerPlate(id: string, answer: {clear: true}): Promise<StmObject> {
-    const confirmation = this.#confirmations.get(id), content = confirmation && confirmAnswer(confirmation.pending.requestedSchema);
-    if (!answer.clear || !confirmation || !content) throw new InvalidStateError('Nothing is waiting for the plate.');
-    confirmation.printing.services.relay.respond(confirmation.pending.id, {action: 'accept', content});
-    this.#confirmations.delete(id);
-    return this.#changed(await this.#deps.store.update(id, o => ({...o, plate: undefined})));
+  /** Older clients cannot turn a plate-only answer into approval of a hardware operation. */
+  async answerPlate(id: string, _answer: {clear: true}): Promise<StmObject> {
+    await this.get(id);
+    throw new InvalidStateError('Read and answer the printer confirmation in an updated app. A clear plate alone does not approve the print.');
+  }
+
+  answerPrintConfirmation(id: string, confirmationId: string, answer: unknown): Promise<StmObject> {
+    return this.#gate(id, async () => {
+      const confirmation = this.#confirmations.get(id);
+      if (!confirmation || confirmation.pending.id !== confirmationId || !this.#pending(id, confirmationId))
+        throw new InvalidStateError('That printer confirmation is no longer waiting. Refresh the project.');
+      const question = printQuestion(confirmation.pending);
+      if (!record(answer) || Object.keys(answer).some(key => !['action', 'content'].includes(key)))
+        throw new InvalidStateError('Invalid printer confirmation answer.');
+      let checked: ObjectPrintAnswer;
+      if (answer.action === 'cancel' || answer.action === 'decline') {
+        if (answer.content !== undefined) throw new InvalidStateError('Invalid printer confirmation answer.');
+        checked = {action: answer.action};
+      } else if (answer.action === 'accept' && question.supported && record(answer.content)) {
+        const content = answer.content;
+        if (Object.entries(content).some(([key, value]) => typeof value !== 'boolean' || !question.fields.some(field => field.name === key))
+            || question.fields.some(field => field.required && !Object.hasOwn(content, field.name)))
+          throw new InvalidStateError('Answer the fields in the current printer confirmation.');
+        checked = {action: 'accept', content: {...content} as Record<string, boolean>};
+      } else throw new InvalidStateError('This printer question cannot be approved here. Cancel it and use a supported confirmation form.');
+      if (checked.action !== 'accept') this.#cancelledPrints.add(id);
+      if (!confirmation.printing.services.relay.respond(confirmationId, checked)) {
+        this.#cancelledPrints.delete(id);
+        throw new InvalidStateError('That printer confirmation is no longer waiting. Refresh the project.');
+      }
+      clearTimeout(confirmation.timer);
+      this.#confirmations.delete(id);
+      return this.#changed(await this.#deps.store.update(id, o => o.printConfirmation?.id === confirmationId
+        ? {...o, printConfirmation: undefined, plate: undefined} : o));
+    });
+  }
+
+  #pending(id: string, confirmationId: string): boolean {
+    const current = this.#confirmations.get(id);
+    return current?.pending.id === confirmationId && current.pending.expiresAtMs > Date.now()
+      && current.printing.services.relay.pending().some(item => item.id === confirmationId);
   }
 
   async #confirm(id: string, pending: PendingElicitation, printing: NonNullable<ObjectServiceDeps['print']>): Promise<void> {
-    this.#confirmations.set(id, {pending, printing});
-    const content = confirmAnswer(pending.requestedSchema);
-    if (!pending.cameraSnapshot) { this.#changed(await this.#deps.store.update(id, o => ({...o, plate: {noCamera: true}}))); return; }
+    clearTimeout(this.#confirmations.get(id)?.timer);
+    const timer = setTimeout(() => {
+      void this.#gate(id, async () => {
+        if (this.#confirmations.get(id)?.pending.id !== pending.id) return;
+        this.#confirmations.delete(id);
+        this.#changed(await this.#deps.store.update(id, o => o.printConfirmation?.id === pending.id
+          ? {...o, printConfirmation: undefined, plate: undefined} : o));
+      }).catch(() => undefined);
+    }, Math.max(0, pending.expiresAtMs - Date.now()));
+    this.#confirmations.set(id, {pending, printing, timer});
+    this.#changed(await this.#deps.store.update(id, o => this.#pending(id, pending.id)
+      ? {...o, printConfirmation: printQuestion(pending), plate: pending.cameraSnapshot ? undefined : {noCamera: true}} : o));
+    if (!pending.cameraSnapshot || !this.#pending(id, pending.id)) return;
+    // Camera evidence is advisory; it never answers the MCP's human hardware confirmation.
+    const photo = await writeFile(join(this.#deps.store.dir(id), 'plate.jpg'), Buffer.from(pending.cameraSnapshot.base64, 'base64')).then(() => true, () => false);
+    if (!this.#pending(id, pending.id)) return;
+    this.#changed(await this.#deps.store.update(id, o => this.#pending(id, pending.id)
+      ? {...o, plate: {...(photo ? {photo} : {})}} : o));
     let verdict: PlateVerdict;
     try { verdict = await printing.judgePlate(pending.cameraSnapshot.base64); }
-    catch { verdict = {clear: false, item: 'something'}; }
-    if (verdict.clear && content) {
-      printing.services.relay.respond(pending.id, {action: 'accept', content});
-      this.#confirmations.delete(id);
-      return;
-    }
-    // Keep the camera photo so the phone and the Mac can show what is on the plate.
-    const photo = await writeFile(join(this.#deps.store.dir(id), 'plate.jpg'), Buffer.from(pending.cameraSnapshot.base64, 'base64')).then(() => true, () => false);
-    this.#changed(await this.#deps.store.update(id, o => ({...o, plate: {item: verdict.item?.trim() || 'something', ...(photo ? {photo} : {})}})));
+    catch { return; }
+    if (!this.#pending(id, pending.id)) return;
+    this.#changed(await this.#deps.store.update(id, o => this.#pending(id, pending.id)
+      ? {...o, plate: {...(photo ? {photo} : {}), ...(!verdict.clear ? {item: verdict.item?.trim() || 'something'} : {})}} : o));
   }
 
   /** Resolves when the object's current touch-up or print (if any) has finished. */

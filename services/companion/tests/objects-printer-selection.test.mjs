@@ -33,6 +33,7 @@ async function fixture(t) {
         calls.push({destination: destination.id, backend: bundle.backend, selection: bundle.selection});
         const answer = await relay.request({method: 'elicitation/create', params: {mode: 'form', message: 'Check the selected printer.', requestedSchema: CONFIRM}}, {bundleId: id});
         answers.push({destination: destination.id, answer});
+        if (answer.action !== 'accept') throw new Error('declined');
         return {bundleId: id};
       }}});
   }
@@ -55,7 +56,7 @@ test('selected printer dispatches through its own runner and confirmation relay;
   assert.deepEqual(printing.print.destination, {id: 'second', name: 'Other printer'});
   await until(async () => (await service.get(object.id)).plate?.noCamera);
   await assert.rejects(service.selectPrinter(object.id, 'current'), InvalidStateError);
-  await service.answerPlate(object.id, {clear: true});
+  await service.answerPrintConfirmation(object.id, (await service.get(object.id)).printConfirmation.id, {action: 'accept', content: {confirmed: true}});
   const finished = await service.settled(object.id);
   assert.equal(finished.state, 'printed');
   assert.deepEqual(calls, [{destination: 'second', backend: 'mcp-3d-printer-server', selection: {host: 'second.local'}}]);
@@ -66,9 +67,46 @@ test('selected printer dispatches through its own runner and confirmation relay;
   await service.selectPrinter(object.id, 'current');
   await service.print(object.id);
   await until(async () => (await service.get(object.id)).plate?.noCamera);
-  await service.answerPlate(object.id, {clear: true});
+  await service.answerPrintConfirmation(object.id, (await service.get(object.id)).printConfirmation.id, {action: 'accept', content: {confirmed: true}});
   await service.settled(object.id);
   assert.deepEqual(calls.map(call => call.destination), ['second', 'current']);
+});
+
+test('phone and Mac confirmation answers use the selected destination and reject legacy or stale approval', async t => {
+  const {service, object, answers} = await fixture(t);
+  await service.selectPrinter(object.id, 'second');
+  const dispatch = createControlDispatcher({auth: {}, companionVersion: 'test', objects: service});
+  await dispatch('objects.print', {id: object.id});
+  await until(async () => (await service.get(object.id)).printConfirmation);
+  const question = (await dispatch('objects.get', {id: object.id})).object.printConfirmation;
+  assert.equal(question.message, 'Check the selected printer.');
+  await assert.rejects(dispatch('objects.answerPlate', {id: object.id}), error => error.code === 'conflict');
+  await assert.rejects(dispatch('objects.answerPrintConfirmation', {id: object.id, confirmationId: '00000000-0000-4000-8000-000000000001', answer: {action: 'accept', content: {confirmed: true}}}), error => error.code === 'conflict');
+  await dispatch('objects.answerPrintConfirmation', {id: object.id, confirmationId: question.id, answer: {action: 'accept', content: {confirmed: true}}});
+  await service.settled(object.id);
+  assert.equal(answers[0].destination, 'second');
+  assert.deepEqual(answers[0].answer.content, {confirmed: true});
+
+  await service.print(object.id);
+  await until(async () => (await service.get(object.id)).printConfirmation);
+  const next = (await service.get(object.id)).printConfirmation;
+  const scopes = [], routes = createObjectRoutes(service);
+  const server = createServer(async (request, response) => {
+    try { await routes.handle(request, response, async scope => { scopes.push(scope); }, () => undefined); }
+    catch { response.writeHead(500); response.end(); }
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  const endpoint = `http://127.0.0.1:${server.address().port}/v1/objects/${object.id}/print-confirmation`;
+  const post = body => fetch(endpoint, {method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify(body)});
+  assert.equal((await post({confirmationId: question.id, answer: {action: 'accept', content: {confirmed: true}}})).status, 409);
+  assert.equal((await post({confirmationId: next.id, answer: {action: 'accept', content: {confirmed: true, other: true}}})).status, 409);
+  assert.equal(answers.length, 1);
+  assert.equal((await post({confirmationId: next.id, answer: {action: 'cancel'}})).status, 200);
+  assert.equal((await service.settled(object.id)).state, 'ready');
+  assert.equal(answers[1].destination, 'second');
+  assert.equal(answers[1].answer.action, 'cancel');
+  assert.deepEqual(scopes, ['printer-handoff:use', 'printer-handoff:use', 'printer-handoff:use']);
 });
 
 test('unknown printers and changes during a touch-up are rejected without changing the selection', async t => {

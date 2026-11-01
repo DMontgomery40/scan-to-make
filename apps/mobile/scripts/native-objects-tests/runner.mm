@@ -27,11 +27,11 @@ static NSDictionary *STMObjectsPairing(NSString *scope, NSString **code) { retur
 @implementation STMObjectsRequest
 + (void)send:(NSString *)method path:(NSString *)path body:(NSData *)body type:(NSString *)type pairing:(NSDictionary *)pairing limit:(NSUInteger)limit
         done:(void (^)(NSInteger, NSData *, NSString *))done {
-    [requests addObject:@{@"method":method,@"path":path,@"body":body ?: NSData.data,@"type":type ?: @""}];
+    [requests addObject:@{@"method":method,@"path":path,@"body":body ?: NSData.data,@"type":type ?: @"",@"scope":pairing[@"scope"] ?: @""}];
     if ([method isEqual:@"GET"]) {
         done(200,[NSJSONSerialization dataWithJSONObject:@{@"object":remoteObject} options:0 error:nil],nil); return;
     }
-    if ([path hasSuffix:@"/start"]) {
+    if ([path hasSuffix:@"/start"] || [path hasSuffix:@"/print-confirmation"]) {
         done(200,[NSJSONSerialization dataWithJSONObject:@{@"object":remoteObject} options:0 error:nil],nil); return;
     }
     NSURLComponents *url=[NSURLComponents componentsWithString:[@"https://fixture.invalid" stringByAppendingString:path]];
@@ -146,6 +146,16 @@ int main(void) { @autoreleasepool {
         NSString *oversized=[@"x" stringByPaddingToLength:128*1024 withString:@"x" startingAtIndex:0];
         [bridge callOptions:@{@"method":@"POST",@"path":[NSString stringWithFormat:@"/v1/objects/%@/start",objectID],@"json":@{@"captureManifest":oversized}} resolve:^(id r){reply=r;} reject:^(NSString*c,NSString*m,NSError*e){failure=c;}];
         Require(reply==nil && [failure isEqual:@"invalid-request"] && requests.count==0,@"start payloads above128KiB remain bounded");
+        NSString *confirmationPath=[NSString stringWithFormat:@"/v1/objects/%@/print-confirmation",objectID];
+        for (NSDictionary *answer in @[@{@"action":@"accept",@"content":@{@"plate_clear":@YES,@"watch":@NO}},@{@"action":@"cancel"}]) {
+            NSDictionary *confirmation=@{@"confirmationId":@"question-1",@"answer":answer};
+            [requests removeAllObjects]; reply=nil; failure=nil;
+            [bridge callOptions:@{@"method":@"POST",@"path":confirmationPath,@"json":confirmation} resolve:^(id r){reply=r;} reject:^(NSString*c,NSString*m,NSError*e){failure=c;}];
+            Require(reply!=nil && failure==nil && requests.count==1,@"print confirmation uses authenticated object transport");
+            Require([requests[0][@"scope"] isEqual:@"printer-handoff:use"],@"confirmation requires printer scope");
+            Require([[NSJSONSerialization JSONObjectWithData:requests[0][@"body"] options:0 error:nil] isEqual:confirmation],@"confirmation ID, action and boolean fields are unchanged");
+        }
+        Require(STMObjectsPath(confirmationPath,@"GET")==nil && STMObjectsPath(confirmationPath,@"PATCH")==nil,@"confirmation only permits POST");
         printf("NATIVE_OBJECTS_HOST_PASS full completion manifest, finished-marker guard, paired retry, source retention, legacy capture and bounded start payload\n");
     } @catch (NSException *error) {
         fprintf(stderr,"FAIL %s\n",error.reason.UTF8String); status=1;

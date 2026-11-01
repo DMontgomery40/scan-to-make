@@ -114,6 +114,10 @@ private func native(_ name: String) -> NSObject? { (NSClassFromString(name) as? 
     func closeup(_ id: String, bestGuess: Bool) async throws -> StmObject { try await request("POST", "/v1/objects/\(id)/closeup", ["bestGuess": bestGuess], as: ObjectReply.self).object }
     func print(_ id: String, checked: Bool) async throws -> StmObject { try await request("POST", "/v1/objects/\(id)/print", checked ? ["checked": true] : nil, as: ObjectReply.self).object }
     func plateClear(_ id: String) async throws -> StmObject { try await request("POST", "/v1/objects/\(id)/plate", ["clear": true], as: ObjectReply.self).object }
+    func answerPrintConfirmation(_ id: String, response: PrintConfirmationResponse) async throws -> StmObject {
+        let json = try JSONSerialization.jsonObject(with: JSONEncoder().encode(response)) as? [String: Any]
+        return try await request("POST", "/v1/objects/\(id)/print-confirmation", json, as: ObjectReply.self).object
+    }
     func delete(_ id: String) async throws { _ = try await request("DELETE", "/v1/objects/\(id)", as: Deleted.self) }
 
     /// Photos picked for a new object; they stay on this phone until sent.
@@ -887,6 +891,18 @@ struct ObjectDetailView: View {
         }
     }
 
+    private func answerPrintConfirmation(_ questionId: String, action: PrintConfirmationResponse.Action, content: [String: Bool]) {
+        act {
+            guard let object = self.object, object.state == .printing,
+                  let response = object.printConfirmation?.response(confirmationId: questionId, action: action, content: content,
+                                                                      atMs: Date().timeIntervalSince1970 * 1000) else {
+                await reload()
+                throw MacError(code: "stale-confirmation", message: "This printer question has changed or expired. Review the current question before continuing.")
+            }
+            return try await store.mac.answerPrintConfirmation(id, response: response)
+        }
+    }
+
     @ViewBuilder private func page(_ object: StmObject) -> some View {
         let words = ObjectWords(object)
         ScrollView {
@@ -904,10 +920,20 @@ struct ObjectDetailView: View {
                     Label(problem, systemImage: "exclamationmark.triangle.fill")
                         .font(.subheadline).foregroundStyle(.red)
                 }
+                if object.state == .printing, let confirmation = object.printConfirmation {
+                    PrinterConfirmationView(question: confirmation, working: working) { action, content in
+                        answerPrintConfirmation(confirmation.id, action: action, content: content)
+                    }
+                    .id(confirmation.id)
+                }
                 if object.plate?.photo == true, let plateImage {
                     Image(uiImage: plateImage).resizable().scaledToFit()
                         .clipShape(RoundedRectangle(cornerRadius: 16))
                         .accessibilityLabel("The printer camera's view of the plate")
+                    if object.printConfirmation != nil {
+                        Text("The camera image is a reference. Check the printer yourself before confirming.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
                 }
                 if !words.actions.contains(.print) && !words.actions.contains(.printChecked) {
                     actions(object, words)
@@ -1102,6 +1128,63 @@ struct ObjectDetailView: View {
 }
 
 enum ProjectSection: String, CaseIterable { case model = "Model", inputs = "Inputs", activity = "Activity" }
+
+private struct PrinterConfirmationView: View {
+    let question: StmObject.PrintConfirmation
+    let working: Bool
+    let answer: (PrintConfirmationResponse.Action, [String: Bool]) -> Void
+    @State private var checked: [String: Bool] = [:]
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { timeline in
+            let now = timeline.date.timeIntervalSince1970 * 1000
+            let expired = question.expiresAtMs <= now
+            VStack(alignment: .leading, spacing: 16) {
+                Text("Printer Confirmation").font(.headline)
+                Text(verbatim: question.message).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                if question.supported {
+                    ForEach(question.fields, id: \.name) { field in
+                        Button { checked[field.name] = !(checked[field.name] ?? false) } label: {
+                            HStack(alignment: .top, spacing: 12) {
+                                Image(systemName: checked[field.name] == true ? "checkmark.square.fill" : "square")
+                                    .font(.title2).foregroundStyle(.tint)
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(verbatim: field.title).font(.body.weight(.medium))
+                                    if let description = field.description {
+                                        Text(verbatim: description).font(.subheadline).foregroundStyle(.secondary)
+                                    }
+                                    if field.required { Text("Required").font(.caption).foregroundStyle(.secondary) }
+                                }
+                                Spacer(minLength: 0)
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityValue(checked[field.name] == true ? "Checked" : "Unchecked")
+                        .disabled(working || expired)
+                    }
+                    Button { answer(.accept, checked) } label: {
+                        Label("Confirm and Continue", systemImage: "checkmark.circle").frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.glassProminent).controlSize(.large)
+                    .disabled(working || !question.canAccept(checked, atMs: now))
+                } else {
+                    Text("This printer question needs a form this app cannot display. Cancel this print to continue.")
+                        .font(.subheadline).foregroundStyle(.secondary)
+                }
+                if expired {
+                    Text("This confirmation has expired. Waiting for your Mac to update.")
+                        .font(.subheadline).foregroundStyle(.secondary)
+                }
+                Button("Cancel Print", role: .destructive) { answer(.cancel, [:]) }
+                    .buttonStyle(.glass).controlSize(.large).frame(maxWidth: .infinity)
+                    .disabled(working || expired)
+            }
+            .padding(16).frame(maxWidth: .infinity, alignment: .leading)
+            .background(.background, in: RoundedRectangle(cornerRadius: 16))
+        }
+    }
+}
 
 struct ProjectInputs: View {
     let store: ObjectsStore

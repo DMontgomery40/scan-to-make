@@ -9,7 +9,7 @@ import {RECONSTRUCTION_FAILED} from './reconstruct.js';
 const READ: RemoteScope = 'projects:read', WRITE: RemoteScope = 'captures:import', PRINT: RemoteScope = 'printer-handoff:use';
 const MAX_SCAN = 64 * 1024 * 1024, MAX_PHOTO = 25 * 1024 * 1024, MAX_JSON = 16 * 1024;
 const MAX_DEPTH = 8 * 1024 * 1024;
-const PATH = /^\/v1\/objects(?:\/([0-9a-f-]{36})(?:\/(scan|photos|capture|capture-depth|start|corrections|closeup|print|printer|plate\.jpg|plate|model\.stl|passes\/[^/]+\/activity|(?:renders|photos|capture)\/[^/]+))?)?$/;
+const PATH = /^\/v1\/objects(?:\/([0-9a-f-]{36})(?:\/(scan|photos|capture|capture-depth|start|corrections|closeup|print|print-confirmation|printer|plate\.jpg|plate|model\.stl|passes\/[^/]+\/activity|(?:renders|photos|capture)\/[^/]+))?)?$/;
 
 class HttpFailure extends Error {
   constructor(readonly status: number, readonly code: string, message = code) { super(message); }
@@ -145,7 +145,7 @@ export function createObjectRoutes(service: ObjectService) {
           return;
         }
         if (method !== (action === 'scan' ? 'PUT' : 'POST')) throw new HttpFailure(405, 'method-not-allowed');
-        await authorize(action === 'print' || action === 'printer' || action === 'plate' ? PRINT : WRITE);
+        await authorize(['print', 'printer', 'plate', 'print-confirmation'].includes(action) ? PRINT : WRITE);
         let object: StmObject;
         switch (action) {
           case 'scan': object = await service.addScan(id, 'scan.usdz', await body(request, MAX_SCAN)); break;
@@ -183,6 +183,15 @@ export function createObjectRoutes(service: ObjectService) {
           }
           case 'closeup': object = await service.answerCloseup(id, {bestGuess: (await json<{bestGuess?: unknown}>(request)).bestGuess === true}); break;
           case 'print': object = await service.print(id, (await json<{checked?: unknown}>(request)).checked === true ? {checked: true} : {}); break;
+          case 'print-confirmation': {
+            const input = await json<unknown>(request);
+            if (!input || typeof input !== 'object' || Array.isArray(input)
+                || Object.keys(input).some(key => !['confirmationId', 'answer'].includes(key))) throw new HttpFailure(400, 'invalid-request');
+            const {confirmationId, answer} = input as {confirmationId?: unknown; answer?: unknown};
+            if (typeof confirmationId !== 'string' || !/^[0-9a-f-]{36}$/i.test(confirmationId)) throw new HttpFailure(400, 'invalid-request');
+            object = await service.answerPrintConfirmation(id, confirmationId, answer);
+            break;
+          }
           case 'plate': {
             if ((await json<{clear?: unknown}>(request)).clear !== true) throw new HttpFailure(400, 'invalid-request');
             object = await service.answerPlate(id, {clear: true});

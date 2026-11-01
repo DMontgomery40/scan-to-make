@@ -20,6 +20,25 @@ struct StmObject: Codable, Identifiable, Equatable, Sendable {
     struct Plate: Codable, Equatable, Sendable { var item: String?; var noCamera: Bool?; var photo: Bool? }
     struct PrintDestination: Codable, Equatable, Sendable { var id: String; var name: String }
     struct Print: Codable, Equatable, Sendable { var bundleId: String; var uncertain: Bool?; var destination: PrintDestination? = nil }
+    struct PrintConfirmation: Codable, Equatable, Sendable {
+        struct Field: Codable, Equatable, Sendable {
+            var name: String; var title: String; var description: String?; var required: Bool
+        }
+        var id: String; var message: String; var expiresAtMs: Double; var fields: [Field]; var supported: Bool
+
+        func canAccept(_ content: [String: Bool], atMs: Double) -> Bool {
+            supported && expiresAtMs > atMs && fields.allSatisfy { !$0.required || content[$0.name] == true }
+        }
+
+        /// An answer belongs to exactly one live question. Never carry checks to its replacement.
+        func response(confirmationId: String, action: PrintConfirmationResponse.Action, content: [String: Bool], atMs: Double) -> PrintConfirmationResponse? {
+            guard confirmationId == id, expiresAtMs > atMs else { return nil }
+            if action == .accept && !canAccept(content, atMs: atMs) { return nil }
+            var checked: [String: Bool] = [:]
+            for field in fields { checked[field.name] = content[field.name] ?? false }
+            return .init(confirmationId: id, answer: .init(action: action, content: action == .accept ? checked : nil))
+        }
+    }
 
     var id: String
     var createdAtMs: Double
@@ -39,6 +58,7 @@ struct StmObject: Codable, Identifiable, Equatable, Sendable {
     var failure: String?
     var print: Print?
     var printerDestinationId: String? = nil
+    var printConfirmation: PrintConfirmation? = nil
 
     /// Progress updates do not change saved media. A finished pass can replace the model and
     /// renders at the same paths, so expire their shared cache only when a pass finishes.
@@ -122,7 +142,9 @@ struct ObjectWords: Equatable, Sendable {
         case .ready:
             (status, tone, busy, actions) = ("Ready to print", .pass, false, made)
         case .printing:
-            if object.plate?.noCamera == true {
+            if object.printConfirmation != nil {
+                (status, tone, busy, actions) = ("Your printer needs your confirmation.", .accent, true, [])
+            } else if object.plate?.noCamera == true {
                 (status, tone, busy, actions) = ("Check the plate is clear.", .accent, true, [.plateClear])
             } else if let plate = object.plate {
                 let item = (plate.item ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
@@ -141,6 +163,13 @@ struct ObjectWords: Equatable, Sendable {
             (status, tone, busy, actions) = ("Update Counterpart to see this one.", .neutral, false, [])
         }
     }
+}
+
+struct PrintConfirmationResponse: Codable, Equatable, Sendable {
+    enum Action: String, Codable, Sendable { case accept, decline, cancel }
+    struct Answer: Codable, Equatable, Sendable { var action: Action; var content: [String: Bool]? }
+    var confirmationId: String
+    var answer: Answer
 }
 
 struct PrinterDestination: Codable, Identifiable, Equatable, Sendable {

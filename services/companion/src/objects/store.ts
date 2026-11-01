@@ -5,6 +5,14 @@ import type {TouchupActivity} from '../touchup/runner.js';
 
 export type ObjectState = 'new' | 'touching-up' | 'needs-closeup' | 'ready' | 'printing' | 'printed' | 'failed';
 
+export interface ObjectPrintConfirmation {
+  id: string;
+  message: string;
+  expiresAtMs: number;
+  fields: {name: string; title: string; description?: string; required: boolean}[];
+  supported: boolean;
+}
+
 export interface ObjectPass {
   startedAtMs: number;
   endedAtMs?: number;
@@ -44,6 +52,8 @@ export interface StmObject {
   question?: {closeup: string};
   /** Set while a print waits for the user: something is on the plate, or the printer has no camera. */
   plate?: {item?: string; noCamera?: boolean; photo?: boolean};
+  /** The printer MCP's original question. Only an explicit answer to this ID can approve it. */
+  printConfirmation?: ObjectPrintConfirmation;
   failure?: string;
   /** The last print; `uncertain` when it may have reached the printer and must not be sent again by itself. */
   print?: {bundleId: string; uncertain?: boolean; destination?: {id: string; name: string}};
@@ -123,7 +133,7 @@ export class ObjectStore {
     for (const object of await this.list()) {
       if (object.state === 'touching-up' || object.state === 'printing') {
         const atMs = Date.now(), failure = 'interrupted when your Mac restarted the app';
-        await this.update(object.id, o => ({...o, state: 'failed', failure, progress: undefined,
+        await this.update(object.id, o => ({...o, state: 'failed', failure, progress: undefined, plate: undefined, printConfirmation: undefined,
           passes: o.state !== 'touching-up' ? o.passes : o.passes.map((pass, index) => index !== o.passes.length - 1 || pass.endedAtMs !== undefined ? pass : {
             ...pass, endedAtMs: atMs, status: 'interrupted',
             activity: [...(pass.activity ?? []), {atMs, kind: 'message' as const, text: failure}].slice(-200),

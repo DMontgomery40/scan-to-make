@@ -70,7 +70,9 @@ public struct ObjectWords: Sendable, Equatable {
         case .ready:
             (status, tone, busy, actions) = ("Ready to print", .pass, false, made)
         case .printing:
-            if object.plate?.noCamera == true {
+            if object.printConfirmation != nil {
+                (status, tone, actions) = ("Waiting for your print confirmation.", .accent, [])
+            } else if object.plate?.noCamera == true {
                 (status, tone, actions) = ("Check the plate is clear.", .accent, [.plateClear])
             } else if let plate = object.plate {
                 let item = plate.item?.trimmingCharacters(in: .whitespacesAndNewlines)

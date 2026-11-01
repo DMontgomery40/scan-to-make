@@ -14,11 +14,13 @@ protocol ObjectsCompanion: Sendable {
     func answerCloseup(_ id: String, bestGuess: Bool) async throws -> StmObject
     func print(_ id: String, checked: Bool) async throws -> StmObject
     func answerPlate(_ id: String) async throws -> StmObject
+    func answerPrintConfirmation(_ id: String, confirmationId: String, answer: PrintConfirmationAnswer) async throws -> StmObject
     func start(_ id: String) async throws -> StmObject
     func delete(_ id: String) async throws
 }
 
 extension ObjectsCompanion {
+    func answerPrintConfirmation(_ id: String, confirmationId: String, answer: PrintConfirmationAnswer) async throws -> StmObject { throw ControlClientError.unavailable }
     func passActivity(_ id: String, index: Int) async throws -> [StmObject.Activity] { throw ControlClientError.unavailable }
     func printers() async throws -> PrinterCatalog { throw ControlClientError.unavailable }
     func selectPrinter(_ id: String, destinationId: String) async throws -> StmObject { throw ControlClientError.unavailable }
@@ -35,6 +37,9 @@ struct SocketObjects: ObjectsCompanion {
     func answerCloseup(_ id: String, bestGuess: Bool) async throws -> StmObject { try await ControlClient(socketPath:path).answerCloseup(id, bestGuess:bestGuess) }
     func print(_ id: String, checked: Bool) async throws -> StmObject { try await ControlClient(socketPath:path).printObject(id, checked:checked) }
     func answerPlate(_ id: String) async throws -> StmObject { try await ControlClient(socketPath:path).answerPlate(id) }
+    func answerPrintConfirmation(_ id: String, confirmationId: String, answer: PrintConfirmationAnswer) async throws -> StmObject {
+        try await ControlClient(socketPath:path).answerPrintConfirmation(id, confirmationId:confirmationId, answer:answer)
+    }
     func start(_ id: String) async throws -> StmObject { try await ControlClient(socketPath:path).startObject(id) }
     func delete(_ id: String) async throws { try await ControlClient(socketPath:path).deleteObject(id) }
 }
@@ -136,6 +141,7 @@ struct SocketObjects: ObjectsCompanion {
     /// Runs one action on one object. Returns whether it went through.
     @discardableResult func perform(_ action: ObjectAction, on id: String, note: String = "") async -> Bool {
         guard !working.contains(id) else { return false }
+        if action == .plateClear, objects.first(where:{ $0.id == id })?.printConfirmation != nil { return false }
         working.insert(id)
         defer { working.remove(id) }
         if problem?.id == id { problem = nil }
@@ -155,6 +161,31 @@ struct SocketObjects: ObjectsCompanion {
         } catch {
             problem = Problem(id:id, text:Self.sentence(for:error))
             // A refusal usually means the object moved on (another device, or a finished step): show where it is now.
+            await refresh()
+            return false
+        }
+    }
+
+    @discardableResult func answerPrintConfirmation(_ id: String, confirmationId: String, answer: PrintConfirmationAnswer) async -> Bool {
+        guard !working.contains(id) else { return false }
+        guard let question = objects.first(where:{ $0.id == id })?.printConfirmation, question.id == confirmationId else {
+            problem = Problem(id:id, text:"That print confirmation has changed. Review the current request.")
+            return false
+        }
+        if answer.action == .accept, !question.canAccept(answer.content ?? [:], at:Date().timeIntervalSince1970 * 1000) {
+            problem = Problem(id:id, text:"Complete the required checks before confirming this print. The request may have expired.")
+            return false
+        }
+        working.insert(id)
+        defer { working.remove(id) }
+        if problem?.id == id { problem = nil }
+        do {
+            let updated = try await companion.answerPrintConfirmation(id, confirmationId:confirmationId, answer:answer)
+            if let index = objects.firstIndex(where:{ $0.id == id }) { objects[index] = updated }
+            wake()
+            return true
+        } catch {
+            problem = Problem(id:id, text:Self.sentence(for:error))
             await refresh()
             return false
         }

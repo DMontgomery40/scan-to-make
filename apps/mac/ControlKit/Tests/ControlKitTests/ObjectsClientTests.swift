@@ -23,6 +23,52 @@ private func failure(_ request: [String: Any], _ code: String) throws -> Data {
 }
 
 final class ObjectsClientTests: XCTestCase {
+    private func confirmation(_ overrides: [String: Any] = [:]) throws -> StmObject.PrintConfirmation {
+        let fields: [String: Any] = ["id":"q1", "message":"Check the actual printer.\nKeep all checks.", "expiresAtMs":2000,
+            "supported":true, "fields":[["name":"bed_clear", "title":"The bed is clear", "description":"Look at the entire plate.", "required":true],
+                                        ["name":"optional_check", "title":"Optional check", "required":false]]]
+        return try JSONDecoder().decode(StmObject.PrintConfirmation.self, from:JSONSerialization.data(withJSONObject:fields.merging(overrides) { $1 }))
+    }
+
+    func testConfirmationDecodesOriginalMessageAndDraftRequiresActualChecks() throws {
+        let question = try confirmation()
+        let decoded = try JSONDecoder().decode(StmObject.self, from:JSONSerialization.data(withJSONObject:ready.merging([
+            "printConfirmation": ["id":"q1", "message":question.message, "expiresAtMs":2000, "fields":[], "supported":false]
+        ]) { $1 }))
+        XCTAssertEqual(decoded.printConfirmation?.message, "Check the actual printer.\nKeep all checks.")
+        XCTAssertEqual(question.fields[0].description, "Look at the entire plate.")
+        var draft = PrintConfirmationDraft(question)
+        XCTAssertTrue(draft.values.isEmpty)
+        XCTAssertNil(draft.answer(for:question, at:1000))
+        draft.values = ["bed_clear":true, "not_in_schema":true]
+        XCTAssertEqual(draft.answer(for:question, at:1000)?.content, ["bed_clear":true, "optional_check":false])
+        XCTAssertNil(draft.answer(for:question, at:2000), "Expired questions cannot be accepted")
+        let next = try confirmation(["id":"q2"])
+        XCTAssertNil(draft.answer(for:next, at:1000), "Answers cannot transfer to a replacement question")
+        XCTAssertNil(PrintConfirmationDraft(next).answer(for:next, at:1000), "A new question starts unchecked")
+        XCTAssertNil(draft.answer(for:try confirmation(["supported":false]), at:1000))
+    }
+
+    func testConfirmationTransportPreservesExactQuestionAndBooleanAnswers() async throws {
+        for action in [PrintConfirmationAnswer.Action.accept, .decline, .cancel] {
+            let answer = PrintConfirmationAnswer(action:action, content:action == .accept ? ["bed_clear":true, "optional_check":false] : nil)
+            let server = try UnixFixture { request in
+                XCTAssertEqual(request["method"] as? String, "objects.answerPrintConfirmation")
+                let params = request["params"] as! [String: Any]
+                XCTAssertEqual(Set(params.keys), ["id", "confirmationId", "answer"])
+                XCTAssertEqual(params["id"] as? String, id)
+                XCTAssertEqual(params["confirmationId"] as? String, "exact-pending-question")
+                let sent = params["answer"] as! [String: Any]
+                XCTAssertEqual(sent["action"] as? String, action.rawValue)
+                XCTAssertEqual(sent["content"] as? [String: Bool], answer.content)
+                XCTAssertEqual(sent.count, action == .accept ? 2 : 1)
+                return [try objectReply(request)]
+            }
+            _ = try await ControlClient(socketPath:server.path).answerPrintConfirmation(id, confirmationId:"exact-pending-question", answer:answer)
+            withExtendedLifetime(server) {}
+        }
+    }
+
     func testPassActivityLoadsSeparatelyByObjectAndIndex() async throws {
         let server = try UnixFixture { request in
             XCTAssertEqual(request["method"] as? String, "objects.passActivity")

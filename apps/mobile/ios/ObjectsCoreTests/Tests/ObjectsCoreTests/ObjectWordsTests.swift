@@ -12,6 +12,52 @@ private func ready(_ more: [String: Any] = [:]) -> StmObject {
 }
 
 final class ObjectWordsTests: XCTestCase {
+    private var confirmation: [String: Any] { [
+        "id": "question-1", "message": "Check the printer.\nConfirm **each** item before continuing.",
+        "expiresAtMs": 1000, "supported": true,
+        "fields": [["name": "plate_clear", "title": "Build plate is clear", "description": "Remove the previous print.", "required": true],
+                   ["name": "watch", "title": "Watch the first layer", "required": false]]
+    ] }
+
+    func testPrinterConfirmationPreservesTheQuestionAndReplacesLegacyPlateAction() throws {
+        let project = ready(["state": "printing", "plate": ["noCamera": true, "photo": true], "printConfirmation": confirmation])
+        let question = try XCTUnwrap(project.printConfirmation)
+        XCTAssertEqual(question.message, "Check the printer.\nConfirm **each** item before continuing.")
+        XCTAssertEqual(question.fields.first?.description, "Remove the previous print.")
+        XCTAssertEqual(ObjectWords(project).status, "Your printer needs your confirmation.")
+        XCTAssertTrue(ObjectWords(project).busy)
+        XCTAssertTrue(ObjectWords(project).actions.isEmpty, "a camera/legacy plate answer cannot answer the MCP question")
+        XCTAssertNil(ready().printConfirmation, "older companion responses still decode")
+    }
+
+    func testPrinterConfirmationRequiresExplicitChecksAndCurrentQuestion() throws {
+        let question = try XCTUnwrap(ready(["printConfirmation": confirmation]).printConfirmation)
+        XCTAssertFalse(question.canAccept([:], atMs: 999))
+        XCTAssertFalse(question.canAccept(["plate_clear": false], atMs: 999))
+        XCTAssertTrue(question.canAccept(["plate_clear": true], atMs: 999))
+        XCTAssertFalse(question.canAccept(["plate_clear": true], atMs: 1000))
+        XCTAssertNil(question.response(confirmationId: "old", action: .accept, content: ["plate_clear": true], atMs: 999))
+        XCTAssertNil(question.response(confirmationId: question.id, action: .accept, content: [:], atMs: 999))
+        let accepted = try XCTUnwrap(question.response(confirmationId: question.id, action: .accept,
+                                                       content: ["plate_clear": true, "unrelated": true], atMs: 999))
+        XCTAssertEqual(accepted.answer.content, ["plate_clear": true, "watch": false])
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(accepted)) as? [String: Any])
+        XCTAssertEqual(json["confirmationId"] as? String, question.id)
+        XCTAssertEqual((json["answer"] as? [String: Any])?["action"] as? String, "accept")
+        XCTAssertNil(question.response(confirmationId: question.id, action: .cancel, content: [:], atMs: 1000))
+    }
+
+    func testUnknownPrinterSchemaCanOnlyBeCancelled() throws {
+        var unknown = confirmation
+        unknown["supported"] = false
+        let question = try XCTUnwrap(ready(["printConfirmation": unknown]).printConfirmation)
+        XCTAssertFalse(question.canAccept(["plate_clear": true], atMs: 999))
+        XCTAssertNil(question.response(confirmationId: question.id, action: .accept, content: ["plate_clear": true], atMs: 999))
+        let cancelled = try XCTUnwrap(question.response(confirmationId: question.id, action: .cancel, content: ["plate_clear": true], atMs: 999))
+        XCTAssertEqual(cancelled.answer.action, .cancel)
+        XCTAssertNil(cancelled.answer.content)
+    }
+
     func testMediaVersionIgnoresProgressAndChangesWhenAPassFinishes() {
         var project = ready()
         let original = project.mediaVersion

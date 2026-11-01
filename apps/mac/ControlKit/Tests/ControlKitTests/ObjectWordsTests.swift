@@ -69,6 +69,17 @@ final class ObjectWordsTests: XCTestCase {
         XCTAssertEqual(ready(["state": "printing"]).words.actions, [])
     }
 
+    func testPendingPrintConfirmationReplacesPlateOnlyAction() {
+        for supported in [true, false] {
+            let words = ready(["state":"printing", "plate":["noCamera":true, "photo":true],
+                "printConfirmation":["id":"q", "message":"Check the printer.", "expiresAtMs":2000, "fields":[], "supported":supported]]).words
+            XCTAssertEqual(words.status, "Waiting for your print confirmation.")
+            XCTAssertEqual(words.tone, .accent)
+            XCTAssertEqual(words.actions, [])
+            XCTAssertTrue(words.busy, "Keep polling while the human confirmation is pending")
+        }
+    }
+
     func testAReadyObjectPrintsOrTakesCorrectionsWithItsLidarSize() {
         let words = ready().words
         XCTAssertEqual(words.actions, [.print, .correct])

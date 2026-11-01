@@ -55,6 +55,10 @@ export const parameters = {
   'objects.answerCloseup': z.strictObject({id: z.uuid(), bestGuess: z.boolean()}),
   'objects.print': z.strictObject({id: z.uuid(), checked: z.boolean().optional()}),
   'objects.answerPlate': z.strictObject({id: z.uuid()}),
+  'objects.answerPrintConfirmation': z.strictObject({id: z.uuid(), confirmationId: z.uuid(), answer: z.union([
+    z.strictObject({action: z.literal('accept'), content: z.record(z.string().max(128), z.boolean())}),
+    z.strictObject({action: z.enum(['decline', 'cancel'])}),
+  ])}),
 };
 export type ControlMethod = keyof typeof parameters;
 export type DoorParameters = z.infer<typeof parameters['doors.prepare']>;

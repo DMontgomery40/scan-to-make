@@ -236,6 +236,73 @@ private struct Thumbnail: View {
 
 // MARK: - The object page
 
+private struct PrintConfirmationForm: View {
+    let object: StmObject
+    let question: StmObject.PrintConfirmation
+    @ObservedObject var model: ObjectsModel
+    @State private var draft: PrintConfirmationDraft
+
+    init(object: StmObject, question: StmObject.PrintConfirmation, model: ObjectsModel) {
+        self.object = object; self.question = question; self.model = model
+        _draft = State(initialValue:PrintConfirmationDraft(question))
+    }
+
+    var body: some View {
+        TimelineView(.periodic(from:.now, by:1)) { context in
+            let answer = draft.answer(for:question, at:context.date.timeIntervalSince1970 * 1000)
+            let expired = question.expiresAtMs <= context.date.timeIntervalSince1970 * 1000
+            let working = model.working.contains(object.id)
+            GroupBox {
+                VStack(alignment:.leading, spacing:14) {
+                    Text("Waiting for Your Print Confirmation").font(.headline)
+                    Text(verbatim:question.message).textSelection(.enabled).fixedSize(horizontal:false, vertical:true)
+                    if let photo = object.platePhotoURL {
+                        FileImage(url:photo, version:object.updatedAtMs, contentMode:.fit)
+                            .frame(maxWidth:320, maxHeight:220)
+                            .accessibilityLabel("Printer camera photo for reference")
+                        Text("The camera photo is for reference. Check the printer and answer each item yourself.")
+                            .font(.callout).foregroundStyle(.secondary)
+                    }
+                    if question.supported {
+                        ForEach(question.fields, id:\.name) { field in
+                            Toggle(isOn:Binding(get:{ draft.values[field.name] ?? false }, set:{ draft.values[field.name] = $0 })) {
+                                VStack(alignment:.leading, spacing:4) {
+                                    Text(verbatim:field.title)
+                                    if let description = field.description {
+                                        Text(verbatim:description).font(.callout).foregroundStyle(.secondary)
+                                    }
+                                    if field.required { Text("Required").font(.caption).foregroundStyle(.secondary) }
+                                }
+                                .fixedSize(horizontal:false, vertical:true)
+                            }
+                            .toggleStyle(.checkbox).disabled(working || expired)
+                        }
+                    } else {
+                        Text("This confirmation cannot be answered here. Cancel this print to continue.")
+                            .foregroundStyle(.secondary)
+                    }
+                    if expired { Text("This confirmation has expired.").foregroundStyle(.secondary) }
+                    HStack(spacing:12) {
+                        if question.supported {
+                            Button("Confirm and Continue") {
+                                guard let answer = draft.answer(for:question, at:Date().timeIntervalSince1970 * 1000) else { return }
+                                Task { await model.answerPrintConfirmation(object.id, confirmationId:question.id, answer:answer) }
+                            }
+                            .primaryAction().disabled(working || answer == nil)
+                        }
+                        Button("Cancel Print", role:.destructive) {
+                            Task { await model.answerPrintConfirmation(object.id, confirmationId:question.id, answer:.init(action:.cancel)) }
+                        }
+                        .disabled(working)
+                        if working { ProgressView().controlSize(.small) }
+                    }
+                }
+                .frame(maxWidth:.infinity, alignment:.leading).padding(8)
+            }
+        }
+    }
+}
+
 struct ObjectPage: View {
     let object: StmObject
     @ObservedObject var model: ObjectsModel
@@ -270,7 +337,10 @@ struct ObjectPage: View {
                     Label(problem.text, systemImage:"exclamationmark.circle.fill")
                         .foregroundStyle(Color(nsColor:.systemRed)).textSelection(.enabled)
                 }
-                if words.tone == .accent { ask }
+                if let confirmation = object.printConfirmation {
+                    PrintConfirmationForm(object:object, question:confirmation, model:model)
+                        .id(object.id + ":" + confirmation.id)
+                } else if words.tone == .accent { ask }
                 printerSelection
                 Picker("Project section", selection:$projectSection) {
                     ForEach(MacProjectSection.allCases, id:\.self) { Text($0.rawValue).tag($0) }
@@ -412,7 +482,7 @@ struct ObjectPage: View {
                         Text("Send a close-up from your iPhone, or let me guess.").foregroundStyle(.secondary)
                         answer("Make Your Best Guess", .bestGuess)
                     }
-                    if words.actions.contains(.plateClear) {
+                    if object.printConfirmation == nil, words.actions.contains(.plateClear) {
                         answer(object.plate?.noCamera == true ? "The Plate Is Clear" : "It’s Actually Clear", .plateClear)
                     }
                 }
