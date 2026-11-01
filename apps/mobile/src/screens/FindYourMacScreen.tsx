@@ -267,13 +267,13 @@ export function FindYourMacScreen({
             Connected to your Mac
           </Text>
           <Text style={styles.connectedBody}>
-            Your Mac cleans up your scans and talks to your printer.
+            Your Mac touches up your scans and sends them to your printer.
           </Text>
         </View>
         <View style={styles.footer}>
           <Button
             label={
-              resume ? 'Done' : canScan ? 'Scan something' : 'Open projects'
+              resume ? 'Done' : canScan ? 'Scan something' : 'See your things'
             }
             onPress={() =>
               onDone(resume ? 'back' : canScan ? 'scan' : 'projects')
@@ -414,7 +414,7 @@ export function FindYourMacScreen({
         Find your Mac
       </Text>
       <Text style={styles.body}>
-        Scan to Make uses your Mac to clean up scans and talk to your printer.
+        Scan to Make uses your Mac to touch up scans and send them to your printer.
       </Text>
       <View style={[styles.finder, { height: Math.min(380, height * 0.45) }]}>
         <QRViewfinder
