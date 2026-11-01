@@ -194,14 +194,16 @@ export function createControlDispatcher(services: ControlServices) {
           const objects = services.objects;
           if (!objects) throw new ControlFailure('unavailable');
           try {
-            if (method === 'objects.list') return {objects: (await objects.list()).map(publicObject)};
+            // The Mac app is on this Mac: it gets each object's folder to read the renders and model from.
+            const local = (o: Awaited<ReturnType<typeof objects.get>>) => ({...publicObject(o), directory: objects.dir(o.id)});
+            if (method === 'objects.list') return {objects: (await objects.list()).map(local)};
             const params = parameters[method].parse(raw) as {id: string; note?: string; bestGuess?: boolean; checked?: boolean};
             const object = method === 'objects.get' ? await objects.get(params.id)
               : method === 'objects.correct' ? await objects.correct(params.id, params.note!)
               : method === 'objects.answerCloseup' ? await objects.answerCloseup(params.id, {bestGuess: params.bestGuess!})
               : method === 'objects.print' ? await objects.print(params.id, params.checked ? {checked: true} : {})
               : await objects.answerPlate(params.id, {clear: true});
-            return {object: publicObject(object)};
+            return {object: local(object)};
           } catch (error) {
             if (error instanceof ObjectNotFoundError) throw new ControlFailure('not-found');
             if (error instanceof InvalidStateError) throw new ControlFailure('conflict');

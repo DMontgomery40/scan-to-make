@@ -20,6 +20,13 @@ test('the Mac app lists and opens the same objects the phone sees', async () => 
   assert.equal((await dispatch('objects.get', {id: object.id})).object.instructions, 'A hook.');
 });
 
+test('the Mac app gets the folder of each object, so it can show the renders and model from disk', async () => {
+  const {dispatch, objects} = await dispatcher();
+  const object = await objects.create();
+  assert.equal((await dispatch('objects.list', {})).objects[0].directory, objects.dir(object.id));
+  assert.equal((await dispatch('objects.get', {id: object.id})).object.directory, objects.dir(object.id));
+});
+
 test('an unknown object and a wrong state come back as plain control errors', async () => {
   const {dispatch, objects} = await dispatcher();
   await assert.rejects(dispatch('objects.get', {id: '00000000-0000-4000-8000-000000000000'}), error => error.code === 'not-found');
