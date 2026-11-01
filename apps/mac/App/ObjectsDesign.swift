@@ -371,7 +371,11 @@ import CoreImage
         guard let eye = scene.rootNode.childNode(withName:"eye", recursively:false) else { return }
         if eye.value(forKey:"home") == nil { eye.setValue(NSValue(scnVector3:eye.position), forKey:"home") }
         let home = (eye.value(forKey:"home") as! NSValue).scnVector3Value
-        eye.position = SCNVector3(home.x * cos(angle) + home.z * sin(angle), home.y, -home.x * sin(angle) + home.z * cos(angle))
+        // Separate steps: one mixed CGFloat/Double expression is too slow for Xcode 16's type checker (CI's runner).
+        let c = CGFloat(cos(angle)), s = CGFloat(sin(angle))
+        let x: CGFloat = home.x * c + home.z * s
+        let z: CGFloat = home.z * c - home.x * s
+        eye.position = SCNVector3(x, home.y, z)
         eye.look(at:SCNVector3Zero)
     }
 

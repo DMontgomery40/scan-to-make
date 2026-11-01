@@ -38,11 +38,22 @@ private struct ActionStyle: ViewModifier {
     func body(content: Content) -> some View {
         if standIns {
             content.buttonStyle(SolidStandIn(prominent:prominent))
-        } else if #available(macOS 26, *) {
-            if prominent { content.buttonStyle(.glassProminent).tint(ObjectsStyle.accent) } else { content.buttonStyle(.glass) }
         } else {
-            if prominent { content.buttonStyle(.borderedProminent).tint(ObjectsStyle.accent) } else { content.buttonStyle(.bordered) }
+            // The glass styles exist only in the macOS 26 SDK (Swift 6.2 and later): an older Xcode, such as
+            // CI's macos-15 runner, builds the bordered fallback. `STM_NO_GLASS` builds that branch here too.
+            #if compiler(>=6.2) && !STM_NO_GLASS
+            if #available(macOS 26, *) {
+                if prominent { content.buttonStyle(.glassProminent).tint(ObjectsStyle.accent) } else { content.buttonStyle(.glass) }
+            } else {
+                bordered(content)
+            }
+            #else
+            bordered(content)
+            #endif
         }
+    }
+    @ViewBuilder private func bordered(_ content: Content) -> some View {
+        if prominent { content.buttonStyle(.borderedProminent).tint(ObjectsStyle.accent) } else { content.buttonStyle(.bordered) }
     }
 }
 

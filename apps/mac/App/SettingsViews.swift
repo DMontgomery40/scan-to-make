@@ -91,7 +91,8 @@ struct GeneralSettings: View {
         }
         .formStyle(.grouped)
         .task { await mac.refresh() }
-        .sheet(isPresented:$pairing) { PairAnotherIPhone() }
+        // A phone paired from the sheet shows up (with its Remove) as soon as the sheet closes.
+        .sheet(isPresented:$pairing, onDismiss: { Task { await mac.refresh() } }) { PairAnotherIPhone() }
         .confirmationDialog(removing.map { "Remove “\($0.deviceName)”?" } ?? "Remove?", isPresented:Binding(get: { removing != nil }, set: { if !$0 { removing = nil } }),
                             titleVisibility:.visible, presenting:removing) { device in
             Button("Remove", role:.destructive) { Task { await mac.remove(device.deviceId) } }
