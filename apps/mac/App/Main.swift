@@ -12,8 +12,8 @@ import ControlKit
         #if DEBUG
         // Design QA only: draws the objects window with fixture objects to PNGs, then exits.
         if let index = CommandLine.arguments.firstIndex(of:"--render-objects-design"), index + 1 < CommandLine.arguments.count {
-            MainActor.assumeIsolated { ObjectsDesign.render(to:URL(fileURLWithPath:CommandLine.arguments[index + 1])) }
-            exit(0)
+            let steady = MainActor.assumeIsolated { ObjectsDesign.render(to:URL(fileURLWithPath:CommandLine.arguments[index + 1])) }
+            exit(steady ? 0 : 2)
         }
         #endif
         if CommandLine.arguments.contains("--companion-agent") { launchAgent(Installation(bundle:.main)) }
@@ -40,7 +40,7 @@ struct ScanToMakeApp: App {
     @State private var isInserted = true
     var body: some Scene {
         MenuBarExtra(isInserted:$isInserted) {
-            MenuBarPopover(model:model, nearby:nearby)
+            MenuBarPopover(nearby:nearby, mac:MacStatusModel.shared) { PairingView(model:model, side:232) }
         } label: {
             // A dot on the cube while a phone waits for Allow, so the request is seen with the popover closed.
             Image(nsImage:nearby.requests.isEmpty ? .menuBarCube : .menuBarCubeWaiting)
@@ -78,9 +78,9 @@ struct PairingView: View {
     private var failureMessage: String? {
         guard let failure = model.failure else { return nil }
         switch failure as? AgentError {
-        case .approvalRequired?: return "Allow Scan to Make in System Settings → General → Login Items."
-        case .companionUnavailable?: return "Scan to Make couldn’t start in the background."
-        default: return "Scan to Make couldn’t make a code."
+        case .approvalRequired?: return "Allow Counterpart in System Settings → General → Login Items."
+        case .companionUnavailable?: return "Counterpart couldn’t start in the background."
+        default: return "Counterpart couldn’t make a code."
         }
     }
 }
@@ -93,54 +93,6 @@ struct PairingWindowContent: View {
         PairingView(model:model,side:292)
             .padding(EdgeInsets(top:17,leading:34,bottom:51,trailing:34))
             .background(Color.white)
-    }
-}
-
-/// The menu-bar popover: the same code on white, with mockup 08's footer reduced to Quit.
-/// The app has no Dock icon or main menu, so this is the only ordinary way to quit it.
-struct MenuBarPopover: View {
-    @ObservedObject var model: CompanionModel
-    @ObservedObject var nearby: NearbyModel
-    var body: some View {
-        VStack(spacing:0) {
-            // A phone waiting to pair stays at the top until it is answered or expires.
-            if !nearby.requests.isEmpty {
-                VStack(spacing:8) {
-                    ForEach(nearby.requests) { NearbyRequestCard(request:$0, model:nearby) }
-                }
-                .padding(10)
-                Divider()
-            }
-            PairingView(model:model,side:292)
-                .padding(40)
-                .background(Color.white)
-            Divider()
-            PopoverFooter()
-        }
-        .frame(width:372)
-    }
-}
-
-/// The popover's footer: the objects window, Settings and Quit.
-struct PopoverFooter: View {
-    var body: some View {
-        HStack(spacing:16) {
-            Button { ObjectsWindow.shared.show() } label: { Label("Open Scan to Make", systemImage:"macwindow") }
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
-                .keyboardShortcut("o")
-            Button { SettingsWindow.shared.show() } label: { Label("Settings…", systemImage:"gearshape") }
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
-                .keyboardShortcut(",")
-            Spacer()
-            Button("Quit") { NSApp.terminate(nil) }
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
-                .keyboardShortcut("q")
-        }
-        .font(.system(size:12.5))
-        .padding(EdgeInsets(top:11,leading:12,bottom:13,trailing:12))
     }
 }
 
@@ -172,7 +124,7 @@ extension NSImage {
             return true
         }
         image.isTemplate = true
-        image.accessibilityDescription = dot ? "Scan to Make, a phone is waiting to pair" : "Scan to Make"
+        image.accessibilityDescription = dot ? "Counterpart, a phone is waiting to pair" : "Counterpart"
         return image
     }
 }
@@ -220,7 +172,9 @@ extension NSImage {
                               backing:.buffered, defer:false)
         window.title = "Popover (QA)"
         window.isReleasedWhenClosed = false
-        window.contentView = NSHostingView(rootView:MenuBarPopover(model:CompanionModel.shared, nearby:NearbyModel.shared))
+        window.contentView = NSHostingView(rootView:MenuBarPopover(nearby:NearbyModel.shared, mac:MacStatusModel.shared) {
+            PairingView(model:CompanionModel.shared, side:232)
+        })
         window.setFrameTopLeftPoint(NSPoint(x:80, y:(NSScreen.main?.visibleFrame.maxY ?? 900) - 40))
         window.makeKeyAndOrderFront(nil)
         popoverQAWindow = window
@@ -285,7 +239,7 @@ extension NSImage {
         if window == nil {
             let window = NSWindow(contentRect:NSRect(x:0,y:0,width:360,height:360),
                                   styleMask:[.titled,.closable],backing:.buffered,defer:false)
-            window.title = "Scan to Make" // Window menu and VoiceOver only; never drawn.
+            window.title = "Counterpart" // Window menu and VoiceOver only; never drawn.
             window.titleVisibility = .hidden
             window.titlebarAppearsTransparent = true
             window.backgroundColor = .white
@@ -326,7 +280,7 @@ extension NSImage {
     }
     func updater(_ updater: SPUUpdater, mayPerform updateCheck: SPUUpdateCheck) throws {
         guard safeToReplaceApp else {
-            throw NSError(domain:"com.scantomake.mac.updates",code:1,userInfo:[NSLocalizedDescriptionKey:"Updates wait until the companion is stopped."])
+            throw NSError(domain:"com.scantomake.mac.updates",code:1,userInfo:[NSLocalizedDescriptionKey:"Updates wait until Counterpart is stopped in the background."])
         }
     }
     func updater(_ updater: SPUUpdater, shouldPostponeRelaunchForUpdate item: SUAppcastItem, untilInvokingBlock installHandler: @escaping () -> Void) -> Bool {

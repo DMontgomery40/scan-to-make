@@ -85,6 +85,21 @@ final class ObjectsClientTests: XCTestCase {
         }
     }
 
+    func testDeleteSendsOnlyTheIdAndNeedsTheCompanionToSayDeleted() async throws {
+        let server = try UnixFixture { request in
+            XCTAssertEqual(request["method"] as? String, "objects.delete")
+            XCTAssertEqual((request["params"] as! [String: Any]).mapValues { $0 as! AnyHashable }, ["id": id])
+            return [try reply(request, result: ["deleted": true])]
+        }
+        try await ControlClient(socketPath: server.path).deleteObject(id)
+        withExtendedLifetime(server) {}
+
+        let refused = try UnixFixture { request in [try failure(request, "not-found")] }
+        do { try await ControlClient(socketPath: refused.path).deleteObject(id); XCTFail("No refusal") }
+        catch { XCTAssertEqual((error as? ControlRemoteError)?.code, "not-found") }
+        withExtendedLifetime(refused) {}
+    }
+
     func testRefusalsKeepTheirCodes() async throws {
         for code in ["unavailable", "conflict", "not-found"] {
             let server = try UnixFixture { request in [try failure(request, code)] }

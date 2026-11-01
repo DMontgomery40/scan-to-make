@@ -96,7 +96,7 @@ struct SocketNearby: NearbyCompanion {
         } catch let error as ControlRemoteError where error.code == "not-found" {
             requests.removeAll { $0.id == request.id }
         } catch {
-            problem = Problem(requestID:request.id, text:"That didn't reach Scan to Make. If the phone is still waiting, try again.")
+            problem = Problem(requestID:request.id, text:"That didn't reach Counterpart. If the phone is still waiting, try again.")
         }
         await list()
         answering.remove(request.id)

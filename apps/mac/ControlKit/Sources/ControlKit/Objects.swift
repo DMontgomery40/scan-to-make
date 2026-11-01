@@ -126,6 +126,12 @@ public extension ControlClient {
         if checked { params["checked"] = .bool(true) }
         let result: ObjectReply = try await call("objects.print", params); return result.object
     }
+    /// Removes the object and its folder from this Mac. Refused (`conflict`) while it is printing.
+    func deleteObject(_ id: String) async throws {
+        struct Deleted: Decodable { let deleted: Bool }
+        let result: Deleted = try await call("objects.delete", ["id": .string(id)])
+        guard result.deleted else { throw ControlRemoteError(code: "conflict", message: "") }
+    }
     /// The user says the plate is clear: the printer has no camera, or the check saw something that isn't there.
     func answerPlate(_ id: String) async throws -> StmObject {
         let result: ObjectReply = try await call("objects.answerPlate", ["id": .string(id)]); return result.object
