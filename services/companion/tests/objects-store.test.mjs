@@ -56,6 +56,31 @@ test('work interrupted by a restart is marked failed, never left running', async
   assert.equal((await s.get(ready.id)).state, 'ready');
 });
 
+test('restart closes the interrupted pass and preserves its actual activity without completing a print pass', async () => {
+  const s = await store(), object = await s.create('Keep this request.');
+  const completed = {startedAtMs: 10, endedAtMs: 20, status: 'done', summary: 'Previous result.'};
+  const activity = [{atMs: 31, kind: 'message', text: 'Checking the side.'}, {atMs: 32, kind: 'tool', text: 'Read'}];
+  await s.update(object.id, o => ({...o, state: 'touching-up', progress: 'Using Read.', passes: [completed, {startedAtMs: 30, note: 'Make it wider.', activity}]}));
+  const printing = await s.create();
+  await s.update(printing.id, o => ({...o, state: 'printing', passes: [completed], print: {bundleId: 'retained-bundle'}}));
+  await s.recoverInterrupted();
+  const recovered = await s.get(object.id), pass = recovered.passes[1];
+  assert.equal(recovered.state, 'failed');
+  assert.equal(recovered.progress, undefined);
+  assert.deepEqual(recovered.passes[0], completed);
+  assert.equal(pass.note, 'Make it wider.');
+  assert.equal(pass.status, 'interrupted');
+  assert.ok(pass.endedAtMs >= pass.startedAtMs);
+  assert.deepEqual(pass.activity.slice(0, -1), activity);
+  assert.equal(pass.activity.at(-1).text, recovered.failure);
+  assert.match(recovered.failure, /interrupted/);
+  await s.recoverInterrupted();
+  assert.deepEqual(await s.get(object.id), recovered);
+  const interruptedPrint = await s.get(printing.id);
+  assert.deepEqual(interruptedPrint.passes, [completed]);
+  assert.deepEqual(interruptedPrint.print, {bundleId: 'retained-bundle'});
+});
+
 test('simultaneous updates to one object all land, none lost', async () => {
   const s = await store();
   const object = await s.create();

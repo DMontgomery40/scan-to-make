@@ -22,6 +22,8 @@ export interface TouchupInput {
   instructions?: string;
   note?: string;
   summary?: string;
+  /** The supplied scan is the previously generated STL, already in millimetres. */
+  currentModel?: boolean;
   onProgress?: (progress: TouchupProgress) => void;
   signal?: AbortSignal;
 }
@@ -94,7 +96,10 @@ async function touchUpLocked(input: TouchupInput, deps: TouchupDeps): Promise<To
   await (deps.resetScene ?? resetBlenderScene)(client, input.signal);
   const pass = await (deps.prepare ?? prepareTouchupPass)({root: input.root, objectId: input.objectId, scan: input.scan, photos: input.photos,
     requirePhotos: !(input.instructions?.trim() || input.note?.trim())});
-  const inv = buildTouchupInvocation({pass, printer: input.handoff.process, claudePath: input.claudePath,
+  // Older CLI callers use a note plus a single STL for a revision. The object
+  // service supplies the explicit flag, including false for failed first passes.
+  const currentModel = input.currentModel ?? (input.note !== undefined && input.scan.length === 1 && input.scan[0]!.toLowerCase().endsWith('.stl'));
+  const inv = buildTouchupInvocation({pass, printer: input.handoff.process, claudePath: input.claudePath, currentModel,
     ...(input.instructions !== undefined ? {instructions: input.instructions} : {}),
     ...(input.note !== undefined ? {note: input.note} : {}), ...(input.summary !== undefined ? {summary: input.summary} : {})});
   const inputStlSha256 = await stlSha256(input.scan);

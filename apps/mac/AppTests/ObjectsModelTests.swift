@@ -6,6 +6,7 @@ private actor FakeObjects: ObjectsCompanion {
     var listError: Error?
     var actionError: Error?
     private(set) var calls: [String] = []
+    private(set) var confirmationAnswer: PrintConfirmationAnswer?
     func set(_ items: [[String: Any]]) { self.items = items }
     func failList(with error: Error?) { listError = error }
     func failActions(with error: Error?) { actionError = error }
@@ -29,6 +30,10 @@ private actor FakeObjects: ObjectsCompanion {
     func answerCloseup(_ id: String, bestGuess: Bool) async throws -> StmObject { try change(id, "closeup:\(bestGuess)", ["state": "touching-up"]) }
     func print(_ id: String, checked: Bool) async throws -> StmObject { try change(id, "print:\(checked)", ["state": "printing"]) }
     func answerPlate(_ id: String) async throws -> StmObject { try change(id, "plate", ["plate": NSNull()]) }
+    func answerPrintConfirmation(_ id: String, confirmationId: String, answer: PrintConfirmationAnswer) async throws -> StmObject {
+        confirmationAnswer = answer
+        return try change(id, "confirmation:\(confirmationId):\(answer.action.rawValue)", ["printConfirmation":NSNull()])
+    }
     func start(_ id: String) async throws -> StmObject { try change(id, "start", ["state": "touching-up"]) }
     func delete(_ id: String) async throws {
         calls.append("delete:\(id)")
@@ -44,6 +49,46 @@ private func item(_ id: String, _ state: String, _ fields: [String: Any] = [:]) 
 }
 
 @MainActor final class ObjectsModelTests: XCTestCase {
+    func testConfirmationRejectsStaleIncompleteAndPlateOnlyAnswers() async {
+        let companion = FakeObjects()
+        var question: [String: Any] = ["id":"q1", "message":"Check the actual printer.", "expiresAtMs":Date().timeIntervalSince1970 * 1000 + 60_000,
+            "supported":true, "fields":[["name":"bed_clear", "title":"Bed is clear", "required":true]]]
+        await companion.set([item("a", "printing", ["printConfirmation":question, "plate":["noCamera":true]])])
+        let model = ObjectsModel(companion:companion)
+        await model.refresh()
+        let plate = await model.perform(.plateClear, on:"a")
+        let incomplete = await model.answerPrintConfirmation("a", confirmationId:"q1", answer:.init(action:.accept))
+        XCTAssertFalse(plate)
+        XCTAssertFalse(incomplete)
+        question["id"] = "q2"
+        await companion.set([item("a", "printing", ["printConfirmation":question])])
+        await model.refresh()
+        let stale = await model.answerPrintConfirmation("a", confirmationId:"q1", answer:.init(action:.accept, content:["bed_clear":true]))
+        XCTAssertFalse(stale)
+        let before = await companion.calls
+        XCTAssertFalse(before.contains { $0.hasPrefix("confirmation:") || $0 == "plate" })
+        let accepted = await model.answerPrintConfirmation("a", confirmationId:"q2", answer:.init(action:.accept, content:["bed_clear":true]))
+        XCTAssertTrue(accepted)
+        let calls = await companion.calls
+        XCTAssertEqual(calls.last, "confirmation:q2:accept")
+        let answer = await companion.confirmationAnswer
+        XCTAssertEqual(answer?.content, ["bed_clear":true])
+        XCTAssertNil(model.selected?.printConfirmation)
+    }
+
+    func testUnsupportedAndExpiredConfirmationCanBeCanceledButNotAccepted() async {
+        let companion = FakeObjects()
+        await companion.set([item("a", "printing", ["printConfirmation":["id":"q", "message":"Unknown form", "expiresAtMs":1, "supported":false, "fields":[]]])])
+        let model = ObjectsModel(companion:companion)
+        await model.refresh()
+        let accepted = await model.answerPrintConfirmation("a", confirmationId:"q", answer:.init(action:.accept, content:[:]))
+        XCTAssertFalse(accepted)
+        let canceled = await model.answerPrintConfirmation("a", confirmationId:"q", answer:.init(action:.cancel))
+        XCTAssertTrue(canceled)
+        let calls = await companion.calls
+        XCTAssertEqual(calls.last, "confirmation:q:cancel")
+    }
+
     func testReadsQuicklyOnlyWhileSomethingIsBusy() async {
         let companion = FakeObjects()
         await companion.set([item("a", "ready"), item("b", "printed")])

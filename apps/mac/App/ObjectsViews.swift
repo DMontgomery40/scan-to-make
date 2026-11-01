@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import UniformTypeIdentifiers
 #if canImport(ControlKit)
 import ControlKit
 #endif
@@ -85,13 +86,19 @@ struct ObjectsWindowView: View {
     var startWith3D = false
     /// The object the Delete dialog is about, fixed when it opens: the selection can move underneath it.
     @State private var deleting: StmObject?
+    @State private var search = ""
 
     var body: some View {
         NavigationSplitView {
             List(selection:$model.selection) {
-                ForEach(model.objects) { ObjectCard(object:$0).tag($0.id) }
+                Section("Projects") {
+                    ForEach(model.objects.filter { search.isEmpty || ($0.instructions ?? $0.words.title).localizedCaseInsensitiveContains(search) }) {
+                        ObjectCard(object:$0).tag($0.id)
+                    }
+                }
             }
             .listStyle(.sidebar)
+            .searchable(text:$search, prompt:"Find a project")
             .navigationSplitViewColumnWidth(min:220, ideal:264, max:340)
             .onDeleteCommand { deleting = model.selected }
         } detail: {
@@ -129,7 +136,7 @@ struct ObjectsWindowView: View {
         case .loading: return ""
         case .notSetUp: return "Not set up"
         case .notRunning: return "Not running"
-        case .ready: return model.objects.isEmpty ? "" : model.objects.count == 1 ? "1 object" : "\(model.objects.count) objects"
+        case .ready: return model.objects.isEmpty ? "" : model.objects.count == 1 ? "1 project" : "\(model.objects.count) projects"
         }
     }
 
@@ -193,8 +200,12 @@ struct ObjectCard: View {
         HStack(spacing:10) {
             Thumbnail(object:object, busy:words.busy).frame(width:40, height:40)
             VStack(alignment:.leading, spacing:2) {
-                Text(words.title).font(.body.weight(.medium)).lineLimit(1)
-                Text(words.headline).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
+                Text(words.title).font(.body.weight(.medium)).lineLimit(2)
+                Label(object.state == .failed ? "Needs attention" : words.headline,
+                      systemImage:object.state == .failed ? "exclamationmark.circle" : "circle.fill")
+                    .font(.caption).foregroundStyle(object.state == .failed ? Color.orange : Color.secondary).lineLimit(1)
+                Text(Date(timeIntervalSince1970:object.createdAtMs / 1000), format:.dateTime.month(.abbreviated).day().hour().minute())
+                    .font(.caption2).foregroundStyle(.tertiary)
             }
         }
         .padding(.vertical, 3)
@@ -211,6 +222,8 @@ private struct Thumbnail: View {
             ObjectsStyle.stage
             if let url = object.renderURLs.first {
                 FileImage(url:url, version:object.updatedAtMs, contentMode:.fill)
+            } else if let url = object.photoURLs.first ?? object.captureURLs.first {
+                FileImage(url:url, version:object.updatedAtMs, contentMode:.fill)
             } else if busy {
                 ProgressView().controlSize(.small)
             } else {
@@ -224,17 +237,180 @@ private struct Thumbnail: View {
 
 // MARK: - The object page
 
+private struct PrintConfirmationForm: View {
+    let object: StmObject
+    let question: StmObject.PrintConfirmation
+    @ObservedObject var model: ObjectsModel
+    @State private var draft: PrintConfirmationDraft
+
+    init(object: StmObject, question: StmObject.PrintConfirmation, model: ObjectsModel) {
+        self.object = object; self.question = question; self.model = model
+        _draft = State(initialValue:PrintConfirmationDraft(question))
+    }
+
+    var body: some View {
+        TimelineView(.periodic(from:.now, by:1)) { context in
+            let answer = draft.answer(for:question, at:context.date.timeIntervalSince1970 * 1000)
+            let expired = question.expiresAtMs <= context.date.timeIntervalSince1970 * 1000
+            let working = model.working.contains(object.id)
+            GroupBox {
+                VStack(alignment:.leading, spacing:14) {
+                    Text("Waiting for Your Print Confirmation").font(.headline)
+                    Text(verbatim:question.message).textSelection(.enabled).fixedSize(horizontal:false, vertical:true)
+                    if let item = object.plate?.item, !item.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty {
+                        Label("The camera check saw \(item) on the plate. Check and clear it before confirming.", systemImage:"exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange).fixedSize(horizontal:false, vertical:true)
+                    }
+                    if let photo = object.platePhotoURL {
+                        FileImage(url:photo, version:object.updatedAtMs, contentMode:.fit)
+                            .frame(maxWidth:320, maxHeight:220)
+                            .accessibilityLabel("Printer camera photo for reference")
+                        Text("The camera photo is for reference. Check the printer and answer each item yourself.")
+                            .font(.callout).foregroundStyle(.secondary)
+                    }
+                    if question.supported {
+                        ForEach(question.fields, id:\.name) { field in
+                            Toggle(isOn:Binding(get:{ draft.values[field.name] ?? false }, set:{ draft.values[field.name] = $0 })) {
+                                VStack(alignment:.leading, spacing:4) {
+                                    Text(verbatim:field.title)
+                                    if let description = field.description {
+                                        Text(verbatim:description).font(.callout).foregroundStyle(.secondary)
+                                    }
+                                    if field.required { Text("Required").font(.caption).foregroundStyle(.secondary) }
+                                }
+                                .fixedSize(horizontal:false, vertical:true)
+                            }
+                            .toggleStyle(.checkbox).disabled(working || expired)
+                        }
+                    } else {
+                        Text("This confirmation cannot be answered here. Cancel this print to continue.")
+                            .foregroundStyle(.secondary)
+                    }
+                    if expired { Text("This confirmation has expired.").foregroundStyle(.secondary) }
+                    HStack(spacing:12) {
+                        if question.supported {
+                            Button("Confirm and Continue") {
+                                guard let answer = draft.answer(for:question, at:Date().timeIntervalSince1970 * 1000) else { return }
+                                Task { await model.answerPrintConfirmation(object.id, confirmationId:question.id, answer:answer) }
+                            }
+                            .primaryAction().disabled(working || answer == nil)
+                        }
+                        Button("Cancel Print", role:.destructive) {
+                            Task { await model.answerPrintConfirmation(object.id, confirmationId:question.id, answer:.init(action:.cancel)) }
+                        }
+                        .disabled(working || expired)
+                        if working { ProgressView().controlSize(.small) }
+                    }
+                }
+                .frame(maxWidth:.infinity, alignment:.leading).padding(8)
+            }
+        }
+    }
+}
+
+private struct PrepareObjectPrint: View {
+    let object: StmObject
+    @ObservedObject var model: ObjectsModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var choices: [PrinterFilament] = []
+    @State private var selected: Int?
+    @State private var loading = true
+    @State private var failure: String?
+    @State private var checked = false
+
+    private func swatch(_ hex: String) -> Color {
+        let value = Int(hex.dropFirst(), radix:16) ?? 0
+        return Color(red:Double((value >> 16) & 255)/255, green:Double((value >> 8) & 255)/255, blue:Double(value & 255)/255)
+    }
+
+    var body: some View {
+        VStack(alignment:.leading, spacing:20) {
+            HStack {
+                VStack(alignment:.leading, spacing:4) {
+                    Text("Prepare to Print").font(.title2.weight(.semibold))
+                    Text(object.instructions?.isEmpty == false ? object.instructions! : "Your model")
+                        .lineLimit(1).font(.callout)
+                    if let printer = model.printer(for:object) { Label(printer.name, systemImage:"printer").foregroundStyle(.secondary) }
+                }
+                Spacer()
+                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
+            }
+            HStack {
+                Text("Choose Filament").font(.headline)
+                Spacer()
+                if !loading && failure == nil { Button("Refresh") { Task { await load() } } }
+            }
+            if loading {
+                ProgressView("Reading filament from your printer…").frame(maxWidth:.infinity, minHeight:100)
+            } else if let failure {
+                Label(failure, systemImage:"exclamationmark.circle").foregroundStyle(.secondary)
+                Button("Try Again") { Task { await load() } }
+            } else if choices.isEmpty {
+                Text("No selectable filament was reported. Check the printer’s filament or open the model in your slicer.").foregroundStyle(.secondary)
+            } else {
+                ScrollView {
+                    LazyVGrid(columns:[GridItem(.adaptive(minimum:145), spacing:10)], spacing:10) {
+                        ForEach(choices) { filament in
+                            Button { selected = filament.slot } label: {
+                                VStack(alignment:.leading, spacing:8) {
+                                    HStack {
+                                        Circle().fill(swatch(filament.colour)).frame(width:34, height:34)
+                                            .overlay(Circle().strokeBorder(.secondary.opacity(0.4)))
+                                        Spacer()
+                                        if selected == filament.slot { Image(systemName:"checkmark.circle.fill").foregroundStyle(ObjectsStyle.accent) }
+                                    }
+                                    Text(filament.material).font(.headline)
+                                    Text(filament.slot >= 254 ? "External spool" : "Slot \(filament.slot + 1)").font(.caption).foregroundStyle(.secondary)
+                                }.padding(12).frame(maxWidth:.infinity, alignment:.leading)
+                                    .background(RoundedRectangle(cornerRadius:12).fill(Color(nsColor:.controlBackgroundColor)))
+                                    .overlay(RoundedRectangle(cornerRadius:12).stroke(selected == filament.slot ? ObjectsStyle.accent : Color.secondary.opacity(0.25), lineWidth:selected == filament.slot ? 2 : 1))
+                            }.buttonStyle(.plain).accessibilityLabel("\(filament.material), \(filament.colour), slot \(filament.slot + 1)")
+                        }
+                    }
+                }.frame(maxHeight:240)
+            }
+            if object.print?.uncertain == true {
+                Toggle("I checked the printer; it isn’t already printing this model.", isOn:$checked)
+            }
+            if let problem = model.problem, problem.id == object.id { Text(problem.text).foregroundStyle(.red) }
+            Spacer(minLength:0)
+            HStack {
+                Text("The printer may ask you to confirm its checks next.").font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                Button("Print") {
+                    guard let filament = choices.first(where:{ $0.slot == selected }) else { return }
+                    Task { if await model.print(object.id, checked:object.print?.uncertain == true && checked, filament:filament) { dismiss() } }
+                }.primaryAction().controlSize(.large)
+                    .disabled(selected == nil || model.working.contains(object.id) || (object.print?.uncertain == true && !checked))
+            }
+        }
+        .padding(24).frame(width:540).frame(minHeight:400)
+        .task { await load() }
+    }
+
+    private func load() async {
+        loading = true; failure = nil; selected = nil
+        do { choices = try await model.filaments(object.id) }
+        catch { failure = (error as? ControlRemoteError)?.message ?? "Couldn’t read filament from this printer." }
+        loading = false
+    }
+}
+
 struct ObjectPage: View {
     let object: StmObject
     @ObservedObject var model: ObjectsModel
     @State private var showing: Showing?
     @State private var note = ""
+    @State private var projectSection = MacProjectSection.model
+    @State private var editorError: String?
+    @State private var preparingPrint = false
     enum Showing: Hashable { case model, render(Int) }
 
     init(object: StmObject, model: ObjectsModel, startWith3D: Bool = false) {
         self.object = object
         self.model = model
-        _showing = State(initialValue:startWith3D && object.modelURL != nil ? .model : nil)
+        _showing = State(initialValue:object.modelURL != nil ? .model : nil)
+        _projectSection = State(initialValue:object.state == .touchingUp ? .activity : object.current == nil ? .inputs : .model)
     }
 
     private var words: ObjectWords { object.words }
@@ -256,19 +432,150 @@ struct ObjectPage: View {
                     Label(problem.text, systemImage:"exclamationmark.circle.fill")
                         .foregroundStyle(Color(nsColor:.systemRed)).textSelection(.enabled)
                 }
-                if words.tone == .accent { ask }
-                stage
-                if let instructions = object.instructions?.trimmingCharacters(in:.whitespacesAndNewlines), !instructions.isEmpty {
-                    section("What You Asked For") {
-                        Text(instructions).textSelection(.enabled).fixedSize(horizontal:false, vertical:true)
+                if let confirmation = object.printConfirmation {
+                    PrintConfirmationForm(object:object, question:confirmation, model:model)
+                        .id(object.id + ":" + confirmation.id)
+                } else if words.tone == .accent { ask }
+                printerSelection
+                if let report = object.print?.printerStatus {
+                    VStack(alignment:.leading, spacing:6) {
+                        Label("Printer: \(report.state.capitalized)", systemImage:"printer").font(.headline)
+                        if let job = report.job { Text("Reported job: \(job)").foregroundStyle(.secondary) }
+                        if let percent = report.percent { ProgressView(value:percent,total:100); Text("\(Int(percent))% of reported printer job").monospacedDigit() }
+                        if let remaining = report.remainingMinutes { Text("\(Int(remaining)) min remaining").monospacedDigit() }
+                        if report.state == "FAILED" { Text("The previous printer job failed. Inspect the printer and clear the plate before confirming a new print.").foregroundStyle(.orange) }
+                    }.textSelection(.enabled)
+                }
+                if object.modelURL != nil { editorActions }
+                Picker("Project section", selection:$projectSection) {
+                    ForEach(MacProjectSection.allCases, id:\.self) { Text($0.rawValue).tag($0) }
+                }
+                .pickerStyle(.segmented).frame(maxWidth:420)
+                switch projectSection {
+                case .model:
+                    if object.modelURL != nil || !object.renderURLs.isEmpty {
+                        stage
+                        if let summary = object.current?.summary { Text(summary).textSelection(.enabled) }
+                    } else {
+                        QuietMessage(title:words.busy ? "Your Mac Is Working" : "No Model Yet",
+                                     text:"Your request and source photos are saved in Inputs. Follow Activity to see each pass.")
+                            .frame(minHeight:220)
                     }
+                    if !object.photoURLs.isEmpty {
+                        section("Reference Photos") { MacProjectPhotos(object:object, photos:object.photoURLs) }
+                    }
+                case .inputs:
+                    section("Your Request") {
+                        Text(object.instructions?.isEmpty == false ? object.instructions! : object.scan != nil || !(object.capture ?? []).isEmpty ? "A copy of the scanned object." : "No description was saved with this project.")
+                            .textSelection(.enabled).fixedSize(horizontal:false, vertical:true)
+                    }
+                    if !object.photoURLs.isEmpty {
+                        section("Reference Photos") { MacProjectPhotos(object:object, photos:object.photoURLs) }
+                    }
+                    if !object.captureURLs.isEmpty {
+                        DisclosureGroup("Scan Images (\(object.captureURLs.count))") {
+                            MacProjectPhotos(object:object, photos:object.captureURLs)
+                        }
+                    }
+                    if object.scan != nil { Label("Original scan saved with this project", systemImage:"viewfinder").foregroundStyle(.secondary) }
+                case .activity:
+                    MacProjectActivity(object:object, model:model)
                 }
                 if words.actions.contains(.correct) { corrections }
             }
             .padding(EdgeInsets(top:20, leading:28, bottom:32, trailing:28))
-            .frame(maxWidth:820, alignment:.leading)
+            .frame(maxWidth:1000, alignment:.leading)
             .frame(maxWidth:.infinity)
             .keepsScrollerRoom()
+        }
+        .alert("Couldn’t Open the Model", isPresented: Binding(get:{ editorError != nil }, set:{ if !$0 { editorError = nil } })) {
+            Button("OK", role:.cancel) { editorError = nil }
+        } message: { Text(editorError ?? "") }
+        .sheet(isPresented:$preparingPrint) { PrepareObjectPrint(object:object, model:model) }
+    }
+
+    private var editorActions: some View {
+        VStack(alignment:.leading, spacing:6) {
+            HStack(spacing:12) {
+                Menu {
+                    Button("Bambu Studio") { openModel(in:.bambu) }
+                    Button("OrcaSlicer") { openModel(in:.orca) }
+                    Divider()
+                    Button("Choose Another App…") { openModel(in:.other) }
+                } label: { Label("Open in Slicer", systemImage:"square.and.arrow.up") }
+                Button { openModel(in:.blender) } label: { Label("Open in Blender", systemImage:"cube") }
+                    .secondaryAction()
+            }
+            Text("Opens a copy; changes in another app don’t update this project.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    private enum ModelEditor { case bambu, orca, blender, other }
+
+    private func openModel(in editor: ModelEditor) {
+        guard let source = object.modelURL else { return }
+        let workspace = NSWorkspace.shared
+        let application: URL?
+        switch editor {
+        case .bambu: application = workspace.urlForApplication(withBundleIdentifier:"com.bambulab.bambu-studio")
+        case .orca: application = workspace.urlForApplication(withBundleIdentifier:"com.orcaslicer.OrcaSlicer")
+            ?? workspace.urlForApplication(withBundleIdentifier:"com.softfever3d.orca-slicer")
+        case .blender: application = workspace.urlForApplication(withBundleIdentifier:"org.blenderfoundation.blender")
+        case .other:
+            let panel = NSOpenPanel()
+            panel.allowedContentTypes = [.applicationBundle]
+            panel.prompt = "Choose App"
+            panel.message = "Choose the slicer to open this model."
+            application = panel.runModal() == .OK ? panel.url : nil
+            if application == nil { return }
+        }
+        guard let application else {
+            editorError = "That app isn’t available on this Mac. Install it or choose another slicer."
+            return
+        }
+        do {
+            let root = try FileManager.default.url(for:.applicationSupportDirectory, in:.userDomainMask, appropriateFor:nil, create:true)
+                .appendingPathComponent("Scan to Make/Editor Copies", isDirectory:true)
+                .appendingPathComponent(UUID().uuidString, isDirectory:true)
+            try FileManager.default.createDirectory(at:root, withIntermediateDirectories:true)
+            let copy = root.appendingPathComponent(source.lastPathComponent)
+            try FileManager.default.copyItem(at:source, to:copy)
+            let configuration = NSWorkspace.OpenConfiguration()
+            if editor == .blender {
+                // Blender opens .blend files directly, but an STL must be imported into a scene.
+                // Start a separate instance so this never replaces an existing Blender session.
+                configuration.createsNewApplicationInstance = true
+                configuration.arguments = ["--factory-startup", "--python-expr", "import bpy,sys; bpy.ops.object.select_all(action='SELECT'); bpy.ops.object.delete(use_global=False); bpy.ops.wm.stl_import(filepath=sys.argv[-1])", "--", copy.path]
+                workspace.openApplication(at:application, configuration:configuration) { _, error in
+                    if let error { Task { @MainActor in editorError = error.localizedDescription } }
+                }
+            } else {
+                workspace.open([copy], withApplicationAt:application, configuration:configuration) { _, error in
+                    if let error { Task { @MainActor in editorError = error.localizedDescription } }
+                }
+            }
+        } catch { editorError = error.localizedDescription }
+    }
+
+    @ViewBuilder private var printerSelection: some View {
+        if let catalog = model.printerCatalog, !catalog.destinations.isEmpty {
+            HStack(spacing:16) {
+                Picker(selection:Binding(get:{ object.printerDestinationId ?? catalog.defaultDestinationId }, set:{ destination in
+                    Task { await model.selectPrinter(object.id, destinationId:destination) }
+                })) {
+                    ForEach(catalog.destinations) { Text($0.name).tag($0.id) }
+                } label: { Label("Printer", systemImage:"printer") }
+                .frame(maxWidth:360)
+                .disabled(working || object.state == .touchingUp || object.state == .printing)
+                if let destination = object.print?.destination {
+                    Text(object.print?.uncertain == true ? "Last attempt: \(destination.name)" : "Last print: \(destination.name)").font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer(minLength:0)
+            }
+        } else {
+            Label("Printer information is unavailable. Check the companion connection in Settings.", systemImage:"printer")
+                .font(.callout).foregroundStyle(.secondary)
         }
     }
 
@@ -290,7 +597,8 @@ struct ObjectPage: View {
 
     private var titleAndStatus: some View {
         VStack(alignment:.leading, spacing:6) {
-            Text(words.title).font(.title.weight(.semibold)).textSelection(.enabled)
+            Text(object.instructions?.isEmpty == false ? object.instructions! : words.title).font(.title2.weight(.semibold)).textSelection(.enabled)
+                .lineLimit(3)
                 .fixedSize(horizontal:false, vertical:true)
             if words.tone != .accent { statusLine }
         }
@@ -318,12 +626,12 @@ struct ObjectPage: View {
             HStack(spacing:10) {
                 if working { ProgressView().controlSize(.small) }
                 // No keyboard shortcut: Print starts the printer, so it is always a deliberate click.
-                Button { run(action) } label: {
-                    Label(action == .printChecked ? "I Checked. Print Again" : action == .retry ? "Try Again" : "Print",
+                Button { if action == .retry { run(action) } else { preparingPrint = true } } label: {
+                    Label(action == .retry ? "Try Again" : "Prepare to Print",
                           systemImage:action == .retry ? "arrow.clockwise" : "printer")
                 }
                 .primaryAction().controlSize(.large)
-                .disabled(working)
+                .disabled(working || (action != .retry && model.printer(for:object) == nil))
                 .help(action == .printChecked ? "Only if the printer isn’t already printing this" : "")
             }
             .fixedSize() // never squeezed by the title beside it
@@ -347,7 +655,7 @@ struct ObjectPage: View {
                         Text("Send a close-up from your iPhone, or let me guess.").foregroundStyle(.secondary)
                         answer("Make Your Best Guess", .bestGuess)
                     }
-                    if words.actions.contains(.plateClear) {
+                    if object.printConfirmation == nil, words.actions.contains(.plateClear) {
                         answer(object.plate?.noCamera == true ? "The Plate Is Clear" : "It’s Actually Clear", .plateClear)
                     }
                 }
@@ -368,6 +676,14 @@ struct ObjectPage: View {
     // The model: the chosen render or the turnable STL, a strip to switch between them, and its size.
     private var stage: some View {
         VStack(alignment:.leading, spacing:10) {
+            if let estimate = object.print?.estimate {
+                HStack(spacing:20) {
+                    Label("Sliced", systemImage:"checkmark.circle.fill").foregroundStyle(.green)
+                    if let seconds = estimate.seconds { Label("\(Int(ceil(seconds / 60))) min", systemImage:"clock") }
+                    if let grams = estimate.grams { Label("\(grams, specifier: "%.2f") g", systemImage:"scalemass") }
+                    Text("Estimated").foregroundStyle(.secondary)
+                }.font(.headline).monospacedDigit()
+            }
             ZStack {
                 ObjectsStyle.stage
                 switch shown {
@@ -395,7 +711,6 @@ struct ObjectPage: View {
                 if let size = object.current?.sizeMm, size.count == 3 {
                     Label(ObjectWords.formatSize(size), systemImage:"ruler").foregroundStyle(.secondary)
                         .labelStyle(.titleAndIcon).textSelection(.enabled)
-                        .accessibilityLabel("Size \(ObjectWords.formatSize(size))")
                         .fixedSize()
                 }
             }
@@ -439,7 +754,11 @@ struct ObjectPage: View {
 
     // "Anything to Fix?": the note goes back to the touch-up, which starts again from this model.
     private var corrections: some View {
-        section("Anything to Fix?") {
+        section(object.current == nil ? "Revise Your Request" : "Refine This Version") {
+            if object.current == nil {
+                Text("Explain what you want made from these photos, or clarify what went wrong. Your existing photos stay with the project.")
+                    .font(.callout).foregroundStyle(.secondary)
+            }
             HStack(alignment:.bottom, spacing:10) {
                 TextField("For example: you missed the clip on the side, or it’s 70 mm long.", text:$note, axis:.vertical)
                     .textFieldStyle(.roundedBorder).lineLimit(2...6)
@@ -461,9 +780,117 @@ struct ObjectPage: View {
     private func send() {
         let text = note.trimmingCharacters(in:.whitespacesAndNewlines)
         guard !text.isEmpty, !working else { return }
-        Task { if await model.perform(.correct, on:object.id, note:text) { note = "" } }
+        Task { if await model.perform(.correct, on:object.id, note:text) { note = ""; projectSection = .activity } }
     }
     private func run(_ action: ObjectAction) { Task { await model.perform(action, on:object.id) } }
+}
+
+enum MacProjectSection: String, CaseIterable { case model = "Model", inputs = "Inputs", activity = "Activity" }
+
+struct MacProjectPhotos: View {
+    let object: StmObject
+    let photos: [URL]
+    @State private var selected: URL?
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators:false) {
+            HStack(spacing:12) {
+                ForEach(Array(photos.enumerated()), id:\.element) { index, url in
+                    Button { selected = url } label: {
+                        FileImage(url:url, version:object.updatedAtMs, contentMode:.fill)
+                            .frame(width:160, height:130).clipped()
+                            .clipShape(RoundedRectangle(cornerRadius:12))
+                    }
+                    .buttonStyle(.plain).help("Open reference photo \(index + 1)")
+                    .accessibilityLabel("Reference photo \(index + 1)")
+                }
+            }.padding(.vertical, 4)
+        }
+        .sheet(isPresented:Binding(get:{ selected != nil }, set:{ if !$0 { selected = nil } })) {
+            VStack(spacing:16) {
+                if let selected { FileImage(url:selected, version:object.updatedAtMs).frame(maxWidth:.infinity, maxHeight:.infinity) }
+                Button("Done") { selected = nil }.keyboardShortcut(.cancelAction)
+            }.padding(20).frame(minWidth:600, minHeight:500)
+        }
+    }
+}
+
+struct MacProjectActivity: View {
+    let object: StmObject
+    let model: ObjectsModel
+    var body: some View {
+        VStack(alignment:.leading, spacing:18) {
+            Label("Project Created", systemImage:"plus.circle.fill").font(.headline)
+            Text(Date(timeIntervalSince1970:object.createdAtMs / 1000), format:.dateTime.month().day().hour().minute())
+                .font(.caption).foregroundStyle(.secondary)
+            ForEach(Array(object.passes.enumerated()), id:\.offset) { index, pass in
+                VStack(alignment:.leading, spacing:10) {
+                    Divider()
+                    HStack {
+                        Label("Pass \(index + 1)", systemImage:pass.endedAtMs == nil ? "sparkles" : "clock.arrow.circlepath")
+                            .font(.headline)
+                        Spacer()
+                        Text(pass.status?.replacingOccurrences(of:"_", with:" ").capitalized ?? "In progress")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    Text(Date(timeIntervalSince1970:pass.startedAtMs / 1000), format:.dateTime.month(.abbreviated).day().hour().minute())
+                        .font(.caption).foregroundStyle(.secondary)
+                    if let note = pass.note, !note.isEmpty {
+                        Text("Your change").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                        Text(note).textSelection(.enabled)
+                    }
+                    if let summary = pass.summary, !summary.isEmpty { Text(summary).textSelection(.enabled) }
+                    if (pass.activityCount ?? pass.activity?.count ?? 0) > 0 {
+                        MacPassActivity(object:object, model:model, index:index, count:pass.activityCount ?? pass.activity?.count ?? 0)
+                    } else if pass.endedAtMs != nil {
+                        Text("Detailed activity wasn't recorded for this earlier pass.").font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            }
+            if object.passes.isEmpty { Text("Work will appear here when you send this project from your iPhone.").foregroundStyle(.secondary) }
+        }
+    }
+}
+
+struct MacPassActivity: View {
+    let object: StmObject
+    let model: ObjectsModel
+    let index: Int
+    let count: Int
+    @State private var expanded = false
+    @State private var entries: [StmObject.Activity] = []
+    @State private var failed = false
+    @State private var loading = false
+
+    var body: some View {
+        DisclosureGroup("Model Activity (\(count))", isExpanded:$expanded) {
+            VStack(alignment:.leading, spacing:12) {
+                if failed {
+                    Button("Couldn't load this pass. Try again.") { Task { await load() } }
+                } else if loading && entries.isEmpty { ProgressView().controlSize(.small) }
+                ForEach(Array(entries.enumerated()), id:\.offset) { _, entry in
+                    HStack(alignment:.top, spacing:12) {
+                        Image(systemName:entry.kind == "tool" ? "wrench.and.screwdriver" : "text.bubble")
+                            .foregroundStyle(.secondary).frame(width:20)
+                        VStack(alignment:.leading, spacing:4) {
+                            Text(entry.text).textSelection(.enabled)
+                            Text(Date(timeIntervalSince1970:entry.atMs / 1000), format:.dateTime.hour().minute().second())
+                                .font(.caption2).foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }.padding(.top,12)
+        }
+        .task(id:expanded ? object.updatedAtMs : -1) { if expanded { await load() } }
+    }
+    private func load() async {
+        loading = true
+        defer { loading = false }
+        do {
+            let activity = try await model.passActivity(object.id, index:index)
+            guard !Task.isCancelled else { return }
+            entries = activity; failed = false
+        } catch { if !Task.isCancelled { failed = true } }
+    }
 }
 
 // MARK: - Steady scrolling

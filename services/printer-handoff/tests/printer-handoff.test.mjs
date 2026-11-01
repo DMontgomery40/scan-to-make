@@ -6,6 +6,7 @@ import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {
   HandoffBundleStore,
+  DispatchedPrintError,
   InMemoryElicitationRelay,
   PrinterHandoffRunner,
   PrinterMcpClient,
@@ -19,7 +20,7 @@ const selection = {
   bedType: 'textured_plate', material: 'PLA', plateIndex: 0,
 };
 
-async function setup(t, {mode = 'bambu', backend = 'bambu-printer-mcp', answer = 'accept', relayTimeoutMs = 5000, dispatch} = {}) {
+async function setup(t, {mode = 'bambu', backend = 'bambu-printer-mcp', answer = 'accept', relayTimeoutMs = 5000, dispatch, ephemeral = false, noColour = false, crypto = false, noConnectionType = false} = {}) {
   const root = await mkdtemp(join(tmpdir(), 'printer-handoff-'));
   t.after(() => rm(root, {recursive: true, force: true}));
   const log = join(root, 'calls.jsonl');
@@ -28,7 +29,8 @@ async function setup(t, {mode = 'bambu', backend = 'bambu-printer-mcp', answer =
   await writeFile(stlPath, stl);
   const config = {
     backend,
-    process: {command: process.execPath, args: [fixture, mode, log], cwd: root, ...(dispatch ? {env: {HANDOFF_FIXTURE_DISPATCH: dispatch}} : {})},
+    process: {command: process.execPath, args: [fixture, mode, log], cwd: root,
+      env: {...(noConnectionType ? {HANDOFF_FIXTURE_NO_CONNECTION_TYPE:'1'} : {}), ...(crypto ? {HANDOFF_FIXTURE_CRYPTO:'1'} : {}), ...(dispatch ? {HANDOFF_FIXTURE_DISPATCH: dispatch} : {}), ...(ephemeral ? {HANDOFF_FIXTURE_EPHEMERAL: '1'} : {}), ...(noColour ? {HANDOFF_FIXTURE_NO_COLOUR:'1'} : {})}},
     selection,
     timeouts: {connectMs: 5000, toolMs: 5000, elicitationMs: relayTimeoutMs},
   };
@@ -58,6 +60,27 @@ test('config file parses backend, process, selection and timeouts', async t => {
   const path = join(f.root, 'config.json');
   await writeFile(path, JSON.stringify(f.config));
   assert.deepEqual(await readPrinterHandoffConfig(path), f.config);
+});
+
+test('a selected colour and profile reach slicing and its AMS slot reaches printing', async t => {
+  const f = await setup(t);
+  const store = new HandoffBundleStore(join(f.root, 'selected-filament'));
+  const manifest = await store.create({stl, prompt:'', backend:'bambu-printer-mcp',
+    selection:{...selection, useAms:true, amsSlots:[1], autoMatchAms:false}});
+  await f.runner.runBundle(store, manifest.id, {slicer:{loadFilaments:'/profiles/pla.json', filamentColours:'#FEC600'}});
+  const calls = await f.calls();
+  const slice = calls.find(call => call.tool === 'slice_stl');
+  const print = calls.find(call => call.tool === 'print_3mf');
+  assert.equal(slice.arguments.load_filaments, '/profiles/pla.json');
+  assert.equal(slice.arguments.filament_colours, '#FEC600');
+  assert.deepEqual(print.arguments.ams_slots, [1]);
+  assert.equal(print.arguments.auto_match_ams, false);
+});
+
+test('a backend that cannot honour the chosen colour is refused before slicing or dispatch', async t => {
+  const f = await setup(t, {noColour:true});
+  await assert.rejects(f.runner.run({stlPath:f.stlPath, slicer:{loadFilaments:'/profiles/pla.json', filamentColours:'#FEC600'}}), /filament-selection-unsupported/);
+  assert.deepEqual(await f.calls(), []);
 });
 
 test('bundle store creates, verifies, claims and records designed artifacts', async t => {
@@ -258,7 +281,7 @@ test('runBundle stores only a bare failure code on the bundle', async t => {
 });
 
 for (const print of [true, false]) {
-  test(`runBundle preserves dispatch state when recording output fails (print=${print})`, async t => {
+  test(`runBundle refuses dispatch when recording output fails (print=${print})`, async t => {
     const f = await setup(t);
     const store = new HandoffBundleStore(join(f.root, 'bundles-record-failure'));
     const bundle = await store.create({stl, prompt: 'record failure', backend: 'bambu-printer-mcp', selection});
@@ -266,12 +289,67 @@ for (const print of [true, false]) {
       throw Object.assign(new Error('/private/operator/output failed'), {code: 'record-failed'});
     };
     await assert.rejects(f.runner.runBundle(store, bundle.id, {print}), {code: 'record-failed'});
-    assert.equal((await f.calls()).filter(item => item.tool === 'print_3mf').length, print ? 1 : 0);
+    assert.equal((await f.calls()).filter(item => item.tool === 'print_3mf').length, 0);
     const read = await store.read(bundle.id);
-    assert.equal(read.status, print ? 'printed' : 'failed');
+    assert.equal(read.status, 'failed');
     assert.equal(read.failure, 'record-failed');
   });
 }
+
+for (const mode of ['bambu', 'generic-gcode']) for (const print of [true, false]) {
+  test(`backend exit cleanup leaves durable artifacts and dispatch paths (${mode}, print=${print})`, async t => {
+    const backend = mode === 'bambu' ? 'bambu-printer-mcp' : 'mcp-3d-printer-server';
+    const f = await setup(t, {mode, backend, ephemeral: true});
+    const store = new HandoffBundleStore(join(f.root, 'durable'));
+    const bundle = await store.create({stl, prompt: 'Retain the sliced artifact.', backend, selection});
+    const outcome = await f.runner.runBundle(store, bundle.id, {print});
+    assert.equal(outcome.manifest.status, print ? 'printed' : 'sliced');
+    assert.ok((await readFile(outcome.result.slicedPath)).length > 0);
+    assert.ok((await readFile(outcome.result.orientedStlPath)).length > 0);
+    const calls = (await f.calls()).filter(call => call.tool);
+    const originalOriented = calls.find(call => call.tool === 'slice_stl').arguments.stl_path;
+    await assert.rejects(readFile(originalOriented), {code: 'ENOENT'});
+    const dispatches = calls.filter(call => ['print_3mf', 'upload_gcode'].includes(call.tool));
+    assert.equal(dispatches.length, print ? 1 : 0);
+    if (print) {
+      const dispatchedPath = dispatches[0].arguments.three_mf_path ?? dispatches[0].arguments.gcode_path;
+      assert.equal(dispatchedPath, outcome.result.slicedPath);
+      assert.ok(dispatchedPath.startsWith(store.directory(bundle.id)));
+    }
+  });
+}
+
+test('failure saving the second artifact prevents dispatch despite the sliced artifact being saved', async t => {
+  const f = await setup(t);
+  const store = new HandoffBundleStore(join(f.root, 'partial-artifacts'));
+  const bundle = await store.create({stl, prompt: '', backend: 'bambu-printer-mcp', selection});
+  const recordArtifact = store.recordArtifact.bind(store);
+  store.recordArtifact = async (id, key, name, bytes) => {
+    if (key === 'oriented') throw Object.assign(Error('Cannot save oriented artifact'), {code: 'record-failed'});
+    return recordArtifact(id, key, name, bytes);
+  };
+  await assert.rejects(f.runner.runBundle(store, bundle.id), {code: 'record-failed'});
+  const manifest = await store.read(bundle.id);
+  assert.ok(manifest.artifacts.sliced);
+  assert.equal(manifest.status, 'failed');
+  assert.equal((await f.calls()).filter(call => call.tool === 'print_3mf').length, 0);
+});
+
+test('failure recording success after dispatch preserves printed state and cannot replay', async t => {
+  const f = await setup(t);
+  const store = new HandoffBundleStore(join(f.root, 'dispatched-status'));
+  const bundle = await store.create({stl, prompt: '', backend: 'bambu-printer-mcp', selection});
+  const setStatus = store.setStatus.bind(store);
+  let failOnce = true;
+  store.setStatus = async (id, status, failure) => {
+    if (status === 'printed' && failOnce) { failOnce = false; throw Object.assign(Error('Cannot record success'), {code: 'record-failed'}); }
+    return setStatus(id, status, failure);
+  };
+  await assert.rejects(f.runner.runBundle(store, bundle.id), error => error instanceof DispatchedPrintError && error.code === 'record-failed');
+  assert.equal((await store.read(bundle.id)).status, 'printed');
+  await assert.rejects(f.runner.runBundle(store, bundle.id), {code: 'already-printed'});
+  assert.equal((await f.calls()).filter(call => call.tool === 'print_3mf').length, 1);
+});
 
 test('aborting a run awaiting confirmation clears its pending elicitation', async t => {
   const f = await setup(t, {answer: 'none', relayTimeoutMs: 60000});
@@ -331,4 +409,62 @@ test('a successful retry clears its prior failure code', async t => {
   const result = await f.runner.runBundle(store, bundle.id);
   assert.equal(result.manifest.status, 'printed');
   assert.equal(result.manifest.failure, undefined);
+});
+
+
+test('a known pre-dispatch printer refusal preserves its reason without claiming it may have started', async t => {
+  const f = await setup(t, {dispatch:'preflight-error'});
+  await assert.rejects(f.runner.run({stlPath:f.stlPath}), error => {
+    assert.equal(error.code, 'printer-not-ready');
+    assert.match(error.detail, /Printer state FAILED is not safely idle/);
+    return true;
+  });
+});
+
+test('progress reaches the caller before each operation, including the last printer request', async t => {
+  const f = await setup(t);
+  const progress = [];
+  await f.runner.run({stlPath:f.stlPath, onProgress:async update => {progress.push(update.phase);}});
+  assert.deepEqual(progress, ['connecting','orienting','slicing','inspecting','slice-ready','checking-printer','requesting-print','accepted']);
+});
+
+
+test('failure recording accepted progress never makes an accepted print replayable', async t => {
+  const f = await setup(t);
+  const store = new HandoffBundleStore(join(f.root, 'accepted-progress'));
+  const bundle = await store.create({stl,prompt:'',backend:'bambu-printer-mcp',selection});
+  await f.runner.runBundle(store,bundle.id,{onProgress:async update=>{if(update.phase==='accepted')throw Error('disk full');}});
+  assert.equal((await store.read(bundle.id)).status,'printed');
+  await assert.rejects(f.runner.runBundle(store,bundle.id),{code:'already-printed'});
+});
+
+
+test('an explicitly selected authenticated transport reaches the MCP print tool', async t => {
+  const f=await setup(t);
+  await f.runner.run({stlPath:f.stlPath,selection:{...selection,connectionMode:'bambu_network',connectionType:'lan'}});
+  const printed=(await f.calls()).find(x=>x.tool==='print_3mf');
+  assert.equal(printed.arguments.connection_mode,'bambu_network');
+  assert.equal(printed.arguments.connection_type,'lan');
+});
+
+
+test('authenticated LAN recovery relays the printer error acknowledgment before print clearance', async t => {
+ const f=await setup(t,{crypto:true});
+ await f.runner.run({stlPath:f.stlPath,selection:{...selection,connectionMode:'bambu_network',connectionType:'lan'}});
+ const tools=(await f.calls()).filter(x=>x.tool).map(x=>x.tool);
+ assert.ok(tools.indexOf('clear_hms_errors')<tools.indexOf('print_3mf'));
+ assert.equal(f.seen.length,2);
+});
+
+test('declining error acknowledgment stops before the print command', async t => {
+ const f=await setup(t,{crypto:true,answer:'decline'});
+ await assert.rejects(f.runner.run({stlPath:f.stlPath,selection:{...selection,connectionMode:'bambu_network',connectionType:'lan'}}));
+ assert.equal((await f.calls()).filter(x=>x.tool==='print_3mf').length,0);
+});
+
+
+test('an explicit LAN route cannot silently become cloud when a backend omits connection_type', async t => {
+ const f=await setup(t,{noConnectionType:true});
+ await assert.rejects(f.runner.run({stlPath:f.stlPath,selection:{...selection,connectionMode:'bambu_network',connectionType:'lan'}}),{code:'print-transport-unsupported'});
+ assert.deepEqual(await f.calls(),[]);
 });

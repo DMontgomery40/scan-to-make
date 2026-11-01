@@ -44,6 +44,13 @@ with tempfile.TemporaryDirectory() as temporary:
     # Also filter supplied archives: they may contain a full companion install.
     # A removed/forbidden worker never re-enters the app through SOURCE_ARCHIVE.
     run('tar', '-xf', archive, '-C', source, *MANIFEST['sourcePaths'])
+    for helper in MANIFEST['firstPartyExecutables']:
+        package = source / helper['sourcePath']
+        run('swift', 'build', '-c', 'release', '--package-path', package, '--product', helper['name'])
+        destination = payload / helper['path']
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(package / '.build/release' / helper['name'], destination)
+        shutil.rmtree(package / '.build')
     env = dict(os.environ, PATH=str(payload / 'node/bin') + ':' + os.environ['PATH'])
     for package in MANIFEST['npmPackages']:
         run('npm', 'ci', '--ignore-scripts', '--prefix', source / package, env=env)

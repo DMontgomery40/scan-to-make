@@ -7,8 +7,10 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		B5D84F9236D44B4CB0550001 /* HandheldDepthRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5D84F9236D44B4CB0550002 /* HandheldDepthRecorder.swift */; };
 		0C80B921A6F3F58F76C31292 /* libPods-ScanToMake.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 5DCACB8F33CDC322A6C60F78 /* libPods-ScanToMake.a */; };
 		13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 13B07FB51A68108700A75B9A /* Images.xcassets */; };
+		73A2236B17A4699EE3C2716E /* HandheldCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4ED96C170BBA1E9BAB6F8DBA /* HandheldCapture.swift */; };
 		761780ED2CA45674006654EE /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 761780EC2CA45674006654EE /* AppDelegate.swift */; };
 		781301000000000000000002 /* STMActionButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = 781301000000000000000001 /* STMActionButton.swift */; };
 		781301000000000000000004 /* STMActionButtonManager.mm in Sources */ = {isa = PBXBuildFile; fileRef = 781301000000000000000003 /* STMActionButtonManager.mm */; };
@@ -21,6 +23,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		B5D84F9236D44B4CB0550002 /* HandheldDepthRecorder.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = HandheldDepthRecorder.swift; sourceTree = "<group>"; };
 		13B07F961A680F5B00A75B9A /* ScanToMake.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ScanToMake.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		13B07FB51A68108700A75B9A /* Images.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; name = Images.xcassets; path = ScanToMake/Images.xcassets; sourceTree = "<group>"; };
 		13B07FB61A68108700A75B9A /* Info.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; name = Info.plist; path = ScanToMake/Info.plist; sourceTree = "<group>"; };
@@ -28,6 +31,7 @@
 		2C6E851EC193408262A329D7 /* Guided capture assets */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = folder.assetcatalog; name = "Guided capture assets"; path = GuidedCaptureAssets.xcassets; sourceTree = DERIVED_FILE_DIR; };
 		3B4392A12AC88292D35C810B /* Pods-ScanToMake.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-ScanToMake.debug.xcconfig"; path = "Target Support Files/Pods-ScanToMake/Pods-ScanToMake.debug.xcconfig"; sourceTree = "<group>"; };
 		40CB4C44DD8EF3BBA41F5042 /* STMObjectsAppManager.mm */ = {isa = PBXFileReference; includeInIndex = 1; path = ScanToMake/STMObjectsAppManager.mm; sourceTree = "<group>"; };
+		4ED96C170BBA1E9BAB6F8DBA /* HandheldCapture.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = HandheldCapture.swift; sourceTree = "<group>"; };
 		5709B34CF0A7D63546082F79 /* Pods-ScanToMake.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-ScanToMake.release.xcconfig"; path = "Target Support Files/Pods-ScanToMake/Pods-ScanToMake.release.xcconfig"; sourceTree = "<group>"; };
 		5D62E45D20AB9D9704A76C60 /* ObjectsModel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ObjectsModel.swift; sourceTree = "<group>"; };
 		5DCACB8F33CDC322A6C60F78 /* libPods-ScanToMake.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-ScanToMake.a"; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -81,6 +85,8 @@
 			children = (
 				5D62E45D20AB9D9704A76C60 /* ObjectsModel.swift */,
 				D0B87DEAC18A6E5EE1CD186B /* ObjectsApp.swift */,
+				4ED96C170BBA1E9BAB6F8DBA /* HandheldCapture.swift */,
+				B5D84F9236D44B4CB0550002 /* HandheldDepthRecorder.swift */,
 			);
 			name = Objects;
 			path = ScanToMake/Objects;
@@ -302,6 +308,8 @@
 				D83CADDCD5C357E4F2540BE4 /* ObjectsModel.swift in Sources */,
 				BE5F2FFB17CF9A32234D8E3B /* ObjectsApp.swift in Sources */,
 				F79ACF3851BABE80C1B03DF4 /* STMObjectsAppManager.mm in Sources */,
+				73A2236B17A4699EE3C2716E /* HandheldCapture.swift in Sources */,
+				B5D84F9236D44B4CB0550001 /* HandheldDepthRecorder.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

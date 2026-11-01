@@ -27,7 +27,7 @@ public struct ObjectWords: Sendable, Equatable {
     public let size: String?
     public let actions: [ObjectAction]
 
-    static let wait = "This can take a few minutes. We'll let you know when it's ready."
+    static let wait = "You can leave this project and return to it while your Mac works."
 
     public static func formatSize(_ size: [Double]) -> String {
         size.map { String(Int($0.rounded())) }.joined(separator: " × ") + " mm"
@@ -39,7 +39,10 @@ public struct ObjectWords: Sendable, Equatable {
         let text = (object.instructions ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let first = text.cut(at: #"(?<=[.!?])\s|\n"#).replacingPattern(#"[.!?]+$"#, with: "")
         let line = first.pieces(at: #",\s*(?=[a-z])"#).prefix(2).joined(separator: ", ")
-        if line.isEmpty { return object.scan == nil ? "Something new" : "Copy of your scan" }
+        if line.isEmpty {
+            if object.scan != nil || !(object.capture ?? []).isEmpty { return "Copy of your scan" }
+            return object.photos.isEmpty ? "Unfinished project" : "Photo project"
+        }
         guard line.count > 60 else { return line }
         return String(line.prefix(57)).replacingPattern(#"\s+$"#, with: "") + "…"
     }
@@ -53,11 +56,10 @@ public struct ObjectWords: Sendable, Equatable {
         switch object.state {
         case .new:
             // Nothing has arrived from the phone yet, or it is on its way.
-            let arriving = object.scan != nil || !object.photos.isEmpty
-            (status, tone, busy, actions) = (arriving ? "Sending to your Mac…" : "Waiting for a scan or photos.", .pending, true, [])
+            (status, tone, busy, actions) = ("Draft saved. Continue on your iPhone.", .neutral, false, [])
         case .touchingUp:
-            let what = object.passes.count > 1 && object.current != nil ? "Making your changes."
-                : object.scan != nil ? "Touching up your scan." : "Making it."
+            let what = object.progress ?? (object.passes.count > 1 && object.current != nil ? "Making your changes."
+                : object.scan != nil ? "Touching up your scan." : "Making it.")
             (status, tone, busy, actions) = ("\(what) \(Self.wait)", .pending, true, [])
         case .needsCloseup:
             let part = object.question?.closeup?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -68,21 +70,23 @@ public struct ObjectWords: Sendable, Equatable {
         case .ready:
             (status, tone, busy, actions) = ("Ready to print", .pass, false, made)
         case .printing:
-            if object.plate?.noCamera == true {
+            if object.printConfirmation != nil {
+                (status, tone, actions) = ("Waiting for your print confirmation.", .accent, [])
+            } else if object.plate?.noCamera == true {
                 (status, tone, actions) = ("Check the plate is clear.", .accent, [.plateClear])
             } else if let plate = object.plate {
                 let item = plate.item?.trimmingCharacters(in: .whitespacesAndNewlines)
                 status = "Looks like there's \(item?.isEmpty == false ? item! : "something") on your plate. Can you take it off first?"
                 (tone, actions) = (.accent, [.plateClear])
             } else {
-                (status, tone, actions) = ("Printing", .pending, [])
+                (status, tone, actions) = (object.progress ?? "Preparing print…", .pending, [])
             }
             busy = true
         case .printed:
-            (status, tone, busy, actions) = ("Printed", .pass, false, made)
+            (status, tone, busy, actions) = ("Print request accepted", .pass, false, made)
         case .failed:
             let failure = object.failure?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            (status, tone, busy, actions) = (failure.isEmpty ? "Something went wrong on your Mac." : failure, .fail, false, made.isEmpty ? [.retry] : made)
+            (status, tone, busy, actions) = (failure.isEmpty ? "Something went wrong on your Mac." : failure, .fail, false, made.isEmpty ? [.retry, .correct] : made)
         case .unknown:
             (status, tone, busy, actions) = ("Update Counterpart to see this one.", .neutral, false, [])
         }

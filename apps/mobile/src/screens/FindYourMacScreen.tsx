@@ -7,6 +7,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
   useWindowDimensions,
 } from 'react-native';
@@ -37,7 +38,6 @@ type Phase =
   | { kind: 'failed'; message: string; retry?: string }
   | { kind: 'connected' };
 
-const DEVICE_NAME = 'My phone';
 const OUT_OF_REACH = new Set(['network', 'timeout']);
 // Your Mac no longer accepts this phone's credential.
 const TURNED_AWAY = new Set(['unauthorized', 'forbidden', 'pairing-required']);
@@ -81,6 +81,8 @@ export function FindYourMacScreen({
   const gate = useRequestGate();
   const { height } = useWindowDimensions();
   const [status, setStatus] = useState<PairingStatus | null>(null);
+  const [deviceName, setDeviceName] = useState('iPhone');
+  const [editingName, setEditingName] = useState(false);
   const [readFailed, setReadFailed] = useState(false);
   const [phase, setPhase] = useState<Phase>({ kind: 'scanning' });
   const [camera, setCamera] = useState<ViewfinderState | null>(null);
@@ -98,7 +100,11 @@ export function FindYourMacScreen({
 
   const readStatus = async () => {
     try {
-      const value = await native!.status();
+      const [value, name] = await Promise.all([
+        native!.status(),
+        native!.deviceName?.() ?? Promise.resolve('iPhone'),
+      ]);
+      setDeviceName(name);
       setStatus(value);
       setReadFailed(false);
       return value;
@@ -158,10 +164,16 @@ export function FindYourMacScreen({
       // Queued like every other request, so a refresh waiting its turn
       // can't take the phone's one request first. v1 codes pair at their
       // one address; v2 codes try every address with the key pin.
-      const result = await gate(() => {
+      const result = await gate(async () => {
         if (!open.current)
           throw Object.assign(Error('Closed'), { code: 'cancelled' });
-        return pairWithInvitation(native, parsed, DEVICE_NAME);
+        const name = deviceName.trim();
+        if (!name || name.length > 80)
+          throw Object.assign(Error('Invalid phone name'), { code: 'invalid-device-name' });
+        await native.setDeviceName?.(name);
+        if (!open.current)
+          throw Object.assign(Error('Closed'), { code: 'cancelled' });
+        return pairWithInvitation(native, parsed, name);
       });
       setStatus(result);
       setReplacing(false);
@@ -407,7 +419,8 @@ export function FindYourMacScreen({
   // The camera waits for the stored pairing: a paired Mac is replaced only
   // after asking. It's off while a code is in use, and re-arms for the next.
   const armed =
-    status !== null && phase.kind === 'scanning' && !readFailed && !paused;
+    status !== null && phase.kind === 'scanning' && !readFailed && !paused &&
+    !editingName && deviceName.trim().length > 0;
   return (
     <Shell insets={insets} onBack={busy ? undefined : onBack}>
       <Text accessibilityRole="header" style={styles.title}>
@@ -416,6 +429,20 @@ export function FindYourMacScreen({
       <Text style={styles.body}>
         Counterpart uses your Mac to touch up scans and send them to your printer.
       </Text>
+      <View style={styles.panel}>
+        <Text style={type.caption}>This phone’s name on your Mac</Text>
+        <TextInput
+          accessibilityLabel="Phone name"
+          value={deviceName}
+          onChangeText={setDeviceName}
+          onFocus={() => setEditingName(true)}
+          onBlur={() => setEditingName(false)}
+          editable={!busy}
+          maxLength={80}
+          returnKeyType="done"
+          style={styles.body}
+        />
+      </View>
       <View style={[styles.finder, { height: Math.min(380, height * 0.45) }]}>
         <QRViewfinder
           active={armed}

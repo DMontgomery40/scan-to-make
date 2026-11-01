@@ -7,13 +7,19 @@ import {
   type PrinterHandoffConfig, type PrinterSelection, type PrinterSlicer, type PrinterPrintOptions,
 } from './config.js';
 import type {ElicitationRelay} from './elicitation.js';
+import {sliceEstimate, type SliceEstimate} from './slice-estimate.js';
 import type {HandoffBundleStore} from './bundle.js';
 import {PrinterMcpClient, PrinterMcpError, toolResultJson, toolResultText, type PrinterToolCatalog} from './mcp-client.js';
 
 export type PrintStep = 'discover' | 'lay_flat' | 'slice_stl' | 'inspect' | 'camera_snapshot' | 'print';
+export type PrintPhase = 'connecting' | 'orienting' | 'slicing' | 'inspecting' | 'slice-ready' | 'checking-printer' | 'resolving-printer-error' | 'requesting-print' | 'accepted';
+export interface PrintProgress {phase: PrintPhase; estimate?: SliceEstimate}
 export interface PrintRunInput {
+  onProgress?: (update: PrintProgress) => Promise<void>;
   /** Persist a non-replayable intent before sending the print tool call. */
   beforePrint?: () => Promise<void>;
+  /** Save backend scratch outputs while the MCP is alive; dispatch uses the returned durable paths. */
+  persistOutput?: (output: {slicedPath: string; orientedStlPath: string}) => Promise<{slicedPath: string; orientedStlPath: string}>;
   stlPath: string;
   selection?: PrinterSelection;
   slicer?: PrinterSlicer;
@@ -111,6 +117,33 @@ export class PrinterHandoffRunner {
     finally { await client.close().catch(() => undefined); }
   }
 
+  /** Display-only printer status, using the configured route and the standard MCP tool. */
+  async status(signal?: AbortSignal): Promise<unknown> {
+    const client = this.client();
+    try {
+      await client.connect(signal);
+      if (!client.hasTool('get_printer_status')) return undefined;
+      const selection = this.#config.selection;
+      return resultValue(await call(client, 'get_printer_status', {
+        host: selection?.host, type: selection?.printerType, port: selection?.port,
+      }, signal));
+    } finally { await client.close().catch(() => undefined); }
+  }
+
+  /** Read the printer's live material inventory without starting or uploading a print. */
+  async filaments(signal?: AbortSignal): Promise<unknown> {
+    const client = this.client();
+    try {
+      await client.connect(signal);
+      if (!client.hasTool('get_printer_filaments')) fail('filament-inventory-unavailable');
+      const selection = this.#config.selection;
+      return resultValue(await call(client, 'get_printer_filaments', {
+        bambu_model: selection?.model,
+        nozzle_diameter: selection?.nozzleDiameterMm === undefined ? undefined : String(selection.nozzleDiameterMm),
+      }, signal));
+    } finally { await client.close().catch(() => undefined); }
+  }
+
   private async inspect(client: PrinterMcpClient, slicedPath: string, selection: PrinterSelection, signal?: AbortSignal) {
     if (client.hasTool('inspect_print_file')) {
       const result = await call(client, 'inspect_print_file', {
@@ -144,16 +177,35 @@ export class PrinterHandoffRunner {
     const client = this.client();
     const tag = input.bundleId === undefined ? {} : {bundleId: input.bundleId};
     client.setElicitationContext(tag);
+    const progress = async (phase: PrintPhase, estimate?: SliceEstimate) => { await input.onProgress?.({phase, ...(estimate ? {estimate} : {})}); };
     try {
+      await progress('connecting');
       const catalog = await client.connect(input.signal);
       step('discover');
+      if (selection.connectionMode || selection.connectionType) {
+        const properties = client.getTool('print_3mf').inputSchema.properties ?? {};
+        if ((selection.connectionMode && !Object.hasOwn(properties, 'connection_mode'))
+            || (selection.connectionType && !Object.hasOwn(properties, 'connection_type'))) fail('print-transport-unsupported');
+      }
+      if (slicer.filamentColours) {
+        const sliceProperties = client.getTool('slice_stl').inputSchema.properties ?? {};
+        if (!Object.hasOwn(sliceProperties, 'filament_colours') || !Object.hasOwn(sliceProperties, 'load_filaments'))
+          fail('filament-selection-unsupported');
+        if (input.print !== false) {
+          const printProperties = client.getTool('print_3mf').inputSchema.properties ?? {};
+          if (!Object.hasOwn(printProperties, 'ams_slots') || !Object.hasOwn(printProperties, 'use_ams'))
+            fail('filament-selection-unsupported');
+        }
+      }
       let orientedStlPath = input.stlPath;
       const laidFlat = client.hasTool('lay_flat');
       if (laidFlat) {
+        await progress('orienting');
         orientedStlPath = absolutePath(await call(client, 'lay_flat', {stl_path: input.stlPath}, input.signal));
         step('lay_flat');
       }
-      const slicedPath = absolutePath(await call(client, 'slice_stl', {
+      await progress('slicing');
+      let slicedPath = absolutePath(await call(client, 'slice_stl', {
         stl_path: orientedStlPath,
         bambu_model: isBambuSlicing(this.#config, selection, slicer) ? selection.model : undefined,
         nozzle_diameter: selection.nozzleDiameterMm === undefined ? undefined : String(selection.nozzleDiameterMm),
@@ -163,6 +215,7 @@ export class PrinterHandoffRunner {
         slicer_profile: slicer.profile,
         filament_profile: slicer.filamentProfile,
         load_filaments: slicer.loadFilaments,
+        filament_colours: slicer.filamentColours,
         template_name: slicer.templateName,
         use_printer_filaments: false,
         // lay_flat already chose the flat face; otherwise let the slicer orient.
@@ -171,11 +224,16 @@ export class PrinterHandoffRunner {
         ensure_on_bed: true,
       }, input.signal));
       step('slice_stl');
+      const estimate = await sliceEstimate(await readFile(slicedPath), selection.plateIndex ?? 0);
+      await progress('inspecting', estimate);
       const inspection = await this.inspect(client, slicedPath, selection, input.signal);
       if (inspection) step('inspect');
+      if (input.persistOutput) ({slicedPath, orientedStlPath} = await input.persistOutput({slicedPath, orientedStlPath}));
+      await progress('slice-ready', estimate);
       const common = {backend: this.#config.backend, catalog, stlPath: input.stlPath, orientedStlPath, slicedPath, inspection, steps};
       if (input.print === false) return common;
 
+      await progress('checking-printer');
       let cameraSnapshot: Record<string, unknown> | undefined;
       if (this.#config.backend === 'bambu-printer-mcp' && this.#config.cameraSnapshot !== false && client.hasTool('camera_snapshot')) {
         try {
@@ -193,12 +251,26 @@ export class PrinterHandoffRunner {
         } catch { /* The print prompts still go to the user without an image. */ }
       }
 
+      // A rejected unsigned command leaves a software HMS error. The authenticated
+      // LAN route can recover it only through the server's own human confirmation.
+      if (this.#config.backend === 'bambu-printer-mcp' && selection.connectionMode === 'bambu_network'
+          && client.hasTool('get_printer_status') && client.hasTool('clear_hms_errors')) {
+        const status = resultValue(await call(client, 'get_printer_status', {}, input.signal)) as {raw?: {hms?: {attr?: number; code?: number}[]}};
+        const errors = status?.raw?.hms;
+        if (Array.isArray(errors) && errors.length === 1 && errors[0]?.attr === 0x05000500 && errors[0]?.code === 0x00010007) {
+          await progress('resolving-printer-error');
+          await call(client, 'clear_hms_errors', {bambu_model:selection.model}, input.signal);
+        }
+      }
+      await progress('requesting-print');
       let printed: unknown;
       try {
         if (this.#config.backend === 'bambu-printer-mcp' || slicedPath.toLowerCase().endsWith('.3mf') || selection.printerType === 'bambu') {
           if (!slicedPath.toLowerCase().endsWith('.3mf')) fail('expected-sliced-3mf');
           const result = await call(client, 'print_3mf', {
             three_mf_path: slicedPath,
+            connection_mode: selection.connectionMode,
+            connection_type: selection.connectionType,
             bambu_model: selection.model,
             bed_type: selection.bedType,
             nozzle_type: selection.nozzleType,
@@ -230,6 +302,7 @@ export class PrinterHandoffRunner {
         }
       } finally { client.setElicitationContext(tag); }
       step('print');
+      await progress('accepted').catch(() => undefined); // Telemetry cannot erase an accepted dispatch.
       return {...common, cameraSnapshot, print: printed};
     } finally {
       await client.close().catch(() => undefined);
@@ -240,7 +313,7 @@ export class PrinterHandoffRunner {
    * Runs a stored handoff bundle and records the sliced output back into it.
    * The bundle backend must match this runner's configured backend.
    */
-  async runBundle(store: HandoffBundleStore, id: string, options: {print?: boolean; signal?: AbortSignal} = {}) {
+  async runBundle(store: HandoffBundleStore, id: string, options: {print?: boolean; signal?: AbortSignal; slicer?: PrinterSlicer; onProgress?: PrintRunInput['onProgress']} = {}) {
     const manifest = await store.read(id);
     if (manifest.backend !== this.#config.backend) fail('backend-mismatch');
     if (manifest.status === 'uncertain') fail('dispatch-uncertain');
@@ -253,20 +326,24 @@ export class PrinterHandoffRunner {
     try {
       const inputStl = join(workDirectory, basename(store.stlPath(manifest)));
       await copyFile(store.stlPath(manifest), inputStl);
-      const result = await this.run({stlPath: inputStl, selection: manifest.selection, print: options.print, signal: options.signal, bundleId: id,
+      const result = await this.run({stlPath: inputStl, selection: manifest.selection, slicer: options.slicer, print: options.print, signal: options.signal, bundleId: id, onProgress: options.onProgress,
+        persistOutput: async output => {
+          // MCP backends may delete scratch files on close. Save both artifacts
+          // before dispatch, and give the printer the durable bundle path.
+          let saved = await store.recordArtifact(id, 'sliced', basename(output.slicedPath), await readFile(output.slicedPath));
+          if (output.orientedStlPath !== inputStl) {
+            saved = await store.recordArtifact(id, 'oriented', basename(output.orientedStlPath), await readFile(output.orientedStlPath));
+          }
+          return {slicedPath: join(store.directory(id), saved.artifacts.sliced!.file),
+            orientedStlPath: saved.artifacts.oriented ? join(store.directory(id), saved.artifacts.oriented.file) : store.stlPath(saved)};
+        },
         beforePrint: async () => { await store.setStatus(id, 'uncertain', 'dispatch-uncertain'); },
       });
       dispatched = options.print !== false;
       // A later artifact write must not erase a successful print dispatch
       // and make the phone offer the same bundle for printing again.
       if (dispatched) await store.setStatus(id, 'printed');
-      const sliced = await readFile(result.slicedPath);
-      let updated = await store.recordArtifact(id, 'sliced', basename(result.slicedPath), sliced);
-      if (result.orientedStlPath !== inputStl) {
-        const oriented = await readFile(result.orientedStlPath);
-        updated = await store.recordArtifact(id, 'oriented', basename(result.orientedStlPath), oriented);
-      }
-      updated = await store.setStatus(id, options.print === false ? 'sliced' : 'printed');
+      const updated = await store.setStatus(id, options.print === false ? 'sliced' : 'printed');
       // Report persisted bundle paths, not the throwaway run directory.
       const persisted: PrintRunResult = {
         ...result,

@@ -6,23 +6,46 @@ import ControlKit
 
 /// What the objects window needs from the companion: local-control's `objects.*` methods.
 protocol ObjectsCompanion: Sendable {
+    func printers() async throws -> PrinterCatalog
+    func filaments(_ id: String) async throws -> [PrinterFilament]
+    func print(_ id: String, checked: Bool, filament: PrinterFilament) async throws -> StmObject
+    func passActivity(_ id: String, index: Int) async throws -> [StmObject.Activity]
+    func selectPrinter(_ id: String, destinationId: String) async throws -> StmObject
     func objects() async throws -> [StmObject]
     func correct(_ id: String, note: String) async throws -> StmObject
     func answerCloseup(_ id: String, bestGuess: Bool) async throws -> StmObject
     func print(_ id: String, checked: Bool) async throws -> StmObject
     func answerPlate(_ id: String) async throws -> StmObject
+    func answerPrintConfirmation(_ id: String, confirmationId: String, answer: PrintConfirmationAnswer) async throws -> StmObject
     func start(_ id: String) async throws -> StmObject
     func delete(_ id: String) async throws
+}
+
+extension ObjectsCompanion {
+    func filaments(_ id: String) async throws -> [PrinterFilament] { throw ControlClientError.unavailable }
+    func print(_ id: String, checked: Bool, filament: PrinterFilament) async throws -> StmObject { throw ControlClientError.unavailable }
+    func answerPrintConfirmation(_ id: String, confirmationId: String, answer: PrintConfirmationAnswer) async throws -> StmObject { throw ControlClientError.unavailable }
+    func passActivity(_ id: String, index: Int) async throws -> [StmObject.Activity] { throw ControlClientError.unavailable }
+    func printers() async throws -> PrinterCatalog { throw ControlClientError.unavailable }
+    func selectPrinter(_ id: String, destinationId: String) async throws -> StmObject { throw ControlClientError.unavailable }
 }
 
 /// The control socket. A fresh client per call, so a missing socket fails that call, not the model.
 struct SocketObjects: ObjectsCompanion {
     let path: String
+    func passActivity(_ id: String, index: Int) async throws -> [StmObject.Activity] { try await ControlClient(socketPath:path).passActivity(id, index:index) }
+    func printers() async throws -> PrinterCatalog { try await ControlClient(socketPath:path).printers() }
+    func filaments(_ id: String) async throws -> [PrinterFilament] { try await ControlClient(socketPath:path, timeout:30).filaments(id) }
+    func print(_ id: String, checked: Bool, filament: PrinterFilament) async throws -> StmObject { try await ControlClient(socketPath:path, timeout:30).printObject(id, checked:checked, filament:filament) }
+    func selectPrinter(_ id: String, destinationId: String) async throws -> StmObject { try await ControlClient(socketPath:path).selectPrinter(id, destinationId:destinationId) }
     func objects() async throws -> [StmObject] { try await ControlClient(socketPath:path).objects() }
     func correct(_ id: String, note: String) async throws -> StmObject { try await ControlClient(socketPath:path).correctObject(id, note:note) }
     func answerCloseup(_ id: String, bestGuess: Bool) async throws -> StmObject { try await ControlClient(socketPath:path).answerCloseup(id, bestGuess:bestGuess) }
     func print(_ id: String, checked: Bool) async throws -> StmObject { try await ControlClient(socketPath:path).printObject(id, checked:checked) }
     func answerPlate(_ id: String) async throws -> StmObject { try await ControlClient(socketPath:path).answerPlate(id) }
+    func answerPrintConfirmation(_ id: String, confirmationId: String, answer: PrintConfirmationAnswer) async throws -> StmObject {
+        try await ControlClient(socketPath:path).answerPrintConfirmation(id, confirmationId:confirmationId, answer:answer)
+    }
     func start(_ id: String) async throws -> StmObject { try await ControlClient(socketPath:path).startObject(id) }
     func delete(_ id: String) async throws { try await ControlClient(socketPath:path).deleteObject(id) }
 }
@@ -44,6 +67,7 @@ struct SocketObjects: ObjectsCompanion {
     static let busyDelay: Double = 3, idleDelay: Double = 15
 
     @Published private(set) var objects: [StmObject] = []
+    @Published private(set) var printerCatalog: PrinterCatalog?
     @Published private(set) var availability = Availability.loading
     @Published var selection: String?
     @Published private(set) var working: Set<String> = []
@@ -57,12 +81,51 @@ struct SocketObjects: ObjectsCompanion {
     var selected: StmObject? { objects.first { $0.id == selection } }
     var isPolling: Bool { loop != nil }
 
+    func passActivity(_ id: String, index: Int) async throws -> [StmObject.Activity] {
+        try await companion.passActivity(id, index:index)
+    }
+
+    func filaments(_ id: String) async throws -> [PrinterFilament] { try await companion.filaments(id) }
+
+    @discardableResult func print(_ id: String, checked: Bool, filament: PrinterFilament) async -> Bool {
+        guard !working.contains(id) else { return false }
+        working.insert(id)
+        defer { working.remove(id) }
+        problem = nil
+        do {
+            let updated = try await companion.print(id, checked:checked, filament:filament)
+            if let index = objects.firstIndex(where:{ $0.id == id }) { objects[index] = updated }
+            wake()
+            return true
+        } catch {
+            await refresh()
+            problem = Problem(id:id, text:Self.sentence(for:error))
+            return false
+        }
+    }
+
+    func printer(for object: StmObject) -> PrinterDestination? {
+        guard let catalog = printerCatalog else { return nil }
+        return catalog.destinations.first { $0.id == (object.printerDestinationId ?? catalog.defaultDestinationId) }
+    }
+    func selectPrinter(_ id: String, destinationId: String) async {
+        guard !working.contains(id) else { return }
+        working.insert(id)
+        defer { working.remove(id) }
+        do {
+            let updated = try await companion.selectPrinter(id, destinationId:destinationId)
+            if let index = objects.firstIndex(where:{ $0.id == id }) { objects[index] = updated }
+            problem = nil
+        } catch { problem = Problem(id:id, text:Self.sentence(for:error)) }
+    }
+
     /// Reads the list once and returns the seconds until the next read.
     @discardableResult func refresh() async -> Double {
         do {
             let list = try await companion.objects()
             failures = 0
             objects = list
+            printerCatalog = try? await companion.printers()
             availability = .ready
             if !list.contains(where: { $0.id == selection }) { selection = list.first?.id }
             if let problem, !list.contains(where: { $0.id == problem.id }) { self.problem = nil }
@@ -103,6 +166,10 @@ struct SocketObjects: ObjectsCompanion {
     /// Runs one action on one object. Returns whether it went through.
     @discardableResult func perform(_ action: ObjectAction, on id: String, note: String = "") async -> Bool {
         guard !working.contains(id) else { return false }
+        if action == .plateClear, objects.first(where:{ $0.id == id })?.printConfirmation != nil {
+            problem = Problem(id:id, text:"Review the printer's confirmation before continuing.")
+            return false
+        }
         working.insert(id)
         defer { working.remove(id) }
         if problem?.id == id { problem = nil }
@@ -122,6 +189,31 @@ struct SocketObjects: ObjectsCompanion {
         } catch {
             problem = Problem(id:id, text:Self.sentence(for:error))
             // A refusal usually means the object moved on (another device, or a finished step): show where it is now.
+            await refresh()
+            return false
+        }
+    }
+
+    @discardableResult func answerPrintConfirmation(_ id: String, confirmationId: String, answer: PrintConfirmationAnswer) async -> Bool {
+        guard !working.contains(id) else { return false }
+        guard let question = objects.first(where:{ $0.id == id })?.printConfirmation, question.id == confirmationId else {
+            problem = Problem(id:id, text:"That print confirmation has changed. Review the current request.")
+            return false
+        }
+        if answer.action == .accept, !question.canAccept(answer.content ?? [:], at:Date().timeIntervalSince1970 * 1000) {
+            problem = Problem(id:id, text:"Complete the required checks before confirming this print. The request may have expired.")
+            return false
+        }
+        working.insert(id)
+        defer { working.remove(id) }
+        if problem?.id == id { problem = nil }
+        do {
+            let updated = try await companion.answerPrintConfirmation(id, confirmationId:confirmationId, answer:answer)
+            if let index = objects.firstIndex(where:{ $0.id == id }) { objects[index] = updated }
+            wake()
+            return true
+        } catch {
+            problem = Problem(id:id, text:Self.sentence(for:error))
             await refresh()
             return false
         }

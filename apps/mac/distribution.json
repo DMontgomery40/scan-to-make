@@ -170,6 +170,15 @@
       ]
     }
   ],
+  "firstPartyExecutables": [
+    {
+      "name": "mac-reconstruct",
+      "path": "bin/mac-reconstruct",
+      "sourcePath": "tools/mac-reconstruct",
+      "licence": "MIT",
+      "licencePath": "tools/mac-reconstruct/LICENSE"
+    }
+  ],
   "sourcePaths": [
     "packages/contracts",
     "services/project",
@@ -178,6 +187,7 @@
     "tools/capture-mesh-convert",
     "tools/capture-pipeline",
     "tools/capture-fit-eval",
+    "tools/mac-reconstruct",
     "deploy/companion/generate-lan-tls.py",
     "deploy/companion/healthcheck.mjs"
   ],

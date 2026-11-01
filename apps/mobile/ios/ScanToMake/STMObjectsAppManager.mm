@@ -1,5 +1,6 @@
 #import <React/RCTViewManager.h>
 #import <React-RCTAppDelegate/RCTDefaultReactNativeFactoryDelegate.h>
+#import <AVFoundation/AVFoundation.h>
 #import "ScanToMake-Swift.h"
 
 // The SwiftUI app (Objects/ObjectsApp.swift) as a React Native view, so the shell keeps pairing,

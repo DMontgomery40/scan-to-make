@@ -1,8 +1,17 @@
 import {randomUUID} from 'node:crypto';
 import {mkdir, readdir, readFile, rename, rm, writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
+import type {TouchupActivity} from '../touchup/runner.js';
 
 export type ObjectState = 'new' | 'touching-up' | 'needs-closeup' | 'ready' | 'printing' | 'printed' | 'failed';
+
+export interface ObjectPrintConfirmation {
+  id: string;
+  message: string;
+  expiresAtMs: number;
+  fields: {name: string; title: string; description?: string; required: boolean}[];
+  supported: boolean;
+}
 
 export interface ObjectPass {
   startedAtMs: number;
@@ -13,6 +22,8 @@ export interface ObjectPass {
   seconds?: number;
   costUsd?: number;
   dir?: string;
+  /** The most recent public worker messages and tool names, in stream order. */
+  activity?: TouchupActivity[];
 }
 
 /** One thing the user scanned or asked to have made, as the phone and the Mac app both show it. */
@@ -21,19 +32,31 @@ export interface StmObject {
   createdAtMs: number;
   updatedAtMs: number;
   instructions?: string;
+  /** A configured destination id; process settings and credentials stay in the companion. */
+  printerDestinationId?: string;
   state: ObjectState;
   /** File name under scan/. */
   scan?: string;
   /** File names under photos/, in upload order. */
   photos: string[];
+  /** A handheld scan: its photos under capture/ (with depth), rebuilt into scan/scan.usdz on this Mac. */
+  capture?: string[];
+  /** Lossless depth/calibration companions under capture/, separate from viewable images. */
+  captureDepth?: string[];
+  /** The source phone confirmed the entire finished capture; the digest binds its retained file names. */
+  captureCompletion?: {version: 1; depthRequired: boolean; frameCount: number; sha256: string; completedAtMs: number};
+  /** What the Mac is doing right now, in words, while it is longer than a moment (building a handheld scan). */
+  progress?: string;
   passes: ObjectPass[];
   current?: {model: string; renders: string[]; sizeMm?: [number, number, number]; summary?: string};
   question?: {closeup: string};
   /** Set while a print waits for the user: something is on the plate, or the printer has no camera. */
   plate?: {item?: string; noCamera?: boolean; photo?: boolean};
+  /** The printer MCP's original question. Only an explicit answer to this ID can approve it. */
+  printConfirmation?: ObjectPrintConfirmation;
   failure?: string;
   /** The last print; `uncertain` when it may have reached the printer and must not be sent again by itself. */
-  print?: {bundleId: string; uncertain?: boolean};
+  print?: {bundleId: string; uncertain?: boolean; destination?: {id: string; name: string}; printerStatus?: {state: string; job?: string; checkedAtMs: number; percent?: number; remainingMinutes?: number}; sliced?: boolean; estimate?: {seconds?: number; grams?: number}; events?: {atMs: number; message: string}[]};
 }
 
 const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -90,7 +113,7 @@ export class ObjectStore {
   }
 
   /** Stores an uploaded file under the object; the name must be a plain file name. */
-  async addFile(id: string, kind: 'scan' | 'photos', name: string, bytes: Buffer): Promise<string> {
+  async addFile(id: string, kind: 'scan' | 'photos' | 'capture', name: string, bytes: Buffer): Promise<string> {
     if (!FILE_NAME.test(name) || name.includes('..')) throw new Error('Invalid file name');
     const folder = join(this.dir(id), kind);
     await mkdir(folder, {recursive: true});
@@ -99,17 +122,23 @@ export class ObjectStore {
     return path;
   }
 
-  /** After a restart nothing is still running: mark interrupted work failed so it can be started again. */
   /** Removes the object and every file it has. */
   async remove(id: string): Promise<void> {
     await this.get(id);
     await rm(this.dir(id), {recursive: true, force: true});
   }
 
+  /** After a restart nothing is still running: record interruption, never successful completion. */
   async recoverInterrupted(): Promise<void> {
     for (const object of await this.list()) {
       if (object.state === 'touching-up' || object.state === 'printing') {
-        await this.update(object.id, o => ({...o, state: 'failed', failure: 'interrupted when your Mac restarted the app'}));
+        const atMs = Date.now(), failure = 'interrupted when your Mac restarted the app';
+        await this.update(object.id, o => ({...o, state: 'failed', failure, progress: undefined, plate: undefined, printConfirmation: undefined,
+          passes: o.state !== 'touching-up' ? o.passes : o.passes.map((pass, index) => index !== o.passes.length - 1 || pass.endedAtMs !== undefined ? pass : {
+            ...pass, endedAtMs: atMs, status: 'interrupted',
+            activity: [...(pass.activity ?? []), {atMs, kind: 'message' as const, text: failure}].slice(-200),
+          }),
+        }));
       }
     }
   }

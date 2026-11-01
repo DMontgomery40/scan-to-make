@@ -3,8 +3,15 @@
 import {Server} from '@modelcontextprotocol/sdk/server/index.js';
 import {StdioServerTransport} from '@modelcontextprotocol/sdk/server/stdio.js';
 import {CallToolRequestSchema, ListToolsRequestSchema} from '@modelcontextprotocol/sdk/types.js';
-import {appendFileSync, writeFileSync} from 'node:fs';
+import {appendFileSync, writeFileSync, mkdtempSync, rmSync} from 'node:fs';
 import {basename, dirname, join} from 'node:path';
+import {tmpdir} from 'node:os';
+
+const ephemeral = process.env.HANDOFF_FIXTURE_EPHEMERAL === '1' ? mkdtempSync(join(tmpdir(), 'fixture-printer-output-')) : undefined;
+if (ephemeral) {
+  process.once('exit', () => rmSync(ephemeral, {recursive: true, force: true}));
+  process.once('SIGTERM', () => process.exit(0));
+}
 
 const [mode, log] = process.argv.slice(2);
 const record = entry => appendFileSync(log, JSON.stringify(entry) + '\n');
@@ -15,25 +22,31 @@ const bool = {type: 'boolean'};
 const sliceProps = {
   stl_path: string, bambu_model: {type: 'string', enum: ['p1s']}, nozzle_diameter: string,
   bed_type: string, nozzle_type: string, slicer_type: string, slicer_profile: string,
-  filament_profile: string, load_filaments: string, template_name: string,
+  filament_profile: string, load_filaments: string, filament_colours: string, template_name: string,
   use_printer_filaments: bool, orient: bool, arrange: bool, ensure_on_bed: bool,
 };
+if (process.env.HANDOFF_FIXTURE_NO_COLOUR === '1') delete sliceProps.filament_colours;
 const bambuPrintProps = {
-  three_mf_path: string, bambu_model: string, bed_type: string, nozzle_type: string,
+  connection_mode:string, connection_type:string, three_mf_path: string, bambu_model: string, bed_type: string, nozzle_type: string,
   nozzle_diameter: string, nozzle_diameters: {type: 'array', items: number}, plate_index: integer,
   use_ams: bool, ams_slots: {type: 'array', items: integer},
   ams_mapping: {type: 'array', items: integer}, auto_match_ams: bool,
   bed_leveling: bool, flow_calibration: bool, vibration_calibration: bool,
   layer_inspect: bool, timelapse: bool,
 };
+if (process.env.HANDOFF_FIXTURE_NO_CONNECTION_TYPE) delete bambuPrintProps.connection_type;
 const genericPrintProps = {
-  three_mf_path: string, bambu_model: string, bed_type: string, nozzle_type: string,
+  connection_mode:string, connection_type:string, three_mf_path: string, bambu_model: string, bed_type: string, nozzle_type: string,
   nozzle_diameter: string, use_ams: bool, ams_mapping: {type: 'object'},
 };
 const tools = [
   {name: 'lay_flat', inputSchema: {type: 'object', additionalProperties: false, required: ['stl_path'], properties: {stl_path: string}}},
   {name: 'slice_stl', inputSchema: {type: 'object', additionalProperties: false, required: ['stl_path'], properties: sliceProps}},
   ...(mode === 'bambu' ? [
+    ...(process.env.HANDOFF_FIXTURE_CRYPTO ? [
+      {name:'get_printer_status',inputSchema:{type:'object',properties:{}}},
+      {name:'clear_hms_errors',inputSchema:{type:'object',properties:{bambu_model:string}}},
+    ] : []),
     {name: 'inspect_print_file', inputSchema: {type: 'object', additionalProperties: false, required: ['file_path'], properties: {
       file_path: string, bambu_model: string, plate_index: integer,
       nozzle_diameters: {type: 'array', items: number}, bed_type: string}}},
@@ -90,7 +103,7 @@ server.setRequestHandler(CallToolRequestSchema, async request => {
   let args = request.params.arguments ?? {};
   if ((name === 'slice_stl' || name === 'print_3mf') && !args.bambu_model) args = await elicitModel(args);
   record({tool: name, arguments: args});
-  const directory = dirname(args.stl_path ?? args.three_mf_path ?? args.gcode_path ?? process.cwd());
+  const directory = ephemeral ?? dirname(args.stl_path ?? args.three_mf_path ?? args.gcode_path ?? process.cwd());
   if (name === 'lay_flat') {
     const path = join(directory, `${basename(args.stl_path, '.stl')}_flat.stl`);
     writeFileSync(path, 'solid flat\nendsolid flat\n');
@@ -105,8 +118,11 @@ server.setRequestHandler(CallToolRequestSchema, async request => {
     return text({dispatchAuthorized: false, inspection: {model: args.bambu_model, plate: args.plate_index ?? 0}});
   }
   if (name === 'confirm_temperatures') return text({compatible: true, peakNozzleTempC: 220});
+  if (name === 'get_printer_status') return text({raw:{hms:[{attr:0x05000500,code:0x00010007}]}});
+  if (name === 'clear_hms_errors') {await confirmPrint();return text({status:'success'});}
   if (name === 'camera_snapshot') return text({format: 'jpeg', base64: 'ZmFrZQ==', savedTo: join(directory, 'snapshot.jpg')});
   if (name === 'print_3mf' || name === 'upload_gcode' || name === 'process_and_print_stl') {
+    if (process.env.HANDOFF_FIXTURE_DISPATCH === 'preflight-error') return {isError:true, content:[{type:'text',text:'Printer state FAILED is not safely idle.'}]};
     await confirmPrint();
     if (process.env.HANDOFF_FIXTURE_DISPATCH === 'crash') process.exit(9);
     if (process.env.HANDOFF_FIXTURE_DISPATCH === 'timeout') await new Promise(() => {});

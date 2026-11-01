@@ -9,11 +9,43 @@ struct StmObject: Codable, Identifiable, Equatable, Sendable {
             self = State(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .unknown
         }
     }
-    struct Pass: Codable, Equatable, Sendable { var startedAtMs: Double; var endedAtMs: Double?; var note: String?; var status: String?; var summary: String? }
+    struct Activity: Codable, Equatable, Sendable { var atMs: Double; var kind: String; var text: String }
+    struct Pass: Codable, Equatable, Sendable {
+        var startedAtMs: Double; var endedAtMs: Double?; var note: String?; var status: String?; var summary: String?
+        var activity: [Activity]? = nil
+        var activityCount: Int? = nil
+    }
     struct Current: Codable, Equatable, Sendable { var model: String; var renders: [String]; var sizeMm: [Double]?; var summary: String? }
     struct Question: Codable, Equatable, Sendable { var closeup: String? }
     struct Plate: Codable, Equatable, Sendable { var item: String?; var noCamera: Bool?; var photo: Bool? }
-    struct Print: Codable, Equatable, Sendable { var bundleId: String; var uncertain: Bool? }
+    struct PrintDestination: Codable, Equatable, Sendable { var id: String; var name: String }
+    struct PrinterStatus: Codable, Equatable, Sendable { var state: String; var job: String?; var checkedAtMs: Double; var percent: Double?; var remainingMinutes: Double? }
+    struct PrintEstimate: Codable, Equatable, Sendable { var seconds: Double?; var grams: Double? }
+    struct PrintEvent: Codable, Equatable, Sendable { var atMs: Double; var message: String }
+    struct Print: Codable, Equatable, Sendable {
+        var bundleId: String; var uncertain: Bool?; var destination: PrintDestination? = nil
+        var printerStatus: PrinterStatus? = nil
+        var sliced: Bool? = nil; var estimate: PrintEstimate? = nil; var events: [PrintEvent]? = nil
+    }
+    struct PrintConfirmation: Codable, Equatable, Sendable {
+        struct Field: Codable, Equatable, Sendable {
+            var name: String; var title: String; var description: String?; var required: Bool
+        }
+        var id: String; var message: String; var expiresAtMs: Double; var fields: [Field]; var supported: Bool
+
+        func canAccept(_ content: [String: Bool], atMs: Double) -> Bool {
+            supported && expiresAtMs > atMs && fields.allSatisfy { !$0.required || content[$0.name] == true }
+        }
+
+        /// An answer belongs to exactly one live question. Never carry checks to its replacement.
+        func response(confirmationId: String, action: PrintConfirmationResponse.Action, content: [String: Bool], atMs: Double) -> PrintConfirmationResponse? {
+            guard confirmationId == id, expiresAtMs > atMs else { return nil }
+            if action == .accept && !canAccept(content, atMs: atMs) { return nil }
+            var checked: [String: Bool] = [:]
+            for field in fields { checked[field.name] = content[field.name] ?? false }
+            return .init(confirmationId: id, answer: .init(action: action, content: action == .accept ? checked : nil))
+        }
+    }
 
     var id: String
     var createdAtMs: Double
@@ -22,12 +54,22 @@ struct StmObject: Codable, Identifiable, Equatable, Sendable {
     var state: State
     var scan: String?
     var photos: [String]
+    /// A handheld scan's photos, rebuilt into the scan on the Mac.
+    var capture: [String]?
+    /// What the Mac is doing right now, in words (building a handheld scan).
+    var progress: String?
     var passes: [Pass]
     var current: Current?
     var question: Question?
     var plate: Plate?
     var failure: String?
     var print: Print?
+    var printerDestinationId: String? = nil
+    var printConfirmation: PrintConfirmation? = nil
+
+    /// Progress updates do not change saved media. A finished pass can replace the model and
+    /// renders at the same paths, so expire their shared cache only when a pass finishes.
+    var mediaVersion: Double { passes.last(where: { $0.endedAtMs != nil })?.endedAtMs ?? createdAtMs }
 }
 
 /// What the object page and the list can offer for an object right now.
@@ -47,11 +89,14 @@ struct ObjectWords: Equatable, Sendable {
     let size: String?
     let actions: [ObjectAction]
 
-    static let wait = "This can take a few minutes. We'll let you know when it's ready."
+    static let wait = "You can leave this project and return to it while your Mac works."
 
     static func title(_ object: StmObject) -> String {
         let text = (object.instructions ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return object.scan == nil ? "Something new" : "Copy of your scan" }
+        guard !text.isEmpty else {
+            if object.scan != nil || !(object.capture ?? []).isEmpty { return "Copy of your scan" }
+            return object.photos.isEmpty ? "Unfinished project" : "Photo project"
+        }
         // The first sentence, without its full stop, cut at a word if it is long.
         var first = text.components(separatedBy: "\n")[0]
         if let end = first.range(of: #"[.!?](\s|$)"#, options: .regularExpression) { first = String(first[..<end.lowerBound]) }
@@ -70,7 +115,7 @@ struct ObjectWords: Equatable, Sendable {
     static func sent(_ object: StmObject) -> String {
         let photos = object.photos.count
         let photoWords = photos == 1 ? "1 photo" : "\(photos) photos"
-        switch (object.scan != nil, photos) {
+        switch (object.scan != nil || !(object.capture ?? []).isEmpty, photos) {
         case (true, 0): return "A scan"
         case (true, _): return "A scan and \(photoWords)"
         case (false, 0): return "Just the description"
@@ -84,13 +129,15 @@ struct ObjectWords: Equatable, Sendable {
         let made: [ObjectAction] = object.current == nil ? [] : [object.print?.uncertain == true ? .printChecked : .print, .correct]
         switch object.state {
         case .new:
-            if object.scan != nil || !object.photos.isEmpty {
-                (status, tone, busy, actions) = ("Sending to your Mac…", .pending, true, [.finishSending])
+            if object.scan != nil || !object.photos.isEmpty || !(object.capture ?? []).isEmpty {
+                (status, tone, busy, actions) = ("Draft saved. Finish sending to begin.", .neutral, false, [.finishSending])
             } else {
                 let described = !(object.instructions ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 (status, tone, busy, actions) = ("Waiting for a scan or photos.", .neutral, false,
                                                  described ? [.scan, .attachPhotos, .makeIt] : [.scan, .attachPhotos])
             }
+        case .touchingUp where !(object.progress ?? "").trimmingCharacters(in: .whitespaces).isEmpty:
+            (status, tone, busy, actions) = ("\(object.progress!) \(Self.wait)", .pending, true, [])
         case .touchingUp:
             let what = object.passes.count > 1 && object.current != nil ? "Making your changes."
                 : object.scan != nil ? "Touching up your scan." : "Making it."
@@ -102,23 +149,55 @@ struct ObjectWords: Equatable, Sendable {
         case .ready:
             (status, tone, busy, actions) = ("Ready to print", .pass, false, made)
         case .printing:
-            if object.plate?.noCamera == true {
+            if object.printConfirmation != nil {
+                (status, tone, busy, actions) = ("Your printer needs your confirmation.", .accent, true, [])
+            } else if object.plate?.noCamera == true {
                 (status, tone, busy, actions) = ("Check the plate is clear.", .accent, true, [.plateClear])
             } else if let plate = object.plate {
                 let item = (plate.item ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
                 (status, tone, busy, actions) = ("Looks like there's \(item.isEmpty ? "something" : item) on your plate. Can you take it off first?",
                                                  .accent, true, [.plateClear])
             } else {
-                (status, tone, busy, actions) = ("Printing", .pending, true, [])
+                (status, tone, busy, actions) = (object.progress ?? "Preparing print…", .pending, true, [])
             }
         case .printed:
-            (status, tone, busy, actions) = ("Printed", .pass, false, made)
+            (status, tone, busy, actions) = ("Print request accepted", .pass, false, made)
         case .failed:
             let failure = (object.failure ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             (status, tone, busy, actions) = (failure.isEmpty ? "Something went wrong on your Mac." : failure, .fail, false,
-                                             made.isEmpty ? [.retry] : made)
+                                             made.isEmpty ? [.retry, .correct] : made)
         case .unknown:
             (status, tone, busy, actions) = ("Update Counterpart to see this one.", .neutral, false, [])
         }
     }
+}
+
+struct PrintConfirmationResponse: Codable, Equatable, Sendable {
+    enum Action: String, Codable, Sendable { case accept, decline, cancel }
+    struct Answer: Codable, Equatable, Sendable { var action: Action; var content: [String: Bool]? }
+    var confirmationId: String
+    var answer: Answer
+}
+
+struct PrinterDestination: Codable, Identifiable, Equatable, Sendable {
+    var id: String
+    var name: String
+    var backend: String
+    var model: String?
+    var address: String?
+    var source: String
+}
+struct PrinterCatalog: Codable, Equatable, Sendable {
+    var destinations: [PrinterDestination]
+    var defaultDestinationId: String
+}
+
+struct PrinterFilament: Codable, Identifiable, Equatable, Sendable {
+    var slot: Int
+    var colour: String
+    var material: String
+    var name: String
+    var filamentId: String
+    var destinationId: String
+    var id: Int { slot }
 }

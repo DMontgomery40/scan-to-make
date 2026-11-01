@@ -8,13 +8,27 @@ import type {ElicitationContext, ElicitationRelay} from './elicitation.js';
 
 export class PrinterMcpError extends Error {
   readonly code: string;
-  constructor(code: string, cause?: unknown) {
+  readonly detail?: string;
+  constructor(code: string, cause?: unknown, detail?: string) {
     super(`Printer MCP failed: ${code}`);
     this.code = code;
+    this.detail = detail;
     if (cause !== undefined) this.cause = cause;
   }
 }
-function fail(code: string, cause?: unknown): never { throw new PrinterMcpError(code, cause); }
+function fail(code: string, cause?: unknown, detail?: string): never { throw new PrinterMcpError(code, cause, detail); }
+
+/** The server's user-facing failure, bounded and stripped of configured credentials. */
+function failureDetail(result: CallToolResult, config: PrinterHandoffConfig): string | undefined {
+  let text = (result.content ?? []).filter(item => item.type === 'text').map(item => item.text).join(' ').slice(0, 4096);
+  for (const [key, value] of Object.entries(config.process.env ?? {})) {
+    if (/token|secret|password|access.?code|api.?key/i.test(key) && typeof value === 'string' && value.length >= 4)
+      text = text.split(value).join('[redacted]');
+  }
+  text = text.replace(/((?:access[_ -]?(?:token|code)|password|api[_ -]?key|secret)\s*[:=]\s*)[^\s,;]+/gi, '$1[redacted]')
+    .replace(/[\x00-\x1f]/g, ' ').trim();
+  return text ? text.slice(0, 1000) : undefined;
+}
 
 export interface PrinterToolCatalog {
   server: {name: string; version: string};
@@ -175,13 +189,24 @@ export class PrinterMcpClient {
       }) as CallToolResult;
     } catch (error) {
       fail(options.dispatchSensitive && this.#declinedElicitations === declinedBefore
-        ? 'dispatch-uncertain' : options.signal?.aborted ? 'cancelled' : 'tool-failed', error);
+        ? 'dispatch-uncertain' : options.signal?.aborted ? 'cancelled' : 'tool-failed', error,
+        failureDetail({content:[{type:'text',text:error instanceof Error ? error.message : String(error)}]}, this.#config));
+    }
+    // This exact Bambu rejection is emitted by the idle-state preflight before
+    // upload/dispatch. Preserve the actionable refusal instead of inventing uncertainty.
+    if (result.isError && this.#config.backend === 'bambu-printer-mcp' && name === 'print_3mf') {
+      const detail = failureDetail(result, this.#config);
+      if (/^(?:Error: )?The printer rejected the print command \(HMS 0500-0500-0001-0007,/.test(detail ?? '') && detail?.includes('nothing is printing'))
+        fail('printer-command-rejected', undefined, detail);
+      if (/^(?:Error: )?Printer state (?:FAILED|RUNNING|PAUSE|PREPARE|SLICING|UNKNOWN) is not safely idle\.$/.test(detail ?? ''))
+        fail('printer-not-ready', undefined, detail);
     }
     // Unstructured tool errors can include a lost post-dispatch acknowledgement.
     // A declined confirmation is known not to dispatch; other ambiguous results
     // must be reconciled at the printer before another print is attempted.
     if (options.dispatchSensitive && this.#declinedElicitations === declinedBefore
-      && (result.isError || Buffer.byteLength(JSON.stringify(result)) > MAX_RESULT_BYTES)) fail('dispatch-uncertain');
+      && (result.isError || Buffer.byteLength(JSON.stringify(result)) > MAX_RESULT_BYTES)) fail('dispatch-uncertain', undefined, failureDetail(result, this.#config));
+    if (result.isError) fail('tool-failed', undefined, failureDetail(result, this.#config));
     if (Buffer.byteLength(JSON.stringify(result)) > MAX_RESULT_BYTES) fail('result-limit');
     return structuredClone(result);
   }

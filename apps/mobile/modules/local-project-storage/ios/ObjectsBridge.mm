@@ -24,11 +24,14 @@ static BOOL STMObjectsMatches(id value, NSString *pattern) {
 static NSString *STMObjectsPath(NSString *path, NSString *method) {
   // Only the objects routes, each with its own method.
   NSString *one = [NSString stringWithFormat:@"/v1/objects/%@", STMObjectsUUID];
-  if ([method isEqual:@"GET"] && (STMObjectsMatches(path, @"/v1/objects") || STMObjectsMatches(path, one))) return @"projects:read";
+  if ([method isEqual:@"GET"] && (STMObjectsMatches(path, @"/v1/objects(?:/printers)?") || STMObjectsMatches(path, one))) return @"projects:read";
+  if ([method isEqual:@"GET"] && STMObjectsMatches(path, [one stringByAppendingString:@"/passes/(0|[1-9][0-9]{0,15})/activity"])) return @"projects:read";
+  if ([method isEqual:@"GET"] && STMObjectsMatches(path, [one stringByAppendingString:@"/filaments"])) return @"printer-handoff:use";
+  if ([method isEqual:@"PATCH"] && STMObjectsMatches(path, one)) return @"captures:import";
   if ([method isEqual:@"DELETE"] && STMObjectsMatches(path, one)) return @"captures:import";
   if ([method isEqual:@"POST"] && STMObjectsMatches(path, @"/v1/objects")) return @"captures:import";
   if ([method isEqual:@"POST"] && STMObjectsMatches(path, [one stringByAppendingString:@"/(start|corrections|closeup)"])) return @"captures:import";
-  if ([method isEqual:@"POST"] && STMObjectsMatches(path, [one stringByAppendingString:@"/(print|plate)"])) return @"printer-handoff:use";
+  if ([method isEqual:@"POST"] && STMObjectsMatches(path, [one stringByAppendingString:@"/(print|plate|printer|print-confirmation)"])) return @"printer-handoff:use";
   return nil;
 }
 /** The record, if it is current: unexpired and holding the scope. */
@@ -137,7 +140,9 @@ RCT_REMAP_METHOD(call, callOptions:(NSDictionary *)o resolve:(RCTPromiseResolveB
   if (json) {
     if (![NSJSONSerialization isValidJSONObject:json]) { reject(@"invalid-request", STMObjectsMessage(@"invalid-request"), nil); return; }
     body = [NSJSONSerialization dataWithJSONObject:json options:0 error:nil];
-    if (!body || body.length > 16 * 1024) { reject(@"invalid-request", STMObjectsMessage(@"invalid-request"), nil); return; }
+    BOOL captureStart = [method isEqual:@"POST"] && STMObjectsMatches(path, [NSString stringWithFormat:@"/v1/objects/%@/start", STMObjectsUUID]);
+    NSUInteger bodyLimit = captureStart ? 128 * 1024 : 16 * 1024;
+    if (!body || body.length > bodyLimit) { reject(@"invalid-request", STMObjectsMessage(@"invalid-request"), nil); return; }
   }
   [STMObjectsRequest send:method path:path body:body type:@"application/json" pairing:pairing limit:STMObjectsJSONLimit done:^(NSInteger status, NSData *data, NSString *failure) {
     if (failure) { reject(failure, STMObjectsMessage(failure), nil); return; }
@@ -156,7 +161,8 @@ RCT_REMAP_METHOD(call, callOptions:(NSDictionary *)o resolve:(RCTPromiseResolveB
   NSUInteger limit = [file[@"scan"] boolValue] ? STMObjectsScanLimit : STMObjectsPhotoLimit;
   if (!bytes.length || bytes.length > limit) { done(sent, @"unreadable-file", @"A file from this scan couldn't be read."); return; }
   NSString *path = [file[@"scan"] boolValue] ? [NSString stringWithFormat:@"/v1/objects/%@/scan", objectId]
-    : [NSString stringWithFormat:@"/v1/objects/%@/photos?name=%@", objectId, [file[@"name"] stringByAddingPercentEncodingWithAllowedCharacters:NSCharacterSet.URLQueryAllowedCharacterSet]];
+    : [NSString stringWithFormat:@"/v1/objects/%@/%@?name=%@", objectId, [file[@"depth"] boolValue] ? @"capture-depth" : [file[@"capture"] boolValue] ? @"capture" : @"photos",
+       [file[@"name"] stringByAddingPercentEncodingWithAllowedCharacters:NSCharacterSet.URLQueryAllowedCharacterSet]];
   [STMObjectsRequest send:[file[@"scan"] boolValue] ? @"PUT" : @"POST" path:path body:bytes type:file[@"type"] pairing:pairing limit:STMObjectsJSONLimit
                      done:^(NSInteger status, NSData *data, NSString *failure) {
     if (failure) { done(sent, failure, STMObjectsMessage(failure)); return; }
@@ -186,10 +192,13 @@ RCT_REMAP_METHOD(call, callOptions:(NSDictionary *)o resolve:(RCTPromiseResolveB
   [self existing:objectId pairing:pairing done:^(NSDictionary *object, NSString *failure) {
     if (!object) { [self.uploading removeObject:objectId]; reject(failure, STMObjectsMessage(failure), nil); return; }
     NSArray *have = [object[@"photos"] isKindOfClass:NSArray.class] ? object[@"photos"] : @[];
+    NSArray *captured = [object[@"capture"] isKindOfClass:NSArray.class] ? object[@"capture"] : @[];
+    NSArray *depths = [object[@"captureDepth"] isKindOfClass:NSArray.class] ? object[@"captureDepth"] : @[];
     BOOL hasScan = [object[@"scan"] isKindOfClass:NSString.class];
     NSMutableArray *missing = [NSMutableArray array];
     for (NSDictionary *file in files) {
-      if ([file[@"scan"] boolValue] ? !hasScan : ![have containsObject:file[@"name"]]) [missing addObject:file];
+      BOOL there = [file[@"scan"] boolValue] ? hasScan : [([file[@"depth"] boolValue] ? depths : [file[@"capture"] boolValue] ? captured : have) containsObject:file[@"name"]];
+      if (!there) [missing addObject:file];
     }
     [self upload:missing objectId:objectId pairing:pairing index:0 sent:0 done:^(NSUInteger sent, NSString *uploadFailure, NSString *message) {
       [self.uploading removeObject:objectId];
@@ -223,6 +232,41 @@ RCT_REMAP_METHOD(sendCapture, sendCaptureOptions:(NSDictionary *)o resolve:(RCTP
   }
   [self sendFiles:files objectId:objectId resolve:^{
     resolve(@{@"scanSent": @YES, @"photosSent": @(files.count - 1)});
+  } reject:reject];
+}
+
+/** Send the saved RGB/depth pairs, retaining compatibility with earlier embedded-depth photos. */
+RCT_REMAP_METHOD(sendHandheld, sendHandheldOptions:(NSDictionary *)o resolve:(RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject) {
+  NSString *objectId = o[@"objectId"];
+  if (!STMObjectsMatches(objectId, STMObjectsUUID)) { reject(@"invalid-request", STMObjectsMessage(@"invalid-request"), nil); return; }
+  NSURL *folder = [STMObjectsRoot(NSDocumentDirectory, @"HandheldCaptures") URLByAppendingPathComponent:objectId isDirectory:YES];
+  NSNumber *finished = nil;
+  if (![[folder URLByAppendingPathComponent:@"finished"] getResourceValue:&finished forKey:NSURLIsRegularFileKey error:nil] || !finished.boolValue) {
+    reject(@"unfinished-capture", @"This capture hasn't finished saving. Your capture is still saved on this phone.", nil); return;
+  }
+  NSArray<NSString *> *contents = [NSFileManager.defaultManager contentsOfDirectoryAtPath:folder.path error:nil];
+  NSArray<NSString *> *names = [[contents
+    filteredArrayUsingPredicate:[NSPredicate predicateWithFormat:@"SELF MATCHES %@", @"[0-9]{4}\\.heic"]] sortedArrayUsingSelector:@selector(compare:)];
+  if (names.count == 0) { reject(@"no-photos", @"The scan has no photos. Scan it again.", nil); return; }
+  // A damaged streaming capture must not silently become a legacy photo-only upload.
+  BOOL exactDepthRequired = [contents containsObject:@"capture-frames.jsonl"] ||
+    [contents filteredArrayUsingPredicate:[NSPredicate predicateWithFormat:@"SELF ENDSWITH %@", @".depth.plist"]].count > 0;
+  NSMutableArray *files = [NSMutableArray array];
+  for (NSString *name in names) {
+    NSString *depthName = [name.stringByDeletingPathExtension stringByAppendingString:@".depth.plist"];
+    NSURL *depthURL = [folder URLByAppendingPathComponent:depthName];
+    BOOL hasDepth = [NSFileManager.defaultManager fileExistsAtPath:depthURL.path];
+    if (exactDepthRequired && !hasDepth) {
+      reject(@"incomplete-depth", @"A recorded frame is missing its depth file. Your capture is still saved on this phone.", nil); return;
+    }
+    if (hasDepth) {
+      // Send original depth first. The companion refuses to reconstruct an incomplete RGB/depth set.
+      [files addObject:@{@"depth": @YES, @"name": depthName, @"url": depthURL, @"type": @"application/octet-stream"}];
+    }
+    [files addObject:@{@"capture": @YES, @"name": name, @"url": [folder URLByAppendingPathComponent:name], @"type": @"image/heic"}];
+  }
+  [self sendFiles:files objectId:objectId resolve:^{
+    resolve(@{@"photosSent": @(names.count), @"captureManifest": @{@"version": @1, @"images": names, @"depthRequired": @(exactDepthRequired)}});
   } reject:reject];
 }
 
@@ -377,7 +421,7 @@ RCT_REMAP_METHOD(sendChosen, sendChosenOptions:(NSDictionary *)o resolve:(RCTPro
 
 RCT_REMAP_METHOD(download, downloadOptions:(NSDictionary *)o resolve:(RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject) {
   NSString *objectId = o[@"objectId"], *name = o[@"name"];
-  if (!STMObjectsMatches(objectId, STMObjectsUUID) || !STMObjectsMatches(name, @"model\\.stl|plate\\.jpg|renders/[A-Za-z0-9][A-Za-z0-9._-]{0,120}\\.png") || [name containsString:@".."]) {
+  if (!STMObjectsMatches(objectId, STMObjectsUUID) || !STMObjectsMatches(name, @"model\\.stl|plate\\.jpg|renders/[A-Za-z0-9][A-Za-z0-9._-]{0,120}\\.png|(?:photos|capture)/[A-Za-z0-9][A-Za-z0-9._ -]{0,127}") || [name containsString:@".."]) {
     reject(@"invalid-request", STMObjectsMessage(@"invalid-request"), nil); return;
   }
   [self fetch:objectId name:name version:[NSString stringWithFormat:@"%lld", [o[@"version"] longLongValue]] done:^(NSURL *url, NSString *code) {

@@ -190,20 +190,31 @@ export function createControlDispatcher(services: ControlServices) {
           return {answered:true};
         }
         case 'doors.prepare': return await prepareDoor(parameters[method].parse(raw));
-        case 'objects.list': case 'objects.get': case 'objects.start': case 'objects.delete': case 'objects.correct': case 'objects.answerCloseup': case 'objects.print': case 'objects.answerPlate': {
+        case 'objects.list': case 'objects.printers': case 'objects.filaments': case 'objects.selectPrinter': case 'objects.get': case 'objects.passActivity': case 'objects.start': case 'objects.delete': case 'objects.correct': case 'objects.answerCloseup': case 'objects.print': case 'objects.answerPlate': case 'objects.answerPrintConfirmation': {
           const objects = services.objects;
           if (!objects) throw new ControlFailure('unavailable');
           try {
             // The Mac app is on this Mac: it gets each object's folder to read the renders and model from.
             const local = (o: Awaited<ReturnType<typeof objects.get>>) => ({...publicObject(o), directory: objects.dir(o.id)});
             if (method === 'objects.list') return {objects: (await objects.list()).map(local)};
+            if (method === 'objects.printers') return objects.printers();
+            if (method === 'objects.filaments') return {filaments: await objects.filaments(parameters[method].parse(raw).id)};
+            if (method === 'objects.passActivity') {
+              const {id, index} = parameters[method].parse(raw);
+              return {activity: await objects.passActivity(id, index)};
+            }
             if (method === 'objects.delete') { await objects.delete((parameters[method].parse(raw) as {id: string}).id); return {deleted: true}; }
-            const params = parameters[method].parse(raw) as {id: string; note?: string; bestGuess?: boolean; checked?: boolean};
+            if (method === 'objects.answerPrintConfirmation') {
+              const {id, confirmationId, answer} = parameters[method].parse(raw);
+              return {object: local(await objects.answerPrintConfirmation(id, confirmationId, answer))};
+            }
+            const params = parameters[method].parse(raw) as {id: string; destinationId?: string; note?: string; bestGuess?: boolean; checked?: boolean; filament?: import('./objects/service.js').FilamentChoice};
             const object = method === 'objects.get' ? await objects.get(params.id)
+              : method === 'objects.selectPrinter' ? await objects.selectPrinter(params.id, params.destinationId!)
               : method === 'objects.start' ? await objects.start(params.id)
               : method === 'objects.correct' ? await objects.correct(params.id, params.note!)
               : method === 'objects.answerCloseup' ? await objects.answerCloseup(params.id, {bestGuess: params.bestGuess!})
-              : method === 'objects.print' ? await objects.print(params.id, params.checked ? {checked: true} : {})
+              : method === 'objects.print' ? await objects.print(params.id, {checked:params.checked, filament:params.filament})
               : await objects.answerPlate(params.id, {clear: true});
             return {object: local(object)};
           } catch (error) {

@@ -71,7 +71,7 @@ test('a printer MCP working directory is honoured through a quoted shell wrapper
 
 test('correction prompt never resumes', async () => {
   const inv = buildTouchupInvocation({pass: await pass(), printer, claudePath: '/c', sourceEnv,
-    note: 'you missed the clip on the side', summary: 'Added texture to the base.'});
+    note: 'you missed the clip on the side', summary: 'Added texture to the base.', currentModel: true});
   const prompt = inv.args.at(-1);
   assert.ok(prompt.startsWith('This is the current model. Added texture to the base.\n\nChange requested: you missed the clip on the side'));
   assert.equal(inv.args.includes('--resume'), false);
@@ -123,7 +123,7 @@ test('the worker loads none of the user\'s personal Claude settings', async () =
 
 test('a correction keeps the original instructions and says the model is already in millimetres', async () => {
   const inv = buildTouchupInvocation({pass: await pass(), printer, claudePath: '/c', sourceEnv,
-    instructions: 'A hook for a 25 mm handle.', note: 'make it 2 mm thicker', summary: 'Made the hook.'});
+    instructions: 'A hook for a 25 mm handle.', note: 'make it 2 mm thicker', summary: 'Made the hook.', currentModel: true});
   const prompt = inv.args.at(-1);
   assert.ok(prompt.includes('A hook for a 25 mm handle.'));
   assert.ok(prompt.includes('Change requested: make it 2 mm thicker'));
@@ -132,6 +132,17 @@ test('a correction keeps the original instructions and says the model is already
 
 test('the answer can report a failure', () => {
   assert.deepEqual(TOUCHUP_RESULT_SCHEMA.properties.status.enum, ['done', 'needs_closeup', 'failed']);
+});
+
+test('a revised request without a completed model uses original inputs without claiming millimetre STL units', async () => {
+  const p = await pass();
+  const prompt = buildTouchupInvocation({pass: p, printer, claudePath: '/c', sourceEnv,
+    instructions: 'Copy this object.', note: 'The photos show the missing clip.'}).args.at(-1);
+  assert.match(prompt, /No completed model is available yet/);
+  assert.ok(prompt.includes('Original request: Copy this object.'));
+  assert.ok(prompt.includes('Change requested: The photos show the missing clip.'));
+  assert.equal(prompt.includes('already in millimetres'), false);
+  assert.ok(prompt.includes(p.scanPaths[0]));
 });
 
 test('the worker works only with objects in its own scene', () => {
