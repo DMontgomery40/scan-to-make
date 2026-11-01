@@ -50,7 +50,7 @@ const NOT_ANSWERING = new Set([
 ]);
 
 /**
- * Find your Mac (P7): point the camera at the code in Scan to Make on your
+ * Find your Mac (P7): point the camera at the code in Counterpart on your
  * Mac, and it pairs. An already-paired phone sees its Mac instead (P8).
  */
 export function FindYourMacScreen({
@@ -414,7 +414,7 @@ export function FindYourMacScreen({
         Find your Mac
       </Text>
       <Text style={styles.body}>
-        Scan to Make uses your Mac to touch up scans and send them to your printer.
+        Counterpart uses your Mac to touch up scans and send them to your printer.
       </Text>
       <View style={[styles.finder, { height: Math.min(380, height * 0.45) }]}>
         <QRViewfinder
@@ -428,7 +428,7 @@ export function FindYourMacScreen({
         {camera === 'denied' ? (
           <Overlay>
             <Text style={styles.overlayText}>
-              Scan to Make can’t use the camera.
+              Counterpart can’t use the camera.
             </Text>
             <Button
               label="Open Settings"
@@ -443,7 +443,7 @@ export function FindYourMacScreen({
         {phase.kind === 'asking' ? (
           <Overlay light>
             <Text style={styles.askTitle}>
-              To find your Mac, Scan to Make needs to look on your Wi-Fi.
+              To find your Mac, Counterpart needs to look on your Wi-Fi.
             </Text>
             <Button
               label="Continue"
@@ -466,7 +466,7 @@ export function FindYourMacScreen({
         ) : null}
       </View>
       <Text style={styles.caption}>
-        Point at the code in Scan to Make on your Mac
+        Point at the code in Counterpart on your Mac
       </Text>
       {readFailed ? (
         <View style={styles.panel}>
@@ -495,8 +495,8 @@ export function FindYourMacScreen({
         accessibilityRole="button"
         onPress={() =>
           Alert.alert(
-            'Get Scan to Make for Mac',
-            'Get Scan to Make for Mac from the Scan to Make website on your Mac. It shows a code to scan.',
+            'Get Counterpart for Mac',
+            'Get Counterpart for Mac from the Counterpart website on your Mac. It shows a code to scan.',
           )
         }
         style={({ pressed }) => [styles.link, pressed && styles.pressed]}

@@ -49,7 +49,7 @@ ${body}
 export function renderPairingPage(svg: string | null, expiresAt: number): string {
   if (svg === null) {
     return page(
-      "Pairing code unavailable · Scan to Make",
+      "Pairing code unavailable · Counterpart",
       `<h1>This pairing code is no longer available</h1>
 <p class="lead">It expired or has already been used.</p>
 <p class="muted">To pair an iPhone, start pairing again from the companion in Terminal.</p>`,
@@ -61,9 +61,9 @@ export function renderPairingPage(svg: string | null, expiresAt: number): string
     ? `It works once and expires after five minutes, at <time datetime="${escapeHtml(expiry.iso)}">${escapeHtml(expiry.label)}</time>.`
     : "It works once and expires after five minutes.";
   return page(
-    "Pair your iPhone · Scan to Make",
+    "Pair your iPhone · Counterpart",
     `<h1>Pair your iPhone</h1>
-<p class="lead">Open the Camera app on your iPhone, point it at this code, then tap the Scan to Make banner.</p>
+<p class="lead">Open the Camera app on your iPhone, point it at this code, then tap the Counterpart banner.</p>
 <div class="qr" role="img" aria-label="Pairing QR code. Scan it with the iPhone Camera app.">${svg}</div>
 <p class="muted">${expiryText}</p>
 <p class="muted">Don't share this code. A phone that can connect to this computer could use it to pair.</p>`,

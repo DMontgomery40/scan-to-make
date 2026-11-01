@@ -78,7 +78,7 @@ private func native(_ name: String) -> NSObject? { (NSClassFromString(name) as? 
         let message = error?["message"] as? String
         switch status {
         case 401, 403: throw MacError(code: "pairing", message: "Connect to your Mac again.")
-        case 404 where path == "/v1/objects": throw MacError(code: "not-set-up", message: "Your Mac isn't ready to make things yet. Open Scan to Make on your Mac.")
+        case 404 where path == "/v1/objects": throw MacError(code: "not-set-up", message: "Your Mac isn't ready to make things yet. Open Counterpart on your Mac.")
         case 404: throw MacError(code: "not-found", message: "This is no longer on your Mac.")
         case 409: throw MacError(code: "conflict", message: message ?? "Wait until the current step finishes.")
         default: throw MacError(code: "failed", message: "Something went wrong on your Mac. Try again.")
@@ -246,7 +246,7 @@ struct ObjectsRootView: View {
                 // iPad and an unfolded Duo: the list and the page side by side.
                 NavigationSplitView {
                     ObjectsListView(store: store, startNew: { creating = true }, selection: $selected)
-                        .navigationTitle("Scan to Make")
+                        .navigationTitle("Counterpart")
                         .toolbar { listToolbar }
                 } detail: {
                     if let selected {
@@ -260,7 +260,7 @@ struct ObjectsRootView: View {
             } else {
                 NavigationStack(path: $path) {
                     ObjectsListView(store: store, startNew: { creating = true })
-                        .navigationTitle("Scan to Make")
+                        .navigationTitle("Counterpart")
                         .toolbar { listToolbar }
                         .navigationDestination(for: String.self) { id in
                             ObjectDetailView(store: store, id: id, close: { path.removeAll() })
@@ -847,7 +847,7 @@ struct SettingsView: View {
                             .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
                             .accessibilityHidden(true)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("Scan to Make").font(.title3.bold())
+                            Text("Counterpart").font(.title3.bold())
                             Text("Scan it or describe it. Your Mac makes it. Your printer prints it.")
                                 .font(.subheadline).foregroundStyle(.secondary)
                         }
@@ -868,7 +868,7 @@ struct SettingsView: View {
                     }
                     Button("Connect to a Different Mac") { dismiss(); store.onPair() }
                 } header: { Text("Your Mac") } footer: {
-                    Text("Your Mac does the touch-ups and talks to your printer. Keep Scan to Make running on it.")
+                    Text("Your Mac does the touch-ups and talks to your printer. Keep Counterpart running on it.")
                 }
                 Section("How It Works") {
                     Label("Describe what you want, add a photo or two, or scan a real object.", systemImage: "text.viewfinder")
@@ -876,15 +876,15 @@ struct SettingsView: View {
                     Label("Check the size and pictures, fix anything, then tap Print.", systemImage: "printer")
                 }
                 Section("Help") {
-                    Link(destination: URL(string: "https://github.com/DMontgomery40/scan-to-make#readme")!) {
-                        Label("Scan to Make Website", systemImage: "safari")
+                    Link(destination: URL(string: "https://counterpart.dtmont.com/")!) {
+                        Label("Counterpart Website", systemImage: "safari")
                     }
-                    Link(destination: URL(string: "https://github.com/DMontgomery40/scan-to-make/issues")!) {
-                        Label("Report a Problem", systemImage: "exclamationmark.bubble")
+                    Link(destination: URL(string: "https://counterpart.dtmont.com/#help")!) {
+                        Label("Get Help", systemImage: "questionmark.circle")
                     }
                 }
                 Section("About") {
-                    LabeledContent("Scan to Make", value: version)
+                    LabeledContent("Counterpart", value: version)
                     LabeledContent("Made With", value: "Open source")
                 }
             }

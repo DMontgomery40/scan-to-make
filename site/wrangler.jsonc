@@ -1,0 +1,9 @@
+// Counterpart docs: static assets served by a Cloudflare Worker on David's domain.
+// A Worker (rather than Pages) leaves room for hosted compute on the same domain later.
+// Deploy: npx wrangler@4 deploy --config site/wrangler.jsonc
+{
+  "name": "counterpart-site",
+  "compatibility_date": "2026-11-01",
+  "assets": { "directory": "./public", "not_found_handling": "404-page" },
+  "routes": [{ "pattern": "counterpart.dtmont.com", "custom_domain": true }]
+}

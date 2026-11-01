@@ -88,7 +88,7 @@ export function Screen({
               <Text style={styles.backText}>‹ Back</Text>
             </Pressable>
           ) : (
-            <Text style={styles.brand}>Scan to Make</Text>
+            <Text style={styles.brand}>Counterpart</Text>
           )}
           {accessory}
         </View>
