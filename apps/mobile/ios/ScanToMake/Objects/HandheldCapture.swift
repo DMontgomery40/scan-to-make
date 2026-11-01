@@ -408,7 +408,10 @@ private let depthReadinessGate = AnalysisGate()
                 self.watchdog = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
                     Task { @MainActor in
                         guard let self, self.phase == .capturing else { return }
-                        if !self.canStart { await self.captureFailed("The camera stopped delivering synchronized RGB and depth. The frames already recorded are saved.") }
+                        if !self.canStart {
+                            self.notice = "Capture was interrupted. Recorded frames are preserved."
+                            await self.pause()
+                        }
                     }
                 }
                 self.recordDiagnostics("recording")
@@ -419,7 +422,10 @@ private let depthReadinessGate = AnalysisGate()
     func pause() async {
         guard phase == .capturing else { return }
         phase = .saving; watchdog?.invalidate(); watchdog = nil
-        if let summary = await recorder?.stop() { retain(summary) }
+        if let summary = await recorder?.stop() {
+            retain(summary)
+            if let failure = summary.failure { self.failure = failure }
+        }
         guard !closed else { return }
         phase = .paused; recordDiagnostics("paused")
     }
@@ -460,6 +466,7 @@ private let depthReadinessGate = AnalysisGate()
         }
         do {
             try Data().write(to: folder.appending(path: "finished"), options: .atomic)
+            failure = nil
             didFinish = true; phase = .finished; recordDiagnostics("saved")
         } catch { failure = "Counterpart couldn't save the capture."; phase = .paused }
         finishInProgress = false

@@ -148,6 +148,14 @@ struct CameraDevice {
     // CAN_RECORD_AGAIN
     // RECORD_AGAIN
     // RETAIN_SUMMARY
+    // PAUSE_CAPTURE
+    // CAPTURE_FAILED
+    func watchdogTick() async {
+        let callback = { [weak self] in
+            // WATCHDOG_CALLBACK
+        }
+        await callback().value
+    }
     // FINISH_CAPTURE
     // CLOSE_CAPTURE
 }
@@ -214,6 +222,48 @@ struct CameraDevice {
         ready.retain(.init())
         ready.legacyCapture = true
         check(!ready.canStart, "Legacy saved capture offered incompatible streaming append")
+
+        let uninterrupted = try CaptureOwner()
+        await uninterrupted.watchdogTick()
+        check(uninterrupted.phase == .capturing && uninterrupted.recorder!.stopCalls == 0,
+              "Readiness watchdog stopped a healthy recording")
+        for interruption in ["preview", "rgb", "depth"] {
+            let paused = try CaptureOwner(), pausedRecorder = paused.recorder!
+            if interruption == "preview" { paused.previewRendering = false }
+            if interruption == "rgb" { paused.lastVideoFrameAt = nil }
+            if interruption == "depth" { paused.lastDepthFrameAt = nil }
+            let pauseTask = Task { await paused.watchdogTick() }
+            await pausedRecorder.waitForStops(1)
+            check(paused.phase == .saving && !paused.markerExists,
+                  "Readiness pause did not wait for the active writer drain")
+            await paused.watchdogTick()
+            check(pausedRecorder.stopCalls == 1, "Repeated readiness callback started another pause")
+            pausedRecorder.releaseDrain(.init(framesSaved: 7))
+            await pauseTask.value
+            check(paused.phase == .paused && paused.taken == 7 && !paused.markerExists,
+                  "Readiness pause lost the committed partial capture")
+            check(paused.failure == nil && paused.notice != nil && !paused.canStart,
+                  "Transient readiness loss latched a fatal error or allowed premature Resume")
+            paused.previewRendering = true
+            paused.lastVideoFrameAt = ProcessInfo.processInfo.systemUptime
+            paused.lastDepthFrameAt = ProcessInfo.processInfo.systemUptime
+            check(paused.canStart, "Fresh camera evidence did not restore Resume after a transient pause")
+        }
+        let pauseFailure = try CaptureOwner(), pauseFailureRecorder = pauseFailure.recorder!
+        let pauseWithFailedWrite = Task { await pauseFailure.pause() }
+        await pauseFailureRecorder.waitForStops(1)
+        pauseFailureRecorder.releaseDrain(.init(framesSaved: 7, failure: "writer failed during pause"))
+        await pauseWithFailedWrite.value
+        check(pauseFailure.failure == "writer failed during pause" && !pauseFailure.canStart,
+              "Pause silently cleared a fatal writer failure")
+        let fatal = try CaptureOwner(), fatalRecorder = fatal.recorder!
+        let fatalTask = Task { await fatal.captureFailed("encoding failed") }
+        await fatalRecorder.waitForStops(1)
+        fatalRecorder.releaseDrain(.init(framesSaved: 7, failure: "encoding failed"))
+        await fatalTask.value
+        await fatal.watchdogTick()
+        check(fatal.failure == "encoding failed" && fatal.phase == .paused && !fatal.canStart,
+              "Readiness watchdog cleared a real encoding failure")
 
         for count in [1, 23] {
             let legacy = try CaptureOwner()
@@ -288,9 +338,16 @@ struct CameraDevice {
         // A second explicit Save acknowledges the failure and keeps already committed valid pairs.
         let saveKnownFailure = Task { await failed.finish() }
         await failedRecorder.waitForStops(2)
+        check(failed.failure == "writer failed" && !failed.markerExists,
+              "Explicit Save cleared the active error before the finished marker existed")
         failedRecorder.releaseDrain(.init(failure: "writer failed"))
         let savedKnownFailure = await saveKnownFailure.value
         check(savedKnownFailure && failed.markerExists, "Explicit save after a known failure was blocked")
+        check(failed.failure == nil && failed.phase == .finished,
+              "Successful explicit Save still displayed the old active failure")
+        let failureHistory = try JSONSerialization.jsonObject(with: Data(contentsOf: failed.folder.appending(path: "capture-diagnostics.json"))) as! [String: Any]
+        check(failureHistory["failure"] as? String == "writer failed",
+              "Successful explicit Save erased the retained recorder failure history")
 
         let canceled = try CaptureOwner(), canceledRecorder = canceled.recorder!
         let canceledFinish = Task { await canceled.finish() }
@@ -311,6 +368,7 @@ struct CameraDevice {
         check(!shortResult && !short.markerExists && short.phase == .paused, "Insufficient frames were marked finished")
 
         let unwritable = try CaptureOwner(), unwritableRecorder = unwritable.recorder!
+        unwritable.failure = "known writer failure"
         let unwritableFinish = Task { await unwritable.finish() }
         await unwritableRecorder.waitForStops(1)
         try FileManager.default.removeItem(at: unwritable.folder)
@@ -320,6 +378,6 @@ struct CameraDevice {
               "Finished-marker write failure was reported as success")
 
         if !failures.isEmpty { failures.forEach { print("FAIL: \($0)") }; exit(1) }
-        print("PASS synchronized readiness, retained limits, drain-before-finish, failures, duplicate Done and canceled finish")
+        print("PASS synchronized readiness, transient pause/resume, retained fatal failures, saved status/history, retained limits, drain-before-finish, duplicate Done and canceled finish")
     }
 }
