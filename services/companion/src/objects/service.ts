@@ -1,4 +1,4 @@
-import {copyFile, mkdir, readFile, rm} from 'node:fs/promises';
+import {copyFile, mkdir, readFile, rm, writeFile} from 'node:fs/promises';
 import {basename, join} from 'node:path';
 import {DispatchedPrintError, type ElicitationRelay, type HandoffBundleStore, type PendingElicitation, type PrinterHandoffConfig, type PrinterHandoffRunner} from '@scan-to-make/printer-handoff';
 import type {PlateVerdict} from './bedcheck.js';
@@ -9,6 +9,7 @@ import {ObjectStore, type StmObject} from './store.js';
 /** How many of an object's photos go to one touch-up pass. More only costs time. */
 export const PHOTOS_PER_PASS = 24;
 const BEST_GUESS_NOTE = "Make your best guess for the parts you couldn't see in the photos, and carry on.";
+const UNCERTAIN = 'The printer may have started this print. Check the printer before printing again.';
 
 export class InvalidStateError extends Error {
   constructor(message: string) { super(message); this.name = 'InvalidStateError'; }
@@ -46,8 +47,29 @@ export function spreadPick<T>(items: T[], count: number): T[] {
 export class ObjectService {
   readonly #deps: ObjectServiceDeps;
   readonly #running = new Map<string, Promise<StmObject>>();
+  readonly #controllers = new Map<string, AbortController>();
   readonly #confirmations = new Map<string, PendingElicitation>();
+  /** One action at a time per object, so a double tap can't start the same work twice. */
+  readonly #gates = new Map<string, Promise<unknown>>();
+  #closed = false;
   constructor(deps: ObjectServiceDeps) { this.#deps = deps; }
+
+  #gate<T>(id: string, action: () => Promise<T>): Promise<T> {
+    const next = (this.#gates.get(id) ?? Promise.resolve()).catch(() => undefined).then(() => {
+      if (this.#closed) throw new InvalidStateError('Scan to Make is shutting down on this Mac.');
+      return action();
+    });
+    this.#gates.set(id, next);
+    void next.catch(() => undefined).finally(() => { if (this.#gates.get(id) === next) this.#gates.delete(id); });
+    return next;
+  }
+
+  /** Stops running touch-ups and prints and waits for them to finish. */
+  async close(): Promise<void> {
+    this.#closed = true;
+    for (const controller of this.#controllers.values()) controller.abort();
+    await Promise.allSettled([...this.#gates.values(), ...this.#running.values()]);
+  }
 
   create(instructions?: string) { return this.#deps.store.create(instructions).then(o => this.#changed(o)); }
   list() { return this.#deps.store.list(); }
@@ -69,7 +91,8 @@ export class ObjectService {
   }
 
   /** The inputs are complete: start the touch-up. Starting again while it runs changes nothing. */
-  async start(id: string): Promise<StmObject> {
+  start(id: string): Promise<StmObject> { return this.#gate(id, () => this.#start(id)); }
+  async #start(id: string): Promise<StmObject> {
     const object = await this.get(id);
     if (object.state === 'touching-up') return object;
     if (object.state === 'needs-closeup') return this.#pass(object, {});
@@ -77,47 +100,63 @@ export class ObjectService {
     return this.#pass(object, {});
   }
 
-  async correct(id: string, note: string): Promise<StmObject> {
+  correct(id: string, note: string): Promise<StmObject> { return this.#gate(id, () => this.#correct(id, note)); }
+  async #correct(id: string, note: string): Promise<StmObject> {
     const object = await this.get(id);
     if (!object.current) throw new InvalidStateError('There is no model to correct yet.');
     if (object.state === 'touching-up' || object.state === 'printing') throw new InvalidStateError('Wait until the current step finishes.');
     return this.#pass(object, {note: note.trim()});
   }
 
-  async answerCloseup(id: string, answer: {bestGuess?: boolean}): Promise<StmObject> {
+  answerCloseup(id: string, answer: {bestGuess?: boolean}): Promise<StmObject> { return this.#gate(id, () => this.#answerCloseup(id, answer)); }
+  async #answerCloseup(id: string, answer: {bestGuess?: boolean}): Promise<StmObject> {
     const object = await this.get(id);
     if (object.state !== 'needs-closeup') throw new InvalidStateError('No close-up was asked for.');
-    return this.#pass(object, answer.bestGuess ? {note: BEST_GUESS_NOTE} : {});
+    // Carry on with what the asking pass was doing: a correction keeps its note and its model.
+    const asked = object.passes.at(-1)?.note;
+    const parts = [asked, answer.bestGuess && !asked?.includes(BEST_GUESS_NOTE) ? BEST_GUESS_NOTE : undefined].filter(Boolean);
+    return this.#pass(object, parts.length ? {note: parts.join('\n')} : {});
   }
 
   /** Prints the current model through the user's printer MCP. The plate is checked in the background. */
-  async print(id: string): Promise<StmObject> {
+  print(id: string, options: {checked?: boolean} = {}): Promise<StmObject> { return this.#gate(id, () => this.#print(id, options)); }
+  async #print(id: string, options: {checked?: boolean}): Promise<StmObject> {
     const object = await this.get(id);
     if (!object.current) throw new InvalidStateError('There is no model to print yet.');
     if (object.state === 'touching-up' || object.state === 'printing') throw new InvalidStateError('Wait until the current step finishes.');
+    if (object.print?.uncertain && !options.checked) throw new InvalidStateError("The printer may already be printing this. Check the printer, then print again if it isn't.");
     const printing = this.#deps.print;
     if (!printing) throw new InvalidStateError('Printing is not set up on this Mac.');
     const {store: bundles, relay, runner, selection} = printing.services;
     const stl = await readFile(join(this.#deps.store.dir(id), object.current.model));
     const manifest = await bundles.create({stl, prompt: '', backend: runner.backend, ...(selection ? {selection} : {})});
     const started = await this.#deps.store.update(id, o => ({...o, state: 'printing', print: {bundleId: manifest.id}, plate: undefined, failure: undefined}));
-    const unsubscribe = relay.subscribe(pending => { void this.#confirm(id, pending); });
-    const work = runner.runBundle(bundles, manifest.id, {print: true})
+    // Only this print's questions: other prints share the relay.
+    const unsubscribe = relay.subscribe(pending => { if (pending.bundleId === manifest.id) void this.#confirm(id, pending); });
+    const controller = new AbortController();
+    this.#controllers.set(id, controller);
+    const work = runner.runBundle(bundles, manifest.id, {print: true, signal: controller.signal})
       .then(() => this.#deps.store.update(id, o => ({...o, state: 'printed', plate: undefined})),
         async error => {
+          const status = (await bundles.read(manifest.id).catch(() => undefined))?.status;
           // Once the printer has the job it is printing, whatever went wrong afterwards (as the phone's print route does).
-          const dispatched = error instanceof DispatchedPrintError || (await bundles.read(manifest.id).catch(() => undefined))?.status === 'printed';
-          return this.#deps.store.update(id, o => dispatched ? {...o, state: 'printed', plate: undefined}
-            : {...o, state: 'failed', plate: undefined, failure: error instanceof Error ? error.message : String(error)});
+          if (error instanceof DispatchedPrintError || status === 'printed') return this.#deps.store.update(id, o => ({...o, state: 'printed', plate: undefined}));
+          // It may have reached the printer: never send it again by itself.
+          if (status === 'uncertain') return this.#deps.store.update(id, o => ({...o, state: 'failed', plate: undefined, failure: UNCERTAIN, print: {bundleId: manifest.id, uncertain: true}}));
+          return this.#deps.store.update(id, o => ({...o, state: 'failed', plate: undefined, failure: error instanceof Error ? error.message : String(error)}));
         })
       .then(o => this.#changed(o))
-      .finally(() => { unsubscribe(); this.#running.delete(id); this.#confirmations.delete(id); });
+      .finally(() => {
+        unsubscribe(); this.#running.delete(id); this.#controllers.delete(id); this.#confirmations.delete(id);
+        void rm(join(this.#deps.store.dir(id), 'plate.jpg'), {force: true}).catch(() => undefined);
+      });
     this.#running.set(id, work);
     return this.#changed(started);
   }
 
   /** The user says the plate is clear (no camera, or the check saw something that isn't really there). */
-  async answerPlate(id: string, answer: {clear: true}): Promise<StmObject> {
+  answerPlate(id: string, answer: {clear: true}): Promise<StmObject> { return this.#gate(id, () => this.#answerPlate(id, answer)); }
+  async #answerPlate(id: string, answer: {clear: true}): Promise<StmObject> {
     const pending = this.#confirmations.get(id), content = pending && confirmAnswer(pending.requestedSchema);
     if (!answer.clear || !pending || !content) throw new InvalidStateError('Nothing is waiting for the plate.');
     this.#deps.print!.services.relay.respond(pending.id, {action: 'accept', content});
@@ -137,7 +176,9 @@ export class ObjectService {
       this.#confirmations.delete(id);
       return;
     }
-    this.#changed(await this.#deps.store.update(id, o => ({...o, plate: {item: verdict.item?.trim() || 'something'}})));
+    // Keep the camera photo so the phone and the Mac can show what is on the plate.
+    const photo = await writeFile(join(this.#deps.store.dir(id), 'plate.jpg'), Buffer.from(pending.cameraSnapshot.base64, 'base64')).then(() => true, () => false);
+    this.#changed(await this.#deps.store.update(id, o => ({...o, plate: {item: verdict.item?.trim() || 'something', ...(photo ? {photo} : {})}})));
   }
 
   /** Resolves when the object's current touch-up or print (if any) has finished. */
@@ -157,9 +198,11 @@ export class ObjectService {
     const input: TouchupInput = {root: join(dir, 'passes'), objectId: 'pass', scan, photos, handoff: this.#deps.handoff, claudePath: this.#deps.claudePath,
       ...(object.instructions ? {instructions: object.instructions} : {}),
       ...(opts.note !== undefined ? {note: opts.note, ...(object.current?.summary ? {summary: object.current.summary} : {})} : {})};
-    const work = this.#deps.runTouchup(input)
+    const controller = new AbortController();
+    this.#controllers.set(object.id, controller);
+    const work = this.#deps.runTouchup({...input, signal: controller.signal})
       .then(result => this.#finish(object.id, startedAtMs, result), error => this.#fail(object.id, startedAtMs, error))
-      .finally(() => this.#running.delete(object.id));
+      .finally(() => { this.#running.delete(object.id); this.#controllers.delete(object.id); });
     this.#running.set(object.id, work);
     return running;
   }

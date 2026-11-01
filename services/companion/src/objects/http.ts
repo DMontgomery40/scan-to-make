@@ -7,7 +7,7 @@ import {ObjectNotFoundError, type StmObject} from './store.js';
 
 const READ: RemoteScope = 'projects:read', WRITE: RemoteScope = 'captures:import', PRINT: RemoteScope = 'printer-handoff:use';
 const MAX_SCAN = 64 * 1024 * 1024, MAX_PHOTO = 25 * 1024 * 1024, MAX_JSON = 16 * 1024;
-const PATH = /^\/v1\/objects(?:\/([0-9a-f-]{36})(?:\/(scan|photos|start|corrections|closeup|print|plate|model\.stl|renders\/[^/]+))?)?$/;
+const PATH = /^\/v1\/objects(?:\/([0-9a-f-]{36})(?:\/(scan|photos|start|corrections|closeup|print|plate\.jpg|plate|model\.stl|renders\/[^/]+))?)?$/;
 
 class HttpFailure extends Error {
   constructor(readonly status: number, readonly code: string, message = code) { super(message); }
@@ -65,6 +65,16 @@ export function createObjectRoutes(service: ObjectService) {
           await authorize(READ);
           return send(response, 200, {object: publicObject(await service.get(id))});
         }
+        if (action === 'plate.jpg') {
+          if (method !== 'GET') throw new HttpFailure(405, 'method-not-allowed');
+          await authorize(PRINT);
+          if (!(await service.get(id)).plate?.photo) throw new HttpFailure(404, 'not-found');
+          const bytes = await readFile(join(service.dir(id), 'plate.jpg')).catch(() => { throw new HttpFailure(404, 'not-found'); });
+          response.statusCode = 200;
+          response.setHeader('content-type', 'image/jpeg');
+          response.end(bytes);
+          return;
+        }
         if (action === 'model.stl' || action.startsWith('renders/')) {
           if (method !== 'GET') throw new HttpFailure(405, 'method-not-allowed');
           await authorize(READ);
@@ -97,7 +107,7 @@ export function createObjectRoutes(service: ObjectService) {
             break;
           }
           case 'closeup': object = await service.answerCloseup(id, {bestGuess: (await json<{bestGuess?: unknown}>(request)).bestGuess === true}); break;
-          case 'print': object = await service.print(id); break;
+          case 'print': object = await service.print(id, (await json<{checked?: unknown}>(request)).checked === true ? {checked: true} : {}); break;
           case 'plate': {
             if ((await json<{clear?: unknown}>(request)).clear !== true) throw new HttpFailure(400, 'invalid-request');
             object = await service.answerPlate(id, {clear: true});

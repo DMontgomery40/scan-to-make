@@ -21,6 +21,8 @@ export interface PrintRunInput {
   /** Set false to stop after slicing and inspection. Defaults to printing. */
   print?: boolean;
   signal?: AbortSignal;
+  /** Tags the printer's questions with the bundle being printed. */
+  bundleId?: string;
 }
 export interface PrintRunResult {
   backend: PrinterHandoffConfig['backend'];
@@ -140,6 +142,8 @@ export class PrinterHandoffRunner {
     const steps: PrintStep[] = [];
     const step = (name: PrintStep) => { steps.push(name); this.#onStep?.(name); };
     const client = this.client();
+    const tag = input.bundleId === undefined ? {} : {bundleId: input.bundleId};
+    client.setElicitationContext(tag);
     try {
       const catalog = await client.connect(input.signal);
       step('discover');
@@ -179,7 +183,7 @@ export class PrinterHandoffRunner {
             await call(client, 'camera_snapshot', {bambu_model: selection.model, timeout_ms: 8000}, input.signal));
           if (typeof snapshot.base64 === 'string' && snapshot.base64) {
             cameraSnapshot = snapshot;
-            client.setElicitationContext({cameraSnapshot: {
+            client.setElicitationContext({...tag, cameraSnapshot: {
               format: typeof snapshot.format === 'string' ? snapshot.format : 'jpeg',
               base64: snapshot.base64,
               ...(typeof snapshot.savedTo === 'string' ? {savedTo: snapshot.savedTo} : {}),
@@ -224,7 +228,7 @@ export class PrinterHandoffRunner {
           }, input.signal, input.beforePrint);
           printed = resultValue(result);
         }
-      } finally { client.clearElicitationContext(); }
+      } finally { client.setElicitationContext(tag); }
       step('print');
       return {...common, cameraSnapshot, print: printed};
     } finally {
@@ -249,7 +253,7 @@ export class PrinterHandoffRunner {
     try {
       const inputStl = join(workDirectory, basename(store.stlPath(manifest)));
       await copyFile(store.stlPath(manifest), inputStl);
-      const result = await this.run({stlPath: inputStl, selection: manifest.selection, print: options.print, signal: options.signal,
+      const result = await this.run({stlPath: inputStl, selection: manifest.selection, print: options.print, signal: options.signal, bundleId: id,
         beforePrint: async () => { await store.setStatus(id, 'uncertain', 'dispatch-uncertain'); },
       });
       dispatched = options.print !== false;

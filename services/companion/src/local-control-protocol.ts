@@ -47,7 +47,7 @@ export const parameters = {
   'objects.get': z.strictObject({id: z.uuid()}),
   'objects.correct': z.strictObject({id: z.uuid(), note: z.string().trim().min(1).max(4000)}),
   'objects.answerCloseup': z.strictObject({id: z.uuid(), bestGuess: z.boolean()}),
-  'objects.print': z.strictObject({id: z.uuid()}),
+  'objects.print': z.strictObject({id: z.uuid(), checked: z.boolean().optional()}),
   'objects.answerPlate': z.strictObject({id: z.uuid()}),
 };
 export type ControlMethod = keyof typeof parameters;

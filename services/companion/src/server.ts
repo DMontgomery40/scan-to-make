@@ -412,10 +412,13 @@ export async function startCompanionServer(
           );
           const capturesStopped=captureRoutes?.close();
           const handoffStopped=printHandoffRoutes?.close();
+          // Object touch-ups and prints stop before the server's resources go.
+          const objectsStopped=options.objects?.close();
           server.closeAllConnections();
           await stopped;
           await capturesStopped;
           await handoffStopped;
+          await objectsStopped;
           await instanceLock?.release();
         })();
       return closing;

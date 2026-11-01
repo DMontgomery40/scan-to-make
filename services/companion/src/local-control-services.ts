@@ -195,11 +195,11 @@ export function createControlDispatcher(services: ControlServices) {
           if (!objects) throw new ControlFailure('unavailable');
           try {
             if (method === 'objects.list') return {objects: (await objects.list()).map(publicObject)};
-            const params = parameters[method].parse(raw) as {id: string; note?: string; bestGuess?: boolean};
+            const params = parameters[method].parse(raw) as {id: string; note?: string; bestGuess?: boolean; checked?: boolean};
             const object = method === 'objects.get' ? await objects.get(params.id)
               : method === 'objects.correct' ? await objects.correct(params.id, params.note!)
               : method === 'objects.answerCloseup' ? await objects.answerCloseup(params.id, {bestGuess: params.bestGuess!})
-              : method === 'objects.print' ? await objects.print(params.id)
+              : method === 'objects.print' ? await objects.print(params.id, params.checked ? {checked: true} : {})
               : await objects.answerPlate(params.id, {clear: true});
             return {object: publicObject(object)};
           } catch (error) {

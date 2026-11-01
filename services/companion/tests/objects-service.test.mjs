@@ -9,13 +9,15 @@ import {ObjectService, InvalidStateError} from '../dist/objects/service.js';
 
 const STL = 'solid m\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 1 0 0\nvertex 0 1 0\nendloop\nendfacet\nendsolid m\n';
 
-async function setup(outcome = {status: 'done', summary: 'Fixed the card.'}, {throws, delayMs = 0} = {}) {
+async function setup(outcome = {status: 'done', summary: 'Fixed the card.'}, {throws, delayMs = 0, outcomes, waitForAbort} = {}) {
   const root = await mkdtemp(join(tmpdir(), 'objects-svc-'));
   const store = new ObjectStore(join(root, 'objects'));
   const calls = [];
   const runTouchup = async input => {
     calls.push(input);
+    if (waitForAbort) await new Promise(r => input.signal.addEventListener('abort', r, {once: true}));
     await new Promise(r => setTimeout(r, delayMs));
+    if (outcomes) outcome = outcomes[calls.length - 1] ?? outcome;
     if (throws) throw new Error(throws);
     const passDir = join(root, 'pass-' + calls.length), out = join(passDir, 'out');
     await mkdir(out, {recursive: true});
@@ -139,4 +141,54 @@ test('a model the engine stopped early is kept and shown as ready with a note', 
   const settled = await service.settled(object.id);
   assert.equal(settled.state, 'ready');
   assert.match(settled.current.summary, /time limit/);
+});
+
+test('a close-up answer after a correction carries on from the corrected model and the correction', async () => {
+  const {service, object, calls, store} = await setup(undefined, {outcomes: [
+    {status: 'done', summary: 'Fixed the card.'},
+    {status: 'needs_closeup', closeup: 'the underside', summary: 'Need the underside.'},
+    {status: 'done', summary: 'Made it 70 mm long.'},
+    {status: 'needs_closeup', closeup: 'the underside', summary: 'Still need it.'},
+    {status: 'done', summary: 'Guessed the underside.'},
+  ]});
+  await service.start(object.id);
+  await service.settled(object.id);
+  await service.correct(object.id, 'it is 70 mm long');
+  assert.equal((await service.settled(object.id)).state, 'needs-closeup');
+  await service.addPhoto(object.id, 'under.jpg', Buffer.from('img'));
+  await service.answerCloseup(object.id, {bestGuess: false});
+  await service.settled(object.id);
+  const current = join(store.dir(object.id), 'current', 'model.stl');
+  assert.deepEqual(calls[2].scan, [current]);
+  assert.match(calls[2].note, /70 mm long/);
+  await service.correct(object.id, 'it is 70 mm long');
+  await service.settled(object.id);
+  await service.answerCloseup(object.id, {bestGuess: true});
+  await service.settled(object.id);
+  assert.deepEqual(calls[4].scan, [current]);
+  assert.match(calls[4].note, /70 mm long/);
+  assert.match(calls[4].note, /best guess/);
+});
+
+test('closing the service stops a running touch-up and waits for it', async () => {
+  const {service, object, calls} = await setup(undefined, {waitForAbort: true});
+  await service.start(object.id);
+  await service.close();
+  assert.equal(calls[0].signal.aborted, true);
+});
+
+test('two quick starts run one touch-up', async () => {
+  const {service, object, calls} = await setup(undefined, {delayMs: 20});
+  await Promise.all([service.start(object.id), service.start(object.id)]);
+  await service.settled(object.id);
+  assert.equal(calls.length, 1);
+});
+
+test('closing the companion stops object work before it shuts down', async () => {
+  const {startCompanionServer} = await import('../dist/server.js');
+  const {service, object, calls} = await setup(undefined, {waitForAbort: true});
+  const server = await startCompanionServer({objects: service, port: 0});
+  await service.start(object.id);
+  await server.close();
+  assert.equal(calls[0].signal.aborted, true);
 });

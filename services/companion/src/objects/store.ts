@@ -30,9 +30,10 @@ export interface StmObject {
   current?: {model: string; renders: string[]; sizeMm?: [number, number, number]; summary?: string};
   question?: {closeup: string};
   /** Set while a print waits for the user: something is on the plate, or the printer has no camera. */
-  plate?: {item?: string; noCamera?: boolean};
+  plate?: {item?: string; noCamera?: boolean; photo?: boolean};
   failure?: string;
-  print?: {bundleId: string};
+  /** The last print; `uncertain` when it may have reached the printer and must not be sent again by itself. */
+  print?: {bundleId: string; uncertain?: boolean};
 }
 
 const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;

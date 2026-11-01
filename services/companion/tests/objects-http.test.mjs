@@ -35,7 +35,7 @@ async function fixture(t, {denied = []} = {}) {
     let json; try { json = JSON.parse(bytes.toString()); } catch {}
     return {status: response.status, json, bytes};
   };
-  return {call, scopes, service};
+  return {call, scopes, service, store};
 }
 
 test('create, list and get an object', async t => {
@@ -90,4 +90,24 @@ test('printing needs the printer scope', async t => {
   const {call} = await fixture(t, {denied: ['printer-handoff:use']});
   const id = (await call('POST', '/v1/objects', {})).json.object.id;
   assert.equal((await call('POST', `/v1/objects/${id}/print`)).status, 403);
+});
+
+test('the plate photo downloads only while the plate check is waiting', async t => {
+  const {call, store} = await fixture(t);
+  const id = (await call('POST', '/v1/objects', {})).json.object.id;
+  assert.equal((await call('GET', `/v1/objects/${id}/plate.jpg`)).status, 404);
+  await writeFile(join(store.dir(id), 'plate.jpg'), 'jpeg');
+  await store.update(id, o => ({...o, state: 'printing', plate: {item: 'a spool', photo: true}}));
+  const photo = await call('GET', `/v1/objects/${id}/plate.jpg`);
+  assert.equal(photo.status, 200);
+  assert.equal(photo.bytes.toString(), 'jpeg');
+});
+
+test('printing again after an uncertain print says the user checked', async t => {
+  const {call, store} = await fixture(t);
+  const id = (await call('POST', '/v1/objects', {})).json.object.id;
+  await store.update(id, o => ({...o, state: 'failed', current: {model: 'current/model.stl', renders: []}, print: {bundleId: 'b', uncertain: true}}));
+  const refused = await call('POST', `/v1/objects/${id}/print`);
+  assert.equal(refused.status, 409);
+  assert.match(refused.json.error.message, /Check the printer/);
 });
