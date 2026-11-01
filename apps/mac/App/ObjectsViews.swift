@@ -176,6 +176,7 @@ struct ObjectPage: View {
             .padding(EdgeInsets(top:8, leading:32, bottom:32, trailing:32))
             .frame(maxWidth:860, alignment:.leading)
             .frame(maxWidth:.infinity)
+            .keepsScrollerRoom()
         }
     }
 
@@ -277,9 +278,9 @@ struct ObjectPage: View {
                 }
             }
             .environment(\.colorScheme, .dark)  // The stage is always the dark plate.
-            .frame(minHeight:300, idealHeight:430, maxHeight:520)
-            .aspectRatio(4 / 3, contentMode:.fit)
+            // A fixed height: a stage whose height follows its width makes the page's height follow the window's width.
             .frame(maxWidth:.infinity)
+            .frame(height:420)
             .clipShape(RoundedRectangle(cornerRadius:14, style:.continuous))
             .overlay(alignment:.bottomLeading) {
                 if shown == .model {
@@ -346,6 +347,30 @@ struct ObjectPage: View {
         Task { if await model.perform(.correct, on:object.id, note:text) { note = "" } }
     }
     private func run(_ action: ObjectAction) { Task { await model.perform(action, on:object.id) } }
+}
+
+// MARK: - Steady scrolling
+
+extension View {
+    /// Inside a vertical ScrollView: its page's width never depends on whether it scrolls. AppKit hides a
+    /// legacy (always-shown) scroller once the page fits and gives its 15–17 pt back to the page; a page
+    /// whose height depends on its width then gets shorter, needs the scroller again, gets narrower and
+    /// taller, and so on: on screen the window shakes (KAN-207). Keeping the scroller tiled ends the loop.
+    /// Overlay scrollers take no room and are unaffected.
+    func keepsScrollerRoom() -> some View { background(ScrollerRoom()) }
+}
+
+private struct ScrollerRoom: NSViewRepresentable {
+    func makeNSView(context: Context) -> Probe { Probe() }
+    func updateNSView(_ view: Probe, context: Context) { view.apply() }
+    final class Probe: NSView {
+        override func viewDidMoveToWindow() { super.viewDidMoveToWindow(); apply() }
+        override func layout() { super.layout(); apply() }
+        func apply() {
+            guard let scroll = enclosingScrollView, scroll.autohidesScrollers else { return }
+            scroll.autohidesScrollers = false
+        }
+    }
 }
 
 // MARK: - Files on this Mac

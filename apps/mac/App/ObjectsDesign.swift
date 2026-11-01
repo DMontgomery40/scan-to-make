@@ -10,20 +10,23 @@ import ModelIO
 /// network: it runs before any of that, with its own fixture companion. The fixture STLs are real
 /// files read back through ModelScene, so the 3D stills also check the STL loading and framing.
 @MainActor enum ObjectsDesign {
-    static func render(to output: URL) {
+    /// Returns false if any window failed its stability check or the render failed.
+    static func render(to output: URL) -> Bool {
         _ = NSApplication.shared
         NSApp.setActivationPolicy(.accessory)
-        var done = false
+        var done = false, steady = false
         Task { @MainActor in
-            do { try await renderAll(to:output) } catch { FileHandle.standardError.write(Data("design render failed: \(error)\n".utf8)) }
+            do { steady = try await renderAll(to:output) } catch { FileHandle.standardError.write(Data("design render failed: \(error)\n".utf8)) }
             done = true
         }
         while !done { RunLoop.main.run(until:Date().addingTimeInterval(0.05)) }
+        return steady
     }
 
     private struct Shot { let name: String; let objects: [StmObject]?; let selection: String?; var dark = false; var threeD = false }
 
-    private static func renderAll(to output: URL) async throws {
+    private static func renderAll(to output: URL) async throws -> Bool {
+        var stability: [DesignStability.Result] = []
         try FileManager.default.createDirectory(at:output, withIntermediateDirectories:true)
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("stm-objects-design-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at:root) }
@@ -61,6 +64,15 @@ import ModelIO
             if shot.threeD, let live = findSceneView(window.contentView!) {
                 try write(live.snapshot(), to:output.appendingPathComponent(shot.name + "-scnview.png"))
             }
+            stability += await DesignStability.check(window, name:shot.name)
+            stability.append(DesignStability.minimumSize(window, name:shot.name, expected:ObjectsWindow.minimumSize))
+            stability.append(DesignStability.scrollerFlip(window, name:shot.name))
+            if ProcessInfo.processInfo.environment["STM_DESIGN_SWEEP"] == "1", shot.name.hasSuffix("ready-light") || shot.name.hasSuffix("plate-light") {
+                stability += await DesignStability.sweep(window, name:shot.name)
+            }
+            if ProcessInfo.processInfo.environment["STM_DESIGN_FIT"] == "1", shot.name.hasSuffix("ready-light") || shot.name.hasSuffix("plate-light") {
+                stability += await DesignStability.fit(window, name:shot.name)
+            }
             window.orderOut(nil)
             window.close()
         }
@@ -87,6 +99,7 @@ import ModelIO
             .environment(\.colorScheme, .light))
         footer.scale = 2
         if let image = footer.nsImage { try write(image, to:output.appendingPathComponent("popover-footer-light.png")) }
+        return DesignStability.report(stability)
     }
 
     private static func findSceneView(_ view: NSView) -> SCNView? {

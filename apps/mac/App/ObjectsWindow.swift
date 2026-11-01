@@ -10,6 +10,8 @@ import AgentKit
     private lazy var model = ObjectsModel(companion:SocketObjects(path:ModelAccessModel.socketPath(for:Installation(bundle:.main))))
     var isVisible: Bool { window?.isVisible == true }
 
+    static let minimumSize = NSSize(width:760, height:520)
+
     static func make(model: ObjectsModel, startWith3D: Bool = false) -> NSWindow {
         let window = NSWindow(contentRect:NSRect(x:0, y:0, width:1020, height:700),
                               styleMask:[.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
@@ -20,10 +22,15 @@ import AgentKit
         window.titlebarAppearsTransparent = true
         window.isReleasedWhenClosed = false
         let content = NSHostingController(rootView:ObjectsWindowView(model:model, startWith3D:startWith3D))
-        content.sizingOptions = [.minSize]
+        // The window owns its size. A minimum that follows SwiftUI's layout can push the window back
+        // and forth as the content reflows (KAN-207: the window shook under the pointer).
+        content.sizingOptions = []
         window.contentViewController = content
+        // Fixed AppKit constraints, not SwiftUI's layout, keep the window's minimum.
+        NSLayoutConstraint.activate([content.view.widthAnchor.constraint(greaterThanOrEqualToConstant:minimumSize.width),
+                                     content.view.heightAnchor.constraint(greaterThanOrEqualToConstant:minimumSize.height)])
         window.setContentSize(NSSize(width:1020, height:700))
-        window.contentMinSize = NSSize(width:760, height:520)
+        window.contentMinSize = minimumSize
         return window
     }
 
