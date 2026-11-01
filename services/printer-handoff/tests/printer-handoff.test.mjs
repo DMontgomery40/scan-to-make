@@ -20,7 +20,7 @@ const selection = {
   bedType: 'textured_plate', material: 'PLA', plateIndex: 0,
 };
 
-async function setup(t, {mode = 'bambu', backend = 'bambu-printer-mcp', answer = 'accept', relayTimeoutMs = 5000, dispatch, ephemeral = false} = {}) {
+async function setup(t, {mode = 'bambu', backend = 'bambu-printer-mcp', answer = 'accept', relayTimeoutMs = 5000, dispatch, ephemeral = false, noColour = false} = {}) {
   const root = await mkdtemp(join(tmpdir(), 'printer-handoff-'));
   t.after(() => rm(root, {recursive: true, force: true}));
   const log = join(root, 'calls.jsonl');
@@ -30,7 +30,7 @@ async function setup(t, {mode = 'bambu', backend = 'bambu-printer-mcp', answer =
   const config = {
     backend,
     process: {command: process.execPath, args: [fixture, mode, log], cwd: root,
-      env: {...(dispatch ? {HANDOFF_FIXTURE_DISPATCH: dispatch} : {}), ...(ephemeral ? {HANDOFF_FIXTURE_EPHEMERAL: '1'} : {})}},
+      env: {...(dispatch ? {HANDOFF_FIXTURE_DISPATCH: dispatch} : {}), ...(ephemeral ? {HANDOFF_FIXTURE_EPHEMERAL: '1'} : {}), ...(noColour ? {HANDOFF_FIXTURE_NO_COLOUR:'1'} : {})}},
     selection,
     timeouts: {connectMs: 5000, toolMs: 5000, elicitationMs: relayTimeoutMs},
   };
@@ -60,6 +60,27 @@ test('config file parses backend, process, selection and timeouts', async t => {
   const path = join(f.root, 'config.json');
   await writeFile(path, JSON.stringify(f.config));
   assert.deepEqual(await readPrinterHandoffConfig(path), f.config);
+});
+
+test('a selected colour and profile reach slicing and its AMS slot reaches printing', async t => {
+  const f = await setup(t);
+  const store = new HandoffBundleStore(join(f.root, 'selected-filament'));
+  const manifest = await store.create({stl, prompt:'', backend:'bambu-printer-mcp',
+    selection:{...selection, useAms:true, amsSlots:[1], autoMatchAms:false}});
+  await f.runner.runBundle(store, manifest.id, {slicer:{loadFilaments:'/profiles/pla.json', filamentColours:'#FEC600'}});
+  const calls = await f.calls();
+  const slice = calls.find(call => call.tool === 'slice_stl');
+  const print = calls.find(call => call.tool === 'print_3mf');
+  assert.equal(slice.arguments.load_filaments, '/profiles/pla.json');
+  assert.equal(slice.arguments.filament_colours, '#FEC600');
+  assert.deepEqual(print.arguments.ams_slots, [1]);
+  assert.equal(print.arguments.auto_match_ams, false);
+});
+
+test('a backend that cannot honour the chosen colour is refused before slicing or dispatch', async t => {
+  const f = await setup(t, {noColour:true});
+  await assert.rejects(f.runner.run({stlPath:f.stlPath, slicer:{loadFilaments:'/profiles/pla.json', filamentColours:'#FEC600'}}), /filament-selection-unsupported/);
+  assert.deepEqual(await f.calls(), []);
 });
 
 test('bundle store creates, verifies, claims and records designed artifacts', async t => {

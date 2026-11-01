@@ -1,5 +1,11 @@
 import Foundation
 
+public struct PrinterFilament: Codable, Sendable, Identifiable, Equatable {
+    public let slot: Int
+    public let colour: String, material: String, name: String, filamentId: String, destinationId: String
+    public var id: Int { slot }
+}
+
 /// One thing the user scanned or asked to have made: the companion's `StmObject`
 /// (services/companion/src/objects/store.ts) plus `directory`, its folder on this Mac.
 /// Decoding is tolerant: unknown keys are ignored, missing lists read as empty, and a state
@@ -137,6 +143,11 @@ public extension ControlClient {
     private struct PassActivityReply: Decodable { let activity: [StmObject.Activity] }
 
     func printers() async throws -> PrinterCatalog { try await call("objects.printers") }
+    func filaments(_ id: String) async throws -> [PrinterFilament] {
+        struct Result: Decodable { let filaments: [PrinterFilament] }
+        let result: Result = try await call("objects.filaments", ["id":.string(id)])
+        return result.filaments
+    }
     func selectPrinter(_ id: String, destinationId: String) async throws -> StmObject {
         let result: ObjectReply = try await call("objects.selectPrinter", ["id": .string(id), "destinationId": .string(destinationId)])
         return result.object
@@ -170,6 +181,12 @@ public extension ControlClient {
         var params: [String: JSONValue] = ["id": .string(id)]
         if checked { params["checked"] = .bool(true) }
         let result: ObjectReply = try await call("objects.print", params); return result.object
+    }
+    func printObject(_ id: String, checked: Bool, filament: PrinterFilament) async throws -> StmObject {
+        let value: [String: JSONValue] = ["slot":.number(Double(filament.slot)), "colour":.string(filament.colour),
+            "material":.string(filament.material), "name":.string(filament.name), "filamentId":.string(filament.filamentId), "destinationId":.string(filament.destinationId)]
+        let result: ObjectReply = try await call("objects.print", ["id":.string(id), "checked":.bool(checked), "filament":.object(value)])
+        return result.object
     }
     /// Removes the object and its folder from this Mac. Refused (`conflict`) while it is printing.
     func deleteObject(_ id: String) async throws {

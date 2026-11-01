@@ -7,6 +7,8 @@ import ControlKit
 /// What the objects window needs from the companion: local-control's `objects.*` methods.
 protocol ObjectsCompanion: Sendable {
     func printers() async throws -> PrinterCatalog
+    func filaments(_ id: String) async throws -> [PrinterFilament]
+    func print(_ id: String, checked: Bool, filament: PrinterFilament) async throws -> StmObject
     func passActivity(_ id: String, index: Int) async throws -> [StmObject.Activity]
     func selectPrinter(_ id: String, destinationId: String) async throws -> StmObject
     func objects() async throws -> [StmObject]
@@ -20,6 +22,8 @@ protocol ObjectsCompanion: Sendable {
 }
 
 extension ObjectsCompanion {
+    func filaments(_ id: String) async throws -> [PrinterFilament] { throw ControlClientError.unavailable }
+    func print(_ id: String, checked: Bool, filament: PrinterFilament) async throws -> StmObject { throw ControlClientError.unavailable }
     func answerPrintConfirmation(_ id: String, confirmationId: String, answer: PrintConfirmationAnswer) async throws -> StmObject { throw ControlClientError.unavailable }
     func passActivity(_ id: String, index: Int) async throws -> [StmObject.Activity] { throw ControlClientError.unavailable }
     func printers() async throws -> PrinterCatalog { throw ControlClientError.unavailable }
@@ -31,6 +35,8 @@ struct SocketObjects: ObjectsCompanion {
     let path: String
     func passActivity(_ id: String, index: Int) async throws -> [StmObject.Activity] { try await ControlClient(socketPath:path).passActivity(id, index:index) }
     func printers() async throws -> PrinterCatalog { try await ControlClient(socketPath:path).printers() }
+    func filaments(_ id: String) async throws -> [PrinterFilament] { try await ControlClient(socketPath:path, timeout:30).filaments(id) }
+    func print(_ id: String, checked: Bool, filament: PrinterFilament) async throws -> StmObject { try await ControlClient(socketPath:path, timeout:30).printObject(id, checked:checked, filament:filament) }
     func selectPrinter(_ id: String, destinationId: String) async throws -> StmObject { try await ControlClient(socketPath:path).selectPrinter(id, destinationId:destinationId) }
     func objects() async throws -> [StmObject] { try await ControlClient(socketPath:path).objects() }
     func correct(_ id: String, note: String) async throws -> StmObject { try await ControlClient(socketPath:path).correctObject(id, note:note) }
@@ -77,6 +83,25 @@ struct SocketObjects: ObjectsCompanion {
 
     func passActivity(_ id: String, index: Int) async throws -> [StmObject.Activity] {
         try await companion.passActivity(id, index:index)
+    }
+
+    func filaments(_ id: String) async throws -> [PrinterFilament] { try await companion.filaments(id) }
+
+    @discardableResult func print(_ id: String, checked: Bool, filament: PrinterFilament) async -> Bool {
+        guard !working.contains(id) else { return false }
+        working.insert(id)
+        defer { working.remove(id) }
+        problem = nil
+        do {
+            let updated = try await companion.print(id, checked:checked, filament:filament)
+            if let index = objects.firstIndex(where:{ $0.id == id }) { objects[index] = updated }
+            wake()
+            return true
+        } catch {
+            await refresh()
+            problem = Problem(id:id, text:Self.sentence(for:error))
+            return false
+        }
     }
 
     func printer(for object: StmObject) -> PrinterDestination? {

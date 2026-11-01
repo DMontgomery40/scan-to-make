@@ -46,6 +46,7 @@ export const parameters = {
     .refine(p => (p.projectId === undefined) !== (p.handoffId === undefined)),
   'objects.list': empty,
   'objects.printers': empty,
+  'objects.filaments': z.strictObject({id: z.uuid()}),
   'objects.selectPrinter': z.strictObject({id: z.uuid(), destinationId: z.string().min(1).max(256)}),
   'objects.get': z.strictObject({id: z.uuid()}),
   'objects.passActivity': z.strictObject({id: z.uuid(), index: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER)}),
@@ -53,7 +54,10 @@ export const parameters = {
   'objects.delete': z.strictObject({id: z.uuid()}),
   'objects.correct': z.strictObject({id: z.uuid(), note: z.string().trim().min(1).max(4000)}),
   'objects.answerCloseup': z.strictObject({id: z.uuid(), bestGuess: z.boolean()}),
-  'objects.print': z.strictObject({id: z.uuid(), checked: z.boolean().optional()}),
+  'objects.print': z.strictObject({id: z.uuid(), checked: z.boolean().optional(), filament: z.strictObject({
+    slot:z.number().int().min(0).max(255), colour:z.string().regex(/^#[0-9A-F]{6}$/), material:z.string().min(1).max(128),
+    name:z.string().max(256), filamentId:z.string().max(128), destinationId:z.string().min(1).max(256),
+  }).optional()}),
   'objects.answerPlate': z.strictObject({id: z.uuid()}),
   'objects.answerPrintConfirmation': z.strictObject({id: z.uuid(), confirmationId: z.uuid(), answer: z.union([
     z.strictObject({action: z.literal('accept'), content: z.record(z.string().max(128), z.boolean())}),

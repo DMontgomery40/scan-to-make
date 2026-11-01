@@ -6,12 +6,13 @@ import {tmpdir} from 'node:os';
 import {DispatchedPrintError, HandoffBundleStore, InMemoryElicitationRelay} from '@scan-to-make/printer-handoff';
 import {ObjectStore} from '../dist/objects/store.js';
 import {ObjectService, InvalidStateError} from '../dist/objects/service.js';
+import {createControlDispatcher} from '../dist/local-control-services.js';
 
 const STL = Buffer.from('solid m\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 1 0 0\nvertex 0 1 0\nendloop\nendfacet\nendsolid m\n' + ' '.repeat(40));
 // The advertised Bambu hardware-confirmation schema (including its unchecked default).
 const CONFIRM = {type: 'object', properties: {confirmed: {type: 'boolean', title: 'I checked the printer and confirm this operation', default: false}}, required: ['confirmed']};
 
-async function setup({judge = async () => ({clear: true}), camera = true, runnerFails, afterDispatch, uncertain, objects = 1, slowMs = 0, schema = CONFIRM, mode = 'form', timeoutMs = 5000} = {}) {
+async function setup({judge = async () => ({clear: true}), camera = true, runnerFails, afterDispatch, uncertain, objects = 1, slowMs = 0, schema = CONFIRM, mode = 'form', timeoutMs = 5000, inventory} = {}) {
   const root = await mkdtemp(join(tmpdir(), 'objects-print-'));
   const store = new ObjectStore(join(root, 'objects'));
   const relay = new InMemoryElicitationRelay({timeoutMs});
@@ -20,6 +21,7 @@ async function setup({judge = async () => ({clear: true}), camera = true, runner
   const runs = [];
   const runner = {
     backend: 'bambu-printer-mcp',
+    filaments: async () => inventory,
     runBundle: async (bundleStore, id, options = {}) => {
       runs.push({id, options});
       await new Promise(r => setTimeout(r, slowMs));
@@ -57,6 +59,38 @@ test('printing with no model is refused', async () => {
   const {service, store} = await setup();
   const bare = await store.create();
   await assert.rejects(service.print(bare.id), InvalidStateError);
+});
+
+test('chosen live filament sets slicing profile and AMS slot; a changed spool is refused', async () => {
+  const tray = {slot:1, loaded:true, tray_color:'FEC600FF', tray_type:'PLA', tray_info_idx:'GFA00',
+    display_name:'Yellow PLA', resolved_profile_path:'/profiles/yellow-pla.json'};
+  const {service, object, runs, bundles} = await setup({inventory:{trays:[tray]}});
+  const [choice] = await service.filaments(object.id);
+  assert.deepEqual(choice, {slot:1, colour:'#FEC600', material:'PLA', name:'Yellow PLA', filamentId:'GFA00', destinationId:'default'});
+  await assert.rejects(service.print(object.id, {filament:{...choice, destinationId:'other-printer'}}), /filament changed/);
+  tray.tray_color = '000000FF';
+  await assert.rejects(service.print(object.id, {filament:choice}), /filament changed/);
+  assert.equal(runs.length, 0);
+  tray.tray_color = 'FEC600FF';
+  const started = await service.print(object.id, {filament:choice});
+  const bundle = await bundles.read(started.print.bundleId);
+  assert.deepEqual(bundle.selection, {material:'PLA', useAms:true, amsSlots:[1], autoMatchAms:false});
+  assert.deepEqual(runs[0].options.slicer, {loadFilaments:'/profiles/yellow-pla.json', filamentColours:'#FEC600'});
+  await approve(service, object.id);
+  await service.settled(object.id);
+});
+
+test('Mac local control carries the selected filament through to print preparation', async () => {
+  const inventory = {trays:[{slot:3, loaded:true, tray_color:'5B6579FF', tray_type:'PLA', tray_info_idx:'GFA00',
+    display_name:'Blue PLA', resolved_profile_path:'/profiles/blue.json'}]};
+  const {service, object, bundles, runs} = await setup({inventory});
+  const dispatch = createControlDispatcher({auth:{}, companionVersion:'test', objects:service});
+  const [choice] = (await dispatch('objects.filaments', {id:object.id})).filaments;
+  const started = (await dispatch('objects.print', {id:object.id, checked:false, filament:choice})).object;
+  assert.deepEqual((await bundles.read(started.print.bundleId)).selection.amsSlots, [3]);
+  assert.equal(runs[0].options.slicer.filamentColours, '#5B6579');
+  await approve(service, object.id);
+  await service.settled(object.id);
 });
 
 test('a clear camera never answers the printer question; explicit checked values are required', async () => {

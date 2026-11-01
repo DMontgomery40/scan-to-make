@@ -23,6 +23,24 @@ private func failure(_ request: [String: Any], _ code: String) throws -> Data {
 }
 
 final class ObjectsClientTests: XCTestCase {
+    func testFilamentChoiceRoundTripsToThePrintRequest() async throws {
+        let choice: [String: Any] = ["slot":1, "colour":"#FEC600", "material":"PLA", "name":"Yellow PLA", "filamentId":"GFA00", "destinationId":"p1s"]
+        let inventory = try UnixFixture { request in
+            XCTAssertEqual(request["method"] as? String, "objects.filaments")
+            return [try reply(request, result:["filaments":[choice]])]
+        }
+        let filament = try await ControlClient(socketPath:inventory.path).filaments(id)[0]
+        XCTAssertEqual(filament.colour, "#FEC600")
+        let print = try UnixFixture { request in
+            XCTAssertEqual(request["method"] as? String, "objects.print")
+            let params = request["params"] as! [String: Any]
+            XCTAssertEqual(params["checked"] as? Bool, true)
+            XCTAssertEqual((params["filament"] as? [String: Any])?.mapValues { $0 as! AnyHashable }, choice.mapValues { $0 as! AnyHashable })
+            return [try objectReply(request)]
+        }
+        _ = try await ControlClient(socketPath:print.path).printObject(id, checked:true, filament:filament)
+        withExtendedLifetime((inventory, print)) {}
+    }
     private func confirmation(_ overrides: [String: Any] = [:]) throws -> StmObject.PrintConfirmation {
         let fields: [String: Any] = ["id":"q1", "message":"Check the actual printer.\nKeep all checks.", "expiresAtMs":2000,
             "supported":true, "fields":[["name":"bed_clear", "title":"The bed is clear", "description":"Look at the entire plate.", "required":true],

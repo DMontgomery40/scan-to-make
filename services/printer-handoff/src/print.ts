@@ -113,6 +113,20 @@ export class PrinterHandoffRunner {
     finally { await client.close().catch(() => undefined); }
   }
 
+  /** Read the printer's live material inventory without starting or uploading a print. */
+  async filaments(signal?: AbortSignal): Promise<unknown> {
+    const client = this.client();
+    try {
+      await client.connect(signal);
+      if (!client.hasTool('get_printer_filaments')) fail('filament-inventory-unavailable');
+      const selection = this.#config.selection;
+      return resultValue(await call(client, 'get_printer_filaments', {
+        bambu_model: selection?.model,
+        nozzle_diameter: selection?.nozzleDiameterMm === undefined ? undefined : String(selection.nozzleDiameterMm),
+      }, signal));
+    } finally { await client.close().catch(() => undefined); }
+  }
+
   private async inspect(client: PrinterMcpClient, slicedPath: string, selection: PrinterSelection, signal?: AbortSignal) {
     if (client.hasTool('inspect_print_file')) {
       const result = await call(client, 'inspect_print_file', {
@@ -149,6 +163,16 @@ export class PrinterHandoffRunner {
     try {
       const catalog = await client.connect(input.signal);
       step('discover');
+      if (slicer.filamentColours) {
+        const sliceProperties = client.getTool('slice_stl').inputSchema.properties ?? {};
+        if (!Object.hasOwn(sliceProperties, 'filament_colours') || !Object.hasOwn(sliceProperties, 'load_filaments'))
+          fail('filament-selection-unsupported');
+        if (input.print !== false) {
+          const printProperties = client.getTool('print_3mf').inputSchema.properties ?? {};
+          if (!Object.hasOwn(printProperties, 'ams_slots') || !Object.hasOwn(printProperties, 'use_ams'))
+            fail('filament-selection-unsupported');
+        }
+      }
       let orientedStlPath = input.stlPath;
       const laidFlat = client.hasTool('lay_flat');
       if (laidFlat) {
@@ -165,6 +189,7 @@ export class PrinterHandoffRunner {
         slicer_profile: slicer.profile,
         filament_profile: slicer.filamentProfile,
         load_filaments: slicer.loadFilaments,
+        filament_colours: slicer.filamentColours,
         template_name: slicer.templateName,
         use_printer_filaments: false,
         // lay_flat already chose the flat face; otherwise let the slicer orient.
@@ -243,7 +268,7 @@ export class PrinterHandoffRunner {
    * Runs a stored handoff bundle and records the sliced output back into it.
    * The bundle backend must match this runner's configured backend.
    */
-  async runBundle(store: HandoffBundleStore, id: string, options: {print?: boolean; signal?: AbortSignal} = {}) {
+  async runBundle(store: HandoffBundleStore, id: string, options: {print?: boolean; signal?: AbortSignal; slicer?: PrinterSlicer} = {}) {
     const manifest = await store.read(id);
     if (manifest.backend !== this.#config.backend) fail('backend-mismatch');
     if (manifest.status === 'uncertain') fail('dispatch-uncertain');
@@ -256,7 +281,7 @@ export class PrinterHandoffRunner {
     try {
       const inputStl = join(workDirectory, basename(store.stlPath(manifest)));
       await copyFile(store.stlPath(manifest), inputStl);
-      const result = await this.run({stlPath: inputStl, selection: manifest.selection, print: options.print, signal: options.signal, bundleId: id,
+      const result = await this.run({stlPath: inputStl, selection: manifest.selection, slicer: options.slicer, print: options.print, signal: options.signal, bundleId: id,
         persistOutput: async output => {
           // MCP backends may delete scratch files on close. Save both artifacts
           // before dispatch, and give the printer the durable bundle path.

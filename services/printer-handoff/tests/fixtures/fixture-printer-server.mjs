@@ -22,9 +22,10 @@ const bool = {type: 'boolean'};
 const sliceProps = {
   stl_path: string, bambu_model: {type: 'string', enum: ['p1s']}, nozzle_diameter: string,
   bed_type: string, nozzle_type: string, slicer_type: string, slicer_profile: string,
-  filament_profile: string, load_filaments: string, template_name: string,
+  filament_profile: string, load_filaments: string, filament_colours: string, template_name: string,
   use_printer_filaments: bool, orient: bool, arrange: bool, ensure_on_bed: bool,
 };
+if (process.env.HANDOFF_FIXTURE_NO_COLOUR === '1') delete sliceProps.filament_colours;
 const bambuPrintProps = {
   three_mf_path: string, bambu_model: string, bed_type: string, nozzle_type: string,
   nozzle_diameter: string, nozzle_diameters: {type: 'array', items: number}, plate_index: integer,

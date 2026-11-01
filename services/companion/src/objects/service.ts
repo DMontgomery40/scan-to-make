@@ -61,6 +61,8 @@ export interface ObjectServiceDeps {
 }
 
 export type ObjectPrintAnswer = {action: 'accept'; content: Record<string, boolean>} | {action: 'decline' | 'cancel'; content?: never};
+export interface FilamentChoice {slot: number; colour: string; material: string; name: string; filamentId: string; destinationId: string}
+type LiveFilament = FilamentChoice & {profile: string};
 const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
 
 /** Preserve the question; support only the boolean form we can faithfully show and answer. */
@@ -144,6 +146,30 @@ export class ObjectService {
     const catalog = this.#deps.printerCatalog;
     return {defaultDestinationId: catalog?.defaultDestinationId, destinations: catalog?.destinations.map(({id, name, backend, model, address, source}) =>
       ({id, name, backend, ...(model ? {model} : {}), ...(address ? {address} : {}), source})) ?? []};
+  }
+
+  private async liveFilaments(id: string): Promise<LiveFilament[]> {
+    const object = await this.get(id), configured = this.#deps.print, catalog = this.#deps.printerCatalog;
+    const destinationId = object.printerDestinationId ?? catalog?.defaultDestinationId;
+    const services = destinationId ? configured?.destinations?.get(destinationId) : configured?.services;
+    if (!services || services.runner.backend !== 'bambu-printer-mcp' || !services.runner.filaments) throw new InvalidStateError('Filament choices are unavailable for this printer. Open the model in your slicer to choose a material.');
+    let inventory: unknown;
+    try { inventory = await services.runner.filaments(); }
+    catch { throw new InvalidStateError('Couldn’t read the printer’s filament. Check its connection and try again.'); }
+    if (!record(inventory) || !Array.isArray(inventory.trays)) throw new InvalidStateError('The printer did not return a filament inventory.');
+    return inventory.trays.flatMap((tray: unknown): LiveFilament[] => {
+      if (!record(tray) || tray.loaded !== true || !Number.isSafeInteger(tray.slot) || (tray.slot as number) < 0
+          || typeof tray.tray_color !== 'string' || !/^[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/.test(tray.tray_color)
+          || typeof tray.tray_type !== 'string' || !tray.tray_type || tray.tray_type.length > 128 || typeof tray.tray_info_idx !== 'string' || tray.tray_info_idx.length > 128
+          || typeof tray.resolved_profile_path !== 'string' || !tray.resolved_profile_path.startsWith('/')) return [];
+      return [{slot:tray.slot as number, colour:'#' + tray.tray_color.slice(0,6).toUpperCase(), material:tray.tray_type,
+        filamentId:tray.tray_info_idx, destinationId:destinationId ?? 'default', name:typeof tray.display_name === 'string' ? tray.display_name.slice(0,256) : tray.tray_type,
+        profile:tray.resolved_profile_path}];
+    });
+  }
+
+  async filaments(id: string): Promise<FilamentChoice[]> {
+    return (await this.liveFilaments(id)).map(({profile: _profile, ...choice}) => choice);
   }
 
   selectPrinter(id: string, destinationId: string): Promise<StmObject> {
@@ -288,8 +314,8 @@ export class ObjectService {
   }
 
   /** Prints the current model through the user's printer MCP. The plate is checked in the background. */
-  print(id: string, options: {checked?: boolean} = {}): Promise<StmObject> { return this.#gate(id, () => this.#print(id, options)); }
-  async #print(id: string, options: {checked?: boolean}): Promise<StmObject> {
+  print(id: string, options: {checked?: boolean; filament?: FilamentChoice} = {}): Promise<StmObject> { return this.#gate(id, () => this.#print(id, options)); }
+  async #print(id: string, options: {checked?: boolean; filament?: FilamentChoice}): Promise<StmObject> {
     const object = await this.get(id);
     if (!object.current) throw new InvalidStateError('There is no model to print yet.');
     if (object.state === 'touching-up' || object.state === 'printing') throw new InvalidStateError('Wait until the current step finishes.');
@@ -307,8 +333,18 @@ export class ObjectService {
     const printing = {...configured, services};
     const printDestination = destination ? {id: destination.id, name: destination.name} : undefined;
     const {store: bundles, relay, runner, selection} = printing.services;
+    let selected = selection;
+    let slicer: {loadFilaments: string; filamentColours: string} | undefined;
+    if (options.filament) {
+      const choice = options.filament;
+      const live = (await this.liveFilaments(id)).find(item => item.slot === choice.slot && item.colour === choice.colour
+        && item.material === choice.material && item.filamentId === choice.filamentId && item.destinationId === choice.destinationId);
+      if (!live) throw new InvalidStateError('The chosen filament changed. Choose a current spool and try again.');
+      selected = {...selection, material:live.material, useAms:live.slot !== 254 && live.slot !== 255, amsSlots:[live.slot], amsMapping:undefined, autoMatchAms:false};
+      slicer = {loadFilaments:live.profile, filamentColours:live.colour};
+    }
     const stl = await readFile(join(this.#deps.store.dir(id), object.current.model));
-    const manifest = await bundles.create({stl, prompt: '', backend: runner.backend, ...(selection ? {selection} : {})});
+    const manifest = await bundles.create({stl, prompt: '', backend: runner.backend, ...(selected ? {selection:selected} : {})});
     const print = {bundleId: manifest.id, ...(printDestination ? {destination: printDestination} : {})};
     const started = await this.#deps.store.update(id, o => ({...o, state: 'printing', print, plate: undefined, printConfirmation: undefined, failure: undefined}));
     // Only this print's questions: other prints share the relay.
@@ -317,7 +353,7 @@ export class ObjectService {
     });
     const controller = new AbortController();
     this.#controllers.set(id, controller);
-    const work = runner.runBundle(bundles, manifest.id, {print: true, signal: controller.signal})
+    const work = runner.runBundle(bundles, manifest.id, {print: true, signal: controller.signal, ...(slicer ? {slicer} : {})})
       .then(() => this.#deps.store.update(id, o => ({...o, state: 'printed', plate: undefined, printConfirmation: undefined})),
         async error => {
           const status = (await bundles.read(manifest.id).catch(() => undefined))?.status;

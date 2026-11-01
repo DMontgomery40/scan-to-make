@@ -38,6 +38,7 @@ export const printerSlicerSchema = z.strictObject({
   profile: z.string().trim().min(1).max(4096).optional(),
   filamentProfile: z.string().trim().min(1).max(4096).optional(),
   loadFilaments: z.string().trim().min(1).max(4096).optional(),
+  filamentColours: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
   templateName: z.string().trim().min(1).max(256).optional(),
 });
 export type PrinterSlicer = z.infer<typeof printerSlicerSchema>;
