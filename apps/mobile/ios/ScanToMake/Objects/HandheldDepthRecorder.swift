@@ -42,7 +42,8 @@ enum HandheldDepthFrameCodec {
     /// Lossless companion to the HEIC: ImageIO quantizes HEIC auxiliary depth even at quality 1.
     /// The payload and calibration XMP come from AVFoundation, not generated camera parameters.
     static func exactDepthRepresentation(_ depth: AVDepthData, rgbTimestamp: Double, depthTimestamp: Double,
-                                         rgbWidth: Int, rgbHeight: Int, rgbIntrinsics: [Float]? = nil) throws -> Data {
+                                         rgbWidth: Int, rgbHeight: Int, rgbIntrinsics: [Float]? = nil,
+                                         rgbGeometry: [String: Any]? = nil) throws -> Data {
         let metric = depth.converting(toDepthDataType: kCVPixelFormatType_DepthFloat32)
         var type: NSString?
         guard let info = metric.dictionaryRepresentation(forAuxiliaryDataType: &type), let type,
@@ -63,6 +64,8 @@ enum HandheldDepthFrameCodec {
             "data": bytes, "description": description, "metadataXMP": xmp as Data
         ]
         if let rgbIntrinsics { payload["rgbIntrinsicsColumnMajor"] = rgbIntrinsics }
+        payload["rgbIntrinsicsStatus"] = rgbIntrinsics == nil ? "unavailable" : "sample-buffer-attachment"
+        if let rgbGeometry { payload["rgbGeometry"] = rgbGeometry }
         return try PropertyListSerialization.data(fromPropertyList: payload, format: .binary, options: 0)
     }
 
@@ -264,6 +267,8 @@ final class HandheldDepthRecorder: NSObject, AVCaptureDataOutputSynchronizerDele
         let depth: AVDepthData
         let rgbPTS: Double, depthPTS: Double
         let observedExposure: Double, observedISO: Double
+        let observedGDCSupported: Bool, observedGDCEnabled: Bool
+        let observedZoomFactor: Double
     }
     private let device: AVCaptureDevice
     private let videoOutput: AVCaptureVideoDataOutput
@@ -456,7 +461,10 @@ final class HandheldDepthRecorder: NSObject, AVCaptureDataOutputSynchronizerDele
         guard admission.admit(timestamp: rgbPTS, writerBusy: false) else { dropped(.cadence); return }
         writerBusy = true
         let pair = Pair(video: video.sampleBuffer, depth: depth.depthData, rgbPTS: rgbPTS, depthPTS: depthPTS,
-                        observedExposure: CMTimeGetSeconds(device.exposureDuration), observedISO: Double(device.iso))
+                        observedExposure: CMTimeGetSeconds(device.exposureDuration), observedISO: Double(device.iso),
+                        observedGDCSupported: device.isGeometricDistortionCorrectionSupported,
+                        observedGDCEnabled: device.isGeometricDistortionCorrectionEnabled,
+                        observedZoomFactor: Double(device.videoZoomFactor))
         let index = framesSaved, remainingBytes = configuration.maximumBytes - bytes
         writerQueue.async {
             let result: Result<(SavedFrame, FrameRecord), Error> = Result {
@@ -508,9 +516,24 @@ final class HandheldDepthRecorder: NSObject, AVCaptureDataOutputSynchronizerDele
                           matrix.columns.1.x, matrix.columns.1.y, matrix.columns.1.z,
                           matrix.columns.2.x, matrix.columns.2.y, matrix.columns.2.z]
         }
+        // The saved image uses the whole pixel buffer. The clean aperture describes its valid
+        // display region; it is not an instruction to crop again or to rescale a still-photo K.
+        var geometry: [String: Any] = [
+            "storedRegion": "full-pixel-buffer", "cleanApertureOrigin": "top-left",
+            "observedDeviceGeometricDistortionCorrectionSupported": pair.observedGDCSupported,
+            "observedDeviceGeometricDistortionCorrectionEnabled": pair.observedGDCEnabled,
+            "observedDeviceVideoZoomFactor": pair.observedZoomFactor
+        ]
+        if let format = CMSampleBufferGetFormatDescription(pair.video) {
+            let size = CMVideoFormatDescriptionGetDimensions(format)
+            let aperture = CMVideoFormatDescriptionGetCleanAperture(format, originIsAtTopLeft: true)
+            geometry["formatDimensions"] = [Int(size.width), Int(size.height)]
+            geometry["cleanAperture"] = [aperture.origin.x, aperture.origin.y, aperture.width, aperture.height]
+        }
         let exactDepth = try HandheldDepthFrameCodec.exactDepthRepresentation(pair.depth, rgbTimestamp: pair.rgbPTS,
                                                                             depthTimestamp: pair.depthPTS,
-                                                                            rgbWidth: image.width, rgbHeight: image.height, rgbIntrinsics: intrinsics)
+                                                                            rgbWidth: image.width, rgbHeight: image.height,
+                                                                            rgbIntrinsics: intrinsics, rgbGeometry: geometry)
         let exif = attachments[kCGImagePropertyExifDictionary as String] as? [String: Any]
         let record = FrameRecord(index: index, filename: name, depthFilename: depthName, rgbTimestamp: pair.rgbPTS, depthTimestamp: pair.depthPTS,
                                  rgbWidth: image.width, rgbHeight: image.height,

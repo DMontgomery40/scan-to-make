@@ -4,6 +4,7 @@ import {basename, join} from 'node:path';
 import type {RemoteScope} from '../remote-auth.js';
 import {InvalidStateError, type ObjectService} from './service.js';
 import {ObjectNotFoundError, type ObjectPass, type StmObject} from './store.js';
+import {RECONSTRUCTION_FAILED} from './reconstruct.js';
 
 const READ: RemoteScope = 'projects:read', WRITE: RemoteScope = 'captures:import', PRINT: RemoteScope = 'printer-handoff:use';
 const MAX_SCAN = 64 * 1024 * 1024, MAX_PHOTO = 25 * 1024 * 1024, MAX_JSON = 16 * 1024;
@@ -32,9 +33,18 @@ async function json<T>(request: IncomingMessage): Promise<T> {
 
 export type PublicObject = Omit<StmObject, 'passes'> & {passes: (Omit<ObjectPass, 'dir' | 'activity'> & {activityCount: number})[]};
 
+// Earlier generic failures asserted a capture mistake without evidence. Correct the displayed
+// advice for those retained attempts too, leaving their original stored records intact.
+function currentFailureText(message: string | undefined): string | undefined {
+  return message === "Your Mac couldn't build a model from these photos. Try again with the object filling more of the frame, turning it slowly."
+    ? RECONSTRUCTION_FAILED : message;
+}
+
 /** Project metadata stays small; retained activity is read one pass at a time. */
 export function publicObject(object: StmObject): PublicObject {
-  return {...object, passes: object.passes.map(({dir: _dir, activity, ...pass}) => ({...pass, activityCount: activity?.length ?? 0}))};
+  return {...object, failure: currentFailureText(object.failure),
+    passes: object.passes.map(({dir: _dir, activity, ...pass}) => ({...pass,
+      summary: currentFailureText(pass.summary), activityCount: activity?.length ?? 0}))};
 }
 
 function send(response: ServerResponse, status: number, value: unknown): void {

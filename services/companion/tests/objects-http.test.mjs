@@ -50,6 +50,20 @@ test('create, list and get an object', async t => {
   assert.deepEqual(scopes, ['captures:import', 'projects:read', 'projects:read']);
 });
 
+test('retained reconstruction failures stop asserting user error without rewriting stored history', async t => {
+  const {call, store, service} = await fixture(t);
+  const object = await service.create();
+  const old = "Your Mac couldn't build a model from these photos. Try again with the object filling more of the frame, turning it slowly.";
+  await store.update(object.id, o => ({...o, state: 'failed', failure: old, passes: [{startedAtMs: 1, status: 'failed', summary: old}]}));
+  for (const shown of [(await call('GET', `/v1/objects/${object.id}`)).json.object,
+                       (await call('GET', '/v1/objects')).json.objects[0]]) {
+    assert.equal(shown.failure, "Your Mac couldn't build a model from this capture. Your photos are saved in Inputs.");
+    assert.equal(shown.passes[0].summary, shown.failure);
+  }
+  assert.equal((await store.get(object.id)).failure, old);
+  assert.equal((await store.get(object.id)).passes[0].summary, old);
+});
+
 test('exact capture depth requires write scope, stays separate from photo media, and rejects unsafe names', async t => {
   const {call, scopes, service} = await fixture(t);
   const object = await service.create();
