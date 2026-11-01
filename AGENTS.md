@@ -4,14 +4,6 @@ Build an open-source iPhone app that scans a real object with LiDAR and cleans u
 
 The app covers capture (LiDAR Object Capture plus close-up stills) and cleanup (`tools/scan-repair`, `tools/scan-correct`, `tools/capture-mesh-convert`, run by the companion). The clean mesh then goes to [bambu-printer-mcp](https://github.com/DMontgomery40/bambu-printer-mcp) or [mcp-3D-printer-server](https://github.com/DMontgomery40/mcp-3D-printer-server) (`/Users/davidmontgomery/mcp-3D-printer-server` on the Mac). The handoff is built: the companion relays it through `services/printer-handoff` (#124), and the phone's Send to printer flow answers the printer's questions (#132). The consumer journey and Mac app design are in [`docs/design/journey.md`](docs/design/journey.md).
 
-Use real Slack for conversation. Add informal findings to the append-only scratchpad channel; preserve linked dated/topic archives. `shared/SCRATCHPAD.md` is a local archival mirror.
-
-Before choosing work, read recent Slack messages in [build-room](https://app.slack.com/client/T0C92NRJM5G/C0C8WNMEKAP), [decisions](https://app.slack.com/client/T0C92NRJM5G/C0C96L9JC76), and the append-only [scratchpad](https://app.slack.com/client/T0C92NRJM5G/C0C8MHYGZHD). Local shared files are plan/archive mirrors, not a fake chat system. User instructions outrank plans. Codex coordinates with one vote; two matching member votes carry, and three different choices go to David. Grok/Cursor together have one vote. Muse Wonder Full gets slight advisory preference only on common-sense judgments; regular Wonder or another model does not.
-
-UI design, copy, components, interactions and visual implementation are authored by Claude Opus 5.5 until an explicitly qualified replacement is recorded. Other members can report defects and define data contracts; they hand UI fixes to the qualified UI author. Every PR is opened from the same GitHub account, so authorship isn't visible in a diff. Reviewers shouldn't raise UI-authorship findings; review the code itself.
-
-Claim a task and its file scope before editing. One owner per active scope. Preserve others' uncommitted work. Review observable defects and the agreed acceptance criteria; use one bounded review pass, then verify fixes. Keep speculative improvements in the backlog.
-
 ## Read bambu-printer-mcp before you build
 
 `bambu-printer-mcp` ([GitHub](https://github.com/DMontgomery40/bambu-printer-mcp), `/Users/davidmontgomery/bambu-printer-mcp` on the Mac) is most of this product's working back end, not a side adapter. It already has:
@@ -47,4 +39,4 @@ Keep credentials, personal captures, private coordination and provider usage det
 
 ## Local PR checks
 
-Before pushing, run `scripts/ci-local.sh all --changed-only` and the local reviews described in [scripts/README.md](scripts/README.md). Paste the command/result summary into the PR and its KAN ticket. The workflow YAML is the test source of truth; the guide explains local runtime selection and Mac launchd execution. This is David's local-gate process from 2026-10-31 (KAN-181); the lead routes current-head bot verdicts and calls merges.
+Before pushing, run `scripts/ci-local.sh all --changed-only` and the local reviews described in [scripts/README.md](scripts/README.md). Paste the command/result summary into the PR and its KAN ticket. The workflow YAML is the test source of truth; the guide explains local runtime selection and Mac launchd execution. This is David's local-gate process from 2026-10-31 (KAN-181).
