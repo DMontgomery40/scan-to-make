@@ -1,91 +1,75 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
-  Alert,
   BackHandler,
+  Linking,
   Modal,
   Platform,
   StatusBar,
-  Text,
+  StyleSheet,
+  View,
   useColorScheme,
-  Linking,
+  useWindowDimensions,
 } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import type {
-  SavedProjects,
-  ListProjectsResult,
-} from '@scan-to-make/contracts/saved-project';
-import { localSavedProjects, newProjectId } from './src/project/savedProjects';
-import { emptyUnnamedProject, unnamedBrief } from './src/project/scanFirst';
+import { companionNative } from './src/companion/pairing';
+import { isPairingLink } from './src/companion/pairingLink';
+import { KeepPairingFresh } from './src/companion/keepPairingFresh';
 import {
   FindYourMacScreen,
   type AfterPairing,
 } from './src/screens/FindYourMacScreen';
-import { companionNative } from './src/companion/pairing';
-import { objectCaptureNative } from './src/capture/nativeObjectCapture';
-import { isPairingLink } from './src/companion/pairingLink';
-import { KeepPairingFresh } from './src/companion/keepPairingFresh';
-import { ProjectsHomeScreen } from './src/screens/ProjectsHomeScreen';
-import { SettingsScreen } from './src/screens/SettingsScreen';
-import { RetainedCapturesScreen } from './src/screens/RetainedCapturesScreen';
-import { ScanResultsScreen } from './src/screens/ScanResultsScreen';
-import type { ReferenceDraft } from './src/screens/scanResultsModel';
-import { CloseUpsScreen } from './src/screens/CloseUpsScreen';
-import { PrintScreen } from './src/screens/PrintScreen';
-import { liveScanServices } from './src/screens/liveScanServices';
 import { RequestGateProvider } from './src/screens/requestGate';
-import type { ScanServices, ScanTarget } from './src/screens/scanServices';
-import type { ScanProcessingJob } from '@scan-to-make/contracts';
-import { Screen } from './src/ui/components';
-import { type } from './src/ui/theme';
+import { ObjectsScreen } from './src/screens/ObjectsScreen';
+import { ObjectScreen } from './src/screens/ObjectScreen';
+import { StartScreen } from './src/screens/StartScreen';
+import { ObjectsClient } from './src/objects/client';
+import { objectsNative, type ObjectsNative } from './src/objects/native';
+import { objectCapture, type ObjectCapture } from './src/objects/capture';
+import { colors } from './src/ui/theme';
 
 type Route =
-  | 'home'
-  | 'settings'
-  | 'retainedCaptures'
-  | 'scanResults'
-  | 'closeUps'
-  | 'print';
-const PARENT: Record<Route, Route | null> = {
-  home: null,
-  settings: 'home',
-  retainedCaptures: 'home',
-  scanResults: 'retainedCaptures',
-  closeUps: 'scanResults',
-  print: 'scanResults',
-};
+  | { name: 'objects' }
+  | { name: 'start' }
+  | { name: 'object'; id: string };
+
+/** Without the native module (tests, Android) every call says to connect. */
+const unpaired: ObjectsNative = new Proxy({} as ObjectsNative, {
+  get: () => () =>
+    Promise.reject(
+      Object.assign(new Error('Not paired'), { code: 'pairing-required' }),
+    ),
+});
+
+/** Wide windows (an open iPhone Duo, iPad) show the list and a page side by side. */
+const TWO_PANES = 700;
 
 function App({
-  repository: injected,
-  scanServices: injectedScan,
+  objects: injected,
+  capture: injectedCapture,
 }: {
-  repository?: SavedProjects;
-  scanServices?: ScanServices;
+  objects?: ObjectsClient;
+  capture?: ObjectCapture;
 }) {
-  const [repository] = useState(() => injected ?? localSavedProjects());
-  // Real companion clients on iOS; elsewhere the screens say it's unavailable.
-  const [scanServices] = useState(
-    () => injectedScan ?? liveScanServices(repository),
+  const [client] = useState(
+    () => injected ?? new ObjectsClient(objectsNative() ?? unpaired),
   );
+  const [capture] = useState(() => injectedCapture ?? objectCapture());
   const scheme = useColorScheme();
-  const [scanTarget, setScanTarget] = useState<ScanTarget | null>(null);
-  // Real-size drafts per scan, so moving to close-ups keeps them.
-  const [referenceDrafts, setReferenceDrafts] = useState<
-    Record<string, ReferenceDraft>
-  >({});
-  const scanKey = scanTarget
-    ? JSON.stringify([scanTarget.projectId, scanTarget.capture.captureId])
-    : '';
-  // The finished scan check whose cleaned-up model Send to printer uses.
-  const [printJob, setPrintJob] = useState<ScanProcessingJob | null>(null);
+  const { width } = useWindowDimensions();
+  const twoPanes = width >= TWO_PANES;
+  const [route, setRoute] = useState<Route>({ name: 'objects' });
+  // The last object opened stays on the right in the two-pane layout.
+  const [shown, setShown] = useState<string | null>(null);
+  const [refreshKey, setRefreshKey] = useState(0);
   const [companionOpen, setCompanionOpen] = useState(false);
-  // Bumped when the pairing screen closes, so home reads the pairing again.
-  const [pairingKey, setPairingKey] = useState(0);
+  const [canScan, setCanScan] = useState(false);
+  useEffect(() => {
+    capture.available().then(setCanScan, () => {});
+  }, [capture]);
   // With no Mac paired, Find your Mac is the first screen. A pairing that
-  // can't be read (or no pairing module) leaves home in place, so local
-  // projects stay reachable.
+  // can't be read leaves the list in place.
   const [needsMac, setNeedsMac] = useState(false);
-  // True while Find your Mac is the screen on show, so a link goes to it.
-  const findingMac = useRef(false);
+  const [pairingKey, setPairingKey] = useState(0);
   useEffect(() => {
     let live = true;
     companionNative()
@@ -98,27 +82,12 @@ function App({
       live = false;
     };
   }, [pairingKey]);
-  // Scan something after pairing needs LiDAR; elsewhere it's Open projects.
-  const [canScan, setCanScan] = useState(false);
-  useEffect(() => {
-    objectCaptureNative()
-      ?.status()
-      .then(value => setCanScan(value.supported && value.lidar !== false))
-      .catch(() => {});
-  }, []);
-  const afterPairing = (next: AfterPairing) => {
-    setCompanionOpen(false);
-    setNeedsMac(false);
-    setPairingKey(key => key + 1);
-    // Paired in the middle of something: stay there.
-    if (next === 'back') return;
-    setRoute('home');
-    if (next === 'scan') startScan();
-  };
-  // scantomake://pair links, e.g. the companion's QR read by the Camera app.
+  // True while Find your Mac is the screen on show, so a link goes to it.
+  const findingMac = useRef(false);
+  findingMac.current = needsMac;
+  // scantomake://pair links, e.g. the Mac's QR read by the Camera app. A cold
+  // start can deliver the same link twice within moments: drop that repeat.
   const [pairLink, setPairLink] = useState<string | null>(null);
-  // A cold start can deliver the same link twice within moments. Drop that
-  // repeat, but let the user open the same link again later to retry.
   const lastLink = useRef<{ url: string; at: number } | null>(null);
   useEffect(() => {
     const open = (url?: string | null) => {
@@ -128,7 +97,6 @@ function App({
       lastLink.current = { url, at: now };
       if (last?.url === url && now - last.at < 2000) return;
       setPairLink(url);
-      // Find your Mac takes the link itself when it's already on screen.
       if (!findingMac.current) setCompanionOpen(true);
     };
     Linking.getInitialURL().then(open, () => {});
@@ -137,191 +105,104 @@ function App({
     );
     return () => subscription.remove();
   }, []);
-  const [route, setRoute] = useState<Route>('home');
-  const [hydrated, setHydrated] = useState(false);
-  findingMac.current = hydrated && route === 'home' && needsMac;
-  const [listing, setListing] = useState<ListProjectsResult | null>(null);
-  const [captureProjectId, setCaptureProjectId] = useState<string | null>(null);
-  const [creating, setCreating] = useState(false);
-  const creatingNow = useRef(false);
-  // Opens the camera once on the project scans screen; cleared when it starts.
-  const [scanNow, setScanNow] = useState(false);
-  // The grid keeps showing while it reloads.
-  const refresh = useCallback(async () => {
-    const result = await repository.list();
-    setListing(result);
-    setHydrated(true);
-  }, [repository]);
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
   useEffect(() => {
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
-      if (creating) {
-        return true;
-      }
-      const parent = PARENT[route];
-      if (parent) {
-        setRoute(parent);
-        return true;
-      }
-      return false;
+      if (route.name === 'objects') return false;
+      setRoute({ name: 'objects' });
+      return true;
     });
     return () => sub.remove();
-  }, [route, creating]);
-  const openCaptures = (id: string, scan = false) => {
-    setScanNow(scan);
-    setCaptureProjectId(id);
-    setRoute('retainedCaptures');
+  }, [route]);
+
+  const afterPairing = (next: AfterPairing) => {
+    setCompanionOpen(false);
+    setNeedsMac(false);
+    setPairingKey(key => key + 1);
+    setRefreshKey(key => key + 1);
+    if (next === 'back') return;
+    setRoute(next === 'scan' ? { name: 'start' } : { name: 'objects' });
   };
-  // Scan something: the camera opens first and the name is asked after the
-  // scan (P2). A scan needs its project, so an unnamed one is made first, or
-  // one left empty by a stopped scan is used again.
-  // One at a time: the guard is held from the tap through the project, the
-  // list reload and the move to the scans screen, so a second tap can't make
-  // a second project or open the camera twice.
-  const startScan = async () => {
-    if (creatingNow.current) return;
-    creatingNow.current = true;
-    setCreating(true);
-    try {
-      let id: string | null = null;
-      try {
-        // Read now, not from the last render's list.
-        id = await emptyUnnamedProject(await repository.list(), repository);
-        if (!id) {
-          const result = await repository.create({
-            id: newProjectId(),
-            brief: unnamedBrief(),
-          });
-          if (result.status === 'ok') id = result.project.id;
-        }
-      } catch {
-        id = null;
-      }
-      await refresh().catch(() => {});
-      if (!id) {
-        Alert.alert(
-          'Couldn’t start a scan',
-          'The project couldn’t be saved. Your other projects are unchanged.',
-        );
-        return;
-      }
-      openCaptures(id, true);
-    } finally {
-      creatingNow.current = false;
-      setCreating(false);
-    }
+  const pair = () => setCompanionOpen(true);
+  const open = (id: string) => {
+    setShown(id);
+    setRoute({ name: 'object', id });
   };
+  const toList = () => {
+    setRefreshKey(key => key + 1);
+    setRoute({ name: 'objects' });
+  };
+
+  const list = (
+    <ObjectsScreen
+      client={client}
+      selected={twoPanes ? shown : null}
+      refreshKey={refreshKey}
+      onNew={() => setRoute({ name: 'start' })}
+      onOpen={open}
+      onPair={pair}
+    />
+  );
+  const start = (
+    <StartScreen
+      client={client}
+      capture={capture}
+      onBack={toList}
+      onStarted={id => {
+        setRefreshKey(key => key + 1);
+        open(id);
+      }}
+      onPair={pair}
+    />
+  );
+  const page = (id: string, back?: () => void) => (
+    <ObjectScreen
+      key={id}
+      client={client}
+      capture={capture}
+      id={id}
+      onBack={back}
+      onPair={pair}
+    />
+  );
+
   let screen: React.ReactNode;
-  if (!hydrated) {
+  if (needsMac)
     screen = (
-      <Screen title="Opening your projects">
-        <Text style={type.body}>Loading saved data…</Text>
-      </Screen>
+      <FindYourMacScreen
+        onDone={afterPairing}
+        canScan={canScan}
+        // One camera at a time: this one waits under an open sheet.
+        paused={companionOpen}
+        link={companionOpen ? null : pairLink}
+        onLinkUsed={() => setPairLink(null)}
+      />
+    );
+  else if (twoPanes) {
+    const right =
+      route.name === 'start'
+        ? start
+        : route.name === 'object'
+        ? page(route.id)
+        : shown
+        ? page(shown)
+        : null;
+    screen = (
+      <View style={styles.panes}>
+        <View style={styles.list}>{list}</View>
+        <View style={styles.page}>{right}</View>
+      </View>
     );
   } else
-    switch (route) {
-      case 'retainedCaptures':
-        screen = captureProjectId ? (
-          <RetainedCapturesScreen
-            id={captureProjectId}
-            repository={repository}
-            onBack={() => {
-              refresh();
-              setRoute('home');
-            }}
-            onCompanion={() => setCompanionOpen(true)}
-            scanNow={scanNow}
-            onScanStarted={() => setScanNow(false)}
-            onResults={capture => {
-              setScanTarget({ projectId: captureProjectId, capture });
-              setRoute('scanResults');
-            }}
-          />
-        ) : null;
-        break;
-      case 'scanResults':
-        screen = scanTarget ? (
-          <ScanResultsScreen
-            target={scanTarget}
-            services={scanServices}
-            onBack={() => setRoute('retainedCaptures')}
-            onCompanion={() => setCompanionOpen(true)}
-            onCloseUps={() => setRoute('closeUps')}
-            onPrint={
-              scanServices.printing
-                ? job => {
-                    setPrintJob(job);
-                    setRoute('print');
-                  }
-                : undefined
-            }
-            reference={referenceDrafts[scanKey] ?? null}
-            onReferenceChange={draft =>
-              setReferenceDrafts(current => ({ ...current, [scanKey]: draft }))
-            }
-          />
-        ) : null;
-        break;
-      case 'print':
-        screen = scanTarget ? (
-          <PrintScreen
-            target={scanTarget}
-            job={printJob}
-            services={scanServices}
-            onBack={() => setRoute('scanResults')}
-            onCompanion={() => setCompanionOpen(true)}
-          />
-        ) : null;
-        break;
-      case 'closeUps':
-        screen = scanTarget ? (
-          <CloseUpsScreen
-            target={scanTarget}
-            services={scanServices}
-            onBack={() => setRoute('scanResults')}
-            onCompanion={() => setCompanionOpen(true)}
-          />
-        ) : null;
-        break;
-      case 'settings':
-        screen = (
-          <SettingsScreen
-            onPair={() => setCompanionOpen(true)}
-            onBack={() => setRoute('home')}
-          />
-        );
-        break;
-      default:
-        screen = needsMac ? (
-          <FindYourMacScreen
-            onDone={afterPairing}
-            canScan={canScan}
-            // One camera at a time: this one waits under an open sheet.
-            paused={companionOpen}
-            // A link goes to one screen only: the open pairing sheet if any.
-            link={companionOpen ? null : pairLink}
-            onLinkUsed={() => setPairLink(null)}
-          />
-        ) : (
-          <ProjectsHomeScreen
-            result={listing}
-            services={scanServices}
-            pairingKey={pairingKey}
-            paused={companionOpen}
-            creating={creating}
-            onScan={startScan}
-            onOpen={openCaptures}
-            onRetry={refresh}
-            onPair={() => setCompanionOpen(true)}
-            onSettings={() => setRoute('settings')}
-          />
-        );
-    }
+    screen =
+      route.name === 'start'
+        ? start
+        : route.name === 'object'
+        ? page(route.id, toList)
+        : list;
+
   return (
     <SafeAreaProvider>
-      {/* One queue for every companion call, across screens. */}
+      {/* One queue for every call to the Mac, across screens. */}
       <RequestGateProvider>
         {/* Keeps the paired Mac's credential alive, in the same queue. */}
         <KeepPairingFresh onPairAgain={() => setPairingKey(key => key + 1)} />
@@ -348,8 +229,7 @@ function App({
               }}
               onDone={afterPairing}
               canScan={canScan}
-              // Opened from anywhere but home, Connected goes back there.
-              resume={route !== 'home'}
+              resume={route.name !== 'objects'}
               link={pairLink}
               onLinkUsed={() => setPairLink(null)}
             />
@@ -359,4 +239,15 @@ function App({
     </SafeAreaProvider>
   );
 }
+
+const styles = StyleSheet.create({
+  panes: { flex: 1, flexDirection: 'row', backgroundColor: colors.background },
+  list: {
+    width: 360,
+    borderRightWidth: StyleSheet.hairlineWidth,
+    borderRightColor: colors.line,
+  },
+  page: { flex: 1 },
+});
+
 export default App;

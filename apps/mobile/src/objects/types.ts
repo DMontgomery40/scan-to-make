@@ -32,7 +32,8 @@ export interface StmObject {
     summary?: string;
   };
   question?: { closeup: string };
-  plate?: { item?: string; noCamera?: boolean };
+  plate?: { item?: string; noCamera?: boolean; photo?: boolean };
   failure?: string;
-  print?: { bundleId: string };
+  /** `uncertain`: the printer may already have started it. */
+  print?: { bundleId: string; uncertain?: boolean };
 }

@@ -130,8 +130,13 @@ export class ObjectsClient {
       bestGuess: false,
     });
   }
-  print(id: string) {
-    return this.object('POST', `/v1/objects/${id}/print`);
+  /** `checked`: the user looked at the printer after a print that may have started. */
+  print(id: string, options: { checked?: boolean } = {}) {
+    return this.object(
+      'POST',
+      `/v1/objects/${id}/print`,
+      options.checked ? { checked: true } : undefined,
+    );
   }
   plateClear(id: string) {
     return this.object('POST', `/v1/objects/${id}/plate`, { clear: true });
@@ -174,6 +179,20 @@ export class ObjectsClient {
         await this.native.download({
           objectId: object.id,
           name,
+          version: object.updatedAtMs,
+        })
+      ).uri;
+    } catch (error) {
+      throw fromNative(error);
+    }
+  }
+  /** The printer camera's photo while the plate check waits. */
+  async plateUri(object: StmObject) {
+    try {
+      return (
+        await this.native.download({
+          objectId: object.id,
+          name: 'plate.jpg',
           version: object.updatedAtMs,
         })
       ).uri;

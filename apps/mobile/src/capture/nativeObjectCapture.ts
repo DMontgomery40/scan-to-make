@@ -1,10 +1,17 @@
 import { NativeModules } from 'react-native';
-import {
-  CaptureClient,
-  type CaptureDestination,
-  type CaptureFile,
-} from './retainedCaptures';
 
+/** Where a capture belongs; the objects app uses the object's id as `projectId`. */
+export type CaptureDestination = {
+  projectId: string;
+  revision: number;
+  snapshot: string;
+  context: string | null;
+};
+export type CaptureFile = {
+  sha256: string;
+  byteLength: number;
+  mediaType: string;
+};
 export type NativeCaptureDraft = {
   formatVersion: 1;
   runID: string;
@@ -21,6 +28,7 @@ export type NativeCaptureDraft = {
   message?: string;
   addRequested?: boolean;
 };
+/** The native LiDAR Object Capture module (kept from the first app). */
 export interface ObjectCaptureNative {
   status(): Promise<{
     supported: boolean;
@@ -34,91 +42,4 @@ export interface ObjectCaptureNative {
 }
 export function objectCaptureNative(): ObjectCaptureNative | null {
   return NativeModules.NativeCaptureCoordinator ?? null;
-}
-export class NativeObjectCaptureClient {
-  constructor(
-    readonly captures: CaptureClient,
-    readonly native: ObjectCaptureNative,
-  ) {}
-  async start(id: string) {
-    return this.native.start(await this.captures.destination(id, true));
-  }
-  async drafts(id: string) {
-    return (await this.native.drafts()).filter(
-      draft => draft.origin.projectId === id,
-    );
-  }
-  /**
-   * Scan something opens the camera before the project has a name, so naming
-   * it afterwards moves the project on one version. The scan follows it there
-   * only if the name is all that changed; anything else still needs choosing.
-   */
-  private async named(id: string, origin: CaptureDestination) {
-    const current = await this.captures.destination(id).catch(() => null);
-    if (
-      !current ||
-      current.snapshot === origin.snapshot ||
-      current.projectId !== origin.projectId ||
-      current.context !== origin.context
-    )
-      return null;
-    try {
-      const before = JSON.parse(origin.snapshot);
-      const after = JSON.parse(current.snapshot);
-      const unnamed = (project: { revision: number; brief: object }) =>
-        JSON.stringify({
-          ...project,
-          revision: 0,
-          brief: { ...project.brief, object: '' },
-        });
-      return before.brief?.object === '' &&
-        after.revision > before.revision &&
-        unnamed(before) === unnamed(after)
-        ? current
-        : null;
-    } catch {
-      return null;
-    }
-  }
-  async add(
-    id: string,
-    draft: NativeCaptureDraft,
-    selectedDestination?: CaptureDestination,
-    again = false,
-  ) {
-    if (draft.status !== 'ready' || !draft.file)
-      throw Error(
-        'This scan has no completed model. Its original files are kept on this device.',
-      );
-    if (draft.origin.projectId !== id)
-      throw Error('This scan belongs to another project.');
-    if (draft.file.byteLength < 1 || draft.file.byteLength > 32 * 1024 * 1024) {
-      throw Error(
-        'This scan is larger than the 32 MB import limit. The original model is kept on this device.',
-      );
-    }
-    const adopt = this.captures.native.adoptNativeOutput;
-    if (!adopt)
-      throw Error('Native scan import is unavailable in this app version.');
-    const file = await adopt(draft.runID);
-    if (
-      file.sha256 !== draft.file.sha256 ||
-      file.byteLength !== draft.file.byteLength ||
-      file.mediaType !== draft.file.mediaType
-    ) {
-      throw Error(
-        'The local scan identity changed. Its files are kept on this device.',
-      );
-    }
-    const capture = await this.captures.import(
-      id,
-      file,
-      selectedDestination ??
-        (await this.named(id, draft.origin)) ??
-        draft.origin,
-      again,
-    );
-    await this.captures.reopen(id, capture);
-    return capture;
-  }
 }
