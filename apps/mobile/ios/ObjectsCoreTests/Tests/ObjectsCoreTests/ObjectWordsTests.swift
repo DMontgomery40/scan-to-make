@@ -119,8 +119,8 @@ final class ObjectWordsTests: XCTestCase {
         XCTAssertEqual(ObjectWords(ready(["state": "touching-up", "passes": [["startedAtMs": 1], ["startedAtMs": 3, "note": "thicker"]]])).status,
                        "Making your changes. You can leave this project and return to it while your Mac works.")
         XCTAssertEqual(ObjectWords(ready()).status, "Ready to print")
-        XCTAssertEqual(ObjectWords(ready(["state": "printing"])).status, "Printing")
-        XCTAssertEqual(ObjectWords(ready(["state": "printed"])).status, "Printed")
+        XCTAssertEqual(ObjectWords(ready(["state": "printing"])).status, "Preparing print…")
+        XCTAssertEqual(ObjectWords(ready(["state": "printed"])).status, "Print request accepted")
         XCTAssertEqual(ObjectWords(object(["state": "failed"])).status, "Something went wrong on your Mac.")
     }
 

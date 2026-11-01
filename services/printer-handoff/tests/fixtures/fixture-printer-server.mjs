@@ -115,6 +115,7 @@ server.setRequestHandler(CallToolRequestSchema, async request => {
   if (name === 'confirm_temperatures') return text({compatible: true, peakNozzleTempC: 220});
   if (name === 'camera_snapshot') return text({format: 'jpeg', base64: 'ZmFrZQ==', savedTo: join(directory, 'snapshot.jpg')});
   if (name === 'print_3mf' || name === 'upload_gcode' || name === 'process_and_print_stl') {
+    if (process.env.HANDOFF_FIXTURE_DISPATCH === 'preflight-error') return {isError:true, content:[{type:'text',text:'Printer state FAILED is not safely idle.'}]};
     await confirmPrint();
     if (process.env.HANDOFF_FIXTURE_DISPATCH === 'crash') process.exit(9);
     if (process.env.HANDOFF_FIXTURE_DISPATCH === 'timeout') await new Promise(() => {});

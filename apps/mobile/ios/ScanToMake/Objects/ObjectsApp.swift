@@ -924,7 +924,7 @@ struct ObjectDetailView: View {
                     HStack(alignment: .top, spacing: 8) {
                         if words.busy { ProgressView().padding(.top, 3) }
                         if object.print?.uncertain == true {
-                            Label("Check the previous print before trying again", systemImage: "exclamationmark.triangle.fill")
+                            Label(object.failure ?? "The previous print start could not be confirmed. Check the printer before trying again.", systemImage: "exclamationmark.triangle.fill")
                                 .font(.subheadline).foregroundStyle(.orange)
                         } else {
                             Text(words.status).font(.subheadline).foregroundStyle(words.tone.color)
@@ -960,6 +960,49 @@ struct ObjectDetailView: View {
                     actions(object, words)
                 }
                 printerSelection(object)
+                if let report = object.print?.printerStatus {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Label("Printer: \(report.state.capitalized)", systemImage: "printer").font(.headline)
+                        if let job = report.job { Text("Reported job: \(job)").font(.subheadline) }
+                        if let percent = report.percent {
+                            ProgressView(value: percent, total: 100)
+                            Text("\(Int(percent))% of reported printer job").font(.subheadline).monospacedDigit()
+                        }
+                        if let remaining = report.remainingMinutes { Text("\(Int(remaining)) min remaining").font(.subheadline).monospacedDigit() }
+                        if report.state == "FAILED" {
+                            Text("The printer reports a failed previous job. The printer service blocks a new print in this state.")
+                                .font(.subheadline).foregroundStyle(.orange)
+                        }
+                        Text("Checked \(Date(timeIntervalSince1970: report.checkedAtMs / 1000), format: .dateTime.hour().minute().second())")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }.textSelection(.enabled)
+                }
+                if let print = object.print, print.sliced == true {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Label("Sliced file ready", systemImage: "checkmark.circle.fill").font(.headline).foregroundStyle(.green)
+                        HStack(spacing: 24) {
+                            if let seconds = print.estimate?.seconds {
+                                Label("\(Int(ceil(seconds / 60))) min", systemImage: "clock")
+                            }
+                            if let grams = print.estimate?.grams {
+                                Label("\(grams, specifier: "%.2f") g", systemImage: "scalemass")
+                            }
+                        }.font(.title3.weight(.semibold)).monospacedDigit()
+                        Text("Slicer estimates. A sliced file does not mean the printer has started.")
+                            .font(.caption).foregroundStyle(.secondary)
+                        if let events = print.events, !events.isEmpty {
+                            DisclosureGroup("Print activity") {
+                                ForEach(Array(events.enumerated()), id: \.offset) { _, event in
+                                    HStack(alignment: .top) {
+                                        Text(Date(timeIntervalSince1970: event.atMs / 1000), format: .dateTime.hour().minute().second()).monospacedDigit()
+                                        Text(event.message)
+                                    }.font(.caption).frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 3)
+                                }
+                            }
+                        }
+                    }.padding(16).frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
+                }
                 Picker("Project section", selection: $section) {
                     ForEach(ProjectSection.allCases, id: \.self) { Text($0.rawValue).tag($0) }
                 }

@@ -437,6 +437,15 @@ struct ObjectPage: View {
                         .id(object.id + ":" + confirmation.id)
                 } else if words.tone == .accent { ask }
                 printerSelection
+                if let report = object.print?.printerStatus {
+                    VStack(alignment:.leading, spacing:6) {
+                        Label("Printer: \(report.state.capitalized)", systemImage:"printer").font(.headline)
+                        if let job = report.job { Text("Reported job: \(job)").foregroundStyle(.secondary) }
+                        if let percent = report.percent { ProgressView(value:percent,total:100); Text("\(Int(percent))% of reported printer job").monospacedDigit() }
+                        if let remaining = report.remainingMinutes { Text("\(Int(remaining)) min remaining").monospacedDigit() }
+                        if report.state == "FAILED" { Text("The printer service blocks a new print while the printer reports this failed job.").foregroundStyle(.orange) }
+                    }.textSelection(.enabled)
+                }
                 if object.modelURL != nil { editorActions }
                 Picker("Project section", selection:$projectSection) {
                     ForEach(MacProjectSection.allCases, id:\.self) { Text($0.rawValue).tag($0) }
@@ -667,6 +676,14 @@ struct ObjectPage: View {
     // The model: the chosen render or the turnable STL, a strip to switch between them, and its size.
     private var stage: some View {
         VStack(alignment:.leading, spacing:10) {
+            if let estimate = object.print?.estimate {
+                HStack(spacing:20) {
+                    Label("Sliced", systemImage:"checkmark.circle.fill").foregroundStyle(.green)
+                    if let seconds = estimate.seconds { Label("\(Int(ceil(seconds / 60))) min", systemImage:"clock") }
+                    if let grams = estimate.grams { Label("\(grams, specifier: "%.2f") g", systemImage:"scalemass") }
+                    Text("Estimated").foregroundStyle(.secondary)
+                }.font(.headline).monospacedDigit()
+            }
             ZStack {
                 ObjectsStyle.stage
                 switch shown {

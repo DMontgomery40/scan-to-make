@@ -44,8 +44,8 @@ final class ObjectWordsTests: XCTestCase {
                                 "passes": [["startedAtMs": 1, "endedAtMs": 2, "status": "done"], ["startedAtMs": 3, "note": "thicker"]]])
         XCTAssertEqual(correcting.words.status, "Making your changes." + waitLine)
         XCTAssertEqual(ready().words.status, "Ready to print")
-        XCTAssertEqual(ready(["state": "printing"]).words.status, "Printing")
-        XCTAssertEqual(ready(["state": "printed"]).words.status, "Printed")
+        XCTAssertEqual(ready(["state": "printing"]).words.status, "Preparing print…")
+        XCTAssertEqual(ready(["state": "printed"]).words.status, "Print request accepted")
     }
 
     func testAsksForACloseUpInOneSentenceAndOffersTheGuess() {

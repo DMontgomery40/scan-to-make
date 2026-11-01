@@ -71,7 +71,12 @@ public struct StmObject: Decodable, Sendable, Identifiable, Equatable {
     }
     /// The last print. `uncertain`: it may have reached the printer, so it is only sent again with `checked`.
     public struct PrintDestination: Decodable, Sendable, Equatable { public let id: String; public let name: String }
+    public struct PrinterStatus: Decodable, Sendable, Equatable { public let state: String; public let job: String?; public let checkedAtMs: Double; public let percent: Double?; public let remainingMinutes: Double? }
+    public struct PrintEstimate: Decodable, Sendable, Equatable { public let seconds: Double?; public let grams: Double? }
     public struct Print: Decodable, Sendable, Equatable {
+        public let printerStatus: PrinterStatus?
+        public let sliced: Bool?
+        public let estimate: PrintEstimate?
         public let bundleId: String?
         public let uncertain: Bool?
         public let destination: PrintDestination?

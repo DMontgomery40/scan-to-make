@@ -14,7 +14,7 @@ const STL = Buffer.from('solid m\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\n
 // The advertised Bambu hardware-confirmation schema (including its unchecked default).
 const CONFIRM = {type: 'object', properties: {confirmed: {type: 'boolean', title: 'I checked the printer and confirm this operation', default: false}}, required: ['confirmed']};
 
-async function setup({judge = async () => ({clear: true}), camera = true, runnerFails, afterDispatch, uncertain, objects = 1, slowMs = 0, schema = CONFIRM, mode = 'form', timeoutMs = 5000, inventory} = {}) {
+async function setup({judge = async () => ({clear: true}), camera = true, runnerFails, afterDispatch, uncertain, objects = 1, slowMs = 0, schema = CONFIRM, mode = 'form', timeoutMs = 5000, inventory, progressUpdates, printerReport} = {}) {
   const root = await mkdtemp(join(tmpdir(), 'objects-print-'));
   const store = new ObjectStore(join(root, 'objects'));
   const relay = new InMemoryElicitationRelay({timeoutMs});
@@ -24,8 +24,10 @@ async function setup({judge = async () => ({clear: true}), camera = true, runner
   const runner = {
     backend: 'bambu-printer-mcp',
     filaments: async () => inventory,
+    ...(printerReport ? {status:async()=>printerReport} : {}),
     runBundle: async (bundleStore, id, options = {}) => {
       runs.push({id, options});
+      for (const update of progressUpdates ?? []) await options.onProgress?.(update);
       await new Promise(r => setTimeout(r, slowMs));
       if (runnerFails) throw new Error(runnerFails);
       if (uncertain) { await bundleStore.setStatus(id, 'uncertain', 'dispatch-uncertain'); throw Object.assign(new Error('dispatch-uncertain'), {code: 'dispatch-uncertain'}); }
@@ -299,4 +301,43 @@ test('timeout and delayed camera judging cannot restore a completed question', a
   assert.equal((await store.get(object.id)).printConfirmation, undefined);
   assert.equal((await service.get(object.id)).plate, undefined);
   await assert.rejects(service.answerPrintConfirmation(object.id, question.id, {action: 'accept', content: {confirmed: true}}), InvalidStateError);
+});
+
+
+test('print phases and estimates are visible before confirmation and survive a failure', async () => {
+  const {service, object} = await setup({progressUpdates:[{phase:'slicing'},{phase:'slice-ready',estimate:{seconds:2575,grams:16.74}}], uncertain:true});
+  await service.print(object.id);
+  const done = await service.settled(object.id);
+  assert.equal(done.state, 'failed');
+  assert.equal(done.progress, undefined);
+  assert.equal(done.print.sliced, true);
+  assert.deepEqual(done.print.estimate, {seconds:2575,grams:16.74});
+  assert.deepEqual(done.print.events.map(x=>x.message), ['Slicing the model…','Sliced file saved.']);
+});
+
+
+test('an existing failed attempt exposes its retained slice estimate without rewriting its history', async () => {
+  const {service,store,object,bundles}=await setup();
+  const bundle=await bundles.create({stl:STL,prompt:'',backend:'bambu-printer-mcp'});
+  await bundles.recordArtifact(bundle.id,'sliced','sliced.3mf',Buffer.from('UEsDBBQAAAAIAGdlYV0FODnfWQAAAJAAAAAaAAAATWV0YWRhdGEvc2xpY2VfaW5mby5jb25maWezSc7PS8tMt7MpyEksSbWzyU0tSUxJLElUyE6ttFXKzEtJrVBSKEvMKU21VTJU0kdXUFCUmpKZXJKZnwdXZWRqboqpsDw1Mz2jBGGUmZ65CUiVPtRefag7AFBLAQIUAxQAAAAIAGdlYV0FODnfWQAAAJAAAAAaAAAAAAAAAAAAAACAAQAAAABNZXRhZGF0YS9zbGljZV9pbmZvLmNvbmZpZ1BLBQYAAAAAAQABAEgAAACRAAAAAAA=','base64'));
+  await bundles.setStatus(bundle.id,'uncertain','dispatch-uncertain');
+  await store.update(object.id,o=>({...o,state:'failed',failure:'old saved warning',print:{bundleId:bundle.id,uncertain:true}}));
+  const loaded=await service.get(object.id);
+  assert.deepEqual(loaded.print.estimate,{seconds:2575,grams:16.74});
+  assert.equal(loaded.print.sliced,true);
+  assert.equal(loaded.failure,'old saved warning');
+  assert.equal((await store.get(object.id)).print.estimate,undefined);
+  assert.deepEqual((await service.list())[0].print.estimate,loaded.print.estimate);
+});
+
+
+test('live printer status identifies its own job and omits stale progress for a failed job', async () => {
+  const report={connected:true,status:'FAILED',raw:{gcode_state:'FAILED'},print:{filename:'Previous caliper',progress:23,remaining:66}};
+  const {service,store,object}=await setup({printerReport:report});
+  await store.update(object.id,o=>({...o,print:{bundleId:'00000000-0000-4000-8000-000000000001'}}));
+  const loaded=await service.get(object.id);
+  assert.equal(loaded.print.printerStatus.state,'FAILED');
+  assert.equal(loaded.print.printerStatus.job,'Previous caliper');
+  assert.equal(loaded.print.printerStatus.percent,undefined);
+  assert.equal(loaded.print.printerStatus.remainingMinutes,undefined);
 });

@@ -79,11 +79,11 @@ public struct ObjectWords: Sendable, Equatable {
                 status = "Looks like there's \(item?.isEmpty == false ? item! : "something") on your plate. Can you take it off first?"
                 (tone, actions) = (.accent, [.plateClear])
             } else {
-                (status, tone, actions) = ("Printing", .pending, [])
+                (status, tone, actions) = (object.progress ?? "Preparing print…", .pending, [])
             }
             busy = true
         case .printed:
-            (status, tone, busy, actions) = ("Printed", .pass, false, made)
+            (status, tone, busy, actions) = ("Print request accepted", .pass, false, made)
         case .failed:
             let failure = object.failure?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             (status, tone, busy, actions) = (failure.isEmpty ? "Something went wrong on your Mac." : failure, .fail, false, made.isEmpty ? [.retry, .correct] : made)

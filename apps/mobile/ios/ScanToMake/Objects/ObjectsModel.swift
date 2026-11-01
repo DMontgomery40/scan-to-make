@@ -19,7 +19,14 @@ struct StmObject: Codable, Identifiable, Equatable, Sendable {
     struct Question: Codable, Equatable, Sendable { var closeup: String? }
     struct Plate: Codable, Equatable, Sendable { var item: String?; var noCamera: Bool?; var photo: Bool? }
     struct PrintDestination: Codable, Equatable, Sendable { var id: String; var name: String }
-    struct Print: Codable, Equatable, Sendable { var bundleId: String; var uncertain: Bool?; var destination: PrintDestination? = nil }
+    struct PrinterStatus: Codable, Equatable, Sendable { var state: String; var job: String?; var checkedAtMs: Double; var percent: Double?; var remainingMinutes: Double? }
+    struct PrintEstimate: Codable, Equatable, Sendable { var seconds: Double?; var grams: Double? }
+    struct PrintEvent: Codable, Equatable, Sendable { var atMs: Double; var message: String }
+    struct Print: Codable, Equatable, Sendable {
+        var bundleId: String; var uncertain: Bool?; var destination: PrintDestination? = nil
+        var printerStatus: PrinterStatus? = nil
+        var sliced: Bool? = nil; var estimate: PrintEstimate? = nil; var events: [PrintEvent]? = nil
+    }
     struct PrintConfirmation: Codable, Equatable, Sendable {
         struct Field: Codable, Equatable, Sendable {
             var name: String; var title: String; var description: String?; var required: Bool
@@ -151,10 +158,10 @@ struct ObjectWords: Equatable, Sendable {
                 (status, tone, busy, actions) = ("Looks like there's \(item.isEmpty ? "something" : item) on your plate. Can you take it off first?",
                                                  .accent, true, [.plateClear])
             } else {
-                (status, tone, busy, actions) = ("Printing", .pending, true, [])
+                (status, tone, busy, actions) = (object.progress ?? "Preparing print…", .pending, true, [])
             }
         case .printed:
-            (status, tone, busy, actions) = ("Printed", .pass, false, made)
+            (status, tone, busy, actions) = ("Print request accepted", .pass, false, made)
         case .failed:
             let failure = (object.failure ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             (status, tone, busy, actions) = (failure.isEmpty ? "Something went wrong on your Mac." : failure, .fail, false,

@@ -410,3 +410,30 @@ test('a successful retry clears its prior failure code', async t => {
   assert.equal(result.manifest.status, 'printed');
   assert.equal(result.manifest.failure, undefined);
 });
+
+
+test('a known pre-dispatch printer refusal preserves its reason without claiming it may have started', async t => {
+  const f = await setup(t, {dispatch:'preflight-error'});
+  await assert.rejects(f.runner.run({stlPath:f.stlPath}), error => {
+    assert.equal(error.code, 'printer-not-ready');
+    assert.match(error.detail, /Printer state FAILED is not safely idle/);
+    return true;
+  });
+});
+
+test('progress reaches the caller before each operation, including the last printer request', async t => {
+  const f = await setup(t);
+  const progress = [];
+  await f.runner.run({stlPath:f.stlPath, onProgress:async update => {progress.push(update.phase);}});
+  assert.deepEqual(progress, ['connecting','orienting','slicing','inspecting','slice-ready','checking-printer','requesting-print','accepted']);
+});
+
+
+test('failure recording accepted progress never makes an accepted print replayable', async t => {
+  const f = await setup(t);
+  const store = new HandoffBundleStore(join(f.root, 'accepted-progress'));
+  const bundle = await store.create({stl,prompt:'',backend:'bambu-printer-mcp',selection});
+  await f.runner.runBundle(store,bundle.id,{onProgress:async update=>{if(update.phase==='accepted')throw Error('disk full');}});
+  assert.equal((await store.read(bundle.id)).status,'printed');
+  await assert.rejects(f.runner.runBundle(store,bundle.id),{code:'already-printed'});
+});

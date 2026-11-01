@@ -56,7 +56,7 @@ export interface StmObject {
   printConfirmation?: ObjectPrintConfirmation;
   failure?: string;
   /** The last print; `uncertain` when it may have reached the printer and must not be sent again by itself. */
-  print?: {bundleId: string; uncertain?: boolean; destination?: {id: string; name: string}};
+  print?: {bundleId: string; uncertain?: boolean; destination?: {id: string; name: string}; printerStatus?: {state: string; job?: string; checkedAtMs: number; percent?: number; remainingMinutes?: number}; sliced?: boolean; estimate?: {seconds?: number; grams?: number}; events?: {atMs: number; message: string}[]};
 }
 
 const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;

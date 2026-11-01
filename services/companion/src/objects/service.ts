@@ -1,7 +1,7 @@
 import {copyFile, mkdir, readFile, rm, stat, writeFile} from 'node:fs/promises';
 import {createHash} from 'node:crypto';
 import {basename, join} from 'node:path';
-import {DispatchedPrintError, type PendingElicitation, type PrinterHandoffConfig} from '@scan-to-make/printer-handoff';
+import {DispatchedPrintError, PrinterMcpError, sliceEstimate, type PrintProgress, type PendingElicitation, type PrinterHandoffConfig} from '@scan-to-make/printer-handoff';
 import type {PrintHandoffServices} from '../print-handoff-http.js';
 import type {PlateVerdict} from './bedcheck.js';
 import type {TouchupInput} from '../touchup/touchup.js';
@@ -131,8 +131,47 @@ export class ObjectService {
   }
 
   create(instructions?: string) { return this.#deps.store.create(instructions).then(o => this.#changed(o)); }
-  list() { return this.#deps.store.list(); }
-  get(id: string) { return this.#deps.store.get(id); }
+  async list() { return Promise.all((await this.#deps.store.list()).map(o => this.get(o.id))); }
+  readonly #printerReports = new Map<string, {atMs: number; value: Promise<{state: string; job?: string; checkedAtMs: number; percent?: number; remainingMinutes?: number} | undefined>}>();
+  readonly #estimates = new Map<string, {seconds?: number; grams?: number}>();
+  async get(id: string): Promise<StmObject> {
+    let object = await this.#deps.store.get(id);
+    if (!object.print) return object;
+    const printing = this.#deps.print;
+    const destinationId = object.print.destination?.id;
+    const services = destinationId ? printing?.destinations?.get(destinationId) : printing?.services;
+    if (services?.runner.status) {
+      const key = destinationId ?? "default";
+      let report = this.#printerReports.get(key);
+      if (!report || Date.now() - report.atMs > 15000) {
+        report = {atMs:Date.now(), value:services.runner.status(AbortSignal.timeout(5000)).then(value => {
+          if (!record(value)) return undefined;
+          const raw = record(value.raw) ? value.raw : {};
+          const state = value.connected === false ? "OFFLINE" : String(raw.gcode_state ?? value.status ?? "UNKNOWN");
+          const job = record(value.print) ? value.print.filename : raw.subtask_name;
+          const active = ['RUNNING','PREPARE','PAUSE','SLICING'].includes(state.toUpperCase());
+          const percent = record(value.print) ? value.print.progress : undefined;
+          const remaining = record(value.print) ? value.print.remaining : undefined;
+          return {...(active && typeof percent === 'number' && percent >= 0 && percent <= 100 ? {percent} : {}),
+            ...(active && typeof remaining === 'number' && remaining >= 0 ? {remainingMinutes:remaining} : {}), state:state.slice(0,40), ...(typeof job === "string" && job ? {job:job.slice(0,160)} : {}), checkedAtMs:Date.now()};
+        }).catch(() => undefined)};
+        this.#printerReports.set(key, report);
+      }
+      const printerStatus = await report.value;
+      if (printerStatus) object = {...object, print:{...object.print!, printerStatus}};
+    }
+    if (object.print!.estimate) return object;
+    const bundleId = object.print!.bundleId;
+    let estimate = this.#estimates.get(bundleId);
+    if (!estimate) {
+      if (services) try {
+        const manifest = await services.store.read(bundleId);
+        if (manifest.artifacts.sliced) estimate = await sliceEstimate(await readFile(join(services.store.directory(bundleId), manifest.artifacts.sliced.file)), manifest.selection?.plateIndex ?? 0);
+        if (estimate) this.#estimates.set(bundleId, estimate);
+      } catch { /* Missing historical artifacts do not hide the project. */ }
+    }
+    return estimate ? {...object, print:{...object.print!, sliced:true, estimate}} : object;
+  }
   dir(id: string) { return this.#deps.store.dir(id); }
 
   async passActivity(id: string, index: number): Promise<TouchupActivity[]> {
@@ -346,25 +385,37 @@ export class ObjectService {
     const stl = await readFile(join(this.#deps.store.dir(id), object.current.model));
     const manifest = await bundles.create({stl, prompt: '', backend: runner.backend, ...(selected ? {selection:selected} : {})});
     const print = {bundleId: manifest.id, ...(printDestination ? {destination: printDestination} : {})};
-    const started = await this.#deps.store.update(id, o => ({...o, state: 'printing', print, plate: undefined, printConfirmation: undefined, failure: undefined}));
+    const started = await this.#deps.store.update(id, o => ({...o, state: 'printing', progress: 'Connecting to your printer service…', print, plate: undefined, printConfirmation: undefined, failure: undefined}));
     // Only this print's questions: other prints share the relay.
     const unsubscribe = relay.subscribe(pending => {
       if (pending.bundleId === manifest.id) void this.#confirm(id, pending, printing).catch(() => { relay.respond(pending.id, {action: 'cancel'}); });
     });
     const controller = new AbortController();
     this.#controllers.set(id, controller);
-    const work = runner.runBundle(bundles, manifest.id, {print: true, signal: controller.signal, ...(slicer ? {slicer} : {})})
-      .then(() => this.#deps.store.update(id, o => ({...o, state: 'printed', plate: undefined, printConfirmation: undefined})),
+    const messages: Record<PrintProgress['phase'], string> = {
+      connecting:'Connecting to your printer service…', orienting:'Orienting the model for printing…', slicing:'Slicing the model…',
+      inspecting:'Checking the sliced print file…', 'slice-ready':'Sliced file saved.', 'checking-printer':'Checking the printer…',
+      'requesting-print':'Requesting print. Waiting for the printer service…', accepted:'Print request accepted.',
+    };
+    const onProgress = async (update: PrintProgress) => {
+      const message = messages[update.phase];
+      this.#changed(await this.#deps.store.update(id, o => o.print?.bundleId !== manifest.id || o.state !== 'printing' ? o : ({...o,
+        progress:message, print:{...o.print, ...(update.phase === 'slice-ready' ? {sliced:true} : {}),
+          ...(update.estimate ? {estimate:update.estimate} : {}), events:[...(o.print.events ?? []), {atMs:Date.now(), message}].slice(-20)},
+      })));
+    };
+    const work = runner.runBundle(bundles, manifest.id, {print: true, signal: controller.signal, onProgress, ...(slicer ? {slicer} : {})})
+      .then(() => this.#deps.store.update(id, o => ({...o, state: 'printed', progress: undefined, plate: undefined, printConfirmation: undefined})),
         async error => {
           const status = (await bundles.read(manifest.id).catch(() => undefined))?.status;
           // Once the printer has the job it is printing, whatever went wrong afterwards (as the phone's print route does).
-          if (error instanceof DispatchedPrintError || status === 'printed') return this.#deps.store.update(id, o => ({...o, state: 'printed', plate: undefined, printConfirmation: undefined}));
+          if (error instanceof DispatchedPrintError || status === 'printed') return this.#deps.store.update(id, o => ({...o, state: 'printed', progress: undefined, plate: undefined, printConfirmation: undefined}));
           // It may have reached the printer: never send it again by itself.
-          if (status === 'uncertain') return this.#deps.store.update(id, o => ({...o, state: 'failed', plate: undefined, printConfirmation: undefined, failure: UNCERTAIN, print: {...print, uncertain: true}}));
-          if (this.#cancelledPrints.has(id)) return this.#deps.store.update(id, o => ({...o, state: 'ready', plate: undefined, printConfirmation: undefined, failure: undefined}));
+          if (status === 'uncertain') return this.#deps.store.update(id, o => ({...o, state: 'failed', plate: undefined, printConfirmation: undefined, progress: undefined, failure: error instanceof PrinterMcpError && error.detail ? `Printer service: ${error.detail} Counterpart could not confirm a print start. Check the printer before trying again.` : UNCERTAIN, print: {...o.print!, uncertain: true}}));
+          if (this.#cancelledPrints.has(id)) return this.#deps.store.update(id, o => ({...o, state: 'ready', progress: undefined, plate: undefined, printConfirmation: undefined, failure: undefined}));
           if (this.#expiredConfirmations.has(id) || (this.#confirmations.get(id)?.pending.expiresAtMs ?? Infinity) <= Date.now())
-            return this.#deps.store.update(id, o => ({...o, state: 'failed', plate: undefined, printConfirmation: undefined, failure: 'Printer confirmation timed out; no print was sent. Press Print to try again.'}));
-          return this.#deps.store.update(id, o => ({...o, state: 'failed', plate: undefined, printConfirmation: undefined, failure: error instanceof Error ? error.message : String(error)}));
+            return this.#deps.store.update(id, o => ({...o, state: 'failed', progress: undefined, plate: undefined, printConfirmation: undefined, failure: 'Printer confirmation timed out; no print was sent. Press Print to try again.'}));
+          return this.#deps.store.update(id, o => ({...o, state: 'failed', progress: undefined, plate: undefined, printConfirmation: undefined, failure: error instanceof PrinterMcpError && error.detail ? error.detail : error instanceof Error ? error.message : String(error)}));
         })
       .then(o => this.#changed(o))
       .finally(() => {

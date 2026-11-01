@@ -7,11 +7,15 @@ import {
   type PrinterHandoffConfig, type PrinterSelection, type PrinterSlicer, type PrinterPrintOptions,
 } from './config.js';
 import type {ElicitationRelay} from './elicitation.js';
+import {sliceEstimate, type SliceEstimate} from './slice-estimate.js';
 import type {HandoffBundleStore} from './bundle.js';
 import {PrinterMcpClient, PrinterMcpError, toolResultJson, toolResultText, type PrinterToolCatalog} from './mcp-client.js';
 
 export type PrintStep = 'discover' | 'lay_flat' | 'slice_stl' | 'inspect' | 'camera_snapshot' | 'print';
+export type PrintPhase = 'connecting' | 'orienting' | 'slicing' | 'inspecting' | 'slice-ready' | 'checking-printer' | 'requesting-print' | 'accepted';
+export interface PrintProgress {phase: PrintPhase; estimate?: SliceEstimate}
 export interface PrintRunInput {
+  onProgress?: (update: PrintProgress) => Promise<void>;
   /** Persist a non-replayable intent before sending the print tool call. */
   beforePrint?: () => Promise<void>;
   /** Save backend scratch outputs while the MCP is alive; dispatch uses the returned durable paths. */
@@ -113,6 +117,19 @@ export class PrinterHandoffRunner {
     finally { await client.close().catch(() => undefined); }
   }
 
+  /** Display-only printer status, using the configured route and the standard MCP tool. */
+  async status(signal?: AbortSignal): Promise<unknown> {
+    const client = this.client();
+    try {
+      await client.connect(signal);
+      if (!client.hasTool('get_printer_status')) return undefined;
+      const selection = this.#config.selection;
+      return resultValue(await call(client, 'get_printer_status', {
+        host: selection?.host, type: selection?.printerType, port: selection?.port,
+      }, signal));
+    } finally { await client.close().catch(() => undefined); }
+  }
+
   /** Read the printer's live material inventory without starting or uploading a print. */
   async filaments(signal?: AbortSignal): Promise<unknown> {
     const client = this.client();
@@ -160,7 +177,9 @@ export class PrinterHandoffRunner {
     const client = this.client();
     const tag = input.bundleId === undefined ? {} : {bundleId: input.bundleId};
     client.setElicitationContext(tag);
+    const progress = async (phase: PrintPhase, estimate?: SliceEstimate) => { await input.onProgress?.({phase, ...(estimate ? {estimate} : {})}); };
     try {
+      await progress('connecting');
       const catalog = await client.connect(input.signal);
       step('discover');
       if (slicer.filamentColours) {
@@ -176,9 +195,11 @@ export class PrinterHandoffRunner {
       let orientedStlPath = input.stlPath;
       const laidFlat = client.hasTool('lay_flat');
       if (laidFlat) {
+        await progress('orienting');
         orientedStlPath = absolutePath(await call(client, 'lay_flat', {stl_path: input.stlPath}, input.signal));
         step('lay_flat');
       }
+      await progress('slicing');
       let slicedPath = absolutePath(await call(client, 'slice_stl', {
         stl_path: orientedStlPath,
         bambu_model: isBambuSlicing(this.#config, selection, slicer) ? selection.model : undefined,
@@ -198,12 +219,16 @@ export class PrinterHandoffRunner {
         ensure_on_bed: true,
       }, input.signal));
       step('slice_stl');
+      const estimate = await sliceEstimate(await readFile(slicedPath), selection.plateIndex ?? 0);
+      await progress('inspecting', estimate);
       const inspection = await this.inspect(client, slicedPath, selection, input.signal);
       if (inspection) step('inspect');
       if (input.persistOutput) ({slicedPath, orientedStlPath} = await input.persistOutput({slicedPath, orientedStlPath}));
+      await progress('slice-ready', estimate);
       const common = {backend: this.#config.backend, catalog, stlPath: input.stlPath, orientedStlPath, slicedPath, inspection, steps};
       if (input.print === false) return common;
 
+      await progress('checking-printer');
       let cameraSnapshot: Record<string, unknown> | undefined;
       if (this.#config.backend === 'bambu-printer-mcp' && this.#config.cameraSnapshot !== false && client.hasTool('camera_snapshot')) {
         try {
@@ -221,6 +246,7 @@ export class PrinterHandoffRunner {
         } catch { /* The print prompts still go to the user without an image. */ }
       }
 
+      await progress('requesting-print');
       let printed: unknown;
       try {
         if (this.#config.backend === 'bambu-printer-mcp' || slicedPath.toLowerCase().endsWith('.3mf') || selection.printerType === 'bambu') {
@@ -258,6 +284,7 @@ export class PrinterHandoffRunner {
         }
       } finally { client.setElicitationContext(tag); }
       step('print');
+      await progress('accepted').catch(() => undefined); // Telemetry cannot erase an accepted dispatch.
       return {...common, cameraSnapshot, print: printed};
     } finally {
       await client.close().catch(() => undefined);
@@ -268,7 +295,7 @@ export class PrinterHandoffRunner {
    * Runs a stored handoff bundle and records the sliced output back into it.
    * The bundle backend must match this runner's configured backend.
    */
-  async runBundle(store: HandoffBundleStore, id: string, options: {print?: boolean; signal?: AbortSignal; slicer?: PrinterSlicer} = {}) {
+  async runBundle(store: HandoffBundleStore, id: string, options: {print?: boolean; signal?: AbortSignal; slicer?: PrinterSlicer; onProgress?: PrintRunInput['onProgress']} = {}) {
     const manifest = await store.read(id);
     if (manifest.backend !== this.#config.backend) fail('backend-mismatch');
     if (manifest.status === 'uncertain') fail('dispatch-uncertain');
@@ -281,7 +308,7 @@ export class PrinterHandoffRunner {
     try {
       const inputStl = join(workDirectory, basename(store.stlPath(manifest)));
       await copyFile(store.stlPath(manifest), inputStl);
-      const result = await this.run({stlPath: inputStl, selection: manifest.selection, slicer: options.slicer, print: options.print, signal: options.signal, bundleId: id,
+      const result = await this.run({stlPath: inputStl, selection: manifest.selection, slicer: options.slicer, print: options.print, signal: options.signal, bundleId: id, onProgress: options.onProgress,
         persistOutput: async output => {
           // MCP backends may delete scratch files on close. Save both artifacts
           // before dispatch, and give the printer the durable bundle path.
