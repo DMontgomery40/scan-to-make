@@ -18,6 +18,7 @@ import React
     @objc(takePhotoOptions:resolve:reject:) func takePhoto(_ o: NSDictionary, resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock)
     @objc(downloadOptions:resolve:reject:) func download(_ o: NSDictionary, resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock)
     @objc(showModelOptions:resolve:reject:) func showModel(_ o: NSDictionary, resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock)
+    @objc(sendHandheldOptions:resolve:reject:) func sendHandheld(_ o: NSDictionary, resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock)
 }
 @objc private protocol CaptureCalls {
     @objc(status:reject:) func status(_ resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock)
@@ -166,6 +167,13 @@ private func native(_ name: String) -> NSObject? { (NSClassFromString(name) as? 
         _ = try await promise { bridge.sendCapture(["objectId": id, "runID": run, "maxPhotos": 24] as NSDictionary, resolve: $0, reject: $1) }
     }
 
+    /// A handheld scan's photos (HandheldCapture.swift); the Mac rebuilds the model, then touches it up.
+    func sendHandheld(_ id: String) async throws -> StmObject {
+        let bridge = try require(bridge)
+        _ = try await promise { bridge.sendHandheld(["objectId": id] as NSDictionary, resolve: $0, reject: $1) }
+        return try await start(id)
+    }
+
     struct Pairing: Equatable { var paired: Bool; var address: String? }
     func pairing(check: Bool) async -> Pairing {
         guard let pairingModule else { return Pairing(paired: false, address: nil) }
@@ -202,7 +210,7 @@ struct ChosenPhoto: Identifiable, Equatable { var id: String; var url: URL }
     func refreshConnection(check: Bool = false) async { connection = await mac.pairing(check: check) }
 }
 
-private let cobalt = Color(uiColor: UIColor { $0.userInterfaceStyle == .dark
+let cobalt = Color(uiColor: UIColor { $0.userInterfaceStyle == .dark
     ? UIColor(red: 0x7B / 255, green: 0x95 / 255, blue: 0xFF / 255, alpha: 1)
     : UIColor(red: 0x24 / 255, green: 0x48 / 255, blue: 0xD8 / 255, alpha: 1) })
 
@@ -278,6 +286,9 @@ struct ObjectsRootView: View {
         }
         .sheet(isPresented: $settings) { SettingsView(store: store) }
         .task(id: pairingKey) {
+            #if targetEnvironment(simulator)
+            HandheldCapture.previewIfAsked()
+            #endif
             async let scan = store.mac.canScan()
             await store.refreshConnection()
             await store.load()
@@ -492,8 +503,8 @@ struct NewObjectView: View {
                     .controlSize(.extraLarge)
                     .disabled(working != nil)
                     .accessibilityLabel(working == "make" ? "Sending to your Mac" : "Make It")
-                    if store.canScan && !describing {
-                        Button { Task { await scan() } } label: {
+                    if (store.canScan || HandheldCapture.isAvailable) && !describing {
+                        Menu { ScanChoices(walkAround: store.canScan) { handheld in Task { await scan(handheld: handheld) } } } label: {
                             Label(working == "scan" ? "Sending to Your Mac…" : "Scan It Instead", systemImage: "viewfinder")
                                 .frame(maxWidth: .infinity)
                         }
@@ -555,9 +566,15 @@ struct NewObjectView: View {
             started(try await store.mac.start(object.id))
         }
     }
-    private func scan() async {
+    private func scan(handheld: Bool) async {
         await run("scan") {
             let object = try await object()
+            if handheld {
+                guard await HandheldCapture.run(objectId: object.id) else { started(object); return }
+                try await sendPhotos(object.id)
+                started(try await store.mac.sendHandheld(object.id))
+                return
+            }
             guard let run = try await store.mac.scan(object.id) else { started(object); return }
             try await store.mac.sendCapture(object.id, run: run)
             try await sendPhotos(object.id)
@@ -767,15 +784,24 @@ struct ObjectDetailView: View {
                     big("Try Again", "arrow.clockwise", prominent: true) { try await store.mac.start(object.id) }
                 case .finishSending:
                     big("Finish Sending", "arrow.up.circle", prominent: false) {
+                        if HandheldCapture.finished(object.id) { return try await store.mac.sendHandheld(object.id) }
                         if let run = await store.mac.finishedScan(object.id) { return try await store.mac.sendScan(object.id, run: run) }
                         return try await store.mac.start(object.id)
                     }
                 case .scan:
-                    if store.canScan {
-                        big("Scan It", "viewfinder", prominent: true) {
-                            guard let run = try await store.mac.scan(object.id) else { return nil }
-                            return try await store.mac.sendScan(object.id, run: run)
-                        }
+                    if store.canScan || HandheldCapture.isAvailable {
+                        Menu {
+                            ScanChoices(walkAround: store.canScan) { handheld in
+                                act {
+                                    if handheld { return await HandheldCapture.run(objectId: object.id) ? try await store.mac.sendHandheld(object.id) : nil }
+                                    guard let run = try await store.mac.scan(object.id) else { return nil }
+                                    return try await store.mac.sendScan(object.id, run: run)
+                                }
+                            }
+                        } label: { Label("Scan It", systemImage: "viewfinder").frame(maxWidth: .infinity) }
+                        .buttonStyle(.glassProminent)
+                        .controlSize(.large)
+                        .disabled(working)
                     }
                 case .makeIt:
                     big("Make It From the Description", "wand.and.sparkles", prominent: false) { try await store.mac.start(object.id) }

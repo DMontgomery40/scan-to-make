@@ -156,7 +156,8 @@ RCT_REMAP_METHOD(call, callOptions:(NSDictionary *)o resolve:(RCTPromiseResolveB
   NSUInteger limit = [file[@"scan"] boolValue] ? STMObjectsScanLimit : STMObjectsPhotoLimit;
   if (!bytes.length || bytes.length > limit) { done(sent, @"unreadable-file", @"A file from this scan couldn't be read."); return; }
   NSString *path = [file[@"scan"] boolValue] ? [NSString stringWithFormat:@"/v1/objects/%@/scan", objectId]
-    : [NSString stringWithFormat:@"/v1/objects/%@/photos?name=%@", objectId, [file[@"name"] stringByAddingPercentEncodingWithAllowedCharacters:NSCharacterSet.URLQueryAllowedCharacterSet]];
+    : [NSString stringWithFormat:@"/v1/objects/%@/%@?name=%@", objectId, [file[@"capture"] boolValue] ? @"capture" : @"photos",
+       [file[@"name"] stringByAddingPercentEncodingWithAllowedCharacters:NSCharacterSet.URLQueryAllowedCharacterSet]];
   [STMObjectsRequest send:[file[@"scan"] boolValue] ? @"PUT" : @"POST" path:path body:bytes type:file[@"type"] pairing:pairing limit:STMObjectsJSONLimit
                      done:^(NSInteger status, NSData *data, NSString *failure) {
     if (failure) { done(sent, failure, STMObjectsMessage(failure)); return; }
@@ -186,10 +187,12 @@ RCT_REMAP_METHOD(call, callOptions:(NSDictionary *)o resolve:(RCTPromiseResolveB
   [self existing:objectId pairing:pairing done:^(NSDictionary *object, NSString *failure) {
     if (!object) { [self.uploading removeObject:objectId]; reject(failure, STMObjectsMessage(failure), nil); return; }
     NSArray *have = [object[@"photos"] isKindOfClass:NSArray.class] ? object[@"photos"] : @[];
+    NSArray *captured = [object[@"capture"] isKindOfClass:NSArray.class] ? object[@"capture"] : @[];
     BOOL hasScan = [object[@"scan"] isKindOfClass:NSString.class];
     NSMutableArray *missing = [NSMutableArray array];
     for (NSDictionary *file in files) {
-      if ([file[@"scan"] boolValue] ? !hasScan : ![have containsObject:file[@"name"]]) [missing addObject:file];
+      BOOL there = [file[@"scan"] boolValue] ? hasScan : [([file[@"capture"] boolValue] ? captured : have) containsObject:file[@"name"]];
+      if (!there) [missing addObject:file];
     }
     [self upload:missing objectId:objectId pairing:pairing index:0 sent:0 done:^(NSUInteger sent, NSString *uploadFailure, NSString *message) {
       [self.uploading removeObject:objectId];
@@ -224,6 +227,21 @@ RCT_REMAP_METHOD(sendCapture, sendCaptureOptions:(NSDictionary *)o resolve:(RCTP
   [self sendFiles:files objectId:objectId resolve:^{
     resolve(@{@"scanSent": @YES, @"photosSent": @(files.count - 1)});
   } reject:reject];
+}
+
+/** A handheld scan (KAN-210): every photo of Documents/HandheldCaptures/<object id>, depth embedded, for the Mac to rebuild. */
+RCT_REMAP_METHOD(sendHandheld, sendHandheldOptions:(NSDictionary *)o resolve:(RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject) {
+  NSString *objectId = o[@"objectId"];
+  if (!STMObjectsMatches(objectId, STMObjectsUUID)) { reject(@"invalid-request", STMObjectsMessage(@"invalid-request"), nil); return; }
+  NSURL *folder = [STMObjectsRoot(NSDocumentDirectory, @"HandheldCaptures") URLByAppendingPathComponent:objectId isDirectory:YES];
+  NSArray<NSString *> *names = [[NSFileManager.defaultManager contentsOfDirectoryAtPath:folder.path error:nil]
+    filteredArrayUsingPredicate:[NSPredicate predicateWithFormat:@"SELF MATCHES %@", @"[0-9]{4}\\.heic"]];
+  if (names.count == 0) { reject(@"no-photos", @"The scan has no photos. Scan it again.", nil); return; }
+  NSMutableArray *files = [NSMutableArray array];
+  for (NSString *name in [names sortedArrayUsingSelector:@selector(compare:)]) {
+    [files addObject:@{@"capture": @YES, @"name": name, @"url": [folder URLByAppendingPathComponent:name], @"type": @"image/heic"}];
+  }
+  [self sendFiles:files objectId:objectId resolve:^{ resolve(@{@"photosSent": @(files.count)}); } reject:reject];
 }
 
 #pragma mark Photos and camera

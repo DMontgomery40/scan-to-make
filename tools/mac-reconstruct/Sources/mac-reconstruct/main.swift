@@ -64,7 +64,12 @@ func prepareMasks(for files: [URL], in folder: URL) async throws {
     try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
     if maskFolder == nil {
         guard ObjectMasker.isSupported else { emit(["error": "needs-macos-27"]); exit(3) }
-        if await ObjectMasker.needsDownload() { emit(["stage": "downloading"]); try await ObjectMasker.download() }
+        // Vision fetches its model on first use; say so only when that actually takes a while.
+        if await ObjectMasker.needsDownload() {
+            let notice = Task { try await Task.sleep(for: .seconds(2)); emit(["stage": "downloading"]) }
+            try await ObjectMasker.download()
+            notice.cancel()
+        }
     }
     let masker = ObjectMasker()
     for (index, file) in files.enumerated() {

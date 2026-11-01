@@ -19,6 +19,21 @@ final class ObjectWordsTests: XCTestCase {
         XCTAssertEqual(ObjectWords.title(object([:])), "Something new")
     }
 
+    /// A handheld scan (KAN-210): photos arrive, the Mac rebuilds them and says how far it is.
+    func testHandheldScan() {
+        let sent = object(["capture": ["0000.heic", "0001.heic"]])
+        XCTAssertEqual(ObjectWords.title(sent), "Copy of your scan")
+        XCTAssertEqual(ObjectWords.sent(sent), "A scan")
+        XCTAssertEqual(ObjectWords(sent).status, "Sending to your Mac…")
+        XCTAssertEqual(ObjectWords(object(["capture": ["0000.heic"], "state": "touching-up", "progress": "Finding the object in your photos (3 of 90)."])).status,
+                       "Finding the object in your photos (3 of 90). This can take a few minutes. We'll let you know when it's ready.")
+        XCTAssertEqual(ObjectWords(object(["capture": ["0000.heic"], "scan": "scan.usdz", "state": "touching-up"])).status,
+                       "Touching up your scan. This can take a few minutes. We'll let you know when it's ready.")
+        let old = object(["capture": ["0000.heic"], "state": "failed",
+                          "failure": "Holding it up to scan needs macOS 27 on your Mac. Scanning by walking around it still works."])
+        XCTAssertEqual(ObjectWords(old).status, "Holding it up to scan needs macOS 27 on your Mac. Scanning by walking around it still works.")
+    }
+
     func testEveryStateInPlainWords() {
         XCTAssertEqual(ObjectWords(object(["scan": "scan.usdz"])).status, "Sending to your Mac…")
         XCTAssertEqual(ObjectWords(object([:])).status, "Waiting for a scan or photos.")

@@ -22,6 +22,10 @@ struct StmObject: Codable, Identifiable, Equatable, Sendable {
     var state: State
     var scan: String?
     var photos: [String]
+    /// A handheld scan's photos, rebuilt into the scan on the Mac.
+    var capture: [String]?
+    /// What the Mac is doing right now, in words (building a handheld scan).
+    var progress: String?
     var passes: [Pass]
     var current: Current?
     var question: Question?
@@ -51,7 +55,7 @@ struct ObjectWords: Equatable, Sendable {
 
     static func title(_ object: StmObject) -> String {
         let text = (object.instructions ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return object.scan == nil ? "Something new" : "Copy of your scan" }
+        guard !text.isEmpty else { return object.scan == nil && (object.capture ?? []).isEmpty ? "Something new" : "Copy of your scan" }
         // The first sentence, without its full stop, cut at a word if it is long.
         var first = text.components(separatedBy: "\n")[0]
         if let end = first.range(of: #"[.!?](\s|$)"#, options: .regularExpression) { first = String(first[..<end.lowerBound]) }
@@ -70,7 +74,7 @@ struct ObjectWords: Equatable, Sendable {
     static func sent(_ object: StmObject) -> String {
         let photos = object.photos.count
         let photoWords = photos == 1 ? "1 photo" : "\(photos) photos"
-        switch (object.scan != nil, photos) {
+        switch (object.scan != nil || !(object.capture ?? []).isEmpty, photos) {
         case (true, 0): return "A scan"
         case (true, _): return "A scan and \(photoWords)"
         case (false, 0): return "Just the description"
@@ -84,13 +88,15 @@ struct ObjectWords: Equatable, Sendable {
         let made: [ObjectAction] = object.current == nil ? [] : [object.print?.uncertain == true ? .printChecked : .print, .correct]
         switch object.state {
         case .new:
-            if object.scan != nil || !object.photos.isEmpty {
+            if object.scan != nil || !object.photos.isEmpty || !(object.capture ?? []).isEmpty {
                 (status, tone, busy, actions) = ("Sending to your Mac…", .pending, true, [.finishSending])
             } else {
                 let described = !(object.instructions ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 (status, tone, busy, actions) = ("Waiting for a scan or photos.", .neutral, false,
                                                  described ? [.scan, .attachPhotos, .makeIt] : [.scan, .attachPhotos])
             }
+        case .touchingUp where !(object.progress ?? "").trimmingCharacters(in: .whitespaces).isEmpty:
+            (status, tone, busy, actions) = ("\(object.progress!) \(Self.wait)", .pending, true, [])
         case .touchingUp:
             let what = object.passes.count > 1 && object.current != nil ? "Making your changes."
                 : object.scan != nil ? "Touching up your scan." : "Making it."
