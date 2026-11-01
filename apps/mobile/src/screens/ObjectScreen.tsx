@@ -78,7 +78,7 @@ function Renders({
   }, [key]);
   const size = Math.min(width - space.xl * 2, 560);
   return (
-    <View style={[styles.plate, { height: size * 0.8 }]}>
+    <View style={[styles.plate, { height: size }]}>
       {uris.length ? (
         <ScrollView
           horizontal
@@ -92,7 +92,7 @@ function Renders({
               source={{ uri }}
               resizeMode="contain"
               accessibilityIgnoresInvertColors
-              style={{ width: size, height: size * 0.8 }}
+              style={{ width: size, height: size }}
             />
           ))}
         </ScrollView>
@@ -346,7 +346,9 @@ export function ObjectScreen({
         <PlatePhoto client={client} object={object} />
       ) : null}
       {object.current?.summary && object.state !== 'touching-up' ? (
-        <Text style={styles.summary}>{object.current.summary}</Text>
+        <Text style={styles.summary} numberOfLines={4}>
+          {object.current.summary}
+        </Text>
       ) : null}
       {problem ? (
         <View accessibilityLiveRegion="assertive" style={styles.problem}>

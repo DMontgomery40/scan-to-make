@@ -92,6 +92,17 @@ static NSDictionary *Json(NSString *text){id v=[NSJSONSerialization JSONObjectWi
   if(![o[@"state"] isEqual:@"ready"]){Require(![o[@"state"] isEqual:@"failed"],@"touch-up succeeds");dispatch_after(dispatch_time(DISPATCH_TIME_NOW,100*NSEC_PER_MSEC),dispatch_get_main_queue(),^{[self poll:n+1];});return;}
   Require([o[@"current"][@"renders"] count]==1,@"one render");
   NSNumber *version=o[@"updatedAtMs"];
+  // The page loads every render at once: simultaneous downloads must all survive.
+  __block NSUInteger pending=2;__block NSMutableArray *uris=[NSMutableArray array];
+  void (^both)(id)=^(id r){[uris addObject:r[@"uri"]];if(--pending)return;
+   for(NSString *uri in uris)Require([NSFileManager.defaultManager fileExistsAtPath:[NSURL URLWithString:uri].path],@"simultaneous downloads all kept");
+   [self downloadsFrom:o version:version];};
+  [self.bridge downloadOptions:@{@"objectId":self.objectId,@"name":@"model.stl",@"version":version} resolve:both reject:^(NSString*c,NSString*m,NSError*e){Require(NO,[@"concurrent model " stringByAppendingString:c]);}];
+  [self.bridge downloadOptions:@{@"objectId":self.objectId,@"name":@"renders/render_front.png",@"version":version} resolve:both reject:^(NSString*c,NSString*m,NSError*e){Require(NO,[@"concurrent render " stringByAppendingString:c]);}];
+ }];
+}
+- (void)downloadsFrom:(NSDictionary*)o version:(NSNumber*)version {
+ {
   [self.bridge downloadOptions:@{@"objectId":self.objectId,@"name":@"model.stl",@"version":version} resolve:^(id model){
    NSData *bytes=[NSData dataWithContentsOfURL:[NSURL URLWithString:model[@"uri"]]];
    Require([STMHash(bytes) isEqual:config[@"objects"][@"stl"][@"sha256"]],@"model bytes match");
@@ -112,7 +123,7 @@ static NSDictionary *Json(NSString *text){id v=[NSJSONSerialization JSONObjectWi
     } reject:^(NSString*c,NSString*m,NSError*e){Require(NO,[@"cached " stringByAppendingString:c]);}];
    } reject:^(NSString*c,NSString*m,NSError*e){Require(NO,[@"render " stringByAppendingString:c]);}];
   } reject:^(NSString*c,NSString*m,NSError*e){Require(NO,[@"model " stringByAppendingString:c]);}];
- }];
+ }
 }
 - (void)finish {
  NSDictionary *receipt=@{@"passed":@YES,@"runId":config[@"runId"],@"objectId":self.objectId};

@@ -310,8 +310,11 @@ RCT_REMAP_METHOD(takePhoto, takePhotoOptions:(NSDictionary *)o resolve:(RCTPromi
   [STMObjectsRequest send:@"GET" path:path body:nil type:nil pairing:pairing limit:STMObjectsScanLimit done:^(NSInteger status, NSData *data, NSString *failure) {
     if (failure) { done(nil, failure); return; }
     if (status != 200 || !data.length) { done(nil, status == 404 ? @"not-found" : @"download-failed"); return; }
-    // Older versions of this object are no longer shown.
-    [NSFileManager.defaultManager removeItemAtURL:[STMObjectsRoot(NSCachesDirectory, @"Objects") URLByAppendingPathComponent:objectId isDirectory:YES] error:nil];
+    // Older versions of this object are no longer shown. The current version's
+    // folder stays: its other files may be downloading at the same time.
+    NSURL *objectFolder = folder.URLByDeletingLastPathComponent;
+    for (NSURL *other in [NSFileManager.defaultManager contentsOfDirectoryAtURL:objectFolder includingPropertiesForKeys:nil options:0 error:nil])
+      if (![other.lastPathComponent isEqual:version]) [NSFileManager.defaultManager removeItemAtURL:other error:nil];
     [NSFileManager.defaultManager createDirectoryAtURL:folder withIntermediateDirectories:YES attributes:nil error:nil];
     done([data writeToURL:target options:NSDataWritingAtomic error:nil] ? target : nil, nil);
   }];
