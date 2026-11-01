@@ -534,7 +534,6 @@ struct ObjectPage: View {
                 if let size = object.current?.sizeMm, size.count == 3 {
                     Label(ObjectWords.formatSize(size), systemImage:"ruler").foregroundStyle(.secondary)
                         .labelStyle(.titleAndIcon).textSelection(.enabled)
-                        .accessibilityLabel("Size \(ObjectWords.formatSize(size))")
                         .fixedSize()
                 }
             }
