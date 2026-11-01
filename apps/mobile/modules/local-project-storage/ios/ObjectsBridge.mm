@@ -139,7 +139,9 @@ RCT_REMAP_METHOD(call, callOptions:(NSDictionary *)o resolve:(RCTPromiseResolveB
   if (json) {
     if (![NSJSONSerialization isValidJSONObject:json]) { reject(@"invalid-request", STMObjectsMessage(@"invalid-request"), nil); return; }
     body = [NSJSONSerialization dataWithJSONObject:json options:0 error:nil];
-    if (!body || body.length > 16 * 1024) { reject(@"invalid-request", STMObjectsMessage(@"invalid-request"), nil); return; }
+    BOOL captureStart = [method isEqual:@"POST"] && STMObjectsMatches(path, [NSString stringWithFormat:@"/v1/objects/%@/start", STMObjectsUUID]);
+    NSUInteger bodyLimit = captureStart ? 128 * 1024 : 16 * 1024;
+    if (!body || body.length > bodyLimit) { reject(@"invalid-request", STMObjectsMessage(@"invalid-request"), nil); return; }
   }
   [STMObjectsRequest send:method path:path body:body type:@"application/json" pairing:pairing limit:STMObjectsJSONLimit done:^(NSInteger status, NSData *data, NSString *failure) {
     if (failure) { reject(failure, STMObjectsMessage(failure), nil); return; }
@@ -237,15 +239,19 @@ RCT_REMAP_METHOD(sendHandheld, sendHandheldOptions:(NSDictionary *)o resolve:(RC
   NSString *objectId = o[@"objectId"];
   if (!STMObjectsMatches(objectId, STMObjectsUUID)) { reject(@"invalid-request", STMObjectsMessage(@"invalid-request"), nil); return; }
   NSURL *folder = [STMObjectsRoot(NSDocumentDirectory, @"HandheldCaptures") URLByAppendingPathComponent:objectId isDirectory:YES];
+  NSNumber *finished = nil;
+  if (![[folder URLByAppendingPathComponent:@"finished"] getResourceValue:&finished forKey:NSURLIsRegularFileKey error:nil] || !finished.boolValue) {
+    reject(@"unfinished-capture", @"This capture hasn't finished saving. Your capture is still saved on this phone.", nil); return;
+  }
   NSArray<NSString *> *contents = [NSFileManager.defaultManager contentsOfDirectoryAtPath:folder.path error:nil];
-  NSArray<NSString *> *names = [contents
-    filteredArrayUsingPredicate:[NSPredicate predicateWithFormat:@"SELF MATCHES %@", @"[0-9]{4}\\.heic"]];
+  NSArray<NSString *> *names = [[contents
+    filteredArrayUsingPredicate:[NSPredicate predicateWithFormat:@"SELF MATCHES %@", @"[0-9]{4}\\.heic"]] sortedArrayUsingSelector:@selector(compare:)];
   if (names.count == 0) { reject(@"no-photos", @"The scan has no photos. Scan it again.", nil); return; }
   // A damaged streaming capture must not silently become a legacy photo-only upload.
   BOOL exactDepthRequired = [contents containsObject:@"capture-frames.jsonl"] ||
     [contents filteredArrayUsingPredicate:[NSPredicate predicateWithFormat:@"SELF ENDSWITH %@", @".depth.plist"]].count > 0;
   NSMutableArray *files = [NSMutableArray array];
-  for (NSString *name in [names sortedArrayUsingSelector:@selector(compare:)]) {
+  for (NSString *name in names) {
     NSString *depthName = [name.stringByDeletingPathExtension stringByAppendingString:@".depth.plist"];
     NSURL *depthURL = [folder URLByAppendingPathComponent:depthName];
     BOOL hasDepth = [NSFileManager.defaultManager fileExistsAtPath:depthURL.path];
@@ -258,7 +264,9 @@ RCT_REMAP_METHOD(sendHandheld, sendHandheldOptions:(NSDictionary *)o resolve:(RC
     }
     [files addObject:@{@"capture": @YES, @"name": name, @"url": [folder URLByAppendingPathComponent:name], @"type": @"image/heic"}];
   }
-  [self sendFiles:files objectId:objectId resolve:^{ resolve(@{@"photosSent": @(names.count)}); } reject:reject];
+  [self sendFiles:files objectId:objectId resolve:^{
+    resolve(@{@"photosSent": @(names.count), @"captureManifest": @{@"version": @1, @"images": names, @"depthRequired": @(exactDepthRequired)}});
+  } reject:reject];
 }
 
 #pragma mark Photos and camera

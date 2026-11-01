@@ -1,4 +1,5 @@
-import {copyFile, mkdir, readFile, rm, writeFile} from 'node:fs/promises';
+import {copyFile, mkdir, readFile, rm, stat, writeFile} from 'node:fs/promises';
+import {createHash} from 'node:crypto';
 import {basename, join} from 'node:path';
 import {DispatchedPrintError, type PendingElicitation, type PrinterHandoffConfig} from '@scan-to-make/printer-handoff';
 import type {PrintHandoffServices} from '../print-handoff-http.js';
@@ -16,6 +17,28 @@ const UNCERTAIN = 'The printer may have started this print. Check the printer be
 
 export class InvalidStateError extends Error {
   constructor(message: string) { super(message); this.name = 'InvalidStateError'; }
+}
+
+export class InvalidCaptureManifestError extends Error {
+  constructor() { super('Invalid capture manifest'); this.name = 'InvalidCaptureManifestError'; }
+}
+
+export interface CaptureManifest {version: 1; images: string[]; depthRequired: boolean}
+const CAPTURE_PENDING = 'The capture is still missing camera or depth files, or its completed file list. Resume sending it from the phone that recorded it.';
+
+function parseCaptureManifest(value: unknown): CaptureManifest {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new InvalidCaptureManifestError();
+  const manifest = value as Record<string, unknown>;
+  if (manifest.version !== 1 || typeof manifest.depthRequired !== 'boolean' || !Array.isArray(manifest.images)
+      || manifest.images.length < 1 || manifest.images.length > 10000
+      || manifest.images.some(name => typeof name !== 'string' || !/^[0-9]{4}\.heic$/.test(name))
+      || new Set(manifest.images).size !== manifest.images.length) throw new InvalidCaptureManifestError();
+  return {version: 1, images: [...manifest.images].sort(), depthRequired: manifest.depthRequired};
+}
+
+function captureDigest(object: StmObject, depthRequired: boolean): string {
+  return createHash('sha256').update(JSON.stringify({version: 1, depthRequired,
+    images: [...(object.capture ?? [])].sort(), depth: [...(object.captureDepth ?? [])].sort()})).digest('hex');
 }
 
 export interface ObjectServiceDeps {
@@ -133,10 +156,11 @@ export class ObjectService {
     return this.#gate(id, async () => {
       const object = await this.get(id);
       if (object.state !== 'new' || object.scan) throw new InvalidStateError('The scan can only be added before the touch-up starts.');
+      if (object.captureCompletion) await this.#deps.store.update(id, o => ({...o, captureCompletion: undefined}));
       await this.#deps.store.addFile(id, 'capture', name, bytes);
       return this.#changed(await this.#deps.store.update(id, o => {
         const capture = o.capture ?? [];
-        return {...o, capture: capture.includes(name) ? capture : [...capture, name]};
+        return {...o, capture: capture.includes(name) ? capture : [...capture, name], captureCompletion: undefined};
       }));
     });
   }
@@ -148,9 +172,11 @@ export class ObjectService {
         throw new Error('Invalid file name');
       const object = await this.get(id);
       if (object.state !== 'new' || object.scan) throw new InvalidStateError('Depth can only be added before reconstruction starts.');
+      if (object.captureCompletion) await this.#deps.store.update(id, o => ({...o, captureCompletion: undefined}));
       await this.#deps.store.addFile(id, 'capture', name, bytes);
       return this.#changed(await this.#deps.store.update(id, o => ({...o,
         captureDepth: o.captureDepth?.includes(name) ? o.captureDepth : [...(o.captureDepth ?? []), name],
+        captureCompletion: undefined,
       })));
     });
   }
@@ -163,22 +189,55 @@ export class ObjectService {
   }
 
   /** The inputs are complete: start the touch-up. Starting again while it runs changes nothing. */
-  start(id: string): Promise<StmObject> { return this.#gate(id, () => this.#start(id)); }
-  async #start(id: string): Promise<StmObject> {
-    const object = await this.get(id);
+  start(id: string, captureManifest?: unknown): Promise<StmObject> { return this.#gate(id, () => this.#start(id, captureManifest)); }
+  async #start(id: string, captureManifest?: unknown): Promise<StmObject> {
+    let object = await this.get(id);
+    if (captureManifest !== undefined) {
+      const manifest = parseCaptureManifest(captureManifest);
+      const images = [...(object.capture ?? [])].sort(), depths = [...(object.captureDepth ?? [])].sort();
+      const expectedDepth = manifest.depthRequired ? manifest.images.map(name => name.replace('.heic', '.depth.plist')) : [];
+      if (JSON.stringify(images) !== JSON.stringify(manifest.images) || JSON.stringify(depths) !== JSON.stringify(expectedDepth))
+        throw new InvalidStateError(CAPTURE_PENDING);
+      await this.#captureFilesPresent(object);
+      const sha256 = captureDigest(object, manifest.depthRequired);
+      const same = object.captureCompletion?.sha256 === sha256 && object.captureCompletion.depthRequired === manifest.depthRequired;
+      if (same && ['touching-up', 'needs-closeup', 'ready', 'printing', 'printed'].includes(object.state)) return object;
+      if (!same) {
+        if (object.state !== 'new' && object.state !== 'failed') throw new InvalidStateError('Wait until the current step finishes.');
+        object = await this.#deps.store.update(id, o => ({...o, captureCompletion: {
+          version: 1, depthRequired: manifest.depthRequired, frameCount: manifest.images.length, sha256, completedAtMs: Date.now(),
+        }}));
+      }
+    }
     // Photos only show what something looks like; without a scan, the description says what to make.
     if (!object.scan && !object.capture?.length && !object.captureDepth?.length && !object.instructions?.trim() && object.state === 'new')
       throw new InvalidStateError('Describe what to make, or add a scan.');
     if (object.state === 'touching-up') return object;
     if (object.state === 'needs-closeup') return this.#pass(object, {});
     if (object.state !== 'new' && object.state !== 'failed') throw new InvalidStateError('This object has already been touched up.');
-    if (object.captureDepth?.length) {
-      const images = object.capture ?? [];
-      const depths = new Set(object.captureDepth);
-      if (!images.length || images.length !== depths.size || images.some(name => !depths.has(name.replace(/\.heic$/i, '.depth.plist'))))
-        throw new InvalidStateError('The capture is still missing camera or depth files. Resume sending it from your phone.');
-    }
     return this.#pass(object, {});
+  }
+
+  async #captureFilesPresent(object: StmObject): Promise<void> {
+    // Names came from the validated manifest or its bound completion marker, never a caller path.
+    const names = [...(object.capture ?? []), ...(object.captureDepth ?? [])];
+    for (let offset = 0; offset < names.length; offset += 32) {
+      const present = await Promise.all(names.slice(offset, offset + 32).map(async name => {
+        if (!/^[0-9]{4}\.(heic|depth\.plist)$/.test(name)) return false;
+        const info = await stat(join(this.dir(object.id), 'capture', name)).catch(() => undefined);
+        return info?.isFile() && info.size > 0;
+      }));
+      if (!present.every(Boolean)) throw new InvalidStateError(CAPTURE_PENDING);
+    }
+  }
+
+  async #requireCaptureCompletion(object: StmObject): Promise<void> {
+    const complete = object.captureCompletion;
+    if (!object.captureDepth?.length && !complete) return; // Previously recorded image-only captures.
+    if (!complete || complete.version !== 1 || complete.frameCount !== object.capture?.length
+        || (object.captureDepth?.length && !complete.depthRequired)
+        || complete.sha256 !== captureDigest(object, complete.depthRequired)) throw new InvalidStateError(CAPTURE_PENDING);
+    await this.#captureFilesPresent(object);
   }
 
   correct(id: string, note: string): Promise<StmObject> { return this.#gate(id, () => this.#correct(id, note)); }
@@ -288,6 +347,7 @@ export class ObjectService {
   }
 
   async #pass(object: StmObject, opts: {note?: string}): Promise<StmObject> {
+    await this.#requireCaptureCompletion(object);
     const store = this.#deps.store, dir = store.dir(object.id);
     const fromCurrent = opts.note !== undefined && object.current !== undefined;
     // A handheld scan is rebuilt into scan/scan.usdz first, once; its photos also show the touch-up the object.

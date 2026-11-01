@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {chmod, mkdtemp, mkdir, readdir, readFile, writeFile} from 'node:fs/promises';
+import {chmod, mkdtemp, mkdir, readdir, readFile, rm, writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {ObjectStore} from '../dist/objects/store.js';
@@ -8,6 +8,7 @@ import {ObjectService, InvalidStateError} from '../dist/objects/service.js';
 import {macReconstructRunner, progressWords, NEEDS_MACOS_27} from '../dist/objects/reconstruct.js';
 
 const STL = 'solid m\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 1 0 0\nvertex 0 1 0\nendloop\nendfacet\nendsolid m\n';
+const manifest = images => ({version: 1, images, depthRequired: true});
 
 async function setup({reconstruct} = {}) {
   const root = await mkdtemp(join(tmpdir(), 'objects-handheld-'));
@@ -91,7 +92,7 @@ test('exact depth uploads survive retries and an incomplete RGB-depth pair canno
   await assert.rejects(service.start(object.id), /missing camera or depth files/);
   assert.equal(builds.length, 0);
   await service.addCaptureDepth(object.id, '0001.depth.plist', depth);
-  await service.start(object.id);
+  await service.start(object.id, manifest(['0000.heic', '0001.heic']));
   assert.equal((await service.settled(object.id)).state, 'ready');
   await assert.rejects(service.addCaptureDepth(object.id, '0002.depth.plist', depth), InvalidStateError);
 });
@@ -115,13 +116,132 @@ test('reconstruction waits for an admitted RGB upload to finish committing its p
   };
   const upload = service.addCapturePhoto(object.id, '0000.heic', Buffer.from('rgb'));
   await writing.promise;
-  const started = service.start(object.id);
+  const started = service.start(object.id, manifest(['0000.heic']));
   // Attach rejection handling before releasing the write: the unguarded upload failed here.
   const result = Promise.all([upload, started]);
   release.resolve();
   await result;
   assert.equal((await service.settled(object.id)).state, 'ready');
   assert.equal(builds.length, 1);
+});
+
+test('a complete-pair prefix stays uploadable until its source commits the full finished manifest', async () => {
+  const {service, object, builds, store} = await setup();
+  const depth = Buffer.from('bplist00');
+  await service.addCaptureDepth(object.id, '0000.depth.plist', depth);
+  await service.addCapturePhoto(object.id, '0000.heic', Buffer.from('rgb0'));
+  await assert.rejects(service.start(object.id), /completed file list/);
+  await assert.rejects(service.start(object.id, manifest(['0000.heic', '0001.heic'])), /missing camera or depth/);
+  assert.equal((await service.get(object.id)).state, 'new');
+  assert.equal((await service.get(object.id)).captureCompletion, undefined);
+  assert.equal(builds.length, 0);
+  await service.addCaptureDepth(object.id, '0001.depth.plist', depth);
+  await service.addCapturePhoto(object.id, '0001.heic', Buffer.from('rgb1'));
+  const full = manifest(['0000.heic', '0001.heic']);
+  await service.start(object.id, full);
+  const done = await service.settled(object.id);
+  assert.equal(done.state, 'ready');
+  assert.equal(done.captureCompletion.frameCount, 2);
+  assert.match(done.captureCompletion.sha256, /^[a-f0-9]{64}$/);
+  assert.equal(done.captureCompletion.images, undefined, 'the stored marker does not duplicate image names');
+  assert.equal((await new ObjectStore(join(service.dir(object.id), '..')).get(object.id)).captureCompletion.sha256, done.captureCompletion.sha256);
+  assert.equal((await service.start(object.id, full)).state, 'ready', 'lost start responses are idempotent');
+  assert.equal(builds.length, 1);
+  await store.update(object.id, o => ({...o, state: 'needs-closeup'}));
+  await service.addPhoto(object.id, 'detail.jpg', Buffer.from('closeup'));
+  assert.deepEqual((await service.get(object.id)).captureCompletion, done.captureCompletion, 'ordinary close-ups do not invalidate capture completion');
+});
+
+test('a repeated completion manifest preserves the close-up question until it is explicitly answered', async () => {
+  const {service, object, store, touchups} = await setup();
+  await service.addCaptureDepth(object.id, '0000.depth.plist', Buffer.from('bplist00'));
+  await service.addCapturePhoto(object.id, '0000.heic', Buffer.from('rgb'));
+  const full = manifest(['0000.heic']);
+  await service.start(object.id, full);
+  await service.settled(object.id);
+  const question = {closeup: 'Show the underside.'};
+  await store.update(object.id, o => ({...o, state: 'needs-closeup', question}));
+  const before = await service.get(object.id);
+  const retried = await service.start(object.id, full);
+  assert.equal(retried.state, 'needs-closeup');
+  assert.deepEqual(retried.question, question);
+  assert.equal(retried.passes.length, before.passes.length);
+  assert.equal(touchups.length, 1);
+  const answered = await service.answerCloseup(object.id, {bestGuess: true});
+  assert.equal(answered.state, 'touching-up');
+  const done = await service.settled(object.id);
+  assert.equal(done.state, 'ready');
+  assert.equal(done.question, undefined);
+  assert.equal(done.passes.length, before.passes.length + 1);
+  assert.equal(touchups.length, 2);
+});
+
+test('pending depth completion cannot be bypassed by failed retry, correction or close-up paths', async () => {
+  const {service, object, store, builds, touchups} = await setup();
+  await service.addCaptureDepth(object.id, '0000.depth.plist', Buffer.from('bplist00'));
+  await service.addCapturePhoto(object.id, '0000.heic', Buffer.from('rgb'));
+  await store.update(object.id, o => ({...o, state: 'failed'}));
+  await assert.rejects(service.start(object.id), /completed file list/);
+  await assert.rejects(service.correct(object.id, 'Use the saved scan.'), /completed file list/);
+  await store.update(object.id, o => ({...o, state: 'needs-closeup', question: {closeup: 'Closer.'}}));
+  await assert.rejects(service.start(object.id), /completed file list/);
+  await assert.rejects(service.answerCloseup(object.id, {}), /completed file list/);
+  assert.equal(builds.length, 0);
+  assert.equal(touchups.length, 0);
+  assert.equal((await service.get(object.id)).passes.length, 0);
+});
+
+test('committed depth completion survives failed reconstruction and an empty-body retry', async () => {
+  let attempts = 0;
+  const {service, object, store} = await setup({reconstruct: async input => {
+    if (++attempts === 1) throw new Error('temporary reconstruction failure');
+    await writeFile(input.output, 'usdz');
+  }});
+  await service.addCaptureDepth(object.id, '0000.depth.plist', Buffer.from('bplist00'));
+  await service.addCapturePhoto(object.id, '0000.heic', Buffer.from('rgb'));
+  await service.start(object.id, manifest(['0000.heic']));
+  const failed = await service.settled(object.id);
+  assert.equal(failed.state, 'failed');
+  await store.recoverInterrupted();
+  await service.start(object.id);
+  const done = await service.settled(object.id);
+  assert.equal(done.state, 'ready');
+  assert.deepEqual(done.captureCompletion, failed.captureCompletion);
+  assert.equal(attempts, 2);
+});
+
+test('capture completion rejects missing or empty retained files and false depth declarations', async () => {
+  const {service, object} = await setup();
+  await service.addCaptureDepth(object.id, '0000.depth.plist', Buffer.from('bplist00'));
+  await service.addCapturePhoto(object.id, '0000.heic', Buffer.alloc(0));
+  const full = manifest(['0000.heic']);
+  await assert.rejects(service.start(object.id, full), /missing camera or depth/);
+  await service.addCapturePhoto(object.id, '0000.heic', Buffer.from('rgb'));
+  await assert.rejects(service.start(object.id, {...full, depthRequired: false}), /missing camera or depth/);
+  await rm(join(service.dir(object.id), 'capture', '0000.depth.plist'));
+  await assert.rejects(service.start(object.id, full), /missing camera or depth/);
+  assert.equal((await service.get(object.id)).captureCompletion, undefined);
+});
+
+test('capture writes invalidate a persisted marker and optional image-only manifests still validate their exact set', async () => {
+  const {service, object, store} = await setup();
+  await service.addCapturePhoto(object.id, '0000.heic', Buffer.from('rgb'));
+  await assert.rejects(service.start(object.id, {version: 1, images: ['0000.heic', '0001.heic'], depthRequired: false}), /missing camera or depth/);
+  await service.start(object.id, {version: 1, images: ['0000.heic'], depthRequired: false});
+  await service.settled(object.id);
+  assert.equal((await service.get(object.id)).captureCompletion.depthRequired, false);
+  // Simulate a recovered draft with a previously persisted completion marker.
+  await store.update(object.id, o => ({...o, state: 'new', scan: undefined}));
+  await service.addCapturePhoto(object.id, '0000.heic', Buffer.from('resent'));
+  assert.equal((await service.get(object.id)).captureCompletion, undefined);
+  await store.update(object.id, o => ({...o, captureCompletion: {version: 1, depthRequired: false, frameCount: 1, sha256: 'old', completedAtMs: 1}}));
+  await service.addCaptureDepth(object.id, '0000.depth.plist', Buffer.from('bplist00'));
+  assert.equal((await service.get(object.id)).captureCompletion, undefined);
+  await assert.rejects(service.start(object.id), /completed file list/);
+  await store.update(object.id, o => ({...o, captureCompletion: {version: 1, depthRequired: true, frameCount: 1, sha256: 'old', completedAtMs: 1}}));
+  store.addFile = async () => { throw new Error('disk write interrupted'); };
+  await assert.rejects(service.addCapturePhoto(object.id, '0000.heic', Buffer.from('retry')), /disk write interrupted/);
+  assert.equal((await service.get(object.id)).captureCompletion, undefined, 'failed overwrites invalidate completion before touching existing bytes');
 });
 
 test('handheld photos are only taken before the touch-up starts, and not next to a walk-around scan', async () => {

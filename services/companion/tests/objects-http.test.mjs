@@ -11,7 +11,7 @@ import {createControlDispatcher} from '../dist/local-control-services.js';
 
 const STL = 'solid m\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 1 0 0\nvertex 0 1 0\nendloop\nendfacet\nendsolid m\n';
 
-async function fixture(t, {denied = []} = {}) {
+async function fixture(t, {denied = [], reconstruct} = {}) {
   const root = await mkdtemp(join(tmpdir(), 'objects-http-'));
   const store = new ObjectStore(join(root, 'objects'));
   const runTouchup = async () => {
@@ -19,24 +19,24 @@ async function fixture(t, {denied = []} = {}) {
     await writeFile(join(out, 'touched.stl'), STL); await writeFile(join(out, 'front.png'), 'png');
     return {status: 'done', summary: 'Fixed.', model: join(out, 'touched.stl'), renders: [join(out, 'front.png')], checkpoints: [], stats: {seconds: 1, toolCalls: 1}, passDir: join(root, 'pass')};
   };
-  const service = new ObjectService({store, runTouchup, stlInfo: async () => [60.6, 45.2, 21.7], claudePath: '/c', handoff: {backend: 'bambu-printer-mcp', process: {command: '/usr/bin/true'}}});
+  const service = new ObjectService({store, runTouchup, stlInfo: async () => [60.6, 45.2, 21.7], claudePath: '/c', handoff: {backend: 'bambu-printer-mcp', process: {command: '/usr/bin/true'}}, ...(reconstruct ? {reconstruct} : {})});
   const routes = createObjectRoutes(service);
-  const scopes = [];
+  const scopes = [], devices = [];
   const server = createServer(async (request, response) => {
-    const authorize = async scope => { scopes.push(scope); if (denied.includes(scope)) { const e = new Error('forbidden'); e.name = 'RemoteAuthFailure'; throw e; } };
+    const authorize = async scope => { scopes.push(scope); devices.push(request.headers['x-test-device']); if (denied.includes(scope)) { const e = new Error('forbidden'); e.name = 'RemoteAuthFailure'; throw e; } };
     try { await routes.handle(request, response, authorize, name => request.headers[name]); }
     catch (error) { response.statusCode = error.name === 'RemoteAuthFailure' ? 403 : 500; response.end(JSON.stringify({error: {code: String(error.message)}})); }
   });
   await new Promise(r => server.listen(0, '127.0.0.1', r));
   t.after(() => server.close());
   const base = `http://127.0.0.1:${server.address().port}`;
-  const call = async (method, path, body, type = 'application/json') => {
-    const response = await fetch(base + path, {method, ...(body !== undefined ? {body: typeof body === 'string' || Buffer.isBuffer(body) ? body : JSON.stringify(body), headers: {'content-type': type}} : {})});
+  const call = async (method, path, body, type = 'application/json', device = 'source-phone') => {
+    const response = await fetch(base + path, {method, headers: {'content-type': type, 'x-test-device': device}, ...(body !== undefined ? {body: typeof body === 'string' || Buffer.isBuffer(body) ? body : JSON.stringify(body)} : {})});
     const bytes = Buffer.from(await response.arrayBuffer());
     let json; try { json = JSON.parse(bytes.toString()); } catch {}
     return {status: response.status, json, bytes, type: response.headers.get('content-type')};
   };
-  return {call, scopes, service, store};
+  return {call, scopes, devices, service, store};
 }
 
 test('create, list and get an object', async t => {
@@ -81,6 +81,62 @@ test('exact capture depth requires write scope, stays separate from photo media,
   const denied = await fixture(t, {denied: ['captures:import']});
   const other = await denied.service.create();
   assert.equal((await denied.call('POST', `/v1/objects/${other.id}/capture-depth?name=0000.depth.plist`, payload)).status, 403);
+});
+
+test('another authorized phone cannot start an uploaded pair prefix and the source can resume and complete it', async t => {
+  let builds = 0;
+  const release = Promise.withResolvers();
+  const {call, service, devices, scopes} = await fixture(t, {reconstruct: async input => {
+    builds += 1;
+    await release.promise;
+    await writeFile(input.output, 'usdz');
+  }});
+  t.after(() => release.resolve());
+  const id = (await call('POST', '/v1/objects', {})).json.object.id;
+  const path = `/v1/objects/${id}`;
+  const full = {captureManifest: {version: 1, images: ['0000.heic', '0001.heic'], depthRequired: true}};
+  const sendPair = async stem => {
+    assert.equal((await call('POST', `${path}/capture-depth?name=${stem}.depth.plist`, Buffer.from('bplist00'))).status, 200);
+    assert.equal((await call('POST', `${path}/capture?name=${stem}.heic`, Buffer.from('rgb'))).status, 200);
+  };
+  await sendPair('0000');
+  assert.equal((await call('GET', path, undefined, undefined, 'other-paired-phone')).json.object.capture.length, 1);
+  const premature = await call('POST', path + '/start', undefined, undefined, 'other-paired-phone');
+  assert.equal(premature.status, 409);
+  assert.match(premature.json.error.message, /phone that recorded it/);
+  assert.equal((await call('POST', path + '/start', full)).status, 409, 'manifest does not hide a missing trailing pair');
+  assert.equal((await service.get(id)).state, 'new');
+  assert.equal(builds, 0);
+  await sendPair('0001');
+  const started = await call('POST', path + '/start', full);
+  assert.equal(started.status, 200);
+  assert.equal(started.json.object.state, 'touching-up');
+  assert.equal((await call('POST', path + '/start', full)).json.object.state, 'touching-up');
+  release.resolve();
+  assert.equal((await service.settled(id)).state, 'ready');
+  assert.equal((await call('POST', path + '/start', full)).json.object.state, 'ready');
+  assert.equal(builds, 1, 'manifest retries do not replay a completed start');
+  assert.ok(devices.includes('source-phone') && devices.includes('other-paired-phone'));
+  assert.equal(scopes.at(-1), 'captures:import');
+});
+
+test('start validates the bounded manifest and requires capture import scope', async t => {
+  const {call, service} = await fixture(t);
+  const object = await service.create();
+  const path = `/v1/objects/${object.id}/start`;
+  const valid = {version: 1, images: ['0000.heic'], depthRequired: true};
+  for (const captureManifest of [null, [], {}, {...valid, version: 2}, {...valid, depthRequired: 'true'},
+    {...valid, images: []}, {...valid, images: ['../0000.heic']}, {...valid, images: ['0000.HEIC']},
+    {...valid, images: ['0000.heic', '0000.heic']}, {...valid, images: Array(10001).fill('0000.heic')}]) {
+    assert.equal((await call('POST', path, {captureManifest})).status, 400, JSON.stringify(captureManifest).slice(0, 160));
+  }
+  assert.equal((await call('POST', path, 'null')).status, 400);
+  const maximum = {captureManifest: {...valid, images: Array.from({length: 10000}, (_, i) => `${String(i).padStart(4, '0')}.heic`)}};
+  assert.equal((await call('POST', path, maximum)).status, 409, 'valid10,000-name manifest reaches file validation beyond16KiB');
+  assert.equal((await call('POST', path, ' '.repeat(128 * 1024 + 1))).status, 413);
+  const denied = await fixture(t, {denied: ['captures:import']});
+  const other = await denied.service.create();
+  assert.equal((await denied.call('POST', `/v1/objects/${other.id}/start`, {captureManifest: valid})).status, 403);
 });
 
 test('scan, photos, start, then the ready model and renders download', async t => {

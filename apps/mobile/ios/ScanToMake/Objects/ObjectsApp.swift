@@ -107,7 +107,9 @@ private func native(_ name: String) -> NSObject? { (NSClassFromString(name) as? 
     func updateDraft(_ id: String, instructions: String) async throws -> StmObject {
         try await request("PATCH", "/v1/objects/\(id)", ["instructions": instructions], as: ObjectReply.self).object
     }
-    func start(_ id: String) async throws -> StmObject { try await request("POST", "/v1/objects/\(id)/start", as: ObjectReply.self).object }
+    func start(_ id: String, captureManifest: [String: Any]? = nil) async throws -> StmObject {
+        try await request("POST", "/v1/objects/\(id)/start", captureManifest.map { ["captureManifest": $0] }, as: ObjectReply.self).object
+    }
     func correct(_ id: String, _ note: String) async throws -> StmObject { try await request("POST", "/v1/objects/\(id)/corrections", ["note": note], as: ObjectReply.self).object }
     func closeup(_ id: String, bestGuess: Bool) async throws -> StmObject { try await request("POST", "/v1/objects/\(id)/closeup", ["bestGuess": bestGuess], as: ObjectReply.self).object }
     func print(_ id: String, checked: Bool) async throws -> StmObject { try await request("POST", "/v1/objects/\(id)/print", checked ? ["checked": true] : nil, as: ObjectReply.self).object }
@@ -180,10 +182,24 @@ private func native(_ name: String) -> NSObject? { (NSClassFromString(name) as? 
     }
 
     /// A handheld scan's photos (HandheldCapture.swift); the Mac rebuilds the model, then touches it up.
+    private struct HandheldManifest: Decodable {
+        var version: Int
+        var images: [String]
+        var depthRequired: Bool
+    }
     func sendHandheld(_ id: String) async throws -> StmObject {
         let bridge = try require(bridge)
-        _ = try await promise { bridge.sendHandheld(["objectId": id] as NSDictionary, resolve: $0, reject: $1) }
-        return try await start(id)
+        let reply = try await promise { bridge.sendHandheld(["objectId": id] as NSDictionary, resolve: $0, reject: $1) } as? [String: Any]
+        guard let raw = reply?["captureManifest"] as? [String: Any],
+              JSONSerialization.isValidJSONObject(raw),
+              let data = try? JSONSerialization.data(withJSONObject: raw),
+              let manifest = try? JSONDecoder().decode(HandheldManifest.self, from: data),
+              manifest.version == 1, (1...10000).contains(manifest.images.count),
+              manifest.images == manifest.images.sorted(), Set(manifest.images).count == manifest.images.count,
+              manifest.images.allSatisfy({ $0.range(of: "^[0-9]{4}\\.heic$", options: .regularExpression) != nil }) else {
+            throw MacError(code: "invalid-response", message: "The capture upload didn't confirm all saved frames. Your capture is still saved on this phone.")
+        }
+        return try await start(id, captureManifest: raw)
     }
 
     struct Pairing: Equatable { var paired: Bool; var address: String? }

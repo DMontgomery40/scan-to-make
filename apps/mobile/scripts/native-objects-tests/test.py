@@ -35,21 +35,45 @@ def run(command, **kwargs):
 
 if args.host:
     source = (REPO / 'apps/mobile/modules/local-project-storage/ios/ObjectsBridge.mm').read_text()
-    def extract(marker):
-        start = source.index(marker)
-        end = source.index('{', start) + 1
+    def extract(marker, text=source):
+        start = text.index(marker)
+        end = text.index('{', start) + 1
         depth = 1
         while depth:
-            depth += (source[end] == '{') - (source[end] == '}')
+            depth += (text[end] == '{') - (text[end] == '}')
             end += 1
-        return source[start:end]
+        return text[start:end]
+    swift_source = (REPO / 'apps/mobile/ios/ScanToMake/Objects/ObjectsApp.swift').read_text()
+    connection = swift_source.split('@MainActor final class MacConnection {', 1)[1].split('\nstruct ChosenPhoto', 1)[0]
+    swift_fixture = (HERE / 'HandheldManifestTests.swift').read_text()
+    swift_markers = {
+        '// MAC_ERROR': ('struct MacError:', swift_source),
+        '// PROMISE': ('@MainActor private func promise(', swift_source),
+        '// REQUIRE': ('private func require<T>(', connection),
+        '// START': ('func start(', connection),
+        '// SEND_HANDHELD': ('func sendHandheld(', connection),
+    }
+    for placeholder, (marker, text) in swift_markers.items():
+        swift_fixture = swift_fixture.replace(placeholder, extract(marker, text))
+    manifest_marker = 'private struct HandheldManifest:'
+    swift_fixture = swift_fixture.replace('// CAPTURE_MANIFEST', extract(manifest_marker, connection) if manifest_marker in connection else '')
+    swift_path = args.evidence / 'HandheldManifestFixture.swift'
+    swift_path.write_text(swift_fixture)
+    with tempfile.TemporaryDirectory(prefix='native-handheld-manifest-') as directory:
+        binary = str(Path(directory) / 'check')
+        with (args.evidence / 'swift-compile.log').open('w') as log:
+            run(['xcrun', 'swiftc', '-parse-as-library', str(swift_path), '-o', binary], stdout=log, stderr=subprocess.STDOUT)
+        with (args.evidence / 'swift-runtime.log').open('w') as log:
+            run([binary], stdout=log, stderr=subprocess.STDOUT)
     markers = {
         '// HOST_MATCHES': 'static BOOL STMObjectsMatches(',
+        '// HOST_PATH': 'static NSString *STMObjectsPath(',
         '// HOST_MESSAGE': 'static NSString *STMObjectsMessage(',
         '// HOST_UPLOAD': '- (void)upload:',
         '// HOST_EXISTING': '- (void)existing:',
         '// HOST_SEND_FILES': '- (void)sendFiles:',
         '// HOST_SEND_HANDHELD': 'RCT_REMAP_METHOD(sendHandheld,',
+        '// HOST_CALL': 'RCT_REMAP_METHOD(call,',
     }
     fixture = (HERE / 'runner.mm').read_text()
     hashes = {}

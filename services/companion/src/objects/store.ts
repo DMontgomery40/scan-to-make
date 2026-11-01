@@ -35,6 +35,8 @@ export interface StmObject {
   capture?: string[];
   /** Lossless depth/calibration companions under capture/, separate from viewable images. */
   captureDepth?: string[];
+  /** The source phone confirmed the entire finished capture; the digest binds its retained file names. */
+  captureCompletion?: {version: 1; depthRequired: boolean; frameCount: number; sha256: string; completedAtMs: number};
   /** What the Mac is doing right now, in words, while it is longer than a moment (building a handheld scan). */
   progress?: string;
   passes: ObjectPass[];

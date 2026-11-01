@@ -2,7 +2,7 @@ import type {IncomingMessage, ServerResponse} from 'node:http';
 import {readFile} from 'node:fs/promises';
 import {basename, join} from 'node:path';
 import type {RemoteScope} from '../remote-auth.js';
-import {InvalidStateError, type ObjectService} from './service.js';
+import {InvalidCaptureManifestError, InvalidStateError, type ObjectService} from './service.js';
 import {ObjectNotFoundError, type ObjectPass, type StmObject} from './store.js';
 import {RECONSTRUCTION_FAILED} from './reconstruct.js';
 
@@ -25,8 +25,8 @@ async function body(request: IncomingMessage, limit: number): Promise<Buffer> {
   }
   return Buffer.concat(chunks);
 }
-async function json<T>(request: IncomingMessage): Promise<T> {
-  const bytes = await body(request, MAX_JSON);
+async function json<T>(request: IncomingMessage, limit = MAX_JSON): Promise<T> {
+  const bytes = await body(request, limit);
   if (!bytes.length) return {} as T;
   try { return JSON.parse(bytes.toString('utf8')) as T; } catch { throw new HttpFailure(400, 'invalid-request'); }
 }
@@ -163,7 +163,12 @@ export function createObjectRoutes(service: ObjectService) {
             object = action === 'capture' ? await service.addCapturePhoto(id, name, bytes) : await service.addPhoto(id, name, bytes);
             break;
           }
-          case 'start': object = await service.start(id); break;
+          case 'start': {
+            const input = await json<unknown>(request, 128 * 1024);
+            if (!input || typeof input !== 'object' || Array.isArray(input)) throw new HttpFailure(400, 'invalid-request');
+            object = await service.start(id, (input as {captureManifest?: unknown}).captureManifest);
+            break;
+          }
           case 'printer': {
             const {destinationId} = await json<{destinationId?: unknown}>(request);
             if (typeof destinationId !== 'string' || !destinationId.length || destinationId.length > 256) throw new HttpFailure(400, 'invalid-request');
@@ -190,6 +195,7 @@ export function createObjectRoutes(service: ObjectService) {
         if (error instanceof HttpFailure) return send(response, error.status, {error: {code: error.code, message: error.message}});
         if (error instanceof ObjectNotFoundError) return send(response, 404, {error: {code: 'not-found', message: 'Object not found'}});
         if (error instanceof InvalidStateError) return send(response, 409, {error: {code: 'invalid-state', message: error.message}});
+        if (error instanceof InvalidCaptureManifestError) return send(response, 400, {error: {code: 'invalid-request', message: error.message}});
         if (error instanceof Error && error.message === 'Invalid file name') return send(response, 400, {error: {code: 'invalid-name', message: error.message}});
         throw error;
       }

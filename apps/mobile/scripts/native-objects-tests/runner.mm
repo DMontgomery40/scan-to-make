@@ -17,6 +17,7 @@ static NSUInteger const STMObjectsScanLimit = 64 * 1024 * 1024;
 static NSUInteger const STMObjectsPhotoLimit = 25 * 1024 * 1024;
 static NSUInteger const STMObjectsJSONLimit = 4 * 1024 * 1024;
 // HOST_MATCHES
+// HOST_PATH
 // HOST_MESSAGE
 static NSURL *STMObjectsRoot(NSSearchPathDirectory directory, NSString *name) { return [fixtureRoot URLByAppendingPathComponent:name isDirectory:YES]; }
 static NSDictionary *STMObjectsPairing(NSString *scope, NSString **code) { return @{@"scope":scope}; }
@@ -28,6 +29,9 @@ static NSDictionary *STMObjectsPairing(NSString *scope, NSString **code) { retur
         done:(void (^)(NSInteger, NSData *, NSString *))done {
     [requests addObject:@{@"method":method,@"path":path,@"body":body ?: NSData.data,@"type":type ?: @""}];
     if ([method isEqual:@"GET"]) {
+        done(200,[NSJSONSerialization dataWithJSONObject:@{@"object":remoteObject} options:0 error:nil],nil); return;
+    }
+    if ([path hasSuffix:@"/start"]) {
         done(200,[NSJSONSerialization dataWithJSONObject:@{@"object":remoteObject} options:0 error:nil],nil); return;
     }
     NSURLComponents *url=[NSURLComponents componentsWithString:[@"https://fixture.invalid" stringByAppendingString:path]];
@@ -48,6 +52,7 @@ static NSDictionary *STMObjectsPairing(NSString *scope, NSString **code) { retur
 @end
 @implementation ObjectsBridge
 - (instancetype)init { if ((self=[super init])) _uploading=[NSMutableSet set]; return self; }
+// HOST_CALL
 // HOST_UPLOAD
 // HOST_EXISTING
 // HOST_SEND_FILES
@@ -58,6 +63,7 @@ static NSURL *CaptureFolder(void) { return [[STMObjectsRoot(NSDocumentDirectory,
 static void Reset(NSURL *scratch, NSString *name) {
     fixtureRoot=[scratch URLByAppendingPathComponent:name isDirectory:YES];
     Require([NSFileManager.defaultManager createDirectoryAtURL:CaptureFolder() withIntermediateDirectories:YES attributes:nil error:nil],@"private capture folder");
+    Require([NSData.data writeToURL:[CaptureFolder() URLByAppendingPathComponent:@"finished"] atomically:YES],@"local finished marker");
     requests=[NSMutableArray array]; remoteObject=[@{@"photos":@[],@"capture":@[],@"captureDepth":@[]} mutableCopy]; failOnceName=nil;
 }
 static void Put(NSString *name, NSString *payload) {
@@ -86,17 +92,23 @@ int main(void) { @autoreleasepool {
         ObjectsBridge *bridge=[ObjectsBridge new];
         id result=Send(bridge,nil);
         Require([result[@"photosSent"] integerValue]==2,@"paired upload reports RGB count, not file count");
+        NSDictionary *pairedManifest=@{@"version":@1,@"images":@[@"0000.heic",@"0001.heic"],@"depthRequired":@YES};
+        Require([result[@"captureManifest"] isEqual:pairedManifest],@"successful paired upload returns the full sorted completion manifest");
         Require([UploadPaths() isEqual:@[Path(@"capture-depth",@"0000.depth.plist"),Path(@"capture",@"0000.heic"),Path(@"capture-depth",@"0001.depth.plist"),Path(@"capture",@"0001.heic")]],@"each depth uploads before its RGB, in filename order");
         Require([Uploads()[0][@"body"] isEqual:[@"bplist00-depth-zero" dataUsingEncoding:NSUTF8StringEncoding]] && [Uploads()[1][@"body"] isEqual:[@"rgb-zero" dataUsingEncoding:NSUTF8StringEncoding]],@"original depth/RGB bytes preserved");
         Require([Uploads()[0][@"type"] isEqual:@"application/octet-stream"] && [Uploads()[1][@"type"] isEqual:@"image/heic"],@"depth/RGB content types");
-        [requests removeAllObjects]; Send(bridge,nil);
+        [requests removeAllObjects]; result=Send(bridge,nil);
         Require(Uploads().count==0,@"complete paired retry uploads nothing twice");
+        Require([result[@"captureManifest"] isEqual:pairedManifest],@"retry manifest includes every local image even when all uploads are skipped");
+        Require([[NSData dataWithContentsOfURL:[CaptureFolder() URLByAppendingPathComponent:@"0000.heic"]] isEqual:[@"rgb-zero" dataUsingEncoding:NSUTF8StringEncoding]] && [NSFileManager.defaultManager fileExistsAtPath:[CaptureFolder() URLByAppendingPathComponent:@"0001.depth.plist"].path],@"successful completion and retry retain original RGB/depth files");
 
         Reset(scratch,@"interrupted"); Put(@"0000.heic",@"rgb"); Put(@"0000.depth.plist",@"bplist00-depth"); Put(@"capture-frames.jsonl",@"{}\n");
         bridge=[ObjectsBridge new]; failOnceName=@"0000.heic"; Send(bridge,@"upload-failed");
         Require([remoteObject[@"captureDepth"] isEqual:@[@"0000.depth.plist"]] && [remoteObject[@"capture"] count]==0,@"failure retained only the sent depth");
-        [requests removeAllObjects]; Send(bridge,nil);
+        Require([NSFileManager.defaultManager fileExistsAtPath:[CaptureFolder() URLByAppendingPathComponent:@"0000.heic"].path],@"failed upload retains local source");
+        [requests removeAllObjects]; result=Send(bridge,nil);
         Require([UploadPaths() isEqual:@[Path(@"capture",@"0000.heic")]],@"retry independently skips existing depth while sending missing RGB");
+        Require([result[@"captureManifest"] isEqual:@{@"version":@1,@"images":@[@"0000.heic"],@"depthRequired":@YES}],@"partial retry returns the complete image set after remaining upload succeeds");
         remoteObject[@"captureDepth"]=@[]; [requests removeAllObjects]; Send(bridge,nil);
         Require([UploadPaths() isEqual:@[Path(@"capture-depth",@"0000.depth.plist")]],@"existing RGB does not hide a missing depth sidecar");
 
@@ -107,10 +119,34 @@ int main(void) { @autoreleasepool {
         Reset(scratch,@"all-depth-missing"); Put(@"0000.heic",@"rgb"); Put(@"capture-frames.jsonl",@"{}\n");
         Send([ObjectsBridge new],@"incomplete-depth"); Require(requests.count==0,@"stream journal prevents legacy downgrade when all sidecars are missing");
 
+        Reset(scratch,@"unfinished"); Put(@"0000.heic",@"rgb"); Put(@"0000.depth.plist",@"bplist00-depth");
+        Require([NSFileManager.defaultManager removeItemAtURL:[CaptureFolder() URLByAppendingPathComponent:@"finished"] error:nil],@"remove fixture completion marker");
+        Send([ObjectsBridge new],@"unfinished-capture"); Require(requests.count==0,@"unfinished capture fails before every network request and yields no manifest");
+        Require([NSFileManager.defaultManager fileExistsAtPath:[CaptureFolder() URLByAppendingPathComponent:@"0000.depth.plist"].path],@"unfinished rejection retains depth source");
+        Require([NSFileManager.defaultManager createDirectoryAtURL:[CaptureFolder() URLByAppendingPathComponent:@"finished"] withIntermediateDirectories:NO attributes:nil error:nil],@"directory fixture at marker path");
+        Send([ObjectsBridge new],@"unfinished-capture"); Require(requests.count==0,@"a directory is not a completed capture marker");
+
         Reset(scratch,@"legacy"); Put(@"0000.heic",@"opaque legacy HEIC with embedded depth"); Put(@"0001.heic",@"opaque legacy HEIC two");
         result=Send([ObjectsBridge new],nil);
         Require([result[@"photosSent"] integerValue]==2 && [UploadPaths() isEqual:@[Path(@"capture",@"0000.heic"),Path(@"capture",@"0001.heic")]],@"legacy embedded-depth photos remain accepted without fabricated sidecars");
-        printf("NATIVE_OBJECTS_HOST_PASS paired depth-first bytes, independent retry, incomplete-depth preflight, legacy capture\n");
+        Require([result[@"captureManifest"] isEqual:@{@"version":@1,@"images":@[@"0000.heic",@"0001.heic"],@"depthRequired":@NO}],@"finished legacy capture explicitly declares no lossless depth sidecars");
+
+        // The public maximum manifest fits the start route without enlarging other JSON routes.
+        NSMutableArray *allNames=[NSMutableArray arrayWithCapacity:10000];
+        for (NSUInteger i=0;i<10000;i++) [allNames addObject:[NSString stringWithFormat:@"%04lu.heic",(unsigned long)i]];
+        NSDictionary *largeManifest=@{@"captureManifest":@{@"version":@1,@"images":allNames,@"depthRequired":@YES}};
+        [requests removeAllObjects]; __block id reply=nil; __block NSString *failure=nil;
+        [bridge callOptions:@{@"method":@"POST",@"path":[NSString stringWithFormat:@"/v1/objects/%@/start",objectID],@"json":largeManifest} resolve:^(id r){reply=r;} reject:^(NSString*c,NSString*m,NSError*e){failure=c;}];
+        Require(reply!=nil && failure==nil && requests.count==1,@"start accepts the full10000-name manifest within128KiB");
+        Require([[NSJSONSerialization JSONObjectWithData:requests[0][@"body"] options:0 error:nil] isEqual:largeManifest],@"start sends the exact completion manifest JSON");
+        [requests removeAllObjects]; reply=nil; failure=nil;
+        [bridge callOptions:@{@"method":@"POST",@"path":@"/v1/objects",@"json":largeManifest} resolve:^(id r){reply=r;} reject:^(NSString*c,NSString*m,NSError*e){failure=c;}];
+        Require(reply==nil && [failure isEqual:@"invalid-request"] && requests.count==0,@"other routes keep their16KiB JSON limit");
+        reply=nil; failure=nil;
+        NSString *oversized=[@"x" stringByPaddingToLength:128*1024 withString:@"x" startingAtIndex:0];
+        [bridge callOptions:@{@"method":@"POST",@"path":[NSString stringWithFormat:@"/v1/objects/%@/start",objectID],@"json":@{@"captureManifest":oversized}} resolve:^(id r){reply=r;} reject:^(NSString*c,NSString*m,NSError*e){failure=c;}];
+        Require(reply==nil && [failure isEqual:@"invalid-request"] && requests.count==0,@"start payloads above128KiB remain bounded");
+        printf("NATIVE_OBJECTS_HOST_PASS full completion manifest, finished-marker guard, paired retry, source retention, legacy capture and bounded start payload\n");
     } @catch (NSException *error) {
         fprintf(stderr,"FAIL %s\n",error.reason.UTF8String); status=1;
     } @finally { [NSFileManager.defaultManager removeItemAtURL:scratch error:nil]; }
