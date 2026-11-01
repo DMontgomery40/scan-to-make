@@ -67,7 +67,7 @@ export function StartScreen({
       <Field
         label="Describe it"
         hint="Leave it empty to make a copy of what you scan. Product names, model numbers and links all help."
-        placeholder="A hook for my stroller handle that holds a cup"
+        placeholder="A clip that holds a 6 mm cable to the edge of my desk"
         value={instructions}
         onChangeText={setInstructions}
         multiline

@@ -32,7 +32,10 @@ export function objectTitle(object: StmObject): string {
       .split(/,\s*(?=[a-z])/i)
       .slice(0, 2)
       .join(', ');
-    return line.length > 60 ? `${line.slice(0, 57).trimEnd()}…` : line;
+    if (line.length <= 44) return line;
+    // Cut at a word, so the title never ends mid-word.
+    const cut = line.slice(0, 43);
+    return `${cut.slice(0, cut.lastIndexOf(' ')).trimEnd()}…`;
   }
   return object.scan ? 'Copy of your scan' : 'Something new';
 }

@@ -106,7 +106,10 @@ export function ObjectsScreen({
       <Text accessibilityRole="header" style={type.title}>
         Your things
       </Text>
-      <Button label="New" systemImage="plus" onPress={onNew} />
+      {/* A native button has no width of its own inside a row. */}
+      <View style={styles.newButton}>
+        <Button label="New" systemImage="plus" onPress={onNew} />
+      </View>
     </View>
   );
   let body: React.ReactElement | undefined;
@@ -186,6 +189,7 @@ const styles = StyleSheet.create({
     marginBottom: space.lg,
     gap: space.md,
   },
+  newButton: { width: 112 },
   message: { gap: space.lg, paddingVertical: space.xl },
   row: {
     flexDirection: 'row',

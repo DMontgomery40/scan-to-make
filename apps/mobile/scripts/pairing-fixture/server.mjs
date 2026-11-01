@@ -181,7 +181,10 @@ if (process.env.SCAN_OBJECTS_FIXTURE === '1') {
   );
   const fixtureStl =
     'solid fixture\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 10 0 0\nvertex 0 10 0\nendloop\nendfacet\nendsolid fixture\n';
-  const fixtureRender = Buffer.from('fixture render png');
+  // A real picture for looking at the app; the native test uses the default bytes.
+  const fixtureRender = process.env.SCAN_OBJECTS_FIXTURE_RENDER
+    ? await readFile(process.env.SCAN_OBJECTS_FIXTURE_RENDER)
+    : Buffer.from('fixture render png');
   const sha = bytes => createHash('sha256').update(bytes).digest('hex');
   let passes = 0;
   objects = new ObjectService({

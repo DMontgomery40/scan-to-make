@@ -26,10 +26,16 @@ it('names an object by its instructions, or as a copy of a scan', () => {
   expect(
     objectTitle({
       ...base,
-      instructions:
-        'A hook for my stroller handle, 25 mm tube. It should hold a cup.',
+      instructions: 'A hook for a handle, 25 mm tube. It should hold a cup.',
     }),
-  ).toBe('A hook for my stroller handle, 25 mm tube');
+  ).toBe('A hook for a handle, 25 mm tube');
+  expect(
+    objectTitle({
+      ...base,
+      instructions:
+        'A 40 mm cube with a 10 mm round hole straight through the middle.',
+    }),
+  ).toBe('A 40 mm cube with a 10 mm round hole…');
   expect(objectTitle({ ...base, scan: 'scan.usdz' })).toBe('Copy of your scan');
   expect(objectTitle(base)).toBe('Something new');
 });
