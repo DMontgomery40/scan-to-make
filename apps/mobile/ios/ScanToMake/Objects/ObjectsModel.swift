@@ -184,3 +184,13 @@ struct PrinterCatalog: Codable, Equatable, Sendable {
     var destinations: [PrinterDestination]
     var defaultDestinationId: String
 }
+
+struct PrinterFilament: Codable, Identifiable, Equatable, Sendable {
+    var slot: Int
+    var colour: String
+    var material: String
+    var name: String
+    var filamentId: String
+    var destinationId: String
+    var id: Int { slot }
+}

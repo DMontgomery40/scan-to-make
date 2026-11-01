@@ -156,6 +156,9 @@ int main(void) { @autoreleasepool {
             Require([[NSJSONSerialization JSONObjectWithData:requests[0][@"body"] options:0 error:nil] isEqual:confirmation],@"confirmation ID, action and boolean fields are unchanged");
         }
         Require(STMObjectsPath(confirmationPath,@"GET")==nil && STMObjectsPath(confirmationPath,@"PATCH")==nil,@"confirmation only permits POST");
+        NSString *filamentPath=[NSString stringWithFormat:@"/v1/objects/%@/filaments",objectID];
+        Require([STMObjectsPath(filamentPath,@"GET") isEqual:@"printer-handoff:use"],@"filament inventory requires printer scope");
+        Require(STMObjectsPath(filamentPath,@"POST")==nil && STMObjectsPath(filamentPath,@"PATCH")==nil,@"filament inventory only permits GET");
         printf("NATIVE_OBJECTS_HOST_PASS full completion manifest, finished-marker guard, paired retry, source retention, legacy capture and bounded start payload\n");
     } @catch (NSException *error) {
         fprintf(stderr,"FAIL %s\n",error.reason.UTF8String); status=1;

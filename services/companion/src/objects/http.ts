@@ -5,11 +5,12 @@ import type {RemoteScope} from '../remote-auth.js';
 import {InvalidCaptureManifestError, InvalidStateError, type ObjectService} from './service.js';
 import {ObjectNotFoundError, type ObjectPass, type StmObject} from './store.js';
 import {RECONSTRUCTION_FAILED} from './reconstruct.js';
+import {parameters} from '../local-control-protocol.js';
 
 const READ: RemoteScope = 'projects:read', WRITE: RemoteScope = 'captures:import', PRINT: RemoteScope = 'printer-handoff:use';
 const MAX_SCAN = 64 * 1024 * 1024, MAX_PHOTO = 25 * 1024 * 1024, MAX_JSON = 16 * 1024;
 const MAX_DEPTH = 8 * 1024 * 1024;
-const PATH = /^\/v1\/objects(?:\/([0-9a-f-]{36})(?:\/(scan|photos|capture|capture-depth|start|corrections|closeup|print|print-confirmation|printer|plate\.jpg|plate|model\.stl|passes\/[^/]+\/activity|(?:renders|photos|capture)\/[^/]+))?)?$/;
+const PATH = /^\/v1\/objects(?:\/([0-9a-f-]{36})(?:\/(scan|photos|capture|capture-depth|start|corrections|closeup|print|filaments|print-confirmation|printer|plate\.jpg|plate|model\.stl|passes\/[^/]+\/activity|(?:renders|photos|capture)\/[^/]+))?)?$/;
 
 class HttpFailure extends Error {
   constructor(readonly status: number, readonly code: string, message = code) { super(message); }
@@ -93,6 +94,11 @@ export function createObjectRoutes(service: ObjectService) {
           if (method !== 'GET') throw new HttpFailure(405, 'method-not-allowed');
           await authorize(READ);
           return send(response, 200, {object: publicObject(await service.get(id))});
+        }
+        if (action === 'filaments') {
+          if (method !== 'GET') throw new HttpFailure(405, 'method-not-allowed');
+          await authorize(PRINT);
+          return send(response, 200, {filaments: await service.filaments(id)});
         }
         if (action.startsWith('passes/')) {
           if (method !== 'GET') throw new HttpFailure(405, 'method-not-allowed');
@@ -182,7 +188,14 @@ export function createObjectRoutes(service: ObjectService) {
             break;
           }
           case 'closeup': object = await service.answerCloseup(id, {bestGuess: (await json<{bestGuess?: unknown}>(request)).bestGuess === true}); break;
-          case 'print': object = await service.print(id, (await json<{checked?: unknown}>(request)).checked === true ? {checked: true} : {}); break;
+          case 'print': {
+            const input = await json<unknown>(request);
+            if (!input || typeof input !== 'object' || Array.isArray(input)) throw new HttpFailure(400, 'invalid-request');
+            const parsed = parameters['objects.print'].safeParse({...(input as object), id});
+            if (!parsed.success || Object.hasOwn(input, 'id')) throw new HttpFailure(400, 'invalid-request');
+            object = await service.print(id, {checked:parsed.data.checked, filament:parsed.data.filament});
+            break;
+          }
           case 'print-confirmation': {
             const input = await json<unknown>(request);
             if (!input || typeof input !== 'object' || Array.isArray(input)

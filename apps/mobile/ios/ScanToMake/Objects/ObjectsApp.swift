@@ -81,6 +81,7 @@ private func native(_ name: String) -> NSObject? { (NSClassFromString(name) as? 
         switch status {
         case 401, 403: throw MacError(code: "pairing", message: "Connect to your Mac again.")
         case 404 where path == "/v1/objects": throw MacError(code: "not-set-up", message: "Your Mac isn't ready to make things yet. Open Counterpart on your Mac.")
+        case 404 where path.hasSuffix("/filaments"): throw MacError(code: "not-set-up", message: "Update Counterpart on your Mac to choose a filament here.")
         case 404: throw MacError(code: "not-found", message: "This is no longer on your Mac.")
         case 409: throw MacError(code: "conflict", message: message ?? "Wait until the current step finishes.")
         default: throw MacError(code: "failed", message: "Something went wrong on your Mac. Try again.")
@@ -91,6 +92,10 @@ private func native(_ name: String) -> NSObject? { (NSClassFromString(name) as? 
     private struct Deleted: Decodable { var deleted: Bool }
 
     func printers() async throws -> PrinterCatalog { try await request("GET", "/v1/objects/printers", as: PrinterCatalog.self) }
+    private struct FilamentsReply: Decodable { var filaments: [PrinterFilament] }
+    func filaments(_ id: String) async throws -> [PrinterFilament] {
+        try await request("GET", "/v1/objects/\(id)/filaments", as: FilamentsReply.self).filaments
+    }
     private struct ActivityReply: Decodable { var activity: [StmObject.Activity] }
     func passActivity(_ id: String, index: Int) async throws -> [StmObject.Activity] {
         try await request("GET", "/v1/objects/\(id)/passes/\(index)/activity", as: ActivityReply.self).activity
@@ -112,7 +117,12 @@ private func native(_ name: String) -> NSObject? { (NSClassFromString(name) as? 
     }
     func correct(_ id: String, _ note: String) async throws -> StmObject { try await request("POST", "/v1/objects/\(id)/corrections", ["note": note], as: ObjectReply.self).object }
     func closeup(_ id: String, bestGuess: Bool) async throws -> StmObject { try await request("POST", "/v1/objects/\(id)/closeup", ["bestGuess": bestGuess], as: ObjectReply.self).object }
-    func print(_ id: String, checked: Bool) async throws -> StmObject { try await request("POST", "/v1/objects/\(id)/print", checked ? ["checked": true] : nil, as: ObjectReply.self).object }
+    func print(_ id: String, checked: Bool, filament: PrinterFilament) async throws -> StmObject {
+        guard let choice = try JSONSerialization.jsonObject(with: JSONEncoder().encode(filament)) as? [String: Any] else {
+            throw MacError(code: "invalid-request", message: "Couldn’t prepare this filament choice.")
+        }
+        return try await request("POST", "/v1/objects/\(id)/print", ["checked":checked, "filament":choice], as: ObjectReply.self).object
+    }
     func plateClear(_ id: String) async throws -> StmObject { try await request("POST", "/v1/objects/\(id)/plate", ["clear": true], as: ObjectReply.self).object }
     func answerPrintConfirmation(_ id: String, response: PrintConfirmationResponse) async throws -> StmObject {
         let json = try JSONSerialization.jsonObject(with: JSONEncoder().encode(response)) as? [String: Any]
@@ -815,6 +825,7 @@ struct ObjectDetailView: View {
     @State private var confirmDelete = false
     @State private var plateImage: UIImage?
     @State private var section = ProjectSection.model
+    @State private var preparingPrint = false
     @FocusState private var writing: Bool
     private var object: StmObject? { store.objects.first { $0.id == id } }
 
@@ -908,10 +919,16 @@ struct ObjectDetailView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
                 VStack(alignment: .leading, spacing: 10) {
-                    Text(words.title).font(.title2.bold()).textSelection(.enabled)
+                    Text(object.instructions?.isEmpty == false ? object.instructions! : words.title)
+                        .font(.title2.bold()).lineLimit(3).textSelection(.enabled)
                     HStack(alignment: .top, spacing: 8) {
                         if words.busy { ProgressView().padding(.top, 3) }
-                        Text(words.status).font(.subheadline).foregroundStyle(words.tone.color)
+                        if object.print?.uncertain == true {
+                            Label("Check the previous print before trying again", systemImage: "exclamationmark.triangle.fill")
+                                .font(.subheadline).foregroundStyle(.orange)
+                        } else {
+                            Text(words.status).font(.subheadline).foregroundStyle(words.tone.color)
+                        }
                     }
                     Text(Date(timeIntervalSince1970: object.createdAtMs / 1000), format: .dateTime.month(.abbreviated).day().hour().minute())
                         .font(.caption).foregroundStyle(.secondary)
@@ -962,8 +979,12 @@ struct ObjectDetailView: View {
                                         .foregroundStyle(.secondary).textSelection(.enabled)
                                 }
                             }
-                            if let summary = object.current?.summary {
-                                Text(summary).font(.body).textSelection(.enabled)
+                            if let summary = object.current?.summary, !summary.isEmpty {
+                                DisclosureGroup("Model details") {
+                                    Text((try? AttributedString(markdown: summary)) ?? AttributedString(summary))
+                                        .font(.body).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+                                        .padding(.top, 8)
+                                }
                             }
                         }
                     } else {
@@ -1011,11 +1032,13 @@ struct ObjectDetailView: View {
         .background(Color(uiColor: .systemGroupedBackground))
         .navigationTitle("Project")
         .scrollDismissesKeyboard(.interactively)
-        .safeAreaBar(edge: .bottom) {
+        .safeAreaInset(edge: .bottom, spacing: 0) {
             if words.actions.contains(.print) || words.actions.contains(.printChecked) {
-                actions(object, words).padding(.horizontal, 20).padding(.vertical, 8)
+                actions(object, words).padding(.horizontal, 20).padding(.vertical, 10)
+                    .background(Color(uiColor: .systemBackground))
             }
         }
+        .sheet(isPresented: $preparingPrint) { PhonePrintPreparation(store: store, objectId: object.id) }
         .toolbar {
             if writing {
                 ToolbarItem(placement: .confirmationAction) { Button("Done") { writing = false } }
@@ -1049,11 +1072,7 @@ struct ObjectDetailView: View {
                 })) {
                     ForEach(catalog.destinations) { destination in Text(destination.name).tag(destination.id) }
                 } label: { Label("Printer", systemImage: "printer") }
-                .disabled(working || object.state == .touchingUp || object.state == .printing || object.print?.uncertain == true)
-                if let destination = store.printer(for: object) {
-                    Text(destination.backend == "bambu-printer-mcp" ? "Uses your Bambu MCP settings on this Mac" : "Uses your printer MCP settings on this Mac")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
+                .disabled(working || object.state == .touchingUp || object.state == .printing)
             } else {
                 Label(store.printerProblem ?? "Reading your Mac's printers…", systemImage: "printer")
                     .font(.subheadline).foregroundStyle(.secondary)
@@ -1062,11 +1081,12 @@ struct ObjectDetailView: View {
                 }
             }
             if let destination = object.print?.destination {
-                Text("Last print sent to \(destination.name)").font(.caption).foregroundStyle(.secondary)
+                Text(object.print?.uncertain == true ? "Last attempt: \(destination.name)" : "Last print: \(destination.name)")
+                    .font(.caption).foregroundStyle(.secondary)
             }
         }
         .padding(14).frame(maxWidth: .infinity, alignment: .leading)
-        .background(.background, in: RoundedRectangle(cornerRadius: 16))
+        .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
     }
 
     @ViewBuilder private func actions(_ object: StmObject, _ words: ObjectWords) -> some View {
@@ -1074,11 +1094,9 @@ struct ObjectDetailView: View {
             ForEach(Array(words.actions.enumerated()), id: \.offset) { _, action in
                 switch action {
                 case .print:
-                    big(store.printer(for: object).map { "Print on \($0.name)" } ?? "Print", "printer.fill", prominent: true) { try await store.mac.print(object.id, checked: false) }
-                        .disabled(store.printer(for: object) == nil)
+                    prepareButton()
                 case .printChecked:
-                    big("It Isn't Printing, Print Again", "printer.fill", prominent: true) { try await store.mac.print(object.id, checked: true) }
-                        .disabled(store.printer(for: object) == nil)
+                    prepareButton()
                 case .plateClear:
                     big("It's Actually Clear", "checkmark.circle", prominent: true) { try await store.mac.plateClear(object.id) }
                 case .openCamera:
@@ -1117,6 +1135,12 @@ struct ObjectDetailView: View {
         .padding(.vertical, 4)
     }
 
+    private func prepareButton() -> some View {
+        Button { preparingPrint = true } label: {
+            Label("Prepare to Print", systemImage: "printer.fill").frame(maxWidth: .infinity)
+        }.buttonStyle(.glassProminent).controlSize(.large).disabled(working)
+    }
+
     private func big(_ title: String, _ symbol: String, prominent: Bool, _ body: @escaping () async throws -> StmObject?) -> some View {
         Group {
             if prominent {
@@ -1128,6 +1152,148 @@ struct ObjectDetailView: View {
         .controlSize(.large)
         .disabled(working)
         .accessibilityLabel(title)
+    }
+}
+
+private struct PhonePrintPreparation: View {
+    let store: ObjectsStore
+    let objectId: String
+    @Environment(\.dismiss) private var dismiss
+    @State private var printerId = ""
+    @State private var choices: [PrinterFilament] = []
+    @State private var selected: Int?
+    @State private var checked = false
+    @State private var loading = true
+    @State private var sending = false
+    @State private var error: String?
+
+    private var object: StmObject? { store.objects.first { $0.id == objectId } }
+    private var previousPrinter: String { object?.print?.destination?.name ?? "the printer" }
+    private func swatch(_ hex: String) -> Color {
+        let value = Int(hex.dropFirst(), radix: 16) ?? 0
+        return Color(red: Double((value >> 16) & 255) / 255,
+                     green: Double((value >> 8) & 255) / 255,
+                     blue: Double(value & 255) / 255)
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 24) {
+                    if let object {
+                        Text(object.instructions?.isEmpty == false ? object.instructions! : "Your model")
+                            .font(.headline).lineLimit(3)
+                    }
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Printer").font(.headline)
+                        if let catalog = store.printerCatalog, !catalog.destinations.isEmpty {
+                            Picker("Printer", selection: Binding(get: { printerId }, set: { id in Task { await choosePrinter(id) } })) {
+                                ForEach(catalog.destinations) { Text($0.name).tag($0.id) }
+                            }
+                            .pickerStyle(.menu).labelsHidden().disabled(loading || sending)
+                        } else {
+                            Text(store.printerProblem ?? "Reading your Mac’s printers…").foregroundStyle(.secondary)
+                        }
+                    }
+                    if object?.print?.uncertain == true {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Label("Check the previous print", systemImage: "exclamationmark.triangle.fill")
+                                .font(.headline).foregroundStyle(.orange)
+                            Text("The last request may have reached \(previousPrinter). Check it before trying again.")
+                                .font(.subheadline).foregroundStyle(.secondary)
+                            Toggle("I checked; it isn’t printing this model.", isOn: $checked)
+                        }
+                        .padding(16).background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
+                    }
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack {
+                            Text("Filament").font(.headline)
+                            Spacer()
+                            if !loading { Button("Refresh") { Task { await load() } }.disabled(sending) }
+                        }
+                        if loading {
+                            ProgressView("Reading your printer’s filament…").frame(maxWidth: .infinity, alignment: .leading)
+                        } else if choices.isEmpty, error == nil {
+                            Text("No selectable filament was reported. Check the printer or open the model in your slicer.").foregroundStyle(.secondary)
+                        } else {
+                            ForEach(choices) { filament in
+                                Button { selected = filament.slot } label: {
+                                    HStack(spacing: 14) {
+                                        Circle().fill(swatch(filament.colour)).frame(width: 38, height: 38)
+                                            .overlay(Circle().strokeBorder(.secondary.opacity(0.4)))
+                                        VStack(alignment: .leading, spacing: 3) {
+                                            Text(filament.name).font(.body.weight(.medium)).foregroundStyle(.primary)
+                                            Text(filament.slot >= 254 ? "External spool" : "Slot \(filament.slot + 1)")
+                                                .font(.subheadline).foregroundStyle(.secondary)
+                                        }
+                                        Spacer()
+                                        Image(systemName: selected == filament.slot ? "checkmark.circle.fill" : "circle")
+                                            .foregroundStyle(selected == filament.slot ? Color.accentColor : Color.secondary)
+                                    }
+                                    .padding(14).background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
+                                }.buttonStyle(.plain).disabled(sending)
+                                    .accessibilityLabel("\(filament.name), \(filament.colour), slot \(filament.slot + 1)")
+                                    .accessibilityAddTraits(selected == filament.slot ? .isSelected : [])
+                            }
+                        }
+                    }
+                    if let error { Label(error, systemImage: "exclamationmark.circle").foregroundStyle(.red) }
+                    Text("Your printer may ask you to confirm its checks before printing.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }.padding(20)
+            }
+            .background(Color(uiColor: .systemGroupedBackground))
+            .navigationTitle("Prepare to Print").navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.disabled(sending) } }
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                Button { Task { await submit() } } label: {
+                    HStack { if sending { ProgressView() }; Text("Print").frame(maxWidth: .infinity) }
+                }
+                .buttonStyle(.glassProminent).controlSize(.large)
+                .disabled(loading || sending || selected == nil || (object?.print?.uncertain == true && !checked))
+                .padding(.horizontal, 20).padding(.vertical, 10).background(Color(uiColor: .systemBackground))
+            }
+            .task {
+                if store.printerCatalog == nil { await store.loadPrinters() }
+                printerId = object?.printerDestinationId ?? store.printerCatalog?.defaultDestinationId ?? ""
+                await load()
+            }
+        }
+    }
+
+    private func choosePrinter(_ id: String) async {
+        guard id != printerId, !loading, !sending else { return }
+        loading = true; selected = nil; choices = []; error = nil
+        do {
+            let updated = try await store.mac.selectPrinter(objectId, destinationId: id)
+            store.replace(updated); printerId = id
+            await load()
+        } catch let failure as MacError { error = failure.message; loading = false }
+        catch { self.error = MacError.unreachable.message; loading = false }
+    }
+
+    private func load() async {
+        loading = true; selected = nil; choices = []; error = nil
+        if printerId.isEmpty {
+            await store.loadPrinters()
+            printerId = object?.printerDestinationId ?? store.printerCatalog?.defaultDestinationId ?? ""
+        }
+        guard !printerId.isEmpty else { loading = false; error = store.printerProblem ?? "No printer is available on your Mac."; return }
+        do { choices = try await store.mac.filaments(objectId) }
+        catch let failure as MacError { error = failure.message }
+        catch { self.error = MacError.unreachable.message }
+        loading = false
+    }
+
+    private func submit() async {
+        guard let filament = choices.first(where: { $0.slot == selected }), !sending else { return }
+        sending = true; error = nil
+        defer { sending = false }
+        do {
+            let updated = try await store.mac.print(objectId, checked: object?.print?.uncertain == true && checked, filament: filament)
+            store.replace(updated); dismiss()
+        } catch let failure as MacError { error = failure.message }
+        catch { self.error = MacError.unreachable.message }
     }
 }
 

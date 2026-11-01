@@ -26,6 +26,7 @@ static NSString *STMObjectsPath(NSString *path, NSString *method) {
   NSString *one = [NSString stringWithFormat:@"/v1/objects/%@", STMObjectsUUID];
   if ([method isEqual:@"GET"] && (STMObjectsMatches(path, @"/v1/objects(?:/printers)?") || STMObjectsMatches(path, one))) return @"projects:read";
   if ([method isEqual:@"GET"] && STMObjectsMatches(path, [one stringByAppendingString:@"/passes/(0|[1-9][0-9]{0,15})/activity"])) return @"projects:read";
+  if ([method isEqual:@"GET"] && STMObjectsMatches(path, [one stringByAppendingString:@"/filaments"])) return @"printer-handoff:use";
   if ([method isEqual:@"PATCH"] && STMObjectsMatches(path, one)) return @"captures:import";
   if ([method isEqual:@"DELETE"] && STMObjectsMatches(path, one)) return @"captures:import";
   if ([method isEqual:@"POST"] && STMObjectsMatches(path, @"/v1/objects")) return @"captures:import";

@@ -7,6 +7,8 @@ import {DispatchedPrintError, HandoffBundleStore, InMemoryElicitationRelay} from
 import {ObjectStore} from '../dist/objects/store.js';
 import {ObjectService, InvalidStateError} from '../dist/objects/service.js';
 import {createControlDispatcher} from '../dist/local-control-services.js';
+import {createObjectRoutes} from '../dist/objects/http.js';
+import {createServer} from 'node:http';
 
 const STL = Buffer.from('solid m\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 1 0 0\nvertex 0 1 0\nendloop\nendfacet\nendsolid m\n' + ' '.repeat(40));
 // The advertised Bambu hardware-confirmation schema (including its unchecked default).
@@ -89,6 +91,32 @@ test('Mac local control carries the selected filament through to print preparati
   const started = (await dispatch('objects.print', {id:object.id, checked:false, filament:choice})).object;
   assert.deepEqual((await bundles.read(started.print.bundleId)).selection.amsSlots, [3]);
   assert.equal(runs[0].options.slicer.filamentColours, '#5B6579');
+  await approve(service, object.id);
+  await service.settled(object.id);
+});
+
+test('phone inventory and print route preserve filament selection and printer scope', async t => {
+  const inventory = {trays:[{slot:1, loaded:true, tray_color:'FEC600FF', tray_type:'PLA', tray_info_idx:'GFA00',
+    display_name:'Yellow PLA', resolved_profile_path:'/profiles/pla.json'}]};
+  const {service, object, bundles, runs} = await setup({inventory});
+  const scopes = [], routes = createObjectRoutes(service);
+  const server = createServer((request, response) => void routes.handle(request, response, async scope => { scopes.push(scope); }, () => undefined));
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  const endpoint = `http://127.0.0.1:${server.address().port}/v1/objects/${object.id}`;
+  const inventoryResponse = await fetch(endpoint + '/filaments');
+  assert.equal(inventoryResponse.status, 200);
+  const [filament] = (await inventoryResponse.json()).filaments;
+  assert.equal(filament.colour, '#FEC600');
+  assert.equal('profile' in filament, false);
+  const send = body => fetch(endpoint + '/print', {method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify(body)});
+  assert.equal((await send({filament:{...filament, slot:999}})).status, 400);
+  const result = await send({checked:false, filament});
+  assert.equal(result.status, 200);
+  const started = (await result.json()).object;
+  assert.deepEqual((await bundles.read(started.print.bundleId)).selection.amsSlots, [1]);
+  assert.equal(runs[0].options.slicer.filamentColours, '#FEC600');
+  assert.deepEqual(scopes, ['printer-handoff:use', 'printer-handoff:use', 'printer-handoff:use']);
   await approve(service, object.id);
   await service.settled(object.id);
 });

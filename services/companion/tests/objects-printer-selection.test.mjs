@@ -124,6 +124,16 @@ test('a printer without an inventory explains that material must be chosen in it
   await assert.rejects(service.filaments(object.id), /Open the model in your slicer/);
 });
 
+test('changing printer after an uncertain print preserves the original printer warning', async t => {
+  const {service, store, object} = await fixture(t);
+  await store.update(object.id, o => ({...o, state:'failed', print:{bundleId:'prior', uncertain:true, destination:{id:'current', name:'Current printer'}}}));
+  const updated = await service.selectPrinter(object.id, 'second');
+  assert.equal(updated.printerDestinationId, 'second');
+  assert.deepEqual(updated.print.destination, {id:'current', name:'Current printer'});
+  assert.equal(updated.print.uncertain, true);
+  await assert.rejects(service.print(object.id), /Check the printer/);
+});
+
 test('the phone and local control expose the same destination ids without MCP configuration or credentials', async t => {
   const {service, object, catalog} = await fixture(t);
   const dispatch = createControlDispatcher({auth: {}, companionVersion: 'test', objects: service});
