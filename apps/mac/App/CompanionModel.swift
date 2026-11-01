@@ -10,7 +10,7 @@ import AgentKit
     let install = Installation(bundle:.main)
     var error: String? {
         guard let failure else { return nil }
-        if (failure as? AgentError) == .approvalRequired { return "Allow Scan to Make in Login Items, then retry." }
+        if (failure as? AgentError) == .approvalRequired { return "Allow Counterpart in Login Items, then retry." }
         if (failure as? AgentError) == .companionUnavailable { return failure.localizedDescription }
         return "Your pairing code couldn’t be created. Please try again."
     }

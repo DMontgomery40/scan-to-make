@@ -128,7 +128,7 @@ import CoreImage
         host.wantsLayer = true
         let window = NSWindow(contentRect:NSRect(origin:.zero, size:fitted), styleMask:titled ? [.titled, .closable] : [.borderless],
                               backing:.buffered, defer:false)
-        window.title = "Scan to Make Settings"
+        window.title = "Counterpart Settings"
         window.isReleasedWhenClosed = false
         window.contentView = host
         window.setContentSize(fitted)

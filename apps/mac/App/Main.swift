@@ -78,9 +78,9 @@ struct PairingView: View {
     private var failureMessage: String? {
         guard let failure = model.failure else { return nil }
         switch failure as? AgentError {
-        case .approvalRequired?: return "Allow Scan to Make in System Settings → General → Login Items."
-        case .companionUnavailable?: return "Scan to Make couldn’t start in the background."
-        default: return "Scan to Make couldn’t make a code."
+        case .approvalRequired?: return "Allow Counterpart in System Settings → General → Login Items."
+        case .companionUnavailable?: return "Counterpart couldn’t start in the background."
+        default: return "Counterpart couldn’t make a code."
         }
     }
 }
@@ -124,7 +124,7 @@ extension NSImage {
             return true
         }
         image.isTemplate = true
-        image.accessibilityDescription = dot ? "Scan to Make, a phone is waiting to pair" : "Scan to Make"
+        image.accessibilityDescription = dot ? "Counterpart, a phone is waiting to pair" : "Counterpart"
         return image
     }
 }
@@ -239,7 +239,7 @@ extension NSImage {
         if window == nil {
             let window = NSWindow(contentRect:NSRect(x:0,y:0,width:360,height:360),
                                   styleMask:[.titled,.closable],backing:.buffered,defer:false)
-            window.title = "Scan to Make" // Window menu and VoiceOver only; never drawn.
+            window.title = "Counterpart" // Window menu and VoiceOver only; never drawn.
             window.titleVisibility = .hidden
             window.titlebarAppearsTransparent = true
             window.backgroundColor = .white
@@ -280,7 +280,7 @@ extension NSImage {
     }
     func updater(_ updater: SPUUpdater, mayPerform updateCheck: SPUUpdateCheck) throws {
         guard safeToReplaceApp else {
-            throw NSError(domain:"com.scantomake.mac.updates",code:1,userInfo:[NSLocalizedDescriptionKey:"Updates wait until Scan to Make is stopped in the background."])
+            throw NSError(domain:"com.scantomake.mac.updates",code:1,userInfo:[NSLocalizedDescriptionKey:"Updates wait until Counterpart is stopped in the background."])
         }
     }
     func updater(_ updater: SPUUpdater, shouldPostponeRelaunchForUpdate item: SUAppcastItem, untilInvokingBlock installHandler: @escaping () -> Void) -> Bool {

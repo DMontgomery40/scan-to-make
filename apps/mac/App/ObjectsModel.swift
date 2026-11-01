@@ -161,7 +161,7 @@ struct SocketObjects: ObjectsCompanion {
         }
         switch error as? ControlClientError {
         case .timedOut?: return "That's taking longer than usual. This page will update when it's done."
-        case .unavailable?: return "Scan to Make couldn’t start in the background."
+        case .unavailable?: return "Counterpart couldn’t start in the background."
         default: return "Something went wrong on your Mac."
         }
     }

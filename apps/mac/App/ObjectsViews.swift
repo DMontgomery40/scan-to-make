@@ -53,7 +53,7 @@ struct ObjectsWindowView: View {
         } detail: {
             detail
         }
-        .navigationTitle("Scan to Make")
+        .navigationTitle("Counterpart")
         .navigationSubtitle(subtitle)
         .frame(minWidth:ObjectsWindow.minimumSize.width, minHeight:ObjectsWindow.minimumSize.height)
         .toolbar {
@@ -94,14 +94,14 @@ struct ObjectsWindowView: View {
         case .loading where model.objects.isEmpty:
             ProgressView().controlSize(.small).frame(maxWidth:.infinity, maxHeight:.infinity)
         case .notSetUp:
-            QuietMessage(title:"Not Set Up Yet", text:"Scan to Make needs Claude Code and your printer set up on this Mac first.")
+            QuietMessage(title:"Not Set Up Yet", text:"Counterpart needs Claude Code and your printer set up on this Mac first.")
         case .notRunning:
-            QuietMessage(title:"Not Running", text:"Scan to Make couldn’t start in the background.")
+            QuietMessage(title:"Not Running", text:"Counterpart couldn’t start in the background.")
         default:
             if let object = model.selected {
                 ObjectPage(object:object, model:model, startWith3D:startWith3D).id(object.id)
             } else if model.objects.isEmpty {
-                QuietMessage(title:"Nothing Here Yet", text:"Scan something, or say what you want made, in Scan to Make on your iPhone. It shows up here.")
+                QuietMessage(title:"Nothing Here Yet", text:"Scan something, or say what you want made, in Counterpart on your iPhone. It shows up here.")
             } else {
                 QuietMessage(text:"Choose something on the left.")
             }

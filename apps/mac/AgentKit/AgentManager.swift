@@ -10,11 +10,11 @@ public enum AgentError: Error, LocalizedError, Equatable {
     case approvalRequired, companionUnavailable, commandFailed, invalidInvitation, rollbackFailed
     public var errorDescription: String? {
         switch self {
-        case .approvalRequired: return "Allow Scan to Make in System Settings → General → Login Items, then try again."
-        case .companionUnavailable: return "Scan to Make couldn’t start in the background. Please try again."
+        case .approvalRequired: return "Allow Counterpart in System Settings → General → Login Items, then try again."
+        case .companionUnavailable: return "Counterpart couldn’t start in the background. Please try again."
         case .commandFailed: return "That didn’t work. Your saved projects and pairing are unchanged."
         case .invalidInvitation: return "Could not create a valid pairing code. Try again."
-        case .rollbackFailed: return "The previous version of Scan to Make couldn’t be restarted. Its settings and data are kept."
+        case .rollbackFailed: return "The previous version of Counterpart couldn’t be restarted. Its settings and data are kept."
         }
     }
 }

@@ -117,7 +117,7 @@ final class ObjectWordsTests: XCTestCase {
 
     func testAStateThisAppDoesNotKnowAsksForAnUpdate() {
         let words = object(["state": "archived"]).words
-        XCTAssertEqual(words.status, "Update Scan to Make to see this one.")
+        XCTAssertEqual(words.status, "Update Counterpart to see this one.")
         XCTAssertEqual(words.actions, [])
         XCTAssertFalse(words.busy)
     }

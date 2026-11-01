@@ -49,6 +49,7 @@
 		BAF1A1C7C03E0182232FEFA5 /* ModelKeychain.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F489172C7C02B2C5FD93371 /* ModelKeychain.swift */; };
 		BDC8064662448F9AD28A1E09 /* ModelAccessModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA5042DB008B425E2606B911 /* ModelAccessModel.swift */; };
 		C6B573A4A78875903AD76ED9 /* ModelAccessModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA5042DB008B425E2606B911 /* ModelAccessModel.swift */; };
+		C71FDEDE0E5E3F04EBABDC85 /* InfoPlist.strings in Resources */ = {isa = PBXBuildFile; fileRef = 87778C7477AB7FC555B4F7F8 /* InfoPlist.strings */; };
 		CD8C26ED361E938070BEC7CA /* ControlClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = FBB383B9DEFCA66744C36B14 /* ControlClient.swift */; };
 		CDAC222A911270AB01F443E8 /* CompanionModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7E10258D71E1A28BE7C0F61 /* CompanionModel.swift */; };
 		CF246BFAE6CBC7A02A42E10E /* PrinterCheck.swift in Sources */ = {isa = PBXBuildFile; fileRef = 112D6ADABF2AF7AAEB888655 /* PrinterCheck.swift */; };
@@ -125,6 +126,7 @@
 		66391F486F1835582AFD9847 /* ObjectsViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ObjectsViews.swift; sourceTree = "<group>"; };
 		666DD15803F0A0C9F25C5AB3 /* PairingSessionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingSessionTests.swift; sourceTree = "<group>"; };
 		67B5A7B68401A1C2066938E8 /* LocalNetworkAccessTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalNetworkAccessTests.swift; sourceTree = "<group>"; };
+		7A8990C00F35007DA6F0FE21 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/InfoPlist.strings; sourceTree = "<group>"; };
 		81F869DA19C2B26065AAF581 /* MacStatusModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacStatusModel.swift; sourceTree = "<group>"; };
 		910E4B0114E7E04F953E42A1 /* AgentManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentManagerTests.swift; sourceTree = "<group>"; };
 		913372FAC73619F16894D542 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
@@ -236,6 +238,7 @@
 				AD88AEEFC08611A87FA75FE2 /* Assets.xcassets */,
 				C7E10258D71E1A28BE7C0F61 /* CompanionModel.swift */,
 				3A2A6147413BB927015F00A1 /* DesignStability.swift */,
+				87778C7477AB7FC555B4F7F8 /* InfoPlist.strings */,
 				81F869DA19C2B26065AAF581 /* MacStatusModel.swift */,
 				21B73436F785508B3D834AF9 /* Main.swift */,
 				BA5042DB008B425E2606B911 /* ModelAccessModel.swift */,
@@ -380,6 +383,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				3A503EA4B215F6C28F117E28 /* Assets.xcassets in Resources */,
+				C71FDEDE0E5E3F04EBABDC85 /* InfoPlist.strings in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -491,6 +495,17 @@
 			targetProxy = F61C03FA02CD1532E3B79147 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
+
+/* Begin PBXVariantGroup section */
+		87778C7477AB7FC555B4F7F8 /* InfoPlist.strings */ = {
+			isa = PBXVariantGroup;
+			children = (
+				7A8990C00F35007DA6F0FE21 /* en */,
+			);
+			name = InfoPlist.strings;
+			sourceTree = "<group>";
+		};
+/* End PBXVariantGroup section */
 
 /* Begin XCBuildConfiguration section */
 		316EB55137DD5550E030ACD5 /* Release */ = {

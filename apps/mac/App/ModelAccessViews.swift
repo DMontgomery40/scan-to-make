@@ -74,7 +74,7 @@ struct ModelAccessPane: View {
 
     private var unavailable: some View {
         VStack(alignment:.leading, spacing:10) {
-            Text("Scan to Make couldn’t start in the background.").font(.system(size:13))
+            Text("Counterpart couldn’t start in the background.").font(.system(size:13))
             Button("Try again") { Task { await model.refresh() } }
         }
     }
@@ -240,7 +240,7 @@ struct SetupView: View {
             VStack(alignment:.leading, spacing:14) {
                 HStack(spacing:8) {
                     Image(nsImage:.menuBarCube).renderingMode(.template).foregroundStyle(clay)
-                    Text("Scan to Make").font(.system(size:13, weight:.semibold))
+                    Text("Counterpart").font(.system(size:13, weight:.semibold))
                 }
                 Text("Set up your Mac").font(.system(size:12)).foregroundStyle(.secondary)
                 Label("Your iPhone", systemImage:"checkmark.circle.fill").foregroundStyle(.secondary)
@@ -279,7 +279,7 @@ struct ModelSettingsView: View {
         if window == nil {
             let window = NSWindow(contentRect:NSRect(x:0, y:0, width:560, height:680),
                                   styleMask:[.titled, .closable], backing:.buffered, defer:false)
-            window.title = "Scan to Make Settings"
+            window.title = "Counterpart Settings"
             window.isReleasedWhenClosed = false
             let content = NSHostingView(rootView:SettingsView(mac:MacStatusModel.shared, cleanup:model))
             content.sizingOptions = [] // a fixed size; the content never resizes the window

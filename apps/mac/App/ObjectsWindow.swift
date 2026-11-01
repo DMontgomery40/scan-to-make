@@ -16,7 +16,7 @@ import AgentKit
         let window = NSWindow(contentRect:NSRect(x:0, y:0, width:1020, height:700),
                               styleMask:[.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
                               backing:.buffered, defer:false)
-        window.title = "Scan to Make"
+        window.title = "Counterpart"
         // The standard unified toolbar: the sidebar and toolbar are the system's Liquid Glass.
         window.toolbarStyle = .unified
         window.isReleasedWhenClosed = false

@@ -47,7 +47,7 @@ struct GeneralSettings: View {
                 HStack(spacing:14) {
                     AppMark(size:52)
                     VStack(alignment:.leading, spacing:2) {
-                        Text("Scan to Make").font(.title2.weight(.semibold))
+                        Text("Counterpart").font(.title2.weight(.semibold))
                         Text("Version \(AppVersion.version)").foregroundStyle(.secondary)
                     }
                 }
@@ -55,7 +55,7 @@ struct GeneralSettings: View {
             }
             Section("Your iPhone") {
                 if mac.devices.isEmpty {
-                    Text(mac.connection == .notRunning ? "Your iPhones show here while Scan to Make is running." : "No iPhone is paired yet.")
+                    Text(mac.connection == .notRunning ? "Your iPhones show here while Counterpart is running." : "No iPhone is paired yet.")
                         .foregroundStyle(.secondary)
                 }
                 ForEach(mac.devices) { device in
@@ -72,7 +72,7 @@ struct GeneralSettings: View {
                 }
                 if let problem = mac.problem { Text(problem).foregroundStyle(Color(nsColor:.systemRed)) }
             }
-            Section("Scan to Make on This Mac") {
+            Section("Counterpart on This Mac") {
                 LabeledContent("Status") { ConnectionLabel(connection:mac.connection) }
                 if let address = mac.address {
                     LabeledContent("Address") { Text(address).textSelection(.enabled) }
@@ -80,8 +80,8 @@ struct GeneralSettings: View {
                 Button("Pair Another iPhone…") { pairing = true }
             }
             Section("Help") {
-                Link(destination:URL(string:"https://github.com/DMontgomery40/scan-to-make")!) {
-                    Label("Scan to Make on GitHub", systemImage:"questionmark.circle")
+                Link(destination:URL(string:"https://counterpart.dtmont.com/")!) {
+                    Label("Counterpart Help", systemImage:"questionmark.circle")
                 }
             }
             Section("About") {
@@ -167,7 +167,7 @@ struct MenuBarPopover<Code: View>: View {
             HStack(spacing:10) {
                 AppMark(size:30)
                 VStack(alignment:.leading, spacing:1) {
-                    Text("Scan to Make").font(.headline)
+                    Text("Counterpart").font(.headline)
                     ConnectionLabel(connection:mac.connection).font(.subheadline).foregroundStyle(.secondary)
                 }
                 Spacer(minLength:0)
@@ -184,10 +184,10 @@ struct MenuBarPopover<Code: View>: View {
                 .padding(.bottom, 14)
             Divider().padding(.horizontal, 12)
             VStack(spacing:0) {
-                PopoverRow(title:"Open Scan to Make", symbol:"macwindow", key:"O") { ObjectsWindow.shared.show() }
+                PopoverRow(title:"Open Counterpart", symbol:"macwindow", key:"O") { ObjectsWindow.shared.show() }
                 PopoverRow(title:"Settings…", symbol:"gearshape", key:",") { SettingsWindow.shared.show() }
                 Divider().padding(.horizontal, 6).padding(.vertical, 4)
-                PopoverRow(title:"Quit Scan to Make", symbol:"power", key:"Q") { NSApp.terminate(nil) }
+                PopoverRow(title:"Quit Counterpart", symbol:"power", key:"Q") { NSApp.terminate(nil) }
             }
             .padding(6)
         }
