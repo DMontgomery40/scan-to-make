@@ -30,6 +30,12 @@ private actor FakeObjects: ObjectsCompanion {
     func print(_ id: String, checked: Bool) async throws -> StmObject { try change(id, "print:\(checked)", ["state": "printing"]) }
     func answerPlate(_ id: String) async throws -> StmObject { try change(id, "plate", ["plate": NSNull()]) }
     func start(_ id: String) async throws -> StmObject { try change(id, "start", ["state": "touching-up"]) }
+    func delete(_ id: String) async throws {
+        calls.append("delete:\(id)")
+        if let actionError { throw actionError }
+        guard let index = items.firstIndex(where: { $0["id"] as? String == id }) else { throw ControlRemoteError(code:"not-found", message:"gone") }
+        items.remove(at:index)
+    }
 }
 
 private func item(_ id: String, _ state: String, _ fields: [String: Any] = [:]) -> [String: Any] {
@@ -160,5 +166,48 @@ private func item(_ id: String, _ state: String, _ fields: [String: Any] = [:]) 
             XCTAssertFalse(text.contains("stack") || text.contains("Error") || text.contains("companion"), text)
             XCTAssertTrue(text.hasSuffix("."), text)
         }
+    }
+
+    func testDeleteRemovesTheObjectAndShowsTheNextOne() async {
+        let companion = FakeObjects()
+        await companion.set([item("a", "ready"), item("b", "printed"), item("c", "failed")])
+        let model = ObjectsModel(companion:companion)
+        await model.refresh()
+        model.selection = "b"
+        let deleted = await model.delete("b")
+        XCTAssertTrue(deleted)
+        XCTAssertEqual(model.objects.map(\.id), ["a", "c"])
+        XCTAssertEqual(model.selection, "c", "the page moves to the next object, not back to the top")
+        let calls = await companion.calls
+        XCTAssertTrue(calls.contains("delete:b"))
+        await model.refresh()
+        XCTAssertEqual(model.objects.map(\.id), ["a", "c"], "it stays gone after the next read")
+    }
+
+    func testDeletingTheLastObjectSelectsTheOneBefore() async {
+        let companion = FakeObjects()
+        await companion.set([item("a", "ready"), item("b", "printed")])
+        let model = ObjectsModel(companion:companion)
+        await model.refresh()
+        model.selection = "b"
+        _ = await model.delete("b")
+        XCTAssertEqual(model.selection, "a")
+        _ = await model.delete("a")
+        XCTAssertNil(model.selection)
+        XCTAssertTrue(model.objects.isEmpty)
+    }
+
+    func testADeleteThatFailsKeepsTheObjectAndSaysWhy() async {
+        let companion = FakeObjects()
+        await companion.set([item("a", "ready"), item("b", "printing")])
+        let model = ObjectsModel(companion:companion)
+        await model.refresh()
+        model.selection = "b"
+        await companion.failActions(with:ControlRemoteError(code:"conflict", message:"This is printing. Delete it once the print is done."))
+        let deleted = await model.delete("b")
+        XCTAssertFalse(deleted)
+        XCTAssertEqual(model.objects.map(\.id), ["a", "b"])
+        XCTAssertEqual(model.selection, "b")
+        XCTAssertEqual(model.problem, ObjectsModel.Problem(id:"b", text:"This is printing. Delete it once the print is done."))
     }
 }

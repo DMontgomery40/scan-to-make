@@ -4,30 +4,37 @@ import AppKit
 import SceneKit
 import simd
 import ModelIO
+import Vision
+import CoreImage
 
 /// Design QA only (Debug builds): `Scan to Make --render-objects-design <folder>` draws the objects
 /// window with generic fixture objects to PNGs and exits. It never registers, pairs or probes the
 /// network: it runs before any of that, with its own fixture companion. The fixture STLs are real
 /// files read back through ModelScene, so the 3D stills also check the STL loading and framing.
 @MainActor enum ObjectsDesign {
-    static func render(to output: URL) {
+    /// Returns false if any window failed its stability check or the render failed.
+    static func render(to output: URL) -> Bool {
         _ = NSApplication.shared
         NSApp.setActivationPolicy(.accessory)
-        var done = false
+        var done = false, steady = false
         Task { @MainActor in
-            do { try await renderAll(to:output) } catch { FileHandle.standardError.write(Data("design render failed: \(error)\n".utf8)) }
+            do { steady = try await renderAll(to:output) } catch { FileHandle.standardError.write(Data("design render failed: \(error)\n".utf8)) }
             done = true
         }
         while !done { RunLoop.main.run(until:Date().addingTimeInterval(0.05)) }
+        return steady
     }
 
-    private struct Shot { let name: String; let objects: [StmObject]?; let selection: String?; var dark = false; var threeD = false }
+    private struct Shot { let name: String; let objects: [StmObject]?; let selection: String?; var dark = false; var threeD = false; var size: NSSize? }
 
-    private static func renderAll(to output: URL) async throws {
+    private static func renderAll(to output: URL) async throws -> Bool {
+        var stability: [DesignStability.Result] = []
         try FileManager.default.createDirectory(at:output, withIntermediateDirectories:true)
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("stm-objects-design-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at:root) }
         let objects = try fixtures(in:root, stills:output)
+        // STM_DESIGN_SOLID=1: solid stand-ins for what the capture can't draw (glass buttons, the sidebar's material).
+        let solid = ProcessInfo.processInfo.environment["STM_DESIGN_SOLID"] == "1"
         let byName = Dictionary(uniqueKeysWithValues:zip(["hook", "bracket", "mug", "clip", "arriving", "knob", "spacer", "noCamera"], objects))
         let list = objects.filter { $0.id != byName["noCamera"]!.id }
         let shots = [
@@ -39,6 +46,7 @@ import ModelIO
             Shot(name:"window-plate-light", objects:list, selection:byName["clip"]!.id),
             Shot(name:"window-plate-no-camera-dark", objects:[byName["noCamera"]!] + list, selection:byName["noCamera"]!.id, dark:true),
             Shot(name:"window-uncertain-light", objects:list, selection:byName["knob"]!.id),
+            Shot(name:"window-smallest-light", objects:list, selection:byName["knob"]!.id, size:ObjectsWindow.minimumSize),
             Shot(name:"window-empty-light", objects:[], selection:nil),
             Shot(name:"window-not-set-up-dark", objects:nil, selection:nil, dark:true),
         ]
@@ -46,8 +54,9 @@ import ModelIO
             let model = ObjectsModel(companion:FixtureObjects(items:shot.objects))
             await model.refresh()
             model.selection = shot.selection
-            let window = ObjectsWindow.make(model:model, startWith3D:shot.threeD)
+            let window = ObjectsWindow.make(model:model, startWith3D:shot.threeD, standIns:solid)
             window.appearance = NSAppearance(named:shot.dark ? .darkAqua : .aqua)
+            if let size = shot.size { window.setContentSize(size) }
             window.alphaValue = 0 // drawn for the PNG only, never seen on screen
             window.ignoresMouseEvents = true
             window.orderFrontRegardless()
@@ -56,10 +65,24 @@ import ModelIO
                 let row = table.numberOfRows > 0 && table.rowView(atRow:0, makeIfNecessary:false) != nil
                 FileHandle.standardError.write(Data("\(shot.name): rows \(table.numberOfRows), row view \(row), visible \(table.visibleRect), on screen \(window.occlusionState.contains(.visible))\n".utf8))
             }
-            try png(of:window, to:output.appendingPathComponent(shot.name + ".png"))
+            dumpSidebar(window, name:shot.name)
+            let sidebar = try sidebarDrawing(window, name:shot.name, to:output)
+            if let sidebar {
+                FileHandle.standardError.write(Data(("sidebar text \(shot.name): " + sidebar.1.joined(separator:" / ") + "\n").utf8))
+            }
+            try png(of:window, to:output.appendingPathComponent(shot.name + ".png"), sidebar:solid ? sidebar?.0 : nil)
             // The live SCNView draws through Metal, which the window capture can't see: ask it directly.
             if shot.threeD, let live = findSceneView(window.contentView!) {
                 try write(live.snapshot(), to:output.appendingPathComponent(shot.name + "-scnview.png"))
+            }
+            stability += await DesignStability.check(window, name:shot.name)
+            stability.append(DesignStability.minimumSize(window, name:shot.name, expected:ObjectsWindow.minimumSize))
+            stability.append(DesignStability.scrollerFlip(window, name:shot.name))
+            if ProcessInfo.processInfo.environment["STM_DESIGN_SWEEP"] == "1", shot.name.hasSuffix("ready-light") || shot.name.hasSuffix("plate-light") {
+                stability += await DesignStability.sweep(window, name:shot.name)
+            }
+            if ProcessInfo.processInfo.environment["STM_DESIGN_FIT"] == "1", shot.name.hasSuffix("ready-light") || shot.name.hasSuffix("plate-light") {
+                stability += await DesignStability.fit(window, name:shot.name)
             }
             window.orderOut(nil)
             window.close()
@@ -82,11 +105,79 @@ import ModelIO
             renderer.scale = 2
             if let image = renderer.nsImage { try write(image, to:output.appendingPathComponent("cards-\(dark ? "dark" : "light").png")) }
         }
-        // The popover's footer at its real width, without the popover's pairing code.
-        let footer = ImageRenderer(content:PopoverFooter().frame(width:372).background(Color(nsColor:NSColor(white:0.96, alpha:1)))
-            .environment(\.colorScheme, .light))
-        footer.scale = 2
-        if let image = footer.nsImage { try write(image, to:output.appendingPathComponent("popover-footer-light.png")) }
+        // The menu-bar popover and Settings → General, from fixtures: no socket, no pairing code.
+        for dark in [false, true] {
+            let mac = MacStatusModel(source:FixtureMac())
+            await mac.refresh()
+            let popover = MenuBarPopover(nearby:NearbyModel(companion:FixtureNearby()), mac:mac) {
+                Image(nsImage:fixtureCode()).interpolation(.none).resizable().frame(width:232, height:232)
+            }
+            let popoverWindow = offscreen(popover, size:nil, dark:dark, titled:false)
+            try await Task.sleep(for:.seconds(1))
+            try png(of:popoverWindow, to:output.appendingPathComponent("popover-\(dark ? "dark" : "light").png"))
+            stability += await DesignStability.check(popoverWindow, name:"popover-\(dark ? "dark" : "light")")
+            popoverWindow.orderOut(nil); popoverWindow.close()
+
+            let settings = offscreen(GeneralSettings(mac:mac).frame(width:560, height:680), size:NSSize(width:560, height:680), dark:dark, titled:true)
+            try await Task.sleep(for:.seconds(1))
+            try png(of:settings, to:output.appendingPathComponent("settings-\(dark ? "dark" : "light").png"))
+            stability += await DesignStability.check(settings, name:"settings-\(dark ? "dark" : "light")")
+            stability.append(DesignStability.scrollerFlip(settings, name:"settings-\(dark ? "dark" : "light")"))
+            settings.orderOut(nil); settings.close()
+        }
+        return DesignStability.report(stability)
+    }
+
+    /// A window drawn for its PNG only: fully transparent and ignoring the real pointer. `size` nil: the content's own size.
+    private static func offscreen<Content: View>(_ content: Content, size: NSSize?, dark: Bool, titled: Bool) -> NSWindow {
+        let host = NSHostingView(rootView:content)
+        let fitted = size ?? host.fittingSize // measured before sizing is turned off, which leaves no fitting size
+        host.sizingOptions = []
+        host.wantsLayer = true
+        let window = NSWindow(contentRect:NSRect(origin:.zero, size:fitted), styleMask:titled ? [.titled, .closable] : [.borderless],
+                              backing:.buffered, defer:false)
+        window.title = "Counterpart Settings"
+        window.isReleasedWhenClosed = false
+        window.contentView = host
+        window.setContentSize(fitted)
+        window.appearance = NSAppearance(named:dark ? .darkAqua : .aqua)
+        window.alphaValue = 0 // drawn for the PNG only, never seen on screen
+        window.ignoresMouseEvents = true
+        window.orderFrontRegardless()
+        return window
+    }
+
+    /// A QR code for a made-up address, standing in for the pairing code.
+    private static func fixtureCode() -> NSImage {
+        let filter = CIFilter(name:"CIQRCodeGenerator")!
+        filter.setValue(Data("https://example.invalid/pair/fixture".utf8), forKey:"inputMessage")
+        let output = filter.outputImage!.transformed(by:CGAffineTransform(scaleX:8, y:8))
+        let rep = NSCIImageRep(ciImage:output)
+        let image = NSImage(size:rep.size)
+        image.addRepresentation(rep)
+        return image
+    }
+
+    private struct FixtureNearby: NearbyCompanion {
+        func nearbyPairingEnabled() async throws -> Bool { false }
+        func nearbyRequests() async throws -> [ControlNearbyRequest] { [] }
+        func answerNearby(_ id: String, allow: Bool) async throws {}
+    }
+
+    private struct FixtureMac: MacStatusSource {
+        func status() async throws -> ControlStatus {
+            let json: [String: Any] = ["protocolVersion": 1, "companionVersion": "0.1.0", "transport": "lan", "pairedDeviceCount": 1,
+                                       "capabilities": ["capture": true, "cleanup": true, "printerHandoff": true]]
+            return try JSONDecoder().decode(ControlStatus.self, from:JSONSerialization.data(withJSONObject:json))
+        }
+        func devices() async throws -> [ControlDevice] {
+            let paired = Date().timeIntervalSince1970 * 1000 - 9 * 86_400_000
+            let json: [String: Any] = ["deviceId": "fixture-phone", "deviceName": "iPhone", "scopes": ["capture"], "pairedAt": paired,
+                                       "lastRefreshedAt": paired, "expiresAt": paired + 1, "pairedVia": ["transport": "lan", "login": "lan"]]
+            return [try JSONDecoder().decode(ControlDevice.self, from:JSONSerialization.data(withJSONObject:json))]
+        }
+        func removeDevice(_ id: String) async throws {}
+        func address() -> String? { "192.168.1.20:9077" }
     }
 
     private static func findSceneView(_ view: NSView) -> SCNView? {
@@ -101,13 +192,75 @@ import ModelIO
         return nil
     }
 
-    private static func png(of window: NSWindow, to url: URL) throws {
-        let view = window.contentView!.superview ?? window.contentView!
+    /// The sidebar list's rows as the table has them (their words are read from `sidebarDrawing`'s pixels:
+    /// SwiftUI builds no accessibility tree in a window nobody can see).
+    private static func dumpSidebar(_ window: NSWindow, name: String) {
+        guard let table = findTable(window.contentView!) else {
+            FileHandle.standardError.write(Data("sidebar \(name): no list\n".utf8)); return
+        }
+        let heights = (0..<table.numberOfRows).map { row in table.rowView(atRow:row, makeIfNecessary:true).map { "\(Int($0.frame.height))" } ?? "none" }
+        FileHandle.standardError.write(Data("sidebar \(name): \(table.numberOfRows) rows (heights \(heights.joined(separator:","))), selected \(Array(table.selectedRowIndexes))\n".utf8))
+    }
+
+    /// The sidebar list drawn on its own by AppKit (`cacheDisplay`), which does draw its rows: the window
+    /// capture can't, because the sidebar sits in a material only the window server composites. The selected
+    /// row's selection is a material too, so it is drawn in the system's selection colour instead. Sidebar text
+    /// is vibrant (blended against the material by the window server), so its colours here are not the real
+    /// ones: this proves the rows and their words, not their text colour. Returns
+    /// the drawing (also written as sidebar-<shot>.png) and the text read back from its pixels.
+    private static func sidebarDrawing(_ window: NSWindow, name: String, to output: URL) throws -> (NSBitmapImageRep, [String])? {
+        guard let table = findTable(window.contentView!), table.numberOfRows > 0,
+              let rep = table.bitmapImageRepForCachingDisplay(in:table.bounds) else { return nil }
+        var hidden: [NSView] = []
+        for row in table.selectedRowIndexes {
+            guard let view = table.rowView(atRow:row, makeIfNecessary:false) else { continue }
+            for effect in view.subviews.compactMap({ $0 as? NSVisualEffectView }) where !effect.isHidden { effect.isHidden = true; hidden.append(effect) }
+        }
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep:rep)
+        (window.appearance ?? NSAppearance.currentDrawing()).performAsCurrentDrawingAppearance {
+            NSColor.underPageBackgroundColor.setFill()
+            NSRect(origin:.zero, size:rep.size).fill()
+        }
+        NSGraphicsContext.restoreGraphicsState()
+        (window.appearance ?? NSAppearance.currentDrawing()).performAsCurrentDrawingAppearance {
+            // Selection fills under the rows, then the rows themselves.
+            for row in table.selectedRowIndexes {
+                let rect = table.rect(ofRow:row).insetBy(dx:10, dy:1)
+                NSGraphicsContext.saveGraphicsState()
+                NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep:rep)
+                let flipped = NSRect(x:rect.minX, y:table.bounds.height - rect.maxY, width:rect.width, height:rect.height)
+                // Unemphasized: the drawing's text colours are the inactive window's, so its selection is too.
+                NSColor.unemphasizedSelectedContentBackgroundColor.setFill()
+                NSBezierPath(roundedRect:flipped, xRadius:8, yRadius:8).fill()
+                NSGraphicsContext.restoreGraphicsState()
+            }
+            table.cacheDisplay(in:table.bounds, to:rep)
+        }
+        hidden.forEach { $0.isHidden = false }
+        try rep.representation(using:.png, properties:[:])?.write(to:output.appendingPathComponent("sidebar-\(name).png"))
+        var lines: [String] = []
+        if let image = rep.cgImage {
+            let request = VNRecognizeTextRequest()
+            request.recognitionLevel = .accurate
+            request.usesLanguageCorrection = false
+            try VNImageRequestHandler(cgImage:image).perform([request])
+            lines = (request.results ?? []).sorted { $0.boundingBox.minY > $1.boundingBox.minY }.compactMap { $0.topCandidates(1).first?.string }
+        }
+        return (rep, lines)
+    }
+
+    private static func png(of window: NSWindow, to url: URL, sidebar: NSBitmapImageRep? = nil) throws {
+        // The frame view (with the title bar) when it has a layer; a borderless window has only its content's.
+        let view = [window.contentView!.superview, window.contentView].compactMap { $0 }.first { $0.layer != nil } ?? window.contentView!
         view.layoutSubtreeIfNeeded()
         view.displayIfNeeded()
         // The layer tree, not cacheDisplay: cacheDisplay skips the sidebar list's row layers.
         let scale = window.backingScaleFactor
         let width = Int(view.bounds.width * scale), height = Int(view.bounds.height * scale)
+        if view.layer == nil || width == 0 || height == 0 {
+            FileHandle.standardError.write(Data("png \(url.lastPathComponent): \(type(of:view)) layer \(view.layer != nil) \(width)×\(height)\n".utf8))
+        }
         guard let layer = view.layer,
               let context = CGContext(data:nil, width:width, height:height, bitsPerComponent:8, bytesPerRow:0,
                                       space:CGColorSpace(name:CGColorSpace.sRGB)!, bitmapInfo:CGImageAlphaInfo.premultipliedLast.rawValue) else {
@@ -117,7 +270,19 @@ import ModelIO
         context.fill(CGRect(x:0, y:0, width:width, height:height))
         context.scaleBy(x:scale, y:scale)
         if layer.isGeometryFlipped == false && view.isFlipped == false {} // AppKit layers draw bottom-up like CG
-        (window.appearance ?? NSAppearance.currentDrawing()).performAsCurrentDrawingAppearance { layer.render(in:context) }
+        (window.appearance ?? NSAppearance.currentDrawing()).performAsCurrentDrawingAppearance {
+            layer.render(in:context)
+            // Solid stand-in: the sidebar's material hides the list from this capture, so lay AppKit's own
+            // drawing of the list over it, on a solid sidebar colour, where the window shows it.
+            if let sidebar, let table = findTable(window.contentView!), let list = table.enclosingScrollView {
+                NSGraphicsContext.saveGraphicsState()
+                NSGraphicsContext.current = NSGraphicsContext(cgContext:context, flipped:false)
+                NSColor.underPageBackgroundColor.setFill()
+                list.convert(list.bounds, to:nil).fill()
+                sidebar.draw(in:table.convert(table.bounds, to:nil))
+                NSGraphicsContext.restoreGraphicsState()
+            }
+        }
         guard let image = context.makeImage() else { throw CocoaError(.fileWriteUnknown) }
         try NSBitmapImageRep(cgImage:image).representation(using:.png, properties:[:])!.write(to:url)
     }
@@ -137,6 +302,7 @@ import ModelIO
         func print(_ id: String, checked: Bool) async throws -> StmObject { try refuse() }
         func answerPlate(_ id: String) async throws -> StmObject { try refuse() }
         func start(_ id: String) async throws -> StmObject { try refuse() }
+        func delete(_ id: String) async throws { _ = try refuse() }
     }
 
     private static func fixtures(in root: URL, stills: URL) throws -> [StmObject] {
@@ -205,7 +371,11 @@ import ModelIO
         guard let eye = scene.rootNode.childNode(withName:"eye", recursively:false) else { return }
         if eye.value(forKey:"home") == nil { eye.setValue(NSValue(scnVector3:eye.position), forKey:"home") }
         let home = (eye.value(forKey:"home") as! NSValue).scnVector3Value
-        eye.position = SCNVector3(home.x * cos(angle) + home.z * sin(angle), home.y, -home.x * sin(angle) + home.z * cos(angle))
+        // Separate steps: one mixed CGFloat/Double expression is too slow for Xcode 16's type checker (CI's runner).
+        let c = CGFloat(cos(angle)), s = CGFloat(sin(angle))
+        let x: CGFloat = home.x * c + home.z * s
+        let z: CGFloat = home.z * c - home.x * s
+        eye.position = SCNVector3(x, home.y, z)
         eye.look(at:SCNVector3Zero)
     }
 

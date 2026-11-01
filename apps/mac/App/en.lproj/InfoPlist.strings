@@ -1,0 +1,3 @@
+/* The name people see. The bundle keeps its file name (Scan to Make.app) until the rename ticket migrates it. */
+"CFBundleDisplayName" = "Counterpart";
+"CFBundleName" = "Counterpart";
