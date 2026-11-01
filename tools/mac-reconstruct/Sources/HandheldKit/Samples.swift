@@ -28,7 +28,11 @@ public func loadSample(_ url: URL) throws -> PhotogrammetrySample {
         sample.metadata = (CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [String: Any]) ?? [:]
     }
     sample.gravity = nil
-    if sample.depthDataMap == nil, let depth = embeddedDepth(in: url) { sample.depthDataMap = depth.pixelBuffer() }
+    if let depth = try exactDepth(for: url) {
+        sample.depthDataMap = depth.depthDataMap
+    } else if sample.depthDataMap == nil, let depth = embeddedDepth(in: url) {
+        sample.depthDataMap = depth.pixelBuffer()
+    }
     return sample
 }
 

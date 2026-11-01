@@ -5,24 +5,19 @@ import CoreImage
 import ImageIO
 import Vision
 
-// "Hold it up and turn it" (KAN-210): the phone stays still and the object turns in the user's hand, so a scan
-// needs no room to walk around a desk. The phone takes full-resolution photos with depth embedded (EXIF and the
-// camera's calibration come along) about twice a second through three passes. The Mac cuts the object out of
-// each photo and rebuilds it at full detail (tools/mac-reconstruct samples), then the touch-up runs as usual.
-// The front TrueDepth camera is the default: the phone can be propped up and the user sees what it sees.
+// Handheld capture records synchronized rear-camera RGB and LiDAR depth. The object can move independently
+// of the phone; reconstruction must estimate object-relative poses. These are measured inputs, not a claim
+// that a photo count constitutes complete coverage. The separate Object Capture scanner is unchanged.
 
 enum HandheldCapture {
-    static let passes = ["Turn it slowly all the way round.", "Now turn it over.", "Once more on its side."]
-    static let photosPerPass = 40          // about 20 seconds at two a second
     static let minimumPhotos = 24
 
-    static var frontCamera: AVCaptureDevice? { AVCaptureDevice.default(.builtInTrueDepthCamera, for: .video, position: .front) }
     static var backCamera: AVCaptureDevice? { AVCaptureDevice.default(.builtInLiDARDepthCamera, for: .video, position: .back) }
     static var isAvailable: Bool {
         #if targetEnvironment(simulator)
         return true   // so the screens can be checked in the Simulator, which has no camera to capture with
         #else
-        return frontCamera != nil || backCamera != nil
+        return backCamera != nil
         #endif
     }
 
@@ -89,6 +84,15 @@ struct ScanChoices: View {
 
 // MARK: - Camera
 
+/// Sensor evidence, separate from how dark the object itself is. A valid exposure can legitimately
+/// produce a very dark photo; the failed capture had both near-black pixels and zero exposure/ISO.
+enum HandheldCaptureQuality {
+    static func canCapture(lastFrameAt: TimeInterval?, lastDepthAt: TimeInterval?, now: TimeInterval, exposure: Double, iso: Double) -> Bool {
+        guard let lastFrameAt, let lastDepthAt, exposure.isFinite, exposure > 0, iso.isFinite, iso > 0 else { return false }
+        return now >= lastFrameAt && now - lastFrameAt < 1.5 && now >= lastDepthAt && now - lastDepthAt < 1.5
+    }
+}
+
 /// At most one live analysis at a time, four a second: late frames are simply skipped.
 private final class AnalysisGate: @unchecked Sendable {
     private let lock = NSLock()
@@ -103,248 +107,263 @@ private final class AnalysisGate: @unchecked Sendable {
     func leave() { lock.lock(); busy = false; lock.unlock() }
 }
 private let analysisGate = AnalysisGate()
+private let readinessGate = AnalysisGate()
+private let depthReadinessGate = AnalysisGate()
 
-// fileprivate keeps it (and its AVFoundation delegates) out of the app's generated Objective-C header.
+// fileprivate keeps the AVFoundation owner out of the generated Objective-C header.
 @MainActor @Observable fileprivate final class HandheldCamera: NSObject {
-    enum Phase: Equatable { case ready, countdown(Int), capturing, finished }
+    enum Phase: Equatable { case ready, countdown(Int), capturing, paused, saving, finished }
     var phase: Phase = .ready
-    var pass = 0
-    var taken = 0                       // photos kept in this capture
-    var takenThisPass = 0
-    var warning: String?
-    var mask: CGImage?                  // the object as the phone sees it, for the live preview
-    var front = true
+    var taken = 0
+    var bytesSaved: Int64 = 0
     var failure: String?
+    var notice: String?
+    var mask: CGImage?
+    var lastVideoFrameAt: TimeInterval?
+    var lastDepthFrameAt: TimeInterval?
+    var previewRendering = false
+    var previewSize = CGSize.zero
+    var legacyCapture = false
+    var recordingLimitReached = false
 
     let session = AVCaptureSession()
-    private let photoOutput = AVCapturePhotoOutput()
+    let folder: URL
     private let videoOutput = AVCaptureVideoDataOutput()
     private let queue = DispatchQueue(label: "handheld.camera")
-    private let analysis = DispatchQueue(label: "handheld.analysis")
     private var device: AVCaptureDevice?
-    private var timer: Timer?
-    private var inFlight = false
+    private var recorder: HandheldDepthRecorder?
+    private var countdownTask: Task<Void, Never>?
+    private var watchdog: Timer?
     private var closed = false
-    private var sharpness: [Double] = []
-    private var blurry = false
-    let folder: URL
+    private var finishInProgress = false
+    private var didFinish = false
 
-    init(folder: URL) {
-        self.folder = folder
-        super.init()
+    init(folder: URL) { self.folder = folder; super.init() }
+
+    var canStart: Bool {
+        let now = ProcessInfo.processInfo.systemUptime
+        guard !closed, !recordingLimitReached, !legacyCapture, failure == nil, recorder != nil, session.isRunning, let device,
+              previewRendering, previewSize.width > 1, previewSize.height > 1 else { return false }
+        return HandheldCaptureQuality.canCapture(lastFrameAt: lastVideoFrameAt, lastDepthAt: lastDepthFrameAt, now: now,
+            exposure: CMTimeGetSeconds(device.exposureDuration), iso: Double(device.iso))
     }
 
-    var canSwitch: Bool { HandheldCapture.frontCamera != nil && HandheldCapture.backCamera != nil }
+    fileprivate func previewChanged(rendering: Bool, size: CGSize) {
+        previewRendering = rendering; previewSize = size
+    }
+
+    private func recordDiagnostics(_ event: String) {
+        let report: [String: Any] = [
+            "event": event, "at": ISO8601DateFormatter().string(from: Date()),
+            "captureMethod": "synchronized-rear-lidar", "sessionRunning": session.isRunning,
+            "previewRendering": previewRendering, "previewWidth": previewSize.width,
+            "previewHeight": previewSize.height, "framesSaved": taken, "bytesSaved": bytesSaved,
+            "rgbReceived": lastVideoFrameAt != nil, "depthReceived": lastDepthFrameAt != nil,
+            "failure": failure ?? "", "notice": notice ?? ""
+        ]
+        if let data = try? JSONSerialization.data(withJSONObject: report, options: [.sortedKeys]) {
+            try? data.write(to: folder.appending(path: "capture-ui-diagnostics.json"), options: .atomic)
+        }
+    }
+
+    private func retain(_ summary: HandheldDepthRecorder.Summary) {
+        taken = summary.framesSaved; bytesSaved = summary.bytes
+        recordingLimitReached = summary.limitReached
+        if let data = try? JSONEncoder().encode(summary) {
+            try? data.write(to: folder.appending(path: "capture-diagnostics.json"), options: .atomic)
+        }
+    }
 
     func open() async {
         guard await AVCaptureDevice.requestAccess(for: .video) else {
-            failure = "Counterpart needs the camera to scan. Turn it on in Settings."
-            return
+            failure = "Counterpart needs camera access. You can enable it in Settings."; return
         }
-        try? FileManager.default.removeItem(at: folder)
-        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        configure(front: HandheldCapture.frontCamera != nil)
+        guard !closed else { return }
+        guard let device = HandheldCapture.backCamera else {
+            failure = "Handheld depth capture needs a rear LiDAR camera."; return
+        }
+        // A completed capture belongs to the retry flow; opening a camera must never erase it.
+        if FileManager.default.fileExists(atPath: folder.appending(path: "finished").path) {
+            failure = "This capture is already saved. Return to the project to send it."; return
+        }
+        do { try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true) }
+        catch { failure = "Counterpart couldn't create a folder for this capture."; return }
+        self.device = device
+        let callbacks = HandheldDepthRecorder.Callbacks(
+            onVideo: { [weak self] sample in self?.receivedVideo(sample) },
+            onSaved: { [weak self] frame in
+                Task { @MainActor in
+                    guard let self, !self.closed else { return }
+                    self.taken = frame.framesSaved
+                    self.bytesSaved += frame.byteCount
+                }
+            },
+            onDepthReady: { [weak self] in
+                guard depthReadinessGate.enter() else { return }
+                let now = ProcessInfo.processInfo.systemUptime
+                Task { @MainActor in self?.lastDepthFrameAt = now }
+                depthReadinessGate.leave()
+            },
+            onFailure: { [weak self] message in Task { @MainActor in await self?.captureFailed(message) } },
+            onLimitReached: { [weak self] message in Task { @MainActor in await self?.recordingLimit(message) } })
+        let recorder = HandheldDepthRecorder(device: device, videoOutput: videoOutput, folder: folder, callbacks: callbacks)
+        self.recorder = recorder
+        do {
+            let recovered = try await recorder.recover()
+            retain(recovered)
+            if recovered.framesSaved > 0 {
+                phase = .paused
+                notice = "Your recorded frames are still here. Resume capture or save them to the project."
+            }
+        } catch is HandheldDepthFrameCodec.LegacyCapture {
+            // An older photo capture can be saved, but must not be mixed with a new RGB-D stream.
+            self.recorder = nil; legacyCapture = true; phase = .paused
+            let files = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.fileSizeKey])) ?? []
+            let images = files.filter { $0.pathExtension.lowercased() == "heic" }
+            taken = images.count
+            bytesSaved = images.reduce(Int64(0)) { $0 + Int64((try? $1.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0) }
+            notice = "Your previous photos are still here. Save this capture to the project."
+            return
+        } catch {
+            failure = "The saved capture couldn't be reopened: \(error.localizedDescription)"; return
+        }
+        guard !closed else { return }
+        let session = session, videoOutput = videoOutput
+        let error: String? = await withCheckedContinuation { continuation in
+            queue.async {
+                session.beginConfiguration()
+                do {
+                    let input = try AVCaptureDeviceInput(device: device)
+                    guard session.canAddInput(input) else { throw CaptureSetupError.input }
+                    session.addInput(input)
+                    videoOutput.videoSettings = [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA]
+                    videoOutput.alwaysDiscardsLateVideoFrames = true
+                    guard session.canAddOutput(videoOutput) else { throw CaptureSetupError.output }
+                    session.addOutput(videoOutput)
+                    try recorder.install(in: session)
+                    session.commitConfiguration()
+                    session.startRunning()
+                    continuation.resume(returning: nil)
+                } catch {
+                    session.commitConfiguration()
+                    continuation.resume(returning: error.localizedDescription)
+                }
+            }
+        }
+        if closed { let session = session; queue.async { session.stopRunning() }; return }
+        if let error { failure = "The depth camera couldn't start: \(error)" }
+        recordDiagnostics("configured")
     }
 
-    func configure(front: Bool) {
-        guard let device = front ? HandheldCapture.frontCamera : HandheldCapture.backCamera else { return }
-        self.front = front
-        self.device = device
-        let session = session, photoOutput = photoOutput, videoOutput = videoOutput
-        queue.async { [weak self] in
-            session.beginConfiguration()
-            session.sessionPreset = .photo
-            session.inputs.forEach(session.removeInput)
-            if let input = try? AVCaptureDeviceInput(device: device), session.canAddInput(input) { session.addInput(input) }
-            if session.outputs.isEmpty {
-                if session.canAddOutput(photoOutput) { session.addOutput(photoOutput) }
-                videoOutput.videoSettings = [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA]
-                videoOutput.alwaysDiscardsLateVideoFrames = true
-                if session.canAddOutput(videoOutput) { session.addOutput(videoOutput) }
-            }
-            photoOutput.isDepthDataDeliveryEnabled = photoOutput.isDepthDataDeliverySupported
-            photoOutput.maxPhotoQualityPrioritization = .balanced
-            if let largest = device.activeFormat.supportedMaxPhotoDimensions.max(by: { $0.width * $0.height < $1.width * $1.height }) {
-                photoOutput.maxPhotoDimensions = largest
-            }
-            // Photos as the sensor sees them: never mirrored (a mirrored photo set rebuilds a mirror-image part),
-            // and all in one orientation. Only the on-screen preview is mirrored for the front camera.
-            if let connection = photoOutput.connection(with: .video) {
-                connection.automaticallyAdjustsVideoMirroring = false
-                if connection.isVideoMirroringSupported { connection.isVideoMirrored = false }
-                if connection.isVideoRotationAngleSupported(0) { connection.videoRotationAngle = 0 }
-            }
-            if let connection = videoOutput.connection(with: .video) {
-                connection.automaticallyAdjustsVideoMirroring = false
-                if connection.isVideoMirroringSupported { connection.isVideoMirrored = false }
-                if connection.isVideoRotationAngleSupported(90) { connection.videoRotationAngle = 90 }
-            }
-            session.commitConfiguration()
-            videoOutput.setSampleBufferDelegate(self, queue: self?.analysis)
-            if !session.isRunning { session.startRunning() }
-            let photo = photoOutput.connection(with: .video)
-            print("handheld: \(device.localizedName) running=\(session.isRunning) depth=\(photoOutput.isDepthDataDeliveryEnabled)",
-                  "mirrored=\(photo?.isVideoMirrored ?? false) rotation=\(photo?.videoRotationAngle ?? -1)",
-                  "photo=\(photoOutput.maxPhotoDimensions.width)x\(photoOutput.maxPhotoDimensions.height)")
-        }
+    private enum CaptureSetupError: LocalizedError {
+        case input, output
+        var errorDescription: String? { "The camera does not support this capture configuration." }
     }
 
     func start() {
-        guard phase == .ready else { return }
-        lock()
-        countdown(then: .capturing)
+        guard (phase == .ready || phase == .paused), canStart else { return }
+        countdownTask?.cancel()
+        phase = .countdown(3)
+        countdownTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            for remaining in stride(from: 3, to: 0, by: -1) {
+                guard !Task.isCancelled, !self.closed else { return }
+                self.phase = .countdown(remaining)
+                do { try await Task.sleep(for: .seconds(1)) } catch { return }
+            }
+            guard self.canStart, let recorder = self.recorder else {
+                self.phase = .paused
+                self.notice = "Waiting for synchronized camera and depth data."; return
+            }
+            do {
+                try await recorder.start()
+                guard !self.closed else { _ = await recorder.stop(); return }
+                self.phase = .capturing; self.notice = nil
+                self.watchdog?.invalidate()
+                self.watchdog = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+                    Task { @MainActor in
+                        guard let self, self.phase == .capturing else { return }
+                        if !self.canStart { await self.captureFailed("The camera stopped delivering synchronized RGB and depth. The frames already recorded are saved.") }
+                    }
+                }
+                self.recordDiagnostics("recording")
+            } catch { await self.captureFailed(error.localizedDescription) }
+        }
+    }
+
+    func pause() async {
+        guard phase == .capturing else { return }
+        phase = .saving; watchdog?.invalidate(); watchdog = nil
+        if let summary = await recorder?.stop() { retain(summary) }
+        guard !closed else { return }
+        phase = .paused; recordDiagnostics("paused")
+    }
+
+    private func captureFailed(_ message: String) async {
+        guard !closed, phase != .finished else { return }
+        failure = message; countdownTask?.cancel(); watchdog?.invalidate(); watchdog = nil
+        phase = .saving
+        if let summary = await recorder?.stop() { retain(summary) }
+        guard !closed else { return }
+        phase = .paused; recordDiagnostics("capture-failed")
+    }
+
+    private func recordingLimit(_ message: String) async {
+        guard !closed else { return }
+        notice = message
+        await pause()
+        recordDiagnostics("recording-limit")
+    }
+
+    /// Stop admitting frames and drain the single writer before the upload can see a finished marker.
+    func finish() async -> Bool {
+        guard !closed, !finishInProgress else { return didFinish }
+        finishInProgress = true
+        let savingKnownFailure = failure != nil
+        countdownTask?.cancel(); watchdog?.invalidate(); watchdog = nil; phase = .saving
+        if let summary = await recorder?.stop() {
+            retain(summary)
+            if let failure = summary.failure, !savingKnownFailure {
+                self.failure = failure; phase = .paused; finishInProgress = false
+                return false
+            }
+        }
+        guard !closed else { finishInProgress = false; return false }
+        guard taken >= HandheldCapture.minimumPhotos else {
+            phase = .paused; notice = "There aren't enough recorded frames to send yet."
+            finishInProgress = false; return false
+        }
+        do {
+            try Data().write(to: folder.appending(path: "finished"), options: .atomic)
+            didFinish = true; phase = .finished; recordDiagnostics("saved")
+        } catch { failure = "Counterpart couldn't save the capture."; phase = .paused }
+        finishInProgress = false
+        return didFinish
     }
 
     func close() {
-        closed = true
-        timer?.invalidate()
-        let session = session
-        queue.async { session.stopRunning() }
+        guard !closed else { return }
+        closed = true; countdownTask?.cancel(); watchdog?.invalidate(); watchdog = nil
+        let recorder = recorder, session = session, queue = queue
+        Task { _ = await recorder?.stop(); queue.async { session.stopRunning() } }
     }
 
-    /// Done: keeps what was taken when there is enough to build from.
-    func finish() -> Bool {
-        timer?.invalidate()
-        phase = .finished
-        guard taken >= HandheldCapture.minimumPhotos else { return false }
-        FileManager.default.createFile(atPath: folder.appending(path: "finished").path, contents: Data())
-        return true
-    }
-
-    /// Focus, exposure and white balance stay fixed once capture starts, so every photo of the object matches.
-    private func lock() {
-        guard let device, (try? device.lockForConfiguration()) != nil else { return }
-        if device.isFocusModeSupported(.locked) { device.focusMode = .locked }
-        if device.isExposureModeSupported(.locked) { device.exposureMode = .locked }
-        if device.isWhiteBalanceModeSupported(.locked) { device.whiteBalanceMode = .locked }
-        device.unlockForConfiguration()
-    }
-
-    private func countdown(then next: Phase, from seconds: Int = 3) {
-        timer?.invalidate()
-        phase = .countdown(seconds)
-        Task { @MainActor in
-            for remaining in stride(from: seconds, to: 0, by: -1) {
-                phase = .countdown(remaining)
-                try? await Task.sleep(for: .seconds(1))
-                if phase == .finished || closed { return }
-            }
-            phase = next
-            timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
-                Task { @MainActor in self?.shoot() }
-            }
+    nonisolated private func receivedVideo(_ sample: CMSampleBuffer) {
+        guard let pixels = CMSampleBufferGetImageBuffer(sample) else { return }
+        if readinessGate.enter() {
+            let now = ProcessInfo.processInfo.systemUptime
+            Task { @MainActor [weak self] in self?.lastVideoFrameAt = now }
+            readinessGate.leave()
         }
-    }
-
-    private func shoot() {
-        guard phase == .capturing, !inFlight else { return }
-        if blurry { warning = "Turn it more slowly."; return }
-        inFlight = true
-        let settings = AVCapturePhotoSettings(format: [AVVideoCodecKey: AVVideoCodecType.hevc])
-        settings.isDepthDataDeliveryEnabled = photoOutput.isDepthDataDeliveryEnabled
-        settings.embedsDepthDataInPhoto = true
-        settings.isDepthDataFiltered = true
-        settings.photoQualityPrioritization = .balanced
-        settings.maxPhotoDimensions = photoOutput.maxPhotoDimensions
-        photoOutput.capturePhoto(with: settings, delegate: self)
-    }
-
-    fileprivate func kept(_ data: Data, depthMetres: Float?, mirrored: Bool) {
-        inFlight = false
-        guard phase == .capturing else { return }
-        guard !mirrored else { failure = "This camera sent a mirrored photo. Switch cameras and try again."; return }
-        if let d = depthMetres {
-            warning = d < 0.18 ? "Move it back a little." : d > 0.45 ? "Hold it closer to the phone." : nil
-            if d < 0.12 || d > 0.7 { return }
-        }
-        let name = String(format: "%04d.heic", taken)
-        guard (try? data.write(to: folder.appending(path: name))) != nil else { return }
-        taken += 1
-        takenThisPass += 1
-        if takenThisPass >= HandheldCapture.photosPerPass {
-            takenThisPass = 0
-            if pass + 1 < HandheldCapture.passes.count {
-                pass += 1
-                countdown(then: .capturing, from: 4)
-            } else {
-                _ = finish()
-            }
-        }
-    }
-
-    fileprivate func missed() { inFlight = false }
-
-    fileprivate func analysed(sharp: Double, mask: CGImage?) {
-        sharpness.append(sharp)
-        if sharpness.count > 30 { sharpness.removeFirst() }
-        let typical = sharpness.sorted()[sharpness.count / 2]
-        blurry = sharpness.count > 5 && sharp < typical * 0.45
-        if !blurry && warning == "Turn it more slowly." { warning = nil }
-        if let mask { self.mask = mask }
-    }
-
-}
-
-extension HandheldCamera: AVCapturePhotoCaptureDelegate {
-    nonisolated func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
-        guard error == nil, let data = photo.fileDataRepresentation() else { Task { @MainActor in self.missed() }; return }
-        let orientation = (photo.metadata[kCGImagePropertyOrientation as String] as? Int) ?? 1
-        let depth = photo.depthData.map(Self.centreDepth)
-        Task { @MainActor in self.kept(data, depthMetres: depth ?? nil, mirrored: [2, 4, 5, 7].contains(orientation)) }
-    }
-
-    /// Median depth in the middle of the frame, where the object is held.
-    nonisolated static func centreDepth(_ depthData: AVDepthData) -> Float? {
-        let map = depthData.converting(toDepthDataType: kCVPixelFormatType_DepthFloat32).depthDataMap
-        CVPixelBufferLockBaseAddress(map, .readOnly); defer { CVPixelBufferUnlockBaseAddress(map, .readOnly) }
-        let w = CVPixelBufferGetWidth(map), h = CVPixelBufferGetHeight(map), row = CVPixelBufferGetBytesPerRow(map)
-        guard let base = CVPixelBufferGetBaseAddress(map) else { return nil }
-        var values: [Float] = []
-        for y in stride(from: h * 35 / 100, to: h * 65 / 100, by: 2) {
-            for x in stride(from: w * 35 / 100, to: w * 65 / 100, by: 2) {
-                let v = base.advanced(by: y * row + x * 4).assumingMemoryBound(to: Float.self).pointee
-                if v.isFinite && v > 0.05 { values.append(v) }
-            }
-        }
-        guard values.count > 10 else { return nil }
-        // The near quarter: the object, not the face or wall behind it.
-        return values.sorted()[values.count / 4]
-    }
-}
-
-extension HandheldCamera: AVCaptureVideoDataOutputSampleBufferDelegate {
-    nonisolated func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
-        guard let pixels = CMSampleBufferGetImageBuffer(sampleBuffer), analysisGate.enter() else { return }
-        let sharp = Self.sharpness(pixels)
+        guard analysisGate.enter() else { return }
         nonisolated(unsafe) let frame = pixels
         Task.detached { [weak self] in
             let mask = await Self.objectMask(frame)
-            await MainActor.run { self?.analysed(sharp: sharp, mask: mask) }
+            await MainActor.run { if let mask { self?.mask = mask } }
             analysisGate.leave()
         }
     }
 
-    /// Variance of a Laplacian over the middle of a small grey copy: low when the object smears.
-    nonisolated static func sharpness(_ pixels: CVPixelBuffer) -> Double {
-        CVPixelBufferLockBaseAddress(pixels, .readOnly); defer { CVPixelBufferUnlockBaseAddress(pixels, .readOnly) }
-        let w = CVPixelBufferGetWidth(pixels), h = CVPixelBufferGetHeight(pixels), row = CVPixelBufferGetBytesPerRow(pixels)
-        guard let base = CVPixelBufferGetBaseAddress(pixels)?.assumingMemoryBound(to: UInt8.self) else { return 0 }
-        func grey(_ x: Int, _ y: Int) -> Double {
-            let p = base + y * row + x * 4
-            return 0.114 * Double(p[0]) + 0.587 * Double(p[1]) + 0.299 * Double(p[2])
-        }
-        var sum = 0.0, sumSquares = 0.0, n = 0.0
-        for y in stride(from: h * 3 / 10, to: h * 7 / 10, by: 4) {
-            for x in stride(from: w * 3 / 10, to: w * 7 / 10, by: 4) {
-                let l = 4 * grey(x, y) - grey(x - 2, y) - grey(x + 2, y) - grey(x, y - 2) - grey(x, y + 2)
-                sum += l; sumSquares += l * l; n += 1
-            }
-        }
-        guard n > 0 else { return 0 }
-        return sumSquares / n - (sum / n) * (sum / n)
-    }
-
-    /// The object held in the middle of the frame, cut out on the Neural Engine (Vision, iOS 27).
     nonisolated static func objectMask(_ pixels: CVPixelBuffer) async -> CGImage? {
         guard #available(iOS 27.0, *) else { return nil }
         let request = GenerateIterativeSegmentationRequest(seedPoint: NormalizedPoint(x: 0.5, y: 0.5))
@@ -357,37 +376,44 @@ extension HandheldCamera: AVCaptureVideoDataOutputSampleBufferDelegate {
     }
 }
 
+
 // MARK: - Screen
 
 struct HandheldCaptureView: View {
     let folder: URL
     let done: (Bool) -> Void
+    private let preview: Bool
     @State private var camera: HandheldCamera
 
     fileprivate init(folder: URL, preview: Bool = false, done: @escaping (Bool) -> Void) {
         self.folder = folder
         self.done = done
+        self.preview = preview
         let camera = HandheldCamera(folder: folder)
-        if preview { camera.phase = .capturing; camera.pass = 1; camera.taken = 52; camera.warning = "Hold it closer to the phone." }
+        if preview { camera.phase = .capturing; camera.taken = 52 }
         _camera = State(initialValue: camera)
     }
 
     private var instruction: String {
         switch camera.phase {
-        case .ready: return "Prop the phone up. Hold the object in the circle, about 30 cm away."
-        case .countdown, .capturing: return HandheldCapture.passes[camera.pass]
-        case .finished: return "Done."
+        case .ready: return "Hold the whole object in view."
+        case .countdown, .capturing: return "Show different views of the object. You can pause to change your grip."
+        case .paused: return "Capture paused. Resume when you're ready, or save what you've captured."
+        case .saving: return "Saving the recorded camera and depth data."
+        case .finished: return "Capture saved."
         }
     }
 
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
-            CameraPreview(session: camera.session, mirrored: camera.front).ignoresSafeArea()
+            CameraPreview(session: camera.session, mirrored: false) { rendering, size in
+                camera.previewChanged(rendering: rendering, size: size)
+            }
+            .ignoresSafeArea()
             if let mask = camera.mask {
-                Image(decorative: mask, scale: 1)
+                Image(decorative: mask, scale: 1, orientation: .right)
                     .resizable()
-                    .scaleEffect(x: camera.front ? -1 : 1, y: 1)
                     .scaledToFill()
                     .colorMultiply(cobalt)
                     .blendMode(.screen)
@@ -413,30 +439,30 @@ struct HandheldCaptureView: View {
                         .buttonStyle(.glass)
                         .controlSize(.large)
                     Spacer()
-                    if camera.canSwitch && camera.phase == .ready {
-                        Button("Switch Camera", systemImage: "arrow.triangle.2.circlepath.camera") { camera.configure(front: !camera.front) }
-                            .labelStyle(.iconOnly)
-                            .buttonStyle(.glass)
-                            .controlSize(.large)
-                    }
+                    Label(camera.legacyCapture ? "Saved Capture" : "Handheld LiDAR", systemImage: "viewfinder")
+                        .font(.headline).padding(12).glassEffect(.regular, in: .capsule)
                 }
-                Text(camera.failure ?? instruction)
+                Text(camera.failure ?? (camera.phase == .ready && !camera.canStart ? "Waiting for the camera and LiDAR." : instruction))
                     .font(.title3.weight(.semibold))
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 18).padding(.vertical, 12)
                     .glassEffect(.regular, in: .rect(cornerRadius: 22))
-                if let warning = camera.warning, camera.phase == .capturing {
-                    Label(warning, systemImage: "exclamationmark.triangle.fill")
+                if let notice = camera.notice {
+                    Label(notice, systemImage: "info.circle")
                         .font(.headline)
                         .padding(.horizontal, 16).padding(.vertical, 10)
                         .glassEffect(.regular.tint(.orange), in: .capsule)
                 }
                 Spacer()
                 if camera.phase != .ready {
-                    ProgressView(value: Double(camera.taken), total: Double(HandheldCapture.photosPerPass * HandheldCapture.passes.count)) {
-                        Text("Turn \(camera.pass + 1) of \(HandheldCapture.passes.count)")
+                    HStack {
+                        if camera.phase == .saving { ProgressView() }
+                        Text("\(camera.taken) depth frames recorded")
+                        Spacer()
+                        Text(ByteCountFormatter.string(fromByteCount: camera.bytesSaved, countStyle: .file))
+                            .foregroundStyle(.secondary)
                     }
-                    .tint(cobalt)
+                    .font(.subheadline.monospacedDigit())
                     .padding(.horizontal, 18).padding(.vertical, 12)
                     .glassEffect(.regular, in: .rect(cornerRadius: 22))
                 }
@@ -444,21 +470,33 @@ struct HandheldCaptureView: View {
                     Button { camera.start() } label: { Label("Start", systemImage: "record.circle").frame(maxWidth: .infinity) }
                         .buttonStyle(.glassProminent)
                         .controlSize(.extraLarge)
-                        .disabled(camera.failure != nil)
-                } else {
-                    Button { done(camera.finish()) } label: { Label("Done", systemImage: "checkmark").frame(maxWidth: .infinity) }
-                        .buttonStyle(.glassProminent)
-                        .controlSize(.extraLarge)
+                        .disabled(!camera.canStart)
+                } else if camera.phase == .paused {
+                    if !camera.recordingLimitReached && !camera.legacyCapture && camera.failure == nil {
+                        Button { camera.start() } label: { Label("Resume", systemImage: "record.circle").frame(maxWidth: .infinity) }
+                            .buttonStyle(.glassProminent)
+                            .controlSize(.extraLarge)
+                            .disabled(!camera.canStart)
+                    }
+                    Button { Task { if await camera.finish() { done(true) } } } label: { Label("Save Capture", systemImage: "checkmark").frame(maxWidth: .infinity) }
+                        .buttonStyle(.glass)
+                        .controlSize(.large)
                         .disabled(camera.taken < HandheldCapture.minimumPhotos)
+                } else if camera.phase == .capturing {
+                    HStack {
+                        Button { Task { await camera.pause() } } label: { Label("Pause", systemImage: "pause.fill").frame(maxWidth: .infinity) }
+                            .buttonStyle(.glass)
+                        Button { Task { if await camera.finish() { done(true) } } } label: { Label("Done", systemImage: "checkmark").frame(maxWidth: .infinity) }
+                            .buttonStyle(.glassProminent)
+                            .disabled(camera.taken < HandheldCapture.minimumPhotos)
+                    }
+                    .controlSize(.extraLarge)
                 }
             }
             .padding(20)
         }
         .tint(cobalt)
-        .task { await camera.open() }
-        .onChange(of: camera.phase) { _, phase in
-            if phase == .finished && camera.taken >= HandheldCapture.photosPerPass * HandheldCapture.passes.count { camera.close(); done(true) }
-        }
+        .task { if !preview { await camera.open() } }
         .onDisappear { camera.close() }
     }
 }
@@ -467,20 +505,42 @@ struct HandheldCaptureView: View {
 private struct CameraPreview: UIViewRepresentable {
     let session: AVCaptureSession
     let mirrored: Bool
+    let stateChanged: (Bool, CGSize) -> Void
 
     final class PreviewView: UIView {
         override class var layerClass: AnyClass { AVCaptureVideoPreviewLayer.self }
         var preview: AVCaptureVideoPreviewLayer { layer as! AVCaptureVideoPreviewLayer }
+        var stateChanged: ((Bool, CGSize) -> Void)?
+        private var observation: NSKeyValueObservation?
+        private var lastRendering: Bool?
+        private var lastSize = CGSize.zero
+        func observePreview() {
+            observation = preview.observe(\.isPreviewing, options: [.initial, .new]) { [weak self] _, _ in
+                DispatchQueue.main.async { self?.reportState() }
+            }
+        }
+        override func layoutSubviews() { super.layoutSubviews(); reportState() }
+        override func didMoveToWindow() { super.didMoveToWindow(); reportState() }
+        private func reportState() {
+            let rendering = window != nil && preview.isPreviewing
+            let size = bounds.size
+            guard rendering != lastRendering || size != lastSize else { return }
+            lastRendering = rendering; lastSize = size
+            DispatchQueue.main.async { [weak self] in self?.stateChanged?(rendering, size) }
+        }
     }
 
     func makeUIView(context: Context) -> PreviewView {
         let view = PreviewView()
+        view.stateChanged = stateChanged
         view.preview.session = session
         view.preview.videoGravity = .resizeAspectFill
+        view.observePreview()
         return view
     }
 
     func updateUIView(_ view: PreviewView, context: Context) {
+        view.stateChanged = stateChanged
         guard let connection = view.preview.connection else { return }
         if connection.isVideoRotationAngleSupported(90) { connection.videoRotationAngle = 90 }
         connection.automaticallyAdjustsVideoMirroring = false

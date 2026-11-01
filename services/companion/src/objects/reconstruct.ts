@@ -21,7 +21,7 @@ export type Reconstruct = (input: ReconstructInput) => Promise<void>;
 
 export const NEEDS_MACOS_27 = 'Holding it up to scan needs macOS 27 on your Mac. Scanning by walking around it still works.';
 const NOT_INSTALLED = "Counterpart's model builder is missing on this Mac. Reinstall Counterpart.";
-const FAILED = "Your Mac couldn't build a model from these photos. Try again with the object filling more of the frame, turning it slowly.";
+const FAILED = "Your Mac couldn't build a model from this capture. Your photos are saved in Inputs.";
 
 /**
  * The bundled `mac-reconstruct` (tools/mac-reconstruct): next to the app's payload when installed,

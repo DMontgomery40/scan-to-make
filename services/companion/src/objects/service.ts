@@ -129,14 +129,30 @@ export class ObjectService {
   }
 
   /** One photo of a handheld scan (the object turned in front of a still phone). */
-  async addCapturePhoto(id: string, name: string, bytes: Buffer): Promise<StmObject> {
-    const object = await this.get(id);
-    if (object.state !== 'new' || object.scan) throw new InvalidStateError('The scan can only be added before the touch-up starts.');
-    await this.#deps.store.addFile(id, 'capture', name, bytes);
-    return this.#changed(await this.#deps.store.update(id, o => {
-      const capture = o.capture ?? [];
-      return {...o, capture: capture.includes(name) ? capture : [...capture, name]};
-    }));
+  addCapturePhoto(id: string, name: string, bytes: Buffer): Promise<StmObject> {
+    return this.#gate(id, async () => {
+      const object = await this.get(id);
+      if (object.state !== 'new' || object.scan) throw new InvalidStateError('The scan can only be added before the touch-up starts.');
+      await this.#deps.store.addFile(id, 'capture', name, bytes);
+      return this.#changed(await this.#deps.store.update(id, o => {
+        const capture = o.capture ?? [];
+        return {...o, capture: capture.includes(name) ? capture : [...capture, name]};
+      }));
+    });
+  }
+
+  /** A lossless depth payload paired with a numbered RGB frame; retries retain the same identity. */
+  addCaptureDepth(id: string, name: string, bytes: Buffer): Promise<StmObject> {
+    return this.#gate(id, async () => {
+      if (!/^[0-9]{4}\.depth\.plist$/.test(name) || bytes.length < 8 || bytes.subarray(0, 8).toString('ascii') !== 'bplist00')
+        throw new Error('Invalid file name');
+      const object = await this.get(id);
+      if (object.state !== 'new' || object.scan) throw new InvalidStateError('Depth can only be added before reconstruction starts.');
+      await this.#deps.store.addFile(id, 'capture', name, bytes);
+      return this.#changed(await this.#deps.store.update(id, o => ({...o,
+        captureDepth: o.captureDepth?.includes(name) ? o.captureDepth : [...(o.captureDepth ?? []), name],
+      })));
+    });
   }
 
   async addPhoto(id: string, name: string, bytes: Buffer): Promise<StmObject> {
@@ -151,11 +167,17 @@ export class ObjectService {
   async #start(id: string): Promise<StmObject> {
     const object = await this.get(id);
     // Photos only show what something looks like; without a scan, the description says what to make.
-    if (!object.scan && !object.capture?.length && !object.instructions?.trim() && object.state === 'new')
+    if (!object.scan && !object.capture?.length && !object.captureDepth?.length && !object.instructions?.trim() && object.state === 'new')
       throw new InvalidStateError('Describe what to make, or add a scan.');
     if (object.state === 'touching-up') return object;
     if (object.state === 'needs-closeup') return this.#pass(object, {});
     if (object.state !== 'new' && object.state !== 'failed') throw new InvalidStateError('This object has already been touched up.');
+    if (object.captureDepth?.length) {
+      const images = object.capture ?? [];
+      const depths = new Set(object.captureDepth);
+      if (!images.length || images.length !== depths.size || images.some(name => !depths.has(name.replace(/\.heic$/i, '.depth.plist'))))
+        throw new InvalidStateError('The capture is still missing camera or depth files. Resume sending it from your phone.');
+    }
     return this.#pass(object, {});
   }
 

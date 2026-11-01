@@ -1,3 +1,122 @@
+#if STM_OBJECTS_HOST
+#import <Foundation/Foundation.h>
+#import "React/RCTBridgeModule.h"
+
+// The production file methods below run unchanged. Only native paths, pairing and HTTP
+// completion are controlled; no real Documents, credentials, network, or simulator is used.
+static NSURL *fixtureRoot;
+static NSMutableArray<NSDictionary *> *requests;
+static NSMutableDictionary *remoteObject;
+static NSString *failOnceName;
+static NSString *const objectID = @"11111111-2222-3333-4444-555555555555";
+static void Require(BOOL ok, NSString *why) {
+    if (!ok) @throw [NSException exceptionWithName:@"HostTestFailure" reason:why userInfo:nil];
+}
+static NSString *const STMObjectsUUID = @"[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}";
+static NSUInteger const STMObjectsScanLimit = 64 * 1024 * 1024;
+static NSUInteger const STMObjectsPhotoLimit = 25 * 1024 * 1024;
+static NSUInteger const STMObjectsJSONLimit = 4 * 1024 * 1024;
+// HOST_MATCHES
+// HOST_MESSAGE
+static NSURL *STMObjectsRoot(NSSearchPathDirectory directory, NSString *name) { return [fixtureRoot URLByAppendingPathComponent:name isDirectory:YES]; }
+static NSDictionary *STMObjectsPairing(NSString *scope, NSString **code) { return @{@"scope":scope}; }
+
+@interface STMObjectsRequest : NSObject
+@end
+@implementation STMObjectsRequest
++ (void)send:(NSString *)method path:(NSString *)path body:(NSData *)body type:(NSString *)type pairing:(NSDictionary *)pairing limit:(NSUInteger)limit
+        done:(void (^)(NSInteger, NSData *, NSString *))done {
+    [requests addObject:@{@"method":method,@"path":path,@"body":body ?: NSData.data,@"type":type ?: @""}];
+    if ([method isEqual:@"GET"]) {
+        done(200,[NSJSONSerialization dataWithJSONObject:@{@"object":remoteObject} options:0 error:nil],nil); return;
+    }
+    NSURLComponents *url=[NSURLComponents componentsWithString:[@"https://fixture.invalid" stringByAppendingString:path]];
+    NSString *name=nil;
+    for (NSURLQueryItem *item in url.queryItems) if ([item.name isEqual:@"name"]) name=item.value;
+    Require(name != nil, @"upload includes filename");
+    if ([name isEqual:failOnceName]) { failOnceName=nil; done(503,NSData.data,nil); return; }
+    NSString *collection=[url.path hasSuffix:@"/capture-depth"] ? @"captureDepth" : @"capture";
+    NSMutableArray *names=[remoteObject[collection] mutableCopy];
+    if (![names containsObject:name]) [names addObject:name];
+    remoteObject[collection]=names;
+    done(200,[NSJSONSerialization dataWithJSONObject:@{@"object":remoteObject} options:0 error:nil],nil);
+}
+@end
+
+@interface ObjectsBridge : NSObject
+@property NSMutableSet<NSString *> *uploading;
+@end
+@implementation ObjectsBridge
+- (instancetype)init { if ((self=[super init])) _uploading=[NSMutableSet set]; return self; }
+// HOST_UPLOAD
+// HOST_EXISTING
+// HOST_SEND_FILES
+// HOST_SEND_HANDHELD
+@end
+
+static NSURL *CaptureFolder(void) { return [[STMObjectsRoot(NSDocumentDirectory,@"HandheldCaptures") URLByAppendingPathComponent:objectID] copy]; }
+static void Reset(NSURL *scratch, NSString *name) {
+    fixtureRoot=[scratch URLByAppendingPathComponent:name isDirectory:YES];
+    Require([NSFileManager.defaultManager createDirectoryAtURL:CaptureFolder() withIntermediateDirectories:YES attributes:nil error:nil],@"private capture folder");
+    requests=[NSMutableArray array]; remoteObject=[@{@"photos":@[],@"capture":@[],@"captureDepth":@[]} mutableCopy]; failOnceName=nil;
+}
+static void Put(NSString *name, NSString *payload) {
+    Require([[payload dataUsingEncoding:NSUTF8StringEncoding] writeToURL:[CaptureFolder() URLByAppendingPathComponent:name] atomically:YES],@"fixture payload written");
+}
+static NSArray *Uploads(void) {
+    return [requests filteredArrayUsingPredicate:[NSPredicate predicateWithFormat:@"method == %@",@"POST"]];
+}
+static NSArray *UploadPaths(void) { return [Uploads() valueForKey:@"path"]; }
+static NSString *Path(NSString *route, NSString *name) { return [NSString stringWithFormat:@"/v1/objects/%@/%@?name=%@",objectID,route,name]; }
+static id Send(ObjectsBridge *bridge, NSString *expectedError) {
+    __block id result=nil; __block NSString *failure=nil;
+    [bridge sendHandheldOptions:@{@"objectId":objectID} resolve:^(id value){result=value;} reject:^(NSString *code,NSString *message,NSError *error){failure=code;}];
+    if (expectedError) Require([failure isEqual:expectedError] && result==nil,[@"expected " stringByAppendingString:expectedError]);
+    else Require(result!=nil && failure==nil,[@"send succeeded: " stringByAppendingString:failure ?: @""]);
+    Require(bridge.uploading.count==0,@"upload ownership released after completion/failure");
+    return result;
+}
+int main(void) { @autoreleasepool {
+    NSURL *scratch=[NSURL fileURLWithPath:[NSTemporaryDirectory() stringByAppendingPathComponent:NSUUID.UUID.UUIDString] isDirectory:YES];
+    int status=0;
+    @try {
+        Reset(scratch,@"paired");
+        Put(@"0001.heic",@"rgb-one"); Put(@"0001.depth.plist",@"bplist00-depth-one");
+        Put(@"0000.heic",@"rgb-zero"); Put(@"0000.depth.plist",@"bplist00-depth-zero"); Put(@"capture-frames.jsonl",@"{}\n");
+        ObjectsBridge *bridge=[ObjectsBridge new];
+        id result=Send(bridge,nil);
+        Require([result[@"photosSent"] integerValue]==2,@"paired upload reports RGB count, not file count");
+        Require([UploadPaths() isEqual:@[Path(@"capture-depth",@"0000.depth.plist"),Path(@"capture",@"0000.heic"),Path(@"capture-depth",@"0001.depth.plist"),Path(@"capture",@"0001.heic")]],@"each depth uploads before its RGB, in filename order");
+        Require([Uploads()[0][@"body"] isEqual:[@"bplist00-depth-zero" dataUsingEncoding:NSUTF8StringEncoding]] && [Uploads()[1][@"body"] isEqual:[@"rgb-zero" dataUsingEncoding:NSUTF8StringEncoding]],@"original depth/RGB bytes preserved");
+        Require([Uploads()[0][@"type"] isEqual:@"application/octet-stream"] && [Uploads()[1][@"type"] isEqual:@"image/heic"],@"depth/RGB content types");
+        [requests removeAllObjects]; Send(bridge,nil);
+        Require(Uploads().count==0,@"complete paired retry uploads nothing twice");
+
+        Reset(scratch,@"interrupted"); Put(@"0000.heic",@"rgb"); Put(@"0000.depth.plist",@"bplist00-depth"); Put(@"capture-frames.jsonl",@"{}\n");
+        bridge=[ObjectsBridge new]; failOnceName=@"0000.heic"; Send(bridge,@"upload-failed");
+        Require([remoteObject[@"captureDepth"] isEqual:@[@"0000.depth.plist"]] && [remoteObject[@"capture"] count]==0,@"failure retained only the sent depth");
+        [requests removeAllObjects]; Send(bridge,nil);
+        Require([UploadPaths() isEqual:@[Path(@"capture",@"0000.heic")]],@"retry independently skips existing depth while sending missing RGB");
+        remoteObject[@"captureDepth"]=@[]; [requests removeAllObjects]; Send(bridge,nil);
+        Require([UploadPaths() isEqual:@[Path(@"capture-depth",@"0000.depth.plist")]],@"existing RGB does not hide a missing depth sidecar");
+
+        Reset(scratch,@"missing-depth"); Put(@"0000.heic",@"rgb0"); Put(@"0000.depth.plist",@"bplist00-depth"); Put(@"0001.heic",@"rgb1"); Put(@"capture-frames.jsonl",@"{}\n");
+        Send([ObjectsBridge new],@"incomplete-depth");
+        Require(requests.count==0,@"missing later sidecar rejected before any request/upload");
+        Require([NSFileManager.defaultManager fileExistsAtPath:[CaptureFolder() URLByAppendingPathComponent:@"0001.heic"].path],@"rejected capture remains on disk");
+        Reset(scratch,@"all-depth-missing"); Put(@"0000.heic",@"rgb"); Put(@"capture-frames.jsonl",@"{}\n");
+        Send([ObjectsBridge new],@"incomplete-depth"); Require(requests.count==0,@"stream journal prevents legacy downgrade when all sidecars are missing");
+
+        Reset(scratch,@"legacy"); Put(@"0000.heic",@"opaque legacy HEIC with embedded depth"); Put(@"0001.heic",@"opaque legacy HEIC two");
+        result=Send([ObjectsBridge new],nil);
+        Require([result[@"photosSent"] integerValue]==2 && [UploadPaths() isEqual:@[Path(@"capture",@"0000.heic"),Path(@"capture",@"0001.heic")]],@"legacy embedded-depth photos remain accepted without fabricated sidecars");
+        printf("NATIVE_OBJECTS_HOST_PASS paired depth-first bytes, independent retry, incomplete-depth preflight, legacy capture\n");
+    } @catch (NSException *error) {
+        fprintf(stderr,"FAIL %s\n",error.reason.UTF8String); status=1;
+    } @finally { [NSFileManager.defaultManager removeItemAtURL:scratch error:nil]; }
+    return status;
+} }
+#else
 #import <UIKit/UIKit.h>
 #import <CommonCrypto/CommonDigest.h>
 #import "../../modules/local-project-storage/ios/CompanionPairing.mm"
@@ -184,3 +303,5 @@ static NSDictionary *Json(NSString *text){id v=[NSJSONSerialization JSONObjectWi
 @interface AppDelegate:UIResponder<UIApplicationDelegate>@end
 @implementation AppDelegate@end
 int main(int argc,char**argv){@autoreleasepool{return UIApplicationMain(argc,argv,nil,NSStringFromClass(AppDelegate.class));}}
+
+#endif

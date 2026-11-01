@@ -50,6 +50,25 @@ test('create, list and get an object', async t => {
   assert.deepEqual(scopes, ['captures:import', 'projects:read', 'projects:read']);
 });
 
+test('exact capture depth requires write scope, stays separate from photo media, and rejects unsafe names', async t => {
+  const {call, scopes, service} = await fixture(t);
+  const object = await service.create();
+  const path = `/v1/objects/${object.id}/capture-depth`;
+  const payload = Buffer.concat([Buffer.from('bplist00'), Buffer.from([1, 2, 0, 255])]);
+  const saved = await call('POST', path + '?name=0000.depth.plist', payload, 'application/octet-stream');
+  assert.equal(saved.status, 200);
+  assert.equal(scopes.at(-1), 'captures:import');
+  assert.deepEqual(saved.json.object.captureDepth, ['0000.depth.plist']);
+  assert.equal(saved.json.object.capture, undefined);
+  assert.equal((await call('GET', `/v1/objects/${object.id}/capture/0000.depth.plist`)).status, 404);
+  assert.equal((await call('POST', path + '?name=../0000.depth.plist', payload)).status, 400);
+  assert.equal((await call('POST', path + '?name=0000.depth.plist', Buffer.from('bad'))).status, 400);
+  assert.equal((await call('POST', path + '?name=0001.depth.plist', Buffer.alloc(8 * 1024 * 1024 + 1))).status, 413);
+  const denied = await fixture(t, {denied: ['captures:import']});
+  const other = await denied.service.create();
+  assert.equal((await denied.call('POST', `/v1/objects/${other.id}/capture-depth?name=0000.depth.plist`, payload)).status, 403);
+});
+
 test('scan, photos, start, then the ready model and renders download', async t => {
   const {call, service} = await fixture(t);
   const id = (await call('POST', '/v1/objects', {})).json.object.id;

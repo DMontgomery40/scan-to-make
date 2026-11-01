@@ -1,0 +1,47 @@
+"""Host checks for actual streaming readiness and owner finish/drain methods; no camera access."""
+import argparse
+import hashlib
+import json
+from pathlib import Path
+import subprocess
+import tempfile
+
+HERE = Path(__file__).resolve().parent
+parser = argparse.ArgumentParser()
+parser.add_argument('--evidence', type=Path, required=True)
+args = parser.parse_args()
+args.evidence.mkdir(parents=True, exist_ok=True)
+source = (HERE.parents[1] / 'ios/ScanToMake/Objects/HandheldCapture.swift').read_text()
+def extract(marker):
+    start = source.index(marker)
+    end = source.index('{', start) + 1
+    depth = 1
+    while depth:
+        depth += (source[end] == '{') - (source[end] == '}')
+        end += 1
+    return source[start:end]
+
+markers = {
+    '// QUALITY_POLICY': 'enum HandheldCaptureQuality {',
+    '// CAMERA_PHASE': 'enum Phase: Equatable {',
+    '// CAN_START': 'var canStart: Bool {',
+    '// RETAIN_SUMMARY': 'private func retain(',
+    '// FINISH_CAPTURE': 'func finish() async -> Bool {',
+    '// CLOSE_CAPTURE': 'func close() {',
+}
+fixture = (HERE / 'HandheldQualityTests.swift').read_text()
+methods = {placeholder: extract(marker) for placeholder, marker in markers.items()}
+for placeholder, method in methods.items():
+    fixture = fixture.replace(placeholder, method.replace('private func ', 'func ', 1))
+(args.evidence / 'production-methods.json').write_text(json.dumps({
+    markers[key]: hashlib.sha256(value.encode()).hexdigest() for key, value in methods.items()
+}, indent=2) + '\n')
+fixture_path = args.evidence / 'HandheldQualityFixture.swift'
+fixture_path.write_text(fixture)
+with tempfile.TemporaryDirectory(prefix='native-handheld-quality-') as directory:
+    binary = str(Path(directory) / 'quality')
+    with (args.evidence / 'compile.log').open('w') as log:
+        subprocess.run(['xcrun', 'swiftc', '-swift-version', '5', '-parse-as-library', str(fixture_path), '-o', binary],
+                       stdout=log, stderr=subprocess.STDOUT, check=True, timeout=120)
+    with (args.evidence / 'results.log').open('w') as log:
+        subprocess.run([binary], stdout=log, stderr=subprocess.STDOUT, check=True, timeout=30)

@@ -7,7 +7,8 @@ import {ObjectNotFoundError, type ObjectPass, type StmObject} from './store.js';
 
 const READ: RemoteScope = 'projects:read', WRITE: RemoteScope = 'captures:import', PRINT: RemoteScope = 'printer-handoff:use';
 const MAX_SCAN = 64 * 1024 * 1024, MAX_PHOTO = 25 * 1024 * 1024, MAX_JSON = 16 * 1024;
-const PATH = /^\/v1\/objects(?:\/([0-9a-f-]{36})(?:\/(scan|photos|capture|start|corrections|closeup|print|printer|plate\.jpg|plate|model\.stl|passes\/[^/]+\/activity|(?:renders|photos|capture)\/[^/]+))?)?$/;
+const MAX_DEPTH = 8 * 1024 * 1024;
+const PATH = /^\/v1\/objects(?:\/([0-9a-f-]{36})(?:\/(scan|photos|capture|capture-depth|start|corrections|closeup|print|printer|plate\.jpg|plate|model\.stl|passes\/[^/]+\/activity|(?:renders|photos|capture)\/[^/]+))?)?$/;
 
 class HttpFailure extends Error {
   constructor(readonly status: number, readonly code: string, message = code) { super(message); }
@@ -138,6 +139,12 @@ export function createObjectRoutes(service: ObjectService) {
         let object: StmObject;
         switch (action) {
           case 'scan': object = await service.addScan(id, 'scan.usdz', await body(request, MAX_SCAN)); break;
+          case 'capture-depth': {
+            const name = url.searchParams.get('name') ?? '';
+            if (!/^[0-9]{4}\.depth\.plist$/.test(name)) throw new HttpFailure(400, 'invalid-name');
+            object = await service.addCaptureDepth(id, name, await body(request, MAX_DEPTH));
+            break;
+          }
           case 'photos':
           case 'capture': {
             const name = url.searchParams.get('name') ?? '';

@@ -1,5 +1,6 @@
 #import <React/RCTViewManager.h>
 #import <React-RCTAppDelegate/RCTDefaultReactNativeFactoryDelegate.h>
+#import <AVFoundation/AVFoundation.h>
 #import "ScanToMake-Swift.h"
 
 @interface STMActionButtonManager : RCTViewManager

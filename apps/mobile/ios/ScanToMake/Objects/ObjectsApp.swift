@@ -557,8 +557,8 @@ struct NewObjectView: View {
                         Button { Task { await scan(handheld: true) } } label: {
                             Label {
                                 VStack(alignment: .leading, spacing: 4) {
-                                    Text("Capture with Photos").font(.headline)
-                                    Text("Hold and turn the object. Your Mac builds a model from the photos.")
+                                    Text("Capture in Hand").font(.headline)
+                                    Text("Record the object with the rear camera and LiDAR while you turn it in your hand.")
                                         .font(.subheadline).foregroundStyle(.secondary)
                                 }
                             } icon: { Image(systemName: "hand.raised").font(.title2) }
@@ -1059,7 +1059,7 @@ struct ObjectDetailView: View {
                         big("Scan with LiDAR", "viewfinder", prominent: true) { try await scan(object, handheld: false) }
                     }
                     if HandheldCapture.isAvailable {
-                        big("Capture with Photos", "hand.raised", prominent: false) { try await scan(object, handheld: true) }
+                        big("Capture in Hand", "hand.raised", prominent: false) { try await scan(object, handheld: true) }
                     }
                 case .makeIt:
                     big("Make It From the Description", "wand.and.sparkles", prominent: false) { try await finishSending(object) }

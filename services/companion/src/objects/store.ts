@@ -33,6 +33,8 @@ export interface StmObject {
   photos: string[];
   /** A handheld scan: its photos under capture/ (with depth), rebuilt into scan/scan.usdz on this Mac. */
   capture?: string[];
+  /** Lossless depth/calibration companions under capture/, separate from viewable images. */
+  captureDepth?: string[];
   /** What the Mac is doing right now, in words, while it is longer than a moment (building a handheld scan). */
   progress?: string;
   passes: ObjectPass[];

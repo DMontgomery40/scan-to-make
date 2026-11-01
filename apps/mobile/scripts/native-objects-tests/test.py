@@ -1,6 +1,7 @@
-"""Bounded real Simulator tests for the objects bridge (KAN-204).
+"""Host handheld transport checks or bounded real Simulator objects tests (KAN-204).
 
-Requires built companion. Uses a separate disposable app/container. Uses real
+Host mode uses temporary local files and controlled HTTP completions, without a Simulator.
+Simulator mode requires a built companion and uses a separate disposable app/container. Uses real
 capture-scoped credentials
 against the synthetic pairing fixture (fake converter and scan runner), so
 this proves the native transport, not conversion, Blender or physical fit.
@@ -12,6 +13,7 @@ from pathlib import Path
 import plistlib
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
 import uuid
@@ -21,7 +23,8 @@ HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[3]
 BUNDLE = 'com.scantomake.objectstests'
 parser = argparse.ArgumentParser()
-parser.add_argument('--simulator', required=True, help='Already booted Simulator UUID')
+parser.add_argument('--simulator', help='Already booted Simulator UUID')
+parser.add_argument('--host', action='store_true', help='Exercise actual handheld file methods with controlled local transport; no Simulator')
 parser.add_argument('--evidence', type=Path, required=True)
 args = parser.parse_args()
 args.evidence.mkdir(parents=True, exist_ok=True)
@@ -29,6 +32,58 @@ env = dict(os.environ, DEVELOPER_DIR='/Applications/Xcode.app/Contents/Developer
 
 def run(command, **kwargs):
     return subprocess.run(command, env=env, check=True, timeout=120, **kwargs)
+
+if args.host:
+    source = (REPO / 'apps/mobile/modules/local-project-storage/ios/ObjectsBridge.mm').read_text()
+    def extract(marker):
+        start = source.index(marker)
+        end = source.index('{', start) + 1
+        depth = 1
+        while depth:
+            depth += (source[end] == '{') - (source[end] == '}')
+            end += 1
+        return source[start:end]
+    markers = {
+        '// HOST_MATCHES': 'static BOOL STMObjectsMatches(',
+        '// HOST_MESSAGE': 'static NSString *STMObjectsMessage(',
+        '// HOST_UPLOAD': '- (void)upload:',
+        '// HOST_EXISTING': '- (void)existing:',
+        '// HOST_SEND_FILES': '- (void)sendFiles:',
+        '// HOST_SEND_HANDHELD': 'RCT_REMAP_METHOD(sendHandheld,',
+    }
+    fixture = (HERE / 'runner.mm').read_text()
+    hashes = {}
+    for placeholder, marker in markers.items():
+        method = extract(marker)
+        fixture = fixture.replace(placeholder, method)
+        hashes[marker] = hashlib.sha256(method.encode()).hexdigest()
+    (args.evidence / 'production-methods.json').write_text(json.dumps(hashes, indent=2) + '\n')
+    fixture_path = args.evidence / 'HostFixture.mm'
+    fixture_path.write_text(fixture)
+    with tempfile.TemporaryDirectory(prefix='native-objects-host-') as directory:
+        binary = str(Path(directory) / 'check')
+        sdk = subprocess.check_output(['xcrun','--sdk','macosx','--show-sdk-path'],env=env,text=True).strip()
+        with (args.evidence / 'compile.log').open('w') as log:
+            run(['xcrun','clang++','-fobjc-arc','-fblocks','-DSTM_OBJECTS_HOST=1','-isysroot',sdk,
+                 '-I',str(HERE),str(fixture_path),'-framework','Foundation','-o',binary],stdout=log,stderr=subprocess.STDOUT)
+        with (args.evidence / 'runtime.log').open('w') as log:
+            run([binary],stdout=log,stderr=subprocess.STDOUT)
+    # Also compile the unchanged full bridge through the existing native harness imports.
+    sdk = subprocess.check_output(['xcrun','--sdk','iphonesimulator','--show-sdk-path'],env=env,text=True).strip()
+    with (args.evidence / 'bridge-syntax.log').open('w') as log:
+        run(['xcrun','clang++','-fsyntax-only','-fobjc-arc','-fblocks','-target','arm64-apple-ios17.0-simulator',
+             '-isysroot',sdk,'-I',str(HERE),str(HERE / 'runner.mm')],stdout=log,stderr=subprocess.STDOUT)
+    result = {'passed':True,'mode':'host-controlled-transport','bridgeSha256':hashlib.sha256(source.encode()).hexdigest(),
+              'source':'Actual native handheld upload methods; controlled Foundation HTTP/path boundaries, no real network or camera'}
+    (args.evidence / 'results.json').write_text(json.dumps(result,indent=2)+'\n')
+    print(json.dumps(result))
+    raise SystemExit(0)
+
+if not args.simulator:
+    parser.error('--simulator is required unless --host is used')
+
+# Existing Simulator/CI invocations also retain the new handheld transport regression checks.
+run([sys.executable, str(Path(__file__).resolve()), '--host', '--evidence', str(args.evidence / 'host')])
 
 simulators = json.loads(subprocess.check_output(['xcrun', 'simctl', 'list', 'devices', '-j'], env=env))
 assert any(d['udid'] == args.simulator and d['state'] == 'Booted'

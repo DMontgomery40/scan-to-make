@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {chmod, mkdtemp, mkdir, readdir, writeFile} from 'node:fs/promises';
+import {chmod, mkdtemp, mkdir, readdir, readFile, writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {ObjectStore} from '../dist/objects/store.js';
@@ -74,6 +74,54 @@ test('a Mac without macOS 27 says so plainly, and trying again rebuilds', async 
   await service.start(object.id);
   assert.equal((await service.settled(object.id)).state, 'ready');
   assert.equal(attempts, 2);
+});
+
+test('exact depth uploads survive retries and an incomplete RGB-depth pair cannot start', async () => {
+  const {service, object, builds} = await setup();
+  const depth = Buffer.concat([Buffer.from('bplist00'), Buffer.from([0, 255, 1, 7, 0])]);
+  await service.addCaptureDepth(object.id, '0000.depth.plist', depth);
+  await assert.rejects(service.start(object.id), /missing camera or depth files/);
+  await service.addCapturePhoto(object.id, '0000.heic', Buffer.from('rgb'));
+  await service.addCaptureDepth(object.id, '0000.depth.plist', depth);
+  const retained = await service.get(object.id);
+  assert.deepEqual(retained.captureDepth, ['0000.depth.plist']);
+  assert.deepEqual(retained.capture, ['0000.heic']);
+  assert.deepEqual(await readFile(join(service.dir(object.id), 'capture', '0000.depth.plist')), depth);
+  await service.addCapturePhoto(object.id, '0001.heic', Buffer.from('rgb2'));
+  await assert.rejects(service.start(object.id), /missing camera or depth files/);
+  assert.equal(builds.length, 0);
+  await service.addCaptureDepth(object.id, '0001.depth.plist', depth);
+  await service.start(object.id);
+  assert.equal((await service.settled(object.id)).state, 'ready');
+  await assert.rejects(service.addCaptureDepth(object.id, '0002.depth.plist', depth), InvalidStateError);
+});
+
+test('depth sidecars have a narrow name and container contract', async () => {
+  const {service, object} = await setup();
+  await assert.rejects(service.addCaptureDepth(object.id, '../0000.depth.plist', Buffer.from('bplist00')), /Invalid file name/);
+  await assert.rejects(service.addCaptureDepth(object.id, '0000.heic', Buffer.from('bplist00')), /Invalid file name/);
+  await assert.rejects(service.addCaptureDepth(object.id, '0000.depth.plist', Buffer.from('not-plist')), /Invalid file name/);
+});
+
+test('reconstruction waits for an admitted RGB upload to finish committing its pair', async () => {
+  const {service, store, object, builds} = await setup();
+  await service.addCaptureDepth(object.id, '0000.depth.plist', Buffer.from('bplist00'));
+  const writing = Promise.withResolvers(), release = Promise.withResolvers();
+  const addFile = store.addFile.bind(store);
+  store.addFile = async (...args) => {
+    writing.resolve();
+    await release.promise;
+    return addFile(...args);
+  };
+  const upload = service.addCapturePhoto(object.id, '0000.heic', Buffer.from('rgb'));
+  await writing.promise;
+  const started = service.start(object.id);
+  // Attach rejection handling before releasing the write: the unguarded upload failed here.
+  const result = Promise.all([upload, started]);
+  release.resolve();
+  await result;
+  assert.equal((await service.settled(object.id)).state, 'ready');
+  assert.equal(builds.length, 1);
 });
 
 test('handheld photos are only taken before the touch-up starts, and not next to a walk-around scan', async () => {

@@ -158,7 +158,7 @@ RCT_REMAP_METHOD(call, callOptions:(NSDictionary *)o resolve:(RCTPromiseResolveB
   NSUInteger limit = [file[@"scan"] boolValue] ? STMObjectsScanLimit : STMObjectsPhotoLimit;
   if (!bytes.length || bytes.length > limit) { done(sent, @"unreadable-file", @"A file from this scan couldn't be read."); return; }
   NSString *path = [file[@"scan"] boolValue] ? [NSString stringWithFormat:@"/v1/objects/%@/scan", objectId]
-    : [NSString stringWithFormat:@"/v1/objects/%@/%@?name=%@", objectId, [file[@"capture"] boolValue] ? @"capture" : @"photos",
+    : [NSString stringWithFormat:@"/v1/objects/%@/%@?name=%@", objectId, [file[@"depth"] boolValue] ? @"capture-depth" : [file[@"capture"] boolValue] ? @"capture" : @"photos",
        [file[@"name"] stringByAddingPercentEncodingWithAllowedCharacters:NSCharacterSet.URLQueryAllowedCharacterSet]];
   [STMObjectsRequest send:[file[@"scan"] boolValue] ? @"PUT" : @"POST" path:path body:bytes type:file[@"type"] pairing:pairing limit:STMObjectsJSONLimit
                      done:^(NSInteger status, NSData *data, NSString *failure) {
@@ -190,10 +190,11 @@ RCT_REMAP_METHOD(call, callOptions:(NSDictionary *)o resolve:(RCTPromiseResolveB
     if (!object) { [self.uploading removeObject:objectId]; reject(failure, STMObjectsMessage(failure), nil); return; }
     NSArray *have = [object[@"photos"] isKindOfClass:NSArray.class] ? object[@"photos"] : @[];
     NSArray *captured = [object[@"capture"] isKindOfClass:NSArray.class] ? object[@"capture"] : @[];
+    NSArray *depths = [object[@"captureDepth"] isKindOfClass:NSArray.class] ? object[@"captureDepth"] : @[];
     BOOL hasScan = [object[@"scan"] isKindOfClass:NSString.class];
     NSMutableArray *missing = [NSMutableArray array];
     for (NSDictionary *file in files) {
-      BOOL there = [file[@"scan"] boolValue] ? hasScan : [([file[@"capture"] boolValue] ? captured : have) containsObject:file[@"name"]];
+      BOOL there = [file[@"scan"] boolValue] ? hasScan : [([file[@"depth"] boolValue] ? depths : [file[@"capture"] boolValue] ? captured : have) containsObject:file[@"name"]];
       if (!there) [missing addObject:file];
     }
     [self upload:missing objectId:objectId pairing:pairing index:0 sent:0 done:^(NSUInteger sent, NSString *uploadFailure, NSString *message) {
@@ -231,19 +232,33 @@ RCT_REMAP_METHOD(sendCapture, sendCaptureOptions:(NSDictionary *)o resolve:(RCTP
   } reject:reject];
 }
 
-/** A handheld scan (KAN-210): every photo of Documents/HandheldCaptures/<object id>, depth embedded, for the Mac to rebuild. */
+/** Send the saved RGB/depth pairs, retaining compatibility with earlier embedded-depth photos. */
 RCT_REMAP_METHOD(sendHandheld, sendHandheldOptions:(NSDictionary *)o resolve:(RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject) {
   NSString *objectId = o[@"objectId"];
   if (!STMObjectsMatches(objectId, STMObjectsUUID)) { reject(@"invalid-request", STMObjectsMessage(@"invalid-request"), nil); return; }
   NSURL *folder = [STMObjectsRoot(NSDocumentDirectory, @"HandheldCaptures") URLByAppendingPathComponent:objectId isDirectory:YES];
-  NSArray<NSString *> *names = [[NSFileManager.defaultManager contentsOfDirectoryAtPath:folder.path error:nil]
+  NSArray<NSString *> *contents = [NSFileManager.defaultManager contentsOfDirectoryAtPath:folder.path error:nil];
+  NSArray<NSString *> *names = [contents
     filteredArrayUsingPredicate:[NSPredicate predicateWithFormat:@"SELF MATCHES %@", @"[0-9]{4}\\.heic"]];
   if (names.count == 0) { reject(@"no-photos", @"The scan has no photos. Scan it again.", nil); return; }
+  // A damaged streaming capture must not silently become a legacy photo-only upload.
+  BOOL exactDepthRequired = [contents containsObject:@"capture-frames.jsonl"] ||
+    [contents filteredArrayUsingPredicate:[NSPredicate predicateWithFormat:@"SELF ENDSWITH %@", @".depth.plist"]].count > 0;
   NSMutableArray *files = [NSMutableArray array];
   for (NSString *name in [names sortedArrayUsingSelector:@selector(compare:)]) {
+    NSString *depthName = [name.stringByDeletingPathExtension stringByAppendingString:@".depth.plist"];
+    NSURL *depthURL = [folder URLByAppendingPathComponent:depthName];
+    BOOL hasDepth = [NSFileManager.defaultManager fileExistsAtPath:depthURL.path];
+    if (exactDepthRequired && !hasDepth) {
+      reject(@"incomplete-depth", @"A recorded frame is missing its depth file. Your capture is still saved on this phone.", nil); return;
+    }
+    if (hasDepth) {
+      // Send original depth first. The companion refuses to reconstruct an incomplete RGB/depth set.
+      [files addObject:@{@"depth": @YES, @"name": depthName, @"url": depthURL, @"type": @"application/octet-stream"}];
+    }
     [files addObject:@{@"capture": @YES, @"name": name, @"url": [folder URLByAppendingPathComponent:name], @"type": @"image/heic"}];
   }
-  [self sendFiles:files objectId:objectId resolve:^{ resolve(@{@"photosSent": @(files.count)}); } reject:reject];
+  [self sendFiles:files objectId:objectId resolve:^{ resolve(@{@"photosSent": @(names.count)}); } reject:reject];
 }
 
 #pragma mark Photos and camera

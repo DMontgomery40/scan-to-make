@@ -58,4 +58,22 @@ final class HandheldKitTests: XCTestCase {
         let box = mask.keepingComponent(containing: nil).bounds(scaledTo: (20, 10), grownBy: 0)!
         XCTAssertEqual(box.minX, 0.1, accuracy: 1e-9); XCTAssertEqual(box.width, 0.3, accuracy: 1e-9)
     }
+
+    func testCorruptExactDepthCannotSilentlyFallBackToEmbeddedDepth() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let image = dir.appendingPathComponent("0000.heic")
+        XCTAssertNil(try exactDepth(for: image))
+        let ctx = CGContext(data: nil, width: 64, height: 48, bitsPerComponent: 8, bytesPerRow: 0,
+                            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue)!
+        ctx.setFillColor(CGColor(gray: 0.5, alpha: 1)); ctx.fill(CGRect(x: 0, y: 0, width: 64, height: 48))
+        try writePhoto(ctx.makeImage()!, depth: DepthImage(width: 32, height: 24, metres: Array(repeating: 0.4, count: 32 * 24)),
+                       camera: PhotoCamera(focalPixels: 50), to: image)
+        XCTAssertNotNil(try loadSample(image).depthDataMap)
+        let invalid = try PropertyListSerialization.data(fromPropertyList: ["schemaVersion": 0], format: .binary, options: 0)
+        try invalid.write(to: dir.appendingPathComponent("0000.depth.plist"))
+        XCTAssertThrowsError(try exactDepth(for: image))
+        XCTAssertThrowsError(try loadSample(image))
+    }
 }
