@@ -52,7 +52,7 @@ npm run build --prefix "$app/services/companion"
 for package in packages/contracts services/project services/printer-handoff services/companion; do npm prune --omit=dev --prefix "$app/$package"; done
 "$python" -m venv "$app/.venv"
 "$app/.venv/bin/pip" install -r "$app/tools/capture-mesh-convert/requirements.txt" -r "$app/tools/scan-correct/requirements.txt" -r "$app/tools/ai-tweak-judge/requirements.txt"
-npm install --global --prefix "$app/printers/bambu" bambu-printer-mcp@1.1.42
+npm install --global --prefix "$app/printers/bambu" bambu-printer-mcp@1.1.45
 npm install --global --prefix "$app/printers/generic" mcp-3d-printer-server@1.2.20
 blender=${BLENDER:-/Applications/Blender.app/Contents/MacOS/Blender}
 if [ ! -x "$blender" ] && [ -z "${BLENDER:-}" ]; then
