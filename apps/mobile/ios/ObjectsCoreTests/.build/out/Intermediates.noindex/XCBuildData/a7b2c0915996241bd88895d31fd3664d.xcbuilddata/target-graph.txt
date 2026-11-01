@@ -1,0 +1,8 @@
+Target dependency graph (3 targets)
+Target 'AllIncludingTests' in project 'Aggregate'
+➜ Explicit dependency on target 'ObjectsCoreTests-product' in project 'ObjectsCore'
+➜ Dependency on target 'ObjectsCoreTests-product' in project 'ObjectsCore' via transitive dependency through 'ObjectsCoreTests-test-runner'
+➜ Explicit dependency on target 'ObjectsCore' in project 'ObjectsCore'
+Target 'ObjectsCoreTests-product' in project 'ObjectsCore'
+➜ Explicit dependency on target 'ObjectsCore' in project 'ObjectsCore'
+Target 'ObjectsCore' in project 'ObjectsCore' (no dependencies)

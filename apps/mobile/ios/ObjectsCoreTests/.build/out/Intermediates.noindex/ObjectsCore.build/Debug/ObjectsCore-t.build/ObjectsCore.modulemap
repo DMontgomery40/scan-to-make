@@ -1,0 +1,4 @@
+module ObjectsCore {
+header "ObjectsCore-Swift.h"
+export *
+}

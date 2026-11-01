@@ -1,0 +1,19 @@
+{
+  "" : {
+    "diagnostics" : "/Users/davidmontgomery/stm-wt/KAN-206/apps/mobile/ios/ObjectsCoreTests/.build/out/Intermediates.noindex/ObjectsCore.build/Debug/ObjectsCore-t.build/Objects-normal/arm64/ObjectsCore-primary.dia",
+    "emit-module-dependencies" : "/Users/davidmontgomery/stm-wt/KAN-206/apps/mobile/ios/ObjectsCoreTests/.build/out/Intermediates.noindex/ObjectsCore.build/Debug/ObjectsCore-t.build/Objects-normal/arm64/ObjectsCore-primary-emit-module.d",
+    "emit-module-diagnostics" : "/Users/davidmontgomery/stm-wt/KAN-206/apps/mobile/ios/ObjectsCoreTests/.build/out/Intermediates.noindex/ObjectsCore.build/Debug/ObjectsCore-t.build/Objects-normal/arm64/ObjectsCore-primary-emit-module.dia",
+    "pch" : "/Users/davidmontgomery/stm-wt/KAN-206/apps/mobile/ios/ObjectsCoreTests/.build/out/Intermediates.noindex/ObjectsCore.build/Debug/ObjectsCore-t.build/Objects-normal/arm64/ObjectsCore-primary-Bridging-header.pch",
+    "swift-dependencies" : "/Users/davidmontgomery/stm-wt/KAN-206/apps/mobile/ios/ObjectsCoreTests/.build/out/Intermediates.noindex/ObjectsCore.build/Debug/ObjectsCore-t.build/Objects-normal/arm64/ObjectsCore-primary.swiftdeps"
+  },
+  "/Users/davidmontgomery/stm-wt/KAN-206/apps/mobile/ios/ObjectsCoreTests/Sources/ObjectsCore/ObjectsModel.swift" : {
+    "const-values" : "/Users/davidmontgomery/stm-wt/KAN-206/apps/mobile/ios/ObjectsCoreTests/.build/out/Intermediates.noindex/ObjectsCore.build/Debug/ObjectsCore-t.build/Objects-normal/arm64/ObjectsModel.swiftconstvalues",
+    "dependencies" : "/Users/davidmontgomery/stm-wt/KAN-206/apps/mobile/ios/ObjectsCoreTests/.build/out/Intermediates.noindex/ObjectsCore.build/Debug/ObjectsCore-t.build/Objects-normal/arm64/ObjectsModel.d",
+    "diagnostics" : "/Users/davidmontgomery/stm-wt/KAN-206/apps/mobile/ios/ObjectsCoreTests/.build/out/Intermediates.noindex/ObjectsCore.build/Debug/ObjectsCore-t.build/Objects-normal/arm64/ObjectsModel.dia",
+    "index-unit-output-path" : "/ObjectsCore.build/Debug/ObjectsCore-t.build/Objects-normal/arm64/ObjectsModel.o",
+    "llvm-bc" : "/Users/davidmontgomery/stm-wt/KAN-206/apps/mobile/ios/ObjectsCoreTests/.build/out/Intermediates.noindex/ObjectsCore.build/Debug/ObjectsCore-t.build/Objects-normal/arm64/ObjectsModel.bc",
+    "object" : "/Users/davidmontgomery/stm-wt/KAN-206/apps/mobile/ios/ObjectsCoreTests/.build/out/Intermediates.noindex/ObjectsCore.build/Debug/ObjectsCore-t.build/Objects-normal/arm64/ObjectsModel.o",
+    "swift-dependencies" : "/Users/davidmontgomery/stm-wt/KAN-206/apps/mobile/ios/ObjectsCoreTests/.build/out/Intermediates.noindex/ObjectsCore.build/Debug/ObjectsCore-t.build/Objects-normal/arm64/ObjectsModel.swiftdeps",
+    "swiftmodule" : "/Users/davidmontgomery/stm-wt/KAN-206/apps/mobile/ios/ObjectsCoreTests/.build/out/Intermediates.noindex/ObjectsCore.build/Debug/ObjectsCore-t.build/Objects-normal/arm64/ObjectsModel~partial.swiftmodule"
+  }
+}

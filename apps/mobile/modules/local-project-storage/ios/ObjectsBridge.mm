@@ -25,6 +25,7 @@ static NSString *STMObjectsPath(NSString *path, NSString *method) {
   // Only the objects routes, each with its own method.
   NSString *one = [NSString stringWithFormat:@"/v1/objects/%@", STMObjectsUUID];
   if ([method isEqual:@"GET"] && (STMObjectsMatches(path, @"/v1/objects") || STMObjectsMatches(path, one))) return @"projects:read";
+  if ([method isEqual:@"DELETE"] && STMObjectsMatches(path, one)) return @"captures:import";
   if ([method isEqual:@"POST"] && STMObjectsMatches(path, @"/v1/objects")) return @"captures:import";
   if ([method isEqual:@"POST"] && STMObjectsMatches(path, [one stringByAppendingString:@"/(start|corrections|closeup)"])) return @"captures:import";
   if ([method isEqual:@"POST"] && STMObjectsMatches(path, [one stringByAppendingString:@"/(print|plate)"])) return @"printer-handoff:use";
@@ -229,6 +230,8 @@ RCT_REMAP_METHOD(sendCapture, sendCaptureOptions:(NSDictionary *)o resolve:(RCTP
 
 - (BOOL)sheetBusy:(UIViewController *)presenter { return self.pickResolve || !presenter || presenter.presentedViewController; }
 - (void)finishPick:(NSArray<NSDictionary *> *)photos {
+  // Chosen on the start screen: kept here until Make it.
+  if (self.pickResolve && !self.pickObject) { [self finishChosen:photos]; return; }
   RCTPromiseResolveBlock resolve = self.pickResolve; RCTPromiseRejectBlock reject = self.pickReject; NSString *objectId = self.pickObject;
   self.pickResolve = nil; self.pickReject = nil; self.pickObject = nil;
   if (!resolve) return;
@@ -294,6 +297,58 @@ RCT_REMAP_METHOD(takePhoto, takePhotoOptions:(NSDictionary *)o resolve:(RCTPromi
 - (void)imagePickerControllerDidCancel:(UIImagePickerController *)picker {
   [picker dismissViewControllerAnimated:YES completion:nil];
   [self finishPick:@[]];
+}
+
+#pragma mark Photos chosen on the start screen
+
+// Photos picked before anything is sent: kept on this phone until Make it, shown from their cache
+// file, then sent to the new object. Their ids are `<uuid>.<ext>` in Caches/ObjectsChosen.
+static NSURL *STMObjectsChosenRoot(void) { return STMObjectsRoot(NSCachesDirectory, @"ObjectsChosen"); }
+
+RCT_REMAP_METHOD(choosePhotos, choosePhotosOptions:(NSDictionary *)o resolve:(RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject) {
+  NSInteger limit = [o[@"limit"] integerValue];
+  UIViewController *presenter = RCTPresentedViewController();
+  if (limit < 1 || limit > 24) { reject(@"invalid-request", STMObjectsMessage(@"invalid-request"), nil); return; }
+  if ([self sheetBusy:presenter]) { reject(@"busy", @"Close the current sheet first.", nil); return; }
+  PHPickerConfiguration *configuration = [[PHPickerConfiguration alloc] init];
+  configuration.filter = [PHPickerFilter imagesFilter]; configuration.selectionLimit = limit;
+  configuration.preferredAssetRepresentationMode = PHPickerConfigurationAssetRepresentationModeCurrent;
+  PHPickerViewController *picker = [[PHPickerViewController alloc] initWithConfiguration:configuration];
+  picker.delegate = self; picker.presentationController.delegate = self;
+  self.pickObject = nil; self.pickResolve = resolve; self.pickReject = reject;
+  [presenter presentViewController:picker animated:YES completion:nil];
+}
+
+/** Keeps chosen photos in the cache and resolves their ids and display URIs. */
+- (void)finishChosen:(NSArray<NSDictionary *> *)photos {
+  RCTPromiseResolveBlock resolve = self.pickResolve; self.pickResolve = nil; self.pickReject = nil;
+  if (!resolve) return;
+  NSURL *root = STMObjectsChosenRoot();
+  [NSFileManager.defaultManager createDirectoryAtURL:root withIntermediateDirectories:YES attributes:nil error:nil];
+  NSMutableArray *chosen = [NSMutableArray array];
+  for (NSDictionary *photo in photos) {
+    NSString *name = [NSString stringWithFormat:@"%@.%@", NSUUID.UUID.UUIDString.lowercaseString, [photo[@"name"] pathExtension]];
+    NSURL *url = [root URLByAppendingPathComponent:name];
+    if ([photo[@"bytes"] writeToURL:url options:NSDataWritingAtomic error:nil]) [chosen addObject:@{@"id": name, @"uri": url.absoluteString}];
+  }
+  resolve(chosen);
+}
+
+RCT_REMAP_METHOD(sendChosen, sendChosenOptions:(NSDictionary *)o resolve:(RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject) {
+  NSString *objectId = o[@"objectId"]; NSArray *ids = o[@"ids"];
+  if (!STMObjectsMatches(objectId, STMObjectsUUID) || ![ids isKindOfClass:NSArray.class] || ids.count > 24) { reject(@"invalid-request", STMObjectsMessage(@"invalid-request"), nil); return; }
+  NSMutableArray *files = [NSMutableArray array];
+  for (id chosen in ids) {
+    if (!STMObjectsMatches(chosen, @"[a-f0-9-]{36}\\.(jpg|png|heic)")) { reject(@"invalid-request", STMObjectsMessage(@"invalid-request"), nil); return; }
+    NSString *ext = [chosen pathExtension];
+    NSString *type = [ext isEqual:@"png"] ? @"image/png" : [ext isEqual:@"heic"] ? @"image/heic" : @"image/jpeg";
+    [files addObject:@{@"name": [@"photo-" stringByAppendingString:chosen], @"url": [STMObjectsChosenRoot() URLByAppendingPathComponent:chosen], @"type": type}];
+  }
+  if (!files.count) { resolve(@{@"photosSent": @0}); return; }
+  [self sendFiles:files objectId:objectId resolve:^{
+    for (NSDictionary *file in files) [NSFileManager.defaultManager removeItemAtURL:file[@"url"] error:nil];
+    resolve(@{@"photosSent": @(files.count)});
+  } reject:reject];
 }
 
 #pragma mark Downloads and the 3D view

@@ -1,14 +1,16 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  BackHandler,
   Linking,
   Modal,
   Platform,
   StatusBar,
   StyleSheet,
+  Text,
+  UIManager,
   View,
+  requireNativeComponent,
   useColorScheme,
-  useWindowDimensions,
+  type ViewStyle,
 } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { companionNative } from './src/companion/pairing';
@@ -19,57 +21,43 @@ import {
   type AfterPairing,
 } from './src/screens/FindYourMacScreen';
 import { RequestGateProvider } from './src/screens/requestGate';
-import { ObjectsScreen } from './src/screens/ObjectsScreen';
-import { ObjectScreen } from './src/screens/ObjectScreen';
-import { StartScreen } from './src/screens/StartScreen';
-import { ObjectsClient } from './src/objects/client';
-import { objectsNative, type ObjectsNative } from './src/objects/native';
-import { objectCapture, type ObjectCapture } from './src/objects/capture';
-import { colors } from './src/ui/theme';
+import { objectCaptureNative } from './src/capture/nativeObjectCapture';
+import { colors, type } from './src/ui/theme';
 
-type Route =
-  | { name: 'objects' }
-  | { name: 'start' }
-  | { name: 'object'; id: string };
+/**
+ * The app itself is native SwiftUI (ios/ScanToMake/Objects/ObjectsApp.swift):
+ * iOS 27's own navigation, lists, sheets and Liquid Glass controls. This shell
+ * keeps what already works in React Native: pairing with the Mac, pairing
+ * links, and keeping the credential fresh.
+ */
+type ObjectsAppProps = {
+  style: ViewStyle;
+  pairingKey: number;
+  onPair: () => void;
+};
+const NativeObjectsApp =
+  Platform.OS === 'ios' && UIManager.getViewManagerConfig?.('STMObjectsApp')
+    ? requireNativeComponent<ObjectsAppProps>('STMObjectsApp')
+    : null;
 
-/** Without the native module (tests, Android) every call says to connect. */
-const unpaired: ObjectsNative = new Proxy({} as ObjectsNative, {
-  get: () => () =>
-    Promise.reject(
-      Object.assign(new Error('Not paired'), { code: 'pairing-required' }),
-    ),
-});
-
-/** Wide windows (an open iPhone Duo, iPad) show the list and a page side by side. */
-const TWO_PANES = 700;
-
-function App({
-  objects: injected,
-  capture: injectedCapture,
-}: {
-  objects?: ObjectsClient;
-  capture?: ObjectCapture;
-}) {
-  const [client] = useState(
-    () => injected ?? new ObjectsClient(objectsNative() ?? unpaired),
+function ObjectsApp(props: ObjectsAppProps) {
+  if (NativeObjectsApp) return <NativeObjectsApp {...props} />;
+  return (
+    <View style={[props.style, styles.unavailable]}>
+      <Text style={type.body}>Scan to Make needs an iPhone or iPad.</Text>
+    </View>
   );
-  const [capture] = useState(() => injectedCapture ?? objectCapture());
+}
+
+function App() {
   const scheme = useColorScheme();
-  const { width } = useWindowDimensions();
-  const twoPanes = width >= TWO_PANES;
-  const [route, setRoute] = useState<Route>({ name: 'objects' });
-  // The last object opened stays on the right in the two-pane layout.
-  const [shown, setShown] = useState<string | null>(null);
-  const [refreshKey, setRefreshKey] = useState(0);
   const [companionOpen, setCompanionOpen] = useState(false);
-  const [canScan, setCanScan] = useState(false);
-  useEffect(() => {
-    capture.available().then(setCanScan, () => {});
-  }, [capture]);
-  // With no Mac paired, Find your Mac is the first screen. A pairing that
-  // can't be read leaves the list in place.
-  const [needsMac, setNeedsMac] = useState(false);
+  // Bumped when pairing changes, so the app reads the pairing and its objects again.
   const [pairingKey, setPairingKey] = useState(0);
+  // With no Mac paired, Find your Mac is the first screen. A pairing that
+  // can't be read leaves the app in place.
+  const [needsMac, setNeedsMac] = useState(false);
+  const [canScan, setCanScan] = useState(false);
   useEffect(() => {
     let live = true;
     companionNative()
@@ -105,108 +93,22 @@ function App({
     );
     return () => subscription.remove();
   }, []);
-  useEffect(() => {
-    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
-      if (route.name === 'objects') return false;
-      setRoute({ name: 'objects' });
-      return true;
-    });
-    return () => sub.remove();
-  }, [route]);
 
-  const afterPairing = (next: AfterPairing) => {
+  const afterPairing = (_next: AfterPairing) => {
     setCompanionOpen(false);
     setNeedsMac(false);
     setPairingKey(key => key + 1);
-    setRefreshKey(key => key + 1);
-    if (next === 'back') return;
-    setRoute(next === 'scan' ? { name: 'start' } : { name: 'objects' });
   };
-  const pair = () => setCompanionOpen(true);
-  const open = (id: string) => {
-    setShown(id);
-    setRoute({ name: 'object', id });
+  const closePairing = () => {
+    setCompanionOpen(false);
+    setPairingKey(key => key + 1);
   };
-  const toList = () => {
-    setRefreshKey(key => key + 1);
-    setRoute({ name: 'objects' });
-  };
-
-  const list = (
-    <ObjectsScreen
-      client={client}
-      selected={twoPanes ? shown : null}
-      refreshKey={refreshKey}
-      onNew={() => setRoute({ name: 'start' })}
-      onOpen={open}
-      onPair={pair}
-    />
-  );
-  const start = (
-    <StartScreen
-      client={client}
-      capture={capture}
-      onBack={toList}
-      onStarted={id => {
-        setRefreshKey(key => key + 1);
-        open(id);
-      }}
-      onPair={pair}
-    />
-  );
-  const page = (id: string, back?: () => void) => (
-    <ObjectScreen
-      key={id}
-      client={client}
-      capture={capture}
-      id={id}
-      onBack={back}
-      onPair={pair}
-      refreshKey={pairingKey}
-      onChanged={() => setRefreshKey(key => key + 1)}
-    />
-  );
-
-  let screen: React.ReactNode;
-  if (needsMac)
-    screen = (
-      <FindYourMacScreen
-        onDone={afterPairing}
-        canScan={canScan}
-        // One camera at a time: this one waits under an open sheet.
-        paused={companionOpen}
-        link={companionOpen ? null : pairLink}
-        onLinkUsed={() => setPairLink(null)}
-      />
-    );
-  else if (twoPanes) {
-    const right =
-      route.name === 'start'
-        ? start
-        : route.name === 'object'
-        ? page(route.id)
-        : shown
-        ? page(shown)
-        : null;
-    screen = (
-      <View style={styles.panes}>
-        <View style={styles.list}>{list}</View>
-        <View style={styles.page}>{right}</View>
-      </View>
-    );
-  } else
-    screen =
-      route.name === 'start'
-        ? start
-        : route.name === 'object'
-        ? page(route.id, toList)
-        : list;
 
   return (
     <SafeAreaProvider>
-      {/* One queue for every call to the Mac, across screens. */}
+      {/* One queue for every call to the Mac from the shell. */}
       <RequestGateProvider>
-        {/* Keeps the paired Mac's credential alive, in the same queue. */}
+        {/* Keeps the paired Mac's credential alive. */}
         <KeepPairingFresh onPairAgain={() => setPairingKey(key => key + 1)} />
         <StatusBar
           barStyle={
@@ -215,41 +117,57 @@ function App({
               : 'dark-content'
           }
         />
-        {screen}
+        {needsMac ? (
+          <FindYourMacScreen
+            onDone={afterPairing}
+            canScan={canScan}
+            // One camera at a time: this one waits under an open sheet.
+            paused={companionOpen}
+            link={companionOpen ? null : pairLink}
+            onLinkUsed={() => setPairLink(null)}
+          />
+        ) : (
+          <ObjectsApp
+            style={styles.app}
+            pairingKey={pairingKey}
+            onPair={() => setCompanionOpen(true)}
+          />
+        )}
         {companionOpen ? (
-          <Modal
-            presentationStyle="fullScreen"
-            onRequestClose={() => {
-              setCompanionOpen(false);
-              setPairingKey(key => key + 1);
-            }}
-          >
+          <Modal presentationStyle="fullScreen" onRequestClose={closePairing}>
             <FindYourMacScreen
-              onBack={() => {
-                setCompanionOpen(false);
-                setPairingKey(key => key + 1);
-              }}
+              onBack={closePairing}
               onDone={afterPairing}
               canScan={canScan}
-              resume={route.name !== 'objects'}
+              resume
               link={pairLink}
               onLinkUsed={() => setPairLink(null)}
             />
           </Modal>
         ) : null}
+        <ScanSupport onChange={setCanScan} />
       </RequestGateProvider>
     </SafeAreaProvider>
   );
 }
 
+/** Whether this device can scan (LiDAR), for the pairing screen's wording. */
+function ScanSupport({ onChange }: { onChange: (canScan: boolean) => void }) {
+  useEffect(() => {
+    objectCaptureNative()
+      ?.status()
+      .then(
+        (value: { supported: boolean; lidar?: boolean }) =>
+          onChange(value.supported && value.lidar !== false),
+        () => {},
+      );
+  }, [onChange]);
+  return null;
+}
+
 const styles = StyleSheet.create({
-  panes: { flex: 1, flexDirection: 'row', backgroundColor: colors.background },
-  list: {
-    width: 360,
-    borderRightWidth: StyleSheet.hairlineWidth,
-    borderRightColor: colors.line,
-  },
-  page: { flex: 1 },
+  app: { flex: 1, backgroundColor: colors.background },
+  unavailable: { alignItems: 'center', justifyContent: 'center', padding: 24 },
 });
 
 export default App;
