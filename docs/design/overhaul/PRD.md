@@ -131,7 +131,8 @@ Screenshot: `screens/phone-new.jpg`.
 
 **Layout.** A large sheet:
 - **What do you need?** A multiline field with dictation. The hint: "Describe it, scan it, or both. Your Mac can look up published sizes."
-- **Show it.** Four tiles, all visible at once:
+- **Show it.** Five choices, all visible at once:
+  - **On a scan rig** (a full-width card first, marked *Best quality*): "Clamp your phone to the 360° rig and swing it around." Underneath it: "Don't have one? Print the rig by Kass 3D →", which opens the model's MakerWorld page (§11.1).
   - **Scan it**: walk around it; LiDAR measures it.
   - **Scan in hand**: hold it up and turn it.
   - **Take photos**.
@@ -153,6 +154,11 @@ Screenshot: `screens/phone-new.jpg`.
   - A full-screen camera with the object's live outline and a coverage ring. One glass card carries one instruction at a time ("Turn it so the top faces you").
   - Shutter and LiDAR status are always visible ("1/500 s · LiDAR on"), with a count of sharp and skipped frames.
   - A Walk around / In hand switch, and a Done button.
+- **On a scan rig (new; spec in §11.1).** Screenshot: `screens/phone-rig.jpg`.
+  - The camera view, with one glass card for the current instruction ("Ring 1 of 3 · swing the arm slowly").
+  - A list of rings, each with its own progress ring: clamp low and level; clamp high and tilted down; flip the object and clamp low.
+  - Shutter, LiDAR and mask status are always visible.
+  - The mode switch reads Walk / In hand / Rig.
 
 ### 5.4 Project
 
@@ -256,7 +262,7 @@ Screenshot: `screens/phone-printers.jpg`.
 
 - **Your Mac:** name, connected or last seen, address in use, Check Connection, Connect a Different Mac.
 - **Notifications:** an on/off switch for each event type, and the progress milestones (§9.1, §8.6).
-- **Help:** a guide at the docs site, how scanning works, and **Print the caliper card**.
+- **Help:** a guide at the docs site, how scanning works, **Print the caliper card**, and **Print the scan rig**. The rig link opens Kass 3D's MakerWorld page, credited by name (§15).
 - **About:** the app icon, "Counterpart", the version and build, the website, the licences, and open-source notices.
 
 ### 5.10 First run and pairing
@@ -817,6 +823,38 @@ The full research is in [research/inhand-capture.md](research/inhand-capture.md)
   - the underside is closed;
   - two scans agree within 1%.
 
+### 11.1 On a scan rig
+
+- **What the rig is.** The rig is "Fully 3D-printed 360° photography turntable" by **Kass 3D**, published on MakerWorld:
+  - <https://makerworld.com/en/models/1531561>
+  - Released 2025-06-18.
+  - Profiles for most Bambu printers, including an A1 mini version.
+  - Printed in PLA; the full kit takes about 25 h.
+
+  The phone clamps to an arm that swings around a round platform, with a backdrop panel behind the object. Counterpart links to the model page and never redistributes its files (§15).
+- **Why it gives the best scans:**
+  - The object stays still and the phone moves. That's the condition Object Capture and ARKit tracking are built for.
+  - The phone is clamped and swings slowly at a fixed radius, so frames are sharp and the distance stays constant.
+  - There's no hand to mask.
+  - If the backdrop moves with the arm, every frame has the same plain background. Masking the object is then a colour key, not a segmentation problem.
+- **Capture path. Test first which of the two applies:**
+  1. **Object Capture (preferred).** Run the existing `ObjectCaptureSession` with the phone on the arm.
+     - If world tracking stays locked through a full ring, use it unchanged. The only addition is the ring guidance HUD.
+     - Tracking can still lock because the room around the backdrop stays visible.
+  2. **Mac reconstruction.** If tracking drifts, because the backdrop fills the view and moves with the camera, use the §11 stills pipeline:
+     - full-resolution LiDAR stills;
+     - masks from a chroma key on the backdrop colour, intersected with the LiDAR depth band;
+     - `PhotogrammetrySample` with `objectMask` and no gravity;
+     - `isObjectMaskingEnabled = true`, so the flip between ring 2 and ring 3 is allowed.
+
+     Hand subtraction isn't needed.
+- **Guidance.** Three rings: clamp low and level; clamp high and tilted down; flip the object and clamp low.
+  - Shots fire by themselves every ~10° of arm rotation, about 36 per ring. Rotation is measured from the phone's gyroscope (`CMMotionManager` attitude yaw), so it works even when visual tracking can't.
+  - Exposure follows §11: 1/250 s or faster.
+  - Each ring fills its own progress ring. A gap in a ring sends you back to fill it.
+- **Detecting the rig.** The app asks once ("Using the scan rig?") and remembers the answer. It never infers the rig silently.
+- **Pass criteria.** The same as §11, plus three repeat scans on the rig that agree within 0.5% on every axis. The rig is the repeatable bench for the in-hand and walk-around tests too.
+
 ## 12. Sync and data
 
 - **The Mac is the source of truth.** Projects, inputs, passes and results live in the companion's store, as today.
@@ -839,7 +877,7 @@ Each milestone ends in an on-device check with screenshots compared against `scr
 | M3 | **Print and Live Activity.**<br>• print sheet (printers from both MCPs, slice estimate, colour map, quality, strength)<br>• plate check with the alert and per-printer notes<br>• Printing screen with the camera<br>• pause, resume and stop<br>• Live Activity, with the relay Worker once the APNs key exists<br>• the `slice_stl` quality arguments in both MCPs<br>• the Counterpart tools, `camera_snapshot`, `get_printer_filaments`, pause and resume in mcp-3D-printer-server<br>• `CounterpartCommand` for use away from home | All of these hold:<br>• a real P1S print from the phone shows the Live Activity on the Lock Screen and the Mac menu bar, counting down<br>• a deliberate plate obstruction is caught and cleared with Look Again<br>• a full run on OctoPrint's virtual printer and a Klipper simulator through mcp-3D-printer-server delivers progress, the halfway notification and done<br>• Pause from the Lock Screen pauses the P1S |
 | M3b | **Multi-colour.** The pass contract gains `parts`; per-body STL export through the Blender bridge; `counterpart_make_3mf`; `slice_stl` with `load_filaments`/`load_filament_ids`; `print_3mf` `ams_mapping`; per-part colour map in the print sheet. | A two-part result prints in two AMS colours on the P1S, from the phone |
 | M4 | **Mac rebuild.** SwiftUI scenes, main window, inspector, print sheet, popover, Settings with de-duplicated devices, drop-to-create. | The same project is visible and actionable on the Mac and the phone at once, and re-pairing a phone leaves one row |
-| M5 | **Scan in hand.** As specified in §11. | The §11 pass criteria are met on a real iPhone |
+| M5 | **Scan in hand and on a rig.** As specified in §11 and §11.1, including the test of which rig capture path holds tracking. | The §11 pass criteria are met on a real iPhone in hand, and §11.1 on the rig |
 | M6 | **System surfaces.** Widgets, Control Center control, App Intents and Siri, Spotlight, Share extension, iPad keyboard shortcuts. | Each one is demonstrated on a device |
 
 **Reuse, don't rebuild:**
@@ -850,3 +888,12 @@ Each milestone ends in an on-device check with screenshots compared against `scr
 
 1. **Distribution.** TestFlight first for the iPhone app, and Developer ID with Sparkle for the Mac (journey.md §3.2)? Or App Store for both from the start? Either way CloudKit and push work (§8.8), so this choice doesn't block anything in M1–M3.
 2. **Manual step (not a decision): the APNs key.** The owner creates an APNs auth key in the Apple developer portal and puts it in the Worker's secrets. The Live Activity relay (§8.8) needs it. Everything else in M1 works without it, including notifications with frames.
+
+## 15. Credits
+
+- **Scan rig:** "Fully 3D-printed 360° photography turntable" by **Kass 3D**, on MakerWorld: <https://makerworld.com/en/models/1531561>.
+  - It's licensed under MakerWorld's Standard Digital File License, so Counterpart only links to the page. It never bundles, re-hosts or modifies the files.
+  - Everywhere the app mentions the rig (New, Help, scan tips), it names Kass 3D and opens the MakerWorld page, so prints, likes and reviews go to the designer.
+  - The designer describes it as a recreational and casual-photography rig, not professional equipment. Counterpart's help says the same.
+- **Print flow reference:** Bambu Handy and MakerWorld's Prepare to Print.
+

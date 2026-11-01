@@ -177,3 +177,72 @@ struct CoverageRing: View {
         }
     }
 }
+
+
+// MARK: Scan-rig capture HUD (approximation: the live camera is replaced by a render on a green backdrop)
+
+struct RigCaptureMock: View {
+    var body: some View {
+        ZStack {
+            ModelStage(thumb: .scanB, yaw: 1.4, pitch: -0.2, interactive: false, fit: 0.11, backdrop: Color(red: 0.16, green: 0.62, blue: 0.30))
+                .ignoresSafeArea()
+            // Platform edge
+            Ellipse().fill(Color(red: 0.25, green: 0.42, blue: 0.62).opacity(0.85)).frame(width: 300, height: 60).offset(y: 95)
+            VStack {
+                HStack {
+                    Button { } label: { Image(systemName: "xmark") }.buttonStyle(.glass).controlSize(.large)
+                    Spacer()
+                    HStack(spacing: 6) { Image(systemName: "camera.aperture"); Text("1/250 s · LiDAR on · masks ✓") }
+                        .font(.caption.weight(.semibold)).padding(.horizontal, 12).padding(.vertical, 8).glassEffect(.regular, in: .capsule)
+                    Spacer()
+                    Button { } label: { Image(systemName: "questionmark") }.buttonStyle(.glass).controlSize(.large)
+                }
+                .padding(.horizontal, 16)
+
+                VStack(spacing: 6) {
+                    Text("Ring 1 of 3 · swing the arm slowly").font(.title3.bold())
+                    Text("Shots fire by themselves every 10°. Keep going until the ring is full.").font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                }
+                .padding(.horizontal, 20).padding(.vertical, 14)
+                .glassEffect(.regular, in: .rect(cornerRadius: 22))
+                .padding(.top, 8).padding(.horizontal, 16)
+
+                Spacer()
+
+                VStack(alignment: .leading, spacing: 10) {
+                    RingRow(name: "Ring 1 · clamp low, level", done: 22, total: 36, active: true)
+                    RingRow(name: "Ring 2 · clamp high, tilted down", done: 0, total: 36, active: false)
+                    RingRow(name: "Ring 3 · flip it over, clamp low", done: 0, total: 36, active: false)
+                }
+                .padding(16)
+                .glassEffect(.regular, in: .rect(cornerRadius: 24))
+                .padding(.horizontal, 16)
+
+                GlassEffectContainer(spacing: 14) {
+                    HStack(spacing: 14) {
+                        Picker("Mode", selection: .constant(2)) { Text("Walk").tag(0); Text("In hand").tag(1); Text("Rig").tag(2) }
+                            .pickerStyle(.segmented).frame(width: 230)
+                        Button { } label: { Text("Done").fontWeight(.semibold).padding(.horizontal, 10) }.buttonStyle(.glassProminent).controlSize(.large)
+                    }
+                }
+                .padding(.vertical, 12)
+            }
+        }
+        .foregroundStyle(.white)
+    }
+}
+
+struct RingRow: View {
+    let name: String, done: Int, total: Int, active: Bool
+    var body: some View {
+        HStack(spacing: 12) {
+            ZStack {
+                Circle().stroke(.white.opacity(0.2), lineWidth: 4)
+                Circle().trim(from: 0, to: CGFloat(done) / CGFloat(total)).stroke(Color.okGreen, style: .init(lineWidth: 4, lineCap: .round)).rotationEffect(.degrees(-90))
+            }.frame(width: 26, height: 26)
+            Text(name).font(.subheadline.weight(active ? .semibold : .regular)).foregroundStyle(active ? .white : .secondary)
+            Spacer()
+            Text("\(done)/\(total)").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+        }
+    }
+}

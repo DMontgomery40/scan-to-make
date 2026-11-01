@@ -169,6 +169,7 @@ struct NewSheet: View {
                     }
 
                     Text("Show it").font(.headline)
+                    RigTile()
                     LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
                         SourceTile(symbol: "cube.transparent", title: "Scan it", detail: "Walk around it. LiDAR measures it.", tint: .filament, hero: true)
                         SourceTile(symbol: "hand.raised.fingers.spread", title: "Scan in hand", detail: "Hold it up and turn it.", tint: .blue)
@@ -195,6 +196,24 @@ struct NewSheet: View {
                     .buttonStyle(.glassProminent).controlSize(.large).padding(.horizontal, 20)
             }
         }
+    }
+}
+
+struct RigTile: View {
+    var body: some View {
+        HStack(spacing: 14) {
+            Image(systemName: "rotate.3d.fill").font(.title2.weight(.semibold)).foregroundStyle(Color.okGreen)
+                .frame(width: 44, height: 44)
+                .glassEffect(.regular.tint(Color.okGreen.opacity(0.25)), in: .circle)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) { Text("On a scan rig").font(.headline); Text("BEST QUALITY").font(.caption2.weight(.bold)).foregroundStyle(Color.okGreen) }
+                Text("Clamp your phone to the 360° rig and swing it around.").font(.caption).foregroundStyle(.secondary)
+                Text("Don't have one? Print the rig by Kass 3D →").font(.caption.weight(.semibold)).foregroundStyle(Color.filament)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(14)
+        .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 24))
     }
 }
 

@@ -28,6 +28,7 @@ struct Router: View {
         case "printing": NavigationStack { PrintingView(project: Mock.projects[2]) }
         case "lock": LockScreenMock()
         case "hand": InHandCaptureMock()
+        case "rig": RigCaptureMock()
         case "printers": NavigationStack { PrintersView() }
         case "split": SplitHome()
         default:

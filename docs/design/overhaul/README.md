@@ -5,7 +5,7 @@
 - [research/](research/): Apple's 2026 design awards and iOS 27/macOS 27 changes, and the in-hand capture research. Every claim cites its source.
 - [mockup-app/](mockup-app/): the SwiftUI source for the mockups below. It's a throwaway target and not product code.
 
-The mockups are real SwiftUI with real Liquid Glass, rendered on iOS 27.2 simulators and on macOS 27. Two are approximations, because the system draws them itself: the Lock Screen (`phone-lock`) and the camera feed under the in-hand capture HUD (`phone-hand`).
+The mockups are real SwiftUI with real Liquid Glass, rendered on iOS 27.2 simulators and on macOS 27. Two are approximations, because the system draws them itself: the Lock Screen (`phone-lock`) and the camera feed under the in-hand and rig capture HUDs (`phone-hand`, `phone-rig`).
 
 ## iPhone
 
@@ -20,6 +20,12 @@ The mockups are real SwiftUI with real Liquid Glass, rendered on iOS 27.2 simula
 | Printing | Lock Screen | Scan in hand | Printers |
 |---|---|---|---|
 | ![](screens/phone-printing.jpg) | ![](screens/phone-lock.jpg) | ![](screens/phone-hand.jpg) | ![](screens/phone-printers.jpg) |
+
+| On a scan rig |
+|---|
+| ![](screens/phone-rig.jpg) |
+
+The scan rig is ["Fully 3D-printed 360° photography turntable" by Kass 3D](https://makerworld.com/en/models/1531561) on MakerWorld. Counterpart links to it and doesn't redistribute it; see PRD §15.
 
 ## iPad and iPhone Duo
 

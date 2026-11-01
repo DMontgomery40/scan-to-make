@@ -15,7 +15,7 @@ To rebuild, put those files in `assets/`, then:
 xcodegen generate
 xcodebuild -project CounterpartMock.xcodeproj -scheme MockPhone -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -derivedDataPath build/phone build
 xcrun simctl install <sim> build/phone/Build/Products/Debug-iphonesimulator/Counterpart.app
-xcrun simctl launch <sim> com.dtmont.counterpartmock.phone -screen home   # also: new, working, ask, ready, inputs, print, plate, printing, lock, hand, printers, split
+xcrun simctl launch <sim> com.dtmont.counterpartmock.phone -screen home   # also: new, working, ask, ready, inputs, print, plate, printing, lock, hand, rig, printers, split
 ```
 
 For the Mac app, build `-scheme MockMac`, then `open "build/mac/Build/Products/Debug/Counterpart Mock.app" --args -screen main` (or `print`, `popover`, `devices`).
