@@ -83,7 +83,7 @@ struct ObjectsWindowView: View {
         case .loading: return ""
         case .notSetUp: return "Not set up"
         case .notRunning: return "Not running"
-        case .ready: return model.objects.count == 1 ? "1 object" : "\(model.objects.count) objects"
+        case .ready: return model.objects.isEmpty ? "" : model.objects.count == 1 ? "1 object" : "\(model.objects.count) objects"
         }
     }
 
@@ -124,12 +124,14 @@ struct QuietMessage: View {
     }
 }
 
-/// The app icon, as the app's name and mark wherever it introduces itself.
+/// The app icon's art, wherever the app introduces itself: drawn from the asset catalog (the system's
+/// own icon image can still be a placeholder while it is rendered) and rounded like the icon.
 struct AppMark: View {
     let size: CGFloat
     var body: some View {
-        Image(nsImage:NSApp?.applicationIconImage ?? NSImage(named:NSImage.applicationIconName) ?? NSImage())
+        Image("AppMark")
             .resizable().interpolation(.high).frame(width:size, height:size)
+            .clipShape(RoundedRectangle(cornerRadius:size * 0.225, style:.continuous))
             .accessibilityHidden(true)
     }
 }
@@ -268,6 +270,7 @@ struct ObjectPage: View {
                 .disabled(working)
                 .help(action == .printChecked ? "Only if the printer isn’t already printing this" : "")
             }
+            .fixedSize() // never squeezed by the title beside it
         }
     }
 

@@ -38,6 +38,7 @@ targets:
       PRODUCT_NAME: Scan to Make
       PRODUCT_BUNDLE_IDENTIFIER: com.scantomake.mac$(STM_VARIANT)
       INFOPLIST_FILE: Config/Info.plist
+      ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
       CODE_SIGN_ENTITLEMENTS: Config/App.entitlements
       ENABLE_USER_SCRIPT_SANDBOXING: NO
     postBuildScripts:
@@ -54,6 +55,7 @@ targets:
       - App/ModelAccessModel.swift
       - App/NearbyModel.swift
       - App/ObjectsModel.swift
+      - App/MacStatusModel.swift
       - App/ModelScene.swift
       - ControlKit/Sources/ControlKit
     dependencies:

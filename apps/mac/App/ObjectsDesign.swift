@@ -4,6 +4,7 @@ import AppKit
 import SceneKit
 import simd
 import ModelIO
+import CoreImage
 
 /// Design QA only (Debug builds): `Scan to Make --render-objects-design <folder>` draws the objects
 /// window with generic fixture objects to PNGs and exits. It never registers, pairs or probes the
@@ -94,12 +95,79 @@ import ModelIO
             renderer.scale = 2
             if let image = renderer.nsImage { try write(image, to:output.appendingPathComponent("cards-\(dark ? "dark" : "light").png")) }
         }
-        // The popover's footer at its real width, without the popover's pairing code.
-        let footer = ImageRenderer(content:PopoverFooter().frame(width:372).background(Color(nsColor:NSColor(white:0.96, alpha:1)))
-            .environment(\.colorScheme, .light))
-        footer.scale = 2
-        if let image = footer.nsImage { try write(image, to:output.appendingPathComponent("popover-footer-light.png")) }
+        // The menu-bar popover and Settings → General, from fixtures: no socket, no pairing code.
+        for dark in [false, true] {
+            let mac = MacStatusModel(source:FixtureMac())
+            await mac.refresh()
+            let popover = MenuBarPopover(nearby:NearbyModel(companion:FixtureNearby()), mac:mac) {
+                Image(nsImage:fixtureCode()).interpolation(.none).resizable().frame(width:232, height:232)
+            }
+            let popoverWindow = offscreen(popover, size:nil, dark:dark, titled:false)
+            try await Task.sleep(for:.seconds(1))
+            try png(of:popoverWindow, to:output.appendingPathComponent("popover-\(dark ? "dark" : "light").png"))
+            stability += await DesignStability.check(popoverWindow, name:"popover-\(dark ? "dark" : "light")")
+            popoverWindow.orderOut(nil); popoverWindow.close()
+
+            let settings = offscreen(GeneralSettings(mac:mac).frame(width:560, height:680), size:NSSize(width:560, height:680), dark:dark, titled:true)
+            try await Task.sleep(for:.seconds(1))
+            try png(of:settings, to:output.appendingPathComponent("settings-\(dark ? "dark" : "light").png"))
+            stability += await DesignStability.check(settings, name:"settings-\(dark ? "dark" : "light")")
+            stability.append(DesignStability.scrollerFlip(settings, name:"settings-\(dark ? "dark" : "light")"))
+            settings.orderOut(nil); settings.close()
+        }
         return DesignStability.report(stability)
+    }
+
+    /// A window drawn for its PNG only: fully transparent and ignoring the real pointer. `size` nil: the content's own size.
+    private static func offscreen<Content: View>(_ content: Content, size: NSSize?, dark: Bool, titled: Bool) -> NSWindow {
+        let host = NSHostingView(rootView:content)
+        let fitted = size ?? host.fittingSize // measured before sizing is turned off, which leaves no fitting size
+        host.sizingOptions = []
+        host.wantsLayer = true
+        let window = NSWindow(contentRect:NSRect(origin:.zero, size:fitted), styleMask:titled ? [.titled, .closable] : [.borderless],
+                              backing:.buffered, defer:false)
+        window.title = "Scan to Make Settings"
+        window.isReleasedWhenClosed = false
+        window.contentView = host
+        window.setContentSize(fitted)
+        window.appearance = NSAppearance(named:dark ? .darkAqua : .aqua)
+        window.alphaValue = 0 // drawn for the PNG only, never seen on screen
+        window.ignoresMouseEvents = true
+        window.orderFrontRegardless()
+        return window
+    }
+
+    /// A QR code for a made-up address, standing in for the pairing code.
+    private static func fixtureCode() -> NSImage {
+        let filter = CIFilter(name:"CIQRCodeGenerator")!
+        filter.setValue(Data("https://example.invalid/pair/fixture".utf8), forKey:"inputMessage")
+        let output = filter.outputImage!.transformed(by:CGAffineTransform(scaleX:8, y:8))
+        let rep = NSCIImageRep(ciImage:output)
+        let image = NSImage(size:rep.size)
+        image.addRepresentation(rep)
+        return image
+    }
+
+    private struct FixtureNearby: NearbyCompanion {
+        func nearbyPairingEnabled() async throws -> Bool { false }
+        func nearbyRequests() async throws -> [ControlNearbyRequest] { [] }
+        func answerNearby(_ id: String, allow: Bool) async throws {}
+    }
+
+    private struct FixtureMac: MacStatusSource {
+        func status() async throws -> ControlStatus {
+            let json: [String: Any] = ["protocolVersion": 1, "companionVersion": "0.1.0", "transport": "lan", "pairedDeviceCount": 1,
+                                       "capabilities": ["capture": true, "cleanup": true, "printerHandoff": true]]
+            return try JSONDecoder().decode(ControlStatus.self, from:JSONSerialization.data(withJSONObject:json))
+        }
+        func devices() async throws -> [ControlDevice] {
+            let paired = Date().timeIntervalSince1970 * 1000 - 9 * 86_400_000
+            let json: [String: Any] = ["deviceId": "fixture-phone", "deviceName": "iPhone", "scopes": ["capture"], "pairedAt": paired,
+                                       "lastRefreshedAt": paired, "expiresAt": paired + 1, "pairedVia": ["transport": "lan", "login": "lan"]]
+            return [try JSONDecoder().decode(ControlDevice.self, from:JSONSerialization.data(withJSONObject:json))]
+        }
+        func removeDevice(_ id: String) async throws {}
+        func address() -> String? { "192.168.1.20:9077" }
     }
 
     private static func findSceneView(_ view: NSView) -> SCNView? {
@@ -115,12 +183,16 @@ import ModelIO
     }
 
     private static func png(of window: NSWindow, to url: URL) throws {
-        let view = window.contentView!.superview ?? window.contentView!
+        // The frame view (with the title bar) when it has a layer; a borderless window has only its content's.
+        let view = [window.contentView!.superview, window.contentView].compactMap { $0 }.first { $0.layer != nil } ?? window.contentView!
         view.layoutSubtreeIfNeeded()
         view.displayIfNeeded()
         // The layer tree, not cacheDisplay: cacheDisplay skips the sidebar list's row layers.
         let scale = window.backingScaleFactor
         let width = Int(view.bounds.width * scale), height = Int(view.bounds.height * scale)
+        if view.layer == nil || width == 0 || height == 0 {
+            FileHandle.standardError.write(Data("png \(url.lastPathComponent): \(type(of:view)) layer \(view.layer != nil) \(width)×\(height)\n".utf8))
+        }
         guard let layer = view.layer,
               let context = CGContext(data:nil, width:width, height:height, bitsPerComponent:8, bytesPerRow:0,
                                       space:CGColorSpace(name:CGColorSpace.sRGB)!, bitmapInfo:CGImageAlphaInfo.premultipliedLast.rawValue) else {
