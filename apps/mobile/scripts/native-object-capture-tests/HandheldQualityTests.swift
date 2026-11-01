@@ -6,6 +6,7 @@ import CoreMedia
 // DIAGNOSTIC_OPTIONS
 
 enum HandheldCapture { static let minimumPhotos = 24 }
+// CAPTURE_ARCHIVE
 
 // Controlled synchronized containers exercise the actual production callback prefix before Start.
 struct ProbeSample { var image: Int? = 1 }
@@ -45,6 +46,20 @@ final class RecorderCallbackProbe {
     var lastRGBTimestamp: Double?, lastDepthTimestamp: Double?
     func dropped(_ reason: Drop, sensorReason: Int? = nil) { recordedDrops += 1 }
     // RECORDER_CALLBACK_PREFIX
+}
+
+@MainActor final class DiagnosticCameraProbe {
+    var saved = true, openCalls = 0, captureCalls = 0
+    func open() async { openCalls += 1 }
+    func diagnosticCapture(seconds: Int) async -> Bool { captureCalls += 1; return saved }
+}
+@MainActor final class DiagnosticViewProbe {
+    let camera = DiagnosticCameraProbe()
+    var preview = false
+    var diagnosticSeconds: Int? = 3
+    var dismissCalls = 0
+    func done(_ success: Bool) { dismissCalls += 1 }
+    // VIEW_APPEAR_TASK
 }
 
 // Only the recorder boundary is controlled. Production owner methods are extracted below;
@@ -97,6 +112,7 @@ struct CameraDevice {
     var notice: String?
     var didFinish = false
     var finishInProgress = false
+    var restartInProgress = false
     var closed = false
     var countdownTask: Task<Void, Never>?
     var watchdog: Timer?
@@ -108,17 +124,29 @@ struct CameraDevice {
     var previewSize = CGSize(width: 300, height: 600)
     var lastVideoFrameAt: TimeInterval? = ProcessInfo.processInfo.systemUptime
     var lastDepthFrameAt: TimeInterval? = ProcessInfo.processInfo.systemUptime
+    var mask: Int?
     let queue = DispatchQueue(label: "handheld.test.session")
     let folder: URL
+    let testRoot: URL
     var events: [String] = []
+    var openCalls = 0
+    var filesAtOpen: [String] = []
     init() throws {
-        folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        testRoot = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        folder = testRoot.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
     }
-    deinit { try? FileManager.default.removeItem(at: folder) }
+    deinit { try? FileManager.default.removeItem(at: testRoot) }
     var markerExists: Bool { FileManager.default.fileExists(atPath: folder.appending(path: "finished").path) }
     func recordDiagnostics(_ event: String) { events.append(event) }
+    func open() async {
+        openCalls += 1
+        try! FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        filesAtOpen = try! FileManager.default.contentsOfDirectory(atPath: folder.path)
+    }
     // CAN_START
+    // CAN_RECORD_AGAIN
+    // RECORD_AGAIN
     // RETAIN_SUMMARY
     // FINISH_CAPTURE
     // CLOSE_CAPTURE
@@ -135,6 +163,16 @@ struct CameraDevice {
             check(HandheldDiagnosticOptions.seconds(arguments: args, previewState: "ready") == nil, "diagnostic requires one bounded explicit duration")
         }
         check(HandheldDiagnosticOptions.seconds(arguments: ["app", flag, "3"], previewState: "capturing") == nil, "diagnostic never drives fake capture layout")
+        for saved in [true, false] {
+            let view = DiagnosticViewProbe(); view.camera.saved = saved
+            await view.appear()
+            check(view.camera.openCalls == 1 && view.camera.captureCalls == 1 && view.dismissCalls == 0,
+                  "diagnostic success/failure dismissed the awake stand view")
+        }
+        let ordinaryView = DiagnosticViewProbe(); ordinaryView.diagnosticSeconds = nil
+        await ordinaryView.appear()
+        check(ordinaryView.camera.openCalls == 1 && ordinaryView.camera.captureCalls == 0 && ordinaryView.dismissCalls == 0,
+              "ordinary launch started a diagnostic capture")
         func probe(_ data: AVCaptureSynchronizedDataCollection, _ reason: String, ready: Bool = false) {
             let recorder = RecorderCallbackProbe()
             recorder.dataOutputSynchronizer(.init(), didOutput: data)
@@ -176,6 +214,54 @@ struct CameraDevice {
         ready.retain(.init())
         ready.legacyCapture = true
         check(!ready.canStart, "Legacy saved capture offered incompatible streaming append")
+
+        for count in [1, 23] {
+            let legacy = try CaptureOwner()
+            legacy.legacyCapture = true; legacy.phase = .paused; legacy.taken = count; legacy.recorder = nil
+            let fm = FileManager.default
+            let originals = (0..<count).map { (String(format: "%04d.heic", $0), Data("original-\($0)".utf8)) } + [("capture-ui-diagnostics.json", Data("retained diagnostics".utf8))]
+            for (name, data) in originals { try data.write(to: legacy.folder.appendingPathComponent(name)) }
+            let nested = legacy.folder.appendingPathComponent("retained-notes")
+            try fm.createDirectory(at: nested, withIntermediateDirectories: true)
+            try Data("nested evidence".utf8).write(to: nested.appendingPathComponent("note.txt"))
+            check(legacy.canRecordAgain, "short legacy capture did not offer Record Again")
+            await legacy.recordAgain()
+            let archiveParent = legacy.testRoot.appending(path: "Archives/\(legacy.folder.lastPathComponent)")
+            let archives = try fm.contentsOfDirectory(at: archiveParent, includingPropertiesForKeys: nil)
+            check(archives.count == 1, "restart did not create exactly one project archive")
+            for (name, bytes) in originals { check(try Data(contentsOf: archives[0].appendingPathComponent(name)) == bytes, "archived original bytes changed") }
+            check(try Data(contentsOf: archives[0].appending(path: "retained-notes/note.txt")) == Data("nested evidence".utf8), "nested original files were lost")
+            check(legacy.openCalls == 1 && legacy.filesAtOpen.isEmpty, "fresh production open was not called after complete archive")
+            check(!legacy.legacyCapture && legacy.taken == 0 && legacy.bytesSaved == 0 && legacy.phase == .ready, "legacy owner state was mixed into restart")
+            try Data("fresh-frame".utf8).write(to: legacy.folder.appendingPathComponent("0000.heic"))
+            check(try Data(contentsOf: archives[0].appendingPathComponent("0000.heic")) == Data("original-0".utf8), "new capture overwrote archived frame")
+            await legacy.recordAgain()
+            check(legacy.openCalls == 1, "duplicate Record Again reopened a fresh capture")
+        }
+
+        let collision = try CaptureOwner(), fixedID = UUID()
+        try Data("original".utf8).write(to: collision.folder.appendingPathComponent("0000.heic"))
+        let occupied = collision.testRoot.appending(path: "Archives/\(collision.folder.lastPathComponent)/\(fixedID.uuidString.lowercased())")
+        try FileManager.default.createDirectory(at: occupied, withIntermediateDirectories: true)
+        try Data("existing archive".utf8).write(to: occupied.appendingPathComponent("0000.heic"))
+        do { _ = try HandheldCaptureArchive.preserveLegacy(collision.folder, identifier: fixedID); check(false, "archive collision overwrote files") } catch {}
+        check(try Data(contentsOf: collision.folder.appendingPathComponent("0000.heic")) == Data("original".utf8), "archive collision removed current capture")
+        check(try Data(contentsOf: occupied.appendingPathComponent("0000.heic")) == Data("existing archive".utf8), "archive collision changed earlier archive")
+
+        let archiveFailure = try CaptureOwner()
+        archiveFailure.legacyCapture = true; archiveFailure.phase = .paused; archiveFailure.taken = 1; archiveFailure.recorder = nil
+        try Data("original".utf8).write(to: archiveFailure.folder.appendingPathComponent("0000.heic"))
+        try Data("blocks directory".utf8).write(to: archiveFailure.testRoot.appendingPathComponent("Archives"))
+        await archiveFailure.recordAgain()
+        check(archiveFailure.openCalls == 0 && archiveFailure.legacyCapture && archiveFailure.phase == .paused && archiveFailure.failure != nil, "failed archive still opened/reinitialized capture")
+        check(try Data(contentsOf: archiveFailure.folder.appendingPathComponent("0000.heic")) == Data("original".utf8), "failed archive lost original")
+        for protectedName in ["finished", "capture-frames.jsonl", "0000.depth.plist"] {
+            let protected = try CaptureOwner()
+            try Data("original".utf8).write(to: protected.folder.appendingPathComponent("0000.heic"))
+            try Data().write(to: protected.folder.appendingPathComponent(protectedName))
+            do { _ = try HandheldCaptureArchive.preserveLegacy(protected.folder); check(false, "protected complete/stream capture was archived") } catch {}
+            check(FileManager.default.fileExists(atPath: protected.folder.appendingPathComponent("0000.heic").path), "protected capture was removed")
+        }
 
         let normal = try CaptureOwner(), normalRecorder = normal.recorder!
         let timer = Timer(timeInterval: 0.5, repeats: true) { _ in }

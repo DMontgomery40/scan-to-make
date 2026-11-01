@@ -19,6 +19,26 @@ enum HandheldDiagnosticOptions {
     }
 }
 
+enum HandheldCaptureArchive {
+    enum ArchiveError: Error { case notShortLegacyCapture }
+
+    /// Rename the complete old folder before opening a fresh one; no saved file is replaced or merged.
+    static func preserveLegacy(_ folder: URL, identifier: UUID = UUID()) throws -> URL {
+        let fm = FileManager.default
+        let files = try fm.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)
+        let photos = files.filter { ["heic", "heif"].contains($0.pathExtension.lowercased()) }
+        guard !photos.isEmpty, photos.count < HandheldCapture.minimumPhotos,
+              !files.contains(where: { $0.lastPathComponent == "finished" || $0.lastPathComponent == "capture-frames.jsonl" || $0.lastPathComponent.hasSuffix(".depth.plist") }) else {
+            throw ArchiveError.notShortLegacyCapture
+        }
+        let parent = folder.deletingLastPathComponent().appending(path: "Archives/\(folder.lastPathComponent)", directoryHint: .isDirectory)
+        try fm.createDirectory(at: parent, withIntermediateDirectories: true)
+        let archive = parent.appending(path: identifier.uuidString.lowercased(), directoryHint: .isDirectory)
+        try fm.moveItem(at: folder, to: archive)
+        return archive
+    }
+}
+
 enum HandheldCapture {
     static let minimumPhotos = 24
 
@@ -153,6 +173,7 @@ private let depthReadinessGate = AnalysisGate()
     private var diagnosticsTask: Task<Void, Never>?
     private var closed = false
     private var finishInProgress = false
+    private var restartInProgress = false
     private var didFinish = false
 
     init(folder: URL) { self.folder = folder; super.init() }
@@ -163,6 +184,29 @@ private let depthReadinessGate = AnalysisGate()
               previewRendering, previewSize.width > 1, previewSize.height > 1 else { return false }
         return HandheldCaptureQuality.canCapture(lastFrameAt: lastVideoFrameAt, lastDepthAt: lastDepthFrameAt, now: now,
             exposure: CMTimeGetSeconds(device.exposureDuration), iso: Double(device.iso))
+    }
+
+    var canRecordAgain: Bool {
+        !closed && !restartInProgress && !finishInProgress && phase == .paused && legacyCapture &&
+            recorder == nil && taken > 0 && taken < HandheldCapture.minimumPhotos
+    }
+
+    func recordAgain() async {
+        guard canRecordAgain else { return }
+        restartInProgress = true; phase = .saving
+        defer { restartInProgress = false }
+        do {
+            _ = try HandheldCaptureArchive.preserveLegacy(folder)
+            legacyCapture = false; taken = 0; bytesSaved = 0
+            recordingLimitReached = false; failure = nil; didFinish = false
+            lastVideoFrameAt = nil; lastDepthFrameAt = nil; mask = nil
+            notice = "Your previous photos are preserved in this project's capture archive."
+            phase = .ready
+            await open()
+        } catch {
+            phase = .paused
+            failure = "Your previous capture could not be archived. Its photos have not been deleted."
+        }
     }
 
     fileprivate func previewChanged(rendering: Bool, size: CGSize) {
@@ -263,10 +307,12 @@ private let depthReadinessGate = AnalysisGate()
             // An older photo capture can be saved, but must not be mixed with a new RGB-D stream.
             self.recorder = nil; legacyCapture = true; phase = .paused
             let files = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.fileSizeKey])) ?? []
-            let images = files.filter { $0.pathExtension.lowercased() == "heic" }
+            let images = files.filter { ["heic", "heif"].contains($0.pathExtension.lowercased()) }
             taken = images.count
             bytesSaved = images.reduce(Int64(0)) { $0 + Int64((try? $1.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0) }
-            notice = "Your previous photos are still here. Save this capture to the project."
+            notice = taken < HandheldCapture.minimumPhotos
+                ? "This older capture has too few photos to save. Record Again preserves these photos and starts a fresh capture."
+                : "Your previous photos are still here. Save this capture to the project."
             return
         } catch {
             failure = "The saved capture couldn't be reopened: \(error.localizedDescription)"; return
@@ -557,6 +603,11 @@ struct HandheldCaptureView: View {
                         .controlSize(.extraLarge)
                         .disabled(!camera.canStart)
                 } else if camera.phase == .paused {
+                    if camera.canRecordAgain {
+                        Button { Task { await camera.recordAgain() } } label: { Label("Record Again", systemImage: "arrow.counterclockwise").frame(maxWidth: .infinity) }
+                            .buttonStyle(.glassProminent)
+                            .controlSize(.extraLarge)
+                    }
                     if !camera.recordingLimitReached && !camera.legacyCapture && camera.failure == nil {
                         Button { camera.start() } label: { Label("Resume", systemImage: "record.circle").frame(maxWidth: .infinity) }
                             .buttonStyle(.glassProminent)
@@ -584,7 +635,8 @@ struct HandheldCaptureView: View {
         .task {
             if !preview {
                 await camera.open()
-                if let diagnosticSeconds, await camera.diagnosticCapture(seconds: diagnosticSeconds) { done(true) }
+                // A stand-mounted diagnostic stays visible/awake after saving until explicitly closed.
+                if let diagnosticSeconds { _ = await camera.diagnosticCapture(seconds: diagnosticSeconds) }
             }
         }
         .onAppear {

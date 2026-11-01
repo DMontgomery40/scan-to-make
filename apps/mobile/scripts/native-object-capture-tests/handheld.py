@@ -23,16 +23,21 @@ def extract(marker):
 
 markers = {
     '// DIAGNOSTIC_OPTIONS': 'enum HandheldDiagnosticOptions {',
+    '// CAPTURE_ARCHIVE': 'enum HandheldCaptureArchive {',
     '// QUALITY_POLICY': 'enum HandheldCaptureQuality {',
     '// CAMERA_PHASE': 'enum Phase: Equatable {',
     '// CAN_START': 'var canStart: Bool {',
+    '// CAN_RECORD_AGAIN': 'var canRecordAgain: Bool {',
+    '// RECORD_AGAIN': 'func recordAgain() async {',
     '// RETAIN_SUMMARY': 'private func retain(',
     '// FINISH_CAPTURE': 'func finish() async -> Bool {',
     '// CLOSE_CAPTURE': 'func close() {',
+    '// VIEW_APPEAR_TASK': '.task {',
 }
 fixture = (HERE / 'HandheldQualityTests.swift').read_text()
 methods = {placeholder: extract(marker) for placeholder, marker in markers.items()}
 for placeholder, method in methods.items():
+    if placeholder == '// VIEW_APPEAR_TASK': method = method.replace('.task ', 'func appear() async ', 1)
     fixture = fixture.replace(placeholder, method.replace('private func ', 'func ', 1))
 recorder_source = (HERE.parents[1] / 'ios/ScanToMake/Objects/HandheldDepthRecorder.swift').read_text()
 callback_start = recorder_source.index('    func dataOutputSynchronizer(')
