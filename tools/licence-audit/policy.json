@@ -155,6 +155,126 @@
       "reason": "Pending the repository licence decision (KAN-105). This folder contains no GPL code and will carry or inherit the chosen root licence once it is added.",
       "scope": "server",
       "version": "workspace"
+    },
+    {
+      "ecosystem": "npm",
+      "licence": "LGPL-3.0-or-later",
+      "name": "@img/sharp-libvips-darwin-arm64",
+      "reason": "Dev-only local Workers runtime tooling (miniflare via wrangler/@cloudflare/vitest-plugin) for services/relay; never deployed: the relay bundle has no dependencies.",
+      "scope": "server",
+      "version": "*"
+    },
+    {
+      "ecosystem": "npm",
+      "licence": "LGPL-3.0-or-later",
+      "name": "@img/sharp-libvips-darwin-x64",
+      "reason": "Dev-only local Workers runtime tooling (miniflare via wrangler/@cloudflare/vitest-plugin) for services/relay; never deployed: the relay bundle has no dependencies.",
+      "scope": "server",
+      "version": "*"
+    },
+    {
+      "ecosystem": "npm",
+      "licence": "LGPL-3.0-or-later",
+      "name": "@img/sharp-libvips-linux-arm",
+      "reason": "Dev-only local Workers runtime tooling (miniflare via wrangler/@cloudflare/vitest-plugin) for services/relay; never deployed: the relay bundle has no dependencies.",
+      "scope": "server",
+      "version": "*"
+    },
+    {
+      "ecosystem": "npm",
+      "licence": "LGPL-3.0-or-later",
+      "name": "@img/sharp-libvips-linux-arm64",
+      "reason": "Dev-only local Workers runtime tooling (miniflare via wrangler/@cloudflare/vitest-plugin) for services/relay; never deployed: the relay bundle has no dependencies.",
+      "scope": "server",
+      "version": "*"
+    },
+    {
+      "ecosystem": "npm",
+      "licence": "LGPL-3.0-or-later",
+      "name": "@img/sharp-libvips-linux-ppc64",
+      "reason": "Dev-only local Workers runtime tooling (miniflare via wrangler/@cloudflare/vitest-plugin) for services/relay; never deployed: the relay bundle has no dependencies.",
+      "scope": "server",
+      "version": "*"
+    },
+    {
+      "ecosystem": "npm",
+      "licence": "LGPL-3.0-or-later",
+      "name": "@img/sharp-libvips-linux-riscv64",
+      "reason": "Dev-only local Workers runtime tooling (miniflare via wrangler/@cloudflare/vitest-plugin) for services/relay; never deployed: the relay bundle has no dependencies.",
+      "scope": "server",
+      "version": "*"
+    },
+    {
+      "ecosystem": "npm",
+      "licence": "LGPL-3.0-or-later",
+      "name": "@img/sharp-libvips-linux-s390x",
+      "reason": "Dev-only local Workers runtime tooling (miniflare via wrangler/@cloudflare/vitest-plugin) for services/relay; never deployed: the relay bundle has no dependencies.",
+      "scope": "server",
+      "version": "*"
+    },
+    {
+      "ecosystem": "npm",
+      "licence": "LGPL-3.0-or-later",
+      "name": "@img/sharp-libvips-linux-x64",
+      "reason": "Dev-only local Workers runtime tooling (miniflare via wrangler/@cloudflare/vitest-plugin) for services/relay; never deployed: the relay bundle has no dependencies.",
+      "scope": "server",
+      "version": "*"
+    },
+    {
+      "ecosystem": "npm",
+      "licence": "LGPL-3.0-or-later",
+      "name": "@img/sharp-libvips-linuxmusl-arm64",
+      "reason": "Dev-only local Workers runtime tooling (miniflare via wrangler/@cloudflare/vitest-plugin) for services/relay; never deployed: the relay bundle has no dependencies.",
+      "scope": "server",
+      "version": "*"
+    },
+    {
+      "ecosystem": "npm",
+      "licence": "LGPL-3.0-or-later",
+      "name": "@img/sharp-libvips-linuxmusl-x64",
+      "reason": "Dev-only local Workers runtime tooling (miniflare via wrangler/@cloudflare/vitest-plugin) for services/relay; never deployed: the relay bundle has no dependencies.",
+      "scope": "server",
+      "version": "*"
+    },
+    {
+      "ecosystem": "npm",
+      "licence": "Apache-2.0 AND LGPL-3.0-or-later AND MIT",
+      "name": "@img/sharp-wasm32",
+      "reason": "Dev-only local Workers runtime tooling (miniflare via wrangler/@cloudflare/vitest-plugin) for services/relay; never deployed: the relay bundle has no dependencies.",
+      "scope": "server",
+      "version": "*"
+    },
+    {
+      "ecosystem": "npm",
+      "licence": "Apache-2.0 AND LGPL-3.0-or-later",
+      "name": "@img/sharp-win32-arm64",
+      "reason": "Dev-only local Workers runtime tooling (miniflare via wrangler/@cloudflare/vitest-plugin) for services/relay; never deployed: the relay bundle has no dependencies.",
+      "scope": "server",
+      "version": "*"
+    },
+    {
+      "ecosystem": "npm",
+      "licence": "Apache-2.0 AND LGPL-3.0-or-later",
+      "name": "@img/sharp-win32-ia32",
+      "reason": "Dev-only local Workers runtime tooling (miniflare via wrangler/@cloudflare/vitest-plugin) for services/relay; never deployed: the relay bundle has no dependencies.",
+      "scope": "server",
+      "version": "*"
+    },
+    {
+      "ecosystem": "npm",
+      "licence": "Apache-2.0 AND LGPL-3.0-or-later",
+      "name": "@img/sharp-win32-x64",
+      "reason": "Dev-only local Workers runtime tooling (miniflare via wrangler/@cloudflare/vitest-plugin) for services/relay; never deployed: the relay bundle has no dependencies.",
+      "scope": "server",
+      "version": "*"
+    },
+    {
+      "ecosystem": "npm",
+      "licence": "CC0-1.0",
+      "name": "@speed-highlight/core",
+      "reason": "Dev-only local Workers runtime tooling (miniflare via wrangler/@cloudflare/vitest-plugin) for services/relay; never deployed: the relay bundle has no dependencies.",
+      "scope": "server",
+      "version": "*"
     }
   ],
   "isolatedGplTools": {
