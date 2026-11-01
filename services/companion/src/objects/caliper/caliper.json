@@ -1,0 +1,181 @@
+{
+  "name": "Scan to Make caliper",
+  "params": {
+    "docs_url": "https://dmontgomery40.github.io/scan-to-make/",
+    "printer_url": "https://dmontgomery40.github.io/mcp-3D-printer-server/",
+    "range_mm": 100,
+    "layer": 0.2,
+    "band": 0.4,
+    "body": 3.6,
+    "mark": 0.4,
+    "keeper_t": 1.0,
+    "slot_h": 13.0,
+    "edge_clear": 0.4,
+    "ridge": 0.8,
+    "groove_clear": 0.2,
+    "low_h": 14.0,
+    "up_h": 44.0,
+    "card_left": -148.0,
+    "slot_left": -141.0,
+    "strip_left": -140.0,
+    "zero_x": -122.0,
+    "keeper_w": 7.0,
+    "jaw_ext": 20.0,
+    "jaw_w": 12.0,
+    "head_w": 12.0,
+    "finger_w": 3.5,
+    "finger_len": 14.0,
+    "finger_root": 8.0,
+    "split_lo": 1.6,
+    "split_hi": 2.0,
+    "relief": 0.6,
+    "flex_x": [
+      -38.0,
+      -10.0
+    ],
+    "flex_beam": 1.4,
+    "flex_slit": 0.6,
+    "flex_preload": 0.8,
+    "tick_w": 0.5,
+    "vernier_w": 0.7,
+    "vernier_div": 5,
+    "vernier_modulus": 3,
+    "qr_module": 1.0,
+    "qr_quiet": 2,
+    "fiducial_d": 4.0,
+    "fiducial_big_d": 5.0,
+    "chamfer": [
+      0.3,
+      0.2
+    ]
+  },
+  "reading": {
+    "range_mm": 100,
+    "resolution_mm": 0.2,
+    "vernier_divisions": 5,
+    "vernier_pitch_mm": 2.8,
+    "zero_x": -122.0,
+    "how_to_read": "The whole millimetres are the main-scale value just left of the vernier 0 line. Add 0.2 mm for each vernier division up to the line that lines up best with a main-scale tick (lines are labelled 0 2 4 6 8 in tenths of a millimetre). The same reading is the gap between the OUTSIDE jaws and the span of the INSIDE jaws."
+  },
+  "fiducials": [
+    {
+      "x": -141.0,
+      "y": 51.0,
+      "diameter_mm": 5.0,
+      "through_hole": true
+    },
+    {
+      "x": -12.0,
+      "y": 32.0,
+      "diameter_mm": 4.0,
+      "through_hole": true
+    },
+    {
+      "x": -141.0,
+      "y": -7.0,
+      "diameter_mm": 4.0,
+      "through_hole": true
+    },
+    {
+      "x": -45.0,
+      "y": -7.0,
+      "diameter_mm": 4.0,
+      "through_hole": true
+    }
+  ],
+  "fiducial_note": "Centres in mm in the card frame (x=0 at the fixed jaw face, y=0 at the slot bottom). Use hole centres for scale: printed holes come out undersize.",
+  "qr": [
+    {
+      "url": "https://dmontgomery40.github.io/mcp-3D-printer-server/",
+      "label": "3D printer MCP",
+      "modules": 33,
+      "module_mm": 1.0,
+      "centre_back_view": [
+        74.5,
+        37.0
+      ]
+    },
+    {
+      "url": "https://dmontgomery40.github.io/scan-to-make/",
+      "label": "Scan to Make docs",
+      "modules": 33,
+      "module_mm": 1.0,
+      "centre_back_view": [
+        117.5,
+        37.0
+      ]
+    }
+  ],
+  "colour_bands": [
+    {
+      "z": [
+        0.0,
+        0.4
+      ],
+      "role": "marking"
+    },
+    {
+      "z": [
+        0.4,
+        3.6
+      ],
+      "role": "body"
+    },
+    {
+      "z": [
+        3.6,
+        4.6
+      ],
+      "role": "marking"
+    }
+  ],
+  "pause_at_z": [
+    0.4,
+    3.6
+  ],
+  "plate": {
+    "card": [
+      209.25,
+      126.0
+    ],
+    "slider": [
+      55.25,
+      93.0
+    ],
+    "footprint_mm": [
+      169.5,
+      138.0
+    ],
+    "bed_centre": [
+      128.0,
+      128.0
+    ],
+    "note": "Positions are plate coordinates of each object origin; the slider is turned face down."
+  },
+  "filament_slots": {
+    "1": "body",
+    "2": "marking"
+  },
+  "files": {
+    "caliper-2colour.3mf": {
+      "sha256": "9595c6096d59513fa9e031eade72463ed056c795f61561691966f66b16cd963f",
+      "bytes": 439631
+    },
+    "caliper-1colour.3mf": {
+      "sha256": "de7164aaf19ec1b20c806ac35bbcfd6ec5fef2f3a8f9a9826b6baf06b0f7c13c",
+      "bytes": 439613
+    },
+    "caliper.stl": {
+      "sha256": "040a91d02ca949e4ff0f050e9f5af14a9f9c0cc9775b87f9f5af8883af65c49b",
+      "bytes": 2075484
+    },
+    "caliper-body.stl": {
+      "sha256": "812fcdc5a470061a64fcfa5b1c3e2af13f5d1cfa6283507ef317c736a88ef023",
+      "bytes": 67684
+    },
+    "caliper-marking.stl": {
+      "sha256": "40cba3b1426c2741809fcba21504493ae001f7e72402333b55ca5833e6ed9696",
+      "bytes": 2007884
+    }
+  }
+}
