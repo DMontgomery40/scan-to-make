@@ -111,3 +111,11 @@ test('printing again after an uncertain print says the user checked', async t =>
   assert.equal(refused.status, 409);
   assert.match(refused.json.error.message, /Check the printer/);
 });
+
+test('DELETE removes an object', async t => {
+  const {call} = await fixture(t);
+  const id = (await call('POST', '/v1/objects', {instructions: 'A hook.'})).json.object.id;
+  const deleted = await call('DELETE', `/v1/objects/${id}`);
+  assert.equal(deleted.status, 200);
+  assert.equal((await call('GET', `/v1/objects/${id}`)).status, 404);
+});

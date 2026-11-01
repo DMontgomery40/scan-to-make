@@ -41,3 +41,10 @@ test('the Mac app can start a touch-up again, and a refusal says why in plain wo
   assert.equal((await dispatch('objects.start', {id: object.id})).object.state, 'touching-up');
   await objects.settled(object.id);
 });
+
+test('the Mac app can delete an object', async () => {
+  const {dispatch, objects} = await dispatcher();
+  const object = await objects.create('A hook.');
+  assert.deepEqual(await dispatch('objects.delete', {id: object.id}), {deleted: true});
+  await assert.rejects(dispatch('objects.get', {id: object.id}), error => error.code === 'not-found');
+});

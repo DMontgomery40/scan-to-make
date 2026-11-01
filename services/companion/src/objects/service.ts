@@ -94,6 +94,9 @@ export class ObjectService {
   start(id: string): Promise<StmObject> { return this.#gate(id, () => this.#start(id)); }
   async #start(id: string): Promise<StmObject> {
     const object = await this.get(id);
+    // Photos only show what something looks like; without a scan, the description says what to make.
+    if (!object.scan && !object.instructions?.trim() && object.state === 'new')
+      throw new InvalidStateError('Describe what to make, or add a scan.');
     if (object.state === 'touching-up') return object;
     if (object.state === 'needs-closeup') return this.#pass(object, {});
     if (object.state !== 'new' && object.state !== 'failed') throw new InvalidStateError('This object has already been touched up.');
@@ -116,6 +119,15 @@ export class ObjectService {
     const asked = object.passes.at(-1)?.note;
     const parts = [asked, answer.bestGuess && !asked?.includes(BEST_GUESS_NOTE) ? BEST_GUESS_NOTE : undefined].filter(Boolean);
     return this.#pass(object, parts.length ? {note: parts.join('\n')} : {});
+  }
+
+  /** Deletes the object and its files. Not while a touch-up or print is running. */
+  delete(id: string): Promise<void> { return this.#gate(id, () => this.#delete(id)); }
+  async #delete(id: string): Promise<void> {
+    const object = await this.get(id);
+    if (object.state === 'touching-up' || object.state === 'printing' || this.#running.has(id))
+      throw new InvalidStateError('Wait until the current step finishes.');
+    await this.#deps.store.remove(id);
   }
 
   /** Prints the current model through the user's printer MCP. The plate is checked in the background. */

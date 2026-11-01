@@ -47,6 +47,7 @@ export const parameters = {
   'objects.list': empty,
   'objects.get': z.strictObject({id: z.uuid()}),
   'objects.start': z.strictObject({id: z.uuid()}),
+  'objects.delete': z.strictObject({id: z.uuid()}),
   'objects.correct': z.strictObject({id: z.uuid(), note: z.string().trim().min(1).max(4000)}),
   'objects.answerCloseup': z.strictObject({id: z.uuid(), bestGuess: z.boolean()}),
   'objects.print': z.strictObject({id: z.uuid(), checked: z.boolean().optional()}),

@@ -192,3 +192,27 @@ test('closing the companion stops object work before it shuts down', async () =>
   await server.close();
   assert.equal(calls[0].signal.aborted, true);
 });
+
+test('photos alone, with no description and no scan, are refused before anything runs', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'objects-svc-'));
+  const store = new ObjectStore(join(root, 'objects'));
+  let ran = 0;
+  const service = new ObjectService({store, runTouchup: async () => { ran++; throw new Error('unused'); }, stlInfo: async () => undefined, claudePath: '/c',
+    handoff: {backend: 'bambu-printer-mcp', process: {command: '/usr/bin/true'}}});
+  const object = await service.create();
+  await service.addPhoto(object.id, 'a.jpg', Buffer.from('img'));
+  await assert.rejects(service.start(object.id), error => error instanceof InvalidStateError && /Describe what to make/.test(error.message));
+  assert.equal(ran, 0);
+  assert.equal((await service.get(object.id)).state, 'new');
+});
+
+test('an object can be deleted, but not while it is being worked on', async () => {
+  const {service, object, store} = await setup(undefined, {waitForAbort: true});
+  const other = await service.create('A hook.');
+  await service.start(object.id);
+  await assert.rejects(service.delete(object.id), InvalidStateError);
+  await service.delete(other.id);
+  assert.equal(existsSync(store.dir(other.id)), false);
+  assert.deepEqual((await service.list()).map(o => o.id).includes(other.id), false);
+  await service.close();
+});
