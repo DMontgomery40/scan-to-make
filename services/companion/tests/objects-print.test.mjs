@@ -228,8 +228,10 @@ test('timeout and delayed camera judging cannot restore a completed question', a
   const {service, store, object, answers} = await setup({timeoutMs: 80, judge: async () => judging});
   await service.print(object.id);
   const question = await until(async () => (await service.get(object.id)).printConfirmation);
-  await service.settled(object.id);
+  const timedOut = await service.settled(object.id);
   assert.equal(answers[0].result.action, 'cancel');
+  assert.equal(timedOut.state, 'failed');
+  assert.match(timedOut.failure, /confirmation timed out; no print was sent/i);
   finishJudge({clear: true});
   await new Promise(resolve => setImmediate(resolve));
   assert.equal((await store.get(object.id)).printConfirmation, undefined);

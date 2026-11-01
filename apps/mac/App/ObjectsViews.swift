@@ -297,7 +297,7 @@ private struct PrintConfirmationForm: View {
                         Button("Cancel Print", role:.destructive) {
                             Task { await model.answerPrintConfirmation(object.id, confirmationId:question.id, answer:.init(action:.cancel)) }
                         }
-                        .disabled(working)
+                        .disabled(working || expired)
                         if working { ProgressView().controlSize(.small) }
                     }
                 }

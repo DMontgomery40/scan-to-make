@@ -141,7 +141,10 @@ struct SocketObjects: ObjectsCompanion {
     /// Runs one action on one object. Returns whether it went through.
     @discardableResult func perform(_ action: ObjectAction, on id: String, note: String = "") async -> Bool {
         guard !working.contains(id) else { return false }
-        if action == .plateClear, objects.first(where:{ $0.id == id })?.printConfirmation != nil { return false }
+        if action == .plateClear, objects.first(where:{ $0.id == id })?.printConfirmation != nil {
+            problem = Problem(id:id, text:"Review the printer's confirmation before continuing.")
+            return false
+        }
         working.insert(id)
         defer { working.remove(id) }
         if problem?.id == id { problem = nil }

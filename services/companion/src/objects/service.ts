@@ -104,6 +104,7 @@ export class ObjectService {
   readonly #controllers = new Map<string, AbortController>();
   readonly #confirmations = new Map<string, {pending: PendingElicitation; printing: NonNullable<ObjectServiceDeps['print']>; timer: ReturnType<typeof setTimeout>}>();
   readonly #cancelledPrints = new Set<string>();
+  readonly #expiredConfirmations = new Set<string>();
   /** One action at a time per object, so a double tap can't start the same work twice. */
   readonly #gates = new Map<string, Promise<unknown>>();
   #closed = false;
@@ -325,6 +326,8 @@ export class ObjectService {
           // It may have reached the printer: never send it again by itself.
           if (status === 'uncertain') return this.#deps.store.update(id, o => ({...o, state: 'failed', plate: undefined, printConfirmation: undefined, failure: UNCERTAIN, print: {...print, uncertain: true}}));
           if (this.#cancelledPrints.has(id)) return this.#deps.store.update(id, o => ({...o, state: 'ready', plate: undefined, printConfirmation: undefined, failure: undefined}));
+          if (this.#expiredConfirmations.has(id) || (this.#confirmations.get(id)?.pending.expiresAtMs ?? Infinity) <= Date.now())
+            return this.#deps.store.update(id, o => ({...o, state: 'failed', plate: undefined, printConfirmation: undefined, failure: 'Printer confirmation timed out; no print was sent. Press Print to try again.'}));
           return this.#deps.store.update(id, o => ({...o, state: 'failed', plate: undefined, printConfirmation: undefined, failure: error instanceof Error ? error.message : String(error)}));
         })
       .then(o => this.#changed(o))
@@ -332,6 +335,7 @@ export class ObjectService {
         unsubscribe(); this.#running.delete(id); this.#controllers.delete(id);
         clearTimeout(this.#confirmations.get(id)?.timer); this.#confirmations.delete(id);
         this.#cancelledPrints.delete(id);
+        this.#expiredConfirmations.delete(id);
         void rm(join(this.#deps.store.dir(id), 'plate.jpg'), {force: true}).catch(() => undefined);
       });
     this.#running.set(id, work);
@@ -386,6 +390,8 @@ export class ObjectService {
     const timer = setTimeout(() => {
       void this.#gate(id, async () => {
         if (this.#confirmations.get(id)?.pending.id !== pending.id) return;
+        this.#expiredConfirmations.add(id);
+        printing.services.relay.respond(pending.id, {action: 'cancel'});
         this.#confirmations.delete(id);
         this.#changed(await this.#deps.store.update(id, o => o.printConfirmation?.id === pending.id
           ? {...o, printConfirmation: undefined, plate: undefined} : o));
