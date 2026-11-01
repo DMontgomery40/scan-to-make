@@ -157,9 +157,13 @@ private func native(_ name: String) -> NSObject? { (NSClassFromString(name) as? 
     }
     /// Sends the scan's model and up to 24 of its own photos (only what the Mac lacks), then starts.
     func sendScan(_ id: String, run: String) async throws -> StmObject {
+        try await sendCapture(id, run: run)
+        return try await start(id)
+    }
+    /// Sends the scan's model and photos without starting, so chosen photos can go with them.
+    func sendCapture(_ id: String, run: String) async throws {
         let bridge = try require(bridge)
         _ = try await promise { bridge.sendCapture(["objectId": id, "runID": run, "maxPhotos": 24] as NSDictionary, resolve: $0, reject: $1) }
-        return try await start(id)
     }
 
     struct Pairing: Equatable { var paired: Bool; var address: String? }
@@ -223,29 +227,53 @@ struct ObjectsRootView: View {
     @State private var creating = false
     @State private var settings = false
 
+    @State private var selected: String?
+    @Environment(\.horizontalSizeClass) private var width
+
+    @ToolbarContentBuilder private var listToolbar: some ToolbarContent {
+        ToolbarItem(placement: .topBarLeading) {
+            Button { settings = true } label: { Label("Settings", systemImage: "gearshape") }
+        }
+        ToolbarItem(placement: .topBarTrailing) {
+            Button { creating = true } label: { Label("New", systemImage: "plus") }
+                .buttonStyle(.glassProminent)
+        }
+    }
+
     var body: some View {
-        NavigationStack(path: $path) {
-            ObjectsListView(store: store, startNew: { creating = true })
-                .navigationTitle("Scan to Make")
-                .toolbar {
-                    ToolbarItem(placement: .topBarLeading) {
-                        Button { settings = true } label: { Label("Settings", systemImage: "gearshape") }
-                    }
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button { creating = true } label: { Label("New", systemImage: "plus") }
-                            .buttonStyle(.glassProminent)
+        Group {
+            if width == .regular {
+                // iPad and an unfolded Duo: the list and the page side by side.
+                NavigationSplitView {
+                    ObjectsListView(store: store, startNew: { creating = true }, selection: $selected)
+                        .navigationTitle("Scan to Make")
+                        .toolbar { listToolbar }
+                } detail: {
+                    if let selected {
+                        NavigationStack { ObjectDetailView(store: store, id: selected, close: { self.selected = nil }) }
+                            .id(selected)
+                    } else {
+                        ContentUnavailableView("Choose Something", systemImage: "cube",
+                                               description: Text("Pick something from the list, or tap + to make something new."))
                     }
                 }
-                .navigationDestination(for: String.self) { id in
-                    ObjectDetailView(store: store, id: id, close: { path.removeAll() })
+            } else {
+                NavigationStack(path: $path) {
+                    ObjectsListView(store: store, startNew: { creating = true })
+                        .navigationTitle("Scan to Make")
+                        .toolbar { listToolbar }
+                        .navigationDestination(for: String.self) { id in
+                            ObjectDetailView(store: store, id: id, close: { path.removeAll() })
+                        }
                 }
+            }
         }
         .tint(cobalt)
         .sheet(isPresented: $creating) {
             NewObjectView(store: store) { object in
                 creating = false
                 store.replace(object)
-                path = [object.id]
+                if width == .regular { selected = object.id } else { path = [object.id] }
             }
         }
         .sheet(isPresented: $settings) { SettingsView(store: store) }
@@ -269,12 +297,18 @@ struct ObjectsRootView: View {
 struct ObjectsListView: View {
     @Bindable var store: ObjectsStore
     let startNew: () -> Void
+    /// The selected object in the side-by-side layout (iPad, unfolded Duo); nil on iPhone.
+    var selection: Binding<String?>? = nil
     @State private var deleting: StmObject?
+    @State private var refusal: String?
 
     var body: some View {
-        List {
+        List(selection: selection) {
             Section {
                 ConnectionRow(connection: store.connection, error: store.error) { store.onPair() }
+                if let refusal {
+                    Label(refusal, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red)
+                }
             }
             if store.objects.isEmpty, store.loaded, store.error == nil {
                 Section {
@@ -305,8 +339,10 @@ struct ObjectsListView: View {
                             titleVisibility: .visible, presenting: deleting) { object in
             Button("Delete", role: .destructive) {
                 Task {
-                    do { try await store.mac.delete(object.id); store.remove(object.id) }
-                    catch let failure as MacError { store.error = failure }
+                    do { try await store.mac.delete(object.id); store.remove(object.id); refusal = nil }
+                    catch let failure as MacError {
+                        if failure.needsPairing || failure.code == "unreachable" { store.error = failure } else { refusal = failure.message }
+                    }
                 }
             }
         } message: { _ in Text("Its model, photos and renders are removed from your Mac.") }
@@ -342,6 +378,8 @@ struct ConnectionRow: View {
 struct ObjectRow: View {
     let store: ObjectsStore
     let object: StmObject
+    /// A selected sidebar row sits on the accent colour: its status turns white to stay readable.
+    @Environment(\.backgroundProminence) private var prominence
     var body: some View {
         let words = ObjectWords(object)
         HStack(spacing: 14) {
@@ -353,7 +391,9 @@ struct ObjectRow: View {
                 HStack(spacing: 6) {
                     if words.busy { ProgressView().controlSize(.mini) }
                     Text(words.status.components(separatedBy: ". ").first ?? words.status)
-                        .font(.subheadline).foregroundStyle(words.tone.color).lineLimit(2)
+                        .font(.subheadline)
+                        .foregroundStyle(prominence == .increased ? Color.white.opacity(0.9) : words.tone.color)
+                        .lineLimit(2)
                 }
             }
         }
@@ -390,6 +430,8 @@ struct NewObjectView: View {
     @State private var working: String?
     @State private var problem: String?
     @State private var askedForDescription = false
+    @State private var created: StmObject?
+    @State private var photosSent = false
     @FocusState private var describing: Bool
     @Environment(\.dismiss) private var dismiss
     private var described: Bool { !instructions.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
@@ -491,20 +533,35 @@ struct NewObjectView: View {
         describing = false
         await run("photos") { photos += try await store.mac.choosePhotos(limit: max(1, 12 - photos.count)) }
     }
+    /// The object this form made, kept so a retry finishes it instead of making another.
+    private func object() async throws -> StmObject {
+        if let created { return created }
+        let object = try await store.mac.create(instructions)
+        created = object
+        return object
+    }
+    /// Sends the chosen photos once; they leave this phone's cache when the Mac has them.
+    private func sendPhotos(_ id: String) async throws {
+        guard !photosSent else { return }
+        try await store.mac.sendChosen(id, photos)
+        photosSent = true
+    }
     private func make() async {
         guard described else { askedForDescription = true; describing = true; return }
         describing = false
         await run("make") {
-            let object = try await store.mac.create(instructions)
-            try await store.mac.sendChosen(object.id, photos)
+            let object = try await object()
+            try await sendPhotos(object.id)
             started(try await store.mac.start(object.id))
         }
     }
     private func scan() async {
         await run("scan") {
-            let object = try await store.mac.create(instructions)
-            if let run = try await store.mac.scan(object.id) { started(try await store.mac.sendScan(object.id, run: run)) }
-            else { started(object) }
+            let object = try await object()
+            guard let run = try await store.mac.scan(object.id) else { started(object); return }
+            try await store.mac.sendCapture(object.id, run: run)
+            try await sendPhotos(object.id)
+            started(try await store.mac.start(object.id))
         }
     }
 }
@@ -540,6 +597,9 @@ struct ObjectDetailView: View {
     @State private var note = ""
     @State private var working = false
     @State private var problem: String?
+    /// The last refresh failed; cleared as soon as one succeeds (separate from an action's refusal).
+    @State private var fetchProblem: String?
+    @State private var resumed = false
     @State private var confirmDelete = false
     @State private var plateImage: UIImage?
     @FocusState private var writing: Bool
@@ -550,7 +610,13 @@ struct ObjectDetailView: View {
             if let object { page(object) } else { ProgressView() }
         }
         .navigationBarTitleDisplayMode(.inline)
-        .task(id: id) { await reload() }
+        .task(id: id) {
+            await reload()
+            // A scan that finished on this phone but never reached the Mac (the app closed) goes now.
+            guard !resumed, let object, object.state == .new, object.scan == nil else { return }
+            resumed = true
+            if let run = await store.mac.finishedScan(object.id) { act { try await store.mac.sendScan(object.id, run: run) } }
+        }
         .task(id: object.map { ObjectWords($0).busy } ?? false) {
             guard let object, ObjectWords(object).busy else { return }
             while !Task.isCancelled {
@@ -561,9 +627,9 @@ struct ObjectDetailView: View {
     }
 
     private func reload() async {
-        do { store.replace(try await store.mac.get(id)) }
-        catch let failure as MacError { problem = failure.message }
-        catch { problem = MacError.unreachable.message }
+        do { store.replace(try await store.mac.get(id)); fetchProblem = nil }
+        catch let failure as MacError { fetchProblem = failure.message }
+        catch { fetchProblem = MacError.unreachable.message }
     }
 
     private func act(_ body: @escaping () async throws -> StmObject?) {
@@ -608,7 +674,7 @@ struct ObjectDetailView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                         .accessibilityLabel("The printer camera's view of the plate")
                 }
-                if let problem { Label(problem, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red) }
+                if let problem = problem ?? fetchProblem { Label(problem, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red) }
             }
             if !words.actions.filter({ $0 != .correct }).isEmpty {
                 Section { actions(object, words) }

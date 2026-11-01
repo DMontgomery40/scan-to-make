@@ -3,8 +3,9 @@ import AppKit
 // Scan to Make mark: a viewfinder (scan) framing an isometric cube (make), white on cobalt.
 func draw(size: Int, rounded: Bool, to path: String) {
     let s = CGFloat(size)
-    let rep = NSBitmapImageRep(bitmapDataPlanes:nil, pixelsWide:size, pixelsHigh:size, bitsPerSample:8, samplesPerPixel:4,
-                               hasAlpha:true, isPlanar:false, colorSpaceName:.deviceRGB, bytesPerRow:0, bitsPerPixel:0)!
+    // App icons must have no alpha channel (App Store rejects them); the rounded in-app logo keeps one.
+    let rep = NSBitmapImageRep(bitmapDataPlanes:nil, pixelsWide:size, pixelsHigh:size, bitsPerSample:8, samplesPerPixel:rounded ? 4 : 3,
+                               hasAlpha:rounded, isPlanar:false, colorSpaceName:.deviceRGB, bytesPerRow:0, bitsPerPixel:32)!
     NSGraphicsContext.saveGraphicsState()
     NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep:rep)
     let ctx = NSGraphicsContext.current!.cgContext
