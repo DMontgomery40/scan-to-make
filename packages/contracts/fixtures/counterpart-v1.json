@@ -1,0 +1,675 @@
+{
+ "contract": "counterpart wire fixtures v1",
+ "events": [
+  {
+   "v": 1,
+   "seq": 1,
+   "id": "00000000-0000-4000-8000-000000000001",
+   "at": "2026-11-01T18:01:00.000Z",
+   "type": "pass.started",
+   "projectId": "3f1c2a9e-5b7d-4e21-9a6f-0c8d1e2f3a4b",
+   "title": "Your Mac is working on Mic mount",
+   "body": "About 6 min. You can put your phone down.",
+   "notify": "passive",
+   "data": {
+    "stage": "Getting Blender ready",
+    "estimateSec": 360
+   }
+  },
+  {
+   "v": 1,
+   "seq": 2,
+   "id": "00000000-0000-4000-8000-000000000002",
+   "at": "2026-11-01T18:02:00.000Z",
+   "type": "pass.stage",
+   "projectId": "3f1c2a9e-5b7d-4e21-9a6f-0c8d1e2f3a4b",
+   "title": "Mic mount",
+   "body": "Designing it · about 5 min",
+   "notify": "none",
+   "data": {
+    "stage": "Designing it",
+    "estimateSec": 300
+   }
+  },
+  {
+   "v": 1,
+   "seq": 3,
+   "id": "00000000-0000-4000-8000-000000000003",
+   "at": "2026-11-01T18:03:00.000Z",
+   "type": "pass.ready",
+   "projectId": "3f1c2a9e-5b7d-4e21-9a6f-0c8d1e2f3a4b",
+   "title": "Mic mount is ready to print",
+   "body": "60 × 45 × 22 mm",
+   "notify": "active"
+  },
+  {
+   "v": 1,
+   "seq": 4,
+   "id": "00000000-0000-4000-8000-000000000004",
+   "at": "2026-11-01T18:04:00.000Z",
+   "type": "pass.ask",
+   "projectId": "3f1c2a9e-5b7d-4e21-9a6f-0c8d1e2f3a4b",
+   "title": "Mic mount: Can you take a close-up of the clip on the left side?",
+   "body": "Take a photo, choose one, or let your Mac make its best guess.",
+   "notify": "active",
+   "data": {
+    "askId": "5d1e2f3a-4b5c-4d6e-8f70-8192a3b4c5d6"
+   }
+  },
+  {
+   "v": 1,
+   "seq": 5,
+   "id": "00000000-0000-4000-8000-000000000005",
+   "at": "2026-11-01T18:05:00.000Z",
+   "type": "pass.failed",
+   "projectId": "3f1c2a9e-5b7d-4e21-9a6f-0c8d1e2f3a4b",
+   "title": "Mic mount didn't finish",
+   "body": "Blender stopped responding. Open Blender on your Mac, then try again.",
+   "notify": "active"
+  },
+  {
+   "v": 1,
+   "seq": 6,
+   "id": "00000000-0000-4000-8000-000000000006",
+   "at": "2026-11-01T18:06:00.000Z",
+   "type": "print.preparing",
+   "projectId": "3f1c2a9e-5b7d-4e21-9a6f-0c8d1e2f3a4b",
+   "title": "Getting Mic mount ready",
+   "body": "Slicing for Bambu Lab P1S",
+   "notify": "none",
+   "printId": "8a2b4c6d-1e3f-4a5b-8c7d-9e0f1a2b3c4d",
+   "destinationId": "current",
+   "printerName": "Bambu Lab P1S",
+   "data": {
+    "stage": "Slicing the model"
+   }
+  },
+  {
+   "v": 1,
+   "seq": 7,
+   "id": "00000000-0000-4000-8000-000000000007",
+   "at": "2026-11-01T18:07:00.000Z",
+   "type": "plate.blocked",
+   "projectId": "3f1c2a9e-5b7d-4e21-9a6f-0c8d1e2f3a4b",
+   "title": "Something's on the Bambu Lab P1S plate",
+   "body": "Looks like there's a printed part on your plate. Can you take it off first?",
+   "notify": "timeSensitive",
+   "printId": "8a2b4c6d-1e3f-4a5b-8c7d-9e0f1a2b3c4d",
+   "destinationId": "current",
+   "printerName": "Bambu Lab P1S",
+   "frame": "prints/8a2b4c6d-1e3f-4a5b-8c7d-9e0f1a2b3c4d/frames/00000000-0000-4000-8000-000000000007.jpg"
+  },
+  {
+   "v": 1,
+   "seq": 8,
+   "id": "00000000-0000-4000-8000-000000000008",
+   "at": "2026-11-01T18:08:00.000Z",
+   "type": "print.confirm",
+   "projectId": "3f1c2a9e-5b7d-4e21-9a6f-0c8d1e2f3a4b",
+   "title": "Bambu Lab P1S needs a yes before printing Mic mount",
+   "body": "Open Counterpart to answer.",
+   "notify": "timeSensitive",
+   "printId": "8a2b4c6d-1e3f-4a5b-8c7d-9e0f1a2b3c4d",
+   "destinationId": "current",
+   "printerName": "Bambu Lab P1S",
+   "data": {
+    "confirmationId": "6e2f3a4b-5c6d-4e7f-8091-a2b3c4d5e6f7",
+    "expiresAt": "2026-11-01T18:18:00.000Z"
+   }
+  },
+  {
+   "v": 1,
+   "seq": 9,
+   "id": "00000000-0000-4000-8000-000000000009",
+   "at": "2026-11-01T18:09:00.000Z",
+   "type": "print.started",
+   "projectId": "3f1c2a9e-5b7d-4e21-9a6f-0c8d1e2f3a4b",
+   "title": "Printing Mic mount on Bambu Lab P1S",
+   "body": "Heating the bed",
+   "notify": "passive",
+   "printId": "8a2b4c6d-1e3f-4a5b-8c7d-9e0f1a2b3c4d",
+   "destinationId": "current",
+   "printerName": "Bambu Lab P1S",
+   "data": {
+    "state": "preparing",
+    "stage": "Heating the bed",
+    "progress": 0,
+    "remainingSec": 2580,
+    "endsAt": "2026-11-01T18:52:00.000Z",
+    "estimateSec": 2575,
+    "grams": 16.7
+   }
+  },
+  {
+   "v": 1,
+   "seq": 10,
+   "id": "00000000-0000-4000-8000-000000000010",
+   "at": "2026-11-01T18:10:00.000Z",
+   "type": "print.status",
+   "projectId": "3f1c2a9e-5b7d-4e21-9a6f-0c8d1e2f3a4b",
+   "title": "Mic mount",
+   "body": "12% · 38 min left · layer 9 of 74",
+   "notify": "none",
+   "printId": "8a2b4c6d-1e3f-4a5b-8c7d-9e0f1a2b3c4d",
+   "destinationId": "current",
+   "printerName": "Bambu Lab P1S",
+   "data": {
+    "state": "printing",
+    "progress": 12,
+    "remainingSec": 2280,
+    "endsAt": "2026-11-01T18:48:00.000Z",
+    "layer": 9,
+    "totalLayers": 74
+   }
+  },
+  {
+   "v": 1,
+   "seq": 11,
+   "id": "00000000-0000-4000-8000-000000000011",
+   "at": "2026-11-01T18:11:00.000Z",
+   "type": "print.first-layer",
+   "projectId": "3f1c2a9e-5b7d-4e21-9a6f-0c8d1e2f3a4b",
+   "title": "Mic mount: first layer's down",
+   "body": "41 min left on Bambu Lab P1S",
+   "notify": "passive",
+   "printId": "8a2b4c6d-1e3f-4a5b-8c7d-9e0f1a2b3c4d",
+   "destinationId": "current",
+   "printerName": "Bambu Lab P1S",
+   "data": {
+    "state": "printing",
+    "progress": 3,
+    "remainingSec": 2460,
+    "layer": 2,
+    "totalLayers": 74
+   },
+   "frame": "prints/8a2b4c6d-1e3f-4a5b-8c7d-9e0f1a2b3c4d/frames/00000000-0000-4000-8000-000000000011.jpg"
+  },
+  {
+   "v": 1,
+   "seq": 12,
+   "id": "00000000-0000-4000-8000-000000000012",
+   "at": "2026-11-01T18:12:00.000Z",
+   "type": "print.milestone",
+   "projectId": "3f1c2a9e-5b7d-4e21-9a6f-0c8d1e2f3a4b",
+   "title": "Mic mount is halfway",
+   "body": "19 min left · layer 37 of 74 · Bambu Lab P1S",
+   "notify": "active",
+   "printId": "8a2b4c6d-1e3f-4a5b-8c7d-9e0f1a2b3c4d",
+   "destinationId": "current",
+   "printerName": "Bambu Lab P1S",
+   "data": {
+    "state": "printing",
+    "progress": 50,
+    "remainingSec": 1140,
+    "layer": 37,
+    "totalLayers": 74
+   },
+   "frame": "prints/8a2b4c6d-1e3f-4a5b-8c7d-9e0f1a2b3c4d/frames/00000000-0000-4000-8000-000000000012.jpg"
+  },
+  {
+   "v": 1,
+   "seq": 13,
+   "id": "00000000-0000-4000-8000-000000000013",
+   "at": "2026-11-01T18:13:00.000Z",
+   "type": "print.paused",
+   "projectId": "3f1c2a9e-5b7d-4e21-9a6f-0c8d1e2f3a4b",
+   "title": "Bambu Lab P1S paused Mic mount",
+   "body": "AMS slot 1 ran out of filament",
+   "notify": "timeSensitive",
+   "printId": "8a2b4c6d-1e3f-4a5b-8c7d-9e0f1a2b3c4d",
+   "destinationId": "current",
+   "printerName": "Bambu Lab P1S",
+   "data": {
+    "state": "paused",
+    "progress": 61,
+    "problems": [
+     {
+      "code": "0700_2000_0002_0001",
+      "message": "AMS slot 1 ran out of filament"
+     }
+    ]
+   },
+   "frame": "prints/8a2b4c6d-1e3f-4a5b-8c7d-9e0f1a2b3c4d/frames/00000000-0000-4000-8000-000000000013.jpg"
+  },
+  {
+   "v": 1,
+   "seq": 14,
+   "id": "00000000-0000-4000-8000-000000000014",
+   "at": "2026-11-01T18:14:00.000Z",
+   "type": "print.resumed",
+   "projectId": "3f1c2a9e-5b7d-4e21-9a6f-0c8d1e2f3a4b",
+   "title": "Mic mount",
+   "body": "Printing again on Bambu Lab P1S",
+   "notify": "none",
+   "printId": "8a2b4c6d-1e3f-4a5b-8c7d-9e0f1a2b3c4d",
+   "destinationId": "current",
+   "printerName": "Bambu Lab P1S",
+   "data": {
+    "state": "printing",
+    "progress": 61
+   }
+  },
+  {
+   "v": 1,
+   "seq": 15,
+   "id": "00000000-0000-4000-8000-000000000015",
+   "at": "2026-11-01T18:15:00.000Z",
+   "type": "print.done",
+   "projectId": "3f1c2a9e-5b7d-4e21-9a6f-0c8d1e2f3a4b",
+   "title": "Mic mount is done",
+   "body": "Take it off the plate.",
+   "notify": "active",
+   "printId": "8a2b4c6d-1e3f-4a5b-8c7d-9e0f1a2b3c4d",
+   "destinationId": "current",
+   "printerName": "Bambu Lab P1S",
+   "data": {
+    "state": "finished",
+    "progress": 100
+   },
+   "frame": "prints/8a2b4c6d-1e3f-4a5b-8c7d-9e0f1a2b3c4d/frames/00000000-0000-4000-8000-000000000015.jpg"
+  },
+  {
+   "v": 1,
+   "seq": 16,
+   "id": "00000000-0000-4000-8000-000000000016",
+   "at": "2026-11-01T18:16:00.000Z",
+   "type": "print.failed",
+   "projectId": "3f1c2a9e-5b7d-4e21-9a6f-0c8d1e2f3a4b",
+   "title": "Bambu Lab P1S stopped Mic mount",
+   "body": "The nozzle may be clogged. Check the printer, then try again.",
+   "notify": "timeSensitive",
+   "printId": "8a2b4c6d-1e3f-4a5b-8c7d-9e0f1a2b3c4d",
+   "destinationId": "current",
+   "printerName": "Bambu Lab P1S",
+   "data": {
+    "state": "failed",
+    "problems": [
+     {
+      "code": "0300_0100_0001_0007",
+      "message": "The nozzle may be clogged."
+     }
+    ]
+   },
+   "frame": "prints/8a2b4c6d-1e3f-4a5b-8c7d-9e0f1a2b3c4d/frames/00000000-0000-4000-8000-000000000016.jpg"
+  },
+  {
+   "v": 1,
+   "seq": 17,
+   "id": "00000000-0000-4000-8000-000000000017",
+   "at": "2026-11-01T18:17:00.000Z",
+   "type": "print.cancelled",
+   "projectId": "3f1c2a9e-5b7d-4e21-9a6f-0c8d1e2f3a4b",
+   "title": "Mic mount was cancelled",
+   "body": "Nothing more will print.",
+   "notify": "passive",
+   "printId": "8a2b4c6d-1e3f-4a5b-8c7d-9e0f1a2b3c4d",
+   "destinationId": "current",
+   "printerName": "Bambu Lab P1S",
+   "data": {
+    "state": "cancelled"
+   }
+  },
+  {
+   "v": 1,
+   "seq": 18,
+   "id": "00000000-0000-4000-8000-000000000018",
+   "at": "2026-11-01T18:18:00.000Z",
+   "type": "print.not-started",
+   "projectId": "3f1c2a9e-5b7d-4e21-9a6f-0c8d1e2f3a4b",
+   "title": "Bambu Lab P1S didn't start Mic mount",
+   "body": "Nothing was sent twice. Check the printer, then press Print again.",
+   "notify": "timeSensitive",
+   "printId": "8a2b4c6d-1e3f-4a5b-8c7d-9e0f1a2b3c4d",
+   "destinationId": "current",
+   "printerName": "Bambu Lab P1S"
+  },
+  {
+   "v": 1,
+   "seq": 19,
+   "id": "00000000-0000-4000-8000-000000000019",
+   "at": "2026-11-01T18:19:00.000Z",
+   "type": "print.unreachable",
+   "projectId": "3f1c2a9e-5b7d-4e21-9a6f-0c8d1e2f3a4b",
+   "title": "Lost contact with Bambu Lab P1S",
+   "body": "Still trying.",
+   "notify": "passive",
+   "printId": "8a2b4c6d-1e3f-4a5b-8c7d-9e0f1a2b3c4d",
+   "destinationId": "current",
+   "printerName": "Bambu Lab P1S"
+  }
+ ],
+ "eventsPage": {
+  "events": [
+   {
+    "v": 1,
+    "seq": 1,
+    "id": "00000000-0000-4000-8000-000000000001",
+    "at": "2026-11-01T18:01:00.000Z",
+    "type": "pass.started",
+    "projectId": "3f1c2a9e-5b7d-4e21-9a6f-0c8d1e2f3a4b",
+    "title": "Your Mac is working on Mic mount",
+    "body": "About 6 min. You can put your phone down.",
+    "notify": "passive",
+    "data": {
+     "stage": "Getting Blender ready",
+     "estimateSec": 360
+    }
+   },
+   {
+    "v": 1,
+    "seq": 2,
+    "id": "00000000-0000-4000-8000-000000000002",
+    "at": "2026-11-01T18:02:00.000Z",
+    "type": "pass.stage",
+    "projectId": "3f1c2a9e-5b7d-4e21-9a6f-0c8d1e2f3a4b",
+    "title": "Mic mount",
+    "body": "Designing it · about 5 min",
+    "notify": "none",
+    "data": {
+     "stage": "Designing it",
+     "estimateSec": 300
+    }
+   }
+  ],
+  "next": 2,
+  "latest": 19
+ },
+ "eventsPageTruncated": {
+  "events": [
+   {
+    "v": 1,
+    "seq": 18,
+    "id": "00000000-0000-4000-8000-000000000018",
+    "at": "2026-11-01T18:18:00.000Z",
+    "type": "print.not-started",
+    "projectId": "3f1c2a9e-5b7d-4e21-9a6f-0c8d1e2f3a4b",
+    "title": "Bambu Lab P1S didn't start Mic mount",
+    "body": "Nothing was sent twice. Check the printer, then press Print again.",
+    "notify": "timeSensitive",
+    "printId": "8a2b4c6d-1e3f-4a5b-8c7d-9e0f1a2b3c4d",
+    "destinationId": "current",
+    "printerName": "Bambu Lab P1S"
+   },
+   {
+    "v": 1,
+    "seq": 19,
+    "id": "00000000-0000-4000-8000-000000000019",
+    "at": "2026-11-01T18:19:00.000Z",
+    "type": "print.unreachable",
+    "projectId": "3f1c2a9e-5b7d-4e21-9a6f-0c8d1e2f3a4b",
+    "title": "Lost contact with Bambu Lab P1S",
+    "body": "Still trying.",
+    "notify": "passive",
+    "printId": "8a2b4c6d-1e3f-4a5b-8c7d-9e0f1a2b3c4d",
+    "destinationId": "current",
+    "printerName": "Bambu Lab P1S"
+   }
+  ],
+  "next": 19,
+  "latest": 19,
+  "truncated": true
+ },
+ "eventsPageReset": {
+  "events": [],
+  "next": 19,
+  "latest": 19,
+  "reset": true
+ },
+ "statuses": [
+  {
+   "phase": "sending",
+   "text": "Sending to your Mac",
+   "symbol": "arrow.up.circle",
+   "tint": "blue"
+  },
+  {
+   "phase": "working",
+   "text": "Your Mac is working · Designing it · about 5 min",
+   "symbol": "wand.and.sparkles",
+   "tint": "blue"
+  },
+  {
+   "phase": "needs-you",
+   "text": "Needs you · Can you take a close-up of the clip on the left side?",
+   "symbol": "hand.raised",
+   "tint": "orange"
+  },
+  {
+   "phase": "ready",
+   "text": "Ready to print · 60 × 45 × 22 mm",
+   "symbol": "checkmark.seal",
+   "tint": "accent"
+  },
+  {
+   "phase": "preparing",
+   "text": "Getting the print ready",
+   "symbol": "gearshape",
+   "tint": "accent"
+  },
+  {
+   "phase": "printing",
+   "text": "Printing on Bambu Lab P1S · 42% · 25 min left",
+   "symbol": "printer.fill",
+   "tint": "green"
+  },
+  {
+   "phase": "printed",
+   "text": "Printed Nov 1",
+   "symbol": "shippingbox",
+   "tint": "secondary"
+  },
+  {
+   "phase": "failed",
+   "text": "Bambu Lab P1S didn't start Mic mount · Check the printer, then press Print again.",
+   "symbol": "exclamationmark.triangle",
+   "tint": "red"
+  }
+ ],
+ "printLive": {
+  "source": "counterpart",
+  "observedAt": "2026-11-01T18:30:00.000Z",
+  "state": "printing",
+  "job": {
+   "name": "checked-1b2c-Mic mount",
+   "id": "1730485800",
+   "progress": 42,
+   "elapsedSec": 1200,
+   "remainingSec": 1500,
+   "layer": 31,
+   "totalLayers": 74,
+   "stage": "Printing"
+  },
+  "endsAt": "2026-11-01T18:55:00.000Z",
+  "temps": {
+   "nozzle": {
+    "actual": 219.5,
+    "target": 220
+   },
+   "bed": {
+    "actual": 55,
+    "target": 55
+   },
+   "chamber": 31
+  },
+  "activeFilament": {
+   "slot": "A1",
+   "material": "PLA",
+   "color": "#FEC600"
+  },
+  "problems": []
+ },
+ "printMonitor": {
+  "phase": "watching",
+  "startedAt": "2026-11-01T18:10:00.000Z",
+  "lastReportAt": "2026-11-01T18:30:00.000Z",
+  "milestonesSent": [
+   50
+  ],
+  "firstLayerSent": true
+ },
+ "printSettings": {
+  "quality": "fine",
+  "strength": "strong",
+  "colour": {
+   "amsSlot": 1
+  },
+  "plateCheck": true
+ },
+ "estimate": {
+  "destinationId": "current",
+  "quality": "fine",
+  "strength": "strong",
+  "seconds": 3420,
+  "grams": 19.2,
+  "layers": 183,
+  "layerHeightMm": 0.12,
+  "infillPercent": 25,
+  "wallLoops": 4,
+  "slicedAt": "2026-11-01T18:05:00.000Z"
+ },
+ "destinations": [
+  {
+   "id": "current",
+   "name": "Bambu Lab P1S",
+   "backend": "bambu-printer-mcp",
+   "model": "p1s",
+   "address": "192.168.1.40",
+   "source": "current",
+   "origin": "printer-handoff",
+   "state": "ready",
+   "stateCheckedAt": "2026-11-01T18:00:00.000Z",
+   "capabilities": {
+    "server": {
+     "name": "bambu-printer-mcp",
+     "version": "1.1.44"
+    },
+    "progress": false,
+    "layers": false,
+    "camera": "bambu-tcp",
+    "filaments": "ams",
+    "pause": true,
+    "resume": true,
+    "cancel": true,
+    "quality": false,
+    "strength": false,
+    "multiColour": false,
+    "missing": [
+     "progress",
+     "quality",
+     "strength",
+     "multi-colour"
+    ],
+    "update": {
+     "message": "Update bambu-printer-mcp to see progress and to choose quality and strength.",
+     "package": "bambu-printer-mcp",
+     "command": [
+      "npm",
+      "install",
+      "-g",
+      "bambu-printer-mcp@latest"
+     ]
+    },
+    "detectedAt": "2026-11-01T18:00:00.000Z"
+   }
+  },
+  {
+   "id": "mcp-0123456789abcdef01234567",
+   "name": "Voron",
+   "backend": "mcp-3d-printer-server",
+   "address": "voron.local:7125",
+   "source": "mcp-profile",
+   "origin": "codex",
+   "state": "unknown"
+  }
+ ],
+ "ask": {
+  "id": "5d1e2f3a-4b5c-4d6e-8f70-8192a3b4c5d6",
+  "question": "Can you take a close-up of the clip on the left side?",
+  "photo": "asks/5d1e2f3a-4b5c-4d6e-8f70-8192a3b4c5d6.jpg",
+  "region": {
+   "x": 0.1,
+   "y": 0.35,
+   "width": 0.25,
+   "height": 0.3
+  },
+  "answers": [
+   "camera",
+   "photos",
+   "best-guess",
+   "text"
+  ],
+  "status": "open",
+  "askedAtMs": 1730484000000
+ },
+ "changes": [
+  {
+   "tag": "added",
+   "text": "Two 4 mm screw holes, 40 mm apart"
+  },
+  {
+   "tag": "changed",
+   "text": "Thickened the arm to 3 mm"
+  },
+  {
+   "tag": "assumed",
+   "text": "The stand pole is round"
+  },
+  {
+   "tag": "estimated",
+   "text": "Pole diameter 25 mm",
+   "toleranceMm": 1
+  }
+ ],
+ "stages": [
+  {
+   "id": "preparing",
+   "words": "Getting Blender ready",
+   "startedAtMs": 1730484000000,
+   "endedAtMs": 1730484012000,
+   "typicalSec": 15
+  },
+  {
+   "id": "working",
+   "words": "Designing it",
+   "startedAtMs": 1730484012000,
+   "typicalSec": 300
+  }
+ ],
+ "settings": {
+  "milestones": "50"
+ },
+ "liveActivityTokenUploads": [
+  {
+   "pushToStart": "80f1a2b3c4d5e6f708192a3b4c5d6e7f"
+  },
+  {
+   "activity": {
+    "printId": "8a2b4c6d-1e3f-4a5b-8c7d-9e0f1a2b3c4d",
+    "token": "a1b2c3d4e5f60718293a4b5c6d7e8f90"
+   }
+  },
+  {
+   "activity": {
+    "printId": "8a2b4c6d-1e3f-4a5b-8c7d-9e0f1a2b3c4d",
+    "token": null
+   }
+  }
+ ],
+ "liveActivityTokens": {
+  "pushToStart": [
+   {
+    "deviceId": "7c1d2e3f-4a5b-4c6d-8e7f-90a1b2c3d4e5",
+    "token": "80f1a2b3c4d5e6f708192a3b4c5d6e7f",
+    "updatedAt": "2026-11-01T18:00:00.000Z"
+   }
+  ],
+  "activities": [
+   {
+    "printId": "8a2b4c6d-1e3f-4a5b-8c7d-9e0f1a2b3c4d",
+    "deviceId": "7c1d2e3f-4a5b-4c6d-8e7f-90a1b2c3d4e5",
+    "token": "a1b2c3d4e5f60718293a4b5c6d7e8f90",
+    "updatedAt": "2026-11-01T18:10:00.000Z"
+   }
+  ]
+ }
+}
