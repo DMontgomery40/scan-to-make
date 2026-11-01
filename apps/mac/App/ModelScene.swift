@@ -92,7 +92,8 @@ struct ModelViewer: View {
                 ProgressView().controlSize(.small)
             }
         }
-        .task(id:"\(url.path)#\(version)") {
+        // Reload only when the STL itself is rewritten, not on every state change of the object.
+        .task(id:"\(url.path)#\(FileVersion.of(url, else:version))") {
             failed = false
             let url = url
             let loaded = await Task.detached(priority:.userInitiated) { LoadedScene(scene:ModelScene.load(url)) }.value

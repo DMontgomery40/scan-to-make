@@ -218,8 +218,8 @@ struct ObjectPage: View {
             HStack(spacing:10) {
                 if working { ProgressView().controlSize(.small) }
                 Button(action == .printChecked ? "I checked. Print again" : "Print") { run(action) }
+                    // No keyboard shortcut: Print starts the printer, so it is always a deliberate click.
                     .buttonStyle(.borderedProminent).controlSize(.large).tint(ObjectsStyle.clay)
-                    .keyboardShortcut("p", modifiers:.command)
                     .disabled(working)
                     .help(action == .printChecked ? "Only if the printer isn’t already printing this" : "")
             }
@@ -345,14 +345,14 @@ struct ObjectPage: View {
 
 // MARK: - Files on this Mac
 
-/// A picture from the object's folder, read off the main thread. `version` is the object's
-/// `updatedAtMs`: a new pass rewrites the same file names, so the path alone would show the old picture.
+/// A picture from the object's folder, read off the main thread and keyed on the file's modification
+/// time. `version` (the object's `updatedAtMs`) stands in when that can't be read.
 struct FileImage: View {
     let url: URL
     let version: Double
     var contentMode: ContentMode = .fit
     @State private var image: NSImage?
-    private var key: String { "\(url.path)#\(version)" }
+    private var key: String { "\(url.path)#\(FileVersion.of(url, else:version))" }
     var body: some View {
         Group {
             if let image = image ?? FileImages.cached(key) {
@@ -373,6 +373,14 @@ struct FileImage: View {
 }
 
 private struct SendableImage: @unchecked Sendable { let image: NSImage }
+
+/// A file's modification time, so a picture or model reloads when its file is rewritten (a new pass
+/// reuses the same names) and not when only the object's state changes. `fallback` if it can't be read.
+enum FileVersion {
+    static func of(_ url: URL, else fallback: Double) -> Double {
+        ((try? FileManager.default.attributesOfItem(atPath:url.path))?[.modificationDate] as? Date)?.timeIntervalSince1970 ?? fallback
+    }
+}
 
 @MainActor enum FileImages {
     private static let cache: NSCache<NSString, NSImage> = { let cache = NSCache<NSString, NSImage>(); cache.countLimit = 120; return cache }()
