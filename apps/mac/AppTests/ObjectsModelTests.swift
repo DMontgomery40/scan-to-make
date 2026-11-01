@@ -131,6 +131,28 @@ private func item(_ id: String, _ state: String, _ fields: [String: Any] = [:]) 
         XCTAssertFalse(model.isPolling, "focusing a closed window doesn't start reading")
     }
 
+    func testThe3DViewStartsWithTheWholeModelInView() throws {
+        // A box is the hardest shape to frame: its corners reach furthest from the centre.
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("cube-\(UUID().uuidString).stl")
+        let s = 50.0, v = [(-s,-s,-s),(s,-s,-s),(s,s,-s),(-s,s,-s),(-s,-s,s),(s,-s,s),(s,s,s),(-s,s,s)]
+        let faces = [(0,2,1),(0,3,2),(4,5,6),(4,6,7),(0,1,5),(0,5,4),(2,3,7),(2,7,6),(1,2,6),(1,6,5),(0,4,7),(0,7,3)]
+        var stl = "solid cube\n"
+        for (a, b, c) in faces {
+            stl += "facet normal 0 0 0\nouter loop\n"
+            for i in [a, b, c] { stl += "vertex \(v[i].0) \(v[i].1) \(v[i].2)\n" }
+            stl += "endloop\nendfacet\n"
+        }
+        try (stl + "endsolid cube\n").write(to:url, atomically:true, encoding:.utf8)
+        defer { try? FileManager.default.removeItem(at:url) }
+        let scene = try XCTUnwrap(ModelScene.load(url))
+        let eye = try XCTUnwrap(scene.rootNode.childNode(withName:"eye", recursively:false))
+        let camera = try XCTUnwrap(eye.camera)
+        let p = eye.position, distance = (Double(p.x) * Double(p.x) + Double(p.y) * Double(p.y) + Double(p.z) * Double(p.z)).squareRoot()
+        let halfDiagonal = (3 * 100.0 * 100.0).squareRoot() / 2
+        // The whole box sits inside a sphere of half its diagonal; that sphere must fit the narrower view angle.
+        XCTAssertGreaterThanOrEqual(distance * sin(Double(camera.fieldOfView) / 2 * .pi / 180), halfDiagonal)
+    }
+
     func testErrorSentencesNeverDumpTheError() {
         for error: Error in [ControlRemoteError(code:"internal", message:"stack trace"), ControlClientError.invalidResponse,
                              ControlClientError.timedOut, ControlClientError.unavailable, ControlRemoteError(code:"not-found", message:"x")] {

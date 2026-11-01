@@ -379,14 +379,6 @@ struct FileImage: View {
 
 private struct SendableImage: @unchecked Sendable { let image: NSImage }
 
-/// A file's modification time, so a picture or model reloads when its file is rewritten (a new pass
-/// reuses the same names) and not when only the object's state changes. `fallback` if it can't be read.
-enum FileVersion {
-    static func of(_ url: URL, else fallback: Double) -> Double {
-        ((try? FileManager.default.attributesOfItem(atPath:url.path))?[.modificationDate] as? Date)?.timeIntervalSince1970 ?? fallback
-    }
-}
-
 @MainActor enum FileImages {
     private static let cache: NSCache<NSString, NSImage> = { let cache = NSCache<NSString, NSImage>(); cache.countLimit = 120; return cache }()
     static func cached(_ key: String) -> NSImage? { cache.object(forKey:key as NSString) }

@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		05551324D77D3BD8D2A0C7C3 /* PrinterCheck.swift in Sources */ = {isa = PBXBuildFile; fileRef = 112D6ADABF2AF7AAEB888655 /* PrinterCheck.swift */; };
+		0D8D68EC8CC95CCD600D18AB /* ModelScene.swift in Sources */ = {isa = PBXBuildFile; fileRef = ABBA6E003BC9F29E89A4BCAE /* ModelScene.swift */; };
 		0EFA54A02DBEEF87FFF4215E /* ModelAccessModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC5F2C1001F7210EDDAC44F0 /* ModelAccessModelTests.swift */; };
 		0FE5829508ADAECB01427A8E /* ModelAccessTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BF8AD0AEAAA0378F114C4AB /* ModelAccessTests.swift */; };
 		10A460FF8712D01F74D0C610 /* NearbyViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6F496F4AF4B9CFF607CE85C /* NearbyViews.swift */; };
@@ -429,6 +430,7 @@
 				C6B573A4A78875903AD76ED9 /* ModelAccessModel.swift in Sources */,
 				0EFA54A02DBEEF87FFF4215E /* ModelAccessModelTests.swift in Sources */,
 				0FE5829508ADAECB01427A8E /* ModelAccessTests.swift in Sources */,
+				0D8D68EC8CC95CCD600D18AB /* ModelScene.swift in Sources */,
 				37B4279FFFD1C4DC6FF3C154 /* Models.swift in Sources */,
 				9B3A7601BD4D867D838767C0 /* NearbyModel.swift in Sources */,
 				DD0AF62C78C73075A21BC86E /* NearbyModelTests.swift in Sources */,

@@ -31,10 +31,13 @@ enum ModelScene {
 
         let scene = SCNScene()
         scene.rootNode.addChildNode(upright)
-        let radius = Double(max(high.x - low.x, high.y - low.y, high.z - low.z)) * 0.62
+        // The whole model sits inside a sphere of half its box's diagonal, whatever its shape or how it's
+        // turned; framing that sphere in the vertical (narrower) view angle keeps every corner in view.
+        let (w, h, d) = (Double(high.x - low.x), Double(high.y - low.y), Double(high.z - low.z))
+        let radius = (w * w + h * h + d * d).squareRoot() / 2
         let camera = SCNCamera()
         camera.fieldOfView = 32
-        let distance = radius / sin(16 * .pi / 180) * 1.08
+        let distance = radius / sin(16 * .pi / 180) * 1.04
         camera.zNear = distance / 100
         camera.zFar = distance * 10
         let eye = SCNNode()
@@ -122,5 +125,13 @@ private struct TurnableScene: NSViewRepresentable {
         view.scene = scene
         view.pointOfView = scene.rootNode.childNode(withName:"eye", recursively:false)
         view.defaultCameraController.target = SCNVector3Zero
+    }
+}
+
+/// A file's modification time, so a picture or model reloads when its file is rewritten (a new pass
+/// reuses the same names) and not when only the object's state changes. `fallback` if it can't be read.
+enum FileVersion {
+    static func of(_ url: URL, else fallback: Double) -> Double {
+        ((try? FileManager.default.attributesOfItem(atPath:url.path))?[.modificationDate] as? Date)?.timeIntervalSince1970 ?? fallback
     }
 }
