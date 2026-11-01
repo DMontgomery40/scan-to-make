@@ -57,6 +57,10 @@ import ModelIO
                 FileHandle.standardError.write(Data("\(shot.name): rows \(table.numberOfRows), row view \(row), visible \(table.visibleRect), on screen \(window.occlusionState.contains(.visible))\n".utf8))
             }
             try png(of:window, to:output.appendingPathComponent(shot.name + ".png"))
+            // The live SCNView draws through Metal, which the window capture can't see: ask it directly.
+            if shot.threeD, let live = findSceneView(window.contentView!) {
+                try write(live.snapshot(), to:output.appendingPathComponent(shot.name + "-scnview.png"))
+            }
             window.orderOut(nil)
             window.close()
         }
@@ -78,6 +82,17 @@ import ModelIO
             renderer.scale = 2
             if let image = renderer.nsImage { try write(image, to:output.appendingPathComponent("cards-\(dark ? "dark" : "light").png")) }
         }
+        // The popover's footer at its real width, without the popover's pairing code.
+        let footer = ImageRenderer(content:PopoverFooter().frame(width:372).background(Color(nsColor:NSColor(white:0.96, alpha:1)))
+            .environment(\.colorScheme, .light))
+        footer.scale = 2
+        if let image = footer.nsImage { try write(image, to:output.appendingPathComponent("popover-footer-light.png")) }
+    }
+
+    private static func findSceneView(_ view: NSView) -> SCNView? {
+        if let scene = view as? SCNView { return scene }
+        for child in view.subviews { if let scene = findSceneView(child) { return scene } }
+        return nil
     }
 
     private static func findTable(_ view: NSView) -> NSTableView? {

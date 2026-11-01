@@ -57,6 +57,10 @@ private func item(_ id: String, _ state: String, _ fields: [String: Any] = [:]) 
         let model = ObjectsModel(companion:companion)
         await model.refresh()
         XCTAssertEqual(model.availability, .notSetUp)
+        // A companion from before objects refuses the method itself; it answered, so it is running.
+        await companion.failList(with:ControlRemoteError(code:"invalid-request", message:"Invalid local control request"))
+        for _ in 0..<3 { await model.refresh() }
+        XCTAssertEqual(model.availability, .notSetUp)
     }
 
     func testAMissingCompanionIsReportedOnlyAfterAFewTries() async {

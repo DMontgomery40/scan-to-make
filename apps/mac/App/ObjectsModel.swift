@@ -29,7 +29,7 @@ struct SocketObjects: ObjectsCompanion {
 @MainActor final class ObjectsModel: ObservableObject {
     enum Availability: Equatable {
         case loading, ready
-        /// The companion answered `unavailable`: objects aren't set up on this Mac.
+        /// The companion refused the list: objects aren't set up on this Mac (or it predates them).
         case notSetUp
         /// The companion hasn't answered for a while.
         case notRunning
@@ -63,7 +63,9 @@ struct SocketObjects: ObjectsCompanion {
             if !list.contains(where: { $0.id == selection }) { selection = list.first?.id }
             if let problem, !list.contains(where: { $0.id == problem.id }) { self.problem = nil }
             return list.contains { $0.words.busy } ? Self.busyDelay : Self.idleDelay
-        } catch let error as ControlRemoteError where error.code == "unavailable" {
+        } catch is ControlRemoteError {
+            // The companion answered and refused: `unavailable` when objects aren't set up here, or
+            // `invalid-request` from a companion that predates objects. Either way it is running.
             failures = 0
             objects = []
             availability = .notSetUp

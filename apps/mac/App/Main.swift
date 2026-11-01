@@ -115,25 +115,32 @@ struct MenuBarPopover: View {
                 .padding(40)
                 .background(Color.white)
             Divider()
-            HStack(spacing:16) {
-                Button { ObjectsWindow.shared.show() } label: { Label("Open Scan to Make", systemImage:"macwindow") }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.secondary)
-                    .keyboardShortcut("o")
-                Button { SettingsWindow.shared.show() } label: { Label("Settings…", systemImage:"gearshape") }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.secondary)
-                    .keyboardShortcut(",")
-                Spacer()
-                Button("Quit") { NSApp.terminate(nil) }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.secondary)
-                    .keyboardShortcut("q")
-            }
-            .font(.system(size:12.5))
-            .padding(EdgeInsets(top:11,leading:12,bottom:13,trailing:12))
+            PopoverFooter()
         }
         .frame(width:372)
+    }
+}
+
+/// The popover's footer: the objects window, Settings and Quit.
+struct PopoverFooter: View {
+    var body: some View {
+        HStack(spacing:16) {
+            Button { ObjectsWindow.shared.show() } label: { Label("Open Scan to Make", systemImage:"macwindow") }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .keyboardShortcut("o")
+            Button { SettingsWindow.shared.show() } label: { Label("Settings…", systemImage:"gearshape") }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .keyboardShortcut(",")
+            Spacer()
+            Button("Quit") { NSApp.terminate(nil) }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .keyboardShortcut("q")
+        }
+        .font(.system(size:12.5))
+        .padding(EdgeInsets(top:11,leading:12,bottom:13,trailing:12))
     }
 }
 
