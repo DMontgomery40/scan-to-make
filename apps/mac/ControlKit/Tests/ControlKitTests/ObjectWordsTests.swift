@@ -35,6 +35,9 @@ final class ObjectWordsTests: XCTestCase {
 
     func testSaysWhatIsHappeningInPlainWordsForEveryState() {
         XCTAssertEqual(object(["scan": "scan.usdz"]).words.status, "Sending to your Mac…")
+        XCTAssertEqual(object(["photos": ["one.heic"]]).words.status, "Sending to your Mac…")
+        XCTAssertEqual(object(["instructions": "A hook"]).words.status, "Waiting for a scan or photos.",
+                       "nothing has arrived from the phone yet")
         XCTAssertEqual(object(["scan": "scan.usdz", "state": "touching-up"]).words.status, "Touching up your scan." + waitLine)
         XCTAssertEqual(object(["instructions": "A hook", "state": "touching-up"]).words.status, "Making it." + waitLine)
         let correcting = ready(["state": "touching-up",
@@ -108,7 +111,8 @@ final class ObjectWordsTests: XCTestCase {
         XCTAssertEqual(ready(["state": "printing", "plate": ["item": "a printed part"]]).words.headline,
                        "Looks like there's a printed part on your plate.")
         XCTAssertEqual(ready().words.headline, "Ready to print")
-        XCTAssertEqual(object(["state": "new"]).words.headline, "Sending to your Mac…")
+        XCTAssertEqual(object(["state": "new", "scan": "scan.usdz"]).words.headline, "Sending to your Mac…")
+        XCTAssertEqual(object(["state": "new"]).words.headline, "Waiting for a scan or photos.")
     }
 
     func testAStateThisAppDoesNotKnowAsksForAnUpdate() {

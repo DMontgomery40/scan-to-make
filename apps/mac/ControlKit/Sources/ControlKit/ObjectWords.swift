@@ -50,7 +50,9 @@ public struct ObjectWords: Sendable, Equatable {
         var headline: String?
         switch object.state {
         case .new:
-            (status, tone, busy, actions) = ("Sending to your Mac…", .pending, true, [])
+            // Nothing has arrived from the phone yet, or it is on its way.
+            let arriving = object.scan != nil || !object.photos.isEmpty
+            (status, tone, busy, actions) = (arriving ? "Sending to your Mac…" : "Waiting for a scan or photos.", .pending, true, [])
         case .touchingUp:
             let what = object.passes.count > 1 && object.current != nil ? "Making your changes."
                 : object.scan != nil ? "Touching up your scan." : "Making it."
