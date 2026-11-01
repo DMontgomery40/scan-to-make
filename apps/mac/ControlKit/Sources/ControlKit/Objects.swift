@@ -107,6 +107,10 @@ public extension ControlClient {
     func object(_ id: String) async throws -> StmObject {
         let result: ObjectReply = try await call("objects.get", ["id": .string(id)]); return result.object
     }
+    /// Starts the touch-up again, after one that failed without a model.
+    func startObject(_ id: String) async throws -> StmObject {
+        let result: ObjectReply = try await call("objects.start", ["id": .string(id)]); return result.object
+    }
     /// Sends a correction back to the touch-up; the object returns to touching up.
     func correctObject(_ id: String, note: String) async throws -> StmObject {
         let result: ObjectReply = try await call("objects.correct", ["id": .string(id), "note": .string(note)]); return result.object

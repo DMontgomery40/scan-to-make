@@ -136,6 +136,7 @@ import ModelIO
         func answerCloseup(_ id: String, bestGuess: Bool) async throws -> StmObject { try refuse() }
         func print(_ id: String, checked: Bool) async throws -> StmObject { try refuse() }
         func answerPlate(_ id: String) async throws -> StmObject { try refuse() }
+        func start(_ id: String) async throws -> StmObject { try refuse() }
     }
 
     private static func fixtures(in root: URL, stills: URL) throws -> [StmObject] {
@@ -183,7 +184,7 @@ import ModelIO
             objects.append(try JSONDecoder().decode(StmObject.self, from:JSONSerialization.data(withJSONObject:json)))
             _ = name
         }
-        try add("hook", model:"hook", ["instructions": "A hook for my stroller handle, 25 mm tube. It should hold a cup.", "scan": "scan.usdz"])
+        try add("hook", model:"hook", ["instructions": "A hook for a 25 mm tube. It should hold a cup.", "scan": "scan.usdz"])
         try add("bracket", model:"bracket", ["instructions": "A shelf bracket, 3 mm thick, with two screw holes", "state": "needs-closeup",
                                             "question": ["closeup": "the screw holes on the back"]])
         try add("mug", model:nil, ["scan": "scan.usdz", "state": "touching-up", "passes": [["startedAtMs": now - 90_000]]])

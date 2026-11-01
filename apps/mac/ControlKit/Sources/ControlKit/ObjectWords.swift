@@ -8,6 +8,8 @@ public enum ObjectAction: Sendable, Equatable {
     case correct
     case bestGuess
     case plateClear
+    /// Start the touch-up again after it failed without a model (`objects.start`).
+    case retry
 }
 
 /// An object in plain words, the same as the phone's `describeObject` (apps/mobile/src/objects/model.ts).
@@ -80,7 +82,7 @@ public struct ObjectWords: Sendable, Equatable {
             (status, tone, busy, actions) = ("Printed", .pass, false, made)
         case .failed:
             let failure = object.failure?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            (status, tone, busy, actions) = (failure.isEmpty ? "Something went wrong on your Mac." : failure, .fail, false, made)
+            (status, tone, busy, actions) = (failure.isEmpty ? "Something went wrong on your Mac." : failure, .fail, false, made.isEmpty ? [.retry] : made)
         case .unknown:
             (status, tone, busy, actions) = ("Update Scan to Make to see this one.", .neutral, false, [])
         }

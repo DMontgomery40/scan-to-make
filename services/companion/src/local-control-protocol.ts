@@ -12,7 +12,8 @@ const messages = {
   internal: 'The local control operation failed',
 } as const;
 export class ControlFailure extends Error {
-  constructor(readonly code: keyof typeof messages) { super(messages[code]); }
+  /** `detail` replaces the generic sentence when the refusal has a plain one of its own. */
+  constructor(readonly code: keyof typeof messages, detail?: string) { super(detail ?? messages[code]); }
 }
 export function controlError(error: unknown) {
   const failure = error instanceof ControlFailure ? error : new ControlFailure('internal');
@@ -45,6 +46,7 @@ export const parameters = {
     .refine(p => (p.projectId === undefined) !== (p.handoffId === undefined)),
   'objects.list': empty,
   'objects.get': z.strictObject({id: z.uuid()}),
+  'objects.start': z.strictObject({id: z.uuid()}),
   'objects.correct': z.strictObject({id: z.uuid(), note: z.string().trim().min(1).max(4000)}),
   'objects.answerCloseup': z.strictObject({id: z.uuid(), bestGuess: z.boolean()}),
   'objects.print': z.strictObject({id: z.uuid(), checked: z.boolean().optional()}),

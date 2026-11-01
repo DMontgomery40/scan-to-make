@@ -190,7 +190,7 @@ export function createControlDispatcher(services: ControlServices) {
           return {answered:true};
         }
         case 'doors.prepare': return await prepareDoor(parameters[method].parse(raw));
-        case 'objects.list': case 'objects.get': case 'objects.correct': case 'objects.answerCloseup': case 'objects.print': case 'objects.answerPlate': {
+        case 'objects.list': case 'objects.get': case 'objects.start': case 'objects.correct': case 'objects.answerCloseup': case 'objects.print': case 'objects.answerPlate': {
           const objects = services.objects;
           if (!objects) throw new ControlFailure('unavailable');
           try {
@@ -199,6 +199,7 @@ export function createControlDispatcher(services: ControlServices) {
             if (method === 'objects.list') return {objects: (await objects.list()).map(local)};
             const params = parameters[method].parse(raw) as {id: string; note?: string; bestGuess?: boolean; checked?: boolean};
             const object = method === 'objects.get' ? await objects.get(params.id)
+              : method === 'objects.start' ? await objects.start(params.id)
               : method === 'objects.correct' ? await objects.correct(params.id, params.note!)
               : method === 'objects.answerCloseup' ? await objects.answerCloseup(params.id, {bestGuess: params.bestGuess!})
               : method === 'objects.print' ? await objects.print(params.id, params.checked ? {checked: true} : {})
@@ -206,7 +207,8 @@ export function createControlDispatcher(services: ControlServices) {
             return {object: local(object)};
           } catch (error) {
             if (error instanceof ObjectNotFoundError) throw new ControlFailure('not-found');
-            if (error instanceof InvalidStateError) throw new ControlFailure('conflict');
+            // Its sentence is written for the person ("There is no model to print yet.").
+            if (error instanceof InvalidStateError) throw new ControlFailure('conflict', error.message);
             throw error;
           }
         }

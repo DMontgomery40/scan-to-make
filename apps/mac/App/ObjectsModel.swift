@@ -11,6 +11,7 @@ protocol ObjectsCompanion: Sendable {
     func answerCloseup(_ id: String, bestGuess: Bool) async throws -> StmObject
     func print(_ id: String, checked: Bool) async throws -> StmObject
     func answerPlate(_ id: String) async throws -> StmObject
+    func start(_ id: String) async throws -> StmObject
 }
 
 /// The control socket. A fresh client per call, so a missing socket fails that call, not the model.
@@ -21,6 +22,7 @@ struct SocketObjects: ObjectsCompanion {
     func answerCloseup(_ id: String, bestGuess: Bool) async throws -> StmObject { try await ControlClient(socketPath:path).answerCloseup(id, bestGuess:bestGuess) }
     func print(_ id: String, checked: Bool) async throws -> StmObject { try await ControlClient(socketPath:path).printObject(id, checked:checked) }
     func answerPlate(_ id: String) async throws -> StmObject { try await ControlClient(socketPath:path).answerPlate(id) }
+    func start(_ id: String) async throws -> StmObject { try await ControlClient(socketPath:path).startObject(id) }
 }
 
 /// The objects window's list and the object it shows (spec §5.1, §5.6). It reads the list only while the
@@ -110,6 +112,7 @@ struct SocketObjects: ObjectsCompanion {
             case .correct: updated = try await companion.correct(id, note:String(note.trimmingCharacters(in:.whitespacesAndNewlines).prefix(4000)))
             case .bestGuess: updated = try await companion.answerCloseup(id, bestGuess:true)
             case .plateClear: updated = try await companion.answerPlate(id)
+            case .retry: updated = try await companion.start(id)
             }
             if let index = objects.firstIndex(where: { $0.id == id }) { objects[index] = updated }
             wake()
@@ -125,7 +128,10 @@ struct SocketObjects: ObjectsCompanion {
     /// One plain sentence for an action that didn't go through.
     nonisolated static func sentence(for error: Error) -> String {
         switch (error as? ControlRemoteError)?.code {
-        case "conflict"?: return "That can't be done right now."
+        case "conflict"?:
+            // A current Mac sends its own plain sentence ("There is no model to print yet.").
+            let message = (error as? ControlRemoteError)?.message ?? ""
+            return message.isEmpty || message.hasPrefix("The requested operation") ? "That can't be done right now." : message
         case "not-found"?: return "This one is no longer on your Mac."
         case .some: return "Something went wrong on your Mac."
         case nil: break

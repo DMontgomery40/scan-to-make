@@ -29,6 +29,7 @@ private actor FakeObjects: ObjectsCompanion {
     func answerCloseup(_ id: String, bestGuess: Bool) async throws -> StmObject { try change(id, "closeup:\(bestGuess)", ["state": "touching-up"]) }
     func print(_ id: String, checked: Bool) async throws -> StmObject { try change(id, "print:\(checked)", ["state": "printing"]) }
     func answerPlate(_ id: String) async throws -> StmObject { try change(id, "plate", ["plate": NSNull()]) }
+    func start(_ id: String) async throws -> StmObject { try change(id, "start", ["state": "touching-up"]) }
 }
 
 private func item(_ id: String, _ state: String, _ fields: [String: Any] = [:]) -> [String: Any] {
@@ -101,9 +102,23 @@ private func item(_ id: String, _ state: String, _ fields: [String: Any] = [:]) 
         await companion.failActions(with:ControlRemoteError(code:"conflict", message:"The requested operation conflicts with current state"))
         let refused = await model.perform(.print, on:"a")
         XCTAssertFalse(refused)
-        XCTAssertEqual(model.problem, .init(id:"a", text:"That can't be done right now."))
+        XCTAssertEqual(model.problem, .init(id:"a", text:"That can't be done right now."), "an older Mac's generic refusal")
+        await companion.failActions(with:ControlRemoteError(code:"conflict", message:"There is no model to print yet."))
+        _ = await model.perform(.print, on:"a")
+        XCTAssertEqual(model.problem, .init(id:"a", text:"There is no model to print yet."), "the Mac's own plain sentence")
         let after = await companion.calls
         XCTAssertEqual(after.last, "list", "a refusal reads the object again to show where it is now")
+    }
+
+    func testAFailedTouchUpStartsAgain() async {
+        let companion = FakeObjects()
+        await companion.set([item("b", "failed", ["failure": "Blender is not open on your Mac.", "current": NSNull()])])
+        let model = ObjectsModel(companion:companion)
+        await model.refresh()
+        let started = await model.perform(.retry, on:"b")
+        XCTAssertTrue(started)
+        let calls = await companion.calls
+        XCTAssertEqual(calls.last, "start")
     }
 
     func testPollingFollowsTheWindow() async {

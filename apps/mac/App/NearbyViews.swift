@@ -3,7 +3,7 @@ import SwiftUI
 import ControlKit
 #endif
 
-private let clay = Color(red:0.77, green:0.32, blue:0.17)
+private let clay = Color(red:0x24/255, green:0x48/255, blue:0xD8/255)
 
 extension NearbyModel {
     static let shared = NearbyModel(companion:SocketNearby(path:ModelAccessModel.socketPath(for:Installation(bundle:.main))))

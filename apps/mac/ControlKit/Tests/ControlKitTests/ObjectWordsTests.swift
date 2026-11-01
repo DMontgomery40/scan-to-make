@@ -20,8 +20,8 @@ private let waitLine = " This can take a few minutes. We'll let you know when it
 
 final class ObjectWordsTests: XCTestCase {
     func testNamesAnObjectByItsInstructionsOrAsACopyOfAScan() {
-        XCTAssertEqual(object(["instructions": "A hook for my stroller handle, 25 mm tube. It should hold a cup."]).words.title,
-                       "A hook for my stroller handle, 25 mm tube")
+        XCTAssertEqual(object(["instructions": "A hook for a 25 mm tube. It should hold a cup."]).words.title,
+                       "A hook for a 25 mm tube")
         XCTAssertEqual(object(["scan": "scan.usdz"]).words.title, "Copy of your scan")
         XCTAssertEqual(object([:]).words.title, "Something new")
         XCTAssertEqual(object(["instructions": "   "]).words.title, "Something new")
@@ -81,7 +81,7 @@ final class ObjectWordsTests: XCTestCase {
     func testAFailureSaysWhyAndOffersWhatFixesIt() {
         let touchUp = object(["scan": "scan.usdz", "state": "failed", "failure": "Blender is not open on your Mac."]).words
         XCTAssertEqual(touchUp.status, "Blender is not open on your Mac.")
-        XCTAssertEqual(touchUp.actions, [], "starting over isn't on this Mac's control socket yet")
+        XCTAssertEqual(touchUp.actions, [.retry], "a touch-up that failed with no model can start again")
         let print = ready(["state": "failed", "failure": "The printer is busy."]).words
         XCTAssertEqual(print.status, "The printer is busy.")
         XCTAssertEqual(print.actions, [.print, .correct])

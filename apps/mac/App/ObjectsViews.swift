@@ -9,24 +9,25 @@ import ControlKit
 // model itself, then Print and the corrections box. All copy comes from ObjectWords.
 
 enum ObjectsStyle {
-    static let clay = Color(red:0.77, green:0.32, blue:0.17)
-    /// Clay for text: darker on light backgrounds and lighter on dark ones, so it keeps 4.5:1.
-    static let clayText = Color(nsColor:NSColor(name:nil) { appearance in
+    /// The one action colour, the same cobalt as the iPhone app: Print, and what the object needs.
+    static let accent = Color(nsColor:NSColor(name:nil) { appearance in
         appearance.bestMatch(from:[.aqua, .darkAqua]) == .darkAqua
-            ? NSColor(red:0.96, green:0.58, blue:0.45, alpha:1)
-            : NSColor(red:0.62, green:0.24, blue:0.10, alpha:1)
+            ? NSColor(red:0x7B/255, green:0x95/255, blue:0xFF/255, alpha:1)
+            : NSColor(red:0x24/255, green:0x48/255, blue:0xD8/255, alpha:1)
     })
-    /// The model's stage: a soft neutral that sits under renders and the 3D view alike.
+    /// Accent for text; cobalt keeps 4.5:1 on both window backgrounds.
+    static let accentText = accent
+    /// The model's stage: the iPhone's dark build plate, which the touch-up's renders sit on.
     static let stage = Color(nsColor:NSColor(name:nil) { appearance in
         appearance.bestMatch(from:[.aqua, .darkAqua]) == .darkAqua
-            ? NSColor(red:0.145, green:0.145, blue:0.152, alpha:1)
-            : NSColor(red:0.948, green:0.944, blue:0.936, alpha:1)
+            ? NSColor(red:0x0E/255, green:0x10/255, blue:0x13/255, alpha:1)
+            : NSColor(red:0x2C/255, green:0x31/255, blue:0x38/255, alpha:1)
     })
     static func color(_ tone: ObjectWords.Tone) -> Color {
         switch tone {
         case .pass: return Color(nsColor:.systemGreen)
         case .fail: return Color(nsColor:.systemRed)
-        case .accent: return clay
+        case .accent: return accent
         case .pending, .neutral: return Color(nsColor:.tertiaryLabelColor)
         }
     }
@@ -126,6 +127,7 @@ private struct Thumbnail: View {
                 Image(systemName:"cube").font(.system(size:17, weight:.light)).foregroundStyle(.tertiary)
             }
         }
+        .environment(\.colorScheme, .dark)  // The stage is always the dark plate.
         .clipShape(RoundedRectangle(cornerRadius:9, style:.continuous))
         .overlay(RoundedRectangle(cornerRadius:9, style:.continuous).strokeBorder(Color(nsColor:.separatorColor), lineWidth:0.5))
     }
@@ -213,13 +215,14 @@ struct ObjectPage: View {
     }
 
     @ViewBuilder private var printButton: some View {
-        let action: ObjectAction? = words.actions.contains(.printChecked) ? .printChecked : words.actions.contains(.print) ? .print : nil
+        let action: ObjectAction? = words.actions.contains(.printChecked) ? .printChecked : words.actions.contains(.print) ? .print
+            : words.actions.contains(.retry) ? .retry : nil
         if let action {
             HStack(spacing:10) {
                 if working { ProgressView().controlSize(.small) }
-                Button(action == .printChecked ? "I checked. Print again" : "Print") { run(action) }
+                Button(action == .printChecked ? "I checked. Print again" : action == .retry ? "Try again" : "Print") { run(action) }
                     // No keyboard shortcut: Print starts the printer, so it is always a deliberate click.
-                    .buttonStyle(.borderedProminent).controlSize(.large).tint(ObjectsStyle.clay)
+                    .buttonStyle(.borderedProminent).controlSize(.large).tint(ObjectsStyle.accent)
                     .disabled(working)
                     .help(action == .printChecked ? "Only if the printer isn’t already printing this" : "")
             }
@@ -246,8 +249,8 @@ struct ObjectPage: View {
             Spacer(minLength:0)
         }
         .padding(16)
-        .background(RoundedRectangle(cornerRadius:12, style:.continuous).fill(ObjectsStyle.clay.opacity(0.07)))
-        .overlay(RoundedRectangle(cornerRadius:12, style:.continuous).strokeBorder(ObjectsStyle.clay.opacity(0.24), lineWidth:1))
+        .background(RoundedRectangle(cornerRadius:12, style:.continuous).fill(ObjectsStyle.accent.opacity(0.07)))
+        .overlay(RoundedRectangle(cornerRadius:12, style:.continuous).strokeBorder(ObjectsStyle.accent.opacity(0.24), lineWidth:1))
     }
 
     private func answer(_ title: String, _ action: ObjectAction) -> some View {
@@ -273,13 +276,14 @@ struct ObjectPage: View {
                     else { Image(systemName:"cube").font(.system(size:40, weight:.ultraLight)).foregroundStyle(.tertiary) }
                 }
             }
+            .environment(\.colorScheme, .dark)  // The stage is always the dark plate.
             .frame(minHeight:300, idealHeight:430, maxHeight:520)
             .aspectRatio(4 / 3, contentMode:.fit)
             .frame(maxWidth:.infinity)
             .clipShape(RoundedRectangle(cornerRadius:14, style:.continuous))
             .overlay(alignment:.bottomLeading) {
                 if shown == .model {
-                    Text("Drag to turn it").font(.system(size:11)).foregroundStyle(.secondary).padding(12).allowsHitTesting(false)
+                    Text("Drag to turn it").font(.system(size:11)).foregroundStyle(Color.white.opacity(0.72)).padding(12).allowsHitTesting(false)
                 }
             }
             if object.modelURL != nil || object.renderURLs.count > 1 { strip }
@@ -312,10 +316,11 @@ struct ObjectPage: View {
         let selected = shown == view
         return Button { showing = view } label: {
             ZStack { ObjectsStyle.stage; content() }
+                .environment(\.colorScheme, .dark)
                 .frame(width:72, height:54)
                 .clipShape(RoundedRectangle(cornerRadius:8, style:.continuous))
                 .overlay(RoundedRectangle(cornerRadius:8, style:.continuous)
-                    .strokeBorder(selected ? ObjectsStyle.clay : Color(nsColor:.separatorColor), lineWidth:selected ? 2 : 0.5))
+                    .strokeBorder(selected ? ObjectsStyle.accent : Color(nsColor:.separatorColor), lineWidth:selected ? 2 : 0.5))
         }
         .buttonStyle(.plain)
     }
