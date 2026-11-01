@@ -45,21 +45,20 @@ function fromNative(error: unknown): ObjectsError {
   )
     return new ObjectsError('pairing');
   if (code === 'cancelled') return new ObjectsError('cancelled');
-  if (code === 'busy')
-    return new ObjectsError(
-      'conflict',
-      'Wait until the current upload finishes.',
-    );
   if (
     typeof code === 'string' &&
-    /offline|timed-out|unreachable|network|cannot-connect|connection/.test(code)
+    /offline|timeout|timed-out|unreachable|network|cannot-connect|connection/.test(
+      code,
+    )
   )
     return new ObjectsError('unreachable');
-  const message = (error as { message?: unknown })?.message;
-  return new ObjectsError(
-    'failed',
-    typeof message === 'string' && message ? message : undefined,
-  );
+  const raw = (error as { message?: unknown })?.message;
+  const message = typeof raw === 'string' && raw ? raw : undefined;
+  if (code === 'busy' || code === 'conflict')
+    return new ObjectsError('conflict', message);
+  if (code === 'not-found') return new ObjectsError('not-found');
+  if (code === 'no-model') return new ObjectsError('nothing-sent', message);
+  return new ObjectsError('failed', message);
 }
 
 export class ObjectsClient {

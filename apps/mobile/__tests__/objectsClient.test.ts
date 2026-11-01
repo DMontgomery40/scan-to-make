@@ -147,6 +147,28 @@ it('errors come back as one sentence the screen can show', async () => {
   expect(error.message).toBe(
     "Your Mac isn't answering. Check it's on and awake, then try again.",
   );
+  const noModel = native(() =>
+    Object.assign(
+      new Error("The scan didn't finish making a model. Scan it again."),
+      { code: 'no-model' },
+    ),
+  );
+  (noModel.fake.sendCapture as jest.Mock).mockRejectedValueOnce(
+    Object.assign(
+      new Error("The scan didn't finish making a model. Scan it again."),
+      { code: 'no-model' },
+    ),
+  );
+  await expect(
+    new ObjectsClient(noModel.fake).sendCapture(id, 'run-1'),
+  ).rejects.toMatchObject({
+    kind: 'nothing-sent',
+    message: "The scan didn't finish making a model. Scan it again.",
+  });
+  const timeout = native(() => coded('timeout'));
+  await expect(new ObjectsClient(timeout.fake).list()).rejects.toMatchObject({
+    kind: 'unreachable',
+  });
   const missing = native(() => ({
     status: 404,
     body: { error: { code: 'not-found' } },
