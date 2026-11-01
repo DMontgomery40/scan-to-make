@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import UniformTypeIdentifiers
 #if canImport(ControlKit)
 import ControlKit
 #endif
@@ -313,6 +314,7 @@ struct ObjectPage: View {
     @State private var showing: Showing?
     @State private var note = ""
     @State private var projectSection = MacProjectSection.model
+    @State private var editorError: String?
     enum Showing: Hashable { case model, render(Int) }
 
     init(object: StmObject, model: ObjectsModel, startWith3D: Bool = false) {
@@ -346,6 +348,7 @@ struct ObjectPage: View {
                         .id(object.id + ":" + confirmation.id)
                 } else if words.tone == .accent { ask }
                 printerSelection
+                if object.modelURL != nil { editorActions }
                 Picker("Project section", selection:$projectSection) {
                     ForEach(MacProjectSection.allCases, id:\.self) { Text($0.rawValue).tag($0) }
                 }
@@ -387,6 +390,73 @@ struct ObjectPage: View {
             .frame(maxWidth:.infinity)
             .keepsScrollerRoom()
         }
+        .alert("Couldn’t Open the Model", isPresented: Binding(get:{ editorError != nil }, set:{ if !$0 { editorError = nil } })) {
+            Button("OK", role:.cancel) { editorError = nil }
+        } message: { Text(editorError ?? "") }
+    }
+
+    private var editorActions: some View {
+        VStack(alignment:.leading, spacing:6) {
+            HStack(spacing:12) {
+                Menu {
+                    Button("Bambu Studio") { openModel(in:.bambu) }
+                    Button("OrcaSlicer") { openModel(in:.orca) }
+                    Divider()
+                    Button("Choose Another App…") { openModel(in:.other) }
+                } label: { Label("Open in Slicer", systemImage:"square.and.arrow.up") }
+                Button { openModel(in:.blender) } label: { Label("Open in Blender", systemImage:"cube") }
+                    .secondaryAction()
+            }
+            Text("Opens a copy; changes in another app don’t update this project.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    private enum ModelEditor { case bambu, orca, blender, other }
+
+    private func openModel(in editor: ModelEditor) {
+        guard let source = object.modelURL else { return }
+        let workspace = NSWorkspace.shared
+        let application: URL?
+        switch editor {
+        case .bambu: application = workspace.urlForApplication(withBundleIdentifier:"com.bambulab.bambu-studio")
+        case .orca: application = workspace.urlForApplication(withBundleIdentifier:"com.orcaslicer.OrcaSlicer")
+            ?? workspace.urlForApplication(withBundleIdentifier:"com.softfever3d.orca-slicer")
+        case .blender: application = workspace.urlForApplication(withBundleIdentifier:"org.blenderfoundation.blender")
+        case .other:
+            let panel = NSOpenPanel()
+            panel.allowedContentTypes = [.applicationBundle]
+            panel.prompt = "Choose App"
+            panel.message = "Choose the slicer to open this model."
+            application = panel.runModal() == .OK ? panel.url : nil
+            if application == nil { return }
+        }
+        guard let application else {
+            editorError = "That app isn’t available on this Mac. Install it or choose another slicer."
+            return
+        }
+        do {
+            let root = try FileManager.default.url(for:.applicationSupportDirectory, in:.userDomainMask, appropriateFor:nil, create:true)
+                .appendingPathComponent("Scan to Make/Editor Copies", isDirectory:true)
+                .appendingPathComponent(UUID().uuidString, isDirectory:true)
+            try FileManager.default.createDirectory(at:root, withIntermediateDirectories:true)
+            let copy = root.appendingPathComponent(source.lastPathComponent)
+            try FileManager.default.copyItem(at:source, to:copy)
+            let configuration = NSWorkspace.OpenConfiguration()
+            if editor == .blender {
+                // Blender opens .blend files directly, but an STL must be imported into a scene.
+                // Start a separate instance so this never replaces an existing Blender session.
+                configuration.createsNewApplicationInstance = true
+                configuration.arguments = ["--factory-startup", "--python-expr", "import bpy,sys; bpy.ops.object.select_all(action='SELECT'); bpy.ops.object.delete(use_global=False); bpy.ops.wm.stl_import(filepath=sys.argv[-1])", "--", copy.path]
+                workspace.openApplication(at:application, configuration:configuration) { _, error in
+                    if let error { Task { @MainActor in editorError = error.localizedDescription } }
+                }
+            } else {
+                workspace.open([copy], withApplicationAt:application, configuration:configuration) { _, error in
+                    if let error { Task { @MainActor in editorError = error.localizedDescription } }
+                }
+            }
+        } catch { editorError = error.localizedDescription }
     }
 
     @ViewBuilder private var printerSelection: some View {
