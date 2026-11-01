@@ -668,6 +668,78 @@ For every event with `notify ≠ none`:
   - It updates the activity whenever it gets time: in the foreground, on CloudKit content-available pushes, and on `BGAppRefreshTask`.
   - In both modes the activity renders with `Text(timerInterval:)` and `ProgressView(timerInterval:countsDown:)` up to `endsAt`, so it keeps counting between updates. `staleDate = endsAt + 10 min` shows "Checking…" if nothing has arrived.
 
+### 8.9 Design engine: Blender, or Fusion when the user has it
+
+Scan cleanup always uses Blender. Designing a part from scratch ("make something that fits") uses Autodesk Fusion when the user has Fusion installed and set up; otherwise it uses Blender, as it does today. Both are reached the same way: through a bridge inside the user's printer MCP. The design pass only ever talks to the printer MCP, so nothing changes in the app's UI.
+
+**The Fusion MCP: [faust-machines/fusion360-mcp-server](https://github.com/faust-machines/fusion360-mcp-server)** (MIT). Chosen 2026-11-01 as the most-used and most-maintained community server:
+
+| Server | Stars | Forks | Contributors | Commits since Sept | Last push |
+|---|---|---|---|---|---|
+| **faust-machines** (chosen) | 141 | 33 | 6 | 7 | 2026-10-06 |
+| imranduratbegovic/fusion-mcp | 55 | 8 | 1 | 0 | 2026-03-14 |
+| Joe-Spencer/fusion-mcp-server (GPL-3.0) | 50 | 9 | 1 | 0 | 2025-04-22 |
+| Joelalbon/Fusion-MCP-Server | 41 | 7 | 3 | 0 | 2025-06-12 |
+| frankhommers/autodesk-fusion-mcp | 37 | 4 | 3 | 17 | 2026-09-26 |
+
+**Why this one:**
+- It is tested on macOS arm64.
+- It offers 93 explicit CAD tools that suit an agent working with nobody watching:
+  - `create_sketch`, `extrude`, `revolve`, `create_hole`, `create_thread`, `fillet`, `shell`, `boolean_operation`;
+  - parameters (`get_parameters`, `create_parameter`, `set_parameter`);
+  - `check_interference`, `compare_meshes`;
+  - `export_stl`, `export_step`, `export_f3d`;
+  - `execute_code` as the escape hatch.
+
+**How it runs.** An MCP client talks stdio to the server, which talks TCP on `localhost:9876` to the `Fusion360MCP` add-in, which talks to Fusion's main thread.
+
+**Install exactly this (pinned):**
+- **Server:** `uvx --from git+https://github.com/faust-machines/fusion360-mcp-server@19b9f1e95192 fusion360-mcp-server --mode socket`.
+  - The PyPI release (0.1.0, February 2026) crashes under mcp 2.x (issue #30). Main pins `mcp>=1.0,<2`.
+- **Add-in:** the repo's `addon/` folder at the same commit, copied to `~/Library/Application Support/Autodesk/Autodesk Fusion 360/API/AddIns/Fusion360MCP` and set to **Run on Startup**.
+- **Known broken:** `measure_distance` (issue #27; fixes in PRs #28 and #29). Counterpart never relies on it, because results are measured from the exported STL with `get_stl_info` and our own measuring tool.
+- **Updating the pin:** move it only after the acceptance check below passes on the new commit.
+
+**The bridge, added to both printer MCPs.** It mirrors `src/blender-mcp-bridge.ts`, which bambu-printer-mcp and mcp-3D-printer-server already share almost line for line, as a new `src/fusion-mcp-bridge.ts`:
+
+- **Configuration, in the same env file as `BLENDER_MCP_*`:**
+
+  | Variable | Value |
+  |---|---|
+  | `FUSION_MCP_COMMAND` | `uvx` |
+  | `FUSION_MCP_ARGS` | `["--from","git+https://github.com/faust-machines/fusion360-mcp-server@19b9f1e95192","fusion360-mcp-server","--mode","socket"]` |
+  | `FUSION_MCP_TIMEOUT_MS` | default `180000` |
+  | `FUSION_MCP_HOST` | passed through; default `localhost` |
+
+- **Transport:** a stdio `Client`, kept for the life of the printer MCP session, as the Blender bridge does.
+- **Tools:**
+
+| Tool | Does |
+|---|---|
+| `fusion_mcp_status` | `{configured, connected, addinReachable, fusionRunning, tools[]}`. Takes `launch?: boolean`. When it's true and Fusion isn't running, it runs `open -a "Autodesk Fusion"` and waits up to 90 s for port 9876. |
+| `fusion_mcp_call` | `{tool_name, arguments?, timeout_ms?}` passes the call through to a discovered Faust tool with its full content and errors, never retried. This is the same contract as `blender_mcp_call`. |
+| `fusion_mcp_new_design` | Opens a new parametric design document, through `execute_code` with `app.documents.add(FusionDesignDocumentType)`. Faust tools need an active design (issue #12), so the pass calls this first. |
+| `fusion_mcp_export` | `{output_dir, name}` writes `<name>.stl` (`export_stl`), `<name>.f3d` (`export_f3d`) and `<name>.parameters.json` (`get_parameters`) into the MCP's allowed output directory, and returns their absolute paths. The STL then goes to `get_stl_info`, `lay_flat` and `slice_stl` like any other model. |
+
+**Choosing the engine.** The companion picks the engine for each pass. The agent doesn't choose.
+- **Copy an object** (scan cleanup and touch-up): Blender, always.
+- **Make something that fits:** Fusion if `fusion_mcp_status` reports `connected` (calling it with `launch: true` first). Otherwise Blender.
+- The pass prompt names the engine and the bridge tools for it, and stays generic about the object.
+- The pass result records `engine: "fusion"|"blender"`. For Fusion it also keeps the project's `design.f3d` and `parameters.json`, so a later "Ask for changes" pass starts from the parametric design instead of the mesh.
+
+**Setup on the Mac.** Settings → AI has an optional **Design with Fusion** row:
+- It shows "Fusion found" or "Fusion isn't installed".
+- **Set up** installs the add-in at the pinned commit and adds the four `FUSION_MCP_*` variables to the printer MCP's env file, next to `BLENDER_MCP_*`.
+- Fusion and its licence (including Autodesk's free personal-use licence) belong to the user. Counterpart never ships or requires Fusion.
+
+**Acceptance check** (run on the Mac before the pin moves, and in M1F):
+1. Start a "make something that fits" pass for a dimensioned bracket through bambu-printer-mcp.
+2. Check that `fusion_mcp_export` returns STL, F3D and parameters.
+3. `get_stl_info` matches the requested dimensions within ±0.2 mm.
+4. Run a follow-up pass that changes one dimension by 1 mm. It must be a single `set_parameter`, and the re-export must match within ±0.2 mm.
+5. `slice_stl` succeeds on the P1S profile.
+6. Run steps 1–5 again through mcp-3D-printer-server's bridge.
+
 ## 9. Notifications and Live Activities
 
 Neither app has any notifications today (audit P6, M5). Events come from §8.7 and travel by the routes in §8.8.
@@ -873,6 +945,7 @@ Each milestone ends in an on-device check with screenshots compared against `scr
 |---|---|---|
 | M0 | **Foundation.** `CounterpartKit` package; pure-SwiftUI iPhone app shell; pairing ported out of React Native; React Native removed. | The app pairs by QR and by the nearby card on a real iPhone, and the app bundle no longer contains React Native |
 | M1 | **Back end and notifications.** All of the following:<br>• fixes: `remaining` → `timeRemaining`, "printed" set only on finish, catalog de-duplication, Codex `config.toml` source<br>• `PrinterSessionPool`<br>• `counterpart_printer_info` and `counterpart_print_progress` (with the generated HMS and stage tables), plus `taskId` in the `print_3mf` result, in bambu-printer-mcp<br>• print monitor<br>• event log, `GET /v1/events` and `events.wait`<br>• Mac `EventRelay` (Mac notifications and CloudKit)<br>• iPhone subscriptions, Notification Service Extension and background actions<br>• structured `pass.*` events, with a generated title and a what-changed summary | On a real P1S print, all of these hold:<br>• with the phone locked and on cellular, the halfway notification arrives with a camera frame, and so does "done"<br>• restarting the companion mid-print sends no duplicate milestone<br>• a print that never starts produces `print.not-started` within 3 min<br>• replying to a "ready" notification from the Lock Screen starts a new pass |
+| M1F | **Fusion design engine.**<br>• `fusion-mcp-bridge.ts` with `fusion_mcp_status`, `fusion_mcp_call`, `fusion_mcp_new_design` and `fusion_mcp_export`, in bambu-printer-mcp and mcp-3D-printer-server, each through its own repo's release process<br>• the companion picks the engine per pass<br>• Mac Settings → Design with Fusion | The §8.9 acceptance check passes through both MCPs on the Mac |
 | M2 | **iPhone core.** Home, New, Project (all states), Ask card, Settings and About. | Each screen matches its mockup on iPhone 18 Pro, iPhone 17e, Duo closed and iPad |
 | M3 | **Print and Live Activity.**<br>• print sheet (printers from both MCPs, slice estimate, colour map, quality, strength)<br>• plate check with the alert and per-printer notes<br>• Printing screen with the camera<br>• pause, resume and stop<br>• Live Activity, with the relay Worker once the APNs key exists<br>• the `slice_stl` quality arguments in both MCPs<br>• the Counterpart tools, `camera_snapshot`, `get_printer_filaments`, pause and resume in mcp-3D-printer-server<br>• `CounterpartCommand` for use away from home | All of these hold:<br>• a real P1S print from the phone shows the Live Activity on the Lock Screen and the Mac menu bar, counting down<br>• a deliberate plate obstruction is caught and cleared with Look Again<br>• a full run on OctoPrint's virtual printer and a Klipper simulator through mcp-3D-printer-server delivers progress, the halfway notification and done<br>• Pause from the Lock Screen pauses the P1S |
 | M3b | **Multi-colour.** The pass contract gains `parts`; per-body STL export through the Blender bridge; `counterpart_make_3mf`; `slice_stl` with `load_filaments`/`load_filament_ids`; `print_3mf` `ams_mapping`; per-part colour map in the print sheet. | A two-part result prints in two AMS colours on the P1S, from the phone |
@@ -895,5 +968,6 @@ Each milestone ends in an on-device check with screenshots compared against `scr
   - It's licensed under MakerWorld's Standard Digital File License, so Counterpart only links to the page. It never bundles, re-hosts or modifies the files.
   - Everywhere the app mentions the rig (New, Help, scan tips), it names Kass 3D and opens the MakerWorld page, so prints, likes and reviews go to the designer.
   - The designer describes it as a recreational and casual-photography rig, not professional equipment. Counterpart's help says the same.
+- **Fusion MCP:** [fusion360-mcp-server](https://github.com/faust-machines/fusion360-mcp-server) by Faust Machines and its contributors (MIT), used through the printer MCPs' Fusion bridge at a pinned commit.
 - **Print flow reference:** Bambu Handy and MakerWorld's Prepare to Print.
 
