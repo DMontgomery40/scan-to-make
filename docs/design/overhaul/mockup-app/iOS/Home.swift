@@ -70,7 +70,7 @@ struct NowPrintingCard: View {
         HStack(spacing: 14) {
             ZStack(alignment: .topLeading) {
                 FillImage(name: "bed.jpg", height: 96).frame(width: 96)
-                Text("LIVE").font(.system(size: 9, weight: .heavy)).padding(.horizontal, 5).padding(.vertical, 2).background(.red, in: .capsule).padding(6)
+                Text("3 s ago").font(.system(size: 9, weight: .heavy)).padding(.horizontal, 5).padding(.vertical, 2).background(.black.opacity(0.6), in: .capsule).padding(6)
             }
             .clipShape(.rect(cornerRadius: 18))
             VStack(alignment: .leading, spacing: 6) {

@@ -55,7 +55,7 @@ struct ProjectView: View {
                 } label: { Image(systemName: "ellipsis") }
             }
         }
-        .safeAreaInset(edge: .bottom) { if project.stage != .needsYou { bottomBar } }
+        .safeAreaBar(edge: .bottom) { if project.stage != .needsYou { bottomBar } }
     }
 
     // MARK: Hero

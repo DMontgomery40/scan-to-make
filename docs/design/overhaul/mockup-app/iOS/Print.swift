@@ -211,7 +211,7 @@ struct PrintingView: View {
             VStack(alignment: .leading, spacing: 18) {
                 FillImage(name: "bed.jpg", height: 380)
                     .overlay(alignment: .topLeading) {
-                        HStack(spacing: 6) { Circle().fill(.red).frame(width: 7); Text("LIVE · P1S").font(.caption.weight(.bold)) }
+                        HStack(spacing: 6) { Image(systemName: "camera.fill"); Text("P1S · 3 s ago").font(.caption.weight(.bold)) }
                             .padding(.horizontal, 10).padding(.vertical, 6).glassEffect(.regular, in: .capsule).padding(.top, 110).padding(.leading, 16)
                     }
                     .overlay(alignment: .bottomTrailing) {
@@ -250,7 +250,7 @@ struct PrintingView: View {
         .toolbar {
             ToolbarItem(placement: .topBarLeading) { Button { } label: { Image(systemName: "chevron.left") } }
         }
-        .safeAreaInset(edge: .bottom) {
+        .safeAreaBar(edge: .bottom) {
             GlassEffectContainer(spacing: 10) {
                 HStack(spacing: 10) {
                     Button { } label: { Label("Pause", systemImage: "pause.fill").frame(maxWidth: .infinity).frame(height: 36) }.buttonStyle(.glass)

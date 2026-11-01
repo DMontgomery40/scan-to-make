@@ -200,9 +200,10 @@ Screenshot: `screens/phone-print.jpg`. The flow is modelled on Bambu Handy and M
   - Offline printers are dimmed and show why.
   - The last printer used is preselected.
 - **Plate preview.** The model on a plate, with time, grams and layer count as glass capsules. These come from slicing with the printer MCP (`slice_stl` and its estimate) as soon as a printer is chosen.
-- **Colours:**
-  - Each part or colour of the model maps to an AMS slot or the loaded spool, matched by the MCP's material and colour.
-  - Tap a slot to change it. Grams are shown per colour.
+- **Colours.**
+  - **v1: one colour.** Pick an AMS slot or the loaded spool. It's preselected by matching the MCP's live filaments to the profile's material. Grams are shown.
+  - **Multi-colour (M3b), when the result has separate parts.** Each part maps to a slot, and grams are shown per part. The pipeline is in §8.5.
+  - The mockup shows the multi-colour version.
   - A printer without an AMS shows "Uses the loaded filament: *material colour*", with a reminder to change it if needed.
 - **Quality:** Draft, Standard or Fine (layer height).
 - **Strength:** Standard, Strong or Max (walls and infill).
@@ -420,6 +421,8 @@ Both MCPs gain the same small set of tools with the same arguments and results. 
 | `counterpart_print_progress` | new; wraps `getStatus` | new; per-firmware mapping below |
 | `camera_snapshot` | existing | **new**, with the same arguments and result as Bambu's |
 | `get_printer_filaments` | existing | **new**, single-slot result |
+| `slice_stl` arguments | **add** `layer_height` (mm), `wall_loops` (int) and `sparse_infill_density` (e.g. `"15%"`). The MCP writes them as a process override on top of the machine and process preset it already resolves (Bambu Studio/Orca keys `layer_height`, `wall_loops`, `sparse_infill_density`). Today the only route is a whole `slicer_profile` file | **add** the same three arguments, mapped to the slicer in use (Orca keys as for Bambu; PrusaSlicer `layer_height`, `perimeters`, `fill_density`) |
+| `counterpart_make_3mf` (M3b) | **new**: `{parts: [{stl_path, name}], out_path}` → a multi-object 3MF, one object per part, for multi-colour | not needed: generic printers are single-extruder in v1 |
 | `pause_print` / `resume_print` / `cancel_print` | existing | `cancel_print` exists; **add** pause and resume |
 | `print_3mf` result | **add** `taskId` and `subtaskName` to the result. It already sends `task_id = submissionId` and `subtask_name` (`printers/bambu.ts:957-961`) but doesn't return them | `upload_gcode` / `start_print` result: **add** `jobName` (the remote file name) |
 
@@ -451,7 +454,7 @@ Both MCPs gain the same small set of tools with the same arguments and results. 
 
 | Firmware | Request | state | progress / time | layers | problems |
 |---|---|---|---|---|---|
-| **Bambu** (MQTT report, cached) | none; reads the MCP's `reportSnapshots` | `gcode_state`: IDLE→idle, PREPARE/SLICING→preparing, RUNNING→printing, PAUSE→paused, FINISH→finished, FAILED→failed | `mc_percent`; `mc_remaining_time` is in **minutes**, so ×60 | `layer_num`, `total_layer_num` | `print_error` (non-zero, as 8-digit hex); each `hms[]` entry as `AAAA_BBBB_CCCC_DDDD` from `attr`/`code`. Messages come from Bambu's published HMS table, bundled in the MCP; `url` points to Bambu's page for that code. `stg_cur` maps to `job.stage` through the MCP's stage table |
+| **Bambu** (MQTT report, cached) | none; reads the MCP's `reportSnapshots` | `gcode_state`: IDLE→idle, PREPARE/SLICING→preparing, RUNNING→printing, PAUSE→paused, FINISH→finished, FAILED→failed | `mc_percent`; `mc_remaining_time` is in **minutes**, so ×60 | `layer_num`, `total_layer_num` | `print_error` (non-zero, as 8-digit hex); each `hms[]` entry as `AAAA_BBBB_CCCC_DDDD` from `attr`/`code`. **New:** messages come from a generated `src/safety/hms-messages.ts`, built from the same Bambu Studio `resources/hms/hms_en_<prefix>.json` files and pinned tag that `scripts/generate-hidden-hms.mjs` already reads for `hidden-hms.ts`. `url` points to Bambu's page for that code. **New:** `stg_cur` maps to `job.stage` through a generated stage table, from Bambu Studio's stage strings at the same tag; the MCP has none today |
 | **OctoPrint** | `GET /api/job`, plus `GET /api/printer` for temperatures | `state` text: Printing→printing, Pausing/Paused→paused, Operational→idle (finished when the last job's `progress.completion` = 100), Error→failed, Offline→offline | `progress.completion`; `progress.printTime`; `progress.printTimeLeft` | not in core: omitted | `state.error` |
 | **Klipper** (Moonraker) | `GET /printer/objects/query?print_stats&virtual_sdcard&display_status&extruder&heater_bed&webhooks` | `print_stats.state`: standby→idle, printing, paused, complete→finished, cancelled, error→failed; `webhooks.state` ≠ ready→busy | `display_status.progress` ×100 (falling back to `virtual_sdcard.progress`); `print_stats.print_duration`; remaining = file `estimated_time` (`GET /server/files/metadata?filename=`) − `print_duration` | `print_stats.info.current_layer` / `total_layer` (set when the slicer emits `SET_PRINT_STATS_INFO`; OrcaSlicer and PrusaSlicer do) | `print_stats.message`; `webhooks.state_message` |
 | **PrusaLink** | `GET /api/v1/status` | `printer.state`: PRINTING, PAUSED, FINISHED, STOPPED→cancelled, ERROR→failed, ATTENTION→paused (with a problem), IDLE/READY→idle, BUSY→busy | `job.progress`; `job.time_printing`; `job.time_remaining` | omitted | ATTENTION/ERROR plus `GET /api/v1/job` details |
@@ -501,10 +504,16 @@ Each change follows the MCP repo's own AGENTS.md and release process.
     - layer height Draft 0.28 / Standard 0.20 / Fine 0.12 mm;
     - walls and infill Standard 2/15%, Strong 4/25%, Max 6/40%.
 
-    They go in through `slice_stl`'s existing settings arguments or `slice_with_template`, whichever the installed MCP exposes. Detect which from its tool schema, as `print.ts` already does for its other optional arguments.
-  - **Colour map:**
-    - Bambu: `ams_mapping` / `ams_slots`, or `auto_match_ams` when the user didn't change it.
-    - Generic: the material chosen for the single slot.
+    They go in as the new `slice_stl` arguments `layer_height`, `wall_loops` and `sparse_infill_density` (§8.4). If the installed MCP lacks them (checked from its tool schema, as `print.ts` already does for its other optional arguments), the print sheet shows only Standard, which means the preset's own values.
+  - **Colour, v1 (one colour):**
+    - Bambu: `print_3mf` with `use_ams: true` and `ams_slots: [chosen tray index]`, or `auto_match_ams: true` when the user kept the preselection.
+    - Bambu, external spool: `use_ams: false`.
+    - Generic: `slice_stl` with the chosen material's filament profile through `load_filaments`.
+  - **Colour, M3b (multi-colour):**
+    1. The touch-up or design pass exports each body as its own STL through the printer MCP's Blender bridge (`blender_mcp_call`, export of the selected object). The pass contract gains `parts: [{name, stl}]`.
+    2. `counterpart_make_3mf` combines them.
+    3. `slice_stl` slices with `load_filaments` (one profile per chosen slot) and `load_filament_ids`. Both are existing arguments that map filaments to objects.
+    4. `print_3mf` prints with `ams_mapping` set from the print sheet.
 - **Plate check (existing, extended).**
   - Before `print_3mf`, the companion takes `camera_snapshot`, and `judgePlate` (`objects/bedcheck.ts`) asks the user's own Claude.
   - **Clear:** nothing is shown and the run continues.
@@ -619,14 +628,20 @@ For every event with `notify ≠ none`:
 
 **Live Activity relay** (new: a Cloudflare Worker at `https://counterpart.dtmont.com/relay/v1`).
 - **Why it's needed.** A Live Activity updates on the Lock Screen only from the app itself or from an APNs push signed with the team's key. Apple says that key "must remain private", so it can't ship in the Mac app.
-- **Cost.** The Worker holds only that key (secrets `APNS_KEY_P8`, `APNS_KEY_ID`, `TEAM_ID = X7F5F9LR24`) and stores nothing. It fits Cloudflare's free tier.
+- **Cost.** The Worker holds the key as secrets (`APNS_KEY_P8`, `APNS_KEY_ID`, `TEAM_ID = X7F5F9LR24`). Its only state is rate-limit counters (below); it stores no tokens, payloads or user data. It fits Cloudflare's free tier.
 - **The one manual step:** the owner creates the APNs key in the developer portal.
 - **Phone → Mac:**
   - The phone sends its push-to-start token (`Activity<PrintAttributes>.pushToStartTokenUpdates`) and each activity's update token (`activity.pushTokenUpdates`) to the Mac. On the LAN they go through `POST /v1/devices/live-activity-tokens` (new); otherwise through a `CounterpartDevice` CloudKit record.
   - Tokens never go to the Worker except inside a push request.
 - **Mac → Worker:** `POST /relay/v1/live-activity` with `{token, kind: "start"|"update"|"end", attributes?, contentState, staleDate, priority, alert?}`.
-  - The request is signed with a per-install key registered on first use.
-  - The Worker validates the payload against the `PrintAttributes` schema, limits each install to one update every 10 s per activity and 2,000 a day, and rejects anything else. It is not a general push relay.
+  - **Threat model.** A Live Activity push token is known only to the user's own devices and Mac, so a caller without a token can't reach anyone. The Worker's job is to stop abuse of the team's APNs key: floods, or pushes that aren't Live Activities.
+  - **Payload checks.** The Worker validates the payload against the `PrintAttributes` / content-state schema (title ≤ 80 chars, alert ≤ 200 chars) and rejects anything else. It is not a general push relay.
+  - **Rate limits,** each kept in a Durable Object with a 24-hour window, keyed as shown:
+    - per token (SHA-256 of the token): one update every 10 s and 2,000 a day;
+    - per client IP: 20,000 a day;
+    - globally: a daily cap.
+  - **An APNs `410` or `BadDeviceToken`** adds the token hash to a 30-day deny list, in the same Durable Object.
+  - **No per-install authentication in v1.** App Attest is documented as unavailable on Mac. macOS 27 reports are still provisional ([Apple docs](https://developer.apple.com/documentation/devicecheck/dcappattestservice/issupported), [forum](https://developer.apple.com/forums/thread/836329)). If `DCAppAttestService.isSupported` returns true in the shipping Mac app, add attestation of the Mac app as a later hardening step.
 - **Worker → APNs:** HTTP/2 to `api.push.apple.com`, with these headers:
   - `apns-push-type: liveactivity`;
   - `apns-topic: com.scantomake.push-type.liveactivity`;
@@ -637,6 +652,11 @@ For every event with `notify ≠ none`:
   - `start` on `print.started` (push-to-start, so it appears even if the phone app isn't open);
   - `update` on each `print.status`, `print.paused` and `print.resumed`;
   - `end` on done, failed or cancelled, with a `dismissal-date` 4 hours later.
+- **CloudKit works with Developer ID.** The Mac app can use CloudKit and push whether it ships through the Mac App Store or with Developer ID. Apple has allowed CloudKit and remote notifications for Developer ID-signed apps since 2016 ([summary](https://mjtsai.com/blog/2016/06/16/cloudkit-and-map-kit-for-gatekeeper-apps)). Deploy the CloudKit schema to production before the first release, because Developer ID and App Store builds use the production environment.
+- **Delivery depends on the Mac app running.** Events are always logged by the companion, which runs as its own `SMAppService` agent. They only reach the phone, CloudKit and the relay while Counterpart for Mac is running.
+  - The app opens at login by default (journey.md §3.3).
+  - Its **Quit** menu item reads "Quit Counterpart (your phone stops getting updates)".
+  - On the next launch, catch-up writes every missed record to CloudKit. It notifies only for terminal events (`print.done`, `print.failed`, `pass.ready`, `pass.ask`) that are still unanswered, once each.
 - **Without the relay** (no key yet, or the Worker is unreachable):
   - The phone starts the activity itself when the user taps Print, or the next time the app opens during a print.
   - It updates the activity whenever it gets time: in the foreground, on CloudKit content-available pushes, and on `BGAppRefreshTask`.
@@ -697,6 +717,11 @@ The app's `Localizable.strings` maps `"%1$@" = "%1$@";`.
 4. Sets `threadIdentifier = projectId` and a `relevanceScore`.
 
 If the fetch runs past the extension's time limit, the notification is delivered without the image.
+
+**CloudKit's limits, stated honestly.** CloudKit coalesces pushes and can leave fields out to stay under APNs' size limit. Apple: "don't rely on them for specific changes".
+- Discrete events (ready, ask, plate, milestone, done, failed) are reliable enough as alerts. When the app opens, it always reconciles from the records, never from the pushes.
+- Silent `proj-silent` pushes are throttled by iOS, so they can't carry per-percent progress. That's what the relay (§8.8) is for.
+- Everything needs the same iCloud account on both devices. Without iCloud, the phone gets events only from the LAN long poll while the app is running or has background time. Settings says so.
 
 **Actions:**
 - Background actions without a destructive outcome run without opening the app: **Ask for Changes…** (`UNTextInputNotificationAction`), **Best Guess**, **Look Again**, **It's Clear**, **Pause** and **Resume**.
@@ -809,9 +834,10 @@ Each milestone ends in an on-device check with screenshots compared against `scr
 | # | Milestone | Done when |
 |---|---|---|
 | M0 | **Foundation.** `CounterpartKit` package; pure-SwiftUI iPhone app shell; pairing ported out of React Native; React Native removed. | The app pairs by QR and by the nearby card on a real iPhone, and the app bundle no longer contains React Native |
-| M1 | **Back end and notifications.** All of the following:<br>• fixes: `remaining` → `timeRemaining`, "printed" set only on finish, catalog de-duplication, Codex `config.toml` source<br>• `PrinterSessionPool`<br>• `counterpart_printer_info` and `counterpart_print_progress`, plus `taskId` in the `print_3mf` result, in bambu-printer-mcp<br>• print monitor<br>• event log, `GET /v1/events` and `events.wait`<br>• Mac `EventRelay` (Mac notifications and CloudKit)<br>• iPhone subscriptions, Notification Service Extension and background actions<br>• structured `pass.*` events, with a generated title and a what-changed summary | On a real P1S print, all of these hold:<br>• with the phone locked and on cellular, the halfway notification arrives with a camera frame, and so does "done"<br>• restarting the companion mid-print sends no duplicate milestone<br>• a print that never starts produces `print.not-started` within 3 min<br>• replying to a "ready" notification from the Lock Screen starts a new pass |
+| M1 | **Back end and notifications.** All of the following:<br>• fixes: `remaining` → `timeRemaining`, "printed" set only on finish, catalog de-duplication, Codex `config.toml` source<br>• `PrinterSessionPool`<br>• `counterpart_printer_info` and `counterpart_print_progress` (with the generated HMS and stage tables), plus `taskId` in the `print_3mf` result, in bambu-printer-mcp<br>• print monitor<br>• event log, `GET /v1/events` and `events.wait`<br>• Mac `EventRelay` (Mac notifications and CloudKit)<br>• iPhone subscriptions, Notification Service Extension and background actions<br>• structured `pass.*` events, with a generated title and a what-changed summary | On a real P1S print, all of these hold:<br>• with the phone locked and on cellular, the halfway notification arrives with a camera frame, and so does "done"<br>• restarting the companion mid-print sends no duplicate milestone<br>• a print that never starts produces `print.not-started` within 3 min<br>• replying to a "ready" notification from the Lock Screen starts a new pass |
 | M2 | **iPhone core.** Home, New, Project (all states), Ask card, Settings and About. | Each screen matches its mockup on iPhone 18 Pro, iPhone 17e, Duo closed and iPad |
-| M3 | **Print and Live Activity.**<br>• print sheet (printers from both MCPs, slice estimate, colour map, quality, strength)<br>• plate check with the alert and per-printer notes<br>• Printing screen with the camera<br>• pause, resume and stop<br>• Live Activity, with the relay Worker once the APNs key exists<br>• the Counterpart tools, `camera_snapshot`, `get_printer_filaments`, pause and resume in mcp-3D-printer-server<br>• `CounterpartCommand` for use away from home | All of these hold:<br>• a real P1S print from the phone shows the Live Activity on the Lock Screen and the Mac menu bar, counting down<br>• a deliberate plate obstruction is caught and cleared with Look Again<br>• a full run on OctoPrint's virtual printer and a Klipper simulator through mcp-3D-printer-server delivers progress, the halfway notification and done<br>• Pause from the Lock Screen pauses the P1S |
+| M3 | **Print and Live Activity.**<br>• print sheet (printers from both MCPs, slice estimate, colour map, quality, strength)<br>• plate check with the alert and per-printer notes<br>• Printing screen with the camera<br>• pause, resume and stop<br>• Live Activity, with the relay Worker once the APNs key exists<br>• the `slice_stl` quality arguments in both MCPs<br>• the Counterpart tools, `camera_snapshot`, `get_printer_filaments`, pause and resume in mcp-3D-printer-server<br>• `CounterpartCommand` for use away from home | All of these hold:<br>• a real P1S print from the phone shows the Live Activity on the Lock Screen and the Mac menu bar, counting down<br>• a deliberate plate obstruction is caught and cleared with Look Again<br>• a full run on OctoPrint's virtual printer and a Klipper simulator through mcp-3D-printer-server delivers progress, the halfway notification and done<br>• Pause from the Lock Screen pauses the P1S |
+| M3b | **Multi-colour.** The pass contract gains `parts`; per-body STL export through the Blender bridge; `counterpart_make_3mf`; `slice_stl` with `load_filaments`/`load_filament_ids`; `print_3mf` `ams_mapping`; per-part colour map in the print sheet. | A two-part result prints in two AMS colours on the P1S, from the phone |
 | M4 | **Mac rebuild.** SwiftUI scenes, main window, inspector, print sheet, popover, Settings with de-duplicated devices, drop-to-create. | The same project is visible and actionable on the Mac and the phone at once, and re-pairing a phone leaves one row |
 | M5 | **Scan in hand.** As specified in §11. | The §11 pass criteria are met on a real iPhone |
 | M6 | **System surfaces.** Widgets, Control Center control, App Intents and Siri, Spotlight, Share extension, iPad keyboard shortcuts. | Each one is demonstrated on a device |
@@ -822,5 +848,5 @@ Each milestone ends in an on-device check with screenshots compared against `scr
 
 ## 14. Open questions and the one manual step
 
-1. **Distribution.** TestFlight first for the iPhone app, and Developer ID with Sparkle for the Mac (journey.md §3.2)? Or App Store for both from the start?
+1. **Distribution.** TestFlight first for the iPhone app, and Developer ID with Sparkle for the Mac (journey.md §3.2)? Or App Store for both from the start? Either way CloudKit and push work (§8.8), so this choice doesn't block anything in M1–M3.
 2. **Manual step (not a decision): the APNs key.** The owner creates an APNs auth key in the Apple developer portal and puts it in the Worker's secrets. The Live Activity relay (§8.8) needs it. Everything else in M1 works without it, including notifications with frames.
