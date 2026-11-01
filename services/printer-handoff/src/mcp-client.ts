@@ -196,6 +196,8 @@ export class PrinterMcpClient {
     // upload/dispatch. Preserve the actionable refusal instead of inventing uncertainty.
     if (result.isError && this.#config.backend === 'bambu-printer-mcp' && name === 'print_3mf') {
       const detail = failureDetail(result, this.#config);
+      if (/^(?:Error: )?The printer rejected the print command \(HMS 0500-0500-0001-0007,/.test(detail ?? '') && detail?.includes('nothing is printing'))
+        fail('printer-command-rejected', undefined, detail);
       if (/^(?:Error: )?Printer state (?:FAILED|RUNNING|PAUSE|PREPARE|SLICING|UNKNOWN) is not safely idle\.$/.test(detail ?? ''))
         fail('printer-not-ready', undefined, detail);
     }

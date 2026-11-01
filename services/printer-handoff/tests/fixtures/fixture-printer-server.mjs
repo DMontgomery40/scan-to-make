@@ -27,21 +27,26 @@ const sliceProps = {
 };
 if (process.env.HANDOFF_FIXTURE_NO_COLOUR === '1') delete sliceProps.filament_colours;
 const bambuPrintProps = {
-  three_mf_path: string, bambu_model: string, bed_type: string, nozzle_type: string,
+  connection_mode:string, connection_type:string, three_mf_path: string, bambu_model: string, bed_type: string, nozzle_type: string,
   nozzle_diameter: string, nozzle_diameters: {type: 'array', items: number}, plate_index: integer,
   use_ams: bool, ams_slots: {type: 'array', items: integer},
   ams_mapping: {type: 'array', items: integer}, auto_match_ams: bool,
   bed_leveling: bool, flow_calibration: bool, vibration_calibration: bool,
   layer_inspect: bool, timelapse: bool,
 };
+if (process.env.HANDOFF_FIXTURE_NO_CONNECTION_TYPE) delete bambuPrintProps.connection_type;
 const genericPrintProps = {
-  three_mf_path: string, bambu_model: string, bed_type: string, nozzle_type: string,
+  connection_mode:string, connection_type:string, three_mf_path: string, bambu_model: string, bed_type: string, nozzle_type: string,
   nozzle_diameter: string, use_ams: bool, ams_mapping: {type: 'object'},
 };
 const tools = [
   {name: 'lay_flat', inputSchema: {type: 'object', additionalProperties: false, required: ['stl_path'], properties: {stl_path: string}}},
   {name: 'slice_stl', inputSchema: {type: 'object', additionalProperties: false, required: ['stl_path'], properties: sliceProps}},
   ...(mode === 'bambu' ? [
+    ...(process.env.HANDOFF_FIXTURE_CRYPTO ? [
+      {name:'get_printer_status',inputSchema:{type:'object',properties:{}}},
+      {name:'clear_hms_errors',inputSchema:{type:'object',properties:{bambu_model:string}}},
+    ] : []),
     {name: 'inspect_print_file', inputSchema: {type: 'object', additionalProperties: false, required: ['file_path'], properties: {
       file_path: string, bambu_model: string, plate_index: integer,
       nozzle_diameters: {type: 'array', items: number}, bed_type: string}}},
@@ -113,6 +118,8 @@ server.setRequestHandler(CallToolRequestSchema, async request => {
     return text({dispatchAuthorized: false, inspection: {model: args.bambu_model, plate: args.plate_index ?? 0}});
   }
   if (name === 'confirm_temperatures') return text({compatible: true, peakNozzleTempC: 220});
+  if (name === 'get_printer_status') return text({raw:{hms:[{attr:0x05000500,code:0x00010007}]}});
+  if (name === 'clear_hms_errors') {await confirmPrint();return text({status:'success'});}
   if (name === 'camera_snapshot') return text({format: 'jpeg', base64: 'ZmFrZQ==', savedTo: join(directory, 'snapshot.jpg')});
   if (name === 'print_3mf' || name === 'upload_gcode' || name === 'process_and_print_stl') {
     if (process.env.HANDOFF_FIXTURE_DISPATCH === 'preflight-error') return {isError:true, content:[{type:'text',text:'Printer state FAILED is not safely idle.'}]};

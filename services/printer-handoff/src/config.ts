@@ -30,6 +30,8 @@ export const printerSelectionSchema = z.strictObject({
   // in bambu-printer-mcp and a material-to-slot object in mcp-3D-printer-server.
   amsMapping: z.union([z.array(z.number().int()).max(64), z.record(z.string(), z.number().int())]).optional(),
   autoMatchAms: z.boolean().optional(),
+  connectionMode: z.enum(['lan_mqtt_ftps','bambu_network','bambu_native','bambu_connect']).optional(),
+  connectionType: z.enum(['lan','cloud']).optional(),
 });
 export type PrinterSelection = z.infer<typeof printerSelectionSchema>;
 

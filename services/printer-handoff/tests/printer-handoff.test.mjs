@@ -20,7 +20,7 @@ const selection = {
   bedType: 'textured_plate', material: 'PLA', plateIndex: 0,
 };
 
-async function setup(t, {mode = 'bambu', backend = 'bambu-printer-mcp', answer = 'accept', relayTimeoutMs = 5000, dispatch, ephemeral = false, noColour = false} = {}) {
+async function setup(t, {mode = 'bambu', backend = 'bambu-printer-mcp', answer = 'accept', relayTimeoutMs = 5000, dispatch, ephemeral = false, noColour = false, crypto = false, noConnectionType = false} = {}) {
   const root = await mkdtemp(join(tmpdir(), 'printer-handoff-'));
   t.after(() => rm(root, {recursive: true, force: true}));
   const log = join(root, 'calls.jsonl');
@@ -30,7 +30,7 @@ async function setup(t, {mode = 'bambu', backend = 'bambu-printer-mcp', answer =
   const config = {
     backend,
     process: {command: process.execPath, args: [fixture, mode, log], cwd: root,
-      env: {...(dispatch ? {HANDOFF_FIXTURE_DISPATCH: dispatch} : {}), ...(ephemeral ? {HANDOFF_FIXTURE_EPHEMERAL: '1'} : {}), ...(noColour ? {HANDOFF_FIXTURE_NO_COLOUR:'1'} : {})}},
+      env: {...(noConnectionType ? {HANDOFF_FIXTURE_NO_CONNECTION_TYPE:'1'} : {}), ...(crypto ? {HANDOFF_FIXTURE_CRYPTO:'1'} : {}), ...(dispatch ? {HANDOFF_FIXTURE_DISPATCH: dispatch} : {}), ...(ephemeral ? {HANDOFF_FIXTURE_EPHEMERAL: '1'} : {}), ...(noColour ? {HANDOFF_FIXTURE_NO_COLOUR:'1'} : {})}},
     selection,
     timeouts: {connectMs: 5000, toolMs: 5000, elicitationMs: relayTimeoutMs},
   };
@@ -436,4 +436,35 @@ test('failure recording accepted progress never makes an accepted print replayab
   await f.runner.runBundle(store,bundle.id,{onProgress:async update=>{if(update.phase==='accepted')throw Error('disk full');}});
   assert.equal((await store.read(bundle.id)).status,'printed');
   await assert.rejects(f.runner.runBundle(store,bundle.id),{code:'already-printed'});
+});
+
+
+test('an explicitly selected authenticated transport reaches the MCP print tool', async t => {
+  const f=await setup(t);
+  await f.runner.run({stlPath:f.stlPath,selection:{...selection,connectionMode:'bambu_network',connectionType:'lan'}});
+  const printed=(await f.calls()).find(x=>x.tool==='print_3mf');
+  assert.equal(printed.arguments.connection_mode,'bambu_network');
+  assert.equal(printed.arguments.connection_type,'lan');
+});
+
+
+test('authenticated LAN recovery relays the printer error acknowledgment before print clearance', async t => {
+ const f=await setup(t,{crypto:true});
+ await f.runner.run({stlPath:f.stlPath,selection:{...selection,connectionMode:'bambu_network',connectionType:'lan'}});
+ const tools=(await f.calls()).filter(x=>x.tool).map(x=>x.tool);
+ assert.ok(tools.indexOf('clear_hms_errors')<tools.indexOf('print_3mf'));
+ assert.equal(f.seen.length,2);
+});
+
+test('declining error acknowledgment stops before the print command', async t => {
+ const f=await setup(t,{crypto:true,answer:'decline'});
+ await assert.rejects(f.runner.run({stlPath:f.stlPath,selection:{...selection,connectionMode:'bambu_network',connectionType:'lan'}}));
+ assert.equal((await f.calls()).filter(x=>x.tool==='print_3mf').length,0);
+});
+
+
+test('an explicit LAN route cannot silently become cloud when a backend omits connection_type', async t => {
+ const f=await setup(t,{noConnectionType:true});
+ await assert.rejects(f.runner.run({stlPath:f.stlPath,selection:{...selection,connectionMode:'bambu_network',connectionType:'lan'}}),{code:'print-transport-unsupported'});
+ assert.deepEqual(await f.calls(),[]);
 });

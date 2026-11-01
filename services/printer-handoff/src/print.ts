@@ -12,7 +12,7 @@ import type {HandoffBundleStore} from './bundle.js';
 import {PrinterMcpClient, PrinterMcpError, toolResultJson, toolResultText, type PrinterToolCatalog} from './mcp-client.js';
 
 export type PrintStep = 'discover' | 'lay_flat' | 'slice_stl' | 'inspect' | 'camera_snapshot' | 'print';
-export type PrintPhase = 'connecting' | 'orienting' | 'slicing' | 'inspecting' | 'slice-ready' | 'checking-printer' | 'requesting-print' | 'accepted';
+export type PrintPhase = 'connecting' | 'orienting' | 'slicing' | 'inspecting' | 'slice-ready' | 'checking-printer' | 'resolving-printer-error' | 'requesting-print' | 'accepted';
 export interface PrintProgress {phase: PrintPhase; estimate?: SliceEstimate}
 export interface PrintRunInput {
   onProgress?: (update: PrintProgress) => Promise<void>;
@@ -182,6 +182,11 @@ export class PrinterHandoffRunner {
       await progress('connecting');
       const catalog = await client.connect(input.signal);
       step('discover');
+      if (selection.connectionMode || selection.connectionType) {
+        const properties = client.getTool('print_3mf').inputSchema.properties ?? {};
+        if ((selection.connectionMode && !Object.hasOwn(properties, 'connection_mode'))
+            || (selection.connectionType && !Object.hasOwn(properties, 'connection_type'))) fail('print-transport-unsupported');
+      }
       if (slicer.filamentColours) {
         const sliceProperties = client.getTool('slice_stl').inputSchema.properties ?? {};
         if (!Object.hasOwn(sliceProperties, 'filament_colours') || !Object.hasOwn(sliceProperties, 'load_filaments'))
@@ -246,6 +251,17 @@ export class PrinterHandoffRunner {
         } catch { /* The print prompts still go to the user without an image. */ }
       }
 
+      // A rejected unsigned command leaves a software HMS error. The authenticated
+      // LAN route can recover it only through the server's own human confirmation.
+      if (this.#config.backend === 'bambu-printer-mcp' && selection.connectionMode === 'bambu_network'
+          && client.hasTool('get_printer_status') && client.hasTool('clear_hms_errors')) {
+        const status = resultValue(await call(client, 'get_printer_status', {}, input.signal)) as {raw?: {hms?: {attr?: number; code?: number}[]}};
+        const errors = status?.raw?.hms;
+        if (Array.isArray(errors) && errors.length === 1 && errors[0]?.attr === 0x05000500 && errors[0]?.code === 0x00010007) {
+          await progress('resolving-printer-error');
+          await call(client, 'clear_hms_errors', {bambu_model:selection.model}, input.signal);
+        }
+      }
       await progress('requesting-print');
       let printed: unknown;
       try {
@@ -253,6 +269,8 @@ export class PrinterHandoffRunner {
           if (!slicedPath.toLowerCase().endsWith('.3mf')) fail('expected-sliced-3mf');
           const result = await call(client, 'print_3mf', {
             three_mf_path: slicedPath,
+            connection_mode: selection.connectionMode,
+            connection_type: selection.connectionType,
             bambu_model: selection.model,
             bed_type: selection.bedType,
             nozzle_type: selection.nozzleType,
