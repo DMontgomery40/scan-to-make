@@ -1169,6 +1169,15 @@ private struct PhonePrintPreparation: View {
 
     private var object: StmObject? { store.objects.first { $0.id == objectId } }
     private var previousPrinter: String { object?.print?.destination?.name ?? "the printer" }
+    private func displayName(_ filament: PrinterFilament) -> String {
+        var name = filament.name.replacingOccurrences(of: #"\s*#[0-9a-fA-F]{6,8}\s*$"#, with: "", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let suffix = " " + filament.material
+        if name.count > suffix.count, name.uppercased().hasSuffix(suffix.uppercased()) {
+            name.removeLast(suffix.count)
+        }
+        return name.isEmpty ? filament.material : name
+    }
     private func swatch(_ hex: String) -> Color {
         let value = Int(hex.dropFirst(), radix: 16) ?? 0
         return Color(red: Double((value >> 16) & 255) / 255,
@@ -1222,7 +1231,7 @@ private struct PhonePrintPreparation: View {
                                         Circle().fill(swatch(filament.colour)).frame(width: 38, height: 38)
                                             .overlay(Circle().strokeBorder(.secondary.opacity(0.4)))
                                         VStack(alignment: .leading, spacing: 3) {
-                                            Text(filament.name).font(.body.weight(.medium)).foregroundStyle(.primary)
+                                            Text(displayName(filament)).font(.body.weight(.medium)).foregroundStyle(.primary)
                                             Text(filament.slot >= 254 ? "External spool" : "Slot \(filament.slot + 1)")
                                                 .font(.subheadline).foregroundStyle(.secondary)
                                         }
@@ -1232,7 +1241,7 @@ private struct PhonePrintPreparation: View {
                                     }
                                     .padding(14).background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
                                 }.buttonStyle(.plain).disabled(sending)
-                                    .accessibilityLabel("\(filament.name), \(filament.colour), slot \(filament.slot + 1)")
+                                    .accessibilityLabel("\(displayName(filament)), \(filament.colour), slot \(filament.slot + 1)")
                                     .accessibilityAddTraits(selected == filament.slot ? .isSelected : [])
                             }
                         }
