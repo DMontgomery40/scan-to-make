@@ -206,3 +206,22 @@ it('renders download once per version and come back as file URIs', async () => {
     version: 2,
   });
 });
+
+it('printing again after checking the printer says so, and the plate photo downloads fresh', async () => {
+  const { fake, calls } = native(() => ({ status: 200, body: { object } }));
+  const client = new ObjectsClient(fake);
+  await client.print(id, { checked: true });
+  expect(calls).toEqual([
+    {
+      method: 'POST',
+      path: `/v1/objects/${id}/print`,
+      json: { checked: true },
+    },
+  ]);
+  await client.plateUri({ ...object, updatedAtMs: 9 } as never);
+  expect(fake.download).toHaveBeenCalledWith({
+    objectId: id,
+    name: 'plate.jpg',
+    version: 9,
+  });
+});

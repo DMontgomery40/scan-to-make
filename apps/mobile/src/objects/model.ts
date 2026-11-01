@@ -1,6 +1,9 @@
 import type { StmObject } from './types';
 
 export type ObjectAction =
+  | 'scan'
+  | 'makeIt'
+  | 'printChecked'
   | 'print'
   | 'correct'
   | 'openCamera'
@@ -51,7 +54,15 @@ export function describeObject(object: StmObject): ObjectView {
   ): ObjectView => ({ title, status, tone, actions, busy, size });
   switch (object.state) {
     case 'new':
-      return view('Sending to your Mac…', 'pending', [], true);
+      if (object.scan || object.photos.length)
+        return view('Sending to your Mac…', 'pending', [], true);
+      return view(
+        'Waiting for a scan or photos.',
+        'neutral',
+        object.instructions?.trim()
+          ? ['scan', 'attachPhotos', 'makeIt']
+          : ['scan', 'attachPhotos'],
+      );
     case 'touching-up': {
       const changing = object.passes.length > 1 && !!object.current;
       const what = changing
@@ -95,7 +106,11 @@ export function describeObject(object: StmObject): ObjectView {
       return view(
         object.failure?.trim() || 'Something went wrong on your Mac.',
         'fail',
-        object.current ? ['print', 'correct'] : ['retry'],
+        object.print?.uncertain
+          ? ['printChecked', 'correct']
+          : object.current
+          ? ['print', 'correct']
+          : ['retry'],
       );
   }
 }

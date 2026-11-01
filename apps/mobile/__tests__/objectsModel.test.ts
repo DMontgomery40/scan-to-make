@@ -130,3 +130,29 @@ it('busy states are marked so the page keeps itself up to date', () => {
   expect(describeObject({ ...ready, state: 'printing' }).busy).toBe(true);
   expect(describeObject(ready).busy).toBe(false);
 });
+
+it('an object with nothing sent yet asks for a scan or photos, or to make it from the instructions', () => {
+  const empty = describeObject(base);
+  expect(empty.status).toBe('Waiting for a scan or photos.');
+  expect(empty.busy).toBe(false);
+  expect(empty.actions).toEqual(['scan', 'attachPhotos']);
+  expect(describeObject({ ...base, instructions: 'A hook' }).actions).toEqual([
+    'scan',
+    'attachPhotos',
+    'makeIt',
+  ]);
+  expect(describeObject({ ...base, photos: ['a.jpg'] }).status).toBe(
+    'Sending to your Mac…',
+  );
+});
+
+it('a print that may already have started asks the user to check the printer first', () => {
+  const view = describeObject({
+    ...ready,
+    state: 'failed',
+    failure:
+      'The printer may have started this print. Check the printer before printing again.',
+    print: { bundleId: 'b', uncertain: true },
+  });
+  expect(view.actions).toEqual(['printChecked', 'correct']);
+});
