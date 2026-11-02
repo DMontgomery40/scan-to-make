@@ -226,6 +226,8 @@ Screenshots of the variants: `screens/phone-print-one.jpg` (one colour), `screen
 
 ### 5.6 Plate check
 
+> **Removed (2026-11-01, `ac44431`).** Plate-clearance prompts are gone from both apps, and Counterpart no longer claims the camera checks the plate. The printer MCP's own confirmation stays, including any camera observation it reports ("The printer camera reported *X* on the plate."). The spec below and `screens/phone-plate.jpg` are kept only for history; don't build them.
+
 Screenshot: `screens/phone-plate.jpg`.
 
 - **Shown only when something is on the plate.** The check runs on the Mac with the printer camera and bambu-printer-mcp's check. If the plate is clear, the user sees nothing and the print starts.
