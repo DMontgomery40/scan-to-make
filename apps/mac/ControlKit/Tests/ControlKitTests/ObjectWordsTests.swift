@@ -67,6 +67,9 @@ final class ObjectWordsTests: XCTestCase {
         XCTAssertEqual(words(followless).status, "Sent to Garage MK4 · Counterpart can't follow this print")
         XCTAssertEqual(words(followless).stage, .sent)
         XCTAssertFalse(words(followless).busy, "terminal: nothing to wait for")
+        let connect = ready(["state": "sent", "print": ["bundleId": "b", "uncertain": true, "sentVia": "bambu-connect", "destination": ["id": "p", "name": "P1S"]]])
+        XCTAssertEqual(words(connect).status, "Finish on your Mac: press Print in Bambu Connect")
+        XCTAssertEqual(words(connect).actions.first, .printChecked, "printing it again needs the person's check")
         XCTAssertEqual(words(sent).subtitle(request: nil), "Sent to the printer")
         XCTAssertEqual(words(printed).capsule, "Printed")
         let running = ready(["state": "printed", "updatedAtMs": now.timeIntervalSince1970 * 1000, "print": ["bundleId": "b", "destination": ["id": "p", "name": "P1S"],

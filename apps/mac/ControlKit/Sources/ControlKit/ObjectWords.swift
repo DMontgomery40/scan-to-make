@@ -50,7 +50,7 @@ public enum ProjectStage: String, Sendable, Equatable, CaseIterable {
         case .preparing: return "gearshape"
         case .printing: return "printer.fill"
         case .printed: return "shippingbox.fill"
-        case .sent: return "paperplane.fill"
+        case .sent: return "paperplane"
         case .failed: return "exclamationmark.triangle.fill"
         case .unknown: return "questionmark.circle"
         }
@@ -206,7 +206,9 @@ public struct ObjectWords: Sendable, Equatable {
             }
         case .sent:
             stage = .sent
-            (line, busy, actions) = ("Sent to \(object.print?.destination?.name ?? "your printer") · Counterpart can't follow this print", false, made)
+            line = object.print?.sentVia == "bambu-connect" ? "Finish on your Mac: press Print in Bambu Connect"
+                : "Sent to \(object.print?.destination?.name ?? "your printer") · Counterpart can't follow this print"
+            (busy, actions) = (false, made)
         case .failed:
             stage = .failed
             let failure = object.failure?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""

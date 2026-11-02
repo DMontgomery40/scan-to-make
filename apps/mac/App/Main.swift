@@ -189,6 +189,7 @@ struct CounterpartCommands: Commands {
         let loginLaunch = event?.eventID == kAEOpenApplication
             && event?.paramDescriptor(forKeyword:keyAEPropData)?.enumCodeValue == keyAELaunchedAsLogInItem
         NearbyModel.shared.start()
+        EventRelay.shared.start()
         // At login the app stays in the menu bar; opened by hand, it shows its window (or the pairing code first).
         if !loginLaunch { AppRouter.shared.open(AppRouter.shared.home) }
         #if DEBUG
@@ -202,6 +203,11 @@ struct CounterpartCommands: Commands {
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+
+    /// CloudKit's content-available push for a new command from the phone (PRD §9.3).
+    func application(_ application: NSApplication, didReceiveRemoteNotification userInfo: [String: Any]) {
+        EventRelay.shared.cloud.fetchCommands()
+    }
 
     /// The first Local Network request needs the app in front; a menu bar window can be key without that.
     private func permissionProbeForeground() -> Bool {
