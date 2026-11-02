@@ -125,9 +125,14 @@ export function bambuStatusReport(value: unknown, observedAt: Date): PrintReport
  * mcp-3D-printer-server's `get_printer_status` returns the firmware's own
  * printer endpoint, which has no job progress: only a state is read.
  */
-export function genericStatusReport(value: unknown, observedAt: Date): PrintReport {
+export function genericStatusReport(input: unknown, observedAt: Date): PrintReport {
+  let value: unknown = input;
   const at = observedAt.toISOString();
   const base = {source: 'status-fallback' as const, observedAt: at, problems: []};
+  if (!record(value)) return {...base, state: 'offline'};
+  // Moonraker answers {result: {state}}; PrusaLink {printer: {state}}.
+  if (record(value.result)) value = value.result;
+  if (record(value) && record(value.printer) && typeof value.printer.state === 'string') value = {state: value.printer.state};
   if (!record(value)) return {...base, state: 'offline'};
   const state = record(value.state) ? value.state : undefined;
   const flags = state && record(state.flags) ? state.flags : undefined;
@@ -139,9 +144,9 @@ export function genericStatusReport(value: unknown, observedAt: Date): PrintRepo
     return {...base, state: 'busy'};
   }
   const text = typeof value.state === 'string' ? value.state.toLowerCase() : typeof value.status === 'string' ? value.status.toLowerCase() : undefined;
-  if (text === 'ready' || text === 'idle' || text === 'operational' || text === 'standby') return {...base, state: 'idle'};
+  if (text === 'ready' || text === 'idle' || text === 'operational' || text === 'standby' || text === 'finished' || text === 'stopped') return {...base, state: 'idle'};
   if (text === 'printing') return {...base, state: 'printing'};
-  if (text === 'paused') return {...base, state: 'paused'};
+  if (text === 'paused' || text === 'attention') return {...base, state: 'paused'};
   if (text === 'offline' || text === 'disconnected') return {...base, state: 'offline'};
   return {...base, state: 'busy'};
 }

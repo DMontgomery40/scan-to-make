@@ -86,3 +86,16 @@ test('status.get says the Mac can create projects only when objects are set up',
   assert.equal((await createControlDispatcher({auth, companionVersion: 'test', objects})('status.get', {})).capabilities.objectsCreate, true);
   assert.equal((await createControlDispatcher({auth, companionVersion: 'test'})('status.get', {})).capabilities.objectsCreate, false);
 });
+
+test('two photos with the same name added at once are both kept', async t => {
+  const {dispatch, objects} = await dispatcher();
+  const {writeFile, mkdir, rm} = await import('node:fs/promises');
+  const folder = await mkdtemp(join(tmpdir(), 'objects-race-'));
+  t.after(() => rm(folder, {recursive: true, force: true}));
+  const jpeg = n => Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(60, n)]);
+  for (const sub of ['a', 'b', 'c']) { await mkdir(join(folder, sub)); await writeFile(join(folder, sub, 'photo.jpg'), jpeg(sub.charCodeAt(0))); }
+  const object = await objects.create('x');
+  await Promise.all(['a', 'b', 'c'].map(sub => dispatch('objects.addFile', {id: object.id, kind: 'photos', path: join(folder, sub, 'photo.jpg')})));
+  const photos = (await objects.get(object.id)).photos;
+  assert.deepEqual([...photos].sort(), ['photo-2.jpg', 'photo-3.jpg', 'photo.jpg']);
+});

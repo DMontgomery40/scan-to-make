@@ -181,6 +181,12 @@ export class PrinterSession {
       this.#lastSuccessAt = this.#clock.now();
       this.#lastError = undefined;
       return result;
+    } catch (error) {
+      // MCP cancellation doesn't stop a server handler that is already running: an
+      // abandoned printer call could still ask its question and be answered under
+      // the next call's tag. End that connection before anyone else takes the mutex.
+      if (unlock && (error as PrinterMcpError).incomplete) await this.#quarantine();
+      throw error;
     } finally {
       unlock?.();
       this.#inflight--;
@@ -222,35 +228,53 @@ export class PrinterSession {
     return release;
   }
 
+  async #quarantine(): Promise<void> {
+    const client = this.#client;
+    this.#client = undefined;
+    await client?.close().catch(() => undefined);
+  }
+
+  /** Each caller stops waiting on its own signal; the shared connection attempt has its own lifetime. */
   async #ensure(options: {signal?: AbortSignal; failFast?: boolean}): Promise<SessionClient> {
+    const waitFor = <T>(promise: Promise<T>): Promise<T> => {
+      const signal = options.signal;
+      if (!signal) return promise;
+      if (signal.aborted) return Promise.reject(new PrinterMcpError('cancelled'));
+      return new Promise<T>((resolve, reject) => {
+        const abort = () => reject(new PrinterMcpError('cancelled'));
+        signal.addEventListener('abort', abort, {once: true});
+        promise.then(resolve, reject).finally(() => signal.removeEventListener('abort', abort));
+      });
+    };
     if (this.#closed) throw new PrinterMcpError('session-closed');
     if (this.#client) return this.#client;
-    if (this.#connecting) return this.#connecting;
+    if (this.#connecting) return waitFor(this.#connecting);
     const wait = this.#retryAt - this.#clock.now();
     if (wait > 0) {
       if (options.failFast) throw new PrinterMcpError('printer-unreachable');
       await sleep(this.#clock, wait, options.signal);
       if (this.#client) return this.#client;
-      if (this.#connecting) return this.#connecting;
+      if (this.#connecting) return waitFor(this.#connecting);
     }
     const attempt = (async () => {
       let client!: SessionClient;
       const factory: SessionClientFactory = this.#options.clientFactory ?? ((config, opts) => new PrinterMcpClient(config, opts));
       client = factory(this.#config, {relay: this.#options.relay, onStderr: this.#options.onStderr, onClose: () => this.#lost(client)});
       try {
-        const catalog = await client.connect(options.signal);
+        const catalog = await client.connect();
         if (this.#closed) { await client.close().catch(() => undefined); throw new PrinterMcpError('session-closed'); }
         this.#client = client;
         this.#lastCatalog = catalog;
         this.#options.onConnect?.(catalog);
         return client;
       } catch (error) {
-        if (!this.#closed && (error as {code?: string}).code !== 'cancelled') this.#failed((error as {code?: string}).code ?? 'connection-failed');
+        if (!this.#closed) this.#failed((error as {code?: string}).code ?? 'connection-failed');
         throw error;
       }
     })();
     this.#connecting = attempt;
-    try { return await attempt; } finally { if (this.#connecting === attempt) this.#connecting = undefined; }
+    void attempt.catch(() => undefined).finally(() => { if (this.#connecting === attempt) this.#connecting = undefined; });
+    return waitFor(attempt);
   }
 
   #failed(code: string): void {

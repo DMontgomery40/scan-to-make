@@ -9,6 +9,11 @@ import type {ElicitationContext, ElicitationRelay} from './elicitation.js';
 export class PrinterMcpError extends Error {
   readonly code: string;
   readonly detail?: string;
+  /**
+   * The request itself didn't complete (aborted, timed out, connection lost):
+   * the server's handler may still be running and may still ask a question.
+   */
+  incomplete?: boolean;
   constructor(code: string, cause?: unknown, detail?: string) {
     super(`Printer MCP failed: ${code}`);
     this.code = code;
@@ -228,9 +233,11 @@ export class PrinterMcpClient {
         signal: options.signal, timeout, maxTotalTimeout: timeout, resetTimeoutOnProgress: true,
       }) as CallToolResult;
     } catch (error) {
-      fail(options.dispatchSensitive && this.#declinedElicitations === declinedBefore
+      const failure = new PrinterMcpError(options.dispatchSensitive && this.#declinedElicitations === declinedBefore
         ? 'dispatch-uncertain' : options.signal?.aborted ? 'cancelled' : 'tool-failed', error,
         failureDetail({content:[{type:'text',text:error instanceof Error ? error.message : String(error)}]}, this.#config));
+      failure.incomplete = true;
+      throw failure;
     }
     // This exact Bambu rejection is emitted by the idle-state preflight before
     // upload/dispatch. Preserve the actionable refusal instead of inventing uncertainty.

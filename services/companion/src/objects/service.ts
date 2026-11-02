@@ -170,7 +170,9 @@ export class ObjectService {
     let object = await this.#deps.store.get(id);
     if (!object.print) return object;
     const printing = this.#deps.print;
-    const destinationId = object.print.destination?.id;
+    // A print recorded against a destination that has since become a duplicate reads through its winner.
+    const recorded = object.print.destination?.id;
+    const destinationId = recorded === undefined ? undefined : this.#deps.printerCatalog?.canonical(recorded) ?? recorded;
     const services = destinationId ? printing?.destinations?.get(destinationId) : printing?.services;
     if (services?.runner.status) {
       const key = destinationId ?? "default";
@@ -318,7 +320,11 @@ export class ObjectService {
    * Copies a file on this Mac into the object (the Mac app's New Project and drop targets).
    * The control socket can't carry file bytes, so the companion reads the path itself.
    */
-  async addFile(id: string, kind: 'photos' | 'scan', path: string): Promise<StmObject> {
+  addFile(id: string, kind: 'photos' | 'scan', path: string): Promise<StmObject> {
+    // One at a time per object, so two files with the same name can't take the same slot.
+    return this.#gate(id, () => this.#addFile(id, kind, path));
+  }
+  async #addFile(id: string, kind: 'photos' | 'scan', path: string): Promise<StmObject> {
     const rule = FILE_KINDS[kind];
     if (!isAbsolute(path) || path.includes('\0')) throw new InvalidFileError('Choose a file on this Mac.');
     const extension = extname(path).toLowerCase();
@@ -395,7 +401,7 @@ export class ObjectService {
     let object = await this.get(id);
     if (object.state === 'touching-up' || object.state === 'printing') throw new InvalidStateError('Wait until the current step finishes.');
     if (!object.current && object.state !== 'failed') throw new InvalidStateError('There is no model to correct yet.');
-    for (const path of photos) object = await this.addFile(id, 'photos', path);
+    for (const path of photos) object = await this.#addFile(id, 'photos', path);
     return this.#pass(object, {note: note.trim()});
   }
 

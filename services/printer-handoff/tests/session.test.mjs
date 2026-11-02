@@ -201,3 +201,51 @@ test('a runner on a shared session prints twice through one MCP process, and a c
   assert.equal((await runner.runBundle(store, bundle.id)).manifest.status, 'printed');
   assert.equal((await entries()).filter(entry => entry.started).length, 2);
 });
+
+test('an abandoned printer call ends its connection before the next one may ask a question', async () => {
+  const {log, clients, factory} = fakes({gate: name => name === 'print_3mf' ? new Promise(() => {}) : undefined});
+  // The fake rejects an aborted call the way PrinterMcpClient does: incomplete.
+  const base = factory;
+  const wrapped = (config, options) => {
+    const client = base(config, options);
+    const call = client.callTool.bind(client);
+    client.callTool = (name, args, opts = {}) => new Promise((resolve, reject) => {
+      opts.signal?.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), {code: 'cancelled', incomplete: true})), {once: true});
+      call(name, args, opts).then(resolve, reject);
+    });
+    return client;
+  };
+  const session = new PrinterSession('p1s', config, {clientFactory: wrapped, clock: new FakeClock()});
+  const controller = new AbortController();
+  const print = session.call('print_3mf', {}, {signal: controller.signal, elicitationContext: {bundleId: 'A'}});
+  await flush(); await flush();
+  controller.abort();
+  await assert.rejects(print, {code: 'cancelled'});
+  assert.equal(clients[0].closed, true, 'the connection that may still be asking is gone');
+  await session.call('pause_print', {}, {elicitationContext: {bundleId: 'B'}});
+  assert.equal(clients.length, 2);
+  assert.deepEqual(log.filter(entry => entry[0] === 'start' && entry[1] === 2).map(entry => entry[3]), [{bundleId: 'B'}]);
+});
+
+test('a caller that gives up while the shared connection opens does not cancel the others waiting on it', async () => {
+  let open;
+  const opened = new Promise(resolve => { open = resolve; });
+  const {clients, factory} = fakes();
+  const slow = (config, options) => {
+    const client = factory(config, options);
+    const connect = client.connect.bind(client);
+    client.connect = async signal => { assert.equal(signal, undefined, 'the attempt is the session\'s, not a caller\'s'); await opened; return connect(); };
+    return client;
+  };
+  const session = new PrinterSession('p1s', config, {clientFactory: slow, clock: new FakeClock()});
+  const impatient = new AbortController();
+  const status = session.call('get_printer_status', {}, {signal: impatient.signal});
+  const print = session.call('print_3mf');
+  await flush();
+  impatient.abort();
+  await assert.rejects(status, {code: 'cancelled'});
+  open();
+  await print;
+  assert.equal(clients.length, 1);
+  assert.equal(session.health().connected, true);
+});
