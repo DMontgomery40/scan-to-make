@@ -35,9 +35,10 @@ public struct PrintSettings: Sendable, Equatable {
     public var quality: Quality
     public var strength: Strength
     public var colour: Colour?
-    /// How many on the plate (`capabilities.printCopies`); one sends nothing.
-    public var copies: Int
-    public init(quality: Quality = .standard, strength: Strength = .standard, colour: Colour? = nil, copies: Int = 1) {
+    /// How many on the plate (`capabilities.printCopies`), only when the person picked a number: nil sends nothing,
+    /// so the printer profile's own count applies (one named overrides a profile set to three, KAN-214 #230).
+    public var copies: Int?
+    public init(quality: Quality = .standard, strength: Strength = .standard, colour: Colour? = nil, copies: Int? = nil) {
         self.quality = quality; self.strength = strength; self.colour = colour; self.copies = copies
     }
     /// The `objects.print` fields: standard values are left out.
@@ -52,7 +53,7 @@ public struct PrintSettings: Sendable, Equatable {
         case .material(let material)?: params["colour"] = .object(["material": .string(material)])
         case nil: break
         }
-        if copies > 1 { params["copies"] = .number(Double(copies)) }
+        if let copies { params["copies"] = .number(Double(copies)) }
         return params
     }
 }

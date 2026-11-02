@@ -166,6 +166,8 @@ final class PrintSettingsTests: XCTestCase {
         XCTAssertEqual(chosen["colour"], .object(["amsSlot": .number(2)]))
         XCTAssertEqual(PrintSettings(colour: .auto).params["colour"], .object(["auto": .bool(true)]), "the user kept the preselection")
         XCTAssertEqual(PrintSettings(colour: .external).params["colour"], .object(["external": .bool(true)]))
+        XCTAssertNil(PrintSettings().params["copies"], "untouched Copies: the printer profile's own count")
+        XCTAssertEqual(PrintSettings(copies: 1).params["copies"], .number(1), "one picked overrides a profile set to three")
     }
 
     /// Print Another (PRD §5.4) opens with what the last print was sent with.

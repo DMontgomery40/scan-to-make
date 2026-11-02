@@ -22,6 +22,8 @@ struct PrintSheet: View {
     @State private var quality = PrintSettings.Quality.standard
     @State private var strength = PrintSettings.Strength.standard
     @State private var copies = 1
+    /// The person changed Copies; until then the printer profile's own count applies.
+    @State private var copiesPicked = false
     @State private var checked = false
     @State private var estimate: PrintEstimate?
     @State private var estimateState = Loading.idle
@@ -75,10 +77,12 @@ struct PrintSheet: View {
                     }
                     .pickerStyle(.segmented).labelsHidden().disabled(!offersStrength)
                     if offersCopies {
-                        Stepper(value: $copies, in: 1...64) { Text("Copies: \(copies)").font(.headline) }
+                        Stepper(value: Binding(get: { copies }, set: { copies = $0; copiesPicked = true }), in: 1...64) {
+                            Text(copiesPicked ? "Copies: \(copies)" : "Copies: as the printer profile says").font(.headline)
+                        }
                     }
                     estimateLine
-                    if offersCopies && copies > 1 { Text("The estimate is for one.").font(.caption).foregroundStyle(.secondary) }
+                    if offersCopies && copiesPicked && copies > 1 { Text("The estimate is for one.").font(.caption).foregroundStyle(.secondary) }
                 }
             }
             if uncertain {
@@ -224,7 +228,7 @@ struct PrintSheet: View {
 
     private func send() {
         let settings = PrintSettings(quality: offersQuality ? quality : .standard, strength: offersStrength ? strength : .standard, colour: colour,
-                                     copies: offersCopies ? copies : 1)
+                                     copies: offersCopies && copiesPicked ? copies : nil)
         let filament = chosen
         Task { if await model.print(object.id, checked: uncertain && checked, settings: settings, filament: filament) { dismiss() } }
     }

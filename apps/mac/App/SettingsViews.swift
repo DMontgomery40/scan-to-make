@@ -353,8 +353,6 @@ struct PrintersSettings: View {
     @ObservedObject var objects: ObjectsModel
     @ObservedObject private var updates = PrinterUpdates.shared
     /// Only for a companion without `printers.updateMcp`: the package manager's own command, run here.
-    @State private var updating: Set<String> = []
-    @State private var updateResult: [String: String] = [:]
 
     private var printers: [PrinterDestination] { objects.printerCatalog?.destinations ?? [] }
 
@@ -384,7 +382,7 @@ struct PrintersSettings: View {
             Section("Printer MCPs") {
                 ForEach(PrinterMCP.list(printers)) { mcp in
                     MCPRow(mcp:mcp, companionUpdates:objects.capabilities?.mcpUpdates == true,
-                           status:mcp.mcpId.flatMap { updates.status[$0] }, updatingHere:updating.contains(mcp.id), result:updateResult[mcp.id],
+                           status:mcp.mcpId.flatMap { updates.status[$0] },
                            update:{ update(mcp, fresh:false) }, installFresh:{ update(mcp, fresh:true) })
                 }
                 if PrinterMCP.list(printers).isEmpty { Text("None found yet.").foregroundStyle(.secondary) }
@@ -400,22 +398,11 @@ struct PrintersSettings: View {
         switch state { case "ready": return "Ready"; case "busy": return "Busy"; case "offline": return "Offline"; default: return "Not checked yet" }
     }
 
-    /// The companion updates it its own way (PRD §8.10) and the events carry the progress. A companion without
-    /// `printers.updateMcp` gets the package manager's own command run here, as before; never anything else.
+    /// The companion updates it its own way (PRD §8.10) and the events carry the progress. Only offered by a
+    /// companion with `printers.updateMcp` (`capabilities.mcpUpdates`): no button that can only fail.
     private func update(_ mcp: PrinterMCP, fresh: Bool) {
-        if objects.capabilities?.mcpUpdates == true, let mcpId = mcp.mcpId {
-            Task { await updates.update(mcpId, fresh:fresh, socket:ModelAccessModel.socketPath(for:Installation(bundle:.main))) }
-            return
-        }
-        guard let command = mcp.update?.command, !command.isEmpty else { return }
-        updating.insert(mcp.id)
-        updateResult[mcp.id] = nil
-        Task {
-            let ok = await PrinterMCP.run(command)
-            updating.remove(mcp.id)
-            updateResult[mcp.id] = ok ? "Updated. Counterpart uses it from the next print." : "The update didn’t finish. Try \(command.joined(separator:" ")) in Terminal."
-            await objects.refresh()
-        }
+        guard objects.capabilities?.mcpUpdates == true, let mcpId = mcp.mcpId else { return }
+        Task { await updates.update(mcpId, fresh:fresh, socket:ModelAccessModel.socketPath(for:Installation(bundle:.main))) }
     }
 }
 
@@ -431,20 +418,6 @@ extension PrinterMCP {
         default: return nil
         }
     }
-
-    /// The package manager's own command, through a login shell so it finds the user's npm or uv.
-    static func run(_ command: [String]) async -> Bool {
-        await Task.detached {
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath:"/bin/zsh")
-            process.arguments = ["-lc", command.map { "'" + $0.replacingOccurrences(of:"'", with:"'\\''") + "'" }.joined(separator:" ")]
-            process.standardOutput = FileHandle.nullDevice
-            process.standardError = FileHandle.nullDevice
-            do { try process.run() } catch { return false }
-            process.waitUntilExit()
-            return process.terminationStatus == 0
-        }.value
-    }
 }
 
 private struct MCPRow: View {
@@ -452,14 +425,13 @@ private struct MCPRow: View {
     /// The companion updates MCPs itself (`printers.updateMcp`).
     let companionUpdates: Bool
     let status: McpUpdateStatus?
-    let updatingHere: Bool
-    let result: String?
     let update: () -> Void
     let installFresh: () -> Void
     @State private var showLog = false
 
-    private var canUpdate: Bool { companionUpdates ? mcp.mcpId != nil && mcp.updateAvailable : mcp.update?.command?.isEmpty == false }
-    private var busy: Bool { updatingHere || status?.busy == true }
+    /// Only a companion that updates MCPs itself offers Update; an older one just says a newer version exists.
+    private var canUpdate: Bool { companionUpdates && mcp.mcpId != nil && mcp.updateAvailable }
+    private var busy: Bool { status?.busy == true }
 
     var body: some View {
         HStack(alignment:.top, spacing:10) {
@@ -474,7 +446,6 @@ private struct MCPRow: View {
                 Text(mcp.source + (mcp.printers.count == 1 ? " · used by \(mcp.printers[0])" : "")).font(.caption).foregroundStyle(.secondary)
                 if let message = mcp.update?.message, status == nil { Text(message).font(.caption.weight(.medium)).foregroundStyle(Color.filament) }
                 if let status { statusLine(status) }
-                if let result { Text(result).font(.caption).foregroundStyle(.secondary) }
                 if let url = mcp.configURL {
                     Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([url]) }
                         .buttonStyle(.link).font(.caption).help(url.path)
