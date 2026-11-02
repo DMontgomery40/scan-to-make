@@ -8,9 +8,12 @@
 
 /* Begin PBXBuildFile section */
 		07B1C13B94675AFFC17CC1A5 /* QRScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A063F0AF1467023BC266CD3 /* QRScanner.swift */; };
+		082318AF8AAA16FF57964526 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C0B9B093AA0DA530B8D30EE /* SettingsView.swift */; };
 		0ED20A84ACE088A53ADA5D05 /* AppTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED64475EDD04E226538AB4A1 /* AppTests.swift */; };
+		0FF63D52C1E702ED46E8156F /* ProjectImages.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D4CA906C988EDF604286EEE /* ProjectImages.swift */; };
 		10770C9A31C8CFE359F72200 /* HelpPageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E777495FA1F9594154E2C39 /* HelpPageView.swift */; };
 		176F46A2163B9E73E9346BF7 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 8552441AB54E2F389FDC741F /* PrivacyInfo.xcprivacy */; };
+		1DF0290DD312A98B2576BA48 /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFEE621E7C7B88738E9C985B /* HomeView.swift */; };
 		1F22AB6FE04BE297D4F58BA8 /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B88A65EE36387AD3C5997FA /* OnboardingView.swift */; };
 		269E3E488DA512B46B982D3C /* PrimaryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3DB3E61A3AFC43FEDA78B362 /* PrimaryView.swift */; };
 		28BB7B45004C189F6684F0A4 /* ScanPasses-iPad-FixedHeight-2.mp4 in Resources */ = {isa = PBXBuildFile; fileRef = 90BDC8608CF3C935FD0A810C /* ScanPasses-iPad-FixedHeight-2.mp4 */; };
@@ -22,26 +25,31 @@
 		38A279B8CC7BAFF042F50011 /* CounterpartApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 09C0C6AF585976E2695DC983 /* CounterpartApp.swift */; };
 		397660EB412CA4FDCED48062 /* GuidedObjectCapture.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 9D2907A997F1327C99EDBFE1 /* GuidedObjectCapture.framework */; };
 		3B8C86D96E40CFA0E3A89A66 /* CapturePrimaryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC1CB1BEA42C7C0DEC8500C /* CapturePrimaryView.swift */; };
+		3ED148F8FD2D8C058FF37C49 /* Design.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5882DB1849BF79794D593E7B /* Design.swift */; };
 		3FFDF6C0F464EE022BC227A4 /* OnboardingTutorialView+LocalizedString.swift in Sources */ = {isa = PBXBuildFile; fileRef = E35553F95E01C091DF9206F7 /* OnboardingTutorialView+LocalizedString.swift */; };
+		409469D34AC4D190993E6F60 /* ModelStage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DE67E84E9BAB798590CFEE6 /* ModelStage.swift */; };
 		424EF33DB939FB08D89CAE79 /* ScanPasses-iPhone-FixedHeight-2.mp4 in Resources */ = {isa = PBXBuildFile; fileRef = E8387F4BCF55830449FB51CA /* ScanPasses-iPhone-FixedHeight-2.mp4 */; };
 		4365BA8A690868D5B00F9159 /* AppDataModel+Orbit.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BEA440CD42BB2FD917F9FEE /* AppDataModel+Orbit.swift */; };
 		4DD922974705BF4C9D953A24 /* NativeCaptureDraftStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB6F1E4471FB2873747B61B6 /* NativeCaptureDraftStore.swift */; };
 		51F14113CD4A69CE351F9A52 /* BottomOverlayButtons.swift in Sources */ = {isa = PBXBuildFile; fileRef = 35448431D0EDF07FB21DAA88 /* BottomOverlayButtons.swift */; };
 		5329F95F0621A5807E8F42B7 /* TimedMessageList.swift in Sources */ = {isa = PBXBuildFile; fileRef = B853771AAFFE9BF14BB4AC13 /* TimedMessageList.swift */; };
 		53440DCB3AC6D40D1B9C74BC /* Images.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 9F3E533A0189E34B9FA18B0C /* Images.xcassets */; };
+		5353ABD77357EE49947D8D97 /* Fixtures.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD84D2AFBCE4D6A6AA2583E2 /* Fixtures.swift */; };
 		54B41807E6403360CEFF31EF /* FindYourMacView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5279E748BC72D18A9AB6030A /* FindYourMacView.swift */; };
 		569A773710F907BED1093E76 /* ScanPasses-iPhone-FixedHeight-unflippable-low.mp4 in Resources */ = {isa = PBXBuildFile; fileRef = 8019B8C2DFCB98298CC19BAA /* ScanPasses-iPhone-FixedHeight-unflippable-low.mp4 */; };
 		59129171B4B57108952B47AF /* TutorialPageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 46AE4309AD317B3F657446FD /* TutorialPageView.swift */; };
 		5AE89AB46AF2D9748887BE39 /* TopOverlayButtons.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83E4F8B04A4554B0D7B91815 /* TopOverlayButtons.swift */; };
 		5CA799DC6C7B84CC87D76374 /* NativeCaptureCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94B999A5665CBF001C5AC9CC /* NativeCaptureCoordinator.swift */; };
+		6453F4EEE08D4E674E108CFB /* ProjectsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E61C749D5F1EADE65AE4DFB /* ProjectsStore.swift */; };
 		69CA831F2418049F1EB4C35D /* PlayerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10654E67672E75DE1DACFDE6 /* PlayerView.swift */; };
 		6D9C5EEB90E3D5CB3D7E75ED /* LaunchUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 30C8F1DB07E2FA648BB08A7F /* LaunchUITests.swift */; };
-		6E8EECE038297B6358958951 /* ObjectsApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F2E136860736512C68BA95A /* ObjectsApp.swift */; };
 		6EF67B69E2802B4EC8C9BE4A /* ScanTutorial-iPhone-Area.mp4 in Resources */ = {isa = PBXBuildFile; fileRef = B3503A30A379B1423E074090 /* ScanTutorial-iPhone-Area.mp4 */; };
+		70CB3352849D93D2CD3488EA /* ProjectsRoot.swift in Sources */ = {isa = PBXBuildFile; fileRef = F70942A5A041BBA3161770EF /* ProjectsRoot.swift */; };
 		710A6B0114688842CF893B49 /* ScanPasses-iPad-FixedHeight-unflippable-low.mp4 in Resources */ = {isa = PBXBuildFile; fileRef = C4A459858D6631CA227A164E /* ScanPasses-iPad-FixedHeight-unflippable-low.mp4 */; };
 		7A05ABF0127E4BBB53F77A5C /* CaptureFolderManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB0CBEF9ED82408AA61CE61A /* CaptureFolderManager.swift */; };
 		7DD07FDF0F842DDAD20D14AC /* PhotoSources.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3984B4B77D3A7FACF67B75BC /* PhotoSources.swift */; };
 		8963AD76E6AF168A7BCCEFDF /* en.lproj in Resources */ = {isa = PBXBuildFile; fileRef = D2D8EFDBF2FE8D2707C3D914 /* en.lproj */; };
+		8BBCE6DAF3C3E380DE48CF0C /* ProjectView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 537F64BA1E548A72D13E2062 /* ProjectView.swift */; };
 		8C76723B95B011E124D71A3F /* NativeCaptureHostView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A0A638A403B1B56044E5757 /* NativeCaptureHostView.swift */; };
 		8D64B96F04B085FA80D28D95 /* OnboardingButtonView+LocalizedString.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F88F155C15E9DAE97A1D968 /* OnboardingButtonView+LocalizedString.swift */; };
 		8EACD047144D4EFC19731165 /* MacConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C0B246D96705968A1DF938A /* MacConnection.swift */; };
@@ -53,16 +61,21 @@
 		9F7453F350780E39E173BF95 /* OnboardingTutorialView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4339C608931E0159BDC44447 /* OnboardingTutorialView.swift */; };
 		A76FADA1F330E00A3087BF5E /* HandheldDepthRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = F14EA6DBE40E129A8FD34A66 /* HandheldDepthRecorder.swift */; };
 		ABA6AD6AC67857F7359D79E9 /* TutorialVideoView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F59E8C7324CD980150910FD /* TutorialVideoView.swift */; };
+		AC0A2C5E26F46ADB470C83F8 /* PrintStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = 510069BB85EC1645E845D872 /* PrintStatus.swift */; };
 		AD50A761FCB76CF9CC0C29AE /* GuidedObjectCapture.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 9D2907A997F1327C99EDBFE1 /* GuidedObjectCapture.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		B15E942B8EB2B262DE6FADC9 /* ScanTutorial-iPad-Area.mp4 in Resources */ = {isa = PBXBuildFile; fileRef = 72D780A8AF2666F5A12F293C /* ScanTutorial-iPad-Area.mp4 */; };
 		B595B83E2CFD8903E41B6A11 /* ScanPasses-iPhone-FixedHeight-1.mp4 in Resources */ = {isa = PBXBuildFile; fileRef = F011665A66F3AC69F266FC94 /* ScanPasses-iPhone-FixedHeight-1.mp4 */; };
+		B6661C976EB8040699272B41 /* LegacyPrint.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C2CB175A9E27BA0BEF64C1E /* LegacyPrint.swift */; };
 		B8BF4A410E764E9DE5970D5D /* AppDataModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F75EABD59D72AFE6318BE2E8 /* AppDataModel.swift */; };
 		BA0F02ADB0934148886ED85D /* CounterpartKit in Frameworks */ = {isa = PBXBuildFile; productRef = 9C3781E485F9980822ADA4B0 /* CounterpartKit */; };
+		BDB193C6E13C04A0DB41A061 /* PrintersView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 835B280F8D54D99191129EA2 /* PrintersView.swift */; };
+		BDDE40224A2D4E2C6D66DAD0 /* NewProjectView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3FB944AB913161CA44843077 /* NewProjectView.swift */; };
 		C13097908B7F944446B112DB /* HandheldCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4AA888917D0BB09DAE7339F2 /* HandheldCapture.swift */; };
 		C2DB2A82C5B41A33C3AA0A5E /* OnboardingButtonView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2181C73CED27FF7EB7FFEBE /* OnboardingButtonView.swift */; };
 		C4FE3E5822B7566BB80D80C2 /* CaptureWatchdog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0BA4C6D6E797818CF5E5147F /* CaptureWatchdog.swift */; };
 		C629A1937DFF2FC101C3CDA8 /* OnboardingStateMachine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B243DA4559B80A720D8FEA1 /* OnboardingStateMachine.swift */; };
 		D0BC0961B3EE0484588B383B /* CaptureOverlayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 734A7560D792799195C81953 /* CaptureOverlayView.swift */; };
+		D5158848C8163F8E67E6FB0C /* example-fit.stl in Resources */ = {isa = PBXBuildFile; fileRef = BEBD9320D217A2B678AF82E3 /* example-fit.stl */; };
 		D5AF02B6011FFF964AB4F778 /* ScanPasses-iPad-FixedHeight-3.mp4 in Resources */ = {isa = PBXBuildFile; fileRef = 25F7609A135C8EE6DB3F8655 /* ScanPasses-iPad-FixedHeight-3.mp4 */; };
 		E1C0DC46EDF7E1A1A126B96B /* ReconstructionPrimaryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D886630D48544F53D4F3EBB /* ReconstructionPrimaryView.swift */; };
 		E46F5048FE02E1C55FC84053 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FCE242966FF14140A8FD3AA7 /* ContentView.swift */; };
@@ -111,11 +124,13 @@
 /* Begin PBXFileReference section */
 		09C0C6AF585976E2695DC983 /* CounterpartApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CounterpartApp.swift; sourceTree = "<group>"; };
 		0BA4C6D6E797818CF5E5147F /* CaptureWatchdog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureWatchdog.swift; sourceTree = "<group>"; };
+		0C2CB175A9E27BA0BEF64C1E /* LegacyPrint.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegacyPrint.swift; sourceTree = "<group>"; };
 		0F59E8C7324CD980150910FD /* TutorialVideoView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TutorialVideoView.swift; sourceTree = "<group>"; };
 		10654E67672E75DE1DACFDE6 /* PlayerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerView.swift; sourceTree = "<group>"; };
 		1CF24A1A23C137ADF38A2C45 /* LaunchScreen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = LaunchScreen.storyboard; sourceTree = "<group>"; };
-		1F2E136860736512C68BA95A /* ObjectsApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ObjectsApp.swift; sourceTree = "<group>"; };
+		1E61C749D5F1EADE65AE4DFB /* ProjectsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectsStore.swift; sourceTree = "<group>"; };
 		25F7609A135C8EE6DB3F8655 /* ScanPasses-iPad-FixedHeight-3.mp4 */ = {isa = PBXFileReference; path = "ScanPasses-iPad-FixedHeight-3.mp4"; sourceTree = "<group>"; };
+		2D4CA906C988EDF604286EEE /* ProjectImages.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectImages.swift; sourceTree = "<group>"; };
 		30C8F1DB07E2FA648BB08A7F /* LaunchUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LaunchUITests.swift; sourceTree = "<group>"; };
 		35448431D0EDF07FB21DAA88 /* BottomOverlayButtons.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BottomOverlayButtons.swift; sourceTree = "<group>"; };
 		3984B4B77D3A7FACF67B75BC /* PhotoSources.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoSources.swift; sourceTree = "<group>"; };
@@ -123,13 +138,18 @@
 		3A3F63B53DC48176E21E79EA /* ScanToMakeUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = ScanToMakeUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		3DB3E61A3AFC43FEDA78B362 /* PrimaryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrimaryView.swift; sourceTree = "<group>"; };
 		3F88F155C15E9DAE97A1D968 /* OnboardingButtonView+LocalizedString.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "OnboardingButtonView+LocalizedString.swift"; sourceTree = "<group>"; };
+		3FB944AB913161CA44843077 /* NewProjectView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewProjectView.swift; sourceTree = "<group>"; };
 		4339C608931E0159BDC44447 /* OnboardingTutorialView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingTutorialView.swift; sourceTree = "<group>"; };
 		46AE4309AD317B3F657446FD /* TutorialPageView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TutorialPageView.swift; sourceTree = "<group>"; };
 		46F948354535E6E98DF60988 /* CaptureEmbeddingNamespace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureEmbeddingNamespace.swift; sourceTree = "<group>"; };
 		4AA888917D0BB09DAE7339F2 /* HandheldCapture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HandheldCapture.swift; sourceTree = "<group>"; };
+		4C0B9B093AA0DA530B8D30EE /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		4FA017C87133CEB2F8143398 /* UntilProcessingCompleteFilter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UntilProcessingCompleteFilter.swift; sourceTree = "<group>"; };
+		510069BB85EC1645E845D872 /* PrintStatus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrintStatus.swift; sourceTree = "<group>"; };
 		5279E748BC72D18A9AB6030A /* FindYourMacView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FindYourMacView.swift; sourceTree = "<group>"; };
 		52E4182CD18F047B190437CD /* ScanToMakeTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = ScanToMakeTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		537F64BA1E548A72D13E2062 /* ProjectView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectView.swift; sourceTree = "<group>"; };
+		5882DB1849BF79794D593E7B /* Design.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Design.swift; sourceTree = "<group>"; };
 		5C9ED6057C31B2020C3A594C /* ScanPasses-iPad-FixedHeight-1.mp4 */ = {isa = PBXFileReference; path = "ScanPasses-iPad-FixedHeight-1.mp4"; sourceTree = "<group>"; };
 		5CB3C16A5015E911EF835644 /* ScanToMake.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = ScanToMake.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		668B7EE5735002D15D701BD0 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
@@ -140,9 +160,11 @@
 		7C0B246D96705968A1DF938A /* MacConnection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacConnection.swift; sourceTree = "<group>"; };
 		7E777495FA1F9594154E2C39 /* HelpPageView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HelpPageView.swift; sourceTree = "<group>"; };
 		8019B8C2DFCB98298CC19BAA /* ScanPasses-iPhone-FixedHeight-unflippable-low.mp4 */ = {isa = PBXFileReference; path = "ScanPasses-iPhone-FixedHeight-unflippable-low.mp4"; sourceTree = "<group>"; };
+		835B280F8D54D99191129EA2 /* PrintersView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrintersView.swift; sourceTree = "<group>"; };
 		83E4F8B04A4554B0D7B91815 /* TopOverlayButtons.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TopOverlayButtons.swift; sourceTree = "<group>"; };
 		8552441AB54E2F389FDC741F /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		8D886630D48544F53D4F3EBB /* ReconstructionPrimaryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReconstructionPrimaryView.swift; sourceTree = "<group>"; };
+		8DE67E84E9BAB798590CFEE6 /* ModelStage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelStage.swift; sourceTree = "<group>"; };
 		90BDC8608CF3C935FD0A810C /* ScanPasses-iPad-FixedHeight-2.mp4 */ = {isa = PBXFileReference; path = "ScanPasses-iPad-FixedHeight-2.mp4"; sourceTree = "<group>"; };
 		94B999A5665CBF001C5AC9CC /* NativeCaptureCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeCaptureCoordinator.swift; sourceTree = "<group>"; };
 		9B88A65EE36387AD3C5997FA /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
@@ -153,9 +175,12 @@
 		B3503A30A379B1423E074090 /* ScanTutorial-iPhone-Area.mp4 */ = {isa = PBXFileReference; path = "ScanTutorial-iPhone-Area.mp4"; sourceTree = "<group>"; };
 		B853771AAFFE9BF14BB4AC13 /* TimedMessageList.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimedMessageList.swift; sourceTree = "<group>"; };
 		BB6F1E4471FB2873747B61B6 /* NativeCaptureDraftStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeCaptureDraftStore.swift; sourceTree = "<group>"; };
+		BD84D2AFBCE4D6A6AA2583E2 /* Fixtures.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Fixtures.swift; sourceTree = "<group>"; };
 		BD8ABB3B1C441AA2F83873BF /* FeedbackMessages.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedbackMessages.swift; sourceTree = "<group>"; };
+		BEBD9320D217A2B678AF82E3 /* example-fit.stl */ = {isa = PBXFileReference; path = "example-fit.stl"; sourceTree = "<group>"; };
 		C4A459858D6631CA227A164E /* ScanPasses-iPad-FixedHeight-unflippable-low.mp4 */ = {isa = PBXFileReference; path = "ScanPasses-iPad-FixedHeight-unflippable-low.mp4"; sourceTree = "<group>"; };
 		CB0CBEF9ED82408AA61CE61A /* CaptureFolderManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureFolderManager.swift; sourceTree = "<group>"; };
+		CFEE621E7C7B88738E9C985B /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
 		D2181C73CED27FF7EB7FFEBE /* OnboardingButtonView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingButtonView.swift; sourceTree = "<group>"; };
 		D2D8EFDBF2FE8D2707C3D914 /* en.lproj */ = {isa = PBXFileReference; path = en.lproj; sourceTree = "<group>"; };
 		DEC1CB1BEA42C7C0DEC8500C /* CapturePrimaryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CapturePrimaryView.swift; sourceTree = "<group>"; };
@@ -169,6 +194,7 @@
 		F14EA6DBE40E129A8FD34A66 /* HandheldDepthRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HandheldDepthRecorder.swift; sourceTree = "<group>"; };
 		F3CA28C4E4604B8027F493BD /* ModelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelView.swift; sourceTree = "<group>"; };
 		F5B6C8A8F2EC960651BD9CA1 /* ScanPasses-iPhone-FixedHeight-3.mp4 */ = {isa = PBXFileReference; path = "ScanPasses-iPhone-FixedHeight-3.mp4"; sourceTree = "<group>"; };
+		F70942A5A041BBA3161770EF /* ProjectsRoot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectsRoot.swift; sourceTree = "<group>"; };
 		F75EABD59D72AFE6318BE2E8 /* AppDataModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDataModel.swift; sourceTree = "<group>"; };
 		FCE242966FF14140A8FD3AA7 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		FF186480D5365063EF26C687 /* ScanPasses-iPhone-FixedHeight-unflippable-high.mp4 */ = {isa = PBXFileReference; path = "ScanPasses-iPhone-FixedHeight-unflippable-high.mp4"; sourceTree = "<group>"; };
@@ -224,6 +250,24 @@
 			path = GuidedCaptureSample;
 			sourceTree = "<group>";
 		};
+		4664159B63A10D44B21155C5 /* Design */ = {
+			isa = PBXGroup;
+			children = (
+				5882DB1849BF79794D593E7B /* Design.swift */,
+				8DE67E84E9BAB798590CFEE6 /* ModelStage.swift */,
+				2D4CA906C988EDF604286EEE /* ProjectImages.swift */,
+			);
+			path = Design;
+			sourceTree = "<group>";
+		};
+		492390FBE23022390D38D118 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				BEBD9320D217A2B678AF82E3 /* example-fit.stl */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
 		763AC8A31A6FF6107CAB6571 /* Products */ = {
 			isa = PBXGroup;
 			children = (
@@ -250,9 +294,12 @@
 				1CF24A1A23C137ADF38A2C45 /* LaunchScreen.storyboard */,
 				8552441AB54E2F389FDC741F /* PrivacyInfo.xcprivacy */,
 				8E2F60EBCE0C3B3C4AD20293 /* App */,
+				4664159B63A10D44B21155C5 /* Design */,
 				D0FF89BBE1CB79DDE845A6EE /* Objects */,
 				AE382CAF6F6A17EF5AB0D197 /* Pairing */,
 				0E8BD13B29151BDDFCC4F4F2 /* Platform */,
+				492390FBE23022390D38D118 /* Resources */,
+				90590B10CDD3977003761A17 /* Screens */,
 			);
 			path = ScanToMake;
 			sourceTree = "<group>";
@@ -283,8 +330,25 @@
 			children = (
 				668B7EE5735002D15D701BD0 /* AppModel.swift */,
 				09C0C6AF585976E2695DC983 /* CounterpartApp.swift */,
+				BD84D2AFBCE4D6A6AA2583E2 /* Fixtures.swift */,
+				1E61C749D5F1EADE65AE4DFB /* ProjectsStore.swift */,
 			);
 			path = App;
+			sourceTree = "<group>";
+		};
+		90590B10CDD3977003761A17 /* Screens */ = {
+			isa = PBXGroup;
+			children = (
+				CFEE621E7C7B88738E9C985B /* HomeView.swift */,
+				0C2CB175A9E27BA0BEF64C1E /* LegacyPrint.swift */,
+				3FB944AB913161CA44843077 /* NewProjectView.swift */,
+				835B280F8D54D99191129EA2 /* PrintersView.swift */,
+				510069BB85EC1645E845D872 /* PrintStatus.swift */,
+				F70942A5A041BBA3161770EF /* ProjectsRoot.swift */,
+				537F64BA1E548A72D13E2062 /* ProjectView.swift */,
+				4C0B9B093AA0DA530B8D30EE /* SettingsView.swift */,
+			);
+			path = Screens;
 			sourceTree = "<group>";
 		};
 		9E955C3FD67423CDADC1414A /* Resources */ = {
@@ -348,7 +412,6 @@
 			children = (
 				4AA888917D0BB09DAE7339F2 /* HandheldCapture.swift */,
 				F14EA6DBE40E129A8FD34A66 /* HandheldDepthRecorder.swift */,
-				1F2E136860736512C68BA95A /* ObjectsApp.swift */,
 			);
 			path = Objects;
 			sourceTree = "<group>";
@@ -543,6 +606,7 @@
 				B15E942B8EB2B262DE6FADC9 /* ScanTutorial-iPad-Area.mp4 in Resources */,
 				6EF67B69E2802B4EC8C9BE4A /* ScanTutorial-iPhone-Area.mp4 in Resources */,
 				8963AD76E6AF168A7BCCEFDF /* en.lproj in Resources */,
+				D5158848C8163F8E67E6FB0C /* example-fit.stl in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -601,13 +665,25 @@
 			files = (
 				8F26AFE65ED0BD6954AA6AFD /* AppModel.swift in Sources */,
 				38A279B8CC7BAFF042F50011 /* CounterpartApp.swift in Sources */,
+				3ED148F8FD2D8C058FF37C49 /* Design.swift in Sources */,
 				54B41807E6403360CEFF31EF /* FindYourMacView.swift in Sources */,
+				5353ABD77357EE49947D8D97 /* Fixtures.swift in Sources */,
 				C13097908B7F944446B112DB /* HandheldCapture.swift in Sources */,
 				A76FADA1F330E00A3087BF5E /* HandheldDepthRecorder.swift in Sources */,
+				1DF0290DD312A98B2576BA48 /* HomeView.swift in Sources */,
+				B6661C976EB8040699272B41 /* LegacyPrint.swift in Sources */,
 				8EACD047144D4EFC19731165 /* MacConnection.swift in Sources */,
-				6E8EECE038297B6358958951 /* ObjectsApp.swift in Sources */,
+				409469D34AC4D190993E6F60 /* ModelStage.swift in Sources */,
+				BDDE40224A2D4E2C6D66DAD0 /* NewProjectView.swift in Sources */,
 				7DD07FDF0F842DDAD20D14AC /* PhotoSources.swift in Sources */,
+				AC0A2C5E26F46ADB470C83F8 /* PrintStatus.swift in Sources */,
+				BDB193C6E13C04A0DB41A061 /* PrintersView.swift in Sources */,
+				0FF63D52C1E702ED46E8156F /* ProjectImages.swift in Sources */,
+				8BBCE6DAF3C3E380DE48CF0C /* ProjectView.swift in Sources */,
+				70CB3352849D93D2CD3488EA /* ProjectsRoot.swift in Sources */,
+				6453F4EEE08D4E674E108CFB /* ProjectsStore.swift in Sources */,
 				07B1C13B94675AFFC17CC1A5 /* QRScanner.swift in Sources */,
+				082318AF8AAA16FF57964526 /* SettingsView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

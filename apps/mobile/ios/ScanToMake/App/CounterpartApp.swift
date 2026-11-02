@@ -33,7 +33,7 @@ struct RootView: View {
             } else if app.needsMac || app.holdPairingScreen {
                 FindYourMacView(mode: .firstRun)
             } else {
-                ObjectsRootView(store: app.objects, pairingKey: app.pairingKey)
+                ProjectsRoot(store: app.projects, pairingKey: app.pairingKey)
             }
         }
         .fullScreenCover(isPresented: $app.showPairing) {
@@ -42,10 +42,4 @@ struct RootView: View {
                 .tint(.filament)
         }
     }
-}
-
-extension Color {
-    /// Counterpart's accent, "filament orange" (PRD §10): the primary action, selection and Ready only.
-    static let filament = Color(red: 1.0, green: 0.45, blue: 0.18)
-    static let okGreen = Color(red: 0.25, green: 0.84, blue: 0.47)
 }

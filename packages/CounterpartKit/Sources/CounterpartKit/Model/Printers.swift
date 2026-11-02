@@ -141,22 +141,20 @@ public struct PrintChoice: Equatable, Sendable {
     public var filament: PrinterFilament
     public var quality: PrintQuality
     public var strength: PrintStrength
-    public var checkPlate: Bool
     /// The previous print may have reached the printer, and you said it isn't printing this.
     public var checked: Bool
-    public init(filament: PrinterFilament, quality: PrintQuality = .standard, strength: PrintStrength = .standard, checkPlate: Bool = true, checked: Bool = false) {
-        self.filament = filament; self.quality = quality; self.strength = strength; self.checkPlate = checkPlate; self.checked = checked
+    public init(filament: PrinterFilament, quality: PrintQuality = .standard, strength: PrintStrength = .standard, checked: Bool = false) {
+        self.filament = filament; self.quality = quality; self.strength = strength; self.checked = checked
     }
 
-    /// The `POST …/print` body. Standard quality and strength send nothing (the MCP's preset decides), and the
-    /// plate check is only mentioned when it's off, so a plain print is the body every companion accepts.
+    /// The `POST …/print` body. Standard quality and strength send nothing (the MCP's preset decides), so a
+    /// plain print is the body every companion accepts.
     public var body: [String: Any] {
         var json: [String: Any] = ["checked": checked,
                                    "filament": ["slot": filament.slot, "colour": filament.colour, "material": filament.material, "name": filament.name,
                                                 "filamentId": filament.filamentId, "destinationId": filament.destinationId]]
         if quality != .standard { json["quality"] = quality.rawValue }
         if strength != .standard { json["strength"] = strength.rawValue }
-        if !checkPlate { json["plateCheck"] = false }
         return json
     }
 

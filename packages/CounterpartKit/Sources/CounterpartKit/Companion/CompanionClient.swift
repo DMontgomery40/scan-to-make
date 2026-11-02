@@ -72,7 +72,7 @@ public final class CompanionClient: @unchecked Sendable {
             if is_(one + "/scan") { return "captures:import" }
         case "POST":
             if is_("/v1/objects") || is_(one + "/(start|corrections|closeup|photos|capture|capture-depth)") { return "captures:import" }
-            if is_(one + "/(print|plate|printer|print-confirmation|estimate|print/pause|print/resume|print/cancel)") { return "printer-handoff:use" }
+            if is_(one + "/(print|printer|print-confirmation|estimate|print/pause|print/resume|print/cancel)") { return "printer-handoff:use" }
             if is_("/v1/devices/live-activity-tokens") { return "projects:write" }
         default: break
         }
@@ -227,18 +227,6 @@ public final class CompanionClient: @unchecked Sendable {
     /// Starts preparing the print. The printer MCP still asks its own confirmation.
     public func print(_ id: String, choice: PrintChoice) async throws -> Project {
         try await request("POST", "/v1/objects/\(id)/print", json: choice.body, as: One.self).object
-    }
-    /// "The plate is clear": dismisses the alert and teaches the check for this printer. Never answers the
-    /// printer's own confirmation.
-    public func plateClear(_ id: String, note: String? = nil) async throws -> Project {
-        // `{clear: true}` is what every companion accepts; a note needs PR 2's form.
-        let json: [String: Any] = note.map { ["answer": "clear", "note": String($0.prefix(200))] } ?? ["clear": true]
-        return try await request("POST", "/v1/objects/\(id)/plate", json: json, as: One.self).object
-    }
-    /// "I cleared it. Look again": retakes the frame and judges it again (PR 2).
-    public func plateLookAgain(_ id: String) async throws -> Project {
-        do { return try await request("POST", "/v1/objects/\(id)/plate", json: ["answer": "look-again"], as: One.self).object }
-        catch let error as CompanionError where error.code == "invalid-request" { throw CompanionError.unsupported }
     }
     public func answerPrintConfirmation(_ id: String, response: PrintConfirmationResponse) async throws -> Project {
         let json = try JSONSerialization.jsonObject(with: JSONEncoder().encode(response)) as? [String: Any]

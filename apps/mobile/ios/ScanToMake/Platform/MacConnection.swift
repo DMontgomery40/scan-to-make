@@ -36,7 +36,6 @@ typealias MacError = CompanionError
     func print(_ id: String, checked: Bool, filament: PrinterFilament) async throws -> StmObject {
         try await client.print(id, choice: PrintChoice(filament: filament, checked: checked))
     }
-    func plateClear(_ id: String) async throws -> StmObject { try await client.plateClear(id) }
     func answerPrintConfirmation(_ id: String, response: PrintConfirmationResponse) async throws -> StmObject {
         try await client.answerPrintConfirmation(id, response: response)
     }
@@ -57,6 +56,65 @@ typealias MacError = CompanionError
         }
     }
     static var chosenRoot: URL { URL.cachesDirectory.appending(path: "ObjectsChosen", directoryHint: .isDirectory) }
+
+    /// Keeps one picked or taken photo in the cache until it's sent.
+    static func keep(_ photo: PickedPhoto) -> ChosenPhoto? {
+        try? FileManager.default.createDirectory(at: chosenRoot, withIntermediateDirectories: true)
+        let id = "\(UUID().uuidString.lowercased()).\(photo.ext)"
+        let url = chosenRoot.appending(path: id)
+        return (try? photo.data.write(to: url, options: .atomic)).map { ChosenPhoto(id: id, url: url) }
+    }
+
+    // MARK: Sending a new project
+
+    /// Sends a new project's files and starts it: a finished capture for it first (sent as it was, never
+    /// recaptured), then the chosen photos, then start. Everything it needs is on disk, so a send cut short
+    /// finishes from the project page or on the next launch, without the sheet that began it.
+    func sendProject(_ id: String, photos: [ChosenPhoto]) async throws -> StmObject {
+        Self.markSendRequested(id)
+        if !photos.isEmpty { Self.savePending(id, photos) }
+        let chosen = photos.isEmpty ? Self.pendingPhotos(id) : photos
+        let sent: StmObject
+        if HandheldCapture.finished(id) {
+            try await sendChosen(id, chosen)
+            sent = try await sendHandheld(id)
+        } else if let run = await finishedScan(id) {
+            try await sendCapture(id, run: run)
+            try await sendChosen(id, chosen)
+            sent = try await start(id)
+        } else {
+            try await sendChosen(id, chosen)
+            sent = try await start(id)
+        }
+        Self.clearPending(id)
+        return sent
+    }
+
+    /// The photos chosen for a project still being sent, kept beside them in the cache.
+    static func pendingPhotos(_ id: String) -> [ChosenPhoto] {
+        guard let data = try? Data(contentsOf: pendingFile(id)), let ids = try? JSONDecoder().decode([String].self, from: data) else { return [] }
+        return ids.filter { $0.wholeMatch(of: /[a-f0-9-]{36}\.(jpg|png|heic)/) != nil }
+            .map { ChosenPhoto(id: $0, url: chosenRoot.appending(path: $0)) }
+            .filter { FileManager.default.fileExists(atPath: $0.url.path) }
+    }
+    private static func pendingFile(_ id: String) -> URL { chosenRoot.appending(path: "pending-\(id).json") }
+    private static func savePending(_ id: String, _ photos: [ChosenPhoto]) {
+        try? FileManager.default.createDirectory(at: chosenRoot, withIntermediateDirectories: true)
+        try? JSONEncoder().encode(photos.map(\.id)).write(to: pendingFile(id), options: .atomic)
+    }
+    private static func clearPending(_ id: String) {
+        try? FileManager.default.removeItem(at: pendingFile(id))
+        try? FileManager.default.removeItem(at: requestedFile(id))
+    }
+
+    /// Send was pressed for this project and hasn't finished: the project page may resume it. A draft whose
+    /// scan is attached but never sent has no marker.
+    static func sendRequested(_ id: String) -> Bool { FileManager.default.fileExists(atPath: requestedFile(id).path) }
+    private static func requestedFile(_ id: String) -> URL { chosenRoot.appending(path: "sending-\(id)") }
+    private static func markSendRequested(_ id: String) {
+        try? FileManager.default.createDirectory(at: chosenRoot, withIntermediateDirectories: true)
+        FileManager.default.createFile(atPath: requestedFile(id).path, contents: Data())
+    }
 
     /// Sends chosen photos; they leave this phone's cache once the Mac has every one.
     func sendChosen(_ id: String, _ photos: [ChosenPhoto]) async throws {
@@ -100,6 +158,19 @@ typealias MacError = CompanionError
         let drafts = (try? NativeCaptureCoordinator.shared.drafts()) ?? []
         let draft = drafts.first { ($0["origin"] as? [String: Any])?["projectId"] as? String == id }
         return draft?["status"] as? String == "ready" ? draft?["runID"] as? String : nil
+    }
+
+    /// The walk-around scan's model while it's still on this phone: the project page shows it until the Mac
+    /// has a result of its own. The Mac doesn't serve the scan back.
+    func localScan(_ id: String) -> URL? {
+        #if DEBUG
+        if let folder = Fixtures.folder { return folder.appending(path: "scanB.usdz") }
+        #endif
+        let drafts = (try? NativeCaptureCoordinator.shared.drafts()) ?? []
+        guard let run = drafts.first(where: { ($0["origin"] as? [String: Any])?["projectId"] as? String == id })?["runID"] as? String,
+              UUID(uuidString: run) != nil, run == run.lowercased() else { return nil }
+        let model = URL.documentsDirectory.appending(path: "NativeCaptures/\(run)/Models/model-mobile.usdz")
+        return (try? model.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true ? model : nil
     }
 
     func sendScan(_ id: String, run: String) async throws -> StmObject {
