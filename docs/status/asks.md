@@ -42,7 +42,7 @@ The owner is whoever the lead assigns. Repeats count how often the ask came up a
 | 27 | Update both MCPs from either app | 2 | Mac merged; PR 6 waiting | Update button updates the MCP from the phone and the Mac |
 | 28 | Every Mac setting on the phone | 1 | merged (#218); not verified on device | Changes a Mac setting from the phone |
 | 29 | Phone connects automatically on the same Apple Account | 1 | Mac side merged; phone entitlement pending | Fresh install connects with no code |
-| 30 | Help / docs / website | 2 | help page merged (#232); site not deployed (needs his `wrangler login`); no in-app Help link | counterpart.dtmont.com/help.html loads; Settings → Help opens it |
+| 30 | Help / docs / website | 2 | **site live** at https://counterpart.dtmont.com (deployed 2026-11-02, checked from agents-136: `/` 200, `/help.html` → `/help` 200 "Counterpart Help"); in-app Help link not yet built | counterpart.dtmont.com/help.html loads; Settings → Help opens it |
 | 31 | No bed/plate checks anywhere | 3 | done (app + both MCPs) | — |
 | 32 | Blender only while a pass runs | 1 | spec; a stale Blender from a dev worktree still runs | No Blender between jobs |
 | 33 | CPU/RAM/GPU efficient | 2 | Mac still 15–19% CPU, 1.6–1.9 GB idle on a project | Meets PRD §9.6 budgets |
