@@ -171,12 +171,21 @@ struct NewObjectView: View {
         guard created == nil, !draftId.isEmpty else { return nil }
         do {
             let saved = try await store.mac.get(draftId)
+            // A draft begun as the other job (a scan to copy, then "Make something that fits") isn't this one:
+            // the Mac keeps a project's kind, so this starts afresh.
+            if let job, let kind = saved.kind, kind != job.rawValue, saved.state == .new { draftId = ""; return nil }
             if saved.state == .new { created = saved } else { draftId = "" }
             return saved
         } catch let failure as CompanionError where failure.code == "not-found" { draftId = ""; return nil }
     }
 
-    private func object() async throws -> Project {
+    /// `fit` or `copy`: the starting card you picked; otherwise a scan means copy. Nil lets the Mac infer it.
+    private func kind(scanning: Bool) -> String? {
+        if let job { return job.rawValue }
+        return scanning || attached != nil ? NewProjectJob.copy.rawValue : nil
+    }
+
+    private func object(scanning: Bool = false) async throws -> Project {
         // A sent draft (started elsewhere) opens as it is.
         if let saved = try await savedDraft(), saved.state != .new { return saved }
         if let created {
@@ -189,7 +198,7 @@ struct NewObjectView: View {
                 throw error
             }
         }
-        let object = try await store.mac.create(instructions)
+        let object = try await store.mac.create(instructions, kind: kind(scanning: scanning))
         created = object
         draftId = object.id
         return object
@@ -224,7 +233,7 @@ struct NewObjectView: View {
     private func scan(handheld: Bool) async {
         describing = false
         await run("scan") {
-            let object = try await object()
+            let object = try await object(scanning: true)
             guard object.state == .new else { started(object); return }
             if let saved = await savedCapture(object.id) { attached = saved; return }
             guard object.scan == nil, (object.capture ?? []).isEmpty else {

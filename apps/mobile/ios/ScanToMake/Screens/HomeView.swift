@@ -11,6 +11,7 @@ struct HomeView: View {
     let openPrinters: () -> Void
     let openSettings: () -> Void
     @State private var query = ""
+    @FocusState private var searching: Bool
 
     private var filtered: [Project] {
         let text = query.trimmingCharacters(in: .whitespaces)
@@ -84,6 +85,8 @@ struct HomeView: View {
         .navigationTitle("Counterpart")
         .navigationSubtitle(subtitle)
         .searchable(text: $query, prompt: "Projects, printers, notes")
+        .searchFocused($searching)
+        .background { Button("Search") { searching = true }.keyboardShortcut("f", modifiers: .command).hidden() }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button(action: openPrinters) { Image(systemName: "printer.fill") }

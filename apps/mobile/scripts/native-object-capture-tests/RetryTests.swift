@@ -117,7 +117,7 @@ struct ChosenPhoto: Equatable { var id: String }
     @FixtureState var draft = Project()
     @FixtureState var result: Project? = nil
     @FixtureState var failure: Error? = nil
-    func object() async throws -> Project { draft }
+    func object(scanning: Bool = false) async throws -> Project { draft }
     func started(_ object: Project) { result = object }
     func run(_ kind: String, _ body: () async throws -> Void) async {
         do { try await body() } catch { failure = error }

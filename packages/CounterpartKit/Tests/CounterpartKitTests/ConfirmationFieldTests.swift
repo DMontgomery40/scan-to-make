@@ -61,6 +61,21 @@ final class ConfirmationFieldTests: XCTestCase {
         XCTAssertEqual(content["copies"] as? Int, 2)
     }
 
+    /// The person's edits win over the default: clearing a field never brings the default back, and text
+    /// that isn't a number yet blocks Start Print (KAN-214 Codex review).
+    func testAnEditedFieldKeepsItsEdit() throws {
+        let required = try question(#"{"name":"temp","title":"Bed","type":"number","required":true,"default":60},{"name":"ok","title":"OK","required":true}"#)
+        XCTAssertTrue(required.canAccept(["ok": true], atMs: 1000), "untouched, the default answers it")
+        XCTAssertFalse(required.canAccept(["temp": .null, "ok": true], atMs: 1000), "cleared, it's empty: a required field blocks")
+        XCTAssertNil(required.response(confirmationId: "q", action: .accept, content: ["temp": .null, "ok": true], atMs: 1000))
+        XCTAssertFalse(required.canAccept(["temp": ".", "ok": true], atMs: 1000), "a half-typed number is invalid, not the default")
+        let optional = try question(#"{"name":"temp","title":"Bed","type":"number","required":false,"default":60},{"name":"ok","title":"OK","required":true}"#)
+        XCTAssertTrue(optional.canAccept(["temp": .null, "ok": true], atMs: 1000))
+        XCTAssertEqual(optional.response(confirmationId: "q", action: .accept, content: ["temp": .null, "ok": true], atMs: 1000)?.answer.content, ["ok": true],
+                       "a cleared optional field isn't sent, and its default isn't filled in")
+        XCTAssertFalse(optional.canAccept(["temp": "6O", "ok": true], atMs: 1000), "invalid text blocks even an optional field")
+    }
+
     func testATypeFromANewerMCPGoesToTheMac() throws {
         let q = try question(#"{"name":"tags","title":"Tags","type":"array","required":false}"#)
         XCTAssertEqual(q.fields[0].type, .unknown)

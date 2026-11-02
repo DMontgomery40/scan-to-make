@@ -17,9 +17,7 @@ struct PrintSheet: View {
     @State private var spool: Int?
     @State private var quality = PrintQuality.standard
     @State private var strength = PrintStrength.standard
-    @State private var estimate: SliceEstimate?
-    @State private var estimating = false
-    @State private var estimateKey = ""
+    @State private var slice = EstimateState()
     @State private var checked = false
     @State private var busy: String?
     @State private var problem: String?
@@ -45,6 +43,10 @@ struct PrintSheet: View {
                     VStack(alignment: .leading, spacing: 22) {
                         printers
                         plate
+                        if case .failed(let message) = slice.shown(for: estimateKey, fallback: project?.print?.estimate) {
+                            Label(message, systemImage: "exclamationmark.triangle.fill").font(.footnote).foregroundStyle(.orange)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                         colourSection
                             .padding(16)
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -57,7 +59,6 @@ struct PrintSheet: View {
                         }
                     }
                     .padding(20)
-                    .padding(.bottom, 80)
                     .frame(maxWidth: 640)
                     .frame(maxWidth: .infinity)
                 }
@@ -71,7 +72,7 @@ struct PrintSheet: View {
                     }
                 }
             }
-            .safeAreaInset(edge: .bottom) { printButton }
+            .safeAreaBar(edge: .bottom) { printButton }
         }
         .presentationDetents([.large])
         .task { await start() }
@@ -97,8 +98,11 @@ struct PrintSheet: View {
                     Text(store.printerProblem ?? "Reading your Mac's printers…").font(.subheadline).foregroundStyle(.secondary).padding(.vertical, 30)
                 }
             }
-            .padding(.horizontal, 20)
+            .scrollTargetLayout()
         }
+        // Cards snap whole, inset from both edges, so none is ever cut off.
+        .scrollTargetBehavior(.viewAligned)
+        .contentMargins(.horizontal, 20, for: .scrollContent)
         .padding(.horizontal, -20)
         // The chosen printer is in view, even when it's last in the row.
         .onChange(of: destinationId, initial: true) { _, id in if !id.isEmpty { withAnimation { row.scrollTo(id, anchor: .center) } } }
@@ -112,10 +116,14 @@ struct PrintSheet: View {
                 .overlay(alignment: .bottom) { PlateGrid().frame(height: 70).opacity(0.5).allowsHitTesting(false) }
                 .clipShape(.rect(cornerRadius: 24))
             HStack(spacing: 8) {
-                if estimating && estimate == nil { Metric(symbol: "clock", text: "Slicing…") }
-                if let time = Format.duration(estimate?.seconds ?? project?.print?.estimate?.seconds) { Metric(symbol: "clock", text: time) }
-                if let grams = Format.grams(estimate?.grams ?? project?.print?.estimate?.grams) { Metric(symbol: "scalemass", text: grams) }
-                if let layers = estimate?.layers { Metric(symbol: "square.stack.3d.up", text: "\(layers) layers") }
+                switch slice.shown(for: estimateKey, fallback: project?.print?.estimate) {
+                case .pending: Metric(symbol: "clock", text: "Slicing…")
+                case .failed: Metric(symbol: "exclamationmark.triangle", text: "Couldn't slice")
+                case .ready(let seconds, let grams, let layers):
+                    if let time = Format.duration(seconds) { Metric(symbol: "clock", text: time) }
+                    if let grams = Format.grams(grams) { Metric(symbol: "scalemass", text: grams) }
+                    if let layers { Metric(symbol: "square.stack.3d.up", text: "\(layers) layers") }
+                }
             }
             .padding(12)
         }
@@ -246,7 +254,7 @@ struct PrintSheet: View {
     }
 
     private var doneAround: String? {
-        guard let seconds = estimate?.seconds ?? project?.print?.estimate?.seconds else { return nil }
+        guard case .ready(let seconds?, _, _) = slice.shown(for: estimateKey, fallback: project?.print?.estimate) else { return nil }
         return Date().addingTimeInterval(seconds).formatted(date: .omitted, time: .shortened)
     }
 
@@ -276,7 +284,7 @@ struct PrintSheet: View {
         do {
             store.replace(try await store.mac.selectPrinter(projectId, destinationId: id))
             destinationId = id
-            estimate = nil
+            slice.forget()
         } catch let failure as CompanionError { problem = failure.message; return }
         catch { problem = CompanionError.unreachable.message; return }
         busy = nil
@@ -300,23 +308,25 @@ struct PrintSheet: View {
         } catch { problem = CompanionError.unreachable.message }
     }
 
+    /// The model, printer and settings an estimate is for. Only an estimate for exactly these is shown.
+    private var estimateKey: String { "\(project?.mediaVersion ?? 0)#\(destinationId)#\(quality)#\(strength)" }
+    /// The slice estimate on screen: always for these settings, or pending.
+    private var estimate: SliceEstimate? { slice.estimate(for: estimateKey) }
+
     /// The slice with exactly these settings (PR 2 of KAN-214). An older Mac keeps the pass's own estimate.
     private func refreshEstimate() async {
         guard !destinationId.isEmpty, project?.current != nil else { return }
-        let key = "\(destinationId)#\(quality)#\(strength)"
-        // An estimate for other settings is never shown as this one's.
-        if estimateKey != key { estimate = nil }
-        estimateKey = key; estimating = true
-        defer { if estimateKey == key { estimating = false } }
+        let key = estimateKey
+        slice.start(key)
         do {
             let next = try await store.mac.client.estimate(projectId, destinationId: destinationId,
                                                            quality: printer?.offersQuality == true ? quality : .standard,
                                                            strength: printer?.offersStrength == true ? strength : .standard)
-            guard !Task.isCancelled, estimateKey == key else { return }
-            estimate = next
+            guard !Task.isCancelled else { return }
+            slice.finish(key, next)
         } catch let failure as CompanionError {
-            guard !Task.isCancelled, estimateKey == key, !failure.isUnsupported, failure.code != "cancelled" else { return }
-            problem = failure.message
+            guard !Task.isCancelled, failure.code != "cancelled" else { return }
+            if failure.isUnsupported { slice.unsupported(key) } else { slice.fail(key, failure.message) }
         } catch {}
     }
 
@@ -468,3 +478,33 @@ struct FlowRow: Layout {
         }
     }
 }
+
+/// What the plate preview's estimate shows: a slice for exactly these settings, pending while it runs, or the
+/// failure. The pass's own estimate stands in only on a Mac without the estimate route.
+struct EstimateState: Equatable {
+    enum Shown: Equatable { case pending, failed(String), ready(seconds: Double?, grams: Double?, layers: Int?) }
+    private(set) var key = ""
+    private(set) var result: SliceEstimate?
+    private(set) var failure: String?
+    private(set) var older = false
+
+    mutating func start(_ key: String) {
+        if key != self.key { result = nil; failure = nil }
+        self.key = key
+    }
+    mutating func finish(_ key: String, _ estimate: SliceEstimate) { guard key == self.key else { return }; result = estimate; failure = nil }
+    mutating func fail(_ key: String, _ message: String) { guard key == self.key else { return }; result = nil; failure = message }
+    mutating func unsupported(_ key: String) { guard key == self.key else { return }; older = true }
+    mutating func forget() { key = ""; result = nil; failure = nil }
+
+    func estimate(for key: String) -> SliceEstimate? { key == self.key ? result : nil }
+
+    func shown(for key: String, fallback: Project.PrintEstimate?) -> Shown {
+        if older { return .ready(seconds: fallback?.seconds, grams: fallback?.grams, layers: nil) }
+        guard key == self.key else { return .pending }
+        if let result { return .ready(seconds: result.seconds, grams: result.grams, layers: result.layers) }
+        if let failure { return .failed(failure) }
+        return .pending
+    }
+}
+

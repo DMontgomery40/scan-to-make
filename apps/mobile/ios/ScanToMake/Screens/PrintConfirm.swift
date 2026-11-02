@@ -48,11 +48,10 @@ struct PrintConfirmSheet: View {
                         if let problem { Label(problem, systemImage: "exclamationmark.triangle.fill").font(.subheadline).foregroundStyle(.red) }
                     }
                     .padding(20)
-                    .padding(.bottom, 100)
                     .frame(maxWidth: 640)
                     .frame(maxWidth: .infinity)
                 }
-                .safeAreaInset(edge: .bottom) {
+                .safeAreaBar(edge: .bottom) {
                     VStack(spacing: 8) {
                         Button { answer(.accept) } label: {
                             Text(working ? "Starting…" : "Start Print").fontWeight(.semibold).frame(maxWidth: .infinity).frame(height: 44)
@@ -175,6 +174,16 @@ struct AnswerOnMacSheet: View {
                 Text("\(via) needs an answer before it prints \(ProjectWords.title(project)), and Counterpart can't show that kind of question yet.")
                     .font(.body).foregroundStyle(.secondary).multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
                     .padding(.top, 8).padding(.horizontal, 28)
+                Group {
+                    if store.macCapabilities.contains("genericConfirmations") {
+                        Text("Answer it on \(store.macName ?? "your Mac").").fontWeight(.semibold)
+                    } else {
+                        Text("Counterpart can't answer this kind on your Mac yet either, so the way on is to stop this print.")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .font(.subheadline).multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 8).padding(.horizontal, 28)
                 HStack(spacing: 12) {
                     Image(systemName: "clock").foregroundStyle(.secondary)
                     Text("Waiting on \(store.macName ?? "your Mac")").font(.subheadline)
@@ -279,7 +288,8 @@ struct ConfirmationFieldView: View {
         case .string:
             VStack(alignment: .leading, spacing: 8) {
                 label
-                TextField(field.title, text: Binding(get: { if case .string(let s) = value { s } else { "" } }, set: { value = $0.isEmpty ? nil : .string($0) }))
+                // Cleared is `.null`: the person emptied it, so its default doesn't come back.
+                TextField(field.title, text: Binding(get: { if case .string(let s) = value { s } else { "" } }, set: { value = $0.isEmpty ? .null : .string($0) }))
                     .textFieldStyle(.roundedBorder)
                     .keyboardType(field.format == "email" ? .emailAddress : field.format == "uri" ? .URL : .default)
                     .textInputAutocapitalization(field.format == nil ? .sentences : .never)
@@ -291,7 +301,13 @@ struct ConfirmationFieldView: View {
                 TextField(field.title, text: $text)
                     .textFieldStyle(.roundedBorder)
                     .keyboardType(field.type == .integer ? .numberPad : .decimalPad)
-                    .onChange(of: text) { _, new in value = Double(new.replacingOccurrences(of: ",", with: ".")).map(JSONValue.number) }
+                    // Empty is cleared (`.null`); text that isn't a number yet stays text, which blocks Start Print until it is.
+                    .onChange(of: text) { _, new in
+                        let trimmed = new.trimmingCharacters(in: .whitespaces)
+                        if trimmed.isEmpty { value = .null }
+                        else if let number = Double(trimmed.replacingOccurrences(of: ",", with: ".")) { value = .number(number) }
+                        else { value = .string(trimmed) }
+                    }
                     .onAppear { if case .number(let n) = value { text = field.type == .integer ? String(Int(n)) : String(n) } }
                 limits
             }

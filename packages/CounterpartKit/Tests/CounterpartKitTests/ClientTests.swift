@@ -214,6 +214,24 @@ final class CompanionClientTests: XCTestCase {
         XCTAssertEqual(none, [], "an older Mac lists none")
     }
 
+    func testCreateSendsTheKindYouPicked() async throws {
+        var bodies: [[String: Any]] = []
+        let fake = FakeTransport { request, _ in
+            bodies.append((request.httpBody.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }) ?? [:])
+            return json(201, ["object": ["id": "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a01", "createdAtMs": 1, "updatedAtMs": 1, "state": "new", "photos": [], "passes": []]])
+        }
+        let c = try client(fake)
+        _ = try await c.create("A hook", kind: "fit")
+        _ = try await c.create("", kind: "copy")
+        _ = try await c.create("A hook")
+        _ = try await c.create("A hook", kind: "sculpt")
+        XCTAssertEqual(bodies[0]["kind"] as? String, "fit")
+        XCTAssertEqual(bodies[1]["kind"] as? String, "copy")
+        XCTAssertNil(bodies[1]["instructions"])
+        XCTAssertNil(bodies[2]["kind"], "no card picked and no scan: the Mac infers it")
+        XCTAssertNil(bodies[3]["kind"], "only fit or copy is sent")
+    }
+
     func testScopes() {
         let id = "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a01"
         XCTAssertEqual(CompanionClient.scope("GET", "/v1/objects"), "projects:read")
