@@ -6,7 +6,7 @@ The Mac app administers its companion through a Unix domain socket. The phone AP
 
 An authenticated companion starts `<auth directory>/control.sock`. `SCAN_TO_MAKE_CONTROL_SOCKET` can override this with an absolute pathname for isolated installations. There is no TCP fallback. The immediate directory must be owned by the companion user and have no group/other permissions; the socket is mode `0600`. Existing unrelated files, symlinks and live sockets are never replaced. A process lock serializes startup; a refused stale socket owned by the same user can be reclaimed. Shutdown removes the listening socket.
 
-Use UTF-8 NDJSON, **one request and one reply per connection**. Keep reading after sending the newline; half-closing the write side is supported. Request maximum is 64 KiB including newline; reply maximum is 8 MiB including newline. Connection deadline is 10 seconds, with at most 16 connected or executing requests. Unix paths are limited to 103 UTF-8 bytes for macOS portability. The socket boundary trusts the current OS user, not arbitrary local users or browsers.
+Use UTF-8 NDJSON, **one request and one reply per connection**. Keep reading after sending the newline; half-closing the write side is supported. Request maximum is 64 KiB including newline; reply maximum is 8 MiB including newline. Connection deadline is 10 seconds (longer for `events.wait` and `objects.estimate`, see below), with at most 16 connected or executing requests. Unix paths are limited to 103 UTF-8 bytes for macOS portability. The socket boundary trusts the current OS user, not arbitrary local users or browsers.
 
 ```json
 {"v":1,"id":"00000000-0000-4000-8000-000000000001","method":"status.get","params":{}}
@@ -52,6 +52,66 @@ Rows sort by `(kind, job ID)` with a cursor bound to the project filter. Each pa
 - Blender requires exactly one retained, verified `.blend` artifact in a handoff. Existing cleanup OBJ files are **not** presented as editable `.blend` files. Project editing/import/watch behavior belongs to MAC-7; until its prepared artifact exists, the door returns `unavailable`.
 - Desktop open doors return a fresh editable copy under `<parent of auth directory>/door-copies/open-*/`, with a private directory and mode `0600` file. The bytes are verified before copying. Saving in the editor cannot invalidate the retained bundle or jobs index. Copies remain for the user to save or remove; no automatic re-import or deletion is performed.
 - A missing desktop application returns `ControlClientError.unavailable`; no alternate application or shell command is tried. Handoff `projectRevision` is `null` because the manifest has no project association.
+
+## Objects, printers, events and devices
+
+The Mac app shows the same projects as the phone and drives them through these methods. Field shapes are those of [objects-api.md](objects-api.md) and [events.md](events.md); wire schemas are in `@scan-to-make/contracts/counterpart`, with samples in `packages/contracts/fixtures/counterpart-v1.json`. Each `{object}` result is the phone's object plus `directory`, the project's folder on this Mac (renders, model, frames and Ask pictures are read from there). Refusals a person should read come back as `conflict` with the sentence as `message`. "PR *n*" marks the KAN-214 pull request that adds a method or field; until then the method is rejected as `invalid-request`. Check the `status.get` capability flags instead of the version.
+
+### `status.get` capability flags
+
+`capabilities` gains these booleans, each true once its PR is in the running companion:
+
+| Flag | Meaning | Status |
+|---|---|---|
+| `objectsCreate` | `objects.create`, `objects.addFile` and `objects.correct` `photos` | PR 1 |
+| `printSettings` | `objects.print` settings, `objects.estimate`, destination `state` and `capabilities`, `objects.answerPlate` answers, `settings.*` | PR 2 |
+| `printControl` | `objects.pausePrint`, `objects.resumePrint`, `objects.cancelPrint`, `objects.camera`, `printers.camera`, the print monitor | PR 2 |
+| `events` | `events.wait`, `liveActivity.tokens`, device `model` and `lastSeenAt`, object `status` | PR 3 |
+| `structuredPasses` | object `title`, `kind`, `ask`, `current.changes`, pass `stages` and `estimate`, the design engine | PR 4 |
+
+### Methods
+
+| Method | Parameters | Result | Status |
+|---|---|---|---|
+| `objects.list` | `{}` | `{objects: [object]}` | |
+| `objects.get` | `{id}` | `{object}` | |
+| `objects.create` | `{instructions?: string ≤ 8000, kind?: "fit"\|"copy"}` | `{object}` (`kind` from PR 4) | PR 1 |
+| `objects.addFile` | `{id, kind: "photos"\|"scan", path}` | `{object}` | PR 1 |
+| `objects.start` | `{id}` | `{object}` | |
+| `objects.correct` | `{id, note: string 1–4000, photos?: [path] ≤ 24}` | `{object}`: a new pass (`photos` PR 1) | |
+| `objects.answerCloseup` | `{id, bestGuess: boolean, text?: string ≤ 2000}` | `{object}`: a new pass (`text` PR 4) | |
+| `objects.delete` | `{id}` | `{deleted: true}` | |
+| `objects.passActivity` | `{id, index}` | `{activity}` | |
+| `objects.printers` | `{}` | `{defaultDestinationId, destinations: [PrinterDestination]}`; `origin`, `state`, `stateCheckedAt`, `capabilities` from PR 1 | |
+| `objects.selectPrinter` | `{id, destinationId}` | `{object}` | |
+| `objects.filaments` | `{id}` | `{filaments}`; `suggested` from PR 2 | |
+| `objects.estimate` | `{id, destinationId?, quality?: "draft"\|"standard"\|"fine", strength?: "standard"\|"strong"\|"max"}` | `PrintEstimate` `{destinationId, quality, strength, seconds?, grams?, layers?, layerHeightMm?, infillPercent?, wallLoops?, slicedAt}` | PR 2 |
+| `objects.print` | `{id, checked?, filament?, quality?, strength?, colour?: {auto: true}\|{amsSlot}\|{external: true}\|{material}, plateCheck?: boolean}` | `{object}` (settings PR 2) | |
+| `objects.answerPrintConfirmation` | `{id, confirmationId, answer}` | `{object}` | |
+| `objects.answerPlate` | `{id, answer?: "clear"\|"look-again", note?: string ≤ 200}` (default `clear`) | `{object}` (answers PR 2) | |
+| `objects.pausePrint`, `objects.resumePrint`, `objects.cancelPrint` | `{id}` | `{object}` | PR 2 |
+| `objects.camera` | `{id}` | `{format: "jpeg", base64, capturedAt}` from the project's printer | PR 2 |
+| `printers.camera` | `{destinationId}` | `{format: "jpeg", base64, capturedAt}` | PR 2 |
+| `settings.get` | `{}` | `{settings: {milestones}}` | PR 2 |
+| `settings.set` | `{milestones: "off"\|"50"\|"25-50-75"\|"every-10"}` | `{settings}` | PR 2 |
+| `events.wait` | `{after: integer ≥ 0, timeoutMs?: 0–25000 (default 25000), limit?: 0–500}` | `EventsPage` `{events, next, latest, truncated?, reset?}` | PR 3 |
+| `liveActivity.tokens` | `{}` | `{pushToStart: [{deviceId, token, updatedAt}], activities: [{printId, deviceId, token, updatedAt}]}` | PR 3 |
+| `devices.list` | `{}` | as above, each device also with `model?` (the phone's `X-Scan-Device-Model`) and `lastSeenAt?` (ms of its last authenticated request) | PR 3 for the two fields |
+
+**Deadlines.** Every connection still carries one request. Its deadline is 10 s, except `events.wait` (its `timeoutMs` plus 5 s) and `objects.estimate` (180 s, because it slices). A camera read gives up after 10 s.
+
+**`objects.addFile`.** `path` is an absolute path on this Mac: the companion reads the file itself because requests are capped at 64 KiB. It must be a regular file (a symlink is followed), its extension and first bytes must agree, and:
+
+| `kind` | Accepted | Limit | Stored as | When |
+|---|---|---|---|---|
+| `photos` | `.jpg`/`.jpeg`, `.png`, `.heic` | 25 MiB | its own file name under `photos/` (a `-2`, `-3`… suffix when taken) | any state; a photo added while a pass runs is used by the next pass |
+| `scan` | `.stl`, `.3mf`, `.usdz` | 64 MiB | `scan/scan.<ext>` | only while `state` is `new` |
+
+The file is copied; the original is never changed. Then call `objects.start`. A wrong type or size is `conflict` with a sentence; a missing or unreadable file is `not-found`. `objects.correct` `photos` takes the same photo paths and adds them before the new pass starts.
+
+**`objects.estimate`.** Slices the current model with the same settings a Print would use, through the destination's MCP session; it never prints. The default destination is the project's chosen printer. A repeated call with the same model and settings returns the cached estimate at once. Quality or strength the MCP can't apply is `conflict` with a sentence naming the update.
+
+**Plate answers.** `look-again` retakes a frame and judges it again (`plate.checking` is true meanwhile). `clear` hides the alert and remembers, for that printer, that what was seen is not an obstruction; the note is added to future plate checks for that printer. Neither answers the printer MCP's own confirmation: that always takes `objects.answerPrintConfirmation`.
 
 ## Swift integration
 

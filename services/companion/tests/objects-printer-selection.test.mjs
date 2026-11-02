@@ -23,7 +23,8 @@ async function fixture(t) {
     {id: 'current', name: 'Current printer', backend: current.backend, source: 'current'},
     {id: 'second', name: 'Other printer', backend: second.backend, source: 'mcp-profile', address: 'second.local'},
   ];
-  const catalog = {destinations, defaultDestinationId: 'current', resolve: id => id === 'current' ? structuredClone(current) : id === 'second' ? structuredClone(second) : undefined};
+  const catalog = {destinations, defaultDestinationId: 'current', resolve: id => id === 'current' ? structuredClone(current) : id === 'second' ? structuredClone(second) : undefined,
+    canonical: id => ['current', 'second'].includes(id) ? id : undefined};
   const calls = [], answers = [], routes = new Map();
   for (const destination of destinations) {
     const config = catalog.resolve(destination.id), relay = new InMemoryElicitationRelay({timeoutMs: 2000});
@@ -46,7 +47,7 @@ async function fixture(t) {
   await mkdir(join(store.dir(object.id), 'current'));
   await writeFile(join(store.dir(object.id), 'current', 'model.stl'), STL);
   await store.update(object.id, o => ({...o, state: 'ready', current: {model: 'current/model.stl', renders: []}}));
-  return {service, store, object, calls, answers, catalog};
+  return {service, store, object, calls, answers, catalog, routes};
 }
 
 test('selected printer dispatches through its own runner and confirmation relay; a running job cannot be retargeted', async t => {
@@ -157,4 +158,14 @@ test('the phone and local control expose the same destination ids without MCP co
   assert.deepEqual(scopes, ['projects:read', 'printer-handoff:use']);
   const publicData = JSON.stringify({catalog: await service.printers(), object: publicObject(await service.get(object.id))});
   for (const privateValue of ['private-current-token', 'private-other-key', '/usr/bin/ssh', '/absolute/other-mcp', 'process', 'args']) assert.equal(publicData.includes(privateValue), false);
+});
+
+test('a print recorded against a destination that became a duplicate still reads its printer through the winner', async t => {
+  const {service, store, object, catalog, routes} = await fixture(t);
+  catalog.canonical = id => id === 'old-duplicate' ? 'second' : ['current', 'second'].includes(id) ? id : undefined;
+  for (const [id, route] of routes) route.runner.status = async () => ({connected: true, raw: {gcode_state: 'RUNNING'}, print: {filename: `job on ${id}`, progress: 10}});
+  await store.update(object.id, o => ({...o, state: 'printing', print: {bundleId: '00000000-0000-4000-8000-000000000001', destination: {id: 'old-duplicate', name: 'Old'}}}));
+  const loaded = await service.get(object.id);
+  assert.equal(loaded.print.printerStatus.job, 'job on second');
+  assert.equal(loaded.print.destination.id, 'old-duplicate', 'history is not rewritten');
 });

@@ -81,7 +81,8 @@ function prompt(pass: TouchupPass, instructions?: string, note?: string, summary
        ...(currentModel ? ['The current model is an STL already in millimetres: import and export it at scale 1.'] : [])].join('\n\n')
     : instructions?.trim() || TOUCHUP_INSTRUCTION;
   const files = [
-    ...(pass.scanPaths.length ? [`- Scan: ${pass.scanPaths.join(', ')}`] : []),
+    ...(pass.scanPaths.length ? [`- Scan: ${pass.scanPaths.join(', ')}${!currentModel && pass.scanPaths.some(path => /\.(stl|3mf)$/i.test(path))
+      ? ' (a model file the person added on their Mac, usually in millimetres: check its size with get_stl_info before editing)' : ''}`] : []),
     ...(pass.photoPaths.length ? [`- Photos: ${join(pass.photosDir, 'photo-01.jpg')} … photo-${String(pass.photoPaths.length).padStart(2, '0')}.jpg`] : []),
     `- Checkpoints folder: ${pass.checkpointsDir}`,
     `- Output folder: ${pass.outDir}`,

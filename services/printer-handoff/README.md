@@ -18,6 +18,19 @@ This package does not reimplement slicing or printer control.
   call arguments against the discovered schemas (the two servers disagree on
   some argument shapes), and declares MCP elicitation support when a relay is
   supplied.
+- `PrinterSession` / `PrinterSessionPool` — one long-lived MCP connection per
+  printer destination (PRD §8.3), shared by every call to it. Holders keep it
+  open; it closes 120 s after the last holder and call. A lost connection is
+  reopened by the next call after a 1, 2, 5, 15 then 30 s backoff. Reads run
+  concurrently; calls that change the printer or can ask a question
+  (`MUTATING_TOOLS`, or any call given an elicitation context) take turns
+  through a per-destination mutex, and only the mutex holder tags the
+  server's questions. A runner without a session opens a one-shot session per
+  operation, as before.
+- `counterpart.ts` — zod schemas for the `counterpart/1` tools
+  (`counterpart_printer_info`, `counterpart_print_progress`), the
+  `get_printer_status` fallback for older installs, and capability detection
+  with the "Update <MCP> to …" message.
 - `InMemoryElicitationRelay` — turns each server elicitation into a pending
   confirmation with an id. `respond(id, answer)` answers it; a timeout
   resolves as `cancel`. Nothing is ever answered automatically.

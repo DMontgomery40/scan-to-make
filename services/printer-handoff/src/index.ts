@@ -4,3 +4,5 @@ export * from './elicitation.js';
 export * from './mcp-client.js';
 export * from './print.js';
 export * from './slice-estimate.js';
+export * from './session.js';
+export * from './counterpart.js';

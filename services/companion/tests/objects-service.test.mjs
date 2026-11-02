@@ -93,11 +93,16 @@ test('a second start while touching up does nothing', async () => {
   assert.equal(calls.length, 1);
 });
 
-test('photos can only be added before starting or when asked for a close-up', async () => {
-  const {service, object} = await setup(undefined, {delayMs: 50});
+test('a photo added while a pass runs is kept for the next pass and leaves the running one alone', async () => {
+  const {service, object, calls} = await setup(undefined, {delayMs: 50});
   await service.start(object.id);
-  await assert.rejects(service.addPhoto(object.id, 'late.jpg', Buffer.from('x')), InvalidStateError);
+  const late = await service.addPhoto(object.id, 'late.jpg', Buffer.from('x'));
+  assert.ok(late.photos.includes('late.jpg'));
+  assert.equal(calls[0].photos.some(path => path.endsWith('late.jpg')), false);
   await service.settled(object.id);
+  await service.correct(object.id, 'Use the new photo.');
+  await service.settled(object.id);
+  assert.ok(calls.at(-1).photos.some(path => path.endsWith('late.jpg')));
 });
 
 test('a correction runs from the current model with the note, the last summary and the original instructions', async () => {

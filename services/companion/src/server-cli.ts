@@ -14,7 +14,8 @@ import { instanceName } from './bonjour.js';
 import { computerName, discoverAddresses, localHostName } from './lan-addresses.js';
 import { RemoteAuthStore } from './remote-auth.js';
 import { createPrintHandoffServices } from './print-handoff-http.js';
-import { readPrinterHandoffConfig } from '@scan-to-make/printer-handoff';
+import { PrinterSessionPool, readPrinterHandoffConfig } from '@scan-to-make/printer-handoff';
+import { PrinterDirectory } from './printing/directory.js';
 import {startLocalControl} from './local-control.js';
 import {createControlDispatcher, companionVersion} from './local-control-services.js';
 import type {CaptureServices} from './capture-http.js';
@@ -54,7 +55,11 @@ if((handoffConfigPath===undefined)!==(handoffDirectory===undefined))throw new Er
 if(handoffConfigPath!==undefined&&(!remoteAuth||!isAbsolute(handoffConfigPath)||!isAbsolute(handoffDirectory!)))throw new Error('Printer handoff requires authentication and absolute config and directory paths');
 const handoffConfig=handoffConfigPath===undefined?undefined:await readPrinterHandoffConfig(handoffConfigPath);
 const printerCheck=handoffConfig===undefined?undefined:createPrinterCheck(handoffConfig);
-const printHandoff=handoffConfig===undefined?undefined:createPrintHandoffServices(handoffConfig,handoffDirectory!);
+// PRD §8.3: one long-lived MCP session per printer destination, shared by every call to it.
+const printerPool=new PrinterSessionPool();
+let printerDirectory:PrinterDirectory|undefined;
+const onConnect=(destinationId:string)=>(catalog:import('@scan-to-make/printer-handoff').PrinterToolCatalog)=>printerDirectory?.connected(destinationId,catalog);
+const printHandoff=handoffConfig===undefined?undefined:createPrintHandoffServices(handoffConfig,handoffDirectory!,{pool:printerPool,destinationId:'current',onConnect:onConnect('current')});
 // Objects: the touch-up runs through the user's own printer MCP and their own Claude login. Needs both.
 const claudePath=process.env.SCAN_TO_MAKE_CLAUDE_PATH||undefined;
 if(claudePath!==undefined&&!isAbsolute(claudePath))throw new Error('SCAN_TO_MAKE_CLAUDE_PATH must be absolute');
@@ -63,11 +68,13 @@ if(handoffConfig&&printHandoff&&captureDirectory&&claudePath){
   const objectStore=new ObjectStore(join(captureDirectory,'objects'));
   await objectStore.recoverInterrupted();
   const printerCatalog=await loadPrinterCatalog(handoffConfig);
+  // `current` is the Mac app's own config and keeps the phone handoff route's services.
   const destinations=new Map(printerCatalog.destinations.map(destination=>{
     const config=printerCatalog.resolve(destination.id)!;
-    return [destination.id,destination.id===printerCatalog.defaultDestinationId?printHandoff:createPrintHandoffServices(config,handoffDirectory!)] as const;
+    return [destination.id,destination.id==='current'?printHandoff:createPrintHandoffServices(config,handoffDirectory!,{pool:printerPool,destinationId:destination.id,onConnect:onConnect(destination.id)})] as const;
   }));
-  objects=new ObjectService({store:objectStore,runTouchup:input=>runTouchup(input),claudePath,handoff:handoffConfig,printerCatalog,
+  printerDirectory=new PrinterDirectory(printerCatalog,id=>destinations.get(id)?.runner.session);
+  objects=new ObjectService({store:objectStore,runTouchup:input=>runTouchup(input),claudePath,handoff:handoffConfig,printerCatalog,printers:printerDirectory,
     stlInfo:path=>printerStlSize(handoffConfig,path),
     print:{services:printHandoff,destinations,judgePlate:photo=>judgePlate(photo,claudePath)}});
 }
@@ -129,7 +136,7 @@ process.stdout.write(
 for (const signal of ['SIGINT', 'SIGTERM'] as const)
   process.once(signal, () => {
     modelAccess?.close();
-    void Promise.all([printerCheck?.close(),control?.close(),server.close()]).catch(() => {
+    void Promise.all([printerCheck?.close(),control?.close(),server.close()]).then(()=>printerPool.close()).catch(() => {
       process.exitCode = 1;
     });
   });
