@@ -58,14 +58,10 @@ public struct PrintActivitySnapshot: Equatable, Sendable {
         guard let print = project.print, let id = print.printId else { return nil }
         let live = print.live
         observedAt = live?.observedAtDate ?? Date(timeIntervalSince1970: project.updatedAtMs / 1000)
-        let state: String
-        switch print.monitor?.endState {
-        case "done": state = "finished"
-        case "failed", "not-started": state = "failed"
-        case "cancelled", "replaced": state = "cancelled"
-        default:
-            if [.printed, .confirmed].contains(project.state) { state = "finished" }
-            else { state = live?.state ?? print.printerStatus?.state ?? (project.state == .printing ? "printing" : "") }
+        let state = Self.normalizedState(projectState: project.state.rawValue, outcome: print.monitor?.endState,
+            reported: live?.state ?? print.printerStatus?.state)
+        if ["finished", "failed", "cancelled"].contains(state) {
+            observedAt = max(observedAt, Date(timeIntervalSince1970: project.updatedAtMs / 1000))
         }
         guard ["preparing", "printing", "paused", "finished", "failed", "cancelled", "offline", "busy"].contains(state) else { return nil }
         attributes = .init(projectId: project.id, printId: id, title: project.title ?? "Your print", printerName: print.destination?.name ?? "Your printer")
@@ -73,6 +69,19 @@ public struct PrintActivitySnapshot: Equatable, Sendable {
             layer: live?.job?.layer ?? 0, totalLayers: live?.job?.totalLayers ?? 0,
             endsAt: live?.endsAtDate ?? now.addingTimeInterval(live?.job?.remainingSec ?? print.printerStatus?.remainingMinutes.map { $0 * 60 } ?? 0),
             stage: live?.job?.stage ?? "", problem: live?.problems?.first?.message)
+    }
+
+    /// A monitor outcome belongs to this print; the printer's last report may already describe another job.
+    public static func normalizedState(projectState: String?, outcome: String?, reported: String?) -> String {
+        switch outcome {
+        case "done": return "finished"
+        case "failed", "not-started": return "failed"
+        case "cancelled", "replaced": return "cancelled"
+        default:
+            if ["printed", "confirmed"].contains(projectState) { return "finished" }
+            if projectState == "failed" { return "failed" }
+            return reported ?? (projectState == "printing" ? "printing" : "")
+        }
     }
 
     public func shouldStart(foreground: Bool, dismissed: Set<String>) -> Bool {

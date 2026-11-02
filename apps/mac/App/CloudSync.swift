@@ -249,14 +249,7 @@ import ControlKit
             record["confirmationExpiresAt"] = confirmation.map { Date(timeIntervalSince1970: $0.expiresAtMs / 1000) }
             record["confirmationSupported"] = confirmation.map { $0.supported ? 1 : 0 }
             record["confirmationFields"] = confirmation.flatMap { MirroredConfirmation.fieldsJSON($0.fields) }
-            if let print = project.print {
-                record["printId"] = print.printId
-                record["printerName"] = print.destination?.name
-                record["printState"] = print.live?.state ?? print.printerStatus?.state
-                record["progress"] = print.live?.job?.progress ?? print.printerStatus?.percent
-                record["remainingSec"] = print.live?.job?.remainingSec ?? print.printerStatus?.remainingMinutes.map { $0 * 60 }
-                record["endsAt"] = print.live?.endsAt.flatMap(CounterpartEvent.parse)
-            }
+            PrintActivitySnapshot.mirror(project, into: record)
             if let render = project.renderURLs.first, let version = Self.version(render), defaults.string(forKey: "cloud.thumb.\(project.id)") != version,
                let jpeg = Self.frameJPEG(render, longEdge: 640) {
                 temporary.append(jpeg)

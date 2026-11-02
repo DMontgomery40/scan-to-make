@@ -52,7 +52,9 @@ The Mac deletes its own event records 7 days after `createdAt` (a daily sweep ov
 | `confirmationFields` | String? | JSON `[{name, title, description?, required}]`; an accept sets every required one to `true` in `answer.content` |
 | `printId` | String? | |
 | `printerName` | String? | |
-| `printState` | String? | the printer's state (`printing`, `paused`, …) |
+| `printState` | String? | normalized activity state; a terminal monitor outcome overrides an old printer report |
+| `projectState` | String? | raw project state; `failed`, `printed`, and `confirmed` also settle the activity |
+| `printOutcome` | String? | monitor outcome (`done`, `failed`, `not-started`, `cancelled`, `replaced`, `sent`); consumed before the raw printer report |
 | `progress` | Double? | 0–100 |
 | `remainingSec` | Double? | |
 | `endsAt` | Date? | |
