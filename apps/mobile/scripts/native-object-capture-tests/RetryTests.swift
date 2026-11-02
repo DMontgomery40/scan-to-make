@@ -90,6 +90,13 @@ struct ChosenPhoto: Equatable { var id: String }
     var sending: Set<String> = []
     var failure: Error?
     var latest: Project?
+    private var request = 0
+    func startRequest() -> Int { request += 1; return request }
+    @discardableResult func replace(_ project: Project, ticket: Int) -> Bool {
+        guard ticket == request else { return false }
+        latest = project
+        return true
+    }
     func replace(_ project: Project) { latest = project }
     func sendInBackground(_ id: String, _ body: @escaping @MainActor () async throws -> Void) async {
         sending.insert(id)
