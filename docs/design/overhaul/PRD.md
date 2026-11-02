@@ -110,15 +110,17 @@ Each principle is taken from what Apple rewarded in 2026; sources are in [resear
 
 ### 5.1 Home
 
+**No screen is titled "Counterpart".** David, 2026-11-02: "it looks like it's printing a part called counterpart, i mean, there is not difference in the fonts. and since 3d printing involves printing parts, having it as it is makes it looks like not the name of the app". Like Apple's own apps (Photos says "Library", Music says "Home"), a large title names the screen, never the app; the app icon carries the brand. The app name appears only on Welcome, About and the Mac's menu bar and window chrome. The mockup screenshots below still show the old "Counterpart" title.
+
 Screenshot: `screens/phone-home.jpg`.
 Screenshot, empty state: `screens/phone-home-empty.jpg`.
 
-- **Title area.** A large "Counterpart" title, with the subtitle "*Mac name* connected · *N* printers ready". Top-trailing holds a Printers button with a badge for printer problems, and the account and settings button. Those are the only items at the top, and neither starts work.
+- **Title area.** A large "Projects" title, with the subtitle "*Mac name* connected · *N* printers ready". Top-trailing holds a Printers button with a badge for printer problems, and the account and settings button. Those are the only items at the top, and neither starts work.
 - **Now.** One card for each job that's running:
   - **Printing:** live camera thumbnail, percent, layer, time left, and filament chip.
   - **Working:** model thumbnail, stage in plain words, estimate, and step *n* of *m*.
 - **Needs you.** One card for each open Ask, with the question, its picture, and the **Camera**, **Photos** and **Best guess** buttons inline. You can answer without opening the project.
-- **Projects.** A two-column grid of real renders, each with a status capsule. Ready projects come first, then the rest by recency.
+- **All projects.** A two-column grid of real renders, each with a status capsule. Ready projects come first, then the rest by recency.
 - **Bottom toolbar:**
   - search ("Projects, printers, notes"), using the iOS 27 bottom search placement;
   - a prominent **New** button at the bottom trailing edge, in the accent colour. It's the only prominent control on the screen.
