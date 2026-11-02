@@ -31,6 +31,7 @@ struct ModelStage: View {
     /// Optional companion still while the local model poster loads.
     var poster: URL? = nil
     @State private var still: CGImage?
+    @State private var stillIdentity: String?
     @State private var live = false
     @State private var lastTouch = Date.distantPast
     @State private var visible = true
@@ -48,7 +49,7 @@ struct ModelStage: View {
                 realityView
                     .simultaneousGesture(DragGesture(minimumDistance: 0).onChanged { _ in touch() })
                     .simultaneousGesture(MagnifyGesture().onChanged { _ in touch() })
-            } else if let still {
+            } else if let still, stillIdentity == imageIdentity {
                 Image(decorative: still, scale: 1).resizable().scaledToFit()
                     .contentShape(Rectangle())
                     .gesture(DragGesture(minimumDistance: 2).onChanged { _ in wake() })
@@ -75,15 +76,20 @@ struct ModelStage: View {
         }
         .task(id: "\(imageIdentity)#\(visible)") {
             guard visible else { return }
+            let requestedIdentity = imageIdentity
+            // Uncovering a window does not need a GPU model when its still is
+            // already current. File-version/framing changes must still reload.
+            if stillIdentity == requestedIdentity, still != nil { return }
             failed = false
             let loaded = await Self.cached(url, version: version)
             guard !Task.isCancelled else { return }
             guard let model = loaded else { failed = poster == nil; return }
             let image = await ModelPoster.image(key: imageIdentity, model: model, yaw: yaw, pitch: pitch, fit: fit)
             guard !Task.isCancelled else { return }
-            still = image; failed = image == nil && poster == nil
+            still = image; stillIdentity = requestedIdentity
+            failed = image == nil && poster == nil
         }
-        .onChange(of: imageIdentity) { _, _ in still = nil; live = false }
+        .onChange(of: imageIdentity) { _, _ in live = false }
         .onHover { hovering = $0 }
         .onWindowVisibilityChange { shown in
             visible = shown
@@ -135,6 +141,7 @@ struct ModelStage: View {
 
     /// Loaded once per file version: going live again reuses the mesh instead of reading and building it again.
     @MainActor private static let cache = ModelEntityCache(limit: 1)
+    @MainActor static func releaseCachedModels() { cache.removeAll() }
     @MainActor static func cached(_ url: URL, version: Double) async -> Entity? {
         await cache.load(key: "\(url.path)#\(version)") { await load(url) }
     }

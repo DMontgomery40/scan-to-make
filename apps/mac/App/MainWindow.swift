@@ -38,8 +38,11 @@ struct MainWindow: View {
         .frame(minWidth: 900, minHeight: 600)
         .tint(.filament)
         // Read the companion only while the window can be seen: hidden, minimized or covered, it stops.
-        .onWindowVisibilityChange { model.setVisible($0) }
-        .onDisappear { model.setVisible(false) }
+        .onWindowVisibilityChange { visible in
+            model.setVisible(visible)
+            if !visible { ModelStage.releaseCachedModels() }
+        }
+        .onDisappear { model.setVisible(false); ModelStage.releaseCachedModels() }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in model.wake() }
         .dropDestination(for: URL.self) { urls, _ in
             let usable = urls.filter { ObjectsModel.fileKind($0) != nil }

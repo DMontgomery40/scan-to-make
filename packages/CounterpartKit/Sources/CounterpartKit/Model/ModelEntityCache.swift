@@ -5,28 +5,36 @@ import RealityKit
 /// Callers receive separate entity hierarchies; mesh resources remain shared.
 @MainActor public final class ModelEntityCache {
     private let limit: Int
-    private var entities: [String: Entity] = [:]
-    private var order: [String] = []
-    private var pending: [String: Task<Entity?, Never>] = [:]
+    private final class Storage {
+        var entities: [String: Entity] = [:]
+        var order: [String] = []
+        var pending: [String: Task<Entity?, Never>] = [:]
+    }
+    private var storage = Storage()
 
     public init(limit: Int) { self.limit = max(1, limit) }
 
+    /// Let hidden windows release their GPU resources. An in-flight load retains
+    /// only its old storage, so it cannot refill the reopened window's cache.
+    public func removeAll() { storage = Storage() }
+
     public func load(key: String, operation: @escaping @MainActor () async -> Entity?) async -> Entity? {
         guard !Task.isCancelled else { return nil }
-        if let entity = entities[key] { return entity.clone(recursive: true) }
-        if let task = pending[key] {
+        let storage = storage
+        if let entity = storage.entities[key] { return entity.clone(recursive: true) }
+        if let task = storage.pending[key] {
             let entity = await task.value
             guard !Task.isCancelled else { return nil }
             return entity?.clone(recursive: true)
         }
         let task = Task { @MainActor in await operation() }
-        pending[key] = task
+        storage.pending[key] = task
         let entity = await task.value
-        pending[key] = nil
+        storage.pending[key] = nil
         if let entity {
-            entities[key] = entity
-            order.removeAll { $0 == key }; order.append(key)
-            while order.count > limit { entities[order.removeFirst()] = nil }
+            storage.entities[key] = entity
+            storage.order.removeAll { $0 == key }; storage.order.append(key)
+            while storage.order.count > limit { storage.entities[storage.order.removeFirst()] = nil }
         }
         guard !Task.isCancelled else { return nil }
         return entity?.clone(recursive: true)
