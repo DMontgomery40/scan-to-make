@@ -1,5 +1,6 @@
 import Foundation
 import simd
+import RealityKit
 
 /// A triangle mesh read from an STL: exactly what will print. STL is Z-up millimetres (as slicers see
 /// it); RealityKit is Y-up metres, so every point is stood upright and scaled. Binary and ASCII STL both
@@ -26,6 +27,36 @@ struct ModelMesh: Sendable, Equatable {
     static func read(_ url: URL) -> ModelMesh? {
         guard let data = try? Data(contentsOf: url, options: .mappedIfSafe) else { return nil }
         return stl(data)
+    }
+
+    /// Feed RealityKit the exact preview triangles without its general-purpose
+    /// MeshDescriptor conversion retaining additional copies of a large scan.
+    @MainActor func resource() async -> MeshResource? {
+        let count = positions.count
+        guard count > 0, count.isMultiple(of: 3), count == normals.count, count <= Int(UInt32.max) else { return nil }
+        let prepared = await Task.detached(priority: .userInitiated) {
+            var vertices: [Float] = []
+            vertices.reserveCapacity(count * 6)
+            for i in 0..<count {
+                let p = positions[i], n = normals[i]
+                vertices.append(contentsOf: [p.x, p.y, p.z, n.x, n.y, n.z])
+            }
+            return (vertices, bounds)
+        }.value
+        guard !Task.isCancelled else { return nil }
+        let descriptor = LowLevelMesh.Descriptor(vertexCapacity: count,
+            vertexAttributes: [.init(semantic: .position, format: .float3, offset: 0), .init(semantic: .normal, format: .float3, offset: 12)],
+            vertexLayouts: [.init(bufferIndex: 0, bufferStride: 24)], indexCapacity: count, indexType: .uint32)
+        guard let mesh = try? LowLevelMesh(descriptor: descriptor) else { return nil }
+        mesh.withUnsafeMutableBytes(bufferIndex: 0) { destination in
+            prepared.0.withUnsafeBytes { destination.copyMemory(from: $0) }
+        }
+        mesh.withUnsafeMutableIndices { bytes in
+            let indices = bytes.bindMemory(to: UInt32.self)
+            for i in 0..<count { indices[i] = UInt32(i) }
+        }
+        mesh.parts.replaceAll([.init(indexCount: count, bounds: .init(min: prepared.1.min, max: prepared.1.max))])
+        return try? await MeshResource(from: mesh)
     }
 
     private static func upright(_ p: SIMD3<Float>) -> SIMD3<Float> { SIMD3(p.x, p.z, -p.y) * 0.001 }
