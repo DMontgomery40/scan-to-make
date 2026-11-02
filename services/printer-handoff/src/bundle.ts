@@ -3,6 +3,7 @@ import {mkdir, open, readFile, readdir, rename, rm, writeFile} from 'node:fs/pro
 import {constants} from 'node:fs';
 import {join, resolve} from 'node:path';
 import {z} from 'zod';
+import {inspectModelFile} from './model-file.js';
 import {printerBackendSchema, printerSelectionSchema, type PrinterBackend, type PrinterSelection} from './config.js';
 
 const digest = z.string().regex(/^[a-f0-9]{64}$/);
@@ -24,13 +25,14 @@ export const handoffManifestSchema = z.strictObject({
   prompt: z.string().max(8000),
   backend: printerBackendSchema,
   selection: printerSelectionSchema.optional(),
-  cleanStl: artifactSchema,
+  cleanStl: artifactSchema.optional(),
+  sourceModel: artifactSchema.extend({format: z.enum(['stl', '3mf'])}).optional(),
   designedStl: artifactSchema.optional(),
   artifacts: z.record(z.string(), artifactSchema),
   status: handoffStatusSchema,
   claimedBy: z.string().max(256).optional(),
   failure: z.string().max(2048).optional(),
-});
+}).refine(value => !!value.cleanStl !== !!value.sourceModel, 'Choose one input artifact');
 export type HandoffManifest = z.infer<typeof handoffManifestSchema>;
 
 const MAX_STL_BYTES = 64 * 1024 * 1024;
@@ -67,26 +69,29 @@ export class HandoffBundleStore {
   directory(id: string): string { return join(this.#root, bundleId.parse(id)); }
   private manifestPath(id: string): string { return join(this.directory(id), 'handoff.json'); }
 
-  async create(input: {stl: Buffer; prompt: string; backend: PrinterBackend; selection?: PrinterSelection}): Promise<HandoffManifest> {
-    if (!Buffer.isBuffer(input.stl) || input.stl.length < 84 || input.stl.length > MAX_STL_BYTES) {
+  async create(input: ({stl: Buffer; model?: never} | {model: {bytes: Buffer; format: 'stl' | '3mf'}; stl?: never}) & {prompt: string; backend: PrinterBackend; selection?: PrinterSelection}): Promise<HandoffManifest> {
+    const bytes = input.model?.bytes ?? input.stl;
+    if (!Buffer.isBuffer(bytes) || bytes.length < 84 || bytes.length > MAX_STL_BYTES) {
       throw new Error('Clean STL byte limit exceeded');
     }
     z.string().max(8000).parse(input.prompt);
     printerBackendSchema.parse(input.backend);
     if (input.selection !== undefined) printerSelectionSchema.parse(input.selection);
     const id = randomUUID();
-    const stl = Buffer.from(input.stl);
+    const stl = Buffer.from(bytes);
+    if (input.model) inspectModelFile(stl, input.model.format);
+    const file = input.model ? `original.${input.model.format}` : 'clean.stl';
     const manifest = handoffManifestSchema.parse({
       schema: 'scan-to-make.printer-handoff/0.1', id, createdAtMs: Date.now(),
       prompt: input.prompt, backend: input.backend,
       ...(input.selection === undefined ? {} : {selection: input.selection}),
-      cleanStl: artifactFor('clean.stl', stl), artifacts: {}, status: 'ready',
+      ...(input.model ? {sourceModel: {...artifactFor(file, stl), format: input.model.format}} : {cleanStl: artifactFor(file, stl)}), artifacts: {}, status: 'ready',
     });
     await mkdir(this.#root, {recursive: true, mode: 0o700});
     const staging = join(this.#root, `.tmp-${id}`);
     await mkdir(staging, {mode: 0o700});
     try {
-      await writeFile(join(staging, 'clean.stl'), stl, {flag: 'wx', mode: 0o600});
+      await writeFile(join(staging, file), stl, {flag: 'wx', mode: 0o600});
       await writeFile(join(staging, 'handoff.json'), JSON.stringify(manifest) + '\n', {flag: 'wx', mode: 0o600});
       await rename(staging, this.directory(id));
     } catch (error) {
@@ -99,7 +104,8 @@ export class HandoffBundleStore {
   async read(id: string): Promise<HandoffManifest> {
     const manifest = handoffManifestSchema.parse(JSON.parse(await readFile(this.manifestPath(id), 'utf8')));
     if (manifest.id !== bundleId.parse(id)) throw new Error('Handoff bundle identity mismatch');
-    await verifyFile(join(this.directory(id), manifest.cleanStl.file), manifest.cleanStl);
+    const source = manifest.sourceModel ?? manifest.cleanStl!;
+    await verifyFile(join(this.directory(id), source.file), source);
     if (manifest.designedStl) await verifyFile(join(this.directory(id), manifest.designedStl.file), manifest.designedStl);
     for (const artifact of Object.values(manifest.artifacts)) {
       await verifyFile(join(this.directory(id), artifact.file), artifact);
@@ -160,8 +166,9 @@ export class HandoffBundleStore {
   async writeDesignedStl(id: string, bytes: Buffer): Promise<HandoffManifest> {
     if (!Buffer.isBuffer(bytes) || bytes.length < 84 || bytes.length > MAX_STL_BYTES) throw new Error('Designed STL byte limit exceeded');
     const current = await this.read(id);
+    if (current.sourceModel) throw new Error('Published originals cannot be replaced by a design pass');
     const copy = Buffer.from(bytes);
-    const owned = new Set([current.cleanStl.file, ...Object.values(current.artifacts).map(artifact => artifact.file)]);
+    const owned = new Set([current.cleanStl!.file, ...Object.values(current.artifacts).map(artifact => artifact.file)]);
     const designedStl = await this.publishReplacement(id, 'designed.stl', copy, current.designedStl, owned);
     const next = handoffManifestSchema.parse({...current, designedStl, status: 'designed'});
     await this.writeManifest(next);
@@ -176,7 +183,7 @@ export class HandoffBundleStore {
     const current = await this.read(id);
     const copy = Buffer.from(bytes);
     const owned = new Set([
-      current.cleanStl.file,
+      (current.sourceModel ?? current.cleanStl!).file,
       ...(current.designedStl ? [current.designedStl.file] : []),
       ...Object.entries(current.artifacts).filter(([key]) => key !== name).map(([, artifact]) => artifact.file),
     ]);
@@ -187,6 +194,6 @@ export class HandoffBundleStore {
   }
 
   stlPath(manifest: HandoffManifest): string {
-    return join(this.directory(manifest.id), (manifest.designedStl ?? manifest.cleanStl).file);
+    return join(this.directory(manifest.id), (manifest.sourceModel ?? manifest.designedStl ?? manifest.cleanStl!).file);
   }
 }

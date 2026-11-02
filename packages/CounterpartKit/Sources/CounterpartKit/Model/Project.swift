@@ -78,6 +78,8 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
     /// Published model attribution and files from the companion, retained for shared search.
     public var credit: JSONValue?
     public var files: JSONValue?
+    public var publishedSelection: PublishedSelection?
+    public struct PublishedSelection: Codable, Equatable, Sendable { public var fileIndex: Int; public var plateIndex: Int; public var sliced: Bool }
     public var completion: Completion?
     public var pendingFollowup: String?
     public var pendingMessageId: String?
@@ -101,7 +103,7 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case id, createdAtMs, updatedAtMs, instructions, state, scan, photos, capture, captureDepth, progress, passes, current, question
-        case failure, canRetryCleanup, print, printerDestinationId, printConfirmation, status, title, kind, ask, directory, settings, outcome, archived, credit, files, completion, pendingFollowup, pendingMessageId, messages, requestPhotos, pendingPhotos
+        case failure, canRetryCleanup, print, printerDestinationId, printConfirmation, status, title, kind, ask, directory, settings, outcome, archived, credit, files, publishedSelection, completion, pendingFollowup, pendingMessageId, messages, requestPhotos, pendingPhotos
     }
 
     /// One odd object never drops out of the list: missing lists are empty, and an optional that doesn't
@@ -122,6 +124,7 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
         completion = optional(Completion.self, .completion)
         credit = optional(JSONValue.self, .credit)
         files = optional(JSONValue.self, .files)
+        publishedSelection = optional(PublishedSelection.self, .publishedSelection)
         instructions = optional(String.self, .instructions)
         scan = optional(String.self, .scan)
         photos = optional([String].self, .photos) ?? []
@@ -354,6 +357,10 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
     public struct Ask: Codable, Equatable, Sendable {
         public var id: String
         public var question: String
+        public var type: String?
+        public var url: String?
+        public var options: [Option]?
+        public struct Option: Codable, Equatable, Sendable, Identifiable { public var id: String; public var label: String; public var detail: String?; public var thumbnail: String? }
         /// `asks/<id>.jpg`, served at `GET /v1/objects/<id>/asks/<askId>.jpg`.
         public var photo: String?
         public var region: Region?

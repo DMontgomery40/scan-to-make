@@ -45,6 +45,37 @@ Phone unlock, physical print/stop, camera/Face ID, notification/enrollment accep
 APNs key registration, and public MCP release remain open. Older snapshots below are historical;
 this section and `asks.md` supersede their installation and temporary-project state.
 
+## Published model flow — 2026-11-02 (implementation, acceptance still open)
+
+The parked published backend is integrated with current upload ownership, project defaults and
+worker lifecycle. Both clients can start from a published link; the phone can answer file and
+plate Asks. Retrieval has browser/web/file tools only, never printer dispatch or geometry tools.
+Original 3MF/STL bytes are retained with SHA-256 receipts and embedded designer credit. Older
+Downloads matches require confirmation. Multiple files/plates ask explicitly; a supplied file
+is not replaced by the Mac's subsequent Start call. Designer plate images provide previews.
+
+Unsliced 3MF goes unchanged to `slice_stl` with its selected one-based plate, original arrangement
+and per-part filament assignments. The derived printable file is separate. Pre-sliced originals
+require an exact file-inspection receipt and reject slicing overrides they cannot apply. Print
+still uses the MCP's physical confirmation. Generic MCP's read-only `inspect_print_file` exposure
+is a separate required follow-up; its existing internal inspection is not yet an exposed tool.
+Combining separate designer 3MF files onto one plate is not proven by `arrange: true` and remains
+an explicit acceptance gap. No AI reconstruction from a model page is used.
+
+Read-only real-input evidence: `~/scan-to-make-work/codex-published-model-20261102/file-identity.json`.
+The caliper in Downloads (SHA `932757ca96be8c50998be6e511a14416cfa661bc816938a1843119546cb85a30`)
+has previews/settings but empty geometry and no G-code; it is correctly refused. The depth-gauge
+3MF (SHA `2e0f756da398e8fe9e5cee0831d23c2dab977f0447aae0e8500e97333fac4c56`) imports into an
+isolated temporary project as Ready, preserves exact original/bundle bytes, and retains designer
+“3D Print Masters Hub” and “Standard Digital File License”. Its thumbnail is retained. Both source
+files are unchanged. These are user-provided files; no publisher download checksum was verified.
+No live project, browser session or printer was changed, and no physical print was attempted.
+
+Development checks before final integration: focused published/model tests 14 pass; shared Swift
+140 pass; companion upload/pass/print/HTTP/worker/auth regressions 114 pass; handoff suite 60 pass
+before the last added validation cases; unsigned iPhone and Mac builds pass. Complete current-head
+checks and live download/phone acceptance must be recorded before claiming row 24 accepted.
+
 ## Device acceptance and Blender follow-up — 2026-11-02, 09:24 Mountain
 
 Mac build `202611020921` is installed from merged main `f1d2dde6` (#265); Davica3 has

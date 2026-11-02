@@ -393,6 +393,7 @@ struct SocketObjects: ObjectsCompanion {
     /// (JPEG, HEIC, PNG) go in as photos; STL, 3MF and USDZ as the thing to copy. Returns one sentence when it
     /// didn't go through; the project is selected when it did.
     func startProject(instructions: String, files: [URL], kind: String = "fit", url: String? = nil) async -> String? {
+        if url != nil && capabilities?.publishedModels != true { return "Update Counterpart’s companion to get the designer’s model file." }
         guard capabilities?.objectsCreate == true else { return Self.createUnavailable }
         let text = String(instructions.trimmingCharacters(in:.whitespacesAndNewlines).prefix(4000))
         guard !text.isEmpty || !files.isEmpty || url != nil else { return "Say what you need, or drop a photo or a model." }

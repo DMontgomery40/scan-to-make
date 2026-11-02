@@ -303,7 +303,20 @@ export const AskSchema = z.strictObject({
   photo: z.string().regex(/^asks\/[0-9a-f-]{36}\.jpg$/).optional(),
   /** The region to highlight on `photo`, as fractions of its width and height (origin top-left). */
   region: z.strictObject({ x: z.number().min(0).max(1), y: z.number().min(0).max(1), width: z.number().min(0).max(1), height: z.number().min(0).max(1) }).optional(),
-  answers: z.array(z.enum(['camera', 'photos', 'best-guess', 'text'])).min(1).max(4),
+  answers: z.array(z.enum(['camera', 'photos', 'best-guess', 'text', 'file', 'choice'])).min(1).max(6),
+  /** PRD §8.11 (PR 7): `file` asks for a published model's file, `choice` lists options. Absent means `closeup`. */
+  type: z.enum(['closeup', 'file', 'choice']).optional(),
+  /** `file`: the model's page (Open in Safari), its name and site, and the file types it takes. */
+  url: z.string().url().max(2048).optional(),
+  modelName: text(120).optional(),
+  site: text(64).optional(),
+  accepts: z.array(z.enum(['3mf', 'stl'])).max(2).optional(),
+  /** `file`: a likely file the Mac found but isn't sure of (an absolute path on the Mac). */
+  candidate: z.strictObject({ path: text(1024), name: text(255) }).optional(),
+  /** `choice`: what to pick from, and whether several may be picked; `choices` holds the answer. */
+  options: z.array(z.strictObject({ id: text(64), label: text(120), detail: text(300).optional(), thumbnail: text(512).optional() })).max(32).optional(),
+  multiple: z.boolean().optional(),
+  choices: z.array(text(64)).max(32).optional(),
   status: z.enum(['open', 'answered']),
   askedAtMs: z.number().int().nonnegative(),
 });

@@ -45,6 +45,8 @@ struct PrintSheet: View {
     }
 
     private var object: Project { model.objects.first { $0.id == opened.id } ?? opened }
+    private var published: Bool { object.kind == "published" }
+    private var slicedOriginal: Bool { object.publishedSelection?.sliced == true }
     private var printer: PrinterDestination? { model.printer(for: object) }
     private var settingsServed: Bool { model.capabilities?.printSettings == true }
     private var words: ObjectWords { object.words }
@@ -65,8 +67,11 @@ struct PrintSheet: View {
                         .frame(width: 300, height: 220).clipShape(.rect(cornerRadius: 16))
                 }
                 VStack(alignment: .leading, spacing: 12) {
+                    if published { Text("Keeps the model’s filament assignments. The printer service confirms the loaded spools.").font(.callout) } else {
                     Text("Colors").font(.headline)
                     colours
+                    }
+                    if slicedOriginal { Text("Uses the quality, strength and copies saved in this sliced file. Share an editable 3MF to change them.").font(.callout) } else {
                     Text("Quality").font(.headline)
                     Picker("Quality", selection: $quality) {
                         Text("Draft").tag(PrintSettings.Quality.draft)
@@ -87,6 +92,7 @@ struct PrintSheet: View {
                         }
                     }
                     if !offersCopies, object.settings?.printDefaults?.copies != nil { Text("This printer uses one copy.").font(.caption).foregroundStyle(.secondary) }
+                    }
                     estimateLine
                 }
             }
@@ -191,10 +197,10 @@ struct PrintSheet: View {
 
     // MARK: Estimate
 
-    private var offersQuality: Bool { settingsServed && (printer?.capabilities?.quality ?? true) }
-    private var offersStrength: Bool { settingsServed && (printer?.capabilities?.strength ?? true) }
+    private var offersQuality: Bool { !slicedOriginal && settingsServed && (printer?.capabilities?.quality ?? true) }
+    private var offersStrength: Bool { !slicedOriginal && settingsServed && (printer?.capabilities?.strength ?? true) }
     /// Copies need the companion (`printCopies`) and this printer's MCP (`capabilities.copies`): copies are per printer.
-    private var offersCopies: Bool { model.capabilities?.printCopies == true && printer?.capabilities?.copies == true }
+    private var offersCopies: Bool { !slicedOriginal && model.capabilities?.printCopies == true && printer?.capabilities?.copies == true }
 
     @ViewBuilder private var estimateLine: some View {
         switch estimateState {
@@ -241,6 +247,7 @@ struct PrintSheet: View {
     }
 
     private var colour: PrintSettings.Colour? {
+        if published { return nil }
         guard let chosen else {
             if case .material? = lastColour, (opened.printerDestinationId ?? model.printerCatalog?.defaultDestinationId) == printer?.id { return lastColour }
             return nil
@@ -251,8 +258,8 @@ struct PrintSheet: View {
 
     private func send() {
         let settings = PrintSettings(quality: offersQuality ? quality : .standard, strength: offersStrength ? strength : .standard, colour: colour,
-                                     copies: offersCopies && copiesPicked ? copies : (object.settings?.printDefaults?.copies != nil ? 1 : nil))
-        let filament = chosen
+                                     copies: slicedOriginal ? 1 : offersCopies && copiesPicked ? copies : (object.settings?.printDefaults?.copies != nil ? 1 : nil))
+        let filament = published ? nil : chosen
         Task { if await model.print(object.id, checked: uncertain && checked, settings: settings, filament: filament) { dismiss() } }
     }
 
@@ -283,7 +290,7 @@ struct PrintSheet: View {
         estimateState = .loading
         do {
             let result = try await model.estimate(object.id, destinationId: printer?.id, quality: offersQuality ? quality : .standard,
-                                                  strength: offersStrength ? strength : .standard, copies: offersCopies && copiesPicked ? copies : (object.settings?.printDefaults?.copies != nil ? 1 : nil))
+                                                  strength: offersStrength ? strength : .standard, copies: slicedOriginal ? 1 : offersCopies && copiesPicked ? copies : (object.settings?.printDefaults?.copies != nil ? 1 : nil))
             guard !Task.isCancelled else { return }
             estimate = result
             estimateState = .done

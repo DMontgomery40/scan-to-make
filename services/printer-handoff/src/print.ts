@@ -1,6 +1,6 @@
 import {copyFile, mkdtemp, readFile, rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
-import {basename, isAbsolute, join} from 'node:path';
+import {basename, extname, isAbsolute, join} from 'node:path';
 import type {ElicitResult, Tool} from '@modelcontextprotocol/sdk/types.js';
 import {
   printerHandoffConfigSchema,
@@ -8,6 +8,7 @@ import {
 } from './config.js';
 import type {ElicitationContext, ElicitationRelay} from './elicitation.js';
 import {sliceEstimate, sliceSettings, slicePlateCount, type SliceEstimate, type SliceSettings} from './slice-estimate.js';
+import {inspectModelFile} from './model-file.js';
 import {slicerReport} from './slicer-report.js';
 import type {HandoffBundleStore} from './bundle.js';
 import {PrinterMcpError, toolResultJson, toolResultText, type PrinterToolCatalog} from './mcp-client.js';
@@ -276,6 +277,19 @@ export class PrinterHandoffRunner {
   async #run(session: PrinterSession, shared: boolean, input: PrintRunInput): Promise<PrintRunResult> {
     const selection: PrinterSelection = {...this.#config.selection, ...input.selection};
     const slicer: PrinterSlicer = {...this.#config.slicer, ...input.slicer};
+    const threeMf = extname(input.stlPath).toLowerCase() === '.3mf';
+    const model = threeMf ? inspectModelFile(await readFile(input.stlPath), '3mf') : undefined;
+    const plate = model?.plates.find(item => item.index === (selection.plateIndex ?? 0));
+    if (threeMf && !plate) throw new PrinterMcpError('invalid-plate', undefined, 'Choose a plate contained in this model.');
+    const alreadySliced = plate?.sliced === true;
+    // A 3MF already owns its per-part filaments and profile. Global STL defaults must not collapse them.
+    if (threeMf) {
+      for (const key of ['loadFilaments', 'filamentProfile', 'filamentColours', 'templateName', 'layerHeightMm', 'wallLoops', 'sparseInfillDensity'] as const) {
+        if (input.slicer?.[key] === undefined) delete slicer[key];
+      }
+    }
+    if (alreadySliced && ((slicer.repetitions ?? 1) !== 1 || ['layerHeightMm', 'wallLoops', 'sparseInfillDensity', 'loadFilaments', 'filamentProfile', 'filamentColours', 'templateName'].some(key => Object.hasOwn(input.slicer ?? {}, key))))
+      throw new PrinterMcpError('published-sliced-settings', undefined, 'This file is already sliced. Share the designer’s editable 3MF to change its slicing settings or copies.');
     // A chosen spool's profile (load_filaments) replaces the configured filament alias: MCPs refuse the two when they differ.
     if (input.slicer?.loadFilaments && input.slicer.filamentProfile === undefined) delete slicer.filamentProfile;
     const printOptions: PrinterPrintOptions = {...this.#config.print, ...input.printOptions};
@@ -318,7 +332,7 @@ export class PrinterHandoffRunner {
     }
     let orientedStlPath = input.stlPath;
     let laidFlat = false;
-    if (session.hasTool('lay_flat')) {
+    if (!threeMf && session.hasTool('lay_flat')) {
       await progress('orienting');
       const orientation = await call(session, 'lay_flat', {stl_path: input.stlPath}, local);
       orientedStlPath = absolutePath(orientation);
@@ -328,9 +342,12 @@ export class PrinterHandoffRunner {
       laidFlat = orientation.structuredContent?.laid_flat !== false;
       step('lay_flat');
     }
-    await progress('slicing');
-    const sliced = await call(session, 'slice_stl', {
+    if (threeMf && !alreadySliced && !Object.hasOwn(session.getTool('slice_stl').inputSchema.properties ?? {}, 'slice_plate'))
+      throw new PrinterMcpError('plate-selection-unsupported', undefined, 'Update your printer service to slice the selected 3MF plate.');
+    if (!alreadySliced) await progress('slicing');
+    const sliced = alreadySliced ? undefined : await call(session, 'slice_stl', {
       stl_path: orientedStlPath,
+      slice_plate: threeMf ? (selection.plateIndex ?? 0) + 1 : undefined,
       bambu_model: isBambuSlicing(this.#config, selection, slicer) ? selection.model : undefined,
       nozzle_diameter: selection.nozzleDiameterMm === undefined ? undefined : String(selection.nozzleDiameterMm),
       bed_type: selection.bedType,
@@ -349,15 +366,15 @@ export class PrinterHandoffRunner {
         ? slicer.repetitions : undefined,
       use_printer_filaments: false,
       // lay_flat already chose the flat face; otherwise let the slicer orient.
-      orient: !laidFlat,
-      arrange: true,
-      ensure_on_bed: true,
+      orient: !threeMf && !laidFlat,
+      arrange: !threeMf || (slicer.repetitions ?? 1) > 1,
+      ensure_on_bed: !threeMf,
     }, local);
-    let slicedPath = absolutePath(sliced);
-    step('slice_stl');
+    let slicedPath = sliced ? absolutePath(sliced) : input.stlPath;
+    if (sliced) step('slice_stl');
     // Studio's own verdict on this slice (absent from an MCP that returns only the path): an error is
     // never printed, and a warning is printed only on the user's explicit go, as in Studio.
-    const report = slicerReport(sliced.structuredContent);
+    const report = slicerReport(sliced?.structuredContent);
     if (report?.failed) throw new PrinterMcpError('slicer-error', undefined, report.message);
     const slicerWarning = report?.message;
     const slicedBytes = await readFile(slicedPath);
@@ -371,6 +388,11 @@ export class PrinterHandoffRunner {
     const estimate = await sliceEstimate(slicedBytes, selection.plateIndex ?? 0);
     await progress('inspecting', estimate);
     const inspection = await this.inspect(session, slicedPath, selection, local);
+    if (alreadySliced) {
+      const receipt = inspection?.result as {artifact?: {sha256?: string}; selection?: {plate_index?: number; bambu_model?: string}; inspection?: unknown} | undefined;
+      if (inspection?.tool !== 'inspect_print_file' || receipt?.artifact?.sha256 !== model!.sha256 || receipt.selection?.plate_index !== (selection.plateIndex ?? 0) || receipt.selection?.bambu_model !== selection.model)
+        throw new PrinterMcpError('published-inspection-required', undefined, 'This sliced file needs a compatible printer and a current printer service that can check it.');
+    }
     if (inspection) step('inspect');
     if (input.persistOutput) ({slicedPath, orientedStlPath} = await input.persistOutput({slicedPath, orientedStlPath}));
     await progress('slice-ready', estimate);

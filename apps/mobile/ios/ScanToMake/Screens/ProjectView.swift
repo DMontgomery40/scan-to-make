@@ -160,6 +160,11 @@ struct ProjectView: View {
                     .buttonStyle(.plain).disabled(working || !store.projectRename)
                     .accessibilityIdentifier("project-title")
                     .accessibilityLabel(words.title).accessibilityHint("Rename project")
+                    if let credit = object.credit?.object, let raw = credit["url"]?.string, let url = URL(string: raw), ["http", "https"].contains(url.scheme ?? "") {
+                        Link("by \(credit["designer"]?.string ?? "the designer") on \(credit["site"]?.string ?? url.host ?? "the model page")", destination: url)
+                            .font(.subheadline)
+                        if let licence = credit["licence"]?.string { Text(licence).font(.caption).foregroundStyle(.secondary) }
+                    }
                     if let request = object.instructions, !request.isEmpty, request != words.title {
                         Text(request).font(.body).foregroundStyle(.secondary).textSelection(.enabled)
                     }
@@ -473,13 +478,14 @@ struct ProjectView: View {
         VStack(alignment: .leading, spacing: 12) {
             Label("Your Mac has a question", systemImage: "questionmark.bubble.fill").font(.headline).foregroundStyle(.orange)
             Text(ProjectWords.question(object))
-            HStack(spacing: 10) {
+            if !["file", "choice"].contains(object.openAsk?.type ?? "") { HStack(spacing: 10) {
                 ProjectImage(project: object, path: object.openAsk.flatMap { $0.photo != nil ? "asks/\($0.id).jpg" : nil } ?? object.thumbnailPath, maxPixelSize: 300)
                     .frame(width: 64, height: 64).clipShape(.rect(cornerRadius: 12))
                     .overlay { RegionOverlay(region: object.openAsk?.region) }
                     .overlay { RoundedRectangle(cornerRadius: 12).strokeBorder(.orange, lineWidth: 2) }
                 Text(object.openAsk?.photo != nil ? "Here's where. The highlighted part is what I can't see." : "This is the closest view I have.")
                     .font(.footnote).foregroundStyle(.secondary)
+            }
             }
             AskButtons(store: store, project: object, working: $askWorking, problem: $askProblem)
             // The Mac takes a typed answer when it says so (KAN-214 #204, `answers` includes "text").

@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 import CounterpartKit
 
 /// Home (PRD §5.1, screens/phone-home.jpg): what's running now, what needs you, and every project as a
@@ -337,11 +338,31 @@ struct AskButtons: View {
     @Binding var working: Bool
     @Binding var problem: String?
 
+    @State private var choosingFile = false
+    @Environment(\.openURL) private var openURL
+
     private var answers: Set<String> { Set(project.openAsk?.answers ?? ["camera", "photos", "best-guess"]) }
 
     var body: some View {
         GlassEffectContainer(spacing: 8) {
-            HStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: 8) {
+                if project.openAsk?.type == "file" {
+                    if let raw = project.openAsk?.url, let url = URL(string: raw) { Button("Open in Safari") { openURL(url) }.buttonStyle(.glass) }
+                    Button("Choose model file", systemImage: "folder") { choosingFile = true }.buttonStyle(.glassProminent)
+                }
+                if let ask = project.openAsk, ask.type == "choice" {
+                    ForEach(ask.options ?? []) { option in
+                        Button { act { try await store.mac.client.choosePublishedPlate(project.id, askId: ask.id, choice: option.id) } } label: {
+                            HStack {
+                                if let thumbnail = option.thumbnail { ProjectImage(project: project, path: thumbnail, maxPixelSize: 200).frame(width: 56, height: 56) }
+                                VStack(alignment: .leading) {
+                                    Text(option.label)
+                                    if let detail = option.detail { Text(detail).font(.caption).foregroundStyle(.secondary) }
+                                }
+                            }
+                        }.buttonStyle(.glass)
+                    }
+                }
                 if answers.contains("camera") {
                     Button { answer(camera: true) } label: { StackLabel(text: "Camera", symbol: "camera.fill") }.buttonStyle(.glassProminent)
                 }
@@ -356,6 +377,12 @@ struct AskButtons: View {
             .labelStyle(.titleAndIcon)
             .font(.footnote.weight(.semibold))
             .disabled(working)
+        }
+        .fileImporter(isPresented: $choosingFile, allowedContentTypes: [UTType(filenameExtension: "3mf") ?? .data, UTType(filenameExtension: "stl") ?? .data]) { result in
+            switch result {
+            case .success(let url): act { try await store.mac.client.addModelFile(project.id, file: url) }
+            case .failure(let error): problem = error.localizedDescription
+            }
         }
     }
 

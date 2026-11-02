@@ -16,7 +16,7 @@ import {parameters} from '../local-control-protocol.js';
 const READ: RemoteScope = 'projects:read', WRITE: RemoteScope = 'captures:import', PRINT: RemoteScope = 'printer-handoff:use';
 const MAX_SCAN = 64 * 1024 * 1024, MAX_PHOTO = 25 * 1024 * 1024, MAX_JSON = 16 * 1024;
 const MAX_DEPTH = 8 * 1024 * 1024;
-const PATH = /^\/v1\/objects(?:\/([0-9a-f-]{36})(?:\/(scan|settings|duplicate|photos|capture|capture-depth|start|corrections|closeup|print|print\/pause|print\/resume|print\/cancel|estimate|camera\.jpg|prints\/[0-9a-f-]{36}\/frames\/[0-9a-f-]{36}\.jpg|asks\/[0-9a-f-]{36}\.jpg|filaments|print-confirmation|printer|model\.stl|original\/[0-9]+|passes\/[^/]+\/activity|(?:renders|photos|capture|scan)\/[^/]+))?)?$/;
+const PATH = /^\/v1\/objects(?:\/([0-9a-f-]{36})(?:\/(scan|model|ask|settings|duplicate|photos|capture|capture-depth|start|corrections|closeup|print|print\/pause|print\/resume|print\/cancel|estimate|camera\.jpg|prints\/[0-9a-f-]{36}\/frames\/[0-9a-f-]{36}\.jpg|asks\/[0-9a-f-]{36}\.jpg|filaments|print-confirmation|printer|model\.stl|original\/[0-9]+|passes\/[^/]+\/activity|(?:renders|photos|capture|scan)\/[^/]+))?)?$/;
 const PRINTER_CAMERA = /^\/v1\/objects\/printers\/([A-Za-z0-9_-]{1,256})\/camera\.jpg$/;
 const SETTINGS: RemoteScope = 'projects:write';
 
@@ -195,10 +195,11 @@ export function createObjectRoutes(service: ObjectService) {
           if (method === 'GET') { await authorize(READ); return send(response, 200, {objects: (await service.list()).map(publicObject)}); }
           if (method === 'POST') {
             await authorize(WRITE);
-            const {instructions, kind} = await json<{instructions?: unknown; kind?: unknown}>(request);
+            const {instructions, kind, url: link} = await json<{instructions?: unknown; kind?: unknown; url?: unknown}>(request);
             if (instructions !== undefined && (typeof instructions !== 'string' || instructions.length > 8000)) throw new HttpFailure(400, 'invalid-request');
-            if (kind !== undefined && kind !== 'fit' && kind !== 'copy') throw new HttpFailure(400, 'invalid-request');
-            return send(response, 201, {object: publicObject(await service.create(instructions, kind))});
+            if (kind !== undefined && kind !== 'fit' && kind !== 'copy' && kind !== 'published') throw new HttpFailure(400, 'invalid-request');
+            if (link !== undefined && (typeof link !== 'string' || link.length > 2048)) throw new HttpFailure(400, 'invalid-request');
+            return send(response, 201, {object: publicObject(await service.create(instructions, kind, link))});
           }
           throw new HttpFailure(405, 'method-not-allowed');
         }
@@ -326,11 +327,11 @@ export function createObjectRoutes(service: ObjectService) {
           await authorize(READ);
           const object = await service.get(id);
           const relative = action === 'model.stl' ? object.current?.model
-            : object.current?.renders.find(render => basename(render) === decodeURIComponent(action.slice('renders/'.length)));
+            : [...(object.current?.renders ?? []), ...(object.files?.receipts?.flatMap(file => file.plates.flatMap(plate => plate.thumbnail ? [plate.thumbnail] : [])) ?? [])].find(render => basename(render) === decodeURIComponent(action.slice('renders/'.length)));
           if (!relative) throw new HttpFailure(404, 'not-found');
-          const bytes = await readFile(join(service.dir(id), relative));
+          const bytes = await exportFile(service.dir(id), relative);
           response.statusCode = 200;
-          response.setHeader('content-type', action === 'model.stl' ? 'model/stl' : 'image/png');
+          response.setHeader('content-type', action === 'model.stl' ? (relative?.endsWith('.3mf') ? 'model/3mf' : 'model/stl') : 'image/png');
           response.end(bytes);
           return;
         }
@@ -342,6 +343,21 @@ export function createObjectRoutes(service: ObjectService) {
             const name = url.searchParams.get('name') ?? 'scan.usdz';
             if (!/^scan\.(usdz|stl|3mf)$/.test(name)) throw new HttpFailure(400, 'invalid-name');
             object = await service.receive(id, async () => service.addScan(id, name, await body(request, MAX_SCAN)));
+            break;
+          }
+          case 'ask': {
+            // A choice Ask's answer (PR 7): {askId, choices: [optionId]}.
+            const input = await json<{askId?: unknown; choices?: unknown}>(request);
+            if (typeof input.askId !== 'string' || !/^[0-9a-f-]{36}$/.test(input.askId) || !Array.isArray(input.choices) || input.choices.length > 32
+              || input.choices.some(choice => typeof choice !== 'string' || choice.length > 64)) throw new HttpFailure(400, 'invalid-request');
+            object = await service.answerAsk(id, input.askId, input.choices as string[]);
+            break;
+          }
+          case 'model': {
+            // PRD §8.11: the designer's file, shared for a file Ask (3MF or STL, ≤ 64 MiB).
+            const name = url.searchParams.get('name') ?? '';
+            if (!/\.(3mf|stl)$/i.test(name) || name.length > 255 || /[\/\\\u0000-\u001f]/.test(name) || name === '.' || name === '..') throw new HttpFailure(400, 'invalid-name');
+            object = await service.addModelFile(id, name, await body(request, MAX_SCAN));
             break;
           }
           case 'capture-depth': {

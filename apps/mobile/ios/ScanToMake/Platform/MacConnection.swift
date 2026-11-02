@@ -28,7 +28,16 @@ typealias MacError = CompanionError
     func selectPrinter(_ id: String, destinationId: String) async throws -> StmObject { try await client.selectPrinter(id, destinationId: destinationId) }
     func list() async throws -> [StmObject] { try await client.list() }
     func get(_ id: String) async throws -> StmObject { try await client.get(id) }
-    func create(_ instructions: String, kind: String? = nil) async throws -> StmObject { try await client.create(instructions, kind: kind) }
+    func create(_ instructions: String, kind: String? = nil) async throws -> StmObject {
+        let link = PublishedModelLink.find(in: instructions)
+        if link != nil {
+            let capabilities = try await client.capabilities()
+            guard capabilities.contains("publishedModels") else {
+                throw CompanionError(code: "published-models-unavailable", message: "Update Counterpart on your Mac to get the designer’s model file.")
+            }
+        }
+        return try await client.create(instructions, kind: link == nil ? kind : "published", url: link)
+    }
     func updateDraft(_ id: String, instructions: String) async throws -> StmObject { try await client.updateDraft(id, instructions: instructions) }
     func start(_ id: String, captureManifest: [String: Any]? = nil) async throws -> StmObject { try await client.start(id, captureManifest: captureManifest) }
     func correct(_ id: String, _ note: String, photoNames: [String]? = nil) async throws -> StmObject { try await client.correct(id, note, photoNames: photoNames) }

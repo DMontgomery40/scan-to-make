@@ -72,6 +72,7 @@ The Mac app shows the same projects as the phone and drives them through these m
 | `projectSettings` | `objects.settings.get`/`objects.settings.set` (Status), object `settings.status`, the `confirmed` phase, `project.updated`. Also in `GET /healthz` `capabilities`. | PR 8a |
 | `printCopies` | `objects.print` and `objects.estimate` take `copies`: true when a configured printer's MCP takes `repetitions` (destination `capabilities.copies`). Also in `GET /healthz`. | PR 8b |
 | `genericConfirmations` | `printConfirmation.fields[]` may be text, number, integer and choice fields as well as yes/no, and `objects.answerPrintConfirmation` takes and checks those answers (below). The phone reads the same flag from `GET /healthz` `capabilities` ([objects-api.md](objects-api.md)). | PR 5 |
+| `publishedModels` | `kind: "published"`, `objects.create` `url`, `credit` and `files`, Ask `type` `file` and `choice`, `objects.answerAsk`, `objects.addFile` `model`. Also in `GET /healthz`. | PR 7 |
 | `mcpUpdates` | `printers.updateMcp` and `POST /v1/printers/mcp/<mcpId>/update`, destination `mcpId` and `capabilities.update.latestVersion`, the `mcp.update.*` events. Also in `GET /healthz` `capabilities`. | PR 6 |
 | `materialChoice` | `objects.print` `colour: {material}` is accepted on every printer ("What's loaded?"): sliced with a profile the printer reports for that material, or refused with a sentence saying what to do. Also in `GET /healthz` `capabilities`. | PR 5 |
 
@@ -85,8 +86,9 @@ Destination `capabilities.materialChoice` (PR 5) says the same per printer; what
 | `objects.get` | `{id}` | `{object}` | |
 | `objects.settings.get` | `{id}` | `{settings: {status, archived}}` | PR 8a, 8b |
 | `objects.settings.set` | `{id, status?: "not-printed"\|"printed"\|"works"\|"needs-changes", archived?: boolean}`, at least one | `{settings, object}`; as `PATCH /v1/objects/<id>/settings` (objects-api.md). A refusal is `conflict` with its sentence. | PR 8a, 8b |
-| `objects.create` | `{instructions?: string ≤ 8000, kind?: "fit"\|"copy"}` | `{object}` (`kind` from PR 4) | PR 1 |
-| `objects.addFile` | `{id, kind: "photos"\|"scan", path, forMessage?: boolean}` | `{object, photoName?}` | PR 1 |
+| `objects.create` | `{instructions?: string ≤ 8000, kind?: "fit"\|"copy"\|"published", url?: string ≤ 2048}` | `{object}` (`kind` from PR 4) | PR 1 |
+| `objects.addFile` | `{id, kind: "photos"\|"scan"\|"model", path, forMessage?: boolean}` | `{object, photoName?}` | PR 1 |
+| `objects.answerAsk` | `{id, askId, choices: [optionId]}` | `{object}`; chooses the published file/plate | PR 7 |
 | `objects.start` | `{id}` | `{object}` | |
 | `objects.correct` | `{id, note: string 1–4000, photoNames?: string[] ≤ 100, photos?: [path] ≤ 24}` | `{object}`: a new pass (`photos` PR 1) | |
 | `objects.answerCloseup` | `{id, bestGuess: boolean, text?: string ≤ 2000, photoNames?: string[] ≤ 100}` (omitted names select none; an empty answer is refused) | `{object}`: a new pass (`text` PR 4) | |
