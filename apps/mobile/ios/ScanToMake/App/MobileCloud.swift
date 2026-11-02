@@ -8,6 +8,7 @@ import Observation
     private(set) var macs: [CloudMac] = []
     private(set) var message: String?
     private(set) var reading = false
+    private(set) var printUpdates: [PrintActivitySnapshot] = []
     private var database: CKDatabase?
     private var token: CKServerChangeToken?
     private var records: [CKRecord.ID: CKRecord] = [:]
@@ -46,6 +47,7 @@ import Observation
             }
             macs = records.values.filter { $0.recordType == "CounterpartMac" }.compactMap(Self.mac)
                 .filter { $0.isCurrent() }.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+            printUpdates = records.values.filter { $0.recordType == CloudKitRecords.project }.compactMap(Self.printSnapshot)
             message = macs.isEmpty ? "Open Counterpart on your Mac. It needs the same Apple Account and a connection to iCloud." : nil
         } catch let error as CKError where error.code == .zoneNotFound || error.code == .unknownItem {
             message = "Open Counterpart on your Mac so it can make itself available in iCloud. You can also use its code."
@@ -54,7 +56,19 @@ import Observation
         }
     }
 
-    private func clear() { token = nil; records = [:]; macs = []; subscribed = nil; database = nil; accountID = nil }
+    private func clear() { token = nil; records = [:]; macs = []; printUpdates = []; subscribed = nil; database = nil; accountID = nil }
+
+    func saveActivityTokens(device: String, pushToStart: String?, activities: [String: String]) async -> Bool {
+        guard Self.configured, let database else { return false }
+        let record = CKRecord(recordType: CloudKitRecords.device, recordID: CKRecord.ID(recordName: device, zoneID: CloudNotificationSubscriptions.zoneID))
+        record["deviceId"] = device; record["pushToStartToken"] = pushToStart
+        record["activityTokens"] = activities.sorted { $0.key < $1.key }.map { "\($0.key):\($0.value)" }
+        do {
+            let result = try await database.modifyRecords(saving: [record], deleting: [], savePolicy: .allKeys)
+            for outcome in result.saveResults.values { _ = try outcome.get() }
+            return true
+        } catch { return false }
+    }
 
     func configureAlerts(settings: CompanionSettings?, localChoices: [Bool]) async {
         guard let database else { return }
@@ -85,13 +99,23 @@ import Observation
         while more {
             try Task.checkCancellation()
             let page = try await database.recordZoneChanges(inZoneWith: CloudNotificationSubscriptions.zoneID, since: token,
-                desiredKeys: ["macId", "name", "addresses", "spkiSha256", "enrolmentToken", "tokenExpiresAt"], resultsLimit: 200)
+                desiredKeys: ["macId", "name", "addresses", "spkiSha256", "enrolmentToken", "tokenExpiresAt",
+                    "projectId", "printId", "title", "printerName", "printState", "progress", "remainingSec", "endsAt", "updatedAt"], resultsLimit: 200)
             // Do not advance past a record-level failure; the next attempt must see it again.
             let changed = try page.modificationResultsByID.map { (id, result) in (id, try result.get().record) }
-            for (id, record) in changed where record.recordType == "CounterpartMac" { records[id] = record }
+            for (id, record) in changed where ["CounterpartMac", CloudKitRecords.project].contains(record.recordType) { records[id] = record }
             for deletion in page.deletions { records[deletion.recordID] = nil }
             token = page.changeToken; more = page.moreComing
         }
+    }
+
+    private static func printSnapshot(_ record: CKRecord) -> PrintActivitySnapshot? {
+        guard let project = record["projectId"] as? String, let print = record["printId"] as? String,
+              let state = record["printState"] as? String else { return nil }
+        let updated = record["updatedAt"] as? Date ?? Date()
+        return .init(attributes: .init(projectId: project, printId: print, title: record["title"] as? String ?? "Your print", printerName: record["printerName"] as? String ?? "Your printer"),
+            content: .init(state: state, progress: (record["progress"] as? NSNumber)?.doubleValue ?? 0,
+                           endsAt: record["endsAt"] as? Date ?? updated.addingTimeInterval((record["remainingSec"] as? NSNumber)?.doubleValue ?? 0)), observedAt: updated)
     }
 
     private static func mac(_ record: CKRecord) -> CloudMac? {

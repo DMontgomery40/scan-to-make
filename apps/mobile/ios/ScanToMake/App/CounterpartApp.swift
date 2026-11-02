@@ -17,11 +17,16 @@ struct CounterpartApp: App {
                 .onOpenURL { app.open($0) }
                 .task(id: app.pairingKey) {
                     notifications.attach(app)
+                    app.activities.attach(app)
                     await app.keepFresh()
                     await app.refreshCloud()
+                    await app.activities.reconcile(app.projects.projects.compactMap { PrintActivitySnapshot($0) }, mayStart: true)
                 }
                 .onChange(of: scenePhase) { _, phase in
-                    if phase == .active { Task { await app.keepFresh(); await app.refreshCloud() } }
+                    if phase == .active { Task { await app.keepFresh(); await app.refreshCloud(); await app.activities.publish() } }
+                }
+                .onChange(of: app.projects.projects) { _, projects in
+                    Task { await app.activities.reconcile(projects.compactMap { PrintActivitySnapshot($0) }, mayStart: true) }
                 }
                 .onChange(of: app.projects.settingsChanges) { _, _ in Task { await app.refreshCloud() } }
         }

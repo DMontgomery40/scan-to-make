@@ -198,6 +198,24 @@ private final class SlowTransport: HTTPTransport, @unchecked Sendable {
 }
 
 final class CompanionClientTests: XCTestCase {
+    func testLiveActivityTokenContractAndRemoval() async throws {
+        let fake = FakeTransport { _, _ in json(200, ["stored": true]) }
+        let client = try client(fake)
+        let token = String(repeating: "ab", count: 32)
+        let printId = "11111111-1111-4111-8111-111111111111"
+        try await client.registerLiveActivity(pushToStart: token)
+        try await client.registerLiveActivity(printId: printId, token: token)
+        try await client.registerLiveActivity(printId: printId, token: nil)
+        let bodies = try fake.calls.map { try XCTUnwrap(JSONSerialization.jsonObject(with: $0.request.httpBody!) as? [String: Any]) }
+        XCTAssertEqual(bodies[0]["pushToStart"] as? String, token)
+        XCTAssertEqual((bodies[1]["activity"] as? [String: String])?["printId"], printId)
+        XCTAssertTrue((bodies[2]["activity"] as? [String: Any])?["token"] is NSNull)
+        XCTAssertTrue(fake.calls.allSatisfy { $0.request.url?.path == "/v1/devices/live-activity-tokens" && $0.request.httpMethod == "POST" })
+        do { try await client.registerLiveActivity(printId: "bad", token: token); XCTFail() } catch {}
+        do { try await client.registerLiveActivity(pushToStart: "bad"); XCTFail() } catch {}
+        XCTAssertEqual(fake.calls.count, 3, "invalid tokens never leave the phone")
+    }
+
     private func client(_ fake: FakeTransport, record: PairingRecord = v2Record()) throws -> CompanionClient {
         let store = PairingStore(store: MemoryStore(), defaults: UserDefaults(suiteName: "cc-\(UUID().uuidString)")!)
         try store.save(record, notify: false)

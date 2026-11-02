@@ -40,8 +40,9 @@ import CounterpartKit
         }
         Task {
             await app.cloud.refresh()
-            // Reconcile from the source; CloudKit can omit fields and coalesce pushes.
-            if !app.needsMac { await app.projects.load() }
+            // CloudKit changes supply the mirrored progress during the background runtime. Never
+            // start an activity here or wait for a LAN connection while the phone is away.
+            await app.activities.reconcile(app.cloud.printUpdates, mayStart: false)
             completionHandler(.newData)
         }
     }
