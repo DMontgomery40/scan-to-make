@@ -66,6 +66,90 @@ final class ProjectScreensUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Try Again"].exists)
     }
 
+    /// PRD §5.4: a finished print asks "Did it fit?"; It Works makes it Done: Print Another, and Home's Done section.
+    func testItWorksMovesAPrintedProjectToDone() {
+        let app = launch("printed")
+        let works = app.buttons["it-works"]
+        XCTAssertTrue(works.waitForExistence(timeout: 20))
+        XCTAssertTrue(app.staticTexts["Did it fit?"].exists)
+        XCTAssertTrue(app.buttons["needs-changes"].exists)
+        works.tap()
+        XCTAssertTrue(app.buttons["Print Another"].waitForExistence(timeout: 10), "Done keeps Print, as Print Another")
+        XCTAssertTrue(app.staticTexts["Done"].exists, "the Done capsule")
+        XCTAssertFalse(app.buttons["it-works"].exists, "answered: the card goes")
+        app.navigationBars.buttons.firstMatch.tap()
+        let done = app.staticTexts["Done"]
+        XCTAssertTrue(reach(app, done), "Home has a Done section")
+        XCTAssertTrue(reach(app, app.staticTexts["Potato, first try"]))
+    }
+
+    /// David's mic mount is Ready, not Printed: the status capsule makes it Done in one tap from the page.
+    func testTheStatusCapsuleMarksAReadyProjectDone() {
+        let app = launch("ready")
+        let capsule = app.buttons["status-menu"]
+        XCTAssertTrue(capsule.waitForExistence(timeout: 20))
+        capsule.tap()
+        let done = app.buttons["Done"]
+        XCTAssertTrue(done.waitForExistence(timeout: 5), "the choices are right on the capsule")
+        XCTAssertTrue(app.buttons["Hide from Home"].exists, "Hide from Home is there too, apart")
+        done.tap()
+        XCTAssertTrue(app.buttons["Print Another"].waitForExistence(timeout: 10), "Done, and still printable")
+    }
+
+    /// Needs Changes says so on the Mac and starts the change in Ask for changes.
+    func testNeedsChangesStartsAskForChanges() {
+        let app = launch("printed")
+        let changes = app.buttons["needs-changes"]
+        XCTAssertTrue(changes.waitForExistence(timeout: 20))
+        changes.tap()
+        let field = app.descendants(matching: .any)["ask-for-changes"]
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        XCTAssertEqual(field.value as? String, "After printing: ")
+        XCTAssertTrue(gone(app.buttons["it-works"]), "answered: the card goes")
+    }
+
+    /// ••• → Status lists Not printed, Printed, Done, Needs changes; Hide from Home is apart, and the Archived list
+    /// at the bottom of Home brings it back with Unarchive.
+    func testHideFromHomeAndUnarchive() {
+        let app = launch("printed")
+        XCTAssertTrue(app.buttons["it-works"].waitForExistence(timeout: 20))
+        app.buttons["More"].tap()
+        app.buttons["Status"].tap()
+        for label in ["Not printed", "Printed", "Done", "Needs changes"] { XCTAssertTrue(app.buttons[label].exists, label) }
+        XCTAssertFalse(app.buttons["Archived"].exists, "archive isn't a status")
+        app.buttons["Printed"].tap()
+        app.buttons["More"].tap()
+        let hide = app.buttons["Hide from Home"]
+        XCTAssertTrue(hide.waitForExistence(timeout: 5))
+        hide.tap()
+        XCTAssertTrue(app.buttons["More"].waitForExistence(timeout: 5))
+        app.navigationBars.buttons.firstMatch.tap()
+        let archived = app.buttons["show-archived"]
+        XCTAssertTrue(reach(app, archived))
+        XCTAssertFalse(app.staticTexts["Potato, first try"].exists, "off Home until shown")
+        archived.tap()
+        let unarchive = app.buttons["unarchive"]
+        XCTAssertTrue(reach(app, unarchive))
+        XCTAssertTrue(app.staticTexts["Potato, first try"].exists)
+        unarchive.tap()
+        XCTAssertTrue(gone(app.buttons["show-archived"]), "nothing archived any more")
+        XCTAssertTrue(reach(app, app.staticTexts["Potato, first try"]), "back in Projects")
+    }
+
+    /// Scrolls down until `element` is on screen.
+    private func reach(_ app: XCUIApplication, _ element: XCUIElement) -> Bool {
+        for _ in 0..<10 {
+            if element.exists && element.isHittable { return true }
+            app.swipeUp()
+        }
+        return element.exists
+    }
+
+    /// Waits for `element` to go, after an answer the Mac has to accept first.
+    private func gone(_ element: XCUIElement, timeout: TimeInterval = 10) -> Bool {
+        XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: element)], timeout: timeout) == .completed
+    }
+
     func testNewSaysWhatTheMacNeedsBeforeSending() {
         let app = launch("new")
         let send = app.buttons["send"]
@@ -93,11 +177,13 @@ final class PrintScreensUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["AMS · 4 slots"].exists)
         XCTAssertTrue(app.buttons["print-now"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.buttons["print-now"].isEnabled, "the suggested spool is preselected")
+        XCTAssertTrue(app.descendants(matching: .any)["copies"].exists, "bambu-printer-mcp makes copies: the stepper is offered")
     }
 
     func testAPrinterWithoutAnAMSUsesTheLoadedFilament() {
         let app = launch("print-noams")
         XCTAssertTrue(app.staticTexts["No AMS"].waitForExistence(timeout: 20))
+        XCTAssertFalse(app.descendants(matching: .any)["copies"].exists, "an MCP that would slice one copy isn't offered Copies")
         XCTAssertTrue(app.staticTexts["Uses the loaded filament: PLA Galaxy Black"].exists)
     }
 

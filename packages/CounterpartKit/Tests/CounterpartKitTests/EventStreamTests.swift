@@ -52,6 +52,25 @@ final class EventStreamTests: XCTestCase {
         XCTAssertEqual(feed.requests[3].after, 2, "after a reset, carry on from the Mac's new cursor")
     }
 
+    /// KAN-217 P0 (Davica3, 23:52): a long poll is silent for 25 s, iOS calls that a data stall, and a poll can end
+    /// early or be cancelled underneath us. When the Mac answers a quick health check, the poll just starts again:
+    /// no "reload everything", no "isn't answering", and the next event still arrives from the same cursor.
+    func testALongPollThatEndsEarlyIsRetriedWhileTheMacAnswers() async throws {
+        let feed = ScriptedFeed([
+            .success(page([], next: 10)),
+            .failure(CompanionError.unreachable),
+            .failure(CompanionError.cancelled),
+            .success(page([event(11)], next: 11)),
+        ])
+        var updates: [EventUpdate] = []
+        for try await update in EventStream(feed: feed, healthy: { true }).updates {
+            updates.append(update)
+            if updates.count == 1 { break }
+        }
+        XCTAssertEqual(updates, [.event(event(11))], "no resync while the Mac answers")
+        XCTAssertEqual(Array(feed.requests.map(\.after).prefix(4)), [0, 10, 10, 10], "the same cursor after each early end")
+    }
+
     func testATruncatedPageResyncs() async throws {
         let feed = ScriptedFeed([.success(page([], next: 10)), .success(page([event(200)], next: 200, truncated: true))])
         let updates = try await collect(feed, count: 2)

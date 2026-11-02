@@ -139,7 +139,21 @@ struct ProjectView: View {
             VStack(alignment: .leading, spacing: 18) {
                 hero(object, words)
                 VStack(alignment: .leading, spacing: 6) {
-                    HStack { StatusCapsule(phase: words.phase); Spacer(); Text(Format.when(object.updatedAt)).font(.caption).foregroundStyle(.secondary) }
+                    HStack {
+                        // The status is one tap away: the capsule opens the same choices as ••• → Status.
+                        if store.projectSettings {
+                            Menu { statusChoices(object, words, inline: true) } label: {
+                                HStack(spacing: 4) { StatusCapsule(phase: words.phase); Image(systemName: "chevron.down").font(.caption2.weight(.bold)).foregroundStyle(.secondary) }
+                            }
+                            .accessibilityIdentifier("status-menu")
+                            .accessibilityLabel("Status, \(words.phase.label)")
+                            .accessibilityHint("Changes the project's status")
+                        } else {
+                            StatusCapsule(phase: words.phase)
+                        }
+                        Spacer()
+                        Text(Format.when(object.updatedAt)).font(.caption).foregroundStyle(.secondary)
+                    }
                     Text(words.title).font(.largeTitle.bold()).fixedSize(horizontal: false, vertical: true)
                     if let request = object.instructions, !request.isEmpty, request != words.title {
                         Text(request).font(.body).foregroundStyle(.secondary).textSelection(.enabled)
@@ -191,6 +205,10 @@ struct ProjectView: View {
             }
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
+                    if store.projectSettings {
+                        statusChoices(object, words)
+                        Divider()
+                    }
                     if let modelURL { ShareLink("Share STL", item: modelURL) }
                     if let arURL { ShareLink("Share USDZ", item: arURL) } else if let scanURL { ShareLink("Share Your Scan (USDZ)", item: scanURL) }
                     Divider()
@@ -238,7 +256,8 @@ struct ProjectView: View {
                 }
             }
         }
-        .frame(height: words.phase == .failed ? 300 : 380)
+        // Shorter when a card has to be answered, so its buttons sit above the bottom bar.
+        .frame(height: words.phase == .failed || words.actions.contains(.itWorks) ? 300 : 380)
         .clipped()
         .overlay(alignment: .bottom) {
             GlassEffectContainer(spacing: 10) {
@@ -268,12 +287,6 @@ struct ProjectView: View {
                 scanSize = Format.size([Double(e.x), Double(e.z), Double(e.y)].map { $0 * 1000 })
             }
         }
-        .overlay(alignment: .topTrailing) {
-            if object.current != nil || scanURL != nil {
-                Image(systemName: "rotate.3d").font(.caption).padding(8).glassEffect(.regular, in: .circle).padding(.top, 104).padding(.trailing, 14)
-                    .accessibilityHidden(true)
-            }
-        }
         .ignoresSafeArea(edges: .top)
     }
 
@@ -290,9 +303,78 @@ struct ProjectView: View {
         case .failed: failedCard(object, words)
         case .draft: draftCard(object, words)
         case .sent: sentCard(words)
+        // After a finished print (PRD §5.4), on a Mac that keeps the answer.
+        case .printed where words.actions.contains(.itWorks) && store.projectSettings: didItFitCard(object)
         case .preparing, .printing: PrintStatusCard(store: store, project: object, working: $working, openPrinting: { openPrinting(object.id) },
                                                     openConfirmation: { confirming = object.printConfirmation.map { IdentifiedProject(id: $0.id) } })
         default: EmptyView()
+        }
+    }
+
+    /// "Did it fit?" (PRD §5.4): It works moves it to Done; Needs changes opens Ask for changes, started for you.
+    private func didItFitCard(_ object: Project) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label(ProjectWords.outcomeQuestion(object), systemImage: "ruler").font(.headline)
+            Text("Try it where it goes. Your answer stays with the project on \(store.macName ?? "your Mac").")
+                .font(.subheadline).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            GlassEffectContainer(spacing: 10) {
+                HStack(spacing: 10) {
+                    Button { act { try await store.mac.client.setStatus(object.id, .works) } } label: {
+                        Label("It Works", systemImage: "checkmark").font(.subheadline.weight(.semibold)).lineLimit(1).minimumScaleFactor(0.85)
+                            .frame(maxWidth: .infinity).frame(height: 36)
+                    }
+                    .buttonStyle(.glassProminent).tint(.okGreen)
+                    .accessibilityIdentifier("it-works")
+                    Button { needsChanges(object) } label: {
+                        Label("Needs Changes", systemImage: "pencil").font(.subheadline.weight(.semibold)).lineLimit(1).minimumScaleFactor(0.85)
+                            .frame(maxWidth: .infinity).frame(height: 36)
+                    }
+                    .buttonStyle(.glass)
+                    .accessibilityIdentifier("needs-changes")
+                }
+                .disabled(working)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
+        .glassEffect(.regular, in: .rect(cornerRadius: 24))
+    }
+
+    /// Says so on the Mac, then starts the change in Ask for changes.
+    private func needsChanges(_ object: Project) {
+        act { try await store.mac.client.setStatus(object.id, .needsChanges) }
+        if !note.hasPrefix(Self.afterPrinting) { note = Self.afterPrinting + note }
+        writing = true
+    }
+    static let afterPrinting = "After printing: "
+
+    /// Status (Not printed, Printed, Done, Needs changes), then Hide from Home apart from it: in ••• and on the capsule.
+    @ViewBuilder private func statusChoices(_ object: Project, _ words: ProjectWords, inline: Bool = false) -> some View {
+        let picker = Picker(selection: Binding(get: { shownStatus(object, words) }, set: { status in
+            act { try await store.mac.client.setStatus(object.id, status) }
+        })) {
+            ForEach(ProjectStatus.choices, id: \.self) { Label($0.label, systemImage: $0.symbol).tag($0) }
+        } label: { Label("Status", systemImage: "flag") }
+        // On the capsule the choices are right there, one tap; in ••• they're a Status submenu.
+        if inline { picker.pickerStyle(.inline) } else { picker.pickerStyle(.menu) }
+        // Apart from the status: a Done project hidden from Home is still Done.
+        Section {
+            if object.isArchived {
+                Button("Show on Home", systemImage: "tray.and.arrow.up") { act { try await store.archive(object, false) } }
+            } else {
+                Button("Hide from Home", systemImage: "archivebox") { act { try await store.archive(object, true) } }
+            }
+        }
+    }
+
+    /// The status in Project Settings; archived shows what's under it, and none set shows what the state says.
+    private func shownStatus(_ object: Project, _ words: ProjectWords) -> ProjectStatus {
+        if object.isArchived { return object.statusUnderneath }
+        if let status = object.projectStatus { return status }
+        switch words.phase {
+        case .confirmed: return .works
+        case .printed, .sent: return .printed
+        default: return .notPrinted
         }
     }
 
@@ -475,9 +557,16 @@ struct ProjectView: View {
                                 .submitLabel(.send)
                                 .onSubmit { sendNote(object) }
                                 .accessibilityIdentifier("ask-for-changes")
-                            if note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                                Image(systemName: "mic.fill").foregroundStyle(.secondary).accessibilityHidden(true)
-                            } else {
+                            // A photo of the part where it goes (PRD §5.4 Needs changes) goes with the next change.
+                            Menu {
+                                Button("Take Photo", systemImage: "camera") { attach(object, camera: true) }
+                                Button("Choose Photos", systemImage: "photo.on.rectangle") { attach(object, camera: false) }
+                            } label: { Image(systemName: "camera.fill").foregroundStyle(.secondary) }
+                            .disabled(working)
+                            .accessibilityLabel("Add photos")
+                            .accessibilityIdentifier("attach-photos")
+                            // Dictation is the keyboard's own; nothing here that doesn't do something.
+                            if !note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                                 Button { sendNote(object) } label: { Image(systemName: "arrow.up.circle.fill").font(.title2) }
                                     .disabled(working)
                                     .accessibilityLabel("Send changes")
@@ -488,7 +577,7 @@ struct ProjectView: View {
                     }
                     if canPrint && !writing {
                         Button { openPrint(object.id) } label: {
-                            Label("Print", systemImage: "printer.fill").fontWeight(.semibold).padding(.horizontal, 8).frame(height: 36)
+                            Label(words.phase == .confirmed ? "Print Another" : "Print", systemImage: "printer.fill").fontWeight(.semibold).padding(.horizontal, 8).frame(height: 36)
                         }
                         .buttonStyle(.glassProminent)
                         .controlSize(.large)
@@ -499,6 +588,19 @@ struct ProjectView: View {
             }
             .padding(.horizontal, 16)
             .padding(.bottom, 4)
+        }
+    }
+
+    /// Photos for the next change: the Mac keeps them with the project and uses them in its next pass.
+    private func attach(_ object: Project, camera: Bool) {
+        act {
+            let photos: [ChosenPhoto] = camera
+                ? (try await PhotoSources.takePhoto()).flatMap(MacConnection.keep).map { [$0] } ?? []
+                : try await store.mac.choosePhotos(limit: NewObjectView.photoLimit)
+            guard !photos.isEmpty else { return object }
+            try await store.mac.sendChosen(object.id, photos)
+            notice = photos.count == 1 ? "Added a photo. Your Mac uses it in the next change." : "Added \(photos.count) photos. Your Mac uses them in the next change."
+            return try await store.mac.get(object.id)
         }
     }
 

@@ -196,6 +196,71 @@ final class ProjectWordsTests: XCTestCase {
         for phase in ProjectPhase.allCases { XCTAssertFalse(phase.symbol.isEmpty); XCTAssertFalse(phase.label.isEmpty) }
     }
 
+    /// "Did it fit?" after a finished print (PRD §5.4): It works confirms it; Needs changes asks for changes.
+    func testAFinishedPrintAsksDidItFitAndConfirmedIsDone() {
+        let finished = ready(["state": "printed", "print": ["bundleId": "b", "monitor": ["phase": "ended", "endState": "done", "endedAt": "2026-10-31T09:00:00Z"]]])
+        XCTAssertEqual(Array(ProjectWords(finished).actions.prefix(2)), [.itWorks, .needsChanges])
+        XCTAssertEqual(ProjectWords.outcomeQuestion(finished), "Did it fit?")
+        var published = finished; published.kind = "published"
+        XCTAssertEqual(ProjectWords.outcomeQuestion(published), "Did it come out right?")
+        XCTAssertFalse(ProjectWords(ready(["state": "printed"])).actions.contains(.itWorks), "only a print the monitor saw finish")
+        let confirmed = ready(["state": "confirmed", "print": ["bundleId": "b", "monitor": ["phase": "ended", "endState": "done", "endedAt": "2026-10-31T09:00:00Z"]]])
+        let words = ProjectWords(confirmed, now: ISO.date("2026-11-01T12:00:00Z")!)
+        XCTAssertEqual(words.phase, .confirmed)
+        XCTAssertEqual(words.phase.symbol, "checkmark.circle.fill")
+        XCTAssertEqual(words.phase.label, "Done")
+        XCTAssertEqual(words.line, "Done · it works")
+        XCTAssertFalse(words.actions.contains(.itWorks))
+    }
+
+    /// The status you set (Project Settings): Works is Done once nothing runs; an answered card isn't asked again;
+    /// an unknown status from a newer Mac changes nothing; Archived is only a flag.
+    func testTheStatusYouSetDecidesDone() {
+        let ended: [String: Any] = ["bundleId": "b", "monitor": ["phase": "ended", "endState": "done", "endedAt": "2026-10-31T09:00:00Z"]]
+        XCTAssertEqual(ProjectWords(ready(["settings": ["status": "works"]])).phase, .confirmed, "printed elsewhere, marked Works by hand")
+        XCTAssertEqual(ProjectWords(ready(["settings": ["status": "works"]])).line, "Done · it works")
+        let stale = ready(["settings": ["status": "works"], "status": ["phase": "ready", "text": "Ready to print", "symbol": "", "tint": "accent"]])
+        XCTAssertEqual(ProjectWords(stale).line, "Done · it works", "never Done with the Mac's Ready words beside it")
+        let mac = ready(["state": "confirmed", "settings": ["status": "works"], "status": ["phase": "confirmed", "text": "It works", "symbol": "checkmark.circle.fill", "tint": "green"]])
+        XCTAssertEqual(ProjectWords(mac).phase, .confirmed)
+        XCTAssertEqual(ProjectWords(mac).line, "It works", "the Mac's own words for Works")
+        XCTAssertEqual(ProjectWords(ready(["state": "printed", "print": ended, "outcome": "works"])).phase, .confirmed, "the older outcome field")
+        XCTAssertEqual(ProjectWords(ready(["state": "touching-up", "settings": ["status": "works"]])).phase, .working, "a new pass runs: not Done")
+        let changes = ProjectWords(ready(["state": "printed", "print": ended, "settings": ["status": "needs-changes"]]))
+        XCTAssertEqual(changes.phase, .printed)
+        XCTAssertFalse(changes.actions.contains(.itWorks), "answered: not asked again")
+        let newer = ready(["state": "printed", "print": ended, "settings": ["status": "something-new", "copies": 3]])
+        XCTAssertNil(newer.projectStatus)
+        XCTAssertEqual(Array(ProjectWords(newer).actions.prefix(2)), [.itWorks, .needsChanges])
+        XCTAssertFalse(ProjectWords(ready(["state": "printed", "print": ended, "settings": ["status": "archived"]])).actions.contains(.itWorks))
+        XCTAssertTrue(ProjectWords(ready(["state": "printed", "print": ended, "settings": ["status": "printed"]])).actions.contains(.itWorks))
+        XCTAssertTrue(ready(["settings": ["status": "archived"]]).isArchived)
+        XCTAssertEqual(ProjectWords(ready(["settings": ["status": "archived"]])).phase, .ready)
+        XCTAssertEqual(ProjectWords(ready(["settings": "odd"])).phase, .ready, "an odd settings value decodes")
+        XCTAssertEqual(ProjectStatus.choices.map(\.label), ["Not printed", "Printed", "Done", "Needs changes"], "Archive is apart")
+        // A reprint the Mac can't follow (sent, uncertain) isn't Done, whatever was said about the last one.
+        let resent = ready(["state": "sent", "settings": ["status": "works"], "outcome": "works", "print": ["bundleId": "b2", "uncertain": true, "sentVia": "bambu-connect"]])
+        XCTAssertEqual(ProjectWords(resent).phase, .sent)
+        XCTAssertEqual(ProjectWords(ready(["settings": ["status": "works"], "print": ["bundleId": "b", "uncertain": true]])).phase, .ready, "an uncertain print isn't Done")
+        // Done prints another with no uncertain-print check.
+        let doneUncertain = ready(["state": "confirmed", "settings": ["status": "works"], "print": ["bundleId": "b", "uncertain": true]])
+        XCTAssertEqual(ProjectWords(doneUncertain).actions, [.print, .correct])
+        // Archive is apart from the status: a Done project archived stays Done, and Unarchive knows what was under it.
+        let archivedDone = ready(["state": "confirmed", "settings": ["status": "archived"], "outcome": "works", "archived": true])
+        XCTAssertTrue(archivedDone.isArchived)
+        XCTAssertEqual(ProjectWords(archivedDone).phase, .confirmed)
+        XCTAssertEqual(archivedDone.statusUnderneath, .works)
+        XCTAssertEqual(ready(["state": "printed", "outcome": "needs-changes", "archived": true]).statusUnderneath, .needsChanges)
+        XCTAssertEqual(ready(["state": "sent", "archived": true]).statusUnderneath, .printed)
+        XCTAssertEqual(ready(["archived": true]).statusUnderneath, .notPrinted)
+        // Where the Mac keeps archive apart, the status itself is what's under it.
+        XCTAssertEqual(ready(["state": "printed", "settings": ["status": "needs-changes", "archived": true]]).statusUnderneath, .needsChanges)
+        XCTAssertEqual(ready(["settings": ["status": "works", "archived": true]]).statusUnderneath, .works)
+        // A Mac with the archive setting says so itself.
+        XCTAssertFalse(ready(["settings": ["status": "works", "archived": false], "archived": true]).isArchived)
+        XCTAssertTrue(ready(["settings": ["status": "works", "archived": true]]).isArchived)
+    }
+
     func testCardLines() {
         XCTAssertEqual(ProjectWords(ready()).line, "Ready to print · 62 × 75 × 49 mm")
         XCTAssertEqual(ProjectWords(ready(["state": "printed"])).line, "Sent to your printer", "no claim it printed without the monitor's word")

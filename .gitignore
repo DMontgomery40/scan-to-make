@@ -11,3 +11,6 @@ secrets/
 shared/
 docs/research/
 .team-local/
+
+# SwiftPM build output (CounterpartKit tests)
+packages/CounterpartKit/.build/

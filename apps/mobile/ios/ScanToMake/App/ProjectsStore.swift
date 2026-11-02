@@ -85,6 +85,16 @@ import CounterpartKit
         if let latest = try? await mac.get(id) { replace(latest) }
     }
 
+    /// The Mac keeps Project Settings (PRD §5.4): status, Did it fit?, Done.
+    var projectSettings: Bool { macCapabilities.contains("projectSettings") }
+
+    /// Hide from Home, or show again. A Mac whose settings carry `archived` keeps the status exactly; an older one
+    /// gets back the status that was under it.
+    func archive(_ project: Project, _ archived: Bool) async throws -> Project? {
+        if project.settings?.archived != nil { return try await mac.client.setArchived(project.id, archived) }
+        return try await mac.client.setStatus(project.id, archived ? .archived : project.statusUnderneath)
+    }
+
     func loadCapabilities() async {
         if let names = try? await mac.client.capabilities() { macCapabilities = names }
     }
@@ -135,8 +145,9 @@ import CounterpartKit
     func follow() async {
         if events != false {
             do {
-                for try await update in EventStream(feed: LongPollEventFeed(client: mac.client)).updates {
-                    events = true
+                let client = mac.client
+                for try await update in EventStream(feed: LongPollEventFeed(client: client), healthy: { await client.answers() }).updates {
+                    events = true; reachable = true
                     switch update {
                     case .resync: await load(); await loadPrinters()
                     case .event(let event):

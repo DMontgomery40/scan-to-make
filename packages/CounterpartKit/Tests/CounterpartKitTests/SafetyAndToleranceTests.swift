@@ -63,7 +63,7 @@ final class SafetyAndToleranceTests: XCTestCase {
         XCTAssertEqual(CloudKitRecords.projectState(.needsYou), "needs-you")
         XCTAssertEqual(CloudKitRecords.projectState(.draft), "draft")
         XCTAssertEqual(Set(ProjectPhase.allCases.map(CloudKitRecords.projectState)),
-                       ["draft", "sending", "working", "needs-you", "ready", "preparing", "printing", "printed", "sent", "failed", "unknown"])
+                       ["draft", "sending", "working", "needs-you", "ready", "preparing", "printing", "printed", "sent", "confirmed", "failed", "unknown"])
     }
 
     func testTimesMidSentenceAreLowercase() {

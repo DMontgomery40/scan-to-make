@@ -77,6 +77,7 @@ public final class CompanionClient: @unchecked Sendable {
             if is_(one + "/(filaments|camera\\.jpg)") || is_("/v1/objects/printers/[^/]+/camera\\.jpg") { return "printer-handoff:use" }
         case "PATCH":
             if is_(one) { return "captures:import" }
+            if is_(one + "/settings") { return "captures:import" }
             if is_("/v1/settings") { return "projects:write" }
         case "DELETE":
             if is_(one) { return "captures:import" }
@@ -127,7 +128,8 @@ public final class CompanionClient: @unchecked Sendable {
                 guard attempt.isSamePairing(as: latest ?? nil) else { throw CompanionError.transport("pairing-changed") }
                 return reply
             } catch let error as TransportError {
-                if retry == 0, method == "GET", ["network", "timeout"].contains(error.code), (attempt.addresses?.count ?? 0) > 1,
+                // A long poll that ends early says nothing about the address: only an ordinary request moves it.
+                if retry == 0, method == "GET", !path.hasPrefix("/v1/events"), ["network", "timeout"].contains(error.code), (attempt.addresses?.count ?? 0) > 1,
                    let checked = try? await pairing.check(), checked.activeUrl != attempt.activeUrl,
                    let moved = try? self.record(scope) {
                     attempt = moved
@@ -168,7 +170,8 @@ public final class CompanionClient: @unchecked Sendable {
         let error = JSONValue.object(from: reply.body)?["error"]?.object
         let message = error?["message"]?.string, code = error?["code"]?.string
         let newer = path.hasPrefix("/v1/events") || path.hasPrefix("/v1/settings") || path.hasSuffix("/camera.jpg") || path.contains("/print/")
-            || path.hasSuffix("/estimate") || path.contains("/asks/") || path.hasPrefix("/v1/devices")
+            || path.hasSuffix("/estimate") || path.contains("/asks/") || path.hasPrefix("/v1/devices") || path.hasSuffix("/settings")
+            || path.hasPrefix("/v1/printers/")
         switch reply.status {
         case 401, 403: return CompanionError(code: "pairing", message: "Connect to your Mac again.")
         case 404 where path == "/v1/objects": return CompanionError(code: "not-set-up", message: "Your Mac isn't ready to make things yet. Open Counterpart on your Mac.")
@@ -221,6 +224,21 @@ public final class CompanionClient: @unchecked Sendable {
         if let text { json["text"] = text }
         return try await request("POST", "/v1/objects/\(id)/closeup", json: json, as: One.self).object
     }
+    private struct MaybeOne: Decodable { var object: Project? }
+    /// Sets the project's status (PRD §5.4): It works, Needs changes, Archived… Returns the project when the
+    /// Mac sends it back; otherwise read it again. An older Mac answers `not-supported`.
+    public func setStatus(_ id: String, _ status: ProjectStatus) async throws -> Project? {
+        try await changeProjectSettings(id, ["status": status.rawValue])
+    }
+    /// Hides it from Home or shows it again, keeping its status (a Mac whose settings carry `archived`).
+    public func setArchived(_ id: String, _ archived: Bool) async throws -> Project? {
+        try await changeProjectSettings(id, ["archived": archived])
+    }
+    private func changeProjectSettings(_ id: String, _ patch: [String: Any]) async throws -> Project? {
+        let reply = try await send("PATCH", "/v1/objects/\(id)/settings", body: try JSONSerialization.data(withJSONObject: patch))
+            .checked(path: "/v1/objects/\(id)/settings")
+        return (try? JSONDecoder().decode(MaybeOne.self, from: reply.body))?.object
+    }
     public func delete(_ id: String) async throws { _ = try await request("DELETE", "/v1/objects/\(id)", as: Deleted.self) }
     public func passActivity(_ id: String, index: Int) async throws -> [Project.Activity] {
         try await request("GET", "/v1/objects/\(id)/passes/\(index)/activity", as: ActivityReply.self).activity
@@ -230,6 +248,11 @@ public final class CompanionClient: @unchecked Sendable {
 
     /// What the running companion can do, as the names of its true capability flags (`genericConfirmations`, …),
     /// from `GET /healthz`. Empty from a Mac that doesn't list them.
+    /// A quick "are you there?": `/healthz` with a short timeout, for when a long poll ends early.
+    public func answers() async -> Bool {
+        (try? await send("GET", "/healthz", timeout: 6).checked(path: "/healthz")) != nil
+    }
+
     public func capabilities() async throws -> Set<String> {
         struct Health: Decodable { var capabilities: [String: JSONValue]? }
         let health = try await request("GET", "/healthz", as: Health.self)
@@ -244,11 +267,12 @@ public final class CompanionClient: @unchecked Sendable {
         try await request("POST", "/v1/objects/\(id)/printer", json: ["destinationId": destinationId], as: One.self).object
     }
     /// The slice estimate for these settings (PR 2): time, grams and layers. Can take up to 150 s.
-    public func estimate(_ id: String, destinationId: String?, quality: PrintQuality, strength: PrintStrength) async throws -> SliceEstimate {
+    public func estimate(_ id: String, destinationId: String?, quality: PrintQuality, strength: PrintStrength, copies: Int? = nil) async throws -> SliceEstimate {
         var json: [String: Any] = [:]
         if let destinationId { json["destinationId"] = destinationId }
         if quality != .standard { json["quality"] = quality.rawValue }
         if strength != .standard { json["strength"] = strength.rawValue }
+        if let copies { json["copies"] = max(1, copies) }
         return try await request("POST", "/v1/objects/\(id)/estimate", json: json, as: SliceEstimate.self, timeout: 170)
     }
     /// Starts preparing the print. The printer MCP still asks its own confirmation.

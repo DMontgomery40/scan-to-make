@@ -7,7 +7,8 @@ import Foundation
 public struct Project: Codable, Identifiable, Equatable, Sendable {
     public enum State: String, Codable, Sendable {
         /// `sent`: the printer took the job but Counterpart can't follow it (no job id, or Bambu Connect). Terminal.
-        case new, touchingUp = "touching-up", needsCloseup = "needs-closeup", ready, printing, printed, sent, failed, unknown
+        /// `confirmed`: you said the print works ("Did it fit?" → It works). Done.
+        case new, touchingUp = "touching-up", needsCloseup = "needs-closeup", ready, printing, printed, sent, confirmed, failed, unknown
         public init(from decoder: Decoder) throws {
             self = State(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .unknown
         }
@@ -48,22 +49,30 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
     public var ask: Ask?
     /// The project's folder on the Mac. Only the Mac's control socket (`objects.list`) sends it; absent on `/v1/objects`.
     public var directory: String?
+    /// Project Settings (PRD §5.4), stored by the companion: so far, the status you set.
+    public var settings: Settings?
+    /// "Did it fit?" as the companion keeps it (`works`, `needs-changes`), beside `settings.status`.
+    public var outcome: String?
+    /// Hidden from Home (Archive). Kept beside `settings.status`.
+    public var archived: Bool?
 
     public init(id: String, createdAtMs: Double, updatedAtMs: Double, instructions: String? = nil, state: State, scan: String? = nil,
                 photos: [String] = [], capture: [String]? = nil, progress: String? = nil, passes: [Pass] = [], current: Result? = nil,
                 question: Question? = nil, failure: String? = nil, print: Print? = nil,
                 printerDestinationId: String? = nil, printConfirmation: PrintConfirmation? = nil,
-                status: Status? = nil, title: String? = nil, kind: String? = nil, ask: Ask? = nil, directory: String? = nil) {
+                status: Status? = nil, title: String? = nil, kind: String? = nil, ask: Ask? = nil, directory: String? = nil,
+                settings: Settings? = nil, outcome: String? = nil, archived: Bool? = nil) {
         self.id = id; self.createdAtMs = createdAtMs; self.updatedAtMs = updatedAtMs; self.instructions = instructions
         self.state = state; self.scan = scan; self.photos = photos; self.capture = capture; self.progress = progress
         self.passes = passes; self.current = current; self.question = question; self.failure = failure
         self.print = print; self.printerDestinationId = printerDestinationId; self.printConfirmation = printConfirmation
         self.status = status; self.title = title; self.kind = kind; self.ask = ask; self.directory = directory
+        self.settings = settings; self.outcome = outcome; self.archived = archived
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, createdAtMs, updatedAtMs, instructions, state, scan, photos, capture, captureDepth, progress, passes, current, question
-        case failure, print, printerDestinationId, printConfirmation, status, title, kind, ask, directory
+        case failure, print, printerDestinationId, printConfirmation, status, title, kind, ask, directory, settings, outcome, archived
     }
 
     /// One odd object never drops out of the list: missing lists are empty, and an optional that doesn't
@@ -94,6 +103,9 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
         kind = optional(String.self, .kind)
         ask = optional(Ask.self, .ask)
         directory = optional(String.self, .directory)
+        settings = optional(Settings.self, .settings)
+        outcome = optional(String.self, .outcome)
+        archived = optional(Bool.self, .archived)
     }
 
     public var createdAt: Date { Date(timeIntervalSince1970: createdAtMs / 1000) }
@@ -109,10 +121,40 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
     /// The pass in progress, if the Mac is working.
     public var runningPass: Pass? { state == .touchingUp ? passes.last(where: { $0.endedAtMs == nil }) : nil }
 
+    /// The status you set (Project Settings), or the older `outcome`. Nil when unset or from a newer Mac.
+    public var projectStatus: ProjectStatus? {
+        (settings?.status).flatMap(ProjectStatus.init(rawValue:)) ?? outcome.flatMap(ProjectStatus.init(rawValue:))
+    }
+    /// Hidden from Home. Archiving is apart from the status: a Done project can be archived and stays Done.
+    public var isArchived: Bool { settings?.archived ?? (archived == true || projectStatus == .archived) }
+    /// The status under an archived project: the status itself where the Mac keeps archive apart, else from the
+    /// state (what Unarchive puts back on a Mac without the `archived` setting).
+    public var statusUnderneath: ProjectStatus {
+        if let status = projectStatus, status != .archived { return status }
+        if state == .confirmed { return .works }
+        if outcome == "needs-changes" { return .needsChanges }
+        if state == .printed || state == .sent { return .printed }
+        return .notPrinted
+    }
+
     /// The open question, structured (PR 4) or the older close-up question.
     public var openAsk: Ask? { ask.flatMap { $0.status == "answered" ? nil : $0 } }
 
     // MARK: Nested types
+
+    /// Project Settings (PRD §5.4). Every part is optional, so a newer Mac's other settings never break decoding.
+    public struct Settings: Codable, Equatable, Sendable {
+        /// not-printed, printed, works, needs-changes, archived, or a newer value kept as its string.
+        public var status: String?
+        /// Present on a Mac that archives apart from the status (`PATCH …/settings {archived}`).
+        public var archived: Bool?
+        public init(status: String? = nil, archived: Bool? = nil) { self.status = status; self.archived = archived }
+        public init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            status = (try? c.decodeIfPresent(String.self, forKey: .status)) ?? nil
+            archived = (try? c.decodeIfPresent(Bool.self, forKey: .archived)) ?? nil
+        }
+    }
 
     /// The companion's state line (`ObjectStatus`).
     public struct Status: Codable, Equatable, Sendable {
@@ -575,5 +617,32 @@ public enum ISO {
         let fractional = ISO8601DateFormatter()
         fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return fractional.date(from: text)
+    }
+}
+
+/// The status a person sets on a project (PRD §5.4 Project Settings): `PATCH /v1/objects/<id>/settings {status}`.
+public enum ProjectStatus: String, CaseIterable, Sendable {
+    case notPrinted = "not-printed", printed, works, needsChanges = "needs-changes", archived
+
+    /// The Status choices, in order. Archive is its own action ("Hide from Home"), never a status you pick.
+    public static let choices: [ProjectStatus] = [.notPrinted, .printed, .works, .needsChanges]
+
+    public var label: String {
+        switch self {
+        case .notPrinted: "Not printed"
+        case .printed: "Printed"
+        case .works: "Done"
+        case .needsChanges: "Needs changes"
+        case .archived: "Archived"
+        }
+    }
+    public var symbol: String {
+        switch self {
+        case .notPrinted: "circle.dashed"
+        case .printed: "shippingbox"
+        case .works: "checkmark.circle"
+        case .needsChanges: "pencil.and.ruler"
+        case .archived: "archivebox"
+        }
     }
 }

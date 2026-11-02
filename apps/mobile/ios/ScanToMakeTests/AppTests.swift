@@ -85,6 +85,17 @@ import CounterpartKit
                                          justPaired: false, notificationsUndecided: nil, askedNotifications: false), .welcome)
     }
 
+    /// Print Another starts on the tray this phone last printed with, on that printer only.
+    func testPrintAnotherRemembersTheTrayPerPrinter() {
+        let id = UUID().uuidString.lowercased()
+        XCTAssertNil(LastTray.slot(id, destinationId: "current"))
+        LastTray.save(id, destinationId: "current", slot: 2)
+        XCTAssertEqual(LastTray.slot(id, destinationId: "current"), 2)
+        XCTAssertNil(LastTray.slot(id, destinationId: "mcp-garage"), "another printer's trays are its own")
+        LastTray.save(id, destinationId: "current", slot: 254)
+        XCTAssertEqual(LastTray.slot(id, destinationId: "current"), 254)
+    }
+
     /// Codex on #218: a refused AI choice keeps its reason and isn't tested; a read that works clears a failed read,
     /// but not a refusal.
     func testMacSettingsKeepARefusalAndDropAFailedReadOnceTheMacAnswers() async {
