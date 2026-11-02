@@ -64,7 +64,7 @@ The Mac app shows the same projects as the phone and drives them through these m
 | Flag | Meaning | Status |
 |---|---|---|
 | `objectsCreate` | `objects.create`, `objects.addFile` and `objects.correct` `photos` | PR 1 |
-| `printSettings` | `objects.print` settings, `objects.estimate`, destination `state` and `capabilities`, `objects.answerPlate` answers, `settings.*` | PR 2 |
+| `printSettings` | `objects.print` settings, `objects.estimate`, destination `state` and `capabilities`, `settings.*` | PR 2 |
 | `printControl` | `objects.pausePrint`, `objects.resumePrint`, `objects.cancelPrint`, `objects.camera`, `printers.camera`, the print monitor | PR 2 |
 | `events` | `events.wait`, `liveActivity.tokens`, device `model` and `lastSeenAt`, object `status` | PR 3 |
 | `structuredPasses` | object `title`, `kind`, `ask`, `current.changes`, pass `stages` and `estimate`, the design engine | PR 4 |
@@ -86,9 +86,9 @@ The Mac app shows the same projects as the phone and drives them through these m
 | `objects.selectPrinter` | `{id, destinationId}` | `{object}` | |
 | `objects.filaments` | `{id}` | `{filaments}`; `suggested` from PR 2 | |
 | `objects.estimate` | `{id, destinationId?, quality?: "draft"\|"standard"\|"fine", strength?: "standard"\|"strong"\|"max"}` | `PrintEstimate` `{destinationId, quality, strength, seconds?, grams?, layers?, layerHeightMm?, infillPercent?, wallLoops?, slicedAt}` | PR 2 |
-| `objects.print` | `{id, checked?, filament?, quality?, strength?, colour?: {auto: true}\|{amsSlot}\|{external: true}\|{material}, plateCheck?: boolean}` | `{object}` (settings PR 2) | |
+| `objects.print` | `{id, checked?, filament?, quality?, strength?, colour?: {auto: true}\|{amsSlot}\|{external: true}\|{material}}` | `{object}` (settings PR 2) | |
 | `objects.answerPrintConfirmation` | `{id, confirmationId, answer}` | `{object}` | |
-| `objects.answerPlate` | `{id, answer?: "clear"\|"look-again", note?: string ≤ 200}` (default `clear`) | `{object}` (answers PR 2) | |
+| `objects.answerPlate` | `{id}` | Always `conflict`: a clear plate alone never approves a print. Answer the printer MCP's own question with `objects.answerPrintConfirmation`. (Plate answers and alerts were removed with ac44431.) | |
 | `objects.pausePrint`, `objects.resumePrint`, `objects.cancelPrint` | `{id}` | `{object}` | PR 2 |
 | `objects.camera` | `{id}` | `{format: "jpeg", base64, capturedAt}` from the project's printer | PR 2 |
 | `printers.camera` | `{destinationId}` | `{format: "jpeg", base64, capturedAt}` | PR 2 |
@@ -111,7 +111,7 @@ The file is copied; the original is never changed. Then call `objects.start`. A 
 
 **`objects.estimate`.** Slices the current model with the same settings a Print would use, through the destination's MCP session; it never prints. The default destination is the project's chosen printer. A repeated call with the same model and settings returns the cached estimate at once. Quality or strength the MCP can't apply is `conflict` with a sentence naming the update.
 
-**Plate answers.** `look-again` retakes a frame and judges it again (`plate.checking` is true meanwhile). `clear` hides the alert and remembers, for that printer, that what was seen is not an obstruction; the note is added to future plate checks for that printer. Neither answers the printer MCP's own confirmation: that always takes `objects.answerPrintConfirmation`.
+**Plate check.** None beyond what `main` already does: the printer MCP's own confirmation, with its camera frame when it sends one, is relayed as `printConfirmation` and answered with `objects.answerPrintConfirmation`. Plate prompts were removed from the apps in ac44431; plate alerts, "It's clear" notes and a plate-check setting are not part of KAN-214.
 
 ## Swift integration
 

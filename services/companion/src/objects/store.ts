@@ -2,8 +2,10 @@ import {randomUUID} from 'node:crypto';
 import {mkdir, readdir, readFile, rename, rm, writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import type {TouchupActivity} from '../touchup/runner.js';
+import type {PrintLive, PrintMonitor, PrintSettings} from '@scan-to-make/contracts/counterpart';
 
-export type ObjectState = 'new' | 'touching-up' | 'needs-closeup' | 'ready' | 'printing' | 'printed' | 'failed';
+/** `sent`: the printer accepted the print, but Counterpart can't follow it to the end (no evidence it printed). */
+export type ObjectState = 'new' | 'touching-up' | 'needs-closeup' | 'ready' | 'printing' | 'printed' | 'failed' | 'sent';
 
 export interface ObjectPrintConfirmation {
   id: string;
@@ -56,7 +58,23 @@ export interface StmObject {
   printConfirmation?: ObjectPrintConfirmation;
   failure?: string;
   /** The last print; `uncertain` when it may have reached the printer and must not be sent again by itself. */
-  print?: {bundleId: string; uncertain?: boolean; destination?: {id: string; name: string}; printerStatus?: {state: string; job?: string; checkedAtMs: number; percent?: number; remainingMinutes?: number}; sliced?: boolean; estimate?: {seconds?: number; grams?: number}; events?: {atMs: number; message: string}[]};
+  print?: {bundleId: string; uncertain?: boolean; destination?: {id: string; name: string}; printerStatus?: {state: string; job?: string; checkedAtMs: number; percent?: number; remainingMinutes?: number}; sliced?: boolean; estimate?: {seconds?: number; grams?: number}; events?: {atMs: number; message: string}[];
+    /** PRD §8.5: one uuid per print, from Print. */
+    printId?: string;
+    destinationId?: string;
+    /** When the printer MCP accepted it (ISO). */
+    dispatchedAt?: string;
+    jobName?: string;
+    taskId?: string;
+    /** Without a job identity: the sliced file's base name, to adopt a job named after it. */
+    fileBase?: string;
+    /** The print was handed to Bambu Connect: the person finishes it there. */
+    sentVia?: 'bambu-connect';
+    settings?: PrintSettings;
+    /** The latest report of this print's job (PRD §8.6). */
+    live?: PrintLive;
+    monitor?: PrintMonitor;
+  };
 }
 
 const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -129,8 +147,10 @@ export class ObjectStore {
   }
 
   /** After a restart nothing is still running: record interruption, never successful completion. */
-  async recoverInterrupted(): Promise<void> {
+  async recoverInterrupted(options: {keepPrinting?: boolean} = {}): Promise<void> {
     for (const object of await this.list()) {
+      // A dispatched print keeps going on the printer: its monitor resumes (PRD §8.6).
+      if (object.state === 'printing' && (options.keepPrinting || object.print?.monitor?.phase === 'starting' || object.print?.monitor?.phase === 'watching')) continue;
       if (object.state === 'touching-up' || object.state === 'printing') {
         const atMs = Date.now(), failure = 'interrupted when your Mac restarted the app';
         await this.update(object.id, o => ({...o, state: 'failed', failure, progress: undefined, plate: undefined, printConfirmation: undefined,

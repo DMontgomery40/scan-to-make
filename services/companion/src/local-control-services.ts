@@ -14,6 +14,7 @@ import {RemoteAuthStore, RemoteAuthFailure} from './remote-auth.js';
 import type {ModelAccessService} from './model-access.js';
 import type {NearbyRequest} from '@scan-to-make/contracts/nearby-pairing';
 import {InvalidFileError, InvalidStateError, type ObjectService} from './objects/service.js';
+import {CameraUnavailableError} from './printing/camera.js';
 import {ObjectNotFoundError} from './objects/store.js';
 import {publicObject} from './objects/http.js';
 import type {createPrinterCheck} from './printer-check.js';
@@ -142,7 +143,7 @@ export function createControlDispatcher(services: ControlServices) {
         }
         case 'status.get': return {protocolVersion:1,companionVersion:services.companionVersion,transport:auth.transport,
           pairedDeviceCount:(await auth.listDevices()).length,capabilities:{capture:!!capture?.captures,cleanup:!!capture?.scanProcessing,printerHandoff:!!printHandoff,nearbyPairing:!!services.nearby,
-            objectsCreate:!!services.objects}};
+            objectsCreate:!!services.objects,printSettings:!!services.objects?.printSettingsAvailable,printControl:!!services.objects?.printSettingsAvailable}};
         case 'devices.list': return {devices:await auth.listDevices()};
         case 'devices.remove': {
           const {deviceId} = parameters[method].parse(raw);
@@ -192,7 +193,8 @@ export function createControlDispatcher(services: ControlServices) {
         }
         case 'doors.prepare': return await prepareDoor(parameters[method].parse(raw));
         case 'objects.list': case 'objects.printers': case 'objects.filaments': case 'objects.selectPrinter': case 'objects.get': case 'objects.passActivity': case 'objects.start': case 'objects.delete': case 'objects.correct': case 'objects.answerCloseup': case 'objects.print': case 'objects.answerPlate': case 'objects.answerPrintConfirmation':
-        case 'objects.create': case 'objects.addFile': {
+        case 'objects.create': case 'objects.addFile':
+        case 'objects.estimate': case 'objects.pausePrint': case 'objects.resumePrint': case 'objects.cancelPrint': case 'objects.camera': case 'printers.camera': case 'settings.get': case 'settings.set': {
           const objects = services.objects;
           if (!objects) throw new ControlFailure('unavailable');
           try {
@@ -207,6 +209,25 @@ export function createControlDispatcher(services: ControlServices) {
             }
             if (method === 'objects.delete') { await objects.delete((parameters[method].parse(raw) as {id: string}).id); return {deleted: true}; }
             if (method === 'objects.create') return {object: local(await objects.create(parameters[method].parse(raw).instructions))};
+            if (method === 'objects.estimate') {
+              const {id, ...request} = parameters[method].parse(raw);
+              return await objects.estimate(id, request);
+            }
+            if (method === 'objects.pausePrint' || method === 'objects.resumePrint' || method === 'objects.cancelPrint') {
+              const action = method === 'objects.pausePrint' ? 'pause' : method === 'objects.resumePrint' ? 'resume' : 'cancel';
+              return {object: local(await objects.control(parameters[method].parse(raw).id, action))};
+            }
+            if (method === 'objects.camera' || method === 'printers.camera') {
+              try {
+                const frame = method === 'objects.camera' ? await objects.camera(parameters[method].parse(raw).id) : await objects.printerCamera(parameters[method].parse(raw).destinationId);
+                return {format: 'jpeg', base64: frame.bytes.toString('base64'), capturedAt: frame.capturedAt};
+              } catch (error) {
+                if (error instanceof CameraUnavailableError) throw new ControlFailure(error.reason === 'no-camera' ? 'not-found' : 'unavailable', error.message);
+                throw error;
+              }
+            }
+            if (method === 'settings.get') return {settings: await objects.settings()};
+            if (method === 'settings.set') return {settings: await objects.updateSettings(parameters[method].parse(raw))};
             if (method === 'objects.addFile') {
               const {id, kind, path} = parameters[method].parse(raw);
               return {object: local(await objects.addFile(id, kind, path))};
@@ -219,12 +240,12 @@ export function createControlDispatcher(services: ControlServices) {
               const {id, confirmationId, answer} = parameters[method].parse(raw);
               return {object: local(await objects.answerPrintConfirmation(id, confirmationId, answer))};
             }
-            const params = parameters[method].parse(raw) as {id: string; destinationId?: string; note?: string; bestGuess?: boolean; checked?: boolean; filament?: import('./objects/service.js').FilamentChoice};
+            const params = parameters[method].parse(raw) as {id: string; destinationId?: string; note?: string; bestGuess?: boolean} & import('./objects/service.js').PrintOptions;
             const object = method === 'objects.get' ? await objects.get(params.id)
               : method === 'objects.selectPrinter' ? await objects.selectPrinter(params.id, params.destinationId!)
               : method === 'objects.start' ? await objects.start(params.id)
               : method === 'objects.answerCloseup' ? await objects.answerCloseup(params.id, {bestGuess: params.bestGuess!})
-              : method === 'objects.print' ? await objects.print(params.id, {checked:params.checked, filament:params.filament})
+              : method === 'objects.print' ? await objects.print(params.id, (({id: _id, ...options}) => options)(params))
               : await objects.answerPlate(params.id, {clear: true});
             return {object: local(object)};
           } catch (error) {

@@ -336,6 +336,20 @@
    "printId": "8a2b4c6d-1e3f-4a5b-8c7d-9e0f1a2b3c4d",
    "destinationId": "current",
    "printerName": "Bambu Lab P1S"
+  },
+  {
+   "v": 1,
+   "seq": 20,
+   "id": "00000000-0000-4000-8000-000000000020",
+   "at": "2026-11-01T18:20:00.000Z",
+   "type": "print.sent",
+   "projectId": "3f1c2a9e-5b7d-4e21-9a6f-0c8d1e2f3a4b",
+   "printId": "8a2b4c6d-1e3f-4a5b-8c7d-9e0f1a2b3c4d",
+   "destinationId": "current",
+   "printerName": "Bambu Lab P1S",
+   "title": "Sent Mic mount to Bambu Lab P1S",
+   "body": "Counterpart can't follow this print.",
+   "notify": "passive"
   }
  ],
  "eventsPage": {
@@ -372,7 +386,7 @@
    }
   ],
   "next": 2,
-  "latest": 19
+  "latest": 20
  },
  "eventsPageTruncated": {
   "events": [
@@ -403,16 +417,30 @@
     "printId": "8a2b4c6d-1e3f-4a5b-8c7d-9e0f1a2b3c4d",
     "destinationId": "current",
     "printerName": "Bambu Lab P1S"
+   },
+   {
+    "v": 1,
+    "seq": 20,
+    "id": "00000000-0000-4000-8000-000000000020",
+    "at": "2026-11-01T18:20:00.000Z",
+    "type": "print.sent",
+    "projectId": "3f1c2a9e-5b7d-4e21-9a6f-0c8d1e2f3a4b",
+    "printId": "8a2b4c6d-1e3f-4a5b-8c7d-9e0f1a2b3c4d",
+    "destinationId": "current",
+    "printerName": "Bambu Lab P1S",
+    "title": "Sent Mic mount to Bambu Lab P1S",
+    "body": "Counterpart can't follow this print.",
+    "notify": "passive"
    }
   ],
-  "next": 19,
-  "latest": 19,
+  "next": 20,
+  "latest": 20,
   "truncated": true
  },
  "eventsPageReset": {
   "events": [],
-  "next": 19,
-  "latest": 19,
+  "next": 20,
+  "latest": 20,
   "reset": true
  },
  "statuses": [
@@ -463,6 +491,12 @@
    "text": "Bambu Lab P1S didn't start Mic mount · Check the printer, then press Print again.",
    "symbol": "exclamationmark.triangle",
    "tint": "red"
+  },
+  {
+   "phase": "sent",
+   "text": "Sent to Bambu Lab P1S · Counterpart can't follow this print",
+   "symbol": "paperplane",
+   "tint": "secondary"
   }
  ],
  "printLive": {
@@ -512,8 +546,7 @@
   "strength": "strong",
   "colour": {
    "amsSlot": 1
-  },
-  "plateCheck": true
+  }
  },
  "estimate": {
   "destinationId": "current",

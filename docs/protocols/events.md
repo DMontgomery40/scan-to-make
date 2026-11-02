@@ -1,6 +1,6 @@
 # Counterpart events
 
-Every user-visible change on the Mac becomes one event: a pass starting, a question, a plate alert, a print starting, progress, the end of a print. The companion writes events; the Mac app turns them into Mac notifications, CloudKit records and Live Activity pushes (PRD §8.8); the phone reads them on the LAN for its own UI. All notification wording comes from one place, `services/companion/src/events/words.ts`, so every surface says the same thing.
+Every user-visible change on the Mac becomes one event: a pass starting, a question, a print starting, progress, the end of a print. The companion writes events; the Mac app turns them into Mac notifications, CloudKit records and Live Activity pushes (PRD §8.8); the phone reads them on the LAN for its own UI. All notification wording comes from one place, `services/companion/src/events/words.ts`, so every surface says the same thing.
 
 Status: the event type and its words are fixed by this document. The print events are produced from KAN-214 PR 2, and the log, `GET /v1/events`, the frame route and `events.wait` arrive in PR 3. The pass events are produced from PR 4.
 
@@ -14,7 +14,7 @@ type CounterpartEvent = {
   type: "pass.started"|"pass.stage"|"pass.ready"|"pass.ask"|"pass.failed"
       | "print.preparing"|"plate.blocked"|"print.confirm"|"print.started"|"print.status"|"print.first-layer"
       | "print.milestone"|"print.paused"|"print.resumed"|"print.done"|"print.failed"|"print.cancelled"
-      | "print.not-started"|"print.unreachable";
+      | "print.not-started"|"print.unreachable"|"print.sent";
   projectId: string; printId?: string; destinationId?: string; printerName?: string;
   title: string; body: string;
   notify: "none"|"passive"|"active"|"timeSensitive";
@@ -44,7 +44,7 @@ type CounterpartEvent = {
 | `pass.ask` | A pass ends needing a close-up | "*Title*: *question*" | "Take a photo, choose one, or let your Mac make its best guess." | active | |
 | `pass.failed` | A pass ends without a model | "*Title* didn't finish" | what happened and what to do | active | |
 | `print.preparing` | Print was tapped; each preparation step | "Getting *Title* ready" | the step: "Slicing the model", "Checking the printer", … | none | |
-| `plate.blocked` | The background plate check sees something on the plate | "Something's on the *Printer* plate" | "Looks like there's *item* on your plate. Can you take it off first?" | timeSensitive | yes (the judged frame) |
+| `plate.blocked` | **Not emitted.** Kept in the type from PRD §8.7; plate alerts were removed with ac44431 and would return only in a later change. | "Something's on the *Printer* plate" | "Looks like there's *item* on your plate. Can you take it off first?" | timeSensitive | |
 | `print.confirm` | The printer MCP asks its own confirmation | "*Printer* needs a yes before printing *Title*" | "Open Counterpart to answer." | timeSensitive | |
 | `print.started` | The printer reports our job preparing or printing | "Printing *Title* on *Printer*" | the printer's stage ("Heating the bed", "Auto bed leveling") or "Started" | passive | |
 | `print.status` | Something changed (below) | *Title* | "[*p*%] [· *remaining* left] [· layer *l* of *L*]" | none | |
@@ -57,6 +57,7 @@ type CounterpartEvent = {
 | `print.cancelled` | Our job was cancelled (from the app or the printer) | "*Title* was cancelled" | "Nothing more will print." | passive | |
 | `print.not-started` | Our job didn't appear within 180 s of dispatch | "*Printer* didn't start *Title*" | "Nothing was sent twice. Check the printer, then press Print again." | timeSensitive | |
 | `print.unreachable` | 3 failed reads in a row, or offline for ≥ 60 s | "Lost contact with *Printer*" | "Still trying." | passive | |
+| `print.sent` | The printer has the print but Counterpart can't follow it (objects-api.md, `sent`) | "Sent *Title* to *Printer*" | "Counterpart can't follow this print." / Bambu Connect: "Finish on your Mac: press Print in Bambu Connect." | passive | |
 
 `notify` is the default level from PRD §9.1. The Mac app applies its own Settings → Notifications switches on top; progress events are off by default on the Mac.
 
@@ -66,7 +67,7 @@ type CounterpartEvent = {
 
 One monitor runs per dispatched print and holds its printer's MCP session until the print ends (PRD §8.6).
 
-- **Our job.** bambu-printer-mcp: the report's job id equals the `taskId` `print_3mf` returned; a missing, empty or `"0"` id is not a key, and the job name is compared with the job name instead (today's MCP sends `subtask_name`, the uploaded file's name without `.3mf`). mcp-3D-printer-server: the job name equals the uploaded file name. A different job running is `replaced`.
+- **Our job.** bambu-printer-mcp: the report's job id equals the `taskId` `print_3mf` returned (H2 and P2S); a missing, empty or `"0"` id is not a key, and the job name is compared with `subtaskName` (or BambuNetwork's `printerJobName`, or the uploaded file's name without `.3mf`) instead. mcp-3D-printer-server: the job name equals the uploaded file name. A different job running is `replaced`. With no identity at all, a job named after the sliced file is adopted within the start window, and nothing else counts as ours or as replacing it; without one the print ends `sent`.
 - **Phase 1.** Read every 3 s for up to 180 s. The first report of our job preparing or printing emits `print.started`. None: `print.not-started`.
 - **Phase 2.** Read every 10 s. `print.status` is emitted when progress moves by ≥ 1 point, the state, layer or problems change, or 60 s have passed since the last one.
 - **Older MCP installs.** Without `counterpart_print_progress` the monitor reads `get_printer_status`. On bambu-printer-mcp each of those reads makes the printer send its whole report (`push_all`), which OpenBambuAPI advises against doing often on P1-series printers, so this fallback reads every 10 s in phase 1 and every 30 s in phase 2. mcp-3D-printer-server's `get_printer_status` has no job progress: the monitor reports only the state, and the printer's capabilities say "Update mcp-3D-printer-server to see progress".

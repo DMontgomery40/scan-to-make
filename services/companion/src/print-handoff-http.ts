@@ -85,7 +85,7 @@ function send(response: ServerResponse, bytes: Buffer | string): Promise<void> {
 export interface PrintHandoffServices {
   store: HandoffBundleStore;
   relay: ElicitationRelay;
-  runner: Pick<PrinterHandoffRunner, 'runBundle' | 'backend'> & Partial<Pick<PrinterHandoffRunner, 'filaments' | 'status' | 'session' | 'run'>>;
+  runner: Pick<PrinterHandoffRunner, 'runBundle' | 'backend'> & Partial<Pick<PrinterHandoffRunner, 'filaments' | 'status' | 'session' | 'run' | 'estimate'>>;
   selection?: PrinterHandoffConfig['selection'];
 }
 

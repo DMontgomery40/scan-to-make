@@ -20,7 +20,7 @@ const selection = {
   bedType: 'textured_plate', material: 'PLA', plateIndex: 0,
 };
 
-async function setup(t, {mode = 'bambu', backend = 'bambu-printer-mcp', answer = 'accept', relayTimeoutMs = 5000, dispatch, ephemeral = false, noColour = false, crypto = false, noConnectionType = false} = {}) {
+async function setup(t, {mode = 'bambu', backend = 'bambu-printer-mcp', answer = 'accept', relayTimeoutMs = 5000, dispatch, ephemeral = false, noColour = false, crypto = false, noConnectionType = false, settings = false, remote = false} = {}) {
   const root = await mkdtemp(join(tmpdir(), 'printer-handoff-'));
   t.after(() => rm(root, {recursive: true, force: true}));
   const log = join(root, 'calls.jsonl');
@@ -30,7 +30,7 @@ async function setup(t, {mode = 'bambu', backend = 'bambu-printer-mcp', answer =
   const config = {
     backend,
     process: {command: process.execPath, args: [fixture, mode, log], cwd: root,
-      env: {...(noConnectionType ? {HANDOFF_FIXTURE_NO_CONNECTION_TYPE:'1'} : {}), ...(crypto ? {HANDOFF_FIXTURE_CRYPTO:'1'} : {}), ...(dispatch ? {HANDOFF_FIXTURE_DISPATCH: dispatch} : {}), ...(ephemeral ? {HANDOFF_FIXTURE_EPHEMERAL: '1'} : {}), ...(noColour ? {HANDOFF_FIXTURE_NO_COLOUR:'1'} : {})}},
+      env: {...(settings ? {HANDOFF_FIXTURE_SLICE_SETTINGS:'1'} : {}), ...(remote ? {HANDOFF_FIXTURE_REMOTE:'1'} : {}), ...(noConnectionType ? {HANDOFF_FIXTURE_NO_CONNECTION_TYPE:'1'} : {}), ...(crypto ? {HANDOFF_FIXTURE_CRYPTO:'1'} : {}), ...(dispatch ? {HANDOFF_FIXTURE_DISPATCH: dispatch} : {}), ...(ephemeral ? {HANDOFF_FIXTURE_EPHEMERAL: '1'} : {}), ...(noColour ? {HANDOFF_FIXTURE_NO_COLOUR:'1'} : {})}},
     selection,
     timeouts: {connectMs: 5000, toolMs: 5000, elicitationMs: relayTimeoutMs},
   };
@@ -467,4 +467,19 @@ test('an explicit LAN route cannot silently become cloud when a backend omits co
  const f=await setup(t,{noConnectionType:true});
  await assert.rejects(f.runner.run({stlPath:f.stlPath,selection:{...selection,connectionMode:'bambu_network',connectionType:'lan'}}),{code:'print-transport-unsupported'});
  assert.deepEqual(await f.calls(),[]);
+});
+
+test('quality and strength reach slice_stl as process overrides, and are refused by an MCP without them', async t => {
+  const f = await setup(t, {});
+  const slicer = {layerHeightMm: 0.12, wallLoops: 4, sparseInfillDensity: '25%'};
+  await assert.rejects(f.runner.run({stlPath: f.stlPath, slicer}), {code: 'print-settings-unsupported'});
+  assert.equal((await f.calls()).filter(call => call.tool).length, 0, 'nothing sliced or sent');
+  const g = await setup(t, {settings: true, remote: true});
+  const result = await g.runner.run({stlPath: g.stlPath, slicer});
+  const slice = (await g.calls()).find(call => call.tool === 'slice_stl');
+  assert.equal(slice.arguments.layer_height, 0.12);
+  assert.equal(slice.arguments.wall_loops, 4);
+  assert.equal(slice.arguments.sparse_infill_density, '25%');
+  // Today's bambu-printer-mcp returns the uploaded path; the printer reports its name without .3mf.
+  assert.deepEqual(result.dispatch, {jobName: 'checked-1b2c-sliced', fileBase: 'sliced'});
 });

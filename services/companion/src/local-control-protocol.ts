@@ -1,5 +1,6 @@
 import {z} from 'zod';
 import {ModelAccessChoiceSchema} from './model-access-protocol.js';
+import {MilestonesSchema, PrintColourSchema, PrintQualitySchema, PrintStrengthSchema} from '@scan-to-make/contracts/counterpart';
 
 export const MAX_REQUEST_BYTES = 64 * 1024;
 export const MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
@@ -58,8 +59,16 @@ export const parameters = {
   'objects.answerCloseup': z.strictObject({id: z.uuid(), bestGuess: z.boolean()}),
   'objects.print': z.strictObject({id: z.uuid(), checked: z.boolean().optional(), filament: z.strictObject({
     slot:z.number().int().min(0).max(255), colour:z.string().regex(/^#[0-9A-F]{6}$/), material:z.string().min(1).max(128),
-    name:z.string().max(256), filamentId:z.string().max(128), destinationId:z.string().min(1).max(256),
-  }).optional()}),
+    name:z.string().max(256), filamentId:z.string().max(128), destinationId:z.string().min(1).max(256), suggested:z.boolean().optional(),
+  }).optional(), quality: PrintQualitySchema.optional(), strength: PrintStrengthSchema.optional(), colour: PrintColourSchema.optional()}),
+  'objects.estimate': z.strictObject({id: z.uuid(), destinationId: z.string().min(1).max(256).optional(), quality: PrintQualitySchema.optional(), strength: PrintStrengthSchema.optional()}),
+  'objects.pausePrint': z.strictObject({id: z.uuid()}),
+  'objects.resumePrint': z.strictObject({id: z.uuid()}),
+  'objects.cancelPrint': z.strictObject({id: z.uuid()}),
+  'objects.camera': z.strictObject({id: z.uuid()}),
+  'printers.camera': z.strictObject({destinationId: z.string().min(1).max(256)}),
+  'settings.get': empty,
+  'settings.set': z.strictObject({milestones: MilestonesSchema}),
   'objects.answerPlate': z.strictObject({id: z.uuid()}),
   'objects.answerPrintConfirmation': z.strictObject({id: z.uuid(), confirmationId: z.uuid(), answer: z.union([
     z.strictObject({action: z.literal('accept'), content: z.record(z.string().max(128), z.boolean())}),

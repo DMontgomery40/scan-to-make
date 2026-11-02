@@ -70,7 +70,7 @@ test('chosen live filament sets slicing profile and AMS slot; a changed spool is
     display_name:'Yellow PLA', resolved_profile_path:'/profiles/yellow-pla.json'};
   const {service, object, runs, bundles} = await setup({inventory:{trays:[tray]}});
   const [choice] = await service.filaments(object.id);
-  assert.deepEqual(choice, {slot:1, colour:'#FEC600', material:'PLA', name:'Yellow PLA', filamentId:'GFA00', destinationId:'default'});
+  assert.deepEqual(choice, {slot:1, colour:'#FEC600', material:'PLA', name:'Yellow PLA', filamentId:'GFA00', destinationId:'default', suggested:true});
   await assert.rejects(service.print(object.id, {filament:{...choice, destinationId:'other-printer'}}), /filament changed/);
   tray.tray_color = '000000FF';
   await assert.rejects(service.print(object.id, {filament:choice}), /filament changed/);
@@ -137,7 +137,7 @@ test('a clear camera never answers the printer question; explicit checked values
   await assert.rejects(service.answerPlate(object.id, {clear: true}), InvalidStateError);
   await service.answerPrintConfirmation(object.id, waiting.id, {action: 'accept', content: {confirmed: true}});
   const done = await service.settled(object.id);
-  assert.equal(done.state, 'printed');
+  assert.equal(done.state, 'sent'); // A fake printer reports nothing: dispatched, not proven printed.
   assert.equal(done.printConfirmation, undefined);
   assert.deepEqual(answers[0].result, {action: 'accept', content: {confirmed: true}, bundleId: answers[0].id});
 });
@@ -151,7 +151,7 @@ test('something on the plate waits for the user, who can say it is actually clea
   assert.equal(answers.length, 0);
   await approve(service, object.id);
   const done = await service.settled(object.id);
-  assert.equal(done.state, 'printed');
+  assert.equal(done.state, 'sent'); // A fake printer reports nothing: dispatched, not proven printed.
   assert.equal(done.plate, undefined);
 });
 
@@ -162,7 +162,7 @@ test('a bed check that fails never confirms by itself', async () => {
   assert.equal(waiting.printConfirmation.supported, true);
   assert.equal(answers.length, 0);
   await approve(service, object.id);
-  assert.equal((await service.settled(object.id)).state, 'printed');
+  assert.equal((await service.settled(object.id)).state, 'sent'); // A fake printer reports nothing: dispatched, not proven printed.
 });
 
 test('a printer with no camera asks the user to check the plate', async () => {
@@ -171,7 +171,7 @@ test('a printer with no camera asks the user to check the plate', async () => {
   const waiting = await until(async () => { const o = await service.get(object.id); return o.plate?.noCamera ? o : undefined; });
   assert.deepEqual(waiting.plate, {noCamera: true});
   await approve(service, object.id);
-  assert.equal((await service.settled(object.id)).state, 'printed');
+  assert.equal((await service.settled(object.id)).state, 'sent'); // A fake printer reports nothing: dispatched, not proven printed.
 });
 
 test('a print that fails says why', async () => {
@@ -186,7 +186,7 @@ test('a print the printer took is printed, even if saving its files failed after
   const {service, object} = await setup({afterDispatch: new DispatchedPrintError('could not save the sliced file', new Error('disk full'))});
   await service.print(object.id);
   await approve(service, object.id);
-  assert.equal((await service.settled(object.id)).state, 'printed');
+  assert.equal((await service.settled(object.id)).state, 'sent'); // A fake printer reports nothing: dispatched, not proven printed.
 });
 
 test('two quick Print taps start one print', async () => {
@@ -205,12 +205,12 @@ test('with two prints waiting, each explicit answer reaches its own print', asyn
   await service.print(b.id);
   await until(async () => (await service.get(a.id)).plate && (await service.get(b.id)).plate);
   await approve(service, a.id);
-  assert.equal((await service.settled(a.id)).state, 'printed');
+  assert.equal((await service.settled(a.id)).state, 'sent'); // A fake printer reports nothing: dispatched, not proven printed.
   assert.deepEqual(answers.map(x => x.id), [runs.find(r => r.id === answers[0].id).id]);
   assert.equal(answers[0].id, (await service.get(a.id)).print.bundleId);
   assert.equal((await service.get(b.id)).state, 'printing');
   await approve(service, b.id);
-  assert.equal((await service.settled(b.id)).state, 'printed');
+  assert.equal((await service.settled(b.id)).state, 'sent'); // A fake printer reports nothing: dispatched, not proven printed.
 });
 
 test('a print that may have reached the printer is never sent again until the user checks', async () => {
@@ -259,7 +259,8 @@ test('answers are bound to the current question and preserve explicit false valu
   await service.answerPrintConfirmation(object.id, question.id, {action: 'accept', content: {confirmed: false}});
   await service.settled(object.id);
   assert.deepEqual(answers[0].result.content, {confirmed: false});
-  await service.print(object.id);
+  // The fixture accepted it (a false checkbox is the MCP's to judge) and reports nothing back: printing again needs the check.
+  await service.print(object.id, {checked: true});
   const next = await until(async () => (await service.get(object.id)).printConfirmation);
   assert.notEqual(next.id, question.id);
   await assert.rejects(service.answerPrintConfirmation(object.id, question.id, {action: 'accept', content: {confirmed: true}}), InvalidStateError);

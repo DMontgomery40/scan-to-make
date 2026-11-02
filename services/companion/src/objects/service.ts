@@ -1,7 +1,15 @@
-import {copyFile, mkdir, open, readFile, rm, stat, writeFile} from 'node:fs/promises';
-import {createHash} from 'node:crypto';
+import {copyFile, mkdir, mkdtemp, open, readFile, rm, stat, writeFile} from 'node:fs/promises';
+import {createHash, randomUUID} from 'node:crypto';
+import {tmpdir} from 'node:os';
 import {basename, extname, isAbsolute, join} from 'node:path';
-import {DispatchedPrintError, PrinterMcpError, sliceEstimate, type PrintProgress, type PendingElicitation, type PrinterHandoffConfig} from '@scan-to-make/printer-handoff';
+import {DispatchedPrintError, PrinterMcpError, readPrintReport, routeArgs, sliceEstimate,
+  type PrintProgress, type PendingElicitation, type PrinterHandoffConfig, type PrinterSelection, type PrinterSlicer, type PrintReport, type PrinterSession} from '@scan-to-make/printer-handoff';
+import type {PrintEstimate, PrintSettings} from '@scan-to-make/contracts/counterpart';
+import {PrintMonitorRunner, matchJob, milestonesFor, type EventDraft, type MonitorClock, type MonitorEnd, type MonitorTarget} from '../printing/monitor.js';
+import {CameraFrames, CameraUnavailableError, type CameraFrame} from '../printing/camera.js';
+import {sliceOverrides, settingsUnsupported} from '../printing/print-settings.js';
+import type {CompanionSettingsStore} from '../settings.js';
+import {PRINT_LOG, printEndFailure, projectTitle} from '../events/words.js';
 import type {PrintHandoffServices} from '../print-handoff-http.js';
 import type {PlateVerdict} from './bedcheck.js';
 import type {TouchupInput} from '../touchup/touchup.js';
@@ -92,10 +100,22 @@ export interface ObjectServiceDeps {
     destinations?: ReadonlyMap<string, PrintHandoffServices>;
     judgePlate: (photoBase64: string) => Promise<PlateVerdict>;
   };
+  /** Companion settings: which milestones the print monitor announces. */
+  settings?: CompanionSettingsStore;
+  /** Where print and pass events go (the event log, PRD §8.7). */
+  events?: {emit(draft: EventDraft): Promise<void>};
+  /** The printers' cameras, through their sessions, with a shared 3 s cache. */
+  camera?: CameraFrames;
+  /** Tests only. */
+  monitorClock?: MonitorClock;
 }
 
+/** What the print sheet sends with Print (PRD §8.5). */
+export interface PrintOptions extends PrintSettings {checked?: boolean; filament?: FilamentChoice}
+const BAMBU_TO_STATUS: Record<string, string> = {idle: 'IDLE', preparing: 'PREPARE', printing: 'RUNNING', paused: 'PAUSE', finished: 'FINISH', failed: 'FAILED', cancelled: 'FAILED', offline: 'OFFLINE', busy: 'UNKNOWN'};
+
 export type ObjectPrintAnswer = {action: 'accept'; content: Record<string, boolean>} | {action: 'decline' | 'cancel'; content?: never};
-export interface FilamentChoice {slot: number; colour: string; material: string; name: string; filamentId: string; destinationId: string}
+export interface FilamentChoice {slot: number; colour: string; material: string; name: string; filamentId: string; destinationId: string; suggested?: boolean}
 type LiveFilament = FilamentChoice & {profile: string};
 const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
 
@@ -140,6 +160,7 @@ export class ObjectService {
   readonly #controllers = new Map<string, AbortController>();
   readonly #confirmations = new Map<string, {pending: PendingElicitation; printing: NonNullable<ObjectServiceDeps['print']>; timer: ReturnType<typeof setTimeout>}>();
   readonly #cancelledPrints = new Set<string>();
+  readonly #monitors = new Map<string, {runner: PrintMonitorRunner; controller: AbortController; done: Promise<void>}>();
   readonly #expiredConfirmations = new Set<string>();
   /** One action at a time per object, so a double tap can't start the same work twice. */
   readonly #gates = new Map<string, Promise<unknown>>();
@@ -160,8 +181,19 @@ export class ObjectService {
   async close(): Promise<void> {
     this.#closed = true;
     for (const controller of this.#controllers.values()) controller.abort();
+    // Monitors stop watching; their saved state lets the next start carry on.
+    for (const monitor of this.#monitors.values()) monitor.controller.abort();
+    await Promise.allSettled([...this.#monitors.values()].map(monitor => monitor.done));
     for (const confirmation of this.#confirmations.values()) confirmation.printing.services.relay.respond(confirmation.pending.id, {action: 'cancel'});
     await Promise.allSettled([...this.#gates.values(), ...this.#running.values()]);
+  }
+
+  /** Print settings, controls and the monitor need the printers' sessions. */
+  get printSettingsAvailable(): boolean { return !!this.#deps.printers; }
+  async settings() { return this.#deps.settings ? this.#deps.settings.load() : {milestones: '50' as const}; }
+  async updateSettings(patch: {milestones?: 'off' | '50' | '25-50-75' | 'every-10'}) {
+    if (!this.#deps.settings) throw new InvalidStateError('Settings are unavailable on this Mac.');
+    return this.#deps.settings.update(patch);
   }
 
   create(instructions?: string) { return this.#deps.store.create(instructions).then(o => this.#changed(o)); }
@@ -171,6 +203,15 @@ export class ObjectService {
   async get(id: string): Promise<StmObject> {
     let object = await this.#deps.store.get(id);
     if (!object.print) return object;
+    // A watched print reads its monitor's last report instead of asking the printer again.
+    if (object.print.live) {
+      const live = object.print.live, active = ['preparing', 'printing', 'paused'].includes(live.state);
+      object = {...object, print: {...object.print, printerStatus: {state: BAMBU_TO_STATUS[live.state] ?? 'UNKNOWN',
+        ...(live.job?.name ? {job: live.job.name.slice(0, 160)} : {}), checkedAtMs: Date.parse(live.observedAt) || Date.now(),
+        ...(active && live.job?.progress !== undefined ? {percent: live.job.progress} : {}),
+        ...(active && live.job?.remainingSec !== undefined ? {remainingMinutes: Math.round(live.job.remainingSec / 60)} : {})}}};
+      return object;
+    }
     const printing = this.#deps.print;
     // A print recorded against a destination that has since become a duplicate reads through its winner.
     const recorded = object.print.destination?.id;
@@ -251,8 +292,13 @@ export class ObjectService {
     });
   }
 
+  /** Live filaments; `suggested` marks the preselected one: the configured material's first loaded tray, else the first tray. */
   async filaments(id: string): Promise<FilamentChoice[]> {
-    return (await this.liveFilaments(id)).map(({profile: _profile, ...choice}) => choice);
+    const live = await this.liveFilaments(id), object = await this.get(id);
+    const destinationId = this.#destinationId(object);
+    const material = (destinationId ? this.#deps.print?.destinations?.get(destinationId) : this.#deps.print?.services)?.selection?.material?.toLowerCase();
+    const pick = live.find(item => material && item.material.toLowerCase() === material) ?? live[0];
+    return live.map(({profile: _profile, ...choice}) => ({...choice, ...(choice === pick || (pick && choice.slot === pick.slot) ? {suggested: true} : {})}));
   }
 
   selectPrinter(id: string, destinationId: string): Promise<StmObject> {
@@ -430,12 +476,13 @@ export class ObjectService {
   }
 
   /** Prints the current model through the user's printer MCP. The plate is checked in the background. */
-  print(id: string, options: {checked?: boolean; filament?: FilamentChoice} = {}): Promise<StmObject> { return this.#gate(id, () => this.#print(id, options)); }
-  async #print(id: string, options: {checked?: boolean; filament?: FilamentChoice}): Promise<StmObject> {
+  print(id: string, options: PrintOptions = {}): Promise<StmObject> { return this.#gate(id, () => this.#print(id, options)); }
+  async #print(id: string, options: PrintOptions): Promise<StmObject> {
     const object = await this.get(id);
     if (!object.current) throw new InvalidStateError('There is no model to print yet.');
     if (object.state === 'touching-up' || object.state === 'printing') throw new InvalidStateError('Wait until the current step finishes.');
     if (object.print?.uncertain && !options.checked) throw new InvalidStateError("The printer may already be printing this. Check the printer, then print again if it isn't.");
+    if (options.filament && options.colour) throw new InvalidStateError('Choose one colour.');
     const configured = this.#deps.print;
     if (!configured) throw new InvalidStateError('Printing is not set up on this Mac.');
     const catalog = this.#deps.printerCatalog;
@@ -448,20 +495,20 @@ export class ObjectService {
     // Keep the exact route and identity for this dispatch and every later confirmation.
     const printing = {...configured, services};
     const printDestination = destination ? {id: destination.id, name: destination.name} : undefined;
-    const {store: bundles, relay, runner, selection} = printing.services;
-    let selected = selection;
-    let slicer: {loadFilaments: string; filamentColours: string} | undefined;
-    if (options.filament) {
-      const choice = options.filament;
-      const live = (await this.liveFilaments(id)).find(item => item.slot === choice.slot && item.colour === choice.colour
-        && item.material === choice.material && item.filamentId === choice.filamentId && item.destinationId === choice.destinationId);
-      if (!live) throw new InvalidStateError('The chosen filament changed. Choose a current spool and try again.');
-      selected = {...selection, material:live.material, useAms:live.slot !== 254 && live.slot !== 255, amsSlots:[live.slot], amsMapping:undefined, autoMatchAms:false};
-      slicer = {loadFilaments:live.profile, filamentColours:live.colour};
-    }
+    const {store: bundles, relay, runner} = printing.services;
+    const {selection: selected, slicer} = await this.#colour(id, options, services.selection, runner.backend);
+    const overrides = sliceOverrides(options, selected?.nozzleDiameterMm);
+    const capabilities = destinationId ? this.#deps.printers?.capabilities(destinationId) : undefined;
+    if (capabilities && ((overrides.layerHeightMm !== undefined && !capabilities.quality) || (overrides.wallLoops !== undefined && !capabilities.strength)))
+      throw new InvalidStateError(settingsUnsupported(runner.backend, options));
+    const settings: PrintSettings = {...(options.quality ? {quality: options.quality} : {}), ...(options.strength ? {strength: options.strength} : {}),
+      ...(options.colour ? {colour: options.colour} : {})};
+    const sliced = {...slicer, ...overrides};
     const stl = await readFile(join(this.#deps.store.dir(id), object.current.model));
     const manifest = await bundles.create({stl, prompt: '', backend: runner.backend, ...(selected ? {selection:selected} : {})});
-    const print = {bundleId: manifest.id, ...(printDestination ? {destination: printDestination} : {})};
+    const printId = randomUUID();
+    const print = {bundleId: manifest.id, printId, ...(printDestination ? {destination: printDestination, destinationId: printDestination.id} : {}),
+      ...(Object.keys(settings).length ? {settings} : {})};
     const started = await this.#deps.store.update(id, o => ({...o, state: 'printing', progress: 'Connecting to your printer service…', print, plate: undefined, printConfirmation: undefined, failure: undefined}));
     // Only this print's questions: other prints share the relay.
     const unsubscribe = relay.subscribe(pending => {
@@ -475,24 +522,29 @@ export class ObjectService {
       'resolving-printer-error':'The printer needs your acknowledgment of its rejected command.',
       'requesting-print':'Requesting print. Waiting for the printer service…', accepted:'Print request accepted.',
     };
+    const eventBase = {projectId: id, printId, ...(printDestination ? {destinationId: printDestination.id, printerName: printDestination.name} : {})};
     const onProgress = async (update: PrintProgress) => {
       const message = messages[update.phase];
       this.#changed(await this.#deps.store.update(id, o => o.print?.bundleId !== manifest.id || o.state !== 'printing' ? o : ({...o,
         progress:message, print:{...o.print, ...(update.phase === 'slice-ready' ? {sliced:true} : {}),
           ...(update.estimate ? {estimate:update.estimate} : {}), events:[...(o.print.events ?? []), {atMs:Date.now(), message}].slice(-20)},
       })));
+      if (update.phase !== 'accepted') await this.#emit({id: randomUUID(), type: 'print.preparing', ...eventBase, data: {stage: message.replace(/…$/, '')}});
     };
-    const work = runner.runBundle(bundles, manifest.id, {print: true, signal: controller.signal, onProgress, ...(slicer ? {slicer} : {})})
-      .then(() => this.#deps.store.update(id, o => ({...o, state: 'printed', progress: undefined, plate: undefined, printConfirmation: undefined})),
+    const work = runner.runBundle(bundles, manifest.id, {print: true, signal: controller.signal, onProgress,
+      ...(Object.keys(sliced).length ? {slicer: sliced} : {})})
+      .then(outcome => this.#dispatched(id, manifest.id, printDestination?.id ?? destinationId, (outcome as {result?: {dispatch?: {jobName?: string; taskId?: string; fileBase?: string}}} | undefined)?.result?.dispatch, selected?.connectionMode),
         async error => {
           const status = (await bundles.read(manifest.id).catch(() => undefined))?.status;
           // Once the printer has the job it is printing, whatever went wrong afterwards (as the phone's print route does).
-          if (error instanceof DispatchedPrintError || status === 'printed') return this.#deps.store.update(id, o => ({...o, state: 'printed', progress: undefined, plate: undefined, printConfirmation: undefined}));
+          if (error instanceof DispatchedPrintError || status === 'printed') return this.#dispatched(id, manifest.id, printDestination?.id ?? destinationId, undefined, selected?.connectionMode);
           // It may have reached the printer: never send it again by itself.
           if (status === 'uncertain') return this.#deps.store.update(id, o => ({...o, state: 'failed', plate: undefined, printConfirmation: undefined, progress: undefined, failure: error instanceof PrinterMcpError && error.detail ? `Printer service: ${error.detail} Counterpart could not confirm a print start. Check the printer before trying again.` : UNCERTAIN, print: {...o.print!, uncertain: true}}));
           if (this.#cancelledPrints.has(id)) return this.#deps.store.update(id, o => ({...o, state: 'ready', progress: undefined, plate: undefined, printConfirmation: undefined, failure: undefined}));
           if (this.#expiredConfirmations.has(id) || (this.#confirmations.get(id)?.pending.expiresAtMs ?? Infinity) <= Date.now())
             return this.#deps.store.update(id, o => ({...o, state: 'failed', progress: undefined, plate: undefined, printConfirmation: undefined, failure: 'Printer confirmation timed out; no print was sent. Press Print to try again.'}));
+          if (error instanceof PrinterMcpError && error.code === 'print-settings-unsupported')
+            return this.#deps.store.update(id, o => ({...o, state: 'ready', progress: undefined, plate: undefined, printConfirmation: undefined, failure: settingsUnsupported(runner.backend, options)}));
           return this.#deps.store.update(id, o => ({...o, state: 'failed', progress: undefined, plate: undefined, printConfirmation: undefined, failure: error instanceof PrinterMcpError && error.detail ? error.detail : error instanceof Error ? error.message : String(error)}));
         })
       .then(o => this.#changed(o))
@@ -505,6 +557,273 @@ export class ObjectService {
       });
     this.#running.set(id, work);
     return this.#changed(started);
+  }
+
+  /** The print sheet's colour, as the MCP's own selection and slicing options (PRD §8.5 colour v1). */
+  async #colour(id: string, options: PrintOptions, selection: PrinterSelection | undefined, backend: PrinterHandoffConfig['backend'])
+    : Promise<{selection?: PrinterSelection; slicer?: PrinterSlicer}> {
+    if (options.filament) {
+      const choice = options.filament;
+      const live = (await this.liveFilaments(id)).find(item => item.slot === choice.slot && item.colour === choice.colour
+        && item.material === choice.material && item.filamentId === choice.filamentId && item.destinationId === choice.destinationId);
+      if (!live) throw new InvalidStateError('The chosen filament changed. Choose a current spool and try again.');
+      return {selection: {...selection, material:live.material, useAms:live.slot !== 254 && live.slot !== 255, amsSlots:[live.slot], amsMapping:undefined, autoMatchAms:false},
+        slicer: {loadFilaments:live.profile, filamentColours:live.colour}};
+    }
+    const colour = options.colour;
+    if (!colour) return {...(selection ? {selection} : {})};
+    if ('auto' in colour) return backend === 'bambu-printer-mcp'
+      ? {selection: {...selection, useAms: true, autoMatchAms: true, amsSlots: undefined, amsMapping: undefined}} : {...(selection ? {selection} : {})};
+    if ('material' in colour) {
+      // A material is only honoured with a slicer profile for it; otherwise say so rather than print the old one.
+      const live = await this.liveFilaments(id).catch(() => [] as LiveFilament[]);
+      const match = live.find(item => item.material.toLowerCase() === colour.material.toLowerCase());
+      if (!match) throw new InvalidStateError(`Counterpart can't switch this printer to ${colour.material} yet. Load it and choose its spool, or print with the profile's own material.`);
+      return {selection: {...selection, material: match.material}, slicer: {loadFilaments: match.profile}};
+    }
+    const live = await this.liveFilaments(id);
+    if ('external' in colour) {
+      const tray = live.find(item => item.slot === 254 || item.slot === 255);
+      return {selection: {...selection, useAms: false, amsSlots: undefined, amsMapping: undefined, autoMatchAms: false, ...(tray ? {material: tray.material} : {})},
+        ...(tray ? {slicer: {loadFilaments: tray.profile, filamentColours: tray.colour}} : {})};
+    }
+    const tray = live.find(item => item.slot === colour.amsSlot);
+    if (!tray) throw new InvalidStateError('That AMS slot is empty now. Choose a loaded spool and try again.');
+    return {selection: {...selection, material: tray.material, useAms: true, amsSlots: [tray.slot], amsMapping: undefined, autoMatchAms: false},
+      slicer: {loadFilaments: tray.profile, filamentColours: tray.colour}};
+  }
+
+  /**
+   * The printer MCP accepted the print. "Printed" now means printed (PRD §8.5):
+   * when the destination can report this job, the object stays `printing` and
+   * the monitor sets `printed` when the job finishes. A destination that can't
+   * report jobs (an older mcp-3D-printer-server) ends here, as before.
+   */
+  async #dispatched(id: string, bundleId: string, destinationId: string | undefined, dispatch: {jobName?: string; taskId?: string; fileBase?: string} | undefined,
+    route?: PrinterSelection['connectionMode']): Promise<StmObject> {
+    const session = destinationId ? this.#deps.printers?.session(destinationId) : undefined;
+    const reports = !!session && (session.hasTool('counterpart_print_progress') || (session.backend === 'bambu-printer-mcp' && session.hasTool('get_printer_status')));
+    const identified = !!(dispatch?.jobName || dispatch?.taskId);
+    // Bambu Connect only opens the job on the Mac: the person presses Print there.
+    const bambuConnect = route === 'bambu_connect';
+    // Some routes (Bambu's pre-sliced .gcode.3mf, X2D native, BambuNetwork) return no identity: a job
+    // named after our file within the start window is adopted; otherwise the print ends "sent".
+    const watchable = !!session && reports && !bambuConnect && (identified || !!dispatch?.fileBase);
+    const dispatchedAt = new Date().toISOString();
+    if (!watchable || !session) {
+      // PRD §2.6: no evidence, no "printed". The printer has it; Counterpart can't follow it.
+      const sent = await this.#deps.store.update(id, o => o.print?.bundleId !== bundleId ? o : ({...o, state: 'sent', progress: undefined, plate: undefined, printConfirmation: undefined,
+        failure: undefined, print: {...o.print, dispatchedAt, uncertain: true, ...(dispatch?.jobName ? {jobName: dispatch.jobName} : {}), ...(dispatch?.taskId ? {taskId: dispatch.taskId} : {}),
+          ...(bambuConnect ? {sentVia: 'bambu-connect' as const} : {})}}));
+      if (sent.print?.printId) await this.#emit({id: randomUUID(), type: 'print.sent', projectId: id, printId: sent.print.printId,
+        ...(sent.print.destination ? {destinationId: sent.print.destination.id, printerName: sent.print.destination.name} : {}), ...(bambuConnect ? {detail: {message: 'bambu-connect'}} : {})});
+      return sent;
+    }
+    const updated = await this.#deps.store.update(id, o => o.print?.bundleId !== bundleId ? o : ({...o, state: 'printing', progress: undefined, plate: undefined, printConfirmation: undefined,
+      print: {...o.print, dispatchedAt, ...(dispatch?.jobName ? {jobName: dispatch.jobName} : {}), ...(dispatch?.taskId ? {taskId: dispatch.taskId} : {}),
+        ...(!identified && dispatch?.fileBase ? {fileBase: dispatch.fileBase} : {}),
+        monitor: {phase: 'starting', startedAt: dispatchedAt, milestonesSent: [], firstLayerSent: false}}}));
+    this.#watch(updated, session);
+    return updated;
+  }
+
+  /** Starts (or, after a restart, resumes) the monitor of a dispatched print. */
+  #watch(object: StmObject, session: PrinterSession): void {
+    const print = object.print;
+    // One monitor per print, not per project: the last print's may still be sending its final frame.
+    if (!print?.printId || !print.dispatchedAt || !print.monitor || print.monitor.phase === 'ended' || this.#monitors.has(print.printId) || this.#closed) return;
+    const id = object.id, printId = print.printId, destinationId = print.destinationId ?? print.destination?.id ?? 'current';
+    const printerName = print.destination?.name ?? 'Your printer';
+    const target: MonitorTarget = {projectId: id, printId, destinationId, printerName, dispatchedAtMs: Date.parse(print.dispatchedAt),
+      ...(print.taskId ? {taskId: print.taskId} : {}), ...(print.jobName ? {jobName: print.jobName} : {}), ...(print.fileBase ? {fileBase: print.fileBase} : {}),
+      ...(print.estimate ? {estimate: print.estimate} : {})};
+    const ours = (o: StmObject) => o.print?.printId === printId;
+    const controller = new AbortController();
+    const release = session.hold();
+    const runner = new PrintMonitorRunner(target, {
+      ...(this.#deps.monitorClock ? {clock: this.#deps.monitorClock} : {}),
+      fallback: !session.hasTool('counterpart_print_progress'),
+      read: async signal => {
+        try {
+          const report = await readPrintReport(session, {signal, failFast: true});
+          this.#deps.printers?.record(destinationId, report);
+          return report;
+        } catch (error) { this.#deps.printers?.record(destinationId, undefined, true); throw error; }
+      },
+      frame: async (eventId, signal) => {
+        const frame = await this.#frame(destinationId, session, signal);
+        if (!frame) return undefined;
+        const relative = join('prints', printId, 'frames', `${eventId}.jpg`);
+        await mkdir(join(this.dir(id), 'prints', printId, 'frames'), {recursive: true});
+        await writeFile(join(this.dir(id), relative), frame.bytes, {mode: 0o600});
+        return relative;
+      },
+      milestones: () => milestonesFor(this.#deps.settings?.current().milestones ?? '50'),
+      adopted: async jobName => { this.#changed(await this.#deps.store.update(id, o => ours(o) ? {...o, print: {...o.print!, jobName}} : o)); },
+      save: async (monitor, live) => { this.#changed(await this.#deps.store.update(id, o => ours(o) ? {...o, print: {...o.print!, monitor, ...(live ? {live} : {})}} : o)); },
+      end: async (end, report) => { this.#changed(await this.#deps.store.update(id, o => ours(o) ? this.#ended(o, end, report) : o)); },
+      emit: async draft => {
+        const line = draft.type === 'print.milestone' && draft.data?.progress !== 50 ? `${draft.data?.progress}% done.` : PRINT_LOG[draft.type];
+        if (line) this.#changed(await this.#deps.store.update(id, o => ours(o) ? {...o, print: {...o.print!, events: [...(o.print!.events ?? []), {atMs: Date.now(), message: line}].slice(-20)}} : o));
+        await this.#emit(draft);
+      },
+    }, print.monitor);
+    const done = runner.run(controller.signal).catch(() => undefined).then(() => undefined).finally(() => {
+      release();
+      if (this.#monitors.get(printId)?.runner === runner) this.#monitors.delete(printId);
+    });
+    this.#monitors.set(printId, {runner, controller, done});
+  }
+
+  /** The object after its print's monitor ended. */
+  #ended(o: StmObject, end: MonitorEnd, report: PrintReport | undefined): StmObject {
+    const base = {...o, progress: undefined, plate: undefined, printConfirmation: undefined};
+    const context = {title: projectTitle(o), printer: o.print?.destination?.name ?? 'Your printer', ...(report?.problems[0] ? {problem: report.problems[0].message} : {})};
+    switch (end) {
+      case 'done': return {...base, state: 'printed', failure: undefined};
+      case 'cancelled': return {...base, state: 'ready', failure: undefined};
+      case 'not-started': return {...base, state: 'failed', failure: printEndFailure('not-started', context), print: {...o.print!, uncertain: undefined}};
+      case 'replaced': return {...base, state: 'failed', failure: printEndFailure('replaced', context)};
+      case 'sent': return {...base, state: 'sent', failure: undefined, print: {...o.print!, uncertain: true}};
+      case 'failed': return {...base, state: 'failed', failure: printEndFailure('failed', context)};
+    }
+  }
+
+  /** After a restart: resume watching dispatched prints; a print still being prepared was interrupted. */
+  async resume(): Promise<void> {
+    for (const object of await this.#deps.store.list()) {
+      if (object.state !== 'printing' || !object.print) continue;
+      const monitor = object.print.monitor;
+      const destinationId = object.print.destinationId ?? object.print.destination?.id;
+      const session = destinationId ? this.#deps.printers?.session(destinationId) : undefined;
+      if (monitor && monitor.phase !== 'ended' && session) {
+        await session.connect({failFast: true}).catch(() => undefined);
+        this.#watch(object, session);
+        continue;
+      }
+      if (monitor && monitor.phase !== 'ended') continue; // Its printer isn't configured now: leave it as it was.
+      const services = destinationId ? this.#deps.print?.destinations?.get(destinationId) : this.#deps.print?.services;
+      const status = (await services?.store.read(object.print.bundleId).catch(() => undefined))?.status;
+      const reached = status === 'uncertain' || status === 'printed';
+      this.#changed(await this.#deps.store.update(object.id, o => ({...o, state: 'failed', progress: undefined, plate: undefined, printConfirmation: undefined,
+        failure: reached ? UNCERTAIN : 'interrupted when your Mac restarted the app', ...(reached ? {print: {...o.print!, uncertain: true}} : {})})));
+    }
+  }
+
+  async #emit(draft: EventDraft): Promise<void> { await this.#deps.events?.emit(draft).catch(() => undefined); }
+
+  async #frame(destinationId: string, session: PrinterSession, signal?: AbortSignal): Promise<CameraFrame | undefined> {
+    const camera = this.#deps.camera;
+    if (!camera || signal?.aborted) return undefined;
+    return camera.frame(destinationId, session, {model: session.config.selection?.model}).catch(() => undefined);
+  }
+
+  /** The camera of the project's printer (the one printing it, else its chosen one). */
+  async camera(id: string): Promise<CameraFrame> {
+    const object = await this.get(id);
+    const destinationId = object.state === 'printing' ? object.print?.destinationId ?? object.print?.destination?.id ?? this.#destinationId(object) : this.#destinationId(object);
+    if (!destinationId) throw new CameraUnavailableError('no-camera');
+    return this.printerCamera(destinationId);
+  }
+  async printerCamera(destinationId: string): Promise<CameraFrame> {
+    const session = this.#deps.printers?.session(destinationId), camera = this.#deps.camera;
+    if (!session || !camera) throw new CameraUnavailableError('no-camera');
+    return camera.frame(this.#deps.printerCatalog?.canonical(destinationId) ?? destinationId, session, {model: session.config.selection?.model});
+  }
+
+  /** Pause, resume or stop this project's print, through the destination's mutex (PRD §8.6). */
+  /**
+   * Not under the object's gate: the printer MCP may ask its own confirmation
+   * during the call, and answering it goes through that gate. Two taps are still
+   * one at a time, behind the destination's mutex.
+   */
+  async control(id: string, action: 'pause' | 'resume' | 'cancel'): Promise<StmObject> {
+    if (this.#closed) throw new InvalidStateError('Counterpart is shutting down on this Mac.');
+    const object = await this.get(id);
+    const print = object.print;
+    if (object.state !== 'printing' || !print?.dispatchedAt || !print.monitor || print.monitor.phase === 'ended')
+      throw new InvalidStateError(action === 'cancel' ? 'Nothing of this project is printing.' : `There is no print to ${action}.`);
+    const destinationId = print.destinationId ?? print.destination?.id ?? 'current';
+    const session = this.#deps.printers?.session(destinationId);
+    const services = this.#deps.print?.destinations?.get(this.#deps.printerCatalog?.canonical(destinationId) ?? destinationId) ?? this.#deps.print?.services;
+    const tool = {pause: 'pause_print', resume: 'resume_print', cancel: 'cancel_print'}[action];
+    if (!session || !services) throw new InvalidStateError('That printer is no longer available.');
+    await session.connect({failFast: true}).catch(() => undefined);
+    if (!session.hasTool(tool)) throw new InvalidStateError(`Update ${session.backend === 'bambu-printer-mcp' ? 'bambu-printer-mcp' : 'mcp-3D-printer-server'} to ${action === 'cancel' ? 'stop' : action} prints from Counterpart.`);
+    // The printer MCP's own confirmation, if it asks, is relayed like Print's.
+    const printing = {...this.#deps.print!, services};
+    const unsubscribe = services.relay.subscribe(pending => {
+      if (pending.bundleId === print.bundleId) void this.#confirm(id, pending, printing).catch(() => { services.relay.respond(pending.id, {action: 'cancel'}); });
+    });
+    const target = {...(print.taskId ? {taskId: print.taskId} : {}), ...(print.jobName ? {jobName: print.jobName} : {})};
+    let notOurs = false;
+    try {
+      const properties = (session.getTool(tool).inputSchema as {properties?: Record<string, unknown>}).properties;
+      const args = Object.fromEntries(Object.entries(routeArgs(session.config)).filter(([key, value]) => value !== undefined && (!properties || Object.hasOwn(properties, key))));
+      await session.exclusive(async () => {
+        // The printer's controls act on whatever it is printing now: make sure that is still this project.
+        const report = await readPrintReport(session, {failFast: true});
+        if (matchJob(target, report) !== 'ours' || !['preparing', 'printing', 'paused'].includes(report.state)) { notOurs = true; return; }
+        const result = await session.call(tool, args, {held: true, elicitationContext: {bundleId: print.bundleId}, timeoutMs: 120_000});
+        if (result.isError) throw new PrinterMcpError('tool-failed', undefined, (result.content ?? []).flatMap(item => item.type === 'text' ? [item.text] : []).join(' ').trim().slice(0, 300) || undefined);
+      });
+    } catch (error) {
+      const detail = error instanceof PrinterMcpError ? error.detail : undefined;
+      throw new InvalidStateError(detail ? `The printer didn't ${action === 'cancel' ? 'stop' : action}: ${detail}` : `The printer didn't ${action === 'cancel' ? 'stop' : action}. Check it, then try again.`);
+    } finally {
+      unsubscribe();
+      clearTimeout(this.#confirmations.get(id)?.timer); this.#confirmations.delete(id);
+    }
+    if (notOurs) throw new InvalidStateError(`The printer isn't printing ${projectTitle(object)} any more, so nothing was sent.`);
+    const line = {pause: 'Pause sent.', resume: 'Resume sent.', cancel: 'Stop sent.'}[action];
+    return this.#changed(await this.#deps.store.update(id, o => ({...o, printConfirmation: undefined,
+      ...(o.print ? {print: {...o.print, events: [...(o.print.events ?? []), {atMs: Date.now(), message: line}].slice(-20)}} : {})})));
+  }
+
+  readonly #estimates2 = new Map<string, Promise<PrintEstimate>>();
+  /** Slices the current model with the print sheet's settings, exactly as Print would, and reads the estimate. Never prints. */
+  async estimate(id: string, request: {destinationId?: string; quality?: PrintSettings['quality']; strength?: PrintSettings['strength']} = {}): Promise<PrintEstimate> {
+    const object = await this.get(id);
+    if (!object.current) throw new InvalidStateError('There is no model to print yet.');
+    const catalog = this.#deps.printerCatalog;
+    const destinationId = request.destinationId ? catalog?.canonical(request.destinationId) : this.#destinationId(object);
+    if (request.destinationId && !destinationId) throw new InvalidStateError('That printer is no longer available. Choose another printer.');
+    const services = destinationId ? this.#deps.print?.destinations?.get(destinationId) : this.#deps.print?.services;
+    if (!services?.runner.estimate) throw new InvalidStateError('Estimates are unavailable for this printer.');
+    const quality = request.quality ?? 'standard', strength = request.strength ?? 'standard';
+    const overrides = sliceOverrides({quality, strength}, services.selection?.nozzleDiameterMm);
+    const capabilities = destinationId ? this.#deps.printers?.capabilities(destinationId) : undefined;
+    if (capabilities && ((overrides.layerHeightMm !== undefined && !capabilities.quality) || (overrides.wallLoops !== undefined && !capabilities.strength)))
+      throw new InvalidStateError(settingsUnsupported(services.runner.backend, {quality, strength}));
+    const model = await readFile(join(this.dir(id), object.current.model));
+    const key = JSON.stringify([createHash('sha256').update(model).digest('hex'), destinationId ?? 'default', quality, strength]);
+    let running = this.#estimates2.get(key);
+    if (!running) {
+      const runner = services.runner;
+      running = (async () => {
+        const work = await mkdtemp(join(tmpdir(), 'counterpart-estimate-'));
+        try {
+          const stlPath = join(work, 'model.stl');
+          await writeFile(stlPath, model);
+          const {estimate, settings} = await runner.estimate!({stlPath, ...(services.selection ? {selection: services.selection} : {}), ...(Object.keys(overrides).length ? {slicer: overrides} : {}),
+            signal: AbortSignal.timeout(150_000)});
+          return {destinationId: destinationId ?? 'current', quality, strength,
+            ...(estimate?.seconds !== undefined ? {seconds: estimate.seconds} : {}), ...(estimate?.grams !== undefined ? {grams: estimate.grams} : {}),
+            ...(settings.layers !== undefined ? {layers: settings.layers} : {}), ...(settings.layerHeightMm !== undefined ? {layerHeightMm: settings.layerHeightMm} : {}),
+            ...(settings.infillPercent !== undefined ? {infillPercent: settings.infillPercent} : {}), ...(settings.wallLoops !== undefined ? {wallLoops: settings.wallLoops} : {}),
+            slicedAt: new Date().toISOString()};
+        } finally { await rm(work, {recursive: true, force: true}).catch(() => undefined); }
+      })();
+      this.#estimates2.set(key, running);
+      // Failures aren't kept; a new model has a new key, so stale estimates are never served.
+      running.catch(() => { if (this.#estimates2.get(key) === running) this.#estimates2.delete(key); });
+      if (this.#estimates2.size > 64) this.#estimates2.delete(this.#estimates2.keys().next().value!);
+    }
+    try { return structuredClone(await running); }
+    catch (error) {
+      if (error instanceof PrinterMcpError && error.code === 'print-settings-unsupported') throw new InvalidStateError(settingsUnsupported(services.runner.backend, {quality, strength}));
+      throw new InvalidStateError(error instanceof PrinterMcpError && error.detail ? `Couldn't slice it for an estimate: ${error.detail}` : "Couldn't slice it for an estimate. Check the printer service, then try again.");
+    }
   }
 
   /** Older clients cannot turn a plate-only answer into approval of a hardware operation. */
@@ -532,7 +851,8 @@ export class ObjectService {
           throw new InvalidStateError('Answer the fields in the current printer confirmation.');
         checked = {action: 'accept', content: {...content} as Record<string, boolean>};
       } else throw new InvalidStateError('This printer question cannot be approved here. Cancel it and use a supported confirmation form.');
-      if (checked.action !== 'accept') this.#cancelledPrints.add(id);
+      // Declining Print's own question cancels that print; declining a pause or stop question changes nothing else.
+      if (checked.action !== 'accept' && this.#running.has(id)) this.#cancelledPrints.add(id);
       if (!confirmation.printing.services.relay.respond(confirmationId, checked)) {
         this.#cancelledPrints.delete(id);
         throw new InvalidStateError('That printer confirmation is no longer waiting. Refresh the project.');
@@ -563,8 +883,12 @@ export class ObjectService {
       }).catch(() => undefined);
     }, Math.max(0, pending.expiresAtMs - Date.now()));
     this.#confirmations.set(id, {pending, printing, timer});
-    this.#changed(await this.#deps.store.update(id, o => this.#pending(id, pending.id)
-      ? {...o, printConfirmation: printQuestion(pending), plate: pending.cameraSnapshot ? undefined : {noCamera: true}} : o));
+    const asked = await this.#deps.store.update(id, o => this.#pending(id, pending.id)
+      ? {...o, printConfirmation: printQuestion(pending), plate: pending.cameraSnapshot ? undefined : {noCamera: true}} : o);
+    this.#changed(asked);
+    if (asked.print?.printId) await this.#emit({id: randomUUID(), type: 'print.confirm', projectId: id, printId: asked.print.printId,
+      ...(asked.print.destination ? {destinationId: asked.print.destination.id, printerName: asked.print.destination.name} : {}),
+      data: {confirmationId: pending.id, expiresAt: new Date(pending.expiresAtMs).toISOString()}, detail: {message: pending.message.slice(0, 300)}});
     if (!pending.cameraSnapshot || !this.#pending(id, pending.id)) return;
     // Camera evidence is advisory; it never answers the MCP's human hardware confirmation.
     const photo = await writeFile(join(this.#deps.store.dir(id), 'plate.jpg'), Buffer.from(pending.cameraSnapshot.base64, 'base64')).then(() => true, () => false);

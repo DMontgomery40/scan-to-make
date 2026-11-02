@@ -3,6 +3,8 @@ import {readFile} from 'node:fs/promises';
 import {basename, join} from 'node:path';
 import type {RemoteScope} from '../remote-auth.js';
 import {InvalidCaptureManifestError, InvalidStateError, type ObjectService} from './service.js';
+import {CameraUnavailableError, type CameraFrame} from '../printing/camera.js';
+import {MilestonesSchema} from '@scan-to-make/contracts/counterpart';
 import {ObjectNotFoundError, type ObjectPass, type StmObject} from './store.js';
 import {RECONSTRUCTION_FAILED} from './reconstruct.js';
 import {parameters} from '../local-control-protocol.js';
@@ -10,7 +12,9 @@ import {parameters} from '../local-control-protocol.js';
 const READ: RemoteScope = 'projects:read', WRITE: RemoteScope = 'captures:import', PRINT: RemoteScope = 'printer-handoff:use';
 const MAX_SCAN = 64 * 1024 * 1024, MAX_PHOTO = 25 * 1024 * 1024, MAX_JSON = 16 * 1024;
 const MAX_DEPTH = 8 * 1024 * 1024;
-const PATH = /^\/v1\/objects(?:\/([0-9a-f-]{36})(?:\/(scan|photos|capture|capture-depth|start|corrections|closeup|print|filaments|print-confirmation|printer|plate\.jpg|plate|model\.stl|passes\/[^/]+\/activity|(?:renders|photos|capture)\/[^/]+))?)?$/;
+const PATH = /^\/v1\/objects(?:\/([0-9a-f-]{36})(?:\/(scan|photos|capture|capture-depth|start|corrections|closeup|print|print\/pause|print\/resume|print\/cancel|estimate|camera\.jpg|filaments|print-confirmation|printer|plate\.jpg|plate|model\.stl|passes\/[^/]+\/activity|(?:renders|photos|capture)\/[^/]+))?)?$/;
+const PRINTER_CAMERA = /^\/v1\/objects\/printers\/([A-Za-z0-9_-]{1,256})\/camera\.jpg$/;
+const SETTINGS: RemoteScope = 'projects:write';
 
 class HttpFailure extends Error {
   constructor(readonly status: number, readonly code: string, message = code) { super(message); }
@@ -48,6 +52,15 @@ export function publicObject(object: StmObject): PublicObject {
       summary: currentFailureText(pass.summary), activityCount: activity?.length ?? 0}))};
 }
 
+function sendFrame(response: ServerResponse, frame: CameraFrame): void {
+  response.statusCode = 200;
+  response.setHeader('content-type', 'image/jpeg');
+  response.setHeader('cache-control', 'private, no-store');
+  response.setHeader('x-captured-at', frame.capturedAt);
+  response.setHeader('x-content-type-options', 'nosniff');
+  response.end(frame.bytes);
+}
+
 function send(response: ServerResponse, status: number, value: unknown): void {
   response.statusCode = status;
   response.setHeader('content-type', 'application/json');
@@ -65,6 +78,21 @@ export function createObjectRoutes(service: ObjectService) {
           if (request.method !== 'GET') throw new HttpFailure(405, 'method-not-allowed');
           await authorize(READ);
           return send(response, 200, service.printers());
+        }
+        const printerCamera = PRINTER_CAMERA.exec(url.pathname);
+        if (printerCamera) {
+          if (request.method !== 'GET') throw new HttpFailure(405, 'method-not-allowed');
+          await authorize(PRINT);
+          return sendFrame(response, await service.printerCamera(printerCamera[1]!));
+        }
+        if (url.pathname === '/v1/settings') {
+          if (request.method === 'GET') { await authorize(READ); return send(response, 200, {settings: await service.settings()}); }
+          if (request.method !== 'PATCH') throw new HttpFailure(405, 'method-not-allowed');
+          await authorize(SETTINGS);
+          const input = await json<Record<string, unknown>>(request);
+          const milestones = MilestonesSchema.safeParse(input.milestones);
+          if (!milestones.success || Object.keys(input).some(key => key !== 'milestones')) throw new HttpFailure(400, 'invalid-request');
+          return send(response, 200, {settings: await service.updateSettings({milestones: milestones.data})});
         }
         if (!match) throw new HttpFailure(404, 'not-found');
         const [, id, action] = match;
@@ -126,6 +154,26 @@ export function createObjectRoutes(service: ObjectService) {
           response.setHeader('cache-control', 'private, no-store');
           response.end(bytes);
           return;
+        }
+        if (action === 'camera.jpg') {
+          if (method !== 'GET') throw new HttpFailure(405, 'method-not-allowed');
+          await authorize(PRINT);
+          return sendFrame(response, await service.camera(id));
+        }
+        if (action === 'estimate') {
+          if (method !== 'POST') throw new HttpFailure(405, 'method-not-allowed');
+          await authorize(PRINT);
+          const input = await json<unknown>(request);
+          const parsed = parameters['objects.estimate'].safeParse({...(input && typeof input === 'object' && !Array.isArray(input) ? input : {}), id});
+          if (!parsed.success || (input && typeof input === 'object' && Object.hasOwn(input, 'id'))) throw new HttpFailure(400, 'invalid-request');
+          const {id: _id, ...estimate} = parsed.data;
+          return send(response, 200, await service.estimate(id, estimate));
+        }
+        if (action.startsWith('print/')) {
+          if (method !== 'POST') throw new HttpFailure(405, 'method-not-allowed');
+          await authorize(PRINT);
+          await json<unknown>(request);
+          return send(response, 200, {object: publicObject(await service.control(id, action.slice('print/'.length) as 'pause' | 'resume' | 'cancel'))});
         }
         if (action === 'plate.jpg') {
           if (method !== 'GET') throw new HttpFailure(405, 'method-not-allowed');
@@ -198,7 +246,8 @@ export function createObjectRoutes(service: ObjectService) {
             if (!input || typeof input !== 'object' || Array.isArray(input)) throw new HttpFailure(400, 'invalid-request');
             const parsed = parameters['objects.print'].safeParse({...(input as object), id});
             if (!parsed.success || Object.hasOwn(input, 'id')) throw new HttpFailure(400, 'invalid-request');
-            object = await service.print(id, {checked:parsed.data.checked, filament:parsed.data.filament});
+            const {id: _id, ...options} = parsed.data;
+            object = await service.print(id, options);
             break;
           }
           case 'print-confirmation': {
@@ -223,6 +272,7 @@ export function createObjectRoutes(service: ObjectService) {
         if (error instanceof ObjectNotFoundError) return send(response, 404, {error: {code: 'not-found', message: 'Object not found'}});
         if (error instanceof InvalidStateError) return send(response, 409, {error: {code: 'invalid-state', message: error.message}});
         if (error instanceof InvalidCaptureManifestError) return send(response, 400, {error: {code: 'invalid-request', message: error.message}});
+        if (error instanceof CameraUnavailableError) return send(response, error.reason === 'no-camera' ? 404 : 503, {error: {code: error.reason === 'no-camera' ? 'not-found' : 'unavailable', message: error.message}});
         if (error instanceof Error && error.message === 'Invalid file name') return send(response, 400, {error: {code: 'invalid-name', message: error.message}});
         throw error;
       }
