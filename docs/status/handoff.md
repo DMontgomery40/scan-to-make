@@ -101,11 +101,8 @@ State at 2026-11-02 04:35 MT: **the camera works with Counterpart installed and 
   the Devices window's live device view) held an AVConference link to Davica3 from at least Nov 1 20:36 and
   reconnected after every reboot. While it's connected iOS blackens every camera frame
   (`setBlackenFramesForContinuityDisplayConnected`). Quit at 04:19 with David's approval; the next photo
-  (IMG_2133) was real. **Don't open Xcode's Devices window while the phone is plugged in.**
-- **Cause 2, the same mechanism:** XCTest's automatic screen recording. For UI tests on the phone, set
-  `PreferredScreenCaptureFormat = screenshots` and `SystemAttachmentLifetime`/`UserAttachmentLifetime =
-  keepNever` on each target in the `.xctestrun` (format 1: top-level target keys), and pass
-  `-collect-test-diagnostics never`. Grep the device log for `blackening` before trusting any frame.
+  (IMG_2133) was real.
+- **Cause 2, the same mechanism:** XCTest's automatic screen recording did the same during the 03:47 test run.
 - **Not explained:** the green photos (Nov 2, 02:08–02:11; no camera-daemon logs survive for that window),
   and David's report that the problem started about two weeks ago. Xcode's Devices window and iPhone Mirroring
   were first used heavily on Oct 14 (knowledgeC), but the unified log only goes back to Nov 1 20:49.
