@@ -87,6 +87,8 @@ public struct ProjectWords: Equatable, Sendable {
     /// "W × D × H mm", whole millimetres.
     public let size: String?
     public let actions: [ProjectAction]
+    /// What Ask for changes needs (`canCorrect`): a model, no close-up question open, a pass or print running.
+    let hasModel: Bool, asksForCloseup: Bool, stepRunning: Bool
 
     /// The question after a finished print: "Did it fit?", or for a published model "Did it come out right?".
     public static func outcomeQuestion(_ project: Project) -> String {
@@ -169,6 +171,9 @@ public struct ProjectWords: Equatable, Sendable {
     public init(_ project: Project, sending: Bool = false, printerName: String? = nil, now: Date = Date()) {
         title = Self.title(project)
         size = project.current?.sizeMm.flatMap(Format.size)
+        hasModel = project.current != nil
+        asksForCloseup = project.state == .needsCloseup
+        stepRunning = project.state == .touchingUp || project.state == .printing
         phase = Self.phase(project, sending: sending)
         let made: [ProjectAction] = project.current == nil ? [] : [project.print?.uncertain == true ? .printChecked : .print, .correct]
         var line: String

@@ -18,10 +18,12 @@ import CounterpartKit
     var sending: Set<String> = []
     /// Why a send stopped, until it's tried again.
     var sendFailures: [String: String] = [:]
-    /// Changes asked for while the Mac was working, sent when its pass ends (kept across launches).
-    var queuedNotes: [String: String] = (UserDefaults.standard.dictionary(forKey: "CounterpartQueuedNotes") as? [String: String]) ?? [:] {
-        didSet { UserDefaults.standard.set(queuedNotes, forKey: "CounterpartQueuedNotes") }
+    /// Changes asked for while a pass or a print ran, sent when that step ends (kept across launches).
+    var corrections = CorrectionQueue(notes: (UserDefaults.standard.dictionary(forKey: "CounterpartQueuedNotes") as? [String: String]) ?? [:]) {
+        didSet { UserDefaults.standard.set(corrections.notes, forKey: "CounterpartQueuedNotes") }
     }
+    /// Reads shown in the order they started: an older reply never replaces a newer one.
+    private var reads = ProjectReads()
     /// The companion's capability flags (`genericConfirmations` means the Mac can answer any printer question).
     var macCapabilities: Set<String> = []
     /// Bumped by `settings.changed`: Settings reads again.
@@ -68,10 +70,11 @@ import CounterpartKit
 
     func load() async {
         do {
+            let ticket = reads.start()
             let latest = try await mac.list()
             guard !Task.isCancelled else { return }
-            projects = latest; error = nil; reachable = true
-            for project in latest where queuedNotes[project.id] != nil { sendQueuedNote(project) }
+            projects = reads.merge(latest, ticket: ticket, current: projects); error = nil; reachable = true
+            for project in projects where corrections.pending(project.id) != nil { sendQueuedNote(project) }
         } catch let failure as CompanionError {
             guard !Task.isCancelled, failure.code != "cancelled" else { return }
             error = failure
@@ -81,8 +84,11 @@ import CounterpartKit
         loaded = true
     }
 
+    /// A fresh read of one project (every project event asks for one). Shown only if no later read is.
     func reload(_ id: String) async {
-        if let latest = try? await mac.get(id) { replace(latest) }
+        let ticket = reads.start()
+        guard let latest = try? await mac.get(id), reads.accept(id, ticket) else { return }
+        show(latest)
     }
 
     /// The Mac keeps Project Settings (PRD §5.4): status, Did it fit?, Done.
@@ -115,25 +121,33 @@ import CounterpartKit
         }
     }
 
+    /// A project the Mac just answered an action with: the newest there is.
     func replace(_ project: Project) {
+        _ = reads.accept(project.id, reads.start())
+        show(project)
+    }
+
+    private func show(_ project: Project) {
         if let index = projects.firstIndex(where: { $0.id == project.id }) { projects[index] = project } else { projects.insert(project, at: 0) }
         sendQueuedNote(project)
     }
 
-    func queue(note: String, for id: String) { queuedNotes[id] = [queuedNotes[id], note].compactMap { $0 }.joined(separator: "\n") }
+    func queue(note: String, for id: String) { corrections.add(note, for: id) }
 
-    /// A change asked for during a pass goes in as soon as the Mac can take it.
+    /// A change asked for during a pass or a print goes in as soon as that step ends (`pass.ready`,
+    /// `pass.failed`, the print ending). The Mac's "wait until the current step finishes" keeps it queued.
     private func sendQueuedNote(_ project: Project) {
-        guard let note = queuedNotes[project.id], words(project).actions.contains(.correct), !correcting.contains(project.id) else { return }
+        guard let note = corrections.due(project), !correcting.contains(project.id) else { return }
         correcting.insert(project.id)
         Task {
             defer { correcting.remove(project.id) }
-            if let next = try? await mac.correct(project.id, note) {
-                // Only what was sent leaves the queue; a change added meanwhile waits for this pass to end.
-                let now = queuedNotes[project.id]
-                queuedNotes[project.id] = now == note ? nil : now.map { $0.hasPrefix(note + "\n") ? String($0.dropFirst(note.count + 1)) : $0 }
+            do {
+                let next = try await mac.correct(project.id, note)
+                corrections.sent(note, for: project.id)
                 replace(next)
-            }
+            } catch let failure as CompanionError where CorrectionQueue.waits(failure) {
+                // Still busy: it stays queued for the next end of step.
+            } catch {}
         }
     }
     private var correcting: Set<String> = []
@@ -141,6 +155,7 @@ import CounterpartKit
 
     /// Clears everything read from the previous Mac.
     func reset() {
+        reads.reset()
         projects = []; loaded = false; error = nil; catalog = nil; printerProblem = nil; reachable = nil; events = nil; spools = [:]; macCapabilities = []; mcpUpdates = [:]
         sendFailures = [:]
     }

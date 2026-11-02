@@ -543,15 +543,16 @@ struct ProjectView: View {
     // MARK: Bottom bar
 
     @ViewBuilder private func bottomBar(_ object: Project, _ words: ProjectWords) -> some View {
-        // While the Mac works, a change waits and goes in when this pass finishes.
-        let canCorrect = words.actions.contains(.correct) || words.phase == .working
+        // One rule, shared with the Mac (CounterpartKit): open whenever there's a model; during a pass or a print
+        // the change waits and goes in when that step ends.
+        let canCorrect = words.canCorrect
         let canPrint = words.actions.contains(.print) || words.actions.contains(.printChecked)
         if canCorrect || canPrint {
             GlassEffectContainer(spacing: 10) {
                 HStack(spacing: 10) {
                     if canCorrect {
                         HStack {
-                            TextField(store.queuedNotes[object.id] != nil ? "Your change goes in when this pass finishes" : "Ask for changes…", text: $note, axis: .vertical)
+                            TextField(store.corrections.pending(object.id) != nil ? "Will send when this step finishes" : "Ask for changes…", text: $note, axis: .vertical)
                                 .lineLimit(1...4)
                                 .focused($writing)
                                 .submitLabel(.send)
@@ -608,16 +609,23 @@ struct ProjectView: View {
         let text = note.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         writing = false
-        if store.words(object).phase == .working {
-            // The Mac takes changes between passes; this one is sent the moment the pass ends.
+        if store.words(object).correctionWaits {
+            // A pass or a print is running: the change is kept and sent the moment that step ends.
             store.queue(note: text, for: object.id)
             note = ""
             return
         }
         act {
-            let next = try await store.mac.correct(object.id, text)
-            note = ""; section = .activity
-            return next
+            do {
+                let next = try await store.mac.correct(object.id, text)
+                note = ""; section = .activity
+                return next
+            } catch let failure as CompanionError where CorrectionQueue.waits(failure) {
+                // The Mac started a step meanwhile: queue it rather than call it an error.
+                store.queue(note: text, for: object.id)
+                note = ""
+                return nil
+            }
         }
     }
 }
