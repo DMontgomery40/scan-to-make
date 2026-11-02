@@ -15,7 +15,7 @@ The owner is whoever the lead assigns. Repeats count how often the ask came up a
 |---|---|---|---|---|
 | 1 | Printing works from the app (stove strips) | many | **broken**: our print command differed from Bambu Studio in 6 fields; KAN-215 fixing | He presses Print in the app and the part prints |
 | 2 | Stop/cancel from the app actually stops the printer | 1 | **broken** | Stop in the app stops the printer |
-| 3 | Done / Works status | 7 | phone: on device; Mac: branch #240 | Marks the mic mount Done on both |
+| 3 | Done / Works status | 7 | **on device, both** (Mac and phone at `4d78f6f`) | Marks the mic mount Done on both |
 | 4 | Rename projects | 2 | not started | Taps the name and renames, on both |
 | 5 | Project settings (printer, colours, quality, copies, engine, notifications, files, duplicate, archive/delete) | 2 | status + hide only | Each setting works on both |
 | 6 | Claude names projects | 1 | on device (failed captures still unnamed) | Every project has a real name |
@@ -53,6 +53,19 @@ The owner is whoever the lead assigns. Repeats count how often the ask came up a
 | 38 | Versioning discipline, no overlapping writers | 1 | done (branch_check.py) | — |
 | 39 | Real-world testing of the user experience | 1 | ongoing | Each fix tested on his devices |
 | 40 | Second opinions (advisor, Codex) | 2 | ongoing | — |
+
+## By 9:00 MT today (lead's commitment, 2026-11-02)
+
+Will land on his devices by 9:00 MT, if the three blockers below are cleared:
+- **#1 printing from the app** and **#2 Stop**: KAN-215 matches Bambu Studio's print command. Blocked on his "yes, publish it" for the MCP release.
+- **#11 the Home grid**: KAN-217, first thing.
+- **#26 Fusion**: KAN-220 ships Set up. Blocked on him installing Autodesk Fusion and opening a design, then pressing Set up.
+- **#30 the website**: the lead deploys it. Blocked on him running `wrangler login`.
+- **#23** (getting ready, failure text, Print Again): merged as #237, ships with the next Mac deploy.
+
+Not by 9:00 MT:
+- **#7 scanning:** first a walk-around scan diagnosed and fixed, then in-hand moved onto Apple's capture. The walk-around fix may land today. In-hand won't by 9.
+- The rest of the rows. Each stays in this table until it's on his device.
 
 ## Scanning diagnosis (row 7)
 
