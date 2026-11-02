@@ -68,11 +68,11 @@ struct SettingsView: View {
                 MacSettingsSections(model: macSettings)
 
                 Section {
-                    link(CounterpartIdentifiers.docsSite, SettingsLinkRow(symbol: "book.fill", tint: .blue, title: "Guide", detail: nil))
-                    link(URL(string: "#how", relativeTo: CounterpartIdentifiers.docsSite)!.absoluteURL,
+                    link(CounterpartIdentifiers.helpPage, SettingsLinkRow(symbol: "book.fill", tint: .blue, title: "Guide", detail: nil))
+                    link(URL(string: "#scan", relativeTo: CounterpartIdentifiers.helpPage)!.absoluteURL,
                          SettingsLinkRow(symbol: "cube.transparent.fill", tint: .indigo, title: "How scanning works", detail: nil))
-                    link(URL(string: "#help", relativeTo: CounterpartIdentifiers.docsSite)!.absoluteURL,
-                         SettingsLinkRow(symbol: "ruler.fill", tint: .teal, title: "Print the caliper card", detail: "Checks your scans come out the right size"))
+                    link(URL(string: "#scan", relativeTo: CounterpartIdentifiers.helpPage)!.absoluteURL,
+                         SettingsLinkRow(symbol: "ruler.fill", tint: .teal, title: "Getting the size right", detail: "Measure the size that needs to fit"))
                     link(CounterpartIdentifiers.scanRig,
                          SettingsLinkRow(symbol: "rotate.3d.fill", tint: .filament, title: "Print the scan rig", detail: "By Kass 3D on MakerWorld. For casual photos, not professional equipment."))
                 } header: { Text("Help") }

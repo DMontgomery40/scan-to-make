@@ -10,6 +10,7 @@ public enum CounterpartIdentifiers {
     public static let cloudKitContainer = "iCloud.com.scantomake.counterpart"
     public static let cloudKitZone = "Counterpart"
     public static let docsSite = URL(string: "https://counterpart.dtmont.com/")!
+    public static let helpPage = docsSite.appendingPathComponent("help")
     /// Kass 3D's 360° scan rig on MakerWorld (PRD §11.1, §15). Counterpart links to it and never re-hosts it.
     public static let scanRig = URL(string: "https://makerworld.com/en/models/1531561")!
 }
