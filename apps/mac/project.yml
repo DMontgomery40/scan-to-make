@@ -71,6 +71,7 @@ targets:
       - App/PrinterUpdates.swift
       - App/PublishedModel.swift
       - App/BlenderBridge.swift
+      - App/Files.swift
       - App/ModelMesh.swift
       - ControlKit/Sources/ControlKit
     dependencies:

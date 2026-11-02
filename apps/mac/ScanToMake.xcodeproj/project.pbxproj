@@ -38,6 +38,7 @@
 		4EE9B641DE5C7C16CF7343A5 /* ModelMesh.swift in Sources */ = {isa = PBXBuildFile; fileRef = A23E6083F6062B543A95EE19 /* ModelMesh.swift */; };
 		4FC608CAB60EF4726FCB47E8 /* ObjectsModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5F06994F3DC2679FF8587BB /* ObjectsModel.swift */; };
 		52B7AB859F3BB9583DD551AF /* ModelAccess.swift in Sources */ = {isa = PBXBuildFile; fileRef = 395FAD075324D0E7AA16BA42 /* ModelAccess.swift */; };
+		5EFB72A689F7CD3F8B60CBFC /* FileImagesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59A8B37FDCCE714A49CB678C /* FileImagesTests.swift */; };
 		63E97B5537218BF3EC17EB05 /* CounterpartKit in Frameworks */ = {isa = PBXBuildFile; productRef = 9E8C01A4BBA1C6DDB8368206 /* CounterpartKit */; };
 		685F7884CACEC1D1FA9A8105 /* AgentManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 910E4B0114E7E04F953E42A1 /* AgentManagerTests.swift */; };
 		6864F6F6BA0E296FAE5E85AD /* EventRelayPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 45CABA4399301F85B9574DC6 /* EventRelayPolicy.swift */; };
@@ -95,6 +96,7 @@
 		E32124DEE76415E48FF5D3D8 /* ModelAccess.swift in Sources */ = {isa = PBXBuildFile; fileRef = F42D3DDC4E340B3763151AD3 /* ModelAccess.swift */; };
 		E32237FBE24D39E4554A3475 /* EventRelayTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41E2E1E9E7D4F8125FC6CDC2 /* EventRelayTests.swift */; };
 		EBF8E2C1A689A4388EEF82CC /* Diagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1496538ABC8C1B43DD7C1B15 /* Diagnostics.swift */; };
+		F0CF25101EB20428E8A0FC06 /* Files.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78DF45C7E52F301838B8C603 /* Files.swift */; };
 		F3BAFE04E88CD925CF3D9C3B /* AgentKit.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 084617C3A2280F650DFB14EA /* AgentKit.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		F6BF783263E183A6877B0CC9 /* ProjectDetail.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1B4CAC0C434F5FAB667272B0 /* ProjectDetail.swift */; };
 		F7C6B30924946562ED38E49A /* AgentManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7B0BA880A7A95145CB837BE /* AgentManager.swift */; };
@@ -171,6 +173,7 @@
 		4B0EFAE6EE67455FAFBEF608 /* SettingsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsTests.swift; sourceTree = "<group>"; };
 		5843CF243A6B90D769EE203F /* Events.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Events.swift; sourceTree = "<group>"; };
 		597C236AD2F8BEAB989B447D /* ModelAccessViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelAccessViews.swift; sourceTree = "<group>"; };
+		59A8B37FDCCE714A49CB678C /* FileImagesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileImagesTests.swift; sourceTree = "<group>"; };
 		5A63BE8D6BD19AFFDA3F5D4E /* SettingsViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsViews.swift; sourceTree = "<group>"; };
 		5CB3C16A5015E911EF835644 /* ScanToMake.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ScanToMake.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		6085C88754126EAB39C66248 /* Objects.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Objects.swift; sourceTree = "<group>"; };
@@ -362,6 +365,7 @@
 				F97236849B06E8C6E6FE33F7 /* BlenderBridgeTests.swift */,
 				65E3A0D63F7083BD2ECAB4E5 /* CompanionSettingsTests.swift */,
 				41E2E1E9E7D4F8125FC6CDC2 /* EventRelayTests.swift */,
+				59A8B37FDCCE714A49CB678C /* FileImagesTests.swift */,
 				12A92990D34D700BB41B84E9 /* FusionSetUpFlowTests.swift */,
 				2E2BD0F29478556FD0C62A83 /* MacStatusModelTests.swift */,
 				DC5F2C1001F7210EDDAC44F0 /* ModelAccessModelTests.swift */,
@@ -599,6 +603,8 @@
 				6864F6F6BA0E296FAE5E85AD /* EventRelayPolicy.swift in Sources */,
 				E32237FBE24D39E4554A3475 /* EventRelayTests.swift in Sources */,
 				31CDDE74BDE90572E866C4E8 /* Events.swift in Sources */,
+				5EFB72A689F7CD3F8B60CBFC /* FileImagesTests.swift in Sources */,
+				F0CF25101EB20428E8A0FC06 /* Files.swift in Sources */,
 				6C161D805C690DB83F6BD900 /* FusionSetUpFlowTests.swift in Sources */,
 				7C4EC3FF412AE869CD2EAA04 /* FusionSetup.swift in Sources */,
 				24B88C1F9C6213A8FEF0BE4B /* LocalNetworkAccessTests.swift in Sources */,

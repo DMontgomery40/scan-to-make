@@ -1,14 +1,22 @@
 import SwiftUI
 import AppKit
+import ImageIO
 
 /// A picture from the project's folder, read off the main thread and keyed on the file's modification
-/// time. `version` (the project's `updatedAtMs`) stands in when that can't be read.
+/// time. `version` (the project's `updatedAtMs`) stands in when that can't be read. It is decoded at the size it is
+/// shown (ImageIO, orientation applied), never at the camera's: a 12 MP photo is 46.5 MB decoded, 93 MB in HDR, and a
+/// 26 pt thumbnail needs a few hundred KB (PRD §9.6).
 struct FileImage: View {
     let url: URL
     let version: Double
     var contentMode: ContentMode = .fit
+    @Environment(\.displayScale) private var scale
     @State private var image: NSImage?
-    private var key: String { "\(url.path)#\(FileVersion.of(url, else: version))" }
+    /// The longest side to decode, in pixels: the shown size, rounded up to a step so resizing rarely reloads.
+    @State private var pixels = 0
+    /// The longest shown side, in points: with the scale, it gives `pixels` (a move to a Retina display re-decodes).
+    @State private var side: CGFloat = 0
+    private var key: String { "\(url.path)#\(FileVersion.of(url, else: version))@\(pixels)" }
     var body: some View {
         Group {
             if let image = image ?? FileImages.cached(key) {
@@ -17,14 +25,26 @@ struct FileImage: View {
                 Color.clear
             }
         }
+        .onGeometryChange(for: CGFloat.self) { max($0.size.width, $0.size.height) } action: { shown in
+            side = max(side, shown)
+            grow()
+        }
+        .onChange(of: scale) { grow() }
         .task(id: key) {
+            guard pixels > 0 else { return }
             if let cached = FileImages.cached(key) { image = cached; return }
-            let url = url, key = key
-            let loaded = await Task.detached(priority: .userInitiated) { NSImage(contentsOf: url).map(SendableImage.init) }.value
+            let url = url, key = key, pixels = pixels, scale = scale
+            let loaded = await Task.detached(priority: .userInitiated) { FileImages.decode(url, maxPixels: pixels, scale: scale) }.value
             guard !Task.isCancelled else { return }
-            if let loaded { FileImages.store(loaded.image, key) }
+            if let loaded { FileImages.store(loaded.image, key, bytes: loaded.bytes) }
             image = loaded?.image
         }
+    }
+
+    /// Only ever larger: a fitted image is smaller than its box, and shrinking would reload it.
+    private func grow() {
+        let step = FileImages.step(side * scale)
+        if step > pixels { pixels = step }
     }
 }
 
@@ -37,19 +57,57 @@ struct FillImage: View {
     }
 }
 
-private struct SendableImage: @unchecked Sendable { let image: NSImage }
+struct SendableImage: @unchecked Sendable { let image: NSImage; let bytes: Int }
 
 @MainActor enum FileImages {
-    private static let cache: NSCache<NSString, NSImage> = { let cache = NSCache<NSString, NSImage>(); cache.countLimit = 120; return cache }()
+    /// Decoded pictures, limited by their bytes rather than their number.
+    private static let cache: NSCache<NSString, NSImage> = {
+        let cache = NSCache<NSString, NSImage>()
+        cache.totalCostLimit = 96 << 20
+        return cache
+    }()
     static func cached(_ key: String) -> NSImage? { cache.object(forKey: key as NSString) }
-    static func store(_ image: NSImage, _ key: String) { cache.setObject(image, forKey: key as NSString) }
+    static func store(_ image: NSImage, _ key: String, bytes: Int) { cache.setObject(image, forKey: key as NSString, cost: bytes) }
+
+    /// The decode size for a side of `pixels`: the next of 128, 256, 512, 1024, 2048, 4096.
+    nonisolated static func step(_ pixels: CGFloat) -> Int {
+        guard pixels > 0 else { return 0 }
+        var step = 128
+        while CGFloat(step) < pixels && step < 4096 { step *= 2 }
+        return step
+    }
+
+    /// The picture at most `maxPixels` on its longest side, 8-bit, upright.
+    nonisolated static func decode(_ url: URL, maxPixels: Int, scale: CGFloat) -> SendableImage? {
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary) else { return nil }
+        let options: [CFString: Any] = [kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceCreateThumbnailWithTransform: true,
+                                        kCGImageSourceThumbnailMaxPixelSize: maxPixels, kCGImageSourceShouldCacheImmediately: true]
+        guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
+        let size = NSSize(width: CGFloat(image.width) / max(scale, 1), height: CGFloat(image.height) / max(scale, 1))
+        return SendableImage(image: NSImage(cgImage: image, size: size), bytes: image.bytesPerRow * image.height)
+    }
 }
 
 /// A file's modification time, so a picture or model reloads when its file is rewritten (a new pass reuses
 /// the same names) and not when only the project's state changes. `fallback` if it can't be read.
 enum FileVersion {
+    /// Read at most once a second per file: views ask on every update, and a `stat` each time adds up (PRD §9.6).
+    @MainActor private static var read: [String: (at: Date, value: Double?, fallback: Double)] = [:]
+
     static func of(_ url: URL, else fallback: Double) -> Double {
-        ((try? FileManager.default.attributesOfItem(atPath: url.path))?[.modificationDate] as? Date)?.timeIntervalSince1970 ?? fallback
+        guard Thread.isMainThread else { return stat(url) ?? fallback }
+        return MainActor.assumeIsolated {
+            // A new project version (a pass finished) reads the file again at once, whatever the second says.
+            if let cached = read[url.path], cached.fallback == fallback, Date().timeIntervalSince(cached.at) < 1 { return cached.value ?? fallback }
+            let value = stat(url)
+            if read.count > 512 { read.removeAll() }
+            read[url.path] = (Date(), value, fallback)
+            return value ?? fallback
+        }
+    }
+
+    private static func stat(_ url: URL) -> Double? {
+        ((try? FileManager.default.attributesOfItem(atPath: url.path))?[.modificationDate] as? Date)?.timeIntervalSince1970
     }
 }
 

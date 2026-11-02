@@ -1,4 +1,5 @@
 import XCTest
+import Combine
 
 private actor FakeNearby: NearbyCompanion {
     var enabled = true
@@ -141,5 +142,22 @@ private actor FakeNearby: NearbyCompanion {
         await model.poll()
         XCTAssertNil(model.problem)
         XCTAssertEqual(model.requests.map(\.id), ["b"])
+    }
+
+    /// PRD §9.6: a poll that finds the same requests publishes nothing (each change redraws the menu bar item).
+    func testAnUnchangedPollPublishesNothing() async {
+        let companion = FakeNearby()
+        await companion.add(id: "a", expiresAt: soon)
+        let model = NearbyModel(companion: companion)
+        await model.list()
+        var changes = 0
+        let watching = model.objectWillChange.sink { _ in changes += 1 }
+        await model.list()
+        await model.list()
+        XCTAssertEqual(changes, 0)
+        await companion.add(id: "b", expiresAt: soon)
+        await model.list()
+        XCTAssertEqual(changes, 1, "a new request is shown")
+        watching.cancel()
     }
 }
