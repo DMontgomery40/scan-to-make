@@ -64,7 +64,7 @@ public struct ProjectSettingsForm: View {
         NavigationStack {
             Form {
                 Section {
-                    TextField("Name", text: $name)
+                    TextField("Name", text: $name).accessibilityIdentifier("project-settings-name")
                     Button("Rename") { patch(["title": .string(name.trimmingCharacters(in: .whitespacesAndNewlines))]) }
                         .disabled(!Project.validName(name) || name == ProjectWords(project).title)
                     Picker("Status", selection: Binding(get: { project.statusUnderneath.rawValue }, set: { patch(["status": .string($0)]) })) {
@@ -108,7 +108,7 @@ public struct ProjectSettingsForm: View {
                 }
                 Section {
                     Button("Duplicate Project", systemImage: "plus.square.on.square") { run { try await duplicate(); dismiss() } }
-                        .disabled(project.current == nil || project.state == .touchingUp)
+                        .disabled(project.current == nil || project.state == .touchingUp).accessibilityIdentifier("project-settings-duplicate")
                     Button(project.isArchived ? "Show on Home" : "Archive — Hide from Home") { patch(["archived": .bool(!project.isArchived)]) }
                     Button("Delete Project", role: .destructive) { deleting = true }.disabled(busyProject)
                 } footer: { Text("Duplicate copies the current model and settings. Archive keeps the project's files and status.") }
@@ -116,7 +116,7 @@ public struct ProjectSettingsForm: View {
             }
             .formStyle(.grouped).disabled(busy)
             .navigationTitle("Project Settings")
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() }.disabled(busy) } }
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() }.disabled(busy).accessibilityIdentifier("project-settings-done") } }
             .overlay { if busy { ProgressView().padding().background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12)) } }
             .task(id: project.printerDestinationId) {
                 context = nil
@@ -139,12 +139,12 @@ public struct ProjectSettingsForm: View {
                 }.disabled(busyProject)
                 Picker("Quality", selection: Binding(get: { defaults.quality ?? "standard" }, set: { printPatch("quality", .string($0)) })) {
                     Text("Draft").tag("draft"); Text("Standard").tag("standard"); Text("Fine").tag("fine")
-                }.disabled(printer?.quality != true)
+                }.disabled(printer?.quality != true).accessibilityIdentifier("project-settings-quality")
                 Picker("Strength", selection: Binding(get: { defaults.strength ?? "standard" }, set: { printPatch("strength", .string($0)) })) {
                     Text("Standard").tag("standard"); Text("Strong").tag("strong"); Text("Max").tag("max")
                 }.disabled(printer?.strength != true)
                 Stepper(defaults.copies.map { "Copies: \($0)" } ?? "Copies: printer profile", value: Binding(get: { defaults.copies ?? 1 }, set: { printPatch("copies", .number(Double($0))) }), in: 1...64)
-                    .disabled(printer?.copies != true)
+                    .disabled(printer?.copies != true).accessibilityIdentifier("project-settings-copies")
                 if defaults.copies != nil { Button("Use printer profile's copy count") { printPatch("copies", nil) } }
                 Picker("Colour", selection: Binding(get: { selectedColour }, set: { id in printPatch("colour", context.colours.first { $0.id == id }?.value) })) {
                     Text("Printer profile").tag("profile")

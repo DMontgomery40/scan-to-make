@@ -24,6 +24,8 @@ enum Fixtures {
     /// Statuses set on this run (`PATCH …/settings`), by project id.
     nonisolated(unsafe) static var statuses: [String: String] = [:]
     nonisolated(unsafe) static var titles: [String: String] = [:]
+    nonisolated(unsafe) static var projectPreferences: [String: [String: Any]] = [:]
+    nonisolated(unsafe) static var duplicates: [[String: Any]] = []
 
     static let ids = (mic: "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a01", potato: "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a02",
                       clip: "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a03", plush: "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a04",
@@ -120,9 +122,18 @@ enum Fixtures {
         ]
         // `-CounterpartFixtureSet grid`: only the projects Home shows as cards, so the grid is at the top.
         let shown = set == "grid" ? list.filter { ["ready", "printed", "confirmed", "failed"].contains($0["state"] as? String ?? "") } : list
-        return shown.map(withStatus).map(withPreparing).map { object in
-            guard let id = object["id"] as? String, let title = titles[id] else { return object }
-            return object.merging(["title": title]) { $1 }
+        return (shown + duplicates).map(withStatus).map(withPreparing).map { original in
+            guard let id = original["id"] as? String else { return original }
+            var object = original
+            if let title = titles[id] { object["title"] = title }
+            if let preferences = projectPreferences[id] {
+                var settings = object["settings"] as? [String: Any] ?? ["status": "not-printed"]
+                for key in ["printDefaults", "designEngine", "notifications"] { if let value = preferences[key] { settings[key] = value } }
+                object["settings"] = settings
+                if let destination = preferences["printerDestinationId"] { object["printerDestinationId"] = destination is NSNull ? nil : destination }
+                if let archived = preferences["archived"] { object["archived"] = archived }
+            }
+            return object
         }
     }
 
@@ -239,7 +250,7 @@ struct FixtureTransport: HTTPTransport {
         let objects = Fixtures.objects()
         func object(_ id: String) -> [String: Any]? { objects.first { $0["id"] as? String == id } }
         let parts = path.split(separator: "/").map(String.init)
-        if path == "/healthz" { return json(["status": "ok", "protocolVersion": "0.1.0", "capabilities": ["genericConfirmations": Fixtures.macAnswers, "mcpUpdates": true, "projectSettings": true, "projectRename": true, "printCopies": true]]) }
+        if path == "/healthz" { return json(["status": "ok", "protocolVersion": "0.1.0", "capabilities": ["genericConfirmations": Fixtures.macAnswers, "mcpUpdates": true, "projectSettings": true, "projectRename": true, "projectPreferences": true, "printCopies": true]]) }
         if path == "/v1/objects/printers" { return json(Fixtures.catalog) }
         if path.hasPrefix("/v1/objects/printers/"), path.hasSuffix("/camera.jpg") {
             guard path.contains("/current/") else { return json(["error": ["code": "not-found", "message": "This printer has no camera"]], 404) }
@@ -262,7 +273,18 @@ struct FixtureTransport: HTTPTransport {
                let body = request.httpBody.flatMap({ try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }) {
                 if let status = body["status"] as? String { Fixtures.statuses[id] = status }
                 if let title = body["title"] as? String { Fixtures.titles[id] = title }
+                Fixtures.projectPreferences[id, default: [:]].merge(body) { $1 }
                 return Fixtures.objects().first { $0["id"] as? String == id }.map { json(["object": $0]) } ?? json(["error": ["code": "not-found"]], 404)
+            }
+            if parts[3] == "duplicate", method == "POST", var copied = object(id) {
+                let copyId = UUID().uuidString.lowercased()
+                copied["id"] = copyId; copied["title"] = String((copied["title"] as? String ?? "Project").prefix(114)) + " copy"
+                copied["state"] = "ready"; copied["passes"] = [] as [Any]
+                for key in ["print", "ask", "outcome", "archived", "pendingFollowup", "pendingPhotos", "messages"] { copied[key] = nil }
+                var settings = copied["settings"] as? [String: Any] ?? [:]
+                settings["status"] = "not-printed"; settings["archived"] = false; copied["settings"] = settings
+                Fixtures.duplicates.append(copied)
+                return json(["object": copied], 201)
             }
             if parts[3] == "filaments" { return json(["filaments": Fixtures.filaments(for: id == Fixtures.ids.mic ? Fixtures.printer : "current")]) }
             if parts[3] == "printer", method == "POST",
