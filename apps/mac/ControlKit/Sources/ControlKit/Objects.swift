@@ -206,6 +206,32 @@ public extension ControlClient {
     }
 }
 
+/// `printers.updateMcp` (PRD §8.10): the companion updates an MCP install in its own way and reports progress as
+/// `mcp.update.*` events.
+public struct McpUpdate: Decodable, Sendable, Equatable {
+    /// `started`, `waiting` (after the current print), `current` (already the latest) or `unresolved` (it couldn't
+    /// tell how this copy is installed; `found` says what it saw, and a fresh copy can be installed instead).
+    public let state: String
+    public let mcpId: String
+    public let fromVersion: String?
+    public let toVersion: String?
+    public let found: String?
+    public init(state: String, mcpId: String, fromVersion: String? = nil, toVersion: String? = nil, found: String? = nil) {
+        self.state = state; self.mcpId = mcpId; self.fromVersion = fromVersion; self.toVersion = toVersion; self.found = found
+    }
+}
+
+public extension ControlClient {
+    /// Asks the companion to update one MCP install; `fresh` installs the app's own copy instead.
+    func updateMcp(_ mcpId: String, fresh: Bool = false) async throws -> McpUpdate {
+        struct Reply: Decodable { let update: McpUpdate }
+        var params: [String: JSONValue] = ["mcpId": .string(mcpId)]
+        if fresh { params["fresh"] = .bool(true) }
+        let reply: Reply = try await call("printers.updateMcp", params)
+        return reply.update
+    }
+}
+
 public enum PrintControl: String, Sendable { case pause, resume, cancel
     public var method: String { "objects.\(rawValue)Print" }
 }
@@ -235,6 +261,8 @@ public struct PrinterDestination: Decodable, Sendable, Identifiable, Equatable {
     /// Which client config it came from: `printer-handoff`, `claude-code`, `claude-desktop`, `cursor`, `codemode`, `codex`.
     public let origin: String?
     public let capabilities: PrinterCapabilities?
+    /// The MCP install this printer uses, shared by its printers (`printers.updateMcp`, PRD §8.10).
+    public let mcpId: String?
     /// The MCP that reaches this printer, as people know it.
     public var mcpName: String {
         switch backend {
@@ -242,11 +270,11 @@ public struct PrinterDestination: Decodable, Sendable, Identifiable, Equatable {
         default: return "mcp-3D-printer-server"
         }
     }
-    private enum CodingKeys: String, CodingKey { case id, name, backend, model, address, source, state, origin, capabilities }
+    private enum CodingKeys: String, CodingKey { case id, name, backend, model, address, source, state, origin, capabilities, mcpId }
     public init(id: String, name: String, backend: String, model: String? = nil, address: String? = nil, source: String = "mcp-profile",
-                state: String? = nil, origin: String? = nil, capabilities: PrinterCapabilities? = nil) {
+                state: String? = nil, origin: String? = nil, capabilities: PrinterCapabilities? = nil, mcpId: String? = nil) {
         self.id = id; self.name = name; self.backend = backend; self.model = model; self.address = address; self.source = source
-        self.state = state; self.origin = origin; self.capabilities = capabilities
+        self.state = state; self.origin = origin; self.capabilities = capabilities; self.mcpId = mcpId
     }
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
@@ -259,6 +287,7 @@ public struct PrinterDestination: Decodable, Sendable, Identifiable, Equatable {
         state = try? values.decodeIfPresent(String.self, forKey: .state)
         origin = try? values.decodeIfPresent(String.self, forKey: .origin)
         capabilities = try? values.decodeIfPresent(PrinterCapabilities.self, forKey: .capabilities)
+        mcpId = try? values.decodeIfPresent(String.self, forKey: .mcpId)
     }
 }
 
@@ -268,10 +297,17 @@ public struct PrinterCapabilities: Decodable, Sendable, Equatable {
         public let message: String
         public let package: String
         public let command: [String]?
-        public init(message: String, package: String, command: [String]?) { self.message = message; self.package = package; self.command = command }
+        /// The newest published version (`npm view`, daily and when Settings opens), once the companion checks it.
+        public let latestVersion: String?
+        public init(message: String, package: String, command: [String]?, latestVersion: String? = nil) {
+            self.message = message; self.package = package; self.command = command; self.latestVersion = latestVersion
+        }
     }
     /// The installed MCP's own name and version, from its `initialize` reply.
-    public struct Server: Decodable, Sendable, Equatable { public let name: String; public let version: String }
+    public struct Server: Decodable, Sendable, Equatable {
+        public let name: String; public let version: String
+        public init(name: String, version: String) { self.name = name; self.version = version }
+    }
     public let server: Server?
     public let progress: Bool
     public let layers: Bool?

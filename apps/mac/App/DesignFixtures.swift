@@ -24,6 +24,18 @@ import ControlKit
         let number = CommandLine.arguments.firstIndex(of: "--design-select").flatMap { Int(CommandLine.arguments[$0 + 1]) } ?? 1
         return String(format: "0b6f0f43-7c35-4b8a-9a3c-%012d", number)
     }
+    /// `--design-update waiting|failed|unresolved|updated`: Settings → Printers with the Ender's MCP in that state.
+    static func seedUpdate() {
+        guard assets != nil, let index = CommandLine.arguments.firstIndex(of: "--design-update"), index + 1 < CommandLine.arguments.count else { return }
+        let status: McpUpdateStatus
+        switch CommandLine.arguments[index + 1] {
+        case "waiting": status = .waiting
+        case "failed": status = .failed(log: "npm ERR! code E404\nnpm ERR! 404 Not Found - GET https://registry.npmjs.org/mcp-3d-printer-server\nnpm ERR! A complete log of this run can be found in: ~/.npm/_logs/2026-11-01T20_10_00_000Z-debug-0.log")
+        case "unresolved": status = .unresolved(found: "It runs over SSH on 127.0.0.1, and the key's forced command isn't readable from here.")
+        default: status = .updated(version: "1.3.0")
+        }
+        PrinterUpdates.shared.set("generic-codex", status)
+    }
     /// `--design-tab request|activity|print`.
     static var tab: String { CommandLine.arguments.firstIndex(of: "--design-tab").map { CommandLine.arguments[$0 + 1] } ?? "request" }
     static let micID = "0b6f0f43-7c35-4b8a-9a3c-000000000001"
@@ -97,16 +109,17 @@ import ControlKit
             PrinterDestination(id: "p1s", name: "P1S", backend: "bambu-printer-mcp", model: "Bambu Lab P1S", address: "LAN", state: "ready",
                                origin: "claude-code", capabilities: .init(server: .init(name: "bambu-printer-mcp", version: "1.1.46"),
                                                                           camera: "bambu-tcp", filaments: "ams", pause: true, resume: true, cancel: true,
-                                                                          quality: true, strength: true)),
+                                                                          quality: true, strength: true), mcpId: "bambu"),
             PrinterDestination(id: "mk4", name: "Garage MK4", backend: "mcp-3d-printer-server", model: "Prusa MK4S", address: "Klipper", state: "ready",
                                origin: "claude-desktop", capabilities: .init(server: .init(name: "mcp-3d-printer-server", version: "1.2.17"),
-                                                                             quality: true, strength: true)),
+                                                                             quality: true, strength: true), mcpId: "generic-desktop"),
             PrinterDestination(id: "ender", name: "Ender", backend: "mcp-3d-printer-server", model: "Creality Ender-3 V3", address: "OctoPrint",
                                state: "offline", origin: "codex",
                                capabilities: .init(server: .init(name: "mcp-3d-printer-server", version: "1.2.9"), progress: false,
                                                    missing: ["progress", "camera"],
                                                    update: .init(message: "Update to see progress and camera", package: "mcp-3d-printer-server",
-                                                                 command: ["npm", "install", "-g", "mcp-3d-printer-server@latest"]))),
+                                                                 command: ["npm", "install", "-g", "mcp-3d-printer-server@latest"], latestVersion: "1.3.0")),
+                               mcpId: "generic-codex"),
         ], defaultDestinationId: "p1s"), now: now)
     }
 
@@ -170,7 +183,8 @@ actor FixtureObjects: ObjectsCompanion {
     }
     func status() async throws -> ControlStatus {
         ControlStatus(companionVersion: "fixture", pairedDeviceCount: 1,
-                      capabilities: .init(nearbyPairing: true, objectsCreate: true, events: true, printControl: true, printSettings: true))
+                      capabilities: .init(nearbyPairing: true, objectsCreate: true, events: true, printControl: true, printSettings: true,
+                                          mcpUpdates: true))
     }
     func devices() async throws -> [ControlDevice] {
         [ControlDevice(deviceId: "0b6f0f43-7c35-4b8a-9a3c-0000000000d1", deviceName: "David's iPhone", pairedAt: now - 2 * 86_400_000,
@@ -213,20 +227,43 @@ import UniformTypeIdentifiers
 
     static func capture(to folder: URL) async {
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        let frames = NSApp.windows.filter(\.isVisible).map { "\($0.title) \(NSStringFromRect($0.frame)) content \(NSStringFromRect($0.contentLayoutRect))" }
-        try? frames.joined(separator: "\n").write(to: folder.appendingPathComponent("windows.txt"), atomically: true, encoding: .utf8)
+        // With Stage Manager on, an app that isn't in front keeps its windows in the strip, where the window server
+        // draws them as small tilted thumbnails and a capture gets that thumbnail. Bring the app forward and wait until
+        // every window is at its real size.
+        var waited = 0
+        repeat {
+            NSApp.unhide(nil)
+            NSApp.activate()
+            for window in visibleWindows { window.orderFrontRegardless() }
+            visibleWindows.first { $0.canBecomeKey }?.makeKey()
+            try? await Task.sleep(for: .seconds(1))
+            waited += 1
+        } while visibleWindows.contains(where: inStrip) && waited < 10
+        var lines = NSApp.windows.filter(\.isVisible).map { "\($0.title) \(NSStringFromRect($0.frame)) content \(NSStringFromRect($0.contentLayoutRect))" }
+        lines += visibleWindows.map(frameCheck)
+        defer { try? lines.joined(separator: "\n").write(to: folder.appendingPathComponent("windows.txt"), atomically: true, encoding: .utf8) }
         do {
-            let content = try await SCShareableContent.currentProcess
-            let mine = content.windows.filter { $0.owningApplication?.processID == ProcessInfo.processInfo.processIdentifier }
-            NSLog("KAN220 shareable windows %d, mine %d", content.windows.count, mine.count)
+            // A window that has only just opened can be missing from the shareable content for a moment: ask again
+            // until every visible window is there.
+            var mine: [SCWindow] = []
+            for _ in 0..<5 {
+                let content = try await SCShareableContent.currentProcess
+                mine = content.windows.filter { $0.owningApplication?.processID == ProcessInfo.processInfo.processIdentifier }
+                if visibleWindows.allSatisfy({ window in mine.contains { Int($0.windowID) == window.windowNumber } }) { break }
+                try? await Task.sleep(for: .seconds(1))
+            }
+            for window in visibleWindows where !mine.contains(where: { Int($0.windowID) == window.windowNumber }) {
+                lines.append("not captured \(window.title): the window server didn't offer it for capture")
+            }
             for (index, window) in mine.enumerated() {
-                // The window server may hold it as a Stage Manager thumbnail; ask for the window's real size.
                 guard let app = NSApp.windows.first(where: { $0.windowNumber == Int(window.windowID) }), app.frame.width > 120 else { continue }
+                // Never a thumbnail passed off as the window: it is reported in windows.txt instead.
+                guard !inStrip(app) else { lines.append("not captured \(app.title): in the Stage Manager strip"); continue }
                 let filter = SCContentFilter(desktopIndependentWindow: window)
                 let configuration = SCStreamConfiguration()
-                let scale = app.backingScaleFactor
-                configuration.width = Int(app.frame.width * scale)
-                configuration.height = Int(app.frame.height * scale)
+                let scale = CGFloat(filter.pointPixelScale)
+                configuration.width = Int(filter.contentRect.width * scale)
+                configuration.height = Int(filter.contentRect.height * scale)
                 configuration.showsCursor = false
                 let image = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: configuration)
                 let name = (window.title?.isEmpty == false ? window.title! : "window-\(index)").replacingOccurrences(of: "/", with: "-")
@@ -240,6 +277,35 @@ import UniformTypeIdentifiers
         } catch {
             NSLog("KAN220 capture failed %@", String(describing: error))
         }
+    }
+
+    private static var visibleWindows: [NSWindow] { NSApp.windows.filter { $0.isVisible && $0.frame.width > 120 } }
+
+    /// Where the window server shows the window now, in its own (top-left) coordinates.
+    static func shownBounds(_ window: NSWindow) -> CGRect? {
+        let info = CGWindowListCopyWindowInfo([.optionIncludingWindow], CGWindowID(window.windowNumber)) as? [[String: Any]]
+        guard let bounds = info?.first?[kCGWindowBounds as String] as? NSDictionary else { return nil }
+        return CGRect(dictionaryRepresentation: bounds as CFDictionary)
+    }
+
+    /// Shown much smaller than its frame: a Stage Manager strip thumbnail.
+    static func inStrip(_ window: NSWindow) -> Bool {
+        guard let shown = shownBounds(window) else { return false }
+        return shown.width < window.frame.width * 0.9 || shown.height < window.frame.height * 0.9
+    }
+
+    /// The launch check for design QA: each window at least its minimum size, on a screen, and not in the strip.
+    static func frameCheck(_ window: NSWindow) -> String {
+        // `contentMinSize` bounds the content; `minSize` bounds the whole frame, title bar included.
+        let content = window.contentMinSize != .zero
+        let minimum = content ? window.contentMinSize : window.minSize
+        let size = content ? window.contentRect(forFrameRect: window.frame).size : window.frame.size
+        let onScreen = NSScreen.screens.contains { $0.frame.intersects(window.frame) }
+        let bigEnough = size.width >= minimum.width - 1 && size.height >= minimum.height - 1
+        let strip = inStrip(window)
+        let shown = shownBounds(window).map { NSStringFromRect(NSRectFromCGRect($0)) } ?? "?"
+        return "frame-check \(window.title): \(bigEnough && onScreen && !strip ? "ok" : "FAIL") frame \(NSStringFromRect(window.frame)) "
+            + "minimum \(Int(minimum.width))x\(Int(minimum.height)) onScreen \(onScreen) stageManagerStrip \(strip) shown \(shown)"
     }
 }
 #endif
