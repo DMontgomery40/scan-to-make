@@ -35,7 +35,7 @@ test('copies only the given files', async () => {
     scan: [join(source, 'scan.obj'), join(source, 'scan.mtl'), join(source, 'scan_tex.png')],
     photos: [join(source, 'photo.jpg')]});
   assert.deepEqual(await walk(pass.dir),
-    ['out/', 'out/checkpoints/', 'photos/', 'photos/photo-01.jpg', 'scan/', 'scan/scan.mtl', 'scan/scan.obj', 'scan/scan_tex.png']);
+    ['out/', 'out/checkpoints/', 'photos/', 'photos/overview-01.jpg', 'photos/photo-01.jpg', 'scan/', 'scan/scan.mtl', 'scan/scan.obj', 'scan/scan_tex.png']);
   assert.ok(pass.dir.startsWith(join(root, 'obj-1') + '/'));
   assert.deepEqual(pass.scanPaths, ['scan.obj', 'scan.mtl', 'scan_tex.png'].map(name => join(pass.scanDir, name)));
   assert.deepEqual(pass.photoPaths, [join(pass.photosDir, 'photo-01.jpg')]);
@@ -49,7 +49,7 @@ test('converts HEIC and caps size', {skip: !HAS_SIPS && 'needs macOS sips'}, asy
   const wide = join(source, 'wide.jpg');
   execFileSync('/usr/bin/sips', ['-z', '300', '4000', fixture('photo.jpg'), '--out', wide], {stdio: 'ignore'});
   const pass = await prepareTouchupPass({root, objectId: 'obj-2', scan: [fixture('scan.obj')], photos: [fixture('photo.heic'), wide]});
-  assert.deepEqual((await readdir(pass.photosDir)).sort(), ['photo-01.jpg', 'photo-02.jpg']);
+  assert.deepEqual((await readdir(pass.photosDir)).sort(), ['overview-01.jpg', 'photo-01.jpg', 'photo-02.jpg']);
   for (const path of pass.photoPaths) {
     const [width, height] = pixelSize(path);
     assert.ok(Math.max(width, height) <= 2048, `${path} is ${width}x${height}`);
@@ -90,6 +90,24 @@ test('a relative root still gives absolute pass paths', async () => {
 test('without sips (Linux), JPEG and PNG photos are used as they are and HEIC says it needs a Mac', async () => {
   const root = await temp('touchup-root-');
   const pass = await prepareTouchupPass({root, objectId: 'obj-7', scan: [fixture('scan.obj')], photos: [fixture('photo.jpg'), fixture('scan_tex.png')], photoTool: 'copy'});
-  assert.deepEqual((await readdir(pass.photosDir)).sort(), ['photo-01.jpg', 'photo-02.png']);
+  assert.deepEqual((await readdir(pass.photosDir)).sort(), ['overview-01.jpg', 'photo-01.jpg', 'photo-02.png']);
   await assert.rejects(prepareTouchupPass({root, objectId: 'obj-8', scan: [fixture('scan.obj')], photos: [fixture('photo.heic')], photoTool: 'copy'}), /needs a Mac/);
+});
+
+test('numbered overview includes every supplied photo across bounded pages without changing originals', async t => {
+  const {readFile, rm} = await import('node:fs/promises');
+  const root = await temp('touchup-overview-');
+  t.after(() => rm(root, {recursive: true, force: true}));
+  const python = process.env.CAPTURE_TEST_PYTHON || process.env.SCAN_TO_MAKE_CAPTURE_PYTHON || 'python3';
+  const photos = Array.from({length: 25}, (_, i) => join(root, `${i}.png`));
+  execFileSync(python, ['-c', 'from PIL import Image\nimport sys\nfor i,p in enumerate(sys.argv[1:]): Image.new("RGB",(40,30),(i*10,30,200)).save(p)', ...photos]);
+  const original = await Promise.all(photos.map(path => readFile(path)));
+  const pass = await prepareTouchupPass({root, objectId: 'overview', scan: [], photos, photoTool: 'copy'});
+  assert.equal(pass.photoOverviewPaths.length, 2);
+  assert.equal(pass.photoPaths.length, 25);
+  for (const [i, path] of photos.entries()) assert.deepEqual(await readFile(path), original[i]);
+  const report = JSON.parse(execFileSync(python, ['-c', `from PIL import Image\nimport json,sys\na,b=[Image.open(p) for p in sys.argv[1:]]\nprint(json.dumps({'sizes':[a.size,b.size],'lastFirstPage':a.getpixel((1344,1754)),'lastPage':b.getpixel((192,170))}))`, ...pass.photoOverviewPaths]));
+  assert.deepEqual(report.sizes, [[1536,1896],[384,316]]);
+  assert.ok(Math.abs(report.lastFirstPage[0] - 230) < 5, 'photo 24 occupies the final cell on page 1');
+  assert.ok(Math.abs(report.lastPage[0] - 240) < 5, 'photo 25 is present on page 2');
 });

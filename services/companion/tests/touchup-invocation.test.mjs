@@ -148,3 +148,14 @@ test('a revised request without a completed model uses original inputs without c
 test('the worker works only with objects in its own scene', () => {
   assert.match(TOUCHUP_SYSTEM_RULES, /current scene/);
 });
+
+test('photo evidence lists overview pages first and every real filename, including PNG inputs', async () => {
+  const p = await pass();
+  p.photoPaths = [join(p.photosDir, 'photo-01.jpg'), join(p.photosDir, 'photo-02.png')];
+  p.photoOverviewPaths = [join(p.photosDir, 'overview-01.jpg')];
+  const inv = buildTouchupInvocation({pass: p, printer, claudePath: '/c', sourceEnv});
+  const prompt = inv.args.at(-1);
+  for (const path of [...p.photoOverviewPaths, ...p.photoPaths]) assert.ok(prompt.includes(path), path);
+  assert.ok(prompt.indexOf(p.photoOverviewPaths[0]) < prompt.indexOf(p.photoPaths[0]));
+  assert.equal(prompt.includes('…'), false, 'the worker can locate each actual extension rather than guessing a range');
+});
