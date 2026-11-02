@@ -52,6 +52,16 @@ final class DelayedEngine: NativeCaptureEngine {
         let interrupted = try reopened.list(activeRunID: nil)
         precondition(interrupted.first(where: { $0.runID == third.runID })?.status == "interrupted")
         owner.stop(); engines[2].onFinish?(.stopped)
+        let failedCapture = try owner.start(origin: origin)
+        engines[3].onFinish?(.failed("Camera temporarily unavailable"))
+        precondition(owner.message == "Camera temporarily unavailable", "The capture screen must show the terminal failure reason")
+        let failedDraft = try store.read(failedCapture.runID)
+        precondition(failedDraft.message == owner.message)
+        let retryCapture = try owner.start(origin: origin)
+        precondition(owner.message == nil, "A fresh capture clears the previous failure")
+        owner.stop(); engines[4].onFinish?(.stopped)
+        let retryDraft = try store.read(retryCapture.runID)
+        precondition(retryDraft.status == "stopped")
         for bad in ["../outside", "", second.runID + "/../outside"] {
             do { _ = try store.read(bad); fatalError("Accepted unsafe run ID") } catch {}
         }

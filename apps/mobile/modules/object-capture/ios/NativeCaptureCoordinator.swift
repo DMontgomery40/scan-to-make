@@ -46,7 +46,9 @@ enum NativeCaptureOutcome { case completed, stopped, failed(String) }
             switch outcome {
             case .completed where !stopping: _ = try store.complete(id)
             case .completed, .stopped: try store.update(id, status: "stopped")
-            case .failed(let detail): try store.update(id, status: "failed", message: detail)
+            case .failed(let detail):
+                message = detail
+                try store.update(id, status: "failed", message: detail)
             }
         } catch { message = error.localizedDescription }
         // The callback is a terminal observation, not evidence of physical camera release.

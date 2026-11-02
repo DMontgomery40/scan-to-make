@@ -140,11 +140,12 @@ typealias MacError = CompanionError
         return status["supported"] as? Bool == true && status["lidar"] as? Bool != false
     }
 
-    /// Opens the walk-around scan for a project. The run id when it finished with a model, else nil.
+    /// Opens the walk-around scan. Returns a ready run only when Add to this project was chosen.
     func scan(_ id: String) async throws -> String? {
         do {
             let draft = try await NativeCaptureCoordinator.shared.start(NativeCaptureDestination(projectId: id, revision: 0, snapshot: "{}", context: nil))
-            return draft["status"] as? String == "ready" ? draft["runID"] as? String : nil
+            guard draft["addRequested"] as? Bool == true, draft["status"] as? String == "ready" else { return nil }
+            return draft["runID"] as? String
         } catch {
             throw MacError(code: "capture-error", message: error.localizedDescription)
         }
@@ -153,8 +154,10 @@ typealias MacError = CompanionError
     /// A finished scan for this project still on the phone, so a send cut short can resume.
     func finishedScan(_ id: String) async -> String? {
         let drafts = (try? NativeCaptureCoordinator.shared.drafts()) ?? []
-        let draft = drafts.first { ($0["origin"] as? [String: Any])?["projectId"] as? String == id }
-        return draft?["status"] as? String == "ready" ? draft?["runID"] as? String : nil
+        let draft = drafts.first {
+            $0["status"] as? String == "ready" && ($0["origin"] as? [String: Any])?["projectId"] as? String == id
+        }
+        return draft?["runID"] as? String
     }
 
     /// The walk-around scan's model while it's still on this phone: the project page shows it until the Mac
@@ -164,7 +167,9 @@ typealias MacError = CompanionError
         if let folder = Fixtures.folder { return folder.appending(path: "scanB.usdz") }
         #endif
         let drafts = (try? NativeCaptureCoordinator.shared.drafts()) ?? []
-        guard let run = drafts.first(where: { ($0["origin"] as? [String: Any])?["projectId"] as? String == id })?["runID"] as? String,
+        guard let run = drafts.first(where: {
+            $0["status"] as? String == "ready" && ($0["origin"] as? [String: Any])?["projectId"] as? String == id
+        })?["runID"] as? String,
               UUID(uuidString: run) != nil, run == run.lowercased() else { return nil }
         let model = URL.documentsDirectory.appending(path: "NativeCaptures/\(run)/Models/model-mobile.usdz")
         return (try? model.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true ? model : nil
