@@ -96,8 +96,13 @@ import CounterpartKit
     }
 
     func loadCapabilities() async {
-        if let names = try? await mac.client.capabilities() { macCapabilities = names }
+        guard let health = try? await mac.client.health() else { return }
+        macCapabilities = health.capabilities
+        // The Mac's real name ("Mac mini"), when it says so: a pairing link doesn't always carry it.
+        if let name = health.name, name != macName { UserDefaults.standard.set(name, forKey: Self.macNameKey); macNameChanges += 1 }
     }
+    /// Bumped when the Mac's name is learned, so views reading `macName` refresh.
+    var macNameChanges = 0
 
     func loadPrinters() async {
         do {
@@ -198,7 +203,7 @@ import CounterpartKit
     var connection: PairingStatus? { try? pairingClient.store.status() }
 
     /// "Mac mini", from the pairing (the Mac's name, saved when it paired), else "your Mac".
-    var macName: String? { UserDefaults.standard.string(forKey: Self.macNameKey).flatMap { $0.isEmpty ? nil : $0 } }
+    var macName: String? { _ = macNameChanges; return UserDefaults.standard.string(forKey: Self.macNameKey).flatMap { $0.isEmpty ? nil : $0 } }
     nonisolated static let macNameKey = "CounterpartMacName"
 }
 

@@ -257,6 +257,15 @@ public struct ProjectWords: Equatable, Sendable {
         if let macWords, !(phase == .confirmed && macWords.phase != ProjectPhase.confirmed.rawValue) { self.line = macWords.text } else { self.line = line }
     }
 
+    /// The Printing screen (camera, Pause, Stop) is the place for this project: printing, or getting ready on the
+    /// printer after it was sent (heating, cleaning; layer 0). Slicing and sending still belong to the project page.
+    public static func watchable(_ project: Project, phase: ProjectPhase) -> Bool {
+        if phase == .printing { return true }
+        // Sent to the printer: dispatched, and the monitor is following it (printId is set at the Print tap).
+        guard phase == .preparing, let print = project.print, print.dispatchedAt != nil else { return false }
+        return ["starting", "watching"].contains(print.monitor?.phase ?? "")
+    }
+
     /// A Done project's line, on its card and in the Mac sidebar.
     public static let doneLine = "Done · it works"
 

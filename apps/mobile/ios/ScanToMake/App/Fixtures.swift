@@ -19,6 +19,8 @@ enum Fixtures {
     nonisolated(unsafe) static var confirmation: String?
     /// `-CounterpartScreen confirm-mac-answers`: the Mac answers any printer question.
     nonisolated(unsafe) static var macAnswers = false
+    /// `-CounterpartScreen preparing`: the cable clip is on the printer, getting ready (layer 0).
+    nonisolated(unsafe) static var preparing = false
     /// Statuses set on this run (`PATCH …/settings`), by project id.
     nonisolated(unsafe) static var statuses: [String: String] = [:]
 
@@ -115,7 +117,24 @@ enum Fixtures {
                                     ["id": "preparing", "words": "Filled the gaps", "startedAtMs": ago(9), "endedAtMs": ago(6), "typicalSec": 150],
                                     ["id": "working", "words": "Matching your photos", "startedAtMs": ago(6), "typicalSec": 300]]]]],
         ]
-        return list.map(withStatus)
+        // `-CounterpartFixtureSet grid`: only the projects Home shows as cards, so the grid is at the top.
+        let shown = set == "grid" ? list.filter { ["ready", "printed", "confirmed", "failed"].contains($0["state"] as? String ?? "") } : list
+        return shown.map(withStatus).map(withPreparing)
+    }
+
+    /// The clip's print getting ready on the printer, as the companion words it (KAN-214 #237).
+    private static func withPreparing(_ object: [String: Any]) -> [String: Any] {
+        guard preparing, object["id"] as? String == ids.clip, var print = object["print"] as? [String: Any],
+              var live = print["live"] as? [String: Any] else { return object }
+        var object = object
+        live["state"] = "preparing"
+        live["job"] = ["name": "clip", "progress": 0, "layer": 0, "totalLayers": 212, "stage": "Heating"]
+        print["live"] = live
+        print["monitor"] = ["phase": "starting", "milestonesSent": [], "firstLayerSent": false]
+        print["dispatchedAt"] = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-90))
+        object["print"] = print
+        object["status"] = ["phase": "preparing", "text": "Getting ready · Heating", "symbol": "printer", "tint": "accent"]
+        return object
     }
 
     /// A status set on this run, as the companion's `setStatus` keeps it (KAN-214 #223): archived only hides;
