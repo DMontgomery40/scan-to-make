@@ -30,4 +30,16 @@ final class FileImagesTests: XCTestCase {
         XCTAssertEqual(decoded.image.size.height, 128, "points at 2x")
         XCTAssertLessThanOrEqual(decoded.bytes, 256 * 256 * 4, "a few hundred KB, where the full photo is tens of MB")
     }
+
+    /// A pass that rewrites a file within the second still shows: a new project version reads the date again.
+    @MainActor func testANewProjectVersionReadsTheFileDateAgain() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("model-\(UUID().uuidString).stl")
+        defer { try? FileManager.default.removeItem(at: url) }
+        try Data("a".utf8).write(to: url)
+        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: 1_000)], ofItemAtPath: url.path)
+        XCTAssertEqual(FileVersion.of(url, else: 1), 1_000)
+        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: 2_000)], ofItemAtPath: url.path)
+        XCTAssertEqual(FileVersion.of(url, else: 1), 1_000, "within the second, the same project version reads the cache")
+        XCTAssertEqual(FileVersion.of(url, else: 2), 2_000, "a new project version reads the file again")
+    }
 }
