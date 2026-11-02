@@ -8,6 +8,7 @@ public struct ProjectReads: Sendable {
     private var shown: [String: Int] = [:]
     public init() {}
     public mutating func start() -> Int { issued += 1; return issued }
+    public func isCurrent(_ ticket: Int) -> Bool { ticket > resetAt }
 
     public mutating func accept(_ id: String, ticket: Int) -> Bool {
         guard ticket > resetAt, ticket > (shown[id] ?? 0) else { return false }

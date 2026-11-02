@@ -148,6 +148,11 @@ struct SocketObjects: ObjectsCompanion {
     @Published var selection: String?
     @Published private(set) var working: Set<String> = []
     @Published private(set) var problem: Problem?
+    @Published private(set) var corrections: CorrectionQueue {
+        didSet { defaults.set(corrections.entries, forKey: "CounterpartQueuedNotes") }
+    }
+    private let defaults: UserDefaults
+    private var correcting: Set<String> = []
     private let companion: any ObjectsCompanion
     private var loop: Task<Void, Never>?
     private var failures = 0
@@ -162,7 +167,10 @@ struct SocketObjects: ObjectsCompanion {
     /// How often the footer's phone and AI, and the capability flags, are read again.
     static let extrasDelay: Double = 30
 
-    init(companion: any ObjectsCompanion) { self.companion = companion }
+    init(companion: any ObjectsCompanion, defaults: UserDefaults = .standard) {
+        self.companion = companion; self.defaults = defaults
+        self.corrections = CorrectionQueue(saved: defaults.dictionary(forKey: "CounterpartQueuedNotes"))
+    }
 
     var selected: Project? { objects.first { $0.id == selection } }
 
@@ -297,6 +305,7 @@ struct SocketObjects: ObjectsCompanion {
             if apply(read: read, fetched, extras) {
                 DownloadsWatcher.shared.follow(extras, titles: Dictionary(uniqueKeysWithValues: fetched.map { ($0.id, $0.words.title) }))
             }
+            for project in objects { sendQueuedNote(project) }
             let list = objects
             let catalog = try? await companion.printers()
             if printerCatalog != catalog { printerCatalog = catalog }
@@ -410,12 +419,15 @@ struct SocketObjects: ObjectsCompanion {
     /// Project Settings' Status (PRD §5.4): `not-printed`, `printed`, `works` (Done), `needs-changes`.
     @discardableResult func setStatus(_ status: String, for id: String) async -> Bool {
         guard capabilities?.projectSettings == true else { return false }
+        let pending = objects.first(where: { $0.id == id })?.pendingFollowup
         let done = await change(id) { try await self.companion.setProjectSettings(id, ["status": .string(status)]) }
+        if done, status == "works", let pending { corrections.sent(pending, for: id) }
         if done { await refresh() } // the settings the sidebar and "Did it fit?" read
         return done
     }
     @discardableResult func rename(_ id: String, title: String) async -> Bool {
-        await change(id) { try await self.companion.setProjectSettings(id, ["title": .string(title)]) }
+        guard capabilities?.projectRename == true else { return false }
+        return await change(id) { try await self.companion.setProjectSettings(id, ["title": .string(title)]) }
     }
     /// Archive hides a project from the sidebar's groups and keeps everything; Unarchive brings its status back.
     @discardableResult func setArchived(_ archived: Bool, for id: String) async -> Bool {
@@ -449,6 +461,45 @@ struct SocketObjects: ObjectsCompanion {
         }
     }
 
+    /// Copy evidence to the companion now, so a queued correction survives closing either app.
+    @discardableResult func requestChanges(_ id: String, note: String, photos: [URL] = []) async -> Bool {
+        guard let project = objects.first(where: { $0.id == id }), project.canAskForChanges, !working.contains(id) else { return false }
+        if !project.changesWait { return await perform(.correct, on: id, note: note, photos: photos) }
+        working.insert(id)
+        defer {
+            working.remove(id)
+            if let current = objects.first(where: { $0.id == id }) { sendQueuedNote(current) }
+        }
+        return await queueChanges(id, note: note, photos: photos)
+    }
+
+    private func queueChanges(_ id: String, note: String, photos: [URL]) async -> Bool {
+        do {
+            for photo in photos { applyReply(try await companion.addFile(id, kind: "photos", path: photo.path)) }
+            corrections.add(note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "See the photos I added." : note, for: id)
+            if let project = objects.first(where: { $0.id == id }) { sendQueuedNote(project) }
+            return true
+        } catch { problem = Problem(id: id, text: Self.sentence(for: error)); return false }
+    }
+
+    private func sendQueuedNote(_ project: Project) {
+        guard let note = corrections.due(project), !correcting.contains(project.id), !working.contains(project.id), project.pendingFollowup == nil else { return }
+        correcting.insert(project.id)
+        Task {
+            defer { correcting.remove(project.id) }
+            do {
+                let updated = try await companion.correct(project.id, note: note)
+                corrections.sent(note, for: project.id)
+                applyReply(updated)
+                correcting.remove(project.id)
+                sendQueuedNote(updated)
+                wake()
+            } catch let failure as ControlRemoteError where failure.code == "conflict" && failure.message == "Wait until the current step finishes." {
+                // Another device got there first. Keep the note for the next end of step.
+            } catch { problem = Problem(id: project.id, text: Self.sentence(for: error)) }
+        }
+    }
+
     @discardableResult func perform(_ action: ObjectAction, on id: String, note: String = "", photos: [URL] = []) async -> Bool {
         guard !working.contains(id) else { return false }
         working.insert(id)
@@ -466,9 +517,12 @@ struct SocketObjects: ObjectsCompanion {
             case .bestGuess: updated = try await companion.answerCloseup(id, bestGuess:true)
             case .retry: updated = try await companion.start(id)
             }
+            if action == .correct { corrections.sent(note.trimmingCharacters(in: .whitespacesAndNewlines), for: id) }
             applyReply(updated)
             wake()
             return true
+        } catch let failure as ControlRemoteError where action == .correct && failure.code == "conflict" && failure.message == "Wait until the current step finishes." {
+            return await queueChanges(id, note: note, photos: photos)
         } catch {
             problem = Problem(id:id, text:Self.sentence(for:error))
             // A refusal usually means the object moved on (another device, or a finished step): show where it is now.
@@ -513,6 +567,7 @@ struct SocketObjects: ObjectsCompanion {
         if problem?.id == id { problem = nil }
         do {
             try await companion.delete(id)
+            corrections.remove(id)
             if let index = objects.firstIndex(where: { $0.id == id }) {
                 objects.remove(at:index)
                 if selection == id { selection = objects.isEmpty ? nil : objects[min(index, objects.count - 1)].id }

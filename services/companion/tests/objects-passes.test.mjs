@@ -221,3 +221,34 @@ test('a correction that changes nothing keeps a Done project Done', async t => {
   const {projectStatus} = await import('../dist/objects/service.js');
   assert.equal(projectStatus(kept), 'works');
 });
+
+
+test('a person renaming during a pass wins over the worker title', async t => {
+  const f = await setup(t, [{wait: true, result: {title: 'Generated holder'}}]);
+  const object = await f.service.create('A holder for the desk');
+  await f.service.start(object.id);
+  await until(() => f.inputs.length === 1);
+  await f.service.rename(object.id, 'My desk holder');
+  f.release();
+  assert.equal((await f.service.settled(object.id)).title, 'My desk holder');
+});
+
+test('a person renaming while the title generator answers keeps their name', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'title-race-'));
+  t.after(() => rm(root, {recursive: true, force: true, maxRetries: 10, retryDelay: 20}));
+  const store = new ObjectStore(join(root, 'objects'));
+  const object = await store.update((await store.create('A holder')).id, o => ({...o, state: 'ready'}));
+  let answer;
+  const changes = [];
+  const service = new ObjectService({store, runTouchup: async () => { throw new Error('unused'); }, stlInfo: async () => undefined, claudePath: '/unused',
+    handoff: {backend: 'bambu-printer-mcp', process: {command: '/usr/bin/true'}}, onChange: o => changes.push(o.title),
+    titleFor: async () => new Promise(resolve => { answer = resolve; })});
+  t.after(() => service.close());
+  await service.list(); await until(() => answer);
+  await service.rename(object.id, 'My own name');
+  changes.length = 0;
+  answer('Generated name');
+  await until(() => changes.length);
+  assert.deepEqual(changes, ['My own name']);
+  assert.equal((await store.get(object.id)).title, 'My own name');
+});

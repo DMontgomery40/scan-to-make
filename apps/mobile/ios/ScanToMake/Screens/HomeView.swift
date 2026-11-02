@@ -372,7 +372,7 @@ struct AskButtons: View {
         working = true; problem = nil
         Task {
             defer { working = false }
-            do { if let next = try await body() { store.replace(next) } }
+            do { let ticket = store.startRequest(); if let next = try await body() { store.replace(next, ticket: ticket) } }
             catch let failure as CompanionError {
                 if failure.code == "cancelled" { return }
                 if failure.needsPairing { store.onPair(); return }
@@ -459,7 +459,7 @@ struct ArchivedRow: View {
                 working = true; problem = nil
                 Task {
                     defer { working = false }
-                    do { if let next = try await store.archive(project, false) { store.replace(next) } else { await store.reload(project.id) } }
+                    do { let ticket = store.startRequest(); if let next = try await store.archive(project, false) { store.replace(next, ticket: ticket) } else { await store.reload(project.id) } }
                     catch let failure as CompanionError { problem = failure.message }
                     catch { problem = CompanionError.unreachable.message }
                 }

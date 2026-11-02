@@ -48,7 +48,8 @@ final class ProjectScreensUITests: XCTestCase {
 
     func testAReadyProjectOffersPrintAndChanges() {
         let app = launch("ready")
-        XCTAssertTrue(app.staticTexts["Mic mount"].waitForExistence(timeout: 20))
+        XCTAssertTrue(app.buttons["project-title"].waitForExistence(timeout: 20))
+        XCTAssertEqual(app.buttons["project-title"].label, "Mic mount")
         XCTAssertTrue(app.staticTexts["Ready to print"].exists)
         XCTAssertTrue(app.buttons["print"].exists)
         XCTAssertTrue(app.staticTexts["What changed"].exists)
@@ -57,7 +58,8 @@ final class ProjectScreensUITests: XCTestCase {
 
     func testAWorkingProjectSaysSo() {
         let app = launch("working")
-        XCTAssertTrue(app.staticTexts["Crochet potato"].waitForExistence(timeout: 20))
+        XCTAssertTrue(app.buttons["project-title"].waitForExistence(timeout: 20))
+        XCTAssertEqual(app.buttons["project-title"].label, "Crochet potato")
         XCTAssertTrue(app.staticTexts["Your Mac is working on it"].exists)
         XCTAssertFalse(app.buttons["print"].exists, "nothing to print while the Mac works")
     }

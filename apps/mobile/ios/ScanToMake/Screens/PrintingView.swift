@@ -213,7 +213,7 @@ struct PrintingView: View {
         working = true; problem = nil
         Task {
             defer { working = false }
-            do { store.replace(try await store.mac.client.control(id, action)) }
+            do { let ticket = store.startRequest(); store.replace(try await store.mac.client.control(id, action), ticket: ticket) }
             catch let failure as CompanionError {
                 if failure.needsPairing { store.onPair(); return }
                 problem = failure.isUnsupported ? "Update Counterpart on your Mac to \(action == .cancel ? "stop" : action.rawValue) prints from here." : failure.message
