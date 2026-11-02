@@ -87,12 +87,12 @@ export class CameraFrames {
     }
     viewers.count++;
     const signal = AbortSignal.any([options.signal, viewers.controller.signal]);
-    let last: CameraFrame | undefined, deliveredAt = 0;
+    let last: CameraFrame | undefined, readAt = 0;
     const cadence = options.size === 'full' ? 2000 : 10000;
     try {
       for (;;) {
         signal.throwIfAborted();
-        const pause = deliveredAt + cadence - Date.now();
+        const pause = readAt + cadence - Date.now();
         if (pause > 0) await delay(pause, undefined, {signal});
         const work = this.frame(destinationId, session, {...options, view: true, watch: true, fresh: !!last, signal: viewers.controller.signal});
         // Cancelling one viewer must not cancel the shared MCP request another viewer awaits.
@@ -103,7 +103,9 @@ export class CameraFrames {
           work.then(resolve, reject).finally(() => signal.removeEventListener('abort', abort));
         });
         if (frame.bytes.length > (options.size === 'full' ? 42000 : 20000)) throw new CameraUnavailableError('unreachable');
-        if (!last || !frame.bytes.equals(last.bytes)) { last = frame; deliveredAt = Date.now(); yield frame; }
+        // A conforming server long-polls, but immediate unchanged replies must also stay paced.
+        readAt = Date.now();
+        if (!last || !frame.bytes.equals(last.bytes)) { last = frame; yield frame; }
       }
     } finally {
       if (--viewers.count === 0) {

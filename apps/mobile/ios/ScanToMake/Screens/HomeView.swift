@@ -176,6 +176,7 @@ struct ConnectionBanner: View {
 /// A print that's running: the printer camera, percent, layer, time left and filament.
 struct NowPrintingCard: View {
     @Environment(AppModel.self) private var app
+    @Environment(\.scenePhase) private var scenePhase
     let store: ProjectsStore
     let project: Project
     @State private var camera = CameraFeed()
@@ -221,9 +222,9 @@ struct NowPrintingCard: View {
         }
         .padding(12)
         .glassEffect(.regular, in: .rect(cornerRadius: 26))
-        // Keyed on the phase too, so the camera starts when preparing becomes printing.
-        .task(id: "\(project.id)#\(store.words(project).phase)") {
-            guard store.words(project).phase == .printing else { return }
+        // Scene changes cancel the active stream; returning to the app starts a fresh watch.
+        .task(id: "\(project.id)#\(store.words(project).phase)#\(scenePhase)") {
+            guard scenePhase == .active, store.words(project).phase == .printing else { return }
             await camera.run(app.companion, project: project.id, every: 10, maxPixelSize: 300)
         }
         .accessibilityElement(children: .combine)

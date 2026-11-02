@@ -178,3 +178,23 @@ test('capability lookup failures do not become sticky unsupported or trigger sna
   await assert.rejects(f.camera.frame('p',f.session,{view:true}),error=>error.reason==='unreachable');
   assert.equal(reads,2,'the next request can recover from a temporary discovery error');
 });
+
+
+test('immediate unchanged MCP replies remain paced while a viewer is waiting', {timeout:6000}, async t => {
+  const f=fixture(t), call=f.session.call, controller=new AbortController();
+  let frames=0;
+  f.session.call=async(name,args,options)=>{
+    if(name==='camera_frame') {
+      frames++;
+      if(frames>3) throw Error('unpaced repeated reads');
+    }
+    return call(name,args,options);
+  };
+  const viewer=f.camera.watch('p',f.session,{size:'full',signal:controller.signal});
+  await viewer.next();
+  const pending=viewer.next();
+  pending.catch(()=>{});
+  await new Promise(resolve=>setTimeout(resolve,2250));
+  assert.equal(frames,2,'one read per cadence even when the MCP returns unchanged immediately');
+  controller.abort(); await assert.rejects(pending); assert.equal(f.holds,0);
+});
