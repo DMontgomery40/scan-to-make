@@ -355,12 +355,19 @@ final class DecodingTests: XCTestCase {
             try JSONDecoder().decode(T.self, from: JSONSerialization.data(withJSONObject: try XCTUnwrap(value), options: [.fragmentsAllowed]))
         }
         let events = try decode([CounterpartEvent].self, object["events"])
-        XCTAssertEqual(events.count, 19)
-        XCTAssertEqual(Set(events.map(\.type)).count, 19)
+        XCTAssertEqual(events.count, 20)
+        XCTAssertEqual(Set(events.map(\.type)).count, 20)
+        // KAN-214 #199: `print.sent` is terminal, so it opens the project, not the Printing screen.
+        let sent = try XCTUnwrap(events.first { $0.type == "print.sent" })
+        XCTAssertEqual(AppRoute(notification: ["projectId": sent.projectId, "type": sent.type]), .project(sent.projectId))
         for key in ["eventsPage", "eventsPageTruncated", "eventsPageReset"] { _ = try decode(EventsPage.self, object[key]) }
         XCTAssertTrue(try decode(EventsPage.self, object["eventsPageReset"]).needsResync)
         let statuses = try decode([Project.Status].self, object["statuses"])
         for status in statuses { XCTAssertNotNil(ProjectPhase(rawValue: status.phase), status.phase) }
+        let sentStatus = try XCTUnwrap(statuses.first { $0.phase == "sent" })
+        XCTAssertEqual(sentStatus.symbol, ProjectPhase.sent.symbol)
+        XCTAssertEqual(sentStatus.tint, "secondary")
+        XCTAssertEqual(ProjectPhase.sent.tone, .secondary)
         _ = try decode(PrintLive.self, object["printLive"])
         _ = try decode(Project.PrintMonitor.self, object["printMonitor"])
         _ = try decode(PrintSettings.self, object["printSettings"])

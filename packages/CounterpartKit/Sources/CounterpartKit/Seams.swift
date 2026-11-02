@@ -54,7 +54,7 @@ public enum AppRoute: Equatable, Sendable {
         func value(_ key: String) -> String? { userInfo[key] as? String ?? fields[key] as? String }
         guard let project = value("projectId"), !project.isEmpty else { return nil }
         let type = value("type") ?? ""
-        let ended = ["print.done", "print.failed", "print.cancelled", "print.not-started"]
+        let ended = ["print.done", "print.failed", "print.cancelled", "print.not-started", "print.sent"]
         if action == "PRINT" { self = .print(project) }
         else if action == "CAMERA" { self = .camera(project) }
         else if type.hasPrefix("print.") && !ended.contains(type) { self = .printing(project) }

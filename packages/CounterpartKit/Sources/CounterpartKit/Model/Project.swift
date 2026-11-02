@@ -6,7 +6,8 @@ import Foundation
 /// and the screens show an honest fallback without them (PRD §2.6).
 public struct Project: Codable, Identifiable, Equatable, Sendable {
     public enum State: String, Codable, Sendable {
-        case new, touchingUp = "touching-up", needsCloseup = "needs-closeup", ready, printing, printed, failed, unknown
+        /// `sent`: the printer took the job but Counterpart can't follow it (no job id, or Bambu Connect). Terminal.
+        case new, touchingUp = "touching-up", needsCloseup = "needs-closeup", ready, printing, printed, sent, failed, unknown
         public init(from decoder: Decoder) throws {
             self = State(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .unknown
         }
@@ -79,13 +80,19 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
 
     /// The companion's state line (`ObjectStatus`).
     public struct Status: Codable, Equatable, Sendable {
-        /// sending, working, needs-you, ready, preparing, printing, printed, failed
+        /// sending, working, needs-you, ready, preparing, printing, printed, sent, failed
         public var phase: String
         public var text: String
         public var symbol: String
         /// blue, orange, accent, green, secondary, red
         public var tint: String
         public init(phase: String, text: String, symbol: String, tint: String) { self.phase = phase; self.text = text; self.symbol = symbol; self.tint = tint }
+        /// A status missing its symbol or tint still shows its words.
+        public init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            phase = try c.decode(String.self, forKey: .phase); text = try c.decode(String.self, forKey: .text)
+            symbol = try c.decodeIfPresent(String.self, forKey: .symbol) ?? ""; tint = try c.decodeIfPresent(String.self, forKey: .tint) ?? "secondary"
+        }
     }
 
     /// One worker message or tool line from a pass.
@@ -235,7 +242,7 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
         public var firstLayerSent: Bool?
         /// Set while the printer can't be reached. Never a failure by itself.
         public var unreachableSince: String?
-        /// done, failed, cancelled, not-started, replaced
+        /// done, failed, cancelled, not-started, replaced, sent
         public var endState: String?
         public var endedAt: String?
         public init(phase: String, endState: String? = nil, endedAt: String? = nil, unreachableSince: String? = nil) {
@@ -262,6 +269,10 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
         public var settings: PrintSettings?
         public var live: PrintLive?
         public var monitor: PrintMonitor?
+        /// Set when the dispatch returned no job identity: the name a job is adopted by.
+        public var fileBase: String?
+        /// "bambu-connect" when the print was handed to Bambu Connect on the Mac.
+        public var sentVia: String?
 
         public init(bundleId: String, uncertain: Bool? = nil, destination: PrintDestination? = nil, sliced: Bool? = nil,
                     estimate: PrintEstimate? = nil, printId: String? = nil, live: PrintLive? = nil, monitor: PrintMonitor? = nil) {
