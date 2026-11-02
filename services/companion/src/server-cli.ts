@@ -124,7 +124,7 @@ if(handoffConfig&&printHandoff&&captureDirectory&&claudePath){
     stlInfo:path=>printerStlSize(handoffConfig,path),
     print:{services:printHandoff,destinations,judgePlate:photo=>judgePlate(photo,claudePath)},
     settings:companionSettings,camera:new CameraFrames(),printGate,
-    passTimings:new PassTimings(join(dataRoot,'pass-timings.json')),titleFor:request=>generateTitle(request,claudePath),
+    passTimings:new PassTimings(join(dataRoot,'pass-timings.json')),titleFor:(request,photo)=>generateTitle(request,claudePath,photo?{photo}:{}),
     ...(eventLog?{events:{emit:async draft=>{await eventLog.append(draft);}}}:{})});
   await companionSettings.load();
   // PRD §8.10: Update updates the install each printer runs, between prints.

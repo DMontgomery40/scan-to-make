@@ -496,4 +496,9 @@ test('quality and strength reach slice_stl as process overrides, and are refused
   assert.equal(slice.arguments.sparse_infill_density, '25%');
   // Today's bambu-printer-mcp returns the uploaded path; the printer reports its name without .3mf.
   assert.deepEqual(result.dispatch, {jobName: 'checked-1b2c-sliced', fileBase: 'sliced'});
+  // Copies (Project Settings): slice_stl repetitions, refused by an MCP without it; one copy sends nothing.
+  await assert.rejects(f.runner.run({stlPath: f.stlPath, slicer: {repetitions: 3}}), {code: 'print-settings-unsupported'});
+  const h = await setup(t, {settings: true, remote: true});
+  await h.runner.run({stlPath: h.stlPath, slicer: {repetitions: 3}});
+  assert.equal((await h.calls()).find(call => call.tool === 'slice_stl').arguments.repetitions, 3);
 });

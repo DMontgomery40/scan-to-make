@@ -30,6 +30,8 @@ export interface TouchupInput {
   signal?: AbortSignal;
   /** "fit" (make something that fits) may design in Fusion; "copy" always uses Blender (PRD §8.9). */
   kind?: 'fit' | 'copy' | 'published';
+  /** Project Settings' design engine (PRD §5.4): `blender` never opens Fusion; `auto` and `fusion` try it for a design. */
+  engine?: 'auto' | 'blender' | 'fusion';
   /** The previous Fusion design, so a change starts from its parameters. */
   design?: {f3d: string; parameters?: string};
   /** Stage changes: getting the engine ready, then the worker. */
@@ -105,8 +107,8 @@ async function stlSha256(scan: string[]): Promise<string | undefined> {
  * printer MCP's bridge reports it connected (after `launch: true`) and a new
  * design opens; otherwise Blender, with the reason recorded.
  */
-export async function chooseEngine(input: Pick<TouchupInput, 'handoff' | 'kind' | 'signal'>, deps: Pick<TouchupDeps, 'client'> = {}): Promise<EngineChoice> {
-  if (input.kind !== 'fit') return {engine: 'blender'};
+export async function chooseEngine(input: Pick<TouchupInput, 'handoff' | 'kind' | 'signal' | 'engine'>, deps: Pick<TouchupDeps, 'client'> = {}): Promise<EngineChoice> {
+  if (input.kind !== 'fit' || input.engine === 'blender') return {engine: 'blender'};
   const client = (deps.client ?? (handoff => new PrinterMcpClient(handoff)))(input.handoff);
   try {
     await client.connect(input.signal);

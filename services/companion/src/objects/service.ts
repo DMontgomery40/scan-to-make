@@ -1,4 +1,4 @@
-import {copyFile, mkdir, mkdtemp, open, readFile, rm, stat, writeFile} from 'node:fs/promises';
+import {copyFile, cp, mkdir, mkdtemp, open, readFile, rm, stat, writeFile} from 'node:fs/promises';
 import {createHash, randomUUID} from 'node:crypto';
 import {tmpdir} from 'node:os';
 import {execFile} from 'node:child_process';
@@ -6,7 +6,7 @@ import {promisify} from 'node:util';
 import {basename, extname, isAbsolute, join} from 'node:path';
 import {DispatchedPrintError, PrinterMcpError, readPrintReport, routeArgs, sliceEstimate,
   type PrintProgress, type PendingElicitation, type PrinterHandoffConfig, type PrinterSelection, type PrinterSlicer, type PrintReport, type PrinterSession} from '@scan-to-make/printer-handoff';
-import type {PrintEstimate, PrintSettings} from '@scan-to-make/contracts/counterpart';
+import type {PrintEstimate, PrintSettings, ProjectSettings} from '@scan-to-make/contracts/counterpart';
 import {PrintMonitorRunner, matchJob, milestonesFor, type EventDraft, type MonitorClock, type MonitorEnd, type MonitorTarget} from '../printing/monitor.js';
 import {CameraFrames, CameraUnavailableError, type CameraFrame} from '../printing/camera.js';
 import {PrinterUpdatingError, type PrintGate} from '../printing/print-gate.js';
@@ -138,11 +138,22 @@ export interface ObjectServiceDeps {
   /** This Mac's real stage durations, for pass estimates. */
   passTimings?: PassTimings;
   /** A short title for a request ("Mic mount"), best effort; the worker names it otherwise. */
-  titleFor?: (request: string) => Promise<string | undefined>;
+  titleFor?: (request: string, photo?: string) => Promise<string | undefined>;
 }
 
 /** What the print sheet sends with Print (PRD §8.5). */
-export interface PrintOptions extends PrintSettings {checked?: boolean; filament?: FilamentChoice}
+export interface PrintOptions extends PrintSettings {checked?: boolean; filament?: FilamentChoice; copies?: number}
+const QUIET_WHEN_PROBLEMS_ONLY = new Set(['print.started', 'print.first-layer', 'print.milestone', 'print.done', 'print.sent', 'pass.started', 'pass.stage', 'pass.ready']);
+export const PROJECT_STATUS_WORDS = ['not-printed', 'printed', 'works', 'needs-changes', 'archived'] as const;
+export type ProjectStatus = typeof PROJECT_STATUS_WORDS[number];
+/** PRD §5.4: what Project Settings shows as Status, from the project's state and the person's answers. */
+export function projectStatus(object: Pick<StmObject, 'state' | 'archived' | 'outcome'>): ProjectStatus {
+  if (object.archived) return 'archived';
+  if (object.state === 'confirmed') return 'works';
+  if (object.outcome?.result === 'needs-changes') return 'needs-changes';
+  if (object.state === 'printed' || object.state === 'sent') return 'printed';
+  return 'not-printed';
+}
 const BAMBU_TO_STATUS: Record<string, string> = {idle: 'IDLE', preparing: 'PREPARE', printing: 'RUNNING', paused: 'PAUSE', finished: 'FINISH', failed: 'FAILED', cancelled: 'FAILED', offline: 'OFFLINE', busy: 'UNKNOWN'};
 
 export type ObjectPrintAnswer = {action: 'accept'; content: Record<string, ConfirmationValue>} | {action: 'decline' | 'cancel'; content?: never};
@@ -224,7 +235,10 @@ export class ObjectService {
     const link = url ? publishedLink(url) ?? (() => { try { const parsed = new URL(url); return /^https?:$/.test(parsed.protocol) ? {url: parsed.toString(), site: parsed.hostname} : undefined; } catch { return undefined; } })() : undefined;
     if (url && !link) throw new InvalidStateError('That link isn\'t a web page.');
     const created = await this.#deps.store.create(instructions, kind ?? (link && publishedLink(link.url) ? 'published' : undefined));
-    return this.#changed(link ? await this.#deps.store.update(created.id, o => ({...o, credit: {url: link.url, site: link.site}})) : created);
+    const object = link ? await this.#deps.store.update(created.id, o => ({...o, credit: {url: link.url, site: link.site}})) : created;
+    // PRD §5.4: named the moment it is created; creation never waits for it.
+    this.#title(object);
+    return this.#changed(object);
   }
   async list() {
     const objects = await Promise.all((await this.#deps.store.list()).map(o => this.get(o.id)));
@@ -516,6 +530,78 @@ export class ObjectService {
     return this.#pass(object, {note: note.trim(), trigger: photos.length ? 'late-photos' : 'changes'});
   }
 
+  /** PRD §5.4 Project Settings, as stored on the project. */
+  async projectSettings(id: string): Promise<ProjectSettings> {
+    const object = await this.get(id);
+    const settings = object.settings ?? {};
+    const printer = object.printerDestinationId;
+    return {name: projectTitle(object), status: projectStatus(object), ...(printer ? {printerDestinationId: printer} : {}),
+      ...(settings.colours ? {colours: settings.colours} : {}), ...(settings.quality ? {quality: settings.quality} : {}),
+      ...(settings.strength ? {strength: settings.strength} : {}), ...(settings.copies ? {copies: settings.copies} : {}),
+      engine: settings.engine ?? 'auto', notifications: settings.notifications ?? 'follow'};
+  }
+
+  /** Changes Project Settings; name and status are set by hand (a name the person sets is never replaced). */
+  updateProjectSettings(id: string, patch: Partial<ProjectSettings>): Promise<ProjectSettings> {
+    return this.#gate(id, async () => {
+      const object = await this.get(id);
+      if (patch.printerDestinationId !== undefined && patch.printerDestinationId !== object.printerDestinationId) {
+        const catalog = this.#deps.printerCatalog;
+        if (catalog && !catalog.canonical(patch.printerDestinationId)) throw new InvalidStateError('That printer is no longer available. Choose another printer.');
+      }
+      if (patch.status !== undefined && patch.status !== projectStatus(object)) {
+        if (object.state === 'touching-up' || object.state === 'printing') throw new InvalidStateError('Wait until the current step finishes.');
+        if (patch.status !== 'archived' && patch.status !== 'needs-changes' && !object.current) throw new InvalidStateError('There is no model yet, so it can\'t be marked printed.');
+      }
+      const now = Date.now();
+      const updated = await this.#deps.store.update(id, o => {
+        const next: StmObject = {...o};
+        if (patch.name !== undefined) { next.title = patch.name.trim().slice(0, 80); next.nameSetByUser = true; }
+        if (patch.printerDestinationId !== undefined) next.printerDestinationId = patch.printerDestinationId;
+        const settings = {...o.settings};
+        for (const key of ['colours', 'quality', 'strength', 'copies', 'engine', 'notifications'] as const)
+          if (patch[key] !== undefined) (settings as Record<string, unknown>)[key] = patch[key];
+        next.settings = settings;
+        switch (patch.status) {
+          case 'archived': next.archived = true; break;
+          case 'works': next.archived = false; next.state = 'confirmed'; next.outcome = {result: 'works', atMs: now}; break;
+          case 'printed': next.archived = false; next.state = 'printed'; next.outcome = undefined; break;
+          case 'not-printed': next.archived = false; next.state = o.current ? 'ready' : o.state; next.outcome = undefined; break;
+          case 'needs-changes': next.archived = false; next.outcome = {result: 'needs-changes', atMs: now}; if (o.state === 'confirmed') next.state = 'printed'; break;
+        }
+        return next;
+      });
+      this.#changed(updated);
+      await this.#emit({id: randomUUID(), type: 'project.updated', projectId: id, data: {keys: Object.keys(patch).slice(0, 16)}});
+      return this.projectSettings(id);
+    });
+  }
+
+  /** PRD §5.4 Duplicate: a new project from this one's request, current model and settings. */
+  duplicate(id: string): Promise<StmObject> {
+    return this.#gate(id, async () => {
+      const object = await this.get(id);
+      const copy = await this.#deps.store.create(object.instructions, object.kind);
+      const from = this.dir(id), to = this.dir(copy.id);
+      for (const folder of ['current', 'original', 'photos', 'scan']) await cp(join(from, folder), join(to, folder), {recursive: true}).catch(() => undefined);
+      const updated = await this.#deps.store.update(copy.id, o => ({...o, photos: [...object.photos], ...(object.scan ? {scan: object.scan} : {}),
+        ...(object.current ? {current: structuredClone(object.current), state: 'ready' as const} : {}),
+        ...(object.files ? {files: structuredClone(object.files)} : {}), ...(object.credit ? {credit: {...object.credit}} : {}),
+        ...(object.settings ? {settings: structuredClone(object.settings)} : {}), ...(object.printerDestinationId ? {printerDestinationId: object.printerDestinationId} : {}),
+        title: `${projectTitle(object)} copy`.slice(0, 80), ...(object.nameSetByUser ? {nameSetByUser: true} : {})}));
+      return this.#changed(updated);
+    });
+  }
+
+  /** Export (PRD §5.4 Files): the current model as STL or 3MF, or the scan as USDZ, when the project has it. */
+  async exportFile(id: string, format: 'stl' | '3mf' | 'usdz'): Promise<string> {
+    const object = await this.get(id);
+    const relative = format === 'usdz' ? (object.scan?.toLowerCase().endsWith('.usdz') ? join('scan', object.scan) : undefined)
+      : object.current?.model.toLowerCase().endsWith(`.${format}`) ? object.current.model : undefined;
+    if (!relative) throw new ObjectNotFoundError();
+    return join(this.dir(id), relative);
+  }
+
   /**
    * "Did it fit?" after a print (PRD §4): `works` makes the project `confirmed`; `needs-changes` with a note starts a
    * correction pass from it, as Ask for Changes does. A done project can still be printed again or changed.
@@ -555,7 +641,15 @@ export class ObjectService {
   }
 
   /** Prints the current model through the user's printer MCP. The plate is checked in the background. */
-  print(id: string, options: PrintOptions = {}): Promise<StmObject> { return this.#gate(id, () => this.#print(id, options)); }
+  print(id: string, options: PrintOptions = {}): Promise<StmObject> {
+    return this.#gate(id, async () => {
+      // Project Settings' defaults fill in what the print sheet didn't send (PRD §5.4).
+      const defaults = (await this.get(id)).settings ?? {};
+      const colour = options.colour ?? (options.filament ? undefined : defaults.colours?.default);
+      return this.#print(id, {...(defaults.quality ? {quality: defaults.quality} : {}), ...(defaults.strength ? {strength: defaults.strength} : {}),
+        ...options, ...(colour ? {colour} : {}), ...(defaults.copies && defaults.copies > 1 ? {copies: defaults.copies} : {})});
+    });
+  }
   async #print(id: string, options: PrintOptions): Promise<StmObject> {
     const object = await this.get(id);
     if (!object.current) throw new InvalidStateError('There is no model to print yet.');
@@ -586,7 +680,7 @@ export class ObjectService {
       throw new InvalidStateError(settingsUnsupported(runner.backend, options));
     const settings: PrintSettings = {...(options.quality ? {quality: options.quality} : {}), ...(options.strength ? {strength: options.strength} : {}),
       ...(options.colour ? {colour: options.colour} : {})};
-    const sliced = {...slicer, ...overrides};
+    const sliced = {...slicer, ...overrides, ...(options.copies && options.copies > 1 ? {repetitions: options.copies} : {})};
     const stl = await readFile(join(this.#deps.store.dir(id), object.current.model));
     const manifest = await bundles.create({stl, prompt: '', backend: runner.backend, ...(selected ? {selection:selected} : {})});
     const printId = randomUUID();
@@ -794,6 +888,8 @@ export class ObjectService {
 
   /** After a restart: resume watching dispatched prints; a print still being prepared was interrupted. */
   async resume(): Promise<void> {
+    // PRD §5.4: projects from before names get one, once, when the companion starts.
+    for (const object of await this.#deps.store.list()) if (!object.title && !object.nameSetByUser && object.state !== 'new') this.#title(object, {backfill: true});
     for (const object of await this.#deps.store.list()) {
       if (object.state !== 'printing' || !object.print) continue;
       const monitor = object.print.monitor;
@@ -813,7 +909,14 @@ export class ObjectService {
     }
   }
 
-  async #emit(draft: EventDraft): Promise<void> { await this.#deps.events?.emit(draft).catch(() => undefined); }
+  async #emit(draft: EventDraft): Promise<void> {
+    // Project Settings: a project that follows only problems keeps its progress and done events quiet.
+    if (draft.projectId && QUIET_WHEN_PROBLEMS_ONLY.has(draft.type)) {
+      const object = await this.#deps.store.get(draft.projectId).catch(() => undefined);
+      if (object?.settings?.notifications === 'problems-only') draft = {...draft, notify: 'none'};
+    }
+    await this.#deps.events?.emit(draft).catch(() => undefined);
+  }
 
   async #frame(destinationId: string, session: PrinterSession, signal?: AbortSignal): Promise<CameraFrame | undefined> {
     const camera = this.#deps.camera;
@@ -1105,7 +1208,7 @@ export class ObjectService {
       if (build) scanName = await this.#build(object.id, dir, controller.signal);
       const scan = fromCurrent ? [join(dir, object.current!.model)] : scanName ? [join(dir, 'scan', scanName)] : [];
       const input: TouchupInput = {root: join(dir, 'passes'), objectId: 'pass', scan, photos, currentModel: fromCurrent, handoff: this.#deps.handoff, claudePath: this.#deps.claudePath,
-        kind, onStage: (id, chosen) => stage(id, chosen),
+        kind, onStage: (id, chosen) => stage(id, chosen), ...(object.settings?.engine ? {engine: object.settings.engine} : {}),
         ...(fromCurrent && object.current?.engine === 'fusion' && object.current.design
           ? {design: {f3d: join(dir, object.current.design.f3d), ...(object.current.design.parameters ? {parameters: join(dir, object.current.design.parameters)} : {})}} : {}),
         ...(object.instructions ? {instructions: object.instructions} : {}),
@@ -1156,7 +1259,7 @@ export class ObjectService {
         ...(result.candidate ? {candidate: {path: result.candidate, name: basename(result.candidate)}} : {}),
         answers: ['file' as const], status: 'open' as const, askedAtMs: now};
       const updated = await store.update(id, o => ({...o, state: 'needs-closeup', progress: undefined, ask, question: undefined, kind: 'published' as const,
-        ...(result.model ? {title: result.model.title} : {}), ...(credit ? {credit} : {}), passes: endPass(o, 'needs_file', result.summary)}));
+        ...(result.model && !o.nameSetByUser ? {title: result.model.title} : {}), ...(credit ? {credit} : {}), passes: endPass(o, 'needs_file', result.summary)}));
       await this.#emit({id: randomUUID(), type: 'pass.ask', projectId: id, data: {askId: ask.id}, detail: {question: ask.question}});
       return this.#changed(updated);
     }
@@ -1179,7 +1282,7 @@ export class ObjectService {
     const current = {model: join('current', `model${extension}`), renders: [], ...(sizeMm ? {sizeMm} : {}), ...(summary ? {summary} : {})};
     const published = {original: names.map(name => join('original', name)), current: current.model};
     const updated = await store.update(id, o => ({...o, state: 'ready', progress: undefined, failure: undefined, kind: 'published', current, files: published,
-      ...(info.model ? {title: info.model.title} : {}), ...(info.credit ? {credit: info.credit} : {}),
+      ...(info.model && !o.nameSetByUser ? {title: info.model.title} : {}), ...(info.credit ? {credit: info.credit} : {}),
       ...(o.ask?.status === 'open' ? {ask: {...o.ask, status: 'answered' as const}} : {}),
       passes: info.startedAtMs === undefined ? o.passes : o.passes.map(({estimate: _estimate, ...p}) => p.startedAtMs !== info.startedAtMs ? {...p, ...(_estimate ? {estimate: _estimate} : {})}
         : {...p, endedAtMs: now, status: 'done', stages: p.stages?.map(item => item.endedAtMs === undefined ? {...item, endedAtMs: now} : item), ...(summary ? {summary} : {})})}));
@@ -1264,17 +1367,21 @@ export class ObjectService {
    * project is listed. Tried once per project per run; backfills run one at a time. Never holds anything up.
    */
   #title(object: StmObject, options: {backfill?: boolean} = {}): void {
-    const request = object.instructions?.trim(), titleFor = this.#deps.titleFor;
-    if (object.title || !request || !titleFor || this.#titling.has(object.id)) return;
+    // A published model takes its own name when the file arrives (PRD §8.11); a name the person set stays (§5.4).
+    const request = object.instructions?.trim() ?? '', titleFor = this.#deps.titleFor;
+    const photo = !request ? object.photos[0] ?? object.capture?.[0] : undefined;
+    const photoPath = photo ? join(this.dir(object.id), object.photos[0] ? 'photos' : 'capture', photo) : undefined;
+    if (object.title || object.nameSetByUser || passKind(object) === 'published' || (!request && !photoPath) || !titleFor || this.#titling.has(object.id)) return;
     this.#titling.add(object.id);
     const save = async (title: string | undefined) => {
       const clean = title?.replace(/[\u0000-\u001f\u007f"]/g, '').replace(/[.!]+$/, '').trim().slice(0, 40);
-      if (clean) this.#changed(await this.#deps.store.update(object.id, o => o.title ? o : {...o, title: clean}));
+      if (clean) this.#changed(await this.#deps.store.update(object.id, o => o.title || o.nameSetByUser ? o : {...o, title: clean}));
     };
-    if (!options.backfill) { void titleFor(request).then(save).catch(() => undefined); return; }
+    if (!options.backfill) { void titleFor(request, photoPath).then(save).catch(() => undefined); return; }
     this.#backfills = this.#backfills.then(async () => {
-      if ((await this.#deps.store.get(object.id).catch(() => undefined))?.title) return;
-      await save(await titleFor(request));
+      const latest = await this.#deps.store.get(object.id).catch(() => undefined);
+      if (!latest || latest.title || latest.nameSetByUser) return;
+      await save(await titleFor(request, photoPath));
     }).catch(() => undefined);
   }
 

@@ -114,7 +114,8 @@ export class EventLog {
       const event = CounterpartEventSchema.parse({v: 1, seq: this.#lastSeq + 1, id: draft.id, at: new Date(this.#now()).toISOString(), type: draft.type,
         ...(draft.projectId ? {projectId: draft.projectId} : {}), ...(draft.printId ? {printId: draft.printId} : {}), ...(draft.destinationId ? {destinationId: draft.destinationId} : {}),
         ...(draft.printerName ? {printerName: draft.printerName.slice(0, 120)} : {}), ...words,
-        ...(draft.data && Object.keys(draft.data).length ? {data: draft.data} : {}), ...(draft.frame ? {frame: draft.frame} : {})});
+        ...(draft.data && Object.keys(draft.data).length ? {data: draft.data} : {}), ...(draft.frame ? {frame: draft.frame} : {}),
+        ...(draft.notify ? {notify: draft.notify} : {})});
       const handle = await open(this.#path, 'a', 0o600);
       try { await handle.appendFile(JSON.stringify(event) + '\n'); } finally { await handle.close(); }
       this.#lastSeq = event.seq;

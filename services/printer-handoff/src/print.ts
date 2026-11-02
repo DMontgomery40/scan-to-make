@@ -281,7 +281,8 @@ export class PrinterHandoffRunner {
       const sliceProperties = session.getTool('slice_stl').inputSchema.properties ?? {};
       if ((slicer.layerHeightMm !== undefined && !Object.hasOwn(sliceProperties, 'layer_height'))
           || (slicer.wallLoops !== undefined && !Object.hasOwn(sliceProperties, 'wall_loops'))
-          || (slicer.sparseInfillDensity !== undefined && !Object.hasOwn(sliceProperties, 'sparse_infill_density'))) fail('print-settings-unsupported');
+          || (slicer.sparseInfillDensity !== undefined && !Object.hasOwn(sliceProperties, 'sparse_infill_density'))
+          || (slicer.repetitions !== undefined && slicer.repetitions > 1 && !Object.hasOwn(sliceProperties, 'repetitions'))) fail('print-settings-unsupported');
     }
     let orientedStlPath = input.stlPath;
     const laidFlat = session.hasTool('lay_flat');
@@ -306,6 +307,7 @@ export class PrinterHandoffRunner {
       layer_height: slicer.layerHeightMm,
       wall_loops: slicer.wallLoops,
       sparse_infill_density: slicer.sparseInfillDensity,
+      repetitions: slicer.repetitions !== undefined && slicer.repetitions > 1 ? slicer.repetitions : undefined,
       use_printer_filaments: false,
       // lay_flat already chose the flat face; otherwise let the slicer orient.
       orient: !laidFlat,

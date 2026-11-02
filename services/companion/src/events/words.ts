@@ -6,7 +6,7 @@ import type {CounterpartEvent, CounterpartEventType, NotifyLevel, ObjectStatus} 
  * the same thing. Kept free of I/O: callers pass what they know.
  */
 
-export interface TitleSource {title?: string; instructions?: string; scan?: string; capture?: string[]}
+export interface TitleSource {title?: string; instructions?: string; scan?: string; capture?: string[]; createdAtMs?: number; credit?: {site?: string}}
 
 /** The generated title, else the first words of the request, else a plain name. */
 export function projectTitle(object: TitleSource): string {
@@ -17,7 +17,10 @@ export function projectTitle(object: TitleSource): string {
     const short = words.slice(0, 6).join(' ').replace(/[.,;:!?]+$/, '');
     return (words.length > 6 ? `${short}…` : short).slice(0, 80);
   }
-  return object.scan || object.capture?.length ? 'Your scan' : 'Your project';
+  // PRD §5.4: never "Your project"; until the name arrives, what there is.
+  if (object.credit?.site) return `Model from ${object.credit.site}`;
+  const when = object.createdAtMs ? ` from ${new Intl.DateTimeFormat('en-US', {month: 'short', day: 'numeric'}).format(new Date(object.createdAtMs))}` : '';
+  return object.scan || object.capture?.length ? `Scan${when}` : `Project${when}`;
 }
 
 /** "1 h 5 min", "25 min", "under a minute". */
@@ -81,6 +84,7 @@ export const NOTIFY: Record<CounterpartEventType, NotifyLevel> = {
   'print.resumed': 'none', 'print.done': 'active', 'print.failed': 'timeSensitive', 'print.cancelled': 'passive',
   'print.not-started': 'timeSensitive', 'print.unreachable': 'passive', 'print.sent': 'passive',
   'mcp.update.started': 'none', 'mcp.update.waiting': 'none', 'mcp.update.done': 'passive', 'mcp.update.failed': 'active',
+  'project.updated': 'none',
 };
 
 export function sizeText(sizeMm: readonly number[] | undefined): string | undefined {
@@ -127,6 +131,7 @@ export function eventWords(type: CounterpartEventType, data: CounterpartEvent['d
     case 'print.not-started': title = `${printer} didn't start ${t}`; body = 'Nothing was sent twice. Check the printer, then press Print again.'; break;
     case 'print.unreachable': title = `Lost contact with ${printer}`; body = 'Still trying.'; break;
     case 'print.sent': title = `Sent ${t} to ${printer}`; body = context.reason === 'bambu-connect' ? 'Finish on your Mac: press Print in Bambu Connect.' : "Counterpart can't follow this print."; break;
+    case 'project.updated': title = t; body = 'Project settings changed'; break;
     case 'mcp.update.started': title = `Updating ${pkg}`; body = joined(versions, context.printer) || 'Updating'; break;
     case 'mcp.update.waiting': title = `${pkg} updates after the current print`; body = joined(versions, context.printer) || 'Waiting for the print to finish'; break;
     case 'mcp.update.done': title = data?.toVersion ? `Updated ${pkg} to ${data.toVersion}` : `Updated ${pkg}`; body = context.printer ? `${context.printer} uses it now.` : 'Your printers use it now.'; break;

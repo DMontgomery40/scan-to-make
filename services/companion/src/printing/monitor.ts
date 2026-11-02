@@ -35,6 +35,8 @@ export interface EventDraft {
   frame?: string;
   /** Facts only the words need (they end up in title and body, not in `data`). */
   detail?: {item?: string; question?: string; size?: string; reason?: string; message?: string; package?: string};
+  /** A project that follows only problems (Project Settings) quiets its progress and done events. */
+  notify?: import('@scan-to-make/contracts/counterpart').NotifyLevel;
 }
 
 export interface MonitorClock {

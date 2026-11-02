@@ -22,6 +22,8 @@ export const COUNTERPART_EVENT_TYPES = [
   'print.not-started', 'print.unreachable', 'print.sent',
   // PRD §8.10 (KAN-214 PR 6). No projectId; emitted only once every client decodes events without one.
   'mcp.update.started', 'mcp.update.waiting', 'mcp.update.done', 'mcp.update.failed',
+  // PRD §5.4 (KAN-214 PR 8): a project's name, status or settings changed.
+  'project.updated',
 ] as const;
 export const CounterpartEventTypeSchema = z.enum(COUNTERPART_EVENT_TYPES);
 export type CounterpartEventType = z.infer<typeof CounterpartEventTypeSchema>;
@@ -50,6 +52,8 @@ export const CounterpartEventDataSchema = z.strictObject({
   fromVersion: text(64).optional(),
   toVersion: text(64).optional(),
   log: text(4096).optional(),
+  /** project.updated: which project settings changed. */
+  keys: z.array(text(64)).max(16).optional(),
 });
 
 /** Exactly PRD §8.7's `CounterpartEvent`. `frame` is relative to the project's directory. */
@@ -312,6 +316,23 @@ export type Ask = z.infer<typeof AskSchema>;
 export const MilestonesSchema = z.enum(['off', '50', '25-50-75', 'every-10']);
 export const CompanionSettingsSchema = z.strictObject({ milestones: MilestonesSchema });
 export type CompanionSettings = z.infer<typeof CompanionSettingsSchema>;
+
+/** PRD §5.4 Project Settings (PR 8): `GET`/`PATCH /v1/objects/<id>/settings`, `objects.settings.get`/`objects.settings.set`. */
+export const PROJECT_STATUSES = ['not-printed', 'printed', 'works', 'needs-changes', 'archived'] as const;
+export const ProjectSettingsSchema = z.strictObject({
+  name: z.string().trim().min(1).max(80),
+  status: z.enum(PROJECT_STATUSES),
+  printerDestinationId: text(256).optional(),
+  /** The default colour per part (`default` for a single part), as the print sheet's `colour`. */
+  colours: z.record(z.string().min(1).max(64), PrintColourSchema).optional(),
+  quality: z.enum(['draft', 'standard', 'fine']).optional(),
+  strength: z.enum(['standard', 'strong', 'max']).optional(),
+  copies: z.number().int().min(1).max(64).optional(),
+  engine: z.enum(['auto', 'blender', 'fusion']),
+  notifications: z.enum(['follow', 'problems-only']),
+});
+export type ProjectSettings = z.infer<typeof ProjectSettingsSchema>;
+export const ProjectSettingsPatchSchema = ProjectSettingsSchema.partial().strict();
 
 const apnsToken = z.string().regex(/^[0-9a-fA-F]{16,512}$/);
 /** `POST /v1/devices/live-activity-tokens`. At least one of the two. */

@@ -55,6 +55,13 @@ export interface StmObject {
   /** A configured destination id; process settings and credentials stay in the companion. */
   printerDestinationId?: string;
   state: ObjectState;
+  /** PRD §5.4: the person named it themselves; nothing replaces that name. */
+  nameSetByUser?: boolean;
+  /** PRD §5.4: hidden from Home and the Mac sidebar, with everything kept. */
+  archived?: boolean;
+  /** PRD §5.4 Project Settings: this project's defaults (name, status and printer live in their own fields). */
+  settings?: {colours?: Record<string, import('@scan-to-make/contracts/counterpart').PrintSettings['colour'] & object>; quality?: 'draft' | 'standard' | 'fine';
+    strength?: 'standard' | 'strong' | 'max'; copies?: number; engine?: 'auto' | 'blender' | 'fusion'; notifications?: 'follow' | 'problems-only'};
   /** "Did it fit?" (PRD §4): the person's answer after a print, and when. */
   outcome?: {result: 'works' | 'needs-changes'; atMs: number; note?: string};
   /** The short generated title ("Mic mount"). */
