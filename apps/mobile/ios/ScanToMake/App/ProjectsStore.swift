@@ -135,7 +135,10 @@ import CounterpartKit
                     events = true
                     switch update {
                     case .resync: await load(); await loadPrinters()
-                    case .event(let event): await reload(event.projectId)
+                    case .event(let event):
+                        if let project = event.projectId { await reload(project) }
+                        // Events about the Mac, not a project (a printer MCP updating): the printers changed.
+                        else if event.type.hasPrefix("mcp.") { await loadPrinters() }
                     }
                 }
             } catch let failure as CompanionError {

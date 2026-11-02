@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// One user-visible change (PRD §8.7, docs/protocols/events.md). The companion writes every event's words,
 /// so the phone, the Mac, the Lock Screen and the menu bar say the same thing. Show `title` and `body` as is.
@@ -9,6 +10,7 @@ public struct CounterpartEvent: Codable, Equatable, Identifiable, Sendable {
             self = Notify(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .none
         }
     }
+    /// The event's facts. Every field is optional, and one that doesn't decode is left out.
     public struct Payload: Codable, Equatable, Sendable {
         public var progress: Double?
         public var remainingSec: Double?
@@ -23,6 +25,25 @@ public struct CounterpartEvent: Codable, Equatable, Identifiable, Sendable {
         public var askId: String?
         public var confirmationId: String?
         public var expiresAt: String?
+        /// `mcp.update.*` (PRD §8.10): which printer MCP, from and to which version, and its install log.
+        public var mcpId: String?
+        public var fromVersion: String?
+        public var toVersion: String?
+        public var log: String?
+
+        private enum CodingKeys: String, CodingKey {
+            case progress, remainingSec, endsAt, layer, totalLayers, state, stage, problems, estimateSec, grams, askId, confirmationId, expiresAt
+            case mcpId, fromVersion, toVersion, log
+        }
+        public init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            func optional<T: Decodable>(_ key: CodingKeys) -> T? { (try? c.decodeIfPresent(T.self, forKey: key)) ?? nil }
+            progress = optional(.progress); remainingSec = optional(.remainingSec); endsAt = optional(.endsAt)
+            layer = optional(.layer); totalLayers = optional(.totalLayers); state = optional(.state); stage = optional(.stage)
+            problems = optional(.problems); estimateSec = optional(.estimateSec); grams = optional(.grams); askId = optional(.askId)
+            confirmationId = optional(.confirmationId); expiresAt = optional(.expiresAt)
+            mcpId = optional(.mcpId); fromVersion = optional(.fromVersion); toVersion = optional(.toVersion); log = optional(.log)
+        }
     }
     public struct Problem: Codable, Equatable, Sendable { public var code: String; public var message: String }
 
@@ -30,9 +51,10 @@ public struct CounterpartEvent: Codable, Equatable, Identifiable, Sendable {
     public var seq: Int
     public var id: String
     public var at: String
-    /// `pass.*`, `print.*` or `plate.blocked`; an unknown type from a newer Mac is kept as its string.
+    /// `pass.*`, `print.*`, `mcp.update.*` or `plate.blocked`; an unknown type from a newer Mac is kept as its string.
     public var type: String
-    public var projectId: String
+    /// Absent on events about the Mac rather than a project (`mcp.update.*`).
+    public var projectId: String?
     public var printId: String?
     public var destinationId: String?
     public var printerName: String?
@@ -44,7 +66,8 @@ public struct CounterpartEvent: Codable, Equatable, Identifiable, Sendable {
     public var frame: String?
 }
 
-/// One page of the event log (`EventsPage`).
+/// One page of the event log (`EventsPage`). An event this version can't read is skipped and logged; it
+/// never costs the page.
 public struct EventsPage: Codable, Equatable, Sendable {
     public var events: [CounterpartEvent]
     public var next: Int
@@ -53,6 +76,29 @@ public struct EventsPage: Codable, Equatable, Sendable {
     public var truncated: Bool?
     public var reset: Bool?
     public var needsResync: Bool { truncated == true || reset == true }
+
+    public init(events: [CounterpartEvent], next: Int, latest: Int, truncated: Bool? = nil, reset: Bool? = nil) {
+        self.events = events; self.next = next; self.latest = latest; self.truncated = truncated; self.reset = reset
+    }
+
+    private enum CodingKeys: String, CodingKey { case events, next, latest, truncated, reset }
+    private struct Lossy: Decodable {
+        var event: CounterpartEvent?
+        init(from decoder: Decoder) throws {
+            do { event = try CounterpartEvent(from: decoder) }
+            catch { event = nil; EventsPage.log.notice("Skipped an event this version can't read: \(String(describing: error), privacy: .public)") }
+        }
+    }
+    static let log = Logger(subsystem: "com.scantomake.counterpart", category: "events")
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        events = (try c.decodeIfPresent([Lossy].self, forKey: .events) ?? []).compactMap(\.event)
+        next = try c.decode(Int.self, forKey: .next)
+        latest = try c.decodeIfPresent(Int.self, forKey: .latest) ?? next
+        truncated = try? c.decodeIfPresent(Bool.self, forKey: .truncated)
+        reset = try? c.decodeIfPresent(Bool.self, forKey: .reset)
+    }
 }
 
 /// Where events come from. The LAN long poll today; CloudKit (a later milestone) plugs in beside it.
