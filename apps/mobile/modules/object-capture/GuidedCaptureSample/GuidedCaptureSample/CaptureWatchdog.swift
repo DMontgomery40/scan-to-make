@@ -31,7 +31,7 @@ struct CaptureWatchdog {
         var message: String {
             switch self {
                 case .noCameraImages:
-                    return "The camera sent no images, so capture stopped. If the Camera app is also black, restart iPhone before trying again."
+                    return "Camera tracking didn't start, so capture stopped. Your files are kept. Close this scan and try again when the camera is available."
                 case .trackingNotRecovering:
                     return "Tracking didn't start, so capture stopped. Try a well-lit, textured surface and move iPhone slowly."
                 case .pausedTooLong:
