@@ -34,6 +34,8 @@ protocol ObjectsCompanion: Sendable {
     func objectsWithExtras() async throws -> (projects: [Project], extras: [String: PublishedExtras])
     func answerAsk(_ id: String, askId: String, choices: [String]) async throws -> Project
     func createPublished(url: String, instructions: String?) async throws -> Project
+    /// Project Settings (PRD §5.4): `status` or `archived`.
+    func setProjectSettings(_ id: String, _ patch: [String: JSONValue]) async throws -> Project
 }
 
 extension ObjectsCompanion {
@@ -60,6 +62,7 @@ extension ObjectsCompanion {
     func objectsWithExtras() async throws -> (projects: [Project], extras: [String: PublishedExtras]) { (try await objects(), [:]) }
     func answerAsk(_ id: String, askId: String, choices: [String]) async throws -> Project { throw ControlClientError.unavailable }
     func createPublished(url: String, instructions: String?) async throws -> Project { throw ControlClientError.unavailable }
+    func setProjectSettings(_ id: String, _ patch: [String: JSONValue]) async throws -> Project { throw ControlClientError.unavailable }
 }
 
 /// The control socket. A fresh client per call, so a missing socket fails that call, not the model.
@@ -79,6 +82,9 @@ struct SocketObjects: ObjectsCompanion {
     }
     func createPublished(url: String, instructions: String?) async throws -> Project {
         try await ControlClient(socketPath:path).createPublished(url:url, instructions:instructions)
+    }
+    func setProjectSettings(_ id: String, _ patch: [String: JSONValue]) async throws -> Project {
+        try await ControlClient(socketPath:path).setProjectSettings(id, patch)
     }
     func correct(_ id: String, note: String) async throws -> Project { try await ControlClient(socketPath:path).correctObject(id, note:note) }
     func answerCloseup(_ id: String, bestGuess: Bool) async throws -> Project { try await ControlClient(socketPath:path).answerCloseup(id, bestGuess:bestGuess) }
@@ -158,7 +164,8 @@ struct SocketObjects: ObjectsCompanion {
 
     /// The sidebar (PRD §7.2): Now, Needs you, Ready, Printed, each newest first. Empty groups are left out.
     var groups: [(group: ProjectGroup, objects: [Project])] {
-        let words = Dictionary(uniqueKeysWithValues:objects.map { ($0.id, $0.words.group) })
+        // An archived project leaves its group for Archived, whatever its status (which Unarchive restores).
+        let words = Dictionary(uniqueKeysWithValues:objects.map { ($0.id, extras[$0.id]?.archived == true ? .archived : $0.words.group) })
         return ProjectGroup.allCases.compactMap { group in
             let members = objects.filter { words[$0.id] == group }
             return members.isEmpty ? nil : (group, members)
@@ -372,6 +379,37 @@ struct SocketObjects: ObjectsCompanion {
     /// Answers a published model's `file` Ask with the designer's file (PRD §8.11): the companion copies it and resumes.
     @discardableResult func useModelFile(_ file: URL, for id: String) async -> Bool {
         await change(id) { try await self.companion.addFile(id, kind:"model", path:file.path) }
+    }
+
+    /// Project Settings' Status (PRD §5.4): `not-printed`, `printed`, `works` (Done), `needs-changes`.
+    @discardableResult func setStatus(_ status: String, for id: String) async -> Bool {
+        guard capabilities?.projectSettings == true else { return false }
+        return await change(id) { try await self.companion.setProjectSettings(id, ["status": .string(status)]) }
+    }
+    /// Archive hides a project from the sidebar's groups and keeps everything; Unarchive brings its status back.
+    @discardableResult func setArchived(_ archived: Bool, for id: String) async -> Bool {
+        guard capabilities?.projectSettings == true else { return false }
+        let underneath = objects.first { $0.id == id }.map(Self.statusUnderneath) ?? "not-printed"
+        let done = await change(id) {
+            do {
+                return try await self.companion.setProjectSettings(id, ["archived": .bool(archived)])
+            } catch let error as ControlRemoteError where error.code == "invalid-request" {
+                // A companion from before the separate flag (KAN-214 PR 8a) archives as a status; any other status
+                // unarchives, so the one underneath is sent back.
+                return try await self.companion.setProjectSettings(id, ["status": .string(archived ? "archived" : underneath)])
+            }
+        }
+        if done { await refresh() }
+        return done
+    }
+
+    /// The status an archived project keeps, from its state: Done stays Done.
+    static func statusUnderneath(_ project: Project) -> String {
+        if project.words.done { return "works" }
+        switch project.state.rawValue {
+        case "printed", "sent": return "printed"
+        default: return "not-printed"
+        }
     }
 
     /// Answers a `choice` Ask (plates, objects, colours) with the options picked.

@@ -9,6 +9,42 @@ private actor FakeObjects: ObjectsCompanion {
     private(set) var calls: [String] = []
     private(set) var confirmationAnswer: PrintConfirmationAnswer?
     func set(_ items: [[String: Any]]) { self.items = items }
+    private(set) var settingsPatches: [String: [String: JSONValue]] = [:]
+    private var capabilities: ControlStatus.Capabilities?
+    func setCapabilities(_ capabilities: ControlStatus.Capabilities) { self.capabilities = capabilities }
+    func status() async throws -> ControlStatus {
+        guard let capabilities else { throw ControlClientError.unavailable }
+        return ControlStatus(companionVersion: "test", pairedDeviceCount: 1, capabilities: capabilities)
+    }
+    func objectsWithExtras() async throws -> (projects: [Project], extras: [String: PublishedExtras]) {
+        let list = try await objects()
+        var extras: [String: PublishedExtras] = [:]
+        for item in items {
+            if let id = item["id"] as? String, let data = try? JSONSerialization.data(withJSONObject: item),
+               let found = try? JSONDecoder().decode(PublishedExtras.self, from: data), found != PublishedExtras() { extras[id] = found }
+        }
+        return (list, extras)
+    }
+    /// A companion from KAN-214 PR 8a: Archive is only a status, and any other status unarchives.
+    private var statusOnly = false
+    func takeStatusOnly() { statusOnly = true }
+    func setProjectSettings(_ id: String, _ patch: [String: JSONValue]) async throws -> Project {
+        settingsPatches[id, default: [:]].merge(patch) { $1 }
+        if statusOnly, patch["archived"] != nil { throw ControlRemoteError(code: "invalid-request", message: "Unrecognized key: \"archived\"") }
+        let item = items.first { $0["id"] as? String == id }
+        var settings = item?["settings"] as? [String: Any] ?? ["status": "printed", "archived": false]
+        var fields: [String: Any] = [:]
+        if case .string(let status)? = patch["status"] {
+            if status == "archived" { settings["archived"] = true } else {
+                settings["status"] = status
+                if statusOnly { settings["archived"] = false }
+            }
+            if status == "works" { fields["state"] = "confirmed"; fields["status"] = ["phase": "confirmed", "text": "It works", "symbol": "checkmark.circle.fill", "tint": "green"] }
+        }
+        if case .bool(let archived)? = patch["archived"] { settings["archived"] = archived }
+        fields["settings"] = settings
+        return try change(id, "settings", fields)
+    }
     func failList(with error: Error?) { listError = error }
     func failActions(with error: Error?) { actionError = error }
 
@@ -296,5 +332,53 @@ private func item(_ id: String, _ state: String, _ fields: [String: Any] = [:]) 
         XCTAssertEqual(model.objects.map(\.id), ["a", "b"])
         XCTAssertEqual(model.selection, "b")
         XCTAssertEqual(model.problem, ObjectsModel.Problem(id:"b", text:"This is printing. Delete it once the print is done."))
+    }
+
+    func testDoneIsAStatusTheSidebarShowsAndArchiveIsSeparate() async {
+        let companion = FakeObjects()
+        await companion.set([item("m", "printed", ["current": ["model": "current/model.stl", "renders": []],
+                                                    "print": ["bundleId": "b", "monitor": ["phase": "ended", "endState": "done"]]])])
+        await companion.setCapabilities(.init(objectsCreate: true, projectSettings: true))
+        let model = ObjectsModel(companion: companion)
+        await model.refresh()
+        XCTAssertEqual(model.groups.map(\.group), [.printed])
+        let done = await model.setStatus("works", for: "m")
+        XCTAssertTrue(done)
+        let patches = await companion.settingsPatches
+        XCTAssertEqual(patches["m"], ["status": .string("works")], "Done is the `works` status, set through Project Settings")
+        await model.refresh()
+        XCTAssertEqual(model.groups.map(\.group), [.done], "It works moves it to Done")
+        XCTAssertTrue(model.objects[0].words.actions.contains(.print), "Done stays printable: Print Another…")
+        _ = await model.setArchived(true, for: "m")
+        XCTAssertEqual(model.groups.map(\.group), [.archived], "Archive hides it in Archived, separate from Done")
+        let archive = await companion.settingsPatches
+        XCTAssertEqual(archive["m"]?["archived"], .bool(true), "a flag, not a status")
+        XCTAssertEqual(archive["m"]?["status"], .string("works"), "Archive never changes the status")
+        _ = await model.setArchived(false, for: "m")
+        XCTAssertEqual(model.groups.map(\.group), [.done], "Unarchive brings Done back")
+    }
+
+    /// A companion from before the separate flag (KAN-214 PR 8a) archives as a status; Unarchive sends Done back.
+    func testArchiveOnAStatusOnlyCompanionKeepsDone() async {
+        let companion = FakeObjects()
+        await companion.set([item("m", "confirmed", ["current": ["model": "current/model.stl", "renders": []],
+                                                      "status": ["phase": "confirmed", "text": "It works", "symbol": "checkmark.circle.fill", "tint": "green"],
+                                                      "settings": ["status": "works"]])])
+        await companion.setCapabilities(.init(objectsCreate: true, projectSettings: true))
+        await companion.takeStatusOnly()
+        let model = ObjectsModel(companion: companion)
+        await model.refresh()
+        XCTAssertEqual(model.groups.map(\.group), [.done])
+        let archived = await model.setArchived(true, for: "m")
+        XCTAssertTrue(archived)
+        XCTAssertEqual(model.groups.map(\.group), [.archived])
+        let archive = await companion.settingsPatches
+        XCTAssertEqual(archive["m"]?["status"], .string("archived"))
+        let unarchived = await model.setArchived(false, for: "m")
+        XCTAssertTrue(unarchived)
+        let unarchive = await companion.settingsPatches
+        XCTAssertEqual(unarchive["m"]?["status"], .string("works"), "the status underneath, Done")
+        XCTAssertEqual(model.groups.map(\.group), [.done])
+        XCTAssertNil(model.problem, "the older companion's refusal of the flag is never shown")
     }
 }

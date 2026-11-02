@@ -13,6 +13,7 @@ struct ProjectDetail: View {
     @ObservedObject var model: ObjectsModel
     let print: () -> Void
     @State private var note = ""
+    @FocusState private var noteFocused: Bool
     @State private var photos: [URL] = []
     @State private var dropProblem: String?
     @State private var targeted = false
@@ -25,7 +26,7 @@ struct ProjectDetail: View {
     var body: some View {
         ZStack(alignment: .bottom) {
             stage
-                .overlay(alignment: .topLeading) { StatusCapsule(stage: words.stage, text: words.capsule).padding(.top, 70).padding(.leading, 24) }
+                .overlay(alignment: .topLeading) { StatusCapsule(stage: words.stage, text: words.capsule, done: words.done).padding(.top, 70).padding(.leading, 24) }
                 .overlay(alignment: .topTrailing) {
                     if let size = words.size {
                         Text(size).font(.callout.monospacedDigit().weight(.semibold))
@@ -97,6 +98,11 @@ struct ProjectDetail: View {
                 FileAskCard(object: object, ask: model.extras[object.id]!.fileAsk!, model: model)
             case .needsYou where model.extras[object.id]?.choiceAsk != nil:
                 ChoiceAskCard(object: object, ask: model.extras[object.id]!.choiceAsk!, model: model).id(model.extras[object.id]!.choiceAsk!.id)
+            case .printed where !words.done && model.capabilities?.projectSettings == true && !DidItFit.dismissed(object.id):
+                DidItFitCard(object: object, model: model, published: model.extras[object.id]?.credit != nil) {
+                    note = "After printing: "
+                    noteFocused = true
+                }
             case .needsYou: needsYou
             case .working, .sending, .preparing: progressCard
             case .printing: printingCard
@@ -215,7 +221,7 @@ struct ProjectDetail: View {
                             }
                     }
                     TextField(takesPhotos ? "Ask for changes. Drop photos here too…" : "Ask for changes…", text: $note)
-                        .textFieldStyle(.plain)
+                        .textFieldStyle(.plain).focused($noteFocused)
                         .onSubmit(send)
                         .disabled(!canCorrect)
                     if !note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !photos.isEmpty {
@@ -230,7 +236,7 @@ struct ProjectDetail: View {
                 if words.actions.contains(.retry) && object.current == nil {
                     EmptyView()
                 } else {
-                    Button(action: print) { Label("Print…", systemImage: "printer.fill").padding(.horizontal, 6).frame(height: 30) }
+                    Button(action: print) { Label(words.done ? "Print Another…" : "Print…", systemImage: "printer.fill").padding(.horizontal, 6).frame(height: 30) }
                         .buttonStyle(.glassProminent).controlSize(.extraLarge)
                         .disabled(!canPrint)
                         .help(model.printer(for: object) == nil ? "No printer found in your printer MCP’s settings." : "")
@@ -504,5 +510,42 @@ private struct ChoiceAskCard: View {
 
     private func send(_ choices: [String]) {
         Task { await model.answerAsk(object.id, askId: ask.id, choices: choices) }
+    }
+}
+
+/// PRD §5.4: after printing, "Did it fit?" It works marks the project Done (`status: works`); Needs changes starts Ask
+/// for changes with "After printing: " and keeps the print history. Asked once: Not Now never asks again.
+enum DidItFit {
+    static func dismissed(_ id: String) -> Bool { UserDefaults.standard.bool(forKey: "fit.dismissed." + id) }
+    static func dismiss(_ id: String) { UserDefaults.standard.set(true, forKey: "fit.dismissed." + id) }
+}
+
+private struct DidItFitCard: View {
+    let object: Project
+    @ObservedObject var model: ObjectsModel
+    /// A published model: "Did it come out right?" (PRD §8.11).
+    let published: Bool
+    let needsChanges: () -> Void
+    @State private var hidden = false
+    private var working: Bool { model.working.contains(object.id) }
+
+    var body: some View {
+        if !hidden {
+            HStack(spacing: 12) {
+                Image(systemName: "questionmark.circle.fill").font(.title2).foregroundStyle(Color.filament)
+                Text(published ? "Did it come out right?" : "Did it fit?").font(.subheadline.weight(.semibold))
+                Spacer()
+                Button("Not Now") { DidItFit.dismiss(object.id); hidden = true }.buttonStyle(.plain).foregroundStyle(.secondary)
+                Button("Needs Changes") {
+                    Task { await model.setStatus("needs-changes", for: object.id) }
+                    needsChanges()
+                }
+                .buttonStyle(.glass).disabled(working)
+                Button { Task { await model.setStatus("works", for: object.id) } } label: { Label("It Works", systemImage: "checkmark.circle.fill") }
+                    .buttonStyle(.glassProminent).disabled(working)
+            }
+            .padding(12).frame(maxWidth: .infinity, alignment: .leading)
+            .glassEffect(.regular, in: .rect(cornerRadius: 14))
+        }
     }
 }

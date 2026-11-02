@@ -35,8 +35,10 @@ public struct PrintSettings: Sendable, Equatable {
     public var quality: Quality
     public var strength: Strength
     public var colour: Colour?
-    public init(quality: Quality = .standard, strength: Strength = .standard, colour: Colour? = nil) {
-        self.quality = quality; self.strength = strength; self.colour = colour
+    /// How many on the plate (`capabilities.printCopies`); one sends nothing.
+    public var copies: Int
+    public init(quality: Quality = .standard, strength: Strength = .standard, colour: Colour? = nil, copies: Int = 1) {
+        self.quality = quality; self.strength = strength; self.colour = colour; self.copies = copies
     }
     /// The `objects.print` fields: standard values are left out.
     public var params: [String: JSONValue] {
@@ -50,6 +52,7 @@ public struct PrintSettings: Sendable, Equatable {
         case .material(let material)?: params["colour"] = .object(["material": .string(material)])
         case nil: break
         }
+        if copies > 1 { params["copies"] = .number(Double(copies)) }
         return params
     }
 }

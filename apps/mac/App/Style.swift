@@ -32,11 +32,13 @@ extension ProjectStage {
 struct StatusCapsule: View {
     let stage: ProjectStage
     var text: String? = nil
+    /// Done (PRD §5.4): the green ✓.
+    var done = false
     var body: some View {
-        Label(text ?? stage.label, systemImage: stage.symbol)
+        Label(text ?? stage.label, systemImage: done ? "checkmark.circle.fill" : stage.symbol)
             .font(.caption.weight(.semibold))
             .labelStyle(.titleAndIcon)
-            .foregroundStyle(stage.tint)
+            .foregroundStyle(done ? Color.okGreen : stage.tint)
             .padding(.horizontal, 10).padding(.vertical, 5)
             .glassEffect(.regular, in: .capsule)
     }

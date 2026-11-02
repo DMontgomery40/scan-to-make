@@ -63,7 +63,14 @@ final class ObjectWordsTests: XCTestCase {
         XCTAssertEqual(object(["state": "archived"]).words.group, .now)
         XCTAssertEqual(object(["state": "failed"]).words.group, .needsYou)
         XCTAssertEqual(ObjectWords.group(.draft), .now)
-        XCTAssertEqual(Set(ProjectStage.allCases.map(ObjectWords.group)), Set(ProjectGroup.allCases))
+        XCTAssertTrue(Set(ProjectStage.allCases.map(ObjectWords.group)).isSubset(of: Set(ProjectGroup.allCases)))
+        let done = ready(["state": "confirmed", "status": ["phase": "confirmed", "text": "It works", "symbol": "checkmark.circle.fill", "tint": "green"]]).words
+        XCTAssertTrue(done.done)
+        XCTAssertEqual(done.group, .done, "the person said it works: Done, with the ✓")
+        XCTAssertEqual(done.capsule, "Done")
+        XCTAssertEqual(done.status, "It works")
+        XCTAssertTrue(done.actions.contains(.print), "a Done project can be printed again")
+        XCTAssertFalse(ready(["state": "printed"]).words.done)
         XCTAssertEqual(ProjectStage.needsYou.rawValue, "needs-you", "the companion's phase, the phone's and CloudKit's")
     }
 

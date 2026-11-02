@@ -21,6 +21,7 @@ struct PrintSheet: View {
     @State private var keptSuggestion = true
     @State private var quality = PrintSettings.Quality.standard
     @State private var strength = PrintSettings.Strength.standard
+    @State private var copies = 1
     @State private var checked = false
     @State private var estimate: PrintEstimate?
     @State private var estimateState = Loading.idle
@@ -61,7 +62,11 @@ struct PrintSheet: View {
                         Text("Max").tag(PrintSettings.Strength.max)
                     }
                     .pickerStyle(.segmented).labelsHidden().disabled(!offersStrength)
+                    if model.capabilities?.printCopies == true {
+                        Stepper(value: $copies, in: 1...64) { Text("Copies: \(copies)").font(.headline) }
+                    }
                     estimateLine
+                    if copies > 1 { Text("The estimate is for one.").font(.caption).foregroundStyle(.secondary) }
                 }
             }
             if uncertain {
@@ -204,7 +209,8 @@ struct PrintSheet: View {
     }
 
     private func send() {
-        let settings = PrintSettings(quality: offersQuality ? quality : .standard, strength: offersStrength ? strength : .standard, colour: colour)
+        let settings = PrintSettings(quality: offersQuality ? quality : .standard, strength: offersStrength ? strength : .standard, colour: colour,
+                                     copies: model.capabilities?.printCopies == true ? copies : 1)
         let filament = chosen
         Task { if await model.print(object.id, checked: uncertain && checked, settings: settings, filament: filament) { dismiss() } }
     }

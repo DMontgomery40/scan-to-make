@@ -17,6 +17,8 @@ struct MainWindow: View {
     @State private var newProject: NewProjectDraft?
     @State private var printing: Project?
     @State private var editorError: String?
+    /// "Opened in Blender", for a moment.
+    @State private var editorNote: String?
 
     var body: some View {
         NavigationSplitView {
@@ -69,6 +71,13 @@ struct MainWindow: View {
             Button("Cancel", role: .cancel) {}
         } message: { _ in
             Text("Its scan, photos and model are removed from this Mac. This can’t be undone.")
+        }
+        .overlay(alignment: .top) {
+            if let editorNote {
+                Label(editorNote, systemImage: "checkmark.circle.fill").font(.callout.weight(.medium))
+                    .padding(.horizontal, 14).padding(.vertical, 8).glassEffect(.regular, in: .capsule).padding(.top, 12)
+                    .transition(.opacity)
+            }
         }
         .alert("Couldn’t Open the Model", isPresented: Binding(get: { editorError != nil }, set: { if !$0 { editorError = nil } })) {
             Button("OK", role: .cancel) { editorError = nil }
@@ -149,6 +158,18 @@ struct MainWindow: View {
 
     private func open(_ editor: ModelEditor) {
         guard let source = model.selected?.modelURL else { return }
+        if editor == .blender {
+            Task {
+                switch await ModelEditor.openInBlender(source) {
+                case .success(let note):
+                    withAnimation { editorNote = note }
+                    try? await Task.sleep(for: .seconds(2.5))
+                    withAnimation { editorNote = nil }
+                case .failure(let problem): editorError = problem.text
+                }
+            }
+            return
+        }
         if let problem = ModelEditor.open(source, in: editor) { editorError = problem }
     }
 }
@@ -158,21 +179,30 @@ struct MainWindow: View {
 private struct Sidebar: View {
     @ObservedObject var model: ObjectsModel
     @Binding var deleting: Project?
+    @State private var showArchived = false
+
+    private func rows(_ objects: [Project]) -> some View {
+        ForEach(objects) { object in
+            ProjectRow(object: object, selected: model.selection == object.id).tag(object.id)
+                .contextMenu {
+                    if model.capabilities?.projectSettings == true { ProjectStatusMenu(object: object, model: model) }
+                    Button("Show in Finder") { if let folder = object.folderURL { NSWorkspace.shared.activateFileViewerSelecting([folder]) } }
+                        .disabled(object.folderURL == nil)
+                    Divider()
+                    Button("Delete…", role: .destructive) { deleting = object }
+                        .disabled(model.working.contains(object.id))
+                }
+        }
+    }
 
     var body: some View {
         List(selection: $model.selection) {
             ForEach(model.groups, id: \.group) { entry in
-                Section(entry.group.title) {
-                    ForEach(entry.objects) { object in
-                        ProjectRow(object: object, selected: model.selection == object.id).tag(object.id)
-                            .contextMenu {
-                                Button("Show in Finder") { if let folder = object.folderURL { NSWorkspace.shared.activateFileViewerSelecting([folder]) } }
-                                    .disabled(object.folderURL == nil)
-                                Divider()
-                                Button("Delete…", role: .destructive) { deleting = object }
-                                    .disabled(model.working.contains(object.id))
-                            }
-                    }
+                if entry.group == .archived {
+                    // Archived: everything kept, out of the way until asked for.
+                    Section(isExpanded: $showArchived) { rows(entry.objects) } header: { Text(entry.group.title) }
+                } else {
+                    Section(entry.group.title) { rows(entry.objects) }
                 }
             }
             if let printers = model.printerCatalog?.destinations, !printers.isEmpty {
@@ -227,7 +257,7 @@ struct ProjectRow: View {
             VStack(alignment: .leading, spacing: 1) {
                 Text(words.title).font(.body.weight(.medium)).lineLimit(1)
                 Text(words.status).font(.caption).lineLimit(1)
-                    .foregroundStyle(selected ? AnyShapeStyle(.secondary) : AnyShapeStyle(words.stage.tint))
+                    .foregroundStyle(selected ? AnyShapeStyle(.secondary) : AnyShapeStyle(words.done ? Color.okGreen : words.stage.tint))
             }
         }
         .padding(.vertical, 2)
@@ -259,7 +289,54 @@ struct ProjectThumbnail: View {
 enum ModelEditor {
     case bambu, orca, blender, other
 
-    /// Opens a copy of the STL, so another app's edits never change the project. Returns a sentence on failure.
+    struct Problem: Error { let text: String }
+    static let blenderId = "org.blenderfoundation.blender"
+
+    /// Open in Blender (PRD §9.6): never a new Blender per click. A running Blender gets the model in its own scene
+    /// (through the Blender MCP add-on when it listens, else as a file it is asked to open); with none running, one
+    /// starts and later clicks reuse it. The copy keeps the project's own file untouched.
+    @MainActor static func openInBlender(_ source: URL) async -> Result<String, Problem> {
+        let workspace = NSWorkspace.shared
+        guard let application = workspace.urlForApplication(withBundleIdentifier: blenderId) else {
+            return .failure(Problem(text: "Blender isn’t on this Mac. Install it, or choose a slicer."))
+        }
+        guard let copy = try? editorCopy(source) else { return .failure(Problem(text: "The model couldn’t be copied for Blender.")) }
+        if let running = NSRunningApplication.runningApplications(withBundleIdentifier: blenderId).first {
+            if await BlenderBridge.importSTL(copy) {
+                running.activate()
+                return .success("Opened in Blender")
+            }
+            let configuration = NSWorkspace.OpenConfiguration()
+            configuration.activates = true
+            _ = try? await workspace.open([copy], withApplicationAt: application, configuration: configuration)
+            return .success("Opened in Blender")
+        }
+        // One instance, not `-n`: the next click finds it running.
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.createsNewApplicationInstance = false
+        configuration.arguments = ["--python-expr",
+                                   "import bpy,sys; bpy.ops.object.select_all(action='SELECT'); bpy.ops.object.delete(use_global=False); bpy.ops.wm.stl_import(filepath=sys.argv[-1])",
+                                   "--", copy.path]
+        do {
+            _ = try await workspace.openApplication(at: application, configuration: configuration)
+            return .success("Opened in Blender")
+        } catch {
+            return .failure(Problem(text: "Blender didn’t open. Try again, or open the model from Show in Finder."))
+        }
+    }
+
+    /// A copy of the model, so another app's edits never change the project.
+    static func editorCopy(_ source: URL) throws -> URL {
+        let root = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+            .appendingPathComponent("Scan to Make/Editor Copies", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let copy = root.appendingPathComponent(source.lastPathComponent)
+        try FileManager.default.copyItem(at: source, to: copy)
+        return copy
+    }
+
+    /// Opens a copy of the STL in a slicer (Blender has `openInBlender`). Returns a sentence on failure.
     @MainActor static func open(_ source: URL, in editor: ModelEditor) -> String? {
         let workspace = NSWorkspace.shared
         let application: URL?
@@ -267,7 +344,7 @@ enum ModelEditor {
         case .bambu: application = workspace.urlForApplication(withBundleIdentifier: "com.bambulab.bambu-studio")
         case .orca: application = workspace.urlForApplication(withBundleIdentifier: "com.orcaslicer.OrcaSlicer")
             ?? workspace.urlForApplication(withBundleIdentifier: "com.softfever3d.orca-slicer")
-        case .blender: application = workspace.urlForApplication(withBundleIdentifier: "org.blenderfoundation.blender")
+        case .blender: application = workspace.urlForApplication(withBundleIdentifier: blenderId)
         case .other:
             let panel = NSOpenPanel()
             panel.allowedContentTypes = [.applicationBundle]
@@ -278,26 +355,9 @@ enum ModelEditor {
             if application == nil { return nil }
         }
         guard let application else { return "That app isn’t on this Mac. Install it or choose another one." }
-        do {
-            let root = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
-                .appendingPathComponent("Scan to Make/Editor Copies", isDirectory: true)
-                .appendingPathComponent(UUID().uuidString, isDirectory: true)
-            try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-            let copy = root.appendingPathComponent(source.lastPathComponent)
-            try FileManager.default.copyItem(at: source, to: copy)
-            let configuration = NSWorkspace.OpenConfiguration()
-            if editor == .blender {
-                // Blender imports an STL into a fresh scene, in its own instance so no open session is replaced.
-                configuration.createsNewApplicationInstance = true
-                configuration.arguments = ["--factory-startup", "--python-expr",
-                                           "import bpy,sys; bpy.ops.object.select_all(action='SELECT'); bpy.ops.object.delete(use_global=False); bpy.ops.wm.stl_import(filepath=sys.argv[-1])",
-                                           "--", copy.path]
-                workspace.openApplication(at: application, configuration: configuration) { _, _ in }
-            } else {
-                workspace.open([copy], withApplicationAt: application, configuration: configuration) { _, _ in }
-            }
-            return nil
-        } catch { return "The model couldn’t be copied for the other app." }
+        guard let copy = try? editorCopy(source) else { return "The model couldn’t be copied for the other app." }
+        workspace.open([copy], withApplicationAt: application, configuration: NSWorkspace.OpenConfiguration()) { _, _ in }
+        return nil
     }
 }
 
@@ -308,5 +368,31 @@ extension FocusedValues {
     var newProjectAction: (() -> Void)? {
         get { self[NewProjectActionKey.self] }
         set { self[NewProjectActionKey.self] = newValue }
+    }
+}
+
+/// PRD §5.4: Status, set by hand (Done is `works`), and Archive, which hides a project and keeps its status.
+struct ProjectStatusMenu: View {
+    let object: Project
+    @ObservedObject var model: ObjectsModel
+    static let statuses: [(value: String, label: String)] = [("not-printed", "Not Printed"), ("printed", "Printed"), ("works", "Done"),
+                                                              ("needs-changes", "Needs Changes")]
+    var body: some View {
+        let current = model.extras[object.id]?.status ?? (object.words.done ? "works" : nil)
+        let archived = model.extras[object.id]?.archived == true
+        Menu("Status") {
+            ForEach(Self.statuses, id: \.value) { status in
+                Button { Task { await model.setStatus(status.value, for: object.id) } } label: {
+                    if current == status.value { Label(status.label, systemImage: "checkmark") } else { Text(status.label) }
+                }
+            }
+            Divider()
+            if archived {
+                Button("Unarchive") { Task { await model.setArchived(false, for: object.id) } }
+            } else {
+                Button("Archive (Hide from Sidebar)") { Task { await model.setArchived(true, for: object.id) } }
+            }
+        }
+        .disabled(model.working.contains(object.id))
     }
 }

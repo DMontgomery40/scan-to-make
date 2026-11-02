@@ -70,6 +70,7 @@ targets:
       - App/EventRelayPolicy.swift
       - App/PrinterUpdates.swift
       - App/PublishedModel.swift
+      - App/BlenderBridge.swift
       - App/ModelMesh.swift
       - ControlKit/Sources/ControlKit
     dependencies:
