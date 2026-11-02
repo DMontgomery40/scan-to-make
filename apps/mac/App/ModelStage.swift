@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import RealityKit
+import CounterpartKit
 
 /// The dark "stage" behind every model (PRD §2.1, §10): the object is the hero, glass floats over it.
 struct StageBackground: View {
@@ -27,8 +28,9 @@ struct ModelStage: View {
     var fit: Float = 0.15
     var backdrop: Color? = nil
     var accessibilityText = "The model. Drag to turn it, scroll or pinch to zoom."
-    /// A still of the same model, shown until the person turns or zooms it. Without one the model is live.
+    /// Optional companion still while the local model poster loads.
     var poster: URL? = nil
+    @State private var still: CGImage?
     @State private var live = false
     @State private var lastTouch = Date.distantPast
     @State private var visible = true
@@ -36,7 +38,8 @@ struct ModelStage: View {
     @State private var scrollMonitor: Any?
     @State private var failed = false
 
-    private var showsLive: Bool { visible && (poster == nil || (interactive && live)) }
+    private var showsLive: Bool { visible && interactive && live }
+    private var imageIdentity: String { "\(url.path)#\(version)#\(yaw)#\(pitch)#\(fit)" }
 
     var body: some View {
         ZStack {
@@ -45,34 +48,49 @@ struct ModelStage: View {
                 realityView
                     .simultaneousGesture(DragGesture(minimumDistance: 0).onChanged { _ in touch() })
                     .simultaneousGesture(MagnifyGesture().onChanged { _ in touch() })
+            } else if let still {
+                Image(decorative: still, scale: 1).resizable().scaledToFit()
+                    .contentShape(Rectangle())
+                    .gesture(DragGesture(minimumDistance: 2).onChanged { _ in wake() })
+                    .simultaneousGesture(MagnifyGesture().onChanged { _ in wake() })
             } else if let poster {
                 FileImage(url: poster, version: version, contentMode: .fit).padding(40)
                     .contentShape(Rectangle())
                     .gesture(DragGesture(minimumDistance: 2).onChanged { _ in wake() })
                     .simultaneousGesture(MagnifyGesture().onChanged { _ in wake() })
-                if interactive {
-                    // Top right, under the size: the bottom belongs to the card and the Ask and Print bar.
-                    VStack {
-                        HStack {
-                            Spacer()
-                            Button { wake() } label: { Label("Explore in 3D", systemImage: "rotate.3d") }
-                                .buttonStyle(.glass).padding(.top, 108).padding(.trailing, 24)
-                        }
+            } else if !failed { ProgressView() }
+            if interactive && !showsLive {
+                VStack {
+                    HStack {
                         Spacer()
+                        Button { wake() } label: { Label("Explore in 3D", systemImage: "rotate.3d") }
+                            .buttonStyle(.glass).padding(.top, 108).padding(.trailing, 24)
                     }
+                    Spacer()
                 }
             }
             if failed {
                 Text("This model couldn't be shown.").font(.callout).foregroundStyle(.secondary)
             }
         }
+        .task(id: "\(imageIdentity)#\(visible)") {
+            guard visible else { return }
+            failed = false
+            let loaded = await Self.cached(url, version: version)
+            guard !Task.isCancelled else { return }
+            guard let model = loaded else { failed = poster == nil; return }
+            let image = await ModelPoster.image(key: imageIdentity, model: model, yaw: yaw, pitch: pitch, fit: fit)
+            guard !Task.isCancelled else { return }
+            still = image; failed = image == nil && poster == nil
+        }
+        .onChange(of: imageIdentity) { _, _ in still = nil; live = false }
         .onHover { hovering = $0 }
         .onWindowVisibilityChange { shown in
             visible = shown
             if !shown { live = false }
         }
         .onAppear { watchScrolling() }
-        .onDisappear { if let scrollMonitor { NSEvent.removeMonitor(scrollMonitor) }; scrollMonitor = nil }
+        .onDisappear { live = false; if let scrollMonitor { NSEvent.removeMonitor(scrollMonitor) }; scrollMonitor = nil }
         // Back to the still about 3 s after the last touch.
         .task(id: lastTouch) {
             guard live else { return }
@@ -103,31 +121,12 @@ struct ModelStage: View {
 
     private var realityView: some View {
         RealityView { content in
-            let root = Entity()
-            if let model = await Self.cached(url, version: version) {
-                let bounds = model.visualBounds(relativeTo: nil)
-                let size = max(bounds.extents.x, max(bounds.extents.y, bounds.extents.z))
-                let scale = fit / max(size, 0.0001)
-                model.scale = SIMD3(repeating: scale)
-                model.position = -bounds.center * scale
-                let pivot = Entity()
-                pivot.addChild(model)
-                pivot.orientation = simd_quatf(angle: pitch, axis: [1, 0, 0]) * simd_quatf(angle: yaw, axis: [0, 1, 0])
-                root.addChild(pivot)
-            } else {
-                failed = true
-            }
-            for (intensity, from) in [(Float(4200), SIMD3<Float>(0.4, 0.6, 0.5)), (1600, [-0.5, 0.1, 0.3]), (2200, [0, 0.3, -0.6])] {
-                let light = DirectionalLight()
-                light.light.intensity = intensity
-                light.look(at: .zero, from: from, relativeTo: nil)
-                root.addChild(light)
-            }
-            let camera = PerspectiveCamera()
-            camera.camera.fieldOfViewInDegrees = 34
-            camera.look(at: [0, 0.01, 0], from: [0, 0.05, 0.58], relativeTo: nil)
-            root.addChild(camera)
-            content.add(root)
+            content.camera = .virtual
+            let loaded = await Self.cached(url, version: version)
+            guard !Task.isCancelled, showsLive else { return }
+            if let model = loaded {
+                content.add(ModelPoster.scene(model: model, yaw: yaw, pitch: pitch, fit: fit).root)
+            } else { failed = true }
         }
         .realityViewCameraControls(interactive ? .orbit : .none)
         .allowsHitTesting(interactive)
@@ -135,17 +134,9 @@ struct ModelStage: View {
     }
 
     /// Loaded once per file version: going live again reuses the mesh instead of reading and building it again.
-    @MainActor private static var cache: [String: Entity] = [:]
-    @MainActor private static var order: [String] = []
+    @MainActor private static let cache = ModelEntityCache(limit: 2)
     @MainActor static func cached(_ url: URL, version: Double) async -> Entity? {
-        let key = "\(url.path)#\(version)"
-        if let entity = cache[key] { return entity.clone(recursive: true) }
-        guard let entity = await load(url) else { return nil }
-        cache[key] = entity
-        order.removeAll { $0 == key }
-        order.append(key)
-        while order.count > 4 { cache[order.removeFirst()] = nil }
-        return entity.clone(recursive: true)
+        await cache.load(key: "\(url.path)#\(version)") { await load(url) }
     }
 
     /// STL through `ModelMesh` (read off the main thread); USDZ and other RealityKit formats directly.
