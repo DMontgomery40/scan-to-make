@@ -277,14 +277,20 @@ struct NeedsYouCard: View {
                         .frame(width: 56, height: 56).clipShape(.rect(cornerRadius: 14))
                     VStack(alignment: .leading, spacing: 3) {
                         Text(words.title).font(.headline)
-                        Text("“\(ProjectWords.question(project))”").font(.subheadline).foregroundStyle(.secondary)
+                        Text(project.printConfirmation != nil ? words.line : "“\(ProjectWords.question(project))”").font(.subheadline).foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     Spacer(minLength: 0)
                 }
             }
             .buttonStyle(.plain)
-            AskButtons(store: store, project: project, working: $working, problem: $problem)
+            // A printer's question is answered in its sheet on the project page.
+            if project.printConfirmation != nil {
+                Button(action: open) { Label("Review", systemImage: "checkmark.shield").frame(maxWidth: .infinity).frame(height: 36) }
+                    .buttonStyle(.glassProminent)
+            } else {
+                AskButtons(store: store, project: project, working: $working, problem: $problem)
+            }
             if let problem { Text(problem).font(.footnote).foregroundStyle(.red) }
         }
         .padding(14)

@@ -54,6 +54,15 @@ public enum Format {
         return date.formatted(style)
     }
 
+    /// `when` mid-sentence: "Printed just now", "Printed yesterday", "Printed Oct 30".
+    public static func whenInSentence(_ date: Date, now: Date = Date(), calendar: Calendar = .current, locale: Locale = .current) -> String {
+        switch when(date, now: now, calendar: calendar, locale: locale) {
+        case "Now": "just now"
+        case "Yesterday": "yesterday"
+        case let words: words
+        }
+    }
+
     /// "1:24 PM": the time of day something will finish.
     public static func clock(_ date: Date, locale: Locale = .current, timeZone: TimeZone = .current) -> String {
         var style = Date.FormatStyle(locale: locale).hour().minute()
