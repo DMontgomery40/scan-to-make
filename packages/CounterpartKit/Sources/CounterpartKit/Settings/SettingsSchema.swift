@@ -178,3 +178,25 @@ public struct MCPUpdate: Codable, Equatable, Sendable {
     public var toVersion: String?
     public var found: String?
 }
+
+/// Carries explicit choices from older phones into the shared store. This preserves preferences;
+/// it does not claim that account-wide CloudKit subscriptions can filter an individual device.
+public enum PhoneNotificationMigration {
+    public static func patch(settings: CompanionSettings, deviceId: String, defaults: UserDefaults = .standard) -> [String: Any]? {
+        guard let notifications = settings.notifications else { return nil }
+        let groups: [String: [String]] = [
+            "ready": ["pass.ready"], "ask": ["pass.ask"], "confirm": ["print.confirm"],
+            "live": ["live-activity"], "first": ["print.first-layer"], "paused": ["print.paused"],
+            "done": ["print.done"], "problem": ["pass.failed", "print.failed", "print.not-started"],
+            "lost": ["print.unreachable"],
+        ]
+        let saved = notifications.devices[deviceId] ?? [:]
+        var changes: [String: Bool] = [:]
+        for (key, types) in groups {
+            guard let on = defaults.object(forKey: "CounterpartNotify." + key) as? Bool else { continue }
+            for type in types where saved[type] == nil || (saved[type] == true && !on) { changes[type] = on }
+        }
+        guard !changes.isEmpty else { return nil }
+        return ["notifications": ["devices": [deviceId: changes]]]
+    }
+}

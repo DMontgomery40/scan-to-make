@@ -112,7 +112,7 @@ export const NOTIFY: Record<CounterpartEventType, NotifyLevel> = {
   'print.status': 'none', 'print.first-layer': 'passive', 'print.milestone': 'active', 'print.paused': 'timeSensitive',
   'print.resumed': 'none', 'print.done': 'active', 'print.failed': 'timeSensitive', 'print.cancelled': 'passive',
   'print.not-started': 'timeSensitive', 'print.unreachable': 'passive', 'print.sent': 'passive',
-  'project.updated': 'none', 'project.deleted': 'none',
+  'project.updated': 'none', 'project.deleted': 'none', 'settings.changed': 'none',
   'mcp.update.started': 'none', 'mcp.update.waiting': 'none', 'mcp.update.done': 'passive', 'mcp.update.failed': 'active',
 };
 
@@ -162,6 +162,7 @@ export function eventWords(type: CounterpartEventType, data: CounterpartEvent['d
     case 'print.cancelled': title = `${t} was cancelled`; body = 'Nothing more will print.'; break;
     case 'print.not-started': title = `${printer} didn't start ${t}`; body = 'Nothing was sent twice. Check the printer, then press Print again.'; break;
     case 'print.unreachable': title = `Lost contact with ${printer}`; body = 'Still trying.'; break;
+    case 'settings.changed': title = 'Counterpart settings'; body = 'Settings updated'; break;
     case 'project.updated': title = t; body = 'Project updated'; break;
     case 'project.deleted': title = t; body = 'Project deleted'; break;
     case 'print.sent': title = `Sent ${t} to ${printer}`; body = context.reason === 'bambu-connect' ? 'Finish on your Mac: press Print in Bambu Connect.' : "Counterpart can't follow this print."; break;

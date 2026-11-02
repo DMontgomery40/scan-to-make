@@ -13,7 +13,7 @@ import Observation
     private var token: CKServerChangeToken?
     private var records: [CKRecord.ID: CKRecord] = [:]
     private var accountID: CKRecord.ID?
-    private var subscribed: Bool?
+    private var subscribed: CloudNotificationSubscriptions.Availability?
     private(set) var alertsMessage = "Connect to your Mac to check your saved notification choices."
 
     static var configured: Bool {
@@ -72,25 +72,21 @@ import Observation
 
     func configureAlerts(settings: CompanionSettings?, localChoices: [Bool]) async {
         guard let database else { return }
-        // A temporarily unreachable Mac must not turn off an already configured away-from-home
-        // subscription. Unknown preferences never create one; retry after a successful settings read.
-        guard settings != nil else {
-            alertsMessage = "Connect to your Mac to check your saved notification choices. Existing iCloud alerts keep their last configuration."
-            return
+        let availability = CloudNotificationSubscriptions.availability(settings: settings, localChoices: localChoices)
+        switch availability {
+        case .allowed: alertsMessage = "iCloud alerts include every event type."
+        case .unknown: alertsMessage = "Connect to an updated Mac to check your saved notification choices. Existing iCloud alerts keep their last configuration."
+        case .savedOptOut: alertsMessage = "A saved iPhone alert choice is off. Separate device and event choices aren't supported yet, so Counterpart won't enable shared iCloud alerts. Existing shared alerts keep their last configuration."
         }
-        let enabled = CloudNotificationSubscriptions.alertsAllowed(settings: settings, localChoices: localChoices)
-        alertsMessage = enabled ? "iCloud alerts include every event type." : "iCloud alerts are paused because saved choices are off or couldn't be checked. Individual iPhone alert types aren't supported yet."
-        guard subscribed != enabled else { return }
-        let all = CloudNotificationSubscriptions.make()
-        let saving = enabled ? all : all.filter { $0.subscriptionID == "proj-silent" }
-        let deleting = enabled ? [] : all.filter { $0.subscriptionID != "proj-silent" }.map(\.subscriptionID)
+        guard subscribed != availability else { return }
+        let changes = CloudNotificationSubscriptions.changes(settings: settings, localChoices: localChoices)
         do {
-            let result = try await database.modifySubscriptions(saving: saving, deleting: deleting)
+            let result = try await database.modifySubscriptions(saving: changes.saving, deleting: changes.deleting)
             for outcome in result.saveResults.values { _ = try outcome.get() }
             for outcome in result.deleteResults.values {
                 if case .failure(let error) = outcome, (error as? CKError)?.code != .unknownItem { throw error }
             }
-            subscribed = enabled
+            subscribed = availability
         } catch { alertsMessage = "iCloud couldn't update alerts. Open Counterpart again when connected to check your choices." }
     }
 

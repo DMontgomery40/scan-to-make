@@ -130,7 +130,7 @@ struct GeneralSettings: View {
     private func companionNotifications(_ types: [String: Bool]) -> some View {
         Section {
             ForEach(MacNotificationTypes.ordered, id:\.type) { item in
-                Toggle(item.label, isOn:Binding(get:{ types[item.type] ?? false }, set:{ on in Task { await companion.setNotification(item.type, on) } }))
+                Toggle(item.label, isOn:Binding(get:{ types[item.type] ?? CounterpartKit.SettingsSchema.defaultValue(item.type, mac: true) }, set:{ on in Task { await companion.setNotification(item.type, on) } }))
                 if item.type == "print.milestone" {
                     Picker(selection:Binding(get:{ ProgressNotifications(milestones:companion.settings?.milestones ?? shared ?? "50") ?? .off },
                                              set:{ level in if let value = level.milestones { Task { await companion.set(["milestones":.string(value)]) } } })) {

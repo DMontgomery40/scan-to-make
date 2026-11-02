@@ -4,11 +4,24 @@ import CloudKit
 public enum CloudNotificationSubscriptions {
     public static let zoneID = CKRecordZone.ID(zoneName: CounterpartIdentifiers.cloudKitZone, ownerName: CKCurrentUserDefaultName)
 
-    /// Query subscriptions deliver to the user's devices. Until per-device filtering is provisioned,
-    /// a saved opt-out on any phone pauses these shared alerts instead of silently ignoring it.
+    public enum Availability: Equatable { case allowed, unknown, savedOptOut }
+
+    /// CloudKit query subscriptions belong to the account, not this device. A phone must
+    /// never remove shared subscriptions because its own choices or an older reply differ.
+    public static func availability(settings: CompanionSettings?, localChoices: [Bool]) -> Availability {
+        if localChoices.contains(false) { return .savedOptOut }
+        guard let notifications = settings?.notifications else { return .unknown }
+        return notifications.devices.values.contains { $0.values.contains(false) } ? .savedOptOut : .allowed
+    }
+
     public static func alertsAllowed(settings: CompanionSettings?, localChoices: [Bool]) -> Bool {
-        guard let notifications = settings?.notifications else { return false }
-        return !localChoices.contains(false) && !notifications.devices.values.contains { $0.values.contains(false) }
+        availability(settings: settings, localChoices: localChoices) == .allowed
+    }
+
+    public static func changes(settings: CompanionSettings?, localChoices: [Bool]) -> (saving: [CKSubscription], deleting: [String]) {
+        let subscriptions = make()
+        let enabled = alertsAllowed(settings: settings, localChoices: localChoices)
+        return (enabled ? subscriptions : subscriptions.filter { $0.subscriptionID == "proj-silent" }, [])
     }
 
     public static func make() -> [CKSubscription] {

@@ -83,7 +83,13 @@ import CounterpartKit
         guard MobileCloud.configured else { return }
         // A missed push is recovered on foreground refresh, before any unavailable LAN request.
         await activities.reconcile(cloud.printUpdates, mayStart: true)
-        let settings = try? await companion.settings()
+        var settings = try? await companion.settings()
+        if let read = settings, let deviceId = status?.deviceId,
+           let patch = PhoneNotificationMigration.patch(settings: read, deviceId: deviceId) {
+            // Reconcile real local opt-outs before enabling any shared subscription. A failed
+            // write keeps the local gate below and retries when the phone next refreshes.
+            if let saved = try? await companion.changeSettings(patch) { settings = saved }
+        }
         await cloud.configureAlerts(settings: settings, localChoices: NotificationChoices.all.map { NotificationChoices.isOn($0.id) })
     }
 

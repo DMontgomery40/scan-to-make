@@ -1,4 +1,6 @@
 import Foundation
+import ServiceManagement
+import enum CounterpartKit.SettingsSchema
 #if canImport(ControlKit)
 import ControlKit
 #endif
@@ -111,23 +113,49 @@ struct NotificationPrefs {
     /// Whether an event of this type makes a Mac notification. A milestone notifies whenever Progress is on here: the
     /// shared setting already decided which milestones exist.
     func shouldNotify(type: String, progress percent: Double? = nil) -> Bool {
-        // The companion's switch for this type wins; a type it hasn't heard of is off on the Mac (settings.md).
-        if let types { return types[type] ?? false }
+        // Explicit stored choices win; omitted known types retain their documented defaults.
+        if let types { return types[type] ?? SettingsSchema.defaultValue(type, mac: true) }
         if type == "print.milestone" { return progress != .off }
         guard let item = NotificationSwitch.allCases.first(where: { $0.eventTypes.contains(type) }) else { return false }
         return isOn(item)
     }
 }
 
+/// A registered login item can still be awaiting approval; turning it off cancels that registration.
+enum LoginRegistrationAction: Equatable {
+    case none, register, unregister, approvalRequired, unavailable
+    static func resolve(on: Bool, status: SMAppService.Status) -> Self {
+        switch status {
+        case .enabled: return on ? .none : .unregister
+        case .requiresApproval: return on ? .approvalRequired : .unregister
+        case .notRegistered: return on ? .register : .none
+        default: return .unavailable
+        }
+    }
+}
+
 /// PRD §5.9: the first time the companion keeps settings, this Mac's own choices go up to it.
 enum SettingsMigration {
+    static func currentGeneral(loginStatus: SMAppService.Status, showInDock: Bool, keepAwake: Bool) -> [String: Bool] {
+        var values = ["showInDock": showInDock, "keepAwake": keepAwake]
+        switch loginStatus {
+        case .enabled, .requiresApproval: values["openAtLogin"] = true
+        case .notRegistered: values["openAtLogin"] = false
+        default: break // notFound or a future state is unknown, not a new registration request.
+        }
+        return values
+    }
+
     /// What this Mac had changed from the defaults before the companion kept settings (open at login off, no Dock
     /// icon, a notification switch flipped, Progress on), as the patch that carries it over.
-    static func patch(defaults: UserDefaults, companion: CompanionSettings) -> [String: JSONValue] {
+    static func patch(defaults: UserDefaults, companion: CompanionSettings, currentGeneral: [String: Bool] = [:]) -> [String: JSONValue] {
         var patch: [String: JSONValue] = [:]
         if companion.general != nil {
             var general: [String: JSONValue] = [:]
-            if defaults.bool(forKey: "openAtLoginOff") { general["openAtLogin"] = .bool(false) }
+            let owned: [String: Bool?] = ["openAtLogin": companion.general?.openAtLogin, "showInDock": companion.general?.showInDock, "keepAwake": companion.general?.keepAwake]
+            for (key, value) in currentGeneral where (owned[key] ?? nil) == nil { general[key] = .bool(value) }
+            if let off = defaults.object(forKey: "openAtLoginOff") as? Bool,
+               off || companion.general?.openAtLogin != false { general["openAtLogin"] = .bool(!off) }
             if defaults.object(forKey: "showInDock") as? Bool == false { general["showInDock"] = .bool(false) }
             if !general.isEmpty { patch["general"] = .object(general) }
         }
@@ -138,6 +166,10 @@ enum SettingsMigration {
                 for type in item.eventTypes { mac[type] = .bool(prefs.isOn(item)) }
             }
             if prefs.progress != .off { mac["print.milestone"] = .bool(true) }
+            // Preserve every saved per-type choice, including unknown types from a newer app.
+            for (type, on) in prefs.types ?? [:] { mac[type] = .bool(on) }
+            // A saved opt-out wins over a conflicting older local opt-in during migration.
+            mac = mac.filter { type, value in value != .bool(true) || companion.notificationsMac?[type] != false }
             if !mac.isEmpty { patch["notifications"] = .object(["mac": .object(mac)]) }
         }
         return patch

@@ -24,6 +24,8 @@ export const COUNTERPART_EVENT_TYPES = [
   'project.updated',
   // A project and its files were deleted; `data.by` says from where.
   'project.deleted',
+  // Companion-wide settings changed; clients refresh their saved preferences.
+  'settings.changed',
   // PRD §8.10 (KAN-214 PR 6). No projectId; emitted only once every client decodes events without one.
   'mcp.update.started', 'mcp.update.waiting', 'mcp.update.done', 'mcp.update.failed',
 ] as const;
@@ -326,8 +328,27 @@ export type Ask = z.infer<typeof AskSchema>;
 // Settings and Live Activity tokens (PRD §8.6, §8.8)
 
 export const MilestonesSchema = z.enum(['off', '50', '25-50-75', 'every-10']);
-export const CompanionSettingsSchema = z.strictObject({ milestones: MilestonesSchema });
+// Sparse maps preserve explicit choices, including event types introduced by newer clients.
+const NotificationChoicesSchema = z.record(z.string().min(1).max(128), z.boolean());
+const NotificationDevicesSchema = z.record(z.string().min(1).max(128), NotificationChoicesSchema);
+const GeneralSettingsSchema = z.strictObject({
+  openAtLogin: z.boolean().optional(), showInDock: z.boolean().optional(), keepAwake: z.boolean().optional(),
+});
+const NotificationsSchema = z.strictObject({
+  mac: NotificationChoicesSchema.default({}), devices: NotificationDevicesSchema.default({}),
+});
+export const CompanionSettingsSchema = z.strictObject({
+  milestones: MilestonesSchema,
+  notifications: NotificationsSchema.optional(),
+  general: GeneralSettingsSchema.optional(),
+});
 export type CompanionSettings = z.infer<typeof CompanionSettingsSchema>;
+export const CompanionSettingsPatchSchema = z.strictObject({
+  milestones: MilestonesSchema.optional(),
+  notifications: z.strictObject({mac: NotificationChoicesSchema.optional(), devices: NotificationDevicesSchema.optional()}).optional(),
+  general: GeneralSettingsSchema.optional(),
+}).refine(value => Object.keys(value).length > 0, 'A setting is required');
+export type CompanionSettingsPatch = z.infer<typeof CompanionSettingsPatchSchema>;
 
 /** PRD §5.4 Status, set by hand: `PATCH /v1/objects/<id>/settings {status}` / `objects.settings.set {id, status}`. */
 export const PROJECT_STATUSES = ['not-printed', 'printed', 'works', 'needs-changes', 'archived'] as const;

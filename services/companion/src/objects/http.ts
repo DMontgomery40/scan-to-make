@@ -7,7 +7,7 @@ import {basename, join, isAbsolute, sep} from 'node:path';
 import type {RemoteScope} from '../remote-auth.js';
 import {InvalidAnswerError, InvalidCaptureManifestError, InvalidStateError, projectStatus, type ObjectService} from './service.js';
 import {CameraUnavailableError, type CameraFrame} from '../printing/camera.js';
-import {MilestonesSchema, type ObjectStatus, type ProjectStatus} from '@scan-to-make/contracts/counterpart';
+import {CompanionSettingsPatchSchema, type ObjectStatus, type ProjectStatus} from '@scan-to-make/contracts/counterpart';
 import {objectStatus, projectTitle} from '../events/words.js';
 import {ObjectNotFoundError, type ObjectPass, type StmObject} from './store.js';
 import {RECONSTRUCTION_FAILED} from './reconstruct.js';
@@ -172,9 +172,9 @@ export function createObjectRoutes(service: ObjectService) {
           if (request.method !== 'PATCH') throw new HttpFailure(405, 'method-not-allowed');
           await authorize(SETTINGS);
           const input = await json<Record<string, unknown>>(request);
-          const milestones = MilestonesSchema.safeParse(input.milestones);
-          if (!milestones.success || Object.keys(input).some(key => key !== 'milestones')) throw new HttpFailure(400, 'invalid-request');
-          return send(response, 200, {settings: await service.updateSettings({milestones: milestones.data})});
+          const patch = CompanionSettingsPatchSchema.safeParse(input);
+          if (!patch.success) throw new HttpFailure(400, 'invalid-request');
+          return send(response, 200, {settings: await service.updateSettings(patch.data)});
         }
         if (!match) throw new HttpFailure(404, 'not-found');
         const [, id, action] = match;

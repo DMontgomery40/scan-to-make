@@ -13,6 +13,7 @@ import {PrinterUpdatingError, type PrintGate} from '../printing/print-gate.js';
 import {defaultRunPublished, publishedLink, type PublishedModel, type PublishedPassInput, type PublishedResult} from '../published/published.js';
 import {sliceOverrides, settingsUnsupported} from '../printing/print-settings.js';
 import type {CompanionSettingsStore} from '../settings.js';
+import type {CompanionSettingsPatch} from '@scan-to-make/contracts/counterpart';
 import {PRINT_LOG, printEndFailure, projectTitle, sizeText} from '../events/words.js';
 import {PassTimings, STAGE_DEFAULT_SEC, passEstimate, stageWords, type PassKind, type PassStage, type StageId} from '../touchup/stages.js';
 import type {DesignEngine} from '../touchup/invocation.js';
@@ -229,9 +230,11 @@ export class ObjectService {
   /** Print settings, controls and the monitor need the printers' sessions. */
   get printSettingsAvailable(): boolean { return !!this.#deps.printers; }
   async settings() { return this.#deps.settings ? this.#deps.settings.load() : {milestones: '50' as const}; }
-  async updateSettings(patch: {milestones?: 'off' | '50' | '25-50-75' | 'every-10'}) {
+  async updateSettings(patch: CompanionSettingsPatch) {
     if (!this.#deps.settings) throw new InvalidStateError('Settings are unavailable on this Mac.');
-    return this.#deps.settings.update(patch);
+    const settings = await this.#deps.settings.update(patch);
+    await this.#emit({id: randomUUID(), type: 'settings.changed', data: {keys: Object.keys(patch)}});
+    return settings;
   }
 
   /** Hide from Home (KAN-217): a flag of its own. The status underneath stays exactly as it was, `sent` included. */
