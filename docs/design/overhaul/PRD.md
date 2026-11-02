@@ -252,27 +252,15 @@ Screenshots of the variants: `screens/phone-print-one.jpg` (one colour), `screen
 - **Quality:** Draft, Standard or Fine (layer height).
 - **Strength:** Standard, Strong or Max (walls and infill).
 - **Profile line:** the actual profile name. The trailing toolbar button opens all of the slicer's settings, or "Open in *slicer* on Mac".
-- **Check the plate first:** on by default. Its caption: "Your Mac looks through the printer camera. You'll only hear about it if something's there."
 - **Print on *printer***: a prominent bottom button with "Done around *time*".
 
 **Behaviour:**
 - Starting a print still answers the printer MCP's own confirmation. The app presents the MCP's questions natively, never as a raw form.
 - If the MCP asks something the app can't render, it says so and offers "Answer on your Mac".
 
-### 5.6 Plate check
+### 5.6 No plate check
 
-> **Removed (2026-11-01, `ac44431`).** Plate-clearance prompts are gone from both apps, and Counterpart no longer claims the camera checks the plate. The printer MCP's own confirmation stays, including any camera observation it reports ("The printer camera reported *X* on the plate."). The spec below and `screens/phone-plate.jpg` are kept only for history; don't build them.
-
-Screenshot: `screens/phone-plate.jpg`.
-
-- **Shown only when something is on the plate.** The check runs on the Mac with the printer camera and bambu-printer-mcp's check. If the plate is clear, the user sees nothing and the print starts.
-- **When something is there:**
-  - the title "Something's on the plate";
-  - one sentence saying where;
-  - the camera frame with the region outlined;
-  - **I cleared it. Look again** (prominent) and **The plate is clear. Print anyway**.
-- **"Clear" is remembered as a correction** for that printer, so glare, glue and the printer's own parts stop raising alerts.
-- **It also arrives as a time-sensitive notification** with the frame attached (§9.1).
+There is no plate check of any kind: no camera judging, no "is the plate clear?" prompt, no checkbox and no notification. The printer detects an occupied bed itself during bed leveling and stops; that's the only check. When bambu-printer-mcp or another printer MCP asks its own confirmation, the app shows exactly the checks that MCP asks for, and never adds a plate line.
 
 ### 5.7 Printing
 
@@ -604,11 +592,7 @@ Each change follows the MCP repo's own AGENTS.md and release process.
     2. `counterpart_make_3mf` combines them.
     3. `slice_stl` slices with `load_filaments` (one profile per filament number in the 3MF). It refuses `load_filament_ids` for 3MF input, because the BambuStudio CLI does.
     4. `print_3mf` prints with `ams_mapping` set from the print sheet.
-- **Plate check (existing, extended).**
-  - Before `print_3mf`, the companion takes `camera_snapshot`, and `judgePlate` (`objects/bedcheck.ts`) asks the user's own Claude.
-  - **Clear:** nothing is shown and the run continues.
-  - **Not clear:** emit `plate.blocked` with the frame and the item. **Look again** retakes the photo and judges again. **It's clear** continues, and appends a note for that printer to a per-printer list ("the white piece at the back left is part of the printer"). That list is added to the judge's prompt next time.
-  - **Printers whose capability is `camera: "none"`** skip the camera check. The MCP's own confirmation is still what the user answers.
+- **No plate check.** The companion doesn't take a camera snapshot before printing and doesn't judge the plate. `objects/bedcheck.ts`, `judgePlate`, `objects.answerPlate`, `POST …/plate` and the `plate.blocked` event are removed.
 - **Fix: "printed" now means printed.** On `print_3mf`/`start_print` success, the object goes to `printing` with `print.printId` (a new uuid), `destinationId`, `dispatchedAt`, `jobName`, `taskId?` and the slice `estimate`. Today it goes straight to `printed`. The monitor (§8.6) sets `printed` when the matching job finishes.
 
 ### 8.6 The print monitor (new: `services/companion/src/printing/monitor.ts`)
@@ -680,7 +664,7 @@ Every user-visible change becomes one event.
 type CounterpartEvent = {
   v: 1; seq: number; id: string /* uuid */; at: string /* ISO */;
   type: "pass.started"|"pass.stage"|"pass.ready"|"pass.ask"|"pass.failed"
-      | "print.preparing"|"plate.blocked"|"print.confirm"|"print.started"|"print.status"|"print.first-layer"
+      | "print.preparing"|"print.confirm"|"print.started"|"print.status"|"print.first-layer"
       | "print.milestone"|"print.paused"|"print.resumed"|"print.done"|"print.failed"|"print.cancelled"
       | "print.not-started"|"print.unreachable";
   projectId: string; printId?: string; destinationId?: string; printerName?: string;
@@ -905,7 +889,6 @@ Screenshot: `screens/phone-notifications.jpg` (an approximation: the system draw
 |---|---|---|---|---|
 | `pass.ready` | "*Title* is ready to print" · size and estimate, with a render | **Print** (opens the print sheet), **Ask for Changes…** (text input, sent in the background) | active | on |
 | `pass.ask` | "*Title*: *the question*", with the region picture | **Camera** (opens it), **Best Guess** (background) | active | on |
-| `plate.blocked` | "Something's on the *printer* plate", with the frame | **Look Again**, **It's Clear** (both background) | time-sensitive | on |
 | `print.confirm` | "*Printer* needs a yes before printing *title*" | opens the confirmation | time-sensitive | on |
 | `print.started` | no banner; the Live Activity starts | — | passive | off |
 | `print.first-layer` | "*Title*: first layer's down", with the frame | **Open**, **Pause** | passive | off |
@@ -925,7 +908,6 @@ Each row has its own switch in Settings → Notifications, on both devices. The 
 |---|---|---|
 | `ev-ready` | `pass.ready` | `READY` |
 | `ev-ask` | `pass.ask` | `ASK` |
-| `ev-plate` | `plate.blocked` | `PLATE` |
 | `ev-confirm` | `print.confirm` | `CONFIRM` |
 | `ev-progress` | `print.first-layer`, `print.milestone` | `PROGRESS` |
 | `ev-done` | `print.done` | `DONE` |
@@ -957,9 +939,9 @@ If the fetch runs past the extension's time limit, the notification is delivered
 - Everything needs the same iCloud account on both devices. Without iCloud, the phone gets events only from the LAN long poll while the app is running or has background time. Settings says so.
 
 **Actions:**
-- Background actions without a destructive outcome run without opening the app: **Ask for Changes…** (`UNTextInputNotificationAction`), **Best Guess**, **Look Again**, **It's Clear**, **Pause** and **Resume**.
+- Background actions without a destructive outcome run without opening the app: **Ask for Changes…** (`UNTextInputNotificationAction`), **Best Guess**, **Pause** and **Resume**.
 - Each one sends its command to the Mac:
-  - directly on the LAN, through the existing routes: `POST …/corrections`, `…/closeup`, `…/plate`; pause and resume go through the new `POST …/print/pause` and `…/print/resume`;
+  - directly on the LAN, through the existing routes: `POST …/corrections`, `…/closeup`; pause and resume go through the new `POST …/print/pause` and `…/print/resume`;
   - otherwise as a `CounterpartCommand` record (§9.3).
 - **Print** and **Camera** open the app at the right screen.
 
@@ -970,9 +952,9 @@ If the fetch runs past the extension's time limit, the notification is delivered
 ### 9.3 Commands from anywhere (CloudKit)
 
 - **How a command travels.** When the phone can't reach the Mac directly, it writes a `CounterpartCommand` record into the same private zone:
-  - `{commandId, type, projectId, payload, photos[CKAsset], createdAt}`, where `type` is one of `print | correct | answerAsk | plate | confirm | pause | resume | cancel`.
+  - `{commandId, type, projectId, payload, photos[CKAsset], createdAt}`, where `type` is one of `print | correct | answerAsk | confirm | pause | resume | cancel`.
 - **How the Mac receives it.** The Mac app subscribes to that record type (content-available) and also fetches on launch and on wake.
-  - It runs each command through the control socket method that already does the same job: `objects.print`, `objects.correct`, `objects.answerCloseup`, `objects.answerPlate`, `objects.answerPrintConfirmation`, plus the new pause, resume and cancel.
+  - It runs each command through the control socket method that already does the same job: `objects.print`, `objects.correct`, `objects.answerCloseup`, `objects.answerPrintConfirmation`, plus the new pause, resume and cancel.
   - It writes the result back as `status: done|failed` with a message, and deletes the record a day later.
 - **Commands are bounded.** The Mac acts only on commands from its own private database that are less than 10 minutes old.
 - **The print confirmation is unchanged.** Starting a physical print still answers the printer MCP's own confirmation:
@@ -1123,7 +1105,7 @@ Each milestone ends in an on-device check with screenshots compared against `scr
 | M1 | **Back end and notifications.** All of the following:<br>• fixes: `remaining` → `timeRemaining`, "printed" set only on finish, catalog de-duplication, Codex `config.toml` source<br>• `PrinterSessionPool`<br>• `counterpart_printer_info` and `counterpart_print_progress` (with the generated HMS and stage tables), plus `taskId` in the `print_3mf` result, in bambu-printer-mcp<br>• print monitor<br>• event log, `GET /v1/events` and `events.wait`<br>• Mac `EventRelay` (Mac notifications and CloudKit)<br>• iPhone subscriptions, Notification Service Extension and background actions<br>• structured `pass.*` events, with a generated title and a what-changed summary | On a real P1S print, all of these hold:<br>• with the phone locked and on cellular, the halfway notification arrives with a camera frame, and so does "done"<br>• restarting the companion mid-print sends no duplicate milestone<br>• a print that never starts produces `print.not-started` within 3 min<br>• replying to a "ready" notification from the Lock Screen starts a new pass |
 | M1F | **Fusion design engine.**<br>• `fusion-mcp-bridge.ts` with `fusion_mcp_status`, `fusion_mcp_call`, `fusion_mcp_new_design` and `fusion_mcp_export`, in bambu-printer-mcp and mcp-3D-printer-server, each through its own repo's release process<br>• the companion picks the engine per pass<br>• Mac Settings → Design with Fusion | The §8.9 acceptance check passes through both MCPs on the Mac |
 | M2 | **iPhone core.** Home, New, Project (all states), Ask card, Settings and About. | Each screen matches its mockup on iPhone 18 Pro, iPhone 17e, Duo closed and iPad |
-| M3 | **Print and Live Activity.**<br>• print sheet (printers from both MCPs, slice estimate, colour map, quality, strength)<br>• plate check with the alert and per-printer notes<br>• Printing screen with the camera<br>• pause, resume and stop<br>• Live Activity, with the relay Worker once the APNs key exists<br>• the `slice_stl` quality arguments in both MCPs<br>• the Counterpart tools, `camera_snapshot`, `get_printer_filaments`, pause and resume in mcp-3D-printer-server<br>• `CounterpartCommand` for use away from home | All of these hold:<br>• a real P1S print from the phone shows the Live Activity on the Lock Screen and the Mac menu bar, counting down<br>• a deliberate plate obstruction is caught and cleared with Look Again<br>• a full run on OctoPrint's virtual printer and a Klipper simulator through mcp-3D-printer-server delivers progress, the halfway notification and done<br>• Pause from the Lock Screen pauses the P1S |
+| M3 | **Print and Live Activity.**<br>• print sheet (printers from both MCPs, slice estimate, colour map, quality, strength)<br>• Printing screen with the camera<br>• pause, resume and stop<br>• Live Activity, with the relay Worker once the APNs key exists<br>• the `slice_stl` quality arguments in both MCPs<br>• the Counterpart tools, `camera_snapshot`, `get_printer_filaments`, pause and resume in mcp-3D-printer-server<br>• `CounterpartCommand` for use away from home | All of these hold:<br>• a real P1S print from the phone shows the Live Activity on the Lock Screen and the Mac menu bar, counting down<br>• a full run on OctoPrint's virtual printer and a Klipper simulator through mcp-3D-printer-server delivers progress, the halfway notification and done<br>• Pause from the Lock Screen pauses the P1S |
 | M3b | **Multi-colour.** The pass contract gains `parts`; per-body STL export through the Blender bridge; `counterpart_make_3mf`; `slice_stl` with `load_filaments` (filament numbers carried in the 3MF); `print_3mf` `ams_mapping`; per-part colour map in the print sheet. | A two-part result prints in two AMS colours on the P1S, from the phone |
 | M4 | **Mac rebuild.** SwiftUI scenes, main window, inspector, print sheet, popover, Settings with de-duplicated devices, drop-to-create. | The same project is visible and actionable on the Mac and the phone at once, and re-pairing a phone leaves one row |
 | M5 | **Scan in hand and on a rig.** As specified in §11 and §11.1, including the test of which rig capture path holds tracking. | The §11 pass criteria are met on a real iPhone in hand, and §11.1 on the rig |
