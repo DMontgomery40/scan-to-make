@@ -656,6 +656,16 @@ export class ObjectService {
   /** Answers the open Ask: with a photo (uploaded first), Best guess, or the person's own words. */
   answerCloseup(id: string, answer: {bestGuess?: boolean; text?: string}): Promise<StmObject> { return this.#gate(id, () => this.#answerCloseup(id, answer)); }
   async #answerCloseup(id: string, answer: {bestGuess?: boolean; text?: string}): Promise<StmObject> {
+    // Claim the install before consuming the Ask or its photos. The admitted pass takes its own
+    // counted reservation through worker cleanup; this one only covers the answer transaction.
+    let release = () => {};
+    try { release = this.#deps.printGate?.hold('current') ?? release; }
+    catch (error) { if (error instanceof PrinterUpdatingError) throw new InvalidStateError(error.message); throw error; }
+    try { return await this.#reservedAnswerCloseup(id, answer); }
+    finally { release(); }
+  }
+
+  async #reservedAnswerCloseup(id: string, answer: {bestGuess?: boolean; text?: string}): Promise<StmObject> {
     const object = await this.get(id);
     if (object.state !== 'needs-closeup') throw new InvalidStateError('No close-up was asked for.');
     // Carry on with what the asking pass was doing: a correction keeps its note and its model.

@@ -308,3 +308,35 @@ test('a failed worker releases the MCP install reservation after recording the f
   assert.equal(printGate.held('current'), false);
   assert.equal(printGate.beginUpdate(['current']), true);
 });
+
+test('answering an Ask during an MCP update preserves the open Ask and its pending photos for retry', async () => {
+  const printGate = new PrintGate();
+  const {service, object, store, calls} = await setup(undefined, {printGate});
+  await store.update(object.id, o => ({...o, state: 'needs-closeup', question: {closeup: 'the underside'},
+    ask: {id: 'ask-1', question: 'What is underneath?', answers: ['text'], status: 'open', askedAtMs: Date.now()}}));
+  await service.addPhoto(object.id, 'underside.jpg', Buffer.from('photo'));
+  const before = await store.get(object.id);
+  assert.equal(before.current, undefined, 'the first pass has no model yet');
+  assert.equal(printGate.beginUpdate(['current']), true);
+  await assert.rejects(service.answerCloseup(object.id, {text: 'The underside is flat.'}), /software is updating/);
+  assert.deepEqual(await store.get(object.id), before, 'rejection must not consume the Ask, photos, or create a saved correction');
+  assert.equal(calls.length, 0);
+  assert.equal(printGate.held('current'), false);
+  printGate.endUpdate(['current']);
+  await service.answerCloseup(object.id, {text: 'The underside is flat.'});
+  assert.equal(printGate.held('current'), true, 'the admitted pass retains its own reservation');
+  const after = await service.settled(object.id);
+  assert.equal(after.state, 'ready');
+  assert.equal(after.messages.length, 1);
+  assert.deepEqual(after.messages[0].photos, ['underside.jpg']);
+  assert.equal(calls.length, 1);
+  assert.equal(printGate.held('current'), false);
+});
+
+test('an invalid Ask answer releases its admission reservation', async () => {
+  const printGate = new PrintGate();
+  const {service, object} = await setup(undefined, {printGate});
+  await assert.rejects(service.answerCloseup(object.id, {bestGuess: true}), /No close-up was asked/);
+  assert.equal(printGate.held('current'), false);
+  assert.equal(printGate.beginUpdate(['current']), true);
+});
