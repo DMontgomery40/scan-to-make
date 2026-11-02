@@ -17,13 +17,16 @@ Wire types are zod schemas in `packages/contracts/src/counterpart.ts` (`@scan-to
 | SETTINGS | `projects:write` |
 | PRINT | `printer-handoff:use` |
 
-**Status.** "PR 1" to "PR 4" mark the KAN-214 pull request that adds a route or field; the rest exists on `main`. Until a PR merges, its routes return 404 and its fields are absent. `status.get` on the control socket reports the matching capability flags (local-control.md).
+**Status.** "PR 1" to "PR 5" mark the KAN-214 pull request that adds a route or field; the rest exists on `main`. Until a PR merges, its routes return 404 and its fields are absent. `status.get` on the control socket reports the matching capability flags (local-control.md).
+
+**What this companion supports.** `GET /healthz` (READ) replies `{status: "ok", protocolVersion: "0.1.0", capabilities: {genericConfirmations: true, materialChoice: true}}` from PR 5. `capabilities` is absent on older companions, so treat a missing flag as false. `genericConfirmations` means the printer questions below may carry text, number and choice fields, and `…/print-confirmation` takes those answers. Without it, show only yes/no questions and send booleans. `materialChoice` means `colour: {material}` is accepted ("What's loaded?", below).
 
 ## Headers the phone sends
 
 | Header | Value | Status |
 |---|---|---|
 | `X-Scan-Device-Model` | The hardware identifier, `^[A-Za-z0-9,._ -]{1,64}$` (for example `iPhone18,2`). Optional on every request. The Mac's device list shows it (`devices.list` `model`). Older companions ignore it. | PR 3 |
+| `X-Scan-Device-Name` | The device's own name ("David’s iPhone"), UTF-8 percent-encoded (`encodeURIComponent`); raw UTF-8 is accepted too. Optional on every request. When it differs from the paired name, the companion saves it as the device's `deviceName` (control characters removed, cut to 64 characters). An empty or undecodable value is ignored and never replaces a name. | PR 5 |
 
 ## Projects
 
@@ -50,12 +53,12 @@ Wire types are zod schemas in `packages/contracts/src/counterpart.ts` (`@scan-to
 | Method and path | Scope | Body | Reply |
 |---|---|---|---|
 | `GET /v1/objects/printers` | READ | | `{defaultDestinationId, destinations: PrinterDestination[]}`. From PR 1 each destination may carry `origin`, `state`, `stateCheckedAt` and `capabilities` (below). |
-| `GET /v1/objects/printers/<destinationId>/camera.jpg` | PRINT | | A JPEG from that printer's camera (PR 2), shared 3 s cache. 404 when the destination has no camera; 503 when the camera is busy or unreachable. Header `X-Captured-At` (ISO). |
+| `GET /v1/objects/printers/<destinationId>/camera.jpg` | PRINT | | A JPEG from that printer's camera (PR 2), shared 3 s cache. 404 when the destination has no camera; 503 when the camera is busy or unreachable. Header `X-Captured-At` (ISO), when the frame was taken. From PR 5 a frame up to 2 min old is returned at once while the next is fetched, so only a camera with no frame yet makes the request wait (below). |
 | `POST /v1/objects/<id>/printer` | PRINT | `{destinationId}` | `{object}` |
 | `GET /v1/objects/<id>/filaments` | PRINT | | `{filaments: [{slot, colour, material, name, filamentId, destinationId, suggested?}]}` for the project's printer. `suggested: true` (PR 2) marks the one preselected tray. |
 | `POST /v1/objects/<id>/estimate` | PRINT | `{destinationId?, quality?, strength?}` (PR 2) | `PrintEstimate` (below), unwrapped. Slices through the printer's MCP; can take up to 150 s. |
 | `POST /v1/objects/<id>/print` | PRINT | `{checked?, filament?, quality?, strength?, colour?}` (settings PR 2) | `{object}` with `state: "printing"` |
-| `POST /v1/objects/<id>/print-confirmation` | PRINT | `{confirmationId, answer: {action: "accept", content: {<field>: boolean}} \| {action: "decline"\|"cancel"}}` | `{object}` |
+| `POST /v1/objects/<id>/print-confirmation` | PRINT | `{confirmationId, answer: {action: "accept", content: {<field>: boolean \| string \| number}} \| {action: "decline"\|"cancel"}}` (strings and numbers PR 5) | `{object}`. An answer that doesn't fit the question is 400 `invalid-request`, and `message` names the field and the reason (below). |
 | `POST /v1/objects/<id>/plate` | PRINT | `{clear: true}` | Always 409: a clear plate alone never approves a print (unchanged from `main`). Answer `…/print-confirmation` instead. |
 | `GET /v1/objects/<id>/plate.jpg` | PRINT | | The frame the plate check judged |
 | `GET /v1/objects/<id>/camera.jpg` | PRINT | | A JPEG from the camera of the printer this project is printing on, or its chosen printer (PR 2). Same cache, codes and header as the printer camera route. |
@@ -70,11 +73,63 @@ Wire types are zod schemas in `packages/contracts/src/counterpart.ts` (`@scan-to
 |---|---|---|
 | `quality` | `draft`, `standard` (default), `fine` | `slice_stl` `layer_height`: draft 0.28 mm, fine 0.12 mm for a 0.4 mm nozzle, scaled by nozzle ÷ 0.4 for another configured nozzle size and rounded to 0.01 mm. **Standard sends nothing: the MCP's own preset decides** (0.20 mm on its 0.4 mm presets). |
 | `strength` | `standard` (default), `strong`, `max` | `slice_stl` `wall_loops` and `sparse_infill_density`: strong 4 and `"25%"`, max 6 and `"40%"`. Standard sends nothing (the preset's own, 2 and 15% on Bambu's standard presets). |
-| `colour` | omitted, `{auto: true}`, `{amsSlot: n}`, `{external: true}`, `{material: "PETG"}` | Omitted: the MCP's own defaults, as today. `auto`: `print_3mf` `use_ams: true, auto_match_ams: true` (the user kept the preselection). `amsSlot`: the slot must be a loaded tray in the live filament list; `use_ams: true, ams_slots: [n], auto_match_ams: false`, and `slice_stl` `load_filaments` with that tray's profile and `filament_colours`. `external`: `use_ams: false`. `material` (generic printers): `upload_gcode` `material`, and `slice_stl` `load_filaments` when the MCP's filament list gives a profile for it. |
+| `colour` | omitted, `{auto: true}`, `{amsSlot: n}`, `{external: true}`, `{material: "PETG"}` | Omitted: the MCP's own defaults, as today. `auto`: `print_3mf` `use_ams: true, auto_match_ams: true` (the user kept the preselection). `amsSlot`: the slot must be a loaded tray in the live filament list; `use_ams: true, ams_slots: [n], auto_match_ams: false`, and `slice_stl` `load_filaments` with that tray's profile and `filament_colours`. `external`: `use_ams: false`. `material` ("What's loaded?", any printer, PR 5): see below. |
 
 `filament` (the full tray identity, as today) is still accepted; send either `filament` or `colour`, not both (400).
 
+**`colour: {material}` (PR 5).** The person says which material is loaded, for example `"PETG"` (case doesn't matter). Offer it when the destination's `capabilities.materialChoice` is true. What is sent depends on the printer's MCP:
+
+- **bambu-printer-mcp, the material is on a loaded spool** (an AMS tray, or the external spool when the printer reports it): that spool, exactly as `amsSlot` would choose it: its profile in `slice_stl` `load_filaments` and its colour in `filament_colours`, then `print_3mf` with `ams_slots: [slot]`, or `use_ams: false` for the external spool.
+- **bambu-printer-mcp, no spool reports that material**: refused with 409, "The printer doesn't report a PETG spool. Set the external spool to PETG on the printer, or load PETG in the AMS, then try again." Nothing is sliced or sent: without a spool there is no profile for the material, and the preset's filament would slice it with another material's settings. A printer without an AMS reports the external spool once its type is set on the printer, and that case is the first bullet (`use_ams: false`).
+- **mcp-3D-printer-server**: `slice_stl` `load_filaments` with the profile its `get_printer_filaments` reports for a slot of that material (`slots[].profile`, or `slots[].resolved_profile_path`; absolute paths only), and `upload_gcode` `material`. Without such a profile, only the destination's configured material is accepted (the MCP's own preset is for it). Any other material is refused with 409: "mcp-3D-printer-server doesn't give a slicing profile for PETG on this printer, so Counterpart can't slice for it. Choose PLA, the configured material, or update mcp-3D-printer-server." Today's mcp-3D-printer-server reports no profiles, so on it the choice works once KAN-216 adds them.
+
 A non-standard `quality` or `strength` the destination's MCP can't apply (its `slice_stl` schema lacks the argument) is refused with 409 and a sentence naming the update, never silently printed at preset values. `capabilities.quality` / `capabilities.strength` say beforehand which the print sheet can offer.
+
+### Printer questions: `printConfirmation` (PR 5 for the field types)
+
+While the printer's MCP asks something (MCP elicitation, form mode), the object carries `printConfirmation`:
+
+`{id, message, expiresAtMs, supported, fields: [{name, title, description?, required, type?, enum?, enumNames?, default?, minimum?, maximum?, minLength?, maxLength?, format?}]}`
+
+| Field | Meaning |
+|---|---|
+| `type` | `string`, `number` or `integer`. **Absent means boolean**: the companion leaves `type` out for booleans so older apps read the same fields as before. |
+| `enum`, `enumNames` | A string choice: the allowed values, and the words to show for each (same length). Both MCP spellings are relayed this way: `enum` with optional `enumNames`, and `oneOf: [{const, title}]`. |
+| `default` | The MCP's suggested value (boolean, string or number, matching `type`). Preselect it; it is never sent unless the person submits it. |
+| `minimum`, `maximum` | Number and integer bounds, inclusive |
+| `minLength`, `maxLength` | String length bounds, counted in Unicode code points as JSON Schema does (an emoji made of several code points counts as several) |
+| `format` | `email`, `uri`, `date` (`YYYY-MM-DD`, a real calendar day: `2026-02-30` is refused) or `date-time` (`YYYY-MM-DDTHH:MM[:SS[.fff]]` with `Z` or an offset) |
+
+`supported` is true when the MCP's schema is a flat object whose every property is one of these primitives. Anything else (nested objects, arrays, unknown keywords) is relayed with `supported: false`; show `message` and offer only Cancel.
+
+**Answers.** `{action: "accept", content}` sends `content` as `{<field name>: value}`, each value a boolean, a string or a number matching that field. The companion checks it against the question before the MCP sees it, and a failure is 400 `invalid-request` (`objects.answerPrintConfirmation`: `invalid-request`) whose `message` names the field by its title:
+
+| Check | `message` |
+|---|---|
+| boolean field given something else | `"<title>" needs yes or no.` |
+| string field given something else | `"<title>" needs text.` |
+| not one of `enum` | `"<title>" must be one of the choices.` |
+| shorter than `minLength` / longer than `maxLength` | `"<title>" needs at least N characters.` / `"<title>" takes at most N characters.` |
+| `format` not met | `"<title>" must be a valid email` (or `uri`, `date`, `date-time`) |
+| number field given something else | `"<title>" needs a number.` |
+| integer field given a fraction | `"<title>" needs a whole number.` |
+| below `minimum` / above `maximum` | `"<title>" must be at least N.` / `"<title>" must be at most N.` |
+| a key the question doesn't have | `"<name>" isn't part of the printer's question.` |
+| a `required` field left out | `"<title>" needs an answer.` |
+| accepting a `supported: false` question | `This printer question can only be cancelled here.` |
+
+A rejected answer leaves the question open, so the person can correct it and send again. `decline` and `cancel` take no content. Only a person's answer is sent: a camera frame or plate check never approves a question, and nothing is answered on the person's behalf.
+
+### Camera timing (PR 5)
+
+A P1S camera snapshot (bambu-printer-mcp `camera_snapshot`, bambu-tcp) takes 5 to 7 s on its own, measured on David's printer. So the companion:
+
+- answers a camera request from the last frame when it is under 3 s old, and otherwise from a frame up to 2 min old while one fetch for the next runs (several viewers share it). `X-Captured-At` is always when that frame was taken: show "a few seconds ago" from it rather than assuming it is live;
+- waits only when there is no frame yet, or the last one is over 2 min old;
+- warms the camera when a view opens: `GET /v1/objects/<id>` of a printing project (or one with a printer question) and `GET /v1/objects/printers` connect that printer's session and fetch a frame ahead of the first camera request, at most once a minute per printer;
+- keeps the session held for 30 s after each camera request, so a view refreshing every 3 s never meets a closed session.
+
+Live, P1S through bambu-printer-mcp 1.1.46: cold first frame 5.3 s; then 0 to 1 ms per 3 s refresh (each new frame arrives about every 6 s, as fast as the camera gives them); a view's first request 1 s after it opened waited 4.0 s instead of 5.3 s.
 
 ### `PrintEstimate` (PR 2)
 
@@ -101,6 +156,7 @@ A non-standard `quality` or `strength` the destination's MCP can't apply (its `s
 | `quality` | `slice_stl` takes `layer_height` |
 | `strength` | `slice_stl` takes `wall_loops` and `sparse_infill_density` |
 | `multiColour` | `counterpart_make_3mf` exists |
+| `materialChoice` | always (PR 5): `colour: {material}` is accepted for this destination ("What's loaded?"); the material is sliced with a profile the printer reports for it, or refused with what to do (above) |
 
 `missing` lists what this install's version lacks (not what the hardware lacks), and `update.message` says which update unlocks it, for example "Update mcp-3D-printer-server to see progress and camera." `update.command` is the package-manager command for how that MCP is installed (`["npm","install","-g","bambu-printer-mcp@latest"]` for a global npm install); it is absent for an `npx` profile (npx fetches the latest itself; restarting Counterpart is enough) and for a source checkout. The companion never runs it; the Mac app's Update button does.
 

@@ -313,15 +313,21 @@ test('a control is sent only while the printer is still printing this project\'s
   assert.equal(f.calls.filter(c => c.name === 'cancel_print').length, 0);
 });
 
-test('a material the printer has no loaded spool for is refused instead of printed with the old profile', async t => {
+test('"What\'s loaded?" on Bambu prints from a spool of that material with its profile, and never slices it with another material\'s', async t => {
   const f = await setup(t);
-  await assert.rejects(f.service.print(f.object.id, {colour: {material: 'ASA'}}), /can't switch this printer to ASA/);
+  // A loaded PETG spool: print from it with its own profile.
   await f.service.print(f.object.id, {colour: {material: 'petg'}});
   const run = await until(() => f.runs.at(-1));
-  assert.equal(run.selection.material, 'PETG');
+  assert.deepEqual(run.selection, {model: 'p1s', material: 'PETG', useAms: true, amsSlots: [0], autoMatchAms: false});
   assert.equal(run.options.slicer.loadFilaments, '/p/petg.json');
   await f.approve();
   await f.service.settled(f.object.id);
+  // No spool reports ASA: refused with what to do, nothing sliced or sent (the preset would slice it as PLA).
+  const g = await setup(t);
+  await assert.rejects(g.service.print(g.object.id, {colour: {material: 'ASA'}}), /doesn't report a ASA spool\. Set the external spool to ASA on the printer/);
+  assert.equal(g.runs.length, 0);
+  assert.equal((await g.service.get(g.object.id)).state, 'ready');
+  assert.equal(g.directory.capabilities('current').materialChoice, true);
 });
 
 test('an event\'s frame is served from the project folder, and every object carries its status line', async t => {

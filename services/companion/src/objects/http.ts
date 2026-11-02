@@ -2,7 +2,7 @@ import type {IncomingMessage, ServerResponse} from 'node:http';
 import {readFile} from 'node:fs/promises';
 import {basename, join} from 'node:path';
 import type {RemoteScope} from '../remote-auth.js';
-import {InvalidCaptureManifestError, InvalidStateError, type ObjectService} from './service.js';
+import {InvalidAnswerError, InvalidCaptureManifestError, InvalidStateError, type ObjectService} from './service.js';
 import {CameraUnavailableError, type CameraFrame} from '../printing/camera.js';
 import {MilestonesSchema, type ObjectStatus} from '@scan-to-make/contracts/counterpart';
 import {objectStatus, projectTitle} from '../events/words.js';
@@ -80,7 +80,7 @@ export function createObjectRoutes(service: ObjectService) {
         if (url.pathname === '/v1/objects/printers') {
           if (request.method !== 'GET') throw new HttpFailure(405, 'method-not-allowed');
           await authorize(READ);
-          return send(response, 200, service.printers());
+          return send(response, 200, service.printers({view: true}));
         }
         const printerCamera = PRINTER_CAMERA.exec(url.pathname);
         if (printerCamera) {
@@ -125,7 +125,7 @@ export function createObjectRoutes(service: ObjectService) {
           }
           if (method !== 'GET') throw new HttpFailure(405, 'method-not-allowed');
           await authorize(READ);
-          return send(response, 200, {object: publicObject(await service.get(id))});
+          return send(response, 200, {object: publicObject(await service.view(id))});
         }
         if (action === 'filaments') {
           if (method !== 'GET') throw new HttpFailure(405, 'method-not-allowed');
@@ -306,6 +306,7 @@ export function createObjectRoutes(service: ObjectService) {
       } catch (error) {
         if (error instanceof HttpFailure) return send(response, error.status, {error: {code: error.code, message: error.message}});
         if (error instanceof ObjectNotFoundError) return send(response, 404, {error: {code: 'not-found', message: 'Object not found'}});
+        if (error instanceof InvalidAnswerError) return send(response, 400, {error: {code: 'invalid-request', message: error.message}});
         if (error instanceof InvalidStateError) return send(response, 409, {error: {code: 'invalid-state', message: error.message}});
         if (error instanceof InvalidCaptureManifestError) return send(response, 400, {error: {code: 'invalid-request', message: error.message}});
         if (error instanceof CameraUnavailableError) return send(response, error.reason === 'no-camera' ? 404 : 503, {error: {code: error.reason === 'no-camera' ? 'not-found' : 'unavailable', message: error.message}});

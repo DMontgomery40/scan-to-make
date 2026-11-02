@@ -160,6 +160,21 @@ const exchangeSchema = z.strictObject({
     .max(80)
     .regex(/^[^\x00-\x1f\x7f]+$/),
 });
+/**
+ * `X-Scan-Device-Name`: UTF-8, percent-encoded (encodeURIComponent) so names like "David’s iPhone" survive HTTP.
+ * Raw UTF-8 bytes are accepted too. Control characters go, and it is cut to 64 characters.
+ */
+export function deviceNameFromHeader(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  let text = value;
+  if (/%[0-9A-Fa-f]{2}/.test(text)) { try { text = decodeURIComponent(text); } catch { return undefined; } }
+  else if (/[\x80-\xff]/.test(text)) {
+    const decoded = Buffer.from(text, 'latin1').toString('utf8');
+    if (!decoded.includes('\uFFFD')) text = decoded;
+  }
+  const clean = [...text.replace(/[\x00-\x1f\x7f]/g, '').trim()].slice(0, 64).join('').trim();
+  return clean || undefined;
+}
 const hash = (secret: string) =>
   createHash('sha256').update(secret).digest('hex');
 const matches = (secret: string, digest: string) =>
@@ -579,6 +594,31 @@ export class RemoteAuthStore {
     return this.mutate((state) =>
       state.devices.map(({ tokenHash: _secret, installationKeyHash: _installation, ...device }) => device)
     );
+  }
+  /**
+   * The phone's own name from `X-Scan-Device-Name`, saved when it changes. An empty or unusable value never
+   * replaces a name. Returns whether it changed.
+   */
+  async renameDevice(deviceId: string, header: string): Promise<boolean> {
+    const name = deviceNameFromHeader(header);
+    if (!name) return false;
+    const { state } = await this.read();
+    if (!state.devices.some((device) => device.deviceId === deviceId && device.deviceName !== name)) return false;
+    return this.mutate((latest) => {
+      const device = latest.devices.find((x) => x.deviceId === deviceId);
+      if (!device || device.deviceName === name) return false;
+      device.deviceName = name;
+      return true;
+    });
+  }
+  /** Devices paired before stable installation identity (no installation key): audit M4's duplicate rows. */
+  async legacyDeviceIds(): Promise<Set<string>> {
+    return new Set((await this.legacyDevices()).map(device => device.deviceId));
+  }
+  async legacyDevices(): Promise<{ deviceId: string; pairedAt: number; lastRefreshedAt: number }[]> {
+    const { state } = await this.read();
+    return state.devices.filter(device => !device.installationKeyHash)
+      .map(({ deviceId, pairedAt, lastRefreshedAt }) => ({ deviceId, pairedAt, lastRefreshedAt }));
   }
   async revoke(deviceId: string) {
     z.uuid().parse(deviceId);

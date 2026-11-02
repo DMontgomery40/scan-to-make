@@ -73,7 +73,8 @@ export const parameters = {
   'settings.set': z.strictObject({milestones: MilestonesSchema}),
   'objects.answerPlate': z.strictObject({id: z.uuid()}),
   'objects.answerPrintConfirmation': z.strictObject({id: z.uuid(), confirmationId: z.uuid(), answer: z.union([
-    z.strictObject({action: z.literal('accept'), content: z.record(z.string().max(128), z.boolean())}),
+    // Any elicitation primitive; checked field by field against the pending question's own schema.
+    z.strictObject({action: z.literal('accept'), content: z.record(z.string().max(128), z.union([z.boolean(), z.string().max(4096), z.number().finite()]))}),
     z.strictObject({action: z.enum(['decline', 'cancel'])}),
   ])}),
 };

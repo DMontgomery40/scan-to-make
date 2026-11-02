@@ -199,6 +199,8 @@ export const PrinterCapabilitiesSchema = z.strictObject({
   /** `slice_stl` takes `wall_loops` and `sparse_infill_density`. */
   strength: z.boolean(),
   multiColour: z.boolean(),
+  /** The print sheet may ask "What's loaded?": `colour: {material}` is accepted (shown as chips when there is no spool list). */
+  materialChoice: z.boolean().optional(),
   /** The features this install lacks, each with the update that unlocks it. */
   missing: z.array(z.enum(['progress', 'camera', 'filaments', 'pause', 'resume', 'quality', 'strength', 'multi-colour'])).max(8),
   /** Present when `missing` is not empty: "Update mcp-3D-printer-server to see progress and camera." */

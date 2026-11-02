@@ -29,9 +29,9 @@ async function fixture(t) {
   for (const destination of destinations) {
     const config = catalog.resolve(destination.id), relay = new InMemoryElicitationRelay({timeoutMs: 2000});
     routes.set(destination.id, {store: new HandoffBundleStore(join(root, 'bundles')), relay, selection: config.selection,
-      runner: {backend: config.backend, runBundle: async (bundles, id) => {
+      runner: {backend: config.backend, runBundle: async (bundles, id, options = {}) => {
         const bundle = await bundles.read(id);
-        calls.push({destination: destination.id, backend: bundle.backend, selection: bundle.selection});
+        calls.push({destination: destination.id, backend: bundle.backend, selection: bundle.selection, ...(options.slicer ? {slicer: options.slicer} : {})});
         const answer = await relay.request({method: 'elicitation/create', params: {mode: 'form', message: 'Check the selected printer.', requestedSchema: CONFIRM}}, {bundleId: id});
         answers.push({destination: destination.id, answer});
         if (answer.action !== 'accept') throw new Error('declined');
@@ -101,7 +101,10 @@ test('phone and Mac confirmation answers use the selected destination and reject
   const endpoint = `http://127.0.0.1:${server.address().port}/v1/objects/${object.id}/print-confirmation`;
   const post = body => fetch(endpoint, {method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify(body)});
   assert.equal((await post({confirmationId: question.id, answer: {action: 'accept', content: {confirmed: true}}})).status, 409);
-  assert.equal((await post({confirmationId: next.id, answer: {action: 'accept', content: {confirmed: true, other: true}}})).status, 409);
+  // An answer that doesn't fit the question is refused with the field's reason.
+  const extra = await post({confirmationId: next.id, answer: {action: 'accept', content: {confirmed: true, other: true}}});
+  assert.equal(extra.status, 400);
+  assert.match((await extra.json()).error.message, /"other" isn't part of the printer's question/);
   assert.equal(answers.length, 1);
   assert.equal((await post({confirmationId: next.id, answer: {action: 'cancel'}})).status, 200);
   assert.equal((await service.settled(object.id)).state, 'ready');
@@ -168,4 +171,29 @@ test('a print recorded against a destination that became a duplicate still reads
   const loaded = await service.get(object.id);
   assert.equal(loaded.print.printerStatus.job, 'job on second');
   assert.equal(loaded.print.destination.id, 'old-duplicate', 'history is not rewritten');
+});
+
+test('on mcp-3D-printer-server the chosen material is sliced with the profile its filament report gives, or is the configured one', async t => {
+  const {service, object, calls, routes} = await fixture(t);
+  await service.selectPrinter(object.id, 'second');
+  const answer = async () => {
+    await until(async () => (await service.get(object.id)).printConfirmation);
+    const question = (await service.get(object.id)).printConfirmation;
+    await service.answerPrintConfirmation(object.id, question.id, {action: 'accept', content: {confirmed: true}});
+    await service.settled(object.id);
+  };
+  // No profile for it and not the configured material: refused, never sliced with the preset's filament.
+  await assert.rejects(service.print(object.id, {colour: {material: 'PETG'}}), /doesn't give a slicing profile for PETG on this printer.*Update mcp-3D-printer-server/);
+  assert.equal(calls.length, 0);
+  // The configured material needs no profile: the MCP's own preset is for it.
+  routes.get('second').selection = {...routes.get('second').selection, material: 'PLA'};
+  await service.print(object.id, {colour: {material: 'pla'}});
+  await answer();
+  assert.equal(calls.at(-1).selection.material, 'PLA');
+  assert.equal(calls.at(-1).slicer, undefined);
+  // A report with a profile for it: sliced with that profile.
+  routes.get('second').runner.filaments = async () => ({slots: [{id: 'ext', material: 'PETG', profile: '/profiles/petg.ini', source: 'spoolman'}]});
+  await service.print(object.id, {checked: true, colour: {material: 'petg'}});
+  await answer();
+  assert.deepEqual(calls.at(-1).slicer, {loadFilaments: '/profiles/petg.ini'});
 });

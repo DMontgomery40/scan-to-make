@@ -22,6 +22,7 @@ import { EventLog } from './events/log.js';
 import { projectTitle, sizeText } from './events/words.js';
 import { LiveActivityTokenStore } from './devices/live-activity-tokens.js';
 import { DevicePresence } from './devices/presence.js';
+import { pruneLegacyDevices } from './devices/legacy.js';
 import {startLocalControl} from './local-control.js';
 import {createControlDispatcher, companionVersion} from './local-control-services.js';
 import type {CaptureServices} from './capture-http.js';
@@ -86,6 +87,12 @@ const eventLog=remoteAuth?await new EventLog(join(dataRoot,'events.ndjson'),{con
 }}).open():undefined;
 const liveActivityTokens=remoteAuth?new LiveActivityTokenStore(join(dataRoot,'live-activity-tokens.json')):undefined;
 const presence=remoteAuth?new DevicePresence(join(remoteAuth.directory,'device-presence.json')):undefined;
+// Audit M4: legacy device rows (paired before stable identity) unused for 14 days are removed; checked at start and every 6 h.
+if(remoteAuth&&presence){
+  const prune=()=>void pruneLegacyDevices(remoteAuth,presence,{...(liveActivityTokens?{tokens:liveActivityTokens}:{})}).catch(()=>undefined);
+  prune();
+  setInterval(prune,6*60*60*1000).unref();
+}
 if(handoffConfig&&printHandoff&&captureDirectory&&claudePath){
   const objectStore=new ObjectStore(join(captureDirectory,'objects'));
   objectStoreForEvents=objectStore;

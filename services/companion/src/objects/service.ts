@@ -16,6 +16,8 @@ import {PassTimings, STAGE_DEFAULT_SEC, passEstimate, stageWords, type PassKind,
 import type {DesignEngine} from '../touchup/invocation.js';
 import type {PrintHandoffServices} from '../print-handoff-http.js';
 import type {PlateVerdict} from './bedcheck.js';
+import {printQuestion, validateAnswer, type ConfirmationValue} from './confirmation.js';
+import {InvalidStateError} from './errors.js';
 import type {TouchupInput} from '../touchup/touchup.js';
 import {publicTouchupText, type TouchupActivity, type TouchupResult} from '../touchup/runner.js';
 import {ObjectNotFoundError, ObjectStore, type ObjectPrintConfirmation, type StmObject} from './store.js';
@@ -41,9 +43,8 @@ export const PHOTOS_PER_PASS = 24;
 const BEST_GUESS_NOTE = "Make your best guess for the parts you couldn't see in the photos, and carry on.";
 const UNCERTAIN = 'The printer may have started this print. Check the printer before printing again.';
 
-export class InvalidStateError extends Error {
-  constructor(message: string) { super(message); this.name = 'InvalidStateError'; }
-}
+export {InvalidStateError} from './errors.js';
+export {InvalidAnswerError} from './confirmation.js';
 
 export class InvalidCaptureManifestError extends Error {
   constructor() { super('Invalid capture manifest'); this.name = 'InvalidCaptureManifestError'; }
@@ -135,32 +136,10 @@ export interface ObjectServiceDeps {
 export interface PrintOptions extends PrintSettings {checked?: boolean; filament?: FilamentChoice}
 const BAMBU_TO_STATUS: Record<string, string> = {idle: 'IDLE', preparing: 'PREPARE', printing: 'RUNNING', paused: 'PAUSE', finished: 'FINISH', failed: 'FAILED', cancelled: 'FAILED', offline: 'OFFLINE', busy: 'UNKNOWN'};
 
-export type ObjectPrintAnswer = {action: 'accept'; content: Record<string, boolean>} | {action: 'decline' | 'cancel'; content?: never};
+export type ObjectPrintAnswer = {action: 'accept'; content: Record<string, ConfirmationValue>} | {action: 'decline' | 'cancel'; content?: never};
 export interface FilamentChoice {slot: number; colour: string; material: string; name: string; filamentId: string; destinationId: string; suggested?: boolean}
 type LiveFilament = FilamentChoice & {profile: string};
 const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
-
-/** Preserve the question; support only the boolean form we can faithfully show and answer. */
-function printQuestion(pending: PendingElicitation): ObjectPrintConfirmation {
-  const question: ObjectPrintConfirmation = {id: pending.id, message: pending.message, expiresAtMs: pending.expiresAtMs, fields: [], supported: false};
-  const schema = pending.requestedSchema;
-  if (pending.mode !== 'form' || !record(schema) || schema.type !== 'object' || !record(schema.properties)
-      || Object.keys(schema).some(key => !['type', 'properties', 'required', 'additionalProperties', 'title', 'description'].includes(key))
-      || (schema.additionalProperties !== undefined && typeof schema.additionalProperties !== 'boolean')) return question;
-  const required = schema.required ?? [];
-  if (!Array.isArray(required) || required.some(key => typeof key !== 'string' || !Object.hasOwn(schema.properties as object, key))) return question;
-  const fields: ObjectPrintConfirmation['fields'] = [];
-  for (const [name, property] of Object.entries(schema.properties)) {
-    if (!name.length || name.length > 128 || !record(property) || property.type !== 'boolean'
-        || Object.keys(property).some(key => !['type', 'title', 'description', 'default'].includes(key))
-        || (property.title !== undefined && typeof property.title !== 'string')
-        || (property.description !== undefined && typeof property.description !== 'string')
-        || (property.default !== undefined && typeof property.default !== 'boolean')) return question;
-    fields.push({name, title: typeof property.title === 'string' ? property.title : name,
-      ...(typeof property.description === 'string' ? {description: property.description} : {}), required: required.includes(name)});
-  }
-  return fields.length ? {...question, fields, supported: true} : question;
-}
 
 function toolProgress(name: string): string {
   if (['Read', 'WebSearch', 'WebFetch'].includes(name)) return 'Checking the reference material.';
@@ -212,6 +191,7 @@ export class ObjectService {
   /** Stops running touch-ups and prints and waits for them to finish. */
   async close(): Promise<void> {
     this.#closed = true;
+    this.#deps.camera?.close();
     for (const controller of this.#controllers.values()) controller.abort();
     // Monitors stop watching; their saved state lets the next start carry on.
     for (const monitor of this.#monitors.values()) monitor.controller.abort();
@@ -297,8 +277,14 @@ export class ObjectService {
     return pass.activity ?? [];
   }
 
-  printers(): {defaultDestinationId?: string; destinations: PublicDestination[]} {
-    if (this.#deps.printers) return this.#deps.printers.list();
+  printers(options: {view?: boolean} = {}): {defaultDestinationId?: string; destinations: PublicDestination[]} {
+    if (this.#deps.printers) {
+      const listed = this.#deps.printers.list();
+      // A printer view opened: warm each camera that has one, so its first frame doesn't wait on a cold session.
+      if (options.view) for (const destination of listed.destinations)
+        if (destination.capabilities?.camera !== 'none') this.#warmCamera(destination.id);
+      return listed;
+    }
     const catalog = this.#deps.printerCatalog;
     return {defaultDestinationId: catalog?.defaultDestinationId, destinations: catalog?.destinations.map(({id, name, backend, model, address, source, origin}) =>
       ({id, name, backend, ...(model ? {model} : {}), ...(address ? {address} : {}), source, ...(origin ? {origin} : {})})) ?? []};
@@ -309,6 +295,22 @@ export class ObjectService {
     const catalog = this.#deps.printerCatalog;
     const chosen = object.printerDestinationId ?? catalog?.defaultDestinationId;
     return chosen === undefined ? undefined : catalog?.canonical(chosen) ?? chosen;
+  }
+
+  /** A filament profile path mcp-3D-printer-server reports for a loaded material (`slots[].profile`), if any. */
+  async #genericProfile(id: string, material: string): Promise<string | undefined> {
+    const object = await this.get(id);
+    const destinationId = this.#destinationId(object);
+    const services = destinationId ? this.#deps.print?.destinations?.get(destinationId) : this.#deps.print?.services;
+    if (!services?.runner.filaments) return undefined;
+    const inventory = await services.runner.filaments().catch(() => undefined);
+    const slots = record(inventory) && Array.isArray(inventory.slots) ? inventory.slots : [];
+    for (const slot of slots) {
+      if (!record(slot) || typeof slot.material !== 'string' || slot.material.toLowerCase() !== material.toLowerCase()) continue;
+      const path = typeof slot.profile === 'string' ? slot.profile : typeof slot.resolved_profile_path === 'string' ? slot.resolved_profile_path : undefined;
+      if (path && path.startsWith('/')) return path;
+    }
+    return undefined;
   }
 
   private async liveFilaments(id: string): Promise<LiveFilament[]> {
@@ -618,11 +620,25 @@ export class ObjectService {
     if ('auto' in colour) return backend === 'bambu-printer-mcp'
       ? {selection: {...selection, useAms: true, autoMatchAms: true, amsSlots: undefined, amsMapping: undefined}} : {...(selection ? {selection} : {})};
     if ('material' in colour) {
-      // A material is only honoured with a slicer profile for it; otherwise say so rather than print the old one.
-      const live = await this.liveFilaments(id).catch(() => [] as LiveFilament[]);
-      const match = live.find(item => item.material.toLowerCase() === colour.material.toLowerCase());
-      if (!match) throw new InvalidStateError(`Counterpart can't switch this printer to ${colour.material} yet. Load it and choose its spool, or print with the profile's own material.`);
-      return {selection: {...selection, material: match.material}, slicer: {loadFilaments: match.profile}};
+      // "What's loaded?" (PRD §8.4–8.5): the person says which material is in the printer.
+      const material = colour.material.trim();
+      if (backend === 'bambu-printer-mcp') {
+        const live = await this.liveFilaments(id).catch(() => [] as LiveFilament[]);
+        const match = live.find(item => item.material.toLowerCase() === material.toLowerCase());
+        // A loaded spool of that material: print from it with its own profile.
+        if (match) return {selection: {...selection, material: match.material, useAms: match.slot !== 254 && match.slot !== 255,
+          amsSlots: [match.slot], amsMapping: undefined, autoMatchAms: false}, slicer: {loadFilaments: match.profile, filamentColours: match.colour}};
+        // No spool reports it (the external spool counts once the printer knows its type): there is no profile to
+        // slice it with, and slicing with the preset's filament would print the wrong material's settings.
+        throw new InvalidStateError(`The printer doesn't report a ${material} spool. Set the external spool to ${material} on the printer, or load ${material} in the AMS, then try again.`);
+      }
+      // mcp-3D-printer-server: sliced with the profile its filament report gives for that material. Without one,
+      // only the configured material (what the MCP's own preset is for) can be declared without a profile.
+      const profile = await this.#genericProfile(id, material);
+      if (profile) return {selection: {...selection, material}, slicer: {loadFilaments: profile}};
+      const configured = selection?.material?.trim();
+      if (configured && configured.toLowerCase() === material.toLowerCase()) return {selection: {...selection, material: configured}};
+      throw new InvalidStateError(`mcp-3D-printer-server doesn't give a slicing profile for ${material} on this printer, so Counterpart can't slice for it. ${configured ? `Choose ${configured}, the configured material, or update` : 'Update'} mcp-3D-printer-server.`);
     }
     const live = await this.liveFilaments(id);
     if ('external' in colour) {
@@ -761,6 +777,20 @@ export class ObjectService {
     return camera.frame(destinationId, session, {model: session.config.selection?.model}).catch(() => undefined);
   }
 
+  /** A client opened this project: while it prints (or the printer asks something), warm its printer's camera. */
+  async view(id: string): Promise<StmObject> {
+    const object = await this.get(id);
+    if (object.state === 'printing' || object.printConfirmation) {
+      const destinationId = object.print?.destinationId ?? object.print?.destination?.id ?? this.#destinationId(object);
+      if (destinationId) this.#warmCamera(destinationId);
+    }
+    return object;
+  }
+  #warmCamera(destinationId: string): void {
+    const session = this.#deps.printers?.session(destinationId);
+    if (session) this.#deps.camera?.warm(this.#deps.printerCatalog?.canonical(destinationId) ?? destinationId, session, {model: session.config.selection?.model});
+  }
+
   /** The camera of the project's printer (the one printing it, else its chosen one). */
   async camera(id: string): Promise<CameraFrame> {
     const object = await this.get(id);
@@ -771,7 +801,7 @@ export class ObjectService {
   async printerCamera(destinationId: string): Promise<CameraFrame> {
     const session = this.#deps.printers?.session(destinationId), camera = this.#deps.camera;
     if (!session || !camera) throw new CameraUnavailableError('no-camera');
-    return camera.frame(this.#deps.printerCatalog?.canonical(destinationId) ?? destinationId, session, {model: session.config.selection?.model});
+    return camera.frame(this.#deps.printerCatalog?.canonical(destinationId) ?? destinationId, session, {model: session.config.selection?.model, view: true});
   }
 
   /** Pause, resume or stop this project's print, through the destination's mutex (PRD §8.6). */
@@ -887,12 +917,9 @@ export class ObjectService {
       if (answer.action === 'cancel' || answer.action === 'decline') {
         if (answer.content !== undefined) throw new InvalidStateError('Invalid printer confirmation answer.');
         checked = {action: answer.action};
-      } else if (answer.action === 'accept' && question.supported && record(answer.content)) {
-        const content = answer.content;
-        if (Object.entries(content).some(([key, value]) => typeof value !== 'boolean' || !question.fields.some(field => field.name === key))
-            || question.fields.some(field => field.required && !Object.hasOwn(content, field.name)))
-          throw new InvalidStateError('Answer the fields in the current printer confirmation.');
-        checked = {action: 'accept', content: {...content} as Record<string, boolean>};
+      } else if (answer.action === 'accept' && question.supported) {
+        // Checked field by field against the MCP's own schema before it ever reaches the MCP.
+        checked = {action: 'accept', content: validateAnswer(question, answer.content)};
       } else throw new InvalidStateError('This printer question cannot be approved here. Cancel it and use a supported confirmation form.');
       // Declining Print's own question cancels that print; declining a pause or stop question changes nothing else.
       if (checked.action !== 'accept' && this.#running.has(id)) this.#cancelledPrints.add(id);
