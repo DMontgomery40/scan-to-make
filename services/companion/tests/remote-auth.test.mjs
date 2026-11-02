@@ -264,9 +264,9 @@ const forwarded = JSON.parse(
     'utf8'
   )
 );
-async function httpFixture(t) {
+async function httpFixture(t, extra = {}) {
   const f = await fixture(t);
-  const server = await startCompanionServer({ port: 0, remoteAuth: f.store });
+  const server = await startCompanionServer({ port: 0, remoteAuth: f.store, ...extra });
   t.after(() => server.close());
   return { ...f, server };
 }
@@ -942,4 +942,16 @@ test('refreshing again within an hour writes nothing; the HTTP route refuses a b
     (await wire(server, '/v1/auth/refresh', { method: 'POST', headers: { ...credentials(phone), 'content-type': 'application/json' }, body: '{}' })).status,
     400
   );
+});
+
+test('/healthz says which Mac it is, by the name people know it, when the companion has one', async (t) => {
+  const { store, server } = await httpFixture(t, { name: 'Mac mini' });
+  const invite = await store.createPairing('alice@example.test');
+  const paired = await pairHttp(server, invite.code);
+  const health = await wire(server, '/healthz', { headers: credentials(paired.body) });
+  assert.equal(health.status, 200);
+  assert.equal(health.body.name, 'Mac mini');
+  const { macDisplayName } = await import('../dist/lan-addresses.js');
+  const name = macDisplayName();
+  assert.ok(name === undefined || (name.length > 0 && name.length <= 64 && !/\.local\.?$/i.test(name)), 'never the .local host name');
 });

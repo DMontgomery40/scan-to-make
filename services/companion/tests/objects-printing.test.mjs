@@ -433,3 +433,44 @@ test('one copy named is sent as repetitions 1, so it overrides a printer profile
   await g.approve();
   await g.service.settled(g.object.id);
 });
+
+test('the stove gap filler, end to end: "Getting ready" while it levels, then the printer stops it; failed in its own words, and prints again', async t => {
+  // HMS 0300_0D00_0002_0001 at layer 0 of 52, 3 %, then the job is gone (the real abort of 2026-11-02, as get_printer_status reports it).
+  const hms = {attr: 0x03000D00, code: 0x00020001};
+  const levelling = {connected: true, print: {filename: JOB, progress: 3, timeRemaining: 175, currentLayer: 0, totalLayers: 52}, raw: {gcode_state: 'RUNNING', subtask_name: JOB, task_id: '0', hms: [hms]}};
+  const f = await setup(t, {reports: [status('PREPARE', 0), levelling, levelling, {connected: true, print: {}, raw: {gcode_state: 'IDLE', hms: [hms]}}]});
+  const {objectStatus, eventWords} = await import('../dist/events/words.js');
+  await f.service.print(f.object.id);
+  await f.approve();
+  await f.service.settled(f.object.id);
+  await f.tick(); await f.tick();
+  const getting = await until(async () => { const o = await f.service.get(f.object.id); return o.print?.live?.job?.layer === 0 ? o : undefined; });
+  assert.deepEqual([objectStatus(getting).phase, objectStatus(getting).text], ['preparing', 'Getting ready']);
+  assert.equal(getting.print.printerStatus.percent, undefined, 'no percent while it gets ready');
+  for (let i = 0; i < 2; i++) await f.tick();
+  const failed = await until(async () => { const o = await f.service.get(f.object.id); return o.print?.monitor?.phase === 'ended' ? o : undefined; });
+  // The state really flips to failed, in the printer's own words (this report has only the code).
+  assert.equal(failed.state, 'failed');
+  assert.equal(failed.failure, 'The printer stopped (0300_0D00_0002_0001).');
+  assert.deepEqual(objectStatus(failed), {phase: 'failed', text: failed.failure, symbol: 'exclamationmark.triangle', tint: 'red'});
+  const event = f.events.find(item => item.type === 'print.failed');
+  assert.ok(event?.frame, 'with the camera frame');
+  assert.equal(eventWords(event.type, event.data, {title: 'Stove gap filler', printer: 'Bambu Lab P1S'}).notify, 'timeSensitive');
+  assert.equal(eventWords(event.type, event.data, {title: 'Stove gap filler', printer: 'Bambu Lab P1S'}).body, 'The printer stopped (0300_0D00_0002_0001).');
+  // Print Again: a failed project with its model prints again.
+  const again = await f.service.print(f.object.id);
+  assert.equal(again.state, 'printing');
+});
+
+test('the failure sentence and code come from the report that ended the print (Codex repro: preparing, then idle with the code)', async t => {
+  const hms = {attr: 0x03000D00, code: 0x00020001};
+  const f = await setup(t, {reports: [status('PREPARE', 0), {connected: true, print: {}, raw: {gcode_state: 'IDLE', hms: [hms]}}]});
+  await f.service.print(f.object.id);
+  await f.approve();
+  await f.service.settled(f.object.id);
+  for (let i = 0; i < 2; i++) await f.tick();
+  const failed = await until(async () => { const o = await f.service.get(f.object.id); return o.print?.monitor?.phase === 'ended' ? o : undefined; });
+  assert.deepEqual([failed.state, failed.failure], ['failed', 'The printer stopped (0300_0D00_0002_0001).']);
+  // The saved record is that ending report too, not the last one while it got ready.
+  assert.deepEqual(failed.print.live.problems.map(problem => problem.code), ['0300_0D00_0002_0001']);
+});

@@ -45,14 +45,14 @@ type CounterpartEvent = {
 | `pass.failed` | A pass ends without a model | "*Title* didn't finish" | what happened and what to do | active | |
 | `print.preparing` | Print was tapped; each preparation step | "Getting *Title* ready" | the step: "Slicing the model", "Checking the printer", … | none | |
 | `print.confirm` | The printer MCP asks its own confirmation | "*Printer* needs a yes before printing *Title*" | "Open Counterpart to answer." | timeSensitive | |
-| `print.started` | The printer reports our job preparing or printing | "Printing *Title* on *Printer*" | the printer's stage ("Heating the bed", "Auto bed leveling") or "Started" | passive | |
-| `print.status` | Something changed (below) | *Title* | "[*p*%] [· *remaining* left] [· layer *l* of *L*]" | none | |
+| `print.started` | The printer reports our job preparing or printing | "Printing *Title* on *Printer*"; while it gets ready, "*Printer* started *Title*" | "Getting ready · *stage*" while it gets ready, else the stage or "Started" | passive | |
+| `print.status` | Something changed (below) | *Title* | "Getting ready · *stage*" until layer 1 (below), then "[*p*%] [· *remaining* left] [· layer *l* of *L*]" | none | |
 | `print.first-layer` | Layer ≥ 2 for the first time (5 % when layers aren't reported) | "*Title*: first layer's down" | "[*remaining* left on ]*Printer*" | passive | yes |
 | `print.milestone` | Progress crosses a chosen milestone | 50: "*Title* is halfway"; 25: "*Title* is a quarter done"; 75: "*Title* is three-quarters done"; other: "*Title* is *p*% done" | "[*remaining* left · ][layer *l* of *L* · ]*Printer*" | active | yes |
 | `print.paused` | The printer's state becomes paused | "*Printer* paused *Title*" | the first problem's message, else "Open Counterpart to resume." | timeSensitive | yes |
 | `print.resumed` | paused → printing | *Title* | "Printing again on *Printer*" | none | |
 | `print.done` | The printer finishes our job | "*Title* is done" | "Take it off the plate." | active | yes |
-| `print.failed` | The printer reports our job failed | "*Printer* stopped *Title*" | the first problem's message, else "Check the printer, then try again." | timeSensitive | yes |
+| `print.failed` | The printer reports our job failed | "*Printer* stopped *Title*" | "The printer stopped: *its message*", or "The printer stopped (*code*)" for a code with no text (Bambu has none). Nothing more: the project offers Print Again. | timeSensitive | yes |
 | `print.cancelled` | Our job was cancelled (from the app or the printer) | "*Title* was cancelled" | "Nothing more will print." | passive | |
 | `print.not-started` | Our job didn't appear within 180 s of dispatch | "*Printer* didn't start *Title*" | "Nothing was sent twice. Check the printer, then press Print again." | timeSensitive | |
 | `print.unreachable` | 3 failed reads in a row, or offline for ≥ 60 s | "Lost contact with *Printer*" | "Still trying." | passive | |
@@ -61,7 +61,7 @@ type CounterpartEvent = {
 
 `notify` is the default level from PRD §9.1. The Mac app applies its own Settings → Notifications switches on top; progress events are off by default on the Mac.
 
-`data` per type: print events carry `state`, `progress`, `remainingSec`, `endsAt`, `layer`, `totalLayers` and `stage` whenever the printer reported them, and `problems` when there are any. `print.started` also carries the slice `estimateSec` and `grams`. `pass.started` and `pass.stage` carry `stage` (the stage's words) and `estimateSec` (the pass's time left). `pass.ask` carries `askId`. `print.confirm` carries `confirmationId` and `expiresAt`.
+`data` per type: print events carry `state`, `progress`, `remainingSec`, `endsAt`, `layer`, `totalLayers` and `stage` whenever the printer reported them, and `problems` when there are any. **Getting ready is not printing:** while the printer reports `preparing`, or `printing` at layer 0 (Bambu heats, cleans and levels there, at a few percent with the whole print's time left), or, with no layer count, a Bambu preparation stage ("Auto bed leveling", "Cleaning nozzle tip", "Waiting for heatbed to reach target temperature"…), `state` is `preparing` and there is no `progress`, `remainingSec`, `endsAt`, `layer` or `totalLayers`; `print.live` is the same. Those reports never count toward the first layer or a milestone. "*p*% · *T* left" starts at layer 1. `print.started` also carries the slice `estimateSec` and `grams`. `pass.started` and `pass.stage` carry `stage` (the stage's words) and `estimateSec` (the pass's time left). `pass.ask` carries `askId`. `print.confirm` carries `confirmationId` and `expiresAt`.
 
 ## The print monitor
 
@@ -69,7 +69,7 @@ One monitor runs per dispatched print and holds its printer's MCP session until 
 
 - **Our job.** bambu-printer-mcp: the report's job id equals the `taskId` `print_3mf` returned (H2 and P2S); a missing, empty or `"0"` id is not a key, and the job name is compared with `subtaskName` (or BambuNetwork's `printerJobName`, or the uploaded file's name without `.3mf`) instead. mcp-3D-printer-server: the job name equals the uploaded file name. A different job running is `replaced`. With no identity at all, a job named after the sliced file is adopted within the start window, and nothing else counts as ours or as replacing it; without one the print ends `sent`.
 - **Phase 1.** Read every 3 s for up to 180 s. The first report of our job preparing or printing emits `print.started`. None: `print.not-started`.
-- **Phase 2.** Read every 10 s. `print.status` is emitted when progress moves by ≥ 1 point, the state, layer or problems change, or 60 s have passed since the last one.
+- **Phase 2.** Read every 10 s. `print.status` is emitted when progress moves by ≥ 1 point, the state, layer, stage or problems change, or 60 s have passed since the last one.
 - **Older MCP installs.** Without `counterpart_print_progress` the monitor reads `get_printer_status`. On bambu-printer-mcp each of those reads makes the printer send its whole report (`push_all`), which OpenBambuAPI advises against doing often on P1-series printers, so this fallback reads every 10 s in phase 1 and every 30 s in phase 2. mcp-3D-printer-server's `get_printer_status` has no job progress: the monitor reports only the state, and the printer's capabilities say "Update mcp-3D-printer-server to see progress".
 - **Unreachable.** After 3 failed reads in a row, or 60 s of `offline`, `print.unreachable` is emitted once and reads continue every 30 s. The first good read returns to the normal rate and emits `print.status`.
 - **Milestones.** From the companion setting `milestones` (`off`, `50` (default), `25-50-75`, `every-10`). Each is sent once per print (`print.monitor.milestonesSent`).
