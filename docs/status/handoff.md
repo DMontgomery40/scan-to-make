@@ -1,5 +1,73 @@
 # Handoff: how to pick up Counterpart work
 
+## Latest acceptance update — 2026-11-02, 12:50 Mountain
+
+All 40 asks remain in scope. Main is `d2b612f8` (#279). Mac has signed build `202611021227`;
+phone has `202611021121`. Mac companion payload source `8c4160e2` is unchanged and identical to
+merged #272 (`a13c5735`). Phone installation
+retained app data. Actual phone Home, model, settings and print estimates are observed; physical camera/Face ID acceptance remains open. Mac installation
+and the temporary published-model test preserve six original projects/current models/photos,
+seven pairing identities, TLS and configuration exactly (`codex-deploy-20261102` receipts).
+
+**Observed on Mac:** the mic mount shows as a transparent, framed model; Explore in 3D starts
+interaction and returns to a still after idle. Printer sidebar opens Printers settings while
+preserving selected project. Fresh MakerWorld caliper profile 218979 imports from the browser-
+downloaded original as Ready, with designer/licence/link/plate preview and unchanged SHA-256
+`e08c4d77bc6bafd708e3fee653c7880732384f955622c2d7fbd93ce1f88af7bf`. The native Print sheet
+estimates 1 h 39 m / 40 g / 0.20 mm / 15% infill and preserves original filament assignments.
+It was canceled without dispatch. Only temporary project `7ded7e6e-65a5-4d6e-8531-283cd90c34d8`
+was removed after receipts; the six originals remain. This is not automatic browser-worker or
+physical print acceptance. Screenshots/receipt: `mac-1121-publisher-*` in the deployment folder.
+
+**New Project overflow is fixed and installed:** #278 makes the existing form scroll. On Mac 1215,
+the full MakerWorld preview at 1320 × 820 scrolls to visible Cancel/Get This Model actions; temporary
+draft canceled. Evidence: `mac-1215-new-project-scroll.png`. Model memory is improved by installed #279: exact geometry uses a packed native mesh buffer and a one-model cache. The actual installed potato → mic mount → Explore → idle scenario drops from 510 MB to **306 MB** (peak 564 MB), passing the open-window 350 MB target. Companion is 63 MB (peak 109 MB). Closing the window still retains **307 MB**, above the 150 MB menu-bar target; cache/window lifecycle diagnosis continues. Evidence: `mac-1227-*-footprint.txt`, idle CPU captures and `codex-model-memory-20261102`. Phone Instruments remains unverified.
+
+**Observed on phone 1121:** notification onboarding completed and OS Allow was accepted. Connected Home shows Mac mini / one printer ready and equal inset cards. Mic mount shows the full gold model; its actual Print Another sheet estimates 44 min / 18 g / 272 layers with P1S Ready and AMS choices. It was canceled without dispatch. A disposable duplicate verifies native Rename saves back to the Mac, and Project Settings saves Fine/two-copy defaults that produce a real 1 h 49 m / 37 g / 452-layer estimate in the phone Print sheet. Sheet canceled; only test copy `3caaa187-2858-4935-a1a8-378f1f130d6a` removed. `after-phone-controls.json` equals the prior six-project/seven-pairing preservation receipt. Original project preferences were not changed. Mirroring is closed. Actual notification delivery, camera/Face ID and full mockup parity are still separate checks.
+
+**Fusion is now installed and privately exercised through the real app worker.** Reviewed local
+Bambu 1.1.52 is `ed9aba3`; upstream CLI/add-in is `86a3016`, durable runtime at
+`~/Library/Application Support/Scan to Make/fusion/runtime-86a3016`. Only the two existing Fusion
+command/args lines in `~/bambu-printer-mcp/.env` changed. SSH command/key/config restrictions,
+Fusion manifest and port plist hashes remain unchanged. Configured SSH returns visible ping
+text with document binding; the fabricated empty structured result that hid tool text is fixed.
+Public Bambu #95/#96 and generic #49 remain unmerged/unpublished.
+
+The actual worker produced a 10 × 10 × 10 mm cube with editable `edge = 10 mm`, exported 12-triangle
+STL plus F3D/parameters, reopened the native archive and closed both owned documents. All four
+pre-existing document identities/flags and the original active stove's six-body geometry match.
+The 75-second worker used 20 tool calls; it was a private acceptance model, not a live user
+project or print. `codex-fusion-acceptance-20261102` retains `private-production-result.json`,
+`private-production-root-geometry.json`, `native-import-result.json`, `runtime-switch-receipt.json`,
+`final-local-integration.md`, model/CAD outputs, add-in originals and immediate package/env rollback.
+
+#271 removes physical camera use from ordinary iOS model views by explicitly selecting virtual
+camera mode. #277 rejects pre-dispatch/out-of-order printer reports: the real stove's cached
+FINISH at 17:52:41.810 UTC preceded dispatch at 17:52:44.110 yet previously marked it Done.
+Both fixes are installed; no new physical print/stop or hardware diagnosis is claimed.
+
+Cleanup quality remains unaccepted. The overview candidate improved the rounded rear; ray
+measurements show the alleged broad underside depression was actually overall convex. A later
+normal correction hit the 900-second cap and correctly remained Failed with a checkpoint. Its
+reduced geometry changed shape and was not imported into live projects. No further paid cleanup
+run is planned; inputs and user models remain preserved.
+
+Signed phone 1121 has `aps-environment=development` despite Release configuration. Relay code
+and loopback tests exist, but deployed APNs delivery is not verified. Pending portal key is Sandbox;
+the relay default is Production, so provisioning must match the signed entitlement. No key was
+registered. Mac bookkeeping has 18 saved events and one cloud push-to-start token, which establishes
+prior CloudKit exchange, not phone 1121/Watch delivery. README's Release/environment claim is corrected.
+
+Cleanup reclaimed 3.62 GiB net allocated space from verified merged trees/caches earlier; another
+169.7 MB local and 399.4 MB remote dependency data plus the obsolete 568.4 MiB 0946 app rollback
+were retired. Receipts/models/backups remain. Obsolete 0958/1121 app rollbacks and the older Bambu `16787aa` rollback were also retired; immediate app 1215 and pre-Fusion Bambu rollback remain. Active memory work and unmerged/user-owned branches are retained. Launch Services cleanup is being rechecked after the final build.
+
+Hosted scan-to-make Actions still fail before execution due account billing, including #272's
+post-merge Mac job 125483599839. Exact Node 22/24 workflows and signed native builds passed.
+Bambu ed9 hosted build/test/native-macos genuinely passed. Physical print/stop, fresh scan quality,
+phone/Watch notification delivery, APNs provisioning and same-account enrollment remain open.
+Older snapshots below are historical and superseded by this section.
+
 ## Current acceptance snapshot — 2026-11-02, 10:19 Mountain
 
 Mac build `202611020958` from `cdaf2685` is installed; phone build `202611020946` from

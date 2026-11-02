@@ -89,8 +89,11 @@ Create the APNs key, give it to the Worker, and deploy. Everything else is alrea
 1. **Create the key** in the Apple developer portal: [Certificates, Identifiers & Profiles → Keys → +](https://developer.apple.com/account/resources/authkeys/add).
    - Name: `Counterpart relay`.
    - Tick **Apple Push Notifications service (APNs)**, then **Configure**:
-     - Environment: **Production**. The relay talks to `api.push.apple.com`. A Sandbox-only key gets `403 BadEnvironmentKeyIdInToken` there.
-     - Key restriction: **Team Scoped (All Topics)**.
+     - Environment: match the target signed app. Distribution builds use **Production**;
+       locally signed build `202611021121` uses **Sandbox** and needs the sandbox relay origin below.
+     - Key restriction: select the scope needed for Counterpart. An all-topics key is not a
+       prerequisite. The pending topic-specific `com.scantomake` key still needs real APNs
+       validation for the `com.scantomake.push-type.liveactivity` topic; registration is pending.
    - **Save → Continue → Register.**
    - Download `AuthKey_<KEY_ID>.p8`. Apple lets you download it only once.
    - Note the 10-character **Key ID**.
@@ -124,10 +127,19 @@ Create the APNs key, give it to the Worker, and deploy. Everything else is alrea
 
    The made-up token's hash then sits on the deny list for 30 days, which is harmless.
 
-**Use phone builds that get production tokens.**
-- TestFlight, App Store and Release builds get production push tokens.
-- Builds run from Xcode get sandbox tokens. APNs answers those with `400 BadDeviceToken` on the production host, and the relay then refuses that token for 30 days.
-- If a sandbox relay is ever wanted, use a separate deployment with a Sandbox key and the var `APNS_ORIGIN = "https://api.sandbox.push.apple.com"`.
+**Match the relay to the signed app’s push environment.**
+- Inspect the installed build’s signed [`aps-environment` entitlement](https://developer.apple.com/documentation/bundleresources/entitlements/aps-environment). A Release configuration
+  alone does not imply production push tokens: locally signed Counterpart build `202611021121`
+  has `aps-environment=development`.
+- `development` requires the sandbox APNs host, a compatible key, and
+  `APNS_ORIGIN = "https://api.sandbox.push.apple.com"` in a separate sandbox deployment.
+  The pending sandbox key registration is not a completed provisioning step.
+- `production` uses `api.push.apple.com` (the default when `APNS_ORIGIN` is unset) and a
+  compatible production key. TestFlight/App Store distribution uses this environment.
+- Do not send a development token to the production deployment. APNs can answer
+  `400 BadDeviceToken`, after which this relay refuses that token for 30 days.
+- Before deployment, verify the signed app, key environment, relay host and Live Activity
+  topic agree, following [Apple’s token-based APNs setup](https://developer.apple.com/documentation/usernotifications/establishing-a-token-based-connection-to-apns). Registering a key or passing the loopback smoke test does not prove delivery.
 
 ## Development
 
