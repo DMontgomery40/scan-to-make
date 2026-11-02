@@ -35,6 +35,16 @@ extension ModelAccessChoice {
         case let .endpoint(url, _, _): return url.host ?? "your endpoint"
         }
     }
+    /// The provider alone, for the window's footer ("Claude").
+    var providerName: String {
+        switch self {
+        case .none: return "No AI"
+        case .claudeCode: return "Claude"
+        case .codexCLI: return "Codex"
+        case let .api(provider, _, _): return provider == .anthropic ? "Claude" : "OpenAI"
+        case let .endpoint(url, _, _): return url.host ?? "Your endpoint"
+        }
+    }
     var usesLogin: Bool { self == .claudeCode || self == .codexCLI }
     var isAPIKey: Bool { if case .api = self { return true }; return false }
     var isEndpoint: Bool { if case .endpoint = self { return true }; return false }

@@ -11,7 +11,6 @@
 <key>CFBundleVersion</key><string>$(CURRENT_PROJECT_VERSION)</string>
 <key>LSMinimumSystemVersion</key><string>$(MACOSX_DEPLOYMENT_TARGET)</string>
 <key>NSPrincipalClass</key><string>NSApplication</string>
-<key>LSUIElement</key><true/>
 <key>NSLocalNetworkUsageDescription</key><string>Counterpart needs to talk to your printer and your iPhone over your home network.</string>
 <key>NSBonjourServices</key><array><string>_scantomake._tcp</string></array>
 <key>STMUseLegacyCompanion</key><string>$(STM_USE_LEGACY_COMPANION)</string>

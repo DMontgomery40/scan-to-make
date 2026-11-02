@@ -374,8 +374,8 @@ def main():
         try:
             runner = spec['job']['runs-on']
             if not isinstance(runner,str): raise ValueError('Unsupported runner labels')
-            if runner.startswith('macos') and platform.system()!='Darwin': result = run_mac(spec, root, jobdir, args.mac_host)
-            elif (runner.startswith('ubuntu') and platform.system()=='Linux') or (runner.startswith('macos') and platform.system()=='Darwin'): result = execute_job(spec, root, jobdir)
+            if runner.startswith(('macos', 'xcode-')) and platform.system()!='Darwin': result = run_mac(spec, root, jobdir, args.mac_host)
+            elif (runner.startswith('ubuntu') and platform.system()=='Linux') or (runner.startswith(('macos', 'xcode-')) and platform.system()=='Darwin'): result = execute_job(spec, root, jobdir)
             else: raise ValueError('Runner unavailable: '+runner)
         except Exception as error:
             result = {'spec': spec, 'status':'FAIL', 'steps':[{'name':'Local runner','command':'','status':'FAIL','seconds':0,'note':str(error)}]}
