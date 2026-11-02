@@ -103,7 +103,7 @@ function resultValue(result: Parameters<typeof toolResultText>[0]): unknown {
   if (result.structuredContent !== undefined) return result.structuredContent;
   try { return toolResultJson(result); } catch { return toolResultText(result); }
 }
-function isBambuSlicing(config: PrinterHandoffConfig, selection: PrinterSelection, slicer?: PrinterSlicer): boolean {
+export function isBambuSlicing(config: PrinterHandoffConfig, selection: PrinterSelection, slicer?: PrinterSlicer): boolean {
   if (config.backend === 'bambu-printer-mcp') return true;
   if (selection.printerType === 'bambu') return true;
   const type = (slicer?.type ?? '').toLowerCase();
@@ -280,7 +280,9 @@ export class PrinterHandoffRunner {
       const sliceProperties = session.getTool('slice_stl').inputSchema.properties ?? {};
       if ((slicer.layerHeightMm !== undefined && !Object.hasOwn(sliceProperties, 'layer_height'))
           || (slicer.wallLoops !== undefined && !Object.hasOwn(sliceProperties, 'wall_loops'))
-          || (slicer.sparseInfillDensity !== undefined && !Object.hasOwn(sliceProperties, 'sparse_infill_density'))) fail('print-settings-unsupported');
+          || (slicer.sparseInfillDensity !== undefined && !Object.hasOwn(sliceProperties, 'sparse_infill_density'))
+          // mcp-3D-printer-server forwards repetitions only on its Bambu-compatible route; elsewhere it would slice one.
+          || (slicer.repetitions !== undefined && slicer.repetitions > 1 && (!Object.hasOwn(sliceProperties, 'repetitions') || !isBambuSlicing(this.#config, selection, slicer)))) fail('print-settings-unsupported');
     }
     let orientedStlPath = input.stlPath;
     const laidFlat = session.hasTool('lay_flat');
@@ -305,6 +307,7 @@ export class PrinterHandoffRunner {
       layer_height: slicer.layerHeightMm,
       wall_loops: slicer.wallLoops,
       sparse_infill_density: slicer.sparseInfillDensity,
+      repetitions: slicer.repetitions !== undefined && slicer.repetitions > 1 ? slicer.repetitions : undefined,
       use_printer_filaments: false,
       // lay_flat already chose the flat face; otherwise let the slicer orient.
       orient: !laidFlat,

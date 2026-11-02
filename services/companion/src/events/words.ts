@@ -172,7 +172,7 @@ export function objectStatus(object: StatusSource, updatedAtMs?: number): Object
       return {phase: 'printed', text: at ? `Printed ${formatDate(at)}` : 'Printed', symbol: 'shippingbox', tint: 'secondary'};
     }
     // PRD §5.4: marked Works (Done on Home and in the Mac sidebar).
-    case 'confirmed': return {phase: 'confirmed', text: 'It works', symbol: 'checkmark.circle.fill', tint: 'green'};
+    case 'confirmed': return {phase: 'confirmed', text: 'Done · it works', symbol: 'checkmark.circle.fill', tint: 'green'};
     case 'sent': return {phase: 'sent', text: sentWords(object.print?.destination?.name ?? 'your printer', object.print?.sentVia === 'bambu-connect'), symbol: 'paperplane', tint: 'secondary'};
     default: return {phase: 'failed', text: (object.failure ?? 'Something went wrong. Try again.').slice(0, 300), symbol: 'exclamationmark.triangle', tint: 'red'};
   }

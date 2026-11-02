@@ -46,6 +46,8 @@ export const printerSlicerSchema = z.strictObject({
   layerHeightMm: z.number().min(0.04).max(1.2).optional(),
   wallLoops: z.number().int().min(1).max(20).optional(),
   sparseInfillDensity: z.string().regex(/^(100|[1-9]?[0-9])%$/).optional(),
+  /** Copies on the plate: slice_stl `repetitions`. */
+  repetitions: z.number().int().min(1).max(64).optional(),
 });
 export type PrinterSlicer = z.infer<typeof printerSlicerSchema>;
 

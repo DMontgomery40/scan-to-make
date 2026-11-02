@@ -335,21 +335,31 @@ test('per-pass activity requires read scope and refuses malformed or unknown ind
 test('Status is set by hand: works makes the project confirmed ("It works"), and every app is told', async t => {
   const {call, store} = await fixture(t);
   const id = (await call('POST', '/v1/objects', {instructions: 'A mic mount'})).json.object.id;
-  assert.deepEqual((await call('GET', `/v1/objects/${id}/settings`)).json, {settings: {status: 'not-printed'}});
+  assert.deepEqual((await call('GET', `/v1/objects/${id}/settings`)).json, {settings: {status: 'not-printed', archived: false}});
   assert.equal((await call('PATCH', `/v1/objects/${id}/settings`, {status: 'works'})).status, 409, 'no model yet');
   await store.update(id, o => ({...o, state: 'ready', current: {model: 'current/model.stl', renders: []}}));
   const works = await call('PATCH', `/v1/objects/${id}/settings`, {status: 'works'});
   assert.equal(works.status, 200);
-  assert.deepEqual(works.json.settings, {status: 'works'});
+  assert.deepEqual(works.json.settings, {status: 'works', archived: false});
   assert.equal(works.json.object.state, 'confirmed');
-  assert.deepEqual(works.json.object.status, {phase: 'confirmed', text: 'It works', symbol: 'checkmark.circle.fill', tint: 'green'});
-  assert.deepEqual(works.json.object.settings, {status: 'works'});
+  assert.deepEqual(works.json.object.status, {phase: 'confirmed', text: 'Done · it works', symbol: 'checkmark.circle.fill', tint: 'green'});
+  assert.deepEqual(works.json.object.settings, {status: 'works', archived: false});
   assert.equal((await call('PATCH', `/v1/objects/${id}/settings`, {status: 'done'})).status, 400);
   assert.equal((await call('PATCH', `/v1/objects/${id}/settings`, {status: 'works', name: 'x'})).status, 400);
-  for (const status of ['needs-changes', 'printed', 'archived', 'not-printed']) {
+  for (const status of ['needs-changes', 'printed', 'not-printed']) {
     const changed = await call('PATCH', `/v1/objects/${id}/settings`, {status});
     assert.equal(changed.json.settings.status, status, status);
   }
+  // Hidden from Home is a flag of its own: the status underneath stays exactly, `sent` included.
+  await store.update(id, o => ({...o, state: 'sent'}));
+  const hidden = await call('PATCH', `/v1/objects/${id}/settings`, {archived: true});
+  assert.deepEqual(hidden.json.settings, {status: 'printed', archived: true});
+  assert.equal(hidden.json.object.state, 'sent');
+  const shown = await call('PATCH', `/v1/objects/${id}/settings`, {archived: false});
+  assert.deepEqual([shown.json.settings.archived, shown.json.object.state], [false, 'sent']);
+  assert.equal((await call('PATCH', `/v1/objects/${id}/settings`, {archived: 'yes'})).status, 400);
+  assert.equal((await call('PATCH', `/v1/objects/${id}/settings`, {})).status, 400);
+  await store.update(id, o => ({...o, state: 'ready'}));
   assert.equal((await store.get(id)).state, 'ready');
   // A state the label hides still changes: a sent print marked printed; a failed one with a model marked not printed.
   await store.update(id, o => ({...o, state: 'sent'}));
@@ -358,9 +368,9 @@ test('Status is set by hand: works makes the project confirmed ("It works"), and
   assert.equal((await call('PATCH', `/v1/objects/${id}/settings`, {status: 'not-printed'})).json.object.state, 'ready');
   // A draft without a model can be archived and brought back, staying a draft.
   const draft = (await call('POST', '/v1/objects', {instructions: 'A hook'})).json.object.id;
-  assert.equal((await call('PATCH', `/v1/objects/${draft}/settings`, {status: 'archived'})).json.settings.status, 'archived');
-  const back = await call('PATCH', `/v1/objects/${draft}/settings`, {status: 'not-printed'});
-  assert.deepEqual([back.status, back.json.settings.status, back.json.object.state], [200, 'not-printed', 'new']);
+  assert.equal((await call('PATCH', `/v1/objects/${draft}/settings`, {status: 'archived'})).json.settings.archived, true, 'the old status value still hides it');
+  const back = await call('PATCH', `/v1/objects/${draft}/settings`, {archived: false});
+  assert.deepEqual([back.status, back.json.settings.status, back.json.settings.archived, back.json.object.state], [200, 'not-printed', false, 'new']);
 });
 
 test('the Mac sets Status over the control socket; project.updated tells the apps; the flag says so', async t => {
@@ -379,7 +389,10 @@ test('the Mac sets Status over the control socket; project.updated tells the app
   await write(join(store.dir(object.id), 'current', 'model.stl'), 'solid x');
   await store.update(object.id, o => ({...o, state: 'printed', current: {model: 'current/model.stl', renders: []}}));
   const dispatch = createControlDispatcher({auth: {transport: 'lan', listDevices: async () => []}, companionVersion: 'test', objects: service});
-  assert.deepEqual(await dispatch('objects.settings.get', {id: object.id}), {settings: {status: 'printed'}});
+  assert.deepEqual(await dispatch('objects.settings.get', {id: object.id}), {settings: {status: 'printed', archived: false}});
+  assert.deepEqual((await dispatch('objects.settings.set', {id: object.id, archived: true})).settings, {status: 'printed', archived: true});
+  assert.deepEqual((await dispatch('objects.settings.set', {id: object.id, archived: false})).settings, {status: 'printed', archived: false});
+  events.length = 0;
   const set = await dispatch('objects.settings.set', {id: object.id, status: 'works'});
   assert.deepEqual([set.settings.status, set.object.state, set.object.status.phase], ['works', 'confirmed', 'confirmed']);
   assert.deepEqual(events.map(event => [event.type, event.data]), [['project.updated', {keys: ['status']}]]);

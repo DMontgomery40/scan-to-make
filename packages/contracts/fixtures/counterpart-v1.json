@@ -710,7 +710,7 @@
  "newStatuses": [
   {
    "phase": "confirmed",
-   "text": "It works",
+   "text": "Done · it works",
    "symbol": "checkmark.circle.fill",
    "tint": "green"
   }
