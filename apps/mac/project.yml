@@ -69,6 +69,7 @@ targets:
       - App/Diagnostics.swift
       - App/EventRelayPolicy.swift
       - App/PrinterUpdates.swift
+      - App/PublishedModel.swift
       - App/ModelMesh.swift
       - ControlKit/Sources/ControlKit
     dependencies:

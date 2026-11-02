@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
+import LinkPresentation
 import CounterpartKit
 #if canImport(ControlKit)
 import ControlKit
@@ -32,6 +33,8 @@ struct NewProjectPane: View {
 
     private var available: Bool { model.capabilities?.objectsCreate == true }
     private var empty: Bool { request.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && files.isEmpty }
+    /// PRD §8.11: a model page's link in the request. The project prints what the designer published.
+    private var link: URL? { model.capabilities?.publishedModels == true ? ModelLink.find(in: request) : nil }
 
     var body: some View {
         ZStack {
@@ -49,6 +52,7 @@ struct NewProjectPane: View {
                         .textFieldStyle(.plain).lineLimit(3...5)
                         .padding(14).glassEffect(.regular.interactive(), in: .rect(cornerRadius: 16))
                 }
+                if let link { LinkCard(url: link) }
                 if !available {
                     Label(ObjectsModel.createUnavailable, systemImage: "iphone").font(.callout).foregroundStyle(.secondary)
                 }
@@ -59,7 +63,7 @@ struct NewProjectPane: View {
                     Spacer()
                     if starting { ProgressView().controlSize(.small) }
                     Button("Cancel", action: close).controlSize(.extraLarge).keyboardShortcut(.cancelAction)
-                    Button { start() } label: { Text("Create Project").padding(.horizontal, 6) }
+                    Button { start() } label: { Text(link == nil ? "Create Project" : "Get This Model").padding(.horizontal, 6) }
                         .buttonStyle(.glassProminent).controlSize(.extraLarge).keyboardShortcut(.defaultAction)
                         .disabled(!available || starting || empty)
                 }
@@ -115,7 +119,12 @@ struct NewProjectPane: View {
         starting = true
         problem = nil
         Task {
-            problem = await model.startProject(instructions: request, files: files, kind: kind)
+            if let link {
+                problem = await model.startProject(instructions: ModelLink.words(in: request, without: link), files: files, kind: "published",
+                                                   url: link.absoluteString)
+            } else {
+                problem = await model.startProject(instructions: request, files: files, kind: kind)
+            }
             starting = false
             if problem == nil { close() }
         }
@@ -139,5 +148,31 @@ private struct DroppedChip: View {
         }
         .padding(.horizontal, 10).padding(.vertical, 6)
         .glassEffect(.regular, in: .capsule)
+    }
+}
+
+/// The link as a card with the page's own title and picture, from Apple's LinkPresentation. Only the answer for the
+/// link shown now fills it: an answer for an earlier link is dropped.
+private struct LinkCard: NSViewRepresentable {
+    let url: URL
+    final class Coordinator { var requested: URL? }
+    func makeCoordinator() -> Coordinator { Coordinator() }
+    func makeNSView(context: Context) -> LPLinkView {
+        let view = LPLinkView(url: url)
+        load(into: view, context.coordinator)
+        return view
+    }
+    func updateNSView(_ view: LPLinkView, context: Context) {
+        guard context.coordinator.requested != url else { return }
+        view.metadata = LPLinkMetadata()
+        load(into: view, context.coordinator)
+    }
+    private func load(into view: LPLinkView, _ coordinator: Coordinator) {
+        let address = url
+        coordinator.requested = address
+        LPMetadataProvider().startFetchingMetadata(for: address) { metadata, _ in
+            guard let metadata else { return }
+            DispatchQueue.main.async { if coordinator.requested == address { view.metadata = metadata } }
+        }
     }
 }

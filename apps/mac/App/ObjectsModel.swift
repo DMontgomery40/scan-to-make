@@ -30,6 +30,10 @@ protocol ObjectsCompanion: Sendable {
     func print(_ id: String, checked: Bool, settings: PrintSettings) async throws -> Project
     func estimate(_ id: String, destinationId: String?, quality: PrintSettings.Quality, strength: PrintSettings.Strength) async throws -> PrintEstimate
     func control(_ id: String, _ action: PrintControl) async throws -> Project
+    /// PRD §8.11: the objects with what a published model adds (credit, files, the Ask's type).
+    func objectsWithExtras() async throws -> (projects: [Project], extras: [String: PublishedExtras])
+    func answerAsk(_ id: String, askId: String, choices: [String]) async throws -> Project
+    func createPublished(url: String, instructions: String?) async throws -> Project
 }
 
 extension ObjectsCompanion {
@@ -53,6 +57,9 @@ extension ObjectsCompanion {
         throw ControlClientError.unavailable
     }
     func control(_ id: String, _ action: PrintControl) async throws -> Project { throw ControlClientError.unavailable }
+    func objectsWithExtras() async throws -> (projects: [Project], extras: [String: PublishedExtras]) { (try await objects(), [:]) }
+    func answerAsk(_ id: String, askId: String, choices: [String]) async throws -> Project { throw ControlClientError.unavailable }
+    func createPublished(url: String, instructions: String?) async throws -> Project { throw ControlClientError.unavailable }
 }
 
 /// The control socket. A fresh client per call, so a missing socket fails that call, not the model.
@@ -64,6 +71,15 @@ struct SocketObjects: ObjectsCompanion {
     func print(_ id: String, checked: Bool, filament: PrinterFilament) async throws -> Project { try await ControlClient(socketPath:path, timeout:30).printObject(id, checked:checked, filament:filament) }
     func selectPrinter(_ id: String, destinationId: String) async throws -> Project { try await ControlClient(socketPath:path).selectPrinter(id, destinationId:destinationId) }
     func objects() async throws -> [Project] { try await ControlClient(socketPath:path).objects() }
+    func objectsWithExtras() async throws -> (projects: [Project], extras: [String: PublishedExtras]) {
+        try await ControlClient(socketPath:path).objectsAndExtras()
+    }
+    func answerAsk(_ id: String, askId: String, choices: [String]) async throws -> Project {
+        try await ControlClient(socketPath:path).answerAsk(id, askId:askId, choices:choices)
+    }
+    func createPublished(url: String, instructions: String?) async throws -> Project {
+        try await ControlClient(socketPath:path).createPublished(url:url, instructions:instructions)
+    }
     func correct(_ id: String, note: String) async throws -> Project { try await ControlClient(socketPath:path).correctObject(id, note:note) }
     func answerCloseup(_ id: String, bestGuess: Bool) async throws -> Project { try await ControlClient(socketPath:path).answerCloseup(id, bestGuess:bestGuess) }
     func print(_ id: String, checked: Bool) async throws -> Project { try await ControlClient(socketPath:path).printObject(id, checked:checked) }
@@ -119,6 +135,8 @@ struct SocketObjects: ObjectsCompanion {
     /// What this Mac's companion can do; nil until it answers. Features it lacks show why instead of failing.
     @Published private(set) var capabilities: ControlStatus.Capabilities?
     @Published private(set) var devices: [ControlDevice] = []
+    /// PRD §8.11, by project id: the designer's credit, the files, and the Ask's type.
+    @Published private(set) var extras: [String: PublishedExtras] = [:]
     @Published private(set) var aiProvider: String?
     @Published private(set) var availability = Availability.loading
     @Published var selection: String?
@@ -242,10 +260,12 @@ struct SocketObjects: ObjectsCompanion {
     /// Reads the list once and returns the seconds until the next read.
     @discardableResult func refresh() async -> Double {
         do {
-            let list = try await companion.objects()
+            let (list, extras) = try await companion.objectsWithExtras()
             failures = 0
             // Published only when something changed: an unchanged read redraws nothing (PRD §9.6).
             if objects != list { objects = list }
+            if self.extras != extras { self.extras = extras }
+            DownloadsWatcher.shared.follow(extras, titles: Dictionary(uniqueKeysWithValues: list.map { ($0.id, $0.words.title) }))
             let catalog = try? await companion.printers()
             if printerCatalog != catalog { printerCatalog = catalog }
             if availability != .ready { availability = .ready }
@@ -283,15 +303,21 @@ struct SocketObjects: ObjectsCompanion {
     /// Starts a project on this Mac (PRD §7.2): the request, then each dropped file, then the pass. Photos
     /// (JPEG, HEIC, PNG) go in as photos; STL, 3MF and USDZ as the thing to copy. Returns one sentence when it
     /// didn't go through; the project is selected when it did.
-    func startProject(instructions: String, files: [URL], kind: String = "fit") async -> String? {
+    func startProject(instructions: String, files: [URL], kind: String = "fit", url: String? = nil) async -> String? {
         guard capabilities?.objectsCreate == true else { return Self.createUnavailable }
         let text = String(instructions.trimmingCharacters(in:.whitespacesAndNewlines).prefix(4000))
-        guard !text.isEmpty || !files.isEmpty else { return "Say what you need, or drop a photo or a model." }
+        guard !text.isEmpty || !files.isEmpty || url != nil else { return "Say what you need, or drop a photo or a model." }
         do {
-            var object = try await companion.create(instructions:text.isEmpty ? nil : text,
-                                                    kind:capabilities?.structuredPasses == true ? kind : nil)
+            // A model page's link (PRD §8.11): the companion reads the page and gets the designer's own file.
+            var object = try await (url != nil && capabilities?.publishedModels == true
+                ? companion.createPublished(url:url!, instructions:text.isEmpty ? nil : text)
+                : companion.create(instructions:[url, text.isEmpty ? nil : text].compactMap { $0 }.joined(separator:" ").nilIfEmpty,
+                                   kind:capabilities?.structuredPasses == true ? kind : nil))
+            let published = url != nil && capabilities?.publishedModels == true
             for file in files {
-                guard let kind = Self.fileKind(file) else { continue }
+                guard var kind = Self.fileKind(file) else { continue }
+                // A published model's own file is the designer's model, never a scan to touch up (PRD §8.11).
+                if published && ["stl", "3mf"].contains(file.pathExtension.lowercased()) { kind = "model" }
                 object = try await companion.addFile(object.id, kind:kind, path:file.path)
             }
             object = try await companion.start(object.id)
@@ -343,6 +369,35 @@ struct SocketObjects: ObjectsCompanion {
     }
 
     /// Runs one action on one object. Returns whether it went through.
+    /// Answers a published model's `file` Ask with the designer's file (PRD §8.11): the companion copies it and resumes.
+    @discardableResult func useModelFile(_ file: URL, for id: String) async -> Bool {
+        await change(id) { try await self.companion.addFile(id, kind:"model", path:file.path) }
+    }
+
+    /// Answers a `choice` Ask (plates, objects, colours) with the options picked.
+    @discardableResult func answerAsk(_ id: String, askId: String, choices: [String]) async -> Bool {
+        guard !choices.isEmpty else { return false }
+        return await change(id) { try await self.companion.answerAsk(id, askId:askId, choices:choices) }
+    }
+
+    /// One change to one project, shown as working while it runs; a refusal reads the project again.
+    private func change(_ id: String, _ body: @escaping () async throws -> Project) async -> Bool {
+        guard !working.contains(id) else { return false }
+        working.insert(id)
+        defer { working.remove(id) }
+        if problem?.id == id { problem = nil }
+        do {
+            let updated = try await body()
+            if let index = objects.firstIndex(where: { $0.id == id }) { objects[index] = updated }
+            wake()
+            return true
+        } catch {
+            problem = Problem(id:id, text:Self.sentence(for:error))
+            await refresh()
+            return false
+        }
+    }
+
     @discardableResult func perform(_ action: ObjectAction, on id: String, note: String = "", photos: [URL] = []) async -> Bool {
         guard !working.contains(id) else { return false }
         working.insert(id)
@@ -436,4 +491,8 @@ struct SocketObjects: ObjectsCompanion {
         default: return "Something went wrong on your Mac."
         }
     }
+}
+
+private extension String {
+    var nilIfEmpty: String? { isEmpty ? nil : self }
 }

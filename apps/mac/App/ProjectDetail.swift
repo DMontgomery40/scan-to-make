@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 import AppKit
 import CounterpartKit
 #if canImport(ControlKit)
@@ -92,6 +93,10 @@ struct ProjectDetail: View {
             PrintConfirmationForm(object: object, question: confirmation, model: model).id(object.id + ":" + confirmation.id)
         } else {
             switch words.stage {
+            case .needsYou where model.extras[object.id]?.fileAsk != nil:
+                FileAskCard(object: object, ask: model.extras[object.id]!.fileAsk!, model: model)
+            case .needsYou where model.extras[object.id]?.choiceAsk != nil:
+                ChoiceAskCard(object: object, ask: model.extras[object.id]!.choiceAsk!, model: model).id(model.extras[object.id]!.choiceAsk!.id)
             case .needsYou: needsYou
             case .working, .sending, .preparing: progressCard
             case .printing: printingCard
@@ -378,5 +383,126 @@ private struct ConfirmationFieldRow: View {
             default: return nil
             }
         }
+    }
+}
+
+/// PRD §8.11: the project waits for the designer's own file. The worker tries the person's browser and `~/Downloads`
+/// first; this is the last step, never a look-alike. The file can come from a drop, Choose File…, the model page in the
+/// browser, or a new download ("Use *name*?").
+private struct FileAskCard: View {
+    let object: Project
+    let ask: PublishedExtras.Ask
+    @ObservedObject var model: ObjectsModel
+    @ObservedObject private var downloads = DownloadsWatcher.shared
+    @State private var targeted = false
+
+    private var working: Bool { model.working.contains(object.id) }
+    private var accepts: [String] { ask.accepts ?? ["3mf", "stl"] }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: "arrow.down.doc.fill").font(.title2).foregroundStyle(.orange)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(verbatim: ask.question).font(.subheadline.weight(.semibold)).lineLimit(nil)
+                    Text("Drop the \(accepts.map { $0.uppercased() }.joined(separator: " or ")) here, choose it, or download it in your browser: Counterpart sees it arrive in Downloads.")
+                        .font(.caption).foregroundStyle(.secondary).lineLimit(4)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            ForEach(downloads.candidates[object.id] ?? [], id: \.self) { file in
+                HStack(spacing: 8) {
+                    Image(systemName: "cube.fill").foregroundStyle(Color.filament)
+                    Text("Use \(file.lastPathComponent)?").font(.callout.weight(.medium)).lineLimit(1).truncationMode(.middle)
+                    Spacer()
+                    Button("Not This") { downloads.dismiss(file, for: object.id) }.buttonStyle(.glass)
+                    Button("Use") { Task { await model.useModelFile(file, for: object.id) } }.buttonStyle(.glassProminent).disabled(working)
+                }
+                .padding(8).glassEffect(.regular, in: .rect(cornerRadius: 10))
+            }
+            HStack(spacing: 10) {
+                if let page = ask.url.flatMap(URL.init(string:)) {
+                    Button("Open in Browser") { NSWorkspace.shared.open(page) }.buttonStyle(.glass)
+                }
+                Button("Choose File…") { choose() }.buttonStyle(.glass).disabled(working)
+                Spacer()
+                if working { ProgressView().controlSize(.small) }
+            }
+        }
+        .padding(12).frame(maxWidth: .infinity, alignment: .leading)
+        .glassEffect(.regular.tint(.orange.opacity(targeted ? 0.3 : 0.15)), in: .rect(cornerRadius: 14))
+        .dropDestination(for: URL.self) { urls, _ in
+            guard let file = urls.first(where: { accepts.contains($0.pathExtension.lowercased()) }) else { return false }
+            Task { await model.useModelFile(file, for: object.id) }
+            return true
+        } isTargeted: { targeted = $0 }
+    }
+
+    private func choose() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = accepts.compactMap { UTType(filenameExtension: $0) }
+        panel.directoryURL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Downloads")
+        panel.prompt = "Use"
+        if panel.runModal() == .OK, let file = panel.url { Task { await model.useModelFile(file, for: object.id) } }
+    }
+}
+
+/// PRD §8.11: a question with the companion's own options (which plate or object, which colour), answered here or on
+/// the phone. Several can be picked when the Ask allows it.
+private struct ChoiceAskCard: View {
+    let object: Project
+    let ask: PublishedExtras.Ask
+    @ObservedObject var model: ObjectsModel
+    @State private var picked: Set<String> = []
+
+    private var working: Bool { model.working.contains(object.id) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label { Text(verbatim: ask.question).font(.subheadline.weight(.semibold)).lineLimit(nil) } icon: {
+                Image(systemName: "hand.raised.fill").foregroundStyle(.orange)
+            }
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 10) {
+                    ForEach(ask.options ?? []) { option in
+                        Button { toggle(option.id) } label: { tile(option) }.buttonStyle(.plain).disabled(working)
+                    }
+                }
+            }
+            if ask.multiple == true {
+                HStack {
+                    Spacer()
+                    if working { ProgressView().controlSize(.small) }
+                    Button("Use These") { send(Array(picked)) }.buttonStyle(.glassProminent).disabled(picked.isEmpty || working)
+                }
+            }
+        }
+        .padding(12).frame(maxWidth: .infinity, alignment: .leading)
+        .glassEffect(.regular.tint(.orange.opacity(0.15)), in: .rect(cornerRadius: 14))
+    }
+
+    private func tile(_ option: PublishedExtras.Option) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if let thumbnail = option.thumbnail.flatMap(object.projectFile) {
+                FillImage(url: thumbnail, version: object.updatedAtMs).frame(width: 120, height: 84).clipShape(.rect(cornerRadius: 8))
+            }
+            Text(verbatim: option.label).font(.callout.weight(.medium)).lineLimit(2)
+            if let detail = option.detail { Text(verbatim: detail).font(.caption).foregroundStyle(.secondary).lineLimit(2) }
+        }
+        .frame(width: 132, alignment: .leading)
+        .padding(8)
+        .glassEffect(picked.contains(option.id) ? .regular.tint(Color.filament.opacity(0.35)) : .regular, in: .rect(cornerRadius: 10))
+    }
+
+    private func toggle(_ id: String) {
+        if ask.multiple == true {
+            if picked.contains(id) { picked.remove(id) } else { picked.insert(id) }
+        } else {
+            send([id])
+        }
+    }
+
+    private func send(_ choices: [String]) {
+        Task { await model.answerAsk(object.id, askId: ask.id, choices: choices) }
     }
 }
