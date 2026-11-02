@@ -1,8 +1,8 @@
 # David's asks: status
 
-Every request David has made for Counterpart, checked on 2026-11-02 around 06:55 MT.
-PR #259 (`feat/integrated-recovery`) contains the current repair batch; the Mac and phone updates are installed.
-The running Mac uses `/Applications/Counterpart.app` build `202611020645`; Davica3 has build `202611020630` and is locked.
+Every request David has made for Counterpart, updated after the 2026-11-02 release installation.
+PR #259 merged as `85c88423`. Counterpart on the Mac and Davica3 both have signed build
+`202611020750` from `b3b66b96`; the phone remains locked.
 Code/build evidence and observed device behavior are distinguished below.
 
 How to pick up this work, and the diagnosis notes behind the P0 rows: [`handoff.md`](handoff.md).
@@ -18,11 +18,11 @@ The owner is whoever the lead assigns. Repeats count how often the ask came up a
 
 | # | Ask | Repeats | Status | Done when |
 |---|---|---|---|---|
-| 1 | Printing works from the app (stove strips) | many | **partially verified**: installed bambu-printer-mcp is 1.1.51 (the install folder still says 1.1.46). Re-slicing the original stove model removes the former floating-cantilever warning. The real Mac Print Again sheet shows P1S/PLA, 109 g and 3 h 20 min. PR #259 fixes slicer orientation when `laid_flat` is false. No new physical print dispatched; the original print stopped with the toolhead-cover fault | He presses Print in the app and the part prints |
-| 2 | Stop/cancel from the app actually stops the printer | 1 | **installed, unverified stop**: actual configured MCP 1.1.51 advertises cancel; QoS 1 implementation confirmed. No running print was stopped during this audit | Stop in the app stops the printer |
+| 1 | Printing works from the app (stove strips) | many | **partially verified**: reviewed local bambu-printer-mcp 1.1.52 from PR #95 (`16787aa`) is installed; configured SSH reports P1S Ready. Public npm remains 1.1.51, with no publication. Re-slicing the original stove model removes the former floating-cantilever warning. The real Mac Print Again sheet shows P1S/PLA, 109 g and 3 h 20 min. PR #259 fixes slicer orientation when `laid_flat` is false. No new physical print dispatched; the original print stopped with the toolhead-cover fault | He presses Print in the app and the part prints |
+| 2 | Stop/cancel from the app actually stops the printer | 1 | **installed, unverified stop**: cancel capability and QoS 1 implementation were confirmed in the 1.1.51 audit; reviewed local 1.1.52 is now installed. No running print was stopped during this audit | Stop in the app stops the printer |
 | 3 | Done / Works status | 7 | **on device, both** (#240; Mac at `91734f0`, phone at `c2eb1e0`) | Marks the mic mount Done on both |
 | 4 | Rename projects | 2 | **installed #259; acceptance partial**: Mac rename saved and restored on the real stove project; phone implemented but locked; generated titles cannot overwrite a rename | Taps the name and renames, on both |
-| 5 | Project settings (printer, colours, quality, copies, engine, notifications, files, duplicate, archive/delete) | 2 | **in progress, separate follow-up**: unified settings, saved print defaults, Duplicate and per-project engine/notifications are missing; work started from the accepted PRD | Each setting works on both |
+| 5 | Project settings (printer, colours, quality, copies, engine, notifications, files, duplicate, archive/delete) | 2 | **implemented/tested, [PR #260](https://github.com/DMontgomery40/scan-to-make/pull/260)**: unified native Project Settings on both; saved printer/colour/quality/strength/copies, next-pass engine, print alerts, original-file export and independent Duplicate implemented and tested. Native acceptance of Project Settings on installed devices pending; two isolated simulator checks passed (saved defaults into Print and Duplicate navigation) | Each setting works on both |
 | 6 | Claude names projects | 1 | on device (failed captures still unnamed) | Every project has a real name |
 | 7 | Scanning works at all | many | **not accepted on device**: recorded walk-around phone and Mac models both have an incomplete rear; Apple-only in-hand replay reconstructs the hand instead of the object. Valid STL/topology checks pass but quality fails; in-hand remains off | A walk-around scan becomes a model; then in-hand |
 | 8 | Scanner must not brick the phone camera / Face ID | 1 | **branch #259; device acceptance pending**: capture lifecycle checks pass; pairing camera failures are visible and explicitly retryable. No evidence establishes a hardware fault or proves the recurring camera/Face ID issue resolved | Camera and Face ID fine after scanning |
@@ -39,7 +39,7 @@ The owner is whoever the lead assigns. Repeats count how often the ask came up a
 | 19 | "DONE / it works" message doesn't start a design pass | 1 | **installed #259; acceptance partial**: success reports, including photos, mark Done without a design pass; uncertain classification saves the message; Undo supported | Message marks Done instead |
 | 20 | Notifications (ready, question, halfway with camera frame, done, failed) | 3 | **installed #259; acceptance partial**: phone CloudKit consumer and frame extension now exist and sign. Actual notification/frame delivery and schema acceptance pending. Saved opt-outs preserved; individual phone/type controls explicitly unsupported | Halfway notification with frame on his phone and Watch |
 | 21 | Lock Screen / Live Activity print progress | 1 | **installed #259; acceptance partial**: local Lock Screen/Dynamic Island extension and token registration now exist and sign. Remote APNs relay absent; APNs key configuration is prepared in the signed-in developer portal; key registration and relay provisioning remain | Live Activity on his Lock Screen |
-| 22 | Printer camera efficient (Scrypted-like) | 1 | **in progress, separate follow-up**: published MCP exposes snapshots only. One real frame: 98,571 bytes, 1280×720, 3.313 s. Unnecessary metadata/background polling identified; full streaming budgets not yet met | Budgets met on his P1S |
+| 22 | Printer camera efficient (Scrypted-like) | 1 | **in progress, separate follow-up #262**: native streaming prerequisite is installed as reviewed local Bambu MCP 1.1.52 (`16787aa`); public npm stays 1.1.51. App streaming PR #262 merged as `6ac25742`; its combined app installation is pending. Earlier snapshot: 98,571 bytes, 1280×720, 3.313 s; sustained budgets on the installed app remain unverified | Budgets met on his P1S |
 | 23 | Getting ready vs printing; printer's own failure text + Print Again | 1 | **on Mac, observed**: original printer failure text and Print Again sheet checked in the real installed app | Shows "Getting ready · …" then real failure text |
 | 24 | Print a published model (link → designer's file, credit) | 2 | merged (76d2cf3); not verified on device | Paste a MakerWorld link and it prints that file |
 | 25 | Claude unconstrained on the user's Mac (web, images, browser downloads) | 1 | merged in #219 path; not verified | Link flow downloads via his browser |

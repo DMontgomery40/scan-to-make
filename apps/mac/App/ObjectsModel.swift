@@ -31,7 +31,7 @@ protocol ObjectsCompanion: Sendable {
     func addPhotoFile(_ id: String, path: String, forMessage: Bool) async throws -> String
     func correct(_ id: String, note: String, photos: [String]) async throws -> Project
     func print(_ id: String, checked: Bool, settings: PrintSettings) async throws -> Project
-    func estimate(_ id: String, destinationId: String?, quality: PrintSettings.Quality, strength: PrintSettings.Strength) async throws -> PrintEstimate
+    func estimate(_ id: String, destinationId: String?, quality: PrintSettings.Quality, strength: PrintSettings.Strength, copies: Int?) async throws -> PrintEstimate
     func control(_ id: String, _ action: PrintControl) async throws -> Project
     /// PRD §8.11: the objects with what a published model adds (credit, files, the Ask's type).
     func objectsWithExtras() async throws -> (projects: [Project], extras: [String: PublishedExtras])
@@ -39,6 +39,8 @@ protocol ObjectsCompanion: Sendable {
     func createPublished(url: String, instructions: String?) async throws -> Project
     /// Project Settings (PRD §5.4): `status` or `archived`.
     func setProjectSettings(_ id: String, _ patch: [String: JSONValue]) async throws -> Project
+    func duplicate(_ id: String) async throws -> Project
+    func fusionAvailable() async -> Bool
 }
 
 extension ObjectsCompanion {
@@ -61,7 +63,7 @@ extension ObjectsCompanion {
         return try await correct(id, note: note)
     }
     func print(_ id: String, checked: Bool, settings: PrintSettings) async throws -> Project { throw ControlClientError.unavailable }
-    func estimate(_ id: String, destinationId: String?, quality: PrintSettings.Quality, strength: PrintSettings.Strength) async throws -> PrintEstimate {
+    func estimate(_ id: String, destinationId: String?, quality: PrintSettings.Quality, strength: PrintSettings.Strength, copies: Int?) async throws -> PrintEstimate {
         throw ControlClientError.unavailable
     }
     func control(_ id: String, _ action: PrintControl) async throws -> Project { throw ControlClientError.unavailable }
@@ -69,6 +71,8 @@ extension ObjectsCompanion {
     func answerAsk(_ id: String, askId: String, choices: [String]) async throws -> Project { throw ControlClientError.unavailable }
     func createPublished(url: String, instructions: String?) async throws -> Project { throw ControlClientError.unavailable }
     func setProjectSettings(_ id: String, _ patch: [String: JSONValue]) async throws -> Project { throw ControlClientError.unavailable }
+    func duplicate(_ id: String) async throws -> Project { throw ControlClientError.unavailable }
+    func fusionAvailable() async -> Bool { false }
 }
 
 /// The control socket. A fresh client per call, so a missing socket fails that call, not the model.
@@ -88,6 +92,11 @@ struct SocketObjects: ObjectsCompanion {
     }
     func createPublished(url: String, instructions: String?) async throws -> Project {
         try await ControlClient(socketPath:path).createPublished(url:url, instructions:instructions)
+    }
+    func duplicate(_ id: String) async throws -> Project { try await ControlClient(socketPath: path).duplicateObject(id) }
+    func fusionAvailable() async -> Bool {
+        guard let state = try? await ControlClient(socketPath: path).companionSettings().fusion?.state else { return false }
+        return ["connected", "not-running"].contains(state)
     }
     func setProjectSettings(_ id: String, _ patch: [String: JSONValue]) async throws -> Project {
         try await ControlClient(socketPath:path).setProjectSettings(id, patch)
@@ -125,10 +134,10 @@ struct SocketObjects: ObjectsCompanion {
         try await ControlClient(socketPath:path, timeout:30).correctObject(id, note:note, photos:photos)
     }
     func print(_ id: String, checked: Bool, settings: PrintSettings) async throws -> Project {
-        try await ControlClient(socketPath:path, timeout:30).printObject(id, checked:checked, settings:settings)
+        try await ControlClient(socketPath:path, timeout:30).printObject(id, checked:checked, settings:settings, overrideDefaults:true)
     }
-    func estimate(_ id: String, destinationId: String?, quality: PrintSettings.Quality, strength: PrintSettings.Strength) async throws -> PrintEstimate {
-        try await ControlClient(socketPath:path, timeout:ControlClient.timeout(for:"objects.estimate")).estimate(id, destinationId:destinationId, quality:quality, strength:strength)
+    func estimate(_ id: String, destinationId: String?, quality: PrintSettings.Quality, strength: PrintSettings.Strength, copies: Int?) async throws -> PrintEstimate {
+        try await ControlClient(socketPath:path, timeout:ControlClient.timeout(for:"objects.estimate")).estimate(id, destinationId:destinationId, quality:quality, strength:strength, copies:copies)
     }
     func control(_ id: String, _ action: PrintControl) async throws -> Project {
         try await ControlClient(socketPath:path, timeout:ControlClient.timeout(for:action.method)).controlPrint(id, action)
@@ -148,6 +157,26 @@ struct SocketObjects: ObjectsCompanion {
     }
     /// One sentence about an action that didn't go through, shown on that object's page.
     struct Problem: Equatable { let id: String, text: String }
+
+    enum DiscoveryState { case loading, ready, failed }
+    @Published private(set) var printerDiscovery = DiscoveryState.loading
+    @Published private(set) var phoneDiscovery = DiscoveryState.loading
+    var missingPhoneText: String {
+        if availability == .notRunning { return "Not running" }
+        switch phoneDiscovery {
+        case .loading: return "Checking paired phones…"
+        case .ready: return "No phone paired yet"
+        case .failed: return "Couldn't read paired phones."
+        }
+    }
+    var missingPrinterText: String {
+        if availability == .notRunning { return "Your companion isn't running." }
+        switch printerDiscovery {
+        case .loading: return "Reading your printer settings…"
+        case .ready: return "No printer found in your printer MCP’s settings."
+        case .failed: return "Couldn't read your printer settings."
+        }
+    }
 
     static let busyDelay: Double = 3, idleDelay: Double = 15
 
@@ -252,8 +281,8 @@ struct SocketObjects: ObjectsCompanion {
     }
 
     /// The slice estimate for the sheet; nil when the companion can't give one (the sheet says so).
-    func estimate(_ id: String, destinationId: String?, quality: PrintSettings.Quality, strength: PrintSettings.Strength) async throws -> PrintEstimate {
-        try await companion.estimate(id, destinationId:destinationId, quality:quality, strength:strength)
+    func estimate(_ id: String, destinationId: String?, quality: PrintSettings.Quality, strength: PrintSettings.Strength, copies: Int?) async throws -> PrintEstimate {
+        try await companion.estimate(id, destinationId:destinationId, quality:quality, strength:strength, copies:copies)
     }
 
     /// Pause, resume or stop a print (`capabilities.printControl`). The printer MCP may ask its own confirmation first.
@@ -323,6 +352,7 @@ struct SocketObjects: ObjectsCompanion {
             for project in objects { sendQueuedNote(project) }
             let list = objects
             let catalog = try? await companion.printers()
+            printerDiscovery = catalog == nil ? .failed : .ready
             if printerCatalog != catalog { printerCatalog = catalog }
             if availability != .ready { availability = .ready }
             // The first read shows the top project; later, only a project that went away moves the selection.
@@ -352,7 +382,10 @@ struct SocketObjects: ObjectsCompanion {
         if let extrasReadAt, Date().timeIntervalSince(extrasReadAt) < Self.extrasDelay { return }
         extrasReadAt = Date()
         if let status = try? await companion.status(), capabilities != status.capabilities { capabilities = status.capabilities }
-        if let devices = try? await companion.devices(), devices.map(\.id) != self.devices.map(\.id) || devices.map(\.seenAt) != self.devices.map(\.seenAt) { self.devices = devices }
+        if let devices = try? await companion.devices() {
+            if devices.map(\.id) != self.devices.map(\.id) || devices.map(\.seenAt) != self.devices.map(\.seenAt) { self.devices = devices }
+            phoneDiscovery = .ready
+        } else { phoneDiscovery = .failed }
         aiProvider = await companion.aiProvider()
     }
 
@@ -444,6 +477,45 @@ struct SocketObjects: ObjectsCompanion {
         guard capabilities?.projectRename == true else { return false }
         return await change(id) { try await self.companion.setProjectSettings(id, ["title": .string(title)]) }
     }
+    func savePreferences(_ id: String, patch sharedPatch: [String: CounterpartKit.JSONValue]) async throws {
+        let patch = try JSONDecoder().decode([String: JSONValue].self, from: JSONEncoder().encode(sharedPatch))
+        guard capabilities?.projectPreferences == true else { throw ControlClientError.unavailable }
+        let pending = objects.first(where: { $0.id == id })?.pendingFollowup
+        guard await change(id, { try await self.companion.setProjectSettings(id, patch) }) else {
+            throw CompanionError(code: "settings-failed", message: problem?.text ?? "Couldn't save Project Settings.")
+        }
+        if patch["status"] == .string("works"), let pending { corrections.sent(pending, for: id) }
+    }
+
+    func duplicate(_ id: String) async throws {
+        guard capabilities?.projectPreferences == true, !working.contains(id) else { throw ControlClientError.unavailable }
+        working.insert(id)
+        defer { working.remove(id) }
+        let copied = try await companion.duplicate(id)
+        readApplied = startRead()
+        objects.removeAll { $0.id == copied.id }
+        objects.insert(copied, at: 0)
+        selection = copied.id
+        wake()
+    }
+
+    func projectSettingsContext(_ id: String) async throws -> ProjectSettingsForm.Context {
+        let catalog = try await companion.printers()
+        let fusion = await companion.fusionAvailable()
+        var colours: [ProjectSettingsForm.Colour] = []
+        var filamentProblem: String?
+        do {
+            colours = try await companion.filaments(id).map { spool in
+                .init(id: String(spool.slot), name: "\(spool.external ? "External" : "A\(spool.slot + 1)") · \(spool.material) \(spool.name)",
+                      value: .object(spool.external ? ["external": .bool(true)] : ["amsSlot": .number(Double(spool.slot))]))
+            }
+            if !colours.isEmpty { colours.insert(.init(id: "auto", name: "Suggested spool", value: .object(["auto": .bool(true)])), at: 0) }
+        } catch { filamentProblem = Self.sentence(for: error) }
+        return .init(printers: catalog.destinations.map { .init(id: $0.id, name: $0.name,
+            quality: $0.capabilities?.quality ?? false, strength: $0.capabilities?.strength ?? false, copies: $0.capabilities?.copies == true, materialChoice: $0.capabilities?.materialChoice == true) },
+            defaultPrinter: catalog.defaultDestinationId, colours: colours, fusionAvailable: fusion, filamentProblem: filamentProblem)
+    }
+
     /// Archive hides a project from the sidebar's groups and keeps everything; Unarchive brings its status back.
     @discardableResult func setArchived(_ archived: Bool, for id: String) async -> Bool {
         guard capabilities?.projectSettings == true else { return false }

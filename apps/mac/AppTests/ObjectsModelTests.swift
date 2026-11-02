@@ -9,6 +9,19 @@ private actor FakeObjects: ObjectsCompanion {
     private(set) var calls: [String] = []
     private(set) var correctionPhotoNames: [[String]?] = []
     private(set) var messageUploadFlags: [Bool] = []
+    private var beforeDuplicateReply: (@Sendable () async -> Void)?
+    func beforeDuplicateReturns(_ action: @escaping @Sendable () async -> Void) { beforeDuplicateReply = action }
+    private var discoveryAvailable = false
+    func enableDiscovery() { discoveryAvailable = true }
+    func printers() async throws -> PrinterCatalog {
+        guard discoveryAvailable else { throw ControlClientError.unavailable }
+        return .init(destinations: [], defaultDestinationId: "current")
+    }
+    func devices() async throws -> [ControlDevice] {
+        guard discoveryAvailable else { throw ControlClientError.unavailable }
+        return []
+    }
+
     private(set) var confirmationAnswer: PrintConfirmationAnswer?
     func set(_ items: [[String: Any]]) { self.items = items }
     private(set) var settingsPatches: [String: [String: JSONValue]] = [:]
@@ -38,8 +51,20 @@ private actor FakeObjects: ObjectsCompanion {
             if status == "works" { fields["state"] = "confirmed"; fields["status"] = ["phase": "confirmed", "text": "It works", "symbol": "checkmark.circle.fill", "tint": "green"] }
         }
         if case .bool(let archived)? = patch["archived"] { settings["archived"] = archived }
+        for key in ["printDefaults", "designEngine", "notifications"] {
+            if let value = patch[key] { settings[key] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(value), options: .fragmentsAllowed) }
+        }
         fields["settings"] = settings
         return try change(id, "settings", fields)
+    }
+    func duplicate(_ id: String) async throws -> Project {
+        if let actionError { throw actionError }
+        var copied = items.first { $0["id"] as? String == id }!
+        copied["id"] = "copied"; copied["state"] = "ready"
+        items.append(copied)
+        calls.append("duplicate")
+        await beforeDuplicateReply?()
+        return try decode(copied)
     }
     func failList(with error: Error?) { listError = error }
     func failActions(with error: Error?) { actionError = error }
@@ -98,6 +123,37 @@ private func project(_ item: [String: Any]) throws -> Project {
 }
 
 @MainActor final class ObjectsModelTests: XCTestCase {
+    func testDiscoveryDoesNotClaimEmptyPhonesOrPrintersBeforeSuccessfulReads() async {
+        let failed = ObjectsModel(companion: FakeObjects())
+        XCTAssertEqual(failed.missingPhoneText, "Checking paired phones…")
+        XCTAssertEqual(failed.missingPrinterText, "Reading your printer settings…")
+        await failed.refresh()
+        XCTAssertEqual(failed.missingPhoneText, "Couldn't read paired phones.")
+        XCTAssertEqual(failed.missingPrinterText, "Couldn't read your printer settings.")
+        let companion = FakeObjects()
+        await companion.enableDiscovery()
+        let empty = ObjectsModel(companion: companion)
+        await empty.refresh()
+        XCTAssertEqual(empty.missingPhoneText, "No phone paired yet")
+        XCTAssertEqual(empty.missingPrinterText, "No printer found in your printer MCP’s settings.")
+    }
+
+    func testDuplicateReplyDoesNotInsertASecondIdentityAfterBackgroundRefresh() async throws {
+        let companion = FakeObjects()
+        await companion.set([item("source", "ready")])
+        await companion.setCapabilities(.init(projectPreferences: true))
+        let model = ObjectsModel(companion: companion)
+        await model.refresh()
+        await companion.beforeDuplicateReturns { _ = await model.refresh() }
+        try await model.duplicate("source")
+        let ids = model.objects.map(\.id)
+        guard Set(ids).count == ids.count else { return XCTFail("Duplicate reply inserted an already observed project twice") }
+        XCTAssertEqual(ids.filter { $0 == "copied" }.count, 1)
+        XCTAssertEqual(model.selection, "copied")
+        await model.refresh() // building the next identity dictionary must remain safe
+        XCTAssertEqual(model.objects.count, 2)
+    }
+
     func testQueuedPhotoKeepsItsIntentAndExactReceiptWhenInitialPassFailsDuringUpload() async throws {
         let companion = FakeObjects()
         await companion.set([item("queued", "touching-up", ["current": NSNull(), "pendingPhotos": ["other.jpg"]])])
@@ -111,6 +167,28 @@ private func project(_ item: [String: Any]) throws -> Project {
         XCTAssertEqual(model.objects.first?.state, .failed)
         XCTAssertEqual(model.corrections.messages["queued"]?.first?.photos, ["renamed-evidence.jpg"], "never claim unrelated pending photos")
         XCTAssertEqual(model.corrections.pending("queued"), "Widen this", "a failed initial pass cannot consume the queued correction")
+    }
+
+    func testSavedPreferencesAndDuplicateUpdateTheOpenProjectWithoutStartingAPass() async throws {
+        let companion = FakeObjects()
+        await companion.set([item("source", "ready")])
+        await companion.setCapabilities(.init(projectPreferences: true))
+        let model = ObjectsModel(companion: companion)
+        await model.refresh()
+        try await model.savePreferences("source", patch: ["printDefaults": .object(["copies": .number(1), "quality": .string("fine")]), "notifications": .string("problems")])
+        XCTAssertEqual(model.selected?.settings?.printDefaults?.copies, 1)
+        XCTAssertEqual(model.selected?.settings?.notifications, "problems")
+        try await model.duplicate("source")
+        XCTAssertEqual(model.selection, "copied")
+        XCTAssertEqual(model.objects.count, 2)
+        XCTAssertEqual(model.selected?.settings?.printDefaults?.quality, "fine")
+        XCTAssertEqual(model.selected?.state, .ready)
+        let calls = await companion.calls
+        XCTAssertFalse(calls.contains(where: { $0.hasPrefix("correct:") || $0 == "start" }))
+        await companion.failActions(with: ControlRemoteError(code: "unavailable", message: "Couldn't copy the model."))
+        do { try await model.duplicate("source"); XCTFail("The failure must reach the sheet") } catch {}
+        XCTAssertEqual(model.objects.count, 2)
+        XCTAssertEqual(model.selection, "copied")
     }
 
     func testChangesWrittenDuringAPassAreSavedAndSentOnceWhenItEnds() async throws {

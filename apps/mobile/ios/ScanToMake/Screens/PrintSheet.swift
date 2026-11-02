@@ -57,6 +57,9 @@ struct PrintSheet: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .glassEffect(.regular, in: .rect(cornerRadius: 24))
                         settingsSection.id("settings")
+                        if !offersCopies, project?.settings?.printDefaults?.copies != nil {
+                            Text("This printer uses one copy.").font(.caption).foregroundStyle(.secondary)
+                        }
                         if uncertain { uncertainCard }
                         if let problem {
                             Label(problem, systemImage: "exclamationmark.triangle.fill").font(.subheadline).foregroundStyle(.red)
@@ -189,7 +192,7 @@ struct PrintSheet: View {
                 HStack { Text("What's loaded?").font(.headline); Spacer(); if let g = Format.grams(estimate?.grams) { Text(g).font(.caption).foregroundStyle(.secondary) } }
                 // The Mac can't switch a printer that doesn't report its filament to another material yet, so it
                 // prints with the profile's own; saying so beats offering choices it would refuse.
-                Text("\(name) doesn't say which filament it has, so your Mac prints with its profile's material. Load that before you print.")
+                Text(project?.settings?.printDefaults?.colour?.object?["material"]?.string.map { "Uses \($0), saved in Project Settings. Load it before printing." } ?? "\(name) doesn't say which filament it has, so your Mac prints with its profile's material. Load that before you print.")
                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
         }
@@ -301,9 +304,10 @@ struct PrintSheet: View {
         await store.loadCapabilities()
         destinationId = project?.printerDestinationId ?? store.catalog?.defaultDestinationId ?? ""
         // Print another: the last print's quality and strength again (its printer is the project's).
-        if let last = project?.print?.settings {
+        if let last = project?.resolvedPrintDefaults(destinationId: destinationId) {
             quality = last.quality.flatMap(PrintQuality.init(rawValue:)) ?? quality
             strength = last.strength.flatMap(PrintStrength.init(rawValue:)) ?? strength
+            copies = last.copies
         }
         await loadFilaments()
         await store.loadPrinters()
@@ -337,11 +341,15 @@ struct PrintSheet: View {
             spools[id] = reported
             // The last print's spool on the same printer: the Mac's record (a tray, or the external spool), else the
             // tray this phone sent; else the one the Mac suggests.
-            let recorded = project?.print?.destinationId == id ? project?.print?.settings?.colour?.object : nil
+            let recorded = project?.resolvedPrintDefaults(destinationId: id).colour?.object
             let last: PrinterFilament? = if let slot = recorded?["amsSlot"]?.number {
                 reported.first { $0.slot == Int(slot) }
             } else if recorded?["external"] == .bool(true) {
                 reported.first { $0.isExternal }
+            } else if let material = recorded?["material"]?.string {
+                reported.first { $0.material.caseInsensitiveCompare(material) == .orderedSame }
+            } else if project?.settings?.printDefaults != nil {
+                nil
             } else {
                 LastTray.slot(projectId, destinationId: id).flatMap { slot in reported.first { $0.slot == slot } }
             }
@@ -366,7 +374,7 @@ struct PrintSheet: View {
             let next = try await store.mac.client.estimate(projectId, destinationId: destinationId,
                                                            quality: printer?.offersQuality == true ? quality : .standard,
                                                            strength: printer?.offersStrength == true ? strength : .standard,
-                                                           copies: offersCopies ? copies : nil)
+                                                           copies: offersCopies ? copies : (project?.settings?.printDefaults?.copies != nil ? 1 : nil), overrideDefaults: true)
             guard !Task.isCancelled else { return }
             slice.finish(key, next)
         } catch let failure as CompanionError {
@@ -384,15 +392,15 @@ struct PrintSheet: View {
         case "ams": chosen.map { .tray($0) }
         case "single": filaments.first.map { .tray($0) }
         // A printer that doesn't report its filament prints with its own profile's material.
-        default: nil
+        default: (project?.settings?.printDefaults?.colour?.object?["material"]?.string).map(PrintColour.material)
         }
         let choice = PrintChoice(colour: colour,
                                  quality: printer?.offersQuality == true ? quality : .standard,
                                  strength: printer?.offersStrength == true ? strength : .standard,
-                                 checked: uncertain && checked, copies: offersCopies ? copies : nil)
+                                 checked: uncertain && checked, copies: offersCopies ? copies : (project?.settings?.printDefaults?.copies != nil ? 1 : nil))
         do {
             let ticket = store.startRequest()
-            store.replace(try await store.mac.client.print(projectId, choice: choice), ticket: ticket)
+            store.replace(try await store.mac.client.print(projectId, choice: choice, overrideDefaults: true), ticket: ticket)
             if case .tray(let tray)? = colour { LastTray.save(projectId, destinationId: destinationId, slot: tray.slot) }
             dismiss()
         } catch let failure as CompanionError {

@@ -61,6 +61,53 @@ final class ProjectScreensUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["ask-for-changes"].exists)
     }
 
+    /// Uses only the in-memory canned companion; no user's projects, pairing or printer is contacted.
+    func testProjectSettingsSaveDefaultsAndReopenBeforePrinting() {
+        let app = launch("ready")
+        openProjectSettings(app)
+        let quality = app.buttons["project-settings-quality"]
+        XCTAssertTrue(quality.waitForExistence(timeout: 10))
+        quality.tap()
+        app.buttons["Fine"].tap()
+        let copies = app.steppers["project-settings-copies"]
+        XCTAssertTrue(copies.waitForExistence(timeout: 5))
+        let increment = copies.buttons["project-settings-copies-Increment"]
+        XCTAssertEqual(XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: increment)], timeout: 5), .completed)
+        increment.tap()
+        XCTAssertEqual(XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS %@", "Copies: 2"), object: copies)], timeout: 5), .completed)
+        app.buttons["project-settings-done"].tap()
+        openProjectSettings(app)
+        XCTAssertTrue(copies.label.contains("Copies: 2"), "the companion saved the default")
+        XCTAssertTrue(quality.label.contains("Fine") || (quality.value as? String)?.contains("Fine") == true)
+        app.buttons["project-settings-done"].tap()
+        app.buttons["print"].tap()
+        XCTAssertTrue(app.buttons["print-now"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.segmentedControls.buttons["Fine"].isSelected, "Print consumes the saved default")
+        XCTAssertTrue(app.steppers["copies"].label.contains("2"), "Print consumes the saved copy count")
+    }
+
+    func testProjectSettingsDuplicateOpensAnIndependentReadyProject() {
+        let app = launch("ready")
+        openProjectSettings(app)
+        XCTAssertTrue(reach(app, app.buttons["Export Current model (STL)"]), "the model is available for export")
+        let duplicate = app.buttons["project-settings-duplicate"]
+        XCTAssertTrue(reach(app, duplicate))
+        duplicate.tap()
+        let title = app.buttons["project-title"]
+        let copied = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == %@", "Mic mount copy"), object: title)
+        XCTAssertEqual(XCTWaiter().wait(for: [copied], timeout: 10), .completed)
+        XCTAssertTrue(app.buttons["print"].exists, "the copy is ready without a new design pass")
+    }
+
+    private func openProjectSettings(_ app: XCUIApplication) {
+        XCTAssertTrue(app.buttons["More"].waitForExistence(timeout: 20))
+        app.buttons["More"].tap()
+        let settings = app.buttons["Project Settings"]
+        XCTAssertTrue(settings.waitForExistence(timeout: 5))
+        settings.tap()
+        XCTAssertTrue(app.textFields["project-settings-name"].waitForExistence(timeout: 10))
+    }
+
     func testAWorkingProjectSaysSo() {
         let app = launch("working")
         XCTAssertTrue(app.buttons["project-title"].waitForExistence(timeout: 20))

@@ -24,6 +24,16 @@ final class ProjectReadsTests: XCTestCase {
         XCTAssertTrue(reads.merge([], ticket: reads.start(), current: [project("new")]).isEmpty, "A later authoritative list can remove it")
     }
 
+    func testSuccessfulMutationCanCompleteAfterNewerRefreshButNotConnectionReset() {
+        var reads = ProjectReads()
+        let mutation = reads.start()
+        XCTAssertTrue(reads.accept("duplicate", ticket: reads.start()))
+        XCTAssertFalse(reads.accept("duplicate", ticket: mutation), "keep the newer displayed project")
+        XCTAssertTrue(reads.isCurrent(mutation), "the saved change may still finish navigation or draft cleanup")
+        reads.reset()
+        XCTAssertFalse(reads.isCurrent(mutation), "a reply from the previous Mac must not navigate")
+    }
+
     func testPreviousMacCannotRepopulateAfterReset() {
         var reads = ProjectReads()
         let previous = reads.start()

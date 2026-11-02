@@ -321,6 +321,21 @@ export const PROJECT_STATUSES = ['not-printed', 'printed', 'works', 'needs-chang
 export const ProjectStatusSchema = z.enum(PROJECT_STATUSES);
 export type ProjectStatus = z.infer<typeof ProjectStatusSchema>;
 
+/** Print and engine defaults apply to future work; notification choices affect future events. */
+export const ProjectPreferencesSchema = z.strictObject({
+  printDefaults: PrintSettingsSchema.optional(),
+  designEngine: z.enum(['auto', 'blender', 'fusion']).optional(),
+  notifications: z.enum(['all', 'problems']).optional(),
+});
+export type ProjectPreferences = z.infer<typeof ProjectPreferencesSchema>;
+export const ProjectSettingsPatchSchema = ProjectPreferencesSchema.extend({
+  title: z.string().trim().min(1).max(120).regex(/^[^\u0000-\u001f\u007f]+$/).optional(),
+  status: ProjectStatusSchema.optional(), archived: z.boolean().optional(),
+  printerDestinationId: z.string().min(1).max(256).nullable().optional(),
+}).refine(value => Object.keys(value).length > 0);
+export type ProjectSettingsPatch = z.infer<typeof ProjectSettingsPatchSchema>;
+
+
 const apnsToken = z.string().regex(/^[0-9a-fA-F]{16,512}$/);
 /** `POST /v1/devices/live-activity-tokens`. At least one of the two. */
 export const LiveActivityTokenUploadSchema = z.strictObject({

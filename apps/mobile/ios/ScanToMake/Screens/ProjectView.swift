@@ -20,6 +20,7 @@ struct ProjectView: View {
     var openPrinting: (String) -> Void = { _ in }
     @State private var section = ProjectSection.result
     @State private var note = ""
+    @State private var showingSettings = false
     @State private var renaming = false
     @State private var projectName = ""
     @State private var working = false
@@ -241,6 +242,9 @@ struct ProjectView: View {
             }
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
+                    if store.macCapabilities.contains("projectPreferences") {
+                        Button("Project Settings", systemImage: "slider.horizontal.3") { showingSettings = true }
+                    }
                     if store.projectRename {
                         Button("Rename Project", systemImage: "pencil") { projectName = words.title; renaming = true }
                     }
@@ -259,6 +263,9 @@ struct ProjectView: View {
         .safeAreaBar(edge: .bottom) {
             // A failed pass that left an earlier model still offers changes and Print; with no model, the failed card's Try Again is the way on.
             if object.canAskForChanges || (words.phase != .needsYou && !(words.phase == .failed && object.current == nil)) { bottomBar(object, words) }
+        }
+        .sheet(isPresented: $showingSettings) {
+            PhoneProjectSettings(store: store, id: id, close: close)
         }
         .alert("Rename Project", isPresented: $renaming) {
             TextField("Project name", text: $projectName)
@@ -938,5 +945,50 @@ enum ARModel {
             item.allowsContentScaling = false
             return item
         }
+    }
+}
+
+private struct PhoneProjectSettings: View {
+    @Environment(AppModel.self) private var app
+    let store: ProjectsStore
+    let id: String
+    let close: () -> Void
+    var body: some View {
+        if let project = store.project(id) {
+            ProjectSettingsForm(project: project, files: project.settingsFiles,
+                load: { try await context() },
+                save: { patch in
+                    let ticket = store.startRequest()
+                    let saved = try await store.mac.client.setProjectSettings(id, patch)
+                    guard store.requestIsCurrent(ticket) else { throw CancellationError() }
+                    store.replace(saved, ticket: ticket)
+                    if patch["status"] == .string("works"), let pending = project.pendingFollowup { store.corrections.sent(pending, for: id) }
+                }, duplicate: {
+                    let ticket = store.startRequest()
+                    let copied = try await store.mac.client.duplicate(id)
+                    guard store.requestIsCurrent(ticket) else { throw CancellationError() }
+                    store.replace(copied, ticket: ticket)
+                    app.route = .project(copied.id)
+                }, delete: {
+                    try await store.mac.delete(id)
+                    store.remove(id); close()
+                }, download: { try await store.mac.client.download(project, $0.id) })
+        }
+    }
+    private func context() async throws -> ProjectSettingsForm.Context {
+        let catalog = try await store.mac.printers()
+        let fusion = try? await store.mac.client.settings().fusion?.state
+        var colours: [ProjectSettingsForm.Colour] = []
+        var filamentProblem: String?
+        do {
+            colours = try await store.mac.filaments(id).map { spool in
+                .init(id: String(spool.slot), name: "\(spool.isExternal ? "External" : "A\(spool.slot + 1)") · \(spool.material) \(spool.name)",
+                    value: .object(spool.isExternal ? ["external": .bool(true)] : ["amsSlot": .number(Double(spool.slot))]))
+            }
+            if !colours.isEmpty { colours.insert(.init(id: "auto", name: "Suggested spool", value: .object(["auto": .bool(true)])), at: 0) }
+        } catch { filamentProblem = (error as? CompanionError)?.message ?? "Couldn't read the printer's filament." }
+        return .init(printers: catalog.destinations.map { .init(id: $0.id, name: $0.name,
+            quality: $0.offersQuality, strength: $0.offersStrength, copies: $0.capabilities?.copies == true, materialChoice: $0.capabilities?.materialChoice == true) },
+            defaultPrinter: catalog.defaultDestinationId, colours: colours, fusionAvailable: ["connected", "not-running"].contains(fusion ?? ""), filamentProblem: filamentProblem)
     }
 }

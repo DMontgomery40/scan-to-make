@@ -5,7 +5,7 @@ import type {TouchupActivity, TouchupChange} from '../touchup/runner.js';
 import type {PassStage} from '../touchup/stages.js';
 import type {DesignEngine} from '../touchup/invocation.js';
 import type {Ask} from '@scan-to-make/contracts/counterpart';
-import type {PrintLive, PrintMonitor, PrintSettings} from '@scan-to-make/contracts/counterpart';
+import type {PrintLive, PrintMonitor, PrintSettings, ProjectPreferences} from '@scan-to-make/contracts/counterpart';
 
 /** `sent`: the printer accepted the print, but Counterpart can't follow it to the end (no evidence it printed). */
 export type ObjectState = 'new' | 'touching-up' | 'needs-closeup' | 'ready' | 'printing' | 'printed' | 'failed' | 'sent' | 'confirmed';
@@ -57,6 +57,7 @@ export interface StmObject {
   createdAtMs: number;
   updatedAtMs: number;
   instructions?: string;
+  preferences?: ProjectPreferences;
   /** A configured destination id; process settings and credentials stay in the companion. */
   printerDestinationId?: string;
   state: ObjectState;

@@ -73,7 +73,7 @@ public final class CompanionClient: @unchecked Sendable {
             if is_("/v1/objects(?:/printers)?") || is_(one) || is_(one + "/passes/(0|[1-9][0-9]{0,15})/activity") { return "projects:read" }
             if is_("/healthz") { return "generation:health" }
             if is_("/v1/events") || is_("/v1/settings") || is_("/v1/devices") { return "projects:read" }
-            if is_(one + "/(model\\.stl|renders/[^/]+|photos/[^/]+|capture/[^/]+|asks/[^/]+|prints/[^/]+/frames/[^/]+)") { return "projects:read" }
+            if is_(one + "/(model\\.stl|renders/[^/]+|photos/[^/]+|capture/[^/]+|scan/[^/]+|original/[0-9]+|asks/[^/]+|prints/[^/]+/frames/[^/]+)") { return "projects:read" }
             if is_(one + "/(filaments|camera\\.jpg)") || is_("/v1/objects/printers/[^/]+/camera\\.jpg") { return "printer-handoff:use" }
         case "PATCH":
             if is_(one) { return "captures:import" }
@@ -85,7 +85,7 @@ public final class CompanionClient: @unchecked Sendable {
         case "PUT":
             if is_(one + "/scan") { return "captures:import" }
         case "POST":
-            if is_("/v1/objects") || is_(one + "/(start|corrections|closeup|photos|capture|capture-depth)") { return "captures:import" }
+            if is_("/v1/objects") || is_(one + "/(start|duplicate|corrections|closeup|photos|capture|capture-depth)") { return "captures:import" }
             if is_(one + "/(print|printer|print-confirmation|estimate|print/pause|print/resume|print/cancel)") { return "printer-handoff:use" }
             if is_("/v1/devices/live-activity-tokens") { return "projects:write" }
             if is_("/v1/settings/(ai/test|fusion/setup)") { return "projects:write" }
@@ -246,6 +246,14 @@ public final class CompanionClient: @unchecked Sendable {
             .checked(path: "/v1/objects/\(id)/settings")
         return (try? JSONDecoder().decode(MaybeOne.self, from: reply.body))?.object
     }
+    /// Project preferences are available when the companion advertises `projectPreferences`.
+    public func setProjectSettings(_ id: String, _ patch: [String: JSONValue]) async throws -> Project {
+        let reply = try await send("PATCH", "/v1/objects/\(id)/settings", body: try JSONEncoder().encode(patch)).checked(path: "/v1/objects/\(id)/settings")
+        return try JSONDecoder().decode(One.self, from: reply.body).object
+    }
+    public func duplicate(_ id: String) async throws -> Project {
+        try await request("POST", "/v1/objects/\(id)/duplicate", json: [:], as: One.self).object
+    }
     public func delete(_ id: String) async throws { _ = try await request("DELETE", "/v1/objects/\(id)", as: Deleted.self) }
     public func passActivity(_ id: String, index: Int) async throws -> [Project.Activity] {
         try await request("GET", "/v1/objects/\(id)/passes/\(index)/activity", as: ActivityReply.self).activity
@@ -278,17 +286,20 @@ public final class CompanionClient: @unchecked Sendable {
         try await request("POST", "/v1/objects/\(id)/printer", json: ["destinationId": destinationId], as: One.self).object
     }
     /// The slice estimate for these settings (PR 2): time, grams and layers. Can take up to 150 s.
-    public func estimate(_ id: String, destinationId: String?, quality: PrintQuality, strength: PrintStrength, copies: Int? = nil) async throws -> SliceEstimate {
+    public func estimate(_ id: String, destinationId: String?, quality: PrintQuality, strength: PrintStrength, copies: Int? = nil, overrideDefaults: Bool = false) async throws -> SliceEstimate {
         var json: [String: Any] = [:]
         if let destinationId { json["destinationId"] = destinationId }
-        if quality != .standard { json["quality"] = quality.rawValue }
-        if strength != .standard { json["strength"] = strength.rawValue }
+        if overrideDefaults || quality != .standard { json["quality"] = quality.rawValue }
+        if overrideDefaults || strength != .standard { json["strength"] = strength.rawValue }
         if let copies { json["copies"] = max(1, copies) }
         return try await request("POST", "/v1/objects/\(id)/estimate", json: json, as: SliceEstimate.self, timeout: 170)
     }
     /// Starts preparing the print. The printer MCP still asks its own confirmation.
-    public func print(_ id: String, choice: PrintChoice) async throws -> Project {
-        try await request("POST", "/v1/objects/\(id)/print", json: choice.body, as: One.self).object
+    public func print(_ id: String, choice: PrintChoice, overrideDefaults: Bool = false) async throws -> Project {
+        var body = choice.body
+        // Standard is an explicit choice when replacing a saved Fine/Strong project default.
+        if overrideDefaults { body["quality"] = choice.quality.rawValue; body["strength"] = choice.strength.rawValue }
+        return try await request("POST", "/v1/objects/\(id)/print", json: body, as: One.self).object
     }
     public func answerPrintConfirmation(_ id: String, response: PrintConfirmationResponse) async throws -> Project {
         let json = try JSONSerialization.jsonObject(with: JSONEncoder().encode(response)) as? [String: Any]
@@ -425,11 +436,16 @@ public final class CompanionClient: @unchecked Sendable {
 
     /// Downloads one project file into the cache, once per project version, and returns where it is.
     public func download(_ project: Project, _ name: String) async throws -> URL {
-        let allowed = Pattern(#"model\.stl|renders/[A-Za-z0-9][A-Za-z0-9._-]{0,120}\.png|asks/[a-f0-9-]{36}\.(jpg|png)|prints/[a-f0-9-]{36}/frames/[a-f0-9-]{36}\.jpg|(?:photos|capture)/[A-Za-z0-9][A-Za-z0-9._ -]{0,127}"#)
+        let allowed = Pattern(#"original/[0-9]+|model\.stl|renders/[A-Za-z0-9][A-Za-z0-9._-]{0,120}\.png|asks/[a-f0-9-]{36}\.(jpg|png)|prints/[a-f0-9-]{36}/frames/[a-f0-9-]{36}\.jpg|(?:photos|capture|scan)/[A-Za-z0-9][A-Za-z0-9._ -]{0,127}"#)
         guard Pattern(Self.uuid).matches(project.id), allowed.matches(name), !name.contains("..") else { throw CompanionError.transport("invalid-request") }
         let version = String(Int64(project.mediaVersion))
         let folder = cache.appending(path: project.id, directoryHint: .isDirectory).appending(path: version, directoryHint: .isDirectory)
-        let target = folder.appending(path: name.replacingOccurrences(of: "/", with: "_"))
+        var filename = name.replacingOccurrences(of: "/", with: "_")
+        if name.hasPrefix("original/"), let index = Int(name.dropFirst(9)),
+           case .array(let originals)? = project.files?.object?["original"], originals.indices.contains(index), let path = originals[index].string {
+            filename += "_" + URL(fileURLWithPath: path).lastPathComponent
+        }
+        let target = folder.appending(path: filename)
         if FileManager.default.fileExists(atPath: target.path) { return target }
         let encoded = name.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? name
         // The Ask's picture is served by its id; the field gives `asks/<id>.<ext>`.

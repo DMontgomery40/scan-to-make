@@ -155,7 +155,7 @@ export function createControlDispatcher(services: ControlServices) {
         case 'status.get': return {protocolVersion:1,companionVersion:services.companionVersion,...(services.name?{name:services.name}:{}),transport:auth.transport,
           pairedDeviceCount:(await auth.listDevices()).length,capabilities:{capture:!!capture?.captures,cleanup:!!capture?.scanProcessing,printerHandoff:!!printHandoff,nearbyPairing:!!services.nearby,
             objectsCreate:!!services.objects,printSettings:!!services.objects?.printSettingsAvailable,printControl:!!services.objects?.printSettingsAvailable,
-            events:!!services.events&&!!services.liveActivityTokens,structuredPasses:!!services.objects,genericConfirmations:!!services.objects,materialChoice:!!services.objects,projectSettings:!!services.objects,projectRename:!!services.objects,messagePhotos:!!services.objects,mcpUpdates:!!services.mcpUpdates,printCopies:!!services.objects?.printCopiesAvailable}};
+            events:!!services.events&&!!services.liveActivityTokens,structuredPasses:!!services.objects,genericConfirmations:!!services.objects,materialChoice:!!services.objects,projectSettings:!!services.objects,projectPreferences:!!services.objects,projectRename:!!services.objects,messagePhotos:!!services.objects,mcpUpdates:!!services.mcpUpdates,printCopies:!!services.objects?.printCopiesAvailable}};
         case 'printers.updateMcp': {
           if(!services.mcpUpdates)throw new ControlFailure('unavailable');
           const {mcpId,fresh}=parameters[method].parse(raw);
@@ -246,10 +246,8 @@ export function createControlDispatcher(services: ControlServices) {
           try {
             const {projectSettingsView} = await import('./objects/http.js');
             if (method === 'objects.settings.get') return {settings: projectSettingsView(await objects.get(parameters[method].parse(raw).id))};
-            const {id, status, archived, title} = parameters[method].parse(raw);
-            let updated = status !== undefined ? await objects.setStatus(id, status) : await objects.get(id);
-            if (archived !== undefined) updated = await objects.setArchived(id, archived);
-            if (title !== undefined) updated = await objects.rename(id, title);
+            const {id, ...patch} = parameters[method].parse(raw);
+            const updated = await objects.setProjectSettings(id, patch);
             return {settings: projectSettingsView(updated), object: {...publicObject(updated), directory: objects.dir(updated.id)}};
           } catch (error) {
             if (error instanceof ObjectNotFoundError) throw new ControlFailure('not-found');
@@ -257,7 +255,7 @@ export function createControlDispatcher(services: ControlServices) {
             throw error;
           }
         }
-        case 'objects.list': case 'objects.printers': case 'objects.filaments': case 'objects.selectPrinter': case 'objects.get': case 'objects.passActivity': case 'objects.start': case 'objects.delete': case 'objects.correct': case 'objects.answerCloseup': case 'objects.print': case 'objects.answerPrintConfirmation':
+        case 'objects.duplicate': case 'objects.list': case 'objects.printers': case 'objects.filaments': case 'objects.selectPrinter': case 'objects.get': case 'objects.passActivity': case 'objects.start': case 'objects.delete': case 'objects.correct': case 'objects.answerCloseup': case 'objects.print': case 'objects.answerPrintConfirmation':
         case 'objects.create': case 'objects.addFile':
         case 'objects.estimate': case 'objects.pausePrint': case 'objects.resumePrint': case 'objects.cancelPrint': case 'objects.camera': case 'printers.camera': case 'settings.get': case 'settings.set': {
           const objects = services.objects;
@@ -268,6 +266,7 @@ export function createControlDispatcher(services: ControlServices) {
             // sending; one with no files and nothing arriving is a draft still on the phone.
             const local = (o: Awaited<ReturnType<typeof objects.get>>) => ({...publicObject(o), directory: objects.dir(o.id),
               ...(o.state === 'new' && !o.progress && objects.receiving(o.id) ? {progress: RECEIVING} : {})});
+            if (method === 'objects.duplicate') return {object: local(await objects.duplicate(parameters[method].parse(raw).id))};
             if (method === 'objects.list') return {objects: (await objects.list()).map(local)};
             if (method === 'objects.printers') return objects.printers();
             if (method === 'objects.filaments') return {filaments: await objects.filaments(parameters[method].parse(raw).id)};

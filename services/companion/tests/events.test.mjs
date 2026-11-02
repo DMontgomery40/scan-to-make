@@ -357,3 +357,12 @@ test('a phone\'s X-Scan-Device-Name renames its device when it changes, never to
   assert.equal(deviceNameFromHeader(Buffer.from('Ada’s iPad', 'utf8').toString('latin1')), 'Ada’s iPad', 'raw UTF-8 bytes too');
   assert.equal(deviceNameFromHeader('a%0Ab'), 'ab');
 });
+
+
+test('a project notification preference suppresses the alert without losing its event', async t => {
+  const {log} = await openLog(t);
+  const event = await log.append({...draft('print.done'), notify: 'none'});
+  assert.equal(event.type, 'print.done');
+  assert.equal(event.notify, 'none');
+  assert.equal(log.page(0).events.length, 1);
+});

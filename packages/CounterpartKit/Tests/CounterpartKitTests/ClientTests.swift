@@ -246,6 +246,27 @@ final class CompanionClientTests: XCTestCase {
         XCTAssertEqual(bodies[2]["photoNames"] as? [String], ["closeup.jpg"])
     }
 
+    func testProjectPreferencesAndDuplicateUseTheSharedCompanionContract() async throws {
+        let id = "0b6f0f43-7c35-4b8a-9a3c-8f0b4c4b2a11"
+        let object: [String: Any] = ["id": id, "createdAtMs": 1, "updatedAtMs": 2, "state": "ready", "photos": [], "passes": [],
+            "settings": ["status": "not-printed", "archived": false, "printDefaults": ["quality": "fine", "copies": 3], "designEngine": "blender", "notifications": "problems"]]
+        let fake = FakeTransport { _, _ in json(200, ["object": object]) }
+        let c = try client(fake)
+        let saved = try await c.setProjectSettings(id, ["printDefaults": .object(["quality": .string("fine"), "copies": .number(3)])])
+        XCTAssertEqual(saved.settings?.printDefaults?.quality, "fine")
+        XCTAssertEqual(saved.settings?.printDefaults?.copies, 3)
+        XCTAssertEqual(saved.settings?.notifications, "problems")
+        _ = try await c.duplicate(id)
+        _ = try await c.print(id, choice: .init(colour: nil), overrideDefaults: true)
+        XCTAssertTrue(fake.calls[0].request.url!.path.hasSuffix("/settings"))
+        XCTAssertTrue(fake.calls[1].request.url!.path.hasSuffix("/duplicate"))
+        let body = try XCTUnwrap(JSONSerialization.jsonObject(with: fake.calls[2].request.httpBody!) as? [String: Any])
+        XCTAssertEqual(body["quality"] as? String, "standard", "an explicit Standard must replace saved Fine")
+        XCTAssertEqual(body["strength"] as? String, "standard")
+        let decoded = try JSONDecoder().decode(Project.self, from: JSONEncoder().encode(saved))
+        XCTAssertEqual(decoded.settings?.printDefaults?.copies, 3)
+    }
+
     func testCreateSendsTheKindYouPicked() async throws {
         var bodies: [[String: Any]] = []
         let fake = FakeTransport { request, _ in
@@ -338,6 +359,7 @@ final class CompanionClientTests: XCTestCase {
         XCTAssertEqual(CompanionClient.scope("POST", "/v1/objects/\(id)/estimate"), "printer-handoff:use")
         XCTAssertEqual(CompanionClient.scope("POST", "/v1/objects/\(id)/corrections"), "captures:import")
         XCTAssertEqual(CompanionClient.scope("PUT", "/v1/objects/\(id)/scan"), "captures:import")
+        XCTAssertEqual(CompanionClient.scope("GET", "/v1/objects/\(id)/scan/original.usdz"), "projects:read")
         XCTAssertEqual(CompanionClient.scope("GET", "/v1/events"), "projects:read")
         XCTAssertEqual(CompanionClient.scope("PATCH", "/v1/settings"), "projects:write")
         XCTAssertNil(CompanionClient.scope("GET", "/v1/auth/devices"), "the phone never calls routes it doesn't know")
@@ -450,6 +472,18 @@ final class CompanionClientTests: XCTestCase {
         _ = try await uploader.send([photo], to: id)
         XCTAssertEqual(uploads.map(\.query), ["name=evidence.jpg&forMessage=true", "name=evidence.jpg"],
                        "message intent comes from the action; the same failed state also permits initial retry evidence")
+    }
+
+    func testOriginalModelExportsKeepTheirExtensionAndScanUsesReadScope() async throws {
+        let p = try JSONDecoder().decode(Project.self, from: Data(#"{"id":"0b6f0f43-7c35-4b8a-9a3c-8f0b4c4b2a11","createdAtMs":1,"updatedAtMs":2,"state":"ready","photos":[],"passes":[],"scan":"scan.usdz","files":{"original":["original/Designer Part.3mf"]}}"#.utf8))
+        let fake = FakeTransport { _, _ in HTTPReply(status: 200, body: Data("original".utf8)) }
+        let c = try client(fake)
+        let model = try await c.download(p, "original/0")
+        XCTAssertEqual(model.pathExtension, "3mf")
+        XCTAssertTrue(model.lastPathComponent.contains("Designer Part"))
+        let scan = try await c.download(p, "scan/scan.usdz")
+        XCTAssertEqual(scan.pathExtension, "usdz")
+        XCTAssertEqual(fake.calls.map { $0.request.url!.path.components(separatedBy: "/").suffix(2).joined(separator: "/") }, ["original/0", "scan/scan.usdz"])
     }
 
     func testUploadsSkipWhatTheMacHas() async throws {

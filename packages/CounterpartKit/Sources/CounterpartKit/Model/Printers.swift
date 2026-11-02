@@ -46,6 +46,7 @@ public struct PrinterDestination: Codable, Identifiable, Equatable, Hashable, Se
         public var multiColour: Bool?
         /// `slice_stl` takes `repetitions` and really makes them (KAN-214 PR 8b): Print and Estimate take `copies`.
         public var copies: Bool?
+        public var materialChoice: Bool?
         public var missing: [String]?
         public var update: Update?
         public var detectedAt: String?

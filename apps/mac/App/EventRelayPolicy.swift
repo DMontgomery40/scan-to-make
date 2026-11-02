@@ -208,6 +208,8 @@ struct LiveActivityPush: Encodable, Equatable {
         case "print.done", "print.failed", "print.cancelled": kind = .end; priority = 10
         default: return nil
         }
+        // Push-to-start requires an alert. Muted projects can still update an activity started on the phone.
+        if kind == .start && event.notify == "none" { return nil }
         let data = event.data
         let fallbackState: String
         switch event.type {
@@ -234,7 +236,7 @@ struct LiveActivityPush: Encodable, Equatable {
             push.alert = alert(title: "\(shortTitle) is printing", body: "On \(name)")
         } else if kind == .start {
             return nil
-        } else if event.type == "print.paused" || kind == .end {
+        } else if event.notify != "none" && (event.type == "print.paused" || kind == .end) {
             push.alert = alert(title: event.title, body: event.body, sound: kind == .end ? "default" : nil)
         }
         return push

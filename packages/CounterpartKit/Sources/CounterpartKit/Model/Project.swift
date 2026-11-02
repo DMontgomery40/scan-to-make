@@ -14,6 +14,24 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
         }
     }
 
+    /// An explicit fit can use a scan as reference; only legacy records infer their job from capture evidence.
+    public var usesCopyWorkflow: Bool {
+        if kind == "fit" { return false }
+        if kind == "copy" { return true }
+        if scan != nil || !(capture ?? []).isEmpty { return true }
+        return instructions?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false
+    }
+
+    /// Saved defaults replace print history as a whole: an absent colour means use the printer profile.
+    /// Legacy quality/strength/copies can follow the model, but a historical tray belongs to one printer.
+    public func resolvedPrintDefaults(destinationId: String?) -> PrintSettings {
+        if let saved = settings?.printDefaults { return saved }
+        var previous = print?.settings ?? PrintSettings()
+        let previousPrinter = print?.destinationId ?? print?.destination?.id
+        if destinationId == nil || previousPrinter != destinationId { previous.colour = nil }
+        return previous
+    }
+
     public var id: String
     public var createdAtMs: Double
     public var updatedAtMs: Double
@@ -189,11 +207,19 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
         public var status: String?
         /// Present on a Mac that archives apart from the status (`PATCH …/settings {archived}`).
         public var archived: Bool?
+        public var printerDestinationId: String?
+        public var printDefaults: PrintSettings?
+        public var designEngine: String?
+        public var notifications: String?
         public init(status: String? = nil, archived: Bool? = nil) { self.status = status; self.archived = archived }
         public init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             status = (try? c.decodeIfPresent(String.self, forKey: .status)) ?? nil
             archived = (try? c.decodeIfPresent(Bool.self, forKey: .archived)) ?? nil
+            printerDestinationId = try? c.decodeIfPresent(String.self, forKey: .printerDestinationId)
+            printDefaults = try? c.decodeIfPresent(PrintSettings.self, forKey: .printDefaults)
+            designEngine = try? c.decodeIfPresent(String.self, forKey: .designEngine)
+            notifications = try? c.decodeIfPresent(String.self, forKey: .notifications)
         }
     }
 
@@ -624,17 +650,19 @@ public struct PrintSettings: Codable, Equatable, Sendable {
     public var strength: String?
     /// `{auto: true}`, `{amsSlot: n}`, `{external: true}` or `{material: "PETG"}`.
     public var colour: JSONValue?
+    public var copies: Int?
 
-    public init(quality: String? = nil, strength: String? = nil, colour: JSONValue? = nil) {
-        self.quality = quality; self.strength = strength; self.colour = colour
+    public init(quality: String? = nil, strength: String? = nil, colour: JSONValue? = nil, copies: Int? = nil) {
+        self.quality = quality; self.strength = strength; self.colour = colour; self.copies = copies
     }
 
-    private enum CodingKeys: String, CodingKey { case quality, strength, colour }
+    private enum CodingKeys: String, CodingKey { case quality, strength, colour, copies }
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encodeIfPresent(quality, forKey: .quality)
         try c.encodeIfPresent(strength, forKey: .strength)
         try c.encodeIfPresent(colour, forKey: .colour)
+        try c.encodeIfPresent(copies, forKey: .copies)
     }
 }
 
