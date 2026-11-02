@@ -47,7 +47,7 @@ or agent memory.** Update this file when you hand off.
   - **KAN-215:** bambu-printer-mcp.
 - Ask the lead what to own. Don't write into another seat's worktree or branch.
 - **Codex sessions** also work on these repos; their uncommitted changes sit in the MCP repos' main
-  checkouts and in `~/.codex/worktrees/`. Don't touch those; use your own worktree.
+  checkouts and in `~/.codex/worktrees/`.
 
 ## The product
 
