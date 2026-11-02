@@ -656,6 +656,23 @@ If a different job is running, the monitor marks ours `replaced` and stops; it n
 - Stop asks for confirmation in the app.
 - The printer MCP's own confirmation, if it asks one, is relayed as usual.
 
+### 8.6.1 The printer camera, done cheaply
+
+David, 2026-11-02: "are we doing that in an effecient and clever say like how scrypted nvr sends over webrtc peer to peer nad it takes like zero memory or compute and it's basically fucking instant… but somehow, i highly doubt we're doing this in an effecient and clever way". He was right. As of `37ecbb6`, every frame opened a new TLS connection to the printer's camera (P1S, port 6000: handshake, auth, one JPEG, close), RTSP printers started a new ffmpeg per frame, phones re-downloaded on a timer whether or not the picture changed, and a dropped event stream fell back to polling the whole project list every 3 s.
+
+The design, Scrypted's shape at a 3D printer's pace:
+1. **One camera connection per printer, only while someone is looking.** The printer MCP gains a camera stream (`camera_stream_start`/`camera_frame`/`camera_stream_stop`, or a long-lived tool result). It keeps the one TLS socket on 6000 (or one ffmpeg reading RTSP and writing MJPEG to stdout) open, holds the latest frame in memory, and closes 30 s after the last viewer. No per-frame reconnects, no per-frame processes. With nobody looking, there is no camera traffic at all.
+2. **Push, don't poll.** The companion serves one long-lived stream per viewer (`GET …/camera.mjpeg`, multipart; or frames on the existing events connection). It sends a frame only when the picture has changed (a 32×18 grayscale difference over a threshold) and at most every 2 s full-screen or every 10 s for a 300 px card, sized for that viewer. A printer slowly laying plastic sends very little.
+3. **Away from home:** the same stream through Tailscale, which is peer-to-peer WireGuard and so works like Scrypted's WebRTC. Without Tailscale there is no live camera away from home; notifications still carry a frame.
+4. **Lock Screen, Watch and widgets:** the notification at each milestone (first layer, halfway, done, problem) carries **one** frame, attached by the Notification Service Extension (§9.2), and it reaches the Watch like any notification. The Live Activity shows progress, layer and time left with no image, because iOS doesn't allow pushed images in a Live Activity. Widgets refresh on the system's budget. There is no 15 s camera on the Lock Screen, by design.
+5. **No timer polling while events work.** The phone re-reads only on events (§8.7). If the event stream is down, it retries the stream and polls no faster than every 30 s meanwhile.
+
+**Budgets (added to §9.6):**
+- with one viewer: the Mac under 2% CPU for the camera path;
+- the phone under 30 KB/s full-screen and 3 KB/s per card;
+- zero camera bytes and zero printer connections when nobody is looking;
+- measured on the real P1S.
+
 ### 8.7 The event log (new: `services/companion/src/events/`)
 
 Every user-visible change becomes one event.
