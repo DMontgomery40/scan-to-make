@@ -248,7 +248,7 @@ Screenshot: `screens/phone-printing.jpg`.
   - Pause and Stop in the bottom glass bar. Stop asks for confirmation.
 - **Live Activity.** It starts when the print starts (§9.4) and appears on:
   - the Lock Screen;
-  - the Dynamic Island (compact: ring and minutes left; expanded: camera still, Pause, Open);
+  - the Dynamic Island (compact: ring and minutes left; expanded: stage text, camera still, Pause, Open; see §9.4 and `screens/phone-island.jpg`);
   - StandBy;
   - the Watch Smart Stack;
   - the Mac menu bar.
@@ -852,7 +852,7 @@ Screenshots: `screens/phone-lock.jpg` and `screens/phone-island.jpg` (approximat
 | **Lock Screen** | title, a progress bar running on its own toward `endsAt`, minutes left, "*printer* · layer *l*/*L*", and **Pause** and **Camera** buttons (`LiveActivityIntent`) |
 | **Dynamic Island, compact** | a ring and minutes left |
 | **Dynamic Island, minimal and limited-width** | the ring (iOS 27 adds limited-width layouts for landscape) |
-| **Dynamic Island, expanded** | the Lock Screen layout plus the stage text |
+| **Dynamic Island, expanded** | stage text, camera still, progress and time left, and **Pause** and **Open** (`screens/phone-island.jpg`) |
 
 - It also appears automatically in StandBy, on the Watch Smart Stack, in CarPlay and in the Mac menu bar.
 - Starting and updating it follow §8.8: through the relay when there's an APNs key, and from the phone itself otherwise.
