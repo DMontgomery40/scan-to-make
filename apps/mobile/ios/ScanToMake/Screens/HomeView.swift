@@ -12,8 +12,9 @@ struct HomeView: View {
     let openSettings: () -> Void
     @State private var query = ""
     @FocusState private var searching: Bool
+    @State private var showArchived = false
 
-    private var filtered: [Project] {
+    private var searched: [Project] {
         let text = query.trimmingCharacters(in: .whitespaces)
         guard !text.isEmpty else { return store.projects }
         return store.projects.filter { project in
@@ -21,6 +22,11 @@ struct HomeView: View {
                 .contains { $0.localizedCaseInsensitiveContains(text) }
         }
     }
+    /// Archived projects stay out of every section but their own (PRD §5.4).
+    private var filtered: [Project] { searched.filter { !$0.isArchived } }
+    private var archived: [Project] { searched.filter(\.isArchived).sorted { $0.updatedAtMs > $1.updatedAtMs } }
+    /// Works: the ones you said came out right.
+    private var done: [Project] { filtered.filter { store.words($0).phase == .confirmed }.sorted { $0.updatedAtMs > $1.updatedAtMs } }
     /// Prints first, then work on the Mac.
     private var running: [Project] {
         let printing = filtered.filter { [.printing, .preparing].contains(store.words($0).phase) }
@@ -30,7 +36,7 @@ struct HomeView: View {
     private var needsYou: [Project] { filtered.filter { store.words($0).phase == .needsYou } }
     /// Ready first, then the rest by recency.
     private var grid: [Project] {
-        filtered.sorted { a, b in
+        filtered.filter { store.words($0).phase != .confirmed }.sorted { a, b in
             let ra = store.words(a).phase == .ready, rb = store.words(b).phase == .ready
             return ra != rb ? ra : a.updatedAtMs > b.updatedAtMs
         }
@@ -61,28 +67,37 @@ struct HomeView: View {
                         ForEach(needsYou) { project in NeedsYouCard(store: store, project: project) { path.append(project.id) } }
                     }
                     if !grid.isEmpty {
-                        SectionTitle("Projects")
-                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 150, maximum: 260), spacing: 12)], spacing: 12) {
-                            ForEach(grid) { project in
-                                Button { path.append(project.id) } label: { ProjectCard(store: store, project: project) }
-                                    .buttonStyle(.plain)
-                                    .contextMenu { DeleteProjectButton(store: store, project: project) }
-                            }
+                        SectionTitle("All projects")
+                        projectGrid(grid)
+                    }
+                    if !done.isEmpty {
+                        SectionTitle("Done")
+                        projectGrid(done)
+                    }
+                    if !archived.isEmpty {
+                        Button { withAnimation { showArchived.toggle() } } label: {
+                            Label("Archived · \(archived.count)", systemImage: showArchived ? "chevron.down" : "chevron.right")
+                                .font(.subheadline.weight(.semibold)).foregroundStyle(.secondary)
+                        }
+                        .accessibilityIdentifier("show-archived")
+                        if showArchived {
+                            VStack(spacing: 8) { ForEach(archived) { ArchivedRow(store: store, project: $0) { path.append($0.id) } } }
                         }
                     }
                     if !store.loaded && store.error == nil {
                         ProgressView().frame(maxWidth: .infinity).padding(.top, 40)
-                    } else if filtered.isEmpty && !query.isEmpty {
+                    } else if searched.isEmpty && !query.isEmpty {
                         ContentUnavailableView.search(text: query)
                     }
                 }
                 .padding(.horizontal, 16)
-                .padding(.bottom, 24)
+                // The last row scrolls clear of the search and New bar.
+                .padding(.bottom, 96)
             }
         }
         .background(Color.black)
         .refreshable { await store.load(); await store.loadPrinters() }
-        .navigationTitle("Counterpart")
+        .navigationTitle("Projects")
         .navigationSubtitle(subtitle)
         .searchable(text: $query, prompt: "Projects, printers, notes")
         .searchFocused($searching)
@@ -107,6 +122,16 @@ struct HomeView: View {
                 .buttonStyle(.glassProminent)
                 .accessibilityIdentifier("new-project")
                 .keyboardShortcut("n", modifiers: .command)
+            }
+        }
+    }
+
+    private func projectGrid(_ projects: [Project]) -> some View {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 150, maximum: 260), spacing: 12)], spacing: 12) {
+            ForEach(projects) { project in
+                Button { path.append(project.id) } label: { ProjectCard(store: store, project: project) }
+                    .buttonStyle(.plain)
+                    .contextMenu { DeleteProjectButton(store: store, project: project) }
             }
         }
     }
@@ -385,11 +410,51 @@ struct ProjectCard: View {
 
     private func capsuleText(_ words: ProjectWords) -> String? {
         switch words.phase {
+        case .confirmed: ProjectWords.doneLine
         case .printed: "Printed"
         case .sent: "Sent"
         case .printing: Format.percent(project.print?.live?.job?.progress).map { "Printing · \($0)" }
         default: nil
         }
+    }
+}
+
+/// An archived project, hidden from Home's sections, with Unarchive.
+struct ArchivedRow: View {
+    let store: ProjectsStore
+    let project: Project
+    let open: (Project) -> Void
+    @State private var working = false
+    @State private var problem: String?
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Button { open(project) } label: {
+                HStack(spacing: 12) {
+                    ProjectImage(project: project, path: project.thumbnailPath, maxPixelSize: 160)
+                        .frame(width: 52, height: 52).clipShape(.rect(cornerRadius: 12))
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(store.words(project).title).font(.subheadline.weight(.semibold)).lineLimit(1)
+                        Text(problem ?? store.words(project).phase.label).font(.caption).foregroundStyle(problem == nil ? Color.secondary : .orange).lineLimit(2)
+                    }
+                    Spacer(minLength: 0)
+                }
+            }
+            .buttonStyle(.plain)
+            Button("Unarchive") {
+                working = true; problem = nil
+                Task {
+                    defer { working = false }
+                    do { if let next = try await store.archive(project, false) { store.replace(next) } else { await store.reload(project.id) } }
+                    catch let failure as CompanionError { problem = failure.message }
+                    catch { problem = CompanionError.unreachable.message }
+                }
+            }
+            .buttonStyle(.glass).controlSize(.small).disabled(working)
+            .accessibilityIdentifier("unarchive")
+        }
+        .padding(10)
+        .background(Color.card, in: .rect(cornerRadius: 18))
     }
 }
 

@@ -85,9 +85,10 @@ struct WelcomeJobCard: View {
                 Text(detail).font(.subheadline).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 HStack(spacing: 6) {
                     ForEach(chips, id: \.1) { chip in
+                        // A tag, not a control: plain fill, no glass, so it doesn't look tappable.
                         Label(chip.1, systemImage: chip.0).font(.caption2.weight(.semibold)).labelStyle(.titleAndIcon)
                             .padding(.horizontal, 8).padding(.vertical, 4)
-                            .glassEffect(.regular, in: .capsule)
+                            .background(.white.opacity(0.08), in: .capsule)
                     }
                 }
                 .foregroundStyle(Color.filament)

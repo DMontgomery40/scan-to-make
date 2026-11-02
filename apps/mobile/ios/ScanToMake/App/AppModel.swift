@@ -110,6 +110,7 @@ import CounterpartKit
         let ids = Fixtures.ids
         switch screen {
         case "ready": route = .project(ids.mic)
+        case "printed": route = .project(ids.first)
         case "inputs": route = .project(ids.mic); debugSection = "inputs"
         case "working": route = .project(ids.potato)
         case "ask": route = .project(ids.plush)

@@ -44,6 +44,8 @@ public struct PrinterDestination: Codable, Identifiable, Equatable, Hashable, Se
         /// `slice_stl` takes `wall_loops` and `sparse_infill_density`.
         public var strength: Bool
         public var multiColour: Bool?
+        /// `slice_stl` takes `repetitions` and really makes them (KAN-214 PR 8b): Print and Estimate take `copies`.
+        public var copies: Bool?
         public var missing: [String]?
         public var update: Update?
         public var detectedAt: String?
@@ -73,6 +75,7 @@ public struct PrinterDestination: Codable, Identifiable, Equatable, Hashable, Se
     public var canResume: Bool { capabilities?.resume ?? false }
     public var canCancel: Bool { capabilities?.cancel ?? false }
     public var offersQuality: Bool { capabilities?.quality ?? false }
+    public var offersCopies: Bool { capabilities?.copies ?? false }
     public var offersStrength: Bool { capabilities?.strength ?? false }
     /// The model as people say it: "Bambu Lab P1S", "Prusa MK4S".
     public var modelName: String { model ?? (isBambu ? "Bambu Lab printer" : "3D printer") }
@@ -172,11 +175,14 @@ public struct PrintChoice: Equatable, Sendable {
     public var strength: PrintStrength
     /// The previous print may have reached the printer, and you said it isn't printing this.
     public var checked: Bool
-    public init(colour: PrintColour?, quality: PrintQuality = .standard, strength: PrintStrength = .standard, checked: Bool = false) {
-        self.colour = colour; self.quality = quality; self.strength = strength; self.checked = checked
+    /// How many on the plate (`slice_stl` `repetitions`), only when you chose a number: nil leaves the printer
+    /// profile's own count (KAN-214 #230).
+    public var copies: Int?
+    public init(colour: PrintColour?, quality: PrintQuality = .standard, strength: PrintStrength = .standard, checked: Bool = false, copies: Int? = nil) {
+        self.colour = colour; self.quality = quality; self.strength = strength; self.checked = checked; self.copies = copies.map { max(1, $0) }
     }
-    public init(filament: PrinterFilament, quality: PrintQuality = .standard, strength: PrintStrength = .standard, checked: Bool = false) {
-        self.init(colour: .tray(filament), quality: quality, strength: strength, checked: checked)
+    public init(filament: PrinterFilament, quality: PrintQuality = .standard, strength: PrintStrength = .standard, checked: Bool = false, copies: Int? = nil) {
+        self.init(colour: .tray(filament), quality: quality, strength: strength, checked: checked, copies: copies)
     }
 
     /// The `POST …/print` body. Standard quality and strength send nothing (the MCP's preset decides), and a
@@ -186,6 +192,8 @@ public struct PrintChoice: Equatable, Sendable {
         if let colour { json[colour.json.key] = colour.json.value }
         if quality != .standard { json["quality"] = quality.rawValue }
         if strength != .standard { json["strength"] = strength.rawValue }
+        // Only a number you chose; otherwise the printer profile's count applies.
+        if let copies { json["copies"] = copies }
         return json
     }
 

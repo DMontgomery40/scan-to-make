@@ -127,12 +127,17 @@ public enum EventUpdate: Equatable, Sendable {
 /// Follows an `EventFeed` for as long as the caller's task runs. The first read starts from now (no
 /// history); later reads carry on from the cursor. Finishes with `not-supported` from an older Mac, so the
 /// caller can fall back to polling, and with a pairing error when the phone has to pair again.
+///
+/// A long poll is silent for up to 25 s by design, so iOS may flag it as a data stall, and a poll that ends
+/// early (cut off, timed out, cancelled underneath us) says nothing about the Mac. When one fails, `healthy`
+/// asks the Mac a quick question; if it answers, the poll simply starts again and nothing is reported.
 public struct EventStream: Sendable {
     let feed: EventFeed
-    public init(feed: EventFeed) { self.feed = feed }
+    let healthy: @Sendable () async -> Bool
+    public init(feed: EventFeed, healthy: @escaping @Sendable () async -> Bool = { false }) { self.feed = feed; self.healthy = healthy }
 
     public var updates: AsyncThrowingStream<EventUpdate, Error> {
-        let feed = feed
+        let feed = feed, healthy = healthy
         return AsyncThrowingStream { continuation in
             let task = Task {
                 var cursor: Int?
@@ -148,9 +153,14 @@ public struct EventStream: Sendable {
                         continuation.finish(throwing: error); return
                     } catch is CancellationError {
                         break
-                    } catch let error as CompanionError where error.code == "cancelled" {
-                        break
                     } catch {
+                        // Our own task stopping ends the stream; a poll cancelled underneath us is just retried.
+                        if Task.isCancelled { break }
+                        if await healthy() {
+                            failures = 0
+                            try? await Task.sleep(for: .seconds(1))
+                            continue
+                        }
                         failures += 1
                         // While the Mac is away: 1, 2, 5, 15, then 30 s between tries. Then reload once it answers.
                         try? await Task.sleep(for: .seconds([1, 2, 5, 15, 30][min(failures - 1, 4)]))

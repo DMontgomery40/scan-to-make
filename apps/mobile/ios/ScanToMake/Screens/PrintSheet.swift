@@ -17,6 +17,8 @@ struct PrintSheet: View {
     @State private var spool: Int?
     @State private var quality = PrintQuality.standard
     @State private var strength = PrintStrength.standard
+    /// How many on the plate, where `offersCopies`; nil until you choose (the printer profile's count).
+    @State private var copies: Int?
     @State private var slice = EstimateState()
     @State private var shownPrinter: String?
     @Environment(\.horizontalSizeClass) private var widthClass
@@ -55,7 +57,7 @@ struct PrintSheet: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .glassEffect(.regular, in: .rect(cornerRadius: 24))
                         settingsSection.id("settings")
-                        if project?.print?.uncertain == true { uncertainCard }
+                        if uncertain { uncertainCard }
                         if let problem {
                             Label(problem, systemImage: "exclamationmark.triangle.fill").font(.subheadline).foregroundStyle(.red)
                                 .fixedSize(horizontal: false, vertical: true)
@@ -82,7 +84,7 @@ struct PrintSheet: View {
         }
         .presentationDetents([.large])
         .task { await start() }
-        .task(id: "\(destinationId)#\(quality)#\(strength)#\(project?.mediaVersion ?? 0)") { await refreshEstimate() }
+        .task(id: estimateKey) { await refreshEstimate() }
     }
 
     // MARK: Sections
@@ -210,6 +212,16 @@ struct PrintSheet: View {
                 Text(presetOnlyWords).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
             Text(profileLine).font(.caption).foregroundStyle(.secondary)
+            if offersCopies {
+                Stepper {
+                    HStack {
+                        Text("Copies").font(.headline)
+                        Spacer()
+                        Text(copies.map { "\($0)" } ?? "From printer profile").monospacedDigit().foregroundStyle(.secondary)
+                    }
+                } onIncrement: { copies = min(64, (copies ?? 1) + 1) } onDecrement: { copies = max(1, (copies ?? 2) - 1) }
+                .accessibilityIdentifier("copies")
+            }
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -232,6 +244,15 @@ struct PrintSheet: View {
         if let chosen { parts.append("\(chosen.displayName) profile") }
         return parts.joined(separator: " · ")
     }
+
+    /// The last print may still be running. A Done project (the Mac's confirmed) prints again without the check.
+    private var uncertain: Bool {
+        guard let project, project.print?.uncertain == true else { return false }
+        return project.state != .confirmed
+    }
+    /// Copies on a Mac that takes them, for a printer whose MCP really makes them (KAN-214 PR 8b).
+    private var offersCopies: Bool { store.macCapabilities.contains("printCopies") && printer?.offersCopies == true }
+
 
     private var uncertainCard: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -266,7 +287,7 @@ struct PrintSheet: View {
 
     private var canPrint: Bool {
         guard busy == nil, printer != nil, printer?.isOffline != true else { return false }
-        if project?.print?.uncertain == true && !checked { return false }
+        if uncertain && !checked { return false }
         // An AMS printer prints the spool you can see chosen here, never whatever the Mac last had set.
         if filamentKind == "ams" && chosen == nil { return false }
         return true
@@ -275,9 +296,15 @@ struct PrintSheet: View {
     // MARK: Actions
 
     private func start() async {
-        // Fresh capabilities: a Mac that just started reads its printers in the background.
+        // Fresh capabilities: a Mac that just started reads its printers in the background (Copies depends on them).
         await store.loadPrinters()
+        await store.loadCapabilities()
         destinationId = project?.printerDestinationId ?? store.catalog?.defaultDestinationId ?? ""
+        // Print another: the last print's quality and strength again (its printer is the project's).
+        if let last = project?.print?.settings {
+            quality = last.quality.flatMap(PrintQuality.init(rawValue:)) ?? quality
+            strength = last.strength.flatMap(PrintStrength.init(rawValue:)) ?? strength
+        }
         await loadFilaments()
         await store.loadPrinters()
         if let project, project.current != nil { modelURL = try? await store.mac.download(project, "model.stl") }
@@ -307,7 +334,17 @@ struct PrintSheet: View {
             guard id == destinationId else { return }
             filaments = reported
             spools[id] = reported
-            spool = (reported.first { $0.suggested == true } ?? reported.first { !$0.isExternal } ?? reported.first)?.slot
+            // The last print's spool on the same printer: the Mac's record (a tray, or the external spool), else the
+            // tray this phone sent; else the one the Mac suggests.
+            let recorded = project?.print?.destinationId == id ? project?.print?.settings?.colour?.object : nil
+            let last: PrinterFilament? = if let slot = recorded?["amsSlot"]?.number {
+                reported.first { $0.slot == Int(slot) }
+            } else if recorded?["external"] == .bool(true) {
+                reported.first { $0.isExternal }
+            } else {
+                LastTray.slot(projectId, destinationId: id).flatMap { slot in reported.first { $0.slot == slot } }
+            }
+            spool = (last ?? reported.first { $0.suggested == true } ?? reported.first { !$0.isExternal } ?? reported.first)?.slot
         } catch let failure as CompanionError {
             // A printer that doesn't report filament still prints; you pick the material.
             if !failure.isUnsupported { problem = failure.message }
@@ -315,7 +352,7 @@ struct PrintSheet: View {
     }
 
     /// The model, printer and settings an estimate is for. Only an estimate for exactly these is shown.
-    private var estimateKey: String { "\(project?.mediaVersion ?? 0)#\(destinationId)#\(quality)#\(strength)" }
+    private var estimateKey: String { "\(project?.mediaVersion ?? 0)#\(destinationId)#\(quality)#\(strength)#\(offersCopies ? copies.map(String.init) ?? "profile" : "profile")" }
     /// The slice estimate on screen: always for these settings, or pending.
     private var estimate: SliceEstimate? { slice.estimate(for: estimateKey) }
 
@@ -327,7 +364,8 @@ struct PrintSheet: View {
         do {
             let next = try await store.mac.client.estimate(projectId, destinationId: destinationId,
                                                            quality: printer?.offersQuality == true ? quality : .standard,
-                                                           strength: printer?.offersStrength == true ? strength : .standard)
+                                                           strength: printer?.offersStrength == true ? strength : .standard,
+                                                           copies: offersCopies ? copies : nil)
             guard !Task.isCancelled else { return }
             slice.finish(key, next)
         } catch let failure as CompanionError {
@@ -350,9 +388,10 @@ struct PrintSheet: View {
         let choice = PrintChoice(colour: colour,
                                  quality: printer?.offersQuality == true ? quality : .standard,
                                  strength: printer?.offersStrength == true ? strength : .standard,
-                                 checked: project?.print?.uncertain == true && checked)
+                                 checked: uncertain && checked, copies: offersCopies ? copies : nil)
         do {
             store.replace(try await store.mac.client.print(projectId, choice: choice))
+            if case .tray(let tray)? = colour { LastTray.save(projectId, destinationId: destinationId, slot: tray.slot) }
             dismiss()
         } catch let failure as CompanionError {
             if failure.needsPairing { dismiss(); store.onPair(); return }
@@ -482,6 +521,19 @@ struct FlowRow: Layout {
             view.place(at: CGPoint(x: x, y: y), proposal: .unspecified)
             x += size.width + spacing; row = max(row, size.height)
         }
+    }
+}
+
+/// The tray this phone last printed a project with, so Print Another starts on it. The companion records a
+/// colour choice in `print.settings`, but not the tray a print was sent with.
+enum LastTray {
+    private static func key(_ projectId: String) -> String { "CounterpartLastTray." + projectId }
+    static func save(_ projectId: String, destinationId: String, slot: Int) {
+        UserDefaults.standard.set(["destinationId": destinationId, "slot": slot], forKey: key(projectId))
+    }
+    static func slot(_ projectId: String, destinationId: String) -> Int? {
+        guard let saved = UserDefaults.standard.dictionary(forKey: key(projectId)), saved["destinationId"] as? String == destinationId else { return nil }
+        return saved["slot"] as? Int
     }
 }
 

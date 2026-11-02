@@ -120,7 +120,7 @@ public struct ObjectWords: Sendable, Equatable {
         case .draft, .sending, .working, .preparing, .printing, .unknown: return .now
         case .needsYou, .failed: return .needsYou
         case .ready: return .ready
-        case .printed, .sent: return .printed
+        case .printed, .sent, .confirmed: return .printed
         }
     }
 }

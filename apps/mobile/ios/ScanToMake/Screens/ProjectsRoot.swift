@@ -122,26 +122,49 @@ struct SidebarList: View {
     let openSettings: () -> Void
     @State private var query = ""
     @FocusState private var searching: Bool
+    @State private var showArchived = false
+
+    private func matches(_ project: Project) -> Bool {
+        query.isEmpty || ProjectWords.title(project).localizedCaseInsensitiveContains(query) || (project.instructions ?? "").localizedCaseInsensitiveContains(query)
+    }
 
     /// The projects in these phases, in the order the phases are given (printing before working, as on Home).
+    /// Archived projects are only in Archived.
     private func group(_ phases: [ProjectPhase]) -> [Project] {
         let rank = { (p: Project) in phases.firstIndex(of: store.words(p).phase) ?? phases.count }
         return store.projects.enumerated()
-            .filter { phases.contains(store.words($0.element).phase) }
-            .filter { query.isEmpty || ProjectWords.title($0.element).localizedCaseInsensitiveContains(query) || ($0.element.instructions ?? "").localizedCaseInsensitiveContains(query) }
+            .filter { !$0.element.isArchived && phases.contains(store.words($0.element).phase) }
+            .filter { matches($0.element) }
             .sorted { (rank($0.element), $0.offset) < (rank($1.element), $1.offset) }
             .map(\.element)
     }
+    private var archived: [Project] { store.projects.filter { $0.isArchived && matches($0) } }
 
     var body: some View {
         List(selection: $selection) {
             section("Now", group([.printing, .preparing, .working, .sending]))
             section("Needs you", group([.needsYou]))
             section("Ready", group([.ready]), highlight: true)
+            section("Done", group([.confirmed]))
             section("Printed", group([.printed, .sent]))
             section("Other", group([.draft, .failed, .unknown]))
+            if !archived.isEmpty {
+                Section(isExpanded: $showArchived) {
+                    ForEach(archived) { project in
+                        SidebarRow(store: store, project: project)
+                            .tag(project.id)
+                            .listRowBackground(selection == project.id ? Color.filament.opacity(0.32) : nil)
+                            .contextMenu {
+                                Button("Unarchive", systemImage: "tray.and.arrow.up") {
+                                    Task { if let next = try? await store.archive(project, false) { store.replace(next) } else { await store.reload(project.id) } }
+                                }
+                                DeleteProjectButton(store: store, project: project)
+                            }
+                    }
+                } header: { Text("Archived · \(archived.count)") }
+            }
         }
-        .navigationTitle("Counterpart")
+        .navigationTitle("Projects")
         .navigationSubtitle(store.reachable == false ? "\(store.macName ?? "Your Mac") isn't answering" : "\(store.macName ?? "Your Mac") connected")
         .searchable(text: $query, prompt: "Projects, printers, notes")
         .searchFocused($searching)

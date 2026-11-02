@@ -6,7 +6,8 @@ public enum ProjectPhase: String, Equatable, Sendable, CaseIterable {
     /// Nothing sent yet: waiting for a scan, photos or a description to be sent.
     case draft
     /// `sent`: handed to a printer Counterpart can't follow; terminal, with no "done".
-    case sending, working, needsYou = "needs-you", ready, preparing, printing, printed, sent, failed
+    /// `confirmed`: printed, and you said it works. Done.
+    case sending, working, needsYou = "needs-you", ready, preparing, printing, printed, sent, confirmed, failed
     /// A state from a newer Mac.
     case unknown
 
@@ -21,6 +22,7 @@ public enum ProjectPhase: String, Equatable, Sendable, CaseIterable {
         case .printing: "printer.fill"
         case .printed: "shippingbox.fill"
         case .sent: "paperplane"
+        case .confirmed: "checkmark.circle.fill"
         case .failed: "exclamationmark.triangle.fill"
         case .unknown: "questionmark.circle"
         }
@@ -33,6 +35,7 @@ public enum ProjectPhase: String, Equatable, Sendable, CaseIterable {
         case .ready, .preparing: .accent
         case .printing: .printing
         case .printed, .sent, .draft, .unknown: .secondary
+        case .confirmed: .printing
         case .failed: .failed
         }
     }
@@ -49,6 +52,7 @@ public enum ProjectPhase: String, Equatable, Sendable, CaseIterable {
         case .printing: "Printing"
         case .printed: "Printed"
         case .sent: "Sent to your printer"
+        case .confirmed: "Done"
         case .failed: "Couldn't finish"
         case .unknown: "Update Counterpart"
         }
@@ -65,7 +69,8 @@ public enum Tone: String, Equatable, Sendable {
 
 /// What a project page or card can offer right now.
 public enum ProjectAction: Equatable, Sendable {
-    case finishSending, scan, attachPhotos, makeIt, print, printChecked, correct, openCamera, bestGuess, retry
+    /// "Did it fit?": `itWorks` marks it Works, `needsChanges` asks for changes (`PATCH …/settings {status}`).
+    case finishSending, scan, attachPhotos, makeIt, print, printChecked, correct, openCamera, bestGuess, retry, itWorks, needsChanges
 }
 
 /// A project in plain words: the one source of status words for the phone, iPad and (later) the Mac,
@@ -82,6 +87,11 @@ public struct ProjectWords: Equatable, Sendable {
     /// "W × D × H mm", whole millimetres.
     public let size: String?
     public let actions: [ProjectAction]
+
+    /// The question after a finished print: "Did it fit?", or for a published model "Did it come out right?".
+    public static func outcomeQuestion(_ project: Project) -> String {
+        project.kind == "published" ? "Did it come out right?" : "Did it fit?"
+    }
 
     public static let wait = "You can leave this project and return to it while your Mac works."
     public static let putDown = "You can put your phone down. We'll let you know when it's ready."
@@ -118,6 +128,12 @@ public struct ProjectWords: Equatable, Sendable {
 
     /// The phase, from the Mac's state plus whether this phone is still sending files.
     public static func phase(_ project: Project, sending: Bool = false) -> ProjectPhase {
+        // You said it works (Did it fit?, or Project Settings): Done, once nothing is running or waiting on you.
+        // Not a sent or uncertain print: a reprint the Mac can't follow is its own state, whatever was said before.
+        if project.projectStatus == .works, [.ready, .printed, .confirmed].contains(project.state), project.printConfirmation == nil,
+           project.state == .confirmed || project.print?.uncertain != true {
+            return .confirmed
+        }
         // The Mac's own phase wins when it gives one (KAN-214 PR 3).
         if let phase = project.status?.phase, let known = ProjectPhase(rawValue: phase), !(project.state == .new && !sending) { return known }
         // An older Mac sends no status: a printer question waiting for an answer needs you, as the Mac shows it.
@@ -137,6 +153,7 @@ public struct ProjectWords: Equatable, Sendable {
         // printer accepts it, which is "sent" in the PRD's words.
         case .printed: return project.print?.monitor?.endState == "done" ? .printed : .sent
         case .sent: return .sent
+        case .confirmed: return .confirmed
         case .failed: return .failed
         case .unknown: return .unknown
         }
@@ -155,75 +172,93 @@ public struct ProjectWords: Equatable, Sendable {
         phase = Self.phase(project, sending: sending)
         let made: [ProjectAction] = project.current == nil ? [] : [project.print?.uncertain == true ? .printChecked : .print, .correct]
         var line: String
-        switch project.state {
-        case .new:
-            if sending {
-                (status, busy, actions) = ("Sending to your Mac. Keep the app open until it finishes.", true, [])
-            } else if project.hasScan || !project.photos.isEmpty {
-                (status, busy, actions) = ("Draft saved. Finish sending to begin.", false, [.finishSending])
-            } else {
-                let described = !(project.instructions ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                (status, busy, actions) = ("Waiting for a scan or photos.", false, described ? [.scan, .attachPhotos, .makeIt] : [.scan, .attachPhotos])
-            }
-            line = phase.label
-        case .touchingUp where !(project.progress ?? "").trimmingCharacters(in: .whitespaces).isEmpty:
-            (status, busy, actions) = ("\(project.progress!) \(Self.wait)", true, [])
-            line = Self.workingLine(project, fallback: project.progress!)
-        case .touchingUp:
-            let what = project.passes.count > 1 && project.current != nil ? "Making your changes."
-                : project.scan != nil ? "Touching up your scan." : "Making it."
-            (status, busy, actions) = ("\(what) \(Self.wait)", true, [])
-            line = Self.workingLine(project, fallback: String(what.dropLast()))
-        case .needsCloseup:
-            (status, busy, actions) = (Self.question(project), false, [.openCamera, .attachPhotos, .bestGuess])
-            line = "Needs you · " + (project.openAsk?.question ?? project.question?.closeup.map { "a close-up of \($0)" } ?? "a close-up")
-        case .ready:
-            (status, busy, actions) = ("Ready to print", false, made)
-            line = ["Ready to print", size].compactMap { $0 }.joined(separator: " · ")
-        case .printing:
-            if project.printConfirmation != nil {
-                (status, busy, actions) = ("Your printer needs your confirmation.", true, [])
-                line = "Your printer needs a yes"
-            } else if phase == .printing {
+        // Done: print another any time, with no uncertain-print check (it printed, and it works).
+        let again: [ProjectAction] = project.current == nil ? [] : [.print, .correct]
+        // Marked Works by hand on a ready or sent project: Done, in the same words.
+        if phase == .confirmed && project.state != .confirmed {
+            (status, busy, actions) = ("It works.", false, again)
+            line = Self.doneLine
+        } else {
+            switch project.state {
+            case .new:
+                if sending {
+                    (status, busy, actions) = ("Sending to your Mac. Keep the app open until it finishes.", true, [])
+                } else if project.hasScan || !project.photos.isEmpty {
+                    (status, busy, actions) = ("Draft saved. Finish sending to begin.", false, [.finishSending])
+                } else {
+                    let described = !(project.instructions ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    (status, busy, actions) = ("Waiting for a scan or photos.", false, described ? [.scan, .attachPhotos, .makeIt] : [.scan, .attachPhotos])
+                }
+                line = phase.label
+            case .touchingUp where !(project.progress ?? "").trimmingCharacters(in: .whitespaces).isEmpty:
+                (status, busy, actions) = ("\(project.progress!) \(Self.wait)", true, [])
+                line = Self.workingLine(project, fallback: project.progress!)
+            case .touchingUp:
+                let what = project.passes.count > 1 && project.current != nil ? "Making your changes."
+                    : project.scan != nil ? "Touching up your scan." : "Making it."
+                (status, busy, actions) = ("\(what) \(Self.wait)", true, [])
+                line = Self.workingLine(project, fallback: String(what.dropLast()))
+            case .needsCloseup:
+                (status, busy, actions) = (Self.question(project), false, [.openCamera, .attachPhotos, .bestGuess])
+                line = "Needs you · " + (project.openAsk?.question ?? project.question?.closeup.map { "a close-up of \($0)" } ?? "a close-up")
+            case .ready:
+                (status, busy, actions) = ("Ready to print", false, made)
+                line = ["Ready to print", size].compactMap { $0 }.joined(separator: " · ")
+            case .printing:
+                if project.printConfirmation != nil {
+                    (status, busy, actions) = ("Your printer needs your confirmation.", true, [])
+                    line = "Your printer needs a yes"
+                } else if phase == .printing {
+                    let printer = printerName ?? project.print?.destination?.name ?? "your printer"
+                    let live = project.print?.live
+                    let parts = ["Printing on \(printer)", Format.percent(live?.job?.progress), Format.duration(live?.job?.remainingSec).map { "\($0) left" }]
+                    line = parts.compactMap { $0 }.joined(separator: " · ")
+                    if live?.state == "paused" { line = "Paused on \(printer)" }
+                    if project.print?.monitor?.unreachableSince != nil { line = "Lost contact with \(printer). Still trying." }
+                    (status, busy, actions) = (line, true, [])
+                } else {
+                    (status, busy, actions) = (project.progress ?? "Preparing print…", true, [])
+                    line = project.progress ?? "Getting the print ready"
+                }
+            case .printed:
+                // A print request accepted isn't a print finished; only the print monitor says it finished.
+                let finished = project.print?.monitor?.endState == "done"
+                let endedAt = project.print?.monitor?.endedAt.flatMap(ISO.date) ?? project.updatedAt
+                // "Did it fit?" until you answer it, here or with any status in Project Settings.
+                let ask = finished && [nil, .printed].contains(project.projectStatus)
+                (status, busy, actions) = (finished ? "Printed" : "Print request accepted", false, ask ? [.itWorks, .needsChanges] + made : made)
+                line = finished ? "Printed " + Format.whenInSentence(endedAt, now: now)
+                    : "Sent to " + (project.print?.destination?.name ?? "your printer")
+            case .confirmed:
+                (status, busy, actions) = ("It works.", false, again)
+                line = Self.doneLine
+            case .sent:
+                // The printer has it, but no "done" will come. It may be printing, so Print asks first (`print.uncertain`).
                 let printer = printerName ?? project.print?.destination?.name ?? "your printer"
-                let live = project.print?.live
-                let parts = ["Printing on \(printer)", Format.percent(live?.job?.progress), Format.duration(live?.job?.remainingSec).map { "\($0) left" }]
-                line = parts.compactMap { $0 }.joined(separator: " · ")
-                if live?.state == "paused" { line = "Paused on \(printer)" }
-                if project.print?.monitor?.unreachableSince != nil { line = "Lost contact with \(printer). Still trying." }
-                (status, busy, actions) = (line, true, [])
-            } else {
-                (status, busy, actions) = (project.progress ?? "Preparing print…", true, [])
-                line = project.progress ?? "Getting the print ready"
+                if project.print?.sentVia == "bambu-connect" {
+                    (status, busy, actions) = ("Finish on your Mac: press Print in Bambu Connect.", false, made)
+                    line = "Finish on your Mac: press Print in Bambu Connect"
+                } else {
+                    (status, busy, actions) = ("Sent to \(printer). Counterpart can't follow this print.", false, made)
+                    line = "Sent to \(printer) · Counterpart can't follow this print"
+                }
+            case .failed:
+                let failure = (project.failure ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                (status, busy, actions) = (failure.isEmpty ? "Something went wrong on your Mac." : failure, false, made.isEmpty ? [.retry, .correct] : made)
+                line = failure.isEmpty ? "Didn't finish · try again" : (failure.components(separatedBy: ". ").first ?? failure)
+            case .unknown:
+                (status, busy, actions) = ("Update Counterpart to see this one.", false, [])
+                line = "Update Counterpart to see this one"
             }
-        case .printed:
-            // A print request accepted isn't a print finished; only the print monitor says it finished.
-            let finished = project.print?.monitor?.endState == "done"
-            let endedAt = project.print?.monitor?.endedAt.flatMap(ISO.date) ?? project.updatedAt
-            (status, busy, actions) = (finished ? "Printed" : "Print request accepted", false, made)
-            line = finished ? "Printed " + Format.whenInSentence(endedAt, now: now)
-                : "Sent to " + (project.print?.destination?.name ?? "your printer")
-        case .sent:
-            // The printer has it, but no "done" will come. It may be printing, so Print asks first (`print.uncertain`).
-            let printer = printerName ?? project.print?.destination?.name ?? "your printer"
-            if project.print?.sentVia == "bambu-connect" {
-                (status, busy, actions) = ("Finish on your Mac: press Print in Bambu Connect.", false, made)
-                line = "Finish on your Mac: press Print in Bambu Connect"
-            } else {
-                (status, busy, actions) = ("Sent to \(printer). Counterpart can't follow this print.", false, made)
-                line = "Sent to \(printer) · Counterpart can't follow this print"
-            }
-        case .failed:
-            let failure = (project.failure ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-            (status, busy, actions) = (failure.isEmpty ? "Something went wrong on your Mac." : failure, false, made.isEmpty ? [.retry, .correct] : made)
-            line = failure.isEmpty ? "Didn't finish · try again" : (failure.components(separatedBy: ". ").first ?? failure)
-        case .unknown:
-            (status, busy, actions) = ("Update Counterpart to see this one.", false, [])
-            line = "Update Counterpart to see this one"
         }
-        // The Mac's own words win when it writes them (KAN-214 PR 3), except while this phone is still sending.
-        if let text = project.status?.text, !text.isEmpty, !(project.state == .new) { self.line = text } else { self.line = line }
+        // The Mac's own words win when it writes them (KAN-214 PR 3), except while this phone is still sending, and
+        // except when they're about another phase than the Works shown here.
+        let macWords = project.status.flatMap { $0.text.isEmpty || project.state == .new ? nil : $0 }
+        if let macWords, !(phase == .confirmed && macWords.phase != ProjectPhase.confirmed.rawValue) { self.line = macWords.text } else { self.line = line }
     }
+
+    /// A Done project's line, on its card and in the Mac sidebar.
+    public static let doneLine = "Done · it works"
 
     /// "Designing it · about 4 min", from the running stage and its estimate when the Mac gives them.
     static func workingLine(_ project: Project, fallback: String, now: Date = Date()) -> String {

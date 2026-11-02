@@ -232,6 +232,42 @@ final class CompanionClientTests: XCTestCase {
         XCTAssertNil(bodies[3]["kind"], "only fit or copy is sent")
     }
 
+    /// Project Settings' status (PRD §5.4): `PATCH /v1/objects/<id>/settings {status}`, the project back when the
+    /// Mac sends it, and "update your Mac" from an older one.
+    func testTheStatusIsSetInProjectSettings() async throws {
+        let id = "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a01"
+        var sent: [(String, String, [String: Any])] = []
+        var replies: [HTTPReply] = [
+            json(200, ["settings": ["status": "works"],
+                       "object": ["id": id, "createdAtMs": 1, "updatedAtMs": 2, "state": "confirmed", "settings": ["status": "works"],
+                                  "status": ["phase": "confirmed", "text": "It works", "symbol": "checkmark.circle.fill", "tint": "green"]]]),
+            json(409, ["error": ["code": "busy", "message": "Wait for the print to finish, then set the status."]]),
+            json(200, ["settings": ["status": "archived"]]),
+            json(404, ["error": ["code": "not-found", "message": "Not found"]]),
+        ]
+        let fake = FakeTransport { request, _ in
+            sent.append((request.httpMethod ?? "", request.url?.path ?? "", (request.httpBody.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }) ?? [:]))
+            return replies.removeFirst()
+        }
+        let c = try client(fake)
+        let works = try await c.setStatus(id, .works)
+        XCTAssertEqual(works?.state, .confirmed)
+        XCTAssertEqual(works?.projectStatus, .works)
+        do { _ = try await c.setStatus(id, .printed); XCTFail() } catch let failure as CompanionError {
+            XCTAssertEqual(failure.message, "Wait for the print to finish, then set the status.", "the Mac's sentence, as is")
+        }
+        let archived = try await c.setStatus(id, .archived)
+        XCTAssertNil(archived, "no project in the reply: the caller reads it again")
+        do { _ = try await c.setStatus(id, .needsChanges); XCTFail() } catch let failure as CompanionError { XCTAssertTrue(failure.isUnsupported) }
+        XCTAssertEqual(sent.map(\.0), ["PATCH", "PATCH", "PATCH", "PATCH"])
+        XCTAssertEqual(sent[0].1, "/v1/objects/\(id)/settings")
+        XCTAssertEqual(sent.map { $0.2["status"] as? String }, ["works", "printed", "archived", "needs-changes"])
+        XCTAssertEqual(CompanionClient.scope("PATCH", "/v1/objects/\(id)/settings"), "captures:import", "the companion's WRITE")
+        replies = [json(200, ["settings": ["status": "works", "archived": true]])]
+        _ = try await c.setArchived(id, true)
+        XCTAssertEqual(sent.last?.2 as NSDictionary?, ["archived": true] as NSDictionary)
+    }
+
     func testScopes() {
         let id = "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a01"
         XCTAssertEqual(CompanionClient.scope("GET", "/v1/objects"), "projects:read")
@@ -310,6 +346,10 @@ final class CompanionClientTests: XCTestCase {
         let filament = PrinterFilament(slot: 0, colour: "#141414", material: "PLA", name: "Bambu PLA Basic", filamentId: "GFA00", destinationId: "current")
         let plain = PrintChoice(filament: filament).body
         XCTAssertEqual(Set(plain.keys), ["checked", "filament"], "standard quality and strength send nothing")
+        XCTAssertNil(PrintChoice(filament: filament).body["copies"], "not chosen: the printer profile's count applies")
+        XCTAssertEqual(PrintChoice(filament: filament, copies: 1).body["copies"] as? Int, 1, "one, chosen, is sent")
+        XCTAssertEqual(PrintChoice(filament: filament, copies: 3).body["copies"] as? Int, 3)
+        XCTAssertEqual(PrintChoice(filament: filament, copies: 0).body["copies"] as? Int, 1, "never fewer than one")
         let more = PrintChoice(filament: filament, quality: .fine, strength: .strong).body
         XCTAssertEqual(more["quality"] as? String, "fine")
         XCTAssertEqual(more["strength"] as? String, "strong")

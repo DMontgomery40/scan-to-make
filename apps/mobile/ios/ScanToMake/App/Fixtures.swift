@@ -19,6 +19,8 @@ enum Fixtures {
     nonisolated(unsafe) static var confirmation: String?
     /// `-CounterpartScreen confirm-mac-answers`: the Mac answers any printer question.
     nonisolated(unsafe) static var macAnswers = false
+    /// Statuses set on this run (`PATCH …/settings`), by project id.
+    nonisolated(unsafe) static var statuses: [String: String] = [:]
 
     static let ids = (mic: "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a01", potato: "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a02",
                       clip: "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a03", plush: "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a04",
@@ -47,7 +49,7 @@ enum Fixtures {
         let p1s: [String: Any] = ["id": "current", "name": "P1S"]
         let micRequest = "Something that holds this mic on top of my monitor arm pole. Both are in the photos."
         let potatoRequest = "Copy this. Close up the bottom and keep the stitches."
-        return [
+        let list: [[String: Any]] = [
             ["id": ids.mic, "createdAtMs": ago(30), "updatedAtMs": ago(2), "state": "ready", "title": "Mic mount", "kind": "fit",
              "instructions": micRequest, "photos": ["photo1.jpg", "photo2.jpg", "photo3.jpg", "photo4.jpg"],
              "passes": [["startedAtMs": ago(20), "endedAtMs": ago(2), "status": "done", "trigger": "new", "activityCount": 5],
@@ -99,7 +101,7 @@ enum Fixtures {
              "current": ["model": "current/model.stl", "renders": ["current/renders/potato.png"], "sizeMm": [92, 61, 58]],
              "print": ["bundleId": "b2", "destination": p1s, "monitor": ["phase": "ended", "endState": "done",
                                                                        "endedAt": ISO8601DateFormatter().string(from: now.addingTimeInterval(-1500 * 60))]]],
-            ["id": ids.v1, "createdAtMs": ago(3000), "updatedAtMs": ago(2900), "state": "printed", "title": "Mic mount v1",
+            ["id": ids.v1, "createdAtMs": ago(3000), "updatedAtMs": ago(2900), "state": "confirmed", "settings": ["status": "works"], "title": "Mic mount v1",
              "instructions": "Something that holds this mic on my monitor arm.", "photos": [],
              "passes": [["startedAtMs": ago(2990), "endedAtMs": ago(2950), "status": "done"]],
              "current": ["model": "current/model.stl", "renders": ["current/renders/mic.png"], "sizeMm": [48, 50, 54]],
@@ -113,6 +115,32 @@ enum Fixtures {
                                     ["id": "preparing", "words": "Filled the gaps", "startedAtMs": ago(9), "endedAtMs": ago(6), "typicalSec": 150],
                                     ["id": "working", "words": "Matching your photos", "startedAtMs": ago(6), "typicalSec": 300]]]]],
         ]
+        return list.map(withStatus)
+    }
+
+    /// A status set on this run, as the companion's `setStatus` keeps it (KAN-214 #223): archived only hides;
+    /// any other status shows it again, works confirms it, needs-changes un-confirms it.
+    private static func withStatus(_ object: [String: Any]) -> [String: Any] {
+        guard let id = object["id"] as? String, let status = statuses[id] else { return object }
+        var object = object
+        object["updatedAtMs"] = Date().timeIntervalSince1970 * 1000
+        if status == "archived" {
+            object["archived"] = true
+        } else {
+            object["archived"] = nil; object["outcome"] = nil
+            switch status {
+            case "works": object["state"] = "confirmed"; object["outcome"] = "works"
+            case "printed": object["state"] = "printed"
+            case "not-printed": object["state"] = "ready"
+            case "needs-changes": object["outcome"] = "needs-changes"; if object["state"] as? String == "confirmed" { object["state"] = "printed" }
+            default: break
+            }
+        }
+        let state = object["state"] as? String
+        let derived = object["archived"] as? Bool == true ? "archived" : state == "confirmed" ? "works"
+            : object["outcome"] as? String == "needs-changes" ? "needs-changes" : ["printed", "sent"].contains(state ?? "") ? "printed" : "not-printed"
+        object["settings"] = ["status": derived]
+        return object
     }
 
     static let catalog: [String: Any] = [
@@ -120,7 +148,7 @@ enum Fixtures {
         "destinations": [
             ["id": "current", "name": "P1S", "backend": "bambu-printer-mcp", "model": "Bambu Lab P1S", "source": "current", "state": "ready",
              "capabilities": ["progress": true, "layers": true, "camera": "bambu-tcp", "filaments": "ams", "pause": true, "resume": true, "cancel": true,
-                              "quality": true, "strength": true, "multiColour": false, "missing": [],
+                              "quality": true, "strength": true, "multiColour": false, "copies": true, "missing": [],
                               "server": ["name": "bambu-printer-mcp", "version": "1.1.48"]]],
             ["id": "mcp-garage", "name": "Garage MK4", "backend": "mcp-3d-printer-server", "model": "Prusa MK4S", "source": "mcp-profile", "origin": "claude-code", "state": "ready",
              "capabilities": ["progress": true, "layers": false, "camera": "none", "filaments": "single", "pause": true, "resume": true, "cancel": true,
@@ -188,7 +216,7 @@ struct FixtureTransport: HTTPTransport {
         let objects = Fixtures.objects()
         func object(_ id: String) -> [String: Any]? { objects.first { $0["id"] as? String == id } }
         let parts = path.split(separator: "/").map(String.init)
-        if path == "/healthz" { return json(["status": "ok", "protocolVersion": "0.1.0", "capabilities": ["genericConfirmations": Fixtures.macAnswers, "mcpUpdates": true]]) }
+        if path == "/healthz" { return json(["status": "ok", "protocolVersion": "0.1.0", "capabilities": ["genericConfirmations": Fixtures.macAnswers, "mcpUpdates": true, "projectSettings": true, "printCopies": true]]) }
         if path == "/v1/objects/printers" { return json(Fixtures.catalog) }
         if path.hasPrefix("/v1/objects/printers/"), path.hasSuffix("/camera.jpg") {
             guard path.contains("/current/") else { return json(["error": ["code": "not-found", "message": "This printer has no camera"]], 404) }
@@ -207,6 +235,11 @@ struct FixtureTransport: HTTPTransport {
             if parts.count == 4 && parts[2] == "printers" { return json(["error": ["code": "not-found"]], 404) }
             let id = parts[2]
             if parts.count == 3 { return object(id).map { json(["object": $0]) } ?? json(["error": ["code": "not-found"]], 404) }
+            if parts[3] == "settings", method == "PATCH",
+               let body = request.httpBody.flatMap({ try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }), let status = body["status"] as? String {
+                Fixtures.statuses[id] = status
+                return Fixtures.objects().first { $0["id"] as? String == id }.map { json(["object": $0]) } ?? json(["error": ["code": "not-found"]], 404)
+            }
             if parts[3] == "filaments" { return json(["filaments": Fixtures.filaments(for: id == Fixtures.ids.mic ? Fixtures.printer : "current")]) }
             if parts[3] == "printer", method == "POST",
                let body = request.httpBody.flatMap({ try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }), let destination = body["destinationId"] as? String {
