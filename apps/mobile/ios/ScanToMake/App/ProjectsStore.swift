@@ -122,6 +122,18 @@ import CounterpartKit
 
     func startRequest() -> Int { reads.start() }
 
+    /// Resetting the connection invalidates commands; accepting a newer display snapshot does not.
+    func requestIsCurrent(_ ticket: Int) -> Bool { !Task.isCancelled && reads.isCurrent(ticket) }
+
+    /// A refresh can overtake draft creation. Keep its newer state without dropping the requested Send.
+    func prepareDraftSend(_ returned: Project, ticket: Int) -> Project? {
+        guard requestIsCurrent(ticket) else { return nil }
+        replace(returned, ticket: ticket)
+        // Either reply can establish that Start already succeeded; never upload that draft again.
+        if returned.state != .new { return returned }
+        return project(returned.id) ?? returned
+    }
+
     @discardableResult func replace(_ project: Project, ticket: Int) -> Bool {
         guard reads.accept(project.id, ticket: ticket) else { return false }
         show(project)

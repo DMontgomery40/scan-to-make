@@ -39,6 +39,9 @@ fixture = fixture.replace('// PROJECT_METHODS', methods(
     'Screens/ProjectView.swift', 'struct ProjectView: View {', ['resumeSavedCapture', 'finishSending', 'scan']))
 fixture = fixture.replace('// SEND_PROJECT', methods(
     'Platform/MacConnection.swift', '@MainActor final class MacConnection {', ['sendProject']))
+fixture = fixture.replace('// DRAFT_SEND_METHODS', methods(
+    'App/ProjectsStore.swift', '@MainActor @Observable final class ProjectsStore {', ['requestIsCurrent', 'prepareDraftSend']))
+fixture = fixture.replace('// PROJECT_READS', (MOBILE.parents[1] / 'packages/CounterpartKit/Sources/CounterpartKit/Store/ProjectReads.swift').read_text().replace('public ', ''))
 fixture_path = args.evidence / 'RetryFixture.swift'
 fixture_path.write_text(fixture)
 with tempfile.TemporaryDirectory(prefix='native-capture-retry-') as directory:
