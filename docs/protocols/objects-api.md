@@ -133,7 +133,11 @@ Live, P1S through bambu-printer-mcp 1.1.46: cold first frame 5.3 s; then 0 to 1 
 
 ### `PrintEstimate` (PR 2)
 
-`{destinationId, quality, strength, seconds?, grams?, layers?, layerHeightMm?, infillPercent?, wallLoops?, slicedAt}`. The companion lays the model flat and slices it with exactly the settings a Print with the same values would use, then reads time and grams from the sliced file (`Metadata/slice_info.config`), and layer height, infill and walls from its settings (`Metadata/project_settings.config`, or the G-code header for G-code output). It never prints. Results are cached per model, destination and settings until the model changes; identical concurrent requests share one slice. A new pass (new model) discards the cache.
+`{destinationId, quality, strength, seconds?, grams?, layers?, layerHeightMm?, infillPercent?, wallLoops?, copies?, slicerWarning?, slicedAt}`. The companion lays the model flat and slices it with exactly the settings a Print with the same values would use, then reads time and grams from the sliced file (`Metadata/slice_info.config`), and layer height, infill and walls from its settings (`Metadata/project_settings.config`, or the G-code header for G-code output). It never prints. Results are cached per model, destination and settings until the model changes; identical concurrent requests share one slice. A new pass (new model) discards the cache.
+
+Bambu Studio's own verdict on the slice (KAN-223, when the MCP returns `slicer_result`) reaches the print sheet in Studio's words, exactly as Print would show them:
+- **A warning** on a slice that worked (for example "It seems object x.stl has floating cantilever. Please re-orient the object or enable support generation.") is `slicerWarning`, verbatim. The estimate asks nothing; Print asks "Print anyway" with the same words before the printer is asked anything.
+- **An error** (`return_code` other than 0) refuses the estimate with 409 `invalid-state`, and the message is Studio's `error_string` plus each plate's warning, word for word: the same text a Print of that model fails with. Other slice failures still read "Couldn't slice it for an estimate: …".
 
 ### `PrinterDestination` (PR 1)
 

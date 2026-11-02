@@ -955,12 +955,14 @@ export class ObjectService {
         try {
           const stlPath = join(work, 'model.stl');
           await writeFile(stlPath, model);
-          const {estimate, settings} = await runner.estimate!({stlPath, ...(services.selection ? {selection: services.selection} : {}), ...(Object.keys(overrides).length ? {slicer: overrides} : {}),
+          const {estimate, settings, slicerWarning} = await runner.estimate!({stlPath, ...(services.selection ? {selection: services.selection} : {}), ...(Object.keys(overrides).length ? {slicer: overrides} : {}),
             signal: AbortSignal.timeout(150_000)});
           return {destinationId: destinationId ?? 'current', quality, strength, ...(copies ? {copies} : {}),
             ...(estimate?.seconds !== undefined ? {seconds: estimate.seconds} : {}), ...(estimate?.grams !== undefined ? {grams: estimate.grams} : {}),
             ...(settings.layers !== undefined ? {layers: settings.layers} : {}), ...(settings.layerHeightMm !== undefined ? {layerHeightMm: settings.layerHeightMm} : {}),
             ...(settings.infillPercent !== undefined ? {infillPercent: settings.infillPercent} : {}), ...(settings.wallLoops !== undefined ? {wallLoops: settings.wallLoops} : {}),
+            // Bambu Studio's own warning on this slice, word for word (KAN-223). Print asks "Print anyway" with the same words.
+            ...(slicerWarning ? {slicerWarning} : {}),
             slicedAt: new Date().toISOString()};
         } finally { await rm(work, {recursive: true, force: true}).catch(() => undefined); }
       })();
@@ -972,6 +974,8 @@ export class ObjectService {
     try { return structuredClone(await running); }
     catch (error) {
       if (error instanceof PrinterMcpError && error.code === 'print-settings-unsupported') throw new InvalidStateError(settingsUnsupported(services.runner.backend, {quality, strength}));
+      // Bambu Studio refused the slice: its own words, exactly what a Print of the same model fails with.
+      if (error instanceof PrinterMcpError && error.code === 'slicer-error' && error.detail) throw new InvalidStateError(error.detail);
       throw new InvalidStateError(error instanceof PrinterMcpError && error.detail ? `Couldn't slice it for an estimate: ${error.detail}` : "Couldn't slice it for an estimate. Check the printer service, then try again.");
     }
   }
