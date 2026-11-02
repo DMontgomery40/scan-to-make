@@ -379,6 +379,38 @@ final class DecodingTests: XCTestCase {
         _ = try decode([Project.Stage].self, object["stages"])
     }
 
+    /// The Mac's control socket (`objects.list`) adds the project folder; `/v1/objects` doesn't.
+    func testDirectoryDecodesWhenTheMacSendsIt() throws {
+        let base = #"{"id":"p","createdAtMs":1,"updatedAtMs":2,"state":"ready","photos":[],"passes":[]"#
+        let local = try JSONDecoder().decode(Project.self, from: Data((base + #","directory":"/Users/d/Counterpart/p"}"#).utf8))
+        XCTAssertEqual(local.directory, "/Users/d/Counterpart/p")
+        XCTAssertNil(try JSONDecoder().decode(Project.self, from: Data((base + "}").utf8)).directory)
+        XCTAssertEqual(Project(id: "p", createdAtMs: 1, updatedAtMs: 2, state: .ready, directory: "/tmp/p").directory, "/tmp/p")
+    }
+
+    /// The Mac and the phone build identical `objects.print` params: only what's set, and only these three.
+    func testPrintSettingsEncodeOnlyWhatsSet() throws {
+        func json(_ settings: PrintSettings) throws -> [String: Any] {
+            try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(settings)) as? [String: Any])
+        }
+        XCTAssertTrue(try json(PrintSettings()).isEmpty, "standard sends nothing")
+        let chosen = try json(PrintSettings(quality: "fine", strength: "strong", colour: .object(["amsSlot": .number(2)])))
+        XCTAssertEqual(Set(chosen.keys), ["quality", "strength", "colour"])
+        XCTAssertEqual(chosen["quality"] as? String, "fine")
+        XCTAssertEqual((chosen["colour"] as? [String: Any])?["amsSlot"] as? Int, 2)
+        // A server's extra field (an older Mac's plateCheck) decodes and is never sent back.
+        let decoded = try JSONDecoder().decode(PrintSettings.self, from: Data(#"{"quality":"draft","plateCheck":true}"#.utf8))
+        XCTAssertEqual(decoded, PrintSettings(quality: "draft"))
+        XCTAssertEqual(Set(try json(decoded).keys), ["quality"])
+    }
+
+    func testConfirmationFieldsCanBeMadeInTests() {
+        let field = Project.PrintConfirmation.Field(name: "confirmed", title: "I checked the printer and confirm this operation", required: true)
+        let question = Project.PrintConfirmation(id: "q", message: "Start?", expiresAtMs: 2000, fields: [field], supported: true)
+        XCTAssertFalse(question.canAccept([:], atMs: 1000))
+        XCTAssertTrue(question.canAccept(["confirmed": true], atMs: 1000))
+    }
+
     func testEventsDecodeUnknownTypesAndLevels() throws {
         let text = #"{"v":1,"seq":3,"id":"a","at":"2026-11-01T09:00:00Z","type":"print.teleported","projectId":"p","title":"T","body":"B","notify":"loud"}"#
         let event = try JSONDecoder().decode(CounterpartEvent.self, from: Data(text.utf8))

@@ -47,17 +47,19 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
     public var kind: String?
     /// A structured question from the Mac, PR 4.
     public var ask: Ask?
+    /// The project's folder on the Mac. Only the Mac's control socket (`objects.list`) sends it; absent on `/v1/objects`.
+    public var directory: String?
 
     public init(id: String, createdAtMs: Double, updatedAtMs: Double, instructions: String? = nil, state: State, scan: String? = nil,
                 photos: [String] = [], capture: [String]? = nil, progress: String? = nil, passes: [Pass] = [], current: Result? = nil,
                 question: Question? = nil, plate: Plate? = nil, failure: String? = nil, print: Print? = nil,
                 printerDestinationId: String? = nil, printConfirmation: PrintConfirmation? = nil,
-                status: Status? = nil, title: String? = nil, kind: String? = nil, ask: Ask? = nil) {
+                status: Status? = nil, title: String? = nil, kind: String? = nil, ask: Ask? = nil, directory: String? = nil) {
         self.id = id; self.createdAtMs = createdAtMs; self.updatedAtMs = updatedAtMs; self.instructions = instructions
         self.state = state; self.scan = scan; self.photos = photos; self.capture = capture; self.progress = progress
         self.passes = passes; self.current = current; self.question = question; self.plate = plate; self.failure = failure
         self.print = print; self.printerDestinationId = printerDestinationId; self.printConfirmation = printConfirmation
-        self.status = status; self.title = title; self.kind = kind; self.ask = ask
+        self.status = status; self.title = title; self.kind = kind; self.ask = ask; self.directory = directory
     }
 
     public var createdAt: Date { Date(timeIntervalSince1970: createdAtMs / 1000) }
@@ -284,12 +286,18 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
     public struct PrintConfirmation: Codable, Equatable, Sendable {
         public struct Field: Codable, Equatable, Sendable {
             public var name: String; public var title: String; public var description: String?; public var required: Bool
+            public init(name: String, title: String, description: String? = nil, required: Bool) {
+                self.name = name; self.title = title; self.description = description; self.required = required
+            }
         }
         public var id: String
         public var message: String
         public var expiresAtMs: Double
         public var fields: [Field]
         public var supported: Bool
+        public init(id: String, message: String, expiresAtMs: Double, fields: [Field], supported: Bool) {
+            self.id = id; self.message = message; self.expiresAtMs = expiresAtMs; self.fields = fields; self.supported = supported
+        }
 
         public func canAccept(_ content: [String: Bool], atMs: Double) -> Bool {
             supported && expiresAtMs > atMs && fields.allSatisfy { !$0.required || content[$0.name] == true }
@@ -353,11 +361,26 @@ public struct PrintLive: Codable, Equatable, Sendable {
     public var observedAtDate: Date? { observedAt.flatMap(ISO.date) }
 }
 
-/// The settings a print was sent with, or will be (`PrintSettings`).
+/// The settings a print was sent with, or will be (`PrintSettingsSchema`): the `objects.print` params the
+/// phone and the Mac both build. Encodes `quality`, `strength` and `colour` only, each only when set, so
+/// standard settings send nothing (the MCP's preset decides).
 public struct PrintSettings: Codable, Equatable, Sendable {
     public var quality: String?
     public var strength: String?
+    /// `{auto: true}`, `{amsSlot: n}`, `{external: true}` or `{material: "PETG"}`.
     public var colour: JSONValue?
+
+    public init(quality: String? = nil, strength: String? = nil, colour: JSONValue? = nil) {
+        self.quality = quality; self.strength = strength; self.colour = colour
+    }
+
+    private enum CodingKeys: String, CodingKey { case quality, strength, colour }
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encodeIfPresent(quality, forKey: .quality)
+        try c.encodeIfPresent(strength, forKey: .strength)
+        try c.encodeIfPresent(colour, forKey: .colour)
+    }
 }
 
 /// `POST /v1/objects/<id>/estimate`: the slice with exactly the settings Print would use (PR 2).
