@@ -105,6 +105,10 @@ Status lives in [`asks.md`](asks.md). These are the technical details behind row
   - `-12681` after our last stop. Face ID errors (`-12681`) *while our session runs* are normal.
 - Check script: `apps/mobile/ios/scripts/check-lidar-sync.py`.
 - Acceptance on Davica3: reboot, open and close the scanner, then the Camera app and Face ID work.
+- **UI tests and the camera** (`docs/status/camera-incident-2026-11-02.md`): XCTest's screen recording makes
+  the phone blacken every camera frame (`The continuity display is connected. Will start blackening
+  frames.`). Turn it off (`DisableDiagnosticScreenRecordings`) for any UI test run on the phone, and grep the
+  device log for `blackening` before trusting any frame.
 
 ### Scanning (row 7)
 
