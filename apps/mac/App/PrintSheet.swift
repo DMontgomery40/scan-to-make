@@ -74,11 +74,11 @@ struct PrintSheet: View {
                         Text("Max").tag(PrintSettings.Strength.max)
                     }
                     .pickerStyle(.segmented).labelsHidden().disabled(!offersStrength)
-                    if model.capabilities?.printCopies == true {
+                    if offersCopies {
                         Stepper(value: $copies, in: 1...64) { Text("Copies: \(copies)").font(.headline) }
                     }
                     estimateLine
-                    if copies > 1 { Text("The estimate is for one.").font(.caption).foregroundStyle(.secondary) }
+                    if offersCopies && copies > 1 { Text("The estimate is for one.").font(.caption).foregroundStyle(.secondary) }
                 }
             }
             if uncertain {
@@ -176,6 +176,8 @@ struct PrintSheet: View {
 
     private var offersQuality: Bool { settingsServed && (printer?.capabilities?.quality ?? true) }
     private var offersStrength: Bool { settingsServed && (printer?.capabilities?.strength ?? true) }
+    /// Copies need the companion (`printCopies`) and this printer's MCP (`capabilities.copies`): copies are per printer.
+    private var offersCopies: Bool { model.capabilities?.printCopies == true && printer?.capabilities?.copies == true }
 
     @ViewBuilder private var estimateLine: some View {
         switch estimateState {
@@ -222,7 +224,7 @@ struct PrintSheet: View {
 
     private func send() {
         let settings = PrintSettings(quality: offersQuality ? quality : .standard, strength: offersStrength ? strength : .standard, colour: colour,
-                                     copies: model.capabilities?.printCopies == true ? copies : 1)
+                                     copies: offersCopies ? copies : 1)
         let filament = chosen
         Task { if await model.print(object.id, checked: uncertain && checked, settings: settings, filament: filament) { dismiss() } }
     }

@@ -319,14 +319,16 @@ public struct PrinterCapabilities: Decodable, Sendable, Equatable {
     public let pause: Bool, resume: Bool, cancel: Bool
     public let quality: Bool, strength: Bool
     public let multiColour: Bool?
+    /// This printer's MCP can put several on the plate (`slice_stl` `repetitions`, KAN-214 PR 8b).
+    public let copies: Bool?
     public let missing: [String]?
     public let update: Update?
     public init(server: Server? = nil, progress: Bool = true, layers: Bool? = nil, camera: String = "none", filaments: String = "none",
                 pause: Bool = false, resume: Bool = false, cancel: Bool = false, quality: Bool = false, strength: Bool = false,
-                multiColour: Bool? = nil, missing: [String]? = nil, update: Update? = nil) {
+                multiColour: Bool? = nil, copies: Bool? = nil, missing: [String]? = nil, update: Update? = nil) {
         self.server = server; self.progress = progress; self.layers = layers; self.camera = camera; self.filaments = filaments
         self.pause = pause; self.resume = resume; self.cancel = cancel; self.quality = quality; self.strength = strength
-        self.multiColour = multiColour; self.missing = missing; self.update = update
+        self.multiColour = multiColour; self.copies = copies; self.missing = missing; self.update = update
     }
 }
 public struct PrinterCatalog: Decodable, Sendable, Equatable {

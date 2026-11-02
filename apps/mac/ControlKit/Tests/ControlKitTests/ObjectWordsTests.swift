@@ -193,6 +193,14 @@ final class PrintSettingsTests: XCTestCase {
         XCTAssertEqual(PrintSettings(last: petg).colour, .material("PETG"))
     }
 
+    /// Copies are per printer (KAN-214 PR 8b): an MCP without `slice_stl` repetitions doesn't say `copies`.
+    func testCopiesAreAPrintersOwnCapability() throws {
+        let with = try JSONDecoder().decode(PrinterCapabilities.self, from: Data(#"{"progress":true,"camera":"none","filaments":"ams","pause":true,"resume":true,"cancel":true,"quality":true,"strength":true,"copies":true}"#.utf8))
+        XCTAssertEqual(with.copies, true)
+        let without = try JSONDecoder().decode(PrinterCapabilities.self, from: Data(#"{"progress":true,"camera":"none","filaments":"none","pause":false,"resume":false,"cancel":false,"quality":false,"strength":false}"#.utf8))
+        XCTAssertNil(without.copies)
+    }
+
     func testTheEstimateAndSuggestedTrayDecodeFromTheCompanion() throws {
         let estimate = try JSONDecoder().decode(PrintEstimate.self, from: Data("""
         {"destinationId":"current","quality":"standard","strength":"standard","seconds":4320,"grams":22.4,"layers":212,
