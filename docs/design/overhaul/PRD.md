@@ -524,7 +524,7 @@ Both MCPs gain the same small set of tools with the same arguments and results. 
 - **PrusaLink and Duet:** there's no local snapshot API, so the camera is `none`.
 - **Any firmware:** the `PRINTER_CAMERA_SNAPSHOT_URL` env variable overrides the source.
 
-**`get_printer_filaments` in mcp-3D-printer-server** returns `{ slots: [{ id: "ext", material?, color?, name?, source: "spoolman"|"unknown" }] }`.
+**`get_printer_filaments` in mcp-3D-printer-server** returns `{ slots: [{ id: "ext", material?, color?, name?, profile?, source: "spoolman"|"unknown" }] }`. `profile` is the absolute path of the installed slicer filament profile for that material (OrcaSlicer or PrusaSlicer, preferring presets for this printer), the path `slice_stl` takes as `load_filaments`. It is left out when nothing resolves; it never falls back to a profile for a different material. bambu-printer-mcp names the same thing `resolved_profile_path`.
 - **Moonraker with Spoolman:** `GET /server/spoolman/spool_id`, then `POST /server/spoolman/proxy` with `{request_method:"GET", path:"/v1/spool/<id>"}` for the material and colour.
 - **Everything else:** `unknown`. The print sheet then asks "What's loaded?", with material chips, defaulting to the slicer profile's material.
 
