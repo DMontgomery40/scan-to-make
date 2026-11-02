@@ -208,3 +208,16 @@ test('a changed model is not Done yet: a correction on a Works project clears it
   const {projectStatus} = await import('../dist/objects/service.js');
   assert.equal(projectStatus(changed), 'not-printed');
 });
+
+test('a correction that changes nothing keeps a Done project Done', async t => {
+  const f = await setup(t, [{result: {summary: 'Made it.'}}, {status: 'unchanged', result: {summary: 'It already fits.'}}]);
+  const object = await f.service.create('A hook for the rail');
+  await f.service.start(object.id);
+  await f.service.settled(object.id);
+  await f.service.setStatus(object.id, 'works');
+  await f.service.correct(object.id, 'Does it still fit the 25 mm rail?');
+  const kept = await f.service.settled(object.id);
+  assert.deepEqual([kept.state, kept.outcome, kept.passes.at(-1).status], ['confirmed', 'works', 'unchanged']);
+  const {projectStatus} = await import('../dist/objects/service.js');
+  assert.equal(projectStatus(kept), 'works');
+});

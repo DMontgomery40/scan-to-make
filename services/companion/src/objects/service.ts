@@ -1193,8 +1193,11 @@ export class ObjectService {
     const state: StmObject['state'] = result.status === 'needs_closeup' ? 'needs-closeup'
       : current && result.status !== 'failed' ? 'ready' : 'failed';
     const now = Date.now();
-    const updated = await store.update(id, o => ({...(current ? (({outcome: _outcome, ...rest}) => rest)(o) : o), state, progress: undefined,
-      // A changed model hasn't been shown to work yet: its first print asks "Did it fit?" again.
+    // A changed model hasn't been shown to work yet: its first print asks "Did it fit?" again. A pass that
+    // changed nothing leaves the outcome alone, and a Done project stays Done.
+    const changed = !!current && result.status !== 'unchanged';
+    const updated = await store.update(id, o => ({...(changed ? (({outcome: _outcome, ...rest}) => rest)(o) : o),
+      state: state === 'ready' && !changed && o.outcome === 'works' ? 'confirmed' : state, progress: undefined,
       ...(current ? {current} : {}),
       ...(!o.title && result.title ? {title: result.title} : {}),
       ...(o.kind ? {} : {kind}),
