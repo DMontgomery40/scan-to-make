@@ -29,6 +29,8 @@ export interface InstallEnvironment {
   exists(path: string): boolean;
   isDirectory(path: string): boolean;
   realpath(path: string): string;
+  /** The companion's PATH, for a bare command name in a profile run directly. */
+  path?: string;
 }
 
 export function hostEnvironment(dataRoot: string): InstallEnvironment {
@@ -38,6 +40,7 @@ export function hostEnvironment(dataRoot: string): InstallEnvironment {
     exists: path => existsSync(path),
     isDirectory: path => { try { return statSync(path).isDirectory(); } catch { return false; } },
     realpath: path => { try { return realpathSync(path); } catch { return path; } },
+    ...(process.env.PATH ? {path: process.env.PATH} : {}),
   };
 }
 
@@ -135,9 +138,14 @@ function parseSsh(args: string[]): {destination?: string; identity?: string; use
 }
 
 function sshHost(destination: string): {user?: string; host: string} {
-  const plain = destination.replace(/^ssh:\/\//, '').replace(/:\d+$/, '');
+  const uri = destination.startsWith('ssh://');
+  const plain = uri ? destination.slice('ssh://'.length) : destination;
   const at = plain.lastIndexOf('@');
-  return at >= 0 ? {user: plain.slice(0, at), host: plain.slice(at + 1).replace(/^\[|\]$/g, '')} : {host: plain.replace(/^\[|\]$/g, '')};
+  let host = plain.slice(at + 1);
+  // Only ssh://host:port carries a port ([::1]:22 for an address); a bare ::1 is an address, not a port.
+  if (host.startsWith('[')) host = host.replace(/^\[(.*)\](?::\d+)?$/, '$1');
+  else if (uri && host.split(':').length === 2) host = host.replace(/:\d+$/, '');
+  return {...(at >= 0 ? {user: plain.slice(0, at)} : {}), host};
 }
 
 /** The forced `command="…"` on the authorized_keys line for this public key. */
@@ -156,11 +164,14 @@ export function forcedCommand(authorizedKeys: string, publicKey: string): string
 const NODE = /(^|\/)node(\d+)?$/;
 function under(path: string, root: string): boolean { return path === root || path.startsWith(root.endsWith(sep) ? root : root + sep); }
 
-/** Resolves an unwrapped command line to its installation. */
-function resolveDirect(pkg: string, argv: string[], cwd: string | undefined, env: InstallEnvironment): McpInstall {
+/** Resolves an unwrapped command line to its installation. `path` is the PATH it runs with, when known. */
+function resolveDirect(pkg: string, argv: string[], cwd: string | undefined, env: InstallEnvironment, path: string | undefined): McpInstall {
   const [command, ...args] = argv;
   if (!command) return {type: 'unresolved', pkg, found: 'an empty command'};
-  const absolute = (path: string) => isAbsolute(path) ? path : cwd ? resolve(cwd, path) : path;
+  const absolute = (file: string) => isAbsolute(file) ? file : cwd ? resolve(cwd, file) : file;
+  // A bare name (node, bambu-printer-mcp) is found through PATH, never in the working directory.
+  const onPath = (name: string) => (path ?? '').split(':').filter(Boolean).map(dir => join(dir, name)).find(file => env.exists(file));
+  const executable = (name: string) => name.includes('/') ? absolute(name) : onPath(name);
   // npx <pkg>[@version], npm exec, or node …/npx-cli.js
   const npxAt = basename(command) === 'npx' ? 0 : args.findIndex(arg => /(^|\/)npx-cli\.js$/.test(arg)) + 1 || -1;
   if (npxAt >= 0) {
@@ -171,9 +182,12 @@ function resolveDirect(pkg: string, argv: string[], cwd: string | undefined, env
     return {type: 'npx', pkg, spec, ...(version ? {version} : {})};
   }
   // node <entry> or the package's bin link.
-  const node = NODE.test(command) ? absolute(command) : undefined;
-  const entryArg = node ? args.find(arg => !arg.startsWith('-')) : undefined;
-  const target = env.realpath(absolute(entryArg ?? command));
+  const isNode = NODE.test(command);
+  const node = isNode ? executable(command) : undefined;
+  const entryArg = isNode ? args.find(arg => !arg.startsWith('-')) : undefined;
+  const program = entryArg ? absolute(entryArg) : executable(command);
+  if (!program) return {type: 'unresolved', pkg, found: `${command}, which isn't on the PATH Counterpart can see`};
+  const target = env.realpath(program);
   const modules = target.lastIndexOf(`${sep}lib${sep}node_modules${sep}${pkg}${sep}`);
   if (modules > 0) {
     const prefix = target.slice(0, modules);
@@ -200,7 +214,7 @@ function launch(inner: {cwd?: string; env: Record<string, string>}): {cwd?: stri
 export function resolveMcpInstall(config: PrinterHandoffConfig, env: InstallEnvironment): ResolvedMcpInstall {
   const pkg = packageName(config.backend);
   const command = config.process.command, args = config.process.args ?? [];
-  if (basename(command) !== 'ssh') return resolveDirect(pkg, [command, ...args], config.process.cwd, env);
+  if (basename(command) !== 'ssh') return resolveDirect(pkg, [command, ...args], config.process.cwd, env, config.process.env?.PATH ?? env.path);
   const ssh = parseSsh(args);
   if (!ssh.destination) return {type: 'unresolved', pkg, found: 'an ssh command without a host'};
   const {host, user: hostUser} = sshHost(ssh.destination);
@@ -216,7 +230,8 @@ export function resolveMcpInstall(config: PrinterHandoffConfig, env: InstallEnvi
     if (user !== env.user) return {type: 'unresolved', pkg, found: `ssh to ${user}@${host}, another account on this Mac whose keys (and any forced command) Counterpart can't read`};
     const inner = shellCommand(ssh.remote.join(' '));
     if (!inner) return {type: 'unresolved', pkg, found: 'an ssh command whose remote command is empty'};
-    return {...resolveDirect(pkg, inner.argv, inner.cwd, env), via: {kind: 'ssh', host, from: 'remote-command', ...launch(inner)}};
+    // The remote shell's PATH is its own: only a PATH the command sets is known.
+    return {...resolveDirect(pkg, inner.argv, inner.cwd, env, inner.env.PATH), via: {kind: 'ssh', host, from: 'remote-command', ...launch(inner)}};
   }
   if (user !== env.user) return {type: 'unresolved', pkg, found: `ssh to ${user}@${host}, another account on this Mac whose keys Counterpart can't read`};
   if (!publicKey) return {type: 'unresolved', pkg, found: `ssh to ${host} with ${identity ? `the key ${identity}, whose .pub file isn't there` : 'no -i key'}, so Counterpart can't find the command it runs`};
@@ -226,7 +241,7 @@ export function resolveMcpInstall(config: PrinterHandoffConfig, env: InstallEnvi
   let inner;
   try { inner = shellCommand(forced); } catch { inner = undefined; }
   if (!inner) return {type: 'unresolved', pkg, found: `a forced command for ${identity} that Counterpart can't read`};
-  return {...resolveDirect(pkg, inner.argv, inner.cwd, env), via: {kind: 'ssh', host, from: 'authorized-keys', ...launch(inner)}};
+  return {...resolveDirect(pkg, inner.argv, inner.cwd, env, inner.env.PATH), via: {kind: 'ssh', host, from: 'authorized-keys', ...launch(inner)}};
 }
 
 /** The version an install has on disk, when it says. */

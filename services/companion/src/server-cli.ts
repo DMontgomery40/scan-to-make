@@ -66,7 +66,10 @@ const handoffDirectory=process.env.SCAN_TO_MAKE_PRINTER_HANDOFF_DIR||undefined;
 if((handoffConfigPath===undefined)!==(handoffDirectory===undefined))throw new Error('Printer handoff requires both its config path and bundle directory');
 if(handoffConfigPath!==undefined&&(!remoteAuth||!isAbsolute(handoffConfigPath)||!isAbsolute(handoffDirectory!)))throw new Error('Printer handoff requires authentication and absolute config and directory paths');
 const handoffConfig=handoffConfigPath===undefined?undefined:await readPrinterHandoffConfig(handoffConfigPath);
-const printerCheck=handoffConfig===undefined?undefined:createPrinterCheck(handoffConfig);
+let mcpUpdates:McpUpdater|undefined;
+// PRD §8.10: every process started from the Mac's own profile runs the version an Update installed.
+const runningHandoff=()=>handoffConfig&&mcpUpdates?mcpUpdates.effective('current',handoffConfig):handoffConfig;
+const printerCheck=handoffConfig===undefined?undefined:createPrinterCheck(()=>runningHandoff()!);
 // PRD §8.3: one long-lived MCP session per printer destination, shared by every call to it.
 const printerPool=new PrinterSessionPool();
 let printerDirectory:PrinterDirectory|undefined;
@@ -79,7 +82,6 @@ if(printHandoff)printHandoff.admit=()=>printGate.hold('current');
 const claudePath=process.env.SCAN_TO_MAKE_CLAUDE_PATH||undefined;
 if(claudePath!==undefined&&!isAbsolute(claudePath))throw new Error('SCAN_TO_MAKE_CLAUDE_PATH must be absolute');
 let objects:ObjectService|undefined;
-let mcpUpdates:McpUpdater|undefined;
 // Events about the Mac rather than a project (mcp.update.*) have no projectId. Both apps decode them now
 // (#210, #211); SCAN_TO_MAKE_PROJECTLESS_EVENTS=0 turns them off.
 const projectlessEventsFlag=process.env.SCAN_TO_MAKE_PROJECTLESS_EVENTS;
@@ -119,8 +121,8 @@ if(handoffConfig&&printHandoff&&captureDirectory&&claudePath){
     return [destination.id,destination.id==='current'?printHandoff:createPrintHandoffServices(config,handoffDirectory!,{pool:printerPool,destinationId:destination.id,onConnect:onConnect(destination.id)})] as const;
   }));
   printerDirectory=new PrinterDirectory(printerCatalog,id=>destinations.get(id)?.runner.session);
-  objects=new ObjectService({store:objectStore,runTouchup:input=>runTouchup(input),claudePath,handoff:handoffConfig,printerCatalog,printers:printerDirectory,
-    stlInfo:path=>printerStlSize(handoffConfig,path),
+  objects=new ObjectService({store:objectStore,runTouchup:input=>runTouchup(input),claudePath,handoff:handoffConfig,runningHandoff:()=>runningHandoff()!,printerCatalog,printers:printerDirectory,
+    stlInfo:path=>printerStlSize(runningHandoff()!,path),
     print:{services:printHandoff,destinations},
     settings:companionSettings,camera:new CameraFrames(),printGate,
     passTimings:new PassTimings(join(dataRoot,'pass-timings.json')),titleFor:request=>generateTitle(request,claudePath),
@@ -142,7 +144,7 @@ if(handoffConfig&&printHandoff&&captureDirectory&&claudePath){
   await objects.resume();
 }
 if(capture?.scanProcessing&&captureDirectory)capture.modelSize=new ModelSizeStore(capture.storage,capture.scanProcessing,join(captureDirectory,'captures'),
- createModelSizeRunner(async()=>handoffConfig?.backend==='bambu-printer-mcp'?handoffConfig.process:installedBambuProcess()));
+ createModelSizeRunner(async()=>{const running=runningHandoff();return running?.backend==='bambu-printer-mcp'?running.process:installedBambuProcess();}));
 // The port variable keeps its original name so existing operator setups still start.
 let lanTls;
 const certPath = process.env.SCAN_TO_MAKE_LAN_TLS_CERT;

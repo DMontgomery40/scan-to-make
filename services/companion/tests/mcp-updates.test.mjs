@@ -98,7 +98,7 @@ async function updater(t, {profile, profiles, files = {}, links = {}, busy = () 
   const updates = new McpUpdater({
     gate, fs: {rename: async (from, to) => { moves.push(['rename', from, to]); if (failRename && failRename(from, to)) throw new Error('EXDEV'); }, rm: async path => { moves.push(['rm', path]); }, mkdir: async () => undefined},
     destinations: () => profiles ?? [{id: 'p1s', config: profile}, {id: 'a1', config: profile}],
-    env, overrides, session, busy: async id => busy(id), runningVersion: id => installed[id] ?? '1.1.46',
+    env, overrides, session, busy: async id => busy(id), runningVersion: id => id in installed ? installed[id] : '1.1.46',
     emit: async event => { events.push(event); }, waitPollMs: 20, node: '/Applications/Scan to Make.app/Contents/Resources/Payload/node/bin/node', path: '/usr/bin:/bin',
     run: async (command, args, options) => {
       commands.push([command, ...args, ...(options.cwd ? [`(in ${options.cwd})`] : [])].join(' '));
@@ -418,4 +418,41 @@ test('review fixes, round three: one update per set of files, npx ranges, a slow
   const {newerVersion} = await import('../dist/printing/directory.js');
   assert.deepEqual([newerVersion('1.2.0', '1.2.0-dev'), newerVersion('1.2.0-dev', '1.2.0'), newerVersion('1.2.0-beta.2', '1.2.0-beta.10'), newerVersion('1.2.1', '1.2.0'), newerVersion('1.2.0', '1.2.0')],
     [true, false, false, true, false]);
+});
+
+test('review fixes, round four: bare commands come from PATH, ::1 is this Mac, unknown npx versions are not current, every launch path runs the update', async t => {
+  const entry = `${APP}/printers/bambu/lib/node_modules/bambu-printer-mcp/dist/index.js`;
+  const env = mac({[entry]: '', [`${APP}/printers/bambu/lib/node_modules/bambu-printer-mcp/package.json`]: pkgJson('1.1.46'), '/opt/homebrew/bin/node': '',
+    '/opt/homebrew/lib/node_modules/bambu-printer-mcp/dist/index.js': ''}, {'/opt/homebrew/bin/bambu-printer-mcp': '/opt/homebrew/lib/node_modules/bambu-printer-mcp/dist/index.js'});
+  // A bare `node` after `cd` is whatever the shell finds, never <cwd>/node.
+  const viaCd = resolveMcpInstall(bambu('/usr/bin/ssh', ['127.0.0.1', `cd /repo && node '${entry}'`]), env);
+  assert.deepEqual([viaCd.type, viaCd.node], ['app', undefined]);
+  const withPath = resolveMcpInstall(bambu('/usr/bin/ssh', ['127.0.0.1', `cd /repo && PATH=/opt/homebrew/bin node '${entry}'`]), env);
+  assert.equal(withPath.node, '/opt/homebrew/bin/node');
+  // Run directly: the profile's PATH, else the companion's.
+  assert.equal(resolveMcpInstall(bambu('node', [entry], {cwd: '/repo', env: {PATH: '/usr/bin:/opt/homebrew/bin'}}), env).node, '/opt/homebrew/bin/node');
+  assert.equal(resolveMcpInstall(bambu('node', [entry], {cwd: '/repo'}), {...env, path: '/opt/homebrew/bin'}).node, '/opt/homebrew/bin/node');
+  const bin = resolveMcpInstall(bambu('bambu-printer-mcp', [], {cwd: '/repo'}), {...env, path: '/opt/homebrew/bin'});
+  assert.deepEqual([bin.type, bin.prefix], ['global', '/opt/homebrew']);
+  assert.match(resolveMcpInstall(bambu('bambu-printer-mcp', [], {cwd: '/repo'}), env).found, /bambu-printer-mcp, which isn't on the PATH/);
+  // IPv6 loopback, bare or with a user, and the ssh:// form with a port, are this Mac.
+  for (const destination of ['::1', 'ada@::1', 'ssh://[::1]:22', 'ssh://ada@127.0.0.1:2222', '[::1]']) {
+    const install = resolveMcpInstall(bambu('/usr/bin/ssh', [destination, 'npx', '-y', 'bambu-printer-mcp@1.1.45']), env);
+    assert.deepEqual([install.type, install.via?.host], ['npx', destination.includes('127.0.0.1') ? '127.0.0.1' : '::1'], destination);
+  }
+  // One npx printer pinned to the latest, one on a range that hasn't connected: not current; both move to the latest.
+  const f = await updater(t, {latest: '2.0.0', installed: {p1s: '2.0.0', a1: undefined}, profiles: [
+    {id: 'p1s', config: bambu('/opt/homebrew/bin/npx', ['-y', 'bambu-printer-mcp@2.0.0'])},
+    {id: 'a1', config: bambu('/opt/homebrew/bin/npx', ['-y', 'bambu-printer-mcp@1'])}]});
+  const answer = await f.updates.update(f.mcpId);
+  assert.equal(answer.state, 'started');
+  assert.equal(answer.fromVersion, undefined, 'the oldest version is not known');
+  await f.done();
+  assert.deepEqual((await f.overrides.get('a1')).args, ['-y', 'bambu-printer-mcp@2.0.0']);
+  // Cleanup workers, the printer check and STL sizes read the profile through effective(): the update's command.
+  const a1 = bambu('/opt/homebrew/bin/npx', ['-y', 'bambu-printer-mcp@1']);
+  assert.deepEqual(f.updates.effective('a1', a1).process.args, ['-y', 'bambu-printer-mcp@2.0.0']);
+  // A profile changed since the update is used as it is.
+  const changed = bambu('/opt/homebrew/bin/npx', ['-y', 'bambu-printer-mcp@1.9.0']);
+  assert.deepEqual(f.updates.effective('a1', changed), changed);
 });

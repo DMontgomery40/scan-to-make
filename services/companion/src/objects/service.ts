@@ -106,6 +106,8 @@ export interface ObjectServiceDeps {
   stlInfo: (stlPath: string) => Promise<[number, number, number] | undefined>;
   claudePath: string;
   handoff: PrinterHandoffConfig;
+  /** The handoff profile as the companion runs it now: after an MCP update (PRD §8.10) it carries that update's command. */
+  runningHandoff?: () => PrinterHandoffConfig;
   printerCatalog?: PrinterCatalog;
   /** Live destination state and capabilities, from each destination's long-lived session. */
   printers?: PrinterDirectory;
@@ -1110,7 +1112,7 @@ export class ObjectService {
       let scanName = object.scan;
       if (build) scanName = await this.#build(object.id, dir, controller.signal);
       const scan = fromCurrent ? [join(dir, object.current!.model)] : scanName ? [join(dir, 'scan', scanName)] : [];
-      const input: TouchupInput = {root: join(dir, 'passes'), objectId: 'pass', scan, photos, currentModel: fromCurrent, handoff: this.#deps.handoff, claudePath: this.#deps.claudePath,
+      const input: TouchupInput = {root: join(dir, 'passes'), objectId: 'pass', scan, photos, currentModel: fromCurrent, handoff: this.#handoff(), claudePath: this.#deps.claudePath,
         kind, onStage: (id, chosen) => stage(id, chosen),
         ...(fromCurrent && object.current?.engine === 'fusion' && object.current.design
           ? {design: {f3d: join(dir, object.current.design.f3d), ...(object.current.design.parameters ? {parameters: join(dir, object.current.design.parameters)} : {})}} : {}),
@@ -1278,7 +1280,8 @@ export class ObjectService {
     return [...previous, ...clean].slice(-200);
   }
 
-  #publicText(text: string): string { return publicTouchupText(text, {...process.env, ...this.#deps.handoff.process.env}); }
+  #handoff(): PrinterHandoffConfig { return this.#deps.runningHandoff?.() ?? this.#deps.handoff; }
+  #publicText(text: string): string { return publicTouchupText(text, {...process.env, ...this.#handoff().process.env}); }
 
   #changed(object: StmObject): StmObject { this.#deps.onChange?.(object); return object; }
 }

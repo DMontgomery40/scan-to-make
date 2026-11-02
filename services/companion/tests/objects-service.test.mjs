@@ -248,3 +248,17 @@ test('an object can be deleted, but not while it is being worked on', async () =
   assert.deepEqual((await service.list()).map(o => o.id).includes(other.id), false);
   await service.close();
 });
+
+test('a pass runs the printer MCP as the companion runs it now (after an MCP update), not the profile it started with', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'objects-svc-'));
+  const store = new ObjectStore(join(root, 'objects'));
+  const seen = [];
+  const updated = {backend: 'bambu-printer-mcp', process: {command: '/opt/homebrew/bin/npx', args: ['-y', 'bambu-printer-mcp@1.1.50']}};
+  const service = new ObjectService({store, runTouchup: async input => { seen.push(input.handoff); throw new Error('stop here'); },
+    stlInfo: async () => undefined, claudePath: '/c', handoff: {backend: 'bambu-printer-mcp', process: {command: '/usr/bin/true'}}, runningHandoff: () => updated});
+  const object = await service.create('A hook for a 25 mm handle.');
+  await service.addScan(object.id, 'scan.usdz', Buffer.from('usdz'));
+  await service.start(object.id);
+  await service.settled(object.id);
+  assert.deepEqual(seen, [updated]);
+});

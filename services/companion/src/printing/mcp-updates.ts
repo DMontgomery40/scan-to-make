@@ -190,6 +190,10 @@ export class McpUpdater {
   close(): void { if (this.#timer) clearInterval(this.#timer); }
 
   /** Loads saved overrides (npx version, fresh copy) and gives the sessions them, before they first connect. */
+  /** A destination's profile as the companion runs it: with the override an update left, while that profile is unchanged. */
+  effective(destinationId: string, config: PrinterHandoffConfig): PrinterHandoffConfig {
+    return this.#deps.overrides.apply(config, this.#deps.overrides.peek(destinationId, config));
+  }
   async applyOverrides(): Promise<void> {
     await this.#deps.overrides.load();
     for (const entry of this.#deps.destinations()) {
@@ -214,10 +218,13 @@ export class McpUpdater {
     const members = this.#members(mcpId);
     if (!members.length) throw new McpUpdateError('not-found', 'No printer uses that MCP.');
     const first = members[0]!, pkg = first.config.backend;
-    // The oldest version any of its printers runs (npx profiles may pin different ones).
-    const versions = members.filter(member => member.mcpId === mcpId)
-      .map(member => installedVersion(member.install, this.#deps.env) ?? this.#deps.runningVersion(member.id)).filter((version): version is string => !!version);
-    const fromVersion = versions.sort((a, b) => newer(a, b) ? 1 : newer(b, a) ? -1 : 0)[0];
+    // The oldest version any of its printers runs (npx profiles may pin different ones). One whose version
+    // isn't known yet (an npx range that hasn't connected) can't be called current.
+    const known = members.filter(member => member.mcpId === mcpId)
+      .map(member => installedVersion(member.install, this.#deps.env) ?? this.#deps.runningVersion(member.id));
+    const versions = known.filter((version): version is string => !!version);
+    const everyKnown = versions.length === known.length;
+    const fromVersion = everyKnown ? versions.sort((a, b) => newer(a, b) ? 1 : newer(b, a) ? -1 : 0)[0] : undefined;
     const found = first.install.type === 'unresolved' ? first.install.found
       // npx inside a wrapper: the version is in a command Counterpart doesn't own.
       : first.install.type === 'npx' && first.install.via ? `${first.install.spec} run through ssh, whose command Counterpart can't change` : undefined;
