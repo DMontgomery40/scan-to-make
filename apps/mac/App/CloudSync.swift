@@ -4,6 +4,7 @@ import CloudKit
 import ImageIO
 import UniformTypeIdentifiers
 import CounterpartKit
+import AgentKit
 #if canImport(ControlKit)
 import ControlKit
 #endif
@@ -102,6 +103,52 @@ import ControlKit
         await sweepIfDue()
         // Pushes can be late or lost: read the zone at least once a minute, and soon after a failed read.
         if readFailed || lastRead.map({ Date().timeIntervalSince($0) > 60 }) ?? true { fetchCommands() }
+    }
+
+    // MARK: This Mac, for iCloud enrolment (PRD §5.10)
+
+    /// What Settings → Advanced says about phones finding this Mac through iCloud.
+    private(set) var macPublication = "Not published yet."
+    private var macWrittenAt: Date?
+    private var macAddresses: String?
+    private var macTokenExpires: Date?
+    private var publishingMac = false
+
+    /// The addresses this Mac answers on now, as a key that changes when any of them does.
+    nonisolated static func addressKey() -> String {
+        let current = NetworkAddresses.current()
+        return (current.lan.sorted() + [current.localHostname ?? ""] + current.tailscale.sorted()).joined(separator: ",")
+    }
+
+    /// Writes the `CounterpartMac` record when it is due: on launch, when an address changes, and every 5 minutes, each
+    /// time with a fresh enrolment token from the companion.
+    func publishMacIfDue(_ client: ControlClient, now: Date = Date()) async {
+        guard let database, !publishingMac else { return }
+        let addresses = Self.addressKey()
+        guard MacPublication.isDue(lastWritten: macWrittenAt, lastAddresses: macAddresses, addresses: addresses,
+                                   tokenExpires: macTokenExpires, now: now) else { return }
+        publishingMac = true
+        defer { publishingMac = false }
+        await prepare()
+        let enrolment: ICloudEnrolment
+        do { enrolment = try await client.icloudEnrolment() } catch {
+            macPublication = "This Mac's Counterpart can't publish itself to iCloud yet. Phones pair with the code in Add a Phone."
+            macWrittenAt = now // try again in 5 minutes, not on every cycle
+            macAddresses = addresses
+            return
+        }
+        let record = CKRecord(recordType: "CounterpartMac", recordID: CKRecord.ID(recordName: enrolment.macId, zoneID: Self.zoneId))
+        for (key, value) in MacPublication.fields(enrolment, name: Host.current().localizedName ?? "Mac", now: now) { record[key] = value }
+        do {
+            try Self.check(try await database.modifyRecords(saving: [record], deleting: [], savePolicy: .allKeys))
+            macWrittenAt = now
+            macAddresses = addresses
+            macTokenExpires = enrolment.expiresAtDate
+            macPublication = "On: phones on your Apple Account find this Mac by themselves."
+        } catch {
+            macPublication = Self.sentence(error)
+            status = .failed(Self.sentence(error))
+        }
     }
 
     // MARK: Events and projects

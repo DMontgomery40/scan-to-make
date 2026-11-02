@@ -202,7 +202,8 @@ struct DevicesSettings: View {
                 if let problem = mac.problem { Text(problem).foregroundStyle(.red) }
                 Button("Add a Phone…") { NSApp.activate(); openWindow(id:"pairing") }
             } header: { Text("Phones and iPads") } footer: {
-                Text("Pairing a phone again replaces its row. It never adds a second one.").font(.caption).foregroundStyle(.secondary)
+                Text("A phone on your Apple Account finds this Mac by itself. Add a Phone shows a code for any other phone. Pairing a phone again replaces its row; it never adds a second one.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
             if !mac.legacy.isEmpty {
                 Section {
@@ -638,6 +639,9 @@ struct AdvancedSettings: View {
             }
             Section {
                 LabeledContent("iCloud") { Text(cloudStatus).foregroundStyle(.secondary).multilineTextAlignment(.trailing) }
+                LabeledContent("Phones find this Mac") {
+                    Text(macPublication).foregroundStyle(.secondary).multilineTextAlignment(.trailing)
+                }
                 Toggle(isOn:$relayOn) {
                     Text("Live Activity relay")
                     Text("Updates your phone's Lock Screen while it prints, through counterpart.dtmont.com. It stores nothing.")
@@ -673,6 +677,12 @@ struct AdvancedSettings: View {
         .formStyle(.grouped)
         .focusEffectDisabled()
         .frame(height:640)
+    }
+
+    /// PRD §5.10: a phone on the same Apple Account finds this Mac in iCloud and enrols by itself.
+    private var macPublication: String {
+        if case .off(let why) = EventRelay.shared.cloud.status { return why + " Phones pair with the code in Add a Phone." }
+        return EventRelay.shared.cloud.macPublication
     }
 
     private var cloudStatus: String {

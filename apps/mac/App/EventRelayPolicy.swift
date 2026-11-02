@@ -1,4 +1,5 @@
 import Foundation
+import CloudKit
 import CounterpartKit
 #if canImport(ControlKit)
 import ControlKit
@@ -270,5 +271,34 @@ enum LiveActivityStart {
     static func stillRunning(_ event: CounterpartEvent, project: Project?) -> Bool {
         guard let project, let printId = event.printId, project.print?.printId == printId, project.state == .printing else { return false }
         return project.print?.monitor?.phase != "ended"
+    }
+}
+
+/// The `CounterpartMac` record (PRD §5.10, docs/protocols/cloudkit.md): this Mac, published so a phone on the same
+/// Apple Account finds it and enrols by itself. Rewritten on launch, whenever the addresses change, and every 5 minutes
+/// while the app runs (each write carries a fresh enrolment token).
+enum MacPublication {
+    static let interval: TimeInterval = 5 * 60
+
+    /// The record's fields. `addresses` is JSON text: `[{kind, host, port?}]`, in the order the phone should try them.
+    static func fields(_ enrolment: ICloudEnrolment, name: String, now: Date) -> [String: CKRecordValueProtocol] {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
+        let addresses = (try? encoder.encode(enrolment.addresses)).flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
+        var fields: [String: CKRecordValueProtocol] = [
+            "macId": enrolment.macId, "name": name, "addresses": addresses, "spkiSha256": enrolment.spkiSha256,
+            "enrolmentToken": enrolment.token, "updatedAt": now,
+        ]
+        if let expires = enrolment.expiresAtDate { fields["tokenExpiresAt"] = expires }
+        return fields
+    }
+
+    /// Whether to write it now: never written, 5 minutes since, the addresses changed, or the token runs out within
+    /// the next interval.
+    static func isDue(lastWritten: Date?, lastAddresses: String?, addresses: String, tokenExpires: Date?, now: Date) -> Bool {
+        guard let lastWritten else { return true }
+        if addresses != lastAddresses { return true }
+        if let tokenExpires, tokenExpires.timeIntervalSince(now) < interval { return true }
+        return now.timeIntervalSince(lastWritten) >= interval
     }
 }

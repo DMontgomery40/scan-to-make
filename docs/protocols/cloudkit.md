@@ -58,6 +58,22 @@ The Mac deletes its own event records 7 days after `createdAt` (a daily sweep ov
 | `endsAt` | Date? | |
 | `thumbnail` | Asset? | a JPEG of the first render, sent only when it changes. Saved with `.changedKeys`, so the last one stays in place. |
 
+## `CounterpartMac` (the Mac writes)
+
+This Mac, published so a phone on the same Apple Account finds it and enrols by itself, with no code (PRD §5.10). `recordName` is the `macId`. The Mac rewrites it on launch, whenever one of its addresses changes, and every 5 minutes while the app runs. Each write carries a fresh enrolment token from the companion's `pairing.icloudToken`. Only the owner's Apple Account can read the private database, and the token is single-use, valid for 10 minutes and pinned to this Mac's key.
+
+| Field | Type | Notes |
+|---|---|---|
+| `macId` | String | also the `recordName` |
+| `name` | String | the Mac's name ("Mac mini") |
+| `addresses` | String | JSON `[{kind, host, port?}]`, in the order to try them. `kind` is `lan`, `mdns` (`.local`) or `tailscale` |
+| `spkiSha256` | String | the companion's key pin |
+| `enrolmentToken` | String | for `POST /v1/pair/icloud {macId, enrolmentToken, installId, deviceName, model}` |
+| `tokenExpiresAt` | Date | when the token stops working; a newer one is published before then |
+| `updatedAt` | Date | the Mac's clock when it wrote the record |
+
+The phone reads every `CounterpartMac` record on first launch, or whenever it has no working Mac. With several Macs it asks once, and with one it doesn't ask. It connects to the first address that answers and pins `spkiSha256`. A build without the iCloud entitlement doesn't publish, and Settings → Advanced says why. The QR code in Add a Phone remains the fallback.
+
 ## `CounterpartDevice` (the phone writes)
 
 The phone's Live Activity tokens when it isn't on the LAN (PRD §8.8). On the LAN they go to the companion instead (`POST /v1/devices/live-activity-tokens`). The Mac reads both and sends each push through the relay; tokens never go anywhere else.
