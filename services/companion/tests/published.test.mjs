@@ -7,7 +7,7 @@ import {createRequire} from 'node:module';
 import {createHash} from 'node:crypto';
 import {EventEmitter} from 'node:events';
 import {PassThrough} from 'node:stream';
-import {HandoffBundleStore,InMemoryElicitationRelay} from '@scan-to-make/printer-handoff';
+import {HandoffBundleStore,InMemoryElicitationRelay,PrinterHandoffRunner,inspectModelFile} from '@scan-to-make/printer-handoff';
 import {ObjectStore} from '../dist/objects/store.js';
 import {ObjectService} from '../dist/objects/service.js';
 import {publicObject} from '../dist/objects/http.js';
@@ -114,4 +114,24 @@ test('duplicating a selected published plate preserves its original receipt and 
  assert.deepEqual(copy.files.original,[selected.current.model]);assert.equal(copy.files.current,copy.current.model);
  assert.deepEqual(await readFile(join(f.service.dir(copy.id),copy.current.model)),bytes);assert.deepEqual(copy.credit,selected.credit);
  await f.service.estimate(copy.id);assert.equal(selections.at(-1).plateIndex,1);
+});
+
+for (const action of ['estimate','print']) test(`pre-sliced original ${action} keeps explicit one copy over configured repetitions`,async t=>{
+ const root=await mkdtemp(join(tmpdir(),'published-sliced-copy-')),store=new ObjectStore(join(root,'objects')),calls=[];
+ const {unzipSync}=createRequire(new URL('../../printer-handoff/package.json',import.meta.url))('fflate');
+ const entries=unzipSync(model());entries['Metadata/plate_1.gcode']=strToU8('; estimated printing time (normal mode) = 1m\nG1 X1');const bytes=Buffer.from(zipSync(entries));
+ const session={hold:()=>()=>{},connect:async()=>({tools:[]}),hasTool:name=>['inspect_print_file','print_3mf'].includes(name),getTool:name=>({name,inputSchema:{type:'object',properties:Object.fromEntries(['file_path','bambu_model','plate_index','three_mf_path'].map(x=>[x,{}]))}}),call:async(name,args,opts)=>{
+  calls.push({name,args});
+  if(name==='inspect_print_file')return{content:[{type:'text',text:JSON.stringify({artifact:{sha256:inspectModelFile(bytes,'3mf').sha256},selection:{plate_index:0,bambu_model:'p1s'}})}]};
+  if(name==='print_3mf'){await opts?.beforeDispatch?.();return{structuredContent:{jobName:'original'},content:[]};}
+  throw Error('Unexpected tool '+name);
+ }};
+ const runner=new PrinterHandoffRunner({backend:'bambu-printer-mcp',process:{command:'/unused'},selection:{model:'p1s'},slicer:{repetitions:3}},{session});
+ const service=new ObjectService({store,claudePath:'/unused',handoff:{backend:'bambu-printer-mcp',process:{command:'/unused'}},print:{services:{runner,store:new HandoffBundleStore(join(root,'bundles')),relay:new InMemoryElicitationRelay({timeoutMs:1000})}}});
+ t.after(async()=>{await service.close();await rm(root,{recursive:true,force:true});});
+ const object=await service.create('Print this','published',LINK);await service.addModelFile(object.id,'original.3mf',bytes);
+ if(action==='estimate')await service.estimate(object.id,{copies:1});
+ else {await service.print(object.id,{copies:1});const settled=await service.settled(object.id);assert.notEqual(settled.state,'failed',settled.failure);}
+ assert.deepEqual(calls.map(x=>x.name),action==='estimate'?['inspect_print_file']:['inspect_print_file','print_3mf']);
+ assert.deepEqual(await readFile(join(service.dir(object.id),(await service.get(object.id)).current.model)),bytes);
 });

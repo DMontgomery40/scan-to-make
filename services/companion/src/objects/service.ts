@@ -833,7 +833,7 @@ export class ObjectService {
     const {store: bundles, relay, runner} = printing.services;
     const {selection: colourSelection, slicer} = await this.#colour(id, options, services.selection, runner.backend);
     const selected = object.publishedSelection ? {...colourSelection, plateIndex: object.publishedSelection.plateIndex} : colourSelection;
-    const overrides = object.publishedSelection?.sliced ? {} : sliceOverrides(options, selected?.nozzleDiameterMm);
+    const overrides = object.publishedSelection?.sliced ? {repetitions: 1} : sliceOverrides(options, selected?.nozzleDiameterMm);
     if (object.kind === 'published' && object.current.model.toLowerCase().endsWith('.3mf')) {
       if (!options.quality || options.quality === 'standard') delete overrides.layerHeightMm;
       if (!options.strength || options.strength === 'standard') { delete overrides.wallLoops; delete overrides.sparseInfillDensity; }
@@ -1210,7 +1210,7 @@ export class ObjectService {
     const quality = request.quality ?? 'standard', strength = request.strength ?? 'standard';
     const copies = request.copies && request.copies > 1 ? request.copies : undefined;
     // Exactly as Print: named copies (1 included) override the printer config's own repetitions.
-    const overrides = object.publishedSelection?.sliced ? {} : sliceOverrides({quality, strength, ...(request.copies !== undefined ? {copies: request.copies} : {})}, services.selection?.nozzleDiameterMm);
+    const overrides = object.publishedSelection?.sliced ? {repetitions: 1} : sliceOverrides({quality, strength, ...(request.copies !== undefined ? {copies: request.copies} : {})}, services.selection?.nozzleDiameterMm);
     if (object.kind === 'published' && object.current.model.toLowerCase().endsWith('.3mf')) {
       if (quality === 'standard') delete overrides.layerHeightMm;
       if (strength === 'standard') { delete overrides.wallLoops; delete overrides.sparseInfillDensity; }
