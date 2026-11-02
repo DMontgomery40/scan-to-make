@@ -943,7 +943,7 @@ struct ObjectDetailView: View {
                     }
                     .id(confirmation.id)
                     if let item = object.plate?.item, !item.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        Label("The camera check saw \(item) on the plate. Check and clear it before confirming.", systemImage: "exclamationmark.triangle.fill")
+                        Label("The printer camera reported \(item) on the plate.", systemImage: "exclamationmark.triangle.fill")
                             .foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
                     }
                 }
@@ -970,7 +970,7 @@ struct ObjectDetailView: View {
                         }
                         if let remaining = report.remainingMinutes { Text("\(Int(remaining)) min remaining").font(.subheadline).monospacedDigit() }
                         if report.state == "FAILED" {
-                            Text("The previous printer job failed. Inspect the printer and clear the plate before confirming a new print.")
+                            Text("The previous printer job failed. Check its status before starting another print.")
                                 .font(.subheadline).foregroundStyle(.orange)
                         }
                         Text("Checked \(Date(timeIntervalSince1970: report.checkedAtMs / 1000), format: .dateTime.hour().minute().second())")

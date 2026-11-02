@@ -130,8 +130,8 @@ final class ObjectWordsTests: XCTestCase {
         XCTAssertEqual(ObjectWords(object(["state": "needs-closeup", "question": ["closeup": "the underside"]])).status,
                        "Can you send me a close-up of the underside? I can't see what's happening there.")
         XCTAssertEqual(ObjectWords(ready(["state": "printing", "plate": ["item": "a spool", "photo": true]])).status,
-                       "Looks like there's a spool on your plate. Can you take it off first?")
-        XCTAssertEqual(ObjectWords(ready(["state": "printing", "plate": ["noCamera": true]])).actions, [.plateClear])
+                       "Preparing print…")
+        XCTAssertEqual(ObjectWords(ready(["state": "printing", "plate": ["noCamera": true]])).actions, [])
         XCTAssertEqual(ObjectWords(ready(["state": "failed", "failure": "x", "print": ["bundleId": "b", "uncertain": true]])).actions, [.printChecked, .correct])
         XCTAssertEqual(ObjectWords(object(["state": "failed", "failure": "Blender is not open on your Mac."])).actions, [.retry, .correct])
         XCTAssertEqual(ObjectWords(object(["scan": "scan.usdz"])).actions, [.finishSending])

@@ -168,15 +168,6 @@ public struct ObjectWords: Sendable, Equatable {
                 stage = .needsYou
                 question = "\(printer ?? "Your printer") needs a yes before printing"
                 (line, actions) = (question!, [])
-            } else if object.plate?.noCamera == true {
-                stage = .needsYou
-                question = "Check the plate is clear"
-                (line, actions) = (question!, [.plateClear])
-            } else if let plate = object.plate {
-                stage = .needsYou
-                let item = plate.item?.trimmingCharacters(in: .whitespacesAndNewlines)
-                question = "Something's on the plate" + (item?.isEmpty == false ? ": \(item!)" : "")
-                (line, actions) = (question!, [.plateClear])
             } else if let live = object.print?.live, ["printing", "paused"].contains(live.state) {
                 stage = .printing
                 progress = live.job?.progress.map { min(1, max(0, $0 / 100)) }
