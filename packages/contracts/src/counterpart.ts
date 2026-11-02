@@ -19,7 +19,7 @@ export const COUNTERPART_EVENT_TYPES = [
   'pass.started', 'pass.stage', 'pass.ready', 'pass.ask', 'pass.failed',
   'print.preparing', 'plate.blocked', 'print.confirm', 'print.started', 'print.status', 'print.first-layer',
   'print.milestone', 'print.paused', 'print.resumed', 'print.done', 'print.failed', 'print.cancelled',
-  'print.not-started', 'print.unreachable',
+  'print.not-started', 'print.unreachable', 'print.sent',
 ] as const;
 export const CounterpartEventTypeSchema = z.enum(COUNTERPART_EVENT_TYPES);
 export type CounterpartEventType = z.infer<typeof CounterpartEventTypeSchema>;
@@ -81,7 +81,7 @@ export type EventsPage = z.infer<typeof EventsPageSchema>;
 // ---------------------------------------------------------------------------
 // Project status words (PRD §4 state table), written by the companion's events/words.ts
 
-export const PROJECT_PHASES = ['sending', 'working', 'needs-you', 'ready', 'preparing', 'printing', 'printed', 'failed'] as const;
+export const PROJECT_PHASES = ['sending', 'working', 'needs-you', 'ready', 'preparing', 'printing', 'printed', 'failed', 'sent'] as const;
 export const ProjectPhaseSchema = z.enum(PROJECT_PHASES);
 export type ProjectPhase = z.infer<typeof ProjectPhaseSchema>;
 
@@ -135,7 +135,8 @@ export const PrintLiveSchema = z.strictObject({
 });
 export type PrintLive = z.infer<typeof PrintLiveSchema>;
 
-export const MonitorEndSchema = z.enum(['done', 'failed', 'cancelled', 'not-started', 'replaced']);
+/** `sent`: the printer accepted it but Counterpart can't follow this print (no job identity it could match). */
+export const MonitorEndSchema = z.enum(['done', 'failed', 'cancelled', 'not-started', 'replaced', 'sent']);
 export const PrintMonitorSchema = z.strictObject({
   phase: z.enum(['starting', 'watching', 'ended']),
   startedAt: iso,
@@ -163,8 +164,6 @@ export const PrintSettingsSchema = z.strictObject({
   quality: PrintQualitySchema.optional(),
   strength: PrintStrengthSchema.optional(),
   colour: PrintColourSchema.optional(),
-  /** Default true: take a camera frame and judge the plate in the background. */
-  plateCheck: z.boolean().optional(),
 });
 export type PrintSettings = z.infer<typeof PrintSettingsSchema>;
 

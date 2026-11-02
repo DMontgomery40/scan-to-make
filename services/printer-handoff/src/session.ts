@@ -74,6 +74,8 @@ export interface SessionCallOptions {
   exclusive?: boolean;
   /** During a reconnect backoff, fail at once with `printer-unreachable` instead of waiting it out. */
   failFast?: boolean;
+  /** The caller already holds the mutex through exclusive(): don't take it again, but tag questions as its holder. */
+  held?: boolean;
 }
 
 function sleep(clock: SessionClock, ms: number, signal?: AbortSignal): Promise<void> {
@@ -166,8 +168,8 @@ export class PrinterSession {
     this.#cancelIdle();
     let unlock: (() => void) | undefined;
     try {
-      const exclusive = options.exclusive ?? (MUTATING_TOOLS.has(name) || options.elicitationContext !== undefined);
-      if (exclusive) unlock = await this.#lock(options.signal);
+      const exclusive = options.held === true || (options.exclusive ?? (MUTATING_TOOLS.has(name) || options.elicitationContext !== undefined));
+      if (exclusive && !options.held) unlock = await this.#lock(options.signal);
       const client = await this.#ensure(options);
       const result = await client.callTool(name, args, {
         ...(options.signal ? {signal: options.signal} : {}),
@@ -185,7 +187,7 @@ export class PrinterSession {
       // MCP cancellation doesn't stop a server handler that is already running: an
       // abandoned printer call could still ask its question and be answered under
       // the next call's tag. End that connection before anyone else takes the mutex.
-      if (unlock && (error as PrinterMcpError).incomplete) await this.#quarantine();
+      if ((unlock || options.held) && (error as PrinterMcpError).incomplete) await this.#quarantine();
       throw error;
     } finally {
       unlock?.();

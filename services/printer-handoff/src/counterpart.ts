@@ -75,6 +75,8 @@ export function bambuState(gcodeState: unknown): PrintState {
   }
 }
 
+/** Bambu print_error 0300_400C: "The task was canceled." */
+export const BAMBU_CANCELLED = 0x0300400c;
 const hex4 = (value: number) => value.toString(16).toUpperCase().padStart(4, '0');
 /** `hms[]` entry → `AAAA_BBBB_CCCC_DDDD`, with Bambu's severity in the code's high half. */
 export function hmsProblem(entry: unknown): CounterpartPrintProgress['problems'][number] | undefined {
@@ -93,15 +95,16 @@ export function bambuStatusReport(value: unknown, observedAt: Date): PrintReport
   if (!record(value) || value.connected === false) return {source: 'status-fallback', observedAt: at, state: 'offline', problems: []};
   const raw = record(value.raw) ? value.raw : {};
   const print = record(value.print) ? value.print : {};
-  const state = bambuState(raw.gcode_state ?? value.status);
+  const printError = finite(raw.print_error);
+  // A job stopped from the printer or an app reports FAILED with "the task was canceled".
+  const state = bambuState(raw.gcode_state ?? value.status) === 'failed' && printError === BAMBU_CANCELLED ? 'cancelled' : bambuState(raw.gcode_state ?? value.status);
   const name = textOf(raw.subtask_name) ?? (textOf(print.filename) !== 'None' ? textOf(print.filename) : undefined);
   const progress = finite(print.progress ?? raw.mc_percent);
   const remainingMin = finite(print.timeRemaining ?? raw.mc_remaining_time);
   const layer = finite(print.currentLayer ?? raw.layer_num), totalLayers = finite(print.totalLayers ?? raw.total_layer_num);
   const taskId = raw.task_id === undefined ? undefined : textOf(String(raw.task_id), 128);
   const problems: CounterpartPrintProgress['problems'] = [];
-  const printError = finite(raw.print_error);
-  if (printError) {
+  if (printError && printError !== BAMBU_CANCELLED) {
     const code = printError.toString(16).toUpperCase().padStart(8, '0');
     problems.push({code, severity: 'error', message: `The printer reported error ${code}.`});
   }

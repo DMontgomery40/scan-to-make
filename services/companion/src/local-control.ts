@@ -31,6 +31,18 @@ async function removeStaleSocket(path: string) {
   await unlink(path);
 }
 
+/** Methods allowed past the usual 10 s connection deadline. */
+export function methodDeadlineMs(method: ControlMethod, params: unknown): number | undefined {
+  if (method === 'objects.estimate') return 180_000;
+  // The printer MCP may ask its own confirmation; the call waits up to 120 s for it.
+  if (method === 'objects.pausePrint' || method === 'objects.resumePrint' || method === 'objects.cancelPrint') return 130_000;
+  if ((method as string) === 'events.wait') {
+    const timeout = (params as {timeoutMs?: unknown})?.timeoutMs;
+    return (typeof timeout === 'number' && Number.isFinite(timeout) ? Math.min(Math.max(timeout, 0), 25_000) : 25_000) + 5_000;
+  }
+  return undefined;
+}
+
 /** Host-local administration only: a filesystem endpoint, never an HTTP route. */
 export async function startLocalControl(options: {
   path: string;
@@ -49,7 +61,9 @@ export async function startLocalControl(options: {
     if (clients.size >= 16 || active.size >= 16) { socket.destroy(); return; }
     clients.add(socket);
     let bytes = Buffer.alloc(0), received = false;
-    const timer = setTimeout(() => socket.destroy(), options.timeoutMs ?? 10_000);
+    let timer = setTimeout(() => socket.destroy(), options.timeoutMs ?? 10_000);
+    /** Long methods get their own deadline once their request is read (events.wait, objects.estimate). */
+    const extend = (ms: number) => { clearTimeout(timer); timer = setTimeout(() => socket.destroy(), ms); };
     socket.on('error', () => {});
     socket.once('close', () => { clearTimeout(timer); clients.delete(socket); });
     const reply = (id: string | null, result: unknown, error?: unknown) => {
@@ -74,6 +88,8 @@ export async function startLocalControl(options: {
           const possibleID = z.object({id:z.uuid()}).safeParse(raw);
           if (possibleID.success) id = possibleID.data.id;
           const request = parseRequest(raw);
+          const deadline = methodDeadlineMs(request.method, request.params);
+          if (deadline !== undefined) extend(deadline);
           const result = await options.dispatch(request.method, request.params);
           reply(id, result);
         } catch (error) {

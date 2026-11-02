@@ -59,14 +59,14 @@ test('selected printer dispatches through its own runner and confirmation relay;
   await assert.rejects(service.selectPrinter(object.id, 'current'), InvalidStateError);
   await service.answerPrintConfirmation(object.id, (await service.get(object.id)).printConfirmation.id, {action: 'accept', content: {confirmed: true}});
   const finished = await service.settled(object.id);
-  assert.equal(finished.state, 'printed');
+  assert.equal(finished.state, 'sent'); // A fake printer reports nothing: dispatched, not proven printed.
   assert.deepEqual(calls, [{destination: 'second', backend: 'mcp-3d-printer-server', selection: {host: 'second.local'}}]);
   assert.equal(answers[0].destination, 'second');
   assert.equal(answers[0].answer.action, 'accept');
   assert.deepEqual(finished.print.destination, printing.print.destination);
   assert.equal((await store.get(object.id)).printerDestinationId, 'second');
   await service.selectPrinter(object.id, 'current');
-  await service.print(object.id);
+  await service.print(object.id, {checked: true});
   await until(async () => (await service.get(object.id)).plate?.noCamera);
   await service.answerPrintConfirmation(object.id, (await service.get(object.id)).printConfirmation.id, {action: 'accept', content: {confirmed: true}});
   await service.settled(object.id);
@@ -88,7 +88,7 @@ test('phone and Mac confirmation answers use the selected destination and reject
   assert.equal(answers[0].destination, 'second');
   assert.deepEqual(answers[0].answer.content, {confirmed: true});
 
-  await service.print(object.id);
+  await service.print(object.id, {checked: true});
   await until(async () => (await service.get(object.id)).printConfirmation);
   const next = (await service.get(object.id)).printConfirmation;
   const scopes = [], routes = createObjectRoutes(service);

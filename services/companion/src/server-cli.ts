@@ -16,6 +16,8 @@ import { RemoteAuthStore } from './remote-auth.js';
 import { createPrintHandoffServices } from './print-handoff-http.js';
 import { PrinterSessionPool, readPrinterHandoffConfig } from '@scan-to-make/printer-handoff';
 import { PrinterDirectory } from './printing/directory.js';
+import { CameraFrames } from './printing/camera.js';
+import { CompanionSettingsStore } from './settings.js';
 import {startLocalControl} from './local-control.js';
 import {createControlDispatcher, companionVersion} from './local-control-services.js';
 import type {CaptureServices} from './capture-http.js';
@@ -64,9 +66,13 @@ const printHandoff=handoffConfig===undefined?undefined:createPrintHandoffService
 const claudePath=process.env.SCAN_TO_MAKE_CLAUDE_PATH||undefined;
 if(claudePath!==undefined&&!isAbsolute(claudePath))throw new Error('SCAN_TO_MAKE_CLAUDE_PATH must be absolute');
 let objects:ObjectService|undefined;
+// The app's data root (~/Library/Application Support/Scan to Make), the parent of the auth directory.
+const dataRoot=remoteAuth?dirname(remoteAuth.directory):join(process.cwd(),'.counterpart');
+const companionSettings=new CompanionSettingsStore(join(dataRoot,'settings.json'));
 if(handoffConfig&&printHandoff&&captureDirectory&&claudePath){
   const objectStore=new ObjectStore(join(captureDirectory,'objects'));
-  await objectStore.recoverInterrupted();
+  // Dispatched prints keep printing: ObjectService.resume() picks their monitors back up.
+  await objectStore.recoverInterrupted({keepPrinting:true});
   const printerCatalog=await loadPrinterCatalog(handoffConfig);
   // `current` is the Mac app's own config and keeps the phone handoff route's services.
   const destinations=new Map(printerCatalog.destinations.map(destination=>{
@@ -76,7 +82,10 @@ if(handoffConfig&&printHandoff&&captureDirectory&&claudePath){
   printerDirectory=new PrinterDirectory(printerCatalog,id=>destinations.get(id)?.runner.session);
   objects=new ObjectService({store:objectStore,runTouchup:input=>runTouchup(input),claudePath,handoff:handoffConfig,printerCatalog,printers:printerDirectory,
     stlInfo:path=>printerStlSize(handoffConfig,path),
-    print:{services:printHandoff,destinations,judgePlate:photo=>judgePlate(photo,claudePath)}});
+    print:{services:printHandoff,destinations,judgePlate:photo=>judgePlate(photo,claudePath)},
+    settings:companionSettings,camera:new CameraFrames()});
+  await companionSettings.load();
+  await objects.resume();
 }
 if(capture?.scanProcessing&&captureDirectory)capture.modelSize=new ModelSizeStore(capture.storage,capture.scanProcessing,join(captureDirectory,'captures'),
  createModelSizeRunner(async()=>handoffConfig?.backend==='bambu-printer-mcp'?handoffConfig.process:installedBambuProcess()));

@@ -7,7 +7,7 @@ import {
   type PrinterHandoffConfig, type PrinterSelection, type PrinterSlicer, type PrinterPrintOptions,
 } from './config.js';
 import type {ElicitationContext, ElicitationRelay} from './elicitation.js';
-import {sliceEstimate, type SliceEstimate} from './slice-estimate.js';
+import {sliceEstimate, sliceSettings, type SliceEstimate, type SliceSettings} from './slice-estimate.js';
 import type {HandoffBundleStore} from './bundle.js';
 import {PrinterMcpError, toolResultJson, toolResultText, type PrinterToolCatalog} from './mcp-client.js';
 import {PrinterSession} from './session.js';
@@ -30,11 +30,19 @@ export interface PrintRunInput {
   signal?: AbortSignal;
   /** Tags the printer's questions with the bundle being printed. */
   bundleId?: string;
-  /** Set false to skip the camera frame before printing (the print sheet's plate check is off). */
-  cameraSnapshot?: boolean;
+}
+/** How the printer will report this print, so its job can be recognised (PRD §8.6). */
+export interface DispatchIdentity {
+  /** The printer's task id, when the print tool returned a real one. */
+  taskId?: string;
+  /** The job name the printer reports: Bambu's subtask name, or the uploaded file name. */
+  jobName?: string;
+  /** The sliced file's name without its extension: a job the printer names after it can be adopted. */
+  fileBase?: string;
 }
 export interface PrintRunResult {
   backend: PrinterHandoffConfig['backend'];
+  dispatch?: DispatchIdentity;
   catalog: PrinterToolCatalog;
   stlPath: string;
   orientedStlPath: string;
@@ -114,6 +122,24 @@ export interface PrinterHandoffRunnerOptions {
   session?: PrinterSession;
 }
 
+/**
+ * The identity the printer will report for a dispatched print: the
+ * counterpart/1 `taskId`/`subtaskName` or `jobName` when the MCP returns them;
+ * otherwise, for bambu-printer-mcp today, the uploaded file's name without
+ * `.3mf` (its `subtask_name`); for G-code uploads, the file name sent.
+ */
+export function dispatchIdentity(printed: unknown, slicedPath: string): DispatchIdentity {
+  const value = printed && typeof printed === 'object' ? printed as Record<string, unknown> : {};
+  const text = (item: unknown) => typeof item === 'string' && item.trim() ? item.trim().slice(0, 256) : typeof item === 'number' && Number.isFinite(item) ? String(item) : undefined;
+  const taskId = text(value.taskId);
+  // bambu_network / bambu_native report the checked name they sent as printerJobName.
+  const named = text(value.subtaskName) ?? text(value.jobName) ?? text(value.printerJobName);
+  const remote = text(value.remoteProjectPath);
+  const jobName = named ?? (remote ? basename(remote).replace(/\.3mf$/i, '') : slicedPath.toLowerCase().endsWith('.3mf') ? undefined : basename(slicedPath));
+  const fileBase = basename(slicedPath).replace(/(\.gcode)?\.(3mf|gcode|bgcode)$/i, '');
+  return {...(taskId && taskId !== '0' ? {taskId} : {}), ...(jobName ? {jobName} : {}), ...(fileBase ? {fileBase} : {})};
+}
+
 export class PrinterHandoffRunner {
   readonly #config: PrinterHandoffConfig;
   readonly #relay?: ElicitationRelay;
@@ -140,6 +166,22 @@ export class PrinterHandoffRunner {
     }
     const session = new PrinterSession('one-shot', this.#config, {relay: this.#relay, onStderr: this.#onStderr});
     try { return await work(session, false); } finally { await session.close(); }
+  }
+
+  /**
+   * Lays the model flat and slices it exactly as a print would, then reads the
+   * time, grams and settings from the sliced file. Never prints.
+   */
+  async estimate(input: {stlPath: string; selection?: PrinterSelection; slicer?: PrinterSlicer; signal?: AbortSignal}): Promise<{estimate?: SliceEstimate; settings: SliceSettings}> {
+    let sliced: Buffer | undefined;
+    const plate = {...this.#config.selection, ...input.selection}.plateIndex ?? 0;
+    await this.run({stlPath: input.stlPath, print: false, ...(input.selection ? {selection: input.selection} : {}), ...(input.slicer ? {slicer: input.slicer} : {}),
+      ...(input.signal ? {signal: input.signal} : {}),
+      // Read the output while the MCP is alive: a one-shot backend may delete it when it closes.
+      persistOutput: async output => { sliced = await readFile(output.slicedPath); return output; }});
+    if (!sliced) fail('invalid-output-path');
+    const estimate = await sliceEstimate(sliced, plate);
+    return {...(estimate ? {estimate} : {}), settings: await sliceSettings(sliced, plate)};
   }
 
   /** Connects and lists the server's tools without calling one (a one-shot session then disconnects). */
@@ -232,6 +274,13 @@ export class PrinterHandoffRunner {
           fail('filament-selection-unsupported');
       }
     }
+    // A chosen quality or strength the MCP can't apply is refused, never silently printed at preset values.
+    {
+      const sliceProperties = session.getTool('slice_stl').inputSchema.properties ?? {};
+      if ((slicer.layerHeightMm !== undefined && !Object.hasOwn(sliceProperties, 'layer_height'))
+          || (slicer.wallLoops !== undefined && !Object.hasOwn(sliceProperties, 'wall_loops'))
+          || (slicer.sparseInfillDensity !== undefined && !Object.hasOwn(sliceProperties, 'sparse_infill_density'))) fail('print-settings-unsupported');
+    }
     let orientedStlPath = input.stlPath;
     const laidFlat = session.hasTool('lay_flat');
     if (laidFlat) {
@@ -252,6 +301,9 @@ export class PrinterHandoffRunner {
       load_filaments: slicer.loadFilaments,
       filament_colours: slicer.filamentColours,
       template_name: slicer.templateName,
+      layer_height: slicer.layerHeightMm,
+      wall_loops: slicer.wallLoops,
+      sparse_infill_density: slicer.sparseInfillDensity,
       use_printer_filaments: false,
       // lay_flat already chose the flat face; otherwise let the slicer orient.
       orient: !laidFlat,
@@ -271,7 +323,7 @@ export class PrinterHandoffRunner {
     await progress('checking-printer');
     let cameraSnapshot: Record<string, unknown> | undefined;
     let printContext: ElicitationContext = tag;
-    if (this.#config.backend === 'bambu-printer-mcp' && this.#config.cameraSnapshot !== false && input.cameraSnapshot !== false && session.hasTool('camera_snapshot')) {
+    if (this.#config.backend === 'bambu-printer-mcp' && this.#config.cameraSnapshot !== false && session.hasTool('camera_snapshot')) {
       try {
         const snapshot = toolResultJson<Record<string, unknown>>(
           await call(session, 'camera_snapshot', {bambu_model: selection.model, timeout_ms: 8000}, read));
@@ -337,7 +389,7 @@ export class PrinterHandoffRunner {
     }
     step('print');
     await progress('accepted').catch(() => undefined); // Telemetry cannot erase an accepted dispatch.
-    return {...common, cameraSnapshot, print: printed};
+    return {...common, cameraSnapshot, print: printed, dispatch: dispatchIdentity(printed, slicedPath)};
   }
 
   /**

@@ -53,3 +53,19 @@ test('a printer whose MCP can\'t be reached reads as offline', async () => {
   await directory.refresh('current');
   assert.equal(directory.list().destinations[0].state, 'offline');
 });
+
+test('camera frames go to the destination\'s own route on mcp-3D-printer-server', async () => {
+  const {CameraFrames} = await import('../dist/printing/camera.js');
+  const calls = [];
+  const jpeg = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff]), Buffer.alloc(8)]);
+  const tools = [tool('camera_snapshot', {host: {}, type: {}, port: {}, timeout_ms: {}})];
+  const session = new PrinterSession('voron', {backend: 'mcp-3d-printer-server', process: {command: '/usr/bin/true'}, selection: {host: 'voron.local', printerType: 'klipper', port: '7125'}}, {clientFactory: () => ({
+    catalog: undefined,
+    async connect() { this.catalog = {server: {name: 'mcp-3d-printer-server', version: '1'}, tools}; return this.catalog; },
+    hasTool: name => tools.some(item => item.name === name), getTool: name => tools.find(item => item.name === name),
+    async callTool(name, args) { calls.push(args); return {content: [{type: 'text', text: JSON.stringify({format: 'image/jpeg', base64: jpeg.toString('base64')})}]}; },
+    async close() {},
+  })});
+  await new CameraFrames().frame('voron', session);
+  assert.deepEqual(calls, [{host: 'voron.local', type: 'klipper', port: '7125', timeout_ms: 8000}]);
+});

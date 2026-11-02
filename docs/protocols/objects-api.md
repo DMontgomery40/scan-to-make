@@ -54,9 +54,9 @@ Wire types are zod schemas in `packages/contracts/src/counterpart.ts` (`@scan-to
 | `POST /v1/objects/<id>/printer` | PRINT | `{destinationId}` | `{object}` |
 | `GET /v1/objects/<id>/filaments` | PRINT | | `{filaments: [{slot, colour, material, name, filamentId, destinationId, suggested?}]}` for the project's printer. `suggested: true` (PR 2) marks the one preselected tray. |
 | `POST /v1/objects/<id>/estimate` | PRINT | `{destinationId?, quality?, strength?}` (PR 2) | `PrintEstimate` (below), unwrapped. Slices through the printer's MCP; can take up to 150 s. |
-| `POST /v1/objects/<id>/print` | PRINT | `{checked?, filament?, quality?, strength?, colour?, plateCheck?}` (settings PR 2) | `{object}` with `state: "printing"` |
+| `POST /v1/objects/<id>/print` | PRINT | `{checked?, filament?, quality?, strength?, colour?}` (settings PR 2) | `{object}` with `state: "printing"` |
 | `POST /v1/objects/<id>/print-confirmation` | PRINT | `{confirmationId, answer: {action: "accept", content: {<field>: boolean}} \| {action: "decline"\|"cancel"}}` | `{object}` |
-| `POST /v1/objects/<id>/plate` | PRINT | `{answer: "look-again"}` or `{answer: "clear", note?: string ≤ 200}` (PR 2; the old `{clear: true}` means `{answer: "clear"}`) | `{object}` |
+| `POST /v1/objects/<id>/plate` | PRINT | `{clear: true}` | Always 409: a clear plate alone never approves a print (unchanged from `main`). Answer `…/print-confirmation` instead. |
 | `GET /v1/objects/<id>/plate.jpg` | PRINT | | The frame the plate check judged |
 | `GET /v1/objects/<id>/camera.jpg` | PRINT | | A JPEG from the camera of the printer this project is printing on, or its chosen printer (PR 2). Same cache, codes and header as the printer camera route. |
 | `POST /v1/objects/<id>/print/pause`, `…/print/resume`, `…/print/cancel` | PRINT | `{}` | `{object}` (PR 2). 409 when nothing of this project's is printing, or the MCP lacks the tool. The MCP's own confirmation, if it asks, arrives as `printConfirmation` exactly as for Print. The app asks "Stop the print?" before posting cancel. |
@@ -71,7 +71,6 @@ Wire types are zod schemas in `packages/contracts/src/counterpart.ts` (`@scan-to
 | `quality` | `draft`, `standard` (default), `fine` | `slice_stl` `layer_height`: draft 0.28 mm, fine 0.12 mm for a 0.4 mm nozzle, scaled by nozzle ÷ 0.4 for another configured nozzle size and rounded to 0.01 mm. **Standard sends nothing: the MCP's own preset decides** (0.20 mm on its 0.4 mm presets). |
 | `strength` | `standard` (default), `strong`, `max` | `slice_stl` `wall_loops` and `sparse_infill_density`: strong 4 and `"25%"`, max 6 and `"40%"`. Standard sends nothing (the preset's own, 2 and 15% on Bambu's standard presets). |
 | `colour` | omitted, `{auto: true}`, `{amsSlot: n}`, `{external: true}`, `{material: "PETG"}` | Omitted: the MCP's own defaults, as today. `auto`: `print_3mf` `use_ams: true, auto_match_ams: true` (the user kept the preselection). `amsSlot`: the slot must be a loaded tray in the live filament list; `use_ams: true, ams_slots: [n], auto_match_ams: false`, and `slice_stl` `load_filaments` with that tray's profile and `filament_colours`. `external`: `use_ams: false`. `material` (generic printers): `upload_gcode` `material`, and `slice_stl` `load_filaments` when the MCP's filament list gives a profile for it. |
-| `plateCheck` | `true` (default), `false` | False skips the camera frame and the background plate judge. The MCP's own confirmation is still asked. |
 
 `filament` (the full tray identity, as today) is still accepted; send either `filament` or `colour`, not both (400).
 
@@ -111,7 +110,7 @@ A non-standard `quality` or `strength` the destination's MCP can't apply (its `s
 
 | Field | Type | Status |
 |---|---|---|
-| `status` | `ObjectStatus` `{phase, text, symbol, tint}`: the PRD §4 state line, written by the companion. Show `text` as is. `phase` is `sending`, `working`, `needs-you`, `ready`, `preparing`, `printing`, `printed` or `failed`. | PR 3 |
+| `status` | `ObjectStatus` `{phase, text, symbol, tint}`: the PRD §4 state line, written by the companion. Show `text` as is. `phase` is `sending`, `working`, `needs-you`, `ready`, `preparing`, `printing`, `printed`, `failed` or `sent` (symbol `paperplane`, tint `secondary`). | PR 3 |
 | `title` | The short generated title ("Mic mount"). Absent until generated; show `status`/the request until then. | PR 4 |
 | `kind` | `fit` (make something that fits) or `copy` (copy an object) | PR 4 |
 | `ask` | `Ask` `{id, question, photo?, region?, answers, status, askedAtMs}` while `state` is `needs-closeup` (and kept, `status: "answered"`, after). The old `question.closeup` is still set for older apps. | PR 4 |
@@ -124,13 +123,14 @@ A non-standard `quality` or `strength` the destination's MCP can't apply (its `s
 | `passes[].engine` | `blender` or `fusion` | PR 4 |
 | `print.printId` | A uuid per dispatched print | PR 2 |
 | `print.destinationId` | The destination it was sent to (same as `print.destination.id`) | PR 2 |
+| `print.fileBase` | Set when the dispatch returned no job identity: the name a job is adopted by | PR 2 |
+| `print.sentVia` | `bambu-connect` when the print was handed to Bambu Connect | PR 2 |
 | `print.dispatchedAt` | ISO; when the printer MCP accepted the print | PR 2 |
 | `print.jobName` | The job name the printer reports for it | PR 2 |
 | `print.taskId` | The printer's task id, when the MCP returns one | PR 2 |
 | `print.settings` | The `PrintSettings` it was printed with | PR 2 |
 | `print.live` | `PrintLive`: the latest normalized printer report for this print (state, job progress, layer, time left, `endsAt`, temperatures, active filament, problems). Replaces reading `printerStatus` once present. | PR 2 |
 | `print.monitor` | `PrintMonitor` `{phase: starting\|watching\|ended, startedAt, lastReportAt?, milestonesSent, firstLayerSent, unreachableSince?, endState?, endedAt?}` | PR 2 |
-| `plate.checking` | `true` while Look Again retakes and judges a frame | PR 2 |
 
 `print.printerStatus` (`{state, job?, checkedAtMs, percent?, remainingMinutes?}`) is kept for older apps; from PR 2 it is derived from `print.live`.
 
@@ -150,6 +150,14 @@ A non-standard `quality` or `strength` the destination's MCP can't apply (its `s
 | Never started within 180 s | `failed` | `failed` | `failure`: "*Printer* didn't start *title*. Nothing was sent twice." `monitor.endState: "not-started"`. `print.uncertain` is cleared, so Print works again without `checked`. |
 | A different job is running | `failed` | `failed` | `failure`: "*Printer* is printing something else." `monitor.endState: "replaced"`; never reported as ours. |
 | Lost contact | `printing` | `printing` | `monitor.unreachableSince`; the monitor keeps trying. |
+| The printer has it, but Counterpart can't follow it (below) | `sent` | `sent` | `print.uncertain: true` (Print needs `checked: true`); `monitor.endState: "sent"` when a monitor was waiting to adopt it; `print.sentVia: "bambu-connect"` for Bambu Connect |
+
+**A print the companion can't follow: `sent`.** Never success without evidence (PRD §2.6). The new object `state` `sent` (and status phase `sent`) means the printer MCP accepted the print but Counterpart can't confirm it printed:
+- An mcp-3D-printer-server install without `counterpart_print_progress` (`capabilities.progress` false) can't say which job is printing: `sent` at once.
+- Bambu Connect only opens the job on the Mac: `sent` at once, with `print.sentVia: "bambu-connect"`; its status reads "Finish on your Mac: press Print in Bambu Connect".
+- Routes that return neither a task id nor a job name (a pre-sliced `.gcode.3mf` on P1, X1 and A1 mini; X2D native; BambuNetwork when it omits `printerJobName`): the monitor starts as usual with `print.fileBase` (the sliced file's name without its extension). The first report within 180 s of a job whose name equals it, or ends with `-` or `_` and it, is adopted (`print.jobName` is set) and watched normally. Otherwise the print ends `sent`, never `not-started`: not seeing an unnamed job proves nothing.
+
+A `sent` print raises one `print.sent` event (passive) and no first-layer, milestone or done events. Its status line is "Sent to *printer* · Counterpart can't follow this print". Older apps that don't know `sent` decode it as an unknown state.
 
 After a companion restart, a print whose monitor is `starting` or `watching` resumes watching (no milestone is sent twice and missed ones are not back-filled; the end state is still delivered). A print that was still being prepared is marked `failed` ("interrupted when your Mac restarted the app"); if it had reached the dispatch step, `print.uncertain` is set and Print needs `checked: true`.
 

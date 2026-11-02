@@ -227,7 +227,7 @@ export async function startCompanionServer(
       if(captureRoutes&&request.url?.startsWith('/v1/saved-projects/')){
         await captureRoutes.handle(request,response,authorize,name=>singleHeader(request,name));return;
       }
-      if(objectRoutes&&(request.url==='/v1/objects'||request.url?.startsWith('/v1/objects/')||request.url?.startsWith('/v1/objects?'))){
+      if(objectRoutes&&(request.url==='/v1/objects'||request.url?.startsWith('/v1/objects/')||request.url?.startsWith('/v1/objects?')||request.url==='/v1/settings')){
         await objectRoutes.handle(request,response,authorize,name=>singleHeader(request,name));return;
       }
       if(printHandoffRoutes&&request.url?.startsWith('/v1/printer-handoff/')){

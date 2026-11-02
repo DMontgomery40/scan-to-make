@@ -42,6 +42,10 @@ export const printerSlicerSchema = z.strictObject({
   loadFilaments: z.string().trim().min(1).max(4096).optional(),
   filamentColours: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
   templateName: z.string().trim().min(1).max(256).optional(),
+  /** Print-sheet quality and strength (PRD §8.5), as process overrides through slice_stl. */
+  layerHeightMm: z.number().min(0.04).max(1.2).optional(),
+  wallLoops: z.number().int().min(1).max(20).optional(),
+  sparseInfillDensity: z.string().regex(/^(100|[1-9]?[0-9])%$/).optional(),
 });
 export type PrinterSlicer = z.infer<typeof printerSlicerSchema>;
 
