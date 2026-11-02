@@ -194,8 +194,8 @@ import CounterpartKit
         sendFailures = [:]
     }
 
-    /// Follows the Mac while the app is on screen: events when served, else a refresh every 3 s while
-    /// something runs (and every 30 s otherwise, so a phone left open still sees new projects).
+    /// One consumer for the visible app: events when served, otherwise a refresh every 30 s.
+    /// Detail screens read this store rather than starting their own polling loops.
     func follow() async {
         if events != false {
             do {
@@ -219,7 +219,7 @@ import CounterpartKit
             } catch {}
         }
         while !Task.isCancelled {
-            try? await Task.sleep(for: .seconds(anyRunning ? 3 : 30))
+            try? await Task.sleep(for: .seconds(30))
             guard !Task.isCancelled else { return }
             if UIApplication.shared.applicationState != .background { await load() }
         }

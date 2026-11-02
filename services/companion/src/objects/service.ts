@@ -367,14 +367,9 @@ export class ObjectService {
     return pass.activity ?? [];
   }
 
-  printers(options: {view?: boolean} = {}): {defaultDestinationId?: string; destinations: PublicDestination[]} {
-    if (this.#deps.printers) {
-      const listed = this.#deps.printers.list();
-      // A printer view opened: warm each camera that has one, so its first frame doesn't wait on a cold session.
-      if (options.view) for (const destination of listed.destinations)
-        if (destination.capabilities?.camera !== 'none') this.#warmCamera(destination.id);
-      return listed;
-    }
+  printers(): {defaultDestinationId?: string; destinations: PublicDestination[]} {
+    // Metadata reads also come from status/event refreshes with no camera on screen.
+    if (this.#deps.printers) return this.#deps.printers.list();
     const catalog = this.#deps.printerCatalog;
     return {defaultDestinationId: catalog?.defaultDestinationId, destinations: catalog?.destinations.map(({id, name, backend, model, address, source, origin}) =>
       ({id, name, backend, ...(model ? {model} : {}), ...(address ? {address} : {}), source, ...(origin ? {origin} : {})})) ?? []};
@@ -991,19 +986,8 @@ export class ObjectService {
     return false;
   }
 
-  /** A client opened this project: while it prints (or the printer asks something), warm its printer's camera. */
-  async view(id: string): Promise<StmObject> {
-    const object = await this.get(id);
-    if (object.state === 'printing' || object.printConfirmation) {
-      const destinationId = object.print?.destinationId ?? object.print?.destination?.id ?? this.#destinationId(object);
-      if (destinationId) this.#warmCamera(destinationId);
-    }
-    return object;
-  }
-  #warmCamera(destinationId: string): void {
-    const session = this.#deps.printers?.session(destinationId);
-    if (session) this.#deps.camera?.warm(this.#deps.printerCatalog?.canonical(destinationId) ?? destinationId, session, {model: session.config.selection?.model});
-  }
+  /** Reading a project does not imply that someone is watching its printer camera. */
+  async view(id: string): Promise<StmObject> { return this.get(id); }
 
   /** The camera of the project's printer (the one printing it, else its chosen one). */
   async camera(id: string): Promise<CameraFrame> {

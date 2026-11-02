@@ -5,6 +5,7 @@ import CounterpartKit
 /// side by side on iPad and Duo unfolded (PRD §6). New, Print and search have keyboard shortcuts.
 struct ProjectsRoot: View {
     @Environment(AppModel.self) private var app
+    @Environment(\.scenePhase) private var scenePhase
     @Bindable var store: ProjectsStore
     let pairingKey: Int
     @Environment(\.horizontalSizeClass) private var width
@@ -39,11 +40,15 @@ struct ProjectsRoot: View {
             // The screenshot comparisons show a LiDAR iPhone, as the mockups do; the Simulator has no LiDAR.
             if Fixtures.folder != nil { store.canScan = true }
             #endif
-            await store.load()
             await store.loadPrinters()
             await store.loadCapabilities()
         }
-        .task(id: pairingKey) { await store.follow() }
+        .task(id: "\(pairingKey)#\(scenePhase)") {
+            guard scenePhase == .active else { return }
+            // Events received while suspended are intentionally skipped; refresh once when returning.
+            await store.load()
+            await store.follow()
+        }
         #if DEBUG
         .task { if app.debugSettings != nil { showSettings = true } }
         #endif

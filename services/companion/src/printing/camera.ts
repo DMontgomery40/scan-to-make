@@ -11,8 +11,6 @@ export class CameraUnavailableError extends Error {
 
 /** A frame up to this old is served at once while a fresh one is fetched, with its real `capturedAt`. */
 export const CAMERA_STALE_MS = 120_000;
-/** Opening a print or printer view fetches a frame ahead of the first request, at most this often. */
-export const CAMERA_WARM_EVERY_MS = 60_000;
 /** A viewer keeps the destination's session held this long after its last request, so it stays connected. */
 export const CAMERA_HOLD_MS = 30_000;
 
@@ -27,7 +25,6 @@ export class CameraFrames {
   /** The last frame each destination returned, and when it arrived. */
   readonly #last = new Map<string, {atMs: number; frame: CameraFrame}>();
   readonly #inflight = new Map<string, Promise<CameraFrame>>();
-  readonly #warmedAt = new Map<string, number>();
   readonly #holds = new Map<string, {release: () => void; timer: ReturnType<typeof setTimeout>}>();
   readonly #now: () => number;
   constructor(options: {now?: () => number} = {}) { this.#now = options.now ?? Date.now; }
@@ -40,23 +37,11 @@ export class CameraFrames {
     if (options.view) this.#hold(destinationId, session);
     const last = this.#last.get(destinationId), age = last ? this.#now() - last.atMs : Infinity;
     if (!options.fresh && last && age < CAMERA_CACHE_MS) return last.frame;
-    const next = (!options.fresh && this.#inflight.get(destinationId)) || this.#fetch(destinationId, session, options.model);
+    const next = this.#inflight.get(destinationId) || this.#fetch(destinationId, session, options.model);
     // Only a person looking gets the older frame meanwhile; an event's frame is saved for good, so it waits for a new one.
     if (!options.fresh && options.view && last && age < CAMERA_STALE_MS) { next.catch(() => undefined); return last.frame; }
     try { return await next; }
     catch (error) { throw error instanceof CameraUnavailableError ? error : new CameraUnavailableError('unreachable'); }
-  }
-
-  /**
-   * A print or printer view opened: hold and connect the session now, and fetch a frame unless one is recent,
-   * so the view's first camera request is answered from the cache. Best effort.
-   */
-  warm(destinationId: string, session: PrinterSession, options: {model?: string} = {}): void {
-    this.#hold(destinationId, session);
-    const now = this.#now(), last = this.#last.get(destinationId);
-    if (this.#inflight.has(destinationId) || (last && now - last.atMs < CAMERA_CACHE_MS) || now - (this.#warmedAt.get(destinationId) ?? -Infinity) < CAMERA_WARM_EVERY_MS) return;
-    this.#warmedAt.set(destinationId, now);
-    this.#fetch(destinationId, session, options.model).catch(() => undefined);
   }
 
   /** Lets every held session go (shutdown). */

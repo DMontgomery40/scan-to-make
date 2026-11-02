@@ -71,7 +71,7 @@ test('camera frames go to the destination\'s own route on mcp-3D-printer-server'
   assert.deepEqual(calls, [{host: 'voron.local', type: 'klipper', port: '7125', timeout_ms: 8000}]);
 });
 
-test('a view never waits on the camera when a recent frame exists, and opening one warms the session and the first frame', async () => {
+test('a view shares recent camera frames and event snapshots without overlapping captures', async () => {
   const {CameraFrames, CAMERA_STALE_MS} = await import('../dist/printing/camera.js');
   const frameOf = n => Buffer.concat([Buffer.from([0xff, 0xd8, 0xff]), Buffer.alloc(8, n)]);
   let calls = 0, gate;
@@ -113,16 +113,7 @@ test('a view never waits on the camera when a recent frame exists, and opening o
   await until(() => calls === 3);
   gate();
   assert.equal((await waiting).bytes[4], 3);
-  // Opening a view with nothing recent fetches ahead, once a minute at most; the request then reads the cache.
-  const fresh = new CameraFrames({now: () => clock.t});
-  fresh.warm('p1s', session);
-  fresh.warm('p1s', session);
-  await until(() => calls === 4);
-  gate();
-  await new Promise(resolve => setImmediate(resolve));
-  assert.equal((await fresh.frame('p1s', session)).bytes[4], 4);
-  assert.equal(calls, 4);
-  camera.close(); fresh.close();
+  camera.close();
   assert.equal(session.health().holders, 0, 'closing lets the session go');
   await session.close();
 });
@@ -144,4 +135,24 @@ test('PRD §8.10: printing() asks the printer now, so a print with no project (t
   const offline = new PrinterDirectory(catalog, id => id === 'current' ? down.session : undefined, {now: () => now});
   down.set(offline);
   assert.equal(await offline.printing('current'), false);
+});
+
+
+test('concurrent fresh camera requests share one snapshot, while a later fresh request bypasses the cache', async () => {
+  const {CameraFrames} = await import('../dist/printing/camera.js');
+  const camera = new CameraFrames();
+  const pending = Promise.withResolvers();
+  let snapshots = 0;
+  const session = {connect: async () => {}, hasTool: () => true, getTool: () => tool('camera_snapshot'), config: {},
+    call: async () => { snapshots++; await pending.promise; return {content: [{type: 'text', text: JSON.stringify({base64: Buffer.from([0xff, 0xd8, snapshots]).toString('base64')})}]}; }};
+  const first = camera.frame('current', session, {fresh: true});
+  const second = camera.frame('current', session, {fresh: true});
+  await new Promise(resolve => setImmediate(resolve));
+  pending.resolve();
+  const frames = await Promise.all([first, second]);
+  assert.equal(snapshots, 1, 'fresh bypasses old frames, not a snapshot already being captured');
+  assert.deepEqual(frames[0], frames[1]);
+  await camera.frame('current', session, {fresh: true});
+  assert.equal(snapshots, 2);
+  camera.close();
 });

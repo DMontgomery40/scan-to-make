@@ -86,7 +86,7 @@ export function createObjectRoutes(service: ObjectService) {
         if (url.pathname === '/v1/objects/printers') {
           if (request.method !== 'GET') throw new HttpFailure(405, 'method-not-allowed');
           await authorize(READ);
-          return send(response, 200, service.printers({view: true}));
+          return send(response, 200, service.printers());
         }
         const printerCamera = PRINTER_CAMERA.exec(url.pathname);
         if (printerCamera) {

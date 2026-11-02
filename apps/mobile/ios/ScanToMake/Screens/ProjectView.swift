@@ -61,13 +61,6 @@ struct ProjectView: View {
             Task { await addDropped(items, to: object.id, forMessage: forMessage) }
             return !items.isEmpty
         }
-        .task(id: object.map { store.words($0).busy } ?? false) {
-            guard let object, store.words(object).busy, store.events != true else { return }
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(3))
-                if UIApplication.shared.applicationState != .background { await reload() }
-            }
-        }
     }
 
     private func defaultSection(_ object: Project) -> ProjectSection {
