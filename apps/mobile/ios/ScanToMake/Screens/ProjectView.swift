@@ -928,7 +928,7 @@ enum ARModel {
     @MainActor static func usdz(fromSTL url: URL) async -> URL? {
         let target = url.deletingPathExtension().appendingPathExtension("usdz")
         if FileManager.default.fileExists(atPath: target.path) { return target }
-        guard let entity = ModelStage.stl(url, tint: UIColor(Color.filament), twoTone: false) else { return nil }
+        guard let entity = await ModelStage.load(url, tint: UIColor(Color.filament), twoTone: false) else { return nil }
         do { try await entity.write(to: target); return target } catch { return nil }
     }
 
