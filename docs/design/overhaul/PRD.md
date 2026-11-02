@@ -830,6 +830,14 @@ Screenshots: `screens/mac-settings-ai.jpg` and `screens/mac-settings-ai-nofusion
 
 **When this job applies.** The request contains a link to a model page, or a 3MF or STL was shared or dropped together with a link or a model name. The companion sets `kind: "published"`. This job never goes to the Blender or Fusion design pass.
 
+**The worker's tools, for every job (fit, copy, published).** No artificial restrictions:
+- `Read`, which includes images: photos, renders, and pages' pictures when they help;
+- `WebSearch` and `WebFetch`, for published specs of known objects and model pages;
+- the browser integration (`--chrome`) when Chrome and the extension are present, for logged-in pages and downloads;
+- the printer MCP, with its Blender, Fusion and MakerWorld tools.
+
+`--strict-mcp-config` stays, so a pass doesn't load every unrelated connector the user has, but nothing the job needs is withheld. The pass's sealed folder still protects the originals (hash-checked inputs).
+
 **Rules:**
 - **Never rebuild a published model from its pictures** when the designer's file exists. Pictures on a model page are for picking a variant, never geometry to copy.
 - **Print what the designer published,** with only the user's choices applied: variant, plate, colours, quality.
@@ -841,12 +849,16 @@ Screenshots: `screens/mac-settings-ai.jpg` and `screens/mac-settings-ai-nofusion
    - The companion fetches the page through the user's own browser session, never a scraper. That means Safari on the Mac, or a `WKWebView` the user can see.
    - It extracts the title, the designer, the licence, and the list of print profiles and files with their names, plates and sizes.
    - If the page can't be read, the project goes straight to step 2 with the link.
-2. **Get the designer's file** (state `needs-you`, Ask type `file`). MakerWorld and similar sites don't allow scripted downloads, so the user downloads the file:
-   - **The ask:** "Download *model name* from *site*, then share it with Counterpart."
-   - **Open the page:** **Open in Safari** on the phone, **Open in Browser** on the Mac.
-   - **Attach the file:** the phone's Share sheet ("Counterpart") or Files picker, or dropping it on the Mac's project.
-   - **On the Mac, nothing to attach:** the companion watches `~/Downloads` for a new `.3mf`/`.stl` whose name matches the model, and asks "Use *file name*?" with one tap.
-   - **When the site has a print-profile choice:** the ask names the profile to pick, chosen from the user's words in step 3.
+2. **Get the designer's file. The worker downloads it itself, on the user's Mac, with the user's own logins.** It runs on the user's own Mac in their own session, so it has the tools a person sitting there would. It isn't sandboxed into a narrower kit. In order:
+   1. **MakerWorld, through the printer MCP (new tool `makerworld_download`, bambu-printer-mcp).**
+      - Input `{url, profile?}`; output `{path, profile, plates[], filaments[], designer, licence}`.
+      - It downloads the profile's 3MF with the user's own Bambu account session: the login Bambu Studio and Bambu Handy already use, read where Bambu Studio stores it, or the MCP's own cloud login.
+      - If no account is signed in, it returns `login-required`.
+   2. **The user's browser.** The worker runs with Claude Code's browser integration (`claude --chrome`, the Claude in Chrome extension), which uses the user's own Chrome profile and logins. It opens the page, selects the matching print profile and clicks Download. The file lands in `~/Downloads`, where the companion picks it up by name and time.
+      - Codex workers use their computer-use tool the same way.
+      - This works for Printables, Thingiverse and any other site.
+   3. **Only when both fail** (not signed in anywhere, or no browser integration) does the project ask the user: state `needs-you`, Ask type `file`, "Sign in to MakerWorld in Chrome, or download *model name* and share it with Counterpart". Its buttons are **Open in Safari**/**Open in Browser**, the Share sheet, Files, drop, and the Mac's `~/Downloads` watch.
+   - **Never a substitute model.** If the file can't be obtained, the pass stops with that Ask. It does not model a look-alike from the page's pictures. A look-alike of a measuring tool or a fitted part is wrong in ways nobody can see.
 3. **Pick the variant and plate** (stage "Choosing the parts").
    - Use the file's plates and objects (`list_3mf_plate_objects`) and the profile names, matched to the user's words. Example: "150 mm" plus "depth gauge" picks the plates and objects whose names contain those words.
    - Several objects requested "on one plate" are arranged with `slice_stl` `arrange: true`.
