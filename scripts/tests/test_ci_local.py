@@ -15,6 +15,17 @@ ROOT = MODULE.parents[1]
 
 
 class LocalWorkflowTests(unittest.TestCase):
+    def test_dry_run_works_from_a_source_archive_without_git_metadata(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            scripts = root / 'scripts'; scripts.mkdir()
+            script = scripts / 'ci_local.py'; script.write_bytes(MODULE.read_bytes())
+            workflows = root / '.github/workflows'; workflows.mkdir(parents=True)
+            (workflows / 'test.yml').write_text('name: Snapshot\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps: []\n')
+            result = subprocess.run([sys.executable, str(script), 'all', '--dry-run'], cwd=root, text=True, capture_output=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(json.loads(result.stdout)[0]['workflowName'], 'Snapshot')
+
     def test_workflows_and_reviews_reject_tracked_or_untracked_changes(self):
         for mode in ('all', 'review'):
             for status in (' M tracked.py', '?? new-fixture.py'):
