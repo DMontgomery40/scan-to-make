@@ -113,6 +113,15 @@ struct ProjectDetail: View {
 
     /// What the Mac needs, or what it is doing, in one glass card above the bar. Nothing when it's ready.
     @ViewBuilder private var card: some View {
+        if model.corrections.failures[object.id] != nil, object.pendingFollowup == nil {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Your change is saved. Check the result before trying again.").font(.subheadline)
+                HStack {
+                    Button("Try Again") { model.retryQueuedChange(object) }.disabled(object.changesWait)
+                    Button("Discard Saved Change") { model.discardQueuedChange(object) }
+                }.disabled(working)
+            }.padding(12).glassEffect(.regular, in: .rect(cornerRadius: 14))
+        }
         if let pending = object.pendingFollowup {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Message saved").font(.headline)

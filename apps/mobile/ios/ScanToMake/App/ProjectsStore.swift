@@ -20,7 +20,7 @@ import CounterpartKit
     var sendFailures: [String: String] = [:]
     /// Changes asked for while the Mac was working, sent when its pass ends (kept across launches).
     var corrections = CorrectionQueue(saved: UserDefaults.standard.dictionary(forKey: "CounterpartQueuedNotes")) {
-        didSet { UserDefaults.standard.set(corrections.entries, forKey: "CounterpartQueuedNotes") }
+        didSet { UserDefaults.standard.set(corrections.saved, forKey: "CounterpartQueuedNotes") }
     }
     /// The companion's capability flags (`genericConfirmations` means the Mac can answer any printer question).
     var macCapabilities: Set<String> = []
@@ -152,9 +152,22 @@ import CounterpartKit
             } catch let failure as CompanionError where CorrectionQueue.waits(failure) {
                 // Another device started a step; keep the saved note until that step ends.
             } catch let failure as CompanionError {
+                corrections.fail(project.id, message: failure.message)
                 sendFailures[project.id] = failure.message
-            } catch { sendFailures[project.id] = CompanionError.unreachable.message }
+            } catch {
+                corrections.fail(project.id, message: CompanionError.unreachable.message)
+                sendFailures[project.id] = CompanionError.unreachable.message
+            }
         }
+    }
+    func retryQueuedChange(_ project: Project) {
+        corrections.retry(project.id); sendFailures[project.id] = nil
+        sendQueuedNote(project)
+    }
+    func discardQueuedChange(_ project: Project) {
+        if let note = corrections.entries[project.id]?.first { corrections.sent(note, for: project.id) }
+        sendFailures[project.id] = nil
+        sendQueuedNote(project)
     }
     private var correcting: Set<String> = []
     func remove(_ id: String) { reads.remove(id); corrections.remove(id); projects.removeAll { $0.id == id } }

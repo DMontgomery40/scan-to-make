@@ -174,6 +174,15 @@ struct ProjectView: View {
                 if let notice, problem == nil {
                     Label(notice, systemImage: "photo.badge.checkmark").font(.subheadline).foregroundStyle(.secondary).padding(.horizontal, 20)
                 }
+                if store.corrections.failures[object.id] != nil, object.pendingFollowup == nil {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Your change is saved. Check the result before trying again.").font(.subheadline)
+                        HStack {
+                            Button("Try Again") { store.retryQueuedChange(object) }.disabled(object.changesWait)
+                            Button("Discard Saved Change") { store.discardQueuedChange(object) }
+                        }.disabled(working)
+                    }.padding(.horizontal, 20)
+                }
                 if let pending = object.pendingFollowup {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Message saved").font(.headline)
