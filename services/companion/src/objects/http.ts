@@ -37,7 +37,7 @@ async function json<T>(request: IncomingMessage, limit = MAX_JSON): Promise<T> {
   try { return JSON.parse(bytes.toString('utf8')) as T; } catch { throw new HttpFailure(400, 'invalid-request'); }
 }
 
-export type PublicObject = Omit<StmObject, 'passes' | 'title'> & {title: string; status: ObjectStatus; settings: {status: ProjectStatus}; passes: (Omit<ObjectPass, 'dir' | 'activity'> & {activityCount: number})[]};
+export type PublicObject = Omit<StmObject, 'passes' | 'title'> & {title: string; status: ObjectStatus; settings: {status: ProjectStatus; archived: boolean}; passes: (Omit<ObjectPass, 'dir' | 'activity'> & {activityCount: number})[]};
 
 // Earlier generic failures asserted a capture mistake without evidence. Correct the displayed
 // advice for those retained attempts too, leaving their original stored records intact.
@@ -47,11 +47,16 @@ function currentFailureText(message: string | undefined): string | undefined {
 }
 
 /** Project metadata stays small; retained activity is read one pass at a time. */
+/** Project Settings as the apps read them: the status, and whether it's hidden from Home. */
+export function projectSettingsView(object: StmObject): {status: ProjectStatus; archived: boolean} {
+  return {status: projectStatus(object), archived: !!object.archived};
+}
+
 export function publicObject(object: StmObject): PublicObject {
   const failure = currentFailureText(object.failure);
   // Never null: until a title is generated (or backfilled for an older project), the request's first words.
   return {...object, title: projectTitle(object), failure, status: objectStatus({...object, ...(failure !== undefined ? {failure} : {})}, object.updatedAtMs),
-    settings: {status: projectStatus(object)},
+    settings: projectSettingsView(object),
     passes: object.passes.map(({dir: _dir, activity, ...pass}) => ({...pass,
       summary: currentFailureText(pass.summary), activityCount: activity?.length ?? 0}))};
 }
@@ -103,14 +108,16 @@ export function createObjectRoutes(service: ObjectService) {
         const method = request.method ?? 'GET';
         if (action === 'settings' && id) {
           // PRD §5.4 Project Settings. This version takes Status; the other settings come later.
-          if (method === 'GET') { await authorize(READ); return send(response, 200, {settings: {status: projectStatus(await service.get(id))}}); }
+          if (method === 'GET') { await authorize(READ); return send(response, 200, {settings: projectSettingsView(await service.get(id))}); }
           if (method !== 'PATCH') throw new HttpFailure(405, 'method-not-allowed');
           await authorize(WRITE);
           const input = await json<Record<string, unknown>>(request);
-          const status = ProjectStatusSchema.safeParse(input.status);
-          if (!status.success || Object.keys(input).some(key => key !== 'status')) throw new HttpFailure(400, 'invalid-request');
-          const updated = await service.setStatus(id, status.data);
-          return send(response, 200, {settings: {status: projectStatus(updated)}, object: publicObject(updated)});
+          const status = input.status === undefined ? undefined : ProjectStatusSchema.safeParse(input.status);
+          if ((status && !status.success) || (input.archived !== undefined && typeof input.archived !== 'boolean') || (!status && input.archived === undefined)
+            || Object.keys(input).some(key => key !== 'status' && key !== 'archived')) throw new HttpFailure(400, 'invalid-request');
+          let updated = status?.success ? await service.setStatus(id, status.data) : await service.get(id);
+          if (typeof input.archived === 'boolean') updated = await service.setArchived(id, input.archived);
+          return send(response, 200, {settings: projectSettingsView(updated), object: publicObject(updated)});
         }
         if (!id) {
           if (method === 'GET') { await authorize(READ); return send(response, 200, {objects: (await service.list()).map(publicObject)}); }

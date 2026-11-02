@@ -53,7 +53,8 @@ export const parameters = {
   'objects.selectPrinter': z.strictObject({id: z.uuid(), destinationId: z.string().min(1).max(256)}),
   'objects.get': z.strictObject({id: z.uuid()}),
   'objects.settings.get': z.strictObject({id: z.uuid()}),
-  'objects.settings.set': z.strictObject({id: z.uuid(), status: z.enum(['not-printed', 'printed', 'works', 'needs-changes', 'archived'])}),
+  'objects.settings.set': z.strictObject({id: z.uuid(), status: z.enum(['not-printed', 'printed', 'works', 'needs-changes', 'archived']).optional(), archived: z.boolean().optional()})
+    .refine(value => value.status !== undefined || value.archived !== undefined),
   'objects.passActivity': z.strictObject({id: z.uuid(), index: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER)}),
   'objects.start': z.strictObject({id: z.uuid()}),
   'objects.delete': z.strictObject({id: z.uuid()}),
@@ -64,8 +65,10 @@ export const parameters = {
   'objects.print': z.strictObject({id: z.uuid(), checked: z.boolean().optional(), filament: z.strictObject({
     slot:z.number().int().min(0).max(255), colour:z.string().regex(/^#[0-9A-F]{6}$/), material:z.string().min(1).max(128),
     name:z.string().max(256), filamentId:z.string().max(128), destinationId:z.string().min(1).max(256), suggested:z.boolean().optional(),
-  }).optional(), quality: PrintQualitySchema.optional(), strength: PrintStrengthSchema.optional(), colour: PrintColourSchema.optional()}),
-  'objects.estimate': z.strictObject({id: z.uuid(), destinationId: z.string().min(1).max(256).optional(), quality: PrintQualitySchema.optional(), strength: PrintStrengthSchema.optional()}),
+  }).optional(), quality: PrintQualitySchema.optional(), strength: PrintStrengthSchema.optional(), colour: PrintColourSchema.optional(),
+    copies: z.number().int().min(1).max(64).optional()}),
+  'objects.estimate': z.strictObject({id: z.uuid(), destinationId: z.string().min(1).max(256).optional(), quality: PrintQualitySchema.optional(), strength: PrintStrengthSchema.optional(),
+    copies: z.number().int().min(1).max(64).optional()}),
   'objects.pausePrint': z.strictObject({id: z.uuid()}),
   'objects.resumePrint': z.strictObject({id: z.uuid()}),
   'objects.cancelPrint': z.strictObject({id: z.uuid()}),

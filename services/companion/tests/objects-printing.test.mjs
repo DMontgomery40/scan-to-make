@@ -25,13 +25,14 @@ const until = async check => { for (let i = 0; i < 300; i++) { const value = awa
  * A P1S behind a fake MCP session, a fake print runner, and a monitor clock the
  * test steps by hand: every printer report and every wait is scripted.
  */
-async function setup(t, {tools = ['get_printer_status', 'camera_snapshot', 'pause_print', 'resume_print', 'cancel_print', 'slice_stl'], sliceArgs = false, reports = []} = {}) {
+async function setup(t, {tools = ['get_printer_status', 'camera_snapshot', 'pause_print', 'resume_print', 'cancel_print', 'slice_stl'], sliceArgs = false, copies = false, reports = []} = {}) {
   const root = await mkdtemp(join(tmpdir(), 'objects-printing-'));
   t.after(() => rm(root, {recursive: true, force: true, maxRetries: 10, retryDelay: 20}));
   const calls = [], events = [], runs = [];
   const queue = [...reports];
   const relay = new InMemoryElicitationRelay({timeoutMs: 5000});
-  const catalogTools = tools.map(name => name === 'slice_stl' && sliceArgs ? tool(name, {layer_height: {}, wall_loops: {}, sparse_infill_density: {}}) : tool(name));
+  const catalogTools = tools.map(name => name === 'slice_stl' && (sliceArgs || copies)
+    ? tool(name, {...(sliceArgs ? {layer_height: {}, wall_loops: {}, sparse_infill_density: {}} : {}), ...(copies ? {repetitions: {}} : {})}) : tool(name));
   const factory = () => ({
     catalog: undefined,
     async connect() { this.catalog = {server: {name: 'bambu-printer-mcp', version: '1.1.46'}, tools: catalogTools}; return this.catalog; },
@@ -349,4 +350,62 @@ test('an event\'s frame is served from the project folder, and every object carr
   assert.deepEqual(scopes, ['projects:read', 'projects:read']);
   const {object} = await (await fetch(base)).json();
   assert.deepEqual(object.status, {phase: 'ready', text: 'Ready to print', symbol: 'checkmark.seal', tint: 'accent'});
+});
+
+test('a Done project prints again without "checked", with copies, and comes back Done; hiding keeps Done', async t => {
+  const f = await setup(t, {copies: true, reports: [status('PREPARE', 0), status('RUNNING', 3), status('RUNNING', 51), status('FINISH', 100)]});
+  // It was printed elsewhere (or sent) and marked Works by hand: an old uncertain flag doesn't stop a reprint.
+  await f.store.update(f.object.id, o => ({...o, state: 'sent', print: {bundleId: 'old', uncertain: true}}));
+  const marked = await f.service.setStatus(f.object.id, 'works');
+  assert.deepEqual([marked.state, marked.print.uncertain], ['confirmed', undefined]);
+  const {objectStatus} = await import('../dist/events/words.js');
+  assert.equal(objectStatus(marked).text, 'Done · it works');
+  // Hide from Home keeps Done, and showing it again leaves it Done.
+  const {projectStatus} = await import('../dist/objects/service.js');
+  const hidden = await f.service.setArchived(f.object.id, true);
+  assert.deepEqual([hidden.archived, hidden.state, projectStatus(hidden)], [true, 'confirmed', 'works']);
+  const shown = await f.service.setArchived(f.object.id, false);
+  assert.deepEqual([shown.archived, shown.state], [undefined, 'confirmed']);
+  // Print two more.
+  const printing = await f.service.print(f.object.id, {copies: 2});
+  assert.equal(printing.state, 'printing');
+  const run = await until(() => f.runs.find(entry => entry.id === printing.print.bundleId));
+  assert.equal(run.options.slicer.repetitions, 2);
+  assert.equal(printing.print.settings.copies, 2);
+  await f.approve();
+  await f.service.settled(f.object.id);
+  for (let i = 0; i < 4; i++) await f.tick();
+  const done = await until(async () => { const o = await f.service.get(f.object.id); return o.print?.monitor?.phase === 'ended' ? o : undefined; });
+  assert.equal(done.state, 'confirmed', 'a known-good part is still known-good');
+  assert.equal(projectStatus(done), 'works');
+});
+
+test('after changes, the next finished print asks "Did it fit?" again: needs-changes ends with it', async t => {
+  const f = await setup(t, {reports: [status('PREPARE', 0), status('RUNNING', 3), status('RUNNING', 51), status('FINISH', 100)]});
+  await f.store.update(f.object.id, o => ({...o, state: 'printed'}));
+  const marked = await f.service.setStatus(f.object.id, 'needs-changes');
+  const {projectStatus} = await import('../dist/objects/service.js');
+  assert.equal(projectStatus(marked), 'needs-changes');
+  await f.service.print(f.object.id);
+  await f.approve();
+  await f.service.settled(f.object.id);
+  for (let i = 0; i < 4; i++) await f.tick();
+  const done = await until(async () => { const o = await f.service.get(f.object.id); return o.print?.monitor?.phase === 'ended' ? o : undefined; });
+  assert.deepEqual([done.state, done.outcome, projectStatus(done)], ['printed', undefined, 'printed']);
+});
+
+test('copies reach the estimate and the print only where the MCP takes them, and the flag says so', async t => {
+  const f = await setup(t, {sliceArgs: true});
+  // This fixture's slice_stl has no repetitions: refused with the update, before anything is sliced.
+  await assert.rejects(f.service.estimate(f.object.id, {copies: 2}), /copies/);
+  await assert.rejects(f.service.print(f.object.id, {copies: 2}), /copies/);
+  assert.equal(f.service.printCopiesAvailable, false);
+  const estimate = await f.service.estimate(f.object.id, {});
+  assert.equal('copies' in estimate, false);
+  // An MCP that takes repetitions: the estimate covers every copy.
+  const g = await setup(t, {copies: true});
+  assert.equal(g.service.printCopiesAvailable, true);
+  const two = await g.service.estimate(g.object.id, {copies: 2});
+  assert.equal(two.copies, 2);
+  assert.equal(g.runs.at(-1).estimate.slicer.repetitions, 2);
 });

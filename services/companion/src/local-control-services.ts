@@ -148,7 +148,7 @@ export function createControlDispatcher(services: ControlServices) {
         case 'status.get': return {protocolVersion:1,companionVersion:services.companionVersion,transport:auth.transport,
           pairedDeviceCount:(await auth.listDevices()).length,capabilities:{capture:!!capture?.captures,cleanup:!!capture?.scanProcessing,printerHandoff:!!printHandoff,nearbyPairing:!!services.nearby,
             objectsCreate:!!services.objects,printSettings:!!services.objects?.printSettingsAvailable,printControl:!!services.objects?.printSettingsAvailable,
-            events:!!services.events&&!!services.liveActivityTokens,structuredPasses:!!services.objects,genericConfirmations:!!services.objects,materialChoice:!!services.objects,projectSettings:!!services.objects}};
+            events:!!services.events&&!!services.liveActivityTokens,structuredPasses:!!services.objects,genericConfirmations:!!services.objects,materialChoice:!!services.objects,projectSettings:!!services.objects,printCopies:!!services.objects?.printCopiesAvailable}};
         case 'devices.list': {
           const devices = await auth.listDevices();
           const legacy = await auth.legacyDeviceIds?.() ?? new Set<string>();
@@ -222,10 +222,12 @@ export function createControlDispatcher(services: ControlServices) {
           const objects = services.objects;
           if (!objects) throw new ControlFailure('unavailable');
           try {
-            if (method === 'objects.settings.get') return {settings: {status: (await import('./objects/service.js')).projectStatus(await objects.get(parameters[method].parse(raw).id))}};
-            const {id, status} = parameters[method].parse(raw);
-            const updated = await objects.setStatus(id, status);
-            return {settings: {status: (await import('./objects/service.js')).projectStatus(updated)}, object: {...publicObject(updated), directory: objects.dir(updated.id)}};
+            const {projectSettingsView} = await import('./objects/http.js');
+            if (method === 'objects.settings.get') return {settings: projectSettingsView(await objects.get(parameters[method].parse(raw).id))};
+            const {id, status, archived} = parameters[method].parse(raw);
+            let updated = status !== undefined ? await objects.setStatus(id, status) : await objects.get(id);
+            if (archived !== undefined) updated = await objects.setArchived(id, archived);
+            return {settings: projectSettingsView(updated), object: {...publicObject(updated), directory: objects.dir(updated.id)}};
           } catch (error) {
             if (error instanceof ObjectNotFoundError) throw new ControlFailure('not-found');
             if (error instanceof InvalidStateError) throw new ControlFailure('conflict', error.message);

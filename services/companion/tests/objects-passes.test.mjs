@@ -194,3 +194,17 @@ test('a project from before titles gets one the first time it is listed, once, a
   assert.equal((await titles())[old.id], 'Mic mount');
   assert.equal(asked.length, 1);
 });
+
+test('a changed model is not Done yet: a correction on a Works project clears it, so its next print asks again', async t => {
+  const f = await setup(t, [{result: {summary: 'Made it.'}}, {result: {summary: 'Made it 5 mm longer.'}}]);
+  const object = await f.service.create('A hook for the rail');
+  await f.service.start(object.id);
+  await f.service.settled(object.id);
+  const done = await f.service.setStatus(object.id, 'works');
+  assert.deepEqual([done.state, done.outcome], ['confirmed', 'works']);
+  await f.service.correct(object.id, 'Make it 5 mm longer');
+  const changed = await f.service.settled(object.id);
+  assert.deepEqual([changed.state, changed.outcome], ['ready', undefined]);
+  const {projectStatus} = await import('../dist/objects/service.js');
+  assert.equal(projectStatus(changed), 'not-printed');
+});

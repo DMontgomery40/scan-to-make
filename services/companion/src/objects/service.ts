@@ -164,9 +164,10 @@ export function passKind(object: Pick<StmObject, 'kind' | 'scan' | 'capture' | '
 }
 
 /** PRD §5.4: the Status Project Settings shows, from the project's state and what the person set. */
-export function projectStatus(object: Pick<StmObject, 'state' | 'archived' | 'outcome'>): ProjectStatus {
-  if (object.archived) return 'archived';
-  if (object.state === 'confirmed') return 'works';
+export function projectStatus(object: Pick<StmObject, 'state' | 'outcome'>): ProjectStatus {
+  // `archived` is a separate flag now: the status underneath is what shows (KAN-217).
+  // A known-good part stays known-good, through a reprint too.
+  if (object.state === 'confirmed' || object.outcome === 'works') return 'works';
   if (object.outcome === 'needs-changes') return 'needs-changes';
   if (object.state === 'printed' || object.state === 'sent') return 'printed';
   return 'not-printed';
@@ -215,6 +216,25 @@ export class ObjectService {
     return this.#deps.settings.update(patch);
   }
 
+  /** Hide from Home (KAN-217): a flag of its own. The status underneath stays exactly as it was, `sent` included. */
+  setArchived(id: string, archived: boolean): Promise<StmObject> {
+    return this.#gate(id, async () => this.#setArchivedNow(id, await this.get(id), archived));
+  }
+  async #setArchivedNow(id: string, object: StmObject, archived: boolean): Promise<StmObject> {
+    if (!!object.archived === archived) return object;
+    const updated = await this.#deps.store.update(id, o => {
+      const {archived: _archived, ...rest} = o;
+      return archived ? {...rest, archived: true} : rest;
+    });
+    await this.#emit({id: randomUUID(), type: 'project.updated', projectId: id, data: {keys: ['archived']}});
+    return this.#changed(updated);
+  }
+
+  /** The printer this project would print on takes `copies` (slice_stl repetitions). */
+  get printCopiesAvailable(): boolean {
+    return (this.#deps.printers?.list().destinations ?? []).some(destination => destination.capabilities?.copies);
+  }
+
   /**
    * PRD §5.4 Status, set by hand at any time (for example to mark something done that printed elsewhere):
    * `works` → state `confirmed`; `printed`; `not-printed` → `ready`; `needs-changes`; `archived` hides it, keeping everything.
@@ -223,19 +243,23 @@ export class ObjectService {
     return this.#gate(id, async () => {
       const object = await this.get(id);
       // Already there (the state itself, not just the label: a sent project marked printed is a real change).
-      const clean = !object.archived && !object.outcome;
-      const there = {works: object.state === 'confirmed' && !object.archived, printed: object.state === 'printed' && clean, archived: !!object.archived,
-        'needs-changes': object.outcome === 'needs-changes' && !object.archived,
+      // `archived` is its own flag (setArchived); the status alias `archived` still hides it.
+      if (status === 'archived') return this.#setArchivedNow(id, object, true);
+      const clean = !object.outcome;
+      const there = {works: object.state === 'confirmed', printed: object.state === 'printed' && clean,
+        'needs-changes': object.outcome === 'needs-changes',
         'not-printed': clean && (object.current ? object.state === 'ready' : !['printed', 'confirmed', 'sent'].includes(object.state))}[status];
       if (there) return object;
       if (object.state === 'touching-up' || object.state === 'printing') throw new InvalidStateError('Wait until the current step finishes.');
       if ((status === 'works' || status === 'printed') && !object.current) throw new InvalidStateError("There's no model yet, so it can't be marked printed.");
       const updated = await this.#deps.store.update(id, o => {
-        const {outcome: _outcome, archived: _archived, ...rest} = o;
+        const {outcome: _outcome, ...rest} = o;
+        // A person saying it printed (or works) settles a print Counterpart couldn't follow.
+        const settled = o.print?.uncertain ? {print: {...o.print, uncertain: undefined}} : {};
         switch (status) {
-          case 'archived': return {...o, archived: true};
-          case 'works': return {...rest, state: 'confirmed', outcome: 'works'};
-          case 'printed': return {...rest, state: 'printed'};
+          // Hide from Home: the project keeps its status (Done stays Done) and gets it back when unhidden.
+          case 'works': return {...rest, ...settled, state: o.state === 'printing' ? o.state : 'confirmed', outcome: 'works'};
+          case 'printed': return {...rest, ...settled, state: 'printed'};
           // Without a model, only the flags clear: a draft stays a draft.
           case 'not-printed': return {...rest, ...(o.current ? {state: 'ready' as const} : {})};
           case 'needs-changes': return {...rest, outcome: 'needs-changes', ...(o.state === 'confirmed' ? {state: 'printed' as const} : {})};
@@ -582,10 +606,11 @@ export class ObjectService {
     const {selection: selected, slicer} = await this.#colour(id, options, services.selection, runner.backend);
     const overrides = sliceOverrides(options, selected?.nozzleDiameterMm);
     const capabilities = destinationId ? this.#deps.printers?.capabilities(destinationId) : undefined;
-    if (capabilities && ((overrides.layerHeightMm !== undefined && !capabilities.quality) || (overrides.wallLoops !== undefined && !capabilities.strength)))
+    if (capabilities && ((overrides.layerHeightMm !== undefined && !capabilities.quality) || (overrides.wallLoops !== undefined && !capabilities.strength)
+        || (overrides.repetitions !== undefined && !capabilities.copies)))
       throw new InvalidStateError(settingsUnsupported(runner.backend, options));
     const settings: PrintSettings = {...(options.quality ? {quality: options.quality} : {}), ...(options.strength ? {strength: options.strength} : {}),
-      ...(options.colour ? {colour: options.colour} : {})};
+      ...(options.colour ? {colour: options.colour} : {}), ...(options.copies && options.copies > 1 ? {copies: options.copies} : {})};
     const sliced = {...slicer, ...overrides};
     const stl = await readFile(join(this.#deps.store.dir(id), object.current.model));
     const manifest = await bundles.create({stl, prompt: '', backend: runner.backend, ...(selected ? {selection:selected} : {})});
@@ -776,8 +801,13 @@ export class ObjectService {
     const base = {...o, progress: undefined, printConfirmation: undefined};
     const context = {title: projectTitle(o), printer: o.print?.destination?.name ?? 'Your printer', ...(report?.problems[0] ? {problem: report.problems[0].message} : {})};
     switch (end) {
-      case 'done': return {...base, state: 'printed', failure: undefined};
-      case 'cancelled': return {...base, state: 'ready', failure: undefined};
+      // A Done project printed again is still Done (PRD §5.4): the part is known to work.
+      // A new print after changes asks "Did it fit?" again: needs-changes ends with it (KAN-217).
+      case 'done': {
+        const {outcome, ...rest} = base;
+        return outcome === 'works' ? {...base, state: 'confirmed', failure: undefined} : {...rest, state: 'printed', failure: undefined};
+      }
+      case 'cancelled': return {...base, state: o.outcome === 'works' ? 'confirmed' : 'ready', failure: undefined};
       case 'not-started': return {...base, state: 'failed', failure: printEndFailure('not-started', context), print: {...o.print!, uncertain: undefined}};
       case 'replaced': return {...base, state: 'failed', failure: printEndFailure('replaced', context)};
       case 'sent': return {...base, state: 'sent', failure: undefined, print: {...o.print!, uncertain: true}};
@@ -892,7 +922,7 @@ export class ObjectService {
 
   readonly #estimates2 = new Map<string, Promise<PrintEstimate>>();
   /** Slices the current model with the print sheet's settings, exactly as Print would, and reads the estimate. Never prints. */
-  async estimate(id: string, request: {destinationId?: string; quality?: PrintSettings['quality']; strength?: PrintSettings['strength']} = {}): Promise<PrintEstimate> {
+  async estimate(id: string, request: {destinationId?: string; quality?: PrintSettings['quality']; strength?: PrintSettings['strength']; copies?: number} = {}): Promise<PrintEstimate> {
     const object = await this.get(id);
     if (!object.current) throw new InvalidStateError('There is no model to print yet.');
     const catalog = this.#deps.printerCatalog;
@@ -901,12 +931,14 @@ export class ObjectService {
     const services = destinationId ? this.#deps.print?.destinations?.get(destinationId) : this.#deps.print?.services;
     if (!services?.runner.estimate) throw new InvalidStateError('Estimates are unavailable for this printer.');
     const quality = request.quality ?? 'standard', strength = request.strength ?? 'standard';
-    const overrides = sliceOverrides({quality, strength}, services.selection?.nozzleDiameterMm);
+    const copies = request.copies && request.copies > 1 ? request.copies : undefined;
+    const overrides = sliceOverrides({quality, strength, ...(copies ? {copies} : {})}, services.selection?.nozzleDiameterMm);
     const capabilities = destinationId ? this.#deps.printers?.capabilities(destinationId) : undefined;
-    if (capabilities && ((overrides.layerHeightMm !== undefined && !capabilities.quality) || (overrides.wallLoops !== undefined && !capabilities.strength)))
-      throw new InvalidStateError(settingsUnsupported(services.runner.backend, {quality, strength}));
+    if (capabilities && ((overrides.layerHeightMm !== undefined && !capabilities.quality) || (overrides.wallLoops !== undefined && !capabilities.strength)
+        || (copies && !capabilities.copies)))
+      throw new InvalidStateError(settingsUnsupported(services.runner.backend, {quality, strength, ...(copies ? {copies} : {})}));
     const model = await readFile(join(this.dir(id), object.current.model));
-    const key = JSON.stringify([createHash('sha256').update(model).digest('hex'), destinationId ?? 'default', quality, strength]);
+    const key = JSON.stringify([createHash('sha256').update(model).digest('hex'), destinationId ?? 'default', quality, strength, copies ?? 1]);
     let running = this.#estimates2.get(key);
     if (!running) {
       const runner = services.runner;
@@ -917,7 +949,7 @@ export class ObjectService {
           await writeFile(stlPath, model);
           const {estimate, settings} = await runner.estimate!({stlPath, ...(services.selection ? {selection: services.selection} : {}), ...(Object.keys(overrides).length ? {slicer: overrides} : {}),
             signal: AbortSignal.timeout(150_000)});
-          return {destinationId: destinationId ?? 'current', quality, strength,
+          return {destinationId: destinationId ?? 'current', quality, strength, ...(copies ? {copies} : {}),
             ...(estimate?.seconds !== undefined ? {seconds: estimate.seconds} : {}), ...(estimate?.grams !== undefined ? {grams: estimate.grams} : {}),
             ...(settings.layers !== undefined ? {layers: settings.layers} : {}), ...(settings.layerHeightMm !== undefined ? {layerHeightMm: settings.layerHeightMm} : {}),
             ...(settings.infillPercent !== undefined ? {infillPercent: settings.infillPercent} : {}), ...(settings.wallLoops !== undefined ? {wallLoops: settings.wallLoops} : {}),
@@ -1161,7 +1193,8 @@ export class ObjectService {
     const state: StmObject['state'] = result.status === 'needs_closeup' ? 'needs-closeup'
       : current && result.status !== 'failed' ? 'ready' : 'failed';
     const now = Date.now();
-    const updated = await store.update(id, o => ({...o, state, progress: undefined,
+    const updated = await store.update(id, o => ({...(current ? (({outcome: _outcome, ...rest}) => rest)(o) : o), state, progress: undefined,
+      // A changed model hasn't been shown to work yet: its first print asks "Did it fit?" again.
       ...(current ? {current} : {}),
       ...(!o.title && result.title ? {title: result.title} : {}),
       ...(o.kind ? {} : {kind}),

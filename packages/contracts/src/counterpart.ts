@@ -168,6 +168,8 @@ export const PrintSettingsSchema = z.strictObject({
   quality: PrintQualitySchema.optional(),
   strength: PrintStrengthSchema.optional(),
   colour: PrintColourSchema.optional(),
+  /** How many on the plate (slice_stl `repetitions`); 1 sends nothing. */
+  copies: z.number().int().min(1).max(64).optional(),
 });
 export type PrintSettings = z.infer<typeof PrintSettingsSchema>;
 
@@ -182,6 +184,8 @@ export const PrintEstimateSchema = z.strictObject({
   layerHeightMm: z.number().positive().optional(),
   infillPercent: z.number().min(0).max(100).optional(),
   wallLoops: z.number().int().nonnegative().optional(),
+  /** How many on the plate; time and grams cover every copy. */
+  copies: z.number().int().min(1).max(64).optional(),
   slicedAt: iso,
 });
 export type PrintEstimate = z.infer<typeof PrintEstimateSchema>;
@@ -203,6 +207,8 @@ export const PrinterCapabilitiesSchema = z.strictObject({
   /** `slice_stl` takes `wall_loops` and `sparse_infill_density`. */
   strength: z.boolean(),
   multiColour: z.boolean(),
+  /** slice_stl takes `repetitions`: Print and Estimate take `copies`. */
+  copies: z.boolean().optional(),
   /** The print sheet may ask "What's loaded?": `colour: {material}` is accepted (shown as chips when there is no spool list). */
   materialChoice: z.boolean().optional(),
   /** The features this install lacks, each with the update that unlocks it. */

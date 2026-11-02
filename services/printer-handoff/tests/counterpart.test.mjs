@@ -119,3 +119,15 @@ test('readiness groups printer states for the printer cards', () => {
     ['ready', 'ready', 'ready', 'ready', 'busy', 'busy', 'busy', 'busy', 'offline']);
   assert.equal(readiness(undefined), 'unknown');
 });
+
+test('copies are offered only where the slice makes them: Bambu, or mcp-3D-printer-server on its Bambu-compatible route', () => {
+  const slice = {name: 'slice_stl', inputSchema: {type: 'object', properties: {repetitions: {type: 'number'}}}};
+  const tools = {server: {name: 'x', version: '1'}, tools: [slice]};
+  const bambuConfig = {backend: 'bambu-printer-mcp', process: {command: '/x'}};
+  const prusa = {backend: 'mcp-3d-printer-server', process: {command: '/x'}, slicer: {type: 'prusaslicer'}};
+  const orcaBambu = {backend: 'mcp-3d-printer-server', process: {command: '/x'}, slicer: {type: 'orcaslicer-bambulab'}};
+  assert.equal(detectCapabilities(bambuConfig, tools).copies, true);
+  assert.equal(detectCapabilities(prusa, tools).copies, false, 'PrusaSlicer would slice one');
+  assert.equal(detectCapabilities(orcaBambu, tools).copies, true);
+  assert.equal(detectCapabilities(bambuConfig, {server: tools.server, tools: [{name: 'slice_stl', inputSchema: {type: 'object', properties: {}}}]}).copies, false);
+});
