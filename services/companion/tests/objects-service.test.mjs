@@ -6,11 +6,12 @@ import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {ObjectStore} from '../dist/objects/store.js';
 import {ObjectService, InvalidStateError} from '../dist/objects/service.js';
+import {PrintGate} from '../dist/printing/print-gate.js';
 import {projectTitle} from '../dist/events/words.js';
 
 const STL = 'solid m\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 1 0 0\nvertex 0 1 0\nendloop\nendfacet\nendsolid m\n';
 
-async function setup(outcome = {status: 'done', summary: 'Fixed the card.'}, {throws, delayMs = 0, outcomes, waitForAbort} = {}) {
+async function setup(outcome = {status: 'done', summary: 'Fixed the card.'}, {throws, delayMs = 0, outcomes, waitForAbort, printGate} = {}) {
   const root = await mkdtemp(join(tmpdir(), 'objects-svc-'));
   const store = new ObjectStore(join(root, 'objects'));
   const calls = [];
@@ -29,7 +30,7 @@ async function setup(outcome = {status: 'done', summary: 'Fixed the card.'}, {th
     return {renders: [join(out, 'front.png')], checkpoints: [], stats: {seconds: 7, toolCalls: 3, costUsd: 0.5}, passDir,
       ...outcome, ...(hasModel ? {model} : {})};
   };
-  const service = new ObjectService({store, runTouchup, stlInfo: async () => [60.6, 45.2, 21.7], claudePath: '/c',
+  const service = new ObjectService({store, runTouchup, printGate, stlInfo: async () => [60.6, 45.2, 21.7], claudePath: '/c',
     handoff: {backend: 'bambu-printer-mcp', process: {command: '/usr/bin/true'}}});
   const object = await service.create('A hook for a 25 mm handle.');
   await service.addScan(object.id, 'scan.usdz', Buffer.from('usdz'));
@@ -287,4 +288,23 @@ test('a pass runs the printer MCP as the companion runs it now (after an MCP upd
   await service.start(object.id);
   await service.settled(object.id);
   assert.deepEqual(seen, [updated]);
+});
+
+
+test('a pass rejected before setup releases the MCP install reservation', async () => {
+  const printGate = new PrintGate();
+  const {service, object, store} = await setup(undefined, {printGate});
+  await store.update(object.id, o => ({...o, captureDepth: ['0001.depth.plist']}));
+  await assert.rejects(service.start(object.id), /upload|capture|scan/i);
+  assert.equal(printGate.held('current'), false);
+  assert.equal(printGate.beginUpdate(['current']), true);
+});
+
+test('a failed worker releases the MCP install reservation after recording the failure', async () => {
+  const printGate = new PrintGate();
+  const {service, object} = await setup(undefined, {printGate, throws: 'worker stopped'});
+  await service.start(object.id);
+  assert.equal((await service.settled(object.id)).state, 'failed');
+  assert.equal(printGate.held('current'), false);
+  assert.equal(printGate.beginUpdate(['current']), true);
 });

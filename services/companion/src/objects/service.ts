@@ -1127,6 +1127,16 @@ export class ObjectService {
   }
 
   async #pass(object: StmObject, opts: {note?: string; trigger?: NonNullable<StmObject['passes'][number]['trigger']>}): Promise<StmObject> {
+    // Design/cleanup workers use the current MCP too. Reserve before any await so an update cannot
+    // swap its files while this pass is admitted, queued, running, saving, or closing its helper.
+    let release = () => {};
+    try { release = this.#deps.printGate?.hold('current') ?? release; }
+    catch (error) { if (error instanceof PrinterUpdatingError) throw new InvalidStateError(error.message); throw error; }
+    try { return await this.#reservedPass(object, opts, release); }
+    catch (error) { release(); throw error; }
+  }
+
+  async #reservedPass(object: StmObject, opts: {note?: string; trigger?: NonNullable<StmObject['passes'][number]['trigger']>}, release: () => void): Promise<StmObject> {
     await this.#requireCaptureCompletion(object);
     const store = this.#deps.store, dir = store.dir(object.id);
     const fromCurrent = opts.note !== undefined && object.current !== undefined;
@@ -1195,7 +1205,7 @@ export class ObjectService {
       finally { stage('saving'); await writing; }
     })()
       .then(result => this.#finish(object.id, startedAtMs, result, kind), error => this.#fail(object.id, startedAtMs, error))
-      .finally(() => { this.#running.delete(object.id); this.#controllers.delete(object.id); });
+      .finally(() => { release(); this.#running.delete(object.id); this.#controllers.delete(object.id); });
     this.#running.set(object.id, work);
     return running;
   }
