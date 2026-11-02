@@ -19,7 +19,7 @@ Delivery depends on the Mac app running (PRD §8.8). After a restart the Mac wri
 | `eventId` | String | the event's uuid |
 | `seq` | Int | the companion log's sequence number |
 | `type` | String | `pass.ready`, `print.done`, … (docs/protocols/events.md) |
-| `projectId` | String | |
+| `projectId` | String? | absent for an event about no project (`mcp.update.*`) |
 | `printId` | String? | |
 | `title` | String | written by the companion for every surface |
 | `body` | String | |

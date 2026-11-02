@@ -29,6 +29,26 @@ final class EventRelayTests: XCTestCase {
         XCTAssertEqual(EventCursor.advance(from: 41, page: EventsPage(events: [], next: 41, latest: 41)).cursor, 41)
     }
 
+    func testAMixedPageKeepsWhatItCanReadAndMovesPastTheRest() throws {
+        let json = #"""
+        {"events":[
+          {"v":1,"seq":41,"id":"e1","at":"2026-11-01T10:00:00Z","type":"print.done","projectId":"p1","printId":"print-1","title":"Mic mount is done","body":"Take it off the plate.","notify":"active"},
+          {"v":1,"seq":42,"id":"e2","at":"2026-11-01T10:00:01Z","type":"mcp.update.done","title":"bambu-printer-mcp updated","body":"1.5.0","notify":"passive","data":{"mcpId":"bambu"}},
+          {"v":1,"seq":"forty-three","id":"e3","type":"print.status"},
+          {"v":1,"seq":44,"id":"e4","at":"2026-11-01T10:00:03Z","type":"pass.ready","projectId":"p2","title":"Hook is ready to print","body":"Ready to print","notify":"active","data":{"progress":"lots"}}],
+         "next":44,"latest":44}
+        """#
+        let page = try JSONDecoder().decode(EventsPage.self, from: Data(json.utf8))
+        XCTAssertEqual(page.events.map(\.id), ["e1", "e2"], "one unreadable event never fails the page")
+        XCTAssertNil(page.events[1].projectId, "an event about no project still reads")
+        XCTAssertEqual(page.skipped, 2)
+        XCTAssertEqual(EventCursor.advance(from: 40, page: page).cursor, 44, "the cursor moves past the skipped events too")
+        XCTAssertFalse(EventCursor.advance(from: 40, page: page).resync)
+        XCTAssertFalse(CatchUp.shouldNotify(page.events[1], now: now, prefs: try prefs(), alreadyNotified: false, later: [], state: nil),
+                       "an event type without a Mac switch never notifies")
+        XCTAssertNil(LiveActivityPush.make(for: page.events[1], token: "aa", title: "x", now: now))
+    }
+
     func testAPrunedOrRecreatedLogResyncsInsteadOfStalling() {
         let reset = EventCursor.advance(from: 900, page: EventsPage(events: [], next: 12, latest: 12, reset: true))
         XCTAssertEqual(reset.cursor, 12)

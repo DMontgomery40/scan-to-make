@@ -212,9 +212,9 @@ struct LiveActivityPush: Encodable, Equatable {
         let name = clip(event.printerName ?? "Your printer", 80)
         var push = LiveActivityPush(token: token.lowercased(), kind: kind, attributes: nil, contentState: content,
                                     staleDate: kind == .end ? nil : Int(ends.addingTimeInterval(10 * 60).timeIntervalSince1970), priority: priority, alert: nil)
-        if kind == .start, let printId = event.printId {
+        if kind == .start, let printId = event.printId, let projectId = event.projectId {
             let shortTitle = clip(title, 80)
-            push.attributes = Attributes(projectId: event.projectId, printId: printId, title: shortTitle, printerName: name)
+            push.attributes = Attributes(projectId: projectId, printId: printId, title: shortTitle, printerName: name)
             push.alert = alert(title: "\(shortTitle) is printing", body: "On \(name)")
         } else if kind == .start {
             return nil
