@@ -22,6 +22,8 @@ export const COUNTERPART_EVENT_TYPES = [
   'print.not-started', 'print.unreachable', 'print.sent',
   // PRD §5.4: a project's status (or, later, its settings) changed.
   'project.updated',
+  // PRD §8.10 (KAN-214 PR 6). No projectId; emitted only once every client decodes events without one.
+  'mcp.update.started', 'mcp.update.waiting', 'mcp.update.done', 'mcp.update.failed',
 ] as const;
 export const CounterpartEventTypeSchema = z.enum(COUNTERPART_EVENT_TYPES);
 export type CounterpartEventType = z.infer<typeof CounterpartEventTypeSchema>;
@@ -47,6 +49,11 @@ export const CounterpartEventDataSchema = z.strictObject({
   expiresAt: iso.optional(),
   /** project.updated: what changed (for example `["status"]`). */
   keys: z.array(text(64)).max(16).optional(),
+  /** mcp.update.*: the install, the versions, and on failure the end of its log (≤ 4 KB). */
+  mcpId: text(64).optional(),
+  fromVersion: text(64).optional(),
+  toVersion: text(64).optional(),
+  log: text(4096).optional(),
 });
 
 /** Exactly PRD §8.7's `CounterpartEvent`. `frame` is relative to the project's directory. */
@@ -56,7 +63,8 @@ export const CounterpartEventSchema = z.strictObject({
   id: uuid,
   at: iso,
   type: CounterpartEventTypeSchema,
-  projectId: uuid,
+  /** Absent for events about the Mac rather than a project (mcp.update.*). */
+  projectId: uuid.optional(),
   printId: uuid.optional(),
   destinationId: text(256).optional(),
   printerName: text(120).optional(),
@@ -219,6 +227,8 @@ export const PrinterCapabilitiesSchema = z.strictObject({
     package: z.enum(['bambu-printer-mcp', 'mcp-3d-printer-server']),
     /** The package manager command for how this MCP is installed, as argv; absent when it can't be told (a git checkout). */
     command: z.array(text(512)).max(16).optional(),
+    /** PRD §8.10 (PR 6): the newest published version (`npm view`), when it is newer than this one or features are missing. */
+    latestVersion: text(64).optional(),
   }).optional(),
   detectedAt: iso,
 });
@@ -241,8 +251,21 @@ export const PrinterDestinationSchema = z.strictObject({
   stateCheckedAt: iso.optional(),
   /** Absent until the destination's MCP has connected once since the companion started. */
   capabilities: PrinterCapabilitiesSchema.optional(),
+  /** PRD §8.10 (PR 6): the MCP install this printer runs; every printer on the same install shares it. */
+  mcpId: z.string().regex(/^mcp-[0-9a-f]{16}$/).optional(),
 });
 export type PrinterDestination = z.infer<typeof PrinterDestinationSchema>;
+
+/** `printers.updateMcp` / `POST /v1/printers/mcp/<mcpId>/update` (PRD §8.10). */
+export const McpUpdateSchema = z.strictObject({
+  mcpId: z.string().regex(/^mcp-[0-9a-f]{16}$/),
+  state: z.enum(['started', 'waiting', 'current', 'unresolved']),
+  fromVersion: text(64).optional(),
+  toVersion: text(64).optional(),
+  /** `unresolved`: what was found, in plain words. Offer Install a Fresh Copy (`fresh: true`). */
+  found: text(500).optional(),
+});
+export type McpUpdate = z.infer<typeof McpUpdateSchema>;
 
 // ---------------------------------------------------------------------------
 // Passes (PRD §4, §8.7, §8.9)

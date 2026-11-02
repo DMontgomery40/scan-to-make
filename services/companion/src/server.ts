@@ -1,8 +1,10 @@
+import { z } from 'zod';
 import {createObjectRoutes} from './objects/http.js';
 import {createEventRoutes} from './events/http.js';
 import type {EventLog} from './events/log.js';
 import type {LiveActivityTokenStore} from './devices/live-activity-tokens.js';
 import type {DevicePresence} from './devices/presence.js';
+import {McpUpdateError, type McpUpdater} from './printing/mcp-updates.js';
 import {LiveActivityTokenUploadSchema} from '@scan-to-make/contracts/counterpart';
 import type {ObjectService} from './objects/service.js';
 import {createCaptureRoutes,type CaptureServices} from './capture-http.js';
@@ -22,6 +24,7 @@ import {
 } from './remote-auth.js';
 
 const MAX_PAIR_REQUEST_BYTES = 4096;
+const McpUpdateRequestSchema = z.strictObject({ fresh: z.boolean().optional() });
 const errors = {
   'invalid-request': [400, 'Invalid request'],
   'payload-too-large': [413, 'Request payload limit exceeded'],
@@ -122,6 +125,8 @@ export async function startCompanionServer(
     liveActivityTokens?: LiveActivityTokenStore;
     /** Last seen and model per device. */
     presence?: DevicePresence;
+    /** PRD §8.10: Update for the printer MCPs. */
+    mcpUpdates?: McpUpdater;
     /** Extra addresses to bind beside the configured one; looked up again every `rediscoverMs`. */
     lanAddresses?: () => LanAddresses;
     /** The Mac's `.local` name, accepted as a Host and listed in v2 links. */
@@ -237,7 +242,7 @@ export async function startCompanionServer(
         // Scope name kept from the first protocol so existing pairings still parse.
         await authorize('generation:health');
         // Additive: older phones read only status and protocolVersion.
-        response.end(JSON.stringify({ status: 'ok', protocolVersion: '0.1.0', capabilities: { genericConfirmations: !!options.objects, materialChoice: !!options.objects, projectSettings: !!options.objects, printCopies: !!options.objects?.printCopiesAvailable } }));
+        response.end(JSON.stringify({ status: 'ok', protocolVersion: '0.1.0', capabilities: { genericConfirmations: !!options.objects, materialChoice: !!options.objects, projectSettings: !!options.objects, mcpUpdates: !!options.mcpUpdates, printCopies: !!options.objects?.printCopiesAvailable } }));
         return;
       }
       if(captureRoutes&&request.url?.startsWith('/v1/saved-projects/')){
@@ -263,6 +268,27 @@ export async function startCompanionServer(
         await authorize('projects:write');
         await options.liveActivityTokens.store(credential().deviceId!,parsed.data);
         response.end(JSON.stringify({stored:true}));return;
+      }
+      const mcpUpdate=/^\/v1\/printers\/mcp\/(mcp-[0-9a-f]{16})\/update$/.exec(request.url??'');
+      if(options.mcpUpdates&&mcpUpdate){
+        if(request.method!=='POST')throw new ServerFailure('method-not-allowed');
+        await authorize('projects:write');
+        const controller=new AbortController();
+        const abort=()=>controller.abort();
+        response.once('close',abort);
+        let input:unknown={};
+        try{if(request.headers['content-length']!=='0'&&request.headers['content-type'])input=await readBody(request,controller.signal,1024);}finally{response.off('close',abort);}
+        const parsed=McpUpdateRequestSchema.safeParse(input??{});
+        if(!parsed.success)throw new ServerFailure('invalid-request');
+        try{
+          const update=await options.mcpUpdates.update(mcpUpdate[1]!,parsed.data);
+          response.end(JSON.stringify({update}));
+        }catch(error){
+          if(!(error instanceof McpUpdateError))throw error;
+          response.statusCode=error.code==='not-found'?404:503;
+          response.end(JSON.stringify({error:{code:error.code,message:error.message}}));
+        }
+        return;
       }
       if(printHandoffRoutes&&request.url?.startsWith('/v1/printer-handoff/')){
         await printHandoffRoutes.handle(request,response,authorize,name=>singleHeader(request,name));return;

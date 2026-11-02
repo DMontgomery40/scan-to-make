@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import {ModelSizeStore} from './model-size.js';
 import {createModelSizeRunner,installedBambuProcess} from './model-size-runner.js';
 import {readFile} from 'node:fs/promises';
@@ -23,6 +24,9 @@ import { projectTitle, sizeText } from './events/words.js';
 import { LiveActivityTokenStore } from './devices/live-activity-tokens.js';
 import { DevicePresence } from './devices/presence.js';
 import { pruneLegacyDevices } from './devices/legacy.js';
+import { McpOverrides, McpUpdater } from './printing/mcp-updates.js';
+import { PrintGate } from './printing/print-gate.js';
+import { hostEnvironment } from './printing/mcp-install.js';
 import {startLocalControl} from './local-control.js';
 import {createControlDispatcher, companionVersion} from './local-control-services.js';
 import type {CaptureServices} from './capture-http.js';
@@ -68,16 +72,27 @@ const printerPool=new PrinterSessionPool();
 let printerDirectory:PrinterDirectory|undefined;
 const onConnect=(destinationId:string)=>(catalog:import('@scan-to-make/printer-handoff').PrinterToolCatalog)=>printerDirectory?.connected(destinationId,catalog);
 const printHandoff=handoffConfig===undefined?undefined:createPrintHandoffServices(handoffConfig,handoffDirectory!,{pool:printerPool,destinationId:'current',onConnect:onConnect('current')});
+// PRD §8.10: a print and an update of its printer's MCP never overlap (the phone's handoff route prints on `current`).
+const printGate=new PrintGate();
+if(printHandoff)printHandoff.admit=()=>printGate.hold('current');
 // Objects: the touch-up runs through the user's own printer MCP and their own Claude login. Needs both.
 const claudePath=process.env.SCAN_TO_MAKE_CLAUDE_PATH||undefined;
 if(claudePath!==undefined&&!isAbsolute(claudePath))throw new Error('SCAN_TO_MAKE_CLAUDE_PATH must be absolute');
 let objects:ObjectService|undefined;
+let mcpUpdates:McpUpdater|undefined;
+// Events about the Mac rather than a project (mcp.update.*) have no projectId. Both apps decode them now
+// (#210, #211); SCAN_TO_MAKE_PROJECTLESS_EVENTS=0 turns them off.
+const projectlessEventsFlag=process.env.SCAN_TO_MAKE_PROJECTLESS_EVENTS;
+if(projectlessEventsFlag!==undefined&&projectlessEventsFlag!=='0'&&projectlessEventsFlag!=='1')throw new Error('SCAN_TO_MAKE_PROJECTLESS_EVENTS must be 0 or 1 when set');
+const projectlessEvents=projectlessEventsFlag!=='0';
 // The app's data root (~/Library/Application Support/Scan to Make), the parent of the auth directory.
 const dataRoot=remoteAuth?dirname(remoteAuth.directory):join(process.cwd(),'.counterpart');
 const companionSettings=new CompanionSettingsStore(join(dataRoot,'settings.json'));
 // PRD §8.7: every user-visible change is one event, with its words, in <data root>/events.ndjson.
 let objectStoreForEvents:ObjectStore|undefined;
 const eventLog=remoteAuth?await new EventLog(join(dataRoot,'events.ndjson'),{context:async draft=>{
+  // An event about the Mac (mcp.update.*) has no project; its words come from the draft.
+  if(!draft.projectId)return {title:'Counterpart'};
   const object=await objectStoreForEvents?.get(draft.projectId).catch(()=>undefined);
   if(!object)return {title:'Your project'};
   const size=sizeText(object.current?.sizeMm);
@@ -107,10 +122,23 @@ if(handoffConfig&&printHandoff&&captureDirectory&&claudePath){
   objects=new ObjectService({store:objectStore,runTouchup:input=>runTouchup(input),claudePath,handoff:handoffConfig,printerCatalog,printers:printerDirectory,
     stlInfo:path=>printerStlSize(handoffConfig,path),
     print:{services:printHandoff,destinations},
-    settings:companionSettings,camera:new CameraFrames(),
+    settings:companionSettings,camera:new CameraFrames(),printGate,
     passTimings:new PassTimings(join(dataRoot,'pass-timings.json')),titleFor:request=>generateTitle(request,claudePath),
     ...(eventLog?{events:{emit:async draft=>{await eventLog.append(draft);}}}:{})});
   await companionSettings.load();
+  // PRD §8.10: Update updates the install each printer runs, between prints.
+  const service=objects, directory=printerDirectory;
+  const labels:Record<string,string>={'bambu-printer-mcp':'bambu-printer-mcp','mcp-3d-printer-server':'mcp-3D-printer-server'};
+  mcpUpdates=new McpUpdater({
+    destinations:()=>printerCatalog.destinations.map(destination=>({id:destination.id,config:printerCatalog.resolve(destination.id)!})),
+    env:hostEnvironment(dataRoot),overrides:new McpOverrides(join(dataRoot,'printers','overrides.json')),
+    session:id=>destinations.get(id)?.runner.session,busy:id=>service.printerBusy(id),
+    runningVersion:id=>directory.capabilities(id)?.server.version,node:process.execPath,gate:printGate,
+    ...(eventLog&&projectlessEvents?{emit:async event=>{await eventLog.append({id:randomUUID(),type:event.type,data:event.data,detail:{package:labels[event.package]??event.package}});}}:{}),
+  });
+  printerDirectory.useVersions(mcpUpdates);
+  await mcpUpdates.applyOverrides();
+  mcpUpdates.start();
   await objects.resume();
 }
 if(capture?.scanProcessing&&captureDirectory)capture.modelSize=new ModelSizeStore(capture.storage,capture.scanProcessing,join(captureDirectory,'captures'),
@@ -142,6 +170,7 @@ const server = await startCompanionServer({
   ...(eventLog ? {events: eventLog} : {}),
   ...(liveActivityTokens ? {liveActivityTokens} : {}),
   ...(presence ? {presence} : {}),
+  ...(mcpUpdates ? {mcpUpdates} : {}),
   remoteAuth,
   port:
     process.env.SCAN_TO_MAKE_GENERATION_PORT === undefined
@@ -159,6 +188,7 @@ try {
       ...(eventLog ? {events: eventLog} : {}),
       ...(liveActivityTokens ? {liveActivityTokens} : {}),
       ...(presence ? {presence} : {}),
+      ...(mcpUpdates ? {mcpUpdates} : {}),
       // With every address answering, the Mac's QR is a v2 link from the live list.
       ...(allAddresses === '1' && server.publicKeySha256 ? {pairingLink:() => ({addresses:server.addresses(),publicKeySha256:server.publicKeySha256!,
         ...(macName ? {name:instanceName(macName)} : {})})} : {}),

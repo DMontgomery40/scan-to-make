@@ -42,6 +42,7 @@ export interface ControlServices {
   events?: import('./events/log.js').EventLog;
   liveActivityTokens?: import('./devices/live-activity-tokens.js').LiveActivityTokenStore;
   presence?: import('./devices/presence.js').DevicePresence;
+  mcpUpdates?: import('./printing/mcp-updates.js').McpUpdater;
   /** Nearby pairing requests waiting for Allow (MAC-5), when the server has nearby pairing on. */
   nearby?: {pending(): NearbyRequest[]; answer(id: string, allow: boolean): Promise<boolean>};
 }
@@ -148,7 +149,17 @@ export function createControlDispatcher(services: ControlServices) {
         case 'status.get': return {protocolVersion:1,companionVersion:services.companionVersion,transport:auth.transport,
           pairedDeviceCount:(await auth.listDevices()).length,capabilities:{capture:!!capture?.captures,cleanup:!!capture?.scanProcessing,printerHandoff:!!printHandoff,nearbyPairing:!!services.nearby,
             objectsCreate:!!services.objects,printSettings:!!services.objects?.printSettingsAvailable,printControl:!!services.objects?.printSettingsAvailable,
-            events:!!services.events&&!!services.liveActivityTokens,structuredPasses:!!services.objects,genericConfirmations:!!services.objects,materialChoice:!!services.objects,projectSettings:!!services.objects,printCopies:!!services.objects?.printCopiesAvailable}};
+            events:!!services.events&&!!services.liveActivityTokens,structuredPasses:!!services.objects,genericConfirmations:!!services.objects,materialChoice:!!services.objects,projectSettings:!!services.objects,mcpUpdates:!!services.mcpUpdates,printCopies:!!services.objects?.printCopiesAvailable}};
+        case 'printers.updateMcp': {
+          if(!services.mcpUpdates)throw new ControlFailure('unavailable');
+          const {mcpId,fresh}=parameters[method].parse(raw);
+          try { return {update: await services.mcpUpdates.update(mcpId, fresh !== undefined ? {fresh} : {})}; }
+          catch (error) {
+            const {McpUpdateError} = await import('./printing/mcp-updates.js');
+            if (error instanceof McpUpdateError) throw new ControlFailure(error.code === 'not-found' ? 'not-found' : 'unavailable', error.message);
+            throw error;
+          }
+        }
         case 'devices.list': {
           const devices = await auth.listDevices();
           const legacy = await auth.legacyDeviceIds?.() ?? new Set<string>();

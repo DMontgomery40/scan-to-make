@@ -87,6 +87,8 @@ export interface PrintHandoffServices {
   relay: ElicitationRelay;
   runner: Pick<PrinterHandoffRunner, 'runBundle' | 'backend'> & Partial<Pick<PrinterHandoffRunner, 'filaments' | 'status' | 'session' | 'run' | 'estimate'>>;
   selection?: PrinterHandoffConfig['selection'];
+  /** PRD §8.10: holds the printer for a print, so its MCP isn't updated under it; throws while it updates. */
+  admit?: () => () => void;
 }
 
 /**
@@ -165,6 +167,8 @@ export function createPrintHandoffRoutes(services: PrintHandoffServices) {
   const startPrint = (bundleId: string) => {
     if (closed) throw new Failure(503, 'closing');
     if (activePrint) throw new Failure(409, 'print-busy');
+    let release: () => void;
+    try { release = services.admit?.() ?? (() => undefined); } catch { throw new Failure(409, 'print-busy'); }
     const controller = new AbortController();
     const entry: ActivePrint = {bundleId, controller, done: Promise.resolve()};
     entry.done = (async () => {
@@ -181,6 +185,7 @@ export function createPrintHandoffRoutes(services: PrintHandoffServices) {
           .then(() => { unpersistedDispatches.delete(bundleId); })
           .catch(() => undefined);
       } finally {
+        release();
         completedPrints++;
         if (activePrint === entry) activePrint = undefined;
       }

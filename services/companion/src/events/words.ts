@@ -64,6 +64,8 @@ export const PRINT_LOG: Record<string, string> = {
 
 export interface WordsContext {
   title: string;
+  /** mcp.update.*: the MCP's name as people know it ("mcp-3D-printer-server"). */
+  package?: string;
   printer?: string;
   /** "60 × 45 × 22 mm" */
   size?: string;
@@ -79,6 +81,7 @@ export const NOTIFY: Record<CounterpartEventType, NotifyLevel> = {
   'print.resumed': 'none', 'print.done': 'active', 'print.failed': 'timeSensitive', 'print.cancelled': 'passive',
   'print.not-started': 'timeSensitive', 'print.unreachable': 'passive', 'print.sent': 'passive',
   'project.updated': 'none',
+  'mcp.update.started': 'none', 'mcp.update.waiting': 'none', 'mcp.update.done': 'passive', 'mcp.update.failed': 'active',
 };
 
 export function sizeText(sizeMm: readonly number[] | undefined): string | undefined {
@@ -101,6 +104,8 @@ export function eventWords(type: CounterpartEventType, data: CounterpartEvent['d
   const layers = data?.layer !== undefined && data.totalLayers ? `layer ${data.layer} of ${data.totalLayers}` : undefined;
   const problem = data?.problems?.[0]?.message;
   const minutes = data?.estimateSec !== undefined ? Math.max(1, Math.round(data.estimateSec / 60)) : undefined;
+  const pkg = context.package ?? 'the printer MCP';
+  const versions = data?.fromVersion && data.toVersion ? `${data.fromVersion} to ${data.toVersion}` : data?.toVersion;
   let title: string, body: string;
   switch (type) {
     case 'pass.started': title = `Your Mac is working on ${t}`; body = minutes ? `About ${minutes} min. You can put your phone down.` : "You can put your phone down. We'll let you know when it's ready."; break;
@@ -123,6 +128,10 @@ export function eventWords(type: CounterpartEventType, data: CounterpartEvent['d
     case 'print.unreachable': title = `Lost contact with ${printer}`; body = 'Still trying.'; break;
     case 'project.updated': title = t; body = 'Project updated'; break;
     case 'print.sent': title = `Sent ${t} to ${printer}`; body = context.reason === 'bambu-connect' ? 'Finish on your Mac: press Print in Bambu Connect.' : "Counterpart can't follow this print."; break;
+    case 'mcp.update.started': title = `Updating ${pkg}`; body = joined(versions, context.printer) || 'Updating'; break;
+    case 'mcp.update.waiting': title = `${pkg} updates after the current print`; body = joined(versions, context.printer) || 'Waiting for the print to finish'; break;
+    case 'mcp.update.done': title = data?.toVersion ? `Updated ${pkg} to ${data.toVersion}` : `Updated ${pkg}`; body = context.printer ? `${context.printer} uses it now.` : 'Your printers use it now.'; break;
+    case 'mcp.update.failed': title = `Couldn't update ${pkg}`; body = `${data?.fromVersion ?? 'The version you had'} is still in use. Try again, or install a fresh copy.`; break;
   }
   return {title: title.slice(0, 200), body: body.slice(0, 500), notify: NOTIFY[type]};
 }
