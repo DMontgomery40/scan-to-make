@@ -641,10 +641,10 @@ export class ObjectService {
   }
 
   /** Record only known attachment ownership. Retry of a held message keeps its identity and timestamp. */
-  async #message(object: StmObject, text: string, photos: string[]): Promise<StmObject> {
+  async #message(object: StmObject, text: string, photos: string[], reusePending = true): Promise<StmObject> {
     if (photos.some(name => !object.photos.includes(name))) throw new InvalidFileError('That photo is not in this project.');
     return this.#deps.store.update(object.id, o => {
-      const previous = o.messages?.find(item => item.id === o.pendingMessageId && item.text === text);
+      const previous = reusePending ? o.messages?.find(item => item.id === o.pendingMessageId && item.text === text) : undefined;
       const message = previous ? {...previous, photos: [...new Set([...previous.photos, ...photos])]}
         : {id: randomUUID(), text, photos, atMs: Date.now()};
       return {...o, messages: [...(o.messages ?? []).filter(item => item.id !== message.id), message],
@@ -654,8 +654,8 @@ export class ObjectService {
   }
 
   /** Answers the open Ask: with a photo (uploaded first), Best guess, or the person's own words. */
-  answerCloseup(id: string, answer: {bestGuess?: boolean; text?: string}): Promise<StmObject> { return this.#gate(id, () => this.#answerCloseup(id, answer)); }
-  async #answerCloseup(id: string, answer: {bestGuess?: boolean; text?: string}): Promise<StmObject> {
+  answerCloseup(id: string, answer: {bestGuess?: boolean; text?: string; photoNames?: string[]}): Promise<StmObject> { return this.#gate(id, () => this.#answerCloseup(id, answer)); }
+  async #answerCloseup(id: string, answer: {bestGuess?: boolean; text?: string; photoNames?: string[]}): Promise<StmObject> {
     // Claim the install before consuming the Ask or its photos. The admitted pass takes its own
     // counted reservation through worker cleanup; this one only covers the answer transaction.
     let release = () => {};
@@ -665,15 +665,20 @@ export class ObjectService {
     finally { release(); }
   }
 
-  async #reservedAnswerCloseup(id: string, answer: {bestGuess?: boolean; text?: string}): Promise<StmObject> {
+  async #reservedAnswerCloseup(id: string, answer: {bestGuess?: boolean; text?: string; photoNames?: string[]}): Promise<StmObject> {
     const object = await this.get(id);
     if (object.state !== 'needs-closeup') throw new InvalidStateError('No close-up was asked for.');
     // Carry on with what the asking pass was doing: a correction keeps its note and its model.
+    // Only this answer's explicit attachments belong to it. Other pending photos may already
+    // be reserved by a correction queued on either client; Best Guess and text claim none.
+    const photos = [...new Set(answer.photoNames ?? [])];
+    if (!photos.length && !answer.bestGuess && !answer.text?.trim()) throw new InvalidStateError('Choose photos for this answer, answer in words, or use Best Guess. If you already chose photos, update Counterpart and try again.');
+    if (photos.some(name => !object.photos.includes(name))) throw new InvalidStateError('That photo is not in this project.');
     const asked = object.passes.at(-1)?.note;
     const said = answer.text?.trim() ? `Answer to "${object.ask?.question ?? object.question?.closeup ?? 'your question'}": ${answer.text.trim()}` : undefined;
     const parts = [asked, said, answer.bestGuess && !asked?.includes(BEST_GUESS_NOTE) ? BEST_GUESS_NOTE : undefined].filter(Boolean);
     if (object.ask) await this.#deps.store.update(id, o => o.ask ? {...o, ask: {...o.ask, status: 'answered'}} : o);
-    const updated = await this.#message(await this.get(id), answer.text?.trim() ?? (answer.bestGuess ? 'Use your best guess.' : ''), object.pendingPhotos ?? []);
+    const updated = await this.#message(await this.get(id), answer.text?.trim() ?? (answer.bestGuess ? 'Use your best guess.' : ''), photos, false);
     const message = updated.messages!.find(item => item.id === updated.pendingMessageId)!;
     return this.#pass(updated, {...(parts.length ? {note: parts.join('\n')} : {}), messageId: message.id, photos: message.photos, trigger: 'ask-answer'});
   }

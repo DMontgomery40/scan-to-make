@@ -232,6 +232,20 @@ final class CompanionClientTests: XCTestCase {
         XCTAssertEqual(none, [], "an older Mac lists none")
     }
 
+    func testAskAnswersNameOnlyTheirOwnPhotosAndBestGuessNamesNone() async throws {
+        let id = "0b6f0f43-7c35-4b8a-9a3c-8f0b4c4b2a11"
+        let object: [String: Any] = ["id": id, "createdAtMs": 1, "updatedAtMs": 2, "state": "ready", "photos": [], "passes": []]
+        let fake = FakeTransport { _, _ in json(200, ["object": object]) }
+        let c = try client(fake)
+        _ = try await c.answerAsk(id, bestGuess: true)
+        _ = try await c.answerAsk(id, text: "The underside is flat.")
+        _ = try await c.answerAsk(id, photoNames: ["closeup.jpg"])
+        let bodies = try fake.calls.map { try XCTUnwrap(JSONSerialization.jsonObject(with: $0.request.httpBody!) as? [String: Any]) }
+        XCTAssertEqual(bodies[0]["photoNames"] as? [String], [])
+        XCTAssertEqual(bodies[1]["photoNames"] as? [String], [])
+        XCTAssertEqual(bodies[2]["photoNames"] as? [String], ["closeup.jpg"])
+    }
+
     func testCreateSendsTheKindYouPicked() async throws {
         var bodies: [[String: Any]] = []
         let fake = FakeTransport { request, _ in

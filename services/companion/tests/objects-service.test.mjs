@@ -190,11 +190,12 @@ test('a close-up answer after a correction carries on from the corrected model a
   await service.correct(object.id, 'it is 70 mm long');
   assert.equal((await service.settled(object.id)).state, 'needs-closeup');
   await service.addPhoto(object.id, 'under.jpg', Buffer.from('img'));
-  await service.answerCloseup(object.id, {bestGuess: false});
+  await service.answerCloseup(object.id, {bestGuess: false, photoNames: ['under.jpg']});
   await service.settled(object.id);
   const current = join(store.dir(object.id), 'current', 'model.stl');
   assert.deepEqual(calls[2].scan, [current]);
   assert.match(calls[2].note, /70 mm long/);
+  assert.ok(calls[2].photos.some(path => path.endsWith('/under.jpg')));
   await service.correct(object.id, 'it is 70 mm long');
   await service.settled(object.id);
   await service.answerCloseup(object.id, {bestGuess: true});
@@ -318,12 +319,12 @@ test('answering an Ask during an MCP update preserves the open Ask and its pendi
   const before = await store.get(object.id);
   assert.equal(before.current, undefined, 'the first pass has no model yet');
   assert.equal(printGate.beginUpdate(['current']), true);
-  await assert.rejects(service.answerCloseup(object.id, {text: 'The underside is flat.'}), /software is updating/);
+  await assert.rejects(service.answerCloseup(object.id, {text: 'The underside is flat.', photoNames: ['underside.jpg']}), /software is updating/);
   assert.deepEqual(await store.get(object.id), before, 'rejection must not consume the Ask, photos, or create a saved correction');
   assert.equal(calls.length, 0);
   assert.equal(printGate.held('current'), false);
   printGate.endUpdate(['current']);
-  await service.answerCloseup(object.id, {text: 'The underside is flat.'});
+  await service.answerCloseup(object.id, {text: 'The underside is flat.', photoNames: ['underside.jpg']});
   assert.equal(printGate.held('current'), true, 'the admitted pass retains its own reservation');
   const after = await service.settled(object.id);
   assert.equal(after.state, 'ready');
@@ -339,4 +340,51 @@ test('an invalid Ask answer releases its admission reservation', async () => {
   await assert.rejects(service.answerCloseup(object.id, {bestGuess: true}), /No close-up was asked/);
   assert.equal(printGate.held('current'), false);
   assert.equal(printGate.beginUpdate(['current']), true);
+});
+
+
+test('Ask answers claim only their attachments and leave queued correction evidence pending', async () => {
+  for (const answer of [{bestGuess: true}, {text: 'It is flat.'}, {photoNames: ['closeup.jpg']}]) {
+    const {service, object, store, calls} = await setup(undefined, {outcomes: [
+      {status: 'needs_closeup', closeup: 'the underside', summary: 'Need a closer look.'},
+      {status: 'done', summary: 'Answered.'}, {status: 'done', summary: 'Changed.'},
+    ]});
+    await service.addPhoto(object.id, 'initial.jpg', Buffer.from('initial'));
+    await service.start(object.id); await service.settled(object.id);
+    await service.addPhoto(object.id, 'queued.jpg', Buffer.from('future change'));
+    await service.addPhoto(object.id, 'closeup.jpg', Buffer.from('answer'));
+    await service.answerCloseup(object.id, answer); await service.settled(object.id);
+    const after = await store.get(object.id);
+    assert.deepEqual(after.messages.at(-1).photos, answer.photoNames ?? []);
+    assert.ok(after.pendingPhotos.includes('queued.jpg'));
+    assert.deepEqual(calls[1].photos.map(path => path.split('/').at(-1)), ['initial.jpg', ...(answer.photoNames ?? [])]);
+    await service.correct(object.id, 'Make the queued change.', [], ['queued.jpg']);
+    const final = await service.settled(object.id);
+    assert.deepEqual(final.messages.at(-1).photos, ['queued.jpg']);
+    assert.ok(calls[2].photos.some(path => path.endsWith('/queued.jpg')));
+  }
+});
+
+test('invalid Ask attachments leave the open question unchanged', async () => {
+  const {service, object, store} = await setup({status: 'needs_closeup', closeup: 'underside', summary: 'Question'});
+  await service.start(object.id); await service.settled(object.id);
+  const before = await store.get(object.id);
+  await assert.rejects(service.answerCloseup(object.id, {}), /Choose photos for this answer/);
+  assert.deepEqual(await store.get(object.id), before);
+  await assert.rejects(service.answerCloseup(object.id, {photoNames: ['missing.jpg']}), /not in this project/);
+  assert.deepEqual(await store.get(object.id), before);
+});
+
+
+test('an Ask answer does not reuse an unrelated held message with identical text', async () => {
+  const {service, object, store} = await setup({status: 'needs_closeup', closeup: 'underside', summary: 'Question'});
+  await service.start(object.id); await service.settled(object.id);
+  await service.addPhoto(object.id, 'held.jpg', Buffer.from('held'));
+  await store.update(object.id, o => ({...o, pendingMessageId: 'held-message', pendingFollowup: 'It is flat.',
+    messages: [{id: 'held-message', text: 'It is flat.', atMs: 1, photos: ['held.jpg']}]}));
+  await service.answerCloseup(object.id, {text: 'It is flat.', photoNames: []});
+  const after = await service.settled(object.id);
+  assert.equal(after.messages[0].id, 'held-message');
+  assert.notEqual(after.messages[1].id, 'held-message');
+  assert.deepEqual(after.messages[1].photos, []);
 });

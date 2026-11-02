@@ -219,11 +219,12 @@ public final class CompanionClient: @unchecked Sendable {
         if let photoNames { json["photoNames"] = photoNames }
         return try await request("POST", "/v1/objects/\(id)/corrections", json: json, as: One.self).object
     }
-    /// Answers the open Ask: after uploading a photo (`{}`), as a best guess, or in words (PR 4).
-    public func answerAsk(_ id: String, bestGuess: Bool = false, text: String? = nil) async throws -> Project {
+    /// Answers the open Ask with explicitly named uploaded photos, a best guess, or words.
+    public func answerAsk(_ id: String, bestGuess: Bool = false, text: String? = nil, photoNames: [String] = []) async throws -> Project {
         var json: [String: Any] = [:]
         if bestGuess { json["bestGuess"] = true }
         if let text { json["text"] = text }
+        json["photoNames"] = photoNames
         return try await request("POST", "/v1/objects/\(id)/closeup", json: json, as: One.self).object
     }
     private struct MaybeOne: Decodable { var object: Project? }

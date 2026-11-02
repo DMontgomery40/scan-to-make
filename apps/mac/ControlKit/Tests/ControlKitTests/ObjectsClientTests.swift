@@ -198,7 +198,7 @@ final class ObjectsClientTests: XCTestCase {
             ("objects.get", ["id": id], { try await $0.object(id) }),
             ("objects.start", ["id": id], { try await $0.startObject(id) }),
             ("objects.correct", ["id": id, "note": "the clip is 3 mm thicker"], { try await $0.correctObject(id, note: "the clip is 3 mm thicker") }),
-            ("objects.answerCloseup", ["id": id, "bestGuess": true], { try await $0.answerCloseup(id, bestGuess: true) }),
+            ("objects.answerCloseup", ["id": id, "bestGuess": true, "photoNames": [String]()], { try await $0.answerCloseup(id, bestGuess: true) }),
             ("objects.print", ["id": id], { try await $0.printObject(id) }),
             ("objects.print", ["id": id, "checked": true], { try await $0.printObject(id, checked: true) }),
         ]

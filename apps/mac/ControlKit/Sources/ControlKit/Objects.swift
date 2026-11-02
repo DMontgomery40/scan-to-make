@@ -179,8 +179,8 @@ public extension ControlClient {
         let result: ObjectReply = try await call("objects.addFile", ["id": .string(id), "kind": .string(kind), "path": .string(path)])
         return result.object
     }
-    func answerCloseup(_ id: String, bestGuess: Bool) async throws -> Project {
-        let result: ObjectReply = try await call("objects.answerCloseup", ["id": .string(id), "bestGuess": .bool(bestGuess)]); return result.object
+    func answerCloseup(_ id: String, bestGuess: Bool, photoNames: [String] = []) async throws -> Project {
+        let result: ObjectReply = try await call("objects.answerCloseup", ["id": .string(id), "bestGuess": .bool(bestGuess), "photoNames": .array(photoNames.map(JSONValue.string))]); return result.object
     }
     /// Prints the current model. `checked` only after an
     /// uncertain print, once the user has looked at the printer. Like every mutation, a deadline after

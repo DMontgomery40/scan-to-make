@@ -89,7 +89,7 @@ Destination `capabilities.materialChoice` (PR 5) says the same per printer; what
 | `objects.addFile` | `{id, kind: "photos"\|"scan", path}` | `{object}` | PR 1 |
 | `objects.start` | `{id}` | `{object}` | |
 | `objects.correct` | `{id, note: string 1–4000, photos?: [path] ≤ 24}` | `{object}`: a new pass (`photos` PR 1) | |
-| `objects.answerCloseup` | `{id, bestGuess: boolean, text?: string ≤ 2000}` | `{object}`: a new pass (`text` PR 4) | |
+| `objects.answerCloseup` | `{id, bestGuess: boolean, text?: string ≤ 2000, photoNames?: string[] ≤ 100}` (omitted names select none; an empty answer is refused) | `{object}`: a new pass (`text` PR 4) | |
 | `objects.delete` | `{id}` | `{deleted: true}` | |
 | `objects.passActivity` | `{id, index}` | `{activity}` | |
 | `objects.printers` | `{}` | `{defaultDestinationId, destinations: [PrinterDestination]}`; `origin`, `state`, `stateCheckedAt`, `capabilities` from PR 1 | |

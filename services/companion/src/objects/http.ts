@@ -286,9 +286,10 @@ export function createObjectRoutes(service: ObjectService) {
             break;
           }
           case 'closeup': {
-            const input = await json<{bestGuess?: unknown; text?: unknown}>(request);
+            const input = await json<{bestGuess?: unknown; text?: unknown; photoNames?: unknown}>(request);
             if (input.text !== undefined && (typeof input.text !== 'string' || !input.text.trim() || input.text.length > 2000)) throw new HttpFailure(400, 'invalid-request');
-            object = await service.answerCloseup(id, {bestGuess: input.bestGuess === true, ...(typeof input.text === 'string' ? {text: input.text} : {})});
+            if (input.photoNames !== undefined && (!Array.isArray(input.photoNames) || input.photoNames.length > 100 || input.photoNames.some(name => typeof name !== 'string' || !name || name.length > 128))) throw new HttpFailure(400, 'invalid-request');
+            object = await service.answerCloseup(id, {photoNames: input.photoNames as string[] | undefined, bestGuess: input.bestGuess === true, ...(typeof input.text === 'string' ? {text: input.text} : {})});
             break;
           }
           case 'print': {

@@ -32,7 +32,7 @@ typealias MacError = CompanionError
     func updateDraft(_ id: String, instructions: String) async throws -> StmObject { try await client.updateDraft(id, instructions: instructions) }
     func start(_ id: String, captureManifest: [String: Any]? = nil) async throws -> StmObject { try await client.start(id, captureManifest: captureManifest) }
     func correct(_ id: String, _ note: String, photoNames: [String]? = nil) async throws -> StmObject { try await client.correct(id, note, photoNames: photoNames) }
-    func closeup(_ id: String, bestGuess: Bool) async throws -> StmObject { try await client.answerAsk(id, bestGuess: bestGuess) }
+    func closeup(_ id: String, bestGuess: Bool, photoNames: [String] = []) async throws -> StmObject { try await client.answerAsk(id, bestGuess: bestGuess, photoNames: photoNames) }
     func answerPrintConfirmation(_ id: String, response: PrintConfirmationResponse) async throws -> StmObject {
         try await client.answerPrintConfirmation(id, response: response)
     }
@@ -122,14 +122,15 @@ typealias MacError = CompanionError
     }
 
     /// Close-ups for a project that asked for them, sent as soon as they're taken or picked.
-    func addCloseups(_ id: String, camera: Bool) async throws -> Int {
+    func addCloseups(_ id: String, camera: Bool) async throws -> [String] {
         let photos: [PickedPhoto]
         if camera { photos = try await PhotoSources.takePhoto().map { [$0] } ?? [] }
         else { photos = try await PhotoSources.pick(limit: 12) }
-        guard !photos.isEmpty else { return 0 }
+        guard !photos.isEmpty else { return [] }
         let files = photos.map { UploadFile(kind: .photo, name: PhotoSources.closeupName($0.ext), source: .bytes($0.data),
                                             type: $0.ext == "png" ? "image/png" : $0.ext == "heic" ? "image/heic" : "image/jpeg") }
-        return try await uploader.send(files, to: id)
+        _ = try await uploader.send(files, to: id)
+        return files.map(\.name)
     }
 
     // MARK: Scans

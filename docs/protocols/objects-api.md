@@ -44,7 +44,7 @@ Wire types are zod schemas in `packages/contracts/src/counterpart.ts` (`@scan-to
 | `POST /v1/objects/<id>/capture?name=NNNN.heic`, `…/capture-depth?name=NNNN.depth.plist` | WRITE | In-hand capture frames | `{object}` |
 | `POST /v1/objects/<id>/start` | WRITE | `{captureManifest?}` | `{object}` |
 | `POST /v1/objects/<id>/corrections` | WRITE | `{note: string 1–4000}`. Upload any new photos first with `…/photos`. | `{object}` (a new pass) |
-| `POST /v1/objects/<id>/closeup` | WRITE | `{bestGuess?: boolean, text?: string ≤ 2000}` (`text` PR 4). Answers the open Ask: upload the photo first, then post `{}`; or `{bestGuess: true}`; or `{text}`. | `{object}` (a new pass) |
+| `POST /v1/objects/<id>/closeup` | WRITE | `{bestGuess?: boolean, text?: string ≤ 2000, photoNames?: string[] ≤ 100}`. Answers the open Ask: upload photos first, then name those exact files in `photoNames`; or use `{bestGuess: true}` or `{text}`. Omitted names select no photos; queued correction evidence remains pending. Empty answers or missing photos are refused before consuming the Ask. | `{object}` (a new pass) |
 | `GET /v1/objects/<id>/passes/<n>/activity` | READ | | `{activity: [{atMs, kind: "message"\|"tool", text}]}` |
 | `GET /v1/objects/<id>/model.stl`, `…/renders/<name>` | READ | | the file |
 | `GET /v1/objects/<id>/photos/<name>`, `…/capture/<name>` | READ | | the image |
