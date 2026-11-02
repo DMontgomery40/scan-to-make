@@ -777,6 +777,17 @@ export class ObjectService {
     return camera.frame(destinationId, session, {model: session.config.selection?.model}).catch(() => undefined);
   }
 
+  /** PRD §8.10: a print is being prepared or monitored on this printer, so its MCP isn't updated now. */
+  async printerBusy(destinationId: string): Promise<boolean> {
+    const canonical = this.#deps.printerCatalog?.canonical(destinationId) ?? destinationId;
+    for (const object of await this.#deps.store.list()) {
+      if (object.state !== 'printing') continue;
+      const target = object.print?.destinationId ?? object.print?.destination?.id ?? this.#destinationId(object);
+      if (target && (this.#deps.printerCatalog?.canonical(target) ?? target) === canonical) return true;
+    }
+    return false;
+  }
+
   /** A client opened this project: while it prints (or the printer asks something), warm its printer's camera. */
   async view(id: string): Promise<StmObject> {
     const object = await this.get(id);

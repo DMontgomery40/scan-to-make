@@ -69,6 +69,7 @@ The Mac app shows the same projects as the phone and drives them through these m
 | `events` | `events.wait`, `liveActivity.tokens`, device `model` and `lastSeenAt`, object `status` | PR 3 |
 | `structuredPasses` | object `title`, `kind`, `ask`, `current.changes`, pass `stages` and `estimate`, the design engine | PR 4 |
 | `genericConfirmations` | `printConfirmation.fields[]` may be text, number, integer and choice fields as well as yes/no, and `objects.answerPrintConfirmation` takes and checks those answers (below). The phone reads the same flag from `GET /healthz` `capabilities` ([objects-api.md](objects-api.md)). | PR 5 |
+| `mcpUpdates` | `printers.updateMcp` and `POST /v1/printers/mcp/<mcpId>/update`, destination `mcpId` and `capabilities.update.latestVersion`, the `mcp.update.*` events. Also in `GET /healthz` `capabilities`. | PR 6 |
 | `materialChoice` | `objects.print` `colour: {material}` is accepted on every printer ("What's loaded?"): sliced with a profile the printer reports for that material, or refused with a sentence saying what to do. Also in `GET /healthz` `capabilities`. | PR 5 |
 
 Destination `capabilities.materialChoice` (PR 5) says the same per printer; what each MCP is sent, and when it is refused, is in [objects-api.md](objects-api.md#print-settings-pr-2). `objects.get` of a printing project and `objects.printers` warm the printers' cameras as the phone's routes do, so `objects.camera` and `printers.camera` answer from a recent frame (objects-api.md, "Camera timing").
@@ -96,6 +97,7 @@ Destination `capabilities.materialChoice` (PR 5) says the same per printer; what
 | `objects.pausePrint`, `objects.resumePrint`, `objects.cancelPrint` | `{id}` | `{object}` | PR 2 |
 | `objects.camera` | `{id}` | `{format: "jpeg", base64, capturedAt}` from the project's printer | PR 2 |
 | `printers.camera` | `{destinationId}` | `{format: "jpeg", base64, capturedAt}` | PR 2 |
+| `printers.updateMcp` | `{mcpId, fresh?: boolean}` | `{update: {mcpId, state: "started"\|"waiting"\|"current"\|"unresolved", fromVersion?, toVersion?, found?}}`. Unknown `mcpId`: `not-found`; npm unreachable: `unavailable` with the sentence. Deadline 70 s (it asks npm for the latest version first). What runs and when: objects-api.md, "Updating the printer MCPs". | PR 6 |
 | `settings.get` | `{}` | `{settings: {milestones}}` | PR 2 |
 | `settings.set` | `{milestones: "off"\|"50"\|"25-50-75"\|"every-10"}` | `{settings}` | PR 2 |
 | `events.wait` | `{after: integer ≥ 0, timeoutMs?: 0–25000 (default 25000), limit?: 0–500}` | `EventsPage` `{events, next, latest, truncated?, reset?}` | PR 3 |

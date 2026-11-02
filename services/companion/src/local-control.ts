@@ -34,6 +34,8 @@ async function removeStaleSocket(path: string) {
 /** Methods allowed past the usual 10 s connection deadline. */
 export function methodDeadlineMs(method: ControlMethod, params: unknown): number | undefined {
   if (method === 'objects.estimate') return 180_000;
+  // Asks npm for the latest version first (up to 60 s); the update itself runs after the reply.
+  if (method === 'printers.updateMcp') return 70_000;
   // The printer MCP may ask its own confirmation; the call waits up to 120 s for it.
   if (method === 'objects.pausePrint' || method === 'objects.resumePrint' || method === 'objects.cancelPrint') return 130_000;
   if (method === 'events.wait') {

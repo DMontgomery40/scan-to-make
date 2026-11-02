@@ -6,9 +6,13 @@ import * as c from '../dist/counterpart.js';
 const fixture = JSON.parse(await readFile(new URL('../fixtures/counterpart-v1.json', import.meta.url), 'utf8'));
 
 test('the wire fixtures cover every event type once, in order, and each one validates', () => {
-  assert.deepEqual(fixture.events.map(event => event.type), [...c.COUNTERPART_EVENT_TYPES]);
-  for (const event of fixture.events) c.CounterpartEventSchema.parse(event);
-  assert.deepEqual(fixture.events.map(event => event.seq), fixture.events.map((_, index) => index + 1));
+  // `events` are a project's (older decoders count them); `macEvents` have no projectId (PRD §8.10).
+  const all = [...fixture.events, ...fixture.macEvents];
+  assert.deepEqual(all.map(event => event.type), [...c.COUNTERPART_EVENT_TYPES]);
+  for (const event of all) c.CounterpartEventSchema.parse(event);
+  assert.deepEqual(all.map(event => event.seq), all.map((_, index) => index + 1));
+  assert.ok(fixture.events.every(event => event.projectId) && fixture.macEvents.every(event => !('projectId' in event)));
+  for (const update of fixture.mcpUpdates) c.McpUpdateSchema.parse(update);
 });
 
 test('every other wire fixture validates against its schema', () => {

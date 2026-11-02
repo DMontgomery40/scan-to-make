@@ -95,7 +95,7 @@ function sleep(clock: SessionClock, ms: number, signal?: AbortSignal): Promise<v
  */
 export class PrinterSession {
   readonly id: string;
-  readonly #config: PrinterHandoffConfig;
+  #config: PrinterHandoffConfig;
   readonly #options: PrinterSessionOptions;
   readonly #clock: SessionClock;
   readonly #backoff: readonly number[];
@@ -200,6 +200,24 @@ export class PrinterSession {
   async exclusive<T>(work: () => Promise<T>, signal?: AbortSignal): Promise<T> {
     const unlock = await this.#lock(signal);
     try { return await work(); } finally { unlock(); }
+  }
+
+  /**
+   * PRD §8.10: after an update, the next call starts the MCP afresh (optionally with a new process config).
+   * Waits for the mutex, so no mutating call is cut off; the session stays usable and keeps its holders.
+   */
+  async restart(config?: PrinterHandoffConfig): Promise<void> {
+    if (this.#closed) throw new PrinterMcpError('session-closed');
+    const unlock = await this.#lock();
+    try {
+      await this.#connecting?.catch(() => undefined);
+      if (config) this.#config = structuredClone(config);
+      const client = this.#client;
+      this.#client = undefined;
+      this.#failures = 0;
+      this.#retryAt = 0;
+      await client?.close().catch(() => undefined);
+    } finally { unlock(); }
   }
 
   async close(): Promise<void> {
