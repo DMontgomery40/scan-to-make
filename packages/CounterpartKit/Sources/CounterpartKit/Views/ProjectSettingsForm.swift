@@ -54,7 +54,7 @@ public struct ProjectSettingsForm: View {
         _name = State(initialValue: ProjectWords(project).title)
     }
 
-    private var defaults: PrintSettings { project.settings?.printDefaults ?? project.print?.settings ?? PrintSettings() }
+    private var defaults: PrintSettings { project.resolvedPrintDefaults(destinationId: project.printerDestinationId ?? context?.defaultPrinter) }
     private var printer: Printer? { context?.printers.first { $0.id == (project.printerDestinationId ?? context?.defaultPrinter) } }
     private var busyProject: Bool { project.state == .touchingUp || project.state == .printing }
     private var copy: Bool { project.usesCopyWorkflow }

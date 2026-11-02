@@ -36,7 +36,7 @@ struct PrintSheet: View {
     init(opened: Project, model: ObjectsModel) {
         self.opened = opened
         _model = ObservedObject(wrappedValue: model)
-        let last = PrintSettings(saved: opened.settings?.printDefaults ?? opened.print?.settings)
+        let last = PrintSettings(saved: opened.resolvedPrintDefaults(destinationId: opened.printerDestinationId ?? model.printerCatalog?.defaultDestinationId))
         _quality = State(initialValue: last.quality)
         _strength = State(initialValue: last.strength)
         _copies = State(initialValue: last.copies ?? 1)
@@ -263,7 +263,7 @@ struct PrintSheet: View {
             guard !Task.isCancelled else { return }
             filaments = list
             let suggested = list.first { $0.suggested == true }
-            if let last = PrintSettings.lastSlot(lastColour, lastPrinter: opened.settings?.printDefaults != nil ? (opened.printerDestinationId ?? model.printerCatalog?.defaultDestinationId) : opened.print?.destinationId, printer: printer?.id, in: list) {
+            if let last = PrintSettings.lastSlot(lastColour, lastPrinter: opened.settings?.printDefaults != nil ? (opened.printerDestinationId ?? model.printerCatalog?.defaultDestinationId) : (opened.print?.destinationId ?? opened.print?.destination?.id), printer: printer?.id, in: list) {
                 slot = last
                 keptSuggestion = false
             } else {

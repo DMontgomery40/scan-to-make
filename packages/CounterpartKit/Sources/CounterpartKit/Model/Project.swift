@@ -22,6 +22,16 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
         return instructions?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false
     }
 
+    /// Saved defaults replace print history as a whole: an absent colour means use the printer profile.
+    /// Legacy quality/strength/copies can follow the model, but a historical tray belongs to one printer.
+    public func resolvedPrintDefaults(destinationId: String?) -> PrintSettings {
+        if let saved = settings?.printDefaults { return saved }
+        var previous = print?.settings ?? PrintSettings()
+        let previousPrinter = print?.destinationId ?? print?.destination?.id
+        if destinationId == nil || previousPrinter != destinationId { previous.colour = nil }
+        return previous
+    }
+
     public var id: String
     public var createdAtMs: Double
     public var updatedAtMs: Double

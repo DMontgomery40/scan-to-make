@@ -304,7 +304,7 @@ struct PrintSheet: View {
         await store.loadCapabilities()
         destinationId = project?.printerDestinationId ?? store.catalog?.defaultDestinationId ?? ""
         // Print another: the last print's quality and strength again (its printer is the project's).
-        if let last = project?.settings?.printDefaults ?? project?.print?.settings {
+        if let last = project?.resolvedPrintDefaults(destinationId: destinationId) {
             quality = last.quality.flatMap(PrintQuality.init(rawValue:)) ?? quality
             strength = last.strength.flatMap(PrintStrength.init(rawValue:)) ?? strength
             copies = last.copies
@@ -341,7 +341,7 @@ struct PrintSheet: View {
             spools[id] = reported
             // The last print's spool on the same printer: the Mac's record (a tray, or the external spool), else the
             // tray this phone sent; else the one the Mac suggests.
-            let recorded = project?.settings?.printDefaults?.colour?.object ?? (project?.print?.destinationId == id ? project?.print?.settings?.colour?.object : nil)
+            let recorded = project?.resolvedPrintDefaults(destinationId: id).colour?.object
             let last: PrinterFilament? = if let slot = recorded?["amsSlot"]?.number {
                 reported.first { $0.slot == Int(slot) }
             } else if recorded?["external"] == .bool(true) {
