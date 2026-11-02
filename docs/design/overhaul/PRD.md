@@ -723,13 +723,14 @@ Scan cleanup always uses Blender. Designing a part from scratch ("make something
   | `FUSION_MCP_ARGS` | `["--from","git+https://github.com/faust-machines/fusion360-mcp-server@19b9f1e95192","fusion360-mcp-server","--mode","socket"]` |
   | `FUSION_MCP_TIMEOUT_MS` | default `180000` |
   | `FUSION_MCP_HOST` | passed through; default `localhost` |
+  | `FUSION_MCP_PORT` | `9877`. Blender's MCP add-on already listens on `localhost:9876`, the add-in's default, so Fusion moves off it. Both the server and the add-in read this variable (`addon/Fusion360MCP.py:45`, `src/fusion360_mcp/connection.py:26` at the pin) |
 
 - **Transport:** a stdio `Client`, kept for the life of the printer MCP session, as the Blender bridge does.
 - **Tools:**
 
 | Tool | Does |
 |---|---|
-| `fusion_mcp_status` | `{configured, connected, addinReachable, fusionRunning, tools[]}`. Takes `launch?: boolean`. When it's true and Fusion isn't running, it runs `open -a "Autodesk Fusion"` and waits up to 90 s for port 9876. |
+| `fusion_mcp_status` | `{configured, connected, addinReachable, fusionRunning, tools[]}`. Takes `launch?: boolean`. When it's true and Fusion isn't running, it runs `open -a "Autodesk Fusion" --env FUSION_MCP_PORT=<port>` and waits up to 90 s for the add-in to answer `ping`. |
 | `fusion_mcp_call` | `{tool_name, arguments?, timeout_ms?}` passes the call through to a discovered Faust tool with its full content and errors, never retried. This is the same contract as `blender_mcp_call`. |
 | `fusion_mcp_new_design` | Opens a new parametric design document, through `execute_code` with `app.documents.add(FusionDesignDocumentType)`. Faust tools need an active design (issue #12), so the pass calls this first. |
 | `fusion_mcp_export` | `{output_dir, name}` writes `<name>.stl` (`export_stl`), `<name>.f3d` (`export_f3d`) and `<name>.parameters.json` (`get_parameters`) into the MCP's allowed output directory, and returns their absolute paths. The STL then goes to `get_stl_info`, `lay_flat` and `slice_stl` like any other model. |
@@ -745,7 +746,9 @@ Scan cleanup always uses Blender. Designing a part from scratch ("make something
 Screenshots: `screens/mac-settings-ai.jpg` and `screens/mac-settings-ai-nofusion.jpg`.
 
 - It shows "Fusion found" or "Fusion isn't installed".
-- **Set up** installs the add-in at the pinned commit and adds the four `FUSION_MCP_*` variables to the printer MCP's env file, next to `BLENDER_MCP_*`.
+- **Set up** installs the add-in at the pinned commit and adds the five `FUSION_MCP_*` variables to the printer MCP's env file, next to `BLENDER_MCP_*`.
+- **The add-in's port.** Fusion is a GUI app, so it doesn't see the MCP's env file. Set up also installs a login LaunchAgent that runs `launchctl setenv FUSION_MCP_PORT 9877`, so Fusion gets the port however it's opened. `fusion_mcp_status` with `launch: true` opens it with `open -a "Autodesk Fusion" --env FUSION_MCP_PORT=9877` too.
+- **The bridge checks it's really the add-in.** It sends the add-in's `ping` and needs `pong` back within 2 s, because another listener (such as Blender's) may hold the port.
 - Fusion and its licence (including Autodesk's free personal-use licence) belong to the user. Counterpart never ships or requires Fusion.
 
 **Acceptance check** (run on the Mac before the pin moves, and in M1F):
