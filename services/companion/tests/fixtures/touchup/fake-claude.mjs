@@ -71,8 +71,8 @@ switch (scenario) {
     result({status: 'done', summary: 'Saved.'});
     break;
   case 'stubborngrandchild': {
-    const child = spawn(process.execPath, ['-e', "process.on('SIGTERM',()=>{});setInterval(()=>{},1000)"], {stdio: 'ignore'});
-    writeFileSync('grandchild.pid', String(child.pid));
+    const child = spawn(process.execPath, ['-e', "process.on('SIGTERM',()=>{});process.send('ready');setInterval(()=>{},1000)"], {stdio: ['ignore', 'ignore', 'ignore', 'ipc']});
+    child.once('message', () => { writeFileSync('grandchild.pid', String(child.pid)); say('stubborn grandchild ready'); });
     hang();
     break;
   }

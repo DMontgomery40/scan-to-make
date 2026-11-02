@@ -147,7 +147,10 @@ test('a binary STL with NaN coordinates is not valid', async () => {
 
 test('a stopped worker leaves no process behind, even one that ignores SIGTERM', async () => {
   const {pass, inv} = await setup('stubborngrandchild');
-  await runTouchupWorker(inv, pass, {timeoutMs: 500});
+  const controller = new AbortController();
+  const stopped = await runTouchupWorker(inv, pass, {signal: controller.signal, timeoutMs: 10_000,
+    onProgress: progress => { if (progress.lastText === 'stubborn grandchild ready') controller.abort(); }});
+  assert.equal(stopped.reason, 'cancelled');
   const pid = Number(await readFile(join(pass.dir, 'grandchild.pid'), 'utf8'));
   await new Promise(r => setTimeout(r, 200));
   assert.throws(() => process.kill(pid, 0), /ESRCH/);
