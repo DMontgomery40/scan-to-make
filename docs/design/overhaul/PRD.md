@@ -636,7 +636,7 @@ type CounterpartEvent = {
 **Mac app `EventRelay` (new, Swift).** It loops on `events.wait` and persists its cursor. After a restart it doesn't notify for events older than 10 minutes; it only syncs them.
 
 For every event with `notify ≠ none`:
-1. **A Mac notification** (`UNUserNotificationCenter`), according to Settings. By default it notifies for `pass.ready`, `pass.ask`, `plate.blocked`, `print.done`, `print.failed`, `print.paused` and `print.not-started`; progress events are off by default on the Mac.
+1. **A Mac notification** (`UNUserNotificationCenter`), according to Settings. Its defaults are the Mac column of §9.1: `pass.ready`, `pass.ask`, `pass.failed`, `print.confirm`, `print.paused`, `print.done`, `print.failed` and `print.not-started` are on; progress, `print.sent` and `print.unreachable` are off.
 2. **CloudKit.** Save a `CounterpartEvent` record in the custom zone `Counterpart` of the private database, in container `iCloud.com.scantomake.counterpart`.
    - Fields: `eventId`, `seq`, `type`, `projectId`, `printId`, `title`, `body`, `notify`, `progress`, `remainingSec`, `createdAt`, and `frame` (a `CKAsset`: a JPEG at most 1280 px on the long edge and about 300 KB, made with ImageIO).
    - A daily sweep deletes records older than 7 days.
