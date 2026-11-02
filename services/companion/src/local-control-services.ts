@@ -13,7 +13,7 @@ import {readBoundedCaptureFile} from './capture-import.js';
 import {RemoteAuthStore, RemoteAuthFailure} from './remote-auth.js';
 import type {ModelAccessService} from './model-access.js';
 import type {NearbyRequest} from '@scan-to-make/contracts/nearby-pairing';
-import {InvalidAnswerError, InvalidFileError, InvalidStateError, type ObjectService} from './objects/service.js';
+import {InvalidAnswerError, InvalidFileError, InvalidStateError, SlicerRefusedError, type ObjectService} from './objects/service.js';
 import {CameraUnavailableError} from './printing/camera.js';
 import {ObjectNotFoundError} from './objects/store.js';
 import {publicObject} from './objects/http.js';
@@ -47,6 +47,8 @@ export interface ControlServices {
   /** Nearby pairing requests waiting for Allow (MAC-5), when the server has nearby pairing on. */
   nearby?: {pending(): NearbyRequest[]; answer(id: string, allow: boolean): Promise<boolean>};
 }
+/** What the Mac says of a new project while its first files arrive from the phone. */
+export const RECEIVING = 'Receiving files from your iPhone';
 const keyOf = (item: JobItem) => `${item.kind}:${item.kind === 'cleanup' ? (item.job as ScanProcessingJob).jobId : (item.job as HandoffManifest).id}`;
 async function entries(directory: string) {
   try { return await readdir(directory, {withFileTypes:true}); }
@@ -243,7 +245,10 @@ export function createControlDispatcher(services: ControlServices) {
           if (!objects) throw new ControlFailure('unavailable');
           try {
             // The Mac app is on this Mac: it gets each object's folder to read the renders and model from.
-            const local = (o: Awaited<ReturnType<typeof objects.get>>) => ({...publicObject(o), directory: objects.dir(o.id)});
+            // A new project whose first files are arriving from the phone says so (`progress`), so the Mac shows it as
+            // sending; one with no files and nothing arriving is a draft still on the phone.
+            const local = (o: Awaited<ReturnType<typeof objects.get>>) => ({...publicObject(o), directory: objects.dir(o.id),
+              ...(o.state === 'new' && !o.progress && objects.receiving(o.id) ? {progress: RECEIVING} : {})});
             if (method === 'objects.list') return {objects: (await objects.list()).map(local)};
             if (method === 'objects.printers') return objects.printers({view: true});
             if (method === 'objects.filaments') return {filaments: await objects.filaments(parameters[method].parse(raw).id)};
@@ -299,6 +304,7 @@ export function createControlDispatcher(services: ControlServices) {
             // Its sentence is written for the person ("There is no model to print yet.").
             // A refused answer says which field and why.
             if (error instanceof InvalidAnswerError) throw new ControlFailure('invalid-request', error.message);
+            if (error instanceof SlicerRefusedError) throw new ControlFailure('slicer-error', error.message);
             if (error instanceof InvalidStateError || error instanceof InvalidFileError) throw new ControlFailure('conflict', error.message);
             throw error;
           }

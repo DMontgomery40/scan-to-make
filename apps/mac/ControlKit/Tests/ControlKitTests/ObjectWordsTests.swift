@@ -71,8 +71,8 @@ final class ObjectWordsTests: XCTestCase {
         XCTAssertEqual(served.status, "Printing on Bambu Lab P1S · 42% · 1 h 5 min left")
         XCTAssertEqual(served.stage, .printing)
         XCTAssertEqual(served.group, .now)
-        let new = object(status("sending", "Sending to your Mac")).words
-        XCTAssertEqual(new.stage, .sending, "this Mac never sends files itself, so a new project is as the companion says")
+        let new = object(["scan": "scan.usdz"].merging(status("sending", "Sending to your Mac")) { $1 }).words
+        XCTAssertEqual(new.stage, .sending, "once its files arrive, a new project is as the companion says")
         XCTAssertEqual(new.status, "Sending to your Mac")
         let future = ready(status("archived", "Archived")).words
         XCTAssertEqual(future.stage, .ready, "an unknown phase keeps the shared reading of the state")
@@ -84,12 +84,43 @@ final class ObjectWordsTests: XCTestCase {
         XCTAssertEqual(sent.subtitle(request: nil), ProjectStage.sent.label)
     }
 
+    /// A phone's draft (9038b931: new, no files, unchanged for hours) is not "Sending to your Mac" under Now. The
+    /// companion keeps no upload session, so the rule is what reached this Mac and whether files are arriving now.
+    func testANewProjectWithNothingSentOrArrivingIsADraftOutsideNow() {
+        let sending = status("sending", "Sending to your Mac")
+        let draft = object(sending).words
+        XCTAssertTrue(ObjectWords.isDraft(object(sending)))
+        XCTAssertEqual(draft.stage, .draft)
+        XCTAssertEqual(draft.group, .drafts)
+        XCTAssertEqual(draft.status, "Draft from your iPhone · nothing sent yet")
+        XCTAssertFalse(draft.busy, "no spinner and no keeping the Mac awake for a draft")
+        XCTAssertFalse(draft.stage.isRunning)
+        XCTAssertEqual(draft.actions, [])
+        // Its age changes nothing: only files arriving or arrived make it a send.
+        XCTAssertEqual(object(sending.merging(["createdAtMs": 1, "updatedAtMs": Date().timeIntervalSince1970 * 1000]) { $1 }).words.stage, .draft)
+        // The first file is arriving: the companion says so on the control socket, and it is a send under Now.
+        let arriving = object(sending.merging(["progress": "Receiving files from your iPhone"]) { $1 }).words
+        XCTAssertEqual(arriving.stage, .sending)
+        XCTAssertEqual(arriving.group, .now)
+        XCTAssertEqual(arriving.status, "Sending to your Mac")
+        // Any file that reached the Mac makes it a send: a scan, photos, an in-hand capture or its depth.
+        for files in [["scan": "scan.usdz"], ["photos": ["a.jpg"]], ["capture": ["0001.jpg"]], ["captureDepth": ["0001.depth.plist"]]] as [[String: Any]] {
+            let sent = object(sending.merging(files) { $1 })
+            XCTAssertFalse(ObjectWords.isDraft(sent), "\(files)")
+            XCTAssertEqual(sent.words.group, .now, "\(files)")
+        }
+        // Only a new project can be a draft.
+        XCTAssertFalse(ObjectWords.isDraft(ready()))
+        XCTAssertEqual(ProjectGroup.drafts.title, "Drafts")
+        XCTAssertTrue(ProjectGroup.drafts < .archived && ProjectGroup.printed < .drafts, "Drafts sit after Printed, before Archived")
+    }
+
     func testEveryStageHasOneSidebarSection() {
         let states = ["new", "touching-up", "needs-closeup", "ready", "printing", "printed", "sent", "failed", "archived"]
         for state in states { XCTAssertTrue(ProjectGroup.allCases.contains(ready(["state": state]).words.group), state) }
         XCTAssertEqual(object(["state": "archived"]).words.group, .now)
         XCTAssertEqual(object(["state": "failed"]).words.group, .needsYou)
-        XCTAssertEqual(ObjectWords.group(.draft), .now)
+        XCTAssertEqual(ObjectWords.group(.draft), .drafts)
         XCTAssertTrue(Set(ProjectStage.allCases.map(ObjectWords.group)).isSubset(of: Set(ProjectGroup.allCases)))
         let done = ready(["state": "confirmed", "status": ["phase": "confirmed", "text": "It works", "symbol": "checkmark.circle.fill", "tint": "green"]]).words
         XCTAssertTrue(done.done)
@@ -236,6 +267,20 @@ final class PrintSettingsTests: XCTestCase {
          "layerHeightMm":0.2,"infillPercent":15,"wallLoops":2,"slicedAt":"2026-11-01T12:00:00Z"}
         """.utf8))
         XCTAssertEqual(estimate.layers, 212)
+        XCTAssertNil(estimate.slicerWarning)
+        // KAN-224: Bambu Studio's warning comes through word for word; Print stays on.
+        let words = "It seems object clean_flat.stl has floating cantilever. Please re-orient the object or enable support generation."
+        let warned = try JSONDecoder().decode(PrintEstimate.self, from: Data(#"{"destinationId":"current","quality":"standard","strength":"standard","seconds":2575,"slicerWarning":"\#(words)","slicedAt":"2026-11-02T10:00:00Z"}"#.utf8))
+        XCTAssertEqual(warned.slicerWarning, words)
+        // Studio's refusal holds Print with its own words; any other failure leaves Print on.
+        let refusal = "Found 3 empty layers.\nPlease re-orient the object or enable support generation."
+        XCTAssertEqual(EstimateOutcome(error: ControlRemoteError(code: "slicer-error", message: refusal)), .refused(refusal))
+        XCTAssertTrue(EstimateOutcome(error: ControlRemoteError(code: "slicer-error", message: refusal)).holdsPrint)
+        let unavailable = EstimateOutcome(error: ControlRemoteError(code: "conflict", message: "Estimates are unavailable for this printer."))
+        XCTAssertEqual(unavailable, .unavailable("Estimates are unavailable for this printer."))
+        XCTAssertFalse(unavailable.holdsPrint, "an estimate that's merely unavailable never blocks printing")
+        XCTAssertFalse(EstimateOutcome(error: ControlClientError.timedOut).holdsPrint)
+        XCTAssertFalse(EstimateOutcome(error: ControlRemoteError(code: "slicer-error", message: " ")).holdsPrint, "no words, no hold")
         let trays = try JSONDecoder().decode([PrinterFilament].self, from: Data("""
         [{"slot":0,"colour":"#141414","material":"PLA","name":"Black","filamentId":"GFA00","destinationId":"current","suggested":true},
          {"slot":254,"colour":"#FFFFFF","material":"PETG","name":"White","filamentId":"GFG00","destinationId":"current"}]

@@ -34,8 +34,9 @@ public enum ObjectAction: Sendable, Equatable {
 
 /// The sidebar's sections (PRD §7.2), in order. Every stage belongs to exactly one.
 public enum ProjectGroup: Int, Sendable, Equatable, CaseIterable, Comparable {
-    /// Done: the person said it works (PRD §5.4). Archived: hidden from the others, collapsed, everything kept.
-    case now, needsYou, ready, done, printed, archived
+    /// Done: the person said it works (PRD §5.4). Drafts: started on the phone, nothing sent yet.
+    /// Archived: hidden from the others, collapsed, everything kept.
+    case now, needsYou, ready, done, printed, drafts, archived
     public var title: String {
         switch self {
         case .now: return "Now"
@@ -43,6 +44,7 @@ public enum ProjectGroup: Int, Sendable, Equatable, CaseIterable, Comparable {
         case .ready: return "Ready"
         case .done: return "Done"
         case .printed: return "Printed"
+        case .drafts: return "Drafts"
         case .archived: return "Archived"
         }
     }
@@ -92,12 +94,25 @@ public struct ObjectWords: Sendable, Equatable {
         return head + " · " + short.prefix(1).lowercased() + short.dropFirst()
     }
 
+    /// "Draft from your iPhone · nothing sent yet".
+    public static let draftLine = "Draft from your iPhone · nothing sent yet"
+
+    /// A project started on the phone with nothing sent: new, no scan, photos or capture on this Mac, and nothing
+    /// arriving. The companion says when the first files are arriving (`progress`, control socket only); it keeps no
+    /// other trace of an upload in progress, so this never guesses from how old the project is.
+    public static func isDraft(_ object: Project) -> Bool {
+        object.state == .new && object.scan == nil && object.photos.isEmpty && (object.capture ?? []).isEmpty
+            && (object.captureDepth ?? []).isEmpty
+            && (object.progress ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     public init(_ object: Project, now: Date = Date()) {
         let project = object
         let printer = object.print?.destination?.name
-        // This Mac never sends a project's files itself, so a new project reads as the companion says it is
-        // ("Sending to your Mac") rather than as a phone's unsent draft.
-        let words = ProjectWords(project, sending: object.state == .new, printerName: printer, now: now)
+        // This Mac never sends a project's files itself. A new project is being sent once its files arrive; before
+        // that it is the phone's draft, not "Sending to your Mac".
+        let draft = Self.isDraft(object)
+        let words = ProjectWords(project, sending: object.state == .new && !draft, printerName: printer, now: now)
         title = words.title
         done = object.status?.phase == "confirmed" || object.state.rawValue == "confirmed"
         // The printer asking for a yes needs the person, also from a companion that doesn't write its own phase yet.
@@ -107,7 +122,7 @@ public struct ObjectWords: Sendable, Equatable {
         // The companion's own words when it sends them ("Getting ready · Heating", "The printer stopped: …"): never a
         // percent built here from the printer's raw progress, which can read 3% before printing has begun.
         let said = object.status?.text.trimmingCharacters(in: .whitespacesAndNewlines)
-        status = said?.isEmpty == false ? said! : done ? "It works" : words.line
+        status = draft ? Self.draftLine : said?.isEmpty == false ? said! : done ? "It works" : words.line
         // A new project waits on the phone; the Mac can't tell an upload from an abandoned draft, so it isn't busy
         // (it would keep the Mac awake and polling for good).
         busy = object.state == .new ? false : words.busy || words.phase.isRunning
@@ -136,7 +151,8 @@ public struct ObjectWords: Sendable, Equatable {
     /// Which sidebar section a stage belongs to. Failures need the person, so they sit with Needs you.
     public static func group(_ stage: ProjectStage) -> ProjectGroup {
         switch stage {
-        case .draft, .sending, .working, .preparing, .printing, .unknown: return .now
+        case .draft: return .drafts
+        case .sending, .working, .preparing, .printing, .unknown: return .now
         case .needsYou, .failed: return .needsYou
         case .ready: return .ready
         case .confirmed: return .done

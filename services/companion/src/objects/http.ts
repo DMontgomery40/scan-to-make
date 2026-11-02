@@ -246,21 +246,23 @@ export function createObjectRoutes(service: ObjectService) {
           case 'scan': {
             const name = url.searchParams.get('name') ?? 'scan.usdz';
             if (!/^scan\.(usdz|stl|3mf)$/.test(name)) throw new HttpFailure(400, 'invalid-name');
-            object = await service.addScan(id, name, await body(request, MAX_SCAN));
+            object = await service.receive(id, async () => service.addScan(id, name, await body(request, MAX_SCAN)));
             break;
           }
           case 'capture-depth': {
             const name = url.searchParams.get('name') ?? '';
             if (!/^[0-9]{4}\.depth\.plist$/.test(name)) throw new HttpFailure(400, 'invalid-name');
-            object = await service.addCaptureDepth(id, name, await body(request, MAX_DEPTH));
+            object = await service.receive(id, async () => service.addCaptureDepth(id, name, await body(request, MAX_DEPTH)));
             break;
           }
           case 'photos':
           case 'capture': {
             const name = url.searchParams.get('name') ?? '';
             if (!/^[A-Za-z0-9][A-Za-z0-9._ -]{0,127}$/.test(name) || name.includes('..')) throw new HttpFailure(400, 'invalid-name');
-            const bytes = await body(request, MAX_PHOTO);
-            object = action === 'capture' ? await service.addCapturePhoto(id, name, bytes) : await service.addPhoto(id, name, bytes);
+            object = await service.receive(id, async () => {
+              const bytes = await body(request, MAX_PHOTO);
+              return action === 'capture' ? service.addCapturePhoto(id, name, bytes) : service.addPhoto(id, name, bytes);
+            });
             break;
           }
           case 'start': {

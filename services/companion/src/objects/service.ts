@@ -16,7 +16,7 @@ import {PassTimings, STAGE_DEFAULT_SEC, passEstimate, stageWords, type PassKind,
 import type {DesignEngine} from '../touchup/invocation.js';
 import type {PrintHandoffServices} from '../print-handoff-http.js';
 import {printQuestion, validateAnswer, type ConfirmationValue} from './confirmation.js';
-import {InvalidStateError} from './errors.js';
+import {InvalidStateError, SlicerRefusedError} from './errors.js';
 import type {TouchupInput} from '../touchup/touchup.js';
 import {publicTouchupText, type TouchupActivity, type TouchupResult} from '../touchup/runner.js';
 import {ObjectNotFoundError, ObjectStore, type ObjectPrintConfirmation, type StmObject} from './store.js';
@@ -42,7 +42,7 @@ export const PHOTOS_PER_PASS = 24;
 const BEST_GUESS_NOTE = "Make your best guess for the parts you couldn't see in the photos, and carry on.";
 const UNCERTAIN = 'The printer may have started this print. Check the printer before printing again.';
 
-export {InvalidStateError} from './errors.js';
+export {InvalidStateError, SlicerRefusedError} from './errors.js';
 export {InvalidAnswerError} from './confirmation.js';
 
 export class InvalidCaptureManifestError extends Error {
@@ -171,6 +171,11 @@ export function projectStatus(object: Pick<StmObject, 'state' | 'outcome'>): Pro
   if (object.outcome === 'needs-changes') return 'needs-changes';
   if (object.state === 'printed' || object.state === 'sent') return 'printed';
   return 'not-printed';
+}
+
+/** Anything sent into the project yet: a scan, photos, or a handheld capture. */
+export function hasFiles(object: Pick<StmObject, 'scan' | 'photos' | 'capture' | 'captureDepth'>): boolean {
+  return !!object.scan || object.photos.length > 0 || (object.capture?.length ?? 0) > 0 || (object.captureDepth?.length ?? 0) > 0;
 }
 
 export class ObjectService {
@@ -421,6 +426,31 @@ export class ObjectService {
       if ((await this.get(id)).state !== 'new') throw new InvalidStateError('The description cannot change after work starts. Send a correction instead.');
       return this.#changed(await this.#deps.store.update(id, object => ({...object, instructions: instructions.trim() || undefined})));
     });
+  }
+
+  /** Phone uploads arriving right now, per project. A `new` project with none and no files yet is a draft. */
+  readonly #receiving = new Map<string, number>();
+  /** Whether a phone upload for this project is arriving right now (its body is being read or stored). */
+  receiving(id: string): boolean { return (this.#receiving.get(id) ?? 0) > 0; }
+  /**
+   * Counts one phone upload while its body arrives and is stored. The companion keeps no other trace of an upload in
+   * progress (bodies are read whole before a file is written), so this is how the Mac tells a send from a draft.
+   */
+  async receive<T>(id: string, work: () => Promise<T>): Promise<T> {
+    const before = this.#receiving.get(id) ?? 0;
+    this.#receiving.set(id, before + 1);
+    if (before === 0) await this.#draftChanged(id);
+    try { return await work(); }
+    finally {
+      const left = (this.#receiving.get(id) ?? 1) - 1;
+      if (left > 0) this.#receiving.set(id, left);
+      else { this.#receiving.delete(id); await this.#draftChanged(id); }
+    }
+  }
+  /** The apps re-read on any event: say so when a new project with no files starts or stops receiving one. */
+  async #draftChanged(id: string): Promise<void> {
+    const object = await this.#deps.store.get(id).catch(() => undefined);
+    if (object?.state === 'new' && !hasFiles(object)) await this.#emit({id: randomUUID(), type: 'project.updated', projectId: id, data: {keys: ['receiving']}});
   }
 
   async addScan(id: string, name: string, bytes: Buffer): Promise<StmObject> {
@@ -975,7 +1005,7 @@ export class ObjectService {
     catch (error) {
       if (error instanceof PrinterMcpError && error.code === 'print-settings-unsupported') throw new InvalidStateError(settingsUnsupported(services.runner.backend, {quality, strength}));
       // Bambu Studio refused the slice: its own words, exactly what a Print of the same model fails with.
-      if (error instanceof PrinterMcpError && error.code === 'slicer-error' && error.detail) throw new InvalidStateError(error.detail);
+      if (error instanceof PrinterMcpError && error.code === 'slicer-error' && error.detail) throw new SlicerRefusedError(error.detail);
       throw new InvalidStateError(error instanceof PrinterMcpError && error.detail ? `Couldn't slice it for an estimate: ${error.detail}` : "Couldn't slice it for an estimate. Check the printer service, then try again.");
     }
   }

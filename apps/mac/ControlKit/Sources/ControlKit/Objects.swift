@@ -69,6 +69,29 @@ public struct PrintEstimate: Decodable, Sendable, Equatable {
     public let layerHeightMm: Double?
     public let infillPercent: Double?
     public let wallLoops: Int?
+    /// Bambu Studio's own warning on this slice, word for word (KAN-224), such as a floating cantilever. Print still
+    /// goes ahead: the run asks "Print anyway" with the same words.
+    public let slicerWarning: String?
+}
+
+/// What the print sheet shows under its settings for one estimate (PRD §5.5): the numbers, Studio's warning, or
+/// Studio's refusal. A refusal (`slicer-error`) holds Print for that file; every other failure leaves Print on.
+public enum EstimateOutcome: Sendable, Equatable {
+    case estimate(PrintEstimate)
+    /// Bambu Studio refused to slice this model: its words, verbatim.
+    case refused(String)
+    /// Any other failure: the companion's words, or a plain fallback. Printing slices it again anyway.
+    case unavailable(String)
+
+    public init(error: Error) {
+        let remote = error as? ControlRemoteError
+        let trimmed = remote?.message.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let words = trimmed.isEmpty ? nil : trimmed
+        if remote?.code == "slicer-error", let words { self = .refused(words) }
+        else { self = .unavailable(words ?? "No estimate right now. Your printer MCP slices it when you print.") }
+    }
+    /// Print stays possible unless Studio refused this exact slice.
+    public var holdsPrint: Bool { if case .refused = self { return true } else { return false } }
 }
 
 /// One project, as CounterpartKit's shared model (`Project`, the same type the phone reads), with `directory`, its

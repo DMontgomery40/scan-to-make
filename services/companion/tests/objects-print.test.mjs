@@ -405,7 +405,7 @@ test("an estimate carries Bambu Studio's words: its warning as slicerWarning, it
     assert.equal(after.state, 'ready', 'an estimate never changes the project');
     assert.equal(after.printConfirmation, undefined, 'an estimate asks nothing');
     assert.equal((await tools()).includes('print_3mf'), false, 'an estimate sends nothing');
-    return outcome;
+    return {...outcome, service, id: object.id};
   };
   // The floating cantilever on the lay_flat output: the estimate comes back, with Studio's warning word for word.
   const words = (await studio('lay-flat-floating-cantilever')).sliced_plates[0].warning_message;
@@ -420,6 +420,12 @@ test("an estimate carries Bambu Studio's words: its warning as slicerWarning, it
   // The empty-layer error: refused with exactly the failure a Print of the same model gets, not a generic one.
   const failing = await studio('orient-empty-layers');
   const refused = await estimate('orient-empty-layers');
-  assert.ok(refused.error instanceof InvalidStateError);
+  assert.ok(refused.error instanceof InvalidStateError, 'still a 409 invalid-state on HTTP: the phone is unchanged');
   assert.equal(refused.error.message, `${failing.error_string}\n${failing.sliced_plates[0].warning_message}`);
+  // The Mac's control socket names it, so the Mac's print sheet holds Print for this file and for nothing else.
+  const dispatch = createControlDispatcher({auth: {}, companionVersion: 'test', objects: refused.service});
+  await assert.rejects(dispatch('objects.estimate', {id: refused.id}),
+    error => error.code === 'slicer-error' && error.message === refused.error.message);
+  const fine = createControlDispatcher({auth: {}, companionVersion: 'test', objects: warned.service});
+  assert.equal((await fine('objects.estimate', {id: warned.id})).slicerWarning, words, 'a warning is an estimate, not a refusal');
 });

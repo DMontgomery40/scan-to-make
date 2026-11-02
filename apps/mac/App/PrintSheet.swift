@@ -27,7 +27,8 @@ struct PrintSheet: View {
     @State private var checked = false
     @State private var estimate: PrintEstimate?
     @State private var estimateState = Loading.idle
-    enum Loading: Equatable { case idle, loading, done, failed(String) }
+    /// `refused`: Bambu Studio refused this slice (its words); Print is held for it.
+    enum Loading: Equatable { case idle, loading, done, failed(String), refused(String) }
 
     /// The last print's colour, chosen again when its printer and spool are (Print Another, PRD §5.4).
     private let lastColour: PrintSettings.Colour?
@@ -47,6 +48,8 @@ struct PrintSheet: View {
     private var words: ObjectWords { object.words }
     private var uncertain: Bool { object.print?.uncertain == true }
     private var chosen: PrinterFilament? { filaments.first { $0.slot == slot } }
+    /// The current model's file version (a correction rewrites the same file), or the project's when it can't be read.
+    private var modelVersion: Double { object.modelURL.map { FileVersion.of($0, else: object.updatedAtMs) } ?? object.updatedAtMs }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -88,6 +91,12 @@ struct PrintSheet: View {
             if uncertain {
                 Toggle("I checked the printer: it isn’t already printing this.", isOn: $checked)
             }
+            // Bambu Studio's own warning on this slice, word for word (KAN-224). Print stays on: the run asks
+            // "Print anyway" with the same words before the printer is asked anything.
+            if estimateState == .done, let warning = estimate?.slicerWarning, !warning.isEmpty {
+                Label { Text(warning).textSelection(.enabled) } icon: { Image(systemName: "exclamationmark.triangle.fill") }
+                    .font(.callout).foregroundStyle(.orange)
+            }
             if let problem = model.problem, problem.id == object.id {
                 Label(problem.text, systemImage: "exclamationmark.circle.fill").foregroundStyle(.red)
             }
@@ -105,7 +114,9 @@ struct PrintSheet: View {
         .frame(width: 720)
         .tint(.filament)
         .task(id: printer?.id) { await loadFilaments() }
-        .task(id: "\(printer?.id ?? "")|\(quality)|\(strength)|\(object.current?.model ?? "")") { await loadEstimate() }
+        // The model's version too: a correction rewrites the same current/model.stl, and a refusal of the old one
+        // must not hold Print for the new one.
+        .task(id: "\(printer?.id ?? "")|\(quality)|\(strength)|\(object.current?.model ?? "")|\(modelVersion)") { await loadEstimate() }
     }
 
     // MARK: Printers
@@ -189,6 +200,10 @@ struct PrintSheet: View {
             HStack(spacing: 6) { ProgressView().controlSize(.mini); Text("Slicing to estimate…") }.font(.callout).foregroundStyle(.secondary)
         case .failed(let text):
             Text(text).font(.callout).foregroundStyle(.secondary).lineLimit(3)
+        case .refused(let words):
+            // Studio refused to slice it: its words in place of the estimate, and Print is held for this file.
+            Label { Text(words).textSelection(.enabled) } icon: { Image(systemName: "xmark.octagon.fill") }
+                .font(.callout).foregroundStyle(.red)
         default:
             if let estimate {
                 Text(Self.summary(estimate)).font(.callout.monospacedDigit()).foregroundStyle(.secondary)
@@ -214,8 +229,11 @@ struct PrintSheet: View {
 
     // MARK: Actions
 
+    /// Bambu Studio refused this slice: printing it would fail the same way.
+    private var refused: Bool { if case .refused = estimateState { return true } else { return false } }
+
     private var canPrint: Bool {
-        printer != nil && !model.working.contains(object.id) && (!uncertain || checked)
+        printer != nil && !model.working.contains(object.id) && (!uncertain || checked) && !refused
             && (words.actions.contains(.print) || words.actions.contains(.printChecked))
             && (settingsServed || chosen != nil || (filamentState == .done && filaments.isEmpty))
     }
@@ -267,7 +285,11 @@ struct PrintSheet: View {
         } catch {
             guard !Task.isCancelled else { return }
             estimate = nil
-            estimateState = .failed((error as? ControlRemoteError)?.message.nilIfEmpty ?? "No estimate right now. Your printer MCP slices it when you print.")
+            switch EstimateOutcome(error: error) {
+            case .refused(let words): estimateState = .refused(words)
+            case .unavailable(let words): estimateState = .failed(words)
+            case .estimate: estimateState = .idle
+            }
         }
     }
 }
