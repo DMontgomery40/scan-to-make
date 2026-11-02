@@ -419,3 +419,11 @@ public extension PrintSettings {
         }
     }
 }
+
+public extension ControlClient {
+    func blenderAddon(_ action: BlenderAddonStatus.Action = .status) async throws -> BlenderAddonStatus {
+        struct Reply: Decodable { let blender: BlenderAddonStatus }
+        let reply: Reply = try await call("blender." + action.rawValue)
+        return reply.blender
+    }
+}

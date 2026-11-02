@@ -216,6 +216,18 @@ final class CompanionClientTests: XCTestCase {
         XCTAssertEqual(fake.calls.count, 3, "invalid tokens never leave the phone")
     }
 
+    func testBlenderActionsUseMatchingMethodsAndDecodeTheCompanionStatus() async throws {
+        let fake = FakeTransport { _, _ in json(200, ["blender": ["state": "restart-needed", "message": "Restart Blender when your work is saved.", "canUpdate": false]]) }
+        let mac = try client(fake)
+        for action in [BlenderAddonStatus.Action.status, .check, .update] {
+            let status = try await mac.blenderAddon(action)
+            XCTAssertEqual(status.state, "restart-needed")
+            XCTAssertFalse(status.canUpdate)
+        }
+        XCTAssertEqual(fake.calls.map { $0.request.httpMethod }, ["GET", "POST", "POST"])
+        XCTAssertEqual(fake.calls.map { $0.request.url?.path }, ["/v1/blender", "/v1/blender/check", "/v1/blender/update"])
+    }
+
     private func client(_ fake: FakeTransport, record: PairingRecord = v2Record()) throws -> CompanionClient {
         let store = PairingStore(store: MemoryStore(), defaults: UserDefaults(suiteName: "cc-\(UUID().uuidString)")!)
         try store.save(record, notify: false)

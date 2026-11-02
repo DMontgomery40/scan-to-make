@@ -66,10 +66,11 @@ function alive(pid: number): boolean {
  * (written aside, then hard-linked into place), so a contender never sees it half-written. A lock left by a
  * dead process is moved aside and checked before it's dropped, so a fresh lock is never taken over.
  */
-export async function acquireBlenderLock(lockPath = BLENDER_LOCK_PATH, opts: {pollMs?: number} = {}): Promise<() => Promise<void>> {
+export async function acquireBlenderLock(lockPath = BLENDER_LOCK_PATH, opts: {pollMs?: number; signal?: AbortSignal} = {}): Promise<() => Promise<void>> {
   await mkdir(dirname(lockPath), {recursive: true});
   const mine = String(process.pid);
   for (;;) {
+    opts.signal?.throwIfAborted();
     const staged = `${lockPath}.${mine}.${randomUUID()}`;
     await writeFile(staged, mine);
     try {

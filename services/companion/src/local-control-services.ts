@@ -46,6 +46,7 @@ export interface ControlServices {
   events?: import('./events/log.js').EventLog;
   liveActivityTokens?: import('./devices/live-activity-tokens.js').LiveActivityTokenStore;
   presence?: import('./devices/presence.js').DevicePresence;
+  blenderAddon?: import('./touchup/addon-repair.js').BlenderAddonRepair;
   mcpUpdates?: import('./printing/mcp-updates.js').McpUpdater;
   /** Nearby pairing requests waiting for Allow (MAC-5), when the server has nearby pairing on. */
   nearby?: {pending(): NearbyRequest[]; answer(id: string, allow: boolean): Promise<boolean>};
@@ -155,7 +156,14 @@ export function createControlDispatcher(services: ControlServices) {
         case 'status.get': return {protocolVersion:1,companionVersion:services.companionVersion,...(services.name?{name:services.name}:{}),transport:auth.transport,
           pairedDeviceCount:(await auth.listDevices()).length,capabilities:{capture:!!capture?.captures,cleanup:!!capture?.scanProcessing,printerHandoff:!!printHandoff,nearbyPairing:!!services.nearby,
             objectsCreate:!!services.objects,printSettings:!!services.objects?.printSettingsAvailable,printControl:!!services.objects?.printSettingsAvailable,
-            events:!!services.events&&!!services.liveActivityTokens,structuredPasses:!!services.objects,genericConfirmations:!!services.objects,materialChoice:!!services.objects,projectSettings:!!services.objects,projectPreferences:!!services.objects,projectRename:!!services.objects,messagePhotos:!!services.objects,mcpUpdates:!!services.mcpUpdates,printCopies:!!services.objects?.printCopiesAvailable}};
+            events:!!services.events&&!!services.liveActivityTokens,structuredPasses:!!services.objects,genericConfirmations:!!services.objects,materialChoice:!!services.objects,projectSettings:!!services.objects,projectPreferences:!!services.objects,projectRename:!!services.objects,messagePhotos:!!services.objects,mcpUpdates:!!services.mcpUpdates,blenderAddon:!!services.blenderAddon,printCopies:!!services.objects?.printCopiesAvailable}};
+        case 'blender.status':
+        case 'blender.check':
+        case 'blender.update': {
+          parameters[method].parse(raw);
+          if(!services.blenderAddon)throw new ControlFailure('unavailable');
+          return {blender:method==='blender.update'?services.blenderAddon.update():method==='blender.check'?services.blenderAddon.requestCheck():services.blenderAddon.current()};
+        }
         case 'printers.updateMcp': {
           if(!services.mcpUpdates)throw new ControlFailure('unavailable');
           const {mcpId,fresh}=parameters[method].parse(raw);
