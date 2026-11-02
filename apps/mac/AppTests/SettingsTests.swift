@@ -17,7 +17,7 @@ final class FusionSetupTests: XCTestCase {
         XCTAssertEqual(Array(lines[(blender + 1)...(blender + 5)]).map { $0.components(separatedBy:"=")[0] },
                        ["FUSION_MCP_COMMAND", "FUSION_MCP_ARGS", "FUSION_MCP_TIMEOUT_MS", "FUSION_MCP_HOST", "FUSION_MCP_PORT"])
         XCTAssertTrue(merged.contains("FUSION_MCP_COMMAND=/opt/homebrew/bin/uvx\n"), "the same uvx the Blender bridge uses")
-        XCTAssertTrue(merged.contains("FUSION_MCP_ARGS=[\"--from\",\"git+https://github.com/faust-machines/fusion360-mcp-server@19b9f1e95192\",\"fusion360-mcp-server\",\"--mode\",\"socket\"]\n"))
+        XCTAssertTrue(merged.contains("FUSION_MCP_ARGS=[\"--from\",\"git+https://github.com/DMontgomery40/fusion360-mcp-server@86a3016a5a5b\",\"fusion360-mcp-server\",\"--mode\",\"socket\"]\n"))
         XCTAssertTrue(merged.contains("FUSION_MCP_PORT=9877\n"), "off Blender's 9876")
         for line in env.components(separatedBy:"\n") where !line.isEmpty { XCTAssertTrue(lines.contains(line), line) }
         XCTAssertTrue(FusionSetup.isConfigured(env:merged))
@@ -41,7 +41,7 @@ final class FusionSetupTests: XCTestCase {
         try FileManager.default.createDirectory(at:folder.appendingPathComponent("server"), withIntermediateDirectories:true)
         try Data("not the add-in".utf8).write(to:folder.appendingPathComponent("Fusion360MCP.py"))
         XCTAssertThrowsError(try FusionSetup.verify(folder))
-        XCTAssertEqual(FusionSetup.addinFiles.count, 9)
+        XCTAssertEqual(FusionSetup.addinFiles.count, 10)
         XCTAssertEqual(FusionSetup.commit.count, 40)
         XCTAssertTrue(FusionSetup.commit.hasPrefix(FusionSetup.shortCommit))
     }

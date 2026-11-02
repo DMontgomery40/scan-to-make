@@ -1,7 +1,8 @@
 import {writeFileSync} from 'node:fs';
 import {userInfo} from 'node:os';
 import {join} from 'node:path';
-import type {PrinterMcpProcess} from '@scan-to-make/printer-handoff';
+import {fileURLToPath} from 'node:url';
+import type {PrinterMcpProcess, PrinterHandoffConfig} from '@scan-to-make/printer-handoff';
 import type {TouchupPass} from './inputs.js';
 
 export const TOUCHUP_INSTRUCTION = 'Look at the pictures of this, and then tweak the scan based on that.';
@@ -38,7 +39,7 @@ export const TOUCHUP_RESULT_SCHEMA = {
 /** The design engine for a pass (PRD §8.9): Blender always for copies; Fusion for new designs when it's connected. */
 export type DesignEngine = 'blender' | 'fusion';
 
-const FUSION_RULES = `- Design it in Autodesk Fusion through the printer MCP's fusion_mcp_* tools: fusion_mcp_call reaches Fusion's own tools (create_sketch, extrude, revolve, fillet, shell, boolean_operation, create_parameter, set_parameter, get_parameters, check_interference, …). A new parametric design is open.
+const FUSION_RULES = `- Design it in Autodesk Fusion through the printer MCP's fusion_mcp_* tools: fusion_mcp_call reaches Fusion's own tools (create_sketch, extrude, revolve, fillet, shell, boolean_operation, create_parameter, set_parameter, get_parameters, check_interference, …). A separate document is already prepared for this pass. Its identity is fixed by the tools: work with the provided design and component, without opening or switching documents.
 - Make every functional dimension a named user parameter, so a later change is one set_parameter.
 - When the design is finished, call fusion_mcp_export with output_dir set to the output folder and name "touched": it writes touched.stl, touched.f3d and touched.parameters.json. Use body_name when the design has more than one body.
 - If you can, save clear PNG views of the design to the output folder, named so the clearest overall view sorts first.`;
@@ -67,6 +68,8 @@ export interface TouchupInvocation {
   env: NodeJS.ProcessEnv;
   cwd: string;
   mcpConfigPath: string;
+  /** Runner-only redaction inputs; never forwarded to the worker or adapter environment. */
+  redactionEnv?: NodeJS.ProcessEnv;
   mcpConfig: {mcpServers: Record<string, McpServerEntry>};
 }
 
@@ -124,9 +127,17 @@ export function systemRules(engine: DesignEngine = 'blender'): string {
 export const TOUCHUP_SYSTEM_RULES = systemRules('blender');
 
 export function buildTouchupInvocation(input: {pass: TouchupPass; printer: PrinterMcpProcess; claudePath: string; instructions?: string; note?: string; summary?: string; currentModel?: boolean; sourceEnv?: NodeJS.ProcessEnv;
-  engine?: DesignEngine; design?: {f3d: string; parameters?: string}}): TouchupInvocation {
+  engine?: DesignEngine; documentId?: string; handoff?: PrinterHandoffConfig; design?: {f3d: string; parameters?: string}}): TouchupInvocation {
   const {pass} = input;
-  const mcpConfig = {mcpServers: {printer: printerServer(input.printer)}};
+  let printer = printerServer(input.printer);
+  if (input.engine === 'fusion') {
+    if (!input.documentId?.trim() || !input.handoff) throw new Error('A Fusion pass requires a document binding');
+    const binding = join(pass.dir, 'fusion-binding.json');
+    writeFileSync(binding, JSON.stringify({handoff: input.handoff, documentId: input.documentId}), {mode: 0o600});
+    printer = {command: process.execPath, args: [fileURLToPath(new URL('./fusion-worker-cli.js', import.meta.url)), binding]};
+    if (process.env.SCAN_TO_MAKE_PRINTER_NODE) printer.env = {SCAN_TO_MAKE_PRINTER_NODE: process.env.SCAN_TO_MAKE_PRINTER_NODE};
+  }
+  const mcpConfig = {mcpServers: {printer}};
   const mcpConfigPath = join(pass.dir, 'mcp.json');
   writeFileSync(mcpConfigPath, JSON.stringify(mcpConfig, null, 2), {mode: 0o600});
   const args = [
@@ -145,7 +156,7 @@ export function buildTouchupInvocation(input: {pass: TouchupPass; printer: Print
     '--output-format', 'stream-json',
     '--verbose',
     prompt(pass, input.instructions, input.note, input.summary, input.currentModel) + (input.engine === 'fusion' && input.design
-      ? `\n\nThe current design is a parametric Fusion design: ${input.design.f3d}${input.design.parameters ? ` (its parameters: ${input.design.parameters})` : ''}. Open it in Fusion and change its parameters rather than the mesh.` : ''),
+      ? `\n\nThe current design is a parametric Fusion design: ${input.design.f3d}${input.design.parameters ? ` (its parameters: ${input.design.parameters})` : ''}. A separate copy is already imported into this pass's bound document. Change its parameters rather than opening the archive again or editing the mesh.` : ''),
   ];
-  return {command: input.claudePath, args, env: isolatedClaudeEnv(input.sourceEnv ?? process.env), cwd: pass.dir, mcpConfigPath, mcpConfig};
+  return {command: input.claudePath, args, env: isolatedClaudeEnv(input.sourceEnv ?? process.env), cwd: pass.dir, mcpConfigPath, mcpConfig, redactionEnv: {...input.printer.env}};
 }

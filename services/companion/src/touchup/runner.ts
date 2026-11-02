@@ -127,7 +127,7 @@ export async function runClaudeWorker(inv: TouchupInvocation, opts: {
   const timeoutMs = opts.timeoutMs ?? TOUCHUP_TIMEOUT_MS, maxToolCalls = opts.maxToolCalls ?? TOUCHUP_MAX_TOOL_CALLS;
   const started = Date.now();
   const seconds = () => Math.round((Date.now() - started) / 1000);
-  const publicText = (text: string) => publicTouchupText(text, {...inv.env, ...inv.mcpConfig.mcpServers.printer?.env});
+  const publicText = (text: string) => publicTouchupText(text, {...inv.env, ...inv.mcpConfig.mcpServers.printer?.env, ...inv.redactionEnv});
   const child = spawn(inv.command, inv.args, {cwd: inv.cwd, env: inv.env, detached: true, stdio: ['ignore', 'pipe', 'pipe']});
   let toolCalls = 0, lastText: string | undefined, resultEvent: ResultEvent | undefined, stopReason: string | undefined, stderrTail = '';
   let worker: TouchupResult['worker'];
@@ -213,7 +213,7 @@ export async function runTouchupWorker(inv: TouchupInvocation, pass: TouchupPass
   const base = {renders, checkpoints, ...(worker ? {worker} : {}), stats: {seconds: seconds(), toolCalls, ...(resultEvent?.total_cost_usd !== undefined ? {costUsd: resultEvent.total_cost_usd} : {})}};
   const withModel = model ? {model} : {};
   const answer = resultEvent?.structured_output;
-  const summary = {...(answer?.summary ? {summary: answer.summary} : {}), ...structured(answer, publicText)};
+  const summary = {...(answer?.summary ? {summary: publicText(answer.summary)} : {}), ...structured(answer, publicText)};
   const f3d = join(pass.outDir, 'touched.f3d'), parameters = join(pass.outDir, 'touched.parameters.json');
   const design = await stat(f3d).then(info => info.isFile(), () => false)
     ? {design: {f3d, ...(await stat(parameters).then(info => info.isFile(), () => false) ? {parameters} : {})}} : {};
@@ -221,16 +221,16 @@ export async function runTouchupWorker(inv: TouchupInvocation, pass: TouchupPass
 
   if (ended.error) {
     const reason = ended.error.code === 'ENOENT' ? `Claude Code wasn't found at ${inv.command}. Install it or sign in.` : `Claude Code couldn't start: ${ended.error.message}`;
-    return {status: 'failed', reason, ...base};
+    return {status: 'failed', reason: publicText(reason), ...base};
   }
   if (stopReason === 'cancelled') return {status: 'failed', reason: 'cancelled', ...withModel, ...base};
   if (stopReason !== undefined) return {status: 'capped', reason: stopReason, ...withModel, ...base};
   if (!resultEvent || resultEvent.is_error || !answer) {
     const reason = resultEvent?.result?.trim() || stderrTail.trim().split('\n').at(-1) || `the worker exited with code ${exitCode}`;
-    return {status: 'failed', reason, ...withModel, ...base};
+    return {status: 'failed', reason: publicText(reason), ...withModel, ...base};
   }
-  if (answer.status === 'failed') return {status: 'failed', reason: answer.summary?.trim() || 'the worker could not finish', ...withModel, ...base};
-  if (answer.status === 'needs_closeup') return {status: 'needs_closeup', closeup: answer.closeup ?? 'a part of the object', ...summary, ...withModel, ...base};
+  if (answer.status === 'failed') return {status: 'failed', reason: publicText(answer.summary?.trim() || 'the worker could not finish'), ...withModel, ...base};
+  if (answer.status === 'needs_closeup') return {status: 'needs_closeup', closeup: publicText(answer.closeup ?? 'a part of the object'), ...summary, ...withModel, ...base};
   if (!model) return {status: 'failed', reason: 'no model was saved', ...summary, ...base};
   // The rules require a checkpoint after every fix: a touch-up of a scan with none saved fixed nothing.
   // A make job (no scan) has nothing to be unchanged.

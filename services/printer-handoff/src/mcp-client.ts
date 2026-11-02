@@ -70,6 +70,9 @@ export interface PrinterMcpClientOptions {
 }
 
 export interface PrinterToolCallOptions {
+  /** Transparent MCP adapters preserve tool errors and media under the SDK's
+   * transport frame limit, without applying printer-domain result semantics. */
+  forwardResult?: boolean;
   signal?: AbortSignal;
   timeoutMs?: number;
   dispatchSensitive?: boolean;
@@ -240,6 +243,7 @@ export class PrinterMcpClient {
       failure.incomplete = true;
       throw failure;
     }
+    if (options.forwardResult) return structuredClone(result);
     // This exact Bambu rejection is emitted by the idle-state preflight before
     // upload/dispatch. Preserve the actionable refusal instead of inventing uncertainty.
     if (result.isError && this.#config.backend === 'bambu-printer-mcp' && name === 'print_3mf') {

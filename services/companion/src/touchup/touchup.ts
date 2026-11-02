@@ -1,5 +1,5 @@
 import {createHash} from 'node:crypto';
-import {link, mkdir, readFile, rename, unlink, writeFile} from 'node:fs/promises';
+import {link, lstat, mkdir, readFile, rename, unlink, writeFile} from 'node:fs/promises';
 import {randomUUID} from 'node:crypto';
 import {homedir} from 'node:os';
 import {dirname, join} from 'node:path';
@@ -37,12 +37,12 @@ export interface TouchupInput {
 }
 
 /** Which engine ran, and why it isn't Fusion when Fusion was wanted. */
-export interface EngineChoice {engine: DesignEngine; note?: string}
+export interface EngineChoice {engine: DesignEngine; note?: string; documentId?: string}
 export interface TouchupDeps {
   ensureBlender?: () => Promise<unknown>;
   resetScene?: (client: ReturnType<NonNullable<TouchupDeps['client']>>, signal?: AbortSignal) => Promise<void>;
   stopBlender?: typeof stopOwnedBlender;
-  client?: (handoff: PrinterHandoffConfig) => Pick<PrinterMcpClient, 'connect' | 'callTool' | 'close' | 'hasTool'>;
+  client?: (handoff: PrinterHandoffConfig) => Pick<PrinterMcpClient, 'connect' | 'callTool' | 'close' | 'hasTool' | 'getTool'>;
   prepare?: typeof prepareTouchupPass;
   run?: (inv: TouchupInvocation, pass: TouchupPass, opts: Parameters<typeof runTouchupWorker>[2]) => Promise<TouchupResult>;
   lockPath?: string;
@@ -107,7 +107,7 @@ async function stlSha256(scan: string[]): Promise<string | undefined> {
  * printer MCP's bridge reports it connected (after `launch: true`) and a new
  * design opens; otherwise Blender, with the reason recorded.
  */
-export async function chooseEngine(input: Pick<TouchupInput, 'handoff' | 'kind' | 'signal' | 'preferredEngine'>, deps: Pick<TouchupDeps, 'client'> = {}): Promise<EngineChoice> {
+export async function chooseEngine(input: Pick<TouchupInput, 'handoff' | 'kind' | 'signal' | 'preferredEngine' | 'design'>, deps: Pick<TouchupDeps, 'client'> = {}): Promise<EngineChoice> {
   if (input.kind !== 'fit' || input.preferredEngine === 'blender') return {engine: 'blender'};
   const client = (deps.client ?? (handoff => new PrinterMcpClient(handoff)))(input.handoff);
   try {
@@ -119,13 +119,55 @@ export async function chooseEngine(input: Pick<TouchupInput, 'handoff' | 'kind' 
     if (value.configured === false) return {engine: 'blender'};
     if (value.connected !== true) return {engine: 'blender', note: `Fusion isn't connected${typeof value.error === 'string' && value.error ? `: ${value.error.slice(0, 200)}` : ''}.`};
     if (!client.hasTool('fusion_mcp_new_design')) return {engine: 'blender', note: "This printer MCP can't open a new Fusion design."};
-    // faust-machines/fusion360-mcp-server#12: opening a design can fail with none open.
-    const opened = await client.callTool('fusion_mcp_new_design', {}, {signal: input.signal, timeoutMs: 120_000});
+    if (!client.getTool('fusion_mcp_new_design').inputSchema.properties?.bind_document)
+      return {engine: 'blender', note: "The Fusion bridge needs an update for document binding."};
+    const opened = await client.callTool('fusion_mcp_new_design', {bind_document: true, ...(input.design ? {source_f3d: input.design.f3d} : {})}, {signal: input.signal, timeoutMs: 120_000});
     if (opened.isError) return {engine: 'blender', note: `Fusion couldn't open a new design: ${toolErrorText(opened).slice(0, 200)}`};
-    return {engine: 'fusion'};
+    const created = JSON.parse((opened.content ?? []).flatMap(item => item.type === 'text' ? [item.text] : []).join('') || '{}') as {document_id?: unknown; document_binding?: unknown};
+    if (created.document_binding !== 1 || typeof created.document_id !== 'string' || !created.document_id.trim())
+      return {engine: 'blender', note: "Fusion did not confirm document binding. Update its bridge and add-in before using it."};
+    return {engine: 'fusion', documentId: created.document_id};
   } catch (error) {
     if (input.signal?.aborted) throw error;
     return {engine: 'blender', note: `Fusion isn't reachable: ${error instanceof Error ? error.message.slice(0, 200) : String(error).slice(0, 200)}`};
+  } finally {
+    await client.close().catch(() => undefined);
+  }
+}
+
+/** Reopen the saved archive with Fusion before discarding the original recovery document.
+ * Native import understands Fusion's archive compression and validates the editable design. */
+async function closeCompletedFusionDocument(input: TouchupInput, deps: TouchupDeps, documentId: string, archive: string): Promise<{valid: boolean; note?: string}> {
+  const client = (deps.client ?? (handoff => new PrinterMcpClient(handoff)))(input.handoff);
+  const signal = AbortSignal.timeout(120_000);
+  let valid = false, verificationId: string | undefined;
+  const close = async (id: string) => {
+    const reply = await client.callTool('fusion_mcp_call', {tool_name: 'close_document', arguments: {}, document_id: id}, {signal, timeoutMs: 10_000});
+    if (reply.isError) throw new Error('close refused');
+  };
+  try {
+    const file = await lstat(archive);
+    if (!file.isFile() || file.size === 0) throw new Error('missing archive');
+    await client.connect(signal);
+    const imported = await client.callTool('fusion_mcp_new_design', {bind_document: true, source_f3d: archive}, {signal, timeoutMs: 120_000});
+    if (imported.isError) throw new Error('archive import refused');
+    const receipt = JSON.parse((imported.content ?? []).flatMap(item => item.type === 'text' ? [item.text] : []).join('') || '{}') as {document_binding?: unknown; document_id?: unknown};
+    if (receipt.document_binding !== 1 || typeof receipt.document_id !== 'string' || !receipt.document_id.trim() || receipt.document_id === documentId)
+      throw new Error('archive import did not confirm a separate owned document');
+    verificationId = receipt.document_id;
+    valid = true;
+    await close(verificationId);
+    verificationId = undefined;
+    await close(documentId);
+    return {valid};
+  } catch {
+    const note = !valid
+      ? 'The editable Fusion archive could not be reopened. The original Fusion document remains open for recovery.'
+      : verificationId
+        ? 'The design files were verified. The original Fusion document remains open because closing the verification document could not be confirmed.'
+        : 'The design files were verified. The original Fusion document may still be open because closing it could not be confirmed.';
+    process.stderr.write(`Counterpart: ${note}\n`);
+    return {valid, note};
   } finally {
     await client.close().catch(() => undefined);
   }
@@ -140,7 +182,18 @@ async function touchUp(input: TouchupInput, deps: TouchupDeps): Promise<TouchupR
   catch (error) { await releaseFusion?.(); throw error; }
   // Fusion passes don't touch Blender: no Blender lock, no launch, no scene reset.
   if (choice.engine === 'fusion') {
-    try { return {...await touchUpLocked(input, deps, choice), ...choice}; }
+    try {
+      const result = await touchUpLocked(input, deps, choice);
+      if ((result.status === 'done' || result.status === 'unchanged') && result.model && result.design?.f3d && choice.documentId) {
+        const checked = await closeCompletedFusionDocument(input, deps, choice.documentId, result.design.f3d);
+        if (!checked.valid) {
+          const {design: _invalidArchive, ...savedMesh} = result;
+          return {...savedMesh, ...choice, status: 'failed', reason: checked.note};
+        }
+        return {...result, ...choice, ...(checked.note ? {note: checked.note} : {})};
+      }
+      return {...result, ...choice};
+    }
     finally { await releaseFusion?.(); }
   }
   await releaseFusion?.();
@@ -162,7 +215,7 @@ async function touchUpLocked(input: TouchupInput, deps: TouchupDeps, choice: Eng
   // service supplies the explicit flag, including false for failed first passes.
   const currentModel = input.currentModel ?? (input.note !== undefined && input.scan.length === 1 && input.scan[0]!.toLowerCase().endsWith('.stl'));
   input.onStage?.('working', choice.engine);
-  const inv = buildTouchupInvocation({pass, printer: input.handoff.process, claudePath: input.claudePath, currentModel, engine: choice.engine,
+  const inv = buildTouchupInvocation({pass, printer: input.handoff.process, claudePath: input.claudePath, currentModel, engine: choice.engine, documentId: choice.documentId, handoff: input.handoff,
     ...(choice.engine === 'fusion' && input.design ? {design: input.design} : {}),
     ...(input.instructions !== undefined ? {instructions: input.instructions} : {}),
     ...(input.note !== undefined ? {note: input.note} : {}), ...(input.summary !== undefined ? {summary: input.summary} : {})});

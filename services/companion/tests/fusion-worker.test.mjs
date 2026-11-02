@@ -1,0 +1,35 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {mkdtemp, writeFile, readFile, rm} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {fileURLToPath} from 'node:url';
+import {createRequire} from 'node:module';
+const handoffRequire = createRequire(new URL('../../printer-handoff/package.json', import.meta.url));
+const {Client} = await import(handoffRequire.resolve('@modelcontextprotocol/sdk/client/index.js'));
+const {StdioClientTransport} = await import(handoffRequire.resolve('@modelcontextprotocol/sdk/client/stdio.js'));
+
+test('actual worker CLI forwards the fixed binding and closes the configured peer on stdin EOF', async t => {
+  const dir = await mkdtemp(join(tmpdir(), 'fusion-worker-'));
+  t.after(() => rm(dir, {recursive: true, force: true}));
+  const log = join(dir, 'calls.jsonl');
+  const config = join(dir, 'binding.json');
+  const peer = fileURLToPath(new URL('../../printer-handoff/tests/fixtures/bound-fusion-peer.mjs', import.meta.url));
+  await writeFile(config, JSON.stringify({documentId: 'owned-document', handoff: {backend: 'bambu-printer-mcp', process: {command: process.execPath, args: [peer, log]}}}));
+  const transport = new StdioClientTransport({command: process.execPath, args: [fileURLToPath(new URL('../dist/touchup/fusion-worker-cli.js', import.meta.url)), config], stderr: 'pipe'});
+  let stderr = '';
+  transport.stderr?.on('data', data => {stderr += data;});
+  const client = new Client({name: 'worker-test', version: '1'});
+  t.after(() => client.close());
+  await client.connect(transport);
+  await client.callTool({name: 'fusion_mcp_call', arguments: {tool_name: 'extrude', arguments: {distance: 1}}});
+  const refused = await client.callTool({name: 'fusion_mcp_call', arguments: {tool_name: 'broken_profile'}});
+  assert.equal(refused.isError, true);
+  assert.match(refused.content[0].text, /PROFILE_NOT_CLOSED: close the loop/);
+  const image = await client.callTool({name: 'fusion_mcp_call', arguments: {tool_name: 'render_view'}});
+  assert.equal(image.content[0].type, 'image');
+  assert.equal(image.content[0].data.length, Buffer.alloc(1024 * 1024).toString('base64').length);
+  await client.close();
+  const events = (await readFile(log, 'utf8')).trim().split('\n').map(JSON.parse);
+  assert.deepEqual(events, [{name: 'fusion_mcp_call', arguments: {tool_name: 'extrude', arguments: {distance: 1}, document_id: 'owned-document'}}, {name: 'fusion_mcp_call', arguments: {tool_name: 'broken_profile', document_id: 'owned-document'}}, {name: 'fusion_mcp_call', arguments: {tool_name: 'render_view', document_id: 'owned-document'}}, {closed: true}], stderr);
+});

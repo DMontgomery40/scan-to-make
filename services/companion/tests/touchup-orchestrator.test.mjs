@@ -159,7 +159,8 @@ test('a batch ending in Fusion still releases the Blender used by its earlier pa
   const fusion = {...recorder(log),
     fusionLockPath: join(mkdtempSync(join(tmpdir(), 'touchup-mixed-lock-')), 'fusion.lock'),
     client: () => ({connect: async () => {}, close: async () => {}, hasTool: () => true,
-      callTool: async () => ({content: [{type: 'text', text: JSON.stringify({connected: true})}]})}),
+      getTool: () => ({inputSchema: {properties: {bind_document: {type: "boolean"}}}}),
+      callTool: async () => ({content: [{type: 'text', text: JSON.stringify({connected: true, document_binding: 1, document_id: "owned-token"})}]})}),
   };
   const first = await input(), last = await input({kind: 'fit'});
   await Promise.all([runTouchup(first, blender), runTouchup(last, fusion)]);

@@ -47,7 +47,7 @@ if(process.env.CODEX_HOME){record.codexHome=fs.readdirSync(process.env.CODEX_HOM
  try{record.auth=fs.readFileSync(path.join(process.env.CODEX_HOME,'auth.json'),'utf8');}catch{}}
 const prompt=argv[1];fs.appendFileSync(${JSON.stringify(join(f.root,'calls.log'))},prompt+'\\n');
 const action=${JSON.stringify(action)};
-const sessionId='11111111-2222-3333-4444-555555555555';
+const sessionId=require('node:crypto').randomUUID();
 if('${name}'==='claude'){
  console.log(JSON.stringify({type:'system',subtype:'init',session_id:sessionId,model:'claude-opus-5-5',apiKeySource:process.env.ANTHROPIC_API_KEY?'ANTHROPIC_API_KEY':'none',mcp_servers:[],plugins:[{source:'builtin@builtin'}],skills:['x']}));
  const projects=path.join(process.env.CLAUDE_CONFIG_DIR||path.join(process.env.HOME,'.claude'),'projects','-sealed');fs.mkdirSync(projects,{recursive:true});
@@ -274,6 +274,7 @@ test('attempts run in separate sealed folders and leave no workspace behind',asy
  const own=join(f.root,'tmp');await mkdir(own);const saved=process.env.TMPDIR;process.env.TMPDIR=own;
  t.after(()=>{if(saved===undefined)delete process.env.TMPDIR;else process.env.TMPDIR=saved;});
  const manifest=await runAiTweak({mesh:f.mesh,stills:[]},out,base(f,{access:{kind:'claude-code'},claudePath,attempts:3}));
+ assert.equal(new Set(manifest.attempts.map(a=>a.seal.sessionId)).size,3,'parallel CLI invocations have distinct sessions');
  assert.deepEqual(manifest.attempts.map(a=>[a.index,a.outcome]),[[1,'changed'],[2,'changed'],[3,'changed']]);
  assert.deepEqual(await readdir(own),[]);
  await assert.rejects(runAiTweak({mesh:f.mesh,stills:[]},out,base(f,{access:{kind:'claude-code'},claudePath})),/EEXIST/);
