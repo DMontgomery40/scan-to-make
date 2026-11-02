@@ -67,7 +67,11 @@ struct SocketNearby: NearbyCompanion {
             }
         }
         pollsSinceStatus += 1
-        guard enabled == true else { requests = []; problem = nil; return 30 }
+        guard enabled == true else {
+            if !requests.isEmpty { requests = [] }
+            if problem != nil { problem = nil }
+            return 30
+        }
         await list()
         return 2
     }
@@ -80,7 +84,9 @@ struct SocketNearby: NearbyCompanion {
     /// Shows unexpired requests, and drops a problem whose request has gone.
     private func show(_ items: [ControlNearbyRequest]) {
         let nowMs = now().timeIntervalSince1970 * 1000
-        requests = items.filter { $0.expiresAt > nowMs }
+        // Published only when it changed: this runs every 2 s, and each change redraws the menu bar item (PRD §9.6).
+        let shown = items.filter { $0.expiresAt > nowMs }
+        if requests != shown { requests = shown }
         if let problem, !requests.contains(where: { $0.id == problem.requestID }) { self.problem = nil }
     }
 

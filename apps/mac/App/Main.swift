@@ -183,6 +183,15 @@ struct CounterpartCommands: Commands {
         #endif
         localNetwork.observeNetwork { [weak self] in self?.permissionProbeForeground() ?? false }
         NotificationCenter.default.addObserver(self, selector:#selector(windowBecameKey(_:)), name:NSWindow.didBecomeKeyNotification, object:nil)
+        #if DEBUG
+        // Design QA on a real project (`--design-project`) only looks: the installed app keeps the event cursor, the
+        // phone relay, nearby pairing and the login item. A second relay would move the shared cursor past events.
+        if DesignFixtures.realProject != nil {
+            AppRouter.shared.open(.main)
+            DesignSnapshot.scheduleIfAsked()
+            return
+        }
+        #endif
         if Installation(bundle:.main).variant.isEmpty && SMAppService.mainApp.status == .notRegistered
             && !UserDefaults.standard.bool(forKey:"openAtLoginOff") {
             try? SMAppService.mainApp.register()
