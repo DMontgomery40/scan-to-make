@@ -24,6 +24,8 @@ import CounterpartKit
     var route: AppRoute?
     /// Debug builds: which project section a screenshot opens on.
     var debugSection: String?
+    /// DEBUG: the printer whose page `-CounterpartScreen printer` opens.
+    var debugPrinter: String?
     private var lastLink: (url: String, at: Date)?
     private var observer: NSObjectProtocol?
 
@@ -109,9 +111,18 @@ import CounterpartKit
         case "ask": route = .project(ids.plush)
         case "failed": route = .project(ids.failed); debugSection = "activity"
         case "printing": route = .printing(ids.clip)
-        case "print": route = .print(ids.mic)
+        // The one-colour sheet: v1 prints one filament (PRD §5.5); "print" shows the same until parts arrive (M3b).
+        case "print", "print-one": route = .print(ids.mic)
+        case "print-noams": Fixtures.printer = "mcp-garage"; route = .print(ids.mic)
+        case "print-loaded": Fixtures.printer = "mcp-ender"; route = .print(ids.mic)
+        case "confirm": Fixtures.confirmation = "supported"; route = .project(ids.mic)
+        case "confirm-mac": Fixtures.confirmation = "unsupported"; route = .project(ids.mic)
+        case "confirm-mac-answers": Fixtures.confirmation = "unsupported"; Fixtures.macAnswers = true; route = .project(ids.mic)
+        case "confirm-generic": Fixtures.confirmation = "generic"; route = .project(ids.mic)
         case "new": route = .newProject
         case "printers": route = .printers
+        case "printer": debugPrinter = "current"; route = .printers
+        case "printer-update": debugPrinter = "mcp-ender"; route = .printers
         default: break
         }
     }

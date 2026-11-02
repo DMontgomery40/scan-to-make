@@ -33,9 +33,6 @@ typealias MacError = CompanionError
     func start(_ id: String, captureManifest: [String: Any]? = nil) async throws -> StmObject { try await client.start(id, captureManifest: captureManifest) }
     func correct(_ id: String, _ note: String) async throws -> StmObject { try await client.correct(id, note) }
     func closeup(_ id: String, bestGuess: Bool) async throws -> StmObject { try await client.answerAsk(id, bestGuess: bestGuess) }
-    func print(_ id: String, checked: Bool, filament: PrinterFilament) async throws -> StmObject {
-        try await client.print(id, choice: PrintChoice(filament: filament, checked: checked))
-    }
     func answerPrintConfirmation(_ id: String, response: PrintConfirmationResponse) async throws -> StmObject {
         try await client.answerPrintConfirmation(id, response: response)
     }

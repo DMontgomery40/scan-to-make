@@ -136,23 +136,48 @@ public enum PrintStrength: String, CaseIterable, Codable, Sendable {
     public var infillPercent: Int { switch self { case .standard: 15; case .strong: 25; case .max: 40 } }
 }
 
+/// Which filament a print uses (`colour` in `POST …/print`, PRD §5.5).
+public enum PrintColour: Equatable, Sendable {
+    /// A tray the printer reported, sent as the full tray identity every companion accepts.
+    case tray(PrinterFilament)
+    /// The tray the Mac suggested, kept: the MCP matches the AMS itself.
+    case auto
+    /// The external spool, not the AMS.
+    case external
+    /// A printer that doesn't report its filament: the material, so the Mac slices at the right temperatures.
+    case material(String)
+
+    var json: (key: String, value: Any) {
+        switch self {
+        case .tray(let f): ("filament", ["slot": f.slot, "colour": f.colour, "material": f.material, "name": f.name,
+                                         "filamentId": f.filamentId, "destinationId": f.destinationId] as [String: Any])
+        case .auto: ("colour", ["auto": true])
+        case .external: ("colour", ["external": true])
+        case .material(let m): ("colour", ["material": m])
+        }
+    }
+}
+
 /// What the print sheet sends with Print.
 public struct PrintChoice: Equatable, Sendable {
-    public var filament: PrinterFilament
+    /// Nil leaves the filament to the MCP's own defaults.
+    public var colour: PrintColour?
     public var quality: PrintQuality
     public var strength: PrintStrength
     /// The previous print may have reached the printer, and you said it isn't printing this.
     public var checked: Bool
+    public init(colour: PrintColour?, quality: PrintQuality = .standard, strength: PrintStrength = .standard, checked: Bool = false) {
+        self.colour = colour; self.quality = quality; self.strength = strength; self.checked = checked
+    }
     public init(filament: PrinterFilament, quality: PrintQuality = .standard, strength: PrintStrength = .standard, checked: Bool = false) {
-        self.filament = filament; self.quality = quality; self.strength = strength; self.checked = checked
+        self.init(colour: .tray(filament), quality: quality, strength: strength, checked: checked)
     }
 
-    /// The `POST …/print` body. Standard quality and strength send nothing (the MCP's preset decides), so a
-    /// plain print is the body every companion accepts.
+    /// The `POST …/print` body. Standard quality and strength send nothing (the MCP's preset decides), and a
+    /// chosen tray goes as `filament`, so a plain print is the body every companion accepts.
     public var body: [String: Any] {
-        var json: [String: Any] = ["checked": checked,
-                                   "filament": ["slot": filament.slot, "colour": filament.colour, "material": filament.material, "name": filament.name,
-                                                "filamentId": filament.filamentId, "destinationId": filament.destinationId]]
+        var json: [String: Any] = ["checked": checked]
+        if let colour { json[colour.json.key] = colour.json.value }
         if quality != .standard { json["quality"] = quality.rawValue }
         if strength != .standard { json["strength"] = strength.rawValue }
         return json

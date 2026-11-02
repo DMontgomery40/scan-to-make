@@ -1,12 +1,13 @@
 import SwiftUI
 import CounterpartKit
 
-/// A print on its way: getting it ready, the printer's own question, or printing.
+/// A print on its way: getting it ready, the printer's own question (answered in its sheet), or printing.
 struct PrintStatusCard: View {
     let store: ProjectsStore
     let project: Project
     @Binding var working: Bool
     let openPrinting: () -> Void
+    let openConfirmation: () -> Void
     @State private var problem: String?
 
     var body: some View {
@@ -18,11 +19,19 @@ struct PrintStatusCard: View {
                 Spacer()
             }
             if let confirmation = project.printConfirmation {
-                PrinterConfirmationView(question: confirmation, working: working) { action, content in answer(confirmation, action, content) }
-                    .id(confirmation.id)
+                Text(confirmation.isRenderable ? "Nothing goes to the printer until you say yes." : "Counterpart can't show this question yet.")
+                    .font(.subheadline).foregroundStyle(.secondary)
+                HStack(spacing: 10) {
+                    Button(action: openConfirmation) { Label("Review", systemImage: "checkmark.shield").frame(maxWidth: .infinity).frame(height: 36) }
+                        .buttonStyle(.glassProminent)
+                    Button(role: .destructive) { answer(confirmation, .cancel, [:]) } label: { Text("Don't Print").frame(maxWidth: .infinity).frame(height: 36) }
+                        .buttonStyle(.glass)
+                }
+                .disabled(working)
             } else if words.phase == .printing {
-                // The Printing screen with the camera arrives with the print screens (KAN-217 PR 3).
                 if let progress = project.print?.live?.job?.progress { ProgressView(value: progress, total: 100).tint(.okGreen) }
+                Button(action: openPrinting) { Label("Watch the Print", systemImage: "camera").frame(maxWidth: .infinity).frame(height: 36) }
+                    .buttonStyle(.glass)
             } else {
                 ProgressView().progressViewStyle(.linear).tint(words.phase.color)
                 if let event = project.print?.events?.last { Text(event.message).font(.footnote).foregroundStyle(.secondary) }
