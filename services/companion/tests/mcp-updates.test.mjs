@@ -490,3 +490,18 @@ test('review fixes, round five: every printer on the files starts the new versio
   assert.deepEqual([gate2.updating('p1s'), gate2.updating('a1')], [false, false]);
   assert.equal(h.commands.filter(command => command.includes('install')).length, 0, 'nothing ran');
 });
+
+test('review fixes, round six: overrides written at the same time all reach the file', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'mcp-overrides-'));
+  t.after(() => rm(root, {recursive: true, force: true}));
+  const path = join(root, 'printers', 'overrides.json');
+  const overrides = new McpOverrides(path);
+  const ids = Array.from({length: 24}, (_, index) => `printer-${index}`);
+  await Promise.all(ids.map(id => overrides.set(id, {command: '/node', args: [`/copy/${id}.js`]})));
+  const reread = new McpOverrides(path);
+  assert.deepEqual(Object.keys(await reread.load()).sort(), [...ids].sort());
+  // Removing one and changing another at the same time keeps both changes.
+  await Promise.all([overrides.set('printer-0', undefined), overrides.set('printer-1', {command: '/node', args: ['/copy/new.js']})]);
+  const again = await new McpOverrides(path).load();
+  assert.deepEqual([again['printer-0'], again['printer-1'].args], [undefined, ['/copy/new.js']]);
+});

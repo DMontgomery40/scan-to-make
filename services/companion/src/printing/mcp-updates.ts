@@ -35,6 +35,7 @@ export function profileFingerprint(config: PrinterHandoffConfig): string {
 export class McpOverrides {
   readonly #path: string;
   #state?: Record<string, Override>;
+  #writes: Promise<void> = Promise.resolve();
   constructor(path: string) { this.#path = path; }
   async load() {
     if (this.#state) return this.#state;
@@ -48,13 +49,18 @@ export class McpOverrides {
     const value = this.#state?.[id];
     return value && config && value.source && value.source !== profileFingerprint(config) ? undefined : value;
   }
-  async set(id: string, value: Override | undefined, config?: PrinterHandoffConfig) {
-    const state = await this.load();
-    if (value) state[id] = {...value, ...(config ? {source: profileFingerprint(config)} : {})}; else delete state[id];
-    await mkdir(dirname(this.#path), {recursive: true, mode: 0o700});
-    const temporary = `${this.#path}.${randomUUID()}.tmp`;
-    await writeFile(temporary, JSON.stringify(state, null, 1) + '\n', {mode: 0o600});
-    await rename(temporary, this.#path);
+  /** One change at a time, each written in full before the next: updates of different installs never undo each other on disk. */
+  set(id: string, value: Override | undefined, config?: PrinterHandoffConfig): Promise<void> {
+    const change = this.#writes.then(async () => {
+      const state = await this.load();
+      if (value) state[id] = {...value, ...(config ? {source: profileFingerprint(config)} : {})}; else delete state[id];
+      await mkdir(dirname(this.#path), {recursive: true, mode: 0o700});
+      const temporary = `${this.#path}.${randomUUID()}.tmp`;
+      await writeFile(temporary, JSON.stringify(state, null, 1) + '\n', {mode: 0o600});
+      await rename(temporary, this.#path);
+    });
+    this.#writes = change.catch(() => undefined);
+    return change;
   }
   /** The profile as the companion runs it. */
   apply(config: PrinterHandoffConfig, override: Override | undefined): PrinterHandoffConfig {
