@@ -53,19 +53,17 @@ enum HandheldCapture {
 
     /// Launched with `-STMHandheldPreview ready` the capture screen opens at once, so a build can be checked on a
     /// device or the Simulator without tapping through. `capturing` (Simulator only) shows the capturing layout.
+    /// Simulator screenshots only. On a phone the camera opens only from a tap on Scan in Hand (KAN-217 P0).
     @MainActor static func previewIfAsked() {
+        #if DEBUG && targetEnvironment(simulator)
         guard let state = UserDefaults.standard.string(forKey: "STMHandheldPreview") else { return }
         UserDefaults.standard.removeObject(forKey: "STMHandheldPreview")
-        #if targetEnvironment(simulator)
         let preview = state == "capturing"
         let diagnosticSeconds: Int? = nil
-        #else
-        let preview = false
-        let diagnosticSeconds = HandheldDiagnosticOptions.seconds(arguments: CommandLine.arguments, previewState: state)
-        #endif
         // This launch-only path has no companion/project uploader. The random object's files stay local.
         Task { _ = await run(objectId: UUID().uuidString.lowercased(), preview: preview,
                              diagnosticSeconds: diagnosticSeconds, keepAwake: true) }
+        #endif
     }
 
     /// One folder per object: Documents/HandheldCaptures/<object id>/0000.heic … plus `finished` when complete.
@@ -335,6 +333,9 @@ private let depthReadinessGate = AnalysisGate()
                     session.startRunning()
                     continuation.resume(returning: nil)
                 } catch {
+                    // Nothing stays configured on the LiDAR camera after a failed start: the next open starts clean.
+                    for output in session.outputs { session.removeOutput(output) }
+                    for input in session.inputs { session.removeInput(input) }
                     session.commitConfiguration()
                     continuation.resume(returning: error.localizedDescription)
                 }
@@ -478,7 +479,9 @@ private let depthReadinessGate = AnalysisGate()
         closed = true; countdownTask?.cancel(); watchdog?.invalidate(); watchdog = nil
         diagnosticsTask?.cancel(); diagnosticsTask = nil
         let recorder = recorder, session = session, queue = queue
-        Task { _ = await recorder?.stop(); queue.async { session.stopRunning() } }
+        // The camera is released first, whatever the writer is doing; the last write drains after.
+        queue.async { session.stopRunning() }
+        Task { _ = await recorder?.stop() }
     }
 
     nonisolated private func receivedVideo(_ sample: CMSampleBuffer) {
