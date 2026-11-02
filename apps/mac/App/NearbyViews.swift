@@ -24,7 +24,7 @@ struct NearbyRequestCard: View {
                     .foregroundStyle(clay)
                     .frame(width:28, height:28)
                     .background(RoundedRectangle(cornerRadius:7).fill(clay.opacity(0.14)))
-                (Text("\(request.deviceName) wants to connect · ") + Text(NearbyModel.format(request.code)).fontWeight(.semibold).monospacedDigit())
+                Text("\(request.deviceName) wants to connect · \(Text(NearbyModel.format(request.code)).fontWeight(.semibold).monospacedDigit())")
                     .font(.system(size:12.5))
                     .frame(maxWidth:.infinity, alignment:.leading)
             }

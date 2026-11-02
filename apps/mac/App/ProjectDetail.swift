@@ -1,0 +1,310 @@
+import SwiftUI
+import AppKit
+#if canImport(ControlKit)
+import ControlKit
+#endif
+
+/// One project (PRD §7.2): the model full height on the dark stage, the state in a glass capsule, the size,
+/// what the Mac needs or is doing in one glass card, and a glass bar with Ask for changes… and Print….
+struct ProjectDetail: View {
+    let object: StmObject
+    @ObservedObject var model: ObjectsModel
+    let print: () -> Void
+    @State private var note = ""
+    @State private var photos: [URL] = []
+    @State private var dropProblem: String?
+    @State private var targeted = false
+
+    private var words: ObjectWords { object.words }
+    private var working: Bool { model.working.contains(object.id) }
+    private var takesPhotos: Bool { model.capabilities?.objectsCreate == true }
+
+    var body: some View {
+        ZStack(alignment: .bottom) {
+            stage
+                .overlay(alignment: .topLeading) { StatusCapsule(stage: words.stage, text: words.capsule).padding(.top, 70).padding(.leading, 24) }
+                .overlay(alignment: .topTrailing) {
+                    if let size = words.size {
+                        Text(size).font(.callout.monospacedDigit().weight(.semibold))
+                            .padding(.horizontal, 12).padding(.vertical, 7).glassEffect(.regular, in: .capsule)
+                            .padding(.top, 64).padding(.trailing, 24)
+                            .accessibilityLabel("Size \(size)")
+                    }
+                }
+                .ignoresSafeArea(edges: .top)
+            VStack(spacing: 12) {
+                card
+                bar
+            }
+            .frame(maxWidth: 680)
+            .padding(24)
+        }
+        .navigationTitle(words.title)
+        .navigationSubtitle(words.subtitle(request: object.instructions))
+    }
+
+    // MARK: Stage
+
+    @ViewBuilder private var stage: some View {
+        if let url = object.modelURL ?? object.scanURL.flatMap({ $0.pathExtension.lowercased() == "usdz" ? $0 : nil }) {
+            ModelStage(url: url, version: FileVersion.of(url, else: object.updatedAtMs), fit: 0.15,
+                       accessibilityText: "\(words.title)\(words.size.map { ", \($0)" } ?? ""). Drag to turn it, scroll to zoom.")
+        } else {
+            ZStack {
+                StageBackground()
+                if let still = object.renderURLs.first ?? object.photoURLs.first ?? object.captureURLs.first {
+                    FileImage(url: still, version: object.updatedAtMs, contentMode: .fit).padding(80)
+                } else if words.busy {
+                    ProgressView().controlSize(.large)
+                } else {
+                    Image(systemName: "cube").font(.system(size: 54, weight: .ultraLight)).foregroundStyle(.white.opacity(0.35))
+                }
+            }
+            .environment(\.colorScheme, .dark)
+        }
+    }
+
+    // MARK: The one card
+
+    /// What the Mac needs, or what it is doing, in one glass card above the bar. Nothing when it's ready.
+    @ViewBuilder private var card: some View {
+        if let problem = model.problem, problem.id == object.id {
+            Label(problem.text, systemImage: "exclamationmark.circle.fill")
+                .foregroundStyle(.red).textSelection(.enabled)
+                .padding(12).frame(maxWidth: .infinity, alignment: .leading)
+                .glassEffect(.regular.tint(.red.opacity(0.12)), in: .rect(cornerRadius: 14))
+        }
+        if let dropProblem {
+            Label(dropProblem, systemImage: "photo.badge.exclamationmark")
+                .padding(12).frame(maxWidth: .infinity, alignment: .leading)
+                .glassEffect(.regular, in: .rect(cornerRadius: 14))
+        }
+        if let confirmation = object.printConfirmation {
+            PrintConfirmationForm(object: object, question: confirmation, model: model).id(object.id + ":" + confirmation.id)
+        } else {
+            switch words.stage {
+            case .needsYou: needsYou
+            case .working, .sending, .preparing: progressCard
+            case .printing: printingCard
+            case .failed: failedCard
+            default: EmptyView()
+            }
+        }
+    }
+
+    private var needsYou: some View {
+        HStack(alignment: .top, spacing: 12) {
+            if let photo = object.platePhotoURL {
+                FillImage(url: photo, version: object.updatedAtMs).frame(width: 150, height: 110).clipShape(.rect(cornerRadius: 10))
+                    .accessibilityLabel("The printer camera’s photo of the plate")
+            } else {
+                Image(systemName: "hand.raised.fill").foregroundStyle(.orange)
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                Text(words.question ?? words.status).font(.subheadline.weight(.semibold))
+                Text(object.state == .needsCloseup ? "Asked on your iPhone too. Send a close-up from it, or let your Mac make its best guess."
+                     : "Asked on your iPhone too.")
+                    .font(.caption).foregroundStyle(.secondary).lineLimit(4)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .layoutPriority(1)
+            if words.actions.contains(.bestGuess) { answer("Best Guess", .bestGuess) }
+            if words.actions.contains(.plateClear) { answer(object.plate?.noCamera == true ? "The Plate Is Clear" : "It’s Actually Clear", .plateClear) }
+        }
+        .padding(12).frame(maxWidth: .infinity, alignment: .leading)
+        .glassEffect(.regular.tint(.orange.opacity(0.15)), in: .rect(cornerRadius: 14))
+    }
+
+    private func answer(_ title: String, _ action: ObjectAction) -> some View {
+        Button(title) { Task { await model.perform(action, on: object.id) } }
+            .buttonStyle(.glass).controlSize(.large).disabled(working).fixedSize()
+    }
+
+    private var progressCard: some View {
+        HStack(spacing: 12) {
+            ProgressView().controlSize(.small)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(words.stage == .working ? words.status : words.stage.label).font(.subheadline.weight(.semibold))
+                Text("You can leave this. Counterpart tells you when it’s ready.").font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(12).frame(maxWidth: .infinity, alignment: .leading)
+        .glassEffect(.regular, in: .rect(cornerRadius: 14))
+    }
+
+    private var printingCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(object.print?.destination.map { "Printing on \($0.name)" } ?? "Printing").font(.subheadline.weight(.semibold))
+                Spacer()
+                if let status = object.print?.printerStatus, let percent = status.percent {
+                    Text([("\(Int(percent.rounded()))%"), status.remainingMinutes.map { ObjectWords.formatMinutes($0) + " left" }]
+                        .compactMap { $0 }.joined(separator: " · "))
+                        .font(.caption.monospacedDigit()).foregroundStyle(Color.okGreen)
+                }
+            }
+            if let progress = words.progress { ProgressView(value: progress).tint(.okGreen) }
+        }
+        .padding(12).frame(maxWidth: .infinity, alignment: .leading)
+        .glassEffect(.regular, in: .rect(cornerRadius: 14))
+    }
+
+    private var failedCard: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.red)
+            Text(words.status).font(.subheadline).lineLimit(4).textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .layoutPriority(1)
+            if words.actions.contains(.retry) {
+                Button("Try Again") { Task { await model.perform(.retry, on: object.id) } }.buttonStyle(.glass).controlSize(.large).disabled(working).fixedSize()
+            }
+        }
+        .padding(12).frame(maxWidth: .infinity, alignment: .leading)
+        .glassEffect(.regular.tint(.red.opacity(0.12)), in: .rect(cornerRadius: 14))
+    }
+
+    // MARK: The bar
+
+    private var canCorrect: Bool { words.actions.contains(.correct) && !working }
+    private var canPrint: Bool {
+        (words.actions.contains(.print) || words.actions.contains(.printChecked)) && !working && model.printer(for: object) != nil
+    }
+
+    private var bar: some View {
+        GlassEffectContainer(spacing: 10) {
+            HStack(spacing: 10) {
+                HStack(spacing: 8) {
+                    Image(systemName: "text.bubble").foregroundStyle(.secondary)
+                    ForEach(photos, id: \.self) { url in
+                        FillImage(url: url, version: 0).frame(width: 26, height: 26).clipShape(.rect(cornerRadius: 6))
+                            .overlay(alignment: .topTrailing) {
+                                Button { photos.removeAll { $0 == url } } label: { Image(systemName: "xmark.circle.fill") }
+                                    .buttonStyle(.plain).font(.caption2).offset(x: 5, y: -5).accessibilityLabel("Remove photo")
+                            }
+                    }
+                    TextField(takesPhotos ? "Ask for changes. Drop photos here too…" : "Ask for changes…", text: $note)
+                        .textFieldStyle(.plain)
+                        .onSubmit(send)
+                        .disabled(!canCorrect)
+                    if !note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !photos.isEmpty {
+                        Button(action: send) { Image(systemName: "arrow.up.circle.fill").font(.title2) }
+                            .buttonStyle(.plain).foregroundStyle(Color.filament).disabled(!canCorrect)
+                            .keyboardShortcut(.return, modifiers: .command).accessibilityLabel("Send")
+                    }
+                }
+                .padding(.horizontal, 16).frame(height: 44)
+                .glassEffect(targeted ? .regular.tint(Color.filament.opacity(0.25)).interactive() : .regular.interactive(), in: .capsule)
+                .dropDestination(for: URL.self) { urls, _ in drop(urls) } isTargeted: { targeted = $0 && canCorrect }
+                if words.actions.contains(.retry) && object.current == nil {
+                    EmptyView()
+                } else {
+                    Button(action: print) { Label("Print…", systemImage: "printer.fill").padding(.horizontal, 6).frame(height: 30) }
+                        .buttonStyle(.glassProminent).controlSize(.extraLarge)
+                        .disabled(!canPrint)
+                        .help(model.printer(for: object) == nil ? "No printer found in your printer MCP’s settings." : "")
+                }
+            }
+        }
+    }
+
+    private func drop(_ urls: [URL]) -> Bool {
+        let images = urls.filter { ObjectsModel.fileKind($0) == "photos" }
+        guard canCorrect, !images.isEmpty else { return false }
+        guard takesPhotos else {
+            dropProblem = "Send photos from your iPhone for now. This Mac can take them after Counterpart’s next update."
+            return false
+        }
+        dropProblem = nil
+        photos = Array((photos + images).prefix(8))
+        return true
+    }
+
+    private func send() {
+        let text = note.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard canCorrect, !text.isEmpty || !photos.isEmpty else { return }
+        let sent = photos
+        Task {
+            if await model.perform(.correct, on: object.id, note: text, photos: sent) { note = ""; photos = [] }
+        }
+    }
+}
+
+/// The printer MCP's own confirmation, answered here exactly as asked (PRD §5.5): each check is the
+/// person's to tick; the camera photo is only a reference.
+struct PrintConfirmationForm: View {
+    let object: StmObject
+    let question: StmObject.PrintConfirmation
+    @ObservedObject var model: ObjectsModel
+    @State private var draft: PrintConfirmationDraft
+
+    init(object: StmObject, question: StmObject.PrintConfirmation, model: ObjectsModel) {
+        self.object = object; self.question = question; self.model = model
+        _draft = State(initialValue: PrintConfirmationDraft(question))
+    }
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            let answer = draft.answer(for: question, at: context.date.timeIntervalSince1970 * 1000)
+            let expired = question.expiresAtMs <= context.date.timeIntervalSince1970 * 1000
+            let working = model.working.contains(object.id)
+            VStack(alignment: .leading, spacing: 10) {
+                Label(object.words.question ?? "Your printer needs a yes before printing", systemImage: "hand.raised.fill")
+                    .font(.subheadline.weight(.semibold)).foregroundStyle(.orange)
+                // The printer MCP's own safety checks, every word of them: scrolling when they are long, never cut.
+                ViewThatFits(in: .vertical) {
+                    details(working: working, expired: expired)
+                    ScrollView { details(working: working, expired: expired) }
+                }
+                .frame(maxHeight: 360)
+                HStack(spacing: 10) {
+                    Spacer()
+                    if working { ProgressView().controlSize(.small) }
+                    Button("Cancel Print", role: .destructive) {
+                        Task { await model.answerPrintConfirmation(object.id, confirmationId: question.id, answer: .init(action: .cancel)) }
+                    }
+                    .buttonStyle(.glass).disabled(working || expired)
+                    if question.supported {
+                        Button("Print") {
+                            guard let answer = draft.answer(for: question, at: Date().timeIntervalSince1970 * 1000) else { return }
+                            Task { await model.answerPrintConfirmation(object.id, confirmationId: question.id, answer: answer) }
+                        }
+                        .buttonStyle(.glassProminent).disabled(working || answer == nil)
+                    }
+                }
+            }
+            .padding(14).frame(maxWidth: .infinity, alignment: .leading)
+            .glassEffect(.regular.tint(.orange.opacity(0.12)), in: .rect(cornerRadius: 14))
+        }
+    }
+
+    private func details(working: Bool, expired: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+                Text(verbatim: question.message).font(.callout).textSelection(.enabled).lineLimit(nil)
+                if let item = object.plate?.item, !item.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Label("The camera check saw \(item) on the plate. Check and clear it before you say yes.", systemImage: "exclamationmark.triangle.fill")
+                        .font(.callout).foregroundStyle(.orange).lineLimit(nil)
+                }
+                if let photo = object.platePhotoURL {
+                    FileImage(url: photo, version: object.updatedAtMs, contentMode: .fit).frame(maxWidth: 280, maxHeight: 180)
+                        .clipShape(.rect(cornerRadius: 10)).accessibilityLabel("Printer camera photo, for reference")
+                }
+                if question.supported {
+                    ForEach(question.fields, id: \.name) { field in
+                        Toggle(isOn: Binding(get: { draft.values[field.name] ?? false }, set: { draft.values[field.name] = $0 })) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(verbatim: field.title)
+                                if let description = field.description { Text(verbatim: description).font(.caption).foregroundStyle(.secondary) }
+                            }
+                            .lineLimit(nil)
+                        }
+                        .toggleStyle(.checkbox).disabled(working || expired)
+                    }
+                } else {
+                    Text("This question can’t be answered here. Cancel the print to continue.").font(.callout).foregroundStyle(.secondary)
+                }
+                if expired { Text("This question has expired.").font(.callout).foregroundStyle(.secondary) }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}

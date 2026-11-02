@@ -59,7 +59,7 @@ struct ModelAccessPane: View {
             } else {
                 ScrollViewReader { reader in
                     ScrollView { options.padding(.trailing,6) }
-                        .onChange(of:door) { opened in
+                        .onChange(of:door) { _, opened in
                             guard let opened else { return }
                             withAnimation { reader.scrollTo(opened == .key ? "key" : "endpoint", anchor:.bottom) }
                         }
@@ -69,7 +69,7 @@ struct ModelAccessPane: View {
             if context == .firstRun { footer }
         }
         .task { await model.refresh() }
-        .onChange(of:provider) { keyModel = $0 == .anthropic ? "claude-opus-5-5" : "gpt-6-astra" }
+        .onChange(of:provider) { _, value in keyModel = value == .anthropic ? "claude-opus-5-5" : "gpt-6-astra" }
     }
 
     private var unavailable: some View {
@@ -266,29 +266,5 @@ struct ModelSettingsView: View {
         ModelAccessPane(model:model, context:.settings)
             .padding(24)
             .frame(width:520, height:500, alignment:.topLeading)
-    }
-}
-
-/// Opens Settings from the popover; one window, reused.
-@MainActor final class SettingsWindow {
-    static let shared = SettingsWindow()
-    private var window: NSWindow?
-    private lazy var model = ModelAccessModel(installation:Installation(bundle:.main))
-    func show() {
-        if window != nil { Task { await model.refresh(); await MacStatusModel.shared.refresh() } }
-        if window == nil {
-            let window = NSWindow(contentRect:NSRect(x:0, y:0, width:560, height:680),
-                                  styleMask:[.titled, .closable], backing:.buffered, defer:false)
-            window.title = "Counterpart Settings"
-            window.isReleasedWhenClosed = false
-            let content = NSHostingView(rootView:SettingsView(mac:MacStatusModel.shared, cleanup:model))
-            content.sizingOptions = [] // a fixed size; the content never resizes the window
-            window.contentView = content
-            window.setContentSize(NSSize(width:560, height:680))
-            window.center()
-            self.window = window
-        }
-        window?.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps:true)
     }
 }

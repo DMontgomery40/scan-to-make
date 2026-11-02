@@ -1,23 +1,30 @@
-# Scan to Make for Mac
+# Counterpart for Mac
 
-A macOS menu-bar app (macOS 13+, Apple Silicon runtime payload) that shows a fresh
-pairing QR automatically. There are no address fields or setup/status controls.
-Opening the app also opens the same QR view; reopening or opening the popover
-reuses the current invitation while it remains unexpired and unused. At expiry,
-the companion retires the expired code and mints another. Each presentation and
-retry checks service/listener readiness before showing a QR, including a cached
-one. A failure replaces the QR with one sentence and Retry.
-Login-item launches stay in the menu bar. Until a phone has been paired and set up,
-a manual launch or reopen shows the QR, then setup.
+A normal Mac app for macOS 27 with a menu bar extra (PRD `docs/design/overhaul/PRD.md` §7). It is built from
+SwiftUI scenes only:
 
-After that, a manual launch or reopen opens the objects window, and the QR stays in
-the popover for pairing more phones. The popover's **Open Scan to Make** opens the
-window at any time. The window shows the same object list and pages as the iPhone app
-(the spec's §5.1, §5.3–5.6), and the app has a Dock icon while it is open. It reads
-`objects.list` over the control socket, every 3 s while something is touching up or
-printing and every 15 s otherwise, and only while the window is on screen. Renders,
-the plate photo and the STL (turnable in SceneKit) are read from the object's
-`directory`. A companion without objects shows one sentence.
+- `Window` "Counterpart" (`main`): the sidebar groups projects as Now, Needs you, Ready and Printed, then the
+  printers with their ready dots, and a footer with the phone and the AI. The detail is the project's model in
+  RealityKit, full height on the dark stage (orbit and zoom with the system camera controls), with the state in a
+  glass capsule, the size, one glass card for what the Mac needs or is doing, and a glass bar with **Ask for
+  changes…** (it takes dropped photos when the companion has `objectsCreate`) and **Print…**. The toolbar has
+  Open in Blender, Open in Slicer, Show in Finder, New Project and the Inspector (Request, Activity, Print).
+- `Window` "Add a Phone" (`pairing`): the pairing QR; on first run, once a phone connects, it becomes setup (the
+  AI choice).
+- `Settings`, and `MenuBarExtra(.window)` for the popover.
+
+There is a Dock icon by default; Settings → General → Show in Dock hides it (the activation policy is set once
+at launch and when that setting changes). Opened by hand, the app shows its window, or the pairing code until a
+phone is paired and set up; launched at login it stays in the menu bar. Quit reads "Quit Counterpart (your phone
+stops getting updates)", because delivery to the phone runs in this app (PRD §8.8).
+
+Every word about a project comes from `ControlKit/ObjectWords.swift` (PRD §4), which prefers the companion's own
+`status` line when it serves one; `packages/CounterpartKit` replaces it when that lands. Features the running
+companion lacks (its `status.get` capability flags) show a sentence saying so instead of failing.
+
+The window reads `objects.list` over the control socket while it is on screen: every 3 s while something is
+working or printing and every 15 s otherwise. Renders, photos and the model are read from each project's
+`directory`.
 
 The companion turns objects on only when it knows the user's own `claude` CLI. When
 serving, `agent.mjs` passes `SCAN_TO_MAKE_CLAUDE_PATH`. An explicit absolute path in
@@ -39,14 +46,19 @@ contract; multi-address invitations and certificate renewal are separate follow-
 ## Build and test
 
 `ScanToMake.xcodeproj` is checked in. `project.yml` is its XcodeGen source.
-`--render-objects-design` (Debug builds only) draws the objects window with generic
-fixture objects to PNGs and exits, without registering, pairing or probing the network.
+
+Design QA (Debug builds only): `--design-fixtures <assets>` runs the real app on screen with the mockup's projects
+(`docs/design/overhaul/mockup-app`), reading the uncommitted mockup assets from `<assets>`, without registering,
+pairing or probing the network. `--design-select 1…6`, `--design-tab request|activity|print` and
+`--design-screen main|popover|settings` choose what shows; `--design-snapshot <folder>` writes a PNG of each of the
+app's own windows (through ScreenCaptureKit's `currentProcess`, which needs no Screen Recording grant) for the
+side-by-side comparison with `docs/design/overhaul/screens/mac-*.jpg`. Build a design run with
+`STM_VARIANT=.design STM_USE_LEGACY_COMPANION=NO` so it never shares the installed app's identity.
 
 ```sh
 swift test --package-path apps/mac
 xcodebuild -project apps/mac/ScanToMake.xcodeproj -scheme ScanToMake \
   -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO test
-"<Debug build>/Scan to Make.app/Contents/MacOS/Scan to Make" --render-objects-design /tmp/objects-design
 bash apps/mac/scripts/prepare-payload.sh
 xcodebuild -project apps/mac/ScanToMake.xcodeproj -scheme ScanToMake \
   -configuration Debug -derivedDataPath apps/mac/build \

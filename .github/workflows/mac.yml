@@ -9,9 +9,15 @@ permissions:
   contents: read
 jobs:
   build:
-    runs-on: macos-15
+    # The app targets macOS 27 (Liquid Glass and the macOS 27 scene APIs): GitHub's macOS 27 image with Xcode 27.
+    runs-on: xcode-27
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Select Xcode 27.2
+        # The hosted image keeps it at Xcode_27.2.app; a Mac running the local gate already has it selected.
+        run: |
+          if [ -d /Applications/Xcode_27.2.app ]; then sudo xcode-select -s /Applications/Xcode_27.2.app; fi
+          case "$(xcodebuild -version)" in "Xcode 27.2"*) ;; *) echo "Xcode 27.2 is required"; exit 1 ;; esac
       - name: Unit tests
         run: swift test --package-path apps/mac
       - name: ControlKit tests
