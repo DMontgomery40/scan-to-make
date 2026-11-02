@@ -20,7 +20,7 @@ extension ProjectStage {
         case .needsYou: return .orange
         case .ready, .preparing: return .filament
         case .printing: return .okGreen
-        case .printed, .unknown: return .secondary
+        case .printed, .sent, .unknown: return .secondary
         case .failed: return .red
         }
     }

@@ -84,9 +84,19 @@ import ControlKit
              "directory": folder("c6", ["current/model.stl": "mic.stl", "current/renders/front.png": "thumb-mic.png"])],
         ]
         return FixtureObjects(items: items, catalog: PrinterCatalog(destinations: [
-            PrinterDestination(id: "p1s", name: "P1S", backend: "bambu-printer-mcp", model: "Bambu Lab P1S", state: "ready"),
-            PrinterDestination(id: "mk4", name: "Garage MK4", backend: "mcp-3d-printer-server", model: "Prusa MK4S", state: "ready"),
-            PrinterDestination(id: "ender", name: "Ender", backend: "mcp-3d-printer-server", model: "Creality Ender-3 V3", state: "offline"),
+            PrinterDestination(id: "p1s", name: "P1S", backend: "bambu-printer-mcp", model: "Bambu Lab P1S", address: "LAN", state: "ready",
+                               origin: "claude-code", capabilities: .init(server: .init(name: "bambu-printer-mcp", version: "1.1.46"),
+                                                                          camera: "bambu-tcp", filaments: "ams", pause: true, resume: true, cancel: true,
+                                                                          quality: true, strength: true)),
+            PrinterDestination(id: "mk4", name: "Garage MK4", backend: "mcp-3d-printer-server", model: "Prusa MK4S", address: "Klipper", state: "ready",
+                               origin: "claude-desktop", capabilities: .init(server: .init(name: "mcp-3d-printer-server", version: "1.2.17"),
+                                                                             quality: true, strength: true)),
+            PrinterDestination(id: "ender", name: "Ender", backend: "mcp-3d-printer-server", model: "Creality Ender-3 V3", address: "OctoPrint",
+                               state: "offline", origin: "codex",
+                               capabilities: .init(server: .init(name: "mcp-3d-printer-server", version: "1.2.9"), progress: false,
+                                                   missing: ["progress", "camera"],
+                                                   update: .init(message: "Update to see progress and camera", package: "mcp-3d-printer-server",
+                                                                 command: ["npm", "install", "-g", "mcp-3d-printer-server@latest"]))),
         ], defaultDestinationId: "p1s"), now: now)
     }
 
@@ -94,6 +104,30 @@ import ControlKit
         var parts = DateComponents(); parts.year = 2026; parts.month = 10; parts.day = 30; parts.hour = 12
         return (Calendar.current.date(from: parts) ?? Date()).timeIntervalSince1970 * 1000
     }
+}
+
+extension DesignFixtures {
+    /// The mockup's paired phones (mac-devices.jpg): an iPhone connected now and an iPad seen yesterday.
+    static func macStatus() -> FixtureMac? { assets == nil ? nil : FixtureMac() }
+}
+
+struct FixtureMac: MacStatusSource {
+    func status() async throws -> ControlStatus {
+        ControlStatus(companionVersion: "fixture", pairedDeviceCount: 2, capabilities: .init(nearbyPairing: true))
+    }
+    func devices() async throws -> [ControlDevice] {
+        let now = Date().timeIntervalSince1970 * 1000
+        func day(_ month: Int, _ day: Int) -> Double {
+            var parts = DateComponents(); parts.year = 2026; parts.month = month; parts.day = day; parts.hour = 12
+            return (Calendar.current.date(from: parts) ?? Date()).timeIntervalSince1970 * 1000
+        }
+        return [ControlDevice(deviceId: "0b6f0f43-7c35-4b8a-9a3c-0000000000d1", deviceName: "David's iPhone 18 Pro", pairedAt: day(10, 30),
+                              lastRefreshedAt: now - 30_000, expiresAt: now + 86_400_000, model: "iPhone18,2", lastSeenAt: now - 10_000),
+                ControlDevice(deviceId: "0b6f0f43-7c35-4b8a-9a3c-0000000000d2", deviceName: "David's iPad Pro", pairedAt: day(10, 31),
+                              lastRefreshedAt: now - 86_400_000, expiresAt: now + 86_400_000, model: "iPad16,3", lastSeenAt: now - 86_400_000)]
+    }
+    func removeDevice(_ id: String) async throws {}
+    func address() -> String? { "mac-mini.local:9077" }
 }
 
 /// The mockup's projects, served as the control socket would serve them. Actions answer from memory.
@@ -114,7 +148,7 @@ actor FixtureObjects: ObjectsCompanion {
     func objects() async throws -> [StmObject] { try items.map(decode) }
     func printers() async throws -> PrinterCatalog { catalog }
     func filaments(_ id: String) async throws -> [PrinterFilament] {
-        [PrinterFilament(slot: 0, colour: "#141414", material: "PLA", name: "Black", filamentId: "GFA00", destinationId: "p1s"),
+        [PrinterFilament(slot: 0, colour: "#141414", material: "PLA", name: "Black", filamentId: "GFA00", destinationId: "p1s", suggested: true),
          PrinterFilament(slot: 1, colour: "#FAC71A", material: "PLA", name: "Yellow", filamentId: "GFA01", destinationId: "p1s"),
          PrinterFilament(slot: 2, colour: "#BFEADB", material: "PETG", name: "Translucent", filamentId: "GFG00", destinationId: "p1s"),
          PrinterFilament(slot: 3, colour: "#6B7385", material: "PLA", name: "Blue Grey", filamentId: "GFA02", destinationId: "p1s")]
@@ -128,6 +162,13 @@ actor FixtureObjects: ObjectsCompanion {
                        lastRefreshedAt: now - 30_000, expiresAt: now + 86_400_000, model: "iPhone18,2", lastSeenAt: now - 10_000)]
     }
     func aiProvider() async -> String? { "Claude" }
+    func estimate(_ id: String, destinationId: String?, quality: PrintSettings.Quality, strength: PrintSettings.Strength) async throws -> PrintEstimate {
+        let json: [String: Any] = ["destinationId": destinationId ?? "p1s", "quality": quality.rawValue, "strength": strength.rawValue,
+                                   "seconds": quality == .fine ? 7_800 : quality == .draft ? 2_900 : 4_320, "grams": strength == .standard ? 22 : 29,
+                                   "layerHeightMm": quality == .fine ? 0.12 : quality == .draft ? 0.28 : 0.20,
+                                   "infillPercent": strength == .max ? 40 : strength == .strong ? 25 : 15, "slicedAt": "2026-11-01T12:00:00Z"]
+        return try JSONDecoder().decode(PrintEstimate.self, from: JSONSerialization.data(withJSONObject: json))
+    }
     func correct(_ id: String, note: String) async throws -> StmObject { try change(id, ["state": "touching-up"]) }
     func answerCloseup(_ id: String, bestGuess: Bool) async throws -> StmObject { try change(id, ["state": "touching-up"]) }
     func print(_ id: String, checked: Bool) async throws -> StmObject { try change(id, ["state": "printing"]) }

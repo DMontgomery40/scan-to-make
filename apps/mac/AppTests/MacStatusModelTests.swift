@@ -80,6 +80,70 @@ private func phone(_ id: String, _ name: String, pairedAt: Double = 1_700_000_00
         let removed = await model.remove("a")
         XCTAssertFalse(removed)
         XCTAssertEqual(model.devices.map(\.deviceId), ["a"])
-        XCTAssertEqual(model.problem, "That iPhone couldn’t be removed. Try again.")
+        XCTAssertEqual(model.problem, "That phone couldn’t be removed. Try again.")
+    }
+
+    func testRePairingLeavesOneRowAndRemoveTakesEveryPairingInIt() async {
+        let mac = FakeMac(host:nil)
+        // Six legacy "My phone" pairings from before stable identity (each unused since the next paired), and one iPad.
+        var phones = (0..<6).map { phone("p\($0)", $0 == 2 ? " my phone " : "My phone", pairedAt:1_700_000_000_000 + Double($0) * 1000) }
+        phones.append(phone("ipad", "David's iPad Pro", pairedAt:1_600_000_000_000))
+        await mac.set(phones:phones)
+        let model = MacStatusModel(source:mac)
+        await model.refresh()
+        let groups = model.groups
+        XCTAssertEqual(groups.count, 2, "re-pairing never shows a second row")
+        XCTAssertEqual(groups[0].primary.deviceId, "p5", "the newest pairing speaks for the row")
+        XCTAssertEqual(groups[0].older, 5)
+        XCTAssertEqual(groups[1].kind, "iPad")
+        let older = await model.remove(Array(groups[0].ids.dropFirst()))
+        XCTAssertTrue(older)
+        let gone = await mac.removed
+        XCTAssertEqual(Set(gone), Set((0..<5).map { "p\($0)" }), "older pairings go only when asked for, and only they go")
+        XCTAssertEqual(model.groups.map(\.id), ["p5", "ipad"])
+    }
+
+    func testTwoPhonesThatShareANameAndAreBothInUseKeepTheirOwnRows() {
+        let base = 1_700_000_000_000.0
+        let older = ControlDevice(deviceId:"a", deviceName:"iPhone", pairedAt:base, lastRefreshedAt:base + 5_000, expiresAt:0, lastSeenAt:base + 9_000)
+        let newer = ControlDevice(deviceId:"b", deviceName:"iPhone", pairedAt:base + 1_000, lastRefreshedAt:base + 2_000, expiresAt:0)
+        let groups = DeviceGroup.groups([older, newer])
+        XCTAssertEqual(groups.count, 2, "the older phone was used after the newer one paired: it is a second phone")
+        XCTAssertTrue(groups.allSatisfy { $0.older == 0 }, "removing one never revokes the other")
+        let iPad = ControlDevice(deviceId:"c", deviceName:"iPhone", pairedAt:base - 1_000, lastRefreshedAt:base - 900, expiresAt:0, model:"iPad16,3")
+        let phone = ControlDevice(deviceId:"d", deviceName:"iPhone", pairedAt:base, lastRefreshedAt:base, expiresAt:0, model:"iPhone18,2")
+        XCTAssertEqual(DeviceGroup.groups([iPad, phone]).count, 2, "different hardware is never folded together")
+    }
+
+    func testARowSaysConnectedOnlyOnARecentRequest() throws {
+        let now = Date(timeIntervalSince1970:1_800_000_000)
+        func device(seen: Double?, model: String? = "iPhone18,2") -> DeviceGroup {
+            DeviceGroup(primary:ControlDevice(deviceId:"d", deviceName:"David's iPhone 18 Pro", pairedAt:(now.timeIntervalSince1970 - 2 * 86_400) * 1000,
+                                              lastRefreshedAt:(now.timeIntervalSince1970 - 3 * 86_400) * 1000, expiresAt:0, model:model,
+                                              lastSeenAt:seen.map { (now.timeIntervalSince1970 - $0) * 1000 }), ids:["d"])
+        }
+        XCTAssertTrue(device(seen:60).detail(at:now).hasPrefix("iPhone · connected now · paired "))
+        XCTAssertTrue(device(seen:86_400).detail(at:now).hasPrefix("iPhone · last seen yesterday"))
+        XCTAssertFalse(device(seen:nil).connectedNow(at:now), "a token refresh alone is not a connection")
+        XCTAssertEqual(device(seen:60, model:"iPad16,3").kind, "iPad")
+    }
+
+    func testNotificationDefaultsFollowTheMacColumnAndProgressIsOff() throws {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName:"kan220-notify-\(UUID().uuidString)"))
+        let prefs = NotificationPrefs(defaults:defaults)
+        for type in ["pass.ready", "pass.ask", "print.done", "print.failed", "print.paused", "print.not-started",
+                     "print.confirm", "pass.failed"] {
+            XCTAssertTrue(prefs.shouldNotify(type:type), type)
+        }
+        for type in ["plate.blocked", "print.first-layer", "print.unreachable", "print.status", "print.started", "pass.started", "pass.stage",
+                     "print.resumed", "print.cancelled", "print.preparing", "something.new"] {
+            XCTAssertFalse(prefs.shouldNotify(type:type), type)
+        }
+        XCTAssertFalse(prefs.shouldNotify(type:"print.milestone", progress:50), "progress is off on the Mac by default")
+        prefs.progress = .quarters
+        XCTAssertTrue(prefs.shouldNotify(type:"print.milestone", progress:75))
+        XCTAssertFalse(prefs.shouldNotify(type:"print.milestone", progress:60))
+        prefs.set(.done, false)
+        XCTAssertFalse(prefs.shouldNotify(type:"print.done"))
     }
 }

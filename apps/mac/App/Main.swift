@@ -95,11 +95,11 @@ struct CounterpartApp: App {
         .restorationBehavior(.disabled)
 
         Settings {
-            SettingsView(mac:MacStatusModel.shared, cleanup:AppModels.modelAccess)
+            SettingsView(mac:MacStatusModel.shared, cleanup:AppModels.modelAccess, objects:objects)
         }
 
         MenuBarExtra(isInserted:$isInserted) {
-            MenuBarPopover(nearby:nearby, mac:MacStatusModel.shared) { PairingView(model:CompanionModel.shared, side:232) }
+            MenuBarPopover(nearby:nearby, mac:MacStatusModel.shared, objects:objects)
         } label: {
             MenuBarLabel(nearby:nearby, router:AppRouter.shared)
         }
@@ -108,7 +108,7 @@ struct CounterpartApp: App {
         #if DEBUG
         // Design QA only: screenshots can't open a menu bar extra, so its content can open as a window.
         Window("Popover (QA)", id:"qa-popover") {
-            MenuBarPopover(nearby:nearby, mac:MacStatusModel.shared) { PairingView(model:CompanionModel.shared, side:232) }
+            MenuBarPopover(nearby:nearby, mac:MacStatusModel.shared, objects:objects)
         }
         .defaultLaunchBehavior(.suppressed)
         .windowResizability(.contentSize)
@@ -174,14 +174,15 @@ struct CounterpartCommands: Commands {
         #if DEBUG
         if DesignFixtures.assets != nil {
             NSApp.appearance = NSAppearance(named:.darkAqua) // the mockups are rendered in dark mode
-            AppRouter.shared.open(DesignFixtures.screen == "popover" ? .qaPopover : DesignFixtures.screen == "settings" ? .settings : .main)
+            AppRouter.shared.open(DesignFixtures.screen == "popover" ? .qaPopover : DesignFixtures.screen.hasPrefix("settings") ? .settings : .main)
             DesignSnapshot.scheduleIfAsked()
             return
         }
         #endif
         localNetwork.observeNetwork { [weak self] in self?.permissionProbeForeground() ?? false }
         NotificationCenter.default.addObserver(self, selector:#selector(windowBecameKey(_:)), name:NSWindow.didBecomeKeyNotification, object:nil)
-        if Installation(bundle:.main).variant.isEmpty && SMAppService.mainApp.status == .notRegistered {
+        if Installation(bundle:.main).variant.isEmpty && SMAppService.mainApp.status == .notRegistered
+            && !UserDefaults.standard.bool(forKey:"openAtLoginOff") {
             try? SMAppService.mainApp.register()
         }
         let event = NSAppleEventManager.shared().currentAppleEvent
@@ -190,6 +191,9 @@ struct CounterpartCommands: Commands {
         NearbyModel.shared.start()
         // At login the app stays in the menu bar; opened by hand, it shows its window (or the pairing code first).
         if !loginLaunch { AppRouter.shared.open(AppRouter.shared.home) }
+        #if DEBUG
+        DesignSnapshot.scheduleIfAsked() // design QA of a Debug build against the real companion
+        #endif
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {

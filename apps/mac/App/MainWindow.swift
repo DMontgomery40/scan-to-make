@@ -48,9 +48,12 @@ struct MainWindow: View {
         .onAppear {
             #if DEBUG
             if DesignFixtures.assets != nil, DesignFixtures.screen == "new" { startNewProject(NewProjectDraft()) }
+            if DesignFixtures.assets != nil, DesignFixtures.screen == "print" {
+                Task { try? await Task.sleep(for: .seconds(2)); printing = model.selected }
+            }
             #endif
         }
-        .sheet(item: $printing) { object in PrepareObjectPrint(opened: object, model: model) }
+        .sheet(item: $printing) { object in PrintSheet(opened: object, model: model) }
         .confirmationDialog(deleting.map { "Delete “\($0.words.title)”?" } ?? "Delete?",
                             isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
                             titleVisibility: .visible, presenting: deleting) { object in

@@ -3,7 +3,67 @@ import Foundation
 public struct PrinterFilament: Codable, Sendable, Identifiable, Equatable {
     public let slot: Int
     public let colour: String, material: String, name: String, filamentId: String, destinationId: String
+    /// The one tray the companion preselects, matching the profile's material (`printSettings`).
+    public let suggested: Bool?
     public var id: Int { slot }
+    /// Slots 254 and 255 are the external spool on a Bambu printer.
+    public var external: Bool { slot >= 254 }
+    public init(slot: Int, colour: String, material: String, name: String, filamentId: String, destinationId: String, suggested: Bool? = nil) {
+        self.slot = slot; self.colour = colour; self.material = material; self.name = name
+        self.filamentId = filamentId; self.destinationId = destinationId; self.suggested = suggested
+    }
+    private enum CodingKeys: String, CodingKey { case slot, colour, material, name, filamentId, destinationId }
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        slot = try values.decode(Int.self, forKey: .slot)
+        colour = try values.decode(String.self, forKey: .colour)
+        material = try values.decode(String.self, forKey: .material)
+        name = try values.decode(String.self, forKey: .name)
+        filamentId = try values.decode(String.self, forKey: .filamentId)
+        destinationId = try values.decode(String.self, forKey: .destinationId)
+        suggested = try? decoder.container(keyedBy: SuggestedKey.self).decodeIfPresent(Bool.self, forKey: .suggested)
+    }
+    private enum SuggestedKey: String, CodingKey { case suggested }
+}
+
+/// What the print sheet asks for (PRD §5.5, §8.5). Standard quality and strength send nothing, so the MCP's preset decides.
+public struct PrintSettings: Sendable, Equatable {
+    public enum Quality: String, Sendable, CaseIterable { case draft, standard, fine }
+    public enum Strength: String, Sendable, CaseIterable { case standard, strong, max }
+    public enum Colour: Sendable, Equatable { case auto, amsSlot(Int), external, material(String) }
+    public var quality: Quality
+    public var strength: Strength
+    public var colour: Colour?
+    public init(quality: Quality = .standard, strength: Strength = .standard, colour: Colour? = nil) {
+        self.quality = quality; self.strength = strength; self.colour = colour
+    }
+    /// The `objects.print` fields: standard values are left out.
+    public var params: [String: JSONValue] {
+        var params: [String: JSONValue] = [:]
+        if quality != .standard { params["quality"] = .string(quality.rawValue) }
+        if strength != .standard { params["strength"] = .string(strength.rawValue) }
+        switch colour {
+        case .auto?: params["colour"] = .object(["auto": .bool(true)])
+        case .amsSlot(let slot)?: params["colour"] = .object(["amsSlot": .number(Double(slot))])
+        case .external?: params["colour"] = .object(["external": .bool(true)])
+        case .material(let material)?: params["colour"] = .object(["material": .string(material)])
+        case nil: break
+        }
+        return params
+    }
+}
+
+/// `objects.estimate`: the slice of the current model with the sheet's settings, through the printer's MCP.
+public struct PrintEstimate: Decodable, Sendable, Equatable {
+    public let destinationId: String
+    public let quality: String
+    public let strength: String
+    public let seconds: Double?
+    public let grams: Double?
+    public let layers: Int?
+    public let layerHeightMm: Double?
+    public let infillPercent: Double?
+    public let wallLoops: Int?
 }
 
 /// One thing the user scanned or asked to have made: the companion's `StmObject`
@@ -12,7 +72,8 @@ public struct PrinterFilament: Codable, Sendable, Identifiable, Equatable {
 /// this app doesn't know reads as `.unknown`, so one object never hides the rest of the list.
 public struct StmObject: Decodable, Sendable, Identifiable, Equatable {
     public enum State: String, Decodable, Sendable {
-        case new, touchingUp = "touching-up", needsCloseup = "needs-closeup", ready, printing, printed, failed, unknown
+        /// `sent`: the printer took the job, but Counterpart can't follow this print (no progress from its MCP). Terminal.
+        case new, touchingUp = "touching-up", needsCloseup = "needs-closeup", ready, printing, printed, sent, failed, unknown
         public init(from decoder: Decoder) throws {
             self = State(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .unknown
         }
@@ -319,6 +380,24 @@ public extension ControlClient {
         let result: ObjectReply = try await call("objects.print", ["id":.string(id), "checked":.bool(checked), "filament":.object(value)])
         return result.object
     }
+    /// Prints with the sheet's settings (`capabilities.printSettings`). A deadline after sending has an unknown outcome.
+    func printObject(_ id: String, checked: Bool, settings: PrintSettings) async throws -> StmObject {
+        var params = settings.params
+        params["id"] = .string(id)
+        if checked { params["checked"] = .bool(true) }
+        let result: ObjectReply = try await call("objects.print", params)
+        return result.object
+    }
+    /// Slices the current model as a Print with these settings would, without printing. Up to 180 s.
+    func estimate(_ id: String, destinationId: String?, quality: PrintSettings.Quality, strength: PrintSettings.Strength) async throws -> PrintEstimate {
+        var params: [String: JSONValue] = ["id": .string(id), "quality": .string(quality.rawValue), "strength": .string(strength.rawValue)]
+        if let destinationId { params["destinationId"] = .string(destinationId) }
+        return try await call("objects.estimate", params)
+    }
+    /// Pause, resume or cancel this project's print (`capabilities.printControl`).
+    func controlPrint(_ id: String, _ action: PrintControl) async throws -> StmObject {
+        let result: ObjectReply = try await call(action.method, ["id": .string(id)]); return result.object
+    }
     /// Removes the object and its folder from this Mac. Refused (`conflict`) while it is printing.
     func deleteObject(_ id: String) async throws {
         struct Deleted: Decodable { let deleted: Bool }
@@ -337,6 +416,10 @@ public extension ControlClient {
         ])
         return result.object
     }
+}
+
+public enum PrintControl: String, Sendable { case pause, resume, cancel
+    var method: String { "objects.\(rawValue)Print" }
 }
 
 public struct PrintConfirmationAnswer: Sendable, Equatable {
@@ -402,7 +485,11 @@ public struct PrinterCapabilities: Decodable, Sendable, Equatable {
         public let message: String
         public let package: String
         public let command: [String]?
+        public init(message: String, package: String, command: [String]?) { self.message = message; self.package = package; self.command = command }
     }
+    /// The installed MCP's own name and version, from its `initialize` reply.
+    public struct Server: Decodable, Sendable, Equatable { public let name: String; public let version: String }
+    public let server: Server?
     public let progress: Bool
     public let layers: Bool?
     /// `bambu-tcp`, `rtsp`, `http-snapshot` or `none`.
@@ -414,6 +501,13 @@ public struct PrinterCapabilities: Decodable, Sendable, Equatable {
     public let multiColour: Bool?
     public let missing: [String]?
     public let update: Update?
+    public init(server: Server? = nil, progress: Bool = true, layers: Bool? = nil, camera: String = "none", filaments: String = "none",
+                pause: Bool = false, resume: Bool = false, cancel: Bool = false, quality: Bool = false, strength: Bool = false,
+                multiColour: Bool? = nil, missing: [String]? = nil, update: Update? = nil) {
+        self.server = server; self.progress = progress; self.layers = layers; self.camera = camera; self.filaments = filaments
+        self.pause = pause; self.resume = resume; self.cancel = cancel; self.quality = quality; self.strength = strength
+        self.multiColour = multiColour; self.missing = missing; self.update = update
+    }
 }
 public struct PrinterCatalog: Decodable, Sendable, Equatable {
     public let destinations: [PrinterDestination]
