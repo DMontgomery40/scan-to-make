@@ -148,10 +148,29 @@ test('concurrent first-create publishes one complete record and ignores interrup
 
 test('stdout flood plus timeout and abort send only one graceful termination',async t=>{
  const {root}=await fixture(t),helper=join(root,'flood'),receipt=join(root,'cleaned');
- await writeFile(helper,`#!${process.execPath}\nconst fs=require('node:fs');process.once('SIGTERM',()=>setTimeout(()=>{fs.writeFileSync(${JSON.stringify(receipt)},'done');process.exit(0)},300));process.stdout.write('x'.repeat(2*1024*1024));setInterval(()=>{},1000);`,{mode:0o700});
+ const ready=join(root,'ready'),signalled=join(root,'signalled');
+ await writeFile(helper,`#!${process.execPath}\nconst fs=require('node:fs');process.once('SIGTERM',()=>{fs.writeFileSync(${JSON.stringify(signalled)},'yes');process.stdout.write('x'.repeat(2*1024*1024));setTimeout(()=>{fs.writeFileSync(${JSON.stringify(receipt)},'done');process.exit(0)},300)});fs.writeFileSync(${JSON.stringify(ready)},'yes');setInterval(()=>{},1000);`,{mode:0o700});
+ // Control only the parent's clock. The real child must install its signal
+ // handler before the production timeout callback runs; startup has no race
+ // against an arbitrary 150/200ms wall-clock delay under parallel CI load.
+ t.mock.timers.enable({apis:['setTimeout']});
  const controller=new AbortController();
+ t.after(()=>{controller.abort();t.mock.timers.tick(10000);});
  const pending=createModelWorker(helper)({kind:'none'},['check'],{signal:controller.signal,timeoutMs:200});
- const rejected=assert.rejects(pending);setTimeout(()=>controller.abort(),150);await rejected;
+ const rejected=assert.rejects(pending);
+ const waitForFile=async file=>{
+  const deadline=Date.now()+5000;
+  while(Date.now()<deadline){
+   if(await stat(file).then(()=>true,error=>{if(error.code==='ENOENT')return false;throw error;}))return;
+   await tick();
+  }
+  throw Error(`Helper did not create ${file}`);
+ };
+ await waitForFile(ready);
+ t.mock.timers.tick(200); // Execute the real worker's timeout handler.
+ await waitForFile(signalled); // Its SIGTERM handler now also floods stdout.
+ controller.abort();
+ await rejected;
  assert.equal(await readFile(receipt,'utf8'),'done');
 });
 
