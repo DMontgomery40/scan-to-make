@@ -505,3 +505,24 @@ test('review fixes, round six: overrides written at the same time all reach the 
   const again = await new McpOverrides(path).load();
   assert.deepEqual([again['printer-0'], again['printer-1'].args], [undefined, ['/copy/new.js']]);
 });
+
+test('review fixes, round seven: a previous npm copy that cannot be put back is reported, not called "still in use"', async t => {
+  const prefix = `${APP}/printers/bambu`, live = `${prefix}/lib/node_modules/bambu-printer-mcp`;
+  const files = {[`${live}/package.json`]: pkgJson('1.1.46'), [`${live}/dist/index.js`]: ''};
+  // The new copy can't start on a printer, and moving the previous one back fails too.
+  const f = await updater(t, {profile: bambu('/x/node', [`${live}/dist/index.js`]), files, connectFail: () => true,
+    failRename: (from, to) => to === live && from.endsWith('/previous')});
+  await f.updates.update(f.mcpId);
+  await f.done();
+  const failed = f.events.at(-1);
+  assert.equal(failed.type, 'mcp.update.failed');
+  assert.match(failed.data.log, /couldn't put the previous version back\. It is kept in .*\/previous: move it to/);
+  assert.match(failed.reason, /couldn't be put back/);
+  const kept = f.moves.find(move => move[0] === 'rename' && move[1] === live)[2];
+  assert.ok(!f.moves.some(move => move[0] === 'rm' && kept.startsWith(move[1] + '/')), 'the folder holding the previous copy is not removed');
+  // The words: no "still in use" when it isn't.
+  const {eventWords} = await import('../dist/events/words.js');
+  const words = eventWords('mcp.update.failed', failed.data, {title: 'Counterpart', package: 'bambu-printer-mcp', reason: failed.reason});
+  assert.doesNotMatch(words.body, /still in use/);
+  assert.match(eventWords('mcp.update.failed', {mcpId: 'x', fromVersion: '1.1.46'}, {title: 'Counterpart', package: 'bambu-printer-mcp'}).body, /1\.1\.46 is still in use/);
+});

@@ -131,7 +131,9 @@ export function eventWords(type: CounterpartEventType, data: CounterpartEvent['d
     case 'mcp.update.started': title = `Updating ${pkg}`; body = joined(versions, context.printer) || 'Updating'; break;
     case 'mcp.update.waiting': title = `${pkg} updates after the current print`; body = joined(versions, context.printer) || 'Waiting for the print to finish'; break;
     case 'mcp.update.done': title = data?.toVersion ? `Updated ${pkg} to ${data.toVersion}` : `Updated ${pkg}`; body = context.printer ? `${context.printer} uses it now.` : 'Your printers use it now.'; break;
-    case 'mcp.update.failed': title = `Couldn't update ${pkg}`; body = `${data?.fromVersion ?? 'The version you had'} is still in use. Try again, or install a fresh copy.`; break;
+    case 'mcp.update.failed': title = `Couldn't update ${pkg}`;
+      // `reason`: the previous version couldn't be put back, so it isn't "still in use".
+      body = context.reason ?? `${data?.fromVersion ?? 'The version you had'} is still in use. Try again, or install a fresh copy.`; break;
   }
   return {title: title.slice(0, 200), body: body.slice(0, 500), notify: NOTIFY[type]};
 }

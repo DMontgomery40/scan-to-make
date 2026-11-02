@@ -19,7 +19,9 @@ export const LOOKUP_TIMEOUT_MS = 7000;
 export type McpUpdateStateName = 'started' | 'waiting' | 'current' | 'unresolved';
 export interface McpUpdate {mcpId: string; state: McpUpdateStateName; fromVersion?: string; toVersion?: string; found?: string}
 export type McpUpdateEventType = 'mcp.update.started' | 'mcp.update.waiting' | 'mcp.update.done' | 'mcp.update.failed';
-export interface McpUpdateEvent {type: McpUpdateEventType; data: {mcpId: string; fromVersion?: string; toVersion?: string; log?: string}; package: string}
+export interface McpUpdateEvent {type: McpUpdateEventType; data: {mcpId: string; fromVersion?: string; toVersion?: string; log?: string}; package: string;
+  /** mcp.update.failed when the previous version couldn't be put back: what to do, in place of "still in use". */
+  reason?: string}
 export type CommandRunner = (command: string, args: string[], options: {cwd?: string; env: NodeJS.ProcessEnv; timeoutMs: number}) => Promise<{code: number; output: string}>;
 
 export class McpUpdateError extends Error {
@@ -78,6 +80,7 @@ export const runCommand: CommandRunner = (command, args, options) => new Promise
   });
 });
 
+const RESTORE_FAILED = "The previous version couldn't be put back, so these printers may not start their MCP. Install a fresh copy from Update.";
 const BUSY_UNKNOWN = (pkg: string) => `Counterpart couldn't check whether a print is running, so it didn't update ${pkg}. Try Update again.`;
 const tail = (text: string) => { const bytes = Buffer.from(text); return bytes.length <= LOG_TAIL_BYTES ? text : bytes.subarray(bytes.length - LOG_TAIL_BYTES).toString('utf8').replace(/^�+/, ''); };
 const newer = newerVersion;
@@ -322,13 +325,19 @@ export class McpUpdater {
         if (!this.#deps.env.exists(join(staged, 'package.json'))) throw new Error('npm install left no package');
         await this.#fs.mkdir(dirname(live));
         const hadLive = this.#deps.env.exists(live);
+        // A step of putting the previous copy back that fails says so; `staging` (which holds `kept`) then stays.
+        const restore = async (step: () => Promise<void>, sentence = `Counterpart couldn't put the previous version back. It is kept in ${kept}: move it to ${live}, or install a fresh copy.`) => {
+          try { await step(); } catch { throw Object.assign(new Error('restore failed'), {restoreFailed: true, sentence}); }
+          await this.#fs.rm(staging).catch(() => undefined);
+        };
         if (hadLive) {
           await this.#fs.rename(live, kept);
           // From here the only copy of the previous version is `kept`: put it back before anything else can fail.
-          undo = async () => { await this.#fs.rename(kept, live); await this.#fs.rm(staging); };
+          undo = () => restore(() => this.#fs.rename(kept, live));
         }
         await this.#fs.rename(staged, live);
-        undo = async () => { await this.#fs.rm(live); if (hadLive) await this.#fs.rename(kept, live); await this.#fs.rm(staging); };
+        undo = hadLive ? () => restore(async () => { await this.#fs.rm(live); await this.#fs.rename(kept, live); })
+          : () => restore(() => this.#fs.rm(live), `Counterpart couldn't remove the new copy at ${live}. Remove it, or install a fresh copy.`);
       } else if (plan.kind === 'checkout') {
         await run('git status', '/bin/sh', ['-c', `test -z "$(${plan.git} -C "$1" status --porcelain)" || { echo "This copy has local changes"; exit 3; }`, 'sh', plan.dir], undefined, process.env);
         const head = (await run('git rev-parse', plan.git, ['-C', plan.dir, 'rev-parse', 'HEAD'], undefined, process.env)).trim().split('\n').at(-1)!;
@@ -342,7 +351,7 @@ export class McpUpdater {
           ] as const) {
             const result = await this.#run(command, [...args], {...(cwd ? {cwd} : {}), env, timeoutMs: MCP_UPDATE_TIMEOUT_MS});
             log += `$ ${[command, ...args].join(' ')}\n${result.output}\n`;
-            if (result.code !== 0) throw Object.assign(new Error(`${label} failed`), {
+            if (result.code !== 0) throw Object.assign(new Error(`${label} failed`), {restoreFailed: true,
               sentence: `Counterpart couldn't put the previous version back (${label} failed). Rebuild it in ${plan.dir} with npm ci && npm run build.`});
           }
         };
@@ -374,14 +383,18 @@ export class McpUpdater {
       await this.#emit('mcp.update.done', pkg, {...update, toVersion: catalog?.server.version ?? latest});
     } catch (error) {
       // The previous version stays in use: the swap or checkout is undone, and an override is put back.
-      let sentence = (error as {sentence?: string}).sentence;
-      await undo?.().catch((failure: {sentence?: string}) => { if (failure?.sentence) sentence = [sentence, failure.sentence].filter(Boolean).join(' '); });
+      let sentence = (error as {sentence?: string}).sentence, restoreFailed = false;
+      await undo?.().catch((failure: {sentence?: string}) => {
+        restoreFailed = true;
+        sentence = [sentence, failure?.sentence ?? "Counterpart couldn't put the previous version back."].filter(Boolean).join(' ');
+      });
       for (const member of members) {
         await this.#deps.overrides.set(member.id, previous.get(member.id), member.config).catch(() => undefined);
         await this.#deps.session(member.id)?.restart(this.#deps.overrides.apply(member.config, previous.get(member.id))).catch(() => undefined);
       }
       this.#active.delete(mcpId);
-      await this.#emit('mcp.update.failed', pkg, update, tail(sentence ? `${log}${sentence}\n` : log || String((error as Error).message)));
+      await this.#emit('mcp.update.failed', pkg, update, tail(sentence ? `${log}${sentence}\n` : log || String((error as Error).message)),
+        restoreFailed ? RESTORE_FAILED : undefined);
     } finally {
       this.#deps.gate?.endUpdate(members.map(member => member.id));
       for (const [key, owner] of [...this.#changing]) if (owner === mcpId) this.#changing.delete(key);
@@ -421,9 +434,9 @@ export class McpUpdater {
     return {kind: 'checkout', dir: install.dir, git: env.exists('/usr/bin/git') ? '/usr/bin/git' : 'git', npm, env: this.#env(npm, install.node)};
   }
 
-  async #emit(type: McpUpdateEventType, pkg: string, update: McpUpdate, log?: string): Promise<void> {
+  async #emit(type: McpUpdateEventType, pkg: string, update: McpUpdate, log?: string, reason?: string): Promise<void> {
     if (!this.#deps.emit) return;
     await this.#deps.emit({type, package: pkg, data: {mcpId: update.mcpId, ...(update.fromVersion ? {fromVersion: update.fromVersion} : {}),
-      ...(update.toVersion ? {toVersion: update.toVersion} : {}), ...(log ? {log} : {})}}).catch(() => undefined);
+      ...(update.toVersion ? {toVersion: update.toVersion} : {}), ...(log ? {log} : {})}, ...(reason ? {reason} : {})}).catch(() => undefined);
   }
 }

@@ -136,7 +136,7 @@ if(handoffConfig&&printHandoff&&captureDirectory&&claudePath){
     env:hostEnvironment(dataRoot),overrides:new McpOverrides(join(dataRoot,'printers','overrides.json')),
     session:id=>destinations.get(id)?.runner.session,busy:id=>service.printerBusy(id),
     runningVersion:id=>directory.capabilities(id)?.server.version,node:process.execPath,gate:printGate,
-    ...(eventLog&&projectlessEvents?{emit:async event=>{await eventLog.append({id:randomUUID(),type:event.type,data:event.data,detail:{package:labels[event.package]??event.package}});}}:{}),
+    ...(eventLog&&projectlessEvents?{emit:async event=>{await eventLog.append({id:randomUUID(),type:event.type,data:event.data,detail:{package:labels[event.package]??event.package,...(event.reason?{reason:event.reason}:{})}});}}:{}),
   });
   printerDirectory.useVersions(mcpUpdates);
   await mcpUpdates.applyOverrides();
