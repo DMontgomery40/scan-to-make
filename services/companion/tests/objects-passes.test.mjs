@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {mkdtemp, mkdir, readFile, rm, writeFile} from 'node:fs/promises';
-import {join} from 'node:path';
+import {basename, join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {createServer} from 'node:http';
 import {ObjectStore} from '../dist/objects/store.js';
@@ -251,4 +251,22 @@ test('a person renaming while the title generator answers keeps their name', asy
   await until(() => changes.length);
   assert.deepEqual(changes, ['My own name']);
   assert.equal((await store.get(object.id)).title, 'My own name');
+});
+
+
+test('a pass uses its claimed photos and prior context, never a later queued message’s uploads', async t => {
+  const f = await setup(t, [{}, {}, {}]);
+  const object = await f.service.create('A mount');
+  await f.service.addPhoto(object.id, 'initial.jpg', JPEG);
+  await f.service.start(object.id); await f.service.settled(object.id);
+  await f.service.addPhoto(object.id, 'a.jpg', JPEG);
+  await f.service.addPhoto(object.id, 'b.jpg', JPEG);
+  await f.service.correct(object.id, 'Change A', [], ['a.jpg']);
+  await f.service.settled(object.id);
+  assert.deepEqual(f.inputs[1].photos.map(path => basename(path)), ['initial.jpg', 'a.jpg']);
+  assert.deepEqual((await f.store.get(object.id)).pendingPhotos, ['b.jpg']);
+  await f.service.correct(object.id, 'Change B', [], ['b.jpg']);
+  await f.service.settled(object.id);
+  assert.deepEqual(f.inputs[2].photos.map(path => basename(path)), ['initial.jpg', 'a.jpg', 'b.jpg']);
+  assert.deepEqual((await f.store.get(object.id)).pendingPhotos, []);
 });
