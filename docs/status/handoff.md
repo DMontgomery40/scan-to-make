@@ -1,5 +1,40 @@
 # Handoff: how to pick up Counterpart work
 
+## Device acceptance and Blender follow-up — 2026-11-02, 09:24 Mountain
+
+Mac build `202611020921` is installed from merged main `f1d2dde6` (#265); Davica3 has
+`202611020904` from `c5ba0d8e` (#263). The Mac agent reports parent version 0921. Source
+hash comparisons confirm the installed Blender startup/preflight matches main. Configuration,
+TLS, pairing identities, existing model/photo bytes survived both installations unchanged.
+
+Real Mac settings acceptance duplicated the stove model, renamed the temporary copy to
+“Counterpart acceptance check”, and saved Fine/two-copy defaults. The print sheet correctly
+consumed both values, then exposed another real defect: Bambu Studio rejects the combination
+`--slice 0 --repetitions 2`. Changing only the sheet to one copy produces a real estimate of
+4 h 48 min / 104 g / 0.12 mm / 15% infill. The two-copy fix is ongoing. Test copy
+`bd2a5e1c-b1c9-469d-be8e-36c1411b2e68` is temporary acceptance evidence, not a new user project;
+retain it until the printing diagnosis finishes, then clean it up. No print was dispatched.
+
+The private cleanup replay reached its tool-call limit and produced a checkpoint with visible
+rear defects. It was rejected, not imported into the live projects. That run also exposed a
+status bug: a capped checkpoint was announced Ready. PR #264 fixes the classification and
+cross-client Retry action, including an exact shared public-response fixture (pass activity is
+intentionally omitted from public responses). It is not installed yet.
+
+The configured Blender bridge could connect while its installed add-on was too old for the
+inspection tools. The official add-on was validated and installed with a mandatory backup,
+legacy module name and preferences preserved. Its auto-start then exposed a second bug: the
+app's delayed enable call disconnected the ready bridge. Merged/installed #265 is idempotent,
+checks add-on compatibility, and preserves user-owned sessions. Real material and solid
+inspection calls pass; a fresh full cleanup replay started at 09:23 with hardware calls blocked.
+Blender status/repair controls for both clients are being reviewed separately.
+
+Evidence: `~/scan-to-make-work/codex-deploy-20261102` (installation receipts, screenshot of the
+actual two-copy failure); `codex-blender-readiness-workflows` (Node 22/24 PASS at `2de556ef`);
+`codex-capped-cleanup-5648c802` (Node 22/24 PASS); signed 0904/0921 build logs. Hosted Actions
+still cannot start because account payments/spending limits block jobs. Phone unlock, physical
+print/stop, scan/Face ID acceptance, APNs registration and public MCP publication remain open.
+
 ## Capture warning and reconstruction diagnostics follow-up — 2026-11-02
 
 New walk-around captures retain Apple's `stitchingIncomplete` warning in the local draft. Capture review and the phone's Send journey say that some sides may be missing and ask for all-side inspection; the warning does not discard the model or claim scan acceptance. Existing drafts without the optional flag are unchanged. A new healthy reconstruction clears the flag.
@@ -45,7 +80,7 @@ cover changed/default/legacy-alias/unknown destinations and explicit defaults wi
 history. The affected Node 22 object-service/HTTP suite passes 69 tests; shared Swift passes 136,
 Mac model checks pass 29, and both fixture UI checks pass again. The complete promotion-path audit
 found no other production history-to-defaults consumer; ControlKit's old `init(last:)` has test callers only.
-Project Settings is not yet installed or accepted on the physical devices.
+Project Settings is installed on both devices; see the current device-acceptance section for observed Mac behavior and remaining phone acceptance.
 
 [Apple's ActivityKit push documentation](https://developer.apple.com/documentation/ActivityKit/starting-and-updating-live-activities-with-activitykit-push-notifications)
 requires an alert for push-to-start. Muted project events therefore skip remote start, while existing
@@ -77,8 +112,7 @@ and notification delivery remain unchecked.
 Local workflow evidence: `codex-recovery-checks-3`, `codex-companion-updater-final` (both Node 22/24
 pass at `3b8ea525`), `codex-relay-checks`, signed Mac/phone build logs and native regression logs.
 Hosted Actions still cannot start because of account billing; there are no required checks.
-The latest review found Ask answers claiming photos reserved by queued corrections; a minimal
-fix is being prepared before merge. Earlier ordering, terminal cloud state, retry attachment,
+The final #259 review fixed Ask answers claiming photos reserved by queued corrections; the fix is installed. Earlier ordering, terminal cloud state, retry attachment,
 foreground activity and updater-deadline findings are fixed and their threads resolved.
 
 The installed batch combines capture intent/error handling, rename/search/ordered reads, queued
