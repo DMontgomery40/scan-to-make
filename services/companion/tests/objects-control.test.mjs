@@ -7,6 +7,8 @@ import {ObjectStore} from '../dist/objects/store.js';
 import {ObjectService} from '../dist/objects/service.js';
 import {createControlDispatcher} from '../dist/local-control-services.js';
 
+const until = async check => { for (let i = 0; i < 300; i++) { if (await check()) return; await new Promise(resolve => setTimeout(resolve, 5)); } throw new Error('timed out'); };
+
 async function dispatcher(events) {
   const store = new ObjectStore(join(await mkdtemp(join(tmpdir(), 'objects-ctl-')), 'objects'));
   const objects = new ObjectService({store, runTouchup: async () => { throw new Error('unused'); }, stlInfo: async () => undefined, claudePath: '/c', handoff: {backend: 'bambu-printer-mcp', process: {command: '/usr/bin/true'}}, ...(events ? {events} : {})});
@@ -40,6 +42,40 @@ test('the Mac app can start a touch-up again, and a refusal says why in plain wo
   await assert.rejects(dispatch('objects.print', {id: object.id}), error => error.code === 'conflict' && error.message === 'There is no model to print yet.');
   assert.equal((await dispatch('objects.start', {id: object.id})).object.state, 'touching-up');
   await objects.settled(object.id);
+});
+
+test('a new project says when its first files are arriving from the phone; with none arriving and none sent it is a draft', async () => {
+  const events = [];
+  const {dispatch, objects} = await dispatcher({emit: async draft => { events.push(draft); }});
+  const object = await objects.create();
+  const progress = async () => (await dispatch('objects.list', {})).objects.find(o => o.id === object.id).progress;
+  assert.equal(await progress(), undefined, 'nothing sent and nothing arriving: a draft');
+  // One upload in flight: the Mac reads it as sending, and an event makes it read again at once.
+  let arrive;
+  const upload = objects.receive(object.id, () => new Promise(resolve => { arrive = resolve; }));
+  await until(() => arrive);
+  assert.equal(await progress(), 'Receiving files from your iPhone');
+  assert.equal((await dispatch('objects.get', {id: object.id})).object.progress, 'Receiving files from your iPhone');
+  const receiving = () => events.filter(event => event.type === 'project.updated' && event.data?.keys?.includes('receiving'));
+  assert.equal(receiving().length, 1);
+  // The upload is cut short: nothing reached the Mac, so it is a draft again, and the apps hear about it.
+  arrive();
+  await upload;
+  assert.equal(await progress(), undefined);
+  assert.equal(receiving().length, 2);
+  // An upload that lands: the project has a file, so it reads as sending from then on; no second event is needed.
+  await objects.receive(object.id, () => objects.addPhoto(object.id, 'a.jpg', Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0])));
+  assert.equal(receiving().length, 3, 'the start of that upload, while the project had nothing');
+  assert.equal(objects.receiving(object.id), false);
+  // Two at once count as one send until both finish.
+  let first, second;
+  const a = objects.receive(object.id, () => new Promise(resolve => { first = resolve; }));
+  const b = objects.receive(object.id, () => new Promise(resolve => { second = resolve; }));
+  await until(() => first && second);
+  first(); await a;
+  assert.equal(objects.receiving(object.id), true);
+  second(); await b;
+  assert.equal(objects.receiving(object.id), false);
 });
 
 test('the Mac app can delete an object, and the event says the Mac did', async () => {

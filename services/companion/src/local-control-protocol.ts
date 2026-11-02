@@ -11,6 +11,8 @@ const messages = {
   conflict: 'The requested operation conflicts with current state',
   unavailable: 'The requested capability is unavailable',
   internal: 'The local control operation failed',
+  // KAN-223: Bambu Studio refused the slice; the message is Studio's own words.
+  'slicer-error': 'Bambu Studio could not slice this model',
 } as const;
 export class ControlFailure extends Error {
   /** `detail` replaces the generic sentence when the refusal has a plain one of its own. */
