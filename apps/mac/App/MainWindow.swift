@@ -292,38 +292,49 @@ enum ModelEditor {
     struct Problem: Error { let text: String }
     static let blenderId = "org.blenderfoundation.blender"
 
-    /// Open in Blender (PRD §9.6): never a new Blender per click. A running Blender gets the model in its own scene
-    /// (through the Blender MCP add-on when it listens, else as a file it is asked to open); with none running, one
-    /// starts and later clicks reuse it. The copy keeps the project's own file untouched.
+    /// Open in Blender (PRD §9.6): never a new Blender per click, and at most one that Counterpart started.
+    /// 1. The person's Blender with the Blender MCP add-on listening: imported into the scene they have open.
+    /// 2. The Blender Counterpart started, still open: it imports from its inbox.
+    /// 3. Otherwise one starts, watching the inbox, and later clicks reuse it. When the person's own Blender is open
+    ///    without the add-on, nothing can tell it to import, so this one is a separate instance.
+    /// The copy keeps the project's own file untouched.
     @MainActor static func openInBlender(_ source: URL) async -> Result<String, Problem> {
         let workspace = NSWorkspace.shared
         guard let application = workspace.urlForApplication(withBundleIdentifier: blenderId) else {
             return .failure(Problem(text: "Blender isn’t on this Mac. Install it, or choose a slicer."))
         }
         guard let copy = try? editorCopy(source) else { return .failure(Problem(text: "The model couldn’t be copied for Blender.")) }
-        if let running = NSRunningApplication.runningApplications(withBundleIdentifier: blenderId).first {
-            if await BlenderBridge.importSTL(copy) {
-                running.activate()
-                return .success("Opened in Blender")
-            }
-            let configuration = NSWorkspace.OpenConfiguration()
-            configuration.activates = true
-            _ = try? await workspace.open([copy], withApplicationAt: application, configuration: configuration)
+        let running = NSRunningApplication.runningApplications(withBundleIdentifier: blenderId).filter { !$0.isTerminated }
+        let ours = BlenderBridge.listeningPid().flatMap { pid in running.first { $0.processIdentifier == pid } }
+            ?? started.flatMap { app in app.isTerminated ? nil : app }
+        if !running.isEmpty, await BlenderBridge.importSTL(copy) {
+            (running.first { $0 != ours } ?? ours)?.activate()
             return .success("Opened in Blender")
         }
-        // One instance, not `-n`: the next click finds it running.
-        let configuration = NSWorkspace.OpenConfiguration()
-        configuration.createsNewApplicationInstance = false
-        configuration.arguments = ["--python-expr",
-                                   "import bpy,sys; bpy.ops.object.select_all(action='SELECT'); bpy.ops.object.delete(use_global=False); bpy.ops.wm.stl_import(filepath=sys.argv[-1])",
-                                   "--", copy.path]
         do {
-            _ = try await workspace.openApplication(at: application, configuration: configuration)
+            if let ours {
+                try BlenderBridge.drop(copy)
+                ours.activate()
+                return .success("Opened in Blender")
+            }
+            BlenderBridge.clear()
+            try BlenderBridge.drop(copy)
+        } catch {
+            return .failure(Problem(text: "The model couldn’t be copied for Blender."))
+        }
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.createsNewApplicationInstance = !running.isEmpty
+        configuration.arguments = ["--python-expr", BlenderBridge.watcher, "--", BlenderBridge.inbox.path]
+        do {
+            started = try await workspace.openApplication(at: application, configuration: configuration)
             return .success("Opened in Blender")
         } catch {
             return .failure(Problem(text: "Blender didn’t open. Try again, or open the model from Show in Finder."))
         }
     }
+
+    /// The Blender this Mac started, from its launch until its inbox heartbeat takes over.
+    @MainActor private static var started: NSRunningApplication?
 
     /// A copy of the model, so another app's edits never change the project.
     static func editorCopy(_ source: URL) throws -> URL {

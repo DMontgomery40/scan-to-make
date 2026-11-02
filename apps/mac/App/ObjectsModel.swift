@@ -384,32 +384,40 @@ struct SocketObjects: ObjectsCompanion {
     /// Project Settings' Status (PRD §5.4): `not-printed`, `printed`, `works` (Done), `needs-changes`.
     @discardableResult func setStatus(_ status: String, for id: String) async -> Bool {
         guard capabilities?.projectSettings == true else { return false }
-        return await change(id) { try await self.companion.setProjectSettings(id, ["status": .string(status)]) }
+        let done = await change(id) { try await self.companion.setProjectSettings(id, ["status": .string(status)]) }
+        if done { await refresh() } // the settings the sidebar and "Did it fit?" read
+        return done
     }
     /// Archive hides a project from the sidebar's groups and keeps everything; Unarchive brings its status back.
     @discardableResult func setArchived(_ archived: Bool, for id: String) async -> Bool {
         guard capabilities?.projectSettings == true else { return false }
-        let underneath = objects.first { $0.id == id }.map(Self.statusUnderneath) ?? "not-printed"
+        let underneath = objects.first { $0.id == id }.flatMap { Self.statusUnderneath($0, outcome: extras[id]?.outcome) }
         let done = await change(id) {
             do {
                 return try await self.companion.setProjectSettings(id, ["archived": .bool(archived)])
             } catch let error as ControlRemoteError where error.code == "invalid-request" {
-                // A companion from before the separate flag (KAN-214 PR 8a) archives as a status; any other status
-                // unarchives, so the one underneath is sent back.
-                return try await self.companion.setProjectSettings(id, ["status": .string(archived ? "archived" : underneath)])
+                // A companion from before the separate flag (KAN-214 PR 8a) archives as a status, keeping the state. Any
+                // other status unarchives it, so only one that changes nothing else is sent back.
+                if archived { return try await self.companion.setProjectSettings(id, ["status": .string("archived")]) }
+                guard let underneath else {
+                    throw ControlRemoteError(code: "conflict", message: "Update Counterpart on this Mac to unarchive this project without changing its status.")
+                }
+                return try await self.companion.setProjectSettings(id, ["status": .string(underneath)])
             }
         }
         if done { await refresh() }
         return done
     }
 
-    /// The status an archived project keeps, from its state: Done stays Done.
-    static func statusUnderneath(_ project: Project) -> String {
-        if project.words.done { return "works" }
-        switch project.state.rawValue {
-        case "printed", "sent": return "printed"
-        default: return "not-printed"
-        }
+    /// For a companion without the separate flag: the status that unarchives a project and changes nothing else (the
+    /// person's own answer, Done or Needs changes, comes back as it was). Nil when every status would also change its
+    /// state (sent, failed, waiting on a close-up).
+    static func statusUnderneath(_ project: Project, outcome: String?) -> String? {
+        if outcome == "needs-changes" { return "needs-changes" }
+        if outcome == "works" || project.words.done { return "works" }
+        if outcome == nil, project.state.rawValue == "printed" { return "printed" }
+        if project.current == nil || (outcome == nil && project.state.rawValue == "ready") { return "not-printed" }
+        return nil
     }
 
     /// Answers a `choice` Ask (plates, objects, colours) with the options picked.
@@ -533,4 +541,17 @@ struct SocketObjects: ObjectsCompanion {
 
 private extension String {
     var nilIfEmpty: String? { isEmpty ? nil : self }
+}
+
+/// PRD §5.4: after printing, "Did it fit?" It works marks the project Done (`status: works`); Needs changes starts Ask
+/// for changes with "After printing: " and keeps the print history. Asked once per print: an answer, or Not Now, ends
+/// it until the next print finishes.
+enum DidItFit {
+    /// This project's last print.
+    static func key(_ object: Project) -> String { "fit.dismissed.\(object.id).\(object.print?.printId ?? object.print?.bundleId ?? "")" }
+    /// Whether to ask: not once it's answered (Needs changes is the answer the companion keeps) or set aside.
+    static func asks(_ object: Project, _ extras: PublishedExtras?, defaults: UserDefaults = .standard) -> Bool {
+        extras?.status != "needs-changes" && extras?.outcome != "needs-changes" && !defaults.bool(forKey: key(object))
+    }
+    static func dismiss(_ object: Project, defaults: UserDefaults = .standard) { defaults.set(true, forKey: key(object)) }
 }

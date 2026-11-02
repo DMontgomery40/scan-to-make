@@ -98,11 +98,13 @@ struct ProjectDetail: View {
                 FileAskCard(object: object, ask: model.extras[object.id]!.fileAsk!, model: model)
             case .needsYou where model.extras[object.id]?.choiceAsk != nil:
                 ChoiceAskCard(object: object, ask: model.extras[object.id]!.choiceAsk!, model: model).id(model.extras[object.id]!.choiceAsk!.id)
-            case .printed where !words.done && model.capabilities?.projectSettings == true && !DidItFit.dismissed(object.id):
+            case .printed where !words.done && model.capabilities?.projectSettings == true && DidItFit.asks(object, model.extras[object.id]):
                 DidItFitCard(object: object, model: model, published: model.extras[object.id]?.credit != nil) {
-                    note = "After printing: "
+                    // Keep a correction the person had already started.
+                    if note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { note = "After printing: " }
                     noteFocused = true
                 }
+                .id(DidItFit.key(object))
             case .needsYou: needsYou
             case .working, .sending, .preparing: progressCard
             case .printing: printingCard
@@ -513,13 +515,6 @@ private struct ChoiceAskCard: View {
     }
 }
 
-/// PRD §5.4: after printing, "Did it fit?" It works marks the project Done (`status: works`); Needs changes starts Ask
-/// for changes with "After printing: " and keeps the print history. Asked once: Not Now never asks again.
-enum DidItFit {
-    static func dismissed(_ id: String) -> Bool { UserDefaults.standard.bool(forKey: "fit.dismissed." + id) }
-    static func dismiss(_ id: String) { UserDefaults.standard.set(true, forKey: "fit.dismissed." + id) }
-}
-
 private struct DidItFitCard: View {
     let object: Project
     @ObservedObject var model: ObjectsModel
@@ -535,13 +530,19 @@ private struct DidItFitCard: View {
                 Image(systemName: "questionmark.circle.fill").font(.title2).foregroundStyle(Color.filament)
                 Text(published ? "Did it come out right?" : "Did it fit?").font(.subheadline.weight(.semibold))
                 Spacer()
-                Button("Not Now") { DidItFit.dismiss(object.id); hidden = true }.buttonStyle(.plain).foregroundStyle(.secondary)
+                Button("Not Now") { DidItFit.dismiss(object); hidden = true }.buttonStyle(.plain).foregroundStyle(.secondary)
                 Button("Needs Changes") {
-                    Task { await model.setStatus("needs-changes", for: object.id) }
-                    needsChanges()
+                    Task {
+                        guard await model.setStatus("needs-changes", for: object.id) else { return }
+                        DidItFit.dismiss(object)
+                        hidden = true
+                        needsChanges()
+                    }
                 }
                 .buttonStyle(.glass).disabled(working)
-                Button { Task { await model.setStatus("works", for: object.id) } } label: { Label("It Works", systemImage: "checkmark.circle.fill") }
+                Button {
+                    Task { if await model.setStatus("works", for: object.id) { DidItFit.dismiss(object); hidden = true } }
+                } label: { Label("It Works", systemImage: "checkmark.circle.fill") }
                     .buttonStyle(.glassProminent).disabled(working)
             }
             .padding(12).frame(maxWidth: .infinity, alignment: .leading)

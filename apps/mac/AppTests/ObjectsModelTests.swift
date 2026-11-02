@@ -84,6 +84,10 @@ private func item(_ id: String, _ state: String, _ fields: [String: Any] = [:]) 
      "current": ["model": "current/model.stl", "renders": []]].merging(fields) { $1 }
 }
 
+private func project(_ item: [String: Any]) throws -> Project {
+    try JSONDecoder().decode(Project.self, from: JSONSerialization.data(withJSONObject: item))
+}
+
 @MainActor final class ObjectsModelTests: XCTestCase {
     func testConfirmationRejectsStaleAndIncompleteAnswers() async {
         let companion = FakeObjects()
@@ -380,5 +384,31 @@ private func item(_ id: String, _ state: String, _ fields: [String: Any] = [:]) 
         XCTAssertEqual(unarchive["m"]?["status"], .string("works"), "the status underneath, Done")
         XCTAssertEqual(model.groups.map(\.group), [.done])
         XCTAssertNil(model.problem, "the older companion's refusal of the flag is never shown")
+    }
+
+    /// "Did it fit?" is asked once per print: answering Needs Changes (or Not Now) ends it until the next print.
+    func testDidItFitIsAskedOncePerPrint() throws {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: "fit-\(UUID().uuidString)"))
+        let first = try project(item("m", "printed", ["print": ["bundleId": "b1", "printId": "p1"]]))
+        XCTAssertTrue(DidItFit.asks(first, nil, defaults: defaults))
+        let answered = try JSONDecoder().decode(PublishedExtras.self, from: Data(#"{"outcome":"needs-changes","settings":{"status":"needs-changes"}}"#.utf8))
+        XCTAssertFalse(DidItFit.asks(first, answered, defaults: defaults), "Needs Changes is an answer")
+        DidItFit.dismiss(first, defaults: defaults)
+        XCTAssertFalse(DidItFit.asks(first, nil, defaults: defaults), "Not Now sets this print aside")
+        let next = try project(item("m", "printed", ["print": ["bundleId": "b2", "printId": "p2"]]))
+        XCTAssertTrue(DidItFit.asks(next, nil, defaults: defaults), "the next print asks again")
+    }
+
+    /// Without the separate flag, Unarchive sends only a status that changes nothing else.
+    func testUnarchiveOnAStatusOnlyCompanionNeverChangesTheState() throws {
+        var draft = item("a", "new")
+        draft.removeValue(forKey: "current")
+        XCTAssertEqual(ObjectsModel.statusUnderneath(try project(item("a", "printed")), outcome: "needs-changes"), "needs-changes")
+        XCTAssertEqual(ObjectsModel.statusUnderneath(try project(item("a", "printed")), outcome: "works"), "works")
+        XCTAssertEqual(ObjectsModel.statusUnderneath(try project(item("a", "printed")), outcome: nil), "printed")
+        XCTAssertEqual(ObjectsModel.statusUnderneath(try project(item("a", "ready")), outcome: nil), "not-printed")
+        XCTAssertEqual(ObjectsModel.statusUnderneath(try project(draft), outcome: nil), "not-printed", "a draft stays a draft")
+        XCTAssertNil(ObjectsModel.statusUnderneath(try project(item("a", "sent")), outcome: nil), "printed would change sent")
+        XCTAssertNil(ObjectsModel.statusUnderneath(try project(item("a", "failed")), outcome: nil), "not-printed would make it ready")
     }
 }
