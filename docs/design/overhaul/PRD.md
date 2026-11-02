@@ -1011,6 +1011,7 @@ Counterpart runs all day in the menu bar and on the phone, so it has to be cheap
 - **One live 3D view per window at most.** It pauses when the window or app isn't visible.
 - **Models are loaded once per file version** and never rebuilt by a refresh. Lists update only what changed.
 - **Only Release builds are installed**, never Debug builds or ones that include Xcode Previews.
+- **No background helpers between jobs.** Blender (and Fusion, when Counterpart opened it) starts when a touch-up or design pass begins and quits when that pass ends. If another pass is already queued, it carries straight on; otherwise it quits right away. Counterpart only ever quits a Blender or Fusion it started itself, never one the user opened. Between jobs, all Counterpart runs is the menu-bar app and the companion.
 - **Every UI PR reports its numbers:** `top -l 5 -pid`, `footprint`, and an Instruments energy log for the phone.
 
 ## 10. Visual system
