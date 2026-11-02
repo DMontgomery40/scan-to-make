@@ -8,3 +8,4 @@ export * from './slicer-report.js';
 export * from './session.js';
 export * from './counterpart.js';
 export * from './model-file.js';
+export * from './bound-fusion.js';

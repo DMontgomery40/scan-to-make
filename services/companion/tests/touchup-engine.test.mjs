@@ -22,7 +22,8 @@ function bridge(results, tools = ['blender_mcp_status', 'blender_mcp_call', 'fus
   return {calls, client: () => ({
     async connect() {}, async close() {},
     hasTool: name => tools.includes(name),
-    async callTool(name, args) { calls.push({name, args}); return results[name] ?? text({}); },
+    getTool: name => ({name, inputSchema: {type: "object", properties: {bind_document: {type: "boolean"}}}}),
+    async callTool(name, args) { calls.push({name, args}); return results[name] ?? text(name === "fusion_mcp_new_design" ? {document_binding: 1, document_id: "owned-token"} : {}); },
   })};
 }
 
@@ -31,7 +32,7 @@ test('copies always use Blender; a design uses Fusion only when it is connected 
   assert.deepEqual(await chooseEngine({handoff, kind: 'copy'}, copy), {engine: 'blender'});
   assert.equal(copy.calls.length, 0, 'a copy never asks about Fusion');
   const ok = bridge({fusion_mcp_status: text({configured: true, connected: true, addinReachable: true, fusionRunning: true, tools: ['extrude']})});
-  assert.deepEqual(await chooseEngine({handoff, kind: 'fit'}, ok), {engine: 'fusion'});
+  assert.deepEqual(await chooseEngine({handoff, kind: 'fit'}, ok), {engine: 'fusion', documentId: 'owned-token'});
   assert.deepEqual(ok.calls.map(c => c.name), ['fusion_mcp_status', 'fusion_mcp_new_design']);
   assert.deepEqual(ok.calls[0].args, {launch: true, timeout_ms: 90000});
   // faust-machines/fusion360-mcp-server#12: no new design → Blender, with the reason recorded.
@@ -83,7 +84,7 @@ test('the worker is told its engine, and a later change starts from the Fusion d
   const root = await mkdtemp(join(tmpdir(), 'touchup-engine-inv-'));
   const pass = await prepareTouchupPass({root, objectId: 'o', scan: [], photos: [], requirePhotos: false});
   const inv = buildTouchupInvocation({pass, printer: handoff.process, claudePath: '/c', instructions: 'A hook', note: 'Make it 1 mm wider', currentModel: true,
-    engine: 'fusion', design: {f3d: '/p/current/design.f3d', parameters: '/p/current/parameters.json'}});
+    engine: 'fusion', documentId: 'owned-token', handoff, design: {f3d: '/p/current/design.f3d', parameters: '/p/current/parameters.json'}});
   assert.match(inv.args.at(-1), /parametric Fusion design: \/p\/current\/design\.f3d \(its parameters: \/p\/current\/parameters\.json\)/);
   for (const field of ['title', 'changes', 'ask']) assert.ok(TOUCHUP_RESULT_SCHEMA.properties[field], field);
 });
@@ -147,4 +148,46 @@ test('design passes hold Fusion across processes from opening the document to th
   await other();
   await pass;
   assert.equal(ran, true);
+});
+
+test('Fusion selection requires a bound identity and imports the prior archive before the worker', async () => {
+  const bound = bridge({fusion_mcp_status: text({configured: true, connected: true}), fusion_mcp_new_design: text({document_binding: 1, document_id: 'owned-token'})});
+  const selected = await chooseEngine({handoff, kind: 'fit', design: {f3d: '/project/model.f3d'}}, bound);
+  assert.deepEqual(selected, {engine: 'fusion', documentId: 'owned-token'});
+  assert.deepEqual(bound.calls.at(-1).args, {bind_document: true, source_f3d: '/project/model.f3d'});
+  const legacy = bridge({fusion_mcp_status: text({configured: true, connected: true}), fusion_mcp_new_design: text({document: 'Untitled'})});
+  const refused = await chooseEngine({handoff, kind: 'fit'}, legacy);
+  assert.equal(refused.engine, 'blender');
+  assert.match(refused.note, /document binding/);
+});
+
+test('Fusion worker config carries the binding independently of configured SSH arguments', async () => {
+  const {readFile} = await import('node:fs/promises');
+  const pass = await prepareTouchupPass({root: await mkdtemp(join(tmpdir(), 'fusion-config-')), objectId: 'p', scan: [], photos: [], requirePhotos: false});
+  const ssh = {...handoff, process: {command: '/usr/bin/ssh', args: ['-i', '/configured/key', 'localhost', 'forced-printer']}};
+  const invocation = buildTouchupInvocation({pass, printer: ssh.process, handoff: ssh, claudePath: '/claude', engine: 'fusion', documentId: 'trusted-document'});
+  const entry = invocation.mcpConfig.mcpServers.printer;
+  assert.equal(entry.command, process.execPath);
+  assert.match(entry.args[0], /fusion-worker-cli\.js$/);
+  const binding = JSON.parse(await readFile(entry.args[1], 'utf8'));
+  assert.deepEqual(binding, {handoff: ssh, documentId: 'trusted-document'});
+  assert.throws(() => buildTouchupInvocation({pass, printer: ssh.process, claudePath: '/claude', engine: 'fusion'}), /binding/);
+});
+
+for (const outcome of [
+  {status: 'done', archive: true, close: true},
+  {status: 'done', archive: true, close: true, closeFailure: true},
+  {status: 'failed', archive: true, close: false},
+  {status: 'capped', archive: true, close: false},
+  {status: 'done', archive: false, close: false},
+]) test(`Fusion document lifecycle preserves recovery unless ${outcome.status}/archive=${outcome.archive}/closeFailure=${Boolean(outcome.closeFailure)} is complete`, async () => {
+  const root = await mkdtemp(join(tmpdir(), 'fusion-owned-lifecycle-'));
+  const fusion = bridge({fusion_mcp_status: text({configured: true, connected: true}), ...(outcome.closeFailure ? {fusion_mcp_call: error('already disconnected')} : {})});
+  const result = await runTouchup({root, objectId: 'o', scan: [], photos: [], instructions: 'A small box', handoff, claudePath: '/claude', kind: 'fit'}, {
+    client: fusion.client, fusionLockPath: join(root, 'fusion.lock'),
+    run: async (_inv, pass) => ({status: outcome.status, model: join(pass.outDir, 'touched.stl'), ...(outcome.archive ? {design: {f3d: join(pass.outDir, 'touched.f3d')}} : {}), renders: [], checkpoints: [], stats: {seconds: 1, toolCalls: 1}}),
+  });
+  assert.equal(result.status, outcome.status);
+  const close = fusion.calls.filter(call => call.name === 'fusion_mcp_call' && call.args.tool_name === 'close_document');
+  assert.deepEqual(close, outcome.close ? [{name: 'fusion_mcp_call', args: {tool_name: 'close_document', arguments: {}, document_id: 'owned-token'}}] : []);
 });

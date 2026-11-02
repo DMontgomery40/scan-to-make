@@ -9,9 +9,10 @@ import Darwin
 /// 3. installs a login LaunchAgent that runs `launchctl setenv FUSION_MCP_PORT 9877` (and runs it once now), because
 ///    Blender's MCP add-on holds 9876 and a Fusion opened from the Dock never sees the env file.
 enum FusionSetup {
-    static let repository = "faust-machines/fusion360-mcp-server"
-    static let commit = "19b9f1e9519235ae4a0f5e8dc6b029c08b87ff5f"
-    static let shortCommit = "19b9f1e95192"
+    // Reviewed document-binding fork while the upstream change is under review.
+    static let repository = "DMontgomery40/fusion360-mcp-server"
+    static let commit = "86a3016a5a5b4a705228acc2f3b75aff7dcfd758"
+    static let shortCommit = "86a3016a5a5b"
     /// Off Blender's 9876. Both the server and the add-in read `FUSION_MCP_PORT`.
     static let port = "9877"
     static let portAgentLabel = "com.scantomake.mac.fusion-port"
@@ -25,10 +26,11 @@ enum FusionSetup {
     /// SHA-256 of every file in the add-in at the pinned commit. Set Up refuses anything else.
     static let addinFiles: [String: String] = [
         "Fusion360MCP.manifest": "28b50ab54dcc962fba726d1490dafd8d6ff7a78e31bb5011644a68c3f1788afa",
-        "Fusion360MCP.py": "890ce46718720624e9b2d5f25762634a48d7ed41897121f0cd6dd8e17c40bd20",
+        "Fusion360MCP.py": "f91c44c6ccaa324d7be6ce6bf4fa08d2dceb0dfec599c066e3835f7442a489a5",
         "server/__init__.py": "cfb2ec371f493b437d1029f82a167ff933e59d7660a0b534e7e840a3d84669de",
-        "server/command_handler.py": "e260e2860e4d550b046632c322ee2cf75da03eb02ed587a13789fbf84889db1c",
-        "server/event_bridge.py": "ca6ccfe2861110ac0f26fbfb867efb9728699b01f16fbd37caa7b96181db0c1e",
+        "server/command_handler.py": "5f95aa7f2b58ef1458747b29af8eb63598108f22ed4521f0702e2dda91969b19",
+        "server/document_scope.py": "2687d370a1a40531c248232e0b1a7c65bbf92c269938e7cb368a78d098c529be",
+        "server/event_bridge.py": "a3a8d55a9267e252b5add0e7261fa4f7f216921b265815e5a2451d0dc3246a72",
         "server/hints.py": "981e89c0032223de1c02ef937b3522280c0328933f07ab89912ff522f4544822",
         "server/hole_geometry.py": "872ef1c7d34a21e49e277517cf413322c609fac47e2e64d2c1ed9580af31d25c",
         "server/parameter_units.py": "1fe5bbf505cecc19902c2720d5d53e12944bb61f182c3c0348e971849afa5c00",

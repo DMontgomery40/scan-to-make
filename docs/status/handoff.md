@@ -447,3 +447,22 @@ Nov 2 capture audit (`feat/capture-recovery`; device acceptance still required):
 - Added an over-broad "we only slice and send" rule that would have blocked legitimate settings like
   temperature. Removed.
 - Left the handoff in a `/private/tmp` scratchpad instead of the repo.
+
+
+## Fusion document isolation source follow-up — 2026-11-02
+
+Row 26 remains real-pass unverified. Source inspection found that the production pass
+opened a new Fusion document but discarded its identity; later modeling and export used
+whichever tab was active. The separate `feat/fusion-document-binding` work spans the
+companion, Bambu bridge, and upstream Fusion add-in; the contract and preservation tests
+are in `docs/design/fusion-document-binding.md`. Upstream source PR #36 has 388 passing tests
+plus three subtests, Ruff and independent/Codex review clearance; Bambu PR #96 has 976 passing
+tests (10 intentional skips). Private add-in replacement preserved its original manifest and
+verified backups. The first bounded test rejected a cached old handler before creating a
+document; original document metadata and geometry stayed unchanged. The source also covers cached-module reload during add-in startup; a path-checked private
+refresh loaded new classes while preserving the old running instance for a controlled Stop.
+Private acceptance still needs a confirmed handler restart and the bounded modeling test. No existing
+user model was edited, saved or closed. Installed printer transport/profile/env, public npm
+packages are unchanged. Mac Set Up pins the reviewed document-binding fork and ten-file hash
+manifest, preventing a later setup downgrade. Row 26 remains unverified until the owned-document
+and production-pass acceptance in `codex-fusion-acceptance-20261102` completes.
