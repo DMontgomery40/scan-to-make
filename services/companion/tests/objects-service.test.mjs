@@ -6,6 +6,7 @@ import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {ObjectStore} from '../dist/objects/store.js';
 import {ObjectService, InvalidStateError} from '../dist/objects/service.js';
+import {projectTitle} from '../dist/events/words.js';
 
 const STL = 'solid m\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 1 0 0\nvertex 0 1 0\nendloop\nendfacet\nendsolid m\n';
 
@@ -258,7 +259,8 @@ test('a deleted project leaves a project.deleted event that says who deleted it;
   assert.deepEqual(deleted.map(event => event.projectId), [phone.id, mac.id, unsaid.id], 'one per delete, none for the refused one');
   assert.deepEqual(deleted.map(event => event.data), [{by: 'device-123'}, {by: 'mac'}, undefined]);
   // The project is gone by the time the log adds words, so the event carries its title.
-  assert.equal(deleted[0].detail.title, 'A hook for a 25 mm handle.');
+  assert.equal(deleted[0].detail.title, projectTitle(phone));
+  assert.equal(deleted[0].detail.title, 'A hook for a 25 mm…');
   await service.close();
 });
 
