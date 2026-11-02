@@ -5,6 +5,7 @@ import {homedir} from 'node:os';
 import {dirname, join} from 'node:path';
 import {PrinterMcpClient, type PrinterHandoffConfig} from '@scan-to-make/printer-handoff';
 import {defaultBlenderLaunch, ensureBlenderMcp, resetBlenderScene} from './blender.js';
+import type {BlenderHost} from './blender-host.js';
 import {prepareTouchupPass, type TouchupPass} from './inputs.js';
 import {buildTouchupInvocation, type DesignEngine, type TouchupInvocation} from './invocation.js';
 import {toolErrorText} from './blender.js';
@@ -39,6 +40,8 @@ export interface TouchupInput {
 export interface EngineChoice {engine: DesignEngine; note?: string}
 export interface TouchupDeps {
   ensureBlender?: () => Promise<unknown>;
+  /** The Blender host for this call (else the process's). */
+  host?: BlenderHost;
   resetScene?: (client: ReturnType<NonNullable<TouchupDeps['client']>>, signal?: AbortSignal) => Promise<void>;
   client?: (handoff: PrinterHandoffConfig) => Pick<PrinterMcpClient, 'connect' | 'callTool' | 'close' | 'hasTool'>;
   prepare?: typeof prepareTouchupPass;
@@ -49,6 +52,12 @@ export interface TouchupDeps {
 
 /** One Blender, one scene: touch-ups run strictly one at a time, within this process (queue) and across processes (lock file). */
 let queue: Promise<unknown> = Promise.resolve();
+/** Passes waiting or running in this process: when the last one ends, the Blender Counterpart started quits (PRD §9.6). */
+let pending = 0;
+let host: BlenderHost | undefined;
+/** PRD §9.6: the Blender host, started per pass and quit after the last one (server-cli sets it; tests use their own). */
+export function useBlenderHost(value: BlenderHost | undefined): void { host = value; }
+const QUIT_CODE = 'import bpy\nbpy.ops.wm.quit_blender()';
 export const BLENDER_LOCK_PATH = join(homedir(), 'Library', 'Caches', 'scan-to-make', 'blender.lock');
 /** One open Fusion document: design passes take turns across companion processes too. */
 export const FUSION_LOCK_PATH = join(homedir(), 'Library', 'Caches', 'scan-to-make', 'fusion.lock');
@@ -146,7 +155,8 @@ async function touchUp(input: TouchupInput, deps: TouchupDeps): Promise<TouchupR
 
 async function touchUpLocked(input: TouchupInput, deps: TouchupDeps, choice: EngineChoice): Promise<TouchupResult & {passDir: string}> {
   if (choice.engine === 'blender') {
-    await (deps.ensureBlender ?? (() => ensureBlenderMcp({launch: defaultBlenderLaunch()})))();
+    const blender = deps.host ?? host;
+    await (deps.ensureBlender ?? (blender ? () => blender.begin() : () => ensureBlenderMcp({launch: defaultBlenderLaunch()})))();
     const client = (deps.client ?? (handoff => new PrinterMcpClient(handoff)))(input.handoff);
     await (deps.resetScene ?? resetBlenderScene)(client, input.signal);
   }
@@ -171,7 +181,25 @@ async function touchUpLocked(input: TouchupInput, deps: TouchupDeps, choice: Eng
 
 /** Touches up one scan pass through the user's printer MCP's Blender bridge. */
 export function runTouchup(input: TouchupInput, deps: TouchupDeps = {}): Promise<TouchupResult & {passDir: string} & Partial<EngineChoice>> {
-  const next = queue.then(() => touchUp(input, deps));
+  pending++;
+  const next = queue.then(() => touchUp(input, deps)).finally(async () => {
+    pending--;
+    // The last pass ended: quit the Blender Counterpart started, at once; a queued pass carries straight on.
+    const blender = deps.host ?? host;
+    if (blender) await blender.end(pending > 0, () => quitBlender(input, deps)).catch(() => undefined);
+  });
   queue = next.catch(() => undefined);
   return next;
+}
+
+/** Asks Blender to quit itself through the printer MCP's bridge. */
+async function quitBlender(input: TouchupInput, deps: TouchupDeps): Promise<void> {
+  const client = (deps.client ?? (handoff => new PrinterMcpClient(handoff)))(input.handoff);
+  try {
+    await client.connect();
+    if (!client.hasTool('blender_mcp_call')) return;
+    // Blender exits while answering, so the call may not return a result.
+    await client.callTool('blender_mcp_call', {tool_name: 'execute_blender_code', arguments: {code: QUIT_CODE, user_prompt: 'Quit the Blender Counterpart started'}})
+      .catch(() => undefined);
+  } finally { await client.close().catch(() => undefined); }
 }
