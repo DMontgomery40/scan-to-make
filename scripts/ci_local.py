@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Execute the repository's workflow run steps; explicit adapters for local setup actions."""
 import argparse
+import concurrent.futures
 import contextlib
 import hashlib
 import itertools
@@ -322,6 +323,41 @@ def run_mac(spec, workspace, directory, host):
     return result
 
 
+def linux_hosts():
+    return [h.strip() for h in os.environ.get('CI_LOCAL_LINUX_HOSTS', 'agents-136,agents-173,agents-171').split(',') if h.strip()]
+
+
+LINUX_JOBS = '/var/tmp/stm-ci'
+
+
+def run_linux(spec, workspace, directory, host):
+    """Run an ubuntu job on a Linux box from the Mac, so the Mac only does Apple work (David, 2026-11-01:
+    "i want those boxes 3 feet from being doing nothing as the project is bottlenecked by one mac box")."""
+    q = shlex.quote
+    remote = output(['ssh', host, 'mkdir -p '+LINUX_JOBS+' && mktemp -d '+LINUX_JOBS+'/job-XXXXXXXX'])
+    if not re.fullmatch(re.escape(LINUX_JOBS)+r'/job-[A-Za-z0-9]{8}', remote): raise RuntimeError('Unexpected remote job folder: '+remote)
+    try:
+        local = directory / 'transfer'; local.mkdir(parents=True)
+        archive = local / 'source.tar'
+        subprocess.run(['git', '-C', str(workspace), 'archive', '--format=tar', '-o', str(archive), 'HEAD'], check=True)
+        manifest = local / 'manifest.json'
+        manifest.write_text(json.dumps({'spec': spec, 'workspace': remote+'/source', 'directory': remote+'/result'}))
+        subprocess.run(['scp', '-q', str(archive), str(manifest), str(Path(__file__).resolve()), host+':'+remote+'/'], check=True)
+        command = ('. ~/.config/scan-to-make/ci-local.env 2>/dev/null; mkdir '+q(remote+'/source')+' && tar -xf '+q(remote+'/source.tar')+' -C '+q(remote+'/source')
+                   +' && python3 '+q(remote+'/ci_local.py')+' --worker '+q(remote+'/manifest.json')+' > '+q(remote+'/worker.log')+' 2>&1')
+        completed = subprocess.run(['ssh', host, command])
+        evidence = directory / 'linux'; evidence.mkdir(parents=True, exist_ok=True)
+        subprocess.run(['scp', '-q', host+':'+remote+'/result/result.json', host+':'+remote+'/result/*.log', host+':'+remote+'/worker.log', str(evidence)+'/'],
+            check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    finally:
+        # The job folder holds node_modules, venvs and Blender links; never leave it on the box.
+        subprocess.run(['ssh', host, 'rm -rf -- '+q(remote)], check=False)
+    result_file = evidence / 'result.json'
+    if not result_file.exists(): raise RuntimeError('Linux job on '+host+' returned no result (exit '+str(completed.returncode)+'); see '+str(evidence))
+    result = json.loads(result_file.read_text()); result['remoteEvidence'] = host
+    return result
+
+
 def collect_mac_evidence(host, remote, destination):
     # RUNNER_TEMP contains Python environments, Blender and Xcode derived data.
     # Keep those on the host; only transfer command logs and the atomic result.
@@ -401,18 +437,29 @@ def main():
     jobs = read_workflows(root, args.workflow, changed)
     if args.dry_run:
         print(json.dumps(jobs, indent=2)); return 0
-    results = []
-    for index, spec in enumerate(jobs):
+    def run_one(index, spec, host=None):
         jobdir = directory/f'{index+1:02}-{spec["workflow"]}-{spec["key"]}'
         try:
             runner = spec['job']['runs-on']
             if not isinstance(runner,str): raise ValueError('Unsupported runner labels')
-            if runner.startswith(('macos', 'xcode-')) and platform.system()!='Darwin': result = run_mac(spec, root, jobdir, args.mac_host)
-            elif (runner.startswith('ubuntu') and platform.system()=='Linux') or (runner.startswith(('macos', 'xcode-')) and platform.system()=='Darwin'): result = execute_job(spec, root, jobdir)
-            else: raise ValueError('Runner unavailable: '+runner)
+            if runner.startswith(('macos', 'xcode-')) and platform.system()!='Darwin': return run_mac(spec, root, jobdir, args.mac_host)
+            if runner.startswith('ubuntu') and host: return run_linux(spec, root, jobdir, host)
+            if (runner.startswith('ubuntu') and platform.system()=='Linux') or (runner.startswith(('macos', 'xcode-')) and platform.system()=='Darwin'): return execute_job(spec, root, jobdir)
+            raise ValueError('Runner unavailable: '+runner)
         except Exception as error:
-            result = {'spec': spec, 'status':'FAIL', 'steps':[{'name':'Local runner','command':'','status':'FAIL','seconds':0,'note':str(error)}]}
-        results.append(result); summary(results, directory/'summary.md', sha)
+            return {'spec': spec, 'status':'FAIL', 'steps':[{'name':'Local runner','command':'','status':'FAIL','seconds':0,'note':str(error)}]}
+    # On the Mac, ubuntu jobs go to the Linux boxes: one lane per box, lanes in parallel, while Apple jobs run here.
+    hosts = linux_hosts() if platform.system()=='Darwin' else []
+    remote = [i for i, spec in enumerate(jobs) if hosts and str(spec['job'].get('runs-on','')).startswith('ubuntu')]
+    lanes = {host: remote[k::len(hosts)] for k, host in enumerate(hosts)}
+    results = [None] * len(jobs)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, len(hosts))) as pool:
+        futures = [pool.submit(lambda host, lane: [(i, run_one(i, jobs[i], host)) for i in lane], host, lane) for host, lane in lanes.items() if lane]
+        for index, spec in enumerate(jobs):
+            if index not in remote: results[index] = run_one(index, spec)
+        for future in futures:
+            for index, result in future.result(): results[index] = result
+    summary(results, directory/'summary.md', sha)
     if not jobs: summary([], directory/'summary.md', sha)
     print('Summary: '+str(directory/'summary.md'))
     return int(any(r['status']=='FAIL' for r in results))

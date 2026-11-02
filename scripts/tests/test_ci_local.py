@@ -137,6 +137,20 @@ class LocalWorkflowTests(unittest.TestCase):
             self.assertEqual(child.returncode,0); self.assertTrue(marker.exists())
             self.assertIn('held by: 123 other-seat',out)
 
+    def test_on_the_mac_ubuntu_jobs_go_to_linux_lanes_and_apple_jobs_stay(self):
+        jobs=[{'workflow':'w','key':str(i),'matrix':{},'env':{},'defaults':{},'job':{'runs-on':r,'steps':[]}}
+              for i,r in enumerate(['ubuntu-latest','macos-27','ubuntu-latest','ubuntu-latest','xcode-27.2'])]
+        calls=[]
+        def fake_linux(spec,workspace,directory,host): calls.append((spec['key'],host)); return {'spec':spec,'status':'PASS','steps':[]}
+        def fake_local(spec,workspace,directory): calls.append((spec['key'],'mac')); return {'spec':spec,'status':'PASS','steps':[]}
+        with tempfile.TemporaryDirectory() as folder, \
+             patch.object(ci.platform,'system',return_value='Darwin'), patch.dict(os.environ,{'CI_LOCAL_LINUX_HOSTS':'a,b'}), \
+             patch.object(ci,'read_workflows',return_value=jobs), patch.object(ci,'run_linux',side_effect=fake_linux), \
+             patch.object(ci,'execute_job',side_effect=fake_local), patch.object(ci,'output',side_effect=lambda argv,**k: '' if 'status' in argv else folder), \
+             patch.object(ci,'evidence_directory',return_value=Path(folder)), patch.object(sys,'argv',['ci_local.py','all']):
+            self.assertEqual(ci.main(),0)
+        self.assertEqual(sorted(calls),[('0','a'),('1','mac'),('2','b'),('3','a'),('4','mac')])
+
     def test_unknown_action_fails_job_and_preserves_error(self):
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder)
