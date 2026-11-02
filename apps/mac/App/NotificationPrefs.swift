@@ -66,7 +66,7 @@ enum ProgressNotifications: String, CaseIterable, Identifiable {
 /// The switches, kept in UserDefaults. Read by Settings and by the event relay before each Mac notification.
 struct NotificationPrefs {
     /// Whether this build posts Mac notifications at all (the event relay); until then the switches are shown, not live.
-    static let delivered = false
+    static let delivered = true
     let defaults: UserDefaults
     init(defaults: UserDefaults = .standard) { self.defaults = defaults }
 

@@ -493,6 +493,8 @@ struct AISettings: View {
 
 struct AdvancedSettings: View {
     @ObservedObject var mac: MacStatusModel
+    @AppStorage(LiveActivityRelay.enabledKey) private var relayOn = false
+    @State private var relayURL = UserDefaults.standard.string(forKey:LiveActivityRelay.urlKey) ?? ""
     @State private var exporting = false
     @State private var exportProblem: String?
     private let addresses = NetworkAddresses.current()
@@ -518,6 +520,20 @@ struct AdvancedSettings: View {
                 Text("Your phone tries these in order and remembers the one that worked. They change by themselves; there's nothing to set.")
                     .font(.caption).foregroundStyle(.secondary)
             }
+            Section {
+                LabeledContent("iCloud") { Text(cloudStatus).foregroundStyle(.secondary).multilineTextAlignment(.trailing) }
+                Toggle(isOn:$relayOn) {
+                    Text("Live Activity relay")
+                    Text("Updates your phone's Lock Screen while it prints, through counterpart.dtmont.com. It stores nothing.")
+                }
+                if relayOn {
+                    TextField("Relay address", text:$relayURL, prompt:Text(verbatim:LiveActivityRelay.defaultURL))
+                        .onSubmit { UserDefaults.standard.set(relayURL.isEmpty ? nil : relayURL, forKey:LiveActivityRelay.urlKey) }
+                    LabeledContent("Last update") { Text(EventRelay.shared.relay.lastResult).foregroundStyle(.secondary) }
+                }
+            } header: { Text("Your phone away from home") } footer: {
+                Text("Without the relay, your phone starts and updates its Live Activity itself.").font(.caption).foregroundStyle(.secondary)
+            }
             Section("Logs") {
                 LabeledContent("Companion") {
                     HStack { Text("companion.log").foregroundStyle(.secondary); Button("Show in Finder") { reveal(state.appendingPathComponent("logs/companion.log")) } }
@@ -540,7 +556,15 @@ struct AdvancedSettings: View {
         }
         .formStyle(.grouped)
         .focusEffectDisabled()
-        .frame(height:560)
+        .frame(height:640)
+    }
+
+    private var cloudStatus: String {
+        switch EventRelay.shared.cloud.status {
+        case .on: return "On: projects, events and commands sync through your iCloud"
+        case .starting: return "Starting…"
+        case .off(let why), .failed(let why): return why
+        }
     }
 
     private struct Row { let address: String; let detail: String; let inUse: Bool }

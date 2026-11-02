@@ -92,11 +92,10 @@ struct SocketObjects: ObjectsCompanion {
         try await ControlClient(socketPath:path, timeout:30).printObject(id, checked:checked, settings:settings)
     }
     func estimate(_ id: String, destinationId: String?, quality: PrintSettings.Quality, strength: PrintSettings.Strength) async throws -> PrintEstimate {
-        // The companion slices: up to 180 s on its side.
-        try await ControlClient(socketPath:path, timeout:190).estimate(id, destinationId:destinationId, quality:quality, strength:strength)
+        try await ControlClient(socketPath:path, timeout:ControlClient.timeout(for:"objects.estimate")).estimate(id, destinationId:destinationId, quality:quality, strength:strength)
     }
     func control(_ id: String, _ action: PrintControl) async throws -> StmObject {
-        try await ControlClient(socketPath:path, timeout:30).controlPrint(id, action)
+        try await ControlClient(socketPath:path, timeout:ControlClient.timeout(for:action.method)).controlPrint(id, action)
     }
 }
 

@@ -227,6 +227,9 @@ public struct StmObject: Decodable, Sendable, Identifiable, Equatable {
     public struct Print: Decodable, Sendable, Equatable {
         public let printId: String?
         public let monitor: PrintMonitor?
+        /// How a `sent` print left: `bambu-connect` means the person finishes it in Bambu Connect on this Mac.
+        public let sentVia: String?
+        public let fileBase: String?
         public let events: [PrintEvent]?
         public let live: PrintLive?
         public let printerStatus: PrinterStatus?
@@ -419,7 +422,19 @@ public extension ControlClient {
 }
 
 public enum PrintControl: String, Sendable { case pause, resume, cancel
-    var method: String { "objects.\(rawValue)Print" }
+    public var method: String { "objects.\(rawValue)Print" }
+}
+
+public extension ControlClient {
+    /// How long to wait for a method's reply: the companion's own deadline for it (local-control.md "Deadlines") plus
+    /// time for the reply to arrive. `events.wait` sets its own from `timeoutMs`.
+    static func timeout(for method: String) -> TimeInterval {
+        switch method {
+        case "objects.estimate": return 190 // it slices: 180 s on the companion
+        case "objects.pausePrint", "objects.resumePrint", "objects.cancelPrint": return 140 // 130 s on the companion
+        default: return 30
+        }
+    }
 }
 
 public struct PrintConfirmationAnswer: Sendable, Equatable {

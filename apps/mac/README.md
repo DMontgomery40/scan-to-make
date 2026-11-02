@@ -22,6 +22,19 @@ Every word about a project comes from `ControlKit/ObjectWords.swift` (PRD §4), 
 `status` line when it serves one; `packages/CounterpartKit` replaces it when that lands. Features the running
 companion lacks (its `status.get` capability flags) show a sentence saying so instead of failing.
 
+**Delivery (PRD §8.8).** `EventRelay` long-polls the companion's `events.wait` (25 s) from a cursor kept in
+UserDefaults. Each event becomes a Mac notification per Settings → General (defaults from PRD §9.1's Mac column;
+progress off), a `CounterpartEvent` record and a `CounterpartProject` upsert in the user's private CloudKit database
+(docs/protocols/cloudkit.md), and, when Settings → Advanced turns the relay on, a Live Activity push through
+`counterpart.dtmont.com/relay/v1` (services/relay/docs.md). After a restart, events older than ten minutes are
+synced but not shown, except `print.done`, `print.failed`, `pass.ready` and `pass.ask` that still stand, once each.
+The relay also runs the phone's `CounterpartCommand` records through the existing control methods (fresh by the
+server's clock, ten minutes at most), and keeps the Mac from idle sleep while a pass or a print runs.
+
+CloudKit needs the iCloud entitlement: build with `STM_ENTITLEMENTS_SUFFIX=+CloudKit` (and
+`STM_APS_ENVIRONMENT=production` for a Developer ID build). A build without it never touches CloudKit, and Settings →
+Advanced says so.
+
 The window reads `objects.list` over the control socket while it is on screen: every 3 s while something is
 working or printing and every 15 s otherwise. Renders, photos and the model are read from each project's
 `directory`.

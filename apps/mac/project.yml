@@ -19,6 +19,9 @@ settings:
     STM_VARIANT: ''
     STM_USE_LEGACY_COMPANION: YES
     SPARKLE_FEED_URL: ''
+    # '+CloudKit' signs the app for iCloud (CloudKit and its pushes); it needs the team's provisioning profile.
+    STM_ENTITLEMENTS_SUFFIX: ''
+    STM_APS_ENVIRONMENT: development
     SPARKLE_PUBLIC_KEY: ''
 targets:
   AgentKit:
@@ -40,7 +43,7 @@ targets:
       INFOPLIST_FILE: Config/Info.plist
       ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
       ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
-      CODE_SIGN_ENTITLEMENTS: Config/App.entitlements
+      CODE_SIGN_ENTITLEMENTS: Config/App$(STM_ENTITLEMENTS_SUFFIX).entitlements
       ENABLE_USER_SCRIPT_SANDBOXING: NO
     postBuildScripts:
       - name: Embed companion and launch agent
@@ -60,6 +63,7 @@ targets:
       - App/NotificationPrefs.swift
       - App/FusionSetup.swift
       - App/Diagnostics.swift
+      - App/EventRelayPolicy.swift
       - App/ModelMesh.swift
       - ControlKit/Sources/ControlKit
     dependencies:
