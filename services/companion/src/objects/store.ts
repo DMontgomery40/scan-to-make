@@ -81,8 +81,6 @@ export interface StmObject {
     /** A Fusion pass keeps its parametric design for the next "Ask for changes" (PRD §8.9). */
     design?: {f3d: string; parameters?: string}};
   question?: {closeup: string};
-  /** Set while a print waits for the user: something is on the plate, or the printer has no camera. */
-  plate?: {item?: string; noCamera?: boolean; photo?: boolean};
   /** The printer MCP's original question. Only an explicit answer to this ID can approve it. */
   printConfirmation?: ObjectPrintConfirmation;
   failure?: string;
@@ -135,7 +133,12 @@ export class ObjectStore {
   }
 
   async get(id: string): Promise<StmObject> {
-    try { return JSON.parse(await readFile(join(this.dir(id), 'object.json'), 'utf8')) as StmObject; }
+    try {
+      const object = JSON.parse(await readFile(join(this.dir(id), 'object.json'), 'utf8')) as StmObject & {plate?: unknown};
+      // PRD §5.6: there is no bed check. A plate observation saved by an older companion is dropped, never shown again.
+      if ('plate' in object) delete object.plate;
+      return object;
+    }
     catch { throw new ObjectNotFoundError(); }
   }
 
@@ -182,7 +185,7 @@ export class ObjectStore {
       if (object.state === 'printing' && (options.keepPrinting || object.print?.monitor?.phase === 'starting' || object.print?.monitor?.phase === 'watching')) continue;
       if (object.state === 'touching-up' || object.state === 'printing') {
         const atMs = Date.now(), failure = 'interrupted when your Mac restarted the app';
-        await this.update(object.id, o => ({...o, state: 'failed', failure, progress: undefined, plate: undefined, printConfirmation: undefined,
+        await this.update(object.id, o => ({...o, state: 'failed', failure, progress: undefined, printConfirmation: undefined,
           passes: o.state !== 'touching-up' ? o.passes : o.passes.map((pass, index) => index !== o.passes.length - 1 || pass.endedAtMs !== undefined ? pass : {
             ...pass, endedAtMs: atMs, status: 'interrupted',
             activity: [...(pass.activity ?? []), {atMs, kind: 'message' as const, text: failure}].slice(-200),

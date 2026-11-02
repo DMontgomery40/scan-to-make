@@ -17,7 +17,7 @@ const text = (max: number) => z.string().max(max);
 
 export const COUNTERPART_EVENT_TYPES = [
   'pass.started', 'pass.stage', 'pass.ready', 'pass.ask', 'pass.failed',
-  'print.preparing', 'plate.blocked', 'print.confirm', 'print.started', 'print.status', 'print.first-layer',
+  'print.preparing', 'print.confirm', 'print.started', 'print.status', 'print.first-layer',
   'print.milestone', 'print.paused', 'print.resumed', 'print.done', 'print.failed', 'print.cancelled',
   'print.not-started', 'print.unreachable', 'print.sent',
   // PRD §8.10 (KAN-214 PR 6). No projectId; emitted only once every client decodes events without one.

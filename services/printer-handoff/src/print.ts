@@ -12,7 +12,7 @@ import type {HandoffBundleStore} from './bundle.js';
 import {PrinterMcpError, toolResultJson, toolResultText, type PrinterToolCatalog} from './mcp-client.js';
 import {PrinterSession} from './session.js';
 
-export type PrintStep = 'discover' | 'lay_flat' | 'slice_stl' | 'inspect' | 'camera_snapshot' | 'print';
+export type PrintStep = 'discover' | 'lay_flat' | 'slice_stl' | 'inspect' | 'print';
 export type PrintPhase = 'connecting' | 'orienting' | 'slicing' | 'inspecting' | 'slice-ready' | 'checking-printer' | 'resolving-printer-error' | 'requesting-print' | 'accepted';
 export interface PrintProgress {phase: PrintPhase; estimate?: SliceEstimate}
 export interface PrintRunInput {
@@ -48,7 +48,6 @@ export interface PrintRunResult {
   orientedStlPath: string;
   slicedPath: string;
   inspection?: {tool: string; result: unknown};
-  cameraSnapshot?: Record<string, unknown>;
   print?: unknown;
   steps: PrintStep[];
 }
@@ -323,23 +322,8 @@ export class PrinterHandoffRunner {
     if (input.print === false) return common;
 
     await progress('checking-printer');
-    let cameraSnapshot: Record<string, unknown> | undefined;
-    let printContext: ElicitationContext = tag;
-    if (this.#config.backend === 'bambu-printer-mcp' && this.#config.cameraSnapshot !== false && session.hasTool('camera_snapshot')) {
-      try {
-        const snapshot = toolResultJson<Record<string, unknown>>(
-          await call(session, 'camera_snapshot', {bambu_model: selection.model, timeout_ms: 8000}, read));
-        if (typeof snapshot.base64 === 'string' && snapshot.base64) {
-          cameraSnapshot = snapshot;
-          printContext = {...tag, cameraSnapshot: {
-            format: typeof snapshot.format === 'string' ? snapshot.format : 'jpeg',
-            base64: snapshot.base64,
-            ...(typeof snapshot.savedTo === 'string' ? {savedTo: snapshot.savedTo} : {}),
-          }};
-          step('camera_snapshot');
-        }
-      } catch { /* The print prompts still go to the user without an image. */ }
-    }
+    // PRD §5.6: no bed check. Bambu's own bed levelling finds a full plate; the MCP's own confirmation is relayed as it asks.
+    const printContext: ElicitationContext = tag;
 
     // A rejected unsigned command leaves a software HMS error. The authenticated
     // LAN route can recover it only through the server's own human confirmation.
@@ -391,7 +375,7 @@ export class PrinterHandoffRunner {
     }
     step('print');
     await progress('accepted').catch(() => undefined); // Telemetry cannot erase an accepted dispatch.
-    return {...common, cameraSnapshot, print: printed, dispatch: dispatchIdentity(printed, slicedPath)};
+    return {...common, print: printed, dispatch: dispatchIdentity(printed, slicedPath)};
   }
 
   /**

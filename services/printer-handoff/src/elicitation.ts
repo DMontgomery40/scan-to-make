@@ -7,12 +7,6 @@ export type ElicitationAnswer =
   | {action: 'accept'; content: Record<string, ElicitationContentValue>}
   | {action: 'decline' | 'cancel'; content?: undefined};
 
-export interface CameraSnapshotContext {
-  format: string;
-  base64: string;
-  savedTo?: string;
-}
-
 export interface PendingElicitation {
   id: string;
   mode: 'form' | 'url';
@@ -20,7 +14,6 @@ export interface PendingElicitation {
   requestedSchema?: unknown;
   url?: string;
   elicitationId?: string;
-  cameraSnapshot?: CameraSnapshotContext;
   /** The handoff bundle whose print asked, so each answer reaches its own print. */
   bundleId?: string;
   createdAtMs: number;
@@ -28,7 +21,6 @@ export interface PendingElicitation {
 }
 
 export interface ElicitationContext {
-  cameraSnapshot?: CameraSnapshotContext;
   bundleId?: string;
 }
 
@@ -82,7 +74,6 @@ export class InMemoryElicitationRelay implements ElicitationRelay {
       ...(params.requestedSchema === undefined ? {} : {requestedSchema: structuredClone(params.requestedSchema)}),
       ...(params.url === undefined ? {} : {url: params.url}),
       ...(params.elicitationId === undefined ? {} : {elicitationId: params.elicitationId}),
-      ...(context.cameraSnapshot === undefined ? {} : {cameraSnapshot: context.cameraSnapshot}),
       ...(context.bundleId === undefined ? {} : {bundleId: context.bundleId}),
       createdAtMs: now,
       expiresAtMs: now + this.#timeoutMs,

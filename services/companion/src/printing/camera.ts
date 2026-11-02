@@ -33,7 +33,7 @@ export class CameraFrames {
   constructor(options: {now?: () => number} = {}) { this.#now = options.now ?? Date.now; }
 
   /**
-   * `fresh` skips the cache (Look Again: the person just cleared the plate) and refreshes it. `view` is a person
+   * `fresh` skips the cache (a person asked for a new picture) and refreshes it. `view` is a person
    * looking (a camera route): their session stays held while they keep looking.
    */
   async frame(destinationId: string, session: PrinterSession, options: {model?: string; fresh?: boolean; view?: boolean} = {}): Promise<CameraFrame> {

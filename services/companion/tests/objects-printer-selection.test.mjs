@@ -41,7 +41,7 @@ async function fixture(t) {
   const store = new ObjectStore(join(root, 'objects'));
   const service = new ObjectService({store, handoff: current, printerCatalog: catalog, claudePath: '/unused',
     runTouchup: async () => { throw new Error('unused'); }, stlInfo: async () => undefined,
-    print: {services: routes.get('current'), destinations: routes, judgePlate: async () => ({clear: true})}});
+    print: {services: routes.get('current'), destinations: routes}});
   t.after(() => service.close());
   const object = await service.create('A hook.');
   await mkdir(join(store.dir(object.id), 'current'));
@@ -55,7 +55,7 @@ test('selected printer dispatches through its own runner and confirmation relay;
   await service.selectPrinter(object.id, 'second');
   const printing = await service.print(object.id);
   assert.deepEqual(printing.print.destination, {id: 'second', name: 'Other printer'});
-  await until(async () => (await service.get(object.id)).plate?.noCamera);
+  await until(async () => (await service.get(object.id)).printConfirmation);
   await assert.rejects(service.selectPrinter(object.id, 'current'), InvalidStateError);
   await service.answerPrintConfirmation(object.id, (await service.get(object.id)).printConfirmation.id, {action: 'accept', content: {confirmed: true}});
   const finished = await service.settled(object.id);
@@ -67,7 +67,7 @@ test('selected printer dispatches through its own runner and confirmation relay;
   assert.equal((await store.get(object.id)).printerDestinationId, 'second');
   await service.selectPrinter(object.id, 'current');
   await service.print(object.id, {checked: true});
-  await until(async () => (await service.get(object.id)).plate?.noCamera);
+  await until(async () => (await service.get(object.id)).printConfirmation);
   await service.answerPrintConfirmation(object.id, (await service.get(object.id)).printConfirmation.id, {action: 'accept', content: {confirmed: true}});
   await service.settled(object.id);
   assert.deepEqual(calls.map(call => call.destination), ['second', 'current']);
@@ -81,7 +81,8 @@ test('phone and Mac confirmation answers use the selected destination and reject
   await until(async () => (await service.get(object.id)).printConfirmation);
   const question = (await dispatch('objects.get', {id: object.id})).object.printConfirmation;
   assert.equal(question.message, 'Check the selected printer.');
-  await assert.rejects(dispatch('objects.answerPlate', {id: object.id}), error => error.code === 'conflict');
+  // There is no plate answer any more (PRD §5.6).
+  await assert.rejects(dispatch('objects.answerPlate', {id: object.id}));
   await assert.rejects(dispatch('objects.answerPrintConfirmation', {id: object.id, confirmationId: '00000000-0000-4000-8000-000000000001', answer: {action: 'accept', content: {confirmed: true}}}), error => error.code === 'conflict');
   await dispatch('objects.answerPrintConfirmation', {id: object.id, confirmationId: question.id, answer: {action: 'accept', content: {confirmed: true}}});
   await service.settled(object.id);

@@ -16,7 +16,6 @@ import {PRINT_LOG, printEndFailure, projectTitle, sizeText} from '../events/word
 import {PassTimings, STAGE_DEFAULT_SEC, passEstimate, stageWords, type PassKind, type PassStage, type StageId} from '../touchup/stages.js';
 import type {DesignEngine} from '../touchup/invocation.js';
 import type {PrintHandoffServices} from '../print-handoff-http.js';
-import type {PlateVerdict} from './bedcheck.js';
 import {printQuestion, validateAnswer, type ConfirmationValue} from './confirmation.js';
 import {InvalidStateError} from './errors.js';
 import type {TouchupInput} from '../touchup/touchup.js';
@@ -117,7 +116,6 @@ export interface ObjectServiceDeps {
     services: PrintHandoffServices;
     /** Built once from each catalog entry's entire MCP config, never a host override. */
     destinations?: ReadonlyMap<string, PrintHandoffServices>;
-    judgePlate: (photoBase64: string) => Promise<PlateVerdict>;
   };
   /** Companion settings: which milestones the print monitor announces. */
   settings?: CompanionSettingsStore;
@@ -523,7 +521,7 @@ export class ObjectService {
     await this.#deps.store.remove(id);
   }
 
-  /** Prints the current model through the user's printer MCP. The plate is checked in the background. */
+  /** Prints the current model through the user's printer MCP. */
   print(id: string, options: PrintOptions = {}): Promise<StmObject> { return this.#gate(id, () => this.#print(id, options)); }
   async #print(id: string, options: PrintOptions): Promise<StmObject> {
     const object = await this.get(id);
@@ -563,7 +561,7 @@ export class ObjectService {
     let release: () => void = () => undefined;
     try { release = this.#deps.printGate?.hold(gated) ?? release; }
     catch (error) { throw error instanceof PrinterUpdatingError ? new InvalidStateError(error.message) : error; }
-    const started = await this.#deps.store.update(id, o => ({...o, state: 'printing', progress: 'Connecting to your printer service…', print, plate: undefined, printConfirmation: undefined, failure: undefined}))
+    const started = await this.#deps.store.update(id, o => ({...o, state: 'printing', progress: 'Connecting to your printer service…', print, printConfirmation: undefined, failure: undefined}))
       .catch(error => { release(); throw error; });
     // Only this print's questions: other prints share the relay.
     const unsubscribe = relay.subscribe(pending => {
@@ -594,13 +592,13 @@ export class ObjectService {
           // Once the printer has the job it is printing, whatever went wrong afterwards (as the phone's print route does).
           if (error instanceof DispatchedPrintError || status === 'printed') return this.#dispatched(id, manifest.id, printDestination?.id ?? destinationId, undefined, selected?.connectionMode);
           // It may have reached the printer: never send it again by itself.
-          if (status === 'uncertain') return this.#deps.store.update(id, o => ({...o, state: 'failed', plate: undefined, printConfirmation: undefined, progress: undefined, failure: error instanceof PrinterMcpError && error.detail ? `Printer service: ${error.detail} Counterpart could not confirm a print start. Check the printer before trying again.` : UNCERTAIN, print: {...o.print!, uncertain: true}}));
-          if (this.#cancelledPrints.has(id)) return this.#deps.store.update(id, o => ({...o, state: 'ready', progress: undefined, plate: undefined, printConfirmation: undefined, failure: undefined}));
+          if (status === 'uncertain') return this.#deps.store.update(id, o => ({...o, state: 'failed', printConfirmation: undefined, progress: undefined, failure: error instanceof PrinterMcpError && error.detail ? `Printer service: ${error.detail} Counterpart could not confirm a print start. Check the printer before trying again.` : UNCERTAIN, print: {...o.print!, uncertain: true}}));
+          if (this.#cancelledPrints.has(id)) return this.#deps.store.update(id, o => ({...o, state: 'ready', progress: undefined, printConfirmation: undefined, failure: undefined}));
           if (this.#expiredConfirmations.has(id) || (this.#confirmations.get(id)?.pending.expiresAtMs ?? Infinity) <= Date.now())
-            return this.#deps.store.update(id, o => ({...o, state: 'failed', progress: undefined, plate: undefined, printConfirmation: undefined, failure: 'Printer confirmation timed out; no print was sent. Press Print to try again.'}));
+            return this.#deps.store.update(id, o => ({...o, state: 'failed', progress: undefined, printConfirmation: undefined, failure: 'Printer confirmation timed out; no print was sent. Press Print to try again.'}));
           if (error instanceof PrinterMcpError && error.code === 'print-settings-unsupported')
-            return this.#deps.store.update(id, o => ({...o, state: 'ready', progress: undefined, plate: undefined, printConfirmation: undefined, failure: settingsUnsupported(runner.backend, options)}));
-          return this.#deps.store.update(id, o => ({...o, state: 'failed', progress: undefined, plate: undefined, printConfirmation: undefined, failure: error instanceof PrinterMcpError && error.detail ? error.detail : error instanceof Error ? error.message : String(error)}));
+            return this.#deps.store.update(id, o => ({...o, state: 'ready', progress: undefined, printConfirmation: undefined, failure: settingsUnsupported(runner.backend, options)}));
+          return this.#deps.store.update(id, o => ({...o, state: 'failed', progress: undefined, printConfirmation: undefined, failure: error instanceof PrinterMcpError && error.detail ? error.detail : error instanceof Error ? error.message : String(error)}));
         })
       .then(o => this.#changed(o))
       .finally(() => {
@@ -609,7 +607,6 @@ export class ObjectService {
         clearTimeout(this.#confirmations.get(id)?.timer); this.#confirmations.delete(id);
         this.#cancelledPrints.delete(id);
         this.#expiredConfirmations.delete(id);
-        void rm(join(this.#deps.store.dir(id), 'plate.jpg'), {force: true}).catch(() => undefined);
       });
     this.#running.set(id, work);
     return this.#changed(started);
@@ -682,14 +679,14 @@ export class ObjectService {
     const dispatchedAt = new Date().toISOString();
     if (!watchable || !session) {
       // PRD §2.6: no evidence, no "printed". The printer has it; Counterpart can't follow it.
-      const sent = await this.#deps.store.update(id, o => o.print?.bundleId !== bundleId ? o : ({...o, state: 'sent', progress: undefined, plate: undefined, printConfirmation: undefined,
+      const sent = await this.#deps.store.update(id, o => o.print?.bundleId !== bundleId ? o : ({...o, state: 'sent', progress: undefined, printConfirmation: undefined,
         failure: undefined, print: {...o.print, dispatchedAt, uncertain: true, ...(dispatch?.jobName ? {jobName: dispatch.jobName} : {}), ...(dispatch?.taskId ? {taskId: dispatch.taskId} : {}),
           ...(bambuConnect ? {sentVia: 'bambu-connect' as const} : {})}}));
       if (sent.print?.printId) await this.#emit({id: randomUUID(), type: 'print.sent', projectId: id, printId: sent.print.printId,
         ...(sent.print.destination ? {destinationId: sent.print.destination.id, printerName: sent.print.destination.name} : {}), ...(bambuConnect ? {detail: {message: 'bambu-connect'}} : {})});
       return sent;
     }
-    const updated = await this.#deps.store.update(id, o => o.print?.bundleId !== bundleId ? o : ({...o, state: 'printing', progress: undefined, plate: undefined, printConfirmation: undefined,
+    const updated = await this.#deps.store.update(id, o => o.print?.bundleId !== bundleId ? o : ({...o, state: 'printing', progress: undefined, printConfirmation: undefined,
       print: {...o.print, dispatchedAt, ...(dispatch?.jobName ? {jobName: dispatch.jobName} : {}), ...(dispatch?.taskId ? {taskId: dispatch.taskId} : {}),
         ...(!identified && dispatch?.fileBase ? {fileBase: dispatch.fileBase} : {}),
         monitor: {phase: 'starting', startedAt: dispatchedAt, milestonesSent: [], firstLayerSent: false}}}));
@@ -747,7 +744,7 @@ export class ObjectService {
 
   /** The object after its print's monitor ended. */
   #ended(o: StmObject, end: MonitorEnd, report: PrintReport | undefined): StmObject {
-    const base = {...o, progress: undefined, plate: undefined, printConfirmation: undefined};
+    const base = {...o, progress: undefined, printConfirmation: undefined};
     const context = {title: projectTitle(o), printer: o.print?.destination?.name ?? 'Your printer', ...(report?.problems[0] ? {problem: report.problems[0].message} : {})};
     switch (end) {
       case 'done': return {...base, state: 'printed', failure: undefined};
@@ -775,7 +772,7 @@ export class ObjectService {
       const services = destinationId ? this.#deps.print?.destinations?.get(destinationId) : this.#deps.print?.services;
       const status = (await services?.store.read(object.print.bundleId).catch(() => undefined))?.status;
       const reached = status === 'uncertain' || status === 'printed';
-      this.#changed(await this.#deps.store.update(object.id, o => ({...o, state: 'failed', progress: undefined, plate: undefined, printConfirmation: undefined,
+      this.#changed(await this.#deps.store.update(object.id, o => ({...o, state: 'failed', progress: undefined, printConfirmation: undefined,
         failure: reached ? UNCERTAIN : 'interrupted when your Mac restarted the app', ...(reached ? {print: {...o.print!, uncertain: true}} : {})})));
     }
   }
@@ -921,11 +918,6 @@ export class ObjectService {
     }
   }
 
-  /** Older clients cannot turn a plate-only answer into approval of a hardware operation. */
-  async answerPlate(id: string, _answer: {clear: true}): Promise<StmObject> {
-    await this.get(id);
-    throw new InvalidStateError('Read and answer the printer confirmation in an updated app. A clear plate alone does not approve the print.');
-  }
 
   answerPrintConfirmation(id: string, confirmationId: string, answer: unknown): Promise<StmObject> {
     return this.#gate(id, async () => {
@@ -952,7 +944,7 @@ export class ObjectService {
       clearTimeout(confirmation.timer);
       this.#confirmations.delete(id);
       return this.#changed(await this.#deps.store.update(id, o => o.printConfirmation?.id === confirmationId
-        ? {...o, printConfirmation: undefined, plate: undefined} : o));
+        ? {...o, printConfirmation: undefined} : o));
     });
   }
 
@@ -971,28 +963,16 @@ export class ObjectService {
         printing.services.relay.respond(pending.id, {action: 'cancel'});
         this.#confirmations.delete(id);
         this.#changed(await this.#deps.store.update(id, o => o.printConfirmation?.id === pending.id
-          ? {...o, printConfirmation: undefined, plate: undefined} : o));
+          ? {...o, printConfirmation: undefined} : o));
       }).catch(() => undefined);
     }, Math.max(0, pending.expiresAtMs - Date.now()));
     this.#confirmations.set(id, {pending, printing, timer});
     const asked = await this.#deps.store.update(id, o => this.#pending(id, pending.id)
-      ? {...o, printConfirmation: printQuestion(pending), plate: pending.cameraSnapshot ? undefined : {noCamera: true}} : o);
+      ? {...o, printConfirmation: printQuestion(pending)} : o);
     this.#changed(asked);
     if (asked.print?.printId) await this.#emit({id: randomUUID(), type: 'print.confirm', projectId: id, printId: asked.print.printId,
       ...(asked.print.destination ? {destinationId: asked.print.destination.id, printerName: asked.print.destination.name} : {}),
       data: {confirmationId: pending.id, expiresAt: new Date(pending.expiresAtMs).toISOString()}, detail: {message: pending.message.slice(0, 300)}});
-    if (!pending.cameraSnapshot || !this.#pending(id, pending.id)) return;
-    // Camera evidence is advisory; it never answers the MCP's human hardware confirmation.
-    const photo = await writeFile(join(this.#deps.store.dir(id), 'plate.jpg'), Buffer.from(pending.cameraSnapshot.base64, 'base64')).then(() => true, () => false);
-    if (!this.#pending(id, pending.id)) return;
-    this.#changed(await this.#deps.store.update(id, o => this.#pending(id, pending.id)
-      ? {...o, plate: {...(photo ? {photo} : {})}} : o));
-    let verdict: PlateVerdict;
-    try { verdict = await printing.judgePlate(pending.cameraSnapshot.base64); }
-    catch { return; }
-    if (!this.#pending(id, pending.id)) return;
-    this.#changed(await this.#deps.store.update(id, o => this.#pending(id, pending.id)
-      ? {...o, plate: {...(photo ? {photo} : {}), ...(!verdict.clear ? {item: verdict.item?.trim() || 'something'} : {})}} : o));
   }
 
   /** Resolves when the object's current touch-up or print (if any) has finished. */

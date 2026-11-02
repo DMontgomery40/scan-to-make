@@ -151,12 +151,11 @@ test('print runs through the fixture MCP server with phone-answered elicitation'
   assert.equal(started.status, 202, started.bytes.toString());
   assert.equal((await wire(f, `/v1/printer-handoff/bundles/${bundle.id}/print`, {method: 'POST'})).status, 409);
   let answered = 0;
-  let sawSnapshot = false;
   let final;
   for (let attempt = 0; attempt < 200; attempt++) {
     const pending = json(await wire(f, '/v1/printer-handoff/elicitations')).elicitations;
     for (const item of pending) {
-      if (item.cameraSnapshot?.base64 === 'ZmFrZQ==') sawSnapshot = true;
+      assert.equal('cameraSnapshot' in item, false, 'no plate picture rides on a printer question');
       const properties = item.requestedSchema?.properties ?? {};
       const content = {};
       if ('confirmed' in properties) content.confirmed = true;
@@ -174,13 +173,12 @@ test('print runs through the fixture MCP server with phone-answered elicitation'
   }
   assert.equal(final.bundle.status, 'printed');
   assert.ok(answered >= 1);
-  assert.equal(sawSnapshot, true);
   const again = await wire(f, `/v1/printer-handoff/bundles/${bundle.id}/print`, {method: 'POST'});
   assert.equal(again.status, 409);
   assert.equal(json(again).error.code, 'already-printed');
   assert.ok(final.bundle.artifacts.sliced);
   const tools = (await f.calls()).filter(entry => entry.tool).map(entry => entry.tool);
-  assert.deepEqual(tools, ['lay_flat', 'slice_stl', 'inspect_print_file', 'camera_snapshot', 'print_3mf']);
+  assert.deepEqual(tools, ['lay_flat', 'slice_stl', 'inspect_print_file', 'print_3mf']);
 });
 
 test('elicitation respond rejects unknown ids and malformed answers', async t => {
@@ -539,7 +537,7 @@ for (const dispatch of ['crash', 'timeout']) {
     assert.equal(final.bundle.status, 'uncertain');
     assert.equal(final.bundle.failure, 'dispatch-uncertain');
     assert.deepEqual((await f.calls()).filter(item => item.tool).map(item => item.tool),
-      ['lay_flat', 'slice_stl', 'inspect_print_file', 'camera_snapshot', 'print_3mf']);
+      ['lay_flat', 'slice_stl', 'inspect_print_file', 'print_3mf']);
     assert.deepEqual((await f.calls()).filter(item => item.elicitation).map(item => item.elicitation),
       [{action: 'accept', content: {confirmed: true}}]);
     for (const restart of [false, true]) {

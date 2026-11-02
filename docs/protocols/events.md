@@ -12,7 +12,7 @@ Schema: `CounterpartEventSchema` in `packages/contracts/src/counterpart.ts`. One
 type CounterpartEvent = {
   v: 1; seq: number; id: string /* uuid */; at: string /* ISO */;
   type: "pass.started"|"pass.stage"|"pass.ready"|"pass.ask"|"pass.failed"
-      | "print.preparing"|"plate.blocked"|"print.confirm"|"print.started"|"print.status"|"print.first-layer"
+      | "print.preparing"|"print.confirm"|"print.started"|"print.status"|"print.first-layer"
       | "print.milestone"|"print.paused"|"print.resumed"|"print.done"|"print.failed"|"print.cancelled"
       | "print.not-started"|"print.unreachable"|"print.sent"
       | "mcp.update.started"|"mcp.update.waiting"|"mcp.update.done"|"mcp.update.failed"; // PR 6
@@ -47,7 +47,6 @@ type CounterpartEvent = {
 | `pass.ask` | A pass ends needing a close-up | "*Title*: *question*" | "Take a photo, choose one, or let your Mac make its best guess." | active | |
 | `pass.failed` | A pass ends without a model | "*Title* didn't finish" | what happened and what to do | active | |
 | `print.preparing` | Print was tapped; each preparation step | "Getting *Title* ready" | the step: "Slicing the model", "Checking the printer", … | none | |
-| `plate.blocked` | **Not emitted.** Kept in the type from PRD §8.7; plate alerts were removed with ac44431 and would return only in a later change. | "Something's on the *Printer* plate" | "Looks like there's *item* on your plate. Can you take it off first?" | timeSensitive | |
 | `print.confirm` | The printer MCP asks its own confirmation | "*Printer* needs a yes before printing *Title*" | "Open Counterpart to answer." | timeSensitive | |
 | `print.started` | The printer reports our job preparing or printing | "Printing *Title* on *Printer*" | the printer's stage ("Heating the bed", "Auto bed leveling") or "Started" | passive | |
 | `print.status` | Something changed (below) | *Title* | "[*p*%] [· *remaining* left] [· layer *l* of *L*]" | none | |

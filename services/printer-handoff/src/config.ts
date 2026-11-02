@@ -71,6 +71,7 @@ export const printerHandoffConfigSchema = z.strictObject({
   selection: printerSelectionSchema.optional(),
   slicer: printerSlicerSchema.optional(),
   print: printerPrintOptionsSchema.optional(),
+  /** Whether the Mac app's printer check tests the camera. Never used to check the bed (PRD §5.6). */
   cameraSnapshot: z.boolean().optional(),
   timeouts: printerTimeoutsSchema.optional(),
 });

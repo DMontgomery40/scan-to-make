@@ -72,7 +72,6 @@ export const parameters = {
   'printers.updateMcp': z.strictObject({mcpId: z.string().regex(/^mcp-[0-9a-f]{16}$/), fresh: z.boolean().optional()}),
   'settings.get': empty,
   'settings.set': z.strictObject({milestones: MilestonesSchema}),
-  'objects.answerPlate': z.strictObject({id: z.uuid()}),
   'objects.answerPrintConfirmation': z.strictObject({id: z.uuid(), confirmationId: z.uuid(), answer: z.union([
     // Any elicitation primitive; checked field by field against the pending question's own schema.
     z.strictObject({action: z.literal('accept'), content: z.record(z.string().max(128), z.union([z.boolean(), z.string().max(4096), z.number().finite()]))}),
