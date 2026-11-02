@@ -335,7 +335,7 @@ test('HTTP source-derived Serve fixture pairs a phone that then passes the authe
   });
   assert.equal(health.status, 200);
   // capabilities is additive; without the objects service there are no generic confirmations to answer.
-  assert.deepEqual(health.body, { status: 'ok', protocolVersion: '0.1.0', capabilities: { genericConfirmations: false, materialChoice: false, projectSettings: false, mcpUpdates: false, printCopies: false, projectRename: false } });
+  assert.deepEqual(health.body, { status: 'ok', protocolVersion: '0.1.0', capabilities: { genericConfirmations: false, materialChoice: false, projectSettings: false, mcpUpdates: false, printCopies: false, projectRename: false, messagePhotos: false } });
 });
 
 test('HTTP rejects missing, wrong and duplicated identity, browser origins, Funnel and local-mode fallback', async (t) => {
