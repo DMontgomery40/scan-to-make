@@ -179,6 +179,7 @@ export function eventWords(type: CounterpartEventType, data: CounterpartEvent['d
 // The project's status line (PRD §4 state table)
 
 export interface StatusSource extends TitleSource {
+  photos?: string[];
   state: string;
   progress?: string;
   question?: {closeup?: string};
@@ -197,7 +198,8 @@ const formatDate = (iso: string) => new Intl.DateTimeFormat('en-US', {month: 'sh
 export function objectStatus(object: StatusSource, updatedAtMs?: number): ObjectStatus {
   const printer = object.print?.destination?.name ?? 'your printer';
   switch (object.state) {
-    case 'new': return {phase: 'sending', text: 'Sending to your Mac', symbol: 'arrow.up.circle', tint: 'blue'};
+    case 'new': return {phase: 'draft', text: object.scan || object.capture?.length || object.photos?.length
+      ? 'Draft saved · finish sending to begin' : 'Add photos or a scan', symbol: 'square.and.pencil', tint: 'secondary'};
     case 'touching-up': {
       const pass = object.passes?.at(-1);
       const stage = pass?.stages?.filter(item => item.endedAtMs === undefined).at(-1)?.words ?? object.progress;

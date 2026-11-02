@@ -128,6 +128,8 @@ public struct ProjectWords: Equatable, Sendable {
 
     /// The phase, from the Mac's state plus whether this phone is still sending files.
     public static func phase(_ project: Project, sending: Bool = false) -> ProjectPhase {
+        // Only the uploading phone knows a transfer is active. Saved drafts are never ongoing sends.
+        if project.state == .new { return sending ? .sending : .draft }
         // You said it works (Did it fit?, or Project Settings): Done, once nothing is running or waiting on you.
         // Not a sent or uncertain print: a reprint the Mac can't follow is its own state, whatever was said before.
         if project.projectStatus == .works, [.ready, .printed, .confirmed].contains(project.state), project.printConfirmation == nil,
@@ -187,9 +189,9 @@ public struct ProjectWords: Equatable, Sendable {
                     (status, busy, actions) = ("Draft saved. Finish sending to begin.", false, [.finishSending])
                 } else {
                     let described = !(project.instructions ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                    (status, busy, actions) = ("Waiting for a scan or photos.", false, described ? [.scan, .attachPhotos, .makeIt] : [.scan, .attachPhotos])
+                    (status, busy, actions) = ("Add photos or a scan.", false, described ? [.scan, .attachPhotos, .makeIt] : [.scan, .attachPhotos])
                 }
-                line = phase.label
+                line = sending ? phase.label : (project.hasScan || !project.photos.isEmpty ? "Draft saved · finish sending to begin" : "Add photos or a scan")
             case .touchingUp where !(project.progress ?? "").trimmingCharacters(in: .whitespaces).isEmpty:
                 (status, busy, actions) = ("\(project.progress!) \(Self.wait)", true, [])
                 line = Self.workingLine(project, fallback: project.progress!)
