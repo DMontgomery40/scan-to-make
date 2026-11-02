@@ -324,7 +324,19 @@ def run_mac(spec, workspace, directory, host):
 
 
 def linux_hosts():
-    return [h.strip() for h in os.environ.get('CI_LOCAL_LINUX_HOSTS', 'agents-136,agents-173,agents-171').split(',') if h.strip()]
+    """Configured Linux boxes that answer SSH now; a dead box is skipped instead of failing its lane."""
+    configured = [h.strip() for h in os.environ.get('CI_LOCAL_LINUX_HOSTS', 'agents-136,agents-173,agents-171').split(',') if h.strip()]
+    def alive(host):
+        try:
+            return subprocess.run(['ssh', '-o', 'ConnectTimeout=5', '-o', 'BatchMode=yes', host, 'true'],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=15).returncode == 0
+        except subprocess.TimeoutExpired:
+            return False
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, len(configured))) as pool:
+        up = [h for h, ok in zip(configured, pool.map(alive, configured)) if ok]
+    for host in configured:
+        if host not in up: print('ci-local: skipping unreachable Linux host ' + host, file=sys.stderr, flush=True)
+    return up
 
 
 LINUX_JOBS = '/var/tmp/stm-ci'
@@ -445,12 +457,14 @@ def main():
             if runner.startswith(('macos', 'xcode-')) and platform.system()!='Darwin': return run_mac(spec, root, jobdir, args.mac_host)
             if runner.startswith('ubuntu') and host: return run_linux(spec, root, jobdir, host)
             if (runner.startswith('ubuntu') and platform.system()=='Linux') or (runner.startswith(('macos', 'xcode-')) and platform.system()=='Darwin'): return execute_job(spec, root, jobdir)
+            if runner.startswith('ubuntu') and platform.system()=='Darwin': raise ValueError('No Linux host reachable (CI_LOCAL_LINUX_HOSTS) for '+runner)
             raise ValueError('Runner unavailable: '+runner)
         except Exception as error:
             return {'spec': spec, 'status':'FAIL', 'steps':[{'name':'Local runner','command':'','status':'FAIL','seconds':0,'note':str(error)}]}
-    # On the Mac, ubuntu jobs go to the Linux boxes: one lane per box, lanes in parallel, while Apple jobs run here.
-    hosts = linux_hosts() if platform.system()=='Darwin' else []
-    remote = [i for i, spec in enumerate(jobs) if hosts and str(spec['job'].get('runs-on','')).startswith('ubuntu')]
+    # On the Mac, ubuntu jobs go to the Linux boxes: one lane per reachable box, lanes in parallel, while Apple jobs run here.
+    ubuntu = [i for i, spec in enumerate(jobs) if str(spec['job'].get('runs-on','')).startswith('ubuntu')]
+    hosts = linux_hosts() if platform.system()=='Darwin' and ubuntu else []
+    remote = ubuntu if hosts else []
     lanes = {host: remote[k::len(hosts)] for k, host in enumerate(hosts)}
     results = [None] * len(jobs)
     with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, len(hosts))) as pool:

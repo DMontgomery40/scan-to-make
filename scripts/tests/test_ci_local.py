@@ -137,19 +137,45 @@ class LocalWorkflowTests(unittest.TestCase):
             self.assertEqual(child.returncode,0); self.assertTrue(marker.exists())
             self.assertIn('held by: 123 other-seat',out)
 
-    def test_on_the_mac_ubuntu_jobs_go_to_linux_lanes_and_apple_jobs_stay(self):
-        jobs=[{'workflow':'w','key':str(i),'matrix':{},'env':{},'defaults':{},'job':{'runs-on':r,'steps':[]}}
-              for i,r in enumerate(['ubuntu-latest','macos-27','ubuntu-latest','ubuntu-latest','xcode-27.2'])]
-        calls=[]
+    def route(self, kinds, alive):
+        """Run main() on a pretend Mac with Linux hosts a, b, c; `alive` is the set that answers SSH."""
+        jobs=[{'workflow':'w','key':str(i),'matrix':{},'env':{},'defaults':{},'job':{'runs-on':r,'steps':[]}} for i,r in enumerate(kinds)]
+        calls=[]; probes=[]
         def fake_linux(spec,workspace,directory,host): calls.append((spec['key'],host)); return {'spec':spec,'status':'PASS','steps':[]}
         def fake_local(spec,workspace,directory): calls.append((spec['key'],'mac')); return {'spec':spec,'status':'PASS','steps':[]}
+        real_run=subprocess.run
+        def fake_run(argv,*a,**k):
+            if argv[:1]==['ssh'] and argv[-1]=='true':
+                probes.append(argv[-2]); return subprocess.CompletedProcess(argv, 0 if argv[-2] in alive else 255)
+            return real_run(argv,*a,**k)
         with tempfile.TemporaryDirectory() as folder, \
-             patch.object(ci.platform,'system',return_value='Darwin'), patch.dict(os.environ,{'CI_LOCAL_LINUX_HOSTS':'a,b'}), \
+             patch.object(ci.platform,'system',return_value='Darwin'), patch.dict(os.environ,{'CI_LOCAL_LINUX_HOSTS':'a,b,c'}), \
+             patch.object(ci.subprocess,'run',side_effect=fake_run), \
              patch.object(ci,'read_workflows',return_value=jobs), patch.object(ci,'run_linux',side_effect=fake_linux), \
              patch.object(ci,'execute_job',side_effect=fake_local), patch.object(ci,'output',side_effect=lambda argv,**k: '' if 'status' in argv else folder), \
              patch.object(ci,'evidence_directory',return_value=Path(folder)), patch.object(sys,'argv',['ci_local.py','all']):
-            self.assertEqual(ci.main(),0)
-        self.assertEqual(sorted(calls),[('0','a'),('1','mac'),('2','b'),('3','a'),('4','mac')])
+            code=ci.main()
+            summary=(Path(folder)/'summary.md').read_text()
+        return code, sorted(calls), sorted(probes), summary
+
+    def test_on_the_mac_ubuntu_jobs_go_to_linux_lanes_and_apple_jobs_stay(self):
+        code,calls,_,_=self.route(['ubuntu-latest','macos-27','ubuntu-latest','ubuntu-latest','xcode-27.2'],{'a','b','c'})
+        self.assertEqual(code,0)
+        self.assertEqual(calls,[('0','a'),('1','mac'),('2','b'),('3','c'),('4','mac')])
+
+    def test_a_dead_linux_host_is_skipped_not_failed(self):
+        code,calls,probes,_=self.route(['ubuntu-latest','ubuntu-latest','ubuntu-latest','macos-27'],{'a','c'})
+        self.assertEqual(code,0); self.assertEqual(probes,['a','b','c'])
+        self.assertEqual(calls,[('0','a'),('1','c'),('2','a'),('3','mac')])
+
+    def test_no_reachable_linux_host_fails_ubuntu_jobs_clearly_and_apple_jobs_still_run(self):
+        code,calls,_,summary=self.route(['ubuntu-latest','macos-27'],set())
+        self.assertEqual(code,1); self.assertEqual(calls,[('1','mac')])
+        self.assertIn('No Linux host reachable',summary)
+
+    def test_apple_only_runs_do_not_probe_linux_hosts(self):
+        _,calls,probes,_=self.route(['macos-27','xcode-27.2'],{'a','b','c'})
+        self.assertEqual(probes,[]); self.assertEqual(calls,[('0','mac'),('1','mac')])
 
     def test_unknown_action_fails_job_and_preserves_error(self):
         with tempfile.TemporaryDirectory() as folder:
