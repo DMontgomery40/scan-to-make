@@ -2,14 +2,20 @@ import SwiftUI
 
 @main
 struct CounterpartMacMock: App {
+    init() { Task { @MainActor in WindowCapture.runIfRequested() } }
+
+    private let screen = UserDefaults.standard.string(forKey: "screen") ?? "main"
+
     var body: some Scene {
-        let screen = UserDefaults.standard.string(forKey: "screen") ?? "main"
         WindowGroup {
             Group {
                 switch screen {
                 case "popover": MenuPopoverMock().frame(width: 360)
-                case "devices": DevicesSettingsMock().frame(width: 620, height: 460)
                 case "print": MacMainWindow().frame(width: 1320, height: 820).sheet(isPresented: .constant(true)) { MacPrintSheet() }
+                case "inspector-activity": MacMainWindow(tab: 1).frame(width: 1320, height: 820)
+                case "inspector-print": MacMainWindow(tab: 2).frame(width: 1320, height: 820)
+                case "new": MacMainWindow(newProject: true).frame(width: 1320, height: 820)
+                case "devices", _ where screen.hasPrefix("settings-"): SettingsLauncher()
                 default: MacMainWindow().frame(width: 1320, height: 820)
                 }
             }
@@ -17,14 +23,31 @@ struct CounterpartMacMock: App {
             .preferredColorScheme(.dark)
         }
         .windowResizability(.contentSize)
+
+        Settings {
+            MacSettingsView(tab: settingsTab, fusionInstalled: screen != "settings-ai-nofusion")
+        }
+    }
+
+    private var settingsTab: SettingsTab {
+        switch screen {
+        case "settings-general": .general
+        case "settings-printers": .printers
+        case "settings-ai", "settings-ai-nofusion": .ai
+        case "settings-advanced": .advanced
+        default: .devices
+        }
     }
 }
 
 struct MacMainWindow: View {
+    /// Inspector tab: 0 Request, 1 Activity, 2 Print (PRD §7.2).
+    @State var tab = 0
+    /// New Project: the detail becomes the drop target (PRD §7.2).
+    var newProject = false
     @State private var selection: Int? = 1
     @State private var inspector = true
     @State private var note = ""
-    @State private var tab = 0
 
     var body: some View {
         NavigationSplitView {
@@ -43,6 +66,7 @@ struct MacMainWindow: View {
                 }
             }
             .navigationSplitViewColumnWidth(min: 240, ideal: 260)
+            .onAppear { if newProject { selection = nil } }
             .safeAreaInset(edge: .bottom) {
                 HStack(spacing: 8) {
                     Circle().fill(Color.okGreen).frame(width: 7)
@@ -53,6 +77,11 @@ struct MacMainWindow: View {
                 .padding(10)
             }
         } detail: {
+            if newProject { NewProjectPane() } else { projectDetail }
+        }
+    }
+
+    private var projectDetail: some View {
             ZStack(alignment: .bottom) {
                 ModelStage(thumb: .mic, fit: 0.15)
                     .overlay(alignment: .topLeading) { StatusCapsule(stage: .ready).padding(.top, 70).padding(.leading, 24) }
@@ -93,34 +122,233 @@ struct MacMainWindow: View {
                     Picker("", selection: $tab) { Text("Request").tag(0); Text("Activity").tag(1); Text("Print").tag(2) }
                         .pickerStyle(.segmented).labelsHidden().padding(14)
                     ScrollView {
-                        VStack(alignment: .leading, spacing: 16) {
-                            Text("YOUR REQUEST").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                            Text(Mock.projects[0].request)
-                            Text("PHOTOS").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
-                                ForEach(["photo1.jpg", "photo2.jpg", "photo3.jpg", "photo4.jpg"], id: \.self) {
-                                    FillImage(name: $0, height: 96).clipShape(.rect(cornerRadius: 10))
-                                }
-                            }
-                            Text("WHAT CHANGED").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                            VStack(alignment: .leading, spacing: 8) {
-                                Label("Cup slides over the pole top, 24 mm deep", systemImage: "plus.circle.fill")
-                                Label("Snap cradle holds the mic level", systemImage: "plus.circle.fill")
-                                Label("Mic size from published specs", systemImage: "ruler")
-                                Label("Pole size estimated ±0.5 mm", systemImage: "exclamationmark.triangle.fill").foregroundStyle(.yellow)
-                            }
-                            .font(.callout)
-                            Text("ACTIVITY").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                            VStack(alignment: .leading, spacing: 4) {
-                                ForEach(Mock.toolLines, id: \.self) { Text($0).font(.caption2.monospaced()).foregroundStyle(.secondary) }
+                        Group {
+                            switch tab {
+                            case 1: InspectorActivity()
+                            case 2: InspectorPrint()
+                            default: InspectorRequest()
                             }
                         }
                         .padding(.horizontal, 16)
+                        .padding(.bottom, 16)
                     }
                 }
                 .inspectorColumnWidth(min: 280, ideal: 320)
             }
+    }
+}
+
+struct InspectorHeading: View {
+    let text: String
+    init(_ t: String) { text = t }
+    var body: some View { Text(text).font(.caption.weight(.semibold)).foregroundStyle(.secondary) }
+}
+
+/// Request: the request, the photos, and what changed.
+struct InspectorRequest: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            InspectorHeading("YOUR REQUEST")
+            Text(Mock.projects[0].request)
+            InspectorHeading("PHOTOS")
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
+                ForEach(["photo1.jpg", "photo2.jpg", "photo3.jpg", "photo4.jpg"], id: \.self) {
+                    FillImage(name: $0, height: 96).clipShape(.rect(cornerRadius: 10))
+                }
+            }
+            InspectorHeading("WHAT CHANGED")
+            VStack(alignment: .leading, spacing: 8) {
+                Label("Cup slides over the pole top, 24 mm deep", systemImage: "plus.circle.fill")
+                Label("Snap cradle holds the mic level", systemImage: "plus.circle.fill")
+                Label("Mic size from published specs", systemImage: "ruler")
+                Label("Pole size estimated ±0.5 mm", systemImage: "exclamationmark.triangle.fill").foregroundStyle(.yellow)
+            }
+            .font(.callout)
+            InspectorHeading("YOUR FOLLOW-UPS")
+            Text("“Make the clamp a bit tighter.” · 11:04").font(.callout).foregroundStyle(.secondary)
         }
+    }
+}
+
+/// Activity: the passes, their stages, and the tool lines of each step.
+struct InspectorActivity: View {
+    private let pass2: [(String, String, String)] = [
+        ("Read your note", "“Make the clamp a bit tighter.”", "11:04"),
+        ("Tightened the clamp", "Inner diameter 25.4 → 25.0 mm", "11:05"),
+        ("Made it printable", "Laid flat, no supports needed", "11:06"),
+        ("Measured it", "48 × 50 × 54 mm · 22 g · 1 h 12 m on P1S", "11:07"),
+    ]
+    private let pass1: [(String, String, String)] = [
+        ("Read your request and photos", "4 photos, no scan", "10:51"),
+        ("Looked up the mic", "Published size 21 × 108 mm", "10:52"),
+        ("Measured the pole from photos", "25.4 mm ±0.5", "10:53"),
+        ("Designed the cup and cradle", "Blender, through bambu-printer-mcp", "10:58"),
+        ("Made it printable and measured it", "", "11:00"),
+    ]
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            PassHeader(title: "Pass 2 · Ask for changes", detail: "11:04 – 11:07 · 3 min", current: true)
+            ForEach(Array(pass2.enumerated()), id: \.offset) { i, s in
+                StageRow(title: s.0, detail: s.1, time: s.2, last: i == pass2.count - 1)
+                if i == 1 {
+                    VStack(alignment: .leading, spacing: 3) {
+                        ForEach(["11:05:02  blender  select  clamp_inner", "11:05:09  blender  scale  0.984  (x, z)", "11:05:20  measure  inner ⌀ 25.0 mm", "11:05:31  render   front → compare photo 1"], id: \.self) {
+                            Text($0).font(.caption2.monospaced()).foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding(10).frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color(white: 0.12), in: .rect(cornerRadius: 10))
+                    .padding(.leading, 28).padding(.top, -6)
+                }
+            }
+            Divider().padding(.vertical, 4)
+            PassHeader(title: "Pass 1 · New project", detail: "10:51 – 11:00 · 9 min", current: false)
+            ForEach(Array(pass1.enumerated()), id: \.offset) { i, s in
+                StageRow(title: s.0, detail: s.1, time: s.2, last: i == pass1.count - 1)
+            }
+        }
+    }
+}
+
+struct PassHeader: View {
+    let title: String, detail: String, current: Bool
+    var body: some View {
+        HStack {
+            Text(title).font(.headline)
+            Spacer()
+            Text(detail).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+        }
+        .foregroundStyle(current ? .primary : .secondary)
+    }
+}
+
+struct StageRow: View {
+    let title: String, detail: String, time: String, last: Bool
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "checkmark.circle.fill").foregroundStyle(.green).frame(width: 18)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.callout.weight(.medium))
+                if !detail.isEmpty { Text(detail).font(.caption).foregroundStyle(.secondary) }
+            }
+            Spacer()
+            Text(time).font(.caption.monospacedDigit()).foregroundStyle(.tertiary)
+        }
+    }
+}
+
+/// Print: printer, profile, colours, and the last print's events.
+struct InspectorPrint: View {
+    private let events: [(String, String, String, Bool)] = [
+        ("10:02", "Plate checked", "Clear, so nothing was shown", false),
+        ("10:03", "Started", "Heating the bed", false),
+        ("10:05", "First layer's down", "", true),
+        ("10:39", "Halfway", "36 min left · layer 106 of 212", true),
+        ("11:14", "Done", "Took it off the plate", true),
+    ]
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            InspectorHeading("PRINTER")
+            HStack(spacing: 10) {
+                Image(systemName: "printer.fill").font(.title3).frame(width: 34, height: 34).glassEffect(.regular, in: .rect(cornerRadius: 9))
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("P1S").font(.headline)
+                    Text("bambu-printer-mcp · ready · plate clear").font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Circle().fill(Color.okGreen).frame(width: 8)
+            }
+            InspectorHeading("PROFILE")
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Bambu PLA Basic @ P1S 0.4 nozzle")
+                Text("Standard · 0.20 mm · 2 walls · 15% infill").font(.caption).foregroundStyle(.secondary)
+            }
+            InspectorHeading("COLORS")
+            VStack(alignment: .leading, spacing: 8) {
+                ColorMapRowMac(part: "Cup", partColor: Color(white: 0.16), spool: Mock.ams[0])
+                ColorMapRowMac(part: "Cradle", partColor: Color(red: 0.8, green: 0.62, blue: 0.36), spool: Mock.ams[1])
+            }
+            .font(.callout)
+            InspectorHeading("LAST PRINT · MIC MOUNT V1 · OCT 30")
+            VStack(alignment: .leading, spacing: 10) {
+                ForEach(Array(events.enumerated()), id: \.offset) { _, e in
+                    HStack(alignment: .top, spacing: 10) {
+                        Text(e.0).font(.caption.monospacedDigit()).foregroundStyle(.tertiary).frame(width: 36, alignment: .leading)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(e.1).font(.callout.weight(.medium))
+                            if !e.2.isEmpty { Text(e.2).font(.caption).foregroundStyle(.secondary) }
+                        }
+                        Spacer()
+                        if e.3 { FillImage(name: "bed.jpg", height: 30).frame(width: 40).clipShape(.rect(cornerRadius: 6)) }
+                    }
+                }
+            }
+            Button { } label: { Label("Print Again…", systemImage: "printer.fill").frame(maxWidth: .infinity) }
+                .buttonStyle(.glass).controlSize(.large)
+        }
+    }
+}
+
+// MARK: New Project (PRD §7.2): drop photos, STL, 3MF or USDZ, or type a request.
+
+struct NewProjectPane: View {
+    @State private var text = "A wall hook for my headphones that matches this mic mount, same arm pole."
+    @State private var kind = 0
+    var body: some View {
+        ZStack {
+            StageBackground().ignoresSafeArea()
+            VStack(alignment: .leading, spacing: 18) {
+                Picker("", selection: $kind) { Text("Make something that fits").tag(0); Text("Copy something").tag(1) }
+                    .pickerStyle(.segmented).labelsHidden().frame(width: 380)
+                VStack(spacing: 14) {
+                    HStack(spacing: 18) {
+                        Image(systemName: "photo.on.rectangle.angled"); Image(systemName: "cube"); Image(systemName: "rotate.3d")
+                    }
+                    .font(.system(size: 30, weight: .light)).foregroundStyle(Color.filament)
+                    Text("Drop photos, STL, 3MF or USDZ files").font(.title3.weight(.semibold))
+                    Text("or choose them, or just describe it below").font(.callout).foregroundStyle(.secondary)
+                    HStack(spacing: 10) {
+                        DroppedChip(image: "photo1.jpg", name: "IMG_4021.jpg")
+                        DroppedChip(image: "thumb-mic.png", name: "Mic mount.3mf")
+                    }
+                    .padding(.top, 6)
+                }
+                .frame(maxWidth: .infinity).frame(height: 300)
+                .glassEffect(.regular.tint(Color.filament.opacity(0.10)), in: .rect(cornerRadius: 28))
+                .overlay { RoundedRectangle(cornerRadius: 28).strokeBorder(Color.filament, style: .init(lineWidth: 2, dash: [8, 6])) }
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("What do you need?").font(.headline)
+                    TextField("A hook for my stroller handle…", text: $text, axis: .vertical)
+                        .textFieldStyle(.plain).lineLimit(3...5)
+                        .padding(14).glassEffect(.regular.interactive(), in: .rect(cornerRadius: 16))
+                }
+                HStack {
+                    Label("It shows up on David's iPhone too.", systemImage: "iphone").font(.callout).foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Cancel") { }.controlSize(.extraLarge)
+                    Button { } label: { Text("Create Project").padding(.horizontal, 6) }.buttonStyle(.glassProminent).controlSize(.extraLarge)
+                }
+            }
+            .frame(maxWidth: 640)
+            .padding(32)
+        }
+        .focusEffectDisabled()
+        .navigationTitle("New Project")
+        .navigationSubtitle("Your Mac starts as soon as you create it")
+    }
+}
+
+struct DroppedChip: View {
+    let image: String, name: String
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(asset: image).resizable().scaledToFill().frame(width: 30, height: 30).clipShape(.rect(cornerRadius: 6))
+            Text(name).font(.callout)
+            Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 10).padding(.vertical, 6)
+        .glassEffect(.regular, in: .capsule)
     }
 }
 
@@ -253,21 +481,17 @@ struct AppIconMac: View {
 struct DevicesSettingsMock: View {
     var body: some View {
         Form {
-            Section("Phones and iPads") {
+            Section {
                 DeviceRow(name: "David's iPhone 18 Pro", detail: "iPhone · connected now · paired Oct 30", symbol: "iphone", live: true)
                 DeviceRow(name: "David's iPad Pro", detail: "iPad · last seen yesterday · paired Oct 31", symbol: "ipad", live: false)
                 Button("Add a Phone…") { }
-            }
-            Section("Printers") {
-                ForEach(Mock.printers) { p in
-                    LabeledContent { Text(p.via).foregroundStyle(.secondary) } label: { Label(p.model, systemImage: p.symbol) }
-                }
-            }
-            Section("AI") {
-                LabeledContent("Touch-ups and designs") { Text("Claude · your subscription · connected").foregroundStyle(Color.okGreen) }
+            } header: { Text("Phones and iPads") } footer: {
+                Text("Pairing a phone again replaces its row. It never adds a second one.").font(.caption).foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
+        .focusEffectDisabled()
+        .frame(height: 300)
     }
 }
 

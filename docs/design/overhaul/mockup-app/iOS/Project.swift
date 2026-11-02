@@ -21,6 +21,7 @@ struct ProjectView: View {
 
                 if project.stage == .needsYou { askCard.padding(.horizontal, 16) }
                 if project.stage == .working { workingCard.padding(.horizontal, 16) }
+                if project.stage == .failed { failedCard.padding(.horizontal, 16) }
 
                 Picker("Section", selection: $section) {
                     ForEach(ProjectSection.allCases, id: \.self) { Text($0.rawValue) }
@@ -55,14 +56,14 @@ struct ProjectView: View {
                 } label: { Image(systemName: "ellipsis") }
             }
         }
-        .safeAreaBar(edge: .bottom) { if project.stage != .needsYou { bottomBar } }
+        .safeAreaBar(edge: .bottom) { if project.stage != .needsYou && project.stage != .failed { bottomBar } }
     }
 
     // MARK: Hero
 
     private var hero: some View {
         ModelStage(thumb: project.thumb)
-            .frame(height: 380)
+            .frame(height: project.stage == .failed ? 300 : 380)
             .overlay(alignment: .bottom) {
                 GlassEffectContainer(spacing: 10) {
                     HStack(spacing: 10) {
@@ -97,6 +98,33 @@ struct ProjectView: View {
         }
         .padding(16)
         .glassEffect(.regular.tint(.blue.opacity(0.15)), in: .rect(cornerRadius: 24))
+    }
+
+    /// What happened and what to do, in plain words; raw codes stay under Details (PRD §2.6, §5.4).
+    private var failedCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label("Your Mac couldn't finish", systemImage: "exclamationmark.triangle.fill").font(.headline).foregroundStyle(.red)
+            Text("Blender closed on your Mac during the touch-up, before the stitches were restored.")
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: "lightbulb.fill").foregroundStyle(.yellow).frame(width: 20)
+                Text("Open Blender on your Mac, then try again. Your scan and photos are kept.").font(.subheadline).foregroundStyle(.secondary)
+            }
+            GlassEffectContainer(spacing: 8) {
+                HStack(spacing: 8) {
+                    Button { } label: { Label("Try Again", systemImage: "arrow.clockwise").fontWeight(.semibold).lineLimit(1).minimumScaleFactor(0.8).frame(maxWidth: .infinity).frame(height: 30) }
+                        .buttonStyle(.glassProminent)
+                    Button { } label: { Label("Open on Mac", systemImage: "macmini").lineLimit(1).minimumScaleFactor(0.8).frame(maxWidth: .infinity).frame(height: 30) }
+                        .buttonStyle(.glass)
+                }
+                .controlSize(.large).font(.subheadline)
+            }
+            DisclosureGroup("Details") {
+                Text("blender_mcp_call · connection closed · 11:02:41").font(.caption2.monospaced()).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading).padding(.top, 4)
+            }
+            .font(.footnote).foregroundStyle(.secondary)
+        }
+        .padding(16)
+        .glassEffect(.regular.tint(.red.opacity(0.14)), in: .rect(cornerRadius: 24))
     }
 
     private var askCard: some View {
@@ -158,14 +186,16 @@ struct ProjectView: View {
         }
     }
 
+    private var failed: Bool { project.stage == .failed }
+
     private var activitySection: some View {
         VStack(alignment: .leading, spacing: 0) {
             ForEach(Array(Mock.trace.enumerated()), id: \.offset) { i, step in
                 HStack(alignment: .top, spacing: 12) {
                     VStack(spacing: 0) {
-                        Image(systemName: step.2 ? "checkmark.circle.fill" : (i == 2 ? "circle.dotted.circle" : "circle"))
-                            .foregroundStyle(step.2 ? .green : (i == 2 ? .blue : .secondary))
-                            .symbolEffect(.pulse, isActive: i == 2)
+                        Image(systemName: step.2 ? "checkmark.circle.fill" : (i == 2 ? (failed ? "xmark.circle.fill" : "circle.dotted.circle") : "circle"))
+                            .foregroundStyle(step.2 ? .green : (i == 2 ? (failed ? .red : .blue) : .secondary))
+                            .symbolEffect(.pulse, isActive: i == 2 && !failed)
                         if i < Mock.trace.count - 1 { Rectangle().fill(.quaternary).frame(width: 2).frame(minHeight: 22) }
                     }
                     VStack(alignment: .leading, spacing: 3) {
@@ -173,7 +203,7 @@ struct ProjectView: View {
                         if !step.1.isEmpty { Text(step.1).font(.subheadline).foregroundStyle(.secondary) }
                         if i == 2 && showTrace {
                             VStack(alignment: .leading, spacing: 4) {
-                                ForEach(Mock.toolLines, id: \.self) { Text($0).font(.caption2.monospaced()).foregroundStyle(.secondary) }
+                                ForEach(failed ? Mock.failedToolLines : Mock.toolLines, id: \.self) { Text($0).font(.caption2.monospaced()).foregroundStyle(.secondary) }
                             }
                             .padding(10).background(Color(white: 0.07), in: .rect(cornerRadius: 12)).padding(.top, 6)
                         }
