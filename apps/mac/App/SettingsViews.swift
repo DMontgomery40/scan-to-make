@@ -44,6 +44,9 @@ struct SettingsView: View {
         }
         .frame(width:620)
         .tint(.filament)
+        .onReceive(NotificationCenter.default.publisher(for:SettingsTab.openRequest)) { note in
+            if let asked = (note.object as? String).flatMap(SettingsTab.init(rawValue:)) { tab = asked }
+        }
         .task {
             #if DEBUG
             // Design QA: the tab asked for wins over the one the system restores from last time.
@@ -55,6 +58,13 @@ struct SettingsView: View {
 }
 
 extension SettingsTab {
+    static let openRequest = Notification.Name("counterpart.settings.open")
+    /// Opens Settings on this tab (the AI sign-in a phone's Test needs finishes here).
+    @MainActor static func open(_ tab: SettingsTab) {
+        NSApp.activate()
+        AppRouter.shared.open(.settings)
+        DispatchQueue.main.asyncAfter(deadline:.now() + 0.5) { NotificationCenter.default.post(name:openRequest, object:tab.rawValue) }
+    }
     @MainActor static var initial: SettingsTab {
         #if DEBUG
         if let designed { return designed }
@@ -74,6 +84,8 @@ extension SettingsTab {
 // MARK: General
 
 struct GeneralSettings: View {
+    /// PRD §5.9: kept in the companion when it keeps them, so the phone shows and changes the same values.
+    @ObservedObject private var companion = CompanionSettingsModel.shared
     @State private var login = SMAppService.mainApp.status == .enabled
     @State private var loginProblem: String?
     @State private var dock = DockIcon.shown
@@ -88,12 +100,54 @@ struct GeneralSettings: View {
     var body: some View {
         Form {
             Section {
-                Toggle(isOn:Binding(get:{ login }, set:{ setLogin($0) })) {
+                Toggle(isOn:Binding(get:{ companion.settings?.general?.openAtLogin ?? login }, set:{ setLogin($0) })) {
                     Text("Open at login")
-                    Text(loginProblem ?? "Your phone only gets updates while Counterpart is running.")
+                    Text(loginProblem ?? companion.problem ?? "Your phone only gets updates while Counterpart is running.")
                 }
-                Toggle("Show in Dock", isOn:Binding(get:{ dock }, set:{ dock = $0; UserDefaults.standard.set($0, forKey:DockIcon.key); DockIcon.apply() }))
+                Toggle("Show in Dock", isOn:Binding(get:{ companion.settings?.general?.showInDock ?? dock }, set:{ setDock($0) }))
+                if let keepAwake = companion.settings?.general?.keepAwake {
+                    Toggle("Keep the Mac awake while working", isOn:Binding(get:{ keepAwake }, set:{ on in Task { await companion.setGeneral("keepAwake", on) } }))
+                }
+            } footer: {
+                if companion.keepsGeneral {
+                    Text("The same on your iPhone: changing one changes it everywhere.").font(.caption).foregroundStyle(.secondary)
+                }
             }
+            .disabled(companion.saving)
+            if let types = companion.settings?.notificationsMac {
+                companionNotifications(types)
+            } else {
+                localNotifications
+            }
+        }
+        .formStyle(.grouped)
+        .focusEffectDisabled()
+        .frame(height:620)
+        .task { await readMilestones(); await companion.refresh(force:true) }
+    }
+
+    /// The companion's switches: one per event type, the same list your iPhone shows for this Mac (settings.md).
+    private func companionNotifications(_ types: [String: Bool]) -> some View {
+        Section {
+            ForEach(MacNotificationTypes.ordered, id:\.type) { item in
+                Toggle(item.label, isOn:Binding(get:{ types[item.type] ?? false }, set:{ on in Task { await companion.setNotification(item.type, on) } }))
+                if item.type == "print.milestone" {
+                    Picker(selection:Binding(get:{ ProgressNotifications(milestones:companion.settings?.milestones ?? shared ?? "50") ?? .off },
+                                             set:{ level in if let value = level.milestones { Task { await companion.set(["milestones":.string(value)]) } } })) {
+                        ForEach(ProgressNotifications.allCases.filter { $0 != .off }) { Text($0.title).tag($0) }
+                    } label: {
+                        Text("Milestones")
+                        Text("Shared with your iPhone.")
+                    }
+                }
+            }
+        } header: { Text("Notifications on this Mac") } footer: {
+            Text("Your iPhone has its own switches, and can change these too.").font(.caption).foregroundStyle(.secondary)
+        }
+        .disabled(companion.saving)
+    }
+
+    private var localNotifications: some View {
             Section {
                 ForEach(NotificationSwitch.ordered) { item in
                     Toggle(item.title, isOn:Binding(get:{ switches[item] ?? item.defaultOn }, set:{ switches[item] = $0; NotificationPrefs().set(item, $0) }))
@@ -114,11 +168,6 @@ struct GeneralSettings: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
             .disabled(!NotificationPrefs.delivered)
-        }
-        .formStyle(.grouped)
-        .focusEffectDisabled()
-        .frame(height:620)
-        .task { await readMilestones() }
     }
 
     /// Shows the shared level while this Mac's Progress is on, so both devices say the same.
@@ -157,8 +206,15 @@ struct GeneralSettings: View {
         try ControlClient(socketPath:ModelAccessModel.socketPath(for:Installation(bundle:.main)))
     }
 
+    private func setDock(_ on: Bool) {
+        if companion.keepsGeneral { Task { await companion.setGeneral("showInDock", on) }; return }
+        dock = on; UserDefaults.standard.set(on, forKey:DockIcon.key); DockIcon.apply()
+    }
+
     private func setLogin(_ on: Bool) {
         loginProblem = nil
+        // Kept in the companion: it changes everywhere, and this Mac applies it from the answer.
+        if companion.keepsGeneral { Task { await companion.setGeneral("openAtLogin", on) }; return }
         // Remembered, so the next launch doesn't register it again behind the person's back.
         UserDefaults.standard.set(!on, forKey:"openAtLoginOff")
         do {

@@ -43,6 +43,7 @@
 		6BCE834DA7C1BC1CB883CCA2 /* MainWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA62B9003D4361659BDE0785 /* MainWindow.swift */; };
 		6C5AB9B038354B84AE551EE5 /* ModelAccess.swift in Sources */ = {isa = PBXBuildFile; fileRef = F42D3DDC4E340B3763151AD3 /* ModelAccess.swift */; };
 		75D893D14AC572EFCB90C634 /* Main.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21B73436F785508B3D834AF9 /* Main.swift */; };
+		790A649A81726C39D2C2D1A1 /* CompanionSettingsModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3DD660C3DBD81EE6B5FCF9A /* CompanionSettingsModel.swift */; };
 		798AD45D8324CCB7C0055EAD /* Files.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78DF45C7E52F301838B8C603 /* Files.swift */; };
 		7B20A7488495F67499D47A1B /* CloudSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = 82E682F2C777DDBCE67DFA31 /* CloudSync.swift */; };
 		7B9AC82A01FF76285D8E0AF9 /* ObjectWords.swift in Sources */ = {isa = PBXBuildFile; fileRef = E82C534F4897E3ACC66A7C81 /* ObjectWords.swift */; };
@@ -61,6 +62,7 @@
 		A0E5DD6215B393751ABBF3DE /* UnixTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = F883FAAC0FC2F4C62EA7B853 /* UnixTransport.swift */; };
 		A2B32923C3B51ACAF1B96258 /* Events.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5843CF243A6B90D769EE203F /* Events.swift */; };
 		AA8A4960648DEA5F67A8ACB2 /* PairingSessionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 666DD15803F0A0C9F25C5AB3 /* PairingSessionTests.swift */; };
+		AB148F95612F23763B83F124 /* CompanionSettingsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 65E3A0D63F7083BD2ECAB4E5 /* CompanionSettingsTests.swift */; };
 		AE855366D17081C32A3DF4E9 /* Diagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1496538ABC8C1B43DD7C1B15 /* Diagnostics.swift */; };
 		B0090E1EDC08376AA430DCD6 /* ObjectsModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9E37E3298AF5B6A96E8E996C /* ObjectsModelTests.swift */; };
 		B5370FB378445BA7284F753F /* PrintSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B814B01D67995804A9C7A30 /* PrintSheet.swift */; };
@@ -159,6 +161,7 @@
 		5A63BE8D6BD19AFFDA3F5D4E /* SettingsViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsViews.swift; sourceTree = "<group>"; };
 		5CB3C16A5015E911EF835644 /* ScanToMake.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ScanToMake.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		6085C88754126EAB39C66248 /* Objects.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Objects.swift; sourceTree = "<group>"; };
+		65E3A0D63F7083BD2ECAB4E5 /* CompanionSettingsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompanionSettingsTests.swift; sourceTree = "<group>"; };
 		666DD15803F0A0C9F25C5AB3 /* PairingSessionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingSessionTests.swift; sourceTree = "<group>"; };
 		67B5A7B68401A1C2066938E8 /* LocalNetworkAccessTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalNetworkAccessTests.swift; sourceTree = "<group>"; };
 		7762DD7E778E78012FBEE749 /* NewProject.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewProject.swift; sourceTree = "<group>"; };
@@ -184,6 +187,7 @@
 		B5F06994F3DC2679FF8587BB /* ObjectsModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ObjectsModel.swift; sourceTree = "<group>"; };
 		B8FC0CEA3CCA9AA8B21FB7AF /* AgentKitTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = AgentKitTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		BA5042DB008B425E2606B911 /* ModelAccessModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelAccessModel.swift; sourceTree = "<group>"; };
+		C3DD660C3DBD81EE6B5FCF9A /* CompanionSettingsModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompanionSettingsModel.swift; sourceTree = "<group>"; };
 		C7E10258D71E1A28BE7C0F61 /* CompanionModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompanionModel.swift; sourceTree = "<group>"; };
 		CF2310321F74FA746A9806F7 /* EventRelay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventRelay.swift; sourceTree = "<group>"; };
 		D25DA0A9EC41FEC7B93D7FC6 /* Confirmation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Confirmation.swift; sourceTree = "<group>"; };
@@ -299,6 +303,7 @@
 				AD88AEEFC08611A87FA75FE2 /* Assets.xcassets */,
 				82E682F2C777DDBCE67DFA31 /* CloudSync.swift */,
 				C7E10258D71E1A28BE7C0F61 /* CompanionModel.swift */,
+				C3DD660C3DBD81EE6B5FCF9A /* CompanionSettingsModel.swift */,
 				90D981FAC780ABCF386D18D0 /* DesignFixtures.swift */,
 				1496538ABC8C1B43DD7C1B15 /* Diagnostics.swift */,
 				CF2310321F74FA746A9806F7 /* EventRelay.swift */,
@@ -334,6 +339,7 @@
 		CD945642CB7F8D1164371067 /* AppTests */ = {
 			isa = PBXGroup;
 			children = (
+				65E3A0D63F7083BD2ECAB4E5 /* CompanionSettingsTests.swift */,
 				41E2E1E9E7D4F8125FC6CDC2 /* EventRelayTests.swift */,
 				2E2BD0F29478556FD0C62A83 /* MacStatusModelTests.swift */,
 				DC5F2C1001F7210EDDAC44F0 /* ModelAccessModelTests.swift */,
@@ -512,6 +518,7 @@
 			files = (
 				7B20A7488495F67499D47A1B /* CloudSync.swift in Sources */,
 				CDAC222A911270AB01F443E8 /* CompanionModel.swift in Sources */,
+				790A649A81726C39D2C2D1A1 /* CompanionSettingsModel.swift in Sources */,
 				8E48F6039DED4418C9F28F98 /* Confirmation.swift in Sources */,
 				CD8C26ED361E938070BEC7CA /* ControlClient.swift in Sources */,
 				D60BE76E1942A334905A2BAA /* DesignFixtures.swift in Sources */,
@@ -556,6 +563,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				685F7884CACEC1D1FA9A8105 /* AgentManagerTests.swift in Sources */,
+				AB148F95612F23763B83F124 /* CompanionSettingsTests.swift in Sources */,
 				C4EA24E23D16F3944224C11D /* Confirmation.swift in Sources */,
 				D64FFB6E46FFDF1015F113A5 /* ControlClient.swift in Sources */,
 				AE855366D17081C32A3DF4E9 /* Diagnostics.swift in Sources */,
