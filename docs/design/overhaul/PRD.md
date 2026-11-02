@@ -186,7 +186,7 @@ Screenshots:
   - **failed:** what happened and what to do, with a retry when one applies.
 - **Sections** (segmented):
   - **Result:** the *what changed* list (added, changed, published sizes used, estimates with their tolerance), and tiles for print time, filament and printer.
-  - **What you sent:** your request, every photo and scan full size, and your follow-ups with times.
+  - **What you sent:** the conversation, shown as message bubbles (§5.4.1).
   - **Activity:** the passes as a stage timeline. The current stage pulses, and each step expands to show the worker's plain-language note and tool lines.
 - **Bottom bar:**
   - an **Ask for changes…** field with attachments, which sends a new pass with your text. Dictation is the keyboard's own mic. No icon is ever drawn that doesn't do something: David, 2026-11-02, "the microphone button in the diaglogue box, is decoration and hitting it doesn't do anything… just kinda janky to show fake icons";
@@ -235,6 +235,19 @@ Screenshots:
 | Archive / Delete | Archive hides it from Home and keeps everything. Delete removes it from the Mac, with a confirmation. |
 
 Home and the Mac sidebar group projects as Now, Needs you, Ready, **Done** (Works) and Printed, with Archived behind a filter. Marking a project **Works** moves it to Done. A Done project stays printable: **Print another** opens the print sheet with the last printer, settings and colours, plus Copies; it needs no extra confirmation, and it stays Done after the new print finishes.
+
+### 5.4.1 The conversation (phone "What you sent", Mac inspector "Request")
+
+David, 2026-11-02: "'you're request' like the dialogue words, and the model/llm words, should be like ios message bubbles… at a glance, and user can see, more eaily, how the whole thing really just a quick texting exchange. DO NOT GO OVER THE TOP and put everything in actions or logs… BUTTTT just the user messages, with just the main actions message, yes… and also they should be in order kinda… my photos of the thing being finished, should not be clusted together with my first pictures."
+
+- **Only two kinds of bubble.** Each of the user's messages (the request, each follow-up, each close-up answer) is a right-aligned bubble in the accent colour. Each pass's reply (its `summary`) is a left-aligned grey bubble. Nothing else becomes a bubble: Activity, stages, tool lines, print events and Ask cards stay where and as they are.
+- **In time order.** Request → reply → follow-up → reply, by `startedAtMs` and the note's time. A small time label appears between messages more than an hour apart, as in Messages.
+- **Photos belong to the message they came with,** shown as a tight thumbnail stack inside or just above that bubble. The finished-part photos sent with "DONE" sit with "DONE", not with the first request.
+  - Data: each pass records the photo names added with its note (`passes[].photos`); the request's photos are the ones present at creation.
+  - Older projects are attributed once, by each photo's time against the passes'.
+- **A long reply shows its first paragraph,** with **More** expanding it in place. Markdown renders: bold, lists.
+- **The bubbles are presentation only.** Same words, same place, same data. No typing indicators, avatars, reactions or invented chat.
+- **A message that says it's finished doesn't start a pass.** "DONE. mounted and working. thanks!!" ran a whole design pass that re-saved the same model. When a follow-up only reports that the part works or fits, the companion classifies it before starting a pass and answers with "Marked Done" (the status becomes Works), with **Undo**. That's one cheap classification call, not a design pass.
 
 ### 5.5 Print
 
@@ -391,7 +404,7 @@ Screenshots, inspector and New Project: `screens/mac-inspector-activity.jpg`, `s
   - a bottom glass bar with **Ask for changes…** (it also accepts dropped photos and files) and **Print…** (prominent).
 - **Toolbar:** Open in Blender, Open in Slicer (a menu: Bambu Studio / OrcaSlicer / Choose Another App…), Show in Finder, New Project, Inspector.
 - **Inspector,** with three tabs:
-  - Request: request, photos, what changed;
+  - Request: the conversation as message bubbles (§5.4.1);
   - Activity: passes, stages and tool lines;
   - Print: printer, profile, colours and the last print's events.
 - **New Project on the Mac.** Drop photos, STL, 3MF or USDZ files, or type a request. Projects started on the Mac appear on the phone too.
