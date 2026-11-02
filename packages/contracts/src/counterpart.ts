@@ -20,6 +20,8 @@ export const COUNTERPART_EVENT_TYPES = [
   'print.preparing', 'plate.blocked', 'print.confirm', 'print.started', 'print.status', 'print.first-layer',
   'print.milestone', 'print.paused', 'print.resumed', 'print.done', 'print.failed', 'print.cancelled',
   'print.not-started', 'print.unreachable', 'print.sent',
+  // PRD §5.4: a project's status (or, later, its settings) changed.
+  'project.updated',
 ] as const;
 export const CounterpartEventTypeSchema = z.enum(COUNTERPART_EVENT_TYPES);
 export type CounterpartEventType = z.infer<typeof CounterpartEventTypeSchema>;
@@ -43,6 +45,8 @@ export const CounterpartEventDataSchema = z.strictObject({
   askId: uuid.optional(),
   confirmationId: uuid.optional(),
   expiresAt: iso.optional(),
+  /** project.updated: what changed (for example `["status"]`). */
+  keys: z.array(text(64)).max(16).optional(),
 });
 
 /** Exactly PRD §8.7's `CounterpartEvent`. `frame` is relative to the project's directory. */
@@ -81,7 +85,7 @@ export type EventsPage = z.infer<typeof EventsPageSchema>;
 // ---------------------------------------------------------------------------
 // Project status words (PRD §4 state table), written by the companion's events/words.ts
 
-export const PROJECT_PHASES = ['sending', 'working', 'needs-you', 'ready', 'preparing', 'printing', 'printed', 'failed', 'sent'] as const;
+export const PROJECT_PHASES = ['sending', 'working', 'needs-you', 'ready', 'preparing', 'printing', 'printed', 'failed', 'sent', 'confirmed'] as const;
 export const ProjectPhaseSchema = z.enum(PROJECT_PHASES);
 export type ProjectPhase = z.infer<typeof ProjectPhaseSchema>;
 
@@ -276,6 +280,11 @@ export type Ask = z.infer<typeof AskSchema>;
 export const MilestonesSchema = z.enum(['off', '50', '25-50-75', 'every-10']);
 export const CompanionSettingsSchema = z.strictObject({ milestones: MilestonesSchema });
 export type CompanionSettings = z.infer<typeof CompanionSettingsSchema>;
+
+/** PRD §5.4 Status, set by hand: `PATCH /v1/objects/<id>/settings {status}` / `objects.settings.set {id, status}`. */
+export const PROJECT_STATUSES = ['not-printed', 'printed', 'works', 'needs-changes', 'archived'] as const;
+export const ProjectStatusSchema = z.enum(PROJECT_STATUSES);
+export type ProjectStatus = z.infer<typeof ProjectStatusSchema>;
 
 const apnsToken = z.string().regex(/^[0-9a-fA-F]{16,512}$/);
 /** `POST /v1/devices/live-activity-tokens`. At least one of the two. */

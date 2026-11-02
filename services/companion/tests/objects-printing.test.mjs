@@ -27,7 +27,7 @@ const until = async check => { for (let i = 0; i < 300; i++) { const value = awa
  */
 async function setup(t, {tools = ['get_printer_status', 'camera_snapshot', 'pause_print', 'resume_print', 'cancel_print', 'slice_stl'], sliceArgs = false, reports = [], judge = async () => ({clear: true}), camera = true} = {}) {
   const root = await mkdtemp(join(tmpdir(), 'objects-printing-'));
-  t.after(() => rm(root, {recursive: true, force: true}));
+  t.after(() => rm(root, {recursive: true, force: true, maxRetries: 10, retryDelay: 20}));
   const calls = [], events = [], runs = [];
   const queue = [...reports];
   const relay = new InMemoryElicitationRelay({timeoutMs: 5000});

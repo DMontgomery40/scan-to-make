@@ -328,3 +328,58 @@ test('per-pass activity requires read scope and refuses malformed or unknown ind
   }
   await assert.rejects(dispatch('objects.passActivity', {id: object.id, index: 0}), error => error.code === 'not-found');
 });
+
+test('Status is set by hand: works makes the project confirmed ("It works"), and every app is told', async t => {
+  const {call, store} = await fixture(t);
+  const id = (await call('POST', '/v1/objects', {instructions: 'A mic mount'})).json.object.id;
+  assert.deepEqual((await call('GET', `/v1/objects/${id}/settings`)).json, {settings: {status: 'not-printed'}});
+  assert.equal((await call('PATCH', `/v1/objects/${id}/settings`, {status: 'works'})).status, 409, 'no model yet');
+  await store.update(id, o => ({...o, state: 'ready', current: {model: 'current/model.stl', renders: []}}));
+  const works = await call('PATCH', `/v1/objects/${id}/settings`, {status: 'works'});
+  assert.equal(works.status, 200);
+  assert.deepEqual(works.json.settings, {status: 'works'});
+  assert.equal(works.json.object.state, 'confirmed');
+  assert.deepEqual(works.json.object.status, {phase: 'confirmed', text: 'It works', symbol: 'checkmark.circle.fill', tint: 'green'});
+  assert.deepEqual(works.json.object.settings, {status: 'works'});
+  assert.equal((await call('PATCH', `/v1/objects/${id}/settings`, {status: 'done'})).status, 400);
+  assert.equal((await call('PATCH', `/v1/objects/${id}/settings`, {status: 'works', name: 'x'})).status, 400);
+  for (const status of ['needs-changes', 'printed', 'archived', 'not-printed']) {
+    const changed = await call('PATCH', `/v1/objects/${id}/settings`, {status});
+    assert.equal(changed.json.settings.status, status, status);
+  }
+  assert.equal((await store.get(id)).state, 'ready');
+  // A state the label hides still changes: a sent print marked printed; a failed one with a model marked not printed.
+  await store.update(id, o => ({...o, state: 'sent'}));
+  assert.equal((await call('PATCH', `/v1/objects/${id}/settings`, {status: 'printed'})).json.object.state, 'printed');
+  await store.update(id, o => ({...o, state: 'failed'}));
+  assert.equal((await call('PATCH', `/v1/objects/${id}/settings`, {status: 'not-printed'})).json.object.state, 'ready');
+  // A draft without a model can be archived and brought back, staying a draft.
+  const draft = (await call('POST', '/v1/objects', {instructions: 'A hook'})).json.object.id;
+  assert.equal((await call('PATCH', `/v1/objects/${draft}/settings`, {status: 'archived'})).json.settings.status, 'archived');
+  const back = await call('PATCH', `/v1/objects/${draft}/settings`, {status: 'not-printed'});
+  assert.deepEqual([back.status, back.json.settings.status, back.json.object.state], [200, 'not-printed', 'new']);
+});
+
+test('the Mac sets Status over the control socket; project.updated tells the apps; the flag says so', async t => {
+  const {mkdtemp: temp, rm: remove, mkdir: makeDir, writeFile: write} = await import('node:fs/promises');
+  const {tmpdir: tmp} = await import('node:os');
+  const {ObjectStore: Store} = await import('../dist/objects/store.js');
+  const {createControlDispatcher} = await import('../dist/local-control-services.js');
+  const root = await temp(join(tmp(), 'objects-status-'));
+  t.after(() => remove(root, {recursive: true, force: true}));
+  const store = new Store(join(root, 'objects')), events = [];
+  const service = new ObjectService({store, runTouchup: async () => { throw new Error('unused'); }, stlInfo: async () => undefined, claudePath: '/c',
+    handoff: {backend: 'bambu-printer-mcp', process: {command: '/usr/bin/true'}}, events: {emit: async draft => { events.push(draft); }}});
+  t.after(() => service.close());
+  const object = await store.create('A mic mount');
+  await makeDir(join(store.dir(object.id), 'current'), {recursive: true});
+  await write(join(store.dir(object.id), 'current', 'model.stl'), 'solid x');
+  await store.update(object.id, o => ({...o, state: 'printed', current: {model: 'current/model.stl', renders: []}}));
+  const dispatch = createControlDispatcher({auth: {transport: 'lan', listDevices: async () => []}, companionVersion: 'test', objects: service});
+  assert.deepEqual(await dispatch('objects.settings.get', {id: object.id}), {settings: {status: 'printed'}});
+  const set = await dispatch('objects.settings.set', {id: object.id, status: 'works'});
+  assert.deepEqual([set.settings.status, set.object.state, set.object.status.phase], ['works', 'confirmed', 'confirmed']);
+  assert.deepEqual(events.map(event => [event.type, event.data]), [['project.updated', {keys: ['status']}]]);
+  assert.equal((await dispatch('status.get', {})).capabilities.projectSettings, true);
+  await assert.rejects(dispatch('objects.settings.set', {id: object.id, status: 'done'}));
+});

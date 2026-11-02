@@ -52,6 +52,8 @@ export const parameters = {
   'objects.filaments': z.strictObject({id: z.uuid()}),
   'objects.selectPrinter': z.strictObject({id: z.uuid(), destinationId: z.string().min(1).max(256)}),
   'objects.get': z.strictObject({id: z.uuid()}),
+  'objects.settings.get': z.strictObject({id: z.uuid()}),
+  'objects.settings.set': z.strictObject({id: z.uuid(), status: z.enum(['not-printed', 'printed', 'works', 'needs-changes', 'archived'])}),
   'objects.passActivity': z.strictObject({id: z.uuid(), index: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER)}),
   'objects.start': z.strictObject({id: z.uuid()}),
   'objects.delete': z.strictObject({id: z.uuid()}),
