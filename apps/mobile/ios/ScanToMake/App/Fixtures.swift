@@ -182,6 +182,7 @@ struct FixtureTransport: HTTPTransport {
             reply.headers["X-Captured-At"] = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-3))
             return reply
         }
+        if path == "/v1/settings" { return json(["settings": ["milestones": "50"]]) }
         if path == "/v1/events" { return json(["error": ["code": "not-found", "message": "Not found"]], 404) }
         if path == "/v1/objects" && method == "GET" { return json(["objects": objects]) }
         if parts.count >= 3, parts[0] == "v1", parts[1] == "objects" {

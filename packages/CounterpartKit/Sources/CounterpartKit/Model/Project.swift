@@ -395,8 +395,12 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
                 return nil
             }
 
-            /// The answer to use when the person gave none: never a default for a switch.
-            func fallback(_ given: JSONValue?) -> JSONValue? { given ?? (type == .boolean ? nil : defaultValue) }
+            /// The answer to use: what the person gave; when they gave nothing, the default (never for a switch).
+            /// A field they edited stays edited: `.null` means they cleared it, and its default doesn't come back.
+            func fallback(_ given: JSONValue?) -> JSONValue? {
+                if given == .null { return nil }
+                return given ?? (type == .boolean ? nil : defaultValue)
+            }
 
             /// "Low (0.2 mm)" for an enum value, else the value itself.
             public func displayName(of value: String) -> String {
@@ -453,7 +457,9 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
         /// The app can show every field natively. Otherwise the question goes to the Mac (or Don't Print).
         public var isRenderable: Bool { supported && fields.allSatisfy { $0.type != .unknown } }
 
-        /// Every required field has a valid value (a default counts), and every value given is valid.
+        /// Every required field has a valid value (an untouched default counts), and every value given is valid.
+        /// Content holds what the person did: a value, `.null` for a field they cleared, or nothing (untouched).
+        /// Text that isn't a number yet is passed as a string, so it's invalid until it is.
         public func canAccept(_ content: [String: JSONValue], atMs: Double) -> Bool {
             guard isRenderable, expiresAtMs > atMs else { return false }
             return fields.allSatisfy { field in

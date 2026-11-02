@@ -33,7 +33,7 @@ struct PrintingView: View {
                     if let problem { Label(problem, systemImage: "exclamationmark.triangle.fill").font(.subheadline).foregroundStyle(.red).padding(.horizontal, 20) }
                     Text(footer(project)).font(.footnote).foregroundStyle(.secondary).padding(.horizontal, 20)
                 }
-                .padding(.bottom, 90)
+                .padding(.bottom, 16)
             }
         }
         .background(Color.black)
@@ -150,8 +150,9 @@ struct PrintingView: View {
         HStack(spacing: 12) {
             InfoTile(title: "Nozzle", value: Format.temperature(live?.temps?.nozzle?.actual) ?? "–", symbol: "flame")
             InfoTile(title: "Bed", value: Format.temperature(live?.temps?.bed?.actual) ?? "–", symbol: "square.fill")
-            // The printer reports no speed level; the print's own quality stands in.
-            InfoTile(title: "Quality", value: project.print?.settings?.quality?.capitalized ?? "Standard", symbol: "gauge.with.dots.needle.33percent")
+            // PRD §5.7: nozzle, bed and speed. The Mac doesn't report the speed level yet, so it says so.
+            InfoTile(title: "Speed", value: "–", symbol: "gauge.with.dots.needle.33percent")
+                .accessibilityLabel("Speed not reported")
         }
     }
 

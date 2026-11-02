@@ -5,6 +5,9 @@ final class LaunchUITests: XCTestCase {
     func testFirstLaunchOpensFindYourMac() throws {
         let app = XCUIApplication()
         app.launch()
+        // First run starts with Welcome; Continue goes on to Find your Mac.
+        let welcome = app.buttons["welcome-continue"]
+        if welcome.waitForExistence(timeout: 20) { welcome.tap() }
         XCTAssertTrue(app.staticTexts["Find your Mac"].waitForExistence(timeout: 20) || app.staticTexts["Your Mac"].exists
                       || app.buttons["new-project"].exists, "the app shows pairing or, when already paired, the projects")
     }
@@ -148,10 +151,92 @@ final class PrintScreensUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Stop Print"].waitForExistence(timeout: 5), "Stop asks first")
     }
 
+    /// Scrolls to the bottom and checks that `last` ends above the bottom bar's top (`bar`), so the bar
+    /// never covers the screen's last control.
+    private func assertLastControlClearsTheBar(_ app: XCUIApplication, last: XCUIElement, bar: XCUIElement, _ screen: String) {
+        XCTAssertTrue(bar.waitForExistence(timeout: 20), screen)
+        for _ in 0..<6 { app.swipeUp() }
+        XCTAssertTrue(last.waitForExistence(timeout: 5), "\(screen): the last control exists")
+        XCTAssertTrue(last.isHittable, "\(screen): the last control can be reached")
+        XCTAssertLessThanOrEqual(last.frame.maxY, bar.frame.minY + 1, "\(screen): the bottom bar covers the last control")
+    }
+
+    func testThePrintSheetsLastControlClearsPrint() {
+        let app = launch("print-one")
+        assertLastControlClearsTheBar(app, last: app.buttons["Max"], bar: app.buttons["print-now"], "print")
+    }
+
+    func testThePresetNoteClearsPrint() {
+        let app = launch("print-loaded")
+        let note = app.staticTexts.containing(NSPredicate(format: "label CONTAINS 'preset is used'")).firstMatch
+        assertLastControlClearsTheBar(app, last: note, bar: app.buttons["print-now"], "print-loaded")
+    }
+
+    func testTheLastQuestionClearsStartPrint() {
+        let app = launch("confirm-generic")
+        assertLastControlClearsTheBar(app, last: app.switches.firstMatch, bar: app.buttons["start-print"], "confirm-generic")
+        XCTAssertLessThanOrEqual(app.textFields["Bed temperature (°C)"].frame.maxY, app.buttons["start-print"].frame.minY + 1)
+    }
+
+    func testThePrintingFooterClearsPauseAndStop() {
+        let app = launch("printing")
+        let footer = app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "a notification when it's done")).firstMatch
+        assertLastControlClearsTheBar(app, last: footer, bar: app.buttons["Pause"], "printing")
+    }
+
     func testAPrinterNamesTheUpdateItsMCPNeeds() {
         let app = launch("printer-update")
         XCTAssertTrue(app.staticTexts["Update mcp-3D-printer-server to see progress and camera"].waitForExistence(timeout: 20))
         XCTAssertTrue(app.buttons["Copy"].exists)
+    }
+}
+
+/// Settings, About and the first-run steps (PRD §5.9, §5.10).
+final class SettingsAndFirstRunUITests: XCTestCase {
+    override func setUp() { continueAfterFailure = false }
+
+    private func launch(_ screen: String) -> XCUIApplication {
+        let app = XCUIApplication()
+        app.launchArguments = ["-CounterpartFixtures", NSTemporaryDirectory() + "no-assets", "-CounterpartScreen", screen]
+        app.launch()
+        return app
+    }
+
+    func testSettingsShowsTheMacHelpAndAbout() {
+        let app = launch("settings")
+        XCTAssertTrue(app.staticTexts["Connected now"].waitForExistence(timeout: 20))
+        XCTAssertTrue(app.buttons["Check Connection"].exists)
+        XCTAssertTrue(app.buttons["Connect a Different Mac"].exists)
+        XCTAssertTrue(app.staticTexts["Print the scan rig"].exists)
+    }
+
+    func testNotificationsHaveASwitchEachAndTheMilestones() {
+        let app = launch("notifications")
+        XCTAssertTrue(app.switches["Ready to print"].waitForExistence(timeout: 20))
+        XCTAssertFalse(app.switches["Something's on the plate"].exists, "no plate check (ac44431)")
+        XCTAssertTrue(app.buttons["Progress"].exists || app.staticTexts["Progress"].exists)
+    }
+
+    func testAboutCreditsTheRigAndListsNotices() {
+        let app = launch("about")
+        XCTAssertTrue(app.staticTexts["Counterpart"].waitForExistence(timeout: 20))
+        XCTAssertTrue(app.buttons["Open-source notices"].exists)
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS 'Kass 3D'")).firstMatch.exists)
+    }
+
+    func testWelcomeShowsTheTwoJobs() {
+        let app = launch("welcome")
+        XCTAssertTrue(app.staticTexts["Make something that fits"].waitForExistence(timeout: 20))
+        XCTAssertTrue(app.staticTexts["Copy something"].exists)
+        XCTAssertTrue(app.buttons["welcome-continue"].exists)
+    }
+
+    func testNotificationsAreAskedWithTheirReason() {
+        let app = launch("notify")
+        XCTAssertTrue(app.staticTexts["Know when it's ready"].waitForExistence(timeout: 20))
+        XCTAssertTrue(app.buttons["Turn On Notifications"].exists)
+        app.buttons["Not Now"].tap()
+        XCTAssertTrue(app.buttons["new-project"].waitForExistence(timeout: 20), "Not Now goes on to the projects")
     }
 }
 

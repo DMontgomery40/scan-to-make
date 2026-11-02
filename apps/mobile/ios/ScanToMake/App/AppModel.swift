@@ -26,6 +26,10 @@ import CounterpartKit
     var debugSection: String?
     /// DEBUG: the printer whose page `-CounterpartScreen printer` opens.
     var debugPrinter: String?
+    /// DEBUG: `-CounterpartScreen welcome` or `notify` shows that first-run step.
+    var debugFirstRun: String?
+    /// DEBUG: the Settings page `-CounterpartScreen notifications` or `about` opens.
+    var debugSettings: String?
     private var lastLink: (url: String, at: Date)?
     private var observer: NSObjectProtocol?
 
@@ -119,6 +123,8 @@ import CounterpartKit
         case "confirm-mac": Fixtures.confirmation = "unsupported"; route = .project(ids.mic)
         case "confirm-mac-answers": Fixtures.confirmation = "unsupported"; Fixtures.macAnswers = true; route = .project(ids.mic)
         case "confirm-generic": Fixtures.confirmation = "generic"; route = .project(ids.mic)
+        case "welcome", "notify": debugFirstRun = screen
+        case "settings", "notifications", "about": debugSettings = screen
         case "new": route = .newProject
         case "printers": route = .printers
         case "printer": debugPrinter = "current"; route = .printers

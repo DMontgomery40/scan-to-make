@@ -49,6 +49,7 @@
 		70CB3352849D93D2CD3488EA /* ProjectsRoot.swift in Sources */ = {isa = PBXBuildFile; fileRef = F70942A5A041BBA3161770EF /* ProjectsRoot.swift */; };
 		710A6B0114688842CF893B49 /* ScanPasses-iPad-FixedHeight-unflippable-low.mp4 in Resources */ = {isa = PBXBuildFile; fileRef = C4A459858D6631CA227A164E /* ScanPasses-iPad-FixedHeight-unflippable-low.mp4 */; };
 		7A05ABF0127E4BBB53F77A5C /* CaptureFolderManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB0CBEF9ED82408AA61CE61A /* CaptureFolderManager.swift */; };
+		7BA5852D98AFEF1C8930C1FC /* Onboarding.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9835F23960CC5E6BC8DCA961 /* Onboarding.swift */; };
 		7DD07FDF0F842DDAD20D14AC /* PhotoSources.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3984B4B77D3A7FACF67B75BC /* PhotoSources.swift */; };
 		8963AD76E6AF168A7BCCEFDF /* en.lproj in Resources */ = {isa = PBXBuildFile; fileRef = D2D8EFDBF2FE8D2707C3D914 /* en.lproj */; };
 		8BBCE6DAF3C3E380DE48CF0C /* ProjectView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 537F64BA1E548A72D13E2062 /* ProjectView.swift */; };
@@ -82,6 +83,7 @@
 		E1C0DC46EDF7E1A1A126B96B /* ReconstructionPrimaryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D886630D48544F53D4F3EBB /* ReconstructionPrimaryView.swift */; };
 		E46F5048FE02E1C55FC84053 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FCE242966FF14140A8FD3AA7 /* ContentView.swift */; };
 		FAFEA209D8004343946B34AC /* FeedbackView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A85058EDC491CA2A28BDA599 /* FeedbackView.swift */; };
+		FEFECBCA1C89BAE9757BEF3D /* THIRD_PARTY_NOTICES.md in Resources */ = {isa = PBXBuildFile; fileRef = E18DE1728EDA573CA4AEDB22 /* THIRD_PARTY_NOTICES.md */; };
 		FF5372D8FE35D1C542526BC0 /* ModelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3CA28C4E4604B8027F493BD /* ModelView.swift */; };
 /* End PBXBuildFile section */
 
@@ -170,6 +172,7 @@
 		8DE67E84E9BAB798590CFEE6 /* ModelStage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelStage.swift; sourceTree = "<group>"; };
 		90BDC8608CF3C935FD0A810C /* ScanPasses-iPad-FixedHeight-2.mp4 */ = {isa = PBXFileReference; path = "ScanPasses-iPad-FixedHeight-2.mp4"; sourceTree = "<group>"; };
 		94B999A5665CBF001C5AC9CC /* NativeCaptureCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeCaptureCoordinator.swift; sourceTree = "<group>"; };
+		9835F23960CC5E6BC8DCA961 /* Onboarding.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Onboarding.swift; sourceTree = "<group>"; };
 		9B88A65EE36387AD3C5997FA /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
 		9BEA440CD42BB2FD917F9FEE /* AppDataModel+Orbit.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppDataModel+Orbit.swift"; sourceTree = "<group>"; };
 		9D2907A997F1327C99EDBFE1 /* GuidedObjectCapture.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = GuidedObjectCapture.framework; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -187,6 +190,7 @@
 		D2181C73CED27FF7EB7FFEBE /* OnboardingButtonView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingButtonView.swift; sourceTree = "<group>"; };
 		D2D8EFDBF2FE8D2707C3D914 /* en.lproj */ = {isa = PBXFileReference; path = en.lproj; sourceTree = "<group>"; };
 		DEC1CB1BEA42C7C0DEC8500C /* CapturePrimaryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CapturePrimaryView.swift; sourceTree = "<group>"; };
+		E18DE1728EDA573CA4AEDB22 /* THIRD_PARTY_NOTICES.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = THIRD_PARTY_NOTICES.md; sourceTree = "<group>"; };
 		E35553F95E01C091DF9206F7 /* OnboardingTutorialView+LocalizedString.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "OnboardingTutorialView+LocalizedString.swift"; sourceTree = "<group>"; };
 		E6D13F2A86633F4FB30BD9CB /* ScanPasses-iPad-FixedHeight-unflippable-high.mp4 */ = {isa = PBXFileReference; path = "ScanPasses-iPad-FixedHeight-unflippable-high.mp4"; sourceTree = "<group>"; };
 		E8387F4BCF55830449FB51CA /* ScanPasses-iPhone-FixedHeight-2.mp4 */ = {isa = PBXFileReference; path = "ScanPasses-iPhone-FixedHeight-2.mp4"; sourceTree = "<group>"; };
@@ -345,6 +349,7 @@
 			children = (
 				CFEE621E7C7B88738E9C985B /* HomeView.swift */,
 				3FB944AB913161CA44843077 /* NewProjectView.swift */,
+				9835F23960CC5E6BC8DCA961 /* Onboarding.swift */,
 				F1F2F11831E109C8EF539549 /* PrintConfirm.swift */,
 				835B280F8D54D99191129EA2 /* PrintersView.swift */,
 				6E83FA80CCD9E3C6EC327839 /* PrintingView.swift */,
@@ -396,6 +401,7 @@
 		C1878FB1FB0631058D43AA25 /* mobile */ = {
 			isa = PBXGroup;
 			children = (
+				E18DE1728EDA573CA4AEDB22 /* THIRD_PARTY_NOTICES.md */,
 				D1705F27F6C4BBEB48958CEA /* modules */,
 			);
 			name = mobile;
@@ -611,6 +617,7 @@
 				569A773710F907BED1093E76 /* ScanPasses-iPhone-FixedHeight-unflippable-low.mp4 in Resources */,
 				B15E942B8EB2B262DE6FADC9 /* ScanTutorial-iPad-Area.mp4 in Resources */,
 				6EF67B69E2802B4EC8C9BE4A /* ScanTutorial-iPhone-Area.mp4 in Resources */,
+				FEFECBCA1C89BAE9757BEF3D /* THIRD_PARTY_NOTICES.md in Resources */,
 				8963AD76E6AF168A7BCCEFDF /* en.lproj in Resources */,
 				D5158848C8163F8E67E6FB0C /* example-fit.stl in Resources */,
 			);
@@ -680,6 +687,7 @@
 				8EACD047144D4EFC19731165 /* MacConnection.swift in Sources */,
 				409469D34AC4D190993E6F60 /* ModelStage.swift in Sources */,
 				BDDE40224A2D4E2C6D66DAD0 /* NewProjectView.swift in Sources */,
+				7BA5852D98AFEF1C8930C1FC /* Onboarding.swift in Sources */,
 				7DD07FDF0F842DDAD20D14AC /* PhotoSources.swift in Sources */,
 				5FBCC45C9150320FCEC6C698 /* PrintConfirm.swift in Sources */,
 				43ED0BBAE889BCB9B1098C03 /* PrintSheet.swift in Sources */,

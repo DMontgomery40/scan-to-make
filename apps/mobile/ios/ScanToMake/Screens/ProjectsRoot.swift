@@ -44,6 +44,9 @@ struct ProjectsRoot: View {
             await store.loadCapabilities()
         }
         .task(id: pairingKey) { await store.follow() }
+        #if DEBUG
+        .task { if app.debugSettings != nil { showSettings = true } }
+        #endif
         .onChange(of: app.route, initial: true) { _, route in
             guard let route else { return }
             app.route = nil
@@ -118,6 +121,7 @@ struct SidebarList: View {
     let openPrinters: () -> Void
     let openSettings: () -> Void
     @State private var query = ""
+    @FocusState private var searching: Bool
 
     /// The projects in these phases, in the order the phases are given (printing before working, as on Home).
     private func group(_ phases: [ProjectPhase]) -> [Project] {
@@ -140,6 +144,8 @@ struct SidebarList: View {
         .navigationTitle("Counterpart")
         .navigationSubtitle(store.reachable == false ? "\(store.macName ?? "Your Mac") isn't answering" : "\(store.macName ?? "Your Mac") connected")
         .searchable(text: $query, prompt: "Projects, printers, notes")
+        .searchFocused($searching)
+        .background { Button("Search") { searching = true }.keyboardShortcut("f", modifiers: .command).hidden() }
         .refreshable { await store.load() }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) { Button(action: openPrinters) { Image(systemName: "printer.fill") }.accessibilityLabel("Printers") }
@@ -158,7 +164,7 @@ struct SidebarList: View {
                 ForEach(projects) { project in
                     SidebarRow(store: store, project: project)
                         .tag(project.id)
-                        .listRowBackground(highlight && selection != project.id ? Color.filament.opacity(0.18) : nil)
+                        .listRowBackground(selection == project.id ? Color.filament.opacity(0.32) : highlight ? Color.filament.opacity(0.12) : nil)
                         .contextMenu { DeleteProjectButton(store: store, project: project) }
                 }
             }

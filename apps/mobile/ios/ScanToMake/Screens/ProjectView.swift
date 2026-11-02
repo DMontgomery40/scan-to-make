@@ -31,6 +31,7 @@ struct ProjectView: View {
     @State private var scanSize: String?
     @State private var askWorking = false
     @State private var askProblem: String?
+    @State private var notice: String?
     /// The printer's own question, shown as a sheet once when it arrives and again from Review.
     @State private var confirming: IdentifiedProject?
     @FocusState private var writing: Bool
@@ -49,6 +50,13 @@ struct ProjectView: View {
             await resumeSavedCapture()
         }
         .modifier(PrinterQuestion(store: store, project: object, confirming: $confirming))
+        // Photos dropped from Files or Safari join the project; the Mac uses them in its next pass (PRD §6).
+        .dropDestination(for: Data.self) { items, _ in
+            // One action at a time: a drop while something runs is refused, not quietly lost.
+            guard let object, !working else { return false }
+            Task { await addDropped(items, to: object.id) }
+            return !items.isEmpty
+        }
         .task(id: object.map { store.words($0).busy } ?? false) {
             guard let object, store.words(object).busy, store.events != true else { return }
             while !Task.isCancelled {
@@ -66,6 +74,20 @@ struct ProjectView: View {
         do { store.replace(try await store.mac.get(id)); fetchProblem = nil }
         catch let failure as CompanionError { if failure.code != "cancelled" { fetchProblem = failure.message } }
         catch { fetchProblem = CompanionError.unreachable.message }
+    }
+
+    private func addDropped(_ items: [Data], to id: String) async {
+        let photos = items.prefix(NewObjectView.photoLimit).compactMap { data -> ChosenPhoto? in
+            let png = data.starts(with: [0x89, 0x50, 0x4E, 0x47])
+            guard let image = UIImage(data: data) else { return nil }
+            return MacConnection.keep(PickedPhoto(data: png ? data : (image.jpegData(compressionQuality: 0.9) ?? data), ext: png ? "png" : "jpg"))
+        }
+        guard !photos.isEmpty else { return }
+        act {
+            try await store.mac.sendChosen(id, photos)
+            notice = photos.count == 1 ? "Added a photo. Your Mac uses it in the next change." : "Added \(photos.count) photos. Your Mac uses them in the next change."
+            return try await store.mac.get(id)
+        }
     }
 
     // MARK: Sending and resuming (the same paths New uses; see MacConnection.sendProject)
@@ -126,6 +148,9 @@ struct ProjectView: View {
 
                 if let message = problem ?? fetchProblem ?? store.sendFailures[object.id] {
                     Label(message, systemImage: "exclamationmark.triangle.fill").font(.subheadline).foregroundStyle(.orange).padding(.horizontal, 20)
+                }
+                if let notice, problem == nil {
+                    Label(notice, systemImage: "photo.badge.checkmark").font(.subheadline).foregroundStyle(.secondary).padding(.horizontal, 20)
                 }
                 stateCard(object, words).padding(.horizontal, 16)
 

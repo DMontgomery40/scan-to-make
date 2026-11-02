@@ -181,10 +181,13 @@ public final class CompanionClient: @unchecked Sendable {
 
     public func list() async throws -> [Project] { try await request("GET", "/v1/objects", as: Many.self).objects }
     public func get(_ id: String) async throws -> Project { try await request("GET", "/v1/objects/\(id)", as: One.self).object }
-    /// Creates a project. `kind` (fit or copy) is sent only to a Mac that takes it.
-    public func create(_ instructions: String) async throws -> Project {
+    /// Creates a project. `kind` is `fit` (make something that fits) or `copy` (copy what you scanned); the
+    /// Mac uses Blender for a copy and may use Fusion for a fit. Without it the Mac infers it (a scan means copy).
+    public func create(_ instructions: String, kind: String? = nil) async throws -> Project {
         let text = instructions.trimmingCharacters(in: .whitespacesAndNewlines)
-        return try await request("POST", "/v1/objects", json: text.isEmpty ? [:] : ["instructions": text], as: One.self).object
+        var json: [String: Any] = text.isEmpty ? [:] : ["instructions": text]
+        if let kind, ["fit", "copy"].contains(kind) { json["kind"] = kind }
+        return try await request("POST", "/v1/objects", json: json, as: One.self).object
     }
     public func updateDraft(_ id: String, instructions: String) async throws -> Project {
         try await request("PATCH", "/v1/objects/\(id)", json: ["instructions": instructions], as: One.self).object
