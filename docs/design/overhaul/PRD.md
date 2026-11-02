@@ -851,14 +851,13 @@ Screenshots: `screens/mac-settings-ai.jpg` and `screens/mac-settings-ai-nofusion
    - It extracts the title, the designer, the licence, and the list of print profiles and files with their names, plates and sizes.
    - If the page can't be read, the project goes straight to step 2 with the link.
 2. **Get the designer's file. The worker downloads it itself, on the user's Mac, with the user's own logins.** It runs on the user's own Mac in their own session, so it has the tools a person sitting there would. It isn't sandboxed into a narrower kit. In order:
-   1. **MakerWorld, through the printer MCP (new tool `makerworld_download`, bambu-printer-mcp).**
-      - Input `{url, profile?}`; output `{path, profile, plates[], filaments[], designer, licence}`.
-      - It downloads the profile's 3MF with the user's own Bambu account session: the login Bambu Studio and Bambu Handy already use, read where Bambu Studio stores it, or the MCP's own cloud login.
-      - If no account is signed in, it returns `login-required`.
-   2. **The user's browser.** The worker runs with Claude Code's browser integration (`claude --chrome`, the Claude in Chrome extension), which uses the user's own Chrome profile and logins. It opens the page, selects the matching print profile and clicks Download. The file lands in `~/Downloads`, where the companion picks it up by name and time.
+   1. **The user's browser, driven where the user can see it.** The worker runs with Claude Code's browser integration (`claude --chrome`, the Claude in Chrome extension), which uses the user's own Chrome profile and logins. It opens the page, selects the matching print profile and clicks Download. The file lands in `~/Downloads`, where the companion picks it up by name and time.
       - Codex workers use their computer-use tool the same way.
       - This works for Printables, Thingiverse and any other site.
-   3. **Only when both fail** (not signed in anywhere, or no browser integration) does the project ask the user: state `needs-you`, Ask type `file`, "Sign in to MakerWorld in Chrome, or download *model name* and share it with Counterpart". Its buttons are **Open in Safari**/**Open in Browser**, the Share sheet, Files, drop, and the Mac's `~/Downloads` watch.
+   2. **The `~/Downloads` pickup.** A matching `.3mf`/`.stl` that appears in `~/Downloads`, from the browser step or from the user downloading it by hand, is used at once.
+   3. **Only when neither produces the file** (not signed in, or no browser integration) does the project ask the user: state `needs-you`, Ask type `file`, "Sign in to MakerWorld in Chrome, or download *model name* and share it with Counterpart". Its buttons are **Open in Safari**/**Open in Browser**, the Share sheet, Files, drop, and the Mac's `~/Downloads` watch.
+   - **No reading of stored logins.** Counterpart and its worker never read cookies, keychain items or other apps' token stores. A site's login is used only through the user's own browser session.
+   - **Download tools in the printer MCP:** used only if a printer MCP offers one through its own documented sign-in. None does today.
    - **Never a substitute model.** If the file can't be obtained, the pass stops with that Ask. It does not model a look-alike from the page's pictures. A look-alike of a measuring tool or a fitted part is wrong in ways nobody can see.
 3. **Pick the variant and plate** (stage "Choosing the parts").
    - Use the file's plates and objects (`list_3mf_plate_objects`) and the profile names, matched to the user's words. Example: "150 mm" plus "depth gauge" picks the plates and objects whose names contain those words.
