@@ -98,7 +98,10 @@ public struct ObjectWords: Sendable, Equatable {
         done = object.status?.phase == "confirmed" || object.state.rawValue == "confirmed"
         // The printer asking for a yes needs the person, also from a companion that doesn't write its own phase yet.
         stage = object.printConfirmation != nil && object.status == nil ? .needsYou : done ? .confirmed : words.phase
-        status = done ? (object.status?.text.isEmpty == false ? object.status!.text : "It works") : words.line
+        // The companion's own words when it sends them ("Getting ready · Heating", "The printer stopped: …"): never a
+        // percent built here from the printer's raw progress, which can read 3% before printing has begun.
+        let said = object.status?.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        status = said?.isEmpty == false ? said! : done ? "It works" : words.line
         // A new project waits on the phone; the Mac can't tell an upload from an abandoned draft, so it isn't busy
         // (it would keep the Mac awake and polling for good).
         busy = object.state == .new ? false : words.busy || words.phase.isRunning
@@ -115,7 +118,9 @@ public struct ObjectWords: Sendable, Equatable {
         } else {
             question = nil
         }
-        if stage == .printing, let percent = object.print?.live?.job?.progress ?? object.print?.printerStatus?.percent {
+        // The bar only while the companion says it is printing (not preparing, not failed).
+        if stage == .printing, object.status.map({ $0.phase == "printing" }) ?? true,
+           let percent = object.print?.live?.job?.progress ?? object.print?.printerStatus?.percent {
             progress = min(1, max(0, percent / 100))
         } else {
             progress = nil

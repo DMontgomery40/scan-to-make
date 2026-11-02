@@ -886,28 +886,24 @@ private struct RunningLine: View {
                 Spacer()
                 Text(trailing).font(.caption.monospacedDigit()).foregroundStyle(words.stage.tint)
             }
+            if !detail.isEmpty { Text(detail).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
             if let progress = words.progress { ProgressView(value:progress).tint(.okGreen) }
-            else if !detail.isEmpty { Text(detail).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
         }
     }
-    /// "42% · 38m" for a print, "~4 min" for a pass.
+    /// "~4 min" for a pass; a print's words come from the companion, in the line under it.
     private var trailing: String {
         let words = object.words
-        if let live = object.print?.live, let progress = live.job?.progress {
-            return ["\(Int(progress.rounded()))%", live.job?.remainingSec.map { "\(Int(($0 / 60).rounded()))m" }].compactMap { $0 }.joined(separator:" · ")
-        }
-        if let report = object.print?.printerStatus, let percent = report.percent, words.stage == .printing {
-            return ["\(Int(percent.rounded()))%", report.remainingMinutes.map { "\(Int($0.rounded()))m" }].compactMap { $0 }.joined(separator:" · ")
-        }
+        if words.stage == .printing || words.stage == .preparing { return words.stage.label }
         if let ends = object.passes.last?.estimate?.endsAtMs {
             let minutes = Int(((ends / 1000 - Date().timeIntervalSince1970) / 60).rounded(.up))
             if minutes > 0 { return "~\(minutes) min" }
         }
         return words.stage.label
     }
+    /// The companion's words: a print's whole line ("Getting ready · Auto bed leveling"), a pass's first part.
     private var detail: String {
         let words = object.words
-        guard words.stage != .printing else { return "" }
+        if words.stage == .printing || words.stage == .preparing { return words.status }
         return words.status.components(separatedBy:" · ").first ?? ""
     }
 }

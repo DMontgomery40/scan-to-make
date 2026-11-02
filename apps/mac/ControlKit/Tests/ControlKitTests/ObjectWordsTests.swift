@@ -22,6 +22,22 @@ private func ready(_ fields: [String: Any] = [:]) -> Project { object(readyField
 private func status(_ phase: String, _ text: String) -> [String: Any] { ["status": ["phase": phase, "text": text, "symbol": "", "tint": "secondary"]] }
 
 final class ObjectWordsTests: XCTestCase {
+    /// A print's words are the companion's, as they are: getting ready shows no percent (the printer's raw progress
+    /// is 3% before it prints anything), and a stopped print says only what the printer said.
+    func testAPrintsWordsAreTheCompanionsAsTheyAre() {
+        let live: [String: Any] = ["print": ["bundleId": "b", "live": ["source": "counterpart", "state": "printing", "job": ["progress": 3]]]]
+        let preparing = ready(["state": "printing"].merging(live) { $1 }.merging(status("preparing", "Getting ready · Heating")) { $1 })
+        XCTAssertEqual(preparing.words.status, "Getting ready · Heating")
+        XCTAssertNil(preparing.words.progress, "no bar while it is getting ready")
+        XCTAssertFalse(preparing.words.status.contains("3%"))
+        let printing = ready(["state": "printing"].merging(live) { $1 }.merging(status("printing", "Printing on P1S · 42% · 38 min left")) { $1 })
+        XCTAssertEqual(printing.words.status, "Printing on P1S · 42% · 38 min left")
+        let stopped = ready(["state": "failed", "failure": "The printer stopped: Print aborted (0300-4000)."]
+            .merging(live) { $1 }.merging(status("failed", "The printer stopped: Print aborted (0300-4000).")) { $1 })
+        XCTAssertEqual(stopped.words.status, "The printer stopped: Print aborted (0300-4000).")
+        XCTAssertTrue(stopped.words.actions.contains(.print), "Print Again")
+    }
+
     func testTheWordsAreTheSharedOnes() {
         // The same object read as CounterpartKit's model gives the phone's words, so the Mac says the same thing.
         let o = ready(["title": "Mic mount"])
