@@ -6,6 +6,10 @@ Build an iPhone app that scans a real object with LiDAR and cleans up the scan's
 
 The app covers capture (LiDAR Object Capture plus close-up stills) and cleanup (`tools/scan-repair`, `tools/scan-correct`, `tools/capture-mesh-convert`, run by the companion). The clean mesh then goes to [bambu-printer-mcp](https://github.com/DMontgomery40/bambu-printer-mcp) or [mcp-3D-printer-server](https://github.com/DMontgomery40/mcp-3D-printer-server) (`/Users/davidmontgomery/mcp-3D-printer-server` on the Mac). The handoff is built: the companion relays it through `services/printer-handoff` (#124), and the phone's Send to printer flow answers the printer's questions (#132). The consumer journey and Mac app design are in [`docs/design/journey.md`](docs/design/journey.md).
 
+## Start here
+
+New session? Read [`docs/status/handoff.md`](docs/status/handoff.md) for how to pick up the work, and [`docs/status/asks.md`](docs/status/asks.md) for what's open. Handoffs go in `docs/status/handoff.md`, not in temp folders or agent memory.
+
 ## Read bambu-printer-mcp before you build
 
 
