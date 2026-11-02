@@ -50,7 +50,8 @@ struct ProjectDetail: View {
     @ViewBuilder private var stage: some View {
         if let url = object.modelURL ?? object.scanURL.flatMap({ $0.pathExtension.lowercased() == "usdz" ? $0 : nil }) {
             ModelStage(url: url, version: FileVersion.of(url, else: object.updatedAtMs), fit: 0.15,
-                       accessibilityText: "\(words.title)\(words.size.map { ", \($0)" } ?? ""). Drag to turn it, scroll to zoom.")
+                       accessibilityText: "\(words.title)\(words.size.map { ", \($0)" } ?? ""). Drag to turn it, scroll to zoom.",
+                       poster: Self.poster(object))
         } else {
             ZStack {
                 StageBackground()
@@ -64,6 +65,12 @@ struct ProjectDetail: View {
             }
             .environment(\.colorScheme, .dark)
         }
+    }
+
+    /// The companion's overview render of the current model, the stage's still.
+    static func poster(_ object: Project) -> URL? {
+        let renders = object.renderURLs
+        return renders.first { $0.lastPathComponent.contains("overview") } ?? renders.first
     }
 
     // MARK: The one card

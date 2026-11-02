@@ -39,7 +39,9 @@ struct PrintSheet: View {
             printers
             HStack(alignment: .top, spacing: 16) {
                 if let url = object.modelURL {
-                    ModelStage(url: url, version: FileVersion.of(url, else: object.updatedAtMs), yaw: 0.9, pitch: -0.5, interactive: false, fit: 0.2)
+                    // The still only: the window's one live stage is the project's own.
+                    ModelStage(url: url, version: FileVersion.of(url, else: object.updatedAtMs), yaw: 0.9, pitch: -0.5, interactive: false, fit: 0.2,
+                               poster: ProjectDetail.poster(object))
                         .frame(width: 300, height: 220).clipShape(.rect(cornerRadius: 16))
                 }
                 VStack(alignment: .leading, spacing: 12) {
