@@ -7,6 +7,7 @@ private actor FakeObjects: ObjectsCompanion {
     var listError: Error?
     var actionError: Error?
     private(set) var calls: [String] = []
+    private(set) var correctionPhotoNames: [[String]?] = []
     private(set) var confirmationAnswer: PrintConfirmationAnswer?
     func set(_ items: [[String: Any]]) { self.items = items }
     private(set) var settingsPatches: [String: [String: JSONValue]] = [:]
@@ -57,7 +58,14 @@ private actor FakeObjects: ObjectsCompanion {
         if let listError { throw listError }
         return try items.map(decode)
     }
-    func correct(_ id: String, note: String) async throws -> Project { try change(id, "correct:\(note)", ["state": "touching-up"]) }
+    func correct(_ id: String, note: String) async throws -> Project {
+        correctionPhotoNames.append(nil)
+        return try change(id, "correct:\(note)", ["state": "touching-up"])
+    }
+    func correct(_ id: String, note: String, photos: [String], photoNames: [String]) async throws -> Project {
+        correctionPhotoNames.append(photoNames)
+        return try change(id, "correct:\(note)", ["state": "touching-up"])
+    }
     func answerCloseup(_ id: String, bestGuess: Bool) async throws -> Project { try change(id, "closeup:\(bestGuess)", ["state": "touching-up"]) }
     func print(_ id: String, checked: Bool) async throws -> Project { try change(id, "print:\(checked)", ["state": "printing"]) }
     func answerPrintConfirmation(_ id: String, confirmationId: String, answer: PrintConfirmationAnswer) async throws -> Project {
@@ -102,6 +110,34 @@ private func project(_ item: [String: Any]) throws -> Project {
         XCTAssertEqual(model.objects.first?.state, .touchingUp)
         let after = await companion.calls
         XCTAssertEqual(after.filter { $0 == "correct:Widen the flange" }.count, 1)
+    }
+
+    func testRetryOfASavedMessageDoesNotSelectLaterUploadedPhotos() async throws {
+        let suite = "counterpart-saved-retry-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let companion = FakeObjects()
+        let held = item("saved", "ready", [
+            "photos": ["a.jpg", "b.jpg"], "pendingPhotos": ["b.jpg"],
+            "pendingFollowup": "DONE", "pendingMessageId": "message-a",
+            "messages": [["id": "message-a", "text": "DONE", "atMs": 1, "photos": ["a.jpg"]]]
+        ])
+        await companion.set([held])
+        await companion.setCapabilities(.init(messagePhotos: true))
+        let model = ObjectsModel(companion: companion, defaults: defaults)
+        await model.refresh()
+        let retried = await model.perform(.correct, on: "saved", note: " DONE ")
+        XCTAssertTrue(retried)
+        let retryRequests = await companion.correctionPhotoNames
+        XCTAssertEqual(retryRequests.count, 1)
+        XCTAssertNil(retryRequests[0], "Omit photoNames so the companion retains A's own evidence instead of claiming pending B")
+        // A genuinely new message still explicitly claims the pending photo.
+        await companion.set([held])
+        await model.refresh()
+        let changed = await model.perform(.correct, on: "saved", note: "Use the new photo for this change")
+        XCTAssertTrue(changed)
+        let allRequests = await companion.correctionPhotoNames
+        XCTAssertEqual(allRequests.last!, ["b.jpg"])
     }
 
     func testRenameUsesItsOwnCapabilityAndKeepsTheRequest() async {
