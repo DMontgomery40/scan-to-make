@@ -18,6 +18,10 @@ public struct CounterpartEvent: Codable, Sendable, Equatable, Identifiable {
         public let askId: String?
         public let confirmationId: String?
         public let expiresAt: String?
+        /// `settings.changed`: which keys, who changed them (`mac` or a device id), and an action for this Mac to run.
+        public let keys: [String]?
+        public let by: String?
+        public let action: String?
         /// `mcp.update.*` (PRD §8.10): which install, the versions, and the log's tail on failure.
         public let mcpId: String?
         public let fromVersion: String?
@@ -28,7 +32,7 @@ public struct CounterpartEvent: Codable, Sendable, Equatable, Identifiable {
             self.progress = progress; self.remainingSec = remainingSec; self.endsAt = endsAt; self.layer = layer; self.totalLayers = totalLayers
             self.state = state; self.stage = stage; self.problems = problems
             estimateSec = nil; grams = nil; askId = nil; confirmationId = nil; expiresAt = nil
-            mcpId = nil; fromVersion = nil; toVersion = nil; log = nil
+            mcpId = nil; fromVersion = nil; toVersion = nil; log = nil; keys = nil; by = nil; action = nil
         }
     }
     public let seq: Int
@@ -132,6 +136,27 @@ public extension ControlClient {
         let _: Reply = try await call("settings.set", ["milestones": .string(value)])
     }
 
+    /// Every setting the companion keeps (docs/protocols/settings.md, PRD §5.9): the phone and the Mac read and write
+    /// the same values. Sections an older companion doesn't send are nil, and the Mac keeps its own then.
+    func companionSettings() async throws -> CompanionSettings {
+        struct Reply: Decodable { let settings: CompanionSettings }
+        let reply: Reply = try await call("settings.get")
+        return reply.settings
+    }
+    /// Changes only the keys named (deep-merged). Returns every setting after the change.
+    @discardableResult func setSettings(_ patch: [String: JSONValue]) async throws -> CompanionSettings {
+        struct Reply: Decodable { let settings: CompanionSettings }
+        let reply: Reply = try await call("settings.set", patch)
+        return reply.settings
+    }
+    /// After the phone asked for Fusion's Set Up (`settings.changed` with `action: "fusion.setup"`), the result.
+    func fusionSetupDone(ok: Bool, message: String?) async throws {
+        struct Reply: Decodable {}
+        var params: [String: JSONValue] = ["ok": .bool(ok)]
+        if let message { params["message"] = .string(message) }
+        let _: Reply = try await call("fusion.setupDone", params)
+    }
+
     /// Runs one control method by name with JSON parameters: commands from the phone (PRD §9.3) name existing methods.
     func run(_ method: String, _ params: [String: JSONValue]) async throws -> JSONValue { try await call(method, params) }
 }
@@ -160,4 +185,42 @@ public struct ICloudEnrolment: Decodable, Sendable, Equatable {
 
 public extension ControlClient {
     func icloudEnrolment() async throws -> ICloudEnrolment { try await call("pairing.icloudToken") }
+}
+
+/// `settings.get` (docs/protocols/settings.md), read tolerantly: a section an older companion doesn't send is nil.
+public struct CompanionSettings: Decodable, Sendable, Equatable {
+    public struct General: Codable, Sendable, Equatable {
+        public var openAtLogin: Bool?
+        public var showInDock: Bool?
+        public var keepAwake: Bool?
+        public init(openAtLogin: Bool? = nil, showInDock: Bool? = nil, keepAwake: Bool? = nil) {
+            self.openAtLogin = openAtLogin; self.showInDock = showInDock; self.keepAwake = keepAwake
+        }
+    }
+    public struct Fusion: Decodable, Sendable, Equatable { public let state: String; public let message: String?; public let version: String? }
+    public let milestones: String?
+    /// `notifications.mac`: one switch per event type, every type filled in by the companion.
+    public let notificationsMac: [String: Bool]?
+    public let general: General?
+    public let fusion: Fusion?
+    /// `ai.check.outcome` of the latest Test; `needs-gui-session` means the sign-in has to finish on this Mac.
+    public let aiCheckOutcome: String?
+
+    public init(milestones: String? = nil, notificationsMac: [String: Bool]? = nil, general: General? = nil, fusion: Fusion? = nil,
+                aiCheckOutcome: String? = nil) {
+        self.milestones = milestones; self.notificationsMac = notificationsMac; self.general = general; self.fusion = fusion
+        self.aiCheckOutcome = aiCheckOutcome
+    }
+
+    private enum CodingKeys: String, CodingKey { case milestones, notifications, general, fusion, ai }
+    private struct Notifications: Decodable { let mac: [String: Bool]? }
+    private struct AI: Decodable { struct Check: Decodable { let outcome: String? }; let check: Check? }
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        milestones = try? c.decodeIfPresent(String.self, forKey: .milestones)
+        notificationsMac = (try? c.decodeIfPresent(Notifications.self, forKey: .notifications))?.mac
+        general = try? c.decodeIfPresent(General.self, forKey: .general)
+        fusion = try? c.decodeIfPresent(Fusion.self, forKey: .fusion)
+        aiCheckOutcome = (try? c.decodeIfPresent(AI.self, forKey: .ai))?.check?.outcome
+    }
 }

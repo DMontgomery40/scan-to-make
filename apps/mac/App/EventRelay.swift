@@ -23,7 +23,7 @@ import ControlKit
     let cloud = CloudSync()
     let relay = LiveActivityRelay()
     private let notifier = MacNotifier()
-    private let awake = AwakeKeeper()
+    let awake = AwakeKeeper()
     private var projects: [String: Project] = [:]
     private var projectsReadAt: Date?
 
@@ -48,6 +48,7 @@ import ControlKit
         guard let status = try? await client.status() else { return 10 }
         await refreshProjects(client, force: false)
         await cloud.tick(projects: projects)
+        await CompanionSettingsModel.shared.refresh()
         await cloud.publishMacIfDue(client)
         guard status.capabilities.events else { return 15 }
         var cursor = EventCursor(defaults: defaults)
@@ -92,6 +93,8 @@ import ControlKit
         let prefs = NotificationPrefs(defaults: defaults)
         let now = Date()
         for (index, event) in events.enumerated() {
+            // A setting changed on either device (PRD §5.9): read it and apply it here.
+            if event.type == "settings.changed" { await CompanionSettingsModel.shared.changed(event) }
             // An MCP update (PRD §8.10): Settings shows it; when it finished, the printers are read again for the version.
             if PrinterUpdates.shared.apply(event) { await AppModels.objects.refresh() }
             let project = event.projectId.flatMap { projects[$0] }
@@ -184,7 +187,12 @@ import ControlKit
 /// Keeps the Mac from idle-sleeping while a pass or a print runs (PRD §7.6), and lets it sleep otherwise.
 @MainActor final class AwakeKeeper {
     private var activity: NSObjectProtocol?
+    private var busy = false
+    /// Settings → General → Keep the Mac awake while working (`general.keepAwake`).
+    var allowed = true { didSet { set(busy: busy) } }
     func set(busy: Bool) {
+        self.busy = busy
+        let busy = busy && allowed
         if busy, activity == nil {
             activity = ProcessInfo.processInfo.beginActivity(options: [.idleSystemSleepDisabled],
                                                              reason: "Counterpart is working on a project or a print")
