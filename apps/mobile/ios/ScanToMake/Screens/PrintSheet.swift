@@ -125,7 +125,13 @@ struct PrintSheet: View {
 
     private var preview: some View {
         ZStack(alignment: .bottomLeading) {
+            Group {
+            if published, let project {
+                ProjectImage(project: project, path: project.thumbnailPath, maxPixelSize: 600, contentMode: .fit)
+            } else {
             ModelStage(url: modelURL, yaw: 0.9, pitch: -0.5, interactive: false, tint: UIColor(spoolColour))
+            }
+            }
                 .frame(height: 220)
                 .overlay(alignment: .bottom) { BedGrid().frame(height: 70).opacity(0.5).allowsHitTesting(false) }
                 .clipShape(.rect(cornerRadius: 24))
@@ -314,7 +320,7 @@ struct PrintSheet: View {
         }
         await loadFilaments()
         await store.loadPrinters()
-        if let project, project.current != nil { modelURL = try? await store.mac.download(project, "model.stl") }
+        if let project, project.current != nil, !published { modelURL = try? await store.mac.download(project, "model.stl") }
     }
 
     private func choose(_ id: String) async {

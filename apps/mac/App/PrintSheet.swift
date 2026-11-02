@@ -60,7 +60,12 @@ struct PrintSheet: View {
             Text("Print \(words.title)").font(.title2.bold())
             printers
             HStack(alignment: .top, spacing: 16) {
-                if let url = object.modelURL {
+                if published {
+                    ZStack {
+                        StageBackground()
+                        if let poster = ProjectDetail.poster(object) { FileImage(url: poster, version: object.updatedAtMs, contentMode: .fit) }
+                    }.frame(width: 300, height: 220).clipShape(.rect(cornerRadius: 16))
+                } else if let url = object.modelURL {
                     // The still only: the window's one live stage is the project's own.
                     ModelStage(url: url, version: FileVersion.of(url, else: object.updatedAtMs), yaw: 0.9, pitch: -0.5, interactive: false, fit: 0.2,
                                poster: ProjectDetail.poster(object))

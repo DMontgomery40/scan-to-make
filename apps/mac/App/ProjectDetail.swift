@@ -94,7 +94,7 @@ struct ProjectDetail: View {
     // MARK: Stage
 
     @ViewBuilder private var stage: some View {
-        if let url = object.modelURL ?? object.scanURL.flatMap({ $0.pathExtension.lowercased() == "usdz" ? $0 : nil }) {
+        if !object.preservesPublishedFilaments, let url = object.modelURL ?? object.scanURL.flatMap({ $0.pathExtension.lowercased() == "usdz" ? $0 : nil }) {
             ModelStage(url: url, version: FileVersion.of(url, else: object.updatedAtMs), fit: 0.15,
                        accessibilityText: "\(words.title)\(words.size.map { ", \($0)" } ?? ""). Drag to turn it, scroll to zoom.",
                        poster: Self.poster(object))
@@ -110,6 +110,11 @@ struct ProjectDetail: View {
                 }
             }
             .environment(\.colorScheme, .dark)
+            .overlay(alignment: .bottom) {
+                if object.preservesPublishedFilaments {
+                    Text("Plate preview · 3D unavailable").font(.caption).padding(8).glassEffect(.regular, in: .capsule).padding(16)
+                }
+            }
         }
     }
 

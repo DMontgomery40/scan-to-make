@@ -468,6 +468,8 @@ public final class CompanionClient: @unchecked Sendable {
         let version = String(Int64(project.mediaVersion))
         let folder = cache.appending(path: project.id, directoryHint: .isDirectory).appending(path: version, directoryHint: .isDirectory)
         var filename = name.replacingOccurrences(of: "/", with: "_")
+        // The historical route serves the current model, including an original 3MF.
+        if name == "model.stl", project.preservesPublishedFilaments { filename = "model.3mf" }
         if name.hasPrefix("original/"), let index = Int(name.dropFirst(9)),
            case .array(let originals)? = project.files?.object?["original"], originals.indices.contains(index), let path = originals[index].string {
             filename += "_" + URL(fileURLWithPath: path).lastPathComponent

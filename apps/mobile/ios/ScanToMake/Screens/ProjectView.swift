@@ -244,7 +244,7 @@ struct ProjectView: View {
             if writing { ToolbarItem(placement: .confirmationAction) { Button("Done") { writing = false } } }
             if let modelURL {
                 ToolbarItem(placement: .topBarTrailing) {
-                    ShareLink(item: modelURL, preview: SharePreview("\(words.title).stl")) { Image(systemName: "square.and.arrow.up") }
+                    ShareLink(item: modelURL, preview: SharePreview("\(words.title).\(object.preservesPublishedFilaments ? "3mf" : "stl")")) { Image(systemName: "square.and.arrow.up") }
                 }
             } else if let scanURL {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -263,7 +263,7 @@ struct ProjectView: View {
                         statusChoices(object, words)
                         Divider()
                     }
-                    if let modelURL { ShareLink("Share STL", item: modelURL) }
+                    if let modelURL { ShareLink(object.preservesPublishedFilaments ? "Share 3MF" : "Share STL", item: modelURL) }
                     if let arURL { ShareLink("Share USDZ", item: arURL) } else if let scanURL { ShareLink("Share Your Scan (USDZ)", item: scanURL) }
                     Divider()
                     Button("Delete Project", systemImage: "trash", role: .destructive) { confirmDelete = true }
@@ -299,7 +299,7 @@ struct ProjectView: View {
             modelURL = nil; arURL = nil
             guard object.current != nil, let url = try? await store.mac.download(object, "model.stl") else { return }
             modelURL = url
-            arURL = await ARModel.usdz(fromSTL: url)
+            if !object.preservesPublishedFilaments { arURL = await ARModel.usdz(fromSTL: url) }
         }
     }
 
@@ -307,7 +307,9 @@ struct ProjectView: View {
 
     @ViewBuilder private func hero(_ object: Project, _ words: ProjectWords) -> some View {
         Group {
-            if object.current != nil {
+            if object.preservesPublishedFilaments {
+                ProjectImage(project: object, path: object.thumbnailPath, maxPixelSize: 1200, contentMode: .fit)
+            } else if object.current != nil {
                 ModelStage(url: modelURL, twoTone: false)
             } else if let scanURL {
                 ModelStage(url: scanURL, twoTone: false)
@@ -331,6 +333,9 @@ struct ProjectView: View {
                     if let arURL = arURL ?? (object.current == nil ? scanURL : nil) {
                         Button { ARModel.show(arURL) } label: { Label("AR", systemImage: "arkit") }.buttonStyle(.glass)
                             .accessibilityHint("Places the model at true size in your room")
+                    }
+                    if object.preservesPublishedFilaments {
+                        Text("Plate preview · 3D and AR unavailable").font(.caption).padding(8).glassEffect(.regular, in: .capsule)
                     }
                     Spacer()
                     if let size = words.size ?? (object.current == nil ? scanSize : nil) {
