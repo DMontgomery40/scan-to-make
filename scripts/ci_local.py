@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Execute the repository's workflow run steps; explicit adapters for local setup actions."""
 import argparse
+import contextlib
 import hashlib
 import itertools
 import json
@@ -196,7 +197,35 @@ def setup_action(step, context, env, temporary):
     raise ValueError('Unsupported action: ' + action)
 
 
+@contextlib.contextmanager
+def ios_lock(label):
+    """One iOS/Mac build or test at a time on this Mac (David, 2026-11-01: load average 672 with three
+    simulator runs at once). Uses flock(2), so any other holder of ~/.stm-ios.lock is respected."""
+    import fcntl
+    path = Path(os.environ.get('STM_IOS_LOCK', str(Path.home() / '.stm-ios.lock')))
+    with path.open('a+') as handle:
+        try:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            handle.seek(0); holder = handle.read().strip() or 'unknown'
+            print('Waiting for the Mac iOS lock ' + str(path) + ', held by: ' + holder, flush=True)
+            fcntl.flock(handle, fcntl.LOCK_EX)
+        handle.seek(0); handle.truncate(); handle.write(str(os.getpid()) + ' ' + label + ' since ' + time.strftime('%H:%M:%S') + '\n'); handle.flush()
+        try:
+            yield
+        finally:
+            handle.seek(0); handle.truncate(); handle.flush()
+
+
 def execute_job(spec, workspace, directory):
+    runner = spec['job'].get('runs-on', '')
+    if isinstance(runner, str) and runner.startswith(('macos', 'xcode-')) and platform.system() == 'Darwin':
+        with ios_lock(spec['workflow'] + '/' + spec['key']):
+            return run_job_steps(spec, workspace, directory)
+    return run_job_steps(spec, workspace, directory)
+
+
+def run_job_steps(spec, workspace, directory):
     directory.mkdir(parents=True, exist_ok=True)
     temporary = directory / 'temp'; temporary.mkdir()
     environment_file = temporary / 'github-env'; environment_file.touch()
@@ -352,7 +381,11 @@ def main():
     parser.add_argument('--author', default=os.environ.get('CI_LOCAL_AUTHOR'))
     parser.add_argument('--prompt-dir', default=os.environ.get('CI_LOCAL_REVIEW_PROMPTS', str(Path.home()/'.config/scan-to-make/review-prompts')))
     parser.add_argument('--worker', type=Path); parser.add_argument('--launch-macos', type=Path)
+    parser.add_argument('--ios-lock', nargs=argparse.REMAINDER, metavar='COMMAND', help='run COMMAND holding the Mac iOS lock (~/.stm-ios.lock)')
     args = parser.parse_args()
+    if args.ios_lock is not None:
+        if not args.ios_lock: raise ValueError('--ios-lock needs a command')
+        with ios_lock(' '.join(args.ios_lock)[:120]): return subprocess.run(args.ios_lock).returncode
     if args.worker:
         config = json.loads(args.worker.read_text()); result = execute_job(config['spec'], Path(config['workspace']), Path(config['directory'])); return result['status']=='FAIL'
     if args.launch_macos: mac_launch(args.launch_macos); return 0
