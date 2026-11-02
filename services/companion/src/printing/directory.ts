@@ -97,6 +97,20 @@ export class PrinterDirectory {
     this.#reports.set(id, {...(report ? {report} : {}), state: failed ? 'offline' : readiness(report), checkedAt: this.#now()});
   }
 
+  /**
+   * PRD §8.10: the printer itself says a print is running: any print, the phone's handoff or one started
+   * elsewhere, which Counterpart has no project for. Read now, not from the cache. A printer that can't be read
+   * isn't printing (and its MCP may be what needs the update).
+   */
+  async printing(destinationId: string): Promise<boolean> {
+    const id = this.catalog.canonical(destinationId);
+    const session = id ? this.#session(id) : undefined;
+    if (!id || !session) return false;
+    const report = await readPrintReport(session, {failFast: true, signal: AbortSignal.timeout(20_000)}).catch(() => undefined);
+    this.record(id, report, !report);
+    return readiness(report) === 'busy';
+  }
+
   /** Reads the destination's state in the background, at most once per READINESS_REFRESH_MS. */
   refresh(destinationId: string): Promise<void> {
     const id = this.catalog.canonical(destinationId);

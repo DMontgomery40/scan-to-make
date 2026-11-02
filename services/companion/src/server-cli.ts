@@ -134,7 +134,9 @@ if(handoffConfig&&printHandoff&&captureDirectory&&claudePath){
   mcpUpdates=new McpUpdater({
     destinations:()=>printerCatalog.destinations.map(destination=>({id:destination.id,config:printerCatalog.resolve(destination.id)!})),
     env:hostEnvironment(dataRoot),overrides:new McpOverrides(join(dataRoot,'printers','overrides.json')),
-    session:id=>destinations.get(id)?.runner.session,busy:id=>service.printerBusy(id),
+    session:id=>destinations.get(id)?.runner.session,
+    // A project printing there, or the printer itself printing (the phone's handoff prints have no project).
+    busy:async id=>await service.printerBusy(id)||await directory.printing(id),
     runningVersion:id=>directory.capabilities(id)?.server.version,node:process.execPath,gate:printGate,
     ...(eventLog&&projectlessEvents?{emit:async event=>{await eventLog.append({id:randomUUID(),type:event.type,data:event.data,detail:{package:labels[event.package]??event.package,...(event.reason?{reason:event.reason}:{})}});}}:{}),
   });
