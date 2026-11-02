@@ -22,6 +22,7 @@ struct NewObjectView: View {
     @State private var askedForDescription = false
     @State private var created: Project?
     @State private var attached: Attached?
+    @State private var captureWarning: String?
     @FocusState private var describing: Bool
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
@@ -87,6 +88,9 @@ struct NewObjectView: View {
                                 }
                             }
                         }
+                    }
+                    if let captureWarning {
+                        Label(captureWarning, systemImage: "exclamationmark.triangle").font(.subheadline).foregroundStyle(.orange)
                     }
                     if let problem {
                         Label(problem, systemImage: "exclamationmark.triangle.fill").font(.subheadline).foregroundStyle(.red)
@@ -232,7 +236,10 @@ struct NewObjectView: View {
 
     private func savedCapture(_ id: String) async -> Attached? {
         if HandheldCapture.finished(id) { return .inHand }
-        if await store.mac.finishedScan(id) != nil { return .walkAround }
+        if await store.mac.finishedScan(id) != nil {
+            captureWarning = store.mac.localScanWarning(id)
+            return .walkAround
+        }
         return nil
     }
 
@@ -250,6 +257,7 @@ struct NewObjectView: View {
                 if await HandheldCapture.run(objectId: object.id) { attached = .inHand }
             } else if try await store.mac.scan(object.id) != nil {
                 attached = .walkAround
+                captureWarning = store.mac.localScanWarning(object.id)
             }
         }
     }

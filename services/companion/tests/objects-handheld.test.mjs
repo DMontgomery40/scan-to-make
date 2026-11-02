@@ -1,11 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {chmod, mkdtemp, mkdir, readdir, readFile, rm, writeFile} from 'node:fs/promises';
+import {chmod, mkdtemp, mkdir, readdir, readFile, rm, stat, symlink, writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {ObjectStore} from '../dist/objects/store.js';
 import {ObjectService, InvalidStateError} from '../dist/objects/service.js';
-import {macReconstructRunner, progressWords, NEEDS_MACOS_27} from '../dist/objects/reconstruct.js';
+import {macReconstructRunner, progressWords, NEEDS_MACOS_27, RECONSTRUCTION_FAILED} from '../dist/objects/reconstruct.js';
 
 const STL = 'solid m\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 1 0 0\nvertex 0 1 0\nendloop\nendfacet\nendsolid m\n';
 const manifest = images => ({version: 1, images, depthRequired: true});
@@ -257,13 +257,14 @@ test('handheld photos are only taken before the touch-up starts, and not next to
   await assert.rejects(service.addCapturePhoto(other.id, '../x.heic', Buffer.from('a')));
 });
 
-test('mac-reconstruct output becomes progress words and plain errors', async () => {
+test('mac-reconstruct output becomes progress words and plain errors', async t => {
   assert.equal(progressWords({stage: 'downloading'}), 'Getting your Mac ready to build from photos. This happens once.');
   assert.equal(progressWords({stage: 'masking', done: 3, total: 90}), 'Finding the object in your photos (3 of 90).');
   assert.equal(progressWords({progress: 0.416}), 'Building the model from your photos (42%).');
   assert.equal(progressWords({skipped: 4}), undefined);
 
   const root = await mkdtemp(join(tmpdir(), 'mac-reconstruct-fake-'));
+  t.after(() => rm(root, {recursive: true, force: true}));
   const fake = async (name, body) => {
     const path = join(root, name);
     await writeFile(path, `#!/bin/sh\n${body}\n`);
@@ -282,4 +283,68 @@ test('mac-reconstruct output becomes progress words and plain errors', async () 
   await assert.rejects(macReconstructRunner(broken)(input), /couldn't build a model/);
   await assert.rejects(macReconstructRunner(null)(input), /Reinstall Counterpart/);
   assert.ok((await readdir(root)).includes('ok'));
+});
+
+
+async function diagnosticFixture(t, script) {
+  const root = await mkdtemp(join(tmpdir(), 'reconstruct-diagnostic-'));
+  t.after(() => rm(root, {recursive: true, force: true}));
+  const binary = join(root, 'helper');
+  await writeFile(binary, `#!${process.execPath}\n${script}\n`, {mode: 0o755});
+  const input = {photosDir: root, output: join(root, 'scan', 'out.usdz'), masksDir: join(root, 'masks')};
+  const directory = join(root, 'scan', '.reconstruction-diagnostics');
+  return {root, binary, input, directory, log: join(directory, 'last-failure.log')};
+}
+
+test('failed reconstruction retains only a private bounded stderr tail across retries', async t => {
+  const f = await diagnosticFixture(t, `process.stderr.write('PRIVATE-START' + 'x'.repeat(100000) + 'PRIVATE-END');
+    console.log(JSON.stringify({error: 'private helper reason'})); process.exitCode = 1;`);
+  const progress = [];
+  await assert.rejects(macReconstructRunner(f.binary)({...f.input, onProgress: words => progress.push(words)}), {message: RECONSTRUCTION_FAILED});
+  const content = await readFile(f.log);
+  const split = content.indexOf(10);
+  const header = JSON.parse(content.subarray(0, split));
+  assert.equal(header.exitCode, 1);
+  assert.equal(header.stderrTruncated, true);
+  assert.equal(header.error, 'private helper reason');
+  assert.ok(Number.isFinite(Date.parse(header.recordedAt)));
+  assert.equal(content.length - split - 1, 64 * 1024);
+  assert.ok(content.length < 66 * 1024);
+  assert.ok(content.toString().endsWith('PRIVATE-END'));
+  assert.equal(content.includes('PRIVATE-START'), false);
+  assert.deepEqual(progress, []);
+  assert.equal((await stat(f.log)).mode & 0o777, 0o600);
+  assert.equal((await stat(f.directory)).mode & 0o777, 0o700);
+
+  await writeFile(join(f.directory, 'unrelated.log'), 'keep this');
+  await writeFile(f.binary, `#!${process.execPath}\nprocess.stderr.write('SECOND-FAILURE'); process.exitCode = 2;\n`, {mode: 0o755});
+  await assert.rejects(macReconstructRunner(f.binary)(f.input), {message: RECONSTRUCTION_FAILED});
+  const retry = await readFile(f.log, 'utf8');
+  assert.ok(retry.endsWith('SECOND-FAILURE'));
+  assert.equal(retry.includes('PRIVATE-END'), false);
+  assert.equal((await stat(f.log)).mode & 0o777, 0o600);
+  assert.deepEqual((await readdir(f.directory)).sort(), ['last-failure.log', 'unrelated.log']);
+  assert.equal(await readFile(join(f.directory, 'unrelated.log'), 'utf8'), 'keep this');
+});
+
+test('healthy reconstruction neither creates a warning nor replaces an earlier failure diagnostic', async t => {
+  const f = await diagnosticFixture(t, `process.stderr.write('informational helper output'); console.log(JSON.stringify({done: '/out.usdz'}));`);
+  await macReconstructRunner(f.binary)(f.input);
+  await assert.rejects(stat(f.directory), {code: 'ENOENT'});
+  await mkdir(f.directory, {recursive: true, mode: 0o700});
+  await writeFile(f.log, 'previous timestamped failure', {mode: 0o600});
+  await macReconstructRunner(f.binary)(f.input);
+  assert.equal(await readFile(f.log, 'utf8'), 'previous timestamped failure');
+});
+
+test('diagnostic storage failure cannot redirect a write or leak helper text into the public error', async t => {
+  const f = await diagnosticFixture(t, `process.stderr.write('PRIVATE-ERROR'); process.exitCode = 1;`);
+  const outside = join(f.root, 'unrelated');
+  await mkdir(outside);
+  await mkdir(join(f.root, 'scan'));
+  await writeFile(join(outside, 'last-failure.log'), 'must stay unchanged');
+  await symlink(outside, f.directory);
+  await assert.rejects(macReconstructRunner(f.binary)(f.input), {message: RECONSTRUCTION_FAILED});
+  assert.deepEqual(await readdir(outside), ['last-failure.log']);
+  assert.equal(await readFile(join(outside, 'last-failure.log'), 'utf8'), 'must stay unchanged');
 });

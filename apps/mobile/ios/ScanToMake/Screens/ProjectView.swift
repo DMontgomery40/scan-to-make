@@ -32,6 +32,7 @@ struct ProjectView: View {
     @State private var arURL: URL?
     @State private var scanURL: URL?
     @State private var scanSize: String?
+    @State private var captureWarning: String?
     @State private var askWorking = false
     @State private var askProblem: String?
     @State private var askText = ""
@@ -47,6 +48,7 @@ struct ProjectView: View {
         }
         .task(id: id) {
             await reload()
+            captureWarning = store.mac.localScanWarning(id)
             if let object { section = defaultSection(object) }
             #if DEBUG
             if let debug = app.debugSection, let chosen = ProjectSection.allCases.first(where: { "\($0)" == debug }) { section = chosen; app.debugSection = nil }
@@ -111,6 +113,7 @@ struct ProjectView: View {
         }
         if handheld { return await HandheldCapture.run(objectId: object.id) ? try await finishSending(object) : nil }
         guard try await store.mac.scan(object.id) != nil else { return nil }
+        captureWarning = store.mac.localScanWarning(object.id)
         return try await finishSending(object)
     }
 
@@ -163,6 +166,9 @@ struct ProjectView: View {
                 }
                 .padding(.horizontal, 20)
 
+                if object.current == nil, let captureWarning {
+                    Label(captureWarning, systemImage: "exclamationmark.triangle").font(.subheadline).foregroundStyle(.orange).padding(.horizontal, 20)
+                }
                 if let message = problem ?? fetchProblem ?? store.sendFailures[object.id] {
                     Label(message, systemImage: "exclamationmark.triangle.fill").font(.subheadline).foregroundStyle(.orange).padding(.horizontal, 20)
                 }

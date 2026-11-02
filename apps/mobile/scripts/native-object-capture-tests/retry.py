@@ -55,7 +55,7 @@ with tempfile.TemporaryDirectory(prefix='native-capture-retry-') as directory:
 # Exercise actual scan-result and draft selection methods. Only the native presentation and the
 # Documents directory are replaced; model-file existence still uses a real temporary filesystem.
 selection = (HERE / 'CaptureSelectionTests.swift').read_text().replace('// CAPTURE_METHODS', methods(
-    'Platform/MacConnection.swift', '@MainActor final class MacConnection {', ['scan', 'finishedScan', 'localScan'])
+    'Platform/MacConnection.swift', '@MainActor final class MacConnection {', ['scan', 'finishedScan', 'localScan', 'localScanWarning'])
     .replace('URL.documentsDirectory', 'CaptureFixture.root'))
 selection_path = args.evidence / 'CaptureSelectionFixture.swift'
 selection_path.write_text(selection)

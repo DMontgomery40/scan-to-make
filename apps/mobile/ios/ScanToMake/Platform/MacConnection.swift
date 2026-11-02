@@ -164,6 +164,15 @@ typealias MacError = CompanionError
         return draft?["runID"] as? String
     }
 
+    /// The saved reconstruction warning follows the same ready run chosen for Send.
+    func localScanWarning(_ id: String) -> String? {
+        let drafts = (try? NativeCaptureCoordinator.shared.drafts()) ?? []
+        let draft = drafts.first {
+            $0["status"] as? String == "ready" && ($0["origin"] as? [String: Any])?["projectId"] as? String == id
+        }
+        return draft?["stitchingIncomplete"] as? Bool == true ? NativeCaptureCoordinator.stitchingWarning : nil
+    }
+
     /// The walk-around scan's model while it's still on this phone: the project page shows it until the Mac
     /// has a result of its own. The Mac doesn't serve the scan back.
     func localScan(_ id: String) -> URL? {

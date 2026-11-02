@@ -35,6 +35,8 @@ struct ChosenPhoto: Equatable { var id: String }
     var received: [Int: String] = [:]
     var photos: Set<String> = []
     var savedRun: String?
+    var captureWarning: String?
+    func localScanWarning(_ id: String) -> String? { captureWarning }
     var captures = 0
     var failUpload = false
     var startedWithIncompleteCapture = false
@@ -126,6 +128,7 @@ struct ChosenPhoto: Equatable { var id: String }
     @FixtureState var draftId = "object-1"
     @FixtureState var photos: [ChosenPhoto] = []
     @FixtureState var attached: Attached? = nil
+    @FixtureState var captureWarning: String? = nil
     @FixtureState var draft = Project()
     @FixtureState var result: Project? = nil
     @FixtureState var failure: Error? = nil
@@ -142,6 +145,7 @@ struct ChosenPhoto: Equatable { var id: String }
     let store = ProjectsStore()
     @FixtureState var object: Project? = Project()
     @FixtureState var resumed = false
+    @FixtureState var captureWarning: String? = nil
     @FixtureState var working = false
     @FixtureState var pending: (() async throws -> Project?)? = nil
     func act(_ body: @escaping () async throws -> Project?) { pending = body }
@@ -188,11 +192,13 @@ struct ChosenPhoto: Equatable { var id: String }
 
         HandheldCapture.reset()
         let walkaround = NewObjectView()
+        walkaround.store.mac.captureWarning = "Check every side"
         await walkaround.scan(handheld: false)
         await walkaround.scan(handheld: true)
         check(walkaround.store.mac.captures == 1 && HandheldCapture.captures == 0,
               "changing scan mode replaced the saved walkaround capture")
         check(walkaround.attached == .walkAround, "the saved walkaround scan wasn't attached")
+        check(walkaround.captureWarning == "Check every side", "saved scan warning disappeared from Send")
         walkaround.store.mac.failUpload = true
         await walkaround.make()
         await walkaround.make()

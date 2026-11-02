@@ -4,9 +4,12 @@ import Observation
 enum NativeCaptureOutcome { case completed, stopped, failed(String) }
 @MainActor protocol NativeCaptureEngine: AnyObject {
     var onFinish: ((NativeCaptureOutcome) -> Void)? { get set }
+    var stitchingIncomplete: Bool { get }
     func start()
     func stop()
 }
+
+extension NativeCaptureEngine { var stitchingIncomplete: Bool { false } }
 
 /// Owned independently of React and presentation. Only a terminal engine callback detaches it.
 @MainActor @Observable final class NativeCaptureRunOwner {
@@ -44,7 +47,7 @@ enum NativeCaptureOutcome { case completed, stopped, failed(String) }
         guard id == activeRunID, engine != nil else { return }
         do {
             switch outcome {
-            case .completed where !stopping: _ = try store.complete(id)
+            case .completed where !stopping: _ = try store.complete(id, stitchingIncomplete: engine?.stitchingIncomplete ?? false)
             case .completed, .stopped: try store.update(id, status: "stopped")
             case .failed(let detail):
                 message = detail
@@ -64,6 +67,7 @@ import ARKit
 
 @MainActor final class GuidedNativeCaptureEngine: NativeCaptureEngine {
     let model: AppDataModel
+    var stitchingIncomplete: Bool { model.stitchingIncomplete }
     var onFinish: ((NativeCaptureOutcome) -> Void)?
     init(directory: URL) {
         model = AppDataModel(captureDirectory: directory)
@@ -81,6 +85,7 @@ import ARKit
 @MainActor public final class NativeCaptureCoordinator {
     static let owner = NativeCaptureRunOwner(store: NativeCaptureDraftStore()) { GuidedNativeCaptureEngine(directory: $0) }
     public static let shared = NativeCaptureCoordinator()
+    public static var stitchingWarning: String { NativeCaptureDraft.stitchingWarning }
     private var host: UIViewController?
     private var completion: CheckedContinuation<[String: Any], Error>?
     private var presentedRunID: String?
