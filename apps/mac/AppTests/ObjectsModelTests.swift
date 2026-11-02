@@ -37,8 +37,19 @@ private actor FakeObjects: ObjectsCompanion {
             if status == "works" { fields["state"] = "confirmed"; fields["status"] = ["phase": "confirmed", "text": "It works", "symbol": "checkmark.circle.fill", "tint": "green"] }
         }
         if case .bool(let archived)? = patch["archived"] { settings["archived"] = archived }
+        for key in ["printDefaults", "designEngine", "notifications"] {
+            if let value = patch[key] { settings[key] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(value), options: .fragmentsAllowed) }
+        }
         fields["settings"] = settings
         return try change(id, "settings", fields)
+    }
+    func duplicate(_ id: String) async throws -> Project {
+        if let actionError { throw actionError }
+        var copied = items.first { $0["id"] as? String == id }!
+        copied["id"] = "copied"; copied["state"] = "ready"
+        items.append(copied)
+        calls.append("duplicate")
+        return try decode(copied)
     }
     func failList(with error: Error?) { listError = error }
     func failActions(with error: Error?) { actionError = error }
@@ -91,6 +102,28 @@ private func project(_ item: [String: Any]) throws -> Project {
 }
 
 @MainActor final class ObjectsModelTests: XCTestCase {
+    func testSavedPreferencesAndDuplicateUpdateTheOpenProjectWithoutStartingAPass() async throws {
+        let companion = FakeObjects()
+        await companion.set([item("source", "ready")])
+        await companion.setCapabilities(.init(projectPreferences: true))
+        let model = ObjectsModel(companion: companion)
+        await model.refresh()
+        try await model.savePreferences("source", patch: ["printDefaults": .object(["copies": .number(1), "quality": .string("fine")]), "notifications": .string("problems")])
+        XCTAssertEqual(model.selected?.settings?.printDefaults?.copies, 1)
+        XCTAssertEqual(model.selected?.settings?.notifications, "problems")
+        try await model.duplicate("source")
+        XCTAssertEqual(model.selection, "copied")
+        XCTAssertEqual(model.objects.count, 2)
+        XCTAssertEqual(model.selected?.settings?.printDefaults?.quality, "fine")
+        XCTAssertEqual(model.selected?.state, .ready)
+        let calls = await companion.calls
+        XCTAssertFalse(calls.contains(where: { $0.hasPrefix("correct:") || $0 == "start" }))
+        await companion.failActions(with: ControlRemoteError(code: "unavailable", message: "Couldn't copy the model."))
+        do { try await model.duplicate("source"); XCTFail("The failure must reach the sheet") } catch {}
+        XCTAssertEqual(model.objects.count, 2)
+        XCTAssertEqual(model.selection, "copied")
+    }
+
     func testChangesWrittenDuringAPassAreSavedAndSentOnceWhenItEnds() async throws {
         let defaults = UserDefaults(suiteName: "counterpart-queue-\(UUID().uuidString)")!
         let companion = FakeObjects()

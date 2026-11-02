@@ -421,7 +421,7 @@ test('one copy named is sent as repetitions 1, so it overrides a printer profile
   const printing = await f.service.print(f.object.id, {copies: 1});
   const run = await until(() => f.runs.find(entry => entry.id === printing.print.bundleId));
   assert.equal(run.options.slicer.repetitions, 1);
-  assert.equal(printing.print.settings?.copies, undefined, 'one copy is the default, recorded as nothing');
+  assert.equal(printing.print.settings?.copies, 1, 'an explicit one survives reprinting and saved defaults');
   await f.approve();
   await f.service.settled(f.object.id);
   // An MCP without repetitions: one copy is still fine (it slices one), never refused.
@@ -473,4 +473,55 @@ test('the failure sentence and code come from the report that ended the print (C
   assert.deepEqual([failed.state, failed.failure], ['failed', 'The printer stopped (0300_0D00_0002_0001).']);
   // The saved record is that ending report too, not the last one while it got ready.
   assert.deepEqual(failed.print.live.problems.map(problem => problem.code), ['0300_0D00_0002_0001']);
+});
+
+
+test('saved project defaults reach Print, and explicit Standard overrides a saved Fine default', async t => {
+  const defaults = {quality: 'fine', strength: 'strong', colour: {amsSlot: 1}, copies: 3};
+  const f = await setup(t, {sliceArgs: true, copies: true, reports: [status('IDLE', 0)]});
+  await f.service.setProjectSettings(f.object.id, {printDefaults: defaults});
+  assert.equal(f.runs.length, 0, 'saving defaults never starts a print');
+  await f.service.print(f.object.id);
+  const run = await until(() => f.runs.at(-1));
+  assert.equal(run.options.slicer.layerHeightMm, 0.12);
+  assert.equal(run.options.slicer.wallLoops, 4);
+  assert.equal(run.options.slicer.repetitions, 3);
+  assert.deepEqual(run.selection.amsSlots, [1]);
+  await f.approve(); await f.service.settled(f.object.id);
+  const g = await setup(t, {sliceArgs: true, copies: true, reports: [status('IDLE', 0)]});
+  await g.service.setProjectSettings(g.object.id, {printDefaults: defaults});
+  await g.service.print(g.object.id, {quality: 'standard', strength: 'standard', copies: 1, colour: {auto: true}});
+  const overridden = await until(() => g.runs.at(-1));
+  assert.equal(overridden.options.slicer.layerHeightMm, undefined);
+  assert.equal(overridden.options.slicer.wallLoops, undefined);
+  assert.equal(overridden.options.slicer.repetitions, 1);
+  assert.equal(overridden.selection.autoMatchAms, true);
+  await g.approve(); await g.service.settled(g.object.id);
+});
+
+test('problems-only projects retain print events without routine notification alerts', async t => {
+  const f = await setup(t, {reports: [status('PREPARE', 0), status('RUNNING', 3), status('RUNNING', 51), status('FINISH', 100)]});
+  await f.service.setProjectSettings(f.object.id, {notifications: 'problems'});
+  await f.service.print(f.object.id); await f.approve(); await f.service.settled(f.object.id);
+  for (let i = 0; i < 3; i++) await f.tick();
+  await until(() => f.events.some(event => event.type === 'print.done'));
+  for (const type of ['print.started', 'print.milestone', 'print.done']) {
+    const event = f.events.find(event => event.type === type);
+    assert.ok(event, type + ' remains in history');
+    assert.equal(event.notify, 'none');
+  }
+  assert.equal(f.events.find(event => event.type === 'print.confirm').notify, undefined, 'questions still need an answer');
+});
+
+
+test('a one-copy-only destination can override an old saved count for Print and Estimate', async t => {
+  const f = await setup(t, {sliceArgs: true, reports: [status('IDLE', 0)]});
+  await f.service.setProjectSettings(f.object.id, {printDefaults: {copies: 3}});
+  await f.service.estimate(f.object.id, {copies: 1});
+  assert.equal(f.runs.at(-1).estimate.slicer.repetitions, 1);
+  await f.service.print(f.object.id, {copies: 1});
+  const run = await until(() => f.runs.find(entry => entry.options));
+  assert.equal(run.options.slicer.repetitions, 1);
+  assert.equal((await f.service.get(f.object.id)).preferences.printDefaults.copies, 3, 'the default remains available for a capable printer');
+  await f.approve(); await f.service.settled(f.object.id);
 });

@@ -3,10 +3,10 @@ import {createHash, randomUUID} from 'node:crypto';
 import {tmpdir} from 'node:os';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
-import {basename, extname, isAbsolute, join} from 'node:path';
+import {basename, dirname, extname, isAbsolute, join} from 'node:path';
 import {DispatchedPrintError, PrinterMcpError, readPrintReport, routeArgs, sliceEstimate,
   type PrintProgress, type PendingElicitation, type PrinterHandoffConfig, type PrinterSelection, type PrinterSlicer, type PrintReport, type PrinterSession} from '@scan-to-make/printer-handoff';
-import type {PrintEstimate, PrintSettings, ProjectStatus} from '@scan-to-make/contracts/counterpart';
+import type {PrintEstimate, PrintSettings, ProjectStatus, ProjectSettingsPatch} from '@scan-to-make/contracts/counterpart';
 import {PrintMonitorRunner, matchJob, milestonesFor, type EventDraft, type MonitorClock, type MonitorEnd, type MonitorTarget} from '../printing/monitor.js';
 import {CameraFrames, CameraUnavailableError, type CameraFrame} from '../printing/camera.js';
 import {PrinterUpdatingError, type PrintGate} from '../printing/print-gate.js';
@@ -241,6 +241,68 @@ export class ObjectService {
     return this.#changed(updated);
   }
 
+  /** Save future-work defaults through the same gate as the project's other mutations. */
+  setProjectSettings(id: string, patch: ProjectSettingsPatch): Promise<StmObject> {
+    return this.#gate(id, async () => {
+      let object = await this.get(id);
+      let destination = patch.printerDestinationId;
+      if (destination !== undefined && destination !== null) {
+        const catalog = this.#deps.printerCatalog;
+        destination = catalog?.canonical(destination);
+        if (!destination || !catalog?.resolve(destination)) throw new InvalidStateError('That printer is no longer available. Choose another printer.');
+      }
+      if (patch.printerDestinationId !== undefined && (object.state === 'touching-up' || object.state === 'printing'))
+        throw new InvalidStateError('Wait until the current step finishes before changing printers.');
+      if (patch.designEngine === 'fusion' && passKind(object) === 'copy')
+        throw new InvalidStateError('Scanned copies are cleaned up in Blender.');
+      // Validate all new fields before applying the existing status/archive actions.
+      if (patch.status !== undefined) object = await this.#setStatusNow(id, patch.status);
+      if (patch.archived !== undefined) object = await this.#setArchivedNow(id, object, patch.archived);
+      const keys = Object.keys(patch).filter(key => key !== 'status' && key !== 'archived');
+      if (!keys.length) return object;
+      const updated = await this.#deps.store.update(id, o => {
+        const preferences = {...o.preferences};
+        if (patch.printDefaults !== undefined) preferences.printDefaults = patch.printDefaults;
+        else if (patch.printerDestinationId !== undefined && (destination ?? this.#deps.printerCatalog?.defaultDestinationId) !== this.#destinationId(o) && preferences.printDefaults) {
+          const {colour: _colour, ...settings} = preferences.printDefaults;
+          preferences.printDefaults = settings;
+        }
+        if (patch.designEngine !== undefined) preferences.designEngine = patch.designEngine;
+        if (patch.notifications !== undefined) preferences.notifications = patch.notifications;
+        return {...o, ...(patch.title !== undefined ? {title: patch.title} : {}),
+          ...(patch.printerDestinationId !== undefined ? {printerDestinationId: destination ?? undefined} : {}), preferences};
+      });
+      await this.#emit({id: randomUUID(), type: 'project.updated', projectId: id, data: {keys}});
+      return this.#changed(updated);
+    });
+  }
+
+  /** An independent ready project: copy model/design files, never jobs, outcomes or pending work. */
+  duplicate(id: string): Promise<StmObject> {
+    return this.#gate(id, async () => {
+      const source = await this.get(id);
+      if (!source.current) throw new InvalidStateError('There is no model to duplicate yet.');
+      if (source.state === 'touching-up') throw new InvalidStateError('Wait until the current step finishes.');
+      const duplicate = await this.#deps.store.create(source.instructions, passKind(source));
+      try {
+        const current = source.current;
+        const paths = [current.model, ...current.renders, ...(current.design ? [current.design.f3d, ...(current.design.parameters ? [current.design.parameters] : [])] : [])];
+        for (const path of new Set(paths)) {
+          if (isAbsolute(path) || path.split('/').some(part => !part || part === '.' || part === '..')) throw new InvalidFileError('The model has an invalid file path.');
+          const target = join(this.dir(duplicate.id), path);
+          await mkdir(dirname(target), {recursive: true});
+          await copyFile(join(this.dir(id), path), target);
+        }
+        const credit = (source as StmObject & {credit?: unknown}).credit;
+        const result = await this.#deps.store.update(duplicate.id, o => ({...o, state: 'ready', current,
+          title: `${projectTitle(source).slice(0, 114)} copy`, printerDestinationId: source.printerDestinationId,
+          preferences: {...source.preferences, printDefaults: source.preferences?.printDefaults ?? source.print?.settings}, ...(credit ? {credit} : {})}));
+        await this.#emit({id: randomUUID(), type: 'project.updated', projectId: result.id, data: {keys: ['created']}});
+        return this.#changed(result);
+      } catch (error) { await this.#deps.store.remove(duplicate.id); throw error; }
+    });
+  }
+
   /** The printer this project would print on takes `copies` (slice_stl repetitions). */
   get printCopiesAvailable(): boolean {
     return (this.#deps.printers?.list().destinations ?? []).some(destination => destination.capabilities?.copies);
@@ -439,7 +501,11 @@ export class ObjectService {
       const chosen = catalog?.canonical(destinationId);
       if (!chosen || !catalog?.destinations.some(destination => destination.id === chosen) || !catalog.resolve(chosen))
         throw new InvalidStateError('That printer is no longer available. Choose another printer.');
-      return this.#changed(await this.#deps.store.update(id, o => ({...o, printerDestinationId: chosen})));
+      return this.#changed(await this.#deps.store.update(id, o => {
+        const {colour: _colour, ...defaults} = o.preferences?.printDefaults ?? {};
+        return {...o, printerDestinationId: chosen, ...(this.#destinationId(o) !== chosen && o.preferences?.printDefaults
+          ? {preferences: {...o.preferences, printDefaults: defaults}} : {})};
+      }));
     });
   }
 
@@ -696,6 +762,7 @@ export class ObjectService {
   print(id: string, options: PrintOptions = {}): Promise<StmObject> { return this.#gate(id, () => this.#print(id, options)); }
   async #print(id: string, options: PrintOptions): Promise<StmObject> {
     const object = await this.get(id);
+    options = {...object.preferences?.printDefaults, ...options, ...(options.filament ? {colour: undefined} : {})};
     if (!object.current) throw new InvalidStateError('There is no model to print yet.');
     if (object.state === 'touching-up' || object.state === 'printing') throw new InvalidStateError('Wait until the current step finishes.');
     if (object.print?.uncertain && !options.checked) throw new InvalidStateError("The printer may already be printing this. Check the printer, then print again if it isn't.");
@@ -722,7 +789,7 @@ export class ObjectService {
         || (overrides.repetitions !== undefined && overrides.repetitions > 1 && !capabilities.copies)))
       throw new InvalidStateError(settingsUnsupported(runner.backend, options));
     const settings: PrintSettings = {...(options.quality ? {quality: options.quality} : {}), ...(options.strength ? {strength: options.strength} : {}),
-      ...(options.colour ? {colour: options.colour} : {}), ...(options.copies && options.copies > 1 ? {copies: options.copies} : {})};
+      ...(options.colour ? {colour: options.colour} : {}), ...(options.copies !== undefined ? {copies: options.copies} : {})};
     const sliced = {...slicer, ...overrides};
     const stl = await readFile(join(this.#deps.store.dir(id), object.current.model));
     const manifest = await bundles.create({stl, prompt: '', backend: runner.backend, ...(selected ? {selection:selected} : {})});
@@ -956,7 +1023,14 @@ export class ObjectService {
     }
   }
 
-  async #emit(draft: EventDraft): Promise<void> { await this.#deps.events?.emit(draft).catch(() => undefined); }
+  async #emit(draft: EventDraft): Promise<void> {
+    if (draft.projectId && draft.type.startsWith('print.') &&
+        !['print.confirm', 'print.paused', 'print.failed', 'print.not-started', 'print.unreachable', 'print.sent'].includes(draft.type)) {
+      const object = await this.#deps.store.get(draft.projectId).catch(() => undefined);
+      if (object?.preferences?.notifications === 'problems') draft = {...draft, notify: 'none'};
+    }
+    await this.#deps.events?.emit(draft).catch(() => undefined);
+  }
 
   async #frame(destinationId: string, session: PrinterSession, signal?: AbortSignal): Promise<CameraFrame | undefined> {
     const camera = this.#deps.camera;
@@ -1055,6 +1129,9 @@ export class ObjectService {
   /** Slices the current model with the print sheet's settings, exactly as Print would, and reads the estimate. Never prints. */
   async estimate(id: string, request: {destinationId?: string; quality?: PrintSettings['quality']; strength?: PrintSettings['strength']; copies?: number} = {}): Promise<PrintEstimate> {
     const object = await this.get(id);
+    const defaults = object.preferences?.printDefaults;
+    request = {...(defaults?.quality ? {quality: defaults.quality} : {}), ...(defaults?.strength ? {strength: defaults.strength} : {}),
+      ...(defaults?.copies ? {copies: defaults.copies} : {}), ...request};
     if (!object.current) throw new InvalidStateError('There is no model to print yet.');
     const catalog = this.#deps.printerCatalog;
     const destinationId = request.destinationId ? catalog?.canonical(request.destinationId) : this.#destinationId(object);
@@ -1238,7 +1315,7 @@ export class ObjectService {
       if (build) scanName = await this.#build(object.id, dir, controller.signal);
       const scan = fromCurrent ? [join(dir, object.current!.model)] : scanName ? [join(dir, 'scan', scanName)] : [];
       const input: TouchupInput = {root: join(dir, 'passes'), objectId: 'pass', scan, photos, currentModel: fromCurrent, handoff: this.#handoff(), claudePath: this.#deps.claudePath,
-        kind, onStage: (id, chosen) => stage(id, chosen),
+        kind, ...(object.preferences?.designEngine && object.preferences.designEngine !== 'auto' ? {preferredEngine: object.preferences.designEngine} : {}), onStage: (id, chosen) => stage(id, chosen),
         ...(fromCurrent && object.current?.engine === 'fusion' && object.current.design
           ? {design: {f3d: join(dir, object.current.design.f3d), ...(object.current.design.parameters ? {parameters: join(dir, object.current.design.parameters)} : {})}} : {}),
         ...(object.instructions ? {instructions: object.instructions} : {}),

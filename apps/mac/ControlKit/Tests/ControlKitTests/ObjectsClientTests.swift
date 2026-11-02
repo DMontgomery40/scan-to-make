@@ -25,6 +25,23 @@ private func failure(_ request: [String: Any], _ code: String) throws -> Data {
 }
 
 final class ObjectsClientTests: XCTestCase {
+    func testDuplicateAndExplicitPrintDefaultsReachTheControlSocket() async throws {
+        let duplicate = try UnixFixture { request in
+            XCTAssertEqual(request["method"] as? String, "objects.duplicate")
+            XCTAssertEqual((request["params"] as? [String: String])?["id"], id)
+            return [try objectReply(request)]
+        }
+        _ = try await ControlClient(socketPath: duplicate.path).duplicateObject(id)
+        let printer = try UnixFixture { request in
+            let params = request["params"] as! [String: Any]
+            XCTAssertEqual(params["quality"] as? String, "standard")
+            XCTAssertEqual(params["strength"] as? String, "standard")
+            return [try objectReply(request)]
+        }
+        _ = try await ControlClient(socketPath: printer.path).printObject(id, checked: false, settings: .init(), overrideDefaults: true)
+        withExtendedLifetime((duplicate, printer)) {}
+    }
+
     func testFilamentChoiceRoundTripsToThePrintRequest() async throws {
         let choice: [String: Any] = ["slot":1, "colour":"#FEC600", "material":"PLA", "name":"Yellow PLA", "filamentId":"GFA00", "destinationId":"p1s"]
         let inventory = try UnixFixture { request in

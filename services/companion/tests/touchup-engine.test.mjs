@@ -47,6 +47,12 @@ test('copies always use Blender; a design uses Fusion only when it is connected 
   assert.equal((await chooseEngine({handoff, kind: 'fit'}, failing)).note, "Fusion isn't reachable: bridge timed out");
 });
 
+test('a project choosing Blender does not open Fusion even for a new design', async () => {
+  const fusion = bridge({fusion_mcp_status: text({configured: true, connected: true})});
+  assert.deepEqual(await chooseEngine({handoff, kind: 'fit', preferredEngine: 'blender'}, fusion), {engine: 'blender'});
+  assert.deepEqual(fusion.calls, []);
+});
+
 test('a Fusion pass never touches Blender: no lock, no launch, no scene reset', async () => {
   const log = [];
   const fusion = bridge({fusion_mcp_status: text({configured: true, connected: true})});

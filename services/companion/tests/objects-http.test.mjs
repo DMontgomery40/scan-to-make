@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createServer} from 'node:http';
-import {mkdtemp, mkdir, writeFile} from 'node:fs/promises';
+import {mkdtemp, mkdir, readFile, writeFile, symlink} from 'node:fs/promises';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {ObjectStore} from '../dist/objects/store.js';
@@ -14,7 +14,9 @@ const STL = 'solid m\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 1 0 0
 async function fixture(t, {denied = [], reconstruct, reportsCompletion} = {}) {
   const root = await mkdtemp(join(tmpdir(), 'objects-http-'));
   const store = new ObjectStore(join(root, 'objects'));
-  const runTouchup = async () => {
+  const inputs = [];
+  const runTouchup = async input => {
+    inputs.push(input);
     const out = join(root, 'pass', 'out'); await mkdir(out, {recursive: true});
     await writeFile(join(out, 'touched.stl'), STL); await writeFile(join(out, 'front.png'), 'png');
     return {status: 'done', summary: 'Fixed.', model: join(out, 'touched.stl'), renders: [join(out, 'front.png')], checkpoints: [], stats: {seconds: 1, toolCalls: 1}, passDir: join(root, 'pass')};
@@ -38,7 +40,7 @@ async function fixture(t, {denied = [], reconstruct, reportsCompletion} = {}) {
     let json; try { json = JSON.parse(bytes.toString()); } catch {}
     return {status: response.status, json, bytes, type: response.headers.get('content-type')};
   };
-  return {call, scopes, devices, service, store, events};
+  return {call, scopes, devices, service, store, events, inputs};
 }
 
 test('create, list and get an object', async t => {
@@ -152,6 +154,11 @@ test('scan, photos, start, then the ready model and renders download', async t =
   const ready = (await call('GET', `/v1/objects/${id}`)).json.object;
   assert.equal(ready.state, 'ready');
   assert.deepEqual(ready.current.sizeMm, [60.6, 45.2, 21.7]);
+  const original = await call('GET', `/v1/objects/${id}/scan/${ready.scan}`);
+  assert.equal(original.bytes.toString(), 'usdz');
+  assert.equal(original.type, 'model/vnd.usdz+zip');
+  assert.equal((await call('GET', `/v1/objects/${id}/scan/unrecorded.usdz`)).status, 404);
+  assert.equal((await call('GET', `/v1/objects/${id}/scan/%2e%2e%2fobject.json`)).status, 404);
   assert.equal((await call('GET', `/v1/objects/${id}/model.stl`)).bytes.toString(), STL);
   assert.equal((await call('GET', `/v1/objects/${id}/renders/front.png`)).bytes.toString(), 'png');
   assert.equal(JSON.stringify(ready).includes(tmpdir()), false, 'no Mac file paths reach the phone');
@@ -527,4 +534,119 @@ test('Mac local photo evidence is copied and attached before marking Done withou
   assert.equal(done.passes.length, before.passes.length);
   assert.deepEqual(done.current, before.current);
   assert.deepEqual(done.messages[0].photos, ['finished.jpg']);
+});
+
+
+test('project preferences persist across both transports without starting work', async t => {
+  const {call, service, store} = await fixture(t);
+  const project = await service.create('A mount', 'fit');
+  const defaults = {quality: 'fine', strength: 'strong', colour: {amsSlot: 1}, copies: 3};
+  const saved = await call('PATCH', `/v1/objects/${project.id}/settings`, {printDefaults: defaults, designEngine: 'blender', notifications: 'problems'});
+  assert.equal(saved.status, 200);
+  assert.deepEqual(saved.json.settings.printDefaults, defaults);
+  assert.equal(saved.json.object.state, 'new');
+  assert.equal(saved.json.object.passes.length, 0);
+  const dispatch = createControlDispatcher({objects: service});
+  assert.equal((await dispatch('objects.settings.get', {id: project.id})).settings.designEngine, 'blender');
+  await dispatch('objects.settings.set', {id: project.id, notifications: 'all'});
+  assert.deepEqual((await store.get(project.id)).preferences, {printDefaults: defaults, designEngine: 'blender', notifications: 'all'});
+  const before = await store.get(project.id);
+  assert.equal((await call('PATCH', `/v1/objects/${project.id}/settings`, {title: 'Must not save', printerDestinationId: 'missing'})).status, 409);
+  assert.deepEqual(await store.get(project.id), before, 'invalid printer does not partially rename or save defaults');
+  assert.equal((await call('PATCH', `/v1/objects/${project.id}/settings`, {printDefaults: {copies: 0}})).status, 400);
+  assert.equal((await call('PATCH', `/v1/objects/${project.id}/settings`, {unexpected: true})).status, 400);
+});
+
+test('duplicate copies the current model and defaults, never the source outcome or active work', async t => {
+  const {call, service, store} = await fixture(t);
+  const project = await service.create('A mount', 'copy');
+  await service.start(project.id); await service.settled(project.id);
+  await service.setProjectSettings(project.id, {title: 'Original mount', status: 'works', archived: true,
+    printDefaults: {quality: 'fine', copies: 2}, notifications: 'problems', designEngine: 'blender'});
+  await writeFile(join(store.dir(project.id), 'current', 'design.f3d'), 'editable Fusion design');
+  await writeFile(join(store.dir(project.id), 'current', 'parameters.json'), '{}');
+  await store.update(project.id, o => ({...o, current: {...o.current, design: {f3d: 'current/design.f3d', parameters: 'current/parameters.json'}}}));
+  const source = await store.get(project.id);
+  const result = await call('POST', `/v1/objects/${project.id}/duplicate`, {});
+  assert.equal(result.status, 200);
+  const copied = result.json.object;
+  assert.notEqual(copied.id, source.id);
+  assert.equal(copied.title, 'Original mount copy');
+  assert.equal(copied.state, 'ready');
+  assert.equal(copied.kind, 'copy');
+  assert.equal(copied.settings.status, 'not-printed');
+  assert.equal(copied.settings.archived, false);
+  assert.deepEqual(copied.preferences, source.preferences);
+  assert.deepEqual(copied.passes, []);
+  assert.equal(copied.print, undefined);
+  assert.equal(copied.pendingFollowup, undefined);
+  const originalPath = join(store.dir(source.id), source.current.model), copyPath = join(store.dir(copied.id), copied.current.model);
+  const originalBytes = await readFile(originalPath);
+  assert.deepEqual(await readFile(copyPath), originalBytes);
+  assert.equal(await readFile(join(store.dir(copied.id), copied.current.design.f3d), 'utf8'), 'editable Fusion design');
+  await writeFile(copyPath, 'changed independently');
+  assert.deepEqual(await readFile(originalPath), originalBytes);
+  assert.deepEqual(await store.get(source.id), source);
+});
+
+
+test('original model export reads only recorded model files with read authorization', async t => {
+  const {call, service, store, scopes} = await fixture(t);
+  const project = await service.create('Published model');
+  await mkdir(join(store.dir(project.id), 'original'), {recursive: true});
+  await writeFile(join(store.dir(project.id), 'original', 'part.3mf'), 'original designer model');
+  await store.update(project.id, o => ({...o, files: {original: ['original/part.3mf', '../private.stl', '/private.stl', 'object.json']}}));
+  const response = await call('GET', `/v1/objects/${project.id}/original/0`);
+  assert.equal(response.status, 200);
+  assert.equal(response.type, 'model/3mf');
+  assert.equal(response.bytes.toString(), 'original designer model');
+  assert.equal(scopes.at(-1), 'projects:read');
+  for (const index of [1, 2, 3, 4, 999999999999999999999]) {
+    assert.equal((await call('GET', `/v1/objects/${project.id}/original/${index}`)).status, 404);
+  }
+  const denied = await fixture(t, {denied: ['projects:read']});
+  assert.equal((await denied.call('GET', `/v1/objects/${project.id}/original/0`)).status, 403);
+});
+
+test('duplicate keeps legacy print defaults and removes only its own partial copy on failure', async t => {
+  const {service, store} = await fixture(t);
+  const project = await service.create('Legacy project', 'fit');
+  await service.start(project.id); await service.settled(project.id);
+  await store.update(project.id, o => ({...o, print: {bundleId: 'old', settings: {quality: 'fine', copies: 1}}}));
+  const duplicate = await service.duplicate(project.id);
+  assert.deepEqual(duplicate.preferences.printDefaults, {quality: 'fine', copies: 1});
+  assert.equal(duplicate.print, undefined);
+  await store.update(project.id, o => ({...o, current: {...o.current, renders: ['missing.png']}}));
+  const before = await store.list();
+  await assert.rejects(service.duplicate(project.id));
+  assert.deepEqual(await store.list(), before);
+});
+
+
+test('exports refuse recorded final and intermediate symlinks that leave the project', async t => {
+  const {call, service, store} = await fixture(t);
+  const project = await service.create('Private exports');
+  const outside = await mkdtemp(join(tmpdir(), 'outside-project-'));
+  await writeFile(join(outside, 'secret.3mf'), 'private');
+  await writeFile(join(outside, 'scan.usdz'), 'private scan');
+  await mkdir(join(store.dir(project.id), 'original'), {recursive: true});
+  await mkdir(join(store.dir(project.id), 'scan'), {recursive: true});
+  await symlink(join(outside, 'secret.3mf'), join(store.dir(project.id), 'original', 'linked.3mf'));
+  await symlink(outside, join(store.dir(project.id), 'external'));
+  await symlink(join(outside, 'scan.usdz'), join(store.dir(project.id), 'scan', 'scan.usdz'));
+  await store.update(project.id, o => ({...o, scan: 'scan.usdz', files: {original: ['original/linked.3mf', 'external/secret.3mf']}}));
+  for (const file of ['original/0', 'original/1', 'scan/scan.usdz']) {
+    assert.equal((await call('GET', `/v1/objects/${project.id}/${file}`)).status, 404);
+  }
+});
+
+
+test('saved project engine reaches the next worker and copies reject Fusion', async t => {
+  const {service, inputs} = await fixture(t);
+  const fit = await service.create('A clip', 'fit');
+  await service.setProjectSettings(fit.id, {designEngine: 'blender'});
+  await service.start(fit.id); await service.settled(fit.id);
+  assert.equal(inputs[0].preferredEngine, 'blender');
+  const copy = await service.create('Copy the clip', 'copy');
+  await assert.rejects(service.setProjectSettings(copy.id, {designEngine: 'fusion'}), /cleaned up in Blender/);
 });

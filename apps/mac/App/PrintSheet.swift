@@ -36,9 +36,11 @@ struct PrintSheet: View {
     init(opened: Project, model: ObjectsModel) {
         self.opened = opened
         _model = ObservedObject(wrappedValue: model)
-        let last = PrintSettings(last: opened.print)
+        let last = PrintSettings(saved: opened.settings?.printDefaults ?? opened.print?.settings)
         _quality = State(initialValue: last.quality)
         _strength = State(initialValue: last.strength)
+        _copies = State(initialValue: last.copies ?? 1)
+        _copiesPicked = State(initialValue: last.copies != nil)
         lastColour = last.colour
     }
 
@@ -84,8 +86,8 @@ struct PrintSheet: View {
                             Text(copiesPicked ? "Copies: \(copies)" : "Copies: as the printer profile says").font(.headline)
                         }
                     }
+                    if !offersCopies, object.settings?.printDefaults?.copies != nil { Text("This printer uses one copy.").font(.caption).foregroundStyle(.secondary) }
                     estimateLine
-                    if offersCopies && copiesPicked && copies > 1 { Text("The estimate is for one.").font(.caption).foregroundStyle(.secondary) }
                 }
             }
             if uncertain {
@@ -116,7 +118,7 @@ struct PrintSheet: View {
         .task(id: printer?.id) { await loadFilaments() }
         // The model's version too: a correction rewrites the same current/model.stl, and a refusal of the old one
         // must not hold Print for the new one.
-        .task(id: "\(printer?.id ?? "")|\(quality)|\(strength)|\(object.current?.model ?? "")|\(modelVersion)") { await loadEstimate() }
+        .task(id: "\(printer?.id ?? "")|\(quality)|\(strength)|\(copiesPicked ? copies : 0)|\(object.current?.model ?? "")|\(modelVersion)") { await loadEstimate() }
     }
 
     // MARK: Printers
@@ -159,7 +161,7 @@ struct PrintSheet: View {
             }
         default:
             if filaments.isEmpty {
-                Text("Uses the loaded filament. Change it on the printer if you need to.").foregroundStyle(.secondary)
+                Text({ if case .material(let material)? = colour { return "Uses \(material), saved in Project Settings. Load it on the printer before printing." }; return "Uses the loaded filament. Change it on the printer if you need to." }()).foregroundStyle(.secondary)
             } else {
                 HStack(spacing: 10) {
                     RoundedRectangle(cornerRadius: 4).fill(Color.secondary.opacity(0.5)).frame(width: 18, height: 18)
@@ -239,14 +241,17 @@ struct PrintSheet: View {
     }
 
     private var colour: PrintSettings.Colour? {
-        guard let chosen else { return nil }
+        guard let chosen else {
+            if case .material? = lastColour, (opened.printerDestinationId ?? model.printerCatalog?.defaultDestinationId) == printer?.id { return lastColour }
+            return nil
+        }
         if keptSuggestion && chosen.suggested == true { return .auto }
         return chosen.external ? .external : .amsSlot(chosen.slot)
     }
 
     private func send() {
         let settings = PrintSettings(quality: offersQuality ? quality : .standard, strength: offersStrength ? strength : .standard, colour: colour,
-                                     copies: offersCopies && copiesPicked ? copies : nil)
+                                     copies: offersCopies && copiesPicked ? copies : (object.settings?.printDefaults?.copies != nil ? 1 : nil))
         let filament = chosen
         Task { if await model.print(object.id, checked: uncertain && checked, settings: settings, filament: filament) { dismiss() } }
     }
@@ -258,7 +263,7 @@ struct PrintSheet: View {
             guard !Task.isCancelled else { return }
             filaments = list
             let suggested = list.first { $0.suggested == true }
-            if let last = PrintSettings.lastSlot(lastColour, lastPrinter: opened.print?.destinationId, printer: printer?.id, in: list) {
+            if let last = PrintSettings.lastSlot(lastColour, lastPrinter: opened.settings?.printDefaults != nil ? (opened.printerDestinationId ?? model.printerCatalog?.defaultDestinationId) : opened.print?.destinationId, printer: printer?.id, in: list) {
                 slot = last
                 keptSuggestion = false
             } else {
@@ -278,7 +283,7 @@ struct PrintSheet: View {
         estimateState = .loading
         do {
             let result = try await model.estimate(object.id, destinationId: printer?.id, quality: offersQuality ? quality : .standard,
-                                                  strength: offersStrength ? strength : .standard)
+                                                  strength: offersStrength ? strength : .standard, copies: offersCopies && copiesPicked ? copies : (object.settings?.printDefaults?.copies != nil ? 1 : nil))
             guard !Task.isCancelled else { return }
             estimate = result
             estimateState = .done

@@ -29,6 +29,7 @@ export interface TouchupInput {
   signal?: AbortSignal;
   /** "fit" (make something that fits) may design in Fusion; "copy" always uses Blender (PRD §8.9). */
   kind?: 'fit' | 'copy';
+  preferredEngine?: DesignEngine;
   /** The previous Fusion design, so a change starts from its parameters. */
   design?: {f3d: string; parameters?: string};
   /** Stage changes: getting the engine ready, then the worker. */
@@ -105,8 +106,8 @@ async function stlSha256(scan: string[]): Promise<string | undefined> {
  * printer MCP's bridge reports it connected (after `launch: true`) and a new
  * design opens; otherwise Blender, with the reason recorded.
  */
-export async function chooseEngine(input: Pick<TouchupInput, 'handoff' | 'kind' | 'signal'>, deps: Pick<TouchupDeps, 'client'> = {}): Promise<EngineChoice> {
-  if (input.kind !== 'fit') return {engine: 'blender'};
+export async function chooseEngine(input: Pick<TouchupInput, 'handoff' | 'kind' | 'signal' | 'preferredEngine'>, deps: Pick<TouchupDeps, 'client'> = {}): Promise<EngineChoice> {
+  if (input.kind !== 'fit' || input.preferredEngine === 'blender') return {engine: 'blender'};
   const client = (deps.client ?? (handoff => new PrinterMcpClient(handoff)))(input.handoff);
   try {
     await client.connect(input.signal);
@@ -132,7 +133,7 @@ export async function chooseEngine(input: Pick<TouchupInput, 'handoff' | 'kind' 
 async function touchUp(input: TouchupInput, deps: TouchupDeps): Promise<TouchupResult & {passDir: string} & EngineChoice> {
   input.onStage?.('preparing', 'blender');
   // A design may open a new Fusion document: hold Fusion from that call to the end of the worker.
-  const releaseFusion = input.kind === 'fit' ? await acquireBlenderLock(deps.fusionLockPath ?? FUSION_LOCK_PATH) : undefined;
+  const releaseFusion = input.kind === 'fit' && input.preferredEngine !== 'blender' ? await acquireBlenderLock(deps.fusionLockPath ?? FUSION_LOCK_PATH) : undefined;
   let choice: EngineChoice;
   try { choice = await chooseEngine(input, deps); }
   catch (error) { await releaseFusion?.(); throw error; }

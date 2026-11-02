@@ -142,7 +142,7 @@ struct GeneralSettings: View {
                 }
             }
         } header: { Text("Notifications on this Mac") } footer: {
-            Text("Your iPhone has its own switches, and can change these too.").font(.caption).foregroundStyle(.secondary)
+            Text("Your iPhone can change these Mac settings. iPhone alerts also follow its system notification permission.").font(.caption).foregroundStyle(.secondary)
         }
         .disabled(companion.saving)
     }
@@ -163,8 +163,8 @@ struct GeneralSettings: View {
                     }
                 }
             } header: { Text("Notifications on this Mac") } footer: {
-                Text(NotificationPrefs.delivered ? "Progress is off on the Mac by default. Your iPhone has its own switches in its Settings."
-                     : "Mac notifications start with the event relay in the next update. Your iPhone has its own switches in its Settings.")
+                Text(NotificationPrefs.delivered ? "Progress is off on the Mac by default. iPhone alerts follow its system notification permission."
+                     : "Mac notifications are unavailable from this companion. iPhone alerts follow its system notification permission.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             .disabled(!NotificationPrefs.delivered)

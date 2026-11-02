@@ -197,22 +197,29 @@ public extension ControlClient {
         return result.object
     }
     /// Prints with the sheet's settings (`capabilities.printSettings`). A deadline after sending has an unknown outcome.
-    func printObject(_ id: String, checked: Bool, settings: PrintSettings) async throws -> Project {
+    func printObject(_ id: String, checked: Bool, settings: PrintSettings, overrideDefaults: Bool = false) async throws -> Project {
         var params = settings.params
+        if overrideDefaults { params["quality"] = .string(settings.quality.rawValue); params["strength"] = .string(settings.strength.rawValue) }
         params["id"] = .string(id)
         if checked { params["checked"] = .bool(true) }
         let result: ObjectReply = try await call("objects.print", params)
         return result.object
     }
     /// Slices the current model as a Print with these settings would, without printing. Up to 180 s.
-    func estimate(_ id: String, destinationId: String?, quality: PrintSettings.Quality, strength: PrintSettings.Strength) async throws -> PrintEstimate {
+    func estimate(_ id: String, destinationId: String?, quality: PrintSettings.Quality, strength: PrintSettings.Strength, copies: Int? = nil) async throws -> PrintEstimate {
         var params: [String: JSONValue] = ["id": .string(id), "quality": .string(quality.rawValue), "strength": .string(strength.rawValue)]
         if let destinationId { params["destinationId"] = .string(destinationId) }
+        if let copies { params["copies"] = .number(Double(copies)) }
         return try await call("objects.estimate", params)
     }
     /// Pause, resume or cancel this project's print (`capabilities.printControl`).
     func controlPrint(_ id: String, _ action: PrintControl) async throws -> Project {
         let result: ObjectReply = try await call(action.method, ["id": .string(id)]); return result.object
+    }
+    /// Copies the current model and project preferences, leaving the source and its print history alone.
+    func duplicateObject(_ id: String) async throws -> Project {
+        let result: ObjectReply = try await call("objects.duplicate", ["id": .string(id)])
+        return result.object
     }
     /// Removes the object and its folder from this Mac. Refused (`conflict`) while it is printing.
     func deleteObject(_ id: String) async throws {
@@ -347,14 +354,15 @@ public struct PrinterCapabilities: Decodable, Sendable, Equatable {
     public let multiColour: Bool?
     /// This printer's MCP can put several on the plate (`slice_stl` `repetitions`, KAN-214 PR 8b).
     public let copies: Bool?
+    public let materialChoice: Bool?
     public let missing: [String]?
     public let update: Update?
     public init(server: Server? = nil, progress: Bool = true, layers: Bool? = nil, camera: String = "none", filaments: String = "none",
                 pause: Bool = false, resume: Bool = false, cancel: Bool = false, quality: Bool = false, strength: Bool = false,
-                multiColour: Bool? = nil, copies: Bool? = nil, missing: [String]? = nil, update: Update? = nil) {
+                multiColour: Bool? = nil, copies: Bool? = nil, materialChoice: Bool? = nil, missing: [String]? = nil, update: Update? = nil) {
         self.server = server; self.progress = progress; self.layers = layers; self.camera = camera; self.filaments = filaments
         self.pause = pause; self.resume = resume; self.cancel = cancel; self.quality = quality; self.strength = strength
-        self.multiColour = multiColour; self.copies = copies; self.missing = missing; self.update = update
+        self.multiColour = multiColour; self.copies = copies; self.materialChoice = materialChoice; self.missing = missing; self.update = update
     }
 }
 public struct PrinterCatalog: Decodable, Sendable, Equatable {
@@ -369,7 +377,10 @@ public extension PrintSettings {
     /// Print Another (PRD §5.4): the settings the last print was sent with, so a reprint is the same print. Standard,
     /// and the suggested colour, for what it didn't record.
     init(last: Project.Print?) {
-        let saved = last?.settings
+        self.init(saved: last?.settings)
+    }
+
+    init(saved: CounterpartKit.PrintSettings?) {
         var colour: Colour?
         if case .object(let value)? = saved?.colour {
             if case .number(let slot)? = value["amsSlot"] { colour = .amsSlot(Int(slot)) }
@@ -378,7 +389,7 @@ public extension PrintSettings {
             else if value["auto"] == .bool(true) { colour = .auto }
         }
         self.init(quality: saved?.quality.flatMap(Quality.init(rawValue:)) ?? .standard,
-                  strength: saved?.strength.flatMap(Strength.init(rawValue:)) ?? .standard, colour: colour)
+                  strength: saved?.strength.flatMap(Strength.init(rawValue:)) ?? .standard, colour: colour, copies: saved?.copies)
     }
 
     /// The spool the last print used: the same slot when it is the same printer, or a loaded spool of the material it

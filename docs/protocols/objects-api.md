@@ -37,8 +37,8 @@ Wire types are zod schemas in `packages/contracts/src/counterpart.ts` (`@scan-to
 | `GET /v1/objects/<id>` | READ | | `{object}` |
 | `PATCH /v1/objects/<id>` | WRITE | `{instructions}`; only while `state` is `new` | `{object}` |
 | `DELETE /v1/objects/<id>` | WRITE | | `{deleted: true}`; 409 while a pass or print runs |
-| `GET /v1/objects/<id>/settings` | READ | | `{settings: {status, archived}}` (PR 8a; `archived` PR 8b). Project Settings; this version has Status and Hide from Home. |
-| `PATCH /v1/objects/<id>/settings` | WRITE | `{status?: "not-printed"\|"printed"\|"works"\|"needs-changes", archived?: boolean}`, at least one; other keys are 400 for now | `{settings, object}`. Status set by hand, any time (PRD §5.4). The path is `not-printed` → `printed` → `works` (shown as **Done**: "Done · it works", Done on Home); `needs-changes` branches off `printed`; `not-printed` makes the state `ready`. `archived` (PR 8b) is a separate flag (Hide from Home): the status underneath, and the state (`sent` included), stay exactly as they were and show again when it is unhidden. `status: "archived"` still works and sets the flag. 409 while a pass or print runs, or (for works/printed) before there is a model. Emits `project.updated` (`keys: ["status"]` or `["archived"]`). |
+| `GET /v1/objects/<id>/settings` | READ | | `{settings: {status, archived, printerDestinationId?, printDefaults?, designEngine?, notifications?}}`. The `projectPreferences` capability advertises the saved defaults. |
+| `PATCH /v1/objects/<id>/settings` | WRITE | `{title?, status?, archived?, printerDestinationId?: string \| null, printDefaults?: PrintSettings, designEngine?: "auto" \| "blender" \| "fusion", notifications?: "all" \| "problems"}`, at least one; unknown keys are 400 | `{settings, object}`. Status set by hand, any time (PRD §5.4). The path is `not-printed` → `printed` → `works` (shown as **Done**: "Done · it works", Done on Home); `needs-changes` branches off `printed`; `not-printed` makes the state `ready`. `archived` (PR 8b) is a separate flag (Hide from Home): the status underneath, and the state (`sent` included), stay exactly as they were and show again when it is unhidden. `status: "archived"` still works and sets the flag. 409 while a pass or print runs, or (for works/printed) before there is a model. Emits `project.updated` (`keys: ["status"]` or `["archived"]`). |
 | `PUT /v1/objects/<id>/scan` | WRITE | The scan's bytes (≤ 64 MiB). Optional `?name=scan.usdz\|scan.stl\|scan.3mf` (PR 1; default `scan.usdz`) | `{object}`; only while `state` is `new` |
 | `POST /v1/objects/<id>/photos?name=<file>` | WRITE | JPEG, PNG or HEIC bytes (≤ 25 MiB) | `{object}`. From PR 1 photos are accepted in every state except while the project is being deleted; photos added after a pass started are used by the next pass ("late photos"). |
 | `POST /v1/objects/<id>/capture?name=NNNN.heic`, `…/capture-depth?name=NNNN.depth.plist` | WRITE | In-hand capture frames | `{object}` |
@@ -64,6 +64,34 @@ Wire types are zod schemas in `packages/contracts/src/counterpart.ts` (`@scan-to
 | `GET /v1/objects/<id>/camera.jpg` | PRINT | | A JPEG from the camera of the printer this project is printing on, or its chosen printer (PR 2). Same cache, codes and header as the printer camera route. |
 | `POST /v1/objects/<id>/print/pause`, `…/print/resume`, `…/print/cancel` | PRINT | `{}` | `{object}` (PR 2). 409 when nothing of this project's is printing, or the MCP lacks the tool. The MCP's own confirmation, if it asks, arrives as `printConfirmation` exactly as for Print. The app asks "Stop the print?" before posting cancel. |
 | `GET /v1/objects/<id>/prints/<printId>/frames/<eventId>.jpg` | READ | | An event's camera frame (PR 3); the event's `frame` field gives the path. |
+
+### Saved Project Settings (`projectPreferences`)
+
+Both clients use the same settings mutation (local control: `objects.settings.set`).
+`printDefaults` replaces that defaults object; omitted fields in the replacement return to the printer profile.
+Print and Estimate merge these defaults beneath explicit per-run choices. Explicit `quality: "standard"`,
+`strength: "standard"`, and `copies: 1` override saved values. The print record retains an explicit one.
+The print sheets show and send one copy when a destination lacks multiple-copy support. Changing the
+physical printer clears the saved colour so a tray number cannot silently select a different printer's spool.
+`printerDestinationId: null` selects the companion's default printer.
+
+The next worker receives `designEngine`; Blender bypasses Fusion discovery and the Fusion lock.
+Scanned copies always use Blender. Automatic/Fusion choices use the existing setup/availability fallback.
+`notifications: "problems"` retains routine print events but gives them `notify: "none"`; printer questions,
+pauses, failures, unreachable and sent-without-monitoring notices remain available. Device preferences
+still apply. The Live Activity relay ends existing activities silently and does not push-start an activity
+for a muted event, because push-to-start requires an alert.
+
+`POST /v1/objects/<id>/duplicate` (WRITE; local `objects.duplicate`) returns `{object}`: a new ready,
+not-printed, unarchived project with independent copies of the current model, renders and editable design,
+its request, credit and defaults. It keeps legacy last-print settings when no saved defaults exist. It copies
+no active job, Ask, pending message, print history or outcome. Missing source files remove only the partial copy.
+A working pass must finish before duplication.
+
+Read-authorized exports include `GET /v1/objects/<id>/scan/<name>` for the recorded original scan and
+`GET /v1/objects/<id>/original/<index>` for a recorded `files.original` STL, 3MF or USDZ. Original/photo/scan
+exports require a regular file canonically inside the project, reject external symlinks and cap downloads at
+64 MiB. They never accept an arbitrary filesystem path. Existing model/photo/capture routes remain available.
 
 ### Print settings (PR 2)
 
