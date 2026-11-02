@@ -374,7 +374,8 @@ final class DecodingTests: XCTestCase {
         XCTAssertEqual(Set(events.map(\.type)).count, 20)
         // KAN-214 #199: `print.sent` is terminal, so it opens the project, not the Printing screen.
         let sent = try XCTUnwrap(events.first { $0.type == "print.sent" })
-        XCTAssertEqual(AppRoute(notification: ["projectId": sent.projectId, "type": sent.type]), .project(sent.projectId))
+        let sentProject = try XCTUnwrap(sent.projectId)
+        XCTAssertEqual(AppRoute(notification: ["projectId": sentProject, "type": sent.type]), .project(sentProject))
         for key in ["eventsPage", "eventsPageTruncated", "eventsPageReset"] { _ = try decode(EventsPage.self, object[key]) }
         XCTAssertTrue(try decode(EventsPage.self, object["eventsPageReset"]).needsResync)
         let statuses = try decode([Project.Status].self, object["statuses"])
@@ -424,6 +425,26 @@ final class DecodingTests: XCTestCase {
         let question = Project.PrintConfirmation(id: "q", message: "Start?", expiresAtMs: 2000, fields: [field], supported: true)
         XCTAssertFalse(question.canAccept([:], atMs: 1000))
         XCTAssertTrue(question.canAccept(["confirmed": true], atMs: 1000))
+    }
+
+    /// One event this version can't read never costs the page (KAN-214 PR 6's `mcp.update.*` has no project).
+    func testAPageKeepsEveryEventItCanRead() throws {
+        let page = #"""
+        {"events":[
+          {"v":1,"seq":7,"id":"e7","at":"2026-11-01T09:00:00Z","type":"pass.ready","projectId":"p","title":"Mic mount is ready","body":"About 1 h 12 m on P1S.","notify":"active"},
+          {"v":1,"seq":8,"id":"e8","at":"2026-11-01T09:01:00Z","type":"mcp.update.done","title":"bambu-printer-mcp updated","body":"1.4.2 → 1.5.0","notify":"passive",
+           "data":{"mcpId":"m1","fromVersion":"1.4.2","toVersion":"1.5.0","log":"added 1 package","progress":"not a number"}},
+          {"garbage":true},
+          {"v":1,"seq":10,"id":"e10","at":"2026-11-01T09:03:00Z","type":"print.teleported","projectId":"p","title":"T","body":"B","notify":"loud"}
+        ],"next":10,"latest":10}
+        """#
+        let decoded = try JSONDecoder().decode(EventsPage.self, from: Data(page.utf8))
+        XCTAssertEqual(decoded.events.map(\.id), ["e7", "e8", "e10"], "the garbage element is skipped; the rest decode")
+        XCTAssertNil(decoded.events[1].projectId)
+        XCTAssertEqual(decoded.events[1].data?.toVersion, "1.5.0")
+        XCTAssertNil(decoded.events[1].data?.progress, "a malformed fact is left out, not the event")
+        XCTAssertEqual(decoded.events[2].type, "print.teleported", "an unknown type is kept as its string")
+        XCTAssertEqual(decoded.next, 10)
     }
 
     func testEventsDecodeUnknownTypesAndLevels() throws {
