@@ -67,7 +67,7 @@ import CounterpartKit
         guard working == nil else { return }
         working = "devices"; refusal = nil
         defer { working = nil }
-        for id in ids {
+        for id in ids where id != deviceId && devices?.first(where: { $0.deviceId == id })?.current != true {
             do { try await store.mac.client.removeDevice(id) }
             catch let failure as CompanionError { refusal = failure.message; break } catch { break }
         }
@@ -240,18 +240,19 @@ struct MacSettingsSections: View {
     // MARK: Phones and iPads
 
     @ViewBuilder private var devicesSection: some View {
-        let current = (model.devices ?? []).filter { $0.legacy != true }
-        let older = (model.devices ?? []).filter { $0.legacy == true }
+        let isCurrent: (CompanionDevice) -> Bool = { $0.current == true || $0.deviceId == model.deviceId }
+        let current = (model.devices ?? []).filter { $0.legacy != true || isCurrent($0) }
+        let older = (model.devices ?? []).filter { $0.legacy == true && !isCurrent($0) }
         Section {
             ForEach(current) { device in
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(device.deviceName ?? device.model ?? "A phone").font(.body)
-                        Text(device.current == true ? "This iPhone" : (device.lastSeenAt.flatMap(ISO.date).map { "Seen " + Format.whenInSentence($0) } ?? "Paired"))
+                        Text(isCurrent(device) ? "This iPhone" : (device.lastSeenAt.flatMap(ISO.date).map { "Seen " + Format.whenInSentence($0) } ?? "Paired"))
                             .font(.caption).foregroundStyle(.secondary)
                     }
                     Spacer()
-                    if device.current != true {
+                    if !isCurrent(device) {
                         Button("Remove", role: .destructive) { Task { await model.remove([device.deviceId]) } }.disabled(model.working != nil)
                     }
                 }
@@ -261,7 +262,7 @@ struct MacSettingsSections: View {
             Section {
                 ForEach(older) { device in Text(device.deviceName ?? "An older pairing").foregroundStyle(.secondary) }
                 Button("Remove All", role: .destructive) { confirmRemoveAll = true }.disabled(model.working != nil)
-            } header: { Text("Older pairings") } footer: { Text("Pairings from before this version. They can't connect any more.") }
+            } header: { Text("Older pairings") } footer: { Text("Remove these only if you no longer use those devices. They'll need to pair again.") }
             .confirmationDialog("Remove \(older.count) older pairings?", isPresented: $confirmRemoveAll, titleVisibility: .visible) {
                 Button("Remove All", role: .destructive) { Task { await model.remove(older.map(\.deviceId)) } }
             }
