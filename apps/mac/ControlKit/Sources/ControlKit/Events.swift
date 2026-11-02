@@ -18,11 +18,17 @@ public struct CounterpartEvent: Codable, Sendable, Equatable, Identifiable {
         public let askId: String?
         public let confirmationId: String?
         public let expiresAt: String?
+        /// `mcp.update.*` (PRD §8.10): which install, the versions, and the log's tail on failure.
+        public let mcpId: String?
+        public let fromVersion: String?
+        public let toVersion: String?
+        public let log: String?
         public init(progress: Double? = nil, remainingSec: Double? = nil, endsAt: String? = nil, layer: Int? = nil, totalLayers: Int? = nil,
                     state: String? = nil, stage: String? = nil, problems: [Problem]? = nil) {
             self.progress = progress; self.remainingSec = remainingSec; self.endsAt = endsAt; self.layer = layer; self.totalLayers = totalLayers
             self.state = state; self.stage = stage; self.problems = problems
             estimateSec = nil; grams = nil; askId = nil; confirmationId = nil; expiresAt = nil
+            mcpId = nil; fromVersion = nil; toVersion = nil; log = nil
         }
     }
     public let seq: Int

@@ -176,6 +176,7 @@ struct CounterpartCommands: Commands {
         if DesignFixtures.assets != nil {
             NSApp.appearance = NSAppearance(named:.darkAqua) // the mockups are rendered in dark mode
             AppRouter.shared.open(DesignFixtures.screen == "popover" ? .qaPopover : DesignFixtures.screen.hasPrefix("settings") ? .settings : .main)
+            DesignFixtures.seedUpdate()
             DesignSnapshot.scheduleIfAsked()
             return
         }

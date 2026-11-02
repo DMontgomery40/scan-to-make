@@ -41,13 +41,15 @@ public struct ControlStatus: Decodable, Sendable {
         public let structuredPasses: Bool
         /// The printer's confirmation is relayed with every elicitation field type, and answered with typed values.
         public let genericConfirmations: Bool
-        private enum CodingKeys: String, CodingKey { case capture, cleanup, printerHandoff, nearbyPairing, objectsCreate, events, printControl, printSettings, structuredPasses, genericConfirmations }
+        /// `printers.updateMcp` and the `mcp.update.*` events (PRD §8.10).
+        public let mcpUpdates: Bool
+        private enum CodingKeys: String, CodingKey { case capture, cleanup, printerHandoff, nearbyPairing, objectsCreate, events, printControl, printSettings, structuredPasses, genericConfirmations, mcpUpdates }
         public init(capture: Bool = true, cleanup: Bool = true, printerHandoff: Bool = true, nearbyPairing: Bool = false,
                     objectsCreate: Bool = false, events: Bool = false, printControl: Bool = false, printSettings: Bool = false,
-                    structuredPasses: Bool = false, genericConfirmations: Bool = false) {
+                    structuredPasses: Bool = false, genericConfirmations: Bool = false, mcpUpdates: Bool = false) {
             self.capture = capture; self.cleanup = cleanup; self.printerHandoff = printerHandoff; self.nearbyPairing = nearbyPairing
             self.objectsCreate = objectsCreate; self.events = events; self.printControl = printControl; self.printSettings = printSettings
-            self.structuredPasses = structuredPasses; self.genericConfirmations = genericConfirmations
+            self.structuredPasses = structuredPasses; self.genericConfirmations = genericConfirmations; self.mcpUpdates = mcpUpdates
         }
         public init(from decoder: Decoder) throws {
             let values = try decoder.container(keyedBy: CodingKeys.self)
@@ -61,6 +63,7 @@ public struct ControlStatus: Decodable, Sendable {
             printSettings = try values.decodeIfPresent(Bool.self, forKey: .printSettings) ?? false
             structuredPasses = try values.decodeIfPresent(Bool.self, forKey: .structuredPasses) ?? false
             genericConfirmations = try values.decodeIfPresent(Bool.self, forKey: .genericConfirmations) ?? false
+            mcpUpdates = try values.decodeIfPresent(Bool.self, forKey: .mcpUpdates) ?? false
         }
     }
     public let protocolVersion: Int

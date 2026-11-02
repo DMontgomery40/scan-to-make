@@ -16,6 +16,7 @@
 		10A460FF8712D01F74D0C610 /* NearbyViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6F496F4AF4B9CFF607CE85C /* NearbyViews.swift */; };
 		114B947DFF6305E6F53ADFFE /* NotificationPrefs.swift in Sources */ = {isa = PBXBuildFile; fileRef = 04530A8CA650F101ADAE8AB8 /* NotificationPrefs.swift */; };
 		16062DFD6EE91A1948D2FD7F /* Runtime.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1DA7ED6F82EDD9901D021D2 /* Runtime.swift */; };
+		1CFBE8719FC7A12325804DDE /* PrinterUpdates.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78E5BE2D91907CDD0FB81A47 /* PrinterUpdates.swift */; };
 		20680B926C59DC5E0AE1AA44 /* AgentKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 084617C3A2280F650DFB14EA /* AgentKit.framework */; };
 		226FDEA6A81D66B9C43E7562 /* NewProject.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7762DD7E778E78012FBEE749 /* NewProject.swift */; };
 		229F4FC26B8A5E5C150CCBB1 /* LiveActivityRelay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83292C1F55412BA76639A23B /* LiveActivityRelay.swift */; };
@@ -50,6 +51,7 @@
 		7D832B15B62FF2048489D655 /* ModelStage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D09E6767AA8F339A8F92FF7 /* ModelStage.swift */; };
 		8591EC1044C78F60778FCC71 /* PairingSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 296E8C1354818E038DD4E375 /* PairingSession.swift */; };
 		879AC1D559DCB7BD49228BB3 /* EventRelayPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 45CABA4399301F85B9574DC6 /* EventRelayPolicy.swift */; };
+		8A43774E4F73900583F1D36F /* PrinterUpdates.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78E5BE2D91907CDD0FB81A47 /* PrinterUpdates.swift */; };
 		8E48F6039DED4418C9F28F98 /* Confirmation.swift in Sources */ = {isa = PBXBuildFile; fileRef = D25DA0A9EC41FEC7B93D7FC6 /* Confirmation.swift */; };
 		9142992D660F78023F63F515 /* SettingsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B0EFAE6EE67455FAFBEF608 /* SettingsTests.swift */; };
 		91AEFAB97B2FBEA45135656F /* MacStatusModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E2BD0F29478556FD0C62A83 /* MacStatusModelTests.swift */; };
@@ -87,6 +89,7 @@
 		FB6A3B989070FD8E00280732 /* Objects.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6085C88754126EAB39C66248 /* Objects.swift */; };
 		FC239A7E21B63E4DD6E6CE1C /* CounterpartKit in Frameworks */ = {isa = PBXBuildFile; productRef = 9C3781E485F9980822ADA4B0 /* CounterpartKit */; };
 		FEC965F8C46620AD288BA7C3 /* NetworkAddresses.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E40641D5842346F76EB19B3 /* NetworkAddresses.swift */; };
+		FFC03AB56E1D793030EBE41D /* PrinterUpdatesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2F79999CAB3CC5AED8AF841 /* PrinterUpdatesTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -160,6 +163,7 @@
 		67B5A7B68401A1C2066938E8 /* LocalNetworkAccessTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalNetworkAccessTests.swift; sourceTree = "<group>"; };
 		7762DD7E778E78012FBEE749 /* NewProject.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewProject.swift; sourceTree = "<group>"; };
 		78DF45C7E52F301838B8C603 /* Files.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Files.swift; sourceTree = "<group>"; };
+		78E5BE2D91907CDD0FB81A47 /* PrinterUpdates.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrinterUpdates.swift; sourceTree = "<group>"; };
 		7A8990C00F35007DA6F0FE21 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/InfoPlist.strings; sourceTree = "<group>"; };
 		81F869DA19C2B26065AAF581 /* MacStatusModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacStatusModel.swift; sourceTree = "<group>"; };
 		82E682F2C777DDBCE67DFA31 /* CloudSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudSync.swift; sourceTree = "<group>"; };
@@ -176,6 +180,7 @@
 		A23E6083F6062B543A95EE19 /* ModelMesh.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelMesh.swift; sourceTree = "<group>"; };
 		AA62B9003D4361659BDE0785 /* MainWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainWindow.swift; sourceTree = "<group>"; };
 		AD88AEEFC08611A87FA75FE2 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		B2F79999CAB3CC5AED8AF841 /* PrinterUpdatesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrinterUpdatesTests.swift; sourceTree = "<group>"; };
 		B5F06994F3DC2679FF8587BB /* ObjectsModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ObjectsModel.swift; sourceTree = "<group>"; };
 		B8FC0CEA3CCA9AA8B21FB7AF /* AgentKitTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = AgentKitTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		BA5042DB008B425E2606B911 /* ModelAccessModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelAccessModel.swift; sourceTree = "<group>"; };
@@ -316,6 +321,7 @@
 				04530A8CA650F101ADAE8AB8 /* NotificationPrefs.swift */,
 				B5F06994F3DC2679FF8587BB /* ObjectsModel.swift */,
 				2D69C6D9C935E91492BF71E4 /* PairingWindow.swift */,
+				78E5BE2D91907CDD0FB81A47 /* PrinterUpdates.swift */,
 				3B814B01D67995804A9C7A30 /* PrintSheet.swift */,
 				1B4CAC0C434F5FAB667272B0 /* ProjectDetail.swift */,
 				A1DA7ED6F82EDD9901D021D2 /* Runtime.swift */,
@@ -333,6 +339,7 @@
 				DC5F2C1001F7210EDDAC44F0 /* ModelAccessModelTests.swift */,
 				124E802B58E41122F995456E /* NearbyModelTests.swift */,
 				9E37E3298AF5B6A96E8E996C /* ObjectsModelTests.swift */,
+				B2F79999CAB3CC5AED8AF841 /* PrinterUpdatesTests.swift */,
 				4B0EFAE6EE67455FAFBEF608 /* SettingsTests.swift */,
 			);
 			path = AppTests;
@@ -535,6 +542,7 @@
 				3DC3AA5F72A5359487CBF13A /* PairingWindow.swift in Sources */,
 				B5370FB378445BA7284F753F /* PrintSheet.swift in Sources */,
 				05551324D77D3BD8D2A0C7C3 /* PrinterCheck.swift in Sources */,
+				8A43774E4F73900583F1D36F /* PrinterUpdates.swift in Sources */,
 				F6BF783263E183A6877B0CC9 /* ProjectDetail.swift in Sources */,
 				16062DFD6EE91A1948D2FD7F /* Runtime.swift in Sources */,
 				02C51868139E34338B1B6200 /* SettingsViews.swift in Sources */,
@@ -573,6 +581,8 @@
 				B0090E1EDC08376AA430DCD6 /* ObjectsModelTests.swift in Sources */,
 				AA8A4960648DEA5F67A8ACB2 /* PairingSessionTests.swift in Sources */,
 				CF246BFAE6CBC7A02A42E10E /* PrinterCheck.swift in Sources */,
+				1CFBE8719FC7A12325804DDE /* PrinterUpdates.swift in Sources */,
+				FFC03AB56E1D793030EBE41D /* PrinterUpdatesTests.swift in Sources */,
 				9142992D660F78023F63F515 /* SettingsTests.swift in Sources */,
 				A0E5DD6215B393751ABBF3DE /* UnixTransport.swift in Sources */,
 			);

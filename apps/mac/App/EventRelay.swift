@@ -91,6 +91,8 @@ import ControlKit
         let prefs = NotificationPrefs(defaults: defaults)
         let now = Date()
         for (index, event) in events.enumerated() {
+            // An MCP update (PRD §8.10): Settings shows it; when it finished, the printers are read again for the version.
+            if PrinterUpdates.shared.apply(event) { await AppModels.objects.refresh() }
             let project = event.projectId.flatMap { projects[$0] }
             let later = events[(index + 1)...].filter { $0.projectId == event.projectId }.map(\.type)
             if CatchUp.shouldNotify(event, now: now, prefs: prefs, alreadyNotified: notified.contains(event.id), later: later,

@@ -44,20 +44,31 @@ struct SettingsView: View {
         }
         .frame(width:620)
         .tint(.filament)
-        .task { await mac.refresh() }
+        .task {
+            #if DEBUG
+            // Design QA: the tab asked for wins over the one the system restores from last time.
+            if let asked = SettingsTab.designed { tab = asked }
+            #endif
+            await mac.refresh()
+        }
     }
 }
 
 extension SettingsTab {
     @MainActor static var initial: SettingsTab {
         #if DEBUG
-        if DesignFixtures.assets != nil, DesignFixtures.screen.hasPrefix("settings-"),
-           let tab = SettingsTab(rawValue:String(DesignFixtures.screen.dropFirst("settings-".count)).replacingOccurrences(of:"-nofusion", with:"")) {
-            return tab
-        }
+        if let designed { return designed }
         #endif
         return .general
     }
+    #if DEBUG
+    /// `--design-screen settings-<tab>`, with fixtures or against the real companion.
+    @MainActor static var designed: SettingsTab? {
+        let screen = DesignFixtures.assets != nil ? DesignFixtures.screen : (DesignFixtures.realScreen ?? "")
+        guard screen.hasPrefix("settings-") else { return nil }
+        return SettingsTab(rawValue:String(screen.dropFirst("settings-".count)).replacingOccurrences(of:"-nofusion", with:""))
+    }
+    #endif
 }
 
 // MARK: General
@@ -283,6 +294,8 @@ private struct DeviceRow: View {
 
 struct PrintersSettings: View {
     @ObservedObject var objects: ObjectsModel
+    @ObservedObject private var updates = PrinterUpdates.shared
+    /// Only for a companion without `printers.updateMcp`: the package manager's own command, run here.
     @State private var updating: Set<String> = []
     @State private var updateResult: [String: String] = [:]
 
@@ -313,7 +326,9 @@ struct PrintersSettings: View {
             }
             Section("Printer MCPs") {
                 ForEach(PrinterMCP.list(printers)) { mcp in
-                    MCPRow(mcp:mcp, updating:updating.contains(mcp.id), result:updateResult[mcp.id]) { update(mcp) }
+                    MCPRow(mcp:mcp, companionUpdates:objects.capabilities?.mcpUpdates == true,
+                           status:mcp.mcpId.flatMap { updates.status[$0] }, updatingHere:updating.contains(mcp.id), result:updateResult[mcp.id],
+                           update:{ update(mcp, fresh:false) }, installFresh:{ update(mcp, fresh:true) })
                 }
                 if PrinterMCP.list(printers).isEmpty { Text("None found yet.").foregroundStyle(.secondary) }
             }
@@ -328,8 +343,13 @@ struct PrintersSettings: View {
         switch state { case "ready": return "Ready"; case "busy": return "Busy"; case "offline": return "Offline"; default: return "Not checked yet" }
     }
 
-    /// Runs the MCP's own package-manager update, as the companion describes it. Never anything else.
-    private func update(_ mcp: PrinterMCP) {
+    /// The companion updates it its own way (PRD §8.10) and the events carry the progress. A companion without
+    /// `printers.updateMcp` gets the package manager's own command run here, as before; never anything else.
+    private func update(_ mcp: PrinterMCP, fresh: Bool) {
+        if objects.capabilities?.mcpUpdates == true, let mcpId = mcp.mcpId {
+            Task { await updates.update(mcpId, fresh:fresh, socket:ModelAccessModel.socketPath(for:Installation(bundle:.main))) }
+            return
+        }
         guard let command = mcp.update?.command, !command.isEmpty else { return }
         updating.insert(mcp.id)
         updateResult[mcp.id] = nil
@@ -342,41 +362,7 @@ struct PrintersSettings: View {
     }
 }
 
-/// One printer MCP install, from the destinations that use it.
-struct PrinterMCP: Identifiable, Equatable {
-    let name: String
-    let version: String?
-    let origin: String?
-    let printers: [String]
-    let update: PrinterCapabilities.Update?
-    let missing: [String]
-    var id: String { "\(name)|\(origin ?? "")|\(version ?? "")" }
-
-    static func == (a: PrinterMCP, b: PrinterMCP) -> Bool { a.id == b.id && a.printers == b.printers }
-
-    static func list(_ printers: [PrinterDestination]) -> [PrinterMCP] {
-        let grouped = Dictionary(grouping:printers) { "\($0.mcpName)|\($0.origin ?? "")|\($0.capabilities?.server?.version ?? "")" }
-        return grouped.values.map { members in
-            let first = members[0]
-            return PrinterMCP(name:first.mcpName, version:first.capabilities?.server?.version, origin:first.origin, printers:members.map(\.name),
-                              update:members.compactMap { $0.capabilities?.update }.first, missing:first.capabilities?.missing ?? [])
-        }
-        .sorted { $0.name == $1.name ? ($0.origin ?? "") < ($1.origin ?? "") : $0.name < $1.name }
-    }
-
-    /// Where its config lives, as people know it.
-    var source: String {
-        switch origin {
-        case "printer-handoff": return "Counterpart · printer-handoff.json"
-        case "claude-code": return "Claude Code · ~/.claude.json"
-        case "claude-desktop": return "Claude Desktop · claude_desktop_config.json"
-        case "cursor": return "Cursor · ~/.cursor/mcp.json"
-        case "codemode": return "Codemode"
-        case "codex": return "Codex · ~/.codex/config.toml"
-        default: return "Your MCP settings"
-        }
-    }
-
+extension PrinterMCP {
     @MainActor var configURL: URL? {
         let home = FileManager.default.homeDirectoryForCurrentUser
         switch origin {
@@ -406,26 +392,65 @@ struct PrinterMCP: Identifiable, Equatable {
 
 private struct MCPRow: View {
     let mcp: PrinterMCP
-    let updating: Bool
+    /// The companion updates MCPs itself (`printers.updateMcp`).
+    let companionUpdates: Bool
+    let status: McpUpdateStatus?
+    let updatingHere: Bool
     let result: String?
     let update: () -> Void
+    let installFresh: () -> Void
+    @State private var showLog = false
+
+    private var canUpdate: Bool { companionUpdates ? mcp.mcpId != nil && mcp.updateAvailable : mcp.update?.command?.isEmpty == false }
+    private var busy: Bool { updatingHere || status?.busy == true }
+
     var body: some View {
-        HStack(spacing:10) {
-            VStack(alignment:.leading, spacing:2) {
+        HStack(alignment:.top, spacing:10) {
+            VStack(alignment:.leading, spacing:3) {
                 HStack(spacing:6) {
                     Text(mcp.name).font(.body.weight(.medium))
                     if let version = mcp.version { Text(version).font(.caption.monospacedDigit()).foregroundStyle(.secondary) }
+                    if let latest = mcp.update?.latestVersion, McpUpdateStatus.newer(installed:mcp.version, latest:latest) {
+                        Text("→ \(latest)").font(.caption.monospacedDigit()).foregroundStyle(Color.filament)
+                    }
                 }
                 Text(mcp.source + (mcp.printers.count == 1 ? " · used by \(mcp.printers[0])" : "")).font(.caption).foregroundStyle(.secondary)
-                if let message = mcp.update?.message { Text(message).font(.caption.weight(.medium)).foregroundStyle(Color.filament) }
+                if let message = mcp.update?.message, status == nil { Text(message).font(.caption.weight(.medium)).foregroundStyle(Color.filament) }
+                if let status { statusLine(status) }
                 if let result { Text(result).font(.caption).foregroundStyle(.secondary) }
+                if let url = mcp.configURL {
+                    Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([url]) }
+                        .buttonStyle(.link).font(.caption).help(url.path)
+                }
             }
             Spacer()
-            if updating { ProgressView().controlSize(.small) }
-            if mcp.update?.command?.isEmpty == false { Button("Update", action:update).buttonStyle(.glassProminent).disabled(updating) }
-            if let url = mcp.configURL {
-                Button("Show Config") { NSWorkspace.shared.activateFileViewerSelecting([url]) }
+            if busy { ProgressView().controlSize(.small) }
+            if case .unresolved = status {
+                Button("Install a Fresh Copy", action:installFresh).buttonStyle(.glassProminent)
+            } else if canUpdate {
+                Button(status.map { if case .failed = $0 { return "Try Again" } else { return "Update" } } ?? "Update", action:update)
+                    .buttonStyle(.glassProminent).disabled(busy)
             }
+        }
+    }
+
+    @ViewBuilder private func statusLine(_ status: McpUpdateStatus) -> some View {
+        switch status {
+        case .failed(let log?) where !log.isEmpty:
+            VStack(alignment:.leading, spacing:4) {
+                Text(status.words).font(.caption).foregroundStyle(.red)
+                DisclosureGroup("What it said", isExpanded:$showLog) {
+                    ScrollView {
+                        Text(verbatim:log).font(.caption2.monospaced()).textSelection(.enabled).frame(maxWidth:.infinity, alignment:.leading)
+                    }
+                    .frame(maxHeight:120)
+                }
+                .font(.caption)
+            }
+        case .failed, .problem: Text(status.words).font(.caption).foregroundStyle(.red)
+        case .unresolved: Text(status.words + " Install a fresh copy to update it from here.").font(.caption).foregroundStyle(.secondary)
+        case .updated: Text(status.words).font(.caption).foregroundStyle(Color.okGreen)
+        default: Text(status.words).font(.caption).foregroundStyle(.secondary)
         }
     }
 }

@@ -69,7 +69,12 @@ side-by-side comparison with `docs/design/overhaul/screens/mac-*.jpg`. Build a d
 `STM_VARIANT=.design STM_USE_LEGACY_COMPANION=NO` so it never shares the installed app's identity.
 Without fixtures, `--design-project <id> [--design-screen print]` opens one real project (and its print sheet, which
 asks the real printer for an estimate and never prints) for the same snapshot against the running companion.
-`--design-legacy` adds three pairings from before stable identity to the fixtures' Phones and iPads.
+`--design-legacy` adds three pairings from before stable identity to the fixtures' Phones and iPads, and
+`--design-update waiting|failed|unresolved|updated` shows Settings → Printers with an MCP update in that state.
+Launch a design run frontmost (`open -n`, not `open -g`): with Stage Manager on, the windows of an app in the
+background sit in the strip as small thumbnails. The snapshot brings the app forward first, and `windows.txt` ends with
+a `frame-check` line per window (size against its minimum, on a screen, not in the strip); a window still in the strip
+is reported there instead of captured.
 
 The words for a project come from `packages/CounterpartKit` (`ProjectWords`, shared with the phone); the Mac adds only
 its sidebar sections, capsule and actions (`ControlKit/Sources/ControlKit/ObjectWords.swift`).

@@ -68,6 +68,7 @@ targets:
       - App/FusionSetup.swift
       - App/Diagnostics.swift
       - App/EventRelayPolicy.swift
+      - App/PrinterUpdates.swift
       - App/ModelMesh.swift
       - ControlKit/Sources/ControlKit
     dependencies:
