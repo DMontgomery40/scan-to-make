@@ -391,7 +391,7 @@ enum FusionSetup {
         case reopenFusion
         /// The add-in answers on its port, but the printer MCP doesn't recognise its reply (bambu-printer-mcp 1.1.49
         /// expects `result.pong`; the pinned add-in says `result.status: "pong"`).
-        case bridgeOutdated
+        case bridgeOutdated(server: String)
         case notConfigured
         /// The printer MCP has no Fusion bridge (older than bambu-printer-mcp 1.1.4x).
         case noBridge
@@ -404,8 +404,8 @@ enum FusionSetup {
             case .connected: return "Fusion is connected. New designs use it while it's running."
             case .needsDesign: return "Open a design in Fusion first (File → New Design), then press Set Up Again."
             case .reopenFusion: return "Quit Fusion and open it again, so it picks up the new settings. Then press Set Up Again."
-            case .bridgeOutdated:
-                return "Fusion's add-in is answering, but your printer MCP doesn't recognise it yet. Update bambu-printer-mcp, then press Set Up Again."
+            case .bridgeOutdated(let server):
+                return "Fusion's add-in is answering, but \(server) doesn't recognise it yet. Update \(server), then press Set Up Again."
             case .notConfigured: return "Your printer MCP doesn't see the Fusion settings yet. Press Set Up Again."
             case .noBridge: return "Your printer MCP can't talk to Fusion. Update it in Settings → Printers, then press Set Up Again."
             case .notConnected(let reason): return reason.isEmpty ? "Fusion didn't connect." : "Fusion didn't connect: \(reason)"
@@ -459,7 +459,9 @@ enum FusionSetup {
             }
             let status = Status.from(status: reply, design: design)
             // "Reopen Fusion" only when the add-in really doesn't answer on its port.
-            if status == .reopenFusion, await addinAnswers(port: UInt16(port) ?? 9877) { return .bridgeOutdated }
+            if status == .reopenFusion, await addinAnswers(port: UInt16(port) ?? 9877) {
+                return .bridgeOutdated(server: reply?.server ?? "your printer MCP")
+            }
             return status
         } catch {
             return .unreachable(error.localizedDescription)
@@ -474,6 +476,9 @@ extension FusionSetup {
             let socket = Darwin.socket(AF_INET, SOCK_STREAM, 0)
             guard socket >= 0 else { return false }
             defer { close(socket) }
+            // A listener that hangs up must fail the probe, not raise SIGPIPE in the app.
+            var on: Int32 = 1
+            setsockopt(socket, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<Int32>.size))
             var time = timeval(tv_sec: timeout, tv_usec: 0)
             setsockopt(socket, SOL_SOCKET, SO_RCVTIMEO, &time, socklen_t(MemoryLayout<timeval>.size))
             setsockopt(socket, SOL_SOCKET, SO_SNDTIMEO, &time, socklen_t(MemoryLayout<timeval>.size))
@@ -506,7 +511,12 @@ struct MCPCall {
     var cwd: String?
     var env: [String: String] = [:]
 
-    struct Reply: Equatable { let isError: Bool; let text: String }
+    struct Reply: Equatable {
+        let isError: Bool
+        let text: String
+        /// The server's own name from `initialize` (`bambu-printer-mcp`, `mcp-3d-printer-server`).
+        var server: String? = nil
+    }
 
     /// As the companion starts a printer MCP (`appOwnedPrinterProcess`): a `node` that is gone is this app's own, and
     /// PATH has this app's node and the usual Homebrew folders, so `npx` and `uvx` are found from a GUI app.
@@ -579,7 +589,7 @@ struct MCPCall {
         }
         try send(["jsonrpc": "2.0", "id": 1, "method": "initialize",
                   "params": ["protocolVersion": "2025-06-18", "capabilities": [:], "clientInfo": ["name": "Counterpart", "version": "1"]]])
-        _ = try await reply(to: 1)
+        let server = ((try await reply(to: 1))["result"] as? [String: Any]).flatMap { ($0["serverInfo"] as? [String: Any])?["name"] as? String }
         try send(["jsonrpc": "2.0", "method": "notifications/initialized"])
         try send(["jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": [:]])
         let tools = Set((((try await reply(to: 2))["result"] as? [String: Any])?["tools"] as? [[String: Any]] ?? []).compactMap { $0["name"] as? String })
@@ -587,10 +597,10 @@ struct MCPCall {
             guard tools.contains(name) else { return nil }
             try send(["jsonrpc": "2.0", "id": id, "method": "tools/call", "params": ["name": name, "arguments": arguments]])
             let answer = try await reply(to: id)
-            if let error = answer["error"] as? [String: Any] { return Reply(isError: true, text: error["message"] as? String ?? "") }
+            if let error = answer["error"] as? [String: Any] { return Reply(isError: true, text: error["message"] as? String ?? "", server: server) }
             let result = answer["result"] as? [String: Any] ?? [:]
             let text = (result["content"] as? [[String: Any]] ?? []).compactMap { $0["type"] as? String == "text" ? $0["text"] as? String : nil }.joined()
-            return Reply(isError: result["isError"] as? Bool ?? false, text: text)
+            return Reply(isError: result["isError"] as? Bool ?? false, text: text, server: server)
         }
         guard let first = try await call(3, name, arguments) else { return (nil, nil) }
         guard let (next, nextArguments) = then(first) else { return (first, nil) }

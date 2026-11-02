@@ -125,7 +125,7 @@ final class FusionSetUpFlowTests: XCTestCase {
         let reply = #"{"jsonrpc":"2.0","id":3,"result":{"content":[{"type":"text","text":"{\"connected\":true,\"configured\":true}"}]}}"#
         let call = MCPCall(command: try fakeMCP(tools: ["fusion_mcp_status"]).path, args: [], env: ["FAKE_REPLY": reply])
         let answer = try await call.callTool("fusion_mcp_status", arguments: ["launch": true], timeout: 10)
-        XCTAssertEqual(answer, MCPCall.Reply(isError: false, text: #"{"connected":true,"configured":true}"#))
+        XCTAssertEqual(answer, MCPCall.Reply(isError: false, text: #"{"connected":true,"configured":true}"#, server: "fake"))
         let older = MCPCall(command: try fakeMCP(tools: ["print_3mf"]).path, args: [], env: ["FAKE_REPLY": reply])
         let none = try await older.callTool("fusion_mcp_status", arguments: [:], timeout: 10)
         XCTAssertNil(none, "a printer MCP without the Fusion bridge")
@@ -188,6 +188,7 @@ final class FusionSetUpFlowTests: XCTestCase {
         XCTAssertTrue(answers)
         let closed = await FusionSetup.addinAnswers(port: port)
         XCTAssertFalse(closed, "nothing listening: reopen Fusion")
-        XCTAssertTrue(FusionSetup.Status.bridgeOutdated.words.contains("Update bambu-printer-mcp"))
+        XCTAssertTrue(FusionSetup.Status.bridgeOutdated(server: "mcp-3d-printer-server").words.contains("Update mcp-3d-printer-server"),
+                      "the printer MCP actually configured, either one")
     }
 }
