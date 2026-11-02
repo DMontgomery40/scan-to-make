@@ -123,6 +123,7 @@ struct ProjectDetail: View {
                 }
                 .id(DidItFit.key(object))
             case .needsYou: needsYou
+            case .preparing where words.printRunning: printingCard
             case .working, .sending, .preparing: progressCard
             case .printing: printingCard
             case .failed: failedCard
@@ -169,13 +170,9 @@ struct ProjectDetail: View {
     private var printingCard: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text(object.print?.destination.map { "Printing on \($0.name)" } ?? "Printing").font(.subheadline.weight(.semibold))
+                // The companion's words as they are: "Getting ready · …" while the printer prepares, then its progress.
+                Text(words.status).font(.subheadline.weight(.semibold))
                 Spacer()
-                if let status = object.print?.printerStatus, let percent = status.percent {
-                    Text([("\(Int(percent.rounded()))%"), status.remainingMinutes.map { ObjectWords.formatMinutes($0) + " left" }]
-                        .compactMap { $0 }.joined(separator: " · "))
-                        .font(.caption.monospacedDigit()).foregroundStyle(Color.okGreen)
-                }
             }
             if let progress = words.progress { ProgressView(value: progress).tint(.okGreen) }
             if model.capabilities?.printControl == true { printControls }
@@ -231,7 +228,9 @@ struct ProjectDetail: View {
         GlassEffectContainer(spacing: 10) {
             HStack(spacing: 10) {
                 HStack(spacing: 8) {
+                    // Part of the field: a click on it is a click in the field.
                     Image(systemName: "text.bubble").foregroundStyle(.secondary)
+                        .contentShape(Rectangle()).onTapGesture { if canCorrect { noteFocused = true } }.accessibilityHidden(true)
                     ForEach(photos, id: \.self) { url in
                         FillImage(url: url, version: 0).frame(width: 26, height: 26).clipShape(.rect(cornerRadius: 6))
                             .overlay(alignment: .topTrailing) {
@@ -255,7 +254,8 @@ struct ProjectDetail: View {
                 if words.actions.contains(.retry) && object.current == nil {
                     EmptyView()
                 } else {
-                    Button(action: print) { Label(words.done ? "Print Another…" : "Print…", systemImage: "printer.fill").padding(.horizontal, 6).frame(height: 30) }
+                    Button(action: print) { Label(words.done ? "Print Another…" : object.state == .failed && object.print != nil ? "Print Again…" : "Print…",
+                                                       systemImage: "printer.fill").padding(.horizontal, 6).frame(height: 30) }
                         .buttonStyle(.glassProminent).controlSize(.extraLarge)
                         .disabled(!canPrint)
                         .help(model.printer(for: object) == nil ? "No printer found in your printer MCP’s settings." : "")

@@ -151,6 +151,10 @@ struct SocketObjects: ObjectsCompanion {
     private let companion: any ObjectsCompanion
     private var loop: Task<Void, Never>?
     private var failures = 0
+    /// Reads are numbered as they start; a reply older than one already applied is dropped, so a slow read can never
+    /// put back a state the project has left (a "Ready to print" shown through a whole pass).
+    private var readsStarted = 0
+    private var readApplied = 0
     private var extrasReadAt: Date?
     private var loadedOnce = false
     /// New Project is open in the window: nothing is selected on purpose.
@@ -192,7 +196,7 @@ struct SocketObjects: ObjectsCompanion {
         problem = nil
         do {
             let updated = try await companion.print(id, checked:checked, filament:filament)
-            if let index = objects.firstIndex(where:{ $0.id == id }) { objects[index] = updated }
+            applyReply(updated)
             wake()
             return true
         } catch {
@@ -214,7 +218,7 @@ struct SocketObjects: ObjectsCompanion {
             if capabilities?.printSettings == true { updated = try await companion.print(id, checked:checked, settings:settings) }
             else if let filament { updated = try await companion.print(id, checked:checked, filament:filament) }
             else { updated = try await companion.print(id, checked:checked) }
-            if let index = objects.firstIndex(where:{ $0.id == id }) { objects[index] = updated }
+            applyReply(updated)
             wake()
             return true
         } catch {
@@ -237,7 +241,7 @@ struct SocketObjects: ObjectsCompanion {
         if problem?.id == id { problem = nil }
         do {
             let updated = try await companion.control(id, action)
-            if let index = objects.firstIndex(where:{ $0.id == id }) { objects[index] = updated }
+            applyReply(updated)
             wake()
             return true
         } catch {
@@ -259,20 +263,41 @@ struct SocketObjects: ObjectsCompanion {
         defer { working.remove(id) }
         do {
             let updated = try await companion.selectPrinter(id, destinationId:destinationId)
-            if let index = objects.firstIndex(where:{ $0.id == id }) { objects[index] = updated }
+            applyReply(updated)
             problem = nil
         } catch { problem = Problem(id:id, text:Self.sentence(for:error)) }
     }
 
     /// Reads the list once and returns the seconds until the next read.
+    /// An action's reply is the newest word on its project: a read that started before it is dropped.
+    private func applyReply(_ updated: Project) {
+        readApplied = startRead()
+        if let index = objects.firstIndex(where: { $0.id == updated.id }) { objects[index] = updated }
+    }
+
+    /// The number of a read about to start: `apply(read:…)` takes its reply.
+    func startRead() -> Int { readsStarted += 1; return readsStarted }
+
+    /// One read's projects, unless a newer read (or an action's reply) was applied first. Returns whether it was.
+    @discardableResult func apply(read: Int, _ list: [Project], _ extras: [String: PublishedExtras]) -> Bool {
+        guard read > readApplied else { return false }
+        readApplied = read
+        // Published only when something changed: an unchanged read redraws nothing (PRD §9.6).
+        if objects != list { objects = list }
+        if self.extras != extras { self.extras = extras }
+        return true
+    }
+
     @discardableResult func refresh() async -> Double {
         do {
-            let (list, extras) = try await companion.objectsWithExtras()
+            let read = startRead()
+            let (fetched, extras) = try await companion.objectsWithExtras()
             failures = 0
-            // Published only when something changed: an unchanged read redraws nothing (PRD §9.6).
-            if objects != list { objects = list }
-            if self.extras != extras { self.extras = extras }
-            DownloadsWatcher.shared.follow(extras, titles: Dictionary(uniqueKeysWithValues: list.map { ($0.id, $0.words.title) }))
+            // A newer read may already be shown (the event relay's): this one's list is dropped, the rest still runs.
+            if apply(read: read, fetched, extras) {
+                DownloadsWatcher.shared.follow(extras, titles: Dictionary(uniqueKeysWithValues: fetched.map { ($0.id, $0.words.title) }))
+            }
+            let list = objects
             let catalog = try? await companion.printers()
             if printerCatalog != catalog { printerCatalog = catalog }
             if availability != .ready { availability = .ready }
@@ -328,6 +353,7 @@ struct SocketObjects: ObjectsCompanion {
                 object = try await companion.addFile(object.id, kind:kind, path:file.path)
             }
             object = try await companion.start(object.id)
+            readApplied = startRead()
             if let index = objects.firstIndex(where:{ $0.id == object.id }) { objects[index] = object } else { objects.insert(object, at:0) }
             selection = object.id
             wake()
@@ -410,7 +436,7 @@ struct SocketObjects: ObjectsCompanion {
         if problem?.id == id { problem = nil }
         do {
             let updated = try await body()
-            if let index = objects.firstIndex(where: { $0.id == id }) { objects[index] = updated }
+            applyReply(updated)
             wake()
             return true
         } catch {
@@ -437,7 +463,7 @@ struct SocketObjects: ObjectsCompanion {
             case .bestGuess: updated = try await companion.answerCloseup(id, bestGuess:true)
             case .retry: updated = try await companion.start(id)
             }
-            if let index = objects.firstIndex(where: { $0.id == id }) { objects[index] = updated }
+            applyReply(updated)
             wake()
             return true
         } catch {
@@ -465,7 +491,7 @@ struct SocketObjects: ObjectsCompanion {
         if problem?.id == id { problem = nil }
         do {
             let updated = try await companion.answerPrintConfirmation(id, confirmationId:confirmationId, answer:answer)
-            if let index = objects.firstIndex(where:{ $0.id == id }) { objects[index] = updated }
+            applyReply(updated)
             wake()
             return true
         } catch {

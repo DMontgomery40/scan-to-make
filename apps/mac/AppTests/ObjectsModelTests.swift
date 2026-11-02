@@ -368,4 +368,40 @@ private func project(_ item: [String: Any]) throws -> Project {
         XCTAssertTrue(DidItFit.asks(next, nil, defaults: defaults), "the next print asks again")
     }
 
+    /// P1: a follow-up pass showed "Ready to print" throughout. pass.ready, then pass.started 182 ms later: the read
+    /// for the first can answer after the read for the second, and must not put Ready back.
+    func testAnOlderReadNeverPutsBackAStateTheProjectLeft() throws {
+        let model = ObjectsModel(companion: FakeObjects())
+        let ready = try project(item("s", "ready")), touchingUp = try project(item("s", "touching-up"))
+        let afterReady = model.startRead(), afterStarted = model.startRead()
+        XCTAssertTrue(model.apply(read: afterStarted, [touchingUp], [:]))
+        XCTAssertFalse(model.apply(read: afterReady, [ready], [:]), "the older reply is dropped")
+        XCTAssertEqual(model.objects.first?.state.rawValue, "touching-up")
+        XCTAssertNotEqual(model.objects.first?.words.capsule, "Ready to print")
+    }
+
+    /// An action's reply is newer than a read that started before it.
+    func testAReadFromBeforeAnActionDoesNotUndoIt() async throws {
+        let companion = FakeObjects()
+        await companion.set([item("s", "ready")])
+        let model = ObjectsModel(companion: companion)
+        await model.refresh()
+        let stale = model.startRead()
+        let corrected = await model.perform(.correct, on: "s", note: "Wider lip")
+        XCTAssertTrue(corrected)
+        XCTAssertFalse(model.apply(read: stale, [try project(item("s", "ready"))], [:]))
+        XCTAssertEqual(model.objects.first?.state.rawValue, "touching-up")
+    }
+
+    /// A poll whose list loses to a newer read still reads the printers and recovers the availability.
+    func testARefreshThatLosesToANewerReadStillDoesTheRest() async throws {
+        let companion = FakeObjects()
+        await companion.set([item("s", "ready")])
+        let model = ObjectsModel(companion: companion)
+        XCTAssertTrue(model.apply(read: model.startRead() + 100, [try project(item("s", "touching-up"))], [:]))
+        await model.refresh()
+        XCTAssertEqual(model.objects.first?.state.rawValue, "touching-up", "the newer read stays")
+        XCTAssertEqual(model.availability, .ready)
+        XCTAssertEqual(model.selection, "s", "the first read still picks the top project")
+    }
 }

@@ -14,6 +14,7 @@ struct MainWindow: View {
     @ObservedObject var model: ObjectsModel
     @State private var inspector = true
     @State private var deleting: Project?
+    @State private var stopping: Project?
     @State private var newProject: NewProjectDraft?
     @State private var printing: Project?
     @State private var editorError: String?
@@ -22,7 +23,7 @@ struct MainWindow: View {
 
     var body: some View {
         NavigationSplitView {
-            Sidebar(model: model, deleting: $deleting)
+            Sidebar(model: model, deleting: $deleting, stopping: $stopping)
         } detail: {
             detail
                 .toolbar { toolbar }
@@ -72,6 +73,7 @@ struct MainWindow: View {
         } message: { _ in
             Text("Its scan, photos and model are removed from this Mac. This can’t be undone.")
         }
+        .modifier(StopPrintDialog(stopping: $stopping, model: model))
         .overlay(alignment: .top) {
             if let editorNote {
                 Label(editorNote, systemImage: "checkmark.circle.fill").font(.callout.weight(.medium))
@@ -179,12 +181,30 @@ struct MainWindow: View {
 private struct Sidebar: View {
     @ObservedObject var model: ObjectsModel
     @Binding var deleting: Project?
+    @Binding var stopping: Project?
     @State private var showArchived = false
 
     private func rows(_ objects: [Project]) -> some View {
         ForEach(objects) { object in
             ProjectRow(object: object, selected: model.selection == object.id).tag(object.id)
                 .contextMenu {
+                    if object.words.printRunning && model.capabilities?.printControl == true {
+                        let capabilities = model.printer(for: object)?.capabilities
+                        // One command at a time, as on the project page: a second would be dropped while the first runs.
+                        Group {
+                            // The project is shown first, so a refusal appears where the person is looking.
+                            if object.print?.live?.state == "paused" {
+                                if capabilities?.resume ?? true {
+                                    Button("Resume Print") { model.selection = object.id; Task { await model.control(object.id, .resume) } }
+                                }
+                            } else if capabilities?.pause ?? true {
+                                Button("Pause Print") { model.selection = object.id; Task { await model.control(object.id, .pause) } }
+                            }
+                            if capabilities?.cancel ?? true { Button("Stop Print…", role: .destructive) { model.selection = object.id; stopping = object } }
+                        }
+                        .disabled(model.working.contains(object.id))
+                        Divider()
+                    }
                     if model.capabilities?.projectSettings == true { ProjectStatusMenu(object: object, model: model) }
                     Button("Show in Finder") { if let folder = object.folderURL { NSWorkspace.shared.activateFileViewerSelecting([folder]) } }
                         .disabled(object.folderURL == nil)
@@ -418,6 +438,20 @@ struct ProjectStatusItems: View {
             Button("Unarchive") { Task { await model.setArchived(false, for: object.id) } }
         } else {
             Button("Archive (Hide from Sidebar)") { Task { await model.setArchived(true, for: object.id) } }
+        }
+    }
+}
+
+/// Stop… from the sidebar asks first, as the project page does.
+private struct StopPrintDialog: ViewModifier {
+    @Binding var stopping: Project?
+    let model: ObjectsModel
+    func body(content: Content) -> some View {
+        content.confirmationDialog("Stop the print?", isPresented: Binding(get: { stopping != nil }, set: { if !$0 { stopping = nil } }),
+                                   titleVisibility: .visible, presenting: stopping) { object in
+            Button("Stop Printing", role: .destructive) { Task { await model.control(object.id, .cancel) } }
+                .disabled(model.working.contains(object.id))
+            Button("Keep Printing", role: .cancel) {}
         }
     }
 }
