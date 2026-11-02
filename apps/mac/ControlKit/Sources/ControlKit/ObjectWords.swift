@@ -18,7 +18,10 @@ public enum ObjectAction: Sendable, Equatable {
 
 /// The states in PRD §4's table. The companion's own states map onto these; nothing is left out.
 public enum ProjectStage: String, Sendable, Equatable, CaseIterable {
-    case sending, working, needsYou, ready, preparing, printing, printed, failed
+    case sending, working, needsYou, ready, preparing, printing, printed
+    /// Sent to the printer, which Counterpart can't follow: terminal, with no "done" to wait for.
+    case sent
+    case failed
     /// A state from a newer companion than this app.
     case unknown
 
@@ -32,6 +35,7 @@ public enum ProjectStage: String, Sendable, Equatable, CaseIterable {
         case .preparing: return "Getting the print ready"
         case .printing: return "Printing"
         case .printed: return "Printed"
+        case .sent: return "Sent to the printer"
         case .failed: return "Didn't work"
         case .unknown: return "Update Counterpart"
         }
@@ -46,6 +50,7 @@ public enum ProjectStage: String, Sendable, Equatable, CaseIterable {
         case .preparing: return "gearshape"
         case .printing: return "printer.fill"
         case .printed: return "shippingbox.fill"
+        case .sent: return "paperplane.fill"
         case .failed: return "exclamationmark.triangle.fill"
         case .unknown: return "questionmark.circle"
         }
@@ -133,7 +138,6 @@ public struct ObjectWords: Sendable, Equatable {
         var question: String?
         var progress: Double?
         var line = ""
-        var capsule: String?
         let stage: ProjectStage
         switch object.state {
         case .new:
@@ -194,13 +198,15 @@ public struct ObjectWords: Sendable, Equatable {
             // finishes, and its printer status isn't tied to this job: say only that it was sent, never "Printed".
             let watched = object.status != nil || object.print?.monitor != nil
             if !watched {
-                stage = .printed
-                capsule = "Sent to the printer"
+                stage = .sent
                 (line, busy, actions) = ("Sent to \(object.print?.destination?.name ?? "your printer") \(when)", false, made)
             } else {
                 stage = .printed
                 (line, busy, actions) = ("Printed \(when)", false, made)
             }
+        case .sent:
+            stage = .sent
+            (line, busy, actions) = ("Sent to \(object.print?.destination?.name ?? "your printer") · Counterpart can't follow this print", false, made)
         case .failed:
             stage = .failed
             let failure = object.failure?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -219,7 +225,7 @@ public struct ObjectWords: Sendable, Equatable {
             self.stage = stage
         }
         status = line
-        self.capsule = object.status != nil ? self.stage.label : capsule ?? self.stage.label
+        self.capsule = self.stage.label
         self.question = question
         self.progress = progress
         group = Self.group(self.stage)
@@ -235,6 +241,7 @@ public struct ObjectWords: Sendable, Equatable {
         case "preparing": return .preparing
         case "printing": return .printing
         case "printed": return .printed
+        case "sent": return .sent
         case "failed": return .failed
         default: return nil
         }
@@ -246,7 +253,7 @@ public struct ObjectWords: Sendable, Equatable {
         case .sending, .working, .preparing, .printing, .unknown: return .now
         case .needsYou, .failed: return .needsYou
         case .ready: return .ready
-        case .printed: return .printed
+        case .printed, .sent: return .printed
         }
     }
 }

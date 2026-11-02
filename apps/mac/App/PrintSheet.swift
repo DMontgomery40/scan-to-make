@@ -4,106 +4,288 @@ import AppKit
 import ControlKit
 #endif
 
-// The print sheet. PR 2 of KAN-220 replaces this with PRD §7.3's sheet (printer cards, plate preview,
-// colours, quality, strength, plate check); until then it keeps today's filament choice working.
+// The print sheet (PRD §7.3, screens/mac-print.jpg): the same choices as the phone's (§5.5) laid out as a
+// sheet. Printer cards, the plate preview, colours, quality and strength, and Print on *printer*. (No plate
+// prompt: the printer MCP's own confirmation, with any camera observation it gives, is what the person answers.) The printer MCP slices and prints; the companion gives the estimate and carries the settings.
 
-struct PrepareObjectPrint: View {
+struct PrintSheet: View {
     /// The project as it was when the sheet opened; `object` reads the current one, so a printer change shows at once.
     let opened: StmObject
     @ObservedObject var model: ObjectsModel
-    private var object: StmObject { model.objects.first { $0.id == opened.id } ?? opened }
     @Environment(\.dismiss) private var dismiss
-    @State private var choices: [PrinterFilament] = []
-    @State private var selected: Int?
-    @State private var loading = true
-    @State private var failure: String?
+    @State private var filaments: [PrinterFilament] = []
+    @State private var filamentState = Loading.loading
+    @State private var slot: Int?
+    @State private var keptSuggestion = true
+    @State private var quality = PrintSettings.Quality.standard
+    @State private var strength = PrintSettings.Strength.standard
     @State private var checked = false
+    @State private var estimate: PrintEstimate?
+    @State private var estimateState = Loading.idle
+    enum Loading: Equatable { case idle, loading, done, failed(String) }
 
-    private func swatch(_ hex: String) -> Color {
-        let value = Int(hex.dropFirst(), radix:16) ?? 0
-        return Color(red:Double((value >> 16) & 255)/255, green:Double((value >> 8) & 255)/255, blue:Double(value & 255)/255)
-    }
+    private var object: StmObject { model.objects.first { $0.id == opened.id } ?? opened }
+    private var printer: PrinterDestination? { model.printer(for: object) }
+    private var settingsServed: Bool { model.capabilities?.printSettings == true }
+    private var words: ObjectWords { object.words }
+    private var uncertain: Bool { object.print?.uncertain == true }
+    private var chosen: PrinterFilament? { filaments.first { $0.slot == slot } }
 
     var body: some View {
-        VStack(alignment:.leading, spacing:20) {
-            HStack {
-                VStack(alignment:.leading, spacing:4) {
-                    Text("Prepare to Print").font(.title2.weight(.semibold))
-                    Text(object.instructions?.isEmpty == false ? object.instructions! : "Your model")
-                        .lineLimit(1).font(.callout)
-                    if let catalog = model.printerCatalog, catalog.destinations.count > 1, let printer = model.printer(for:object) {
-                        Picker(selection:Binding(get:{ printer.id }, set:{ destination in
-                            Task { await model.selectPrinter(object.id, destinationId:destination); await load() }
-                        })) {
-                            ForEach(catalog.destinations) { Text("\($0.name) · \($0.mcpName)").tag($0.id) }
-                        } label: { Label("Printer", systemImage:"printer") }
-                        .frame(maxWidth:360)
-                        .disabled(model.working.contains(object.id))
-                    } else if let printer = model.printer(for:object) {
-                        Label(printer.name, systemImage:"printer").foregroundStyle(.secondary)
-                    }
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Print \(words.title)").font(.title2.bold())
+            printers
+            HStack(alignment: .top, spacing: 16) {
+                if let url = object.modelURL {
+                    ModelStage(url: url, version: FileVersion.of(url, else: object.updatedAtMs), yaw: 0.9, pitch: -0.5, interactive: false, fit: 0.2)
+                        .frame(width: 300, height: 220).clipShape(.rect(cornerRadius: 16))
                 }
-                Spacer()
-                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
-            }
-            HStack {
-                Text("Choose Filament").font(.headline)
-                Spacer()
-                if !loading && failure == nil { Button("Refresh") { Task { await load() } } }
-            }
-            if loading {
-                ProgressView("Reading filament from your printer…").frame(maxWidth:.infinity, minHeight:100)
-            } else if let failure {
-                Label(failure, systemImage:"exclamationmark.circle").foregroundStyle(.secondary)
-                Button("Try Again") { Task { await load() } }
-            } else if choices.isEmpty {
-                Text("No selectable filament was reported. Check the printer’s filament or open the model in your slicer.").foregroundStyle(.secondary)
-            } else {
-                ScrollView {
-                    LazyVGrid(columns:[GridItem(.adaptive(minimum:145), spacing:10)], spacing:10) {
-                        ForEach(choices) { filament in
-                            Button { selected = filament.slot } label: {
-                                VStack(alignment:.leading, spacing:8) {
-                                    HStack {
-                                        Circle().fill(swatch(filament.colour)).frame(width:34, height:34)
-                                            .overlay(Circle().strokeBorder(.secondary.opacity(0.4)))
-                                        Spacer()
-                                        if selected == filament.slot { Image(systemName:"checkmark.circle.fill").foregroundStyle(Color.filament) }
-                                    }
-                                    Text(filament.material).font(.headline)
-                                    Text(filament.slot >= 254 ? "External spool" : "Slot \(filament.slot + 1)").font(.caption).foregroundStyle(.secondary)
-                                }.padding(12).frame(maxWidth:.infinity, alignment:.leading)
-                                    .background(RoundedRectangle(cornerRadius:12).fill(Color(nsColor:.controlBackgroundColor)))
-                                    .overlay(RoundedRectangle(cornerRadius:12).stroke(selected == filament.slot ? Color.filament : Color.secondary.opacity(0.25), lineWidth:selected == filament.slot ? 2 : 1))
-                            }.buttonStyle(.plain).accessibilityLabel("\(filament.material), \(filament.colour), slot \(filament.slot + 1)")
-                        }
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Colors").font(.headline)
+                    colours
+                    Text("Quality").font(.headline)
+                    Picker("Quality", selection: $quality) {
+                        Text("Draft").tag(PrintSettings.Quality.draft)
+                        Text("Standard").tag(PrintSettings.Quality.standard)
+                        Text("Fine").tag(PrintSettings.Quality.fine)
                     }
-                }.frame(maxHeight:240)
+                    .pickerStyle(.segmented).labelsHidden().disabled(!offersQuality)
+                    Text("Strength").font(.headline)
+                    Picker("Strength", selection: $strength) {
+                        Text("Standard").tag(PrintSettings.Strength.standard)
+                        Text("Strong").tag(PrintSettings.Strength.strong)
+                        Text("Max").tag(PrintSettings.Strength.max)
+                    }
+                    .pickerStyle(.segmented).labelsHidden().disabled(!offersStrength)
+                    estimateLine
+                }
             }
-            if object.print?.uncertain == true {
-                Toggle("I checked the printer; it isn’t already printing this model.", isOn:$checked)
+            if uncertain {
+                Toggle("I checked the printer: it isn’t already printing this.", isOn: $checked)
             }
-            if let problem = model.problem, problem.id == object.id { Text(problem.text).foregroundStyle(.red) }
-            Spacer(minLength:0)
+            if let problem = model.problem, problem.id == object.id {
+                Label(problem.text, systemImage: "exclamationmark.circle.fill").foregroundStyle(.red)
+            }
             HStack {
-                Text("The printer may ask you to confirm its checks next.").font(.caption).foregroundStyle(.secondary)
                 Spacer()
-                Button("Print") {
-                    guard let filament = choices.first(where:{ $0.slot == selected }) else { return }
-                    Task { if await model.print(object.id, checked:object.print?.uncertain == true && checked, filament:filament) { dismiss() } }
-                }.buttonStyle(.glassProminent).controlSize(.large)
-                    .disabled(selected == nil || model.working.contains(object.id) || (object.print?.uncertain == true && !checked))
+                if model.working.contains(object.id) { ProgressView().controlSize(.small) }
+                Button("Cancel") { dismiss() }.controlSize(.large).keyboardShortcut(.cancelAction)
+                // No keyboard shortcut: Print starts the printer, so it is always a deliberate click.
+                Button("Print on \(printer?.name ?? "Printer")") { send() }
+                    .buttonStyle(.glassProminent).controlSize(.large)
+                    .disabled(!canPrint)
             }
         }
-        .padding(24).frame(width:540).frame(minHeight:400)
-        .task { await load() }
+        .padding(24)
+        .frame(width: 720)
+        .tint(.filament)
+        .task(id: printer?.id) { await loadFilaments() }
+        .task(id: "\(printer?.id ?? "")|\(quality)|\(strength)|\(object.current?.model ?? "")") { await loadEstimate() }
     }
 
-    private func load() async {
-        loading = true; failure = nil; selected = nil
-        do { choices = try await model.filaments(object.id) }
-        catch { failure = (error as? ControlRemoteError)?.message ?? "Couldn’t read filament from this printer." }
-        loading = false
+    // MARK: Printers
+
+    private var printers: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 10) {
+                ForEach(model.printerCatalog?.destinations ?? []) { destination in
+                    Button {
+                        guard destination.id != printer?.id else { return }
+                        Task { await model.selectPrinter(object.id, destinationId: destination.id) }
+                    } label: {
+                        PrinterCard(printer: destination, selected: destination.id == printer?.id,
+                                    spools: destination.id == printer?.id ? filaments : [])
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(model.working.contains(object.id))
+                    .accessibilityAddTraits(destination.id == printer?.id ? .isSelected : [])
+                }
+            }
+        }
+        .overlay {
+            if model.printerCatalog?.destinations.isEmpty ?? true {
+                Text("No printer found in your printer MCP’s settings.").foregroundStyle(.secondary)
+            }
+        }
+        .frame(minHeight: 72)
+    }
+
+    // MARK: Colours (v1: one colour, PRD §5.5)
+
+    @ViewBuilder private var colours: some View {
+        switch filamentState {
+        case .loading:
+            HStack(spacing: 8) { ProgressView().controlSize(.small); Text("Reading the printer’s filament…").foregroundStyle(.secondary) }
+        case .failed(let text):
+            HStack(spacing: 8) {
+                Text(text).foregroundStyle(.secondary)
+                Button("Try Again") { Task { await loadFilaments() } }
+            }
+        default:
+            if filaments.isEmpty {
+                Text("Uses the loaded filament. Change it on the printer if you need to.").foregroundStyle(.secondary)
+            } else {
+                HStack(spacing: 10) {
+                    RoundedRectangle(cornerRadius: 4).fill(Color.secondary.opacity(0.5)).frame(width: 18, height: 18)
+                    Text("Model").frame(width: 60, alignment: .leading)
+                    Image(systemName: "arrow.right").foregroundStyle(.secondary)
+                    Menu {
+                        ForEach(filaments) { filament in
+                            Button { slot = filament.slot; keptSuggestion = filament.suggested == true } label: {
+                                Text(Self.name(filament))
+                            }
+                        }
+                    } label: {
+                        HStack(spacing: 8) {
+                            if let chosen { SpoolDot(hex: chosen.colour, size: 18); Text(Self.name(chosen)) } else { Text("Choose a spool") }
+                        }
+                    }
+                    .menuStyle(.borderlessButton).fixedSize()
+                }
+            }
+        }
+    }
+
+    static func name(_ filament: PrinterFilament) -> String {
+        let place = filament.external ? "External" : "A\(filament.slot + 1)"
+        return "\(place) · \(filament.material) \(filament.name)"
+    }
+
+    // MARK: Estimate
+
+    private var offersQuality: Bool { settingsServed && (printer?.capabilities?.quality ?? true) }
+    private var offersStrength: Bool { settingsServed && (printer?.capabilities?.strength ?? true) }
+
+    @ViewBuilder private var estimateLine: some View {
+        switch estimateState {
+        case .loading:
+            HStack(spacing: 6) { ProgressView().controlSize(.mini); Text("Slicing to estimate…") }.font(.callout).foregroundStyle(.secondary)
+        case .failed(let text):
+            Text(text).font(.callout).foregroundStyle(.secondary).lineLimit(3)
+        default:
+            if let estimate {
+                Text(Self.summary(estimate)).font(.callout.monospacedDigit()).foregroundStyle(.secondary)
+            } else if let last = object.print?.estimate, last.seconds != nil || last.grams != nil {
+                Text([last.seconds.map { ObjectWords.formatMinutes($0 / 60) }, last.grams.map { "\(Int($0.rounded())) g" }]
+                    .compactMap { $0 }.joined(separator: " · ") + " last time").font(.callout.monospacedDigit()).foregroundStyle(.secondary)
+            } else if !settingsServed {
+                Text("Your printer MCP slices it with its own preset when you print.").font(.callout).foregroundStyle(.secondary)
+            }
+        }
+        if settingsServed, let printer, printer.capabilities?.quality == false || printer.capabilities?.strength == false,
+           let update = printer.capabilities?.update {
+            Text(update.message).font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    /// "1 h 12 min · 22 g · 0.20 mm · 15% infill".
+    static func summary(_ estimate: PrintEstimate) -> String {
+        [estimate.seconds.map { ObjectWords.formatMinutes($0 / 60) }, estimate.grams.map { "\(Int($0.rounded())) g" },
+         estimate.layerHeightMm.map { String(format: "%.2f mm", $0) }, estimate.infillPercent.map { "\(Int($0.rounded()))% infill" }]
+            .compactMap { $0 }.joined(separator: " · ")
+    }
+
+    // MARK: Actions
+
+    private var canPrint: Bool {
+        printer != nil && !model.working.contains(object.id) && (!uncertain || checked)
+            && (words.actions.contains(.print) || words.actions.contains(.printChecked))
+            && (settingsServed || chosen != nil || (filamentState == .done && filaments.isEmpty))
+    }
+
+    private var colour: PrintSettings.Colour? {
+        guard let chosen else { return nil }
+        if keptSuggestion && chosen.suggested == true { return .auto }
+        return chosen.external ? .external : .amsSlot(chosen.slot)
+    }
+
+    private func send() {
+        let settings = PrintSettings(quality: offersQuality ? quality : .standard, strength: offersStrength ? strength : .standard, colour: colour)
+        let filament = chosen
+        Task { if await model.print(object.id, checked: uncertain && checked, settings: settings, filament: filament) { dismiss() } }
+    }
+
+    private func loadFilaments() async {
+        filamentState = .loading; slot = nil
+        do {
+            let list = try await model.filaments(object.id)
+            guard !Task.isCancelled else { return }
+            filaments = list
+            let suggested = list.first { $0.suggested == true }
+            slot = suggested?.slot ?? (list.count == 1 ? list[0].slot : nil)
+            keptSuggestion = suggested != nil
+            filamentState = .done
+        } catch {
+            guard !Task.isCancelled else { return }
+            filaments = []
+            filamentState = .failed((error as? ControlRemoteError)?.message.nilIfEmpty ?? "Couldn’t read the printer’s filament.")
+        }
+    }
+
+    private func loadEstimate() async {
+        guard settingsServed, object.modelURL != nil else { estimateState = .idle; return }
+        estimateState = .loading
+        do {
+            let result = try await model.estimate(object.id, destinationId: printer?.id, quality: offersQuality ? quality : .standard,
+                                                  strength: offersStrength ? strength : .standard)
+            guard !Task.isCancelled else { return }
+            estimate = result
+            estimateState = .done
+        } catch {
+            guard !Task.isCancelled else { return }
+            estimate = nil
+            estimateState = .failed((error as? ControlRemoteError)?.message.nilIfEmpty ?? "No estimate right now. Your printer MCP slices it when you print.")
+        }
     }
 }
 
+/// One printer in the sheet: name, its MCP, ready dot and the spools it reports.
+struct PrinterCard: View {
+    let printer: PrinterDestination
+    let selected: Bool
+    var spools: [PrinterFilament] = []
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Image(systemName: printer.mcpName == "bambu-printer-mcp" ? "printer.fill" : "printer")
+                Text(printer.name).font(.headline).lineLimit(1)
+                Spacer()
+                ReadyDot(state: printer.state)
+            }
+            Text(printer.state == "offline" ? "Offline" : printer.mcpName).font(.caption2).foregroundStyle(.secondary)
+            HStack(spacing: 3) { ForEach(spools.prefix(4)) { SpoolDot(hex: $0.colour, size: 11) } }.frame(height: 11)
+        }
+        .padding(12).frame(width: 200, alignment: .leading)
+        .contentShape(.rect(cornerRadius: 14))
+        .glassEffect(selected ? .regular.tint(Color.filament.opacity(0.3)) : .regular, in: .rect(cornerRadius: 14))
+        .opacity(printer.state == "offline" ? 0.5 : 1)
+    }
+}
+
+/// A spool's colour, as a filled dot with its hub.
+struct SpoolDot: View {
+    let hex: String
+    var size: CGFloat = 30
+    var body: some View {
+        ZStack {
+            Circle().fill(Color(hex: hex))
+            Circle().strokeBorder(.white.opacity(0.25), lineWidth: 1)
+            Circle().fill(.black.opacity(0.35)).frame(width: size * 0.32)
+        }
+        .frame(width: size, height: size)
+        .accessibilityHidden(true)
+    }
+}
+
+extension Color {
+    /// "#RRGGBB" or "RRGGBB(AA)", as the printer reports a filament colour; grey when it can't be read.
+    init(hex: String) {
+        let digits = hex.trimmingCharacters(in: CharacterSet(charactersIn: "#")).prefix(6)
+        guard digits.count == 6, let value = Int(digits, radix: 16) else { self = .gray; return }
+        self = Color(red: Double((value >> 16) & 255) / 255, green: Double((value >> 8) & 255) / 255, blue: Double(value & 255) / 255)
+    }
+}
+
+private extension String {
+    var nilIfEmpty: String? { isEmpty ? nil : self }
+}

@@ -14,6 +14,7 @@ struct ProjectDetail: View {
     @State private var photos: [URL] = []
     @State private var dropProblem: String?
     @State private var targeted = false
+    @State private var stopping = false
 
     private var words: ObjectWords { object.words }
     private var working: Bool { model.working.contains(object.id) }
@@ -144,9 +145,32 @@ struct ProjectDetail: View {
                 }
             }
             if let progress = words.progress { ProgressView(value: progress).tint(.okGreen) }
+            if model.capabilities?.printControl == true { printControls }
         }
         .padding(12).frame(maxWidth: .infinity, alignment: .leading)
         .glassEffect(.regular, in: .rect(cornerRadius: 14))
+    }
+
+    /// Pause, Resume and Stop, when the printer's MCP has them. Stop asks first; the MCP may ask its own question too.
+    @ViewBuilder private var printControls: some View {
+        let capabilities = model.printer(for: object)?.capabilities
+        let paused = object.print?.live?.state == "paused"
+        HStack(spacing: 8) {
+            Spacer()
+            if paused, capabilities?.resume ?? true {
+                Button("Resume") { Task { await model.control(object.id, .resume) } }.buttonStyle(.glass)
+            } else if !paused, capabilities?.pause ?? true {
+                Button("Pause") { Task { await model.control(object.id, .pause) } }.buttonStyle(.glass)
+            }
+            if capabilities?.cancel ?? true {
+                Button("Stop…", role: .destructive) { stopping = true }.buttonStyle(.glass)
+            }
+        }
+        .disabled(working)
+        .confirmationDialog("Stop the print?", isPresented: $stopping, titleVisibility: .visible) {
+            Button("Stop Printing", role: .destructive) { Task { await model.control(object.id, .cancel) } }
+            Button("Keep Printing", role: .cancel) {}
+        } message: { Text("The printer stops now. What's on the plate stays there.") }
     }
 
     private var failedCard: some View {

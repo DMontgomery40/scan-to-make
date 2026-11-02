@@ -6,7 +6,7 @@ public struct ControlClient: Sendable {
     public let timeout: TimeInterval
     public init(socketPath: String, timeout: TimeInterval = 10) throws {
         guard socketPath.hasPrefix("/"), !socketPath.contains("\0"), socketPath.utf8.count <= 103,
-              timeout.isFinite, timeout > 0, timeout <= 60 else { throw ControlClientError.invalidEndpoint }
+              timeout.isFinite, timeout > 0, timeout <= 200 else { throw ControlClientError.invalidEndpoint }
         self.socketPath = socketPath; self.timeout = timeout
     }
     private struct Request: Encodable { let v = 1; let id: String, method: String; let params: JSONValue }
