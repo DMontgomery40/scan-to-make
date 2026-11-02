@@ -9,6 +9,7 @@ import {DispatchedPrintError, PrinterMcpError, readPrintReport, routeArgs, slice
 import type {PrintEstimate, PrintSettings, ProjectStatus} from '@scan-to-make/contracts/counterpart';
 import {PrintMonitorRunner, matchJob, milestonesFor, type EventDraft, type MonitorClock, type MonitorEnd, type MonitorTarget} from '../printing/monitor.js';
 import {CameraFrames, CameraUnavailableError, type CameraFrame} from '../printing/camera.js';
+import {PrinterUpdatingError, type PrintGate} from '../printing/print-gate.js';
 import {sliceOverrides, settingsUnsupported} from '../printing/print-settings.js';
 import type {CompanionSettingsStore} from '../settings.js';
 import {PRINT_LOG, printEndFailure, projectTitle, sizeText} from '../events/words.js';
@@ -105,6 +106,8 @@ export interface ObjectServiceDeps {
   stlInfo: (stlPath: string) => Promise<[number, number, number] | undefined>;
   claudePath: string;
   handoff: PrinterHandoffConfig;
+  /** The handoff profile as the companion runs it now: after an MCP update (PRD §8.10) it carries that update's command. */
+  runningHandoff?: () => PrinterHandoffConfig;
   printerCatalog?: PrinterCatalog;
   /** Live destination state and capabilities, from each destination's long-lived session. */
   printers?: PrinterDirectory;
@@ -120,6 +123,8 @@ export interface ObjectServiceDeps {
   settings?: CompanionSettingsStore;
   /** Where print and pass events go (the event log, PRD §8.7). */
   events?: {emit(draft: EventDraft): Promise<void>};
+  /** PRD §8.10: prints and MCP updates on a printer exclude each other. */
+  printGate?: PrintGate;
   /** The printers' cameras, through their sessions, with a shared 3 s cache. */
   camera?: CameraFrames;
   /** Tests only. */
@@ -634,6 +639,8 @@ export class ObjectService {
     if (destinationId && (!destination || !config)) throw new InvalidStateError('That printer is no longer available. Choose another printer.');
     const services = destinationId ? configured.destinations?.get(destinationId) : configured.services;
     if (!services || (config && services.runner.backend !== config.backend)) throw new InvalidStateError('Printing is not set up for this printer.');
+    const gated = destination?.id ?? destinationId ?? 'current';
+    if (this.#deps.printGate?.updating(gated)) throw new InvalidStateError(new PrinterUpdatingError().message);
     // Keep the exact route and identity for this dispatch and every later confirmation.
     const printing = {...configured, services};
     const printDestination = destination ? {id: destination.id, name: destination.name} : undefined;
@@ -652,7 +659,12 @@ export class ObjectService {
     const printId = randomUUID();
     const print = {bundleId: manifest.id, printId, ...(printDestination ? {destination: printDestination, destinationId: printDestination.id} : {}),
       ...(Object.keys(settings).length ? {settings} : {})};
-    const started = await this.#deps.store.update(id, o => ({...o, state: 'printing', progress: 'Connecting to your printer service…', print, printConfirmation: undefined, failure: undefined}));
+    // PRD §8.10: held from here until the dispatch ends, so the printer's MCP isn't updated under it.
+    let release: () => void = () => undefined;
+    try { release = this.#deps.printGate?.hold(gated) ?? release; }
+    catch (error) { throw error instanceof PrinterUpdatingError ? new InvalidStateError(error.message) : error; }
+    const started = await this.#deps.store.update(id, o => ({...o, state: 'printing', progress: 'Connecting to your printer service…', print, printConfirmation: undefined, failure: undefined}))
+      .catch(error => { release(); throw error; });
     // Only this print's questions: other prints share the relay.
     const unsubscribe = relay.subscribe(pending => {
       if (pending.bundleId === manifest.id) void this.#confirm(id, pending, printing).catch(() => { relay.respond(pending.id, {action: 'cancel'}); });
@@ -692,6 +704,7 @@ export class ObjectService {
         })
       .then(o => this.#changed(o))
       .finally(() => {
+        release();
         unsubscribe(); this.#running.delete(id); this.#controllers.delete(id);
         clearTimeout(this.#confirmations.get(id)?.timer); this.#confirmations.delete(id);
         this.#cancelledPrints.delete(id);
@@ -879,6 +892,17 @@ export class ObjectService {
     const camera = this.#deps.camera;
     if (!camera || signal?.aborted) return undefined;
     return camera.frame(destinationId, session, {model: session.config.selection?.model}).catch(() => undefined);
+  }
+
+  /** PRD §8.10: a print is being prepared or monitored on this printer, so its MCP isn't updated now. */
+  async printerBusy(destinationId: string): Promise<boolean> {
+    const canonical = this.#deps.printerCatalog?.canonical(destinationId) ?? destinationId;
+    for (const object of await this.#deps.store.list()) {
+      if (object.state !== 'printing') continue;
+      const target = object.print?.destinationId ?? object.print?.destination?.id ?? this.#destinationId(object);
+      if (target && (this.#deps.printerCatalog?.canonical(target) ?? target) === canonical) return true;
+    }
+    return false;
   }
 
   /** A client opened this project: while it prints (or the printer asks something), warm its printer's camera. */
@@ -1130,7 +1154,7 @@ export class ObjectService {
       let scanName = object.scan;
       if (build) scanName = await this.#build(object.id, dir, controller.signal);
       const scan = fromCurrent ? [join(dir, object.current!.model)] : scanName ? [join(dir, 'scan', scanName)] : [];
-      const input: TouchupInput = {root: join(dir, 'passes'), objectId: 'pass', scan, photos, currentModel: fromCurrent, handoff: this.#deps.handoff, claudePath: this.#deps.claudePath,
+      const input: TouchupInput = {root: join(dir, 'passes'), objectId: 'pass', scan, photos, currentModel: fromCurrent, handoff: this.#handoff(), claudePath: this.#deps.claudePath,
         kind, onStage: (id, chosen) => stage(id, chosen),
         ...(fromCurrent && object.current?.engine === 'fusion' && object.current.design
           ? {design: {f3d: join(dir, object.current.design.f3d), ...(object.current.design.parameters ? {parameters: join(dir, object.current.design.parameters)} : {})}} : {}),
@@ -1298,7 +1322,8 @@ export class ObjectService {
     return [...previous, ...clean].slice(-200);
   }
 
-  #publicText(text: string): string { return publicTouchupText(text, {...process.env, ...this.#deps.handoff.process.env}); }
+  #handoff(): PrinterHandoffConfig { return this.#deps.runningHandoff?.() ?? this.#deps.handoff; }
+  #publicText(text: string): string { return publicTouchupText(text, {...process.env, ...this.#handoff().process.env}); }
 
   #changed(object: StmObject): StmObject { this.#deps.onChange?.(object); return object; }
 }

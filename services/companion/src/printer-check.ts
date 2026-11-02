@@ -11,10 +11,12 @@ export interface PrinterCheckSnapshot {
 }
 /** Read-only, single-flight diagnostic in the actual companion process tree.
  * Start/poll avoids extending the control socket's short request deadline. */
-export function createPrinterCheck(config:PrinterHandoffConfig,make:(c:PrinterHandoffConfig)=>Session=c=>new PrinterMcpClient(c)) {
+/** `profile` may be a function: the profile as the companion runs it at check time (after an MCP update). */
+export function createPrinterCheck(profile:PrinterHandoffConfig|(()=>PrinterHandoffConfig),make:(c:PrinterHandoffConfig)=>Session=c=>new PrinterMcpClient(c)) {
   let snapshot:PrinterCheckSnapshot={state:'idle'},running:Promise<void>|undefined;
   const abort=new AbortController();
   async function run() {
+    const config=typeof profile==='function'?profile():profile;
     const result:PrinterCheckSnapshot={state:'complete',status:'failed',camera:config.backend==='bambu-printer-mcp'?'failed':'not-supported'};
     const client=make({...config,timeouts:{...config.timeouts,connectMs:10000,toolMs:20000}});
     try {

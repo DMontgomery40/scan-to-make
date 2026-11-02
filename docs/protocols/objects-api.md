@@ -141,7 +141,7 @@ Bambu Studio's own verdict on the slice (KAN-223, when the MCP returns `slicer_r
 
 ### `PrinterDestination` (PR 1)
 
-`{id, name, backend, model?, address?, source, origin?, state?, stateCheckedAt?, capabilities?}`.
+`{id, name, backend, model?, address?, source, origin?, state?, stateCheckedAt?, capabilities?, mcpId?}`. `mcpId` (PR 6, `mcp-<16 hex>`) names the MCP install the printer runs; every printer on the same install has the same one (below).
 
 - **One printer, one destination.** Destinations are keyed by the Bambu serial when the MCP config has one (`BAMBU_PRINTER_SERIAL` or `BAMBU_SERIAL`), otherwise by the lowercased `host:port`. A printer configured in several clients or in both MCPs appears once.
 - **Which MCP wins.** A Bambu printer uses bambu-printer-mcp; mcp-3D-printer-server is used for a Bambu printer only when no bambu-printer-mcp profile reaches it. Every other printer uses mcp-3D-printer-server. Among profiles that reach the same printer through the same MCP, the Mac app's own `printer-handoff.json` (`source: "current"`) wins, then the first source in this order: Claude Code, Claude Desktop, Cursor, Codemode, Codex.
@@ -163,7 +163,38 @@ Bambu Studio's own verdict on the slice (KAN-223, when the MCP returns `slicer_r
 | `copies` | `slice_stl` takes `repetitions` and the slice really makes them (PR 8b): always on bambu-printer-mcp; on mcp-3D-printer-server only on its Bambu-compatible route (PrusaSlicer, Cura and plain OrcaSlicer would slice one). Print and Estimate take `copies`; elsewhere it is refused with the update. |
 | `materialChoice` | always (PR 5): `colour: {material}` is accepted for this destination ("What's loaded?"); the material is sliced with a profile the printer reports for it, or refused with what to do (above) |
 
-`missing` lists what this install's version lacks (not what the hardware lacks), and `update.message` says which update unlocks it, for example "Update mcp-3D-printer-server to see progress and camera." `update.command` is the package-manager command for how that MCP is installed (`["npm","install","-g","bambu-printer-mcp@latest"]` for a global npm install); it is absent for an `npx` profile (npx fetches the latest itself; restarting Counterpart is enough) and for a source checkout. The companion never runs it; the Mac app's Update button does.
+`missing` lists what this install's version lacks (not what the hardware lacks), and `update.message` says which update unlocks it, for example "Update mcp-3D-printer-server to see progress and camera." `update.command` is the package-manager command for how that MCP is installed (`["npm","install","-g","bambu-printer-mcp@latest"]` for a global npm install); it is absent for an `npx` profile and for a source checkout. It is kept for Copy Command; from PR 6 the Update button posts the update instead (below). `update.latestVersion` (PR 6) is the newest published version (`npm view <package> version`); from PR 6 `update` is also present, with "Update bambu-printer-mcp to 1.1.50.", when only a newer version exists.
+
+### Updating the printer MCPs (PR 6, PRD §8.10)
+
+| Method and path | Scope | Body | Reply |
+|---|---|---|---|
+| `POST /v1/printers/mcp/<mcpId>/update` | SETTINGS | `{fresh?: boolean}` (`{}` or no body is fine) | `{update: McpUpdate}`; 404 `not-found` for an unknown `mcpId`; 503 `unavailable` with a sentence when npm can't be reached |
+
+`McpUpdate` is `{mcpId, state, fromVersion?, toVersion?, found?}` (`McpUpdateSchema`):
+
+| `state` | Meaning | Show |
+|---|---|---|
+| `started` | The update is running now. Progress and the result arrive as `mcp.update.*` events ([events.md](events.md)). | a progress bar |
+| `waiting` | A print on one of this install's printers is being prepared or monitored; it starts when that ends | "Updates after the current print" |
+| `current` | `fromVersion` is already the latest | "Up to date" |
+| `unresolved` | Counterpart can't tell how this copy is installed. `found` says what it found, in plain words. Nothing ran. | `found`, and **Install a Fresh Copy** (`{fresh: true}`) |
+
+Asking again while an update is `started` or `waiting` returns that update; it never starts a second. `fresh: true` installs the latest into the app's own copy (`~/Library/Application Support/Scan to Make/printers/bambu` or `…/generic`) and runs that copy for these printers from then on, with the profile's own variables (and, for a wrapped command, its directory and variables). Without events (see events.md), poll by posting again: `current` means it finished.
+
+**What runs**, from the process the profile starts (PRD §8.10's table):
+
+| Installed as | Update runs |
+|---|---|
+| `npx <pkg>[@version]` | nothing global: the profile runs `<pkg>@<latest>` from then on (kept in `printers/overrides.json`; the client's own config file is not edited) |
+| global npm (`<prefix>/bin/<pkg>`, or `node <prefix>/lib/node_modules/<pkg>/…`) | `npm install --global --prefix <prefix>/.counterpart-update-<uuid> <pkg>@<latest>`, with that prefix's own `node`/`npm` when it has them; then the staged package replaces `<prefix>/lib/node_modules/<pkg>` (the old one is kept until the new one has connected) |
+| the app's own copy (`…/Scan to Make/printers/<folder>`) | the same, with the node that runs the MCP and the first npm found (beside that node, on PATH, `/opt/homebrew/bin`, `/usr/local/bin`, then the newest nvm) |
+| a git checkout (`<dir>` with `package.json` named `<pkg>` and `.git`) | stops with "This copy has local changes" if `git status --porcelain` shows any; else `git pull --ff-only`, `npm ci`, `npm run build` in `<dir>`. If a step after the pull fails, the checkout goes back to the commit it was on and is rebuilt |
+| `ssh … 127.0.0.1` (this Mac, this user) | the command it runs: the remote command when the profile gives one, else the `command="…"` for its `-i` key in `~/.ssh/authorized_keys`; that command is then one of the rows above. An npx command behind ssh is `unresolved` (its version is in a command Counterpart doesn't own): offer a fresh copy |
+
+**Between prints.** Prints and updates on a printer exclude each other. An update first marks its printers (a Print or a phone handoff print there is then refused with "The printer's software is updating. Try again in a minute."), then checks for a print being prepared or monitored; if there is one it unmarks them and reports `waiting`, and looks again every 15 s. A print that has started holds its printer until its dispatch ends, after which its `printing` state keeps the update waiting until the print ends. One update runs per install at a time. `mcpId` includes the package, so both MCPs under one global prefix stay apart. After an npx or fresh-copy update the install is read from what now runs, so asking again says `current`.
+
+Then the companion restarts every session on that install (each waits for any printer-changing call in flight), connects one, re-reads capabilities, and reports the version the MCP now gives (`mcp.update.done` `toVersion`). On failure the previous version stays in use: a staged npm install is never swapped in (and a swap that fails puts the old copy back), a checkout goes back to its commit and is rebuilt, and an npx or fresh-copy change is put back; if a checkout can't be rebuilt, `mcp.update.failed` says so in plain words instead. The failure event carries the log's last 4 KB. npx and fresh-copy changes are kept per printer (each keeps its own variables and directory), and printers that end up running the same files are locked and restarted together. An npx group is `current` only when every one of its printers runs the latest. A key's forced command in `authorized_keys` wins over the remote command the profile sends (as OpenSSH does), and a wrapped npx profile is a separate install from directly launched ones. A saved npx or fresh-copy change is dropped when its printer's profile changes. A fresh copy also counts every printer already running the app's own copy: they wait, lock and restart with it. The latest version is checked at start and once a day, and again when a printer list is read and the last check is over an hour old. Nothing ever shows or opens a config file.
 
 ## Project fields
 

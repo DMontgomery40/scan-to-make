@@ -25,6 +25,7 @@ Errors use `{v:1,id,error:{code,message}}`; malformed envelopes may have `id:nul
 | `devices.remove` | `{deviceId}` | `{removed:true}`; an unknown device returns `not-found`. Existing device credentials are revoked. |
 | `pairing.create` | `{login?}` | Existing invitation `{version:1,baseUrl,code,expiresAt,certificateSha256?,qrPayload}` with capture and printer-handoff scopes. LAN selects `lan`; Tailscale defaults to the first retained allowed login. An explicit login must be allowed. When the companion answers on every address (`SCAN_TO_MAKE_LAN_ALL_ADDRESSES=1`), `qrPayload` is a pairing link v2 (`@scan-to-make/contracts/pairing-link`) listing those addresses; the JSON fields keep their v1 shape. |
 | `pairing.isActive` | `{code}` | `{active:boolean}`; false after consumption or expiry. |
+| `pairing.icloudToken` | `{}` | LAN mode: `{token,expiresAt,macId,spkiSha256,addresses}` for the Mac app's private CloudKit record. `expiresAt` is an ISO timestamp; each address has `{kind,host,port}`. The token lasts ten minutes, rotates after five, and may enroll one phone. Unavailable without LAN TLS. |
 | `nearby.list` | `{}` | `{items:[{id,deviceName,code,expiresAt}]}`: nearby pairing requests waiting for **Allow** (`@scan-to-make/contracts/nearby-pairing`). `code` is the 6 digits the phone shows. Empty when nearby pairing is off (`capabilities.nearbyPairing`). |
 | `nearby.answer` | `{id,allow}` | `{answered:true}`. Allow mints one pairing code for that request only; the phone that made it collects it. An unknown, expired or already answered `id` returns `not-found`; with nearby pairing off, `unavailable`. |
 | `confirmations.list` | `{}` | `{items:[PendingElicitation]}` using the existing relay's fields, including original schema/photo and expiry. |
@@ -71,6 +72,7 @@ The Mac app shows the same projects as the phone and drives them through these m
 | `projectSettings` | `objects.settings.get`/`objects.settings.set` (Status), object `settings.status`, the `confirmed` phase, `project.updated`. Also in `GET /healthz` `capabilities`. | PR 8a |
 | `printCopies` | `objects.print` and `objects.estimate` take `copies`: true when a configured printer's MCP takes `repetitions` (destination `capabilities.copies`). Also in `GET /healthz`. | PR 8b |
 | `genericConfirmations` | `printConfirmation.fields[]` may be text, number, integer and choice fields as well as yes/no, and `objects.answerPrintConfirmation` takes and checks those answers (below). The phone reads the same flag from `GET /healthz` `capabilities` ([objects-api.md](objects-api.md)). | PR 5 |
+| `mcpUpdates` | `printers.updateMcp` and `POST /v1/printers/mcp/<mcpId>/update`, destination `mcpId` and `capabilities.update.latestVersion`, the `mcp.update.*` events. Also in `GET /healthz` `capabilities`. | PR 6 |
 | `materialChoice` | `objects.print` `colour: {material}` is accepted on every printer ("What's loaded?"): sliced with a profile the printer reports for that material, or refused with a sentence saying what to do. Also in `GET /healthz` `capabilities`. | PR 5 |
 
 Destination `capabilities.materialChoice` (PR 5) says the same per printer; what each MCP is sent, and when it is refused, is in [objects-api.md](objects-api.md#print-settings-pr-2). `objects.get` of a printing project and `objects.printers` warm the printers' cameras as the phone's routes do, so `objects.camera` and `printers.camera` answer from a recent frame (objects-api.md, "Camera timing").
@@ -99,6 +101,7 @@ Destination `capabilities.materialChoice` (PR 5) says the same per printer; what
 | `objects.pausePrint`, `objects.resumePrint`, `objects.cancelPrint` | `{id}` | `{object}` | PR 2 |
 | `objects.camera` | `{id}` | `{format: "jpeg", base64, capturedAt}` from the project's printer | PR 2 |
 | `printers.camera` | `{destinationId}` | `{format: "jpeg", base64, capturedAt}` | PR 2 |
+| `printers.updateMcp` | `{mcpId, fresh?: boolean}` | `{update: {mcpId, state: "started"\|"waiting"\|"current"\|"unresolved", fromVersion?, toVersion?, found?}}`. Unknown `mcpId`: `not-found`; npm unreachable: `unavailable` with the sentence. It answers within about 7 s: when npm is slower, `unavailable` "npm is slow to answer…" (try again; the lookup keeps going and is cached). What runs and when: objects-api.md, "Updating the printer MCPs". | PR 6 |
 | `settings.get` | `{}` | `{settings: {milestones}}` | PR 2 |
 | `settings.set` | `{milestones: "off"\|"50"\|"25-50-75"\|"every-10"}` | `{settings}` | PR 2 |
 | `events.wait` | `{after: integer ≥ 0, timeoutMs?: 0–25000 (default 25000), limit?: 0–500}` | `EventsPage` `{events, next, latest, truncated?, reset?}` | PR 3 |

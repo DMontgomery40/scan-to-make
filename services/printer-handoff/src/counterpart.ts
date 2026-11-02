@@ -220,7 +220,8 @@ export interface PrinterCapabilities {
   copies: boolean;
   materialChoice: boolean;
   missing: CapabilityFeature[];
-  update?: {message: string; package: PrinterBackend; command?: string[]};
+  /** `latestVersion` (PRD §8.10) is added by the companion from `npm view`. */
+  update?: {message: string; package: PrinterBackend; command?: string[]; latestVersion?: string};
   detectedAt: string;
 }
 
