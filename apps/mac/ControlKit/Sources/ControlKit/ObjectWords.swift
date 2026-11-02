@@ -69,6 +69,10 @@ public struct ObjectWords: Sendable, Equatable {
     public let actions: [ObjectAction]
     /// The person said it works (`confirmed`, PRD §5.4): it shows under Done with the ✓, and can be printed again.
     public let done: Bool
+    /// A print the printer has: printing, or dispatched and still getting ready (`preparing`, with `print.dispatchedAt`
+    /// and the monitor `starting` or `watching`; a `printId` alone is set at the tap, while it still slices and sends).
+    /// Pause and Stop work the same in both; only the words differ.
+    public let printRunning: Bool
 
     /// "38 min", "1 h 12 min".
     public static func formatMinutes(_ minutes: Double) -> String { Format.duration(max(0, minutes) * 60) ?? "0 min" }
@@ -98,6 +102,8 @@ public struct ObjectWords: Sendable, Equatable {
         done = object.status?.phase == "confirmed" || object.state.rawValue == "confirmed"
         // The printer asking for a yes needs the person, also from a companion that doesn't write its own phase yet.
         stage = object.printConfirmation != nil && object.status == nil ? .needsYou : done ? .confirmed : words.phase
+        let dispatched = object.print?.dispatchedAt != nil && ["starting", "watching"].contains(object.print?.monitor?.phase ?? "")
+        printRunning = stage == .printing || (stage == .preparing && dispatched)
         // The companion's own words when it sends them ("Getting ready · Heating", "The printer stopped: …"): never a
         // percent built here from the printer's raw progress, which can read 3% before printing has begun.
         let said = object.status?.text.trimmingCharacters(in: .whitespacesAndNewlines)

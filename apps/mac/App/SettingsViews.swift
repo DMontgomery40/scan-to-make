@@ -792,7 +792,15 @@ struct MenuBarPopover: View {
             ForEach(nearby.requests) { NearbyRequestCard(request:$0, model:nearby) }
             if !running.isEmpty {
                 VStack(alignment:.leading, spacing:8) {
-                    ForEach(running.prefix(3)) { object in RunningLine(object:object) }
+                    // Each opens its project, where Pause and Stop are (a dispatched print getting ready included).
+                    ForEach(running.prefix(3)) { object in
+                        Button {
+                            objects.selection = object.id
+                            NSApp.activate()
+                            openWindow(id:"main")
+                        } label: { RunningLine(object:object).contentShape(Rectangle()) }
+                        .buttonStyle(.plain).help("Open \(object.words.title)")
+                    }
                 }
                 .padding(12).frame(maxWidth:.infinity, alignment:.leading)
                 .glassEffect(.regular, in:.rect(cornerRadius:14))
@@ -900,7 +908,7 @@ private struct RunningLine: View {
         }
         return words.stage.label
     }
-    /// The companion's words: a print's whole line ("Getting ready · Auto bed leveling"), a pass's first part.
+    /// The companion's words: a print's whole line ("Getting ready · Heating"), a pass's first part.
     private var detail: String {
         let words = object.words
         if words.stage == .printing || words.stage == .preparing { return words.status }

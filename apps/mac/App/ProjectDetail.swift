@@ -123,6 +123,7 @@ struct ProjectDetail: View {
                 }
                 .id(DidItFit.key(object))
             case .needsYou: needsYou
+            case .preparing where words.printRunning: printingCard
             case .working, .sending, .preparing: progressCard
             case .printing: printingCard
             case .failed: failedCard

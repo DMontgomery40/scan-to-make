@@ -36,6 +36,17 @@ final class ObjectWordsTests: XCTestCase {
             .merging(live) { $1 }.merging(status("failed", "The printer stopped: Print aborted (0300-4000).")) { $1 })
         XCTAssertEqual(stopped.words.status, "The printer stopped: Print aborted (0300-4000).")
         XCTAssertTrue(stopped.words.actions.contains(.print), "Print Again")
+        XCTAssertTrue(printing.words.printRunning)
+        var dispatched = live
+        dispatched["print"] = ["bundleId": "b", "printId": "p1", "dispatchedAt": "2026-11-02T07:00:00Z", "monitor": ["phase": "starting"]]
+        let gettingReady = ready(["state": "printing"].merging(dispatched) { $1 }.merging(status("preparing", "Getting ready · Heating")) { $1 })
+        XCTAssertTrue(gettingReady.words.printRunning, "dispatched and getting ready: Pause and Stop as while printing")
+        XCTAssertFalse(preparing.words.printRunning, "not dispatched yet: nothing to pause")
+        var slicing = live
+        slicing["print"] = ["bundleId": "b", "printId": "p1"]
+        let tapped = ready(["state": "printing"].merging(slicing) { $1 }.merging(status("preparing", "Preparing print…")) { $1 })
+        XCTAssertFalse(tapped.words.printRunning, "a printId is set at the tap, while it still slices and sends")
+        XCTAssertFalse(stopped.words.printRunning)
     }
 
     func testTheWordsAreTheSharedOnes() {
