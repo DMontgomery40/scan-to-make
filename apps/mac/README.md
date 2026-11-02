@@ -88,13 +88,13 @@ doesn't change that, and moving the copy away leaves the agent failing with `EX_
 ```sh
 LSR=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
 "$LSR" -u "<the other copy>.app"
-"$LSR" -f "/Applications/Scan to Make.app"
-open "/Applications/Scan to Make.app"          # first: the installed app launches
+"$LSR" -f "/Applications/Counterpart.app"
+open "/Applications/Counterpart.app"          # first: the installed app launches
 launchctl kickstart -k "gui/$(id -u)/com.scantomake.mac.companion"
 lsof -p "$(launchctl print "gui/$(id -u)/com.scantomake.mac.companion" | awk '/^\tpid =/{print $3}')" | grep 'txt.*MacOS'
 ```
 
-The last line should name `/Applications/Scan to Make.app`.
+The last line should name `/Applications/Counterpart.app`.
 
 ```sh
 swift test --package-path apps/mac
@@ -169,7 +169,7 @@ from an existing live service without changing that service.
 
 Install the signed app in `/Applications` or `~/Applications` before agent
 registration. The app refuses registration elsewhere. The maintenance entry
-point `"Scan to Make.app/Contents/MacOS/Scan to Make" --install-agent` provisions
+point `"Counterpart.app/Contents/MacOS/Counterpart" --install-agent` provisions
 and registers without opening a pairing window. Launch it in the login session
 for real registration/privacy verification. This also provides an explicit
 migration entry point once the existing service is idle.

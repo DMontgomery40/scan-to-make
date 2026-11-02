@@ -21,7 +21,7 @@ async function fixture(t){
    process.stdout.write(JSON.stringify({pid:process.pid,pgid:Number(execFileSync('/bin/ps',['-o','pgid=','-p',String(process.pid)],{encoding:'utf8'}))})+'\\n');
    setInterval(()=>{},1000);
  `);
- return join(app,'Contents/MacOS/Scan to Make');
+ return join(app,'Contents/MacOS/Counterpart');
 }
 
 test('compiled signed-entry helper execs Node in its own PID/group; forced shutdown closes stdout',async t=>{

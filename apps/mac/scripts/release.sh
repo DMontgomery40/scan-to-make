@@ -14,7 +14,7 @@ case "$SPARKLE_FEED_URL" in https://*) ;; *) exit 1 ;; esac
 out="$mac/build/release-$BUILD_NUMBER"
 mkdir -p "$out"
 xcodebuild -project "$mac/ScanToMake.xcodeproj" -scheme ScanToMake -configuration Release -derivedDataPath "$out/derived" CODE_SIGN_STYLE=Manual OTHER_CODE_SIGN_FLAGS=--timestamp CODE_SIGN_IDENTITY="$DEVELOPER_ID_APPLICATION" CURRENT_PROJECT_VERSION="$BUILD_NUMBER" SPARKLE_FEED_URL="$SPARKLE_FEED_URL" SPARKLE_PUBLIC_KEY="$SPARKLE_PUBLIC_KEY" build
-app="$out/derived/Build/Products/Release/Scan to Make.app"
+app="$out/derived/Build/Products/Release/Counterpart.app"
 codesign --verify --deep --strict "$app"
 ditto -c -k --keepParent "$app" "$out/notarization.zip"
 xcrun notarytool submit "$out/notarization.zip" --keychain-profile "$NOTARY_PROFILE" --wait

@@ -27,4 +27,4 @@ jobs:
       - name: Build shell without signing or runtime downloads
         run: xcodebuild -project apps/mac/ScanToMake.xcodeproj -scheme ScanToMake -configuration Debug -destination 'generic/platform=macOS' -derivedDataPath "${{ runner.temp }}/mac-build" CODE_SIGNING_ALLOWED=NO build
       - name: Compiled model worker boundary tests
-        run: STM_MAC_BUILT_APP="${{ runner.temp }}/mac-build/Build/Products/Debug/Scan to Make.app" node --test apps/mac/Tests/model-worker.test.mjs
+        run: STM_MAC_BUILT_APP="${{ runner.temp }}/mac-build/Build/Products/Debug/Counterpart.app" node --test apps/mac/Tests/model-worker.test.mjs
