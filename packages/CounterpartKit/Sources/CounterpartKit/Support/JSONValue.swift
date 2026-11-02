@@ -82,3 +82,11 @@ public enum JSONValue: Equatable, Sendable, Codable {
         return try? JSONSerialization.data(withJSONObject: any, options: [.sortedKeys])
     }
 }
+
+/// Literals for answers and tests: `["confirmed": true, "speed": "fast", "copies": 2]`.
+extension JSONValue: ExpressibleByBooleanLiteral, ExpressibleByStringLiteral, ExpressibleByIntegerLiteral, ExpressibleByFloatLiteral {
+    public init(booleanLiteral value: Bool) { self = .bool(value) }
+    public init(stringLiteral value: String) { self = .string(value) }
+    public init(integerLiteral value: Int) { self = .number(Double(value)) }
+    public init(floatLiteral value: Double) { self = .number(value) }
+}
