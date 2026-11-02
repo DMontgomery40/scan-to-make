@@ -57,6 +57,10 @@ export interface StmObject {
   state: ObjectState;
   /** PRD §5.4 Status set by hand: `works` (state `confirmed`), `needs-changes`, `archived` (hidden, everything kept). */
   outcome?: 'works' | 'needs-changes';
+  /** A message held for retry when intent classification was unavailable or uncertain. */
+  pendingFollowup?: string;
+  /** The success report that marked this project Done without a design pass. */
+  completion?: {note: string; atMs: number; previousStatus: import('@scan-to-make/contracts/counterpart').ProjectStatus; undone?: boolean};
   archived?: boolean;
   /** The short generated title ("Mic mount"). */
   title?: string;

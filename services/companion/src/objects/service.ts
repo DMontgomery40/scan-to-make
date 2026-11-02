@@ -128,6 +128,7 @@ export interface ObjectServiceDeps {
   passTimings?: PassTimings;
   /** A short title for a request ("Mic mount"), best effort; the worker names it otherwise. */
   titleFor?: (request: string) => Promise<string | undefined>;
+  reportsCompletion?: (note: string) => Promise<'works' | 'changes' | 'unknown'>;
 }
 
 /** What the print sheet sends with Print (PRD §8.5). */
@@ -245,35 +246,39 @@ export class ObjectService {
    * `works` → state `confirmed`; `printed`; `not-printed` → `ready`; `needs-changes`; `archived` hides it, keeping everything.
    */
   setStatus(id: string, status: ProjectStatus): Promise<StmObject> {
-    return this.#gate(id, async () => {
-      const object = await this.get(id);
-      // Already there (the state itself, not just the label: a sent project marked printed is a real change).
-      // `archived` is its own flag (setArchived); the status alias `archived` still hides it.
-      if (status === 'archived') return this.#setArchivedNow(id, object, true);
-      const clean = !object.outcome;
-      const there = {works: object.state === 'confirmed', printed: object.state === 'printed' && clean,
-        'needs-changes': object.outcome === 'needs-changes',
-        'not-printed': clean && (object.current ? object.state === 'ready' : !['printed', 'confirmed', 'sent'].includes(object.state))}[status];
-      if (there) return object;
-      if (object.state === 'touching-up' || object.state === 'printing') throw new InvalidStateError('Wait until the current step finishes.');
-      if ((status === 'works' || status === 'printed') && !object.current) throw new InvalidStateError("There's no model yet, so it can't be marked printed.");
-      const updated = await this.#deps.store.update(id, o => {
-        const {outcome: _outcome, ...rest} = o;
-        // A person saying it printed (or works) settles a print Counterpart couldn't follow.
-        const settled = o.print?.uncertain ? {print: {...o.print, uncertain: undefined}} : {};
-        switch (status) {
-          // Hide from Home: the project keeps its status (Done stays Done) and gets it back when unhidden.
-          case 'works': return {...rest, ...settled, state: o.state === 'printing' ? o.state : 'confirmed', outcome: 'works'};
-          case 'printed': return {...rest, ...settled, state: 'printed'};
-          // Without a model, only the flags clear: a draft stays a draft.
-          case 'not-printed': return {...rest, ...(o.current ? {state: 'ready' as const} : {})};
-          case 'needs-changes': return {...rest, outcome: 'needs-changes', ...(o.state === 'confirmed' ? {state: 'printed' as const} : {})};
-        }
-      });
-      await this.#emit({id: randomUUID(), type: 'project.updated', projectId: id, data: {keys: ['status']}});
-      return this.#changed(updated);
-    });
+    return this.#gate(id, () => this.#setStatusNow(id, status));
   }
+  async #setStatusNow(id: string, status: ProjectStatus): Promise<StmObject> {
+    const object = await this.get(id);
+    // Already there (the state itself, not just the label: a sent project marked printed is a real change).
+    // `archived` is its own flag (setArchived); the status alias `archived` still hides it.
+    if (status === 'archived') return this.#setArchivedNow(id, object, true);
+    const clean = !object.outcome;
+    const there = {works: object.state === 'confirmed', printed: object.state === 'printed' && clean,
+      'needs-changes': object.outcome === 'needs-changes',
+      'not-printed': clean && (object.current ? object.state === 'ready' : !['printed', 'confirmed', 'sent'].includes(object.state))}[status];
+    if (there) return object;
+    if (object.state === 'touching-up' || object.state === 'printing') throw new InvalidStateError('Wait until the current step finishes.');
+    if ((status === 'works' || status === 'printed') && !object.current) throw new InvalidStateError("There's no model yet, so it can't be marked printed.");
+    const updated = await this.#deps.store.update(id, o => {
+      const {outcome: _outcome, ...rest} = o;
+      if (status === 'works') rest.pendingFollowup = undefined;
+      if (status !== 'works' && rest.completion) rest.completion = {...rest.completion, undone: true};
+      // A person saying it printed (or works) settles a print Counterpart couldn't follow.
+      const settled = o.print?.uncertain ? {print: {...o.print, uncertain: undefined}} : {};
+      switch (status) {
+        // Hide from Home: the project keeps its status (Done stays Done) and gets it back when unhidden.
+        case 'works': return {...rest, ...settled, state: o.state === 'printing' ? o.state : 'confirmed', outcome: 'works'};
+        case 'printed': return {...rest, ...settled, state: 'printed'};
+        // Without a model, only the flags clear: a draft stays a draft.
+        case 'not-printed': return {...rest, ...(o.current ? {state: 'ready' as const} : {})};
+        case 'needs-changes': return {...rest, outcome: 'needs-changes', ...(o.state === 'confirmed' ? {state: 'printed' as const} : {})};
+      }
+    });
+    await this.#emit({id: randomUUID(), type: 'project.updated', projectId: id, data: {keys: ['status']}});
+    return this.#changed(updated);
+  }
+
 
   /** A person's name wins over a title generator or a pass still finishing in the background. */
   rename(id: string, title: string): Promise<StmObject> {
@@ -594,6 +599,22 @@ export class ObjectService {
     let object = await this.get(id);
     if (object.state === 'touching-up' || object.state === 'printing') throw new InvalidStateError('Wait until the current step finishes.');
     if (!object.current && object.state !== 'failed') throw new InvalidStateError('There is no model to correct yet.');
+    // A success report is a project outcome, not a request to change its mesh (PRD §5.4).
+    // Attached evidence still takes the normal pass path; the classifier only handles text-only reports.
+    if (object.current && !photos.length && !object.question && object.ask?.status !== 'open' && this.#deps.reportsCompletion) {
+      const intent = await this.#deps.reportsCompletion(note).catch(() => 'unknown' as const);
+      if (intent === 'unknown') {
+        const saved = await this.#deps.store.update(id, o => ({...o, pendingFollowup: note.trim()}));
+        this.#changed(saved);
+        await this.#emit({id: randomUUID(), type: 'project.updated', projectId: id, data: {keys: ['pendingFollowup']}});
+        throw new InvalidStateError("Your message is saved, but I couldn't tell whether it marks Done or asks for changes. Try sending it again, or set Status to Done.");
+      }
+      if (intent === 'works') {
+        const previousStatus = projectStatus(object);
+        await this.#deps.store.update(id, o => ({...o, pendingFollowup: undefined, completion: {note: note.trim(), atMs: Date.now(), previousStatus}}));
+        return this.#setStatusNow(id, 'works');
+      }
+    }
     for (const path of photos) object = await this.#addFile(id, 'photos', path);
     // New photos sent with the request make it a late-photos pass.
     return this.#pass(object, {note: note.trim(), trigger: photos.length ? 'late-photos' : 'changes'});
@@ -1096,7 +1117,8 @@ export class ObjectService {
     let engine: DesignEngine = 'blender';
     let typical = await this.#typical(kind, engine);
     const first: PassStage = {id: plan[0]!, words: stageWords(plan[0]!, engine, kind), startedAtMs, typicalSec: typical[plan[0]!]};
-    const running = await store.update(object.id, o => ({...o, state: 'touching-up', question: undefined, failure: undefined,
+    const running = await store.update(object.id, o => ({...o, state: 'touching-up', question: undefined, failure: undefined, pendingFollowup: undefined,
+      ...(o.completion ? {completion: {...o.completion, undone: true}} : {}),
       ...(build ? {progress: 'Building the model from your photos.'} : {progress: undefined}),
       passes: [...o.passes, {startedAtMs, trigger: opts.trigger ?? 'new', stages: [first], estimate: passEstimate([first], plan, typical, startedAtMs),
         ...(opts.note ? {note: opts.note} : {})}]}));

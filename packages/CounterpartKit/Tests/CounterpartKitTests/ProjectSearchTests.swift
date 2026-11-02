@@ -15,6 +15,18 @@ final class ProjectSearchTests: XCTestCase {
         XCTAssertTrue(project.matchesSearch(" \n "))
     }
 
+    func testCompletionReportIsSearchableAndUndoOnlyAppearsForItsOwnOutcome() throws {
+        let data = Data(#"{"id":"mount","createdAtMs":1,"updatedAtMs":2,"state":"confirmed","completion":{"note":"Mounted and working","atMs":2,"previousStatus":"printed"}}"#.utf8)
+        var project = try JSONDecoder().decode(Project.self, from: data)
+        XCTAssertEqual(project.completionUndoStatus, .printed)
+        XCTAssertTrue(project.matchesSearch("mounted"))
+        project.completion?.undone = true
+        XCTAssertNil(project.completionUndoStatus)
+        project.completion?.undone = false
+        project.state = .touchingUp
+        XCTAssertNil(project.completionUndoStatus)
+    }
+
     func testNameValidationMatchesTheCompanion() {
         XCTAssertTrue(Project.validName("  Desk mount  "))
         XCTAssertTrue(Project.validName(String(repeating: "a", count: 120)))

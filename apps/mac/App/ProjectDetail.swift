@@ -113,6 +113,23 @@ struct ProjectDetail: View {
 
     /// What the Mac needs, or what it is doing, in one glass card above the bar. Nothing when it's ready.
     @ViewBuilder private var card: some View {
+        if let pending = object.pendingFollowup {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Message saved").font(.headline)
+                Text(pending).font(.subheadline).textSelection(.enabled)
+                HStack {
+                    Button("Try Again") { Task { await model.perform(.correct, on: object.id, note: pending) } }
+                    Button("Mark Done") { Task { await model.setStatus("works", for: object.id) } }
+                }.disabled(working)
+            }.padding(12).glassEffect(.regular, in: .rect(cornerRadius: 14))
+        }
+        if let previous = object.completionUndoStatus {
+            HStack {
+                Label("Marked Done", systemImage: "checkmark.circle.fill")
+                Spacer()
+                Button("Undo") { Task { await model.setStatus(previous.rawValue, for: object.id) } }.disabled(working)
+            }.padding(12).glassEffect(.regular, in: .rect(cornerRadius: 14))
+        }
         if let problem = model.problem, problem.id == object.id {
             Label(problem.text, systemImage: "exclamationmark.circle.fill")
                 .foregroundStyle(.red).textSelection(.enabled)

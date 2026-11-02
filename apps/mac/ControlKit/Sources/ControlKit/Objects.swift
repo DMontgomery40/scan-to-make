@@ -162,7 +162,8 @@ public extension ControlClient {
     func correctObject(_ id: String, note: String, photos: [String] = []) async throws -> Project {
         var params: [String: JSONValue] = ["id": .string(id), "note": .string(note)]
         if !photos.isEmpty { params["photos"] = .array(photos.map(JSONValue.string)) }
-        let result: ObjectReply = try await call("objects.correct", params); return result.object
+        let client = try ControlClient(socketPath: socketPath, timeout: max(timeout, Self.timeout(for: "objects.correct")))
+        let result: ObjectReply = try await client.call("objects.correct", params); return result.object
     }
     /// A new project started on this Mac (`capabilities.objectsCreate`). Files follow with `addFile`, then `startObject`.
     /// `kind` (`fit` or `copy`) only to a companion with `structuredPasses`; an older one refuses the field.

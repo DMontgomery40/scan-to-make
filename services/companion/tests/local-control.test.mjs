@@ -240,6 +240,7 @@ test('server CLI owns the control socket lifecycle without exposing admin method
 
 test('long methods get their own socket deadline; everything else keeps 10 s', async () => {
   const {methodDeadlineMs} = await import('../dist/local-control.js');
+  assert.equal(methodDeadlineMs('objects.correct', {}), 25000);
   assert.equal(methodDeadlineMs('objects.estimate', {}), 180000);
   assert.equal(methodDeadlineMs('objects.cancelPrint', {}), 130000);
   assert.equal(methodDeadlineMs('objects.get', {}), undefined);
