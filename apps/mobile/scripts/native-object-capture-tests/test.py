@@ -20,8 +20,6 @@ args = parser.parse_args()
 os.environ['DEVELOPER_DIR'] = '/Applications/Xcode.app/Contents/Developer'
 args.evidence.mkdir(parents=True, exist_ok=True)
 subprocess.run([sys.executable, str(HERE / 'retry.py'), '--evidence', str(args.evidence / 'retry')], check=True)
-subprocess.run([sys.executable, str(HERE / 'handheld.py'), '--evidence', str(args.evidence / 'handheld')], check=True)
-subprocess.run([sys.executable, str(HERE / 'depth-recorder.py'), '--evidence', str(args.evidence / 'depth-recorder')], check=True)
 with tempfile.TemporaryDirectory(prefix='native-object-capture-tests-') as directory:
     binary = str(Path(directory) / 'lifecycle')
     sdk = subprocess.check_output(['xcrun', '--sdk', 'macosx', '--show-sdk-path'], text=True).strip()

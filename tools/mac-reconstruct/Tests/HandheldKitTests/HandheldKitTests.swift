@@ -42,21 +42,8 @@ final class HandheldKitTests: XCTestCase {
             let url = dir.appendingPathComponent("\(tag).heic")
             try writePhoto(ctx.makeImage()!, depth: nil, camera: PhotoCamera(focalPixels: 6, orientation: UInt32(tag)), to: url)
             XCTAssertEqual(orientation(of: try loadSample(url)), tag)
+            XCTAssertEqual(orientation(of: url), tag)   // read without decoding the photo
         }
-    }
-
-    func testMaskHelpers() {
-        var mask = GrayImage(width: 20, height: 10)
-        for y in 2..<8 { for x in 2..<8 { mask[x, y] = 255 } }       // big blob
-        mask[15, 5] = 255                                               // speck
-        XCTAssertEqual(mask.components().count, 2)
-        XCTAssertEqual(mask.keepingComponent(containing: nil).onCount, 36)
-        XCTAssertEqual(mask.keepingComponent(containing: (15, 5)).onCount, 1)
-        let deepest = mask.deepestInteriorPoint()!
-        XCTAssertTrue((4...5).contains(deepest.x) && (4...5).contains(deepest.y))
-        XCTAssertEqual(mask.dilated(by: 1).onCount, 8 * 8 + 9)
-        let box = mask.keepingComponent(containing: nil).bounds(scaledTo: (20, 10), grownBy: 0)!
-        XCTAssertEqual(box.minX, 0.1, accuracy: 1e-9); XCTAssertEqual(box.width, 0.3, accuracy: 1e-9)
     }
 
     func testCorruptExactDepthCannotSilentlyFallBackToEmbeddedDepth() throws {

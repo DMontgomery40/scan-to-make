@@ -26,7 +26,7 @@ struct NewObjectView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
 
-    /// A scan finished for this draft, kept on this phone until Send.
+    /// A scan finished for this draft, kept on this phone until Send (in hand: one saved before it was switched off).
     enum Attached: Equatable { case walkAround, inHand }
 
     private var described: Bool { !instructions.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
@@ -54,20 +54,12 @@ struct NewObjectView: View {
                     }
 
                     Text("Show it").font(.headline)
-                    RigTile(enabled: store.canScan && working == nil, scan: { Task { await scan(handheld: false) } },
+                    RigTile(enabled: store.canScan && working == nil, scan: { Task { await scan() } },
                             printRig: { openURL(CounterpartIdentifiers.scanRig) })
                     LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
                         SourceTile(symbol: "cube.transparent", title: "Scan it", detail: store.canScan ? "Walk around it. LiDAR measures it." : "Needs an iPhone or iPad with LiDAR.",
-                                   tint: .filament, enabled: store.canScan && working == nil) { Task { await scan(handheld: false) } }
+                                   tint: .filament, enabled: store.canScan && working == nil) { Task { await scan() } }
                             .accessibilityIdentifier("scan-object")
-                        // Scan in hand is off until it's rebuilt on Apple's still-photo capture: its LiDAR session
-                        // left the phone's camera black (KAN-217 P0, Davica3 2026-11-02 02:07).
-                        if HandheldCapture.offered {
-                            SourceTile(symbol: "hand.raised.fingers.spread", title: "Scan in hand",
-                                       detail: HandheldCapture.isAvailable ? "Hold it up and turn it." : "Needs an iPhone or iPad with LiDAR.",
-                                       tint: .blue, enabled: HandheldCapture.isAvailable && working == nil) { Task { await scan(handheld: true) } }
-                                .accessibilityIdentifier("capture-photos")
-                        }
                         SourceTile(symbol: "camera", title: "Take photos", detail: photos.count < Self.photoLimit ? "A few angles is plenty." : "24 photos is the most.", tint: .purple,
                                    enabled: working == nil && !photosLocked && photos.count < Self.photoLimit) { Task { await addPhotos(camera: true) } }
                         SourceTile(symbol: "photo.on.rectangle.angled", title: "From Photos", detail: photos.count < Self.photoLimit ? "Pick what you have." : "24 photos is the most.", tint: .green,
@@ -233,8 +225,9 @@ struct NewObjectView: View {
         return nil
     }
 
-    /// Scans for this draft and comes back here with the scan attached; Send sends it with the rest.
-    private func scan(handheld: Bool) async {
+    /// Scans for this draft (walking around it) and comes back here with the scan attached; Send sends it with
+    /// the rest. A capture already saved for this draft, a walk-around or an older Scan in hand, is attached instead.
+    private func scan() async {
         describing = false
         await run("scan") {
             let object = try await object(scanning: true)
@@ -243,11 +236,7 @@ struct NewObjectView: View {
             guard object.scan == nil, (object.capture ?? []).isEmpty else {
                 throw CompanionError(code: "missing-capture", message: "This project's saved scan is no longer on this phone. Start a new project to scan it again.")
             }
-            if handheld {
-                if await HandheldCapture.run(objectId: object.id) { attached = .inHand }
-            } else if try await store.mac.scan(object.id) != nil {
-                attached = .walkAround
-            }
+            if try await store.mac.scan(object.id) != nil { attached = .walkAround }
         }
     }
 }

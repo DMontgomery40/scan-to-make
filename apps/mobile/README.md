@@ -12,7 +12,7 @@ The bundle id stays `com.scantomake` and the Keychain items stay the ones every 
 | `ios/ScanToMake/App/` | The `@main` app, `AppModel` (pairing state, links, the notification-routing entry point) |
 | `ios/ScanToMake/Pairing/` | Find your Mac: the QR scanner (VisionKit `DataScannerViewController`), the nearby-Mac card, pairing links |
 | `ios/ScanToMake/Platform/` | `MacConnection` (projects, photos, scans and printing over CounterpartKit) and the photo picker and camera |
-| `ios/ScanToMake/Objects/` | The project screens, and the in-hand scan recorder (`HandheldCapture.swift`, `HandheldDepthRecorder.swift`) |
+| `ios/ScanToMake/Objects/` | `HandheldCapture.swift`: finds a Scan in hand capture an earlier build saved on the phone, so it can still be sent. The phone no longer records one; the walk-around scan, with its flip, is the scan. |
 | `modules/object-capture/` | The walk-around Object Capture module: Apple's sample, unchanged, plus its entry and exit (`ios/`). It builds as the `GuidedObjectCapture` framework. |
 | `../../packages/CounterpartKit/` | Shared Swift code: the domain model, the status words, the formatters, pairing and the companion client |
 

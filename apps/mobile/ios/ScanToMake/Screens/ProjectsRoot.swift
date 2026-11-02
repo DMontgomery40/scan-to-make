@@ -33,7 +33,6 @@ struct ProjectsRoot: View {
         .sheet(isPresented: $showPrinters) { NavigationStack { PrintersView(store: store) } }
         .task(id: pairingKey) {
             store.reset()
-            HandheldCapture.previewIfAsked()
             store.canScan = await store.mac.canScan()
             #if DEBUG
             // The screenshot comparisons show a LiDAR iPhone, as the mockups do; the Simulator has no LiDAR.

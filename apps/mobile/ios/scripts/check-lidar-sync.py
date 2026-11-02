@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Device check for the LiDAR camera (KAN-217 P0), run after the functional acceptance on the phone.
 
-The acceptance is functional first. After a reboot, open and close Scan in Hand. Then all of these
-must work: the Camera app shows an image, Face ID unlocks, and Scan in Hand starts and shows a preview.
+The acceptance is functional first. After a reboot, open and close the walk-around scan, then swipe the
+app away mid-scan, then finish a scan. After each, the Camera app must show live video and Face ID must
+unlock. (Scan in Hand, whose LiDAR session caused the P0, is gone.)
 This script reads the device syslog captured across those steps and fails on the camera daemon's
 failure markers: another client's capture graph failing to build with -12681 or -12684 ("Fig assert",
 "error ... building graph", "Tearing down graph to recover", "translated error"), as Face ID's did.
@@ -45,7 +46,7 @@ def main(path: str) -> int:
         lines = log.read().splitlines()
     start = next((i for i, line in enumerate(lines) if START.search(line)), None)
     if start is None:
-        print("No Counterpart LiDAR capture session in this log: open Scan in Hand while it records.")
+        print("No Counterpart LiDAR capture session in this log: open the walk-around scan while it records.")
         return 2
     after = lines[start:]
     # Whether a Counterpart session holds the camera at each line: from each start to its stop.

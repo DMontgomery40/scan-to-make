@@ -11,18 +11,14 @@ typealias StmObject = Project
 struct CompanionError: Error { var code: String; var message: String }
 struct ChosenPhoto: Equatable { var id: String }
 
+/// A Scan in hand capture saved on the phone before Scan in hand was switched off. The phone can't record one now.
 @MainActor enum HandheldCapture {
     static var frames: [String] = []
-    static var captures = 0
     static var isFinished = false
     static func finished(_ id: String) -> Bool { isFinished }
-    static func run(objectId: String) async -> Bool {
-        captures += 1
-        frames = (0..<3).map { "capture-\(captures)-frame-\($0)" }
-        isFinished = true
-        return true
-    }
-    static func reset() { frames = []; captures = 0; isFinished = false; MacConnection.pending = [:]; MacConnection.requested = [] }
+    /// One finished capture of three frames, saved by an earlier build.
+    static func saved() { frames = (0..<3).map { "saved-frame-\($0)" }; isFinished = true }
+    static func reset() { frames = []; isFinished = false; MacConnection.pending = [:]; MacConnection.requested = [] }
 }
 
 /// The Mac side: what it has received, keyed by file, and whether start came before every file.
@@ -140,27 +136,29 @@ struct ChosenPhoto: Equatable { var id: String }
         var failures: [String] = []
         func check(_ value: Bool, _ message: String) { if !value { failures.append(message) } }
 
-        // New: a scan attaches; Send sends it in the background; a send cut short resends only what's missing.
+        // New: a saved in-hand capture attaches without a scan; Send sends it in the background; a send cut
+        // short resends only what's missing.
         HandheldCapture.reset()
+        HandheldCapture.saved()
         let handheld = NewObjectView()
-        await handheld.scan(handheld: true)
-        check(handheld.attached == .inHand && handheld.store.mac.events.isEmpty, "scanning in New sent something before Send")
+        await handheld.scan()
+        check(handheld.attached == .inHand && handheld.store.mac.events.isEmpty && handheld.store.mac.captures == 0,
+              "a saved in-hand capture wasn't attached, or New scanned or sent before Send")
         handheld.store.mac.failUpload = true
         await handheld.make()
         check(handheld.store.failure != nil, "fixture must interrupt the first upload")
-        await handheld.scan(handheld: true)
-        check(HandheldCapture.captures == 1, "handheld retry reopened the camera")
+        await handheld.scan()
+        check(handheld.store.mac.captures == 0, "retry scanned over the saved in-hand capture")
         await handheld.make()
-        check(handheld.store.mac.received == [0: "capture-1-frame-0", 1: "capture-1-frame-1", 2: "capture-1-frame-2"],
-              "handheld retry mixed photos from different captures")
+        check(handheld.store.mac.received == [0: "saved-frame-0", 1: "saved-frame-1", 2: "saved-frame-2"],
+              "in-hand retry mixed or omitted saved photos")
         check(!handheld.store.mac.startedWithIncompleteCapture, "handheld started before all saved photos arrived")
 
         HandheldCapture.reset()
         let walkaround = NewObjectView()
-        await walkaround.scan(handheld: false)
-        await walkaround.scan(handheld: true)
-        check(walkaround.store.mac.captures == 1 && HandheldCapture.captures == 0,
-              "changing scan mode replaced the saved walkaround capture")
+        await walkaround.scan()
+        await walkaround.scan()
+        check(walkaround.store.mac.captures == 1, "scanning again replaced the saved walkaround capture")
         check(walkaround.attached == .walkAround, "the saved walkaround scan wasn't attached")
         walkaround.store.mac.failUpload = true
         await walkaround.make()
@@ -188,32 +186,32 @@ struct ChosenPhoto: Equatable { var id: String }
 
         // The project page: Scan again after a failed send reuses the saved capture.
         HandheldCapture.reset()
+        HandheldCapture.saved()
         let detail = ProjectView()
         detail.store.mac.failUpload = true
-        do { _ = try await detail.scan(Project(), handheld: true) } catch { }
-        _ = try await detail.scan(Project(), handheld: false)
-        check(HandheldCapture.captures == 1 && detail.store.mac.captures == 0,
-              "page retry replaced the saved handheld capture")
-        check(detail.store.mac.received == [0: "capture-1-frame-0", 1: "capture-1-frame-1", 2: "capture-1-frame-2"],
+        do { _ = try await detail.scan(Project()) } catch { }
+        _ = try await detail.scan(Project())
+        check(detail.store.mac.captures == 0, "page retry replaced the saved handheld capture")
+        check(detail.store.mac.received == [0: "saved-frame-0", 1: "saved-frame-1", 2: "saved-frame-2"],
               "page retry mixed photos")
 
         HandheldCapture.reset()
         let detailFinish = ProjectView()
         detailFinish.store.mac.failUpload = true
-        do { _ = try await detailFinish.scan(Project(), handheld: false) } catch { }
+        do { _ = try await detailFinish.scan(Project()) } catch { }
         _ = try await detailFinish.finishSending(Project())
         check(detailFinish.store.mac.received.count == 3 && !detailFinish.store.mac.startedWithIncompleteCapture,
               "Finish Sending started before the saved scan arrived")
 
         // A scan attached in New but never sent stays a draft: opening it doesn't send it.
         HandheldCapture.reset()
-        _ = await HandheldCapture.run(objectId: "object-1")
+        HandheldCapture.saved()
         let unsent = ProjectView()
         await unsent.resumeSavedCapture()
         check(unsent.pending == nil, "opening an unsent draft sent its scan")
 
         HandheldCapture.reset()
-        _ = await HandheldCapture.run(objectId: "object-1")
+        HandheldCapture.saved()
         MacConnection.requested.insert("object-1")
         let relaunched = ProjectView()
         relaunched.store.mac.received[0] = HandheldCapture.frames[0]
@@ -228,7 +226,7 @@ struct ChosenPhoto: Equatable { var id: String }
 
         HandheldCapture.reset()
         let stillSending = ProjectView()
-        _ = await HandheldCapture.run(objectId: "object-1")
+        HandheldCapture.saved()
         MacConnection.requested.insert("object-1")
         stillSending.store.sending.insert("object-1")
         await stillSending.resumeSavedCapture()
@@ -247,7 +245,7 @@ struct ChosenPhoto: Equatable { var id: String }
               "relaunch started before the remaining walkaround photos arrived")
 
         HandheldCapture.reset()
-        _ = await HandheldCapture.run(objectId: "object-1")
+        HandheldCapture.saved()
         let alreadyStarted = ProjectView()
         MacConnection.requested.insert("object-1")
         alreadyStarted.object = Project(state: .touchingUp)
@@ -256,18 +254,18 @@ struct ChosenPhoto: Equatable { var id: String }
         let alreadyStartedForm = NewObjectView()
         alreadyStartedForm.draft = Project(state: .touchingUp)
         await alreadyStartedForm.make()
-        await alreadyStartedForm.scan(handheld: true)
+        await alreadyStartedForm.scan()
         check(alreadyStartedForm.store.mac.events.isEmpty, "a lost start reply caused another upload or start")
 
         HandheldCapture.reset()
         let missingLocal = NewObjectView()
         missingLocal.draft = Project(capture: ["0000.heic"])
-        await missingLocal.scan(handheld: true)
-        check(missingLocal.failure != nil && HandheldCapture.captures == 0,
+        await missingLocal.scan()
+        check(missingLocal.failure != nil && missingLocal.store.mac.captures == 0,
               "a missing local capture silently reused a project with uploaded frames")
         let missingLocalDetail = ProjectView()
         var refused = false
-        do { _ = try await missingLocalDetail.scan(Project(scan: "scan.usdz"), handheld: false) }
+        do { _ = try await missingLocalDetail.scan(Project(scan: "scan.usdz")) }
         catch { refused = true }
         check(refused && missingLocalDetail.store.mac.captures == 0,
               "the page replaced an uploaded scan when the local capture was gone")

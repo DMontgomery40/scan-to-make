@@ -16,11 +16,6 @@ extension Color {
     static let well = Color(white: 0.07)
 }
 
-/// The in-hand recorder's own blue (HandheldCapture.swift keeps its look).
-let cobalt = Color(uiColor: UIColor { $0.userInterfaceStyle == .dark
-    ? UIColor(red: 0x3A / 255, green: 0x63 / 255, blue: 0xF2 / 255, alpha: 1)
-    : UIColor(red: 0x24 / 255, green: 0x48 / 255, blue: 0xD8 / 255, alpha: 1) })
-
 extension Tone {
     var color: Color {
         switch self {

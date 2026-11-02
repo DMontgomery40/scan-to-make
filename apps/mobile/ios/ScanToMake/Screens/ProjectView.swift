@@ -106,13 +106,12 @@ struct ProjectView: View {
         try await store.mac.sendProject(object.id, photos: MacConnection.pendingPhotos(object.id))
     }
 
-    private func scan(_ object: Project, handheld: Bool) async throws -> Project? {
+    private func scan(_ object: Project) async throws -> Project? {
         let saved = HandheldCapture.finished(object.id) ? true : await store.mac.finishedScan(object.id) != nil
         if saved { return try await finishSending(object) }
         guard object.scan == nil, (object.capture ?? []).isEmpty else {
             throw CompanionError(code: "missing-capture", message: "This project's saved scan is no longer on this phone. Start a new project to scan it again.")
         }
-        if handheld { return await HandheldCapture.run(objectId: object.id) ? try await finishSending(object) : nil }
         guard try await store.mac.scan(object.id) != nil else { return nil }
         return try await finishSending(object)
     }
@@ -522,7 +521,7 @@ struct ProjectView: View {
                         .buttonStyle(.glassProminent)
                     }
                     if words.actions.contains(.scan) && store.canScan {
-                        Button { act { try await scan(object, handheld: false) } } label: { Label("Scan", systemImage: "cube.transparent").frame(maxWidth: .infinity).frame(height: 30) }
+                        Button { act { try await scan(object) } } label: { Label("Scan", systemImage: "cube.transparent").frame(maxWidth: .infinity).frame(height: 30) }
                             .buttonStyle(.glass)
                     }
                     if words.actions.contains(.attachPhotos) {

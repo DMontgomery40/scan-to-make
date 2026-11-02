@@ -5,16 +5,22 @@ on:
     paths:
       - 'apps/mobile/modules/object-capture/**'
       - 'apps/mobile/scripts/native-object-capture-tests/**'
-      # The in-hand recorder and the retry paths it checks live in the app.
+      # The retry checks run the app's own send and resume paths.
       - 'apps/mobile/ios/ScanToMake/Objects/**'
+      - 'apps/mobile/ios/ScanToMake/Screens/NewProjectView.swift'
+      - 'apps/mobile/ios/ScanToMake/Screens/ProjectView.swift'
+      - 'apps/mobile/ios/ScanToMake/Platform/MacConnection.swift'
       - '.github/workflows/object-capture.yml'
   push:
     branches: [main]
     paths:
       - 'apps/mobile/modules/object-capture/**'
       - 'apps/mobile/scripts/native-object-capture-tests/**'
-      # The in-hand recorder and the retry paths it checks live in the app.
+      # The retry checks run the app's own send and resume paths.
       - 'apps/mobile/ios/ScanToMake/Objects/**'
+      - 'apps/mobile/ios/ScanToMake/Screens/NewProjectView.swift'
+      - 'apps/mobile/ios/ScanToMake/Screens/ProjectView.swift'
+      - 'apps/mobile/ios/ScanToMake/Platform/MacConnection.swift'
       - '.github/workflows/object-capture.yml'
 permissions:
   contents: read

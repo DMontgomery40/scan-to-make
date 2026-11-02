@@ -63,7 +63,6 @@
 		9E228DCC3A050844AE21787B /* ScanPasses-iPhone-FixedHeight-3.mp4 in Resources */ = {isa = PBXBuildFile; fileRef = F5B6C8A8F2EC960651BD9CA1 /* ScanPasses-iPhone-FixedHeight-3.mp4 */; };
 		9F0C179B8891D8B4CCA32931 /* ScanPasses-iPhone-FixedHeight-unflippable-high.mp4 in Resources */ = {isa = PBXBuildFile; fileRef = FF186480D5365063EF26C687 /* ScanPasses-iPhone-FixedHeight-unflippable-high.mp4 */; };
 		9F7453F350780E39E173BF95 /* OnboardingTutorialView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4339C608931E0159BDC44447 /* OnboardingTutorialView.swift */; };
-		A76FADA1F330E00A3087BF5E /* HandheldDepthRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = F14EA6DBE40E129A8FD34A66 /* HandheldDepthRecorder.swift */; };
 		ABA6AD6AC67857F7359D79E9 /* TutorialVideoView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F59E8C7324CD980150910FD /* TutorialVideoView.swift */; };
 		AC0A2C5E26F46ADB470C83F8 /* PrintStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = 510069BB85EC1645E845D872 /* PrintStatus.swift */; };
 		AD50A761FCB76CF9CC0C29AE /* GuidedObjectCapture.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 9D2907A997F1327C99EDBFE1 /* GuidedObjectCapture.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
@@ -200,7 +199,6 @@
 		EBCFAFBD33747C304862AC24 /* CounterpartKit */ = {isa = PBXFileReference; lastKnownFileType = folder; name = CounterpartKit; path = ../../../packages/CounterpartKit; sourceTree = SOURCE_ROOT; };
 		ED64475EDD04E226538AB4A1 /* AppTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppTests.swift; sourceTree = "<group>"; };
 		F011665A66F3AC69F266FC94 /* ScanPasses-iPhone-FixedHeight-1.mp4 */ = {isa = PBXFileReference; path = "ScanPasses-iPhone-FixedHeight-1.mp4"; sourceTree = "<group>"; };
-		F14EA6DBE40E129A8FD34A66 /* HandheldDepthRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HandheldDepthRecorder.swift; sourceTree = "<group>"; };
 		F1F2F11831E109C8EF539549 /* PrintConfirm.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrintConfirm.swift; sourceTree = "<group>"; };
 		F3CA28C4E4604B8027F493BD /* ModelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelView.swift; sourceTree = "<group>"; };
 		F5B6C8A8F2EC960651BD9CA1 /* ScanPasses-iPhone-FixedHeight-3.mp4 */ = {isa = PBXFileReference; path = "ScanPasses-iPhone-FixedHeight-3.mp4"; sourceTree = "<group>"; };
@@ -426,7 +424,6 @@
 			isa = PBXGroup;
 			children = (
 				4AA888917D0BB09DAE7339F2 /* HandheldCapture.swift */,
-				F14EA6DBE40E129A8FD34A66 /* HandheldDepthRecorder.swift */,
 			);
 			path = Objects;
 			sourceTree = "<group>";
@@ -685,7 +682,6 @@
 				54B41807E6403360CEFF31EF /* FindYourMacView.swift in Sources */,
 				5353ABD77357EE49947D8D97 /* Fixtures.swift in Sources */,
 				C13097908B7F944446B112DB /* HandheldCapture.swift in Sources */,
-				A76FADA1F330E00A3087BF5E /* HandheldDepthRecorder.swift in Sources */,
 				1DF0290DD312A98B2576BA48 /* HomeView.swift in Sources */,
 				8EACD047144D4EFC19731165 /* MacConnection.swift in Sources */,
 				2A929BEAFFD3030C188C14A3 /* MacSettings.swift in Sources */,

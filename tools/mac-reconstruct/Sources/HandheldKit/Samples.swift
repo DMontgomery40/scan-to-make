@@ -40,8 +40,17 @@ public func loadSample(_ url: URL) throws -> PhotogrammetrySample {
 /// so the phone must never send one; the front camera's preview is mirrored, its photos must not be.
 public func isMirrored(orientation: Int) -> Bool { [2, 4, 5, 7].contains(orientation) }
 
-public func orientation(of sample: PhotogrammetrySample) -> Int {
-    (sample.metadata["Orientation"] as? Int) ?? ((sample.metadata["{TIFF}"] as? [String: Any])?["Orientation"] as? Int) ?? 1
+public func orientation(of sample: PhotogrammetrySample) -> Int { orientation(in: sample.metadata) }
+
+/// The photo's orientation from its metadata alone, so a whole folder can be checked before anything is decoded.
+public func orientation(of url: URL) -> Int {
+    guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+          let metadata = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [String: Any] else { return 1 }
+    return orientation(in: metadata)
+}
+
+private func orientation(in metadata: [String: Any]) -> Int {
+    (metadata["Orientation"] as? Int) ?? ((metadata["{TIFF}"] as? [String: Any])?["Orientation"] as? Int) ?? 1
 }
 
 private let idLock = NSLock()

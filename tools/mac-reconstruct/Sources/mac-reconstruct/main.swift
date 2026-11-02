@@ -9,10 +9,10 @@ import HandheldKit
 //   mac-reconstruct <images-folder> <output.usdz> [reduced|medium|full|raw]
 //       An Object Capture photo folder (walk-around scan).
 //   mac-reconstruct samples <images-folder> <output.usdz> [reduced|medium|full|raw]
-//                   [--masks <dir> | --no-masks] [--save-masks <dir> [--masks-only]]
-//       Handheld photos: the camera stays still and the object turns in the hand. Each photo becomes a
-//       PhotogrammetrySample with its embedded depth and EXIF, no gravity, and an object mask. Masks come from
-//       <dir>/<photo-name>.png when given, otherwise from Vision on this Mac (the object without the hand or room).
+//       Handheld photos (a Scan in hand capture an earlier phone build saved): the camera stays still and the
+//       object turns in the hand. Each photo becomes a PhotogrammetrySample with its embedded depth and EXIF and
+//       no gravity. Apple's own object masking finds the object; there is no mask of our own (KAN-217).
+//       `--save-masks <dir>` is still accepted (the companion passes it) and writes nothing.
 //
 // Prints one JSON line per progress step and a final {"done":…} or {"error":…} line.
 
@@ -26,7 +26,7 @@ func fail(_ message: String) -> Never { emit(["error": message]); exit(1) }
 
 let usage = """
 usage: mac-reconstruct <images-folder> <output.usdz> [reduced|medium|full|raw]
-       mac-reconstruct samples <images-folder> <output.usdz> [reduced|medium|full|raw] [--masks <dir> | --no-masks] [--save-masks <dir> [--masks-only]]
+       mac-reconstruct samples <images-folder> <output.usdz> [reduced|medium|full|raw]
 
 """
 var args = Array(CommandLine.arguments.dropFirst())
@@ -36,10 +36,7 @@ func option(_ name: String) -> String? {
     guard let i = args.firstIndex(of: name), i + 1 < args.count else { return nil }
     let value = args[i + 1]; args.removeSubrange(i...(i + 1)); return value
 }
-let maskFolder = option("--masks").map { URL(fileURLWithPath: $0, isDirectory: true) }
-let saveMasks = option("--save-masks").map { URL(fileURLWithPath: $0, isDirectory: true) }
-let noMasks = args.contains("--no-masks"); args.removeAll { $0 == "--no-masks" }
-let masksOnly = args.contains("--masks-only"); args.removeAll { $0 == "--masks-only" }
+_ = option("--save-masks")   // the companion still passes it; there are no masks to save
 // Diagnostics for tests: switch off Apple's own object masking, or drop the photos' depth.
 let noObjectMasking = args.contains("--no-object-masking"); args.removeAll { $0 == "--no-object-masking" }
 let noDepth = args.contains("--no-depth"); args.removeAll { $0 == "--no-depth" }
@@ -59,54 +56,16 @@ configuration.isObjectMaskingEnabled = !noObjectMasking   // the object, not wha
 
 let started = Date()
 
-/// Object masks for handheld photos, written as PNGs next to nothing else, so a run can be checked afterwards.
-func prepareMasks(for files: [URL], in folder: URL) async throws {
-    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-    if maskFolder == nil {
-        guard ObjectMasker.isSupported else { emit(["error": "needs-macos-27"]); exit(3) }
-        // Vision fetches its model on first use; say so only when that actually takes a while.
-        if await ObjectMasker.needsDownload() {
-            let notice = Task { try await Task.sleep(for: .seconds(2)); emit(["stage": "downloading"]) }
-            try await ObjectMasker.download()
-            notice.cancel()
-        }
-    }
-    let masker = ObjectMasker()
-    for (index, file) in files.enumerated() {
-        let sample = try loadSample(file)
-        if isMirrored(orientation: orientation(of: sample)) { emit(["error": "mirrored-photos", "file": file.lastPathComponent]); exit(4) }
-        let width = CVPixelBufferGetWidth(sample.image), height = CVPixelBufferGetHeight(sample.image)
-        let target = folder.appendingPathComponent(file.deletingPathExtension().lastPathComponent + ".png")
-        var note: [String: Any] = ["stage": "masking", "done": index + 1, "total": files.count]
-        if let maskFolder {
-            let supplied = maskFolder.appendingPathComponent(file.deletingPathExtension().lastPathComponent + ".png")
-            let mask = try GrayImage(contentsOf: supplied).resized(width: width, height: height).thresholded()
-            try mask.writePNG(to: target)
-        } else {
-            let depth = sample.depthDataMap.flatMap { DepthImage(buffer: $0) }
-            let result = try await masker.mask(image: sample.image, depth: depth)
-            try result.mask.writePNG(to: target)
-            note["method"] = result.method; note["handJoints"] = result.handJoints; note["excluded"] = result.excludedPoints
-            note["coverage"] = (Double(result.mask.onCount) / Double(width * height) * 1000).rounded() / 1000
-            if result.mask.onCount == 0 { note["empty"] = file.lastPathComponent }
-        }
-        emit(note)
-    }
-}
-
 do {
     let session: PhotogrammetrySession
     if samplesMode {
         let files = try photos(in: input)
         guard !files.isEmpty else { fail("No photos in \(input.path).") }
-        var masks: URL? = nil
-        if !noMasks {
-            let folder = saveMasks ?? FileManager.default.temporaryDirectory.appendingPathComponent("mac-reconstruct-masks-\(UUID().uuidString)")
-            try await prepareMasks(for: files, in: folder)
-            masks = folder
-            if masksOnly { emit(["done": folder.path, "seconds": Int(Date().timeIntervalSince(started))]); exit(0) }
+        // A mirrored photo set rebuilds a mirror-image object: refuse it before anything is built.
+        if let mirrored = files.first(where: { isMirrored(orientation: orientation(of: $0)) }) {
+            emit(["error": "mirrored-photos", "file": mirrored.lastPathComponent]); exit(4)
         }
-        emit(["samples": files.count, "masked": masks != nil, "stage": "reconstructing"])
+        emit(["samples": files.count, "stage": "reconstructing"])
         // Loaded lazily: a few hundred full-resolution photos don't need to sit in memory together.
         let samples = AnySequence<PhotogrammetrySample> {
             var iterator = files.makeIterator()
@@ -115,11 +74,6 @@ do {
                     do {
                         var sample = try loadSample(file)
                         if noDepth { sample.depthDataMap = nil }
-                        if let masks {
-                            let mask = try GrayImage(contentsOf: masks.appendingPathComponent(file.deletingPathExtension().lastPathComponent + ".png"))
-                            if mask.onCount == 0 { emit(["skipped": file.lastPathComponent, "reason": "no object found"]); continue }
-                            sample.objectMask = mask.pixelBuffer()
-                        }
                         return sample
                     } catch {
                         emit(["skipped": file.lastPathComponent, "reason": String(describing: error)])
