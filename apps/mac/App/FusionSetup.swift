@@ -431,8 +431,8 @@ enum FusionSetup {
               let command = process["command"] as? String else {
             return .unreachable("there's no printer MCP set up in Counterpart yet.")
         }
-        let call = MCPCall(command: command, args: process["args"] as? [String] ?? [], cwd: process["cwd"] as? String,
-                           env: process["env"] as? [String: String] ?? [:])
+        let call = MCPCall.appOwned(command: command, args: process["args"] as? [String] ?? [], cwd: process["cwd"] as? String,
+                                    env: process["env"] as? [String: String] ?? [:])
         do {
             let reply = try await call.callTool("fusion_mcp_status", arguments: ["launch": true, "timeout_ms": 90_000], timeout: 150)
             return Status.from(toolMissing: reply == nil, isError: reply?.isError ?? false, text: reply?.text ?? "")
@@ -450,6 +450,20 @@ struct MCPCall {
     var env: [String: String] = [:]
 
     struct Reply: Equatable { let isError: Bool; let text: String }
+
+    /// As the companion starts a printer MCP (`appOwnedPrinterProcess`): a `node` that is gone is this app's own, and
+    /// PATH has this app's node and the usual Homebrew folders, so `npx` and `uvx` are found from a GUI app.
+    static func appOwned(command: String, args: [String], cwd: String?, env: [String: String],
+                         bundledNode: URL? = Bundle.main.resourceURL?.appendingPathComponent("Payload/node/bin/node")) -> MCPCall {
+        var command = command
+        if (command as NSString).lastPathComponent == "node", !FileManager.default.isExecutableFile(atPath: command),
+           let bundledNode, FileManager.default.isExecutableFile(atPath: bundledNode.path) { command = bundledNode.path }
+        var env = env
+        let inherited = env["PATH"] ?? ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin"
+        let extra = [bundledNode?.deletingLastPathComponent().path, "/opt/homebrew/bin", "/usr/local/bin"].compactMap { $0 }
+        env["PATH"] = (extra + [inherited]).joined(separator: ":")
+        return MCPCall(command: command, args: args, cwd: cwd, env: env)
+    }
     enum Failure: LocalizedError {
         case start, closed, timedOut
         var errorDescription: String? {
@@ -475,14 +489,18 @@ struct MCPCall {
         do { try process.run() } catch { throw Failure.start }
         defer {
             try? input.fileHandleForWriting.close()
-            if process.isRunning { process.terminate() }
+            MCPCall.stop(process)
         }
-        // A server that never answers is stopped at the deadline, which ends its output.
+        // At the deadline the call ends whether or not the output closes (a wrapper's child can keep it open), and the
+        // server and its children are stopped.
         let watchdog = Watchdog()
-        DispatchQueue.global().asyncAfter(deadline: .now() + timeout) { [process] in
-            if process.isRunning { watchdog.fire(); process.terminate() }
-        }
         let lines = LineReader(output.fileHandleForReading)
+        DispatchQueue.global().asyncAfter(deadline: .now() + timeout) { [process] in
+            guard process.isRunning || !lines.isFinished else { return }
+            watchdog.fire()
+            lines.finish()
+            MCPCall.stop(process)
+        }
         func send(_ message: [String: Any]) throws {
             var data = try JSONSerialization.data(withJSONObject: message)
             data.append(0x0A)
@@ -512,30 +530,52 @@ struct MCPCall {
     }
 }
 
-/// Lines from a pipe, read off the caller's thread, with a deadline.
+/// Lines from a pipe, read on one background thread; `finish()` ends the reading at once, even if the pipe stays open.
 final class LineReader: @unchecked Sendable {
-    private let handle: FileHandle
     private var buffer = Data()
     private var finished = false
+    private var waiting: CheckedContinuation<Void, Never>?
     private let lock = NSLock()
 
-    init(_ handle: FileHandle) { self.handle = handle }
+    init(_ handle: FileHandle) {
+        Thread.detachNewThread { [self] in
+            while true {
+                let chunk = handle.availableData
+                lock.lock()
+                if finished { lock.unlock(); return }
+                if chunk.isEmpty { finished = true } else { buffer.append(chunk) }
+                let resume = waiting; waiting = nil
+                let done = finished
+                lock.unlock()
+                resume?.resume()
+                if done { return }
+            }
+        }
+    }
 
     func next() async -> String? {
         while true {
             if let line = take() { return line }
             if isFinished { return nil }
-            let handle = handle
-            let chunk: Data = await withCheckedContinuation { continuation in
-                DispatchQueue.global().async { continuation.resume(returning: handle.availableData) }
+            await withCheckedContinuation { continuation in
+                lock.lock()
+                if finished || buffer.contains(0x0A) { lock.unlock(); continuation.resume(); return }
+                waiting = continuation
+                lock.unlock()
             }
-            lock.lock()
-            if chunk.isEmpty { finished = true } else { buffer.append(chunk) }
-            lock.unlock()
         }
     }
 
-    private var isFinished: Bool { lock.lock(); defer { lock.unlock() }; return finished }
+    /// No more lines: the caller's wait ends now.
+    func finish() {
+        lock.lock()
+        finished = true
+        let resume = waiting; waiting = nil
+        lock.unlock()
+        resume?.resume()
+    }
+
+    var isFinished: Bool { lock.lock(); defer { lock.unlock() }; return finished }
 
     private func take() -> String? {
         lock.lock(); defer { lock.unlock() }
@@ -551,4 +591,16 @@ final class Watchdog: @unchecked Sendable {
     private var didFire = false
     var fired: Bool { lock.lock(); defer { lock.unlock() }; return didFire }
     func fire() { lock.lock(); didFire = true; lock.unlock() }
+}
+
+extension MCPCall {
+    /// Stops the server and anything it started (a wrapper's child keeps running when only the wrapper is told).
+    static func stop(_ process: Process) {
+        guard process.isRunning else { return }
+        let pkill = Process()
+        pkill.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
+        pkill.arguments = ["-TERM", "-P", String(process.processIdentifier)]
+        try? pkill.run(); pkill.waitUntilExit()
+        process.terminate()
+    }
 }

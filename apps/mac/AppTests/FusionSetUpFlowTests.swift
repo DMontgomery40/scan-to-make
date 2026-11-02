@@ -103,7 +103,7 @@ final class FusionSetUpFlowTests: XCTestCase {
         echo '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-06-18","capabilities":{},"serverInfo":{"name":"fake","version":"1"}}}'
         read line
         read line
-        \(hang ? "exec /bin/sleep 30" : "")
+        \(hang ? "/bin/sleep 30" : "")
         echo '{"jsonrpc":"2.0","id":2,"result":{"tools":[\(list)]}}'
         read line
         printf '%s\\n' "$FAKE_REPLY"
@@ -124,7 +124,10 @@ final class FusionSetUpFlowTests: XCTestCase {
     }
 
     func testAStatusCallThatNeverAnswersTimesOut() async throws {
-        let call = MCPCall(command: try fakeMCP(tools: [], hang: true).path, args: [])
+        // A wrapper (like npx) whose child keeps the output open: the deadline still ends the call.
+        let wrapper = try write("#!/bin/sh\n'\(try fakeMCP(tools: [], hang: true).path)' &\nwait\n", "wrapper.sh")
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: wrapper.path)
+        let call = MCPCall(command: wrapper.path, args: [])
         let started = Date()
         do {
             _ = try await call.callTool("fusion_mcp_status", arguments: [:], timeout: 1)
@@ -132,5 +135,16 @@ final class FusionSetUpFlowTests: XCTestCase {
         } catch MCPCall.Failure.timedOut {
             XCTAssertLessThan(Date().timeIntervalSince(started), 5)
         }
+    }
+
+    func testTheProbeFindsNodeAndHomebrewAsTheCompanionDoes() throws {
+        let node = try write("#!/bin/sh\n", "Payload/node/bin/node")
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: node.path)
+        let call = MCPCall.appOwned(command: "/opt/homebrew/Cellar/node/20.0.0/bin/node", args: ["dist/index.js"], cwd: nil, env: ["PATH": "/usr/bin:/bin"],
+                                    bundledNode: node)
+        XCTAssertEqual(call.command, node.path, "a node that is gone is the app's own")
+        XCTAssertEqual(call.env["PATH"], "\(node.deletingLastPathComponent().path):/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin")
+        let ssh = MCPCall.appOwned(command: "/usr/bin/ssh", args: ["me@127.0.0.1"], cwd: nil, env: [:], bundledNode: node)
+        XCTAssertEqual(ssh.command, "/usr/bin/ssh")
     }
 }
