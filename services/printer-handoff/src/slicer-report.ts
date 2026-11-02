@@ -12,6 +12,8 @@ export interface SlicerReport {
   failed: boolean;
   /** Studio's own words, verbatim: the error and its plates' messages, or the warnings of a slice that worked. */
   message?: string;
+  /** Number of distinct output plates explicitly identified by the slicer. */
+  plateCount?: number;
 }
 
 const MAX_MESSAGE = 2000;
@@ -27,6 +29,9 @@ export function slicerReport(structuredContent: unknown): SlicerReport | undefin
   const result = record(structuredContent) ? structuredContent.slicer_result : undefined;
   if (!record(result)) return undefined;
   const plates = Array.isArray(result.sliced_plates) ? result.sliced_plates : [];
+  const ids = plates.map(plate => record(plate) ? plate.id : undefined);
+  const plateCount = ids.length && ids.every(id => typeof id === 'number' && Number.isSafeInteger(id) && id > 0)
+    ? new Set(ids).size : undefined;
   const warnings = plates.map(plate => record(plate) && typeof plate.warning_message === 'string' ? clean(plate.warning_message) : '')
     .filter(Boolean);
   // Anything but Studio's success code fails closed, a missing one included.
@@ -34,5 +39,5 @@ export function slicerReport(structuredContent: unknown): SlicerReport | undefin
   const error = typeof result.error_string === 'string' ? clean(result.error_string) : '';
   const words = [...new Set([...(failed && error ? [error] : []), ...warnings])].join('\n').slice(0, MAX_MESSAGE);
   if (failed) return {failed, message: words || `Bambu Studio could not slice this model (return code ${String(result.return_code)}).`};
-  return words ? {failed, message: words} : {failed};
+  return {failed, ...(words ? {message: words} : {}), ...(plateCount ? {plateCount} : {})};
 }

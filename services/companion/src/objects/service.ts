@@ -1199,7 +1199,7 @@ export class ObjectService {
     catch (error) {
       if (error instanceof PrinterMcpError && error.code === 'print-settings-unsupported') throw new InvalidStateError(settingsUnsupported(services.runner.backend, {quality, strength}));
       // Bambu Studio refused the slice: its own words, exactly what a Print of the same model fails with.
-      if (error instanceof PrinterMcpError && error.code === 'slicer-error' && error.detail) throw new SlicerRefusedError(error.detail);
+      if (error instanceof PrinterMcpError && ['slicer-error', 'copies-multiple-plates'].includes(error.code) && error.detail) throw new SlicerRefusedError(error.detail);
       throw new InvalidStateError(error instanceof PrinterMcpError && error.detail ? `Couldn't slice it for an estimate: ${error.detail}` : "Couldn't slice it for an estimate. Check the printer service, then try again.");
     }
   }

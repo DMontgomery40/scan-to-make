@@ -382,14 +382,14 @@ test("an estimate carries Bambu Studio's words: its warning as slicerWarning, it
   const {createPrintHandoffServices} = await import('../dist/print-handoff-http.js');
   const fixtures = new URL('../../printer-handoff/tests/fixtures/', import.meta.url);
   const studio = async name => JSON.parse(await readFile(new URL(`slicer-results/${name}.json`, fixtures), 'utf8'));
-  const estimate = async result => {
+  const estimate = async (result, request = {}) => {
     const root = await mkdtemp(join(tmpdir(), 'objects-estimate-studio-'));
     t.after(() => rm(root, {recursive: true, force: true}));
     const log = join(root, 'calls.jsonl');
     await writeFile(log, '');
     const services = createPrintHandoffServices({backend: 'bambu-printer-mcp',
       process: {command: process.execPath, args: [new URL('fixture-printer-server.mjs', fixtures).pathname, 'bambu', log], cwd: root,
-        env: {HANDOFF_FIXTURE_SLICER_RESULT: new URL(`slicer-results/${result}.json`, fixtures).pathname}},
+        env: {HANDOFF_FIXTURE_SLICE_SETTINGS: '1', HANDOFF_FIXTURE_SLICER_RESULT: new URL(`slicer-results/${result}.json`, fixtures).pathname}},
       selection: {model: 'p1s', nozzleDiameterMm: 0.4, nozzleType: 'hardened_steel', bedType: 'textured_plate', material: 'PLA', plateIndex: 0},
       timeouts: {connectMs: 5000, toolMs: 5000, elicitationMs: 10000}}, join(root, 'bundles'));
     const store = new ObjectStore(join(root, 'objects'));
@@ -400,7 +400,7 @@ test("an estimate carries Bambu Studio's words: its warning as slicerWarning, it
     await writeFile(join(store.dir(object.id), 'current', 'model.stl'), STL);
     await store.update(object.id, o => ({...o, state: 'ready', current: {model: 'current/model.stl', renders: []}}));
     const tools = async () => (await readFile(log, 'utf8')).trim().split('\n').filter(Boolean).map(JSON.parse).filter(entry => entry.tool).map(entry => entry.tool);
-    const outcome = await service.estimate(object.id).then(value => ({value}), error => ({error}));
+    const outcome = await service.estimate(object.id, request).then(value => ({value}), error => ({error}));
     const after = await store.get(object.id);
     assert.equal(after.state, 'ready', 'an estimate never changes the project');
     assert.equal(after.printConfirmation, undefined, 'an estimate asks nothing');
@@ -426,6 +426,13 @@ test("an estimate carries Bambu Studio's words: its warning as slicerWarning, it
   const dispatch = createControlDispatcher({auth: {}, companionVersion: 'test', objects: refused.service});
   await assert.rejects(dispatch('objects.estimate', {id: refused.id}),
     error => error.code === 'slicer-error' && error.message === refused.error.message);
+  const copies = await estimate('copies-two-plates', {copies: 2});
+  const copiesWords = 'The slicer placed 2 copies on 2 plates, requiring 2 separate prints. Choose fewer copies for this print.';
+  assert.equal(copies.error.message, copiesWords);
+  const copiesControl = createControlDispatcher({auth: {}, companionVersion: 'test', objects: copies.service});
+  await assert.rejects(copiesControl('objects.estimate', {id: copies.id, copies: 2}),
+    error => error.code === 'slicer-error' && error.message === copiesWords,
+    'the Mac receives an actionable refusal that holds Print, not a transient estimate failure');
   const fine = createControlDispatcher({auth: {}, companionVersion: 'test', objects: warned.service});
   assert.equal((await fine('objects.estimate', {id: warned.id})).slicerWarning, words, 'a warning is an estimate, not a refusal');
 });

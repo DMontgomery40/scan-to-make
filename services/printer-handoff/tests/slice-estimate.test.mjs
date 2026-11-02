@@ -1,7 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {zipSync, strToU8} from 'fflate';
-import {sliceEstimate} from '../dist/slice-estimate.js';
+import {sliceEstimate, slicePlateCount} from '../dist/slice-estimate.js';
+
+test('counts only printable plates in the exact archive, including older path-only MCP output', () => {
+  const files = {'Metadata/plate_1.gcode': strToU8('; one'), 'Metadata/plate_2.gcode': strToU8('; two'),
+    'Metadata/plate_3.png': strToU8('preview'), 'Metadata/plate_0.gcode': strToU8('invalid index')};
+  assert.equal(slicePlateCount(Buffer.from(zipSync(files))), 2);
+  assert.equal(slicePlateCount(Buffer.from('not a 3mf')), undefined);
+});
 
 test('reads the selected plate time and filament weight from a sliced Bambu 3MF', async () => {
   const files = {};

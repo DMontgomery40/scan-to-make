@@ -121,7 +121,8 @@ server.setRequestHandler(CallToolRequestSchema, async request => {
     if (slicerResult && slicerResult.return_code !== 0) return {isError: true, structuredContent: {slicer_result: slicerResult},
       content: [{type: 'text', text: `Slicer failed: the slicer exited with code 156 (${slicerResult.error_string} [${slicerResult.return_code}]). Command failed: /Applications/BambuStudio.app/Contents/MacOS/BambuStudio --slice 0`}]};
     const path = join(directory, mode === 'generic-gcode' ? 'sliced.gcode' : 'sliced.3mf');
-    writeFileSync(path, path.endsWith('.3mf') ? `fixture 3mf ${Date.now()}-${Math.random()}` : `; fixture gcode ${Date.now()}-${Math.random()}\n`);
+    writeFileSync(path, process.env.HANDOFF_FIXTURE_SLICED_FILE ? readFileSync(process.env.HANDOFF_FIXTURE_SLICED_FILE)
+      : path.endsWith('.3mf') ? `fixture 3mf ${Date.now()}-${Math.random()}` : `; fixture gcode ${Date.now()}-${Math.random()}\n`);
     return slicerResult ? {...text(path), structuredContent: {path, slicer_result: slicerResult}} : text(path);
   }
   if (name === 'inspect_print_file') {
