@@ -45,6 +45,51 @@ Phone unlock, physical print/stop, camera/Face ID, notification/enrollment accep
 APNs key registration, and public MCP release remain open. Older snapshots below are historical;
 this section and `asks.md` supersede their installation and temporary-project state.
 
+## Published model flow — 2026-11-02 (implementation, acceptance still open)
+
+The parked published backend is integrated with current upload ownership, project defaults and
+worker lifecycle. Both clients can start from a published link; the phone can answer file and
+plate Asks. Retrieval has browser/web/file tools only, never printer dispatch or geometry tools.
+Original 3MF/STL bytes are retained with SHA-256 receipts and embedded designer credit. Older
+Downloads matches require confirmation. Multiple files/plates ask explicitly; a supplied file
+is not replaced by the Mac's subsequent Start call. Designer plate images provide previews.
+
+Unsliced 3MF goes unchanged to `slice_stl` with its selected one-based plate, original arrangement
+and per-part filament assignments. The derived printable file is separate. Pre-sliced originals
+require an exact file-inspection receipt and reject slicing overrides they cannot apply. Print
+still uses the MCP's physical confirmation. Generic MCP's read-only `inspect_print_file` exposure
+is a separate required follow-up; its existing internal inspection is not yet an exposed tool.
+Combining separate designer 3MF files onto one plate is not proven by `arrange: true` and remains
+an explicit acceptance gap. No AI reconstruction from a model page is used.
+
+Read-only real-input evidence: `~/scan-to-make-work/codex-published-model-20261102/file-identity.json`.
+The caliper in Downloads (SHA `932757ca96be8c50998be6e511a14416cfa661bc816938a1843119546cb85a30`)
+has previews/settings but empty geometry and no G-code; it is correctly refused. The depth-gauge
+3MF (SHA `2e0f756da398e8fe9e5cee0831d23c2dab977f0447aae0e8500e97333fac4c56`) imports into an
+isolated temporary project as Ready, preserves exact original/bundle bytes, and retains designer
+“3D Print Masters Hub” and “Standard Digital File License”. Its thumbnail is retained. Both source
+files are unchanged. These are user-provided files; no publisher download checksum was verified.
+No live project, browser session or printer was changed, and no physical print was attempted.
+
+Fresh publisher retrieval is now separately verified: root downloaded profile 218979 through signed-in
+Brave to `Vernier+Caliper+Ruler+220mm+COLOR-02.3mf` (1,687,930 bytes, SHA
+`e08c4d77bc6bafd708e3fee653c7880732384f955622c2d7fbd93ce1f88af7bf`). Its isolated import is Ready,
+with both OUTER and INNER caliper parts on plate 0, the original designer/licence/profile URL,
+and the selected plate thumbnail. Source, stored original and handoff bundle hashes match;
+source unchanged, temporary project removed. `publisher-download.{json,png}` and
+`publisher-import.json` in the same evidence folder record the browser retrieval and local checks.
+The earlier underscore-named caliper file is damaged; this fresh publisher file is valid.
+No physical print or installed-app acceptance is implied by the isolated import.
+
+Draft #273 review reproduced and fixed two further defects: duplicates now retain the chosen
+original's receipt and plate selection, and phone downloads include the selected original path
+in their cache identity. Focused published tests 11 pass; shared Swift 144 pass; full handoff
+94 pass/5 skips; unsigned iPhone and Mac builds pass before these last model/transport fixes.
+Node 22 full workflow passed; Node 24's unrelated printing-test teardown race is fixed in the
+separate fixture branch. Final exact-head checks and native UI acceptance remain outstanding.
+Generic draft #49 now also exposes file-only inspection, preserves the public print plate index,
+and fixes STL copies; full 607 tests and package installation checks pass. No npm publication.
+
 ## Device acceptance and Blender follow-up — 2026-11-02, 09:24 Mountain
 
 Mac build `202611020921` is installed from merged main `f1d2dde6` (#265); Davica3 has

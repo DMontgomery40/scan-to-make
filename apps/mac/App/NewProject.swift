@@ -34,7 +34,7 @@ struct NewProjectPane: View {
     private var available: Bool { model.capabilities?.objectsCreate == true }
     private var empty: Bool { request.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && files.isEmpty }
     /// PRD §8.11: a model page's link in the request. The project prints what the designer published.
-    private var link: URL? { model.capabilities?.publishedModels == true ? ModelLink.find(in: request) : nil }
+    private var link: URL? { ModelLink.find(in: request) }
 
     var body: some View {
         ZStack {

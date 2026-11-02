@@ -156,7 +156,7 @@ export function createControlDispatcher(services: ControlServices) {
         case 'status.get': return {protocolVersion:1,companionVersion:services.companionVersion,...(services.name?{name:services.name}:{}),transport:auth.transport,
           pairedDeviceCount:(await auth.listDevices()).length,capabilities:{capture:!!capture?.captures,cleanup:!!capture?.scanProcessing,printerHandoff:!!printHandoff,nearbyPairing:!!services.nearby,
             objectsCreate:!!services.objects,printSettings:!!services.objects?.printSettingsAvailable,printControl:!!services.objects?.printSettingsAvailable,
-            events:!!services.events&&!!services.liveActivityTokens,structuredPasses:!!services.objects,genericConfirmations:!!services.objects,materialChoice:!!services.objects,projectSettings:!!services.objects,projectPreferences:!!services.objects,projectRename:!!services.objects,messagePhotos:!!services.objects,mcpUpdates:!!services.mcpUpdates,blenderAddon:!!services.blenderAddon,printCopies:!!services.objects?.printCopiesAvailable}};
+            events:!!services.events&&!!services.liveActivityTokens,structuredPasses:!!services.objects,genericConfirmations:!!services.objects,materialChoice:!!services.objects,projectSettings:!!services.objects,projectPreferences:!!services.objects,projectRename:!!services.objects,messagePhotos:!!services.objects,publishedModels:!!services.objects,mcpUpdates:!!services.mcpUpdates,blenderAddon:!!services.blenderAddon,printCopies:!!services.objects?.printCopiesAvailable}};
         case 'blender.status':
         case 'blender.check':
         case 'blender.update': {
@@ -263,7 +263,7 @@ export function createControlDispatcher(services: ControlServices) {
             throw error;
           }
         }
-        case 'objects.duplicate': case 'objects.list': case 'objects.printers': case 'objects.filaments': case 'objects.selectPrinter': case 'objects.get': case 'objects.passActivity': case 'objects.start': case 'objects.delete': case 'objects.correct': case 'objects.answerCloseup': case 'objects.print': case 'objects.answerPrintConfirmation':
+        case 'objects.answerAsk': case 'objects.duplicate': case 'objects.list': case 'objects.printers': case 'objects.filaments': case 'objects.selectPrinter': case 'objects.get': case 'objects.passActivity': case 'objects.start': case 'objects.delete': case 'objects.correct': case 'objects.answerCloseup': case 'objects.print': case 'objects.answerPrintConfirmation':
         case 'objects.create': case 'objects.addFile':
         case 'objects.estimate': case 'objects.pausePrint': case 'objects.resumePrint': case 'objects.cancelPrint': case 'objects.camera': case 'printers.camera': case 'settings.get': case 'settings.set': {
           const objects = services.objects;
@@ -284,8 +284,8 @@ export function createControlDispatcher(services: ControlServices) {
             }
             if (method === 'objects.delete') { await objects.delete((parameters[method].parse(raw) as {id: string}).id, 'mac'); return {deleted: true}; }
             if (method === 'objects.create') {
-              const {instructions, kind} = parameters[method].parse(raw);
-              return {object: local(await objects.create(instructions, kind))};
+              const {instructions, kind, url} = parameters[method].parse(raw);
+              return {object: local(await objects.create(instructions, kind, url))};
             }
             if (method === 'objects.estimate') {
               const {id, ...request} = parameters[method].parse(raw);
@@ -314,6 +314,10 @@ export function createControlDispatcher(services: ControlServices) {
             if (method === 'objects.correct') {
               const {id, note, photos, photoNames} = parameters[method].parse(raw);
               return {object: local(await objects.correct(id, note, photos, photoNames))};
+            }
+            if (method === 'objects.answerAsk') {
+              const {id, askId, choices} = parameters[method].parse(raw);
+              return {object: local(await objects.answerAsk(id, askId, choices))};
             }
             if (method === 'objects.answerPrintConfirmation') {
               const {id, confirmationId, answer} = parameters[method].parse(raw);

@@ -114,13 +114,16 @@ const sha256 = async (path: string) => createHash('sha256').update(await readFil
  * Runs one touch-up pass and enforces the guard rails the model can't be trusted
  * to keep: a time cap, a tool-call cap, and never losing the last checkpoint.
  */
-export async function runTouchupWorker(inv: TouchupInvocation, pass: TouchupPass, opts: {
-  spawn?: typeof nodeSpawn; timeoutMs?: number; maxToolCalls?: number; inputStlSha256?: string;
-  onProgress?: (progress: TouchupProgress) => void; signal?: AbortSignal;
-} = {}): Promise<TouchupResult> {
+/** One `claude -p --output-format stream-json` worker, run to its end: limits, cancellation, activity and the result event. */
+export interface WorkerRun {
+  resultEvent?: ResultEvent; worker?: TouchupResult['worker']; toolCalls: number; stopReason?: string; stderrTail: string;
+  exitCode: number | null; error?: NodeJS.ErrnoException; seconds: number; publicText: (text: string) => string;
+}
+export async function runClaudeWorker(inv: TouchupInvocation, opts: {
+  spawn?: typeof nodeSpawn; timeoutMs?: number; maxToolCalls?: number; onProgress?: (progress: TouchupProgress) => void; signal?: AbortSignal;
+} = {}): Promise<WorkerRun> {
+  if (opts.signal?.aborted) return {toolCalls: 0, stopReason: 'cancelled', stderrTail: '', exitCode: null, seconds: 0, publicText: text => text};
   const spawn = opts.spawn ?? nodeSpawn;
-  const started0 = Date.now();
-  if (opts.signal?.aborted) return {status: 'failed', reason: 'cancelled', renders: [], checkpoints: [], stats: {seconds: Math.round((Date.now() - started0) / 1000), toolCalls: 0}};
   const timeoutMs = opts.timeoutMs ?? TOUCHUP_TIMEOUT_MS, maxToolCalls = opts.maxToolCalls ?? TOUCHUP_MAX_TOOL_CALLS;
   const started = Date.now();
   const seconds = () => Math.round((Date.now() - started) / 1000);
@@ -178,12 +181,25 @@ export async function runTouchupWorker(inv: TouchupInvocation, pass: TouchupPass
     child.once('error', error => settle({code: null, error}));
     child.once('close', code => settle({code}));
   });
-  const exitCode = ended.code;
   clearTimeout(timer);
   clearTimeout(killTimer);
   // A stopped worker's helpers (MCP servers, Blender bridges) may ignore SIGTERM: leave nothing behind.
   if (stopReason !== undefined && child.pid) { try { process.kill(-child.pid, 'SIGKILL'); } catch { /* group already gone */ } }
   opts.signal?.removeEventListener('abort', onAbort);
+  return {...(resultEvent ? {resultEvent} : {}), ...(worker ? {worker} : {}), toolCalls, ...(stopReason !== undefined ? {stopReason} : {}), stderrTail,
+    exitCode: ended.code, ...(ended.error ? {error: ended.error} : {}), seconds: seconds(), publicText};
+}
+
+export async function runTouchupWorker(inv: TouchupInvocation, pass: TouchupPass, opts: {
+  spawn?: typeof nodeSpawn; timeoutMs?: number; maxToolCalls?: number; inputStlSha256?: string;
+  onProgress?: (progress: TouchupProgress) => void; signal?: AbortSignal;
+} = {}): Promise<TouchupResult> {
+  const started0 = Date.now();
+  if (opts.signal?.aborted) return {status: 'failed', reason: 'cancelled', renders: [], checkpoints: [], stats: {seconds: Math.round((Date.now() - started0) / 1000), toolCalls: 0}};
+  const run = await runClaudeWorker(inv, opts);
+  const {resultEvent, worker, toolCalls, stopReason, stderrTail, publicText} = run;
+  const exitCode = run.exitCode, ended = run.error ? {error: run.error} : {} as {error?: NodeJS.ErrnoException};
+  const seconds = () => run.seconds;
 
   const touched = join(pass.outDir, 'touched.stl');
   const checkpoints = await list(pass.checkpointsDir, '.stl');

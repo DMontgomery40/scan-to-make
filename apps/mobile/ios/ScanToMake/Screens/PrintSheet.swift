@@ -31,6 +31,8 @@ struct PrintSheet: View {
     @State private var spools: [String: [PrinterFilament]] = [:]
 
     private var project: Project? { store.project(projectId) }
+    private var published: Bool { project?.preservesPublishedFilaments == true }
+    private var slicedOriginal: Bool { project?.publishedSelection?.sliced == true }
     private var title: String { project.map { ProjectWords.title($0) } ?? "Model" }
     private var destinations: [PrinterDestination] { store.catalog?.destinations ?? [] }
     private var printer: PrinterDestination? { destinations.first { $0.id == destinationId } }
@@ -52,11 +54,12 @@ struct PrintSheet: View {
                             Label(message, systemImage: "exclamationmark.triangle.fill").font(.footnote).foregroundStyle(.orange)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
-                        colourSection
+                        if published { Text("Keeps the model’s filament assignments. Your printer service confirms the loaded spools before printing.").font(.footnote).foregroundStyle(.secondary) } else { colourSection
                             .padding(16)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .glassEffect(.regular, in: .rect(cornerRadius: 24))
-                        settingsSection.id("settings")
+                        }
+                        if slicedOriginal { Text("Uses the quality, strength and copies already saved in this sliced file. Share an editable 3MF to change them.").font(.footnote).foregroundStyle(.secondary) } else { settingsSection.id("settings") }
                         if !offersCopies, project?.settings?.printDefaults?.copies != nil {
                             Text("This printer uses one copy.").font(.caption).foregroundStyle(.secondary)
                         }
@@ -122,7 +125,13 @@ struct PrintSheet: View {
 
     private var preview: some View {
         ZStack(alignment: .bottomLeading) {
+            Group {
+            if published, let project {
+                ProjectImage(project: project, path: project.thumbnailPath, maxPixelSize: 600, contentMode: .fit)
+            } else {
             ModelStage(url: modelURL, yaw: 0.9, pitch: -0.5, interactive: false, tint: UIColor(spoolColour))
+            }
+            }
                 .frame(height: 220)
                 .overlay(alignment: .bottom) { BedGrid().frame(height: 70).opacity(0.5).allowsHitTesting(false) }
                 .clipShape(.rect(cornerRadius: 24))
@@ -292,7 +301,7 @@ struct PrintSheet: View {
         guard busy == nil, printer != nil, printer?.isOffline != true else { return false }
         if uncertain && !checked { return false }
         // An AMS printer prints the spool you can see chosen here, never whatever the Mac last had set.
-        if filamentKind == "ams" && chosen == nil { return false }
+        if !published && filamentKind == "ams" && chosen == nil { return false }
         return true
     }
 
@@ -311,7 +320,7 @@ struct PrintSheet: View {
         }
         await loadFilaments()
         await store.loadPrinters()
-        if let project, project.current != nil { modelURL = try? await store.mac.download(project, "model.stl") }
+        if let project, project.current != nil, !published { modelURL = try? await store.mac.download(project, "model.stl") }
     }
 
     private func choose(_ id: String) async {
@@ -372,9 +381,9 @@ struct PrintSheet: View {
         slice.start(key)
         do {
             let next = try await store.mac.client.estimate(projectId, destinationId: destinationId,
-                                                           quality: printer?.offersQuality == true ? quality : .standard,
-                                                           strength: printer?.offersStrength == true ? strength : .standard,
-                                                           copies: offersCopies ? copies : (project?.settings?.printDefaults?.copies != nil ? 1 : nil), overrideDefaults: true)
+                                                           quality: !slicedOriginal && printer?.offersQuality == true ? quality : .standard,
+                                                           strength: !slicedOriginal && printer?.offersStrength == true ? strength : .standard,
+                                                           copies: slicedOriginal ? 1 : offersCopies ? copies : (project?.settings?.printDefaults?.copies != nil ? 1 : nil), overrideDefaults: true)
             guard !Task.isCancelled else { return }
             slice.finish(key, next)
         } catch let failure as CompanionError {
@@ -394,10 +403,10 @@ struct PrintSheet: View {
         // A printer that doesn't report its filament prints with its own profile's material.
         default: (project?.settings?.printDefaults?.colour?.object?["material"]?.string).map(PrintColour.material)
         }
-        let choice = PrintChoice(colour: colour,
-                                 quality: printer?.offersQuality == true ? quality : .standard,
-                                 strength: printer?.offersStrength == true ? strength : .standard,
-                                 checked: uncertain && checked, copies: offersCopies ? copies : (project?.settings?.printDefaults?.copies != nil ? 1 : nil))
+        let choice = PrintChoice(colour: published ? nil : colour,
+                                 quality: !slicedOriginal && printer?.offersQuality == true ? quality : .standard,
+                                 strength: !slicedOriginal && printer?.offersStrength == true ? strength : .standard,
+                                 checked: uncertain && checked, copies: slicedOriginal ? 1 : offersCopies ? copies : (project?.settings?.printDefaults?.copies != nil ? 1 : nil))
         do {
             let ticket = store.startRequest()
             store.replace(try await store.mac.client.print(projectId, choice: choice, overrideDefaults: true), ticket: ticket)

@@ -279,6 +279,26 @@ final class CompanionClientTests: XCTestCase {
         XCTAssertEqual(decoded.settings?.printDefaults?.copies, 3)
     }
 
+    func testPublishedCreationUploadAndPlateChoiceUseExactContracts() async throws {
+        let id = "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a01"
+        let fake = FakeTransport { _, _ in json(200, ["object": ["id": id, "createdAtMs": 1, "updatedAtMs": 1, "state": "ready", "photos": [], "passes": []]]) }
+        let c = try client(fake)
+        let link = URL(string: "https://makerworld.com/en/models/1531561")!
+        _ = try await c.create("Print the rig", kind: "published", url: link)
+        let create = try XCTUnwrap(JSONSerialization.jsonObject(with: fake.calls[0].request.httpBody!) as? [String: Any])
+        XCTAssertEqual(create["kind"] as? String, "published"); XCTAssertEqual(create["url"] as? String, link.absoluteString)
+        let file = FileManager.default.temporaryDirectory.appending(path: "original-\(UUID().uuidString).3mf")
+        defer { try? FileManager.default.removeItem(at: file) }
+        let bytes = Data([0x50, 0x4b, 1, 2, 3]); try bytes.write(to: file)
+        _ = try await c.addModelFile(id, file: file)
+        XCTAssertEqual(fake.calls[1].request.httpBody, bytes)
+        XCTAssertEqual(fake.calls[1].request.url?.path, "/v1/objects/\(id)/model")
+        XCTAssertEqual(URLComponents(url: fake.calls[1].request.url!, resolvingAgainstBaseURL: false)?.queryItems?.first?.value, file.lastPathComponent)
+        _ = try await c.choosePublishedPlate(id, askId: "question-id", choice: "1:2")
+        let answer = try XCTUnwrap(JSONSerialization.jsonObject(with: fake.calls[2].request.httpBody!) as? [String: Any])
+        XCTAssertEqual(answer["askId"] as? String, "question-id"); XCTAssertEqual(answer["choices"] as? [String], ["1:2"])
+    }
+
     func testCreateSendsTheKindYouPicked() async throws {
         var bodies: [[String: Any]] = []
         let fake = FakeTransport { request, _ in
@@ -370,6 +390,8 @@ final class CompanionClientTests: XCTestCase {
         XCTAssertEqual(CompanionClient.scope("POST", "/v1/objects/\(id)/print/pause"), "printer-handoff:use")
         XCTAssertEqual(CompanionClient.scope("POST", "/v1/objects/\(id)/estimate"), "printer-handoff:use")
         XCTAssertEqual(CompanionClient.scope("POST", "/v1/objects/\(id)/corrections"), "captures:import")
+        XCTAssertEqual(CompanionClient.scope("POST", "/v1/objects/\(id)/model"), "captures:import")
+        XCTAssertEqual(CompanionClient.scope("POST", "/v1/objects/\(id)/ask"), "captures:import")
         XCTAssertEqual(CompanionClient.scope("PUT", "/v1/objects/\(id)/scan"), "captures:import")
         XCTAssertEqual(CompanionClient.scope("GET", "/v1/objects/\(id)/scan/original.usdz"), "projects:read")
         XCTAssertEqual(CompanionClient.scope("GET", "/v1/events"), "projects:read")
@@ -469,6 +491,36 @@ final class CompanionClientTests: XCTestCase {
         do { _ = try await c.download(p, "plate.jpg"); XCTFail("there's no plate photo to fetch") } catch {}
         XCTAssertEqual(fake.calls.count, 1)
         do { _ = try await c.download(p, "../../etc/passwd"); XCTFail() } catch {}
+    }
+
+    func testPublishedCurrent3MFExportDoesNotMasqueradeAsSTL() async throws {
+        let p = try JSONDecoder().decode(Project.self, from: Data(#"{"id":"0b6f0f43-7c35-4b8a-9a3c-8f0b4c4b2a11","createdAtMs":1,"updatedAtMs":2,"state":"ready","kind":"published","photos":[],"passes":[],"current":{"model":"original/Designer.3MF","renders":["renders/plate.png"]}}"#.utf8))
+        let bytes = Data("original 3MF bytes".utf8)
+        let fake = FakeTransport { _, _ in HTTPReply(status: 200, body: bytes) }
+        let url = try await client(fake).download(p, "model.stl")
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()) }
+        XCTAssertEqual(url.pathExtension, "3mf")
+        XCTAssertEqual(try Data(contentsOf: url), bytes)
+        XCTAssertTrue(p.preservesPublishedFilaments)
+        XCTAssertEqual(p.settingsFiles.first?.name, "Current model (3MF)")
+    }
+
+    func testChangingPublishedOriginalInvalidatesCurrentDownloadWithoutChangingPassTime() async throws {
+        func project(_ file: String) throws -> Project {
+            let data: [String: Any] = ["id": "0b6f0f43-7c35-4b8a-9a3c-8f0b4c4b2a11", "createdAtMs": 1, "updatedAtMs": 2, "state": "ready", "kind": "published", "photos": [], "passes": [], "current": ["model": file, "renders": []], "files": ["original": ["original/first.3mf", "original/second.3mf"]]]
+            return try JSONDecoder().decode(Project.self, from: JSONSerialization.data(withJSONObject: data))
+        }
+        let fake = FakeTransport { request, _ in HTTPReply(status: 200, body: Data((request.url!.path.hasSuffix("/original/0") ? "first" : "second").utf8)) }
+        let c = try client(fake), firstProject = try project("original/first.3mf"), secondProject = try project("original/second.3mf")
+        let first = try await c.download(firstProject, "model.stl")
+        let second = try await c.download(secondProject, "model.stl")
+        XCTAssertEqual(firstProject.mediaVersion, secondProject.mediaVersion)
+        XCTAssertEqual(try Data(contentsOf: first), Data("first".utf8), "The current endpoint may already serve the next selection")
+        XCTAssertNotEqual(first, second)
+        XCTAssertEqual(try Data(contentsOf: second), Data("second".utf8))
+        XCTAssertEqual(fake.calls.count, 2)
+        _ = try await c.download(secondProject, "model.stl")
+        XCTAssertEqual(fake.calls.count, 2)
     }
 
     func testMessageUploadIntentSurvivesAnInitialPassFailingBeforeTheUpload() async throws {

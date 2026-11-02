@@ -7,3 +7,4 @@ export * from './slice-estimate.js';
 export * from './slicer-report.js';
 export * from './session.js';
 export * from './counterpart.js';
+export * from './model-file.js';

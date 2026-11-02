@@ -49,6 +49,7 @@ struct ProjectImage: View {
     let project: Project
     let path: String?
     var maxPixelSize = 600
+    var contentMode: ContentMode = .fill
     var placeholderSymbol = "cube"
     @State private var image: UIImage?
 
@@ -58,7 +59,7 @@ struct ProjectImage: View {
         ZStack {
             StageBackground()
             if let image {
-                Image(uiImage: image).resizable().scaledToFill()
+                Image(uiImage: image).resizable().aspectRatio(contentMode: contentMode)
             } else if path == nil {
                 Image(systemName: placeholderSymbol).font(.title2).foregroundStyle(.white.opacity(0.35))
             }

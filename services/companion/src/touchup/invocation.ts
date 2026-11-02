@@ -67,7 +67,7 @@ export interface TouchupInvocation {
   env: NodeJS.ProcessEnv;
   cwd: string;
   mcpConfigPath: string;
-  mcpConfig: {mcpServers: {printer: McpServerEntry}};
+  mcpConfig: {mcpServers: Record<string, McpServerEntry>};
 }
 
 const quote = (value: string) => `'${value.replace(/'/g, `'\\''`)}'`;

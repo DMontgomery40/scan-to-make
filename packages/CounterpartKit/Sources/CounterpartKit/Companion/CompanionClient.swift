@@ -87,7 +87,7 @@ public final class CompanionClient: @unchecked Sendable {
             if is_(one + "/scan") { return "captures:import" }
         case "POST":
             if is_("/v1/blender/(check|update)") { return "projects:write" }
-            if is_("/v1/objects") || is_(one + "/(start|duplicate|corrections|closeup|photos|capture|capture-depth)") { return "captures:import" }
+            if is_("/v1/objects") || is_(one + "/(start|duplicate|corrections|closeup|model|ask|photos|capture|capture-depth)") { return "captures:import" }
             if is_(one + "/(print|printer|print-confirmation|estimate|print/pause|print/resume|print/cancel)") { return "printer-handoff:use" }
             if is_("/v1/devices/live-activity-tokens") { return "projects:write" }
             if is_("/v1/settings/(ai/test|fusion/setup)") { return "projects:write" }
@@ -204,10 +204,11 @@ public final class CompanionClient: @unchecked Sendable {
     public func get(_ id: String) async throws -> Project { try await request("GET", "/v1/objects/\(id)", as: One.self).object }
     /// Creates a project. `kind` is `fit` (make something that fits) or `copy` (copy what you scanned); the
     /// Mac uses Blender for a copy and may use Fusion for a fit. Without it the Mac infers it (a scan means copy).
-    public func create(_ instructions: String, kind: String? = nil) async throws -> Project {
+    public func create(_ instructions: String, kind: String? = nil, url: URL? = nil) async throws -> Project {
         let text = instructions.trimmingCharacters(in: .whitespacesAndNewlines)
         var json: [String: Any] = text.isEmpty ? [:] : ["instructions": text]
-        if let kind, ["fit", "copy"].contains(kind) { json["kind"] = kind }
+        if let kind, ["fit", "copy", "published"].contains(kind) { json["kind"] = kind }
+        if let url { json["url"] = url.absoluteString }
         return try await request("POST", "/v1/objects", json: json, as: One.self).object
     }
     public func updateDraft(_ id: String, instructions: String) async throws -> Project {
@@ -229,6 +230,23 @@ public final class CompanionClient: @unchecked Sendable {
         if let text { json["text"] = text }
         json["photoNames"] = photoNames
         return try await request("POST", "/v1/objects/\(id)/closeup", json: json, as: One.self).object
+    }
+    public func choosePublishedPlate(_ id: String, askId: String, choice: String) async throws -> Project {
+        try await request("POST", "/v1/objects/\(id)/ask", json: ["askId": askId, "choices": [choice]], as: One.self).object
+    }
+    public func addModelFile(_ id: String, file: URL) async throws -> Project {
+        let access = file.startAccessingSecurityScopedResource()
+        defer { if access { file.stopAccessingSecurityScopedResource() } }
+        let size = try file.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+        guard size > 0, size <= 64 * 1024 * 1024, ["3mf", "stl"].contains(file.pathExtension.lowercased()) else {
+            throw CompanionError(code: "invalid-model", message: "Choose a 3MF or STL file at most 64 MB.")
+        }
+        let data = try Data(contentsOf: file)
+        guard data.count <= 64 * 1024 * 1024 else { throw CompanionError(code: "invalid-model", message: "Choose a model file at most 64 MB.") }
+        var query = URLComponents(); query.queryItems = [URLQueryItem(name: "name", value: file.lastPathComponent)]
+        let path = "/v1/objects/\(id)/model?\(query.percentEncodedQuery!)"
+        let response = try await send("POST", path, body: data, contentType: "application/octet-stream").checked(path: path)
+        return try JSONDecoder().decode(One.self, from: response.body).object
     }
     private struct MaybeOne: Decodable { var object: Project? }
     /// Sets the project's status (PRD §5.4): It works, Needs changes, Archived… Returns the project when the
@@ -450,13 +468,23 @@ public final class CompanionClient: @unchecked Sendable {
         let version = String(Int64(project.mediaVersion))
         let folder = cache.appending(path: project.id, directoryHint: .isDirectory).appending(path: version, directoryHint: .isDirectory)
         var filename = name.replacingOccurrences(of: "/", with: "_")
+        var resource = name
+        // The historical route serves the current model, including an original 3MF.
+        if name == "model.stl", project.kind == "published", let model = project.current?.model {
+            let original = Hex.sha256(Data(model.utf8))
+            filename = "model-\(original).\(project.preservesPublishedFilaments ? "3mf" : "stl")"
+            // Bind this request to the selected original even if another choice
+            // reaches the Mac before this download is served.
+            if case .array(let originals)? = project.files?.object?["original"],
+               let index = originals.firstIndex(where: { $0.string == model }) { resource = "original/\(index)" }
+        }
         if name.hasPrefix("original/"), let index = Int(name.dropFirst(9)),
            case .array(let originals)? = project.files?.object?["original"], originals.indices.contains(index), let path = originals[index].string {
             filename += "_" + URL(fileURLWithPath: path).lastPathComponent
         }
         let target = folder.appending(path: filename)
         if FileManager.default.fileExists(atPath: target.path) { return target }
-        let encoded = name.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? name
+        let encoded = resource.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? resource
         // The Ask's picture is served by its id; the field gives `asks/<id>.<ext>`.
         let path = "/v1/objects/\(project.id)/\(encoded)"
         let reply = try await send("GET", path, limit: Self.scanLimit)

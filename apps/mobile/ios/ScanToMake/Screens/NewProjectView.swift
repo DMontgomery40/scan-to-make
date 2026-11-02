@@ -30,6 +30,7 @@ struct NewObjectView: View {
     /// A scan finished for this draft, kept on this phone until Send.
     enum Attached: Equatable { case walkAround, inHand }
 
+    private var publishedLink: URL? { PublishedModelLink.find(in: instructions) }
     private var described: Bool { !instructions.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     /// The Mac's own rule for starting, in its words: photos show what something looks like, so without a
     /// scan the description says what to make. A scan always goes with its own photos.
@@ -54,6 +55,10 @@ struct NewObjectView: View {
                             .font(.footnote).foregroundStyle(askedForDescription && !canSend ? .red : .secondary)
                     }
 
+                    if let publishedLink {
+                        Label(publishedLink.host ?? "Published model", systemImage: "link").font(.headline)
+                        Text("Your Mac will get the designer’s file and keep its credit.").font(.footnote).foregroundStyle(.secondary)
+                    }
                     Text("Show it").font(.headline)
                     RigTile(enabled: store.canScan && working == nil, scan: { Task { await scan(handheld: false) } },
                             printRig: { openURL(CounterpartIdentifiers.scanRig) })
