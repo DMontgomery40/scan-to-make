@@ -9,6 +9,20 @@ const positive = (value: unknown): number | undefined => {
 };
 const first = (value: unknown) => Array.isArray(value) ? value[0] : value;
 
+/** Count printable plates in the exact output archive without inflating its G-code entries. */
+export function slicePlateCount(bytes: Buffer): number | undefined {
+  if (bytes.length > 128 * 1024 * 1024 || bytes[0] !== 0x50 || bytes[1] !== 0x4b) return undefined;
+  try {
+    const plates = new Set<string>();
+    unzipSync(bytes, {filter: file => {
+      const match = /^Metadata\/plate_([1-9]\d*)\.gcode$/.exec(file.name);
+      if (match) plates.add(match[1]!);
+      return false;
+    }});
+    return plates.size || undefined;
+  } catch { return undefined; }
+}
+
 /**
  * What a sliced file was sliced with: Bambu/Orca 3MF (`Metadata/project_settings.config`,
  * and the plate G-code's header for the layer count) or a G-code file's own header comments.

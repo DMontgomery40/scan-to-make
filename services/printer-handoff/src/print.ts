@@ -7,7 +7,7 @@ import {
   type PrinterHandoffConfig, type PrinterSelection, type PrinterSlicer, type PrinterPrintOptions,
 } from './config.js';
 import type {ElicitationContext, ElicitationRelay} from './elicitation.js';
-import {sliceEstimate, sliceSettings, type SliceEstimate, type SliceSettings} from './slice-estimate.js';
+import {sliceEstimate, sliceSettings, slicePlateCount, type SliceEstimate, type SliceSettings} from './slice-estimate.js';
 import {slicerReport} from './slicer-report.js';
 import type {HandoffBundleStore} from './bundle.js';
 import {PrinterMcpError, toolResultJson, toolResultText, type PrinterToolCatalog} from './mcp-client.js';
@@ -360,7 +360,15 @@ export class PrinterHandoffRunner {
     const report = slicerReport(sliced.structuredContent);
     if (report?.failed) throw new PrinterMcpError('slicer-error', undefined, report.message);
     const slicerWarning = report?.message;
-    const estimate = await sliceEstimate(await readFile(slicedPath), selection.plateIndex ?? 0);
+    const slicedBytes = await readFile(slicedPath);
+    const plateCount = slicePlateCount(slicedBytes) ?? report?.plateCount;
+    // Copies in this flow mean copies in one print. The MCP dispatches one selected plate,
+    // so never present one plate's estimate or dispatch as fulfilling a multi-plate request.
+    if ((slicer.repetitions ?? 1) > 1 && plateCount && plateCount > 1) {
+      throw new PrinterMcpError('copies-multiple-plates', undefined,
+        `The slicer placed ${slicer.repetitions} copies on ${plateCount} plates, requiring ${plateCount} separate prints. Choose fewer copies for this print.`);
+    }
+    const estimate = await sliceEstimate(slicedBytes, selection.plateIndex ?? 0);
     await progress('inspecting', estimate);
     const inspection = await this.inspect(session, slicedPath, selection, local);
     if (inspection) step('inspect');

@@ -1,0 +1,8 @@
+{
+  "return_code": 0,
+  "error_string": "Success.",
+  "sliced_plates": [
+    {"id": 1, "warning_message": ""},
+    {"id": 2, "warning_message": ""}
+  ]
+}

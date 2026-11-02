@@ -4,6 +4,7 @@ import {mkdtemp, readFile, rm, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
+import {zipSync, strToU8} from 'fflate';
 import {
   HandoffBundleStore,
   DispatchedPrintError,
@@ -25,17 +26,18 @@ const selection = {
   bedType: 'textured_plate', material: 'PLA', plateIndex: 0,
 };
 
-async function setup(t, {mode = 'bambu', backend = 'bambu-printer-mcp', answer = 'accept', relayTimeoutMs = 5000, dispatch, ephemeral = false, noColour = false, crypto = false, noConnectionType = false, settings = false, remote = false, slicer, slicerResult, laidFlat} = {}) {
+async function setup(t, {mode = 'bambu', backend = 'bambu-printer-mcp', answer = 'accept', relayTimeoutMs = 5000, dispatch, ephemeral = false, noColour = false, crypto = false, noConnectionType = false, settings = false, remote = false, slicer, slicerResult, laidFlat, slicedBytes} = {}) {
   const root = await mkdtemp(join(tmpdir(), 'printer-handoff-'));
   t.after(() => rm(root, {recursive: true, force: true}));
   const log = join(root, 'calls.jsonl');
   await writeFile(log, '');
   const stlPath = join(root, 'clean.stl');
   await writeFile(stlPath, stl);
+  if (slicedBytes) await writeFile(join(root, 'fixture-output.3mf'), slicedBytes);
   const config = {
     backend,
     process: {command: process.execPath, args: [fixture, mode, log], cwd: root,
-      env: {...(laidFlat !== undefined ? {HANDOFF_FIXTURE_LAID_FLAT: String(laidFlat)} : {}), ...(slicerResult ? {HANDOFF_FIXTURE_SLICER_RESULT: join(slicerResults, `${slicerResult}.json`)} : {}), ...(settings ? {HANDOFF_FIXTURE_SLICE_SETTINGS:'1'} : {}), ...(remote ? {HANDOFF_FIXTURE_REMOTE:'1'} : {}), ...(noConnectionType ? {HANDOFF_FIXTURE_NO_CONNECTION_TYPE:'1'} : {}), ...(crypto ? {HANDOFF_FIXTURE_CRYPTO:'1'} : {}), ...(dispatch ? {HANDOFF_FIXTURE_DISPATCH: dispatch} : {}), ...(ephemeral ? {HANDOFF_FIXTURE_EPHEMERAL: '1'} : {}), ...(noColour ? {HANDOFF_FIXTURE_NO_COLOUR:'1'} : {})}},
+      env: {...(slicedBytes ? {HANDOFF_FIXTURE_SLICED_FILE: join(root, 'fixture-output.3mf')} : {}), ...(laidFlat !== undefined ? {HANDOFF_FIXTURE_LAID_FLAT: String(laidFlat)} : {}), ...(slicerResult ? {HANDOFF_FIXTURE_SLICER_RESULT: join(slicerResults, `${slicerResult}.json`)} : {}), ...(settings ? {HANDOFF_FIXTURE_SLICE_SETTINGS:'1'} : {}), ...(remote ? {HANDOFF_FIXTURE_REMOTE:'1'} : {}), ...(noConnectionType ? {HANDOFF_FIXTURE_NO_CONNECTION_TYPE:'1'} : {}), ...(crypto ? {HANDOFF_FIXTURE_CRYPTO:'1'} : {}), ...(dispatch ? {HANDOFF_FIXTURE_DISPATCH: dispatch} : {}), ...(ephemeral ? {HANDOFF_FIXTURE_EPHEMERAL: '1'} : {}), ...(noColour ? {HANDOFF_FIXTURE_NO_COLOUR:'1'} : {})}},
     selection,
     ...(slicer ? {slicer} : {}),
     timeouts: {connectMs: 5000, toolMs: 5000, elicitationMs: relayTimeoutMs},
@@ -538,6 +540,37 @@ test('named copies override the config: repetitions 3 in the profile, one copy a
   const g = await setup(t, {});
   await g.runner.run({stlPath: g.stlPath, slicer: {repetitions: 1}});
   assert.equal((await g.calls()).find(call => call.tool === 'slice_stl').arguments.repetitions, undefined);
+});
+
+test('copies split across plates explain the separate prints before estimate or dispatch', async t => {
+  const f = await setup(t, {settings: true, slicerResult: 'copies-two-plates'});
+  const options = {stlPath: f.stlPath, slicer: {repetitions: 2}};
+  const expected = {code: 'copies-multiple-plates', detail: 'The slicer placed 2 copies on 2 plates, requiring 2 separate prints. Choose fewer copies for this print.'};
+  await assert.rejects(f.runner.estimate(options), expected);
+  await assert.rejects(f.runner.run(options), expected);
+  assert.equal(f.seen.length, 0, 'no print is offered with fewer than the requested copies');
+  assert.ok(!(await f.calls()).some(call => call.tool === 'print_3mf'));
+});
+
+test('multiple copies on one plate still reach the existing print flow', async t => {
+  const f = await setup(t, {settings: true, slicerResult: 'cap-down-clean'});
+  await f.runner.run({stlPath: f.stlPath, slicer: {repetitions: 2}});
+  assert.equal((await f.calls()).filter(call => call.tool === 'print_3mf').length, 1);
+});
+
+test('path-only MCP output cannot silently drop copies on a second plate', async t => {
+  const slicedBytes = zipSync({'Metadata/plate_1.gcode': strToU8('; one'), 'Metadata/plate_2.gcode': strToU8('; two')});
+  const f = await setup(t, {settings: true, slicedBytes});
+  await assert.rejects(f.runner.run({stlPath: f.stlPath, slicer: {repetitions: 2}}), {code: 'copies-multiple-plates'});
+  assert.ok(!(await f.calls()).some(call => call.tool === 'print_3mf'));
+});
+
+test('one-plate copy estimate uses the sliced total without multiplying it again', async t => {
+  const slicedBytes = zipSync({'Metadata/plate_1.gcode': strToU8('; two copies'),
+    'Metadata/slice_info.config': strToU8('<config><plate><metadata key="index" value="1"/><metadata key="prediction" value="1800"/><metadata key="weight" value="20"/></plate></config>')});
+  const f = await setup(t, {settings: true, slicedBytes});
+  const result = await f.runner.estimate({stlPath: f.stlPath, slicer: {repetitions: 2}});
+  assert.deepEqual(result.estimate, {seconds: 1800, grams: 20});
 });
 
 for (const name of ['lay-flat-floating-cantilever', 'as-scanned-floating-cantilever']) {
