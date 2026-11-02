@@ -244,9 +244,11 @@ struct SocketObjects: ObjectsCompanion {
         do {
             let list = try await companion.objects()
             failures = 0
-            objects = list
-            printerCatalog = try? await companion.printers()
-            availability = .ready
+            // Published only when something changed: an unchanged read redraws nothing (PRD §9.6).
+            if objects != list { objects = list }
+            let catalog = try? await companion.printers()
+            if printerCatalog != catalog { printerCatalog = catalog }
+            if availability != .ready { availability = .ready }
             // The first read shows the top project; later, only a project that went away moves the selection.
             // Nothing selected on purpose (New Project is open) stays that way.
             if let current = selection, !list.contains(where: { $0.id == current }) { selection = ordered.first?.id }
@@ -273,8 +275,8 @@ struct SocketObjects: ObjectsCompanion {
     private func readExtrasIfDue() async {
         if let extrasReadAt, Date().timeIntervalSince(extrasReadAt) < Self.extrasDelay { return }
         extrasReadAt = Date()
-        if let status = try? await companion.status() { capabilities = status.capabilities }
-        if let devices = try? await companion.devices() { self.devices = devices }
+        if let status = try? await companion.status(), capabilities != status.capabilities { capabilities = status.capabilities }
+        if let devices = try? await companion.devices(), devices.map(\.id) != self.devices.map(\.id) || devices.map(\.seenAt) != self.devices.map(\.seenAt) { self.devices = devices }
         aiProvider = await companion.aiProvider()
     }
 

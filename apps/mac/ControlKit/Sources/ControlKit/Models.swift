@@ -25,7 +25,7 @@ public enum JSONValue: Codable, Sendable, Equatable {
     public var string: String? { if case .string(let value) = self { return value }; return nil }
 }
 public struct ControlStatus: Decodable, Sendable {
-    public struct Capabilities: Decodable, Sendable {
+    public struct Capabilities: Decodable, Sendable, Equatable {
         public let capture: Bool, cleanup: Bool, printerHandoff: Bool
         /// Nearby pairing (MAC-5): poll `nearbyRequests()` while true. False from a companion that predates it.
         public let nearbyPairing: Bool
