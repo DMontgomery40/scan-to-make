@@ -251,7 +251,7 @@ export function createControlDispatcher(services: ControlServices) {
               const {id, index} = parameters[method].parse(raw);
               return {activity: await objects.passActivity(id, index)};
             }
-            if (method === 'objects.delete') { await objects.delete((parameters[method].parse(raw) as {id: string}).id); return {deleted: true}; }
+            if (method === 'objects.delete') { await objects.delete((parameters[method].parse(raw) as {id: string}).id, 'mac'); return {deleted: true}; }
             if (method === 'objects.create') {
               const {instructions, kind} = parameters[method].parse(raw);
               return {object: local(await objects.create(instructions, kind))};

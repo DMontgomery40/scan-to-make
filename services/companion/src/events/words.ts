@@ -110,7 +110,7 @@ export const NOTIFY: Record<CounterpartEventType, NotifyLevel> = {
   'print.status': 'none', 'print.first-layer': 'passive', 'print.milestone': 'active', 'print.paused': 'timeSensitive',
   'print.resumed': 'none', 'print.done': 'active', 'print.failed': 'timeSensitive', 'print.cancelled': 'passive',
   'print.not-started': 'timeSensitive', 'print.unreachable': 'passive', 'print.sent': 'passive',
-  'project.updated': 'none',
+  'project.updated': 'none', 'project.deleted': 'none',
 };
 
 export function sizeText(sizeMm: readonly number[] | undefined): string | undefined {
@@ -158,6 +158,7 @@ export function eventWords(type: CounterpartEventType, data: CounterpartEvent['d
     case 'print.not-started': title = `${printer} didn't start ${t}`; body = 'Nothing was sent twice. Check the printer, then press Print again.'; break;
     case 'print.unreachable': title = `Lost contact with ${printer}`; body = 'Still trying.'; break;
     case 'project.updated': title = t; body = 'Project updated'; break;
+    case 'project.deleted': title = t; body = 'Project deleted'; break;
     case 'print.sent': title = `Sent ${t} to ${printer}`; body = context.reason === 'bambu-connect' ? 'Finish on your Mac: press Print in Bambu Connect.' : "Counterpart can't follow this print."; break;
   }
   return {title: title.slice(0, 200), body: body.slice(0, 500), notify: NOTIFY[type]};

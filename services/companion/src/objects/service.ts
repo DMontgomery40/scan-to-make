@@ -573,13 +573,18 @@ export class ObjectService {
     return this.#pass(await this.get(id), {...(parts.length ? {note: parts.join('\n')} : {}), trigger: 'ask-answer'});
   }
 
-  /** Deletes the object and its files. Not while a touch-up or print is running. */
-  delete(id: string): Promise<void> { return this.#gate(id, () => this.#delete(id)); }
-  async #delete(id: string): Promise<void> {
+  /**
+   * Deletes the object and its files. Not while a touch-up or print is running.
+   * `by` is who asked: the phone's device id, or `mac` for the Mac app. The `project.deleted` event records it.
+   */
+  delete(id: string, by?: string): Promise<void> { return this.#gate(id, () => this.#delete(id, by)); }
+  async #delete(id: string, by?: string): Promise<void> {
     const object = await this.get(id);
     if (object.state === 'touching-up' || object.state === 'printing' || this.#running.has(id))
       throw new InvalidStateError('Wait until the current step finishes.');
     await this.#deps.store.remove(id);
+    await this.#emit({id: randomUUID(), type: 'project.deleted', projectId: id, ...(by ? {data: {by: by.slice(0, 128)}} : {}),
+      detail: {title: projectTitle(object)}});
   }
 
   /** Prints the current model through the user's printer MCP. */

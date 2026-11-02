@@ -238,6 +238,30 @@ test('photos alone, with no description and no scan, are refused before anything
   assert.equal((await service.get(object.id)).state, 'new');
 });
 
+test('a deleted project leaves a project.deleted event that says who deleted it; a refused delete leaves none', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'objects-svc-'));
+  const store = new ObjectStore(join(root, 'objects'));
+  const events = [];
+  const service = new ObjectService({store, runTouchup: async input => { await new Promise(r => input.signal.addEventListener('abort', r, {once: true})); throw new Error('stopped'); },
+    stlInfo: async () => undefined, claudePath: '/c', handoff: {backend: 'bambu-printer-mcp', process: {command: '/usr/bin/true'}},
+    events: {emit: async draft => { events.push(draft); }}});
+  const busy = await service.create('A clip.');
+  const phone = await service.create('A hook for a 25 mm handle.');
+  const mac = await service.create('A bracket.');
+  const unsaid = await service.create('A spacer.');
+  await service.start(busy.id);
+  await assert.rejects(service.delete(busy.id, 'mac'), InvalidStateError);
+  await service.delete(phone.id, 'device-123');
+  await service.delete(mac.id, 'mac');
+  await service.delete(unsaid.id);
+  const deleted = events.filter(event => event.type === 'project.deleted');
+  assert.deepEqual(deleted.map(event => event.projectId), [phone.id, mac.id, unsaid.id], 'one per delete, none for the refused one');
+  assert.deepEqual(deleted.map(event => event.data), [{by: 'device-123'}, {by: 'mac'}, undefined]);
+  // The project is gone by the time the log adds words, so the event carries its title.
+  assert.equal(deleted[0].detail.title, 'A hook for a 25 mm handle.');
+  await service.close();
+});
+
 test('an object can be deleted, but not while it is being worked on', async () => {
   const {service, object, store} = await setup(undefined, {waitForAbort: true});
   const other = await service.create('A hook.');

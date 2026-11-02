@@ -58,6 +58,7 @@ type CounterpartEvent = {
 | `print.unreachable` | 3 failed reads in a row, or offline for ≥ 60 s | "Lost contact with *Printer*" | "Still trying." | passive | |
 | `print.sent` | The printer has the print but Counterpart can't follow it (objects-api.md, `sent`) | "Sent *Title* to *Printer*" | "Counterpart can't follow this print." / Bambu Connect: "Finish on your Mac: press Print in Bambu Connect." | passive | |
 | `project.updated` | A project's Status, or whether it's hidden from Home, changed on either device (PR 8a, 8b) | *Title* | "Project updated" | none | `data.keys`: what changed, `["status"]` or `["archived"]` |
+| `project.deleted` | A project and its files were deleted, from either device | *Title* (as it was before deleting) | "Project deleted" | none | `data.by`: the phone's device id, or `mac` for the Mac app |
 
 `notify` is the default level from PRD §9.1. The Mac app applies its own Settings → Notifications switches on top; progress events are off by default on the Mac.
 

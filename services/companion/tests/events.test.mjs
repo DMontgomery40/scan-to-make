@@ -89,6 +89,13 @@ test('a long poll returns as soon as an event arrives, at its time limit otherwi
   assert.equal(log.waiting, 0);
 });
 
+test('project.deleted keeps the title the project had, though the project can no longer be read', async t => {
+  const {log} = await openLog(t, {context: async () => { throw new Error('gone'); }});
+  const event = await log.append({id: randomUUID(), type: 'project.deleted', projectId: PROJECT, data: {by: 'mac'}, detail: {title: 'Mic mount'}});
+  assert.deepEqual([event.title, event.body, event.notify, event.data], ['Mic mount', 'Project deleted', 'none', {by: 'mac'}]);
+  CounterpartEventSchema.parse(event);
+});
+
 test('every event type has words within the limits, and the state line matches the PRD table', () => {
   const context = {title: 'Mic mount', printer: 'Bambu Lab P1S', size: '60 × 45 × 22 mm', item: 'a spool', question: 'Can you take a close-up of the clip?', reason: 'Blender stopped responding.'};
   for (const type of Object.keys(NOTIFY)) {

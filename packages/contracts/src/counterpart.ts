@@ -22,6 +22,8 @@ export const COUNTERPART_EVENT_TYPES = [
   'print.not-started', 'print.unreachable', 'print.sent',
   // PRD §5.4: a project's status (or, later, its settings) changed.
   'project.updated',
+  // A project and its files were deleted; `data.by` says from where.
+  'project.deleted',
 ] as const;
 export const CounterpartEventTypeSchema = z.enum(COUNTERPART_EVENT_TYPES);
 export type CounterpartEventType = z.infer<typeof CounterpartEventTypeSchema>;
@@ -47,6 +49,8 @@ export const CounterpartEventDataSchema = z.strictObject({
   expiresAt: iso.optional(),
   /** project.updated: what changed (for example `["status"]`). */
   keys: z.array(text(64)).max(16).optional(),
+  /** project.deleted: who deleted it, the phone's device id or `mac`. */
+  by: text(128).optional(),
 });
 
 /** Exactly PRD §8.7's `CounterpartEvent`. `frame` is relative to the project's directory. */
