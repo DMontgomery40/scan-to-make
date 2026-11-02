@@ -88,7 +88,7 @@ Each principle is taken from what Apple rewarded in 2026; sources are in [resear
 | **Pass** | One round of work on the Mac | trigger (new, ask for changes, late photos), stages with start and end times, worker trace (plain-language steps plus tool lines), outcome |
 | **Result** | A model version | mesh, renders, dimensions, a "what changed" list (added, changed, assumed or estimated, each tagged), confidence notes |
 | **Ask** | A question from the Mac | text, a picture with the region highlighted, the answers allowed (camera, photos, best guess, free text), status |
-| **Print** | A print job | printer, profile, colour map, estimate (time, grams), plate check result, live state (percent, layer, time left), events |
+| **Print** | A print job | printer, profile, colour map, estimate (time, grams), live state (percent, layer, time left), events |
 | **Printer** | Read from the user's MCP config | name, model, MCP (bambu or 3D-printer-server), state, filament or AMS slots, camera available |
 | **Device** | A paired phone or iPad | stable install id, user-facing name ("David's iPhone"), model, last seen. Re-pairing replaces the device; it never duplicates it. |
 
@@ -213,7 +213,7 @@ Screenshots:
 
 
 **Names.** Every project has a real name, never "Your project", "Your scan" or "Unfinished project".
-- **Naming:** the moment a project is created, the user's own Claude names it in two to four words from whatever there is: the request text, the link's page title, or the first photo. That's one short call with the same model the plate check uses. No reasoning step, and nothing waits on it.
+- **Naming:** the moment a project is created, the user's own Claude names it in two to four words from whatever there is: the request text, the link's page title, or the first photo. That's one short call to the user's own Claude. No reasoning step, and nothing waits on it.
 - **Fallbacks:** until the name arrives, the project shows the first words of the request. A published model takes the model's own name.
 - **Old projects:** projects created before this get named the same way, once, the first time the companion starts with this change.
 - **Renaming:** tap the name on the project page (phone and Mac), or use **Rename** in its menu or in Project Settings. A name the user set is never replaced.
@@ -411,7 +411,7 @@ Screenshots, inspector and New Project: `screens/mac-inspector-activity.jpg`, `s
 
 ### 7.3 Print sheet
 
-Screenshot: `screens/mac-print.jpg`. The same content as the phone's (§5.5), laid out as a sheet: printer cards, the plate preview, the colour map, quality, the plate-check switch, and **Print on *printer***.
+Screenshot: `screens/mac-print.jpg`. The same content as the phone's (§5.5), laid out as a sheet: printer cards, the plate preview, the colour map, quality and strength, and **Print on *printer***.
 
 ### 7.4 Menu bar popover
 
@@ -440,7 +440,6 @@ Screenshots, the other tabs: `screens/mac-settings-general.jpg`, `screens/mac-se
 ### 7.6 What the Mac does without being asked
 
 - **Close-ups from the scan.** On arrival, the Mac selects the sharpest, most informative frames from the capture as reference photos. If the scan can't show a region, the Mac raises an **Ask** with that region highlighted.
-- **Background plate check** before each print (§5.6).
 - **Prevents idle sleep** while a pass or a print is running (journey.md §3.3).
 
 ## 8. Back end: printers, progress and events
@@ -462,7 +461,7 @@ iPhone ──HTTPS, LAN/VPN, pinned key──▶ companion (Node, on the Mac) �
 ```
 
 Who runs what:
-- **The companion** owns everything that talks to printers: MCP sessions, the print monitor, the event log, the plate check, the phone's HTTP API and the Mac's control socket.
+- **The companion** owns everything that talks to printers: MCP sessions, the print monitor, the event log, the phone's HTTP API and the Mac's control socket.
 - **The Mac app** delivers events: Mac notifications, CloudKit records, and Live Activity pushes through the relay.
 - **The phone** never talks to a printer or an MCP directly.
 
@@ -1146,7 +1145,7 @@ Each milestone ends in an on-device check with screenshots compared against `scr
 
 **Reuse, don't rebuild:**
 - The `feat/counterpart-project-workspace` branch already has, in the companion: printer listing across MCPs (`objects/printers.ts`), live filament inventory, retained activity, stable device identity, and the external-editor actions on the Mac. M1–M4 build on those endpoints.
-- Printing, slicing, orientation, plate checks and print confirmation stay in bambu-printer-mcp and mcp-3D-printer-server. Every PR that touches them names the MCP tool it uses.
+- Printing, slicing, orientation and print confirmation stay in bambu-printer-mcp and mcp-3D-printer-server. Every PR that touches them names the MCP tool it uses.
 
 ## 14. Open questions and the one manual step
 
