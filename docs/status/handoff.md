@@ -1,5 +1,50 @@
 # Handoff: how to pick up Counterpart work
 
+## Current acceptance snapshot — 2026-11-02, 10:19 Mountain
+
+Mac build `202611020958` from `cdaf2685` is installed; phone build `202611020946` from
+`af324c7e` is installed but locked. These include capped-cleanup Retry (#264), Blender
+setup/repair (#267), and the Mac/backend multiple-copy explanation (#268). Local Bambu MCP
+1.1.52 now matches draft PR #95 at `d6c1d953`, including the STL clone flag fix. No npm release.
+
+The real Mac Print sheet now explains when two stove copies require two separate plates and
+disables Print. Selecting one copy restores its Fine estimate (4 h 48 min / 104 g) and enables
+Print. The sheet was canceled. The temporary acceptance project was removed; the six original
+projects, seven pairing identities, configuration and source bytes remain unchanged. Settings
+shows Blender is set up and opens on cleanup; the AI Test reports Connected.
+
+Launch Services had 126 registrations for `com.scantomake.mac`, mostly old test builds.
+Unregistering 125 obsolete paths leaves only `/Applications/Counterpart.app`; no files were
+removed by this registry cleanup. Receipts and screenshots are in
+`~/scan-to-make-work/codex-deploy-20261102`, including `launchservices-{before,after}.json`.
+
+**Corrected cleanup diagnosis:** the original photos do show the rounded rear after the object
+is turned over. The earlier worker's claim that those views were absent was wrong. The first
+normal replay completed but left the flattened rear and was rejected. Merged #269 now presents
+all numbered photos together, preserves individual full-size files, and explicitly compares
+all sides. Its private candidate completed in 636 seconds, closed its owned Blender, and left
+all original inputs/live projects unchanged. Independent matched-axis views show a substantially
+improved rounded/textured rear, but the bottom depression still needs assessment. No candidate
+was imported into the live projects; cleanup quality is not accepted merely because the run
+or topology checks pass. #269 is not yet installed in the app.
+
+Evidence: `codex-cleanup-overview-20261102/verification` (six matched-axis views and topology),
+`codex-photo-overview-c5032fd4` (exact Node 22/24 workflow PASS),
+`codex-copies-companion-e719417a` and `codex-copies-handoff-e719417a` (workflow PASS), and
+`codex-copies-20261102` (real slicer outputs and installed MCP hashes), all under
+`~/scan-to-make-work`. Hosted Actions remain blocked before execution by account billing.
+
+Published-model printing was previously overstated: the earlier Mac entry point was gated by
+an unadvertised capability and lacked a working backend/phone path. The active implementation
+preserves publisher files/credit and original 3MF plate settings; no real publisher download is
+yet verified. Fusion setup is connected, but review found active-tab routing could target a
+user document. Session-owned document binding is being fixed across the upstream add-in,
+Bambu bridge and companion before any real design pass. Both changes remain separate branches.
+
+Phone unlock, physical print/stop, camera/Face ID, notification/enrollment acceptance, pending
+APNs key registration, and public MCP release remain open. Older snapshots below are historical;
+this section and `asks.md` supersede their installation and temporary-project state.
+
 ## Device acceptance and Blender follow-up — 2026-11-02, 09:24 Mountain
 
 Mac build `202611020921` is installed from merged main `f1d2dde6` (#265); Davica3 has
