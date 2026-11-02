@@ -69,6 +69,7 @@ export const parameters = {
   'objects.cancelPrint': z.strictObject({id: z.uuid()}),
   'objects.camera': z.strictObject({id: z.uuid()}),
   'printers.camera': z.strictObject({destinationId: z.string().min(1).max(256)}),
+  'printers.updateMcp': z.strictObject({mcpId: z.string().regex(/^mcp-[0-9a-f]{16}$/), fresh: z.boolean().optional()}),
   'settings.get': empty,
   'settings.set': z.strictObject({milestones: MilestonesSchema}),
   'objects.answerPlate': z.strictObject({id: z.uuid()}),

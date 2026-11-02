@@ -14,13 +14,16 @@ type CounterpartEvent = {
   type: "pass.started"|"pass.stage"|"pass.ready"|"pass.ask"|"pass.failed"
       | "print.preparing"|"plate.blocked"|"print.confirm"|"print.started"|"print.status"|"print.first-layer"
       | "print.milestone"|"print.paused"|"print.resumed"|"print.done"|"print.failed"|"print.cancelled"
-      | "print.not-started"|"print.unreachable"|"print.sent";
-  projectId: string; printId?: string; destinationId?: string; printerName?: string;
+      | "print.not-started"|"print.unreachable"|"print.sent"
+      | "mcp.update.started"|"mcp.update.waiting"|"mcp.update.done"|"mcp.update.failed"; // PR 6
+  projectId?: string; // absent for an event about the Mac (mcp.update.*), PR 6
+  printId?: string; destinationId?: string; printerName?: string;
   title: string; body: string;
   notify: "none"|"passive"|"active"|"timeSensitive";
   data?: { progress?: number; remainingSec?: number; endsAt?: string; layer?: number; totalLayers?: number;
            state?: string; stage?: string; problems?: {code: string; message: string}[];
-           estimateSec?: number; grams?: number; askId?: string; confirmationId?: string; expiresAt?: string };
+           estimateSec?: number; grams?: number; askId?: string; confirmationId?: string; expiresAt?: string;
+           mcpId?: string; fromVersion?: string; toVersion?: string; log?: string /* ≤ 4 KB, mcp.update.failed */ };
   frame?: string; // path relative to the project directory
 };
 ```
@@ -58,8 +61,14 @@ type CounterpartEvent = {
 | `print.not-started` | Our job didn't appear within 180 s of dispatch | "*Printer* didn't start *Title*" | "Nothing was sent twice. Check the printer, then press Print again." | timeSensitive | |
 | `print.unreachable` | 3 failed reads in a row, or offline for ≥ 60 s | "Lost contact with *Printer*" | "Still trying." | passive | |
 | `print.sent` | The printer has the print but Counterpart can't follow it (objects-api.md, `sent`) | "Sent *Title* to *Printer*" | "Counterpart can't follow this print." / Bambu Connect: "Finish on your Mac: press Print in Bambu Connect." | passive | |
+| `mcp.update.started` | Update began running for an MCP install (PR 6) | "Updating *package*" | "*from* to *to*" | none | |
+| `mcp.update.waiting` | Update is waiting for a print on that printer to end | "*package* updates after the current print" | "*from* to *to*" | none | |
+| `mcp.update.done` | The new version is installed and its sessions reopened | "Updated *package* to *version*" | "Your printers use it now." | passive | |
+| `mcp.update.failed` | Update failed; the old version stays in use | "Couldn't update *package*" | "*from* is still in use. Try again, or install a fresh copy." | active | |
 
 `notify` is the default level from PRD §9.1. The Mac app applies its own Settings → Notifications switches on top; progress events are off by default on the Mac.
+
+**Events about the Mac (PR 6).** `mcp.update.*` have no `projectId`: they are about an MCP install, named by `data.mcpId` (objects-api.md, "Updating the printer MCPs"). They carry `fromVersion` and `toVersion` when known, and `mcp.update.failed` carries `log`, the last 4 KB of what the update printed. Both apps decode events without `projectId` from #210 and #211. The companion emits them by default; `SCAN_TO_MAKE_PROJECTLESS_EVENTS=0` in its environment turns them off (for a client that can't decode them), and the update then reports only through its method's reply. The project fixtures stay in `events`; these samples are in `macEvents` (`packages/contracts/fixtures/counterpart-v1.json`).
 
 `data` per type: print events carry `state`, `progress`, `remainingSec`, `endsAt`, `layer`, `totalLayers` and `stage` whenever the printer reported them, and `problems` when there are any. `print.started` also carries the slice `estimateSec` and `grams`. `pass.started` and `pass.stage` carry `stage` (the stage's words) and `estimateSec` (the pass's time left). `pass.ask` carries `askId`. `print.confirm` carries `confirmationId` and `expiresAt`.
 

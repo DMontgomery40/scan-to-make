@@ -10,6 +10,7 @@ import {
 } from '../dist/index.js';
 
 const flush = () => new Promise(resolve => setImmediate(resolve));
+const until = async check => { for (let i = 0; i < 200; i++) { if (check()) return; await flush(); } throw new Error('timed out'); };
 /** Deterministic time: timers fire only when the test advances the clock. */
 export class FakeClock {
   t = 0; timers = [];
@@ -36,10 +37,10 @@ const TOOLS = ['get_printer_status', 'camera_snapshot', 'slice_stl', 'print_3mf'
   .map(name => ({name, inputSchema: {type: 'object', properties: {}}}));
 function fakes({failConnect = () => false, gate} = {}) {
   const log = [], clients = [];
-  const factory = (_config, {onClose}) => {
+  const factory = (config, {onClose}) => {
     const id = clients.length + 1;
     const client = {
-      id, catalog: undefined, closed: false,
+      id, catalog: undefined, closed: false, command: config.process.command,
       async connect() {
         if (failConnect()) { log.push(['connect-failed', id]); throw Object.assign(new Error('no'), {code: 'connection-failed'}); }
         client.catalog = {server: {name: 'fake', version: '1'}, tools: TOOLS};
@@ -271,4 +272,28 @@ test('a connection that finishes opening after every caller gave up still closes
   assert.equal(session.health().connected, true);
   await clock.advance(SESSION_IDLE_CLOSE_MS);
   assert.equal(clients[0].closed, true);
+});
+
+test('restart lets a running print call finish, then the next call starts the MCP afresh with the new config', async () => {
+  let release;
+  const {clients, factory} = fakes({gate: name => name === 'print_3mf' ? new Promise(resolve => { release = resolve; }) : undefined});
+  const session = new PrinterSession('p1s', config, {clientFactory: factory});
+  const holder = session.hold();
+  const printing = session.call('print_3mf', {});
+  await until(() => release);
+  let restarted = false;
+  const restart = session.restart({...config, process: {command: '/opt/new/bambu-printer-mcp'}}).then(() => { restarted = true; });
+  await flush();
+  assert.equal(restarted, false, 'waits for the printer-changing call');
+  release();
+  await printing; await restart;
+  assert.equal(clients[0].closed, true);
+  await session.call('get_printer_status', {});
+  assert.equal(clients.length, 2);
+  assert.equal(clients[1].command, '/opt/new/bambu-printer-mcp');
+  assert.equal(session.config.process.command, '/opt/new/bambu-printer-mcp');
+  assert.equal(session.health().holders, 1, 'holders are kept');
+  holder();
+  await session.close();
+  await assert.rejects(session.restart(), /session-closed/);
 });

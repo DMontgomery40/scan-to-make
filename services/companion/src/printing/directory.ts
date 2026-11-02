@@ -9,6 +9,21 @@ export interface PublicDestination extends PrinterDestination {
   state?: Readiness;
   stateCheckedAt?: string;
   capabilities?: PrinterCapabilities;
+  mcpId?: string;
+}
+
+/** PRD §8.10: which install a destination runs, and the newest published version (McpUpdater). */
+export interface McpVersions {
+  mcpId(destinationId: string): string | undefined;
+  latestVersion(pkg: string, options?: {view?: boolean}): string | undefined;
+}
+const PACKAGE_LABELS: Record<string, string> = {'bambu-printer-mcp': 'bambu-printer-mcp', 'mcp-3d-printer-server': 'mcp-3D-printer-server'};
+/** Whether version a is newer than b (major.minor.patch). */
+export function newerVersion(a: string, b: string): boolean {
+  const parse = (v: string) => v.replace(/^v/, '').split(/[.+-]/).slice(0, 3).map(n => Number.parseInt(n, 10) || 0);
+  const [x, y] = [parse(a), parse(b)];
+  for (let i = 0; i < 3; i++) if (x[i] !== y[i]) return x[i]! > y[i]!;
+  return false;
 }
 
 /** How often a list request may start a background read of one destination. */
@@ -26,12 +41,16 @@ export class PrinterDirectory {
   readonly #reports = new Map<string, {report?: PrintReport; state: Readiness; checkedAt: number}>();
   readonly #refreshing = new Map<string, Promise<void>>();
   readonly #now: () => number;
+  #versions?: McpVersions;
 
   constructor(catalog: PrinterCatalog, session: (destinationId: string) => PrinterSession | undefined, options: {now?: () => number} = {}) {
     this.catalog = catalog;
     this.#session = session;
     this.#now = options.now ?? Date.now;
   }
+
+  /** Set once the updater exists: adds `mcpId` and `update.latestVersion` to the list. */
+  useVersions(versions: McpVersions): void { this.#versions = versions; }
 
   /** The session of the destination an id stands for (a duplicate's winner). */
   session(destinationId: string): PrinterSession | undefined {
@@ -84,9 +103,21 @@ export class PrinterDirectory {
     return {defaultDestinationId: this.catalog.defaultDestinationId, destinations: this.catalog.destinations.map(destination => {
       void this.refresh(destination.id);
       const known = this.#reports.get(destination.id), capabilities = this.#capabilities.get(destination.id);
+      const mcpId = this.#versions?.mcpId(destination.id);
       return {...destination, state: known?.state ?? 'unknown',
         ...(known ? {stateCheckedAt: new Date(known.checkedAt).toISOString()} : {}),
-        ...(capabilities ? {capabilities: structuredClone(capabilities)} : {})};
+        ...(capabilities ? {capabilities: this.#withLatest(structuredClone(capabilities), destination.backend)} : {}),
+        ...(mcpId ? {mcpId} : {})};
     })};
+  }
+
+  /** A newer published version shows as `update`, with `latestVersion`, even when no feature is missing. */
+  #withLatest(capabilities: PrinterCapabilities, backend: string): PrinterCapabilities {
+    const latest = this.#versions?.latestVersion(backend, {view: true});
+    if (!latest) return capabilities;
+    const newer = newerVersion(latest, capabilities.server.version);
+    if (capabilities.update) return {...capabilities, update: {...capabilities.update, latestVersion: latest}};
+    if (!newer) return capabilities;
+    return {...capabilities, update: {message: `Update ${PACKAGE_LABELS[backend] ?? backend} to ${latest}.`, package: backend as 'bambu-printer-mcp', latestVersion: latest}};
   }
 }
