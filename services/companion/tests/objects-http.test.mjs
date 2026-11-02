@@ -11,7 +11,7 @@ import {createControlDispatcher} from '../dist/local-control-services.js';
 
 const STL = 'solid m\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 1 0 0\nvertex 0 1 0\nendloop\nendfacet\nendsolid m\n';
 
-async function fixture(t, {denied = [], reconstruct} = {}) {
+async function fixture(t, {denied = [], reconstruct, reportsCompletion} = {}) {
   const root = await mkdtemp(join(tmpdir(), 'objects-http-'));
   const store = new ObjectStore(join(root, 'objects'));
   const runTouchup = async () => {
@@ -20,7 +20,7 @@ async function fixture(t, {denied = [], reconstruct} = {}) {
     return {status: 'done', summary: 'Fixed.', model: join(out, 'touched.stl'), renders: [join(out, 'front.png')], checkpoints: [], stats: {seconds: 1, toolCalls: 1}, passDir: join(root, 'pass')};
   };
   const events = [];
-  const service = new ObjectService({store, runTouchup, stlInfo: async () => [60.6, 45.2, 21.7], claudePath: '/c', handoff: {backend: 'bambu-printer-mcp', process: {command: '/usr/bin/true'}}, ...(reconstruct ? {reconstruct} : {}),
+  const service = new ObjectService({store, runTouchup, reportsCompletion, stlInfo: async () => [60.6, 45.2, 21.7], claudePath: '/c', handoff: {backend: 'bambu-printer-mcp', process: {command: '/usr/bin/true'}}, ...(reconstruct ? {reconstruct} : {}),
     events: {emit: async draft => { events.push(draft); }}});
   const routes = createObjectRoutes(service);
   const scopes = [], devices = [];
@@ -425,4 +425,47 @@ test('a name set on either device persists and does not start or stop a pass', a
     await assert.rejects(dispatch('objects.settings.set', {id: object.id, title}));
   }
   assert.equal((await store.get(object.id)).title, 'Desk mount');
+});
+
+
+test('Done-only messages mark Works without a pass; undo and mixed requests still work', async t => {
+  const classified = [];
+  const {call, service, store} = await fixture(t, {reportsCompletion: async note => { classified.push(note); return note === 'DONE. mounted and working. thanks!!' ? 'works' : 'changes'; }});
+  const project = await service.create('A mic mount');
+  await service.start(project.id); await service.settled(project.id);
+  const before = await store.get(project.id);
+  const done = await call('POST', `/v1/objects/${project.id}/corrections`, {note: 'DONE. mounted and working. thanks!!'});
+  assert.equal(done.status, 200);
+  assert.equal(done.json.object.state, 'confirmed');
+  assert.equal(done.json.object.passes.length, before.passes.length);
+  assert.deepEqual(done.json.object.current, before.current);
+  assert.equal(done.json.object.completion.note, 'DONE. mounted and working. thanks!!');
+  assert.equal(done.json.object.completion.previousStatus, 'not-printed');
+  await call('PATCH', `/v1/objects/${project.id}/settings`, {status: done.json.object.completion.previousStatus});
+  assert.equal((await service.get(project.id)).state, 'ready');
+  const changed = await call('POST', `/v1/objects/${project.id}/corrections`, {note: 'It works, but widen the flange'});
+  assert.equal(changed.json.object.state, 'touching-up');
+  await service.settled(project.id);
+  assert.equal((await service.get(project.id)).passes.length, before.passes.length + 1);
+  assert.deepEqual(classified, ['DONE. mounted and working. thanks!!', 'It works, but widen the flange']);
+});
+
+
+test('unavailable or uncertain classification saves the note without changing the model or starting a pass', async t => {
+  for (const reportsCompletion of [async () => 'unknown', async () => { throw new Error('timed out'); }]) {
+    const {call, service, store} = await fixture(t, {reportsCompletion});
+    const project = await service.create('A mic mount');
+    await service.start(project.id); await service.settled(project.id);
+    const before = await store.get(project.id);
+    const reply = await call('POST', `/v1/objects/${project.id}/corrections`, {note: 'DONE. mounted and working. thanks!!'});
+    assert.equal(reply.status, 409);
+    assert.match(reply.json.error.message, /message is saved/);
+    const after = await store.get(project.id);
+    assert.equal(after.pendingFollowup, 'DONE. mounted and working. thanks!!');
+    assert.equal(after.state, before.state);
+    assert.deepEqual(after.current, before.current);
+    assert.deepEqual(after.passes, before.passes);
+    await service.setStatus(project.id, 'works');
+    assert.equal((await store.get(project.id)).pendingFollowup, undefined);
+  }
 });

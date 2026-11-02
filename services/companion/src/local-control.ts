@@ -33,6 +33,7 @@ async function removeStaleSocket(path: string) {
 
 /** Methods allowed past the usual 10 s connection deadline. */
 export function methodDeadlineMs(method: ControlMethod, params: unknown): number | undefined {
+  if (method === 'objects.correct') return 25_000; // a completion classification is bounded to 20 s
   if (method === 'objects.estimate') return 180_000;
   // The printer MCP may ask its own confirmation; the call waits up to 120 s for it.
   if (method === 'objects.pausePrint' || method === 'objects.resumePrint' || method === 'objects.cancelPrint') return 130_000;

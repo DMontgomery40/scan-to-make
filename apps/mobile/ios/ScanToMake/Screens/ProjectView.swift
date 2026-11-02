@@ -173,6 +173,24 @@ struct ProjectView: View {
                 if let notice, problem == nil {
                     Label(notice, systemImage: "photo.badge.checkmark").font(.subheadline).foregroundStyle(.secondary).padding(.horizontal, 20)
                 }
+                if let pending = object.pendingFollowup {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Message saved").font(.headline)
+                        Text(pending).font(.subheadline).textSelection(.enabled)
+                        HStack {
+                            Button("Try Again") { act { try await store.mac.correct(object.id, pending) } }
+                            Button("Mark Done") { act { try await store.mac.client.setStatus(object.id, .works) } }
+                        }.disabled(working)
+                    }.padding(.horizontal, 20)
+                }
+                if let previous = object.completionUndoStatus {
+                    HStack {
+                        Label("Marked Done", systemImage: "checkmark.circle.fill")
+                        Spacer()
+                        Button("Undo") { act { try await store.mac.client.setStatus(object.id, previous) } }
+                            .disabled(working)
+                    }.font(.subheadline).padding(.horizontal, 20)
+                }
                 stateCard(object, words).padding(.horizontal, 16)
 
                 Picker("Section", selection: $section) {

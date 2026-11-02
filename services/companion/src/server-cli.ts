@@ -1,3 +1,4 @@
+import {reportsCompletion} from './objects/completion-intent.js';
 import {ModelSizeStore} from './model-size.js';
 import {createModelSizeRunner,installedBambuProcess} from './model-size-runner.js';
 import {readFile} from 'node:fs/promises';
@@ -108,7 +109,7 @@ if(handoffConfig&&printHandoff&&captureDirectory&&claudePath){
     stlInfo:path=>printerStlSize(handoffConfig,path),
     print:{services:printHandoff,destinations},
     settings:companionSettings,camera:new CameraFrames(),
-    passTimings:new PassTimings(join(dataRoot,'pass-timings.json')),titleFor:request=>generateTitle(request,claudePath),
+    passTimings:new PassTimings(join(dataRoot,'pass-timings.json')),titleFor:request=>generateTitle(request,claudePath), reportsCompletion:note=>reportsCompletion(note,claudePath),
     ...(eventLog?{events:{emit:async draft=>{await eventLog.append(draft);}}}:{})});
   await companionSettings.load();
   await objects.resume();

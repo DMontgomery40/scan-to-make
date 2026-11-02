@@ -86,7 +86,7 @@ struct SocketObjects: ObjectsCompanion {
     func setProjectSettings(_ id: String, _ patch: [String: JSONValue]) async throws -> Project {
         try await ControlClient(socketPath:path).setProjectSettings(id, patch)
     }
-    func correct(_ id: String, note: String) async throws -> Project { try await ControlClient(socketPath:path).correctObject(id, note:note) }
+    func correct(_ id: String, note: String) async throws -> Project { try await ControlClient(socketPath:path, timeout:30).correctObject(id, note:note) }
     func answerCloseup(_ id: String, bestGuess: Bool) async throws -> Project { try await ControlClient(socketPath:path).answerCloseup(id, bestGuess:bestGuess) }
     func print(_ id: String, checked: Bool) async throws -> Project { try await ControlClient(socketPath:path).printObject(id, checked:checked) }
     func answerPrintConfirmation(_ id: String, confirmationId: String, answer: PrintConfirmationAnswer) async throws -> Project {
@@ -460,7 +460,7 @@ struct SocketObjects: ObjectsCompanion {
             case .print: updated = try await companion.print(id, checked:false)
             case .printChecked: updated = try await companion.print(id, checked:true)
             case .correct:
-                let text = String(note.trimmingCharacters(in:.whitespacesAndNewlines).prefix(4000))
+                let text = note.trimmingCharacters(in:.whitespacesAndNewlines)
                 updated = photos.isEmpty ? try await companion.correct(id, note:text)
                     : try await companion.correct(id, note:text.isEmpty ? "See the photos I added." : text, photos:photos.map(\.path))
             case .bestGuess: updated = try await companion.answerCloseup(id, bestGuess:true)
