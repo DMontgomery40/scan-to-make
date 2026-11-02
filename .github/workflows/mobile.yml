@@ -21,14 +21,18 @@ permissions:
 jobs:
   counterpartkit:
     name: CounterpartKit tests
-    runs-on: macos-latest
+    # GitHub's macOS 27 image with Xcode 27, as mac.yml uses.
+    runs-on: xcode-27
     timeout-minutes: 30
-    env:
-      DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Select Xcode 27.2
+        # The app targets iOS 27: GitHub's image with Xcode 27 keeps it at Xcode_27.2.app; a Mac running the local gate already has it selected.
+        run: |
+          if [ -d /Applications/Xcode_27.2.app ]; then sudo xcode-select -s /Applications/Xcode_27.2.app; fi
+          case "$(xcodebuild -version)" in "Xcode 27.2"*) ;; *) echo "Xcode 27.2 is required"; exit 1 ;; esac
       - name: Show Xcode and Swift versions
         run: |
           xcodebuild -version
@@ -42,14 +46,17 @@ jobs:
 
   app:
     name: iPhone app build and tests
-    runs-on: macos-latest
+    runs-on: xcode-27
     timeout-minutes: 60
-    env:
-      DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Select Xcode 27.2
+        # The app targets iOS 27: GitHub's image with Xcode 27 keeps it at Xcode_27.2.app; a Mac running the local gate already has it selected.
+        run: |
+          if [ -d /Applications/Xcode_27.2.app ]; then sudo xcode-select -s /Applications/Xcode_27.2.app; fi
+          case "$(xcodebuild -version)" in "Xcode 27.2"*) ;; *) echo "Xcode 27.2 is required"; exit 1 ;; esac
       - name: The committed Xcode project matches project.yml
         working-directory: apps/mobile/ios
         run: |
@@ -59,18 +66,10 @@ jobs:
           trap 'rm -rf "${{ runner.temp }}/committed.xcodeproj"' EXIT
           xcodegen generate --spec project.yml --quiet
           diff -r "${{ runner.temp }}/committed.xcodeproj" ScanToMake.xcodeproj
-      - name: Find Xcode 27 and an iOS 27 simulator
+      - name: Find an iOS 27 simulator (iPhone 18 Pro when installed)
         run: |
           set -euo pipefail
-          # The app targets iOS 27, so it needs Xcode 27's SDK. Use whichever installed Xcode has it.
-          for xcode in "$DEVELOPER_DIR" /Applications/Xcode*.app/Contents/Developer; do
-            if DEVELOPER_DIR="$xcode" xcodebuild -showsdks 2>/dev/null | grep -q 'iphoneos27'; then echo "DEVELOPER_DIR=$xcode" >> "$GITHUB_ENV"; found="$xcode"; break; fi
-          done
-          if [ -z "${found:-}" ]; then
-            echo "::error::The iPhone app needs Xcode 27 with the iOS 27 SDK. This runner has: $(xcodebuild -version | head -1). It is tested on the Mac by scripts/ci-local.sh."
-            exit 1
-          fi
-          DEVELOPER_DIR="$found" xcrun simctl list -j runtimes devicetypes > "${{ runner.temp }}/simctl.json"
+          xcrun simctl list -j runtimes devicetypes > "${{ runner.temp }}/simctl.json"
           python3 - "${{ runner.temp }}/simctl.json" >> "$GITHUB_ENV" <<'PY'
           import json, sys
           data = json.load(open(sys.argv[1]))

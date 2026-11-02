@@ -6,7 +6,7 @@ import CounterpartKit
     let pairing: PairingClient
     let companion: CompanionClient
     let nearby: NearbyPairing
-    let objects: ObjectsStore
+    let projects: ProjectsStore
 
     /// Nil until the stored pairing has been read once.
     private(set) var status: PairingStatus?
@@ -22,15 +22,22 @@ import CounterpartKit
     var pendingLink: String?
     /// A screen to open (from a notification or a link), consumed by the root view.
     var route: AppRoute?
+    /// Debug builds: which project section a screenshot opens on.
+    var debugSection: String?
     private var lastLink: (url: String, at: Date)?
     private var observer: NSObjectProtocol?
 
     init(store: SecureStore = KeychainStore()) {
+        var store = store
+        var transport: HTTPTransport = PinnedTransport()
+        #if DEBUG
+        if let folder = Fixtures.folder { store = Fixtures.store(); transport = FixtureTransport(folder: folder) }
+        #endif
         let pairingStore = PairingStore(store: store)
-        pairing = PairingClient(store: pairingStore)
-        companion = CompanionClient(pairing: pairing)
-        nearby = NearbyPairing(client: pairing)
-        objects = ObjectsStore(mac: MacConnection(client: companion), pairing: pairing)
+        pairing = PairingClient(store: pairingStore, transport: transport)
+        companion = CompanionClient(pairing: pairing, transport: transport)
+        nearby = NearbyPairing(client: pairing, transport: transport)
+        projects = ProjectsStore(mac: MacConnection(client: companion), pairing: pairing)
         observer = NotificationCenter.default.addObserver(forName: PairingStore.changed, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated {
                 self?.readStatus()
@@ -38,7 +45,10 @@ import CounterpartKit
             }
         }
         readStatus()
-        objects.onPair = { [weak self] in self?.showPairing = true }
+        projects.onPair = { [weak self] in self?.showPairing = true }
+        #if DEBUG
+        debugRoute()
+        #endif
     }
 
     /// No usable pairing: Find your Mac is the first screen.
@@ -86,4 +96,24 @@ import CounterpartKit
     func open(notification userInfo: [AnyHashable: Any], action: String?) {
         if let route = AppRoute(notification: userInfo, action: action) { self.route = route }
     }
+
+    #if DEBUG
+    /// `-CounterpartScreen <name>` opens one screen directly, as the mockup app's `-screen` does.
+    private func debugRoute() {
+        guard let screen = UserDefaults.standard.string(forKey: "CounterpartScreen") else { return }
+        let ids = Fixtures.ids
+        switch screen {
+        case "ready": route = .project(ids.mic)
+        case "inputs": route = .project(ids.mic); debugSection = "inputs"
+        case "working": route = .project(ids.potato)
+        case "ask": route = .project(ids.plush)
+        case "failed": route = .project(ids.failed); debugSection = "activity"
+        case "printing": route = .printing(ids.clip)
+        case "print": route = .print(ids.mic)
+        case "new": route = .newProject
+        case "printers": route = .printers
+        default: break
+        }
+    }
+    #endif
 }

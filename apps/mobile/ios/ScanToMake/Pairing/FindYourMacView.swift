@@ -351,6 +351,7 @@ struct FindYourMacView: View {
             do {
                 _ = try await app.pairing.pair(invitation, deviceName: name)
                 if Task.isCancelled { return }
+                UserDefaults.standard.set(invitation.name ?? "", forKey: ProjectsStore.macNameKey)
                 if nearbyOwned { app.nearby.cancel(); nearbyOwned = false }
                 replacing = false
                 phase = .connected
@@ -398,6 +399,7 @@ struct FindYourMacView: View {
                     if mine == attempt { nearby = .code(started, mac.name) }
                 }
                 guard mine == attempt else { return }
+                UserDefaults.standard.set(mac.name, forKey: ProjectsStore.macNameKey)
                 nearbyOwned = false
                 app.nearby.cancel()
                 replacing = false

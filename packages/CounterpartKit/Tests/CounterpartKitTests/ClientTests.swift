@@ -282,10 +282,10 @@ final class CompanionClientTests: XCTestCase {
         let filament = PrinterFilament(slot: 0, colour: "#141414", material: "PLA", name: "Bambu PLA Basic", filamentId: "GFA00", destinationId: "current")
         let plain = PrintChoice(filament: filament).body
         XCTAssertEqual(Set(plain.keys), ["checked", "filament"], "standard quality and strength send nothing")
-        let more = PrintChoice(filament: filament, quality: .fine, strength: .strong, checkPlate: false).body
+        let more = PrintChoice(filament: filament, quality: .fine, strength: .strong).body
         XCTAssertEqual(more["quality"] as? String, "fine")
         XCTAssertEqual(more["strength"] as? String, "strong")
-        XCTAssertEqual(more["plateCheck"] as? Bool, false)
+        XCTAssertNil(more["plateCheck"], "no plate check (main ac44431)")
         XCTAssertEqual(PrintChoice(filament: filament).settingsLine, "0.20 mm layers · 2 walls · 15% infill")
         XCTAssertEqual(filament.displayName, "Bambu PLA Basic")
         XCTAssertEqual(PrinterFilament(slot: 254, colour: "#FFFFFF", material: "PETG", name: "Generic PETG #FFFFFF", filamentId: "", destinationId: "x").slotLabel, "Ext")

@@ -206,15 +206,14 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
         }
     }
 
-    /// Set while a print waits for you: something is on the plate, or the printer has no camera.
+    /// What the printer camera reported on the plate, shown beside the printer's own confirmation. Never a
+    /// prompt to clear it (main ac44431).
     public struct Plate: Codable, Equatable, Sendable {
         public var item: String?
         public var noCamera: Bool?
         public var photo: Bool?
-        /// True while Look Again retakes and judges a frame (PR 2).
-        public var checking: Bool?
-        public init(item: String? = nil, noCamera: Bool? = nil, photo: Bool? = nil, checking: Bool? = nil) {
-            self.item = item; self.noCamera = noCamera; self.photo = photo; self.checking = checking
+        public init(item: String? = nil, noCamera: Bool? = nil, photo: Bool? = nil) {
+            self.item = item; self.noCamera = noCamera; self.photo = photo
         }
     }
 
@@ -359,7 +358,6 @@ public struct PrintSettings: Codable, Equatable, Sendable {
     public var quality: String?
     public var strength: String?
     public var colour: JSONValue?
-    public var plateCheck: Bool?
 }
 
 /// `POST /v1/objects/<id>/estimate`: the slice with exactly the settings Print would use (PR 2).

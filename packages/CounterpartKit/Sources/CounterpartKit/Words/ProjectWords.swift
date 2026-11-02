@@ -49,7 +49,7 @@ public enum ProjectPhase: String, Equatable, Sendable, CaseIterable {
         case .printing: "Printing"
         case .printed: "Printed"
         case .sent: "Sent to your printer"
-        case .failed: "Didn't finish"
+        case .failed: "Couldn't finish"
         case .unknown: "Update Counterpart"
         }
     }
@@ -65,7 +65,7 @@ public enum Tone: String, Equatable, Sendable {
 
 /// What a project page or card can offer right now.
 public enum ProjectAction: Equatable, Sendable {
-    case finishSending, scan, attachPhotos, makeIt, print, printChecked, correct, openCamera, bestGuess, plateClear, retry
+    case finishSending, scan, attachPhotos, makeIt, print, printChecked, correct, openCamera, bestGuess, retry
 }
 
 /// A project in plain words: the one source of status words for the phone, iPad and (later) the Mac,
@@ -131,7 +131,9 @@ public struct ProjectWords: Equatable, Sendable {
             // Printing only once the printer reports our job; until then the print is being prepared.
             if project.print?.monitor?.phase == "watching" || (project.print?.printId != nil && ["printing", "paused"].contains(project.print?.live?.state ?? "")) { return .printing }
             return .preparing
-        case .printed: return .printed
+        // "Printed" only once the print monitor saw it finish; an older Mac marks a print printed when the
+        // printer accepts it, which is "sent" in the PRD's words.
+        case .printed: return project.print?.monitor?.endState == "done" ? .printed : .sent
         case .sent: return .sent
         case .failed: return .failed
         case .unknown: return .unknown

@@ -172,7 +172,8 @@ final class ProjectWordsTests: XCTestCase {
         XCTAssertEqual(ProjectWords(project(["state": "needs-closeup"])).phase, .needsYou)
         XCTAssertEqual(ProjectWords(ready()).phase, .ready)
         XCTAssertEqual(ProjectWords(ready(["state": "printing"])).phase, .preparing, "printing starts only when the printer reports our job")
-        XCTAssertEqual(ProjectWords(ready(["state": "printed"])).phase, .printed)
+        XCTAssertEqual(ProjectWords(ready(["state": "printed"])).phase, .sent, "accepted isn't printed until the monitor says so")
+        XCTAssertEqual(ProjectWords(ready(["state": "printed", "print": ["bundleId": "b", "monitor": ["phase": "ended", "endState": "done"]]])).phase, .printed)
         XCTAssertEqual(ProjectWords(project(["state": "failed"])).phase, .failed)
         // KAN-214 #199: a print Counterpart can't follow ends at `sent`; no "done" follows.
         let sent = ready(["state": "sent", "print": ["bundleId": "b", "uncertain": true, "fileBase": "mic-mount", "destination": ["id": "current", "name": "Ender 3"],
