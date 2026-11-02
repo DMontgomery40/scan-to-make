@@ -133,7 +133,10 @@ import CounterpartKit
         sendQueuedNote(project)
     }
 
-    func queue(note: String, for id: String) { corrections.add(note, for: id) }
+    func queue(note: String, for id: String) {
+        let photos = projects.first(where: { $0.id == id }).flatMap { corrections.availablePhotos($0) }
+        corrections.add(note, for: id, photos: photos)
+    }
 
     /// A change asked for during a pass goes in as soon as the Mac can take it.
     private func sendQueuedNote(_ project: Project) {
@@ -143,7 +146,7 @@ import CounterpartKit
             defer { correcting.remove(project.id) }
             do {
                 let ticket = startRequest()
-                let next = try await mac.correct(project.id, note)
+                let next = try await mac.correct(project.id, note, photoNames: corrections.messages[project.id]?.first?.photos)
                 corrections.sent(note, for: project.id)
                 sendFailures[project.id] = nil
                 guard replace(next, ticket: ticket) else { return }

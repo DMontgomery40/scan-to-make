@@ -98,7 +98,7 @@ public enum EstimateOutcome: Sendable, Equatable {
 /// folder on this Mac, which only the control socket sends. These are the files the Mac shows from that folder.
 public extension Project {
     /// A file named by the companion, kept inside the project's folder.
-    private func file(_ relative: String) -> URL? {
+    func file(_ relative: String) -> URL? {
         let parts = relative.split(separator: "/", omittingEmptySubsequences: false)
         guard let directory, directory.hasPrefix("/"), !relative.isEmpty, !relative.hasPrefix("/"),
               !parts.contains(where: { $0 == ".." || $0 == "." || $0.isEmpty }) else { return nil }
@@ -159,9 +159,10 @@ public extension ControlClient {
     }
     /// Sends a correction back to the touch-up; the object returns to touching up. `photos` are absolute paths on
     /// this Mac, sent only to a companion with `objectsCreate` (it copies them into the project).
-    func correctObject(_ id: String, note: String, photos: [String] = []) async throws -> Project {
+    func correctObject(_ id: String, note: String, photos: [String] = [], photoNames: [String]? = nil) async throws -> Project {
         var params: [String: JSONValue] = ["id": .string(id), "note": .string(note)]
         if !photos.isEmpty { params["photos"] = .array(photos.map(JSONValue.string)) }
+        if let photoNames { params["photoNames"] = .array(photoNames.map(JSONValue.string)) }
         let client = try ControlClient(socketPath: socketPath, timeout: max(timeout, Self.timeout(for: "objects.correct")))
         let result: ObjectReply = try await client.call("objects.correct", params); return result.object
     }

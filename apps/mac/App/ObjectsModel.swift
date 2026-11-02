@@ -14,6 +14,8 @@ protocol ObjectsCompanion: Sendable {
     func selectPrinter(_ id: String, destinationId: String) async throws -> Project
     func objects() async throws -> [Project]
     func correct(_ id: String, note: String) async throws -> Project
+    func correct(_ id: String, note: String, photoNames: [String]) async throws -> Project
+    func correct(_ id: String, note: String, photos: [String], photoNames: [String]) async throws -> Project
     func answerCloseup(_ id: String, bestGuess: Bool) async throws -> Project
     func print(_ id: String, checked: Bool) async throws -> Project
     func answerPrintConfirmation(_ id: String, confirmationId: String, answer: PrintConfirmationAnswer) async throws -> Project
@@ -39,6 +41,8 @@ protocol ObjectsCompanion: Sendable {
 }
 
 extension ObjectsCompanion {
+    func correct(_ id: String, note: String, photos: [String], photoNames: [String]) async throws -> Project { try await correct(id, note: note, photos: photos) }
+    func correct(_ id: String, note: String, photoNames: [String]) async throws -> Project { try await correct(id, note: note) }
     func filaments(_ id: String) async throws -> [PrinterFilament] { throw ControlClientError.unavailable }
     func print(_ id: String, checked: Bool, filament: PrinterFilament) async throws -> Project { throw ControlClientError.unavailable }
     func answerPrintConfirmation(_ id: String, confirmationId: String, answer: PrintConfirmationAnswer) async throws -> Project { throw ControlClientError.unavailable }
@@ -85,6 +89,12 @@ struct SocketObjects: ObjectsCompanion {
     }
     func setProjectSettings(_ id: String, _ patch: [String: JSONValue]) async throws -> Project {
         try await ControlClient(socketPath:path).setProjectSettings(id, patch)
+    }
+    func correct(_ id: String, note: String, photos: [String], photoNames: [String]) async throws -> Project {
+        try await ControlClient(socketPath: path, timeout: 30).correctObject(id, note: note, photos: photos, photoNames: photoNames)
+    }
+    func correct(_ id: String, note: String, photoNames: [String]) async throws -> Project {
+        try await ControlClient(socketPath: path, timeout: 30).correctObject(id, note: note, photoNames: photoNames)
     }
     func correct(_ id: String, note: String) async throws -> Project { try await ControlClient(socketPath:path, timeout:30).correctObject(id, note:note) }
     func answerCloseup(_ id: String, bestGuess: Bool) async throws -> Project { try await ControlClient(socketPath:path).answerCloseup(id, bestGuess:bestGuess) }
@@ -476,7 +486,8 @@ struct SocketObjects: ObjectsCompanion {
     private func queueChanges(_ id: String, note: String, photos: [URL]) async -> Bool {
         do {
             for photo in photos { applyReply(try await companion.addFile(id, kind: "photos", path: photo.path)) }
-            corrections.add(note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "See the photos I added." : note, for: id)
+            let available = objects.first(where: { $0.id == id }).flatMap { corrections.availablePhotos($0) }
+            corrections.add(note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "See the photos I added." : note, for: id, photos: available)
             if let project = objects.first(where: { $0.id == id }) { sendQueuedNote(project) }
             return true
         } catch { problem = Problem(id: id, text: Self.sentence(for: error)); return false }
@@ -488,7 +499,10 @@ struct SocketObjects: ObjectsCompanion {
         Task {
             defer { correcting.remove(project.id) }
             do {
-                let updated = try await companion.correct(project.id, note: note)
+                let updated: Project
+                if capabilities?.messagePhotos == true, let photos = corrections.messages[project.id]?.first?.photos {
+                    updated = try await companion.correct(project.id, note: note, photoNames: photos)
+                } else { updated = try await companion.correct(project.id, note: note) }
                 corrections.sent(note, for: project.id)
                 applyReply(updated)
                 correcting.remove(project.id)
@@ -527,8 +541,13 @@ struct SocketObjects: ObjectsCompanion {
             case .printChecked: updated = try await companion.print(id, checked:true)
             case .correct:
                 let text = note.trimmingCharacters(in:.whitespacesAndNewlines)
-                updated = photos.isEmpty ? try await companion.correct(id, note:text)
-                    : try await companion.correct(id, note:text.isEmpty ? "See the photos I added." : text, photos:photos.map(\.path))
+                if capabilities?.messagePhotos == true, let project = objects.first(where: { $0.id == id }) {
+                    updated = try await companion.correct(id, note: text.isEmpty ? "See the photos I added." : text,
+                        photos: photos.map(\.path), photoNames: corrections.availablePhotos(project) ?? [])
+                } else {
+                    updated = photos.isEmpty ? try await companion.correct(id, note:text)
+                        : try await companion.correct(id, note:text.isEmpty ? "See the photos I added." : text, photos:photos.map(\.path))
+                }
             case .bestGuess: updated = try await companion.answerCloseup(id, bestGuess:true)
             case .retry: updated = try await companion.start(id)
             }

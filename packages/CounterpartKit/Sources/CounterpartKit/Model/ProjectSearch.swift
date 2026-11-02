@@ -15,6 +15,7 @@ extension Project {
         var values = [ProjectWords.title(self)] + additional
         values += [instructions, progress, failure, kind, completion?.note, pendingFollowup,
                    question?.closeup, ask?.question, status?.text, outcome].compactMap { $0 }
+        values += (messages ?? []).map(\.text)
         for pass in passes {
             values += [pass.note, pass.summary, pass.engine].compactMap { $0 }
             values += (pass.stages ?? []).map(\.words)

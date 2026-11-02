@@ -214,8 +214,10 @@ public final class CompanionClient: @unchecked Sendable {
         try await request("POST", "/v1/objects/\(id)/start", json: captureManifest.map { ["captureManifest": $0] } ?? [:], as: One.self).object
     }
     /// Ask for changes: a new pass with your text. Upload new photos first.
-    public func correct(_ id: String, _ note: String) async throws -> Project {
-        try await request("POST", "/v1/objects/\(id)/corrections", json: ["note": note], as: One.self).object
+    public func correct(_ id: String, _ note: String, photoNames: [String]? = nil) async throws -> Project {
+        var json: [String: Any] = ["note": note]
+        if let photoNames { json["photoNames"] = photoNames }
+        return try await request("POST", "/v1/objects/\(id)/corrections", json: json, as: One.self).object
     }
     /// Answers the open Ask: after uploading a photo (`{}`), as a best guess, or in words (PR 4).
     public func answerAsk(_ id: String, bestGuess: Bool = false, text: String? = nil) async throws -> Project {

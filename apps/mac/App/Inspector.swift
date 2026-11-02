@@ -66,17 +66,18 @@ private struct RequestTab: View {
                     }
                 }
             }
-            SectionHeading("Your request")
-            Text(request).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
-            let pictures = object.photoURLs.isEmpty ? Array(object.captureURLs.prefix(8)) : object.photoURLs
-            if !pictures.isEmpty {
-                SectionHeading(object.photoURLs.isEmpty ? "From your scan" : "Photos")
-                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
-                    ForEach(pictures, id: \.self) { url in
-                        Button { shown = url } label: { FillImage(url: url, version: object.updatedAtMs).frame(height: 96).clipShape(.rect(cornerRadius: 10)) }
-                            .buttonStyle(.plain).accessibilityLabel("Photo \((pictures.firstIndex(of: url) ?? 0) + 1)")
-                    }
+            let conversation = ProjectConversation(project: object, queued: model.corrections.messages[object.id] ?? [],
+                                                   queueFailed: model.corrections.failures[object.id] != nil)
+            LazyVStack(alignment: .leading, spacing: 16) {
+                ForEach(conversation.entries) { entry in
+                    ConversationBubble(entry: entry) { pictures(entry.photos) }
                 }
+            }
+            if conversation.entries.isEmpty { Text("No request was saved with this project.").foregroundStyle(.secondary) }
+            if !conversation.otherPhotos.isEmpty {
+                SectionHeading("Other project photos")
+                Text("These photos aren't linked to a message.").font(.caption).foregroundStyle(.secondary)
+                pictures(conversation.otherPhotos)
             }
             if let current = object.current {
                 if !(current.changes ?? []).isEmpty || current.summary?.isEmpty == false { SectionHeading("What changed") }
@@ -89,16 +90,7 @@ private struct RequestTab: View {
                     Text(summary).font(.callout).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
                 }
             }
-            let followUps = object.passes.compactMap { pass in pass.note.map { (note: $0, at: pass.startedAtMs) } }
-            if !followUps.isEmpty {
-                SectionHeading("Your follow-ups")
-                VStack(alignment: .leading, spacing: 6) {
-                    ForEach(Array(followUps.enumerated()), id: \.offset) { _, followUp in
-                        Text("“\(followUp.note)” · \(Date(timeIntervalSince1970: followUp.at / 1000).formatted(date: .omitted, time: .shortened))")
-                            .font(.callout).foregroundStyle(.secondary).textSelection(.enabled)
-                    }
-                }
-            }
+
         }
         .sheet(isPresented: Binding(get: { shown != nil }, set: { if !$0 { shown = nil } })) {
             VStack(spacing: 16) {
@@ -109,10 +101,19 @@ private struct RequestTab: View {
         }
     }
 
-    private var request: String {
-        if let text = object.instructions?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty { return text }
-        return object.scan != nil || !(object.capture ?? []).isEmpty ? "Copy the scanned object." : "No request was saved with this project."
+    @ViewBuilder private func pictures(_ paths: [String]) -> some View {
+        if !paths.isEmpty {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 90), spacing: 8)], spacing: 8) {
+                ForEach(paths, id: \.self) { path in
+                    if let url = object.file(path) {
+                        Button { shown = url } label: { FillImage(url: url, version: object.updatedAtMs).frame(height: 96).clipShape(.rect(cornerRadius: 10)) }
+                            .buttonStyle(.plain).accessibilityLabel(path.hasPrefix("photos/") ? "Photo" : "Scan image")
+                    }
+                }
+            }
+        }
     }
+
 }
 
 /// One line of "what changed", with its tag as a symbol and (for guesses) a colour.

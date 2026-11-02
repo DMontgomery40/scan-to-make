@@ -279,9 +279,10 @@ export function createObjectRoutes(service: ObjectService) {
             break;
           }
           case 'corrections': {
-            const {note} = await json<{note?: unknown}>(request);
+            const {note, photoNames} = await json<{note?: unknown; photoNames?: unknown}>(request);
             if (typeof note !== 'string' || !note.trim() || note.length > 4000) throw new HttpFailure(400, 'invalid-request');
-            object = await service.correct(id, note);
+            if (photoNames !== undefined && (!Array.isArray(photoNames) || photoNames.length > 100 || photoNames.some(name => typeof name !== 'string' || name.length > 128))) throw new HttpFailure(400, 'invalid-request');
+            object = await service.correct(id, note, [], photoNames as string[] | undefined);
             break;
           }
           case 'closeup': {

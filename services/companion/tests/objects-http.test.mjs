@@ -469,5 +469,60 @@ test('unavailable or uncertain classification saves the note without changing th
     assert.deepEqual(after.passes, before.passes);
     await service.setStatus(project.id, 'works');
     assert.equal((await store.get(project.id)).pendingFollowup, undefined);
+    assert.equal((await store.get(project.id)).pendingMessageId, undefined);
+    assert.equal((await store.get(project.id)).completion.messageId, after.messages[0].id);
   }
+});
+
+test('message photos stay with their follow-up and a finished-part photo does not start a pass', async t => {
+  const {call, service, store} = await fixture(t, {reportsCompletion: async note => note === 'DONE' ? 'works' : 'changes'});
+  const project = await service.create('A mount');
+  await service.addPhoto(project.id, 'initial.jpg', Buffer.from('photo'));
+  await service.start(project.id); await service.settled(project.id);
+  await service.addPhoto(project.id, 'change.jpg', Buffer.from('photo'));
+  await service.addPhoto(project.id, 'finished.jpg', Buffer.from('photo'));
+  const change = await call('POST', `/v1/objects/${project.id}/corrections`, {note: 'Widen it', photoNames: ['change.jpg']});
+  assert.equal(change.status, 200);
+  await service.settled(project.id);
+  const before = await store.get(project.id);
+  assert.deepEqual(before.requestPhotos, ['initial.jpg']);
+  assert.deepEqual(before.passes.at(-1).photos, ['change.jpg']);
+  assert.deepEqual(before.pendingPhotos, ['finished.jpg']);
+  const done = await call('POST', `/v1/objects/${project.id}/corrections`, {note: 'DONE', photoNames: ['finished.jpg']});
+  assert.equal(done.status, 200);
+  assert.equal(done.json.object.state, 'confirmed');
+  assert.deepEqual(done.json.object.current, before.current);
+  assert.equal(done.json.object.passes.length, before.passes.length);
+  assert.deepEqual(done.json.object.messages.map(message => [message.text, message.photos]), [['Widen it', ['change.jpg']], ['DONE', ['finished.jpg']]]);
+  assert.equal(done.json.object.completion.messageId, done.json.object.messages.at(-1).id);
+});
+
+test('uncertain message retries preserve photo ownership and message identity', async t => {
+  let intent = 'unknown';
+  const {call, service, store} = await fixture(t, {reportsCompletion: async () => intent});
+  const project = await service.create('A mount');
+  await service.start(project.id); await service.settled(project.id);
+  await service.addPhoto(project.id, 'finished.jpg', Buffer.from('photo'));
+  assert.equal((await call('POST', `/v1/objects/${project.id}/corrections`, {note: 'DONE'})).status, 409);
+  const saved = await store.get(project.id);
+  intent = 'works';
+  const done = await call('POST', `/v1/objects/${project.id}/corrections`, {note: 'DONE'});
+  assert.equal(done.status, 200);
+  assert.equal(done.json.object.messages.length, 1);
+  assert.equal(done.json.object.messages[0].id, saved.messages[0].id);
+  assert.deepEqual(done.json.object.messages[0].photos, ['finished.jpg']);
+});
+
+test('Mac local photo evidence is copied and attached before marking Done without a pass', async t => {
+  const {service, store} = await fixture(t, {reportsCompletion: async () => 'works'});
+  const project = await service.create('A mount');
+  await service.start(project.id); await service.settled(project.id);
+  const before = await store.get(project.id);
+  const evidence = join(store.dir(project.id), 'finished.jpg');
+  await writeFile(evidence, Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0, 0, 0]));
+  const done = await service.correct(project.id, 'DONE', [evidence]);
+  assert.equal(done.state, 'confirmed');
+  assert.equal(done.passes.length, before.passes.length);
+  assert.deepEqual(done.current, before.current);
+  assert.deepEqual(done.messages[0].photos, ['finished.jpg']);
 });

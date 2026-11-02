@@ -31,7 +31,7 @@ typealias MacError = CompanionError
     func create(_ instructions: String, kind: String? = nil) async throws -> StmObject { try await client.create(instructions, kind: kind) }
     func updateDraft(_ id: String, instructions: String) async throws -> StmObject { try await client.updateDraft(id, instructions: instructions) }
     func start(_ id: String, captureManifest: [String: Any]? = nil) async throws -> StmObject { try await client.start(id, captureManifest: captureManifest) }
-    func correct(_ id: String, _ note: String) async throws -> StmObject { try await client.correct(id, note) }
+    func correct(_ id: String, _ note: String, photoNames: [String]? = nil) async throws -> StmObject { try await client.correct(id, note, photoNames: photoNames) }
     func closeup(_ id: String, bestGuess: Bool) async throws -> StmObject { try await client.answerAsk(id, bestGuess: bestGuess) }
     func answerPrintConfirmation(_ id: String, response: PrintConfirmationResponse) async throws -> StmObject {
         try await client.answerPrintConfirmation(id, response: response)

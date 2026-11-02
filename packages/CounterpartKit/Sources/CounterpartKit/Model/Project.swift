@@ -60,6 +60,10 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
     public var files: JSONValue?
     public var completion: Completion?
     public var pendingFollowup: String?
+    public var pendingMessageId: String?
+    public var messages: [Message]?
+    public var requestPhotos: [String]?
+    public var pendingPhotos: [String]?
 
     public init(id: String, createdAtMs: Double, updatedAtMs: Double, instructions: String? = nil, state: State, scan: String? = nil,
                 photos: [String] = [], capture: [String]? = nil, progress: String? = nil, passes: [Pass] = [], current: Result? = nil,
@@ -77,7 +81,7 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case id, createdAtMs, updatedAtMs, instructions, state, scan, photos, capture, captureDepth, progress, passes, current, question
-        case failure, print, printerDestinationId, printConfirmation, status, title, kind, ask, directory, settings, outcome, archived, credit, files, completion, pendingFollowup
+        case failure, print, printerDestinationId, printConfirmation, status, title, kind, ask, directory, settings, outcome, archived, credit, files, completion, pendingFollowup, pendingMessageId, messages, requestPhotos, pendingPhotos
     }
 
     /// One odd object never drops out of the list: missing lists are empty, and an optional that doesn't
@@ -91,6 +95,10 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
         updatedAtMs = try c.decode(Double.self, forKey: .updatedAtMs)
         state = try c.decode(State.self, forKey: .state)
         pendingFollowup = optional(String.self, .pendingFollowup)
+        pendingMessageId = optional(String.self, .pendingMessageId)
+        messages = optional([Message].self, .messages)
+        requestPhotos = optional([String].self, .requestPhotos)
+        pendingPhotos = optional([String].self, .pendingPhotos)
         completion = optional(Completion.self, .completion)
         credit = optional(JSONValue.self, .credit)
         files = optional(JSONValue.self, .files)
@@ -155,7 +163,18 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
         return previous
     }
 
+    public struct Message: Codable, Equatable, Identifiable, Sendable {
+        public var id: String
+        public var text: String
+        public var atMs: Double
+        public var photos: [String]
+        public init(id: String, text: String, atMs: Double, photos: [String] = []) {
+            self.id = id; self.text = text; self.atMs = atMs; self.photos = photos
+        }
+    }
+
     public struct Completion: Codable, Equatable, Sendable {
+        public var messageId: String?
         public var note: String
         public var atMs: Double
         public var previousStatus: String
@@ -233,6 +252,8 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
 
     /// One round of work on the Mac.
     public struct Pass: Codable, Equatable, Sendable {
+        public var messageId: String?
+        public var photos: [String]?
         public var startedAtMs: Double
         public var endedAtMs: Double?
         /// Your follow-up that started it, if any.
