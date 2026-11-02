@@ -14,7 +14,7 @@ const STL = Buffer.from('solid m\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\n
 // The advertised Bambu hardware-confirmation schema (including its unchecked default).
 const CONFIRM = {type: 'object', properties: {confirmed: {type: 'boolean', title: 'I checked the printer and confirm this operation', default: false}}, required: ['confirmed']};
 
-async function setup({judge = async () => ({clear: true}), camera = true, runnerFails, afterDispatch, uncertain, objects = 1, slowMs = 0, schema = CONFIRM, mode = 'form', timeoutMs = 5000, inventory, progressUpdates, printerReport} = {}) {
+async function setup({runnerFails, afterDispatch, uncertain, objects = 1, slowMs = 0, schema = CONFIRM, mode = 'form', timeoutMs = 5000, inventory, progressUpdates, printerReport} = {}) {
   const root = await mkdtemp(join(tmpdir(), 'objects-print-'));
   const store = new ObjectStore(join(root, 'objects'));
   const relay = new InMemoryElicitationRelay({timeoutMs});
@@ -32,7 +32,7 @@ async function setup({judge = async () => ({clear: true}), camera = true, runner
       if (runnerFails) throw new Error(runnerFails);
       if (uncertain) { await bundleStore.setStatus(id, 'uncertain', 'dispatch-uncertain'); throw Object.assign(new Error('dispatch-uncertain'), {code: 'dispatch-uncertain'}); }
       const result = await relay.request({method: 'elicitation/create', params: {mode, message: 'Printer: P1S. Build plate is clear?', requestedSchema: schema}},
-        {bundleId: id, ...(camera ? {cameraSnapshot: {format: 'jpeg', base64: Buffer.from('jpeg-' + id).toString('base64')}} : {})});
+        {bundleId: id});
       answers.push({id, result});
       result.bundleId = id;
       if (result.action !== 'accept') throw new Error('declined');
@@ -42,7 +42,7 @@ async function setup({judge = async () => ({clear: true}), camera = true, runner
   };
   const service = new ObjectService({store, runTouchup: async () => { throw new Error('not used'); }, stlInfo: async () => undefined, claudePath: '/c',
     handoff: {backend: 'bambu-printer-mcp', process: {command: '/usr/bin/true'}},
-    print: {services: {store: bundles, relay, runner}, judgePlate: judge}});
+    print: {services: {store: bundles, relay, runner}}});
   const made = [];
   for (let i = 0; i < objects; i++) {
     const object = await store.create('A hook.');
@@ -123,7 +123,7 @@ test('phone inventory and print route preserve filament selection and printer sc
   await service.settled(object.id);
 });
 
-test('a clear camera never answers the printer question; explicit checked values are required', async () => {
+test('only the person answers the printer question: explicit checked values are required, and there is no bed check', async () => {
   const {service, object, answers} = await setup();
   const printing = await service.print(object.id);
   assert.equal(printing.state, 'printing');
@@ -134,44 +134,12 @@ test('a clear camera never answers the printer question; explicit checked values
   assert.deepEqual(waiting.fields, [{name: 'confirmed', title: 'I checked the printer and confirm this operation', required: true, default: false}]);
   assert.equal(answers.length, 0);
   assert.equal((await service.get(object.id)).state, 'printing');
-  await assert.rejects(service.answerPlate(object.id, {clear: true}), InvalidStateError);
+  assert.equal('plate' in (await service.get(object.id)), false);
   await service.answerPrintConfirmation(object.id, waiting.id, {action: 'accept', content: {confirmed: true}});
   const done = await service.settled(object.id);
   assert.equal(done.state, 'sent'); // A fake printer reports nothing: dispatched, not proven printed.
   assert.equal(done.printConfirmation, undefined);
   assert.deepEqual(answers[0].result, {action: 'accept', content: {confirmed: true}, bundleId: answers[0].id});
-});
-
-test('something on the plate waits for the user, who can say it is actually clear', async () => {
-  const {service, object, answers} = await setup({judge: async () => ({clear: false, item: 'a printed part'})});
-  await service.print(object.id);
-  const waiting = await until(async () => { const o = await service.get(object.id); return o.plate?.photo ? o : undefined; });
-  await until(async () => (await service.get(object.id)).plate?.item === 'a printed part');
-  assert.equal(waiting.plate.photo, true);
-  assert.equal(answers.length, 0);
-  await approve(service, object.id);
-  const done = await service.settled(object.id);
-  assert.equal(done.state, 'sent'); // A fake printer reports nothing: dispatched, not proven printed.
-  assert.equal(done.plate, undefined);
-});
-
-test('a bed check that fails never confirms by itself', async () => {
-  const {service, object, answers} = await setup({judge: async () => { throw new Error('Not logged in'); }});
-  await service.print(object.id);
-  const waiting = await until(async () => { const o = await service.get(object.id); return o.plate?.photo ? o : undefined; });
-  assert.equal(waiting.printConfirmation.supported, true);
-  assert.equal(answers.length, 0);
-  await approve(service, object.id);
-  assert.equal((await service.settled(object.id)).state, 'sent'); // A fake printer reports nothing: dispatched, not proven printed.
-});
-
-test('a printer with no camera asks the user to check the plate', async () => {
-  const {service, object} = await setup({camera: false});
-  await service.print(object.id);
-  const waiting = await until(async () => { const o = await service.get(object.id); return o.plate?.noCamera ? o : undefined; });
-  assert.deepEqual(waiting.plate, {noCamera: true});
-  await approve(service, object.id);
-  assert.equal((await service.settled(object.id)).state, 'sent'); // A fake printer reports nothing: dispatched, not proven printed.
 });
 
 test('a print that fails says why', async () => {
@@ -200,10 +168,10 @@ test('two quick Print taps start one print', async () => {
 });
 
 test('with two prints waiting, each explicit answer reaches its own print', async () => {
-  const {service, objects: [a, b], answers, runs} = await setup({objects: 2, judge: async () => ({clear: false, item: 'a spool'})});
+  const {service, objects: [a, b], answers, runs} = await setup({objects: 2});
   await service.print(a.id);
   await service.print(b.id);
-  await until(async () => (await service.get(a.id)).plate && (await service.get(b.id)).plate);
+  await until(async () => (await service.get(a.id)).printConfirmation && (await service.get(b.id)).printConfirmation);
   await approve(service, a.id);
   assert.equal((await service.settled(a.id)).state, 'sent'); // A fake printer reports nothing: dispatched, not proven printed.
   assert.deepEqual(answers.map(x => x.id), [runs.find(r => r.id === answers[0].id).id]);
@@ -227,27 +195,17 @@ test('a print that may have reached the printer is never sent again until the us
   assert.equal(runs.length, 2);
 });
 
-test('a blocked plate keeps its camera photo for the phone to show', async () => {
-  const {service, object, store} = await setup({judge: async () => ({clear: false, item: 'a printed part'})});
-  await service.print(object.id);
-  const waiting = await until(async () => { const o = await service.get(object.id); return o.plate?.photo ? o : undefined; });
-  assert.equal(waiting.plate.photo, true);
-  assert.equal((await readFile(join(store.dir(object.id), 'plate.jpg'))).toString(), 'jpeg-' + waiting.print.bundleId);
-  await approve(service, object.id);
-  await service.settled(object.id);
-});
-
 test('closing the service stops a print in progress and waits for it', async () => {
-  const {service, object, runs} = await setup({judge: async () => ({clear: false, item: 'a spool'})});
+  const {service, object, runs} = await setup();
   await service.print(object.id);
-  await until(async () => (await service.get(object.id)).plate);
+  await until(async () => (await service.get(object.id)).printConfirmation);
   await service.close();
   assert.equal(runs[0].options.signal.aborted, true);
   assert.equal((await service.get(object.id)).printConfirmation, undefined);
 });
 
 test('answers are bound to the current question and preserve explicit false values', async () => {
-  const {service, object, answers} = await setup({camera: false});
+  const {service, object, answers} = await setup();
   await service.print(object.id);
   const question = await until(async () => (await service.get(object.id)).printConfirmation);
   for (const answer of [{action: 'accept', content: {}}, {action: 'accept', content: {confirmed: 'true'}},
@@ -287,20 +245,16 @@ test('unknown schemas and modes preserve the original question but only permit c
   }
 });
 
-test('timeout and delayed camera judging cannot restore a completed question', async () => {
-  let finishJudge;
-  const judging = new Promise(resolve => { finishJudge = resolve; });
-  const {service, store, object, answers} = await setup({timeoutMs: 80, judge: async () => judging});
+test('a timed-out question cannot be answered or restored', async () => {
+  const {service, store, object, answers} = await setup({timeoutMs: 80});
   await service.print(object.id);
   const question = await until(async () => (await service.get(object.id)).printConfirmation);
   const timedOut = await service.settled(object.id);
   assert.equal(answers[0].result.action, 'cancel');
   assert.equal(timedOut.state, 'failed');
   assert.match(timedOut.failure, /confirmation timed out; no print was sent/i);
-  finishJudge({clear: true});
   await new Promise(resolve => setImmediate(resolve));
   assert.equal((await store.get(object.id)).printConfirmation, undefined);
-  assert.equal((await service.get(object.id)).plate, undefined);
   await assert.rejects(service.answerPrintConfirmation(object.id, question.id, {action: 'accept', content: {confirmed: true}}), InvalidStateError);
 });
 
@@ -356,7 +310,7 @@ test('Bambu live timeRemaining is shown for its running printer job', async () =
 test('the Mac answers any flat MCP question; a wrong answer comes back as invalid-request with its reason', async () => {
   const schema = {type: 'object', required: ['confirmed', 'bambu_model'], properties: {
     confirmed: {type: 'boolean', title: 'I checked the printer'}, bambu_model: {type: 'string', title: 'Printer Model', oneOf: [{const: 'p1s', title: 'P1S'}]}}};
-  const {service, object, answers} = await setup({schema, camera: false});
+  const {service, object, answers} = await setup({schema});
   const dispatch = createControlDispatcher({auth: {}, companionVersion: 'test', objects: service});
   const {capabilities} = await createControlDispatcher({auth: {transport: 'lan', listDevices: async () => []}, companionVersion: 'test', objects: service})('status.get', {});
   assert.deepEqual([capabilities.genericConfirmations, capabilities.materialChoice], [true, true]);

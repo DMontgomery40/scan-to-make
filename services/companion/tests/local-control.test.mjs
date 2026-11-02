@@ -105,9 +105,10 @@ test('retained Tailscale identity mints combined pairing, checks activity and re
 test('Mac and phone share one pending confirmation; an answered/expired ID cannot be replayed',async t=>{
   const relay=new InMemoryElicitationRelay();t.after(()=>relay.cancelAll());
   const f=await fixture(t,{printHandoff:{relay}});
-  const request=relay.request({method:'elicitation/create',params:{mode:'form',message:'Original confirmation',requestedSchema:{type:'object',properties:{confirmed:{type:'boolean'}},required:['confirmed']}}},{cameraSnapshot:{format:'image/jpeg',base64:'fixture'}});
+  const request=relay.request({method:'elicitation/create',params:{mode:'form',message:'Original confirmation',requestedSchema:{type:'object',properties:{confirmed:{type:'boolean'}},required:['confirmed']}}},{});
   const pending=(await f.call('confirmations.list')).result.items[0];
-  assert.equal(pending.message,'Original confirmation');assert.equal(pending.cameraSnapshot.base64,'fixture');
+  // PRD §5.6: no plate picture rides on a printer question.
+  assert.equal(pending.message,'Original confirmation');assert.equal('cameraSnapshot' in pending,false);
   assert.deepEqual((await f.call('confirmations.answer',{id:pending.id,answer:{action:'accept',content:{confirmed:true}}})).result,{answered:true});
   assert.deepEqual(await request,{action:'accept',content:{confirmed:true}});
   assert.equal((await f.call('confirmations.answer',{id:pending.id,answer:{action:'accept',content:{confirmed:true}}})).error.code,'not-found');

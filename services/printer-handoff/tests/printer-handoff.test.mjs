@@ -186,23 +186,24 @@ test('tool arguments are validated against the discovered schema before the call
   assert.equal((await f.calls()).filter(entry => entry.tool === 'slice_stl').length, 0);
 });
 
-test('bambu sequence lays flat, slices, inspects, snapshots and prints after phone confirmation', async t => {
+test('bambu sequence lays flat, slices, inspects and prints after phone confirmation, with no bed check', async t => {
   const f = await setup(t);
   const result = await f.runner.run({stlPath: f.stlPath});
-  assert.deepEqual(result.steps, ['discover', 'lay_flat', 'slice_stl', 'inspect', 'camera_snapshot', 'print']);
+  assert.deepEqual(result.steps, ['discover', 'lay_flat', 'slice_stl', 'inspect', 'print']);
   assert.ok(result.orientedStlPath.endsWith('clean_flat.stl'));
   assert.ok(result.slicedPath.endsWith('sliced.3mf'));
   assert.equal(result.inspection.tool, 'inspect_print_file');
   assert.equal(result.print.dispatch, 'started');
   const calls = (await f.calls()).filter(entry => entry.tool);
-  assert.deepEqual(calls.map(entry => entry.tool), ['lay_flat', 'slice_stl', 'inspect_print_file', 'camera_snapshot', 'print_3mf']);
+  // PRD §5.6: no camera_snapshot of the plate before printing; Bambu's own bed levelling finds a full plate.
+  assert.deepEqual(calls.map(entry => entry.tool), ['lay_flat', 'slice_stl', 'inspect_print_file', 'print_3mf']);
   assert.deepEqual(calls[1].arguments, {
     stl_path: result.orientedStlPath, bambu_model: 'p1s', nozzle_diameter: '0.4',
     bed_type: 'textured_plate', nozzle_type: 'hardened_steel',
     use_printer_filaments: false, orient: false, arrange: true, ensure_on_bed: true,
   });
-  assert.equal(calls[4].arguments.three_mf_path, result.slicedPath);
-  assert.equal(f.seen.at(-1).cameraSnapshot.base64, 'ZmFrZQ==');
+  assert.equal(calls[3].arguments.three_mf_path, result.slicedPath);
+  assert.equal('cameraSnapshot' in f.seen.at(-1), false);
   assert.equal(f.relay.pending().length, 0);
 });
 
@@ -281,7 +282,6 @@ test('runBundle tags every printer question with its own bundle, so answers reac
   await f.runner.runBundle(store, bundle.id);
   assert.ok(f.seen.length > 0);
   for (const pending of f.seen) assert.equal(pending.bundleId, bundle.id);
-  assert.equal(f.seen.at(-1).cameraSnapshot.base64, 'ZmFrZQ==');
 });
 
 test('runBundle stores only a bare failure code on the bundle', async t => {

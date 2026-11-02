@@ -88,21 +88,6 @@
    "v": 1,
    "seq": 7,
    "id": "00000000-0000-4000-8000-000000000007",
-   "at": "2026-11-01T18:07:00.000Z",
-   "type": "plate.blocked",
-   "projectId": "3f1c2a9e-5b7d-4e21-9a6f-0c8d1e2f3a4b",
-   "title": "Something's on the Bambu Lab P1S plate",
-   "body": "Looks like there's a printed part on your plate. Can you take it off first?",
-   "notify": "timeSensitive",
-   "printId": "8a2b4c6d-1e3f-4a5b-8c7d-9e0f1a2b3c4d",
-   "destinationId": "current",
-   "printerName": "Bambu Lab P1S",
-   "frame": "prints/8a2b4c6d-1e3f-4a5b-8c7d-9e0f1a2b3c4d/frames/00000000-0000-4000-8000-000000000007.jpg"
-  },
-  {
-   "v": 1,
-   "seq": 8,
-   "id": "00000000-0000-4000-8000-000000000008",
    "at": "2026-11-01T18:08:00.000Z",
    "type": "print.confirm",
    "projectId": "3f1c2a9e-5b7d-4e21-9a6f-0c8d1e2f3a4b",
@@ -119,8 +104,8 @@
   },
   {
    "v": 1,
-   "seq": 9,
-   "id": "00000000-0000-4000-8000-000000000009",
+   "seq": 8,
+   "id": "00000000-0000-4000-8000-000000000008",
    "at": "2026-11-01T18:09:00.000Z",
    "type": "print.started",
    "projectId": "3f1c2a9e-5b7d-4e21-9a6f-0c8d1e2f3a4b",
@@ -142,8 +127,8 @@
   },
   {
    "v": 1,
-   "seq": 10,
-   "id": "00000000-0000-4000-8000-000000000010",
+   "seq": 9,
+   "id": "00000000-0000-4000-8000-000000000009",
    "at": "2026-11-01T18:10:00.000Z",
    "type": "print.status",
    "projectId": "3f1c2a9e-5b7d-4e21-9a6f-0c8d1e2f3a4b",
@@ -164,8 +149,8 @@
   },
   {
    "v": 1,
-   "seq": 11,
-   "id": "00000000-0000-4000-8000-000000000011",
+   "seq": 10,
+   "id": "00000000-0000-4000-8000-000000000010",
    "at": "2026-11-01T18:11:00.000Z",
    "type": "print.first-layer",
    "projectId": "3f1c2a9e-5b7d-4e21-9a6f-0c8d1e2f3a4b",
@@ -186,8 +171,8 @@
   },
   {
    "v": 1,
-   "seq": 12,
-   "id": "00000000-0000-4000-8000-000000000012",
+   "seq": 11,
+   "id": "00000000-0000-4000-8000-000000000011",
    "at": "2026-11-01T18:12:00.000Z",
    "type": "print.milestone",
    "projectId": "3f1c2a9e-5b7d-4e21-9a6f-0c8d1e2f3a4b",
@@ -208,8 +193,8 @@
   },
   {
    "v": 1,
-   "seq": 13,
-   "id": "00000000-0000-4000-8000-000000000013",
+   "seq": 12,
+   "id": "00000000-0000-4000-8000-000000000012",
    "at": "2026-11-01T18:13:00.000Z",
    "type": "print.paused",
    "projectId": "3f1c2a9e-5b7d-4e21-9a6f-0c8d1e2f3a4b",
@@ -233,8 +218,8 @@
   },
   {
    "v": 1,
-   "seq": 14,
-   "id": "00000000-0000-4000-8000-000000000014",
+   "seq": 13,
+   "id": "00000000-0000-4000-8000-000000000013",
    "at": "2026-11-01T18:14:00.000Z",
    "type": "print.resumed",
    "projectId": "3f1c2a9e-5b7d-4e21-9a6f-0c8d1e2f3a4b",
@@ -251,8 +236,8 @@
   },
   {
    "v": 1,
-   "seq": 15,
-   "id": "00000000-0000-4000-8000-000000000015",
+   "seq": 14,
+   "id": "00000000-0000-4000-8000-000000000014",
    "at": "2026-11-01T18:15:00.000Z",
    "type": "print.done",
    "projectId": "3f1c2a9e-5b7d-4e21-9a6f-0c8d1e2f3a4b",
@@ -270,8 +255,8 @@
   },
   {
    "v": 1,
-   "seq": 16,
-   "id": "00000000-0000-4000-8000-000000000016",
+   "seq": 15,
+   "id": "00000000-0000-4000-8000-000000000015",
    "at": "2026-11-01T18:16:00.000Z",
    "type": "print.failed",
    "projectId": "3f1c2a9e-5b7d-4e21-9a6f-0c8d1e2f3a4b",
@@ -294,8 +279,8 @@
   },
   {
    "v": 1,
-   "seq": 17,
-   "id": "00000000-0000-4000-8000-000000000017",
+   "seq": 16,
+   "id": "00000000-0000-4000-8000-000000000016",
    "at": "2026-11-01T18:17:00.000Z",
    "type": "print.cancelled",
    "projectId": "3f1c2a9e-5b7d-4e21-9a6f-0c8d1e2f3a4b",
@@ -311,8 +296,8 @@
   },
   {
    "v": 1,
-   "seq": 18,
-   "id": "00000000-0000-4000-8000-000000000018",
+   "seq": 17,
+   "id": "00000000-0000-4000-8000-000000000017",
    "at": "2026-11-01T18:18:00.000Z",
    "type": "print.not-started",
    "projectId": "3f1c2a9e-5b7d-4e21-9a6f-0c8d1e2f3a4b",
@@ -325,8 +310,8 @@
   },
   {
    "v": 1,
-   "seq": 19,
-   "id": "00000000-0000-4000-8000-000000000019",
+   "seq": 18,
+   "id": "00000000-0000-4000-8000-000000000018",
    "at": "2026-11-01T18:19:00.000Z",
    "type": "print.unreachable",
    "projectId": "3f1c2a9e-5b7d-4e21-9a6f-0c8d1e2f3a4b",
@@ -339,8 +324,8 @@
   },
   {
    "v": 1,
-   "seq": 20,
-   "id": "00000000-0000-4000-8000-000000000020",
+   "seq": 19,
+   "id": "00000000-0000-4000-8000-000000000019",
    "at": "2026-11-01T18:20:00.000Z",
    "type": "print.sent",
    "projectId": "3f1c2a9e-5b7d-4e21-9a6f-0c8d1e2f3a4b",
@@ -350,6 +335,22 @@
    "title": "Sent Mic mount to Bambu Lab P1S",
    "body": "Counterpart can't follow this print.",
    "notify": "passive"
+  },
+  {
+   "v": 1,
+   "seq": 20,
+   "id": "00000000-0000-4000-8000-000000000020",
+   "at": "2026-11-02T05:00:00.000Z",
+   "type": "project.updated",
+   "projectId": "3f1c2a9e-5b7d-4e21-9a6f-0c8d1e2f3a4b",
+   "title": "Mic mount",
+   "body": "Marked as works",
+   "notify": "none",
+   "data": {
+    "keys": [
+     "status"
+    ]
+   }
   }
  ],
  "eventsPage": {
@@ -705,24 +706,7 @@
    }
   ]
  },
- "projectEvents": [
-  {
-   "v": 1,
-   "seq": 21,
-   "id": "00000000-0000-4000-8000-000000000021",
-   "at": "2026-11-02T05:00:00.000Z",
-   "type": "project.updated",
-   "projectId": "3f1c2a9e-5b7d-4e21-9a6f-0c8d1e2f3a4b",
-   "title": "Mic mount",
-   "body": "Marked as works",
-   "notify": "none",
-   "data": {
-    "keys": [
-     "status"
-    ]
-   }
-  }
- ],
+ "projectEvents": [],
  "newStatuses": [
   {
    "phase": "confirmed",

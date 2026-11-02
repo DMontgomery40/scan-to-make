@@ -74,7 +74,7 @@ export interface WordsContext {
 
 export const NOTIFY: Record<CounterpartEventType, NotifyLevel> = {
   'pass.started': 'none', 'pass.stage': 'none', 'pass.ready': 'active', 'pass.ask': 'active', 'pass.failed': 'active',
-  'print.preparing': 'none', 'plate.blocked': 'timeSensitive', 'print.confirm': 'timeSensitive', 'print.started': 'passive',
+  'print.preparing': 'none', 'print.confirm': 'timeSensitive', 'print.started': 'passive',
   'print.status': 'none', 'print.first-layer': 'passive', 'print.milestone': 'active', 'print.paused': 'timeSensitive',
   'print.resumed': 'none', 'print.done': 'active', 'print.failed': 'timeSensitive', 'print.cancelled': 'passive',
   'print.not-started': 'timeSensitive', 'print.unreachable': 'passive', 'print.sent': 'passive',
@@ -109,7 +109,6 @@ export function eventWords(type: CounterpartEventType, data: CounterpartEvent['d
     case 'pass.ask': title = `${t}: ${context.question ?? 'can you take a close-up?'}`; body = 'Take a photo, choose one, or let your Mac make its best guess.'; break;
     case 'pass.failed': title = `${t} didn't finish`; body = context.reason ?? 'Something went wrong on your Mac. Try again.'; break;
     case 'print.preparing': title = `Getting ${t} ready`; body = data?.stage ?? 'Preparing the print'; break;
-    case 'plate.blocked': title = `Something's on the ${printer} plate`; body = `Looks like there's ${context.item ?? 'something'} on your plate. Can you take it off first?`; break;
     case 'print.confirm': title = `${printer} needs a yes before printing ${t}`; body = 'Open Counterpart to answer.'; break;
     case 'print.started': title = `Printing ${t} on ${printer}`; body = data?.stage ?? 'Started'; break;
     case 'print.status': title = t; body = joined(data?.progress !== undefined ? `${Math.round(data.progress)}%` : undefined, remaining ? `${remaining} left` : undefined, layers) || (data?.state ?? 'Printing'); break;
