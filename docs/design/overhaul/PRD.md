@@ -268,8 +268,24 @@ Screenshots, printer detail: `screens/phone-printer.jpg` and `screens/phone-prin
 
 Screenshots: `screens/phone-settings.jpg`, `screens/phone-settings-notifications.jpg` and `screens/phone-about.jpg`.
 
+**Every setting the Mac has is also on the phone, and the two are always the same.** Settings live in the companion, which is the single source of truth. Both apps read and write them through the paired connection, so changing one on either device changes it everywhere. The phone has no "do this on your Mac" settings.
+
 - **Your Mac:** name, connected or last seen, address in use, Check Connection, Connect a Different Mac.
-- **Notifications:** an on/off switch for each event type, and the progress milestones (§9.1, §8.6).
+- **Notifications:**
+  - an on/off switch for each event type, for this iPhone and separately for the Mac;
+  - the progress milestones (§9.1, §8.6).
+  - Phone switches default on. Mac switches use the Mac defaults in §8.8.
+- **Printers.** Each printer shows:
+  - its state, its MCP and that MCP's version;
+  - **Update** (§8.10), with its progress, when a newer version is available;
+  - the features that version is missing ("Update to choose quality and colours").
+- **AI:**
+  - the provider and whether it's connected, plus **Test**;
+  - switching provider, so long as switching doesn't need a sign-in window on the Mac. When it does, the phone says "Finish signing in on Mac mini" and the Mac shows the sign-in window by itself.
+- **Design with Fusion** (§8.9): status and **Set up**.
+- **Phones and iPads:** every paired device, including the Older pairings section, with **Remove** and **Remove All**.
+- **General:** open at login, show in Dock, and keep the Mac awake while working. Each one changes the Mac.
+- **How it works.** The companion exposes `GET /v1/settings` and `PATCH /v1/settings` with the same schema the control socket's `settings.get`/`settings.set` already uses, plus `GET /v1/devices` and `DELETE /v1/devices/<id>`. The schema and its labels live in `CounterpartKit` (`SettingsSchema`), so both apps render the same list from one definition, and a new setting appears on both without separate UI work. Settings that need the Mac's GUI (a sign-in window, a Keychain prompt) run on the Mac, and the phone shows their progress.
 - **Help:** a guide at the docs site, how scanning works, **Print the caliper card**, and **Print the scan rig**. The rig link opens Kass 3D's MakerWorld page, credited by name (§15).
 - **About:** the app icon, "Counterpart", the version and build, the website, the licences, and open-source notices.
 
@@ -277,14 +293,33 @@ Screenshots: `screens/phone-settings.jpg`, `screens/phone-settings-notifications
 
 Screenshots: `screens/phone-welcome.jpg`, `screens/phone-pair.jpg` and `screens/phone-notify.jpg`.
 
+**With the same Apple ID on both devices, nothing needs setting up.** The phone finds the Mac through the user's own iCloud and connects by itself, with no QR code, code to type or Allow button. Both devices already belong to one person, so a second confirmation would add nothing.
+
 **Order:**
 1. Welcome: one screen with the two jobs.
-2. Find your Mac: a QR scanner, with a nearby Mac shown as a card underneath (journey.md §3.4).
+2. **Connecting to *Mac name*…**, then **Connected.** Under it: "Your iPhone and Mac use the same Apple Account, so they found each other."
 3. Notifications permission, asked with a reason: "So you know when it's ready and when the print is done".
 4. Done.
 
-- Camera and Local Network permissions are asked when first used, each with a reason.
-- The Mac's pairing window stays the QR code alone (decided in journey.md §3.4).
+**Automatic connection through iCloud** (the default):
+1. **The Mac publishes itself.** Counterpart for Mac writes a `CounterpartMac` record to the user's **private** CloudKit database (zone `Counterpart`, §8.8) on launch and whenever its addresses change. The record holds:
+   - `macId`;
+   - the name ("Mac mini");
+   - every address (the LAN IPs, `.local`, and the Tailscale address when present);
+   - the companion's key pin (SPKI SHA-256);
+   - an **enrolment token**: 32 random bytes, valid for 10 minutes, replaced every 5 minutes while the Mac app runs.
+2. **The phone reads it on first launch** (and whenever it has no working Mac). Several Macs mean a one-tap choice; one Mac means no question.
+3. **The phone enrols.** It connects to the first address that answers, pins the key, and calls `POST /v1/pair/icloud {macId, enrolmentToken, installId, deviceName, model}`. The companion checks that the token is current and unused, then issues the normal device credential (the same scopes as QR pairing) and records the phone under its `installId`. Re-enrolling the same `installId` replaces its record; it never adds a duplicate.
+4. **Away from home,** the phone still shows projects and receives notifications through CloudKit (§9). It enrols over the LAN the next time it's on the same network.
+
+**Why this is safe.** Only the owner's Apple Account can read their private CloudKit database. The enrolment token is short-lived, single-use and pinned to this Mac's key. The phone's credential can be revoked in Settings on either device.
+
+**Fallbacks, only when iCloud can't be used:** a different Apple Account on the phone, iCloud turned off, or no network path to the Mac.
+- The QR code (journey.md §3.4) is available from **Settings → Connect a Different Mac** and from the Mac's **Add a Phone**.
+- The nearby 6-digit flow is the second fallback.
+- Neither appears in the default first run.
+
+- **Permissions.** Local Network is asked when first used, with a reason. The camera is only needed for the QR fallback.
 
 ## 6. iPad and iPhone Duo
 
@@ -760,6 +795,26 @@ Screenshots: `screens/mac-settings-ai.jpg` and `screens/mac-settings-ai-nofusion
 4. Run a follow-up pass that changes one dimension by 1 mm. It must be a single `set_parameter`, and the re-export must match within ±0.2 mm.
 5. `slice_stl` succeeds on the P1S profile.
 6. Run steps 1–5 again through mcp-3D-printer-server's bridge.
+
+### 8.10 Updating the printer MCPs from either app
+
+**Update** is one tap in Settings → Printers, on the phone or the Mac. It actually updates; it never shows a config file. The phone sends the request through the paired connection (`POST /v1/printers/mcp/<mcpId>/update`, or the `printers.updateMcp` control method on the Mac). The companion does the work and reports progress as events (`mcp.update.started`, `mcp.update.done`, `mcp.update.failed`), so both apps show the same progress bar and result.
+
+**How the companion updates.** It works out how each MCP is installed from the process it runs (§8.2), then runs the matching update in that installation's own directory:
+
+| How it's installed | What the companion runs |
+|---|---|
+| `npx <pkg>` or `npx <pkg>@<version>` | rewrites the MCP profile's args to `<pkg>@<latest>`; npx then fetches it on the next session start. Nothing global changes. |
+| global npm (`<prefix>/bin/<pkg>` or `<prefix>/lib/node_modules/<pkg>/dist/index.js`) | `npm install --global --prefix <that prefix> <pkg>@latest`, using the same `node`/`npm` that installation uses |
+| the app's own install (`~/Library/Application Support/Scan to Make/printers/<bambu\|generic>`) | `npm install --global --prefix <that folder> <pkg>@latest` |
+| a git checkout (`<dir>/dist/index.js` with `<dir>/.git`) | `git -C <dir> pull --ff-only`, then `npm ci`, then `npm run build`. If the checkout has local changes, it reports "This copy has local changes" and doesn't update. |
+| wrapped (for example `ssh … 127.0.0.1` running one of the above) | resolves the wrapped command from the profile's documented target (the remote command or the forced command in the key's `authorized_keys`) and updates that installation as above. If it can't resolve it, it says what it found, in plain words, and offers **Install a fresh copy** (the app's own install). It never just shows the config. |
+
+- **Latest version:** `npm view <pkg> version`, checked once a day and when Settings opens.
+- **The update runs between jobs.** It never starts while that printer has a print being prepared or monitored; it waits, and says "Updates after the current print".
+- **After an update:** the companion closes that MCP's sessions, opens one again, re-reads its capabilities (§8.2) and shows the new version.
+- **On failure:** the previous version stays in use (npm and git leave it intact), and the log is attached to `mcp.update.failed`.
+- **The same flow** updates the Fusion MCP pin (§8.9) once a new pin has passed its acceptance check.
 
 ## 9. Notifications and Live Activities
 
