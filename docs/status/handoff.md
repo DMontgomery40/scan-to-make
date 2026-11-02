@@ -1,24 +1,46 @@
 # Handoff: how to pick up Counterpart work
 
-## Integration snapshot — 2026-11-02, 06:15 MT
+## Integration snapshot — 2026-11-02, 06:55 MT
 
-Codex owns the current integration in `feat/integrated-recovery`, PR #259. The competing Claude
-executors were stopped at David's request; Claude has subsequently been used only with tools disabled.
-The installed Mac app and phone have not yet received this batch. See `asks.md` for all 40 asks and
-what is actually verified. The latest local workflow evidence is under
-`~/scan-to-make-work/codex-recovery-checks-3`; final companion checks are under
-`~/scan-to-make-work/codex-companion-final-2`.
+Codex owns `feat/integrated-recovery`, PR #259. The competing Claude executors were stopped;
+Claude has subsequently been used only with tools disabled. The full 40-item backlog remains open
+where device acceptance is missing; see `asks.md`.
 
-The batch combines capture intent/error handling, rename/search/ordered reads, queued corrections,
-Done classification, conversation/photo ownership, Counterpart app identity, Help links, MCP updates,
-owned Blender cleanup, same-account enrollment and the phone CloudKit/ActivityKit consumer. Review
-fixes now cover draft-send ordering, cloud terminal print state and Mac saved-message attachment
-selection, with regressions passing. No physical scan/print acceptance is inferred from tests or historical captures.
+**Installed:** `/Applications/Counterpart.app`, signed build `202611020645`, source `3b8ea525`.
+Its renamed embedded companion is registered and running. Davica3 has signed phone build
+`202611020630` (source `fd9be649`; the later updater change is Mac backend only). The phone remains
+locked, so no camera/Face ID, Lock Screen or phone UI acceptance is claimed.
 
-The two old KAN-217 camera/state prototypes are retired as active branches and retained in
-`archive/20261102-camera-recovery-prototype` and `archive/20261102-project-state-prototype` tags.
-Their replacement implementations are in #259. Integrated agent source branches were also retired;
-active follow-up work covers full project settings, camera efficiency and reconstruction evidence.
+The six projects, seven pairing identities, TLS files, companion configuration, current models and
+photos match before/after migration checksums. Evidence lives under
+`~/scan-to-make-work/codex-deploy-20261102`. The existing local SSH printer forced command referenced
+Node inside the removed `Scan to Make.app`; its runtime path was updated to `Counterpart.app`,
+with the existing key/restrictions unchanged. The real P1S is Ready through MCP 1.1.51.
+Installed Mac checks passed rename (then restored the original name), search by a follow-up's
+“25 inches” text, and Print Again preparation with loaded PLA, 3 h 20 m and 109 g. No print was sent.
+Advanced Settings now reports iCloud sync and same-account Mac discovery On. Actual phone enrollment
+and notification delivery remain unchecked.
+
+Local workflow evidence: `codex-recovery-checks-3`, `codex-companion-updater-final` (both Node 22/24
+pass at `3b8ea525`), `codex-relay-checks`, signed Mac/phone build logs and native regression logs.
+Hosted Actions still cannot start because of account billing; there are no required checks.
+The latest review found Ask answers claiming photos reserved by queued corrections; a minimal
+fix is being prepared before merge. Earlier ordering, terminal cloud state, retry attachment,
+foreground activity and updater-deadline findings are fixed and their threads resolved.
+
+The installed batch combines capture intent/error handling, rename/search/ordered reads, queued
+corrections, Done classification, conversation/photo ownership, Counterpart identity, Help links,
+MCP updates, owned Blender cleanup, enrollment and phone CloudKit/ActivityKit support. Full project
+settings, efficient streaming and reconstruction audit are separate follow-ups. Recorded in-hand
+reconstruction captured the hand, not the object; both recorded walk-around models have an incomplete
+rear. Producing a valid mesh is not scan acceptance. The audit is on `feat/capture-reconstruction-audit`.
+
+The APNs Sandbox key review page is prepared but Register has not been pressed. Confirmation to
+create that credential and configure/deploy the Cloudflare relay is pending. The current signed
+phone has development APNs entitlement; its relay must use the Sandbox APNs origin.
+
+Old KAN-217 prototypes are retained as `archive/20261102-camera-recovery-prototype` and
+`archive/20261102-project-state-prototype` tags. Integrated agent source branches were retired.
 
 ## Mobile cloud consumer audit — 2026-11-02
 
