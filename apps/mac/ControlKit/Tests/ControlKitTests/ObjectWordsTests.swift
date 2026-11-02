@@ -231,12 +231,13 @@ final class PrintSettingsTests: XCTestCase {
     /// Print Another (PRD §5.4) opens with what the last print was sent with.
     func testPrintAnotherStartsFromTheLastPrintsSettings() throws {
         let last = try JSONDecoder().decode(Project.Print.self, from: Data("""
-        {"bundleId":"b","destinationId":"x1c","settings":{"quality":"fine","strength":"max","colour":{"amsSlot":3}}}
+        {"bundleId":"b","destinationId":"x1c","settings":{"quality":"fine","strength":"max","colour":{"amsSlot":3},"copies":1}}
         """.utf8))
         let settings = PrintSettings(last: last)
         XCTAssertEqual(settings.quality, .fine)
         XCTAssertEqual(settings.strength, .max)
         XCTAssertEqual(settings.colour, .amsSlot(3))
+        XCTAssertEqual(settings.copies, 1, "an explicit one overrides a saved or profile count")
         XCTAssertEqual(PrintSettings(last: nil), PrintSettings(), "a first print starts at Standard")
         let spools = [PrinterFilament(slot: 1, colour: "#fff", material: "PLA", name: "White", filamentId: "a", destinationId: "x1c", suggested: true),
                       PrinterFilament(slot: 3, colour: "#000", material: "PETG", name: "Black", filamentId: "b", destinationId: "x1c"),

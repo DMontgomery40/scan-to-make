@@ -24,6 +24,8 @@ export const MONITOR = {
 
 /** One event as the monitor raises it; the event log adds `seq`, the time and the words. */
 export interface EventDraft {
+  /** A project may silence routine print notifications while retaining the event. */
+  notify?: import('@scan-to-make/contracts/counterpart').NotifyLevel;
   id: string;
   type: CounterpartEventType;
   /** Absent for an event about the Mac, not a project (mcp.update.*). */

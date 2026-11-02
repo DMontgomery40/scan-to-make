@@ -1,5 +1,28 @@
 # Handoff: how to pick up Counterpart work
 
+## Project Settings follow-up — 2026-11-02
+
+`feat/project-settings` is separate from release PR #259. Both clients use one native grouped Form from
+CounterpartKit, with thin transport/file adapters. Preferences save immediately in the companion;
+`projectPreferences` gates the entry point. No settings control starts printing or a design pass.
+Print sheets consume saved defaults and send explicit Standard/one-copy overrides. Duplicate copies
+current model/render/editable-design files into an independent ready project and preserves credit/defaults;
+source jobs, outcome and pending messages stay out of the copy. Original-file exports validate recorded
+membership and canonical containment, including symlink regressions. Mac copy no longer promises
+independent iPhone notification switches.
+
+Validation before publishing: 122 CounterpartKit tests, 43 ControlKit tests, 43 Mac model/relay tests;
+unsigned Mac and iOS Simulator apps build. Node 22 affected companion checks: 123 passed. Node 24 full
+companion suite: 628 passed, 9 intentionally skipped. Linux tests used the existing shared USD Python
+environment; no live projects, printers or notification deliveries were mutated. Read-only review found
+and verified fixes for muted Live Activity alerts, hidden saved multiple-copy counts on one-copy printers,
+and file-export symlink containment. Native settings interaction and physical delivery remain device
+acceptance work for the integration owner.
+
+[Apple's ActivityKit push documentation](https://developer.apple.com/documentation/ActivityKit/starting-and-updating-live-activities-with-activitykit-push-notifications)
+requires an alert for push-to-start. Muted project events therefore skip remote start, while existing
+activities still receive silent updates/end. This does not claim the currently undeployed relay works live.
+
 ## Integration snapshot — 2026-11-02, 06:55 MT
 
 Codex owns `feat/integrated-recovery`, PR #259. The competing Claude executors were stopped;

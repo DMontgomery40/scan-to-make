@@ -1,8 +1,9 @@
 import {once} from 'node:events';
 import {createHash} from 'node:crypto';
 import type {IncomingMessage, ServerResponse} from 'node:http';
-import {readFile} from 'node:fs/promises';
-import {basename, join} from 'node:path';
+import {readFile, realpath, open} from 'node:fs/promises';
+import {constants} from 'node:fs';
+import {basename, join, isAbsolute, sep} from 'node:path';
 import type {RemoteScope} from '../remote-auth.js';
 import {InvalidAnswerError, InvalidCaptureManifestError, InvalidStateError, projectStatus, type ObjectService} from './service.js';
 import {CameraUnavailableError, type CameraFrame} from '../printing/camera.js';
@@ -15,12 +16,28 @@ import {parameters} from '../local-control-protocol.js';
 const READ: RemoteScope = 'projects:read', WRITE: RemoteScope = 'captures:import', PRINT: RemoteScope = 'printer-handoff:use';
 const MAX_SCAN = 64 * 1024 * 1024, MAX_PHOTO = 25 * 1024 * 1024, MAX_JSON = 16 * 1024;
 const MAX_DEPTH = 8 * 1024 * 1024;
-const PATH = /^\/v1\/objects(?:\/([0-9a-f-]{36})(?:\/(scan|settings|photos|capture|capture-depth|start|corrections|closeup|print|print\/pause|print\/resume|print\/cancel|estimate|camera\.jpg|prints\/[0-9a-f-]{36}\/frames\/[0-9a-f-]{36}\.jpg|asks\/[0-9a-f-]{36}\.jpg|filaments|print-confirmation|printer|model\.stl|passes\/[^/]+\/activity|(?:renders|photos|capture)\/[^/]+))?)?$/;
+const PATH = /^\/v1\/objects(?:\/([0-9a-f-]{36})(?:\/(scan|settings|duplicate|photos|capture|capture-depth|start|corrections|closeup|print|print\/pause|print\/resume|print\/cancel|estimate|camera\.jpg|prints\/[0-9a-f-]{36}\/frames\/[0-9a-f-]{36}\.jpg|asks\/[0-9a-f-]{36}\.jpg|filaments|print-confirmation|printer|model\.stl|original\/[0-9]+|passes\/[^/]+\/activity|(?:renders|photos|capture|scan)\/[^/]+))?)?$/;
 const PRINTER_CAMERA = /^\/v1\/objects\/printers\/([A-Za-z0-9_-]{1,256})\/camera\.jpg$/;
 const SETTINGS: RemoteScope = 'projects:write';
 
 class HttpFailure extends Error {
   constructor(readonly status: number, readonly code: string, message = code) { super(message); }
+}
+
+/** Export only regular files whose canonical location stays in this project. */
+async function exportFile(directory: string, relative: string): Promise<Buffer> {
+  if (isAbsolute(relative) || relative.split('/').some(part => !part || part === '.' || part === '..')) throw new HttpFailure(404, 'not-found');
+  try {
+    const root = await realpath(directory), path = await realpath(join(root, relative));
+    if (!path.startsWith(root + sep)) throw new HttpFailure(404, 'not-found');
+    const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    try {
+      const stat = await file.stat();
+      if (!stat.isFile()) throw new HttpFailure(404, 'not-found');
+      if (stat.size > MAX_SCAN) throw new HttpFailure(413, 'file-too-large');
+      return await file.readFile();
+    } finally { await file.close(); }
+  } catch (error) { if (error instanceof HttpFailure) throw error; throw new HttpFailure(404, 'not-found'); }
 }
 
 async function body(request: IncomingMessage, limit: number): Promise<Buffer> {
@@ -39,7 +56,7 @@ async function json<T>(request: IncomingMessage, limit = MAX_JSON): Promise<T> {
   try { return JSON.parse(bytes.toString('utf8')) as T; } catch { throw new HttpFailure(400, 'invalid-request'); }
 }
 
-export type PublicObject = Omit<StmObject, 'passes' | 'title'> & {title: string; status: ObjectStatus; settings: {status: ProjectStatus; archived: boolean}; passes: (Omit<ObjectPass, 'dir' | 'activity'> & {activityCount: number})[]};
+export type PublicObject = Omit<StmObject, 'passes' | 'title'> & {title: string; status: ObjectStatus; settings: ReturnType<typeof projectSettingsView>; passes: (Omit<ObjectPass, 'dir' | 'activity'> & {activityCount: number})[]};
 
 // Earlier generic failures asserted a capture mistake without evidence. Correct the displayed
 // advice for those retained attempts too, leaving their original stored records intact.
@@ -50,8 +67,8 @@ function currentFailureText(message: string | undefined): string | undefined {
 
 /** Project metadata stays small; retained activity is read one pass at a time. */
 /** Project Settings as the apps read them: the status, and whether it's hidden from Home. */
-export function projectSettingsView(object: StmObject): {status: ProjectStatus; archived: boolean} {
-  return {status: projectStatus(object), archived: !!object.archived};
+export function projectSettingsView(object: StmObject) {
+  return {status: projectStatus(object), archived: !!object.archived, ...(object.printerDestinationId ? {printerDestinationId: object.printerDestinationId} : {}), ...object.preferences};
 }
 
 export function publicObject(object: StmObject): PublicObject {
@@ -165,10 +182,8 @@ export function createObjectRoutes(service: ObjectService) {
           const input = await json<Record<string, unknown>>(request);
           const parsed = parameters['objects.settings.set'].safeParse({...input, id});
           if (!parsed.success || 'id' in input) throw new HttpFailure(400, 'invalid-request');
-          const {status, archived, title} = parsed.data;
-          let updated = status !== undefined ? await service.setStatus(id, status) : await service.get(id);
-          if (archived !== undefined) updated = await service.setArchived(id, archived);
-          if (title !== undefined) updated = await service.rename(id, title);
+          const {id: _id, ...patch} = parsed.data;
+          const updated = await service.setProjectSettings(id, patch);
           return send(response, 200, {settings: projectSettingsView(updated), object: publicObject(updated)});
         }
         if (!id) {
@@ -211,19 +226,38 @@ export function createObjectRoutes(service: ObjectService) {
           if (!/^(0|[1-9][0-9]*)$/.test(value) || !Number.isSafeInteger(index)) throw new HttpFailure(400, 'invalid-request');
           return send(response, 200, {activity: await service.passActivity(id, index)});
         }
-        if (action.startsWith('photos/') || action.startsWith('capture/')) {
+        if (action.startsWith('original/')) {
           if (method !== 'GET') throw new HttpFailure(405, 'method-not-allowed');
           await authorize(READ);
-          const kind = action.startsWith('photos/') ? 'photos' : 'capture';
+          const index = Number(action.slice('original/'.length));
+          const object = await service.get(id) as StmObject & {files?: {original?: unknown[]}};
+          const path = Number.isSafeInteger(index) ? object.files?.original?.[index] : undefined;
+          if (typeof path !== 'string' || isAbsolute(path) || path.split('/').some(part => !part || part === '.' || part === '..')) throw new HttpFailure(404, 'not-found');
+          const extension = path.split('.').at(-1)?.toLowerCase();
+          const type = extension === 'stl' ? 'model/stl' : extension === '3mf' ? 'model/3mf' : extension === 'usdz' ? 'model/vnd.usdz+zip' : undefined;
+          if (!type) throw new HttpFailure(404, 'not-found');
+          const bytes = await exportFile(service.dir(id), path);
+          response.statusCode = 200;
+          response.setHeader('content-type', type);
+          response.setHeader('cache-control', 'private, no-store');
+          response.setHeader('x-content-type-options', 'nosniff');
+          response.end(bytes);
+          return;
+        }
+        if (action.startsWith('photos/') || action.startsWith('capture/') || action.startsWith('scan/')) {
+          if (method !== 'GET') throw new HttpFailure(405, 'method-not-allowed');
+          await authorize(READ);
+          const kind = action.startsWith('photos/') ? 'photos' : action.startsWith('scan/') ? 'scan' : 'capture';
           let name: string;
           try { name = decodeURIComponent(action.slice(kind.length + 1)); }
           catch { throw new HttpFailure(404, 'not-found'); }
           if (!/^[A-Za-z0-9][A-Za-z0-9._ -]{0,127}$/.test(name) || name.includes('..')) throw new HttpFailure(404, 'not-found');
           const extension = name.split('.').at(-1)?.toLowerCase();
           const type = extension === 'jpg' || extension === 'jpeg' ? 'image/jpeg'
-            : extension === 'png' ? 'image/png' : extension === 'heic' ? 'image/heic' : undefined;
-          if (!type || !(await service.get(id))[kind]?.includes(name)) throw new HttpFailure(404, 'not-found');
-          const bytes = await readFile(join(service.dir(id), kind, name)).catch(() => { throw new HttpFailure(404, 'not-found'); });
+            : extension === 'png' ? 'image/png' : extension === 'heic' ? 'image/heic' : kind === 'scan' && extension === 'usdz' ? 'model/vnd.usdz+zip' : undefined;
+          const object = await service.get(id);
+          if (!type || !(kind === 'scan' ? object.scan === name : object[kind]?.includes(name))) throw new HttpFailure(404, 'not-found');
+          const bytes = await exportFile(service.dir(id), `${kind}/${name}`);
           response.statusCode = 200;
           response.setHeader('content-type', type);
           response.setHeader('x-content-type-options', 'nosniff');
@@ -332,6 +366,7 @@ export function createObjectRoutes(service: ObjectService) {
             object = await service.selectPrinter(id, destinationId);
             break;
           }
+          case 'duplicate': { object = await service.duplicate(id); break; }
           case 'corrections': {
             const {note, photoNames} = await json<{note?: unknown; photoNames?: unknown}>(request);
             if (typeof note !== 'string' || !note.trim() || note.length > 4000) throw new HttpFailure(400, 'invalid-request');

@@ -208,6 +208,11 @@ final class EventRelayTests: XCTestCase {
         XCTAssertFalse(json.contains("null"), "optionals are left out, never null")
         XCTAssertFalse(json.contains("problem"))
 
+        XCTAssertNil(LiveActivityPush.make(for: event("print.started", notify: "none", printId: "print-1"), token: "aa", title: "Mic mount", now: now), "muted projects never start an alerting activity remotely")
+        let mutedEnd = try XCTUnwrap(LiveActivityPush.make(for: event("print.done", notify: "none", printId: "print-1"), token: "aa", title: "Mic mount", now: now))
+        XCTAssertEqual(mutedEnd.kind, .end)
+        XCTAssertEqual(mutedEnd.contentState.state, "finished")
+        XCTAssertNil(mutedEnd.alert, "Only problems still ends an existing activity, silently")
         let done = try XCTUnwrap(LiveActivityPush.make(for: event("print.done", printId: "print-1"), token: "aa", title: "Mic mount", now: now))
         XCTAssertEqual(done.kind, .end)
         XCTAssertNil(done.staleDate, "an ended activity is never marked stale")

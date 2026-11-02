@@ -13,6 +13,7 @@ struct ProjectDetail: View {
     @ObservedObject var model: ObjectsModel
     let print: () -> Void
     @State private var note = ""
+    @State private var showingSettings = false
     @State private var renaming = false
     @State private var projectName = ""
     @FocusState private var noteFocused: Bool
@@ -65,11 +66,20 @@ struct ProjectDetail: View {
         .navigationTitle(words.title)
         .navigationSubtitle(words.subtitle(request: object.instructions))
         .toolbar {
+            ToolbarItem {
+                if model.capabilities?.projectPreferences == true {
+                    Menu { Button("Project Settings", systemImage: "slider.horizontal.3") { showingSettings = true } }
+                    label: { Image(systemName: "ellipsis") }.accessibilityLabel("More")
+                }
+            }
             ToolbarItem(placement: .principal) {
                 Button { projectName = words.title; renaming = true } label: { Text(words.title).font(.headline) }
                     .buttonStyle(.plain).disabled(working || model.capabilities?.projectRename != true)
                     .help("Rename Project").accessibilityLabel("Rename \(words.title)")
             }
+        }
+        .sheet(isPresented: $showingSettings) {
+            MacProjectSettings(opened: object, model: model).frame(width: 560, height: 660)
         }
         .alert("Rename Project", isPresented: $renaming) {
             TextField("Project name", text: $projectName)
@@ -608,5 +618,35 @@ private struct DidItFitCard: View {
             .padding(12).frame(maxWidth: .infinity, alignment: .leading)
             .glassEffect(.regular, in: .rect(cornerRadius: 14))
         }
+    }
+}
+
+/// Native file access and the socket stay outside the shared settings form.
+private struct MacProjectSettings: View {
+    let opened: Project
+    @ObservedObject var model: ObjectsModel
+    private var project: Project { model.objects.first { $0.id == opened.id } ?? opened }
+    var body: some View {
+        ProjectSettingsForm(project: project, files: project.settingsFiles,
+            reveal: { if let folder = project.folderURL { NSWorkspace.shared.activateFileViewerSelecting([folder]) } },
+            load: { try await model.projectSettingsContext(project.id) },
+            save: { try await model.savePreferences(project.id, patch: $0) },
+            duplicate: { try await model.duplicate(project.id) },
+            delete: {
+                guard await model.delete(project.id) else { throw CompanionError(code: "delete-failed", message: model.problem?.text ?? "Couldn't delete the project.") }
+            }, download: { file in
+                var relative = file.id
+                if file.id.hasPrefix("original/"), let index = Int(file.id.dropFirst(9)),
+                   case .array(let files)? = project.files?.object?["original"], files.indices.contains(index), let path = files[index].string { relative = path }
+                guard let url = file.id == "model.stl" ? project.modelURL : project.file(relative), FileManager.default.fileExists(atPath: url.path) else {
+                    throw CompanionError(code: "not-found", message: "This file is no longer on your Mac.")
+                }
+                let resolved = url.resolvingSymlinksInPath()
+                guard let root = project.folderURL?.resolvingSymlinksInPath(), resolved.path.hasPrefix(root.path + "/"),
+                      (try resolved.resourceValues(forKeys: [.isRegularFileKey])).isRegularFile == true else {
+                    throw CompanionError(code: "not-found", message: "This file isn't inside the project's folder.")
+                }
+                return resolved
+            })
     }
 }
