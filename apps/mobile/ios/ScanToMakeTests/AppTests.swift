@@ -124,6 +124,71 @@ import CounterpartKit
         XCTAssertNil(model.problem)
         XCTAssertTrue(mac.requests.contains("POST /v1/settings/ai/test"), "an accepted choice is tested")
     }
+
+    /// scan-to-make-dc: a project deleted on the Mac stayed on Home, because every event only re-read its project
+    /// (KAN-214 #249 `project.deleted`). It leaves Home, and other projects' events still re-read them.
+    func testAProjectDeletedOnTheMacLeavesHome() async throws {
+        let mac = EventsMac()
+        let pairing = PairingClient(store: PairingStore(store: Fixtures.store()), transport: mac)
+        let store = ProjectsStore(mac: MacConnection(client: CompanionClient(pairing: pairing, transport: mac)), pairing: pairing)
+        func project(_ id: String, _ title: String) throws -> Project {
+            try JSONDecoder().decode(Project.self, from: JSONSerialization.data(withJSONObject: EventsMac.object(id, title)))
+        }
+        store.projects = [try project(EventsMac.deleted, "Stove gap filler"), try project(EventsMac.kept, "Mic mount")]
+        store.queue(note: "Make the lip thicker", for: EventsMac.deleted)
+
+        let following = Task { await store.follow() }
+        defer { following.cancel() }
+        let deadline = Date().addingTimeInterval(10)
+        while store.projects.contains(where: { $0.id == EventsMac.deleted }) || store.projects.first?.title != "Mic mount v2", Date() < deadline {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        XCTAssertEqual(store.projects.map(\.id), [EventsMac.kept], "the deleted project left Home; the other stayed")
+        XCTAssertEqual(store.projects.first?.title, "Mic mount v2", "another project's event still re-reads it")
+        XCTAssertTrue(store.deleted.contains(EventsMac.deleted), "a page open on it says it was deleted")
+        XCTAssertNil(store.queuedNotes[EventsMac.deleted], "a change waiting for it is dropped")
+        XCTAssertFalse(mac.requests.contains("GET /v1/objects/\(EventsMac.deleted)"), "nothing is read for a deleted project")
+        // A read that was already in flight when it was deleted doesn't put it back on Home.
+        store.replace(try project(EventsMac.deleted, "Stove gap filler"))
+        XCTAssertEqual(store.projects.map(\.id), [EventsMac.kept])
+    }
+}
+
+/// A Mac whose event log holds an update to one project and the deletion of another, then waits.
+private final class EventsMac: HTTPTransport, @unchecked Sendable {
+    static let deleted = "2f0a0229-1111-4000-8000-000000000001", kept = "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a01"
+    private let lock = NSLock()
+    private var _requests: [String] = []
+    var requests: [String] { lock.withLock { _requests } }
+
+    static func object(_ id: String, _ title: String) -> [String: Any] {
+        ["id": id, "createdAtMs": 1, "updatedAtMs": 2, "state": "ready", "title": title, "photos": [], "passes": []]
+    }
+    private static func event(_ seq: Int, _ type: String, _ id: String, data: [String: Any]? = nil) -> [String: Any] {
+        var event: [String: Any] = ["v": 1, "seq": seq, "id": "00000000-0000-4000-8000-0000000000\(seq)", "at": "2026-11-02T05:05:00.000Z",
+                                    "type": type, "projectId": id, "title": "T", "body": "B", "notify": "none"]
+        if let data { event["data"] = data }
+        return event
+    }
+
+    func send(_ request: URLRequest, trust: TrustPolicy, limit: Int, resourceTimeout: TimeInterval) async throws -> HTTPReply {
+        let line = "\(request.httpMethod ?? "GET") \(request.url?.path ?? "")"
+        lock.withLock { _requests.append(line) }
+        func json(_ value: Any, _ status: Int = 200) -> HTTPReply { HTTPReply(status: status, body: (try? JSONSerialization.data(withJSONObject: value)) ?? Data()) }
+        let after = request.url.flatMap { URLComponents(url: $0, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "after" }?.value }.flatMap(Int.init)
+        switch line {
+        case "GET /v1/events" where after == 0: return json(["events": [], "next": 20, "latest": 20])
+        case "GET /v1/events" where after == 20:
+            return json(["events": [Self.event(21, "project.updated", Self.kept), Self.event(22, "project.deleted", Self.deleted, data: ["by": "mac"])],
+                         "next": 22, "latest": 22])
+        case "GET /v1/events":
+            try await Task.sleep(for: .seconds(30))   // the long poll waits; the test cancels it
+            return json(["events": [], "next": 22, "latest": 22])
+        case "GET /v1/objects/\(Self.kept)": return json(["object": Self.object(Self.kept, "Mic mount v2")])
+        case "GET /healthz": return json(["status": "ok", "protocolVersion": "0.1.0"])
+        default: return json(["error": ["code": "not-found", "message": "Not found"]], 404)
+        }
+    }
 }
 
 /// A Mac that serves settings, can stop answering, and can refuse an AI choice.

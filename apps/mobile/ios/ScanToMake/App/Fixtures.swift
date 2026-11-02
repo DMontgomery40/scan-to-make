@@ -21,6 +21,11 @@ enum Fixtures {
     nonisolated(unsafe) static var macAnswers = false
     /// `-CounterpartScreen preparing`: the cable clip is on the printer, getting ready (layer 0).
     nonisolated(unsafe) static var preparing = false
+    /// `-CounterpartScreen failed-print` / `failed-change`: the mic mount's print stopped, or a change after its print
+    /// failed. `changed` is the change sent again with Try Again (`POST …/correct`), which starts a pass.
+    nonisolated(unsafe) static var failure: String?
+    nonisolated(unsafe) static var changed: String?
+    static let failedChange = "Make the cup 2 mm deeper."
     /// Statuses set on this run (`PATCH …/settings`), by project id.
     nonisolated(unsafe) static var statuses: [String: String] = [:]
 
@@ -119,7 +124,39 @@ enum Fixtures {
         ]
         // `-CounterpartFixtureSet grid`: only the projects Home shows as cards, so the grid is at the top.
         let shown = set == "grid" ? list.filter { ["ready", "printed", "confirmed", "failed"].contains($0["state"] as? String ?? "") } : list
-        return shown.map(withStatus).map(withPreparing)
+        return shown.map(withStatus).map(withPreparing).map(withFailure)
+    }
+
+    /// The mic mount failed: its print stopped on the printer (as David's P1S did, KAN-217), or a change asked for after
+    /// that print failed in Blender. After Try Again (`changed`) the same change is running.
+    private static func withFailure(_ object: [String: Any]) -> [String: Any] {
+        guard let failure, object["id"] as? String == ids.mic, var print = object["print"] as? [String: Any],
+              var passes = object["passes"] as? [[String: Any]] else { return object }
+        var object = object
+        let ms = Date().timeIntervalSince1970 * 1000
+        let iso = ISO8601DateFormatter()
+        print["dispatchedAt"] = iso.string(from: Date().addingTimeInterval(-50 * 60))
+        print["events"] = [["atMs": ms - 51 * 60_000, "message": "Slicing the model…"]]
+        if failure == "print" {
+            print["monitor"] = ["phase": "ended", "startedAt": iso.string(from: Date().addingTimeInterval(-50 * 60)), "endState": "failed",
+                                "endedAt": iso.string(from: Date().addingTimeInterval(-3 * 60))]
+            object["failure"] = "The printer stopped: The front cover of the toolhead fell off."
+            object["status"] = ["phase": "failed", "text": "The printer stopped: The front cover of the toolhead fell off.", "symbol": "exclamationmark.triangle", "tint": "red"]
+            object["state"] = "failed"
+        } else {
+            print["monitor"] = ["phase": "ended", "endState": "done", "endedAt": iso.string(from: Date().addingTimeInterval(-20 * 60))]
+            let note = failedChange
+            if let changed {
+                passes.append(["startedAtMs": ms - 60_000, "status": "running", "note": changed, "trigger": "changes", "activityCount": 0])
+                object["state"] = "touching-up"
+            } else {
+                passes.append(["startedAtMs": ms - 10 * 60_000, "endedAtMs": ms - 5 * 60_000, "status": "failed", "note": note, "trigger": "changes", "activityCount": 2])
+                object["failure"] = "Blender closed on your Mac during the change. Open Blender on your Mac, then try again."
+                object["state"] = "failed"
+            }
+        }
+        object["print"] = print; object["passes"] = passes
+        return object
     }
 
     /// The clip's print getting ready on the printer, as the companion words it (KAN-214 #237).
@@ -257,6 +294,12 @@ struct FixtureTransport: HTTPTransport {
             if parts[3] == "settings", method == "PATCH",
                let body = request.httpBody.flatMap({ try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }), let status = body["status"] as? String {
                 Fixtures.statuses[id] = status
+                return Fixtures.objects().first { $0["id"] as? String == id }.map { json(["object": $0]) } ?? json(["error": ["code": "not-found"]], 404)
+            }
+            if parts[3] == "corrections", method == "POST",
+               let body = request.httpBody.flatMap({ try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }), let note = body["note"] as? String {
+                // Only the failed change itself starts the pass again: a different note leaves it failed.
+                if id == Fixtures.ids.mic, note == Fixtures.failedChange { Fixtures.changed = note }
                 return Fixtures.objects().first { $0["id"] as? String == id }.map { json(["object": $0]) } ?? json(["error": ["code": "not-found"]], 404)
             }
             if parts[3] == "filaments" { return json(["filaments": Fixtures.filaments(for: id == Fixtures.ids.mic ? Fixtures.printer : "current")]) }

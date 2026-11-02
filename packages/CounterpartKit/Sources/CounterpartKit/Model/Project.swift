@@ -609,6 +609,14 @@ public struct SliceEstimate: Codable, Equatable, Sendable {
     public var slicedAt: String?
 }
 
+extension Project.Print {
+    /// The latest moment this print reports, in ms: a progress line, the dispatch, or the monitor's start or end.
+    var lastActivityMs: Double? {
+        let stamps = [dispatchedAt, monitor?.startedAt, monitor?.endedAt].compactMap { $0.flatMap(ISO.date) }
+        return ((events ?? []).map(\.atMs) + stamps.map { $0.timeIntervalSince1970 * 1000 }).max()
+    }
+}
+
 /// ISO 8601 dates with or without fractional seconds.
 public enum ISO {
     public static func date(_ text: String) -> Date? {

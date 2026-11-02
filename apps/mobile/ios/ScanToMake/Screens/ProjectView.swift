@@ -40,7 +40,11 @@ struct ProjectView: View {
 
     var body: some View {
         Group {
-            if let object { page(object) } else { ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity).background(Color.black) }
+            if let object { page(object) }
+            else if store.deleted.contains(id) {
+                ContentUnavailableView("Project Deleted", systemImage: "trash", description: Text("This project was deleted, with its files."))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity).background(Color.black)
+            } else { ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity).background(Color.black) }
         }
         .task(id: id) {
             await reload()
@@ -224,7 +228,7 @@ struct ProjectView: View {
         .confirmationDialog("Delete this project from your Mac?", isPresented: $confirmDelete, titleVisibility: .visible) {
             Button("Delete Project", role: .destructive) {
                 Task {
-                    do { try await store.mac.delete(object.id); store.remove(object.id); close() }
+                    do { try await store.mac.delete(object.id); store.forget(object.id); close() }
                     catch let failure as CompanionError { problem = failure.message }
                     catch { problem = CompanionError.unreachable.message }
                 }
@@ -456,7 +460,7 @@ struct ProjectView: View {
     private func failedCard(_ object: Project, _ words: ProjectWords) -> some View {
         let (happened, todo) = Self.split(object.failure)
         return VStack(alignment: .leading, spacing: 12) {
-            Label(object.state == .failed && object.print != nil && object.current != nil ? "The print didn't finish" : "Your Mac couldn't finish",
+            Label(words.failedStep == .print ? "The print didn't finish" : "Your Mac couldn't finish",
                   systemImage: "exclamationmark.triangle.fill").font(.headline).foregroundStyle(.red)
             Text(happened)
             if let todo {
@@ -467,17 +471,21 @@ struct ProjectView: View {
             }
             GlassEffectContainer(spacing: 8) {
                 HStack(spacing: 8) {
-                    if words.actions.contains(.retry) {
-                        Button { act { try await store.mac.start(object.id) } } label: {
+                    // Try Again is a failed pass's: a fresh start without a model, or the same change sent again.
+                    if words.actions.contains(.retry) || words.actions.contains(.retryChange) {
+                        Button { act { try await retry(object) } } label: {
                             Label("Try Again", systemImage: "arrow.clockwise").fontWeight(.semibold).lineLimit(1).minimumScaleFactor(0.8).frame(maxWidth: .infinity).frame(height: 30)
                         }
                         .buttonStyle(.glassProminent)
+                        .accessibilityIdentifier("try-again")
                     }
+                    // A failed print prints again, on the last settings (the print sheet starts on them).
                     if words.actions.contains(.print) || words.actions.contains(.printChecked) {
                         Button { openPrint(object.id) } label: {
-                            Label("Print Again", systemImage: "printer").lineLimit(1).minimumScaleFactor(0.8).frame(maxWidth: .infinity).frame(height: 30)
+                            Label(words.failedStep == .print ? "Print Again" : "Print", systemImage: "printer").lineLimit(1).minimumScaleFactor(0.8).frame(maxWidth: .infinity).frame(height: 30)
                         }
                         .buttonStyle(.glass)
+                        .accessibilityIdentifier("print-again")
                     }
                 }
                 .controlSize(.large).font(.subheadline)
@@ -495,6 +503,16 @@ struct ProjectView: View {
         }
         .padding(16)
         .glassEffect(.regular.tint(.red.opacity(0.14)), in: .rect(cornerRadius: 24))
+    }
+
+    /// Try Again on a failed pass: the same change again when one failed (the model is kept), else a fresh start.
+    private func retry(_ object: Project) async throws -> Project? {
+        if let note = ProjectWords.retryNote(object) {
+            let next = try await store.mac.correct(object.id, note)
+            section = .activity
+            return next
+        }
+        return try await store.mac.start(object.id)
     }
 
     /// The Mac's failure sentence and, after it, what to do.
@@ -577,7 +595,7 @@ struct ProjectView: View {
                     }
                     if canPrint && !writing {
                         Button { openPrint(object.id) } label: {
-                            Label(words.phase == .confirmed ? "Print Another" : "Print", systemImage: "printer.fill").fontWeight(.semibold).padding(.horizontal, 8).frame(height: 36)
+                            Label(words.phase == .confirmed ? "Print Another" : words.failedStep == .print ? "Print Again" : "Print", systemImage: "printer.fill").fontWeight(.semibold).padding(.horizontal, 8).frame(height: 36)
                         }
                         .buttonStyle(.glassProminent)
                         .controlSize(.large)

@@ -451,6 +451,10 @@ final class DecodingTests: XCTestCase {
         _ = try decode(Project.Ask.self, object["ask"])
         _ = try decode([Project.Change].self, object["changes"])
         _ = try decode([Project.Stage].self, object["stages"])
+        // KAN-214 #249: a deleted project's event says who deleted it.
+        let deleted = try XCTUnwrap(try decode([CounterpartEvent].self, object["projectEvents"]).first { $0.type == "project.deleted" })
+        XCTAssertEqual(deleted.data?.by, "mac")
+        XCTAssertNotNil(deleted.projectId)
     }
 
     /// The Mac's control socket (`objects.list`) adds the project folder; `/v1/objects` doesn't.

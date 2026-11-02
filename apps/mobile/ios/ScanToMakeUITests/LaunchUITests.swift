@@ -68,6 +68,37 @@ final class ProjectScreensUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Try Again"].exists)
     }
 
+    /// KAN-217: a print that stopped offers Print Again, which opens the print sheet, and never Try Again (that would
+    /// design it again from scratch). The printer's own words are the message (PRD §5.5).
+    func testAFailedPrintOffersPrintAgain() {
+        let app = launch("failed-print")
+        XCTAssertTrue(app.staticTexts["The print didn't finish"].waitForExistence(timeout: 20))
+        XCTAssertTrue(app.staticTexts["The printer stopped: The front cover of the toolhead fell off."].exists)
+        XCTAssertFalse(app.buttons["try-again"].exists, "no Try Again for a print")
+        let again = app.buttons["print-again"]
+        XCTAssertTrue(again.exists)
+        // On a 17e the card's buttons start half under the bottom bar (isHittable doesn't see the bar's glass):
+        // scroll them up, as a person would.
+        app.swipeUp()
+        XCTAssertEqual(again.label, "Print Again")
+        again.tap()
+        XCTAssertTrue(app.buttons["print-now"].waitForExistence(timeout: 10), "Print Again opens the print sheet")
+    }
+
+    /// A change that failed after the print: Try Again sends the same change again (the canned Mac starts a pass only
+    /// for a correction carrying it), and the model it changes can still print.
+    func testAFailedChangeSendsTheSameChangeAgain() {
+        let app = launch("failed-change")
+        XCTAssertTrue(app.staticTexts["Your Mac couldn't finish"].waitForExistence(timeout: 20))
+        XCTAssertEqual(app.buttons["print-again"].label, "Print", "the last model prints; it isn't a failed print")
+        let tryAgain = app.buttons["try-again"]
+        XCTAssertTrue(tryAgain.exists)
+        app.swipeUp()
+        tryAgain.tap()
+        XCTAssertTrue(app.staticTexts["Your Mac is working on it"].waitForExistence(timeout: 10), "the same change is running again")
+        XCTAssertFalse(app.buttons["try-again"].exists)
+    }
+
     /// PRD §5.4: a finished print asks "Did it fit?"; It Works makes it Done: Print Another, and Home's Done section.
     func testItWorksMovesAPrintedProjectToDone() {
         let app = launch("printed")

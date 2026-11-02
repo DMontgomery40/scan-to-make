@@ -136,6 +136,68 @@ final class ProjectWordsTests: XCTestCase {
         XCTAssertFalse(ProjectWords(ready()).busy)
     }
 
+    /// KAN-217: a failed print offers Print Again and never Try Again (`objects.start` would design it again from
+    /// scratch); Try Again is for a failed pass only. The first case is David's project 2f0a0229 as his Mac sent it.
+    func testAFailedPrintOffersPrintAgainAndAFailedPassTryAgain() {
+        let design: [String: Any] = ["startedAtMs": 1_793_600_927_814, "endedAtMs": 1_793_601_166_299, "status": "done", "trigger": "new"]
+        let change: [String: Any] = ["startedAtMs": 1_793_601_166_481, "endedAtMs": 1_793_601_324_046, "status": "done", "trigger": "changes",
+                                     "note": "Oh, and it is 25 inches long total, so probably need four total pieces or something"]
+        let stopped = ready(["state": "failed", "failure": "The printer stopped: The front cover of the toolhead fell off.", "passes": [design, change],
+                             "status": ["phase": "failed", "text": "The printer stopped: The front cover of the toolhead fell off.",
+                                        "symbol": "exclamationmark.triangle", "tint": "red"],
+                             "print": ["bundleId": "b1", "printId": "p1", "dispatchedAt": "2026-11-02T08:50:09.761Z",
+                                       "events": [["atMs": 1_793_609_352_051, "message": "Connecting to your printer service…"]],
+                                       "monitor": ["phase": "ended", "startedAt": "2026-11-02T08:50:09.761Z", "endState": "failed",
+                                                   "endedAt": "2026-11-02T09:57:44.212Z"]]])
+        let words = ProjectWords(stopped)
+        XCTAssertEqual(words.failedStep, .print)
+        XCTAssertEqual(words.actions, [.print, .correct], "Print Again and Ask for changes; no Try Again")
+        XCTAssertEqual(words.line, "The printer stopped: The front cover of the toolhead fell off.")
+        XCTAssertNil(ProjectWords.retryNote(stopped))
+
+        // Stopped before the printer had it (the printer's question timed out): still the print, and still Print Again.
+        let timedOut = ready(["state": "failed", "failure": "Printer confirmation timed out; no print was sent. Press Print to try again.",
+                              "print": ["bundleId": "b2", "events": [["atMs": 5, "message": "Slicing the model…"]]]])
+        XCTAssertEqual(ProjectWords(timedOut).failedStep, .print)
+        XCTAssertEqual(ProjectWords(timedOut).actions, [.print, .correct])
+        // It may have reached the printer: Print Again asks first.
+        XCTAssertEqual(ProjectWords(ready(["state": "failed", "print": ["bundleId": "b", "uncertain": true]])).actions, [.printChecked, .correct])
+
+        // The first pass made no model: Try Again starts it again.
+        let first = project(["state": "failed", "failure": "Blender is not open on your Mac.", "passes": [["startedAtMs": 1, "endedAtMs": 2, "status": "failed"]]])
+        XCTAssertEqual(ProjectWords(first).failedStep, .pass)
+        XCTAssertEqual(ProjectWords(first).actions, [.retry, .correct])
+
+        // Printed, then a change failed: Try Again sends the same change again; the model it changes still prints.
+        let printed: [String: Any] = ["bundleId": "b3", "dispatchedAt": "1970-01-01T00:00:00.010Z",
+                                      "events": [["atMs": 8, "message": "Slicing the model…"]],
+                                      "monitor": ["phase": "ended", "endState": "done", "endedAt": "1970-01-01T00:00:00.020Z"]]
+        let lip: [String: Any] = ["startedAtMs": 30, "endedAtMs": 40, "status": "failed", "trigger": "changes", "note": "  Make the lip 2 mm thicker. "]
+        let changeFailed = ready(["state": "failed", "failure": "Blender closed on your Mac during the change.", "print": printed,
+                                  "passes": [["startedAtMs": 1, "endedAtMs": 2, "status": "done"], lip]])
+        XCTAssertEqual(ProjectWords(changeFailed).failedStep, .pass)
+        XCTAssertEqual(ProjectWords(changeFailed).actions, [.retryChange, .print, .correct])
+        XCTAssertEqual(ProjectWords.retryNote(changeFailed), "Make the lip 2 mm thicker.")
+        // A failed pass with nothing to resend offers no Try Again: a fresh start would throw the model away.
+        var silent = lip; silent["note"] = nil
+        let noNote = ready(["state": "failed", "print": printed, "passes": [["startedAtMs": 1, "endedAtMs": 2, "status": "done"], silent]])
+        XCTAssertEqual(ProjectWords(noNote).actions, [.print, .correct])
+        XCTAssertNil(ProjectWords.retryNote(noNote))
+
+        // The change failed, then the model before it was printed and that print stopped: the print.
+        var later = printed; later["events"] = [["atMs": 50, "message": "Slicing the model…"]]; later["dispatchedAt"] = nil; later["monitor"] = nil
+        let printAfter = ready(["state": "failed", "print": later, "passes": [["startedAtMs": 1, "endedAtMs": 2, "status": "done"], lip]])
+        XCTAssertEqual(ProjectWords(printAfter).failedStep, .print)
+        XCTAssertEqual(ProjectWords(printAfter).actions, [.print, .correct])
+
+        // A print that finished is never what failed, whenever it ended.
+        var finished = later; finished["monitor"] = ["phase": "ended", "endState": "done", "endedAt": "1970-01-01T00:00:00.060Z"]
+        XCTAssertEqual(ProjectWords(ready(["state": "failed", "print": finished, "passes": [["startedAtMs": 1, "endedAtMs": 2, "status": "done"], lip]])).failedStep, .pass)
+
+        XCTAssertNil(ProjectWords(ready()).failedStep)
+        XCTAssertNil(ProjectWords(ready(["state": "printed", "print": printed])).failedStep)
+    }
+
     func testSizeIsWholeMillimetres() {
         XCTAssertEqual(ProjectWords(ready()).size, "62 × 75 × 49 mm")
         XCTAssertNil(ProjectWords(project([:])).size)

@@ -30,10 +30,12 @@ public struct CounterpartEvent: Codable, Equatable, Identifiable, Sendable {
         public var fromVersion: String?
         public var toVersion: String?
         public var log: String?
+        /// `project.deleted` (KAN-214 #249): who deleted it, a phone's device id or `mac`.
+        public var by: String?
 
         private enum CodingKeys: String, CodingKey {
             case progress, remainingSec, endsAt, layer, totalLayers, state, stage, problems, estimateSec, grams, askId, confirmationId, expiresAt
-            case mcpId, fromVersion, toVersion, log
+            case mcpId, fromVersion, toVersion, log, by
         }
         public init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -43,6 +45,7 @@ public struct CounterpartEvent: Codable, Equatable, Identifiable, Sendable {
             problems = optional(.problems); estimateSec = optional(.estimateSec); grams = optional(.grams); askId = optional(.askId)
             confirmationId = optional(.confirmationId); expiresAt = optional(.expiresAt)
             mcpId = optional(.mcpId); fromVersion = optional(.fromVersion); toVersion = optional(.toVersion); log = optional(.log)
+            by = optional(.by)
         }
     }
     public struct Problem: Codable, Equatable, Sendable { public var code: String; public var message: String }

@@ -483,7 +483,7 @@ struct DeleteProjectButton: View {
     var body: some View {
         Button("Delete Project", systemImage: "trash", role: .destructive) {
             Task {
-                do { try await store.mac.delete(project.id); store.remove(project.id) }
+                do { try await store.mac.delete(project.id); store.forget(project.id) }
                 catch let failure as CompanionError { store.error = failure.isUnreachable || failure.needsPairing ? failure : nil }
                 catch { store.error = .unreachable }
             }

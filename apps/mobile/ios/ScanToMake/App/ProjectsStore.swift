@@ -116,6 +116,8 @@ import CounterpartKit
     }
 
     func replace(_ project: Project) {
+        // A read still in flight when the project was deleted doesn't bring it back.
+        guard !deleted.contains(project.id) else { return }
         if let index = projects.firstIndex(where: { $0.id == project.id }) { projects[index] = project } else { projects.insert(project, at: 0) }
         sendQueuedNote(project)
     }
@@ -138,11 +140,15 @@ import CounterpartKit
     }
     private var correcting: Set<String> = []
     func remove(_ id: String) { projects.removeAll { $0.id == id } }
+    /// A project deleted on either device: off Home, with any change still waiting for it. A page still open on it
+    /// says so instead of waiting.
+    func forget(_ id: String) { remove(id); queuedNotes[id] = nil; deleted.insert(id) }
+    private(set) var deleted: Set<String> = []
 
     /// Clears everything read from the previous Mac.
     func reset() {
         projects = []; loaded = false; error = nil; catalog = nil; printerProblem = nil; reachable = nil; events = nil; spools = [:]; macCapabilities = []; mcpUpdates = [:]
-        sendFailures = [:]
+        sendFailures = [:]; deleted = []
     }
 
     /// Follows the Mac while the app is on screen: events when served, else a refresh every 3 s while
@@ -156,7 +162,9 @@ import CounterpartKit
                     switch update {
                     case .resync: await load(); await loadPrinters()
                     case .event(let event):
-                        if let project = event.projectId { await reload(project) }
+                        // Deleted here or on the Mac (KAN-214 #249): it leaves Home now; there's nothing left to read.
+                        if event.type == "project.deleted", let project = event.projectId { forget(project) }
+                        else if let project = event.projectId { await reload(project) }
                         // Events about the Mac, not a project: a printer MCP updating, or a setting changed elsewhere.
                         else if event.type.hasPrefix("mcp.update.") {
                             if let id = event.data?.mcpId { mcpUpdates[id] = MCPUpdateProgress(event) }

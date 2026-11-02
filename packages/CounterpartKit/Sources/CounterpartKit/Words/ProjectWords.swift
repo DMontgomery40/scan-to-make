@@ -70,8 +70,15 @@ public enum Tone: String, Equatable, Sendable {
 /// What a project page or card can offer right now.
 public enum ProjectAction: Equatable, Sendable {
     /// "Did it fit?": `itWorks` marks it Works, `needsChanges` asks for changes (`PATCH …/settings {status}`).
-    case finishSending, scan, attachPhotos, makeIt, print, printChecked, correct, openCamera, bestGuess, retry, itWorks, needsChanges
+    /// `retry` (Try Again) starts the pass again after it failed without a model (`objects.start`, a fresh design).
+    /// `retryChange` (Try Again) sends a failed change again, in its own words (`objects.correct` with
+    /// `ProjectWords.retryNote`), so the model it changes is kept. A failed print offers `print` (Print Again), never these.
+    case finishSending, scan, attachPhotos, makeIt, print, printChecked, correct, openCamera, bestGuess, retry, retryChange, itWorks, needsChanges
 }
+
+/// What stopped a failed project (PRD §5.5, §5.7): the print, or the Mac's pass. The phone and the Mac both read this,
+/// so neither guesses from what the project happens to carry.
+public enum FailedStep: Equatable, Sendable { case print, pass }
 
 /// A project in plain words: the one source of status words for the phone, iPad and (later) the Mac,
 /// the Lock Screen and the menu bar. Copy follows PRD §4 and journey.md §9.
@@ -87,6 +94,8 @@ public struct ProjectWords: Equatable, Sendable {
     /// "W × D × H mm", whole millimetres.
     public let size: String?
     public let actions: [ProjectAction]
+    /// On a failed project, what stopped. Nil when nothing failed.
+    public let failedStep: FailedStep?
 
     /// The question after a finished print: "Did it fit?", or for a published model "Did it come out right?".
     public static func outcomeQuestion(_ project: Project) -> String {
@@ -159,6 +168,27 @@ public struct ProjectWords: Equatable, Sendable {
         }
     }
 
+    /// What stopped a failed project. A print, once the model it prints exists and nothing failed after the print
+    /// began: David's P1S stopping with "The front cover of the toolhead fell off" is a print (the pass before it
+    /// was done). A pass otherwise: a first pass that made no model, or a change that failed after the last print.
+    public static func failedStep(_ project: Project) -> FailedStep? {
+        guard project.state == .failed else { return nil }
+        guard project.current != nil, let print = project.print else { return .pass }
+        guard let pass = project.passes.last, pass.failed else { return .print }
+        // The last pass failed. A print of the model before it, begun after that pass ended and not finished, is
+        // what stopped now; a print that finished isn't a failure, whenever it ended.
+        guard print.monitor?.endState != "done" else { return .pass }
+        return (print.lastActivityMs ?? 0) > (pass.endedAtMs ?? pass.startedAtMs) ? .print : .pass
+    }
+
+    /// The change to send again after a change failed (`retryChange`): the failed pass's own words, so Try Again
+    /// changes the same model again rather than designing it from scratch.
+    public static func retryNote(_ project: Project) -> String? {
+        guard failedStep(project) == .pass, project.current != nil, let pass = project.passes.last, pass.failed else { return nil }
+        let note = (pass.note ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return note.isEmpty ? nil : note
+    }
+
     /// The Mac's question, in its own words when it asked one.
     public static func question(_ project: Project) -> String {
         if let ask = project.openAsk?.question.trimmingCharacters(in: .whitespacesAndNewlines), !ask.isEmpty { return ask }
@@ -170,6 +200,7 @@ public struct ProjectWords: Equatable, Sendable {
         title = Self.title(project)
         size = project.current?.sizeMm.flatMap(Format.size)
         phase = Self.phase(project, sending: sending)
+        failedStep = Self.failedStep(project)
         let made: [ProjectAction] = project.current == nil ? [] : [project.print?.uncertain == true ? .printChecked : .print, .correct]
         var line: String
         // Done: print another any time, with no uncertain-print check (it printed, and it works).
@@ -244,7 +275,10 @@ public struct ProjectWords: Equatable, Sendable {
                 }
             case .failed:
                 let failure = (project.failure ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-                (status, busy, actions) = (failure.isEmpty ? "Something went wrong on your Mac." : failure, false, made.isEmpty ? [.retry, .correct] : made)
+                // Try Again only for a failed pass: a fresh start without a model, the same change again with one.
+                // A failed print offers Print Again (`made`), which opens the print sheet on the last settings.
+                let retry: [ProjectAction] = made.isEmpty ? [.retry] : Self.retryNote(project) != nil ? [.retryChange] : []
+                (status, busy, actions) = (failure.isEmpty ? "Something went wrong on your Mac." : failure, false, retry + (made.isEmpty ? [.correct] : made))
                 line = failure.isEmpty ? "Didn't finish · try again" : (failure.components(separatedBy: ". ").first ?? failure)
             case .unknown:
                 (status, busy, actions) = ("Update Counterpart to see this one.", false, [])
