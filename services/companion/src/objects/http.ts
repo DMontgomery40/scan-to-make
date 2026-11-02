@@ -1,3 +1,4 @@
+import {once} from 'node:events';
 import {createHash} from 'node:crypto';
 import type {IncomingMessage, ServerResponse} from 'node:http';
 import {readFile} from 'node:fs/promises';
@@ -74,6 +75,51 @@ function sendFrame(response: ServerResponse, frame: CameraFrame, match?: string)
   response.end(response.statusCode === 304 ? undefined : frame.bytes);
 }
 
+/** A bounded NDJSON stream; old clients continue receiving JPEG from the same path without stream=1. */
+async function sendCameraStream(response: ServerResponse, authorize: () => Promise<void>, open: (signal: AbortSignal) => Promise<AsyncGenerator<CameraFrame>>): Promise<void> {
+  const controller = new AbortController();
+  const close = () => controller.abort();
+  response.once('close', close);
+  let frames: AsyncGenerator<CameraFrame> | undefined, heartbeat: ReturnType<typeof setInterval> | undefined;
+  try {
+    frames = await open(controller.signal);
+    const first = await frames.next(); // Unsupported capability/errors still have an ordinary HTTP status.
+    if (controller.signal.aborted) return;
+    if (first.done) throw new CameraUnavailableError('unreachable');
+    response.statusCode = 200;
+    response.setHeader('content-type', 'application/x-ndjson');
+    response.setHeader('x-camera-protocol', '1');
+    response.setHeader('cache-control', 'private, no-store');
+    response.setHeader('x-content-type-options', 'nosniff');
+    response.flushHeaders();
+    let checking = false;
+    heartbeat = setInterval(() => {
+      if (checking) return;
+      checking = true;
+      void authorize().then(() => { if (!controller.signal.aborted && !response.write('\n')) close(); }, close)
+        .finally(() => { checking = false; });
+    }, 15000);
+    heartbeat.unref?.();
+    const write = async (frame: CameraFrame) => {
+      controller.signal.throwIfAborted();
+      await authorize();
+      const line = JSON.stringify({v: 1, seq: frame.seq ?? 0, capturedAt: frame.capturedAt, base64: frame.bytes.toString('base64')}) + '\n';
+      if (Buffer.byteLength(line) > 65536) throw new Error('Camera frame exceeded stream line limit');
+      if (!response.write(line)) await once(response, 'drain', {signal: controller.signal});
+    };
+    await write(first.value);
+    for await (const frame of frames) await write(frame);
+  } catch (error) {
+    if (!controller.signal.aborted && !response.headersSent) throw error;
+  } finally {
+    clearInterval(heartbeat);
+    controller.abort();
+    await frames?.return(undefined).catch(() => undefined);
+    response.off('close', close);
+    if (response.headersSent && !response.writableEnded) response.end();
+  }
+}
+
 function send(response: ServerResponse, status: number, value: unknown): void {
   response.statusCode = status;
   response.setHeader('content-type', 'application/json');
@@ -96,6 +142,7 @@ export function createObjectRoutes(service: ObjectService) {
         if (printerCamera) {
           if (request.method !== 'GET') throw new HttpFailure(405, 'method-not-allowed');
           await authorize(PRINT);
+          if (url.searchParams.get('stream') === '1') return await sendCameraStream(response, () => authorize(PRINT), signal => service.printerCameraStream(printerCamera[1]!, {size: url.searchParams.get('size') === 'full' ? 'full' : 'card', signal}));
           return sendFrame(response, await service.printerCamera(printerCamera[1]!, {size: url.searchParams.get('size') === 'full' ? 'full' : 'card'}), header('if-none-match'));
         }
         if (url.pathname === '/v1/settings') {
@@ -214,6 +261,7 @@ export function createObjectRoutes(service: ObjectService) {
         if (action === 'camera.jpg') {
           if (method !== 'GET') throw new HttpFailure(405, 'method-not-allowed');
           await authorize(PRINT);
+          if (url.searchParams.get('stream') === '1') return await sendCameraStream(response, () => authorize(PRINT), signal => service.cameraStream(id, {size: url.searchParams.get('size') === 'full' ? 'full' : 'card', signal}));
           return sendFrame(response, await service.camera(id, {size: url.searchParams.get('size') === 'full' ? 'full' : 'card'}), header('if-none-match'));
         }
         if (action === 'estimate') {
@@ -325,7 +373,7 @@ export function createObjectRoutes(service: ObjectService) {
         if (error instanceof InvalidAnswerError) return send(response, 400, {error: {code: 'invalid-request', message: error.message}});
         if (error instanceof InvalidStateError) return send(response, 409, {error: {code: 'invalid-state', message: error.message}});
         if (error instanceof InvalidCaptureManifestError) return send(response, 400, {error: {code: 'invalid-request', message: error.message}});
-        if (error instanceof CameraUnavailableError) return send(response, error.reason === 'no-camera' ? 404 : 503, {error: {code: error.reason === 'no-camera' ? 'not-found' : 'unavailable', message: error.message}});
+        if (error instanceof CameraUnavailableError) return send(response, error.reason === 'unreachable' ? 503 : 404, {error: {code: error.reason === 'not-supported' ? 'not-supported' : error.reason === 'no-camera' ? 'not-found' : 'unavailable', message: error.message}});
         if (error instanceof Error && error.message === 'Invalid file name') return send(response, 400, {error: {code: 'invalid-name', message: error.message}});
         throw error;
       }

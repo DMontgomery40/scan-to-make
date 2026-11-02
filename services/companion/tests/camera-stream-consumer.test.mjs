@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createServer} from 'node:http';
-import {CameraFrames} from '../dist/printing/camera.js';
+import {CameraFrames, CameraUnavailableError} from '../dist/printing/camera.js';
 import {createObjectRoutes} from '../dist/objects/http.js';
 const jpeg = Buffer.from([255,216,255,1,2,3]);
 function fixture(t, streaming=true) {
@@ -55,4 +55,74 @@ test('camera HTTP routes carry size selection and return304 without repeating an
   const etag=first.headers.get('etag');assert.ok(etag);assert.deepEqual(Buffer.from(await first.arrayBuffer()),jpeg);
   const second=await fetch(url,{headers:{'if-none-match':etag}});assert.equal(second.status,304);assert.equal((await second.arrayBuffer()).byteLength,0);
   assert.deepEqual(sizes,['full','full']);
+});
+
+test('long-lived watchers share the MCP read and cancellation releases only the departing viewer',async t=>{
+  const f=fixture(t),a=new AbortController(),b=new AbortController();
+  const first=f.camera.watch('p',f.session,{size:'full',signal:a.signal});
+  const second=f.camera.watch('p',f.session,{size:'full',signal:b.signal});
+  const [one,two]=await Promise.all([first.next(),second.next()]);
+  assert.equal(one.value.stream,true);assert.equal(two.value,one.value);assert.equal(f.holds,1);
+  a.abort();await first.return();assert.equal(f.holds,1,'the other viewer retains the source session');
+  b.abort();await second.return();assert.equal(f.holds,0);
+});
+
+test('long-lived delivery rejects an older MCP before starting any camera',async t=>{
+  const f=fixture(t,false),controller=new AbortController();
+  const stream=f.camera.watch('p',f.session,{signal:controller.signal});
+  await assert.rejects(stream.next(),error=>error.reason==='not-supported');
+  assert.equal(f.calls.length,0);assert.equal(f.holds,0);
+});
+
+test('HTTP streaming declares its format, sends incremental bounded lines, and cancels its watcher on disconnect',async t=>{
+  let stopped=false,authorized=0;
+  const routes=createObjectRoutes({async printerCameraStream(id,options){return (async function*(){try{yield {bytes:jpeg,capturedAt:'2026-11-02T12:00:00Z',seq:7,stream:true};await new Promise(resolve=>options.signal.addEventListener('abort',resolve,{once:true}));}finally{stopped=true;}})();}});
+  const server=createServer((req,res)=>{void routes.handle(req,res,async()=>{authorized++;},name=>req.headers[name]);});
+  await new Promise(r=>server.listen(0,'127.0.0.1',r));t.after(()=>server.close());
+  const controller=new AbortController();
+  const reply=await fetch(`http://127.0.0.1:${server.address().port}/v1/objects/printers/p/camera.jpg?stream=1&size=full`,{signal:controller.signal});
+  assert.match(reply.headers.get('content-type'),/application\/x-ndjson/);assert.equal(reply.headers.get('x-camera-protocol'),'1');
+  const reader=reply.body.getReader();const chunk=await reader.read();const frame=JSON.parse(Buffer.from(chunk.value).toString().trim());
+  assert.equal(frame.v,1);assert.equal(frame.seq,7);assert.deepEqual(Buffer.from(frame.base64,'base64'),jpeg);
+  controller.abort();
+  for(let i=0;i<100&&!stopped;i++)await new Promise(r=>setTimeout(r,5));
+  assert.equal(stopped,true);assert.ok(authorized>0);
+});
+
+
+test('HTTP unsupported streaming remains a404 JSON reply before camera stream headers',async t=>{
+  const routes=createObjectRoutes({async printerCameraStream(){return (async function*(){throw new CameraUnavailableError('not-supported');})();}});
+  const server=createServer((req,res)=>{void routes.handle(req,res,async()=>{},name=>req.headers[name]);});
+  await new Promise(r=>server.listen(0,'127.0.0.1',r));t.after(()=>server.close());
+  const reply=await fetch(`http://127.0.0.1:${server.address().port}/v1/objects/printers/p/camera.jpg?stream=1`);
+  assert.equal(reply.status,404);assert.match(reply.headers.get('content-type'),/application\/json/);
+  assert.equal((await reply.json()).error.code,'not-supported');assert.equal(reply.headers.get('x-camera-protocol'),null);
+});
+
+test('departing viewer cancels immediately without aborting another shared long poll', {timeout:6000},async t=>{
+  const f=fixture(t),a=new AbortController(),b=new AbortController();
+  const first=f.camera.watch('p',f.session,{size:'full',signal:a.signal}),second=f.camera.watch('p',f.session,{size:'full',signal:b.signal});
+  await Promise.all([first.next(),second.next()]);
+  const original=f.session.call;let pendingSignal;
+  f.session.call=async(name,args,options)=>{
+    if(name!=='camera_frame')return original(name,args,options);
+    pendingSignal=options.signal;
+    return new Promise((resolve,reject)=>options.signal.addEventListener('abort',()=>reject(options.signal.reason),{once:true}));
+  };
+  const x=first.next(),y=second.next();
+  for(let i=0;i<500&&!pendingSignal;i++)await new Promise(r=>setTimeout(r,5));
+  assert.ok(pendingSignal);
+  a.abort();await assert.rejects(x);assert.equal(pendingSignal.aborted,false);assert.equal(f.holds,1);
+  f.camera.close();await assert.rejects(y);assert.equal(pendingSignal.aborted,true);assert.equal(f.holds,0,'shutdown releases the last viewer once');
+});
+
+
+test('an open HTTP camera stops before another frame when authorization is revoked',async t=>{
+  let authorized=0,stopped=false;
+  const routes=createObjectRoutes({async printerCameraStream(){return (async function*(){try{yield {bytes:jpeg,capturedAt:'2026-11-02T12:00:00Z',seq:1};await new Promise(r=>setTimeout(r,10));yield {bytes:jpeg,capturedAt:'2026-11-02T12:00:01Z',seq:2};}finally{stopped=true;}})();}});
+  const server=createServer((req,res)=>{void routes.handle(req,res,async()=>{if(++authorized>2)throw new Error('revoked');},name=>req.headers[name]);});
+  await new Promise(r=>server.listen(0,'127.0.0.1',r));t.after(()=>server.close());
+  const reply=await fetch(`http://127.0.0.1:${server.address().port}/v1/objects/printers/p/camera.jpg?stream=1`);
+  const lines=(await reply.text()).trim().split('\n');
+  assert.equal(lines.length,1);assert.equal(JSON.parse(lines[0]).seq,1);assert.equal(stopped,true);assert.equal(authorized,3);
 });

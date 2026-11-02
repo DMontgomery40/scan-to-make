@@ -996,6 +996,17 @@ export class ObjectService {
     if (!destinationId) throw new CameraUnavailableError('no-camera');
     return this.printerCamera(destinationId, options);
   }
+  async cameraStream(id: string, options: {size?: CameraSize; signal: AbortSignal}): Promise<AsyncGenerator<CameraFrame>> {
+    const object = await this.get(id);
+    const destinationId = object.state === 'printing' ? object.print?.destinationId ?? object.print?.destination?.id ?? this.#destinationId(object) : this.#destinationId(object);
+    if (!destinationId) throw new CameraUnavailableError('no-camera');
+    return this.printerCameraStream(destinationId, options);
+  }
+  async printerCameraStream(destinationId: string, options: {size?: CameraSize; signal: AbortSignal}): Promise<AsyncGenerator<CameraFrame>> {
+    const session = this.#deps.printers?.session(destinationId), camera = this.#deps.camera;
+    if (!session || !camera) throw new CameraUnavailableError('no-camera');
+    return camera.watch(this.#deps.printerCatalog?.canonical(destinationId) ?? destinationId, session, {model: session.config.selection?.model, ...options});
+  }
   async printerCamera(destinationId: string, options: {size?: CameraSize} = {}): Promise<CameraFrame> {
     const session = this.#deps.printers?.session(destinationId), camera = this.#deps.camera;
     if (!session || !camera) throw new CameraUnavailableError('no-camera');
