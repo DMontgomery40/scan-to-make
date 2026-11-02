@@ -101,7 +101,8 @@ Each principle is taken from what Apple rewarded in 2026; sources are in [resear
 | ready | Ready to print · *dimensions* | checkmark.seal, accent |
 | preparing | Getting the print ready | gearshape, accent |
 | printing | Printing on *printer* · *N*% · *T* left | printer.fill, green |
-| printed | Printed *date* | shippingbox, secondary |
+| printed | Printed *date* · Did it fit? | shippingbox, secondary |
+| confirmed | Works · *date* | checkmark.circle.fill, green |
 | failed | *What happened* · *what to do* | exclamationmark.triangle, red |
 
 ## 5. iPhone
@@ -198,6 +199,14 @@ Screenshots:
 **Acceptance:**
 - From a "ready" notification, the user sees the model and **Print** in one tap.
 - From a "needs you" notification, the camera opens in one tap.
+
+
+**After printing: did it fit?** A `printed` project shows a card under the hero:
+- **Did it fit?**, with **It works** and **Needs changes**.
+- **It works** sets the state to `confirmed` (`PATCH /v1/objects/<id> {"outcome":"works"}`). The project moves to a **Done** section on Home and in the Mac sidebar, with a green **Works** capsule.
+- **Needs changes** opens Ask for changes with "After printing: " prefilled and the camera ready, so a photo of the part on the real object can go with it. That starts a new pass, keeps the print history, and sets `outcome: "needs-changes"`.
+- The same two answers are actions on the `print.done` notification (§9.1). Done projects can still be printed again or changed.
+- Projects nobody answers stay `printed` and are never nagged about again after the first card.
 
 ### 5.5 Print
 
@@ -834,7 +843,7 @@ Screenshot: `screens/phone-notifications.jpg` (an approximation: the system draw
 | `print.first-layer` | "*Title*: first layer's down", with the frame | **Open**, **Pause** | passive | off |
 | `print.milestone` | "*Title* is halfway" · time left, layer, printer, with the frame | **Open**, **Pause** | active | off |
 | `print.paused` | "*Printer* paused *title*" · reason, with the frame | **Open**, **Resume** | time-sensitive | on |
-| `print.done` | "*Title* is done. Take it off the plate.", with the frame | **Open** | active | on |
+| `print.done` | "*Title* is done. Take it off the plate.", with the frame | **Open**, **It Works** (background), **Needs Changes** (text input, background) | active | on |
 | `print.failed` / `print.not-started` / `pass.failed` | what happened and what to do | **Open** / **Try Again** | time-sensitive (print) / active (pass) | on |
 | `print.unreachable` | "Lost contact with *printer*. Still trying." | — | passive | off |
 
