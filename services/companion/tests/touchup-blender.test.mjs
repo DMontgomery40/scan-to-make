@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createServer} from 'node:net';
+import {execFileSync} from 'node:child_process';
+import {readFile} from 'node:fs/promises';
+import {PrinterMcpError} from '../../printer-handoff/dist/mcp-client.js';
 import {ensureBlenderMcp, resetBlenderScene, defaultBlenderLaunch, BlenderNotReadyError, BlenderBridgeUnavailableError, BlenderNotInstalledError} from '../dist/touchup/blender.js';
 
 const listen = (port = 0) => new Promise(resolve => {
@@ -17,7 +20,7 @@ function fakeClient({status = result({configured: true, connected: true}), tools
     connected: 0, closed: 0,
     connect: async () => { client.connected++; return {tools: tools.map(name => ({name}))}; },
     hasTool: name => tools.includes(name),
-    callTool: async (name, args) => { calls.push([name, args]); return name === 'blender_mcp_status' ? status : call; },
+    callTool: async (name, args) => { calls.push([name, args]); return name === 'blender_mcp_status' ? status : typeof call === 'function' ? call(args) : call; },
     close: async () => { client.closed++; },
   };
   return {client, calls};
@@ -52,7 +55,6 @@ test('reset goes through the bridge', async () => {
   assert.deepEqual(calls[0][1], {connect: true});
   assert.equal(calls[1][1].tool_name, 'execute_blender_code');
   assert.equal(calls[1][1].arguments.user_prompt, 'Start a fresh, empty scene for a scan touch-up');
-  assert.match(calls[1][1].arguments.code, /scenes\.new/);
   assert.equal(client.connected, 1);
   assert.equal(client.closed, 1);
 });
@@ -83,6 +85,12 @@ test('a bridge that is set up but failing shows the MCP\'s own reason', async ()
   await assert.rejects(resetBlenderScene(client), error => !(error instanceof BlenderBridgeUnavailableError) && /timed out during connect/.test(error.message));
 });
 
+test('the real client error detail survives a refused scene reset', async () => {
+  const {client} = fakeClient({call: () => { throw new PrinterMcpError('tool-failed', undefined, "Counterpart won't change your open Blender session."); }});
+  await assert.rejects(resetBlenderScene(client), /your open Blender session/);
+  assert.equal(client.closed, 1);
+});
+
 test('the timeout names the Blender MCP addon', async () => {
   const port = await freePort();
   await assert.rejects(ensureBlenderMcp({port, timeoutMs: 300, launch: async () => {}}), /Blender MCP addon/);
@@ -93,15 +101,67 @@ test('Blender not installed says how to fix it', async () => {
     error instanceof BlenderNotInstalledError && /blender\.org/.test(error.message));
 });
 
-test('a Blender the app launched is cleared fully; a user\'s own Blender only gets a new scene', async () => {
+test('reset preserves a user session, including its current mode and scene', async () => {
   const {client, calls} = fakeClient();
   await resetBlenderScene(client);
   const code = calls[1][1].arguments.code;
-  assert.match(code, /scan_to_make_owned/);
-  const [owned, notOwned] = code.split(/\nelse:\n/);
-  assert.match(owned, /objects\.remove/, 'leftovers from earlier passes are removed in an app-owned Blender');
-  assert.match(notOwned, /scenes\.new/, 'a user\'s own Blender only gets a fresh scene');
-  assert.doesNotMatch(notOwned, /objects\.remove/);
+  const observed = JSON.parse(execFileSync('python3', ['-c', `
+import sys, types, json
+changes=[]
+bpy=types.SimpleNamespace(app=types.SimpleNamespace(driver_namespace={}),
+ context=types.SimpleNamespace(object=types.SimpleNamespace(mode='EDIT'), window_manager=types.SimpleNamespace(windows=[])),
+ ops=types.SimpleNamespace(object=types.SimpleNamespace(mode_set=lambda **kw: changes.append('mode'))),
+ data=types.SimpleNamespace(scenes=types.SimpleNamespace(new=lambda name: changes.append('scene'))))
+sys.modules['bpy']=bpy
+error=None
+try: exec(${JSON.stringify(code)})
+except Exception as e: error=str(e)
+print(json.dumps({'changes':changes,'error':error}))
+`], {encoding: 'utf8'}));
+  assert.deepEqual(observed.changes, []);
+  assert.match(observed.error, /your open Blender session/);
+});
+
+test('an outdated addon stops before any scene reset', async () => {
+  const {client, calls} = fakeClient({status: result({connected: true, tools: [{name: 'get_addon_status'}]}),
+    call: args => args.tool_name === 'get_addon_status' ? result({up_to_date: false, expected_protocol_version: 15}) : result({result: 'reset'})});
+  await assert.rejects(resetBlenderScene(client), /addon needs an update/);
+  assert.deepEqual(calls.filter(([, a]) => a.tool_name).map(([, a]) => a.tool_name), ['get_addon_status']);
+  assert.equal(client.closed, 1);
+});
+
+test('a compatible addon is checked before the scene reset', async () => {
+  const {client, calls} = fakeClient({status: result({connected: true, tools: [{name: 'get_addon_status'}]}),
+    call: args => args.tool_name === 'get_addon_status' ? result({up_to_date: true, protocol_version: 15}) : result({result: 'reset'})});
+  await resetBlenderScene(client);
+  assert.deepEqual(calls.filter(([, a]) => a.tool_name).map(([, a]) => a.tool_name), ['get_addon_status', 'execute_blender_code']);
+});
+
+test('startup preserves the right listener and rebinds only an owned listener on the wrong port', async () => {
+  const {BLENDER_STARTUP_SCRIPT} = await import('../dist/touchup/blender.js');
+  const script = await readFile(BLENDER_STARTUP_SCRIPT, 'utf8');
+  for (const port of [9876, 9877]) {
+    const observed = JSON.parse(execFileSync('python3', ['-c', `
+import sys,types,json
+calls=[];callbacks=[]
+server=types.SimpleNamespace(running=True,port=${port})
+def stop():
+ calls.append('stop');server.running=False
+server.stop=stop
+addon_utils=types.SimpleNamespace(modules=lambda:[types.SimpleNamespace(__name__='addon',bl_info={'name':'MCP for Blender'})],
+ check=lambda name:(True,True),enable=lambda *a,**kw:calls.append('reenable'))
+bpy=types.SimpleNamespace(app=types.SimpleNamespace(driver_namespace={},timers=types.SimpleNamespace(register=lambda f,**kw:callbacks.append(f))),
+ types=types.SimpleNamespace(blendermcp_server=server),
+ context=types.SimpleNamespace(scene=types.SimpleNamespace(blendermcp_port=9876)),
+ ops=types.SimpleNamespace(blendermcp=types.SimpleNamespace(start_server=lambda:calls.append('restart'))))
+sys.modules['addon_utils']=addon_utils;sys.modules['bpy']=bpy
+exec(${JSON.stringify(script)})
+for callback in callbacks:callback()
+print(json.dumps({'calls':calls,'port':server.port}))
+`], {encoding: 'utf8'}).trim().split('\n').at(-1));
+    assert.deepEqual(observed.calls, port === 9876 ? [] : ['stop', 'restart']);
+    assert.equal(observed.port, 9876);
+  }
 });
 
 test('the startup script marks the Blender it launches as app-owned', async () => {

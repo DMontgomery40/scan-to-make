@@ -23,9 +23,21 @@ def _mcp_addon_module():
 
 def _start():
     try:
-        addon_utils.enable(_mcp_addon_module(), default_set=True, persistent=True)
+        module = _mcp_addon_module()
+        # Recent addons auto-start before this delayed callback. Re-enabling an
+        # enabled addon unregisters it and disconnects an already admitted pass.
+        if not addon_utils.check(module)[1]:
+            addon_utils.enable(module, default_set=True, persistent=True)
         bpy.context.scene.blendermcp_port = PORT
-        bpy.ops.blendermcp.start_server()
+        server = getattr(bpy.types, "blendermcp_server", None)
+        if server and server.port != PORT:
+            # A saved scene may auto-start on a different port. This marked
+            # helper has not admitted a pass on PORT yet; retarget only its server.
+            if server.running:
+                server.stop()
+            server.port = PORT
+        if not server or not server.running:
+            bpy.ops.blendermcp.start_server()
         print("BLENDERMCP_STARTED", flush=True)
     except Exception as error:  # Reported to the companion through the port never opening.
         print("BLENDERMCP_START_FAILED", error, flush=True)
