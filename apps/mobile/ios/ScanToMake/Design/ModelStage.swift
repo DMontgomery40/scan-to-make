@@ -24,6 +24,9 @@ struct ModelStage: View {
 
     var body: some View {
         RealityView { content in
+            // A project preview is not AR. iPhone RealityView otherwise defaults
+            // to spatial tracking and may take the physical camera from capture.
+            content.camera = .virtual
             let root = Entity()
             let pivot = Entity()
             holder.pivot = pivot
