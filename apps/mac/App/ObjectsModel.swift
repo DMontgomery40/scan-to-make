@@ -27,6 +27,9 @@ protocol ObjectsCompanion: Sendable {
     func create(instructions: String?, kind: String?) async throws -> StmObject
     func addFile(_ id: String, kind: String, path: String) async throws -> StmObject
     func correct(_ id: String, note: String, photos: [String]) async throws -> StmObject
+    func print(_ id: String, checked: Bool, settings: PrintSettings) async throws -> StmObject
+    func estimate(_ id: String, destinationId: String?, quality: PrintSettings.Quality, strength: PrintSettings.Strength) async throws -> PrintEstimate
+    func control(_ id: String, _ action: PrintControl) async throws -> StmObject
 }
 
 extension ObjectsCompanion {
@@ -45,6 +48,11 @@ extension ObjectsCompanion {
         guard photos.isEmpty else { throw ControlClientError.unavailable }
         return try await correct(id, note: note)
     }
+    func print(_ id: String, checked: Bool, settings: PrintSettings) async throws -> StmObject { throw ControlClientError.unavailable }
+    func estimate(_ id: String, destinationId: String?, quality: PrintSettings.Quality, strength: PrintSettings.Strength) async throws -> PrintEstimate {
+        throw ControlClientError.unavailable
+    }
+    func control(_ id: String, _ action: PrintControl) async throws -> StmObject { throw ControlClientError.unavailable }
 }
 
 /// The control socket. A fresh client per call, so a missing socket fails that call, not the model.
@@ -79,6 +87,16 @@ struct SocketObjects: ObjectsCompanion {
     }
     func correct(_ id: String, note: String, photos: [String]) async throws -> StmObject {
         try await ControlClient(socketPath:path, timeout:30).correctObject(id, note:note, photos:photos)
+    }
+    func print(_ id: String, checked: Bool, settings: PrintSettings) async throws -> StmObject {
+        try await ControlClient(socketPath:path, timeout:30).printObject(id, checked:checked, settings:settings)
+    }
+    func estimate(_ id: String, destinationId: String?, quality: PrintSettings.Quality, strength: PrintSettings.Strength) async throws -> PrintEstimate {
+        // The companion slices: up to 180 s on its side.
+        try await ControlClient(socketPath:path, timeout:190).estimate(id, destinationId:destinationId, quality:quality, strength:strength)
+    }
+    func control(_ id: String, _ action: PrintControl) async throws -> StmObject {
+        try await ControlClient(socketPath:path, timeout:30).controlPrint(id, action)
     }
 }
 
@@ -161,6 +179,50 @@ struct SocketObjects: ObjectsCompanion {
     }
 
     /// The project's chosen printer; the default one when it chose none or its choice is no longer configured.
+    /// Prints with the sheet's settings when the companion takes them, else with the chosen filament as before.
+    @discardableResult func print(_ id: String, checked: Bool, settings: PrintSettings, filament: PrinterFilament?) async -> Bool {
+        guard !working.contains(id) else { return false }
+        working.insert(id)
+        defer { working.remove(id) }
+        problem = nil
+        do {
+            let updated: StmObject
+            if capabilities?.printSettings == true { updated = try await companion.print(id, checked:checked, settings:settings) }
+            else if let filament { updated = try await companion.print(id, checked:checked, filament:filament) }
+            else { updated = try await companion.print(id, checked:checked) }
+            if let index = objects.firstIndex(where:{ $0.id == id }) { objects[index] = updated }
+            wake()
+            return true
+        } catch {
+            await refresh()
+            problem = Problem(id:id, text:Self.sentence(for:error))
+            return false
+        }
+    }
+
+    /// The slice estimate for the sheet; nil when the companion can't give one (the sheet says so).
+    func estimate(_ id: String, destinationId: String?, quality: PrintSettings.Quality, strength: PrintSettings.Strength) async throws -> PrintEstimate {
+        try await companion.estimate(id, destinationId:destinationId, quality:quality, strength:strength)
+    }
+
+    /// Pause, resume or stop a print (`capabilities.printControl`). The printer MCP may ask its own confirmation first.
+    @discardableResult func control(_ id: String, _ action: PrintControl) async -> Bool {
+        guard !working.contains(id) else { return false }
+        working.insert(id)
+        defer { working.remove(id) }
+        if problem?.id == id { problem = nil }
+        do {
+            let updated = try await companion.control(id, action)
+            if let index = objects.firstIndex(where:{ $0.id == id }) { objects[index] = updated }
+            wake()
+            return true
+        } catch {
+            problem = Problem(id:id, text:Self.sentence(for:error))
+            await refresh()
+            return false
+        }
+    }
+
     func printer(for object: StmObject) -> PrinterDestination? {
         guard let catalog = printerCatalog else { return nil }
         return catalog.destinations.first { $0.id == object.printerDestinationId }
@@ -254,8 +316,13 @@ struct SocketObjects: ObjectsCompanion {
     }
 
     /// The window is on screen (true) or closed, hidden or covered (false).
-    func setVisible(_ visible: Bool) {
-        if !visible { loop?.cancel(); loop = nil; return }
+    func setVisible(_ visible: Bool) { setWatching(visible, by:"window") }
+
+    private var watchers: Set<String> = []
+    /// Reads keep going while anything shows the projects: the window, or the menu bar popover.
+    func setWatching(_ watching: Bool, by watcher: String) {
+        if watching { watchers.insert(watcher) } else { watchers.remove(watcher) }
+        if watchers.isEmpty { loop?.cancel(); loop = nil; return }
         guard loop == nil else { return }
         loop = Task { [weak self] in
             while !Task.isCancelled {
@@ -268,7 +335,10 @@ struct SocketObjects: ObjectsCompanion {
     /// Read now and restart the cadence, e.g. when the window becomes key or after an action.
     func wake() {
         guard loop != nil else { return }
-        setVisible(false); setVisible(true)
+        loop?.cancel(); loop = nil
+        let watching = watchers
+        watchers = []
+        for watcher in watching { setWatching(true, by:watcher) }
     }
 
     /// Runs one action on one object. Returns whether it went through.

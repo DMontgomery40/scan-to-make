@@ -57,6 +57,9 @@ targets:
       - App/NearbyModel.swift
       - App/ObjectsModel.swift
       - App/MacStatusModel.swift
+      - App/NotificationPrefs.swift
+      - App/FusionSetup.swift
+      - App/Diagnostics.swift
       - App/ModelMesh.swift
       - ControlKit/Sources/ControlKit
     dependencies:

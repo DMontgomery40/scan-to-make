@@ -61,6 +61,12 @@ final class ObjectWordsTests: XCTestCase {
         let sent = ready(["state": "printed", "updatedAtMs": now.timeIntervalSince1970 * 1000, "print": ["bundleId": "b", "destination": ["id": "p", "name": "P1S"]]])
         XCTAssertEqual(words(sent).status, "Sent to P1S today")
         XCTAssertEqual(words(sent).capsule, "Sent to the printer", "the capsule never says Printed for a job nobody watched finish")
+        XCTAssertEqual(words(sent).stage, .sent)
+        XCTAssertEqual(words(sent).group, .printed)
+        let followless = ready(["state": "sent", "print": ["bundleId": "b", "destination": ["id": "p", "name": "Garage MK4"]]])
+        XCTAssertEqual(words(followless).status, "Sent to Garage MK4 · Counterpart can't follow this print")
+        XCTAssertEqual(words(followless).stage, .sent)
+        XCTAssertFalse(words(followless).busy, "terminal: nothing to wait for")
         XCTAssertEqual(words(sent).subtitle(request: nil), "Sent to the printer")
         XCTAssertEqual(words(printed).capsule, "Printed")
         let running = ready(["state": "printed", "updatedAtMs": now.timeIntervalSince1970 * 1000, "print": ["bundleId": "b", "destination": ["id": "p", "name": "P1S"],
@@ -87,7 +93,7 @@ final class ObjectWordsTests: XCTestCase {
     }
 
     func testNothingFallsOutOfTheSidebar() {
-        let states = ["new", "touching-up", "needs-closeup", "ready", "printing", "printed", "failed", "archived"]
+        let states = ["new", "touching-up", "needs-closeup", "ready", "printing", "printed", "sent", "failed", "archived"]
         for state in states { XCTAssertTrue(ProjectGroup.allCases.contains(ready(["state": state]).words.group), state) }
         XCTAssertEqual(object(["state": "archived"]).words.group, .now)
         XCTAssertEqual(object(["state": "failed"]).words.group, .needsYou)
@@ -166,5 +172,38 @@ final class ObjectWordsTests: XCTestCase {
                 for banned in ["companion", "MCP", "job"] { XCTAssertFalse(text.localizedCaseInsensitiveContains(banned), text) }
             }
         }
+    }
+}
+
+final class PrintSettingsTests: XCTestCase {
+    func testStandardSendsNothingSoTheMCPPresetDecides() {
+        XCTAssertEqual(PrintSettings().params, [:], "nothing to send: the MCP's preset and own defaults")
+        let chosen = PrintSettings(quality: .fine, strength: .max, colour: .amsSlot(2)).params
+        XCTAssertEqual(chosen["quality"], .string("fine"))
+        XCTAssertEqual(chosen["strength"], .string("max"))
+        XCTAssertEqual(chosen["colour"], .object(["amsSlot": .number(2)]))
+        XCTAssertNil(chosen["plateCheck"], "no plate prompt: the printer MCP's own confirmation is the check")
+        XCTAssertEqual(PrintSettings(colour: .auto).params["colour"], .object(["auto": .bool(true)]), "the user kept the preselection")
+        XCTAssertEqual(PrintSettings(colour: .external).params["colour"], .object(["external": .bool(true)]))
+    }
+
+    func testTheEstimateAndSuggestedTrayDecodeFromTheCompanion() throws {
+        let estimate = try JSONDecoder().decode(PrintEstimate.self, from: Data("""
+        {"destinationId":"current","quality":"standard","strength":"standard","seconds":4320,"grams":22.4,"layers":212,
+         "layerHeightMm":0.2,"infillPercent":15,"wallLoops":2,"slicedAt":"2026-11-01T12:00:00Z"}
+        """.utf8))
+        XCTAssertEqual(estimate.layers, 212)
+        let trays = try JSONDecoder().decode([PrinterFilament].self, from: Data("""
+        [{"slot":0,"colour":"#141414","material":"PLA","name":"Black","filamentId":"GFA00","destinationId":"current","suggested":true},
+         {"slot":254,"colour":"#FFFFFF","material":"PETG","name":"White","filamentId":"GFG00","destinationId":"current"}]
+        """.utf8))
+        XCTAssertEqual(trays.map(\.suggested), [true, nil])
+        XCTAssertTrue(trays[1].external)
+        let status = try JSONDecoder().decode(ControlStatus.self, from: Data("""
+        {"protocolVersion":1,"companionVersion":"0.2.0","transport":"lan","pairedDeviceCount":1,
+         "capabilities":{"capture":true,"cleanup":true,"printerHandoff":true,"objectsCreate":true,"printSettings":true}}
+        """.utf8))
+        XCTAssertTrue(status.capabilities.printSettings)
+        XCTAssertFalse(status.capabilities.printControl, "a flag the companion doesn't send is off")
     }
 }
