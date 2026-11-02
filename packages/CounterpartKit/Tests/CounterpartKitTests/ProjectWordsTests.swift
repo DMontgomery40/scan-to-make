@@ -174,6 +174,19 @@ final class ProjectWordsTests: XCTestCase {
         XCTAssertEqual(ProjectWords(ready(["state": "printing"])).phase, .preparing, "printing starts only when the printer reports our job")
         XCTAssertEqual(ProjectWords(ready(["state": "printed"])).phase, .printed)
         XCTAssertEqual(ProjectWords(project(["state": "failed"])).phase, .failed)
+        // KAN-214 #199: a print Counterpart can't follow ends at `sent`; no "done" follows.
+        let sent = ready(["state": "sent", "print": ["bundleId": "b", "uncertain": true, "fileBase": "mic-mount", "destination": ["id": "current", "name": "Ender 3"],
+                                                      "monitor": ["phase": "ended", "endState": "sent"]]])
+        XCTAssertEqual(ProjectWords(sent).phase, .sent)
+        XCTAssertEqual(ProjectWords(sent).line, "Sent to Ender 3 · Counterpart can't follow this print")
+        XCTAssertFalse(ProjectWords(sent).busy)
+        XCTAssertEqual(ProjectWords(sent).actions, [.printChecked, .correct], "it may be printing, so Print asks first (checked: true); changes still work")
+        let connect = ready(["state": "sent", "print": ["bundleId": "b", "uncertain": true, "sentVia": "bambu-connect"]])
+        XCTAssertEqual(ProjectWords(connect).line, "Finish on your Mac: press Print in Bambu Connect")
+        // A status without its symbol or tint still decodes, and the Mac's phase and words win.
+        let told = ready(["state": "sent", "status": ["phase": "sent", "text": "Sent to Ender 3 · Counterpart can't follow this print"]])
+        XCTAssertEqual(ProjectWords(told).phase, .sent)
+        XCTAssertEqual(ProjectPhase.sent.symbol, "paperplane")
         for phase in ProjectPhase.allCases { XCTAssertFalse(phase.symbol.isEmpty); XCTAssertFalse(phase.label.isEmpty) }
     }
 

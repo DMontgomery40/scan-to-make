@@ -5,7 +5,8 @@ import Foundation
 public enum ProjectPhase: String, Equatable, Sendable, CaseIterable {
     /// Nothing sent yet: waiting for a scan, photos or a description to be sent.
     case draft
-    case sending, working, needsYou = "needs-you", ready, preparing, printing, printed, failed
+    /// `sent`: handed to a printer Counterpart can't follow; terminal, with no "done".
+    case sending, working, needsYou = "needs-you", ready, preparing, printing, printed, sent, failed
     /// A state from a newer Mac.
     case unknown
 
@@ -19,6 +20,7 @@ public enum ProjectPhase: String, Equatable, Sendable, CaseIterable {
         case .preparing: "gearshape"
         case .printing: "printer.fill"
         case .printed: "shippingbox.fill"
+        case .sent: "paperplane"
         case .failed: "exclamationmark.triangle.fill"
         case .unknown: "questionmark.circle"
         }
@@ -30,7 +32,7 @@ public enum ProjectPhase: String, Equatable, Sendable, CaseIterable {
         case .needsYou: .needsYou
         case .ready, .preparing: .accent
         case .printing: .printing
-        case .printed, .draft, .unknown: .secondary
+        case .printed, .sent, .draft, .unknown: .secondary
         case .failed: .failed
         }
     }
@@ -46,6 +48,7 @@ public enum ProjectPhase: String, Equatable, Sendable, CaseIterable {
         case .preparing: "Getting the print ready"
         case .printing: "Printing"
         case .printed: "Printed"
+        case .sent: "Sent to your printer"
         case .failed: "Didn't finish"
         case .unknown: "Update Counterpart"
         }
@@ -129,6 +132,7 @@ public struct ProjectWords: Equatable, Sendable {
             if project.print?.monitor?.phase == "watching" || (project.print?.printId != nil && ["printing", "paused"].contains(project.print?.live?.state ?? "")) { return .printing }
             return .preparing
         case .printed: return .printed
+        case .sent: return .sent
         case .failed: return .failed
         case .unknown: return .unknown
         }
@@ -195,6 +199,16 @@ public struct ProjectWords: Equatable, Sendable {
             (status, busy, actions) = (finished ? "Printed" : "Print request accepted", false, made)
             line = finished ? "Printed " + Format.when(endedAt, now: now).replacingOccurrences(of: "Now", with: "just now")
                 : "Sent to " + (project.print?.destination?.name ?? "your printer")
+        case .sent:
+            // The printer has it, but no "done" will come. It may be printing, so Print asks first (`print.uncertain`).
+            let printer = printerName ?? project.print?.destination?.name ?? "your printer"
+            if project.print?.sentVia == "bambu-connect" {
+                (status, busy, actions) = ("Finish on your Mac: press Print in Bambu Connect.", false, made)
+                line = "Finish on your Mac: press Print in Bambu Connect"
+            } else {
+                (status, busy, actions) = ("Sent to \(printer). Counterpart can't follow this print.", false, made)
+                line = "Sent to \(printer) · Counterpart can't follow this print"
+            }
         case .failed:
             let failure = (project.failure ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             (status, busy, actions) = (failure.isEmpty ? "Something went wrong on your Mac." : failure, false, made.isEmpty ? [.retry, .correct] : made)
