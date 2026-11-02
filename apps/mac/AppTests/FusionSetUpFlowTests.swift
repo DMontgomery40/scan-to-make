@@ -92,6 +92,13 @@ final class FusionSetUpFlowTests: XCTestCase {
                        .notConnected("timed out after 90 s"))
         XCTAssertEqual(FusionSetup.Status.from(toolMissing: false, isError: true, text: "spawn uvx ENOENT"), .unreachable("spawn uvx ENOENT"))
         XCTAssertFalse(FusionSetup.Status.needsDesign.words.lowercased().contains("level"))
+        // Fusion open from before Set Up: running, but the add-in isn't on the new port.
+        XCTAssertEqual(FusionSetup.Status.from(toolMissing: false, isError: false,
+                                               text: #"{"configured":true,"connected":false,"addinReachable":false,"fusionRunning":true}"#), .reopenFusion)
+        // Connected on the Home tab: the parameters read says no design is open (#12).
+        let connected = MCPCall.Reply(isError: false, text: #"{"configured":true,"connected":true,"addinReachable":true,"fusionRunning":true}"#)
+        XCTAssertEqual(FusionSetup.Status.from(status: connected, design: MCPCall.Reply(isError: true, text: "Error: NO_ACTIVE_DESIGN")), .needsDesign)
+        XCTAssertEqual(FusionSetup.Status.from(status: connected, design: MCPCall.Reply(isError: false, text: #"{"count":0}"#)), .connected)
     }
 
     /// A fake printer MCP on stdio, answering in order; its reply to the tool call is `FAKE_REPLY`.
@@ -103,7 +110,7 @@ final class FusionSetUpFlowTests: XCTestCase {
         echo '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-06-18","capabilities":{},"serverInfo":{"name":"fake","version":"1"}}}'
         read line
         read line
-        \(hang ? "/bin/sleep 30" : "")
+        \(hang ? "/bin/sh -c 'exec /bin/sleep 30' \"$0\"" : "")
         echo '{"jsonrpc":"2.0","id":2,"result":{"tools":[\(list)]}}'
         read line
         printf '%s\\n' "$FAKE_REPLY"
@@ -135,6 +142,12 @@ final class FusionSetUpFlowTests: XCTestCase {
         } catch MCPCall.Failure.timedOut {
             XCTAssertLessThan(Date().timeIntervalSince(started), 5)
         }
+        let left = Process(), out = Pipe()
+        left.executableURL = URL(fileURLWithPath: "/usr/bin/pgrep")
+        left.arguments = ["-f", root.path]
+        left.standardOutput = out
+        try left.run(); left.waitUntilExit()
+        XCTAssertEqual(String(decoding: out.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self), "", "nothing of the probe is left running")
     }
 
     func testTheProbeFindsNodeAndHomebrewAsTheCompanionDoes() throws {

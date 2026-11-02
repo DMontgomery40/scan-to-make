@@ -407,7 +407,15 @@ enum FusionSetup {
             }
         }
 
-        /// From the tool's reply (`{connected, configured, error}`), or its error text.
+        /// The status reply, then the design check when there was one.
+        static func from(status: MCPCall.Reply?, design: MCPCall.Reply?) -> Status {
+            let first = from(toolMissing: status == nil, isError: status?.isError ?? false, text: status?.text ?? "")
+            guard first == .connected, let design, design.isError else { return first }
+            let lower = design.text.lowercased()
+            return lower.contains("no_active_design") || lower.contains("no active design") || lower.contains("no open design") ? .needsDesign : first
+        }
+
+        /// From the tool's reply (`{configured, connected, addinReachable, fusionRunning, error}`), or its error text.
         static func from(toolMissing: Bool, isError: Bool, text: String) -> Status {
             if toolMissing { return .noBridge }
             let value = (try? JSONSerialization.jsonObject(with: Data(text.utf8))) as? [String: Any]
@@ -415,7 +423,10 @@ enum FusionSetup {
             let lower = error.lowercased()
             if !isError, value?["configured"] as? Bool == false { return .notConfigured }
             if !isError, value?["connected"] as? Bool == true { return .connected }
-            if lower.contains("design") && (lower.contains("no active") || lower.contains("none open") || lower.contains("open a design")
+            // Fusion was open before Set Up: it runs, but without the add-in on the new port until it is opened again.
+            if !isError, value?["fusionRunning"] as? Bool == true, value?["addinReachable"] as? Bool == false { return .reopenFusion }
+            if lower.contains("no_active_design") || lower.contains("no open design")
+                || lower.contains("design") && (lower.contains("no active") || lower.contains("none open") || lower.contains("open a design")
                                             || lower.contains("activeproduct") || lower.contains("nonetype")) { return .needsDesign }
             if lower.contains("9876") || (lower.contains("refused") && lower.contains("running")) { return .reopenFusion }
             let short = error.count > 200 ? String(error.prefix(199)) + "…" : error
@@ -434,8 +445,13 @@ enum FusionSetup {
         let call = MCPCall.appOwned(command: command, args: process["args"] as? [String] ?? [], cwd: process["cwd"] as? String,
                                     env: process["env"] as? [String: String] ?? [:])
         do {
-            let reply = try await call.callTool("fusion_mcp_status", arguments: ["launch": true, "timeout_ms": 90_000], timeout: 150)
-            return Status.from(toolMissing: reply == nil, isError: reply?.isError ?? false, text: reply?.text ?? "")
+            // Connected on Fusion's Home tab still can't make the first design (#12): a read of the open design's
+            // parameters, which changes nothing, says whether one is open.
+            let (reply, design) = try await call.callTool("fusion_mcp_status", arguments: ["launch": true, "timeout_ms": 90_000], timeout: 150) { reply in
+                Status.from(toolMissing: false, isError: reply.isError, text: reply.text) == .connected
+                    ? ("fusion_mcp_call", ["tool_name": "get_parameters", "arguments": [String: Any](), "timeout_ms": 20_000]) : nil
+            }
+            return Status.from(status: reply, design: design)
         } catch {
             return .unreachable(error.localizedDescription)
         }
@@ -477,6 +493,12 @@ struct MCPCall {
 
     /// The tool's text and whether it is an error; nil when the server has no such tool.
     func callTool(_ name: String, arguments: [String: Any], timeout: TimeInterval) async throws -> Reply? {
+        try await callTool(name, arguments: arguments, timeout: timeout, then: { _ in nil }).0
+    }
+
+    /// One call, then (when `then` names one from its reply) a second in the same session; nil for a tool it hasn't.
+    func callTool(_ name: String, arguments: [String: Any], timeout: TimeInterval,
+                  then: (Reply) -> (String, [String: Any])?) async throws -> (Reply?, Reply?) {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: command)
         process.arguments = args
@@ -519,14 +541,19 @@ struct MCPCall {
         _ = try await reply(to: 1)
         try send(["jsonrpc": "2.0", "method": "notifications/initialized"])
         try send(["jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": [:]])
-        let tools = ((try await reply(to: 2))["result"] as? [String: Any])?["tools"] as? [[String: Any]] ?? []
-        guard tools.contains(where: { $0["name"] as? String == name }) else { return nil }
-        try send(["jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": ["name": name, "arguments": arguments]])
-        let answer = try await reply(to: 3)
-        if let error = answer["error"] as? [String: Any] { return Reply(isError: true, text: error["message"] as? String ?? "") }
-        let result = answer["result"] as? [String: Any] ?? [:]
-        let text = (result["content"] as? [[String: Any]] ?? []).compactMap { $0["type"] as? String == "text" ? $0["text"] as? String : nil }.joined()
-        return Reply(isError: result["isError"] as? Bool ?? false, text: text)
+        let tools = Set((((try await reply(to: 2))["result"] as? [String: Any])?["tools"] as? [[String: Any]] ?? []).compactMap { $0["name"] as? String })
+        func call(_ id: Int, _ name: String, _ arguments: [String: Any]) async throws -> Reply? {
+            guard tools.contains(name) else { return nil }
+            try send(["jsonrpc": "2.0", "id": id, "method": "tools/call", "params": ["name": name, "arguments": arguments]])
+            let answer = try await reply(to: id)
+            if let error = answer["error"] as? [String: Any] { return Reply(isError: true, text: error["message"] as? String ?? "") }
+            let result = answer["result"] as? [String: Any] ?? [:]
+            let text = (result["content"] as? [[String: Any]] ?? []).compactMap { $0["type"] as? String == "text" ? $0["text"] as? String : nil }.joined()
+            return Reply(isError: result["isError"] as? Bool ?? false, text: text)
+        }
+        guard let first = try await call(3, name, arguments) else { return (nil, nil) }
+        guard let (next, nextArguments) = then(first) else { return (first, nil) }
+        return (first, try await call(4, next, nextArguments))
     }
 }
 
@@ -555,8 +582,12 @@ final class LineReader: @unchecked Sendable {
 
     func next() async -> String? {
         while true {
-            if let line = take() { return line }
-            if isFinished { return nil }
+            // A line already read comes before the end, even when the server wrote it and exited at once.
+            switch takeOrEnd() {
+            case .line(let line): return line
+            case .end: return nil
+            case .wait: break
+            }
             await withCheckedContinuation { continuation in
                 lock.lock()
                 if finished || buffer.contains(0x0A) { lock.unlock(); continuation.resume(); return }
@@ -577,12 +608,15 @@ final class LineReader: @unchecked Sendable {
 
     var isFinished: Bool { lock.lock(); defer { lock.unlock() }; return finished }
 
-    private func take() -> String? {
+    private enum Next { case line(String), end, wait }
+    private func takeOrEnd() -> Next {
         lock.lock(); defer { lock.unlock() }
-        guard let newline = buffer.firstIndex(of: 0x0A) else { return nil }
-        let line = String(decoding: buffer[buffer.startIndex..<newline], as: UTF8.self)
-        buffer.removeSubrange(buffer.startIndex...newline)
-        return line
+        if let newline = buffer.firstIndex(of: 0x0A) {
+            let line = String(decoding: buffer[buffer.startIndex..<newline], as: UTF8.self)
+            buffer.removeSubrange(buffer.startIndex...newline)
+            return .line(line)
+        }
+        return finished ? .end : .wait
     }
 }
 
@@ -594,13 +628,25 @@ final class Watchdog: @unchecked Sendable {
 }
 
 extension MCPCall {
-    /// Stops the server and anything it started (a wrapper's child keeps running when only the wrapper is told).
+    /// Stops the server and everything under it (a wrapper's child, and its children, keep running when only the
+    /// wrapper is told), deepest first.
     static func stop(_ process: Process) {
         guard process.isRunning else { return }
-        let pkill = Process()
-        pkill.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
-        pkill.arguments = ["-TERM", "-P", String(process.processIdentifier)]
-        try? pkill.run(); pkill.waitUntilExit()
+        let tree = descendants(of: process.processIdentifier)
+        for pid in tree.reversed() { kill(pid, SIGTERM) }
         process.terminate()
+    }
+
+    static func descendants(of pid: pid_t) -> [pid_t] {
+        let pgrep = Process(), out = Pipe()
+        pgrep.executableURL = URL(fileURLWithPath: "/usr/bin/pgrep")
+        pgrep.arguments = ["-P", String(pid)]
+        pgrep.standardOutput = out
+        pgrep.standardError = FileHandle.nullDevice
+        guard (try? pgrep.run()) != nil else { return [] }
+        pgrep.waitUntilExit()
+        let children = String(decoding: out.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+            .split(separator: "\n").compactMap { pid_t($0.trimmingCharacters(in: .whitespaces)) }
+        return children.flatMap { [$0] + descendants(of: $0) }
     }
 }
