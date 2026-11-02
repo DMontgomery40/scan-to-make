@@ -498,6 +498,22 @@ export class ObjectService {
     return this.#pass(object, {note: note.trim(), trigger: photos.length ? 'late-photos' : 'changes'});
   }
 
+  /**
+   * "Did it fit?" after a print (PRD §4): `works` makes the project `confirmed`; `needs-changes` with a note starts a
+   * correction pass from it, as Ask for Changes does. A done project can still be printed again or changed.
+   */
+  setOutcome(id: string, outcome: {result: 'works' | 'needs-changes'; note?: string}): Promise<StmObject> { return this.#gate(id, () => this.#setOutcome(id, outcome)); }
+  async #setOutcome(id: string, outcome: {result: 'works' | 'needs-changes'; note?: string}): Promise<StmObject> {
+    const object = await this.get(id);
+    if (object.state !== 'printed' && object.state !== 'confirmed') throw new InvalidStateError('Say whether it fits once it has printed.');
+    const note = outcome.note?.trim();
+    const answered = await this.#deps.store.update(id, o => ({...o, outcome: {result: outcome.result, atMs: Date.now(), ...(note ? {note} : {})},
+      ...(outcome.result === 'works' ? {state: 'confirmed' as const} : o.state === 'confirmed' ? {state: 'printed' as const} : {})}));
+    this.#changed(answered);
+    if (outcome.result === 'needs-changes' && note) return this.#pass(answered, {note, trigger: 'changes'});
+    return answered;
+  }
+
   /** Answers the open Ask: with a photo (uploaded first), Best guess, or the person's own words. */
   answerCloseup(id: string, answer: {bestGuess?: boolean; text?: string}): Promise<StmObject> { return this.#gate(id, () => this.#answerCloseup(id, answer)); }
   async #answerCloseup(id: string, answer: {bestGuess?: boolean; text?: string}): Promise<StmObject> {

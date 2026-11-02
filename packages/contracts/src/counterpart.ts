@@ -89,7 +89,7 @@ export type EventsPage = z.infer<typeof EventsPageSchema>;
 // ---------------------------------------------------------------------------
 // Project status words (PRD §4 state table), written by the companion's events/words.ts
 
-export const PROJECT_PHASES = ['sending', 'working', 'needs-you', 'ready', 'preparing', 'printing', 'printed', 'failed', 'sent'] as const;
+export const PROJECT_PHASES = ['sending', 'working', 'needs-you', 'ready', 'preparing', 'printing', 'printed', 'failed', 'sent', 'confirmed'] as const;
 export const ProjectPhaseSchema = z.enum(PROJECT_PHASES);
 export type ProjectPhase = z.infer<typeof ProjectPhaseSchema>;
 

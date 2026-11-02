@@ -13,7 +13,7 @@ import {parameters} from '../local-control-protocol.js';
 const READ: RemoteScope = 'projects:read', WRITE: RemoteScope = 'captures:import', PRINT: RemoteScope = 'printer-handoff:use';
 const MAX_SCAN = 64 * 1024 * 1024, MAX_PHOTO = 25 * 1024 * 1024, MAX_JSON = 16 * 1024;
 const MAX_DEPTH = 8 * 1024 * 1024;
-const PATH = /^\/v1\/objects(?:\/([0-9a-f-]{36})(?:\/(scan|photos|capture|capture-depth|start|corrections|closeup|print|print\/pause|print\/resume|print\/cancel|estimate|camera\.jpg|prints\/[0-9a-f-]{36}\/frames\/[0-9a-f-]{36}\.jpg|asks\/[0-9a-f-]{36}\.jpg|filaments|print-confirmation|printer|plate\.jpg|plate|model\.stl|passes\/[^/]+\/activity|(?:renders|photos|capture)\/[^/]+))?)?$/;
+const PATH = /^\/v1\/objects(?:\/([0-9a-f-]{36})(?:\/(scan|photos|capture|capture-depth|start|corrections|outcome|closeup|print|print\/pause|print\/resume|print\/cancel|estimate|camera\.jpg|prints\/[0-9a-f-]{36}\/frames\/[0-9a-f-]{36}\.jpg|asks\/[0-9a-f-]{36}\.jpg|filaments|print-confirmation|printer|plate\.jpg|plate|model\.stl|passes\/[^/]+\/activity|(?:renders|photos|capture)\/[^/]+))?)?$/;
 const PRINTER_CAMERA = /^\/v1\/objects\/printers\/([A-Za-z0-9_-]{1,256})\/camera\.jpg$/;
 const SETTINGS: RemoteScope = 'projects:write';
 
@@ -114,7 +114,12 @@ export function createObjectRoutes(service: ObjectService) {
         if (!action) {
           if (method === 'PATCH') {
             await authorize(WRITE);
-            const {instructions} = await json<{instructions?: unknown}>(request);
+            const {instructions, outcome} = await json<{instructions?: unknown; outcome?: unknown}>(request);
+            // PRD §4's form of It Works: PATCH {outcome: "works"}.
+            if (outcome !== undefined) {
+              if (outcome !== 'works' || instructions !== undefined) throw new HttpFailure(400, 'invalid-request');
+              return send(response, 200, {object: publicObject(await service.setOutcome(id, {result: 'works'}))});
+            }
             if (typeof instructions !== 'string' || instructions.length > 8000) throw new HttpFailure(400, 'invalid-request');
             return send(response, 200, {object: publicObject(await service.updateInstructions(id, instructions))});
           }
@@ -263,6 +268,14 @@ export function createObjectRoutes(service: ObjectService) {
             const {destinationId} = await json<{destinationId?: unknown}>(request);
             if (typeof destinationId !== 'string' || !destinationId.length || destinationId.length > 256) throw new HttpFailure(400, 'invalid-request');
             object = await service.selectPrinter(id, destinationId);
+            break;
+          }
+          case 'outcome': {
+            // "Did it fit?" (PRD §4): works → confirmed; needs-changes with a note → a correction pass.
+            const input = await json<{result?: unknown; note?: unknown}>(request);
+            if ((input.result !== 'works' && input.result !== 'needs-changes') || (input.note !== undefined && (typeof input.note !== 'string' || input.note.length > 4000))
+              || Object.keys(input).some(key => key !== 'result' && key !== 'note')) throw new HttpFailure(400, 'invalid-request');
+            object = await service.setOutcome(id, {result: input.result, ...(typeof input.note === 'string' ? {note: input.note} : {})});
             break;
           }
           case 'corrections': {

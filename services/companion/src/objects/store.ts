@@ -8,7 +8,7 @@ import type {Ask} from '@scan-to-make/contracts/counterpart';
 import type {PrintLive, PrintMonitor, PrintSettings} from '@scan-to-make/contracts/counterpart';
 
 /** `sent`: the printer accepted the print, but Counterpart can't follow it to the end (no evidence it printed). */
-export type ObjectState = 'new' | 'touching-up' | 'needs-closeup' | 'ready' | 'printing' | 'printed' | 'failed' | 'sent';
+export type ObjectState = 'new' | 'touching-up' | 'needs-closeup' | 'ready' | 'printing' | 'printed' | 'failed' | 'sent' | 'confirmed';
 
 export interface ObjectPrintConfirmation {
   id: string;
@@ -55,6 +55,8 @@ export interface StmObject {
   /** A configured destination id; process settings and credentials stay in the companion. */
   printerDestinationId?: string;
   state: ObjectState;
+  /** "Did it fit?" (PRD §4): the person's answer after a print, and when. */
+  outcome?: {result: 'works' | 'needs-changes'; atMs: number; note?: string};
   /** The short generated title ("Mic mount"). */
   title?: string;
   /** Make something that fits, or copy an object (PRD §1). */

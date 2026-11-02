@@ -236,7 +236,7 @@ export function createControlDispatcher(services: ControlServices) {
           return {answered:true};
         }
         case 'doors.prepare': return await prepareDoor(parameters[method].parse(raw));
-        case 'objects.list': case 'objects.printers': case 'objects.filaments': case 'objects.selectPrinter': case 'objects.get': case 'objects.passActivity': case 'objects.start': case 'objects.delete': case 'objects.correct': case 'objects.answerCloseup': case 'objects.print': case 'objects.answerPlate': case 'objects.answerPrintConfirmation':
+        case 'objects.setOutcome': case 'objects.list': case 'objects.printers': case 'objects.filaments': case 'objects.selectPrinter': case 'objects.get': case 'objects.passActivity': case 'objects.start': case 'objects.delete': case 'objects.correct': case 'objects.answerCloseup': case 'objects.print': case 'objects.answerPlate': case 'objects.answerPrintConfirmation':
         case 'objects.create': case 'objects.addFile':
         case 'objects.estimate': case 'objects.pausePrint': case 'objects.resumePrint': case 'objects.cancelPrint': case 'objects.camera': case 'printers.camera': case 'settings.get': case 'settings.set': {
           const objects = services.objects;
@@ -282,6 +282,10 @@ export function createControlDispatcher(services: ControlServices) {
             if (method === 'objects.correct') {
               const {id, note, photos} = parameters[method].parse(raw);
               return {object: local(await objects.correct(id, note, photos))};
+            }
+            if (method === 'objects.setOutcome') {
+              const {id, result, note} = parameters[method].parse(raw);
+              return {object: local(await objects.setOutcome(id, {result, ...(note !== undefined ? {note} : {})}))};
             }
             if (method === 'objects.answerPrintConfirmation') {
               const {id, confirmationId, answer} = parameters[method].parse(raw);
