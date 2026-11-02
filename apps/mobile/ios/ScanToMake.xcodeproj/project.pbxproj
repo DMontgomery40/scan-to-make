@@ -189,6 +189,7 @@
 		C4A459858D6631CA227A164E /* ScanPasses-iPad-FixedHeight-unflippable-low.mp4 */ = {isa = PBXFileReference; path = "ScanPasses-iPad-FixedHeight-unflippable-low.mp4"; sourceTree = "<group>"; };
 		CB0CBEF9ED82408AA61CE61A /* CaptureFolderManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureFolderManager.swift; sourceTree = "<group>"; };
 		CFEE621E7C7B88738E9C985B /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
+		D12329112CFEE819F508653A /* ScanToMake.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ScanToMake.entitlements; sourceTree = "<group>"; };
 		D2181C73CED27FF7EB7FFEBE /* OnboardingButtonView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingButtonView.swift; sourceTree = "<group>"; };
 		D2D8EFDBF2FE8D2707C3D914 /* en.lproj */ = {isa = PBXFileReference; path = en.lproj; sourceTree = "<group>"; };
 		DEC1CB1BEA42C7C0DEC8500C /* CapturePrimaryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CapturePrimaryView.swift; sourceTree = "<group>"; };
@@ -303,6 +304,7 @@
 				9F3E533A0189E34B9FA18B0C /* Images.xcassets */,
 				1CF24A1A23C137ADF38A2C45 /* LaunchScreen.storyboard */,
 				8552441AB54E2F389FDC741F /* PrivacyInfo.xcprivacy */,
+				D12329112CFEE819F508653A /* ScanToMake.entitlements */,
 				8E2F60EBCE0C3B3C4AD20293 /* App */,
 				4664159B63A10D44B21155C5 /* Design */,
 				D0FF89BBE1CB79DDE845A6EE /* Objects */,
@@ -852,6 +854,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = ScanToMake/ScanToMake.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
 				INFOPLIST_FILE = ScanToMake/Info.plist;
@@ -872,6 +875,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = ScanToMake/ScanToMake.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
 				INFOPLIST_FILE = ScanToMake/Info.plist;

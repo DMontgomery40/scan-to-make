@@ -46,6 +46,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.scantomake
         PRODUCT_NAME: ScanToMake
         INFOPLIST_FILE: ScanToMake/Info.plist
+        CODE_SIGN_ENTITLEMENTS: ScanToMake/ScanToMake.entitlements
         TARGETED_DEVICE_FAMILY: "1,2"
         CODE_SIGN_STYLE: Automatic
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon

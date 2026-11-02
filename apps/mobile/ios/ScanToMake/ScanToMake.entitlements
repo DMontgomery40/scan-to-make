@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Notifications from the Mac (PRD §9.2): CloudKit subscriptions arrive as pushes. -->
+	<key>aps-environment</key>
+	<string>development</string>
+	<!-- Same-Apple-Account pairing (PRD §5.10) and the Mac's notifications: the private CloudKit database. -->
+	<key>com.apple.developer.icloud-container-identifiers</key>
+	<array>
+		<string>iCloud.com.scantomake.counterpart</string>
+	</array>
+	<key>com.apple.developer.icloud-services</key>
+	<array>
+		<string>CloudKit</string>
+	</array>
+</dict>
+</plist>
