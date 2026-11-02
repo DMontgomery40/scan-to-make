@@ -35,6 +35,17 @@ final class CorrectionQueueTests: XCTestCase {
         XCTAssertNil(queue.pending("mount"))
     }
 
+    func testAnUnconfirmedSendStaysPausedAcrossLaunchesUntilExplicitRetry() {
+        var queue = CorrectionQueue(notes: ["mount": "Widen it"])
+        queue.fail("mount", message: "Connection lost after sending")
+        XCTAssertNil(queue.due(project(.ready)), "A completed pass must not cause an automatic duplicate send")
+        queue = CorrectionQueue(saved: queue.saved)
+        XCTAssertNil(queue.due(project(.ready)))
+        XCTAssertEqual(queue.pending("mount"), "Widen it")
+        queue.retry("mount")
+        XCTAssertEqual(queue.due(project(.ready)), "Widen it")
+    }
+
     func testPersistenceReadsBothOldAndNewQueueFormats() {
         let old = CorrectionQueue(saved: ["mount": "Widen it"])
         XCTAssertEqual(old.due(project(.ready)), "Widen it")

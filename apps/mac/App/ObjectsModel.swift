@@ -149,7 +149,7 @@ struct SocketObjects: ObjectsCompanion {
     @Published private(set) var working: Set<String> = []
     @Published private(set) var problem: Problem?
     @Published private(set) var corrections: CorrectionQueue {
-        didSet { defaults.set(corrections.entries, forKey: "CounterpartQueuedNotes") }
+        didSet { defaults.set(corrections.saved, forKey: "CounterpartQueuedNotes") }
     }
     private let defaults: UserDefaults
     private var correcting: Set<String> = []
@@ -496,8 +496,23 @@ struct SocketObjects: ObjectsCompanion {
                 wake()
             } catch let failure as ControlRemoteError where failure.code == "conflict" && failure.message == "Wait until the current step finishes." {
                 // Another device got there first. Keep the note for the next end of step.
-            } catch { problem = Problem(id: project.id, text: Self.sentence(for: error)) }
+            } catch {
+                let message = Self.sentence(for: error)
+                corrections.fail(project.id, message: message)
+                problem = Problem(id: project.id, text: message)
+            }
         }
+    }
+
+    func retryQueuedChange(_ project: Project) {
+        corrections.retry(project.id)
+        if problem?.id == project.id { problem = nil }
+        sendQueuedNote(project)
+    }
+    func discardQueuedChange(_ project: Project) {
+        if let note = corrections.entries[project.id]?.first { corrections.sent(note, for: project.id) }
+        if problem?.id == project.id { problem = nil }
+        sendQueuedNote(project)
     }
 
     @discardableResult func perform(_ action: ObjectAction, on id: String, note: String = "", photos: [URL] = []) async -> Bool {
