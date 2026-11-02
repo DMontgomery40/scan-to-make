@@ -1,7 +1,7 @@
 # David's asks: status
 
-Every request David has made for Counterpart, checked on 2026-11-02 at about 03:50 MT (09:50Z) against
-main (`91734f0`), the Mac app installed at `91734f0`, and the iPhone build `c2eb1e0` on Davica3.
+Every request David has made for Counterpart, checked on 2026-11-02 at about 04:10 MT (10:10Z) against
+main (`9cb3300`), the Mac app installed at `91734f0`, and the iPhone build `c2eb1e0` on Davica3.
 
 How to pick up this work, and the diagnosis notes behind the P0 rows: [`handoff.md`](handoff.md).
 
@@ -16,8 +16,8 @@ The owner is whoever the lead assigns. Repeats count how often the ask came up a
 
 | # | Ask | Repeats | Status | Done when |
 |---|---|---|---|---|
-| 1 | Printing works from the app (stove strips) | many | **prints, upside down**: he pressed Print in the app at 08:49Z and the stove strips (`2f0a0229`) are printing, fin on the bed. Cause: printer-handoff `orient: !laidFlat` plus `lay_flat` picking a face not on the hull; `handoff-orient` and `layflat-mcps` fixing. bambu-printer-mcp 1.1.50 (Studio-matching start options) is on npm but the app still runs 1.1.49; GitHub tag/Release waits on his yes | He presses Print in the app and the part prints |
-| 2 | Stop/cancel from the app actually stops the printer | 1 | **fixed in bambu-printer-mcp 1.1.50** (Studio's stop at QoS 1); not installed in the app yet | Stop in the app stops the printer |
+| 1 | Printing works from the app (stove strips) | many | **broken: the print stopped**. He pressed Print in the app at 08:49Z; the stove strips (`2f0a0229`) printed upside down (fin on the bed) and stopped at 09:57Z, layer 44 of 52. The printer said: "The front cover of the toolhead fell off." Upside down because of `lay_flat`, which picked a face not on the hull (with printer-handoff's `orient: !laidFlat`). Fixing: KAN-223's slicer gate in printer-handoff, and `lay_flat` + `slicer_result` PRs in both MCPs, published only on his yes | He presses Print in the app and the part prints |
+| 2 | Stop/cancel from the app actually stops the printer | 1 | **fixed in bambu-printer-mcp 1.1.50** (Studio's stop at QoS 1); KAN-220 deploying it to the Mac now; not yet tried on his printer | Stop in the app stops the printer |
 | 3 | Done / Works status | 7 | **on device, both** (#240; Mac at `91734f0`, phone at `c2eb1e0`) | Marks the mic mount Done on both |
 | 4 | Rename projects | 2 | not started | Taps the name and renames, on both |
 | 5 | Project settings (printer, colours, quality, copies, engine, notifications, files, duplicate, archive/delete) | 2 | status + hide only | Each setting works on both |
@@ -59,8 +59,8 @@ The owner is whoever the lead assigns. Repeats count how often the ask came up a
 
 ## By 9:00 MT today (lead's commitment, 2026-11-02), as of 03:50 MT
 
-- **#1 printing from the app:** the app sent a print and the strips are printing, but upside down. The orientation fix is in progress (`handoff-orient` in `services/printer-handoff`; `layflat-mcps` as PRs in both MCP repos, unmerged until he says publish). After the print, KAN-220 deploys main with bambu-printer-mcp 1.1.50 on the Mac and restarts the companion.
-- **#2 Stop:** fixed in bambu-printer-mcp 1.1.50 on npm; reaches him with that deploy. The GitHub tag and Release for 1.1.50 (and mcp-3D-printer-server 1.2.24) wait on his yes.
+- **#1 printing from the app:** the app sent a print, but the strips printed upside down and stopped at layer 44 of 52 ("The front cover of the toolhead fell off."). The fix is in progress: KAN-223's slicer gate in `services/printer-handoff`, and `lay_flat` + `slicer_result` PRs in both MCP repos, unmerged until he says publish.
+- **#2 Stop:** fixed in bambu-printer-mcp 1.1.50 on npm; KAN-220 is deploying it to the Mac now. The GitHub tag and Release for 1.1.50 (and mcp-3D-printer-server 1.2.24) wait on his yes.
 - **#8 camera:** #246 is on Davica3; the reboot acceptance waits on David.
 - **#11 the Home grid:** #243 installed on Davica3; he hasn't confirmed it yet.
 - **#26 Fusion:** Set Up (#244, #245) is installed on the Mac. Still needs him to install Autodesk Fusion, open a design and press Set Up.
