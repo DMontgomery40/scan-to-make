@@ -1,6 +1,7 @@
 import Foundation
 import AppKit
 import CryptoKit
+import Darwin
 
 /// Settings → AI → Design with Fusion (PRD §8.9). Counterpart never ships or requires Fusion. Set Up:
 /// 1. installs the Faust Machines add-in at the pinned commit into the user's own Fusion, set to run on startup;
@@ -388,6 +389,9 @@ enum FusionSetup {
         case needsDesign
         /// Fusion was already open before Set Up, so it listens on the old port until it is opened again.
         case reopenFusion
+        /// The add-in answers on its port, but the printer MCP doesn't recognise its reply (bambu-printer-mcp 1.1.49
+        /// expects `result.pong`; the pinned add-in says `result.status: "pong"`).
+        case bridgeOutdated
         case notConfigured
         /// The printer MCP has no Fusion bridge (older than bambu-printer-mcp 1.1.4x).
         case noBridge
@@ -400,6 +404,8 @@ enum FusionSetup {
             case .connected: return "Fusion is connected. New designs use it while it's running."
             case .needsDesign: return "Open a design in Fusion first (File → New Design), then press Set Up Again."
             case .reopenFusion: return "Quit Fusion and open it again, so it picks up the new settings. Then press Set Up Again."
+            case .bridgeOutdated:
+                return "Fusion's add-in is answering, but your printer MCP doesn't recognise it yet. Update bambu-printer-mcp, then press Set Up Again."
             case .notConfigured: return "Your printer MCP doesn't see the Fusion settings yet. Press Set Up Again."
             case .noBridge: return "Your printer MCP can't talk to Fusion. Update it in Settings → Printers, then press Set Up Again."
             case .notConnected(let reason): return reason.isEmpty ? "Fusion didn't connect." : "Fusion didn't connect: \(reason)"
@@ -451,10 +457,45 @@ enum FusionSetup {
                 Status.from(toolMissing: false, isError: reply.isError, text: reply.text) == .connected
                     ? ("fusion_mcp_call", ["tool_name": "get_parameters", "arguments": [String: Any](), "timeout_ms": 20_000]) : nil
             }
-            return Status.from(status: reply, design: design)
+            let status = Status.from(status: reply, design: design)
+            // "Reopen Fusion" only when the add-in really doesn't answer on its port.
+            if status == .reopenFusion, await addinAnswers(port: UInt16(port) ?? 9877) { return .bridgeOutdated }
+            return status
         } catch {
             return .unreachable(error.localizedDescription)
         }
+    }
+}
+
+extension FusionSetup {
+    /// Whether the Fusion360MCP add-in answers a ping on this Mac (`{"type":"ping"}`, a success reply within 2 s).
+    static func addinAnswers(port: UInt16, timeout: Int = 2) async -> Bool {
+        await Task.detached { () -> Bool in
+            let socket = Darwin.socket(AF_INET, SOCK_STREAM, 0)
+            guard socket >= 0 else { return false }
+            defer { close(socket) }
+            var time = timeval(tv_sec: timeout, tv_usec: 0)
+            setsockopt(socket, SOL_SOCKET, SO_RCVTIMEO, &time, socklen_t(MemoryLayout<timeval>.size))
+            setsockopt(socket, SOL_SOCKET, SO_SNDTIMEO, &time, socklen_t(MemoryLayout<timeval>.size))
+            var address = sockaddr_in()
+            address.sin_family = sa_family_t(AF_INET)
+            address.sin_port = in_port_t(port).bigEndian
+            address.sin_addr.s_addr = inet_addr("127.0.0.1")
+            let connected = withUnsafePointer(to: &address) {
+                $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { Darwin.connect(socket, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) }
+            }
+            guard connected == 0 else { return false }
+            let ping = Array("{\"type\":\"ping\",\"params\":{}}\n".utf8)
+            guard ping.withUnsafeBufferPointer({ send(socket, $0.baseAddress, ping.count, 0) }) == ping.count else { return false }
+            var reply = Data(), buffer = [UInt8](repeating: 0, count: 4096)
+            while !reply.contains(0x0A), reply.count < 65_536 {
+                let read = recv(socket, &buffer, buffer.count, 0)
+                guard read > 0 else { break }
+                reply.append(contentsOf: buffer[0..<read])
+            }
+            let line = reply.split(separator: 0x0A).first.map { Data($0) } ?? reply
+            return ((try? JSONSerialization.jsonObject(with: line)) as? [String: Any])?["status"] as? String == "success"
+        }.value
     }
 }
 

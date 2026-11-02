@@ -1,4 +1,5 @@
 import XCTest
+import Darwin
 
 /// Settings → AI → Design with Fusion → Set Up (PRD §8.9), end to end on fixtures: a printer MCP reached through the
 /// SSH stopgap, a fake add-in, a fake launchctl and a fake Fusion behind a fake printer MCP. Nothing on this Mac changes.
@@ -159,5 +160,34 @@ final class FusionSetUpFlowTests: XCTestCase {
         XCTAssertEqual(call.env["PATH"], "\(node.deletingLastPathComponent().path):/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin")
         let ssh = MCPCall.appOwned(command: "/usr/bin/ssh", args: ["me@127.0.0.1"], cwd: nil, env: [:], bundledNode: node)
         XCTAssertEqual(ssh.command, "/usr/bin/ssh")
+    }
+
+    /// The pinned add-in's ping reply is `{"status":"success","result":{"ok":true,"status":"pong"}}`: a listening add-in
+    /// counts as answering, so Set Up never tells David to reopen a Fusion that is fine.
+    func testTheAddinsOwnPingDecidesBetweenReopenAndUpdate() async throws {
+        let listener = Darwin.socket(AF_INET, SOCK_STREAM, 0)
+        var address = sockaddr_in()
+        address.sin_family = sa_family_t(AF_INET)
+        address.sin_addr.s_addr = inet_addr("127.0.0.1")
+        address.sin_port = 0
+        _ = withUnsafePointer(to: &address) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { Darwin.bind(listener, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) } }
+        XCTAssertEqual(Darwin.listen(listener, 1), 0)
+        var length = socklen_t(MemoryLayout<sockaddr_in>.size)
+        _ = withUnsafeMutablePointer(to: &address) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { getsockname(listener, $0, &length) } }
+        let port = UInt16(bigEndian: address.sin_port)
+        Thread.detachNewThread {
+            let client = Darwin.accept(listener, nil, nil)
+            var buffer = [UInt8](repeating: 0, count: 256)
+            _ = recv(client, &buffer, buffer.count, 0)
+            let reply = Array("{\"status\": \"success\", \"result\": {\"ok\": true, \"status\": \"pong\"}}\n".utf8)
+            _ = reply.withUnsafeBufferPointer { send(client, $0.baseAddress, reply.count, 0) }
+            Darwin.close(client)
+        }
+        let answers = await FusionSetup.addinAnswers(port: port)
+        Darwin.close(listener)
+        XCTAssertTrue(answers)
+        let closed = await FusionSetup.addinAnswers(port: port)
+        XCTAssertFalse(closed, "nothing listening: reopen Fusion")
+        XCTAssertTrue(FusionSetup.Status.bridgeOutdated.words.contains("Update bambu-printer-mcp"))
     }
 }
