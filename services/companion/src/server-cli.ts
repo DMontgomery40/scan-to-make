@@ -26,6 +26,7 @@ import { DevicePresence } from './devices/presence.js';
 import { pruneLegacyDevices } from './devices/legacy.js';
 import { McpOverrides, McpUpdater } from './printing/mcp-updates.js';
 import { hostEnvironment } from './printing/mcp-install.js';
+import { IcloudEnrolment } from './icloud-enrolment.js';
 import {startLocalControl} from './local-control.js';
 import {createControlDispatcher, companionVersion} from './local-control-services.js';
 import type {CaptureServices} from './capture-http.js';
@@ -157,6 +158,8 @@ const nearbyPairing = process.env.SCAN_TO_MAKE_NEARBY_PAIRING;
 if (nearbyPairing !== undefined && (nearbyPairing !== '1' || allAddresses !== '1'))
   throw new Error('SCAN_TO_MAKE_NEARBY_PAIRING must be 1 when set, with SCAN_TO_MAKE_LAN_ALL_ADDRESSES=1');
 const macName = allAddresses === '1' ? computerName() : undefined;
+// PRD §5.10: a phone on the owner's Apple Account enrols with a token the Mac app publishes to their private CloudKit.
+const icloud = remoteAuth?.transport === 'lan' ? new IcloudEnrolment(join(remoteAuth.directory, 'mac-id')) : undefined;
 const server = await startCompanionServer({
   lanTls,
   ...(allAddresses === '1' ? { lanAddresses: () => discoverAddresses(), localName: localHostName() } : {}),
@@ -168,6 +171,7 @@ const server = await startCompanionServer({
   ...(liveActivityTokens ? {liveActivityTokens} : {}),
   ...(presence ? {presence} : {}),
   ...(mcpUpdates ? {mcpUpdates} : {}),
+  ...(icloud ? {icloud} : {}),
   remoteAuth,
   port:
     process.env.SCAN_TO_MAKE_GENERATION_PORT === undefined
@@ -189,7 +193,11 @@ try {
       // With every address answering, the Mac's QR is a v2 link from the live list.
       ...(allAddresses === '1' && server.publicKeySha256 ? {pairingLink:() => ({addresses:server.addresses(),publicKeySha256:server.publicKeySha256!,
         ...(macName ? {name:instanceName(macName)} : {})})} : {}),
-      ...(server.nearby ? {nearby:server.nearby} : {})}),
+      ...(server.nearby ? {nearby:server.nearby} : {}),
+      ...(icloud && server.publicKeySha256 ? {icloudToken:async () => {
+        const issued = await icloud.token();
+        return {token:issued.token,expiresAt:new Date(issued.expiresAt).toISOString(),macId:issued.macId,spkiSha256:server.publicKeySha256!,addresses:server.addressList()};
+      }} : {})}),
   });
   else if (process.env.SCAN_TO_MAKE_CONTROL_SOCKET !== undefined) throw new Error('Local control requires an auth store');
 } catch {

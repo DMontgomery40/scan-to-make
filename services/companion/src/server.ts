@@ -5,6 +5,7 @@ import type {EventLog} from './events/log.js';
 import type {LiveActivityTokenStore} from './devices/live-activity-tokens.js';
 import type {DevicePresence} from './devices/presence.js';
 import {McpUpdateError, type McpUpdater} from './printing/mcp-updates.js';
+import type {IcloudEnrolment} from './icloud-enrolment.js';
 import {LiveActivityTokenUploadSchema} from '@scan-to-make/contracts/counterpart';
 import type {ObjectService} from './objects/service.js';
 import {createCaptureRoutes,type CaptureServices} from './capture-http.js';
@@ -25,6 +26,14 @@ import {
 
 const MAX_PAIR_REQUEST_BYTES = 4096;
 const McpUpdateRequestSchema = z.strictObject({ fresh: z.boolean().optional() });
+/** `POST /v1/pair/icloud`. `installId` is the phone's installation key, the same value QR pairing sends as `installationKey`. */
+const IcloudEnrolSchema = z.strictObject({
+  macId: z.uuid(),
+  enrolmentToken: z.string().regex(/^[A-Za-z0-9_-]{43}$/),
+  installId: z.string().regex(/^[A-Za-z0-9_-]{43}$/),
+  deviceName: z.string().trim().min(1).max(80).regex(/^[^\x00-\x1f\x7f]+$/),
+  model: z.string().regex(/^[A-Za-z0-9,._ -]{1,64}$/).optional(),
+});
 const errors = {
   'invalid-request': [400, 'Invalid request'],
   'payload-too-large': [413, 'Request payload limit exceeded'],
@@ -127,6 +136,8 @@ export async function startCompanionServer(
     presence?: DevicePresence;
     /** PRD §8.10: Update for the printer MCPs. */
     mcpUpdates?: McpUpdater;
+    /** PRD §5.10: enrolment through the owner's iCloud (LAN mode only). */
+    icloud?: IcloudEnrolment;
     /** Extra addresses to bind beside the configured one; looked up again every `rediscoverMs`. */
     lanAddresses?: () => LanAddresses;
     /** The Mac's `.local` name, accepted as a Host and listed in v2 links. */
@@ -143,6 +154,8 @@ export async function startCompanionServer(
   close(): Promise<void>;
   /** Pairing link v2 origins in the order to try: only addresses this server is bound to. */
   addresses(): string[];
+  /** The same addresses with their kind, for the CloudKit `CounterpartMac` record (PRD §5.10). */
+  addressList(): {kind: 'lan' | 'mdns' | 'tailscale'; host: string; port: number}[];
   /** The SHA-256 of the TLS public key (v2 `k=`), in LAN mode. */
   publicKeySha256?: string;
   /** Nearby requests waiting for Allow on the Mac, and the answer (control socket). */
@@ -348,6 +361,21 @@ export async function startCompanionServer(
         }
         return;
       }
+      if (auth && lan && options.icloud && request.url === '/v1/pair/icloud') {
+        // PRD §5.10: no credential beyond the enrolment token from the owner's iCloud, over the pinned TLS.
+        if (request.method !== 'POST') throw new ServerFailure('method-not-allowed');
+        await auth.reservePairAttempt(login);
+        const parsed = IcloudEnrolSchema.safeParse(await pairBody());
+        if (!parsed.success) throw new ServerFailure('invalid-request');
+        const { macId, enrolmentToken, installId, deviceName, model } = parsed.data;
+        if (!await options.icloud.redeem(macId, enrolmentToken)) throw new RemoteAuthFailure('unauthorized');
+        // The same credential and scopes as QR pairing; the install key replaces that install's earlier record.
+        const { code } = await auth.createPairing(login);
+        const issued = await auth.exchange(login, { code, deviceName, installationKey: installId });
+        if (model) void options.presence?.seen(issued.deviceId, model).catch(() => undefined);
+        response.end(JSON.stringify(issued));
+        return;
+      }
       if (!auth || request.url !== '/v1/pair')
         throw new ServerFailure('not-found');
       if (request.method !== 'POST')
@@ -455,6 +483,17 @@ export async function startCompanionServer(
     url: lan ? auth!.baseUrl : `http://${authority}`,
     ...(lan ? { publicKeySha256 } : {}),
     addresses,
+    addressList: () => {
+      if (!lan) return [];
+      const live = (list: string[]) => list.filter(a => extras.has(a));
+      const all = [
+        ...[lanUrl!.hostname, ...live(found.lan)].map(host => ({ kind: 'lan' as const, host })),
+        ...(options.localName ? [{ kind: 'mdns' as const, host: options.localName }] : []),
+        ...live(found.tailscale).map(host => ({ kind: 'tailscale' as const, host })),
+      ];
+      return all.filter((entry, index) => all.findIndex(other => other.host.toLowerCase() === entry.host.toLowerCase()) === index)
+        .slice(0, 8).map(entry => ({ ...entry, port }));
+    },
     ...(nearby ? { nearby: { pending: () => nearby.pending(), answer: (id: string, allow: boolean) => nearby.answer(id, allow) } } : {}),
     close() {
       if (!closing)

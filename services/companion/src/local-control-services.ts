@@ -38,6 +38,8 @@ export interface ControlServices {
   printHandoff?: PrintHandoffServices;
   /** The running server's v2 details (pairing link v2, MAC-5). Without them pairing.create mints v1. */
   pairingLink?: () => {addresses: string[]; publicKeySha256: string; name?: string};
+  /** PRD §5.10: the enrolment token and this Mac's addresses, for the CloudKit `CounterpartMac` record. */
+  icloudToken?: () => Promise<{token: string; expiresAt: string; macId: string; spkiSha256: string; addresses: {kind: 'lan' | 'mdns' | 'tailscale'; host: string; port: number}[]}>;
   /** The event log (PRD §8.7). */
   events?: import('./events/log.js').EventLog;
   liveActivityTokens?: import('./devices/live-activity-tokens.js').LiveActivityTokenStore;
@@ -186,6 +188,11 @@ export function createControlDispatcher(services: ControlServices) {
           await services.liveActivityTokens?.removeDevice(deviceId).catch(() => undefined);
           await services.presence?.forget(deviceId).catch(() => undefined);
           return {removed:true};
+        }
+        case 'pairing.icloudToken': {
+          parameters[method].parse(raw);
+          if (!services.icloudToken) throw new ControlFailure('unavailable');
+          return services.icloudToken();
         }
         case 'pairing.create': {
           let {login} = parameters[method].parse(raw);
