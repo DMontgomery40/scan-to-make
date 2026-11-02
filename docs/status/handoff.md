@@ -30,6 +30,13 @@ insert an identity twice, explicit fit/copy intent wins over legacy inference, a
 does not claim empty phone/printer lists before successful reads. Two fixture-only iPhone Simulator
 UI tests passed: saved Fine/two-copy defaults persist and reach Print, and Duplicate opens ready.
 The test simulator was isolated and deleted afterward; no live project or printer was contacted.
+Final colour-default review fixes use destination-scoped history in both print sheets, the shared
+settings Form, and backend Duplicate. Explicit saved defaults (including no colour) take precedence;
+old tray/external-spool choices transfer only to the same recorded printer. Nine duplication scenarios
+cover changed/default/legacy-alias/unknown destinations and explicit defaults without rewriting source
+history. The affected Node 22 object-service/HTTP suite passes 69 tests; shared Swift passes 136,
+Mac model checks pass 29, and both fixture UI checks pass again. The complete promotion-path audit
+found no other production history-to-defaults consumer; ControlKit's old `init(last:)` has test callers only.
 Project Settings is not yet installed or accepted on the physical devices.
 
 [Apple's ActivityKit push documentation](https://developer.apple.com/documentation/ActivityKit/starting-and-updating-live-activities-with-activitykit-push-notifications)

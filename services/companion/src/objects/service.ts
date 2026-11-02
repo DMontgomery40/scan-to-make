@@ -296,7 +296,7 @@ export class ObjectService {
         const credit = (source as StmObject & {credit?: unknown}).credit;
         const result = await this.#deps.store.update(duplicate.id, o => ({...o, state: 'ready', current,
           title: `${projectTitle(source).slice(0, 114)} copy`, printerDestinationId: source.printerDestinationId,
-          preferences: {...source.preferences, printDefaults: source.preferences?.printDefaults ?? source.print?.settings}, ...(credit ? {credit} : {})}));
+          preferences: {...source.preferences, printDefaults: this.#resolvedPrintDefaults(source)}, ...(credit ? {credit} : {})}));
         await this.#emit({id: randomUUID(), type: 'project.updated', projectId: result.id, data: {keys: ['created']}});
         return this.#changed(result);
       } catch (error) { await this.#deps.store.remove(duplicate.id); throw error; }
@@ -442,6 +442,18 @@ export class ObjectService {
     const catalog = this.#deps.printerCatalog;
     const chosen = object.printerDestinationId ?? catalog?.defaultDestinationId;
     return chosen === undefined ? undefined : catalog?.canonical(chosen) ?? chosen;
+  }
+
+  /** Saved defaults are intentional; a historical spool belongs only to its recorded printer. */
+  #resolvedPrintDefaults(object: StmObject): PrintSettings | undefined {
+    if (object.preferences?.printDefaults !== undefined) return object.preferences.printDefaults;
+    const previous = object.print?.settings;
+    if (!previous) return undefined;
+    const recorded = object.print?.destinationId ?? object.print?.destination?.id;
+    const previousPrinter = recorded === undefined ? undefined : this.#deps.printerCatalog?.canonical(recorded) ?? recorded;
+    if (previousPrinter !== undefined && previousPrinter === this.#destinationId(object)) return previous;
+    const {colour: _colour, ...defaults} = previous;
+    return defaults;
   }
 
   /** A filament profile path mcp-3D-printer-server reports for a loaded material (`slots[].profile`), if any. */

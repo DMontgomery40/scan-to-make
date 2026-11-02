@@ -748,3 +748,34 @@ test('saved project engine reaches the next worker and copies reject Fusion', as
   const copy = await service.create('Copy the clip', 'copy');
   await assert.rejects(service.setProjectSettings(copy.id, {designEngine: 'fusion'}), /cleaned up in Blender/);
 });
+
+
+test('duplicate inherits historical colour only for the same effective printer', async t => {
+  const printerCatalog = {defaultDestinationId: 'printer-b', canonical: id => id === 'old-b-alias' ? 'printer-b' : id, destinations: []};
+  const {service, store, call} = await fixture(t, {printerCatalog});
+  const project = await service.create('Legacy defaults', 'fit');
+  await service.start(project.id); await service.settled(project.id);
+  const independent = {quality: 'fine', strength: 'strong', copies: 2};
+  const history = {...independent, colour: {amsSlot: 3}};
+  const cases = [
+    {name: 'changed printer', chosen: 'printer-b', previous: {destinationId: 'printer-a'}, expected: independent},
+    {name: 'changed default printer', previous: {destinationId: 'printer-a'}, expected: independent},
+    {name: 'same selected printer', chosen: 'printer-a', previous: {destinationId: 'printer-a'}, expected: history},
+    {name: 'same default printer', previous: {destinationId: 'printer-b'}, expected: history},
+    {name: 'legacy destination and canonical alias', previous: {destination: {id: 'old-b-alias'}}, expected: history},
+    {name: 'unknown historical printer', expected: independent},
+    {name: 'explicit profile colour', previous: {destinationId: 'printer-b'}, saved: independent, expected: independent},
+    {name: 'explicit empty defaults', previous: {destinationId: 'printer-b'}, saved: {}, expected: {}},
+    {name: 'explicit colour for new printer', previous: {destinationId: 'printer-a'}, saved: {colour: {amsSlot: 1}}, expected: {colour: {amsSlot: 1}}},
+  ];
+  for (const item of cases) {
+    await store.update(project.id, o => ({...o, printerDestinationId: item.chosen,
+      preferences: item.saved === undefined ? undefined : {printDefaults: item.saved},
+      print: {bundleId: 'old', ...item.previous, settings: history}}));
+    const before = await store.get(project.id);
+    const response = await call('POST', `/v1/objects/${project.id}/duplicate`, {});
+    assert.equal(response.status, 200, item.name);
+    assert.deepEqual(response.json.object.preferences.printDefaults, item.expected, item.name);
+    assert.deepEqual(await store.get(project.id), before, 'duplicating does not rewrite the source history');
+  }
+});
