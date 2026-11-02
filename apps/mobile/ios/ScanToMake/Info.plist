@@ -30,16 +30,17 @@
 			<key>CFBundleURLSchemes</key>
 			<array>
 				<string>scantomake</string>
+				<string>counterpart</string>
 			</array>
 		</dict>
 	</array>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
-	<key>UIFileSharingEnabled</key>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
+	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>LSSupportsOpeningDocumentsInPlace</key>
-	<true/>
-	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSAppTransportSecurity</key>
 	<dict>
@@ -48,35 +49,21 @@
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
-	<key>ITSAppUsesNonExemptEncryption</key>
-	<false/>
-	<key>NSLocalNetworkUsageDescription</key>
-	<string>To find your Mac, Counterpart needs to look on your Wi-Fi.</string>
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_scantomake._tcp</string>
 	</array>
 	<key>NSCameraUsageDescription</key>
 	<string>Counterpart uses the camera, its depth sensing and the LiDAR Scanner to scan the object you want to print, and to read the code on your Mac when you pair.</string>
-	<key>RCTNewArchEnabled</key>
-	<true/>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>To find your Mac, Counterpart needs to look on your Wi-Fi.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
-		<false/>
-		<key>UISceneConfigurations</key>
-		<dict>
-			<key>UIWindowSceneSessionRoleApplication</key>
-			<array>
-				<dict>
-					<key>UISceneConfigurationName</key>
-					<string>Default Configuration</string>
-					<key>UISceneDelegateClassName</key>
-					<string>$(PRODUCT_MODULE_NAME).SceneDelegate</string>
-				</dict>
-			</array>
-		</dict>
+		<true/>
 	</dict>
+	<key>UIFileSharingEnabled</key>
+	<true/>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
 	<key>UIRequiredDeviceCapabilities</key>

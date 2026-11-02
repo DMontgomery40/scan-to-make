@@ -680,6 +680,39 @@ COCOAPODS: 1.15.2
                 )
             self.assertEqual(rc_stale, 1)
 
+    def test_embedded_mobile_modules_listed_without_npm_or_cocoapods(self) -> None:
+        """The Swift app has no lockfiles: modules with LICENSE.txt and PROVENANCE.md are still noticed and audited."""
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            repo = base / "repo"
+            site = base / "site-packages"
+            site.mkdir()
+            policy_path = _create_allowed_repo_fixture(repo, site)
+            mobile = repo / "apps" / "mobile"
+            for name in ("package.json", "package-lock.json", "ios/Podfile.lock"):
+                (mobile / name).unlink(missing_ok=True)
+            module = mobile / "modules" / "sample-capture"
+            _write_text(module / "LICENSE.txt", "Copyright (c) 2024 Example Inc.\n\n" + MIT_TEXT)
+            _write_text(module / "PROVENANCE.md", "# Provenance\n\nRetrieved from the vendor.\n")
+            _write_json(module / "package.json", {"name": "@scan-to-make/sample-capture", "version": "0.0.1", "private": True})
+            # A module without provenance is first-party code, not an embedded third-party module.
+            _write_text(mobile / "modules" / "ours" / "LICENSE.txt", MIT_TEXT)
+
+            rc_write = audit.main(["notices", "--repo-root", str(repo), "--policy", str(policy_path), "--write"])
+            self.assertEqual(rc_write, 0)
+            rendered = (mobile / "THIRD_PARTY_NOTICES.md").read_text(encoding="utf-8")
+            self.assertIn("| `@scan-to-make/sample-capture` | `0.0.1` | `MIT` | `apps/mobile/modules/sample-capture` |", rendered)
+            self.assertIn("Copyright (c) 2024 Example Inc.", rendered)
+            self.assertNotIn("modules/ours", rendered)
+            self.assertNotIn("Podfile.lock`)", rendered.split("This file lists", 1)[1].split("\n", 1)[1])
+            rc_check = audit.main(["notices", "--repo-root", str(repo), "--policy", str(policy_path), "--check"])
+            self.assertEqual(rc_check, 0)
+
+            report = audit.run_audit(repo, policy_path, python_paths=[site])
+            embedded = report["inventory"]["mobileEmbedded"]
+            self.assertEqual([item["name"] for item in embedded], ["@scan-to-make/sample-capture"])
+            self.assertEqual(embedded[0]["status"], "allowed")
+
     def test_mobile_peer_dependencies_traversed_and_absent_optional_peers_ignored(self) -> None:
         # 1. Production package with a resolved GPL-3.0-only peer fails app allowlist
         with tempfile.TemporaryDirectory() as tmp:

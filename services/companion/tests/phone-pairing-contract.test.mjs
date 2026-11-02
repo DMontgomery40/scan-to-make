@@ -8,8 +8,6 @@ import {fileURLToPath} from 'node:url';
 import {X509Certificate} from 'node:crypto';
 import {createServer} from 'node:net';
 import {request} from 'node:https';
-import {runInNewContext} from 'node:vm';
-import ts from 'typescript';
 import {RemoteAuthStore} from '../dist/remote-auth.js';
 import {startCompanionServer} from '../dist/server.js';
 async function fixture(t) {
@@ -30,23 +28,11 @@ function wire(url,cert,path,{method='GET',headers={},body}={}) {
   });req.on('error',reject);req.end(body);
  });
 }
+// The iPhone app (packages/CounterpartKit, Swift) ports this parser rule for rule and is held to the same
+// answers by packages/contracts/fixtures/pairing-link-vectors.json, which this file checks against the parser.
 async function phonePairingParser() {
- // Execute the phone's real TypeScript parser; only its unused native bridge is stubbed.
- const modules={},contract=await import('@scan-to-make/contracts/pairing-link');
- for(const name of ['pairing','pairingLink']){
-  const source=await readFile(new URL(`../../../apps/mobile/src/companion/${name}.ts`,import.meta.url),'utf8');
-  const code=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
-  const module={exports:{}};
-  const require=name=>{
-   if(name==='react-native')return {NativeModules:{}};
-   if(name==='./pairing')return modules.pairing;
-   if(name==='@scan-to-make/contracts/pairing-link')return contract;
-   throw Error(`Unexpected phone parser dependency: ${name}`);
-  };
-  runInNewContext(code,{module,exports:module.exports,require},{filename:`${name}.js`});
-  modules[name]=module.exports;
- }
- return modules.pairingLink.parsePairingQR;
+ const {parsePairingLink}=await import('@scan-to-make/contracts/pairing-link');
+ return text=>parsePairingLink(text,Date.now());
 }
 for(const command of ['pair-capture','pair-capture-and-printer-handoff'])test(`${command} CLI QR with certificate f is accepted by the current phone parser and pairs over HTTPS`,async t=>{
  const f=await fixture(t),parse=await phonePairingParser();
@@ -78,6 +64,16 @@ test('the companion still mints v1 byte-for-byte, and the phone reads a v2 link 
  assert.equal(invite.qrPayload,`scantomake://pair?${q}`);
  const addresses=[f.store.baseUrl,'https://davids-mac-mini.local:9077','https://100.101.102.103:9077'];
  const v2=formatPairingLink({version:2,addresses,code:invite.code,expiresAt:invite.expiresAt,publicKeySha256:'ab'.repeat(32),name:"David's Mac mini"});
- assert.deepEqual({...parse(v2)},{baseUrl:addresses[0],code:invite.code,addresses,publicKeySha256:'ab'.repeat(32),name:"David's Mac mini"});
+ assert.deepEqual({...parse(v2)},{version:2,expiresAt:invite.expiresAt,code:invite.code,addresses,publicKeySha256:'ab'.repeat(32),name:"David's Mac mini"});
  assert.throws(()=>parse(v2.replace('v=2','v=3')),error=>error.code==='unsupported-invitation');
+});
+test('the shared pairing-link vectors are exactly what the parser answers',async()=>{
+ const {parsePairingLink}=await import('@scan-to-make/contracts/pairing-link');
+ const vectors=JSON.parse(await readFile(new URL('../../../packages/contracts/fixtures/pairing-link-vectors.json',import.meta.url),'utf8'));
+ assert.ok(vectors.cases.length>100);
+ for(const item of vectors.cases){
+  let answer;
+  try{answer={parsed:parsePairingLink(item.link,item.now)};}catch(error){answer={error:error.code};}
+  assert.deepEqual(answer,item.parsed?{parsed:item.parsed}:{error:item.error},item.link);
+ }
 });

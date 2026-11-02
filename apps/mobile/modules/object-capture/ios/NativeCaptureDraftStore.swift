@@ -2,11 +2,14 @@ import Foundation
 import CryptoKit
 import Darwin
 
-struct NativeCaptureDestination: Codable, Equatable {
-    let projectId: String
-    let revision: Int
-    let snapshot: String
-    let context: String?
+public struct NativeCaptureDestination: Codable, Equatable {
+    public let projectId: String
+    public let revision: Int
+    public let snapshot: String
+    public let context: String?
+    public init(projectId: String, revision: Int, snapshot: String, context: String?) {
+        self.projectId = projectId; self.revision = revision; self.snapshot = snapshot; self.context = context
+    }
 }
 struct NativeCaptureFile: Codable, Equatable {
     let sha256: String

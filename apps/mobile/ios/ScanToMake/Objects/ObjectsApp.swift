@@ -1,236 +1,18 @@
 import SwiftUI
 import UIKit
 import ImageIO
-import React
+import CounterpartKit
 
-// The phone's app UI, in SwiftUI so it is the system's own iOS 27 design (Liquid Glass bars, toolbars,
-// sheets, lists and buttons). Every network, photo, capture and 3D call goes through the native modules
-// the React Native app already uses and tests (ObjectsBridge, NativeCaptureCoordinator, CompanionPairing),
-// so pairing, pinning and uploads behave exactly as before. Pairing itself stays a React Native screen.
-
-// MARK: - The native modules, called directly
-
-@objc private protocol ObjectsBridgeCalls {
-    @objc(callOptions:resolve:reject:) func call(_ o: NSDictionary, resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock)
-    @objc(sendCaptureOptions:resolve:reject:) func sendCapture(_ o: NSDictionary, resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock)
-    @objc(choosePhotosOptions:resolve:reject:) func choosePhotos(_ o: NSDictionary, resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock)
-    @objc(sendChosenOptions:resolve:reject:) func sendChosen(_ o: NSDictionary, resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock)
-    @objc(pickPhotosOptions:resolve:reject:) func pickPhotos(_ o: NSDictionary, resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock)
-    @objc(takePhotoOptions:resolve:reject:) func takePhoto(_ o: NSDictionary, resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock)
-    @objc(downloadOptions:resolve:reject:) func download(_ o: NSDictionary, resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock)
-    @objc(showModelOptions:resolve:reject:) func showModel(_ o: NSDictionary, resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock)
-    @objc(sendHandheldOptions:resolve:reject:) func sendHandheld(_ o: NSDictionary, resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock)
-}
-@objc private protocol CaptureCalls {
-    @objc(status:reject:) func status(_ resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock)
-    @objc(drafts:reject:) func drafts(_ resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock)
-    @objc(start:resolve:reject:) func start(_ o: NSDictionary, resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock)
-}
-@objc private protocol PairingCalls {
-    @objc(statusResolve:reject:) func status(_ resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock)
-    @objc(checkResolve:reject:) func check(_ resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock)
-}
-
-/// A refusal in one sentence the screen can show as it is.
-struct MacError: Error, Equatable {
-    var code: String
-    var message: String
-    var needsPairing: Bool { ["pairing-required", "pairing-changed", "certificate-changed", "scope-denied", "pairing"].contains(code) }
-    static let unreachable = MacError(code: "unreachable", message: "Your Mac isn't answering. Check it's on and awake, then try again.")
-}
-
-private func native(_ name: String) -> NSObject? { (NSClassFromString(name) as? NSObject.Type)?.init() }
-
-@MainActor private func promise(_ body: (@escaping RCTPromiseResolveBlock, @escaping RCTPromiseRejectBlock) -> Void) async throws -> Any? {
-    try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Any?, Error>) in
-        var done = false
-        body({ value in
-            guard !done else { return }; done = true
-            continuation.resume(returning: value)
-        }, { code, message, _ in
-            guard !done else { return }; done = true
-            continuation.resume(throwing: MacError(code: code ?? "failed", message: message ?? "Something went wrong talking to your Mac. Try again."))
-        })
-    }
-}
-
-/// The Mac, through the paired, pinned connection the native modules keep.
-@MainActor final class MacConnection {
-    private let bridge = native("ObjectsBridge").map { unsafeBitCast($0, to: ObjectsBridgeCalls.self) }
-    private let captureModule = native("NativeCaptureCoordinator").map { unsafeBitCast($0, to: CaptureCalls.self) }
-    private let pairingModule = native("CompanionPairing").map { unsafeBitCast($0, to: PairingCalls.self) }
-
-    private func require<T>(_ value: T?) throws -> T {
-        guard let value else { throw MacError(code: "unavailable", message: "This needs the iPhone app.") }
-        return value
-    }
-
-    private func request<T: Decodable>(_ method: String, _ path: String, _ json: [String: Any]? = nil, as type: T.Type) async throws -> T {
-        let bridge = try require(bridge)
-        var options: [String: Any] = ["method": method, "path": path]
-        if let json { options["json"] = json }
-        let reply = try await promise { bridge.call(options as NSDictionary, resolve: $0, reject: $1) } as? [String: Any]
-        let status = reply?["status"] as? Int ?? 0
-        let data = Data(((reply?["body"] as? String) ?? "").utf8)
-        if (200..<300).contains(status) {
-            do { return try JSONDecoder().decode(T.self, from: data) }
-            catch { throw MacError(code: "invalid-response", message: "Your Mac sent something this app doesn't understand. Update both apps.") }
-        }
-        let error = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? [String: Any]
-        let message = error?["message"] as? String
-        switch status {
-        case 401, 403: throw MacError(code: "pairing", message: "Connect to your Mac again.")
-        case 404 where path == "/v1/objects": throw MacError(code: "not-set-up", message: "Your Mac isn't ready to make things yet. Open Counterpart on your Mac.")
-        case 404 where path.hasSuffix("/filaments"): throw MacError(code: "not-set-up", message: "Update Counterpart on your Mac to choose a filament here.")
-        case 404: throw MacError(code: "not-found", message: "This is no longer on your Mac.")
-        case 409: throw MacError(code: "conflict", message: message ?? "Wait until the current step finishes.")
-        default: throw MacError(code: "failed", message: "Something went wrong on your Mac. Try again.")
-        }
-    }
-    private struct ObjectReply: Decodable { var object: StmObject }
-    private struct ListReply: Decodable { var objects: [StmObject] }
-    private struct Deleted: Decodable { var deleted: Bool }
-
-    func printers() async throws -> PrinterCatalog { try await request("GET", "/v1/objects/printers", as: PrinterCatalog.self) }
-    private struct FilamentsReply: Decodable { var filaments: [PrinterFilament] }
-    func filaments(_ id: String) async throws -> [PrinterFilament] {
-        try await request("GET", "/v1/objects/\(id)/filaments", as: FilamentsReply.self).filaments
-    }
-    private struct ActivityReply: Decodable { var activity: [StmObject.Activity] }
-    func passActivity(_ id: String, index: Int) async throws -> [StmObject.Activity] {
-        try await request("GET", "/v1/objects/\(id)/passes/\(index)/activity", as: ActivityReply.self).activity
-    }
-    func selectPrinter(_ id: String, destinationId: String) async throws -> StmObject {
-        try await request("POST", "/v1/objects/\(id)/printer", ["destinationId": destinationId], as: ObjectReply.self).object
-    }
-    func list() async throws -> [StmObject] { try await request("GET", "/v1/objects", as: ListReply.self).objects }
-    func get(_ id: String) async throws -> StmObject { try await request("GET", "/v1/objects/\(id)", as: ObjectReply.self).object }
-    func create(_ instructions: String) async throws -> StmObject {
-        let text = instructions.trimmingCharacters(in: .whitespacesAndNewlines)
-        return try await request("POST", "/v1/objects", text.isEmpty ? [:] : ["instructions": text], as: ObjectReply.self).object
-    }
-    func updateDraft(_ id: String, instructions: String) async throws -> StmObject {
-        try await request("PATCH", "/v1/objects/\(id)", ["instructions": instructions], as: ObjectReply.self).object
-    }
-    func start(_ id: String, captureManifest: [String: Any]? = nil) async throws -> StmObject {
-        try await request("POST", "/v1/objects/\(id)/start", captureManifest.map { ["captureManifest": $0] }, as: ObjectReply.self).object
-    }
-    func correct(_ id: String, _ note: String) async throws -> StmObject { try await request("POST", "/v1/objects/\(id)/corrections", ["note": note], as: ObjectReply.self).object }
-    func closeup(_ id: String, bestGuess: Bool) async throws -> StmObject { try await request("POST", "/v1/objects/\(id)/closeup", ["bestGuess": bestGuess], as: ObjectReply.self).object }
-    func print(_ id: String, checked: Bool, filament: PrinterFilament) async throws -> StmObject {
-        guard let choice = try JSONSerialization.jsonObject(with: JSONEncoder().encode(filament)) as? [String: Any] else {
-            throw MacError(code: "invalid-request", message: "Couldn’t prepare this filament choice.")
-        }
-        return try await request("POST", "/v1/objects/\(id)/print", ["checked":checked, "filament":choice], as: ObjectReply.self).object
-    }
-    func plateClear(_ id: String) async throws -> StmObject { try await request("POST", "/v1/objects/\(id)/plate", ["clear": true], as: ObjectReply.self).object }
-    func answerPrintConfirmation(_ id: String, response: PrintConfirmationResponse) async throws -> StmObject {
-        let json = try JSONSerialization.jsonObject(with: JSONEncoder().encode(response)) as? [String: Any]
-        return try await request("POST", "/v1/objects/\(id)/print-confirmation", json, as: ObjectReply.self).object
-    }
-    func delete(_ id: String) async throws { _ = try await request("DELETE", "/v1/objects/\(id)", as: Deleted.self) }
-
-    /// Photos picked for a new object; they stay on this phone until sent.
-    func choosePhotos(limit: Int) async throws -> [ChosenPhoto] {
-        let bridge = try require(bridge)
-        let chosen = try await promise { bridge.choosePhotos(["limit": limit] as NSDictionary, resolve: $0, reject: $1) } as? [[String: Any]] ?? []
-        return chosen.compactMap { item in
-            guard let id = item["id"] as? String, let uri = item["uri"] as? String, let url = URL(string: uri) else { return nil }
-            return ChosenPhoto(id: id, url: url)
-        }
-    }
-    func sendChosen(_ id: String, _ photos: [ChosenPhoto]) async throws {
-        guard !photos.isEmpty else { return }
-        let bridge = try require(bridge)
-        _ = try await promise { bridge.sendChosen(["objectId": id, "ids": photos.map(\.id)] as NSDictionary, resolve: $0, reject: $1) }
-    }
-    /// Close-ups for an object that asked for them; sent as soon as they're picked or taken.
-    func addCloseups(_ id: String, camera: Bool) async throws -> Int {
-        let bridge = try require(bridge)
-        let reply = try await promise {
-            if camera { bridge.takePhoto(["objectId": id] as NSDictionary, resolve: $0, reject: $1) }
-            else { bridge.pickPhotos(["objectId": id, "limit": 12] as NSDictionary, resolve: $0, reject: $1) }
-        } as? [String: Any]
-        return reply?["photosSent"] as? Int ?? 0
-    }
-    func download(_ object: StmObject, _ name: String) async throws -> URL? {
-        let bridge = try require(bridge)
-        let reply = try await promise {
-            bridge.download(["objectId": object.id, "name": name, "version": object.mediaVersion] as NSDictionary, resolve: $0, reject: $1)
-        } as? [String: Any]
-        return (reply?["uri"] as? String).flatMap(URL.init(string:))
-    }
-    func showModel(_ object: StmObject) async throws {
-        let bridge = try require(bridge)
-        _ = try await promise { bridge.showModel(["objectId": object.id, "version": object.mediaVersion] as NSDictionary, resolve: $0, reject: $1) }
-    }
-
-    // LiDAR capture: the native Object Capture flow, with the object's id as its origin, so a finished
-    // scan that wasn't sent is found again and sent.
-    func canScan() async -> Bool {
-        guard let captureModule else { return false }
-        let status = (try? await promise { captureModule.status($0, reject: $1) }) as? [String: Any]
-        return status?["supported"] as? Bool == true && status?["lidar"] as? Bool != false
-    }
-    func scan(_ id: String) async throws -> String? {
-        let captureModule = try require(captureModule)
-        let origin: [String: Any] = ["projectId": id, "revision": 0, "snapshot": "{}", "context": NSNull()]
-        let draft = try await promise { captureModule.start(origin as NSDictionary, resolve: $0, reject: $1) } as? [String: Any]
-        return draft?["status"] as? String == "ready" ? draft?["runID"] as? String : nil
-    }
-    func finishedScan(_ id: String) async -> String? {
-        guard let captureModule else { return nil }
-        let drafts = (try? await promise { captureModule.drafts($0, reject: $1) }) as? [[String: Any]] ?? []
-        let draft = drafts.first { ($0["origin"] as? [String: Any])?["projectId"] as? String == id }
-        return draft?["status"] as? String == "ready" ? draft?["runID"] as? String : nil
-    }
-    /// Sends the scan's model and up to 24 of its own photos (only what the Mac lacks), then starts.
-    func sendScan(_ id: String, run: String) async throws -> StmObject {
-        try await sendCapture(id, run: run)
-        return try await start(id)
-    }
-    /// Sends the scan's model and photos without starting, so chosen photos can go with them.
-    func sendCapture(_ id: String, run: String) async throws {
-        let bridge = try require(bridge)
-        _ = try await promise { bridge.sendCapture(["objectId": id, "runID": run, "maxPhotos": 24] as NSDictionary, resolve: $0, reject: $1) }
-    }
-
-    /// A handheld scan's photos (HandheldCapture.swift); the Mac rebuilds the model, then touches it up.
-    private struct HandheldManifest: Decodable {
-        var version: Int
-        var images: [String]
-        var depthRequired: Bool
-    }
-    func sendHandheld(_ id: String) async throws -> StmObject {
-        let bridge = try require(bridge)
-        let reply = try await promise { bridge.sendHandheld(["objectId": id] as NSDictionary, resolve: $0, reject: $1) } as? [String: Any]
-        guard let raw = reply?["captureManifest"] as? [String: Any],
-              JSONSerialization.isValidJSONObject(raw),
-              let data = try? JSONSerialization.data(withJSONObject: raw),
-              let manifest = try? JSONDecoder().decode(HandheldManifest.self, from: data),
-              manifest.version == 1, (1...10000).contains(manifest.images.count),
-              manifest.images == manifest.images.sorted(), Set(manifest.images).count == manifest.images.count,
-              manifest.images.allSatisfy({ $0.range(of: "^[0-9]{4}\\.heic$", options: .regularExpression) != nil }) else {
-            throw MacError(code: "invalid-response", message: "The capture upload didn't confirm all saved frames. Your capture is still saved on this phone.")
-        }
-        return try await start(id, captureManifest: raw)
-    }
-
-    struct Pairing: Equatable { var paired: Bool; var address: String? }
-    func pairing(check: Bool) async -> Pairing {
-        guard let pairingModule else { return Pairing(paired: false, address: nil) }
-        let reply = (try? await promise { check ? pairingModule.check($0, reject: $1) : pairingModule.status($0, reject: $1) }) as? [String: Any]
-        let address = (reply?["baseUrl"] as? String).flatMap(URL.init(string:))?.host
-        return Pairing(paired: reply?["state"] as? String == "paired", address: address)
-    }
-}
-
-struct ChosenPhoto: Identifiable, Equatable { var id: String; var url: URL }
+// The phone's project screens, in SwiftUI. Every network, photo, capture and 3D call goes through
+// MacConnection (CounterpartKit's pinned companion client), so pairing, pinning and uploads behave exactly
+// as they always have.
 
 // MARK: - State
 
 @MainActor @Observable final class ObjectsStore {
-    let mac = MacConnection()
+    let mac: MacConnection
+    let pairingClient: PairingClient
+    init(mac: MacConnection, pairing: PairingClient) { self.mac = mac; self.pairingClient = pairing }
     var objects: [StmObject] = []
     var loaded = false
     var error: MacError?
@@ -279,21 +61,34 @@ struct ChosenPhoto: Identifiable, Equatable { var id: String; var url: URL }
         return catalog.destinations.first { $0.id == (object.printerDestinationId ?? catalog.defaultDestinationId) }
     }
     var anyBusy: Bool { objects.contains { ObjectWords($0).busy } }
-    func refreshConnection(check: Bool = false) async { connection = await mac.pairing(check: check) }
+    func refreshConnection(check: Bool = false) async {
+        let status: PairingStatus?
+        if check { status = try? await pairingClient.check() } else { status = try? pairingClient.store.status() }
+        let fallback = try? pairingClient.store.status()
+        let current = status ?? fallback
+        connection = MacConnection.Pairing(paired: current?.state == .paired, address: current?.host)
+    }
 }
 
 let cobalt = Color(uiColor: UIColor { $0.userInterfaceStyle == .dark
     ? UIColor(red: 0x3A / 255, green: 0x63 / 255, blue: 0xF2 / 255, alpha: 1)
     : UIColor(red: 0x24 / 255, green: 0x48 / 255, blue: 0xD8 / 255, alpha: 1) })
 
-private extension ObjectWords.Tone {
+typealias ObjectWords = ProjectWords
+typealias ObjectAction = ProjectAction
+
+private extension ProjectWords {
+    var tone: Tone { phase.tone }
+}
+
+private extension Tone {
     var color: Color {
         switch self {
-        case .pass: .green
-        case .fail: .red
+        case .printing: .green
+        case .failed: .red
         case .accent: cobalt
-        case .pending: .orange
-        case .neutral: .secondary
+        case .needsYou, .working: .orange
+        case .secondary: .secondary
         }
     }
 }
@@ -1676,34 +1471,4 @@ struct SettingsView: View {
         }
         .tint(cobalt)
     }
-}
-
-// MARK: - Hosting inside the React Native shell
-
-/// The React Native view that shows the SwiftUI app. `pairingKey` changes after pairing, so the app reloads;
-/// `onPair` asks the shell to show its pairing screen.
-@objc(STMObjectsAppView)
-public final class STMObjectsAppView: UIView {
-    @objc public var pairingKey: NSNumber = 0 { didSet { render() } }
-    @objc public var onPair: RCTDirectEventBlock? { didSet { store.onPair = { [weak self] in self?.onPair?([:]) } } }
-    private let store = ObjectsStore()
-    private var host: UIHostingController<ObjectsRootView>?
-
-    public override func didMoveToWindow() {
-        super.didMoveToWindow()
-        guard window != nil, host == nil else { return }
-        let host = UIHostingController(rootView: ObjectsRootView(store: store, pairingKey: pairingKey.intValue))
-        // A child of the nearest view controller, so navigation bars, sheets and dialogs work.
-        var responder: UIResponder? = self
-        while let next = responder?.next, !(next is UIViewController) { responder = next }
-        (responder?.next as? UIViewController)?.addChild(host)
-        host.view.frame = bounds
-        host.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        host.view.backgroundColor = .clear
-        addSubview(host.view)
-        host.didMove(toParent: host.parent)
-        self.host = host
-    }
-    private func render() { host?.rootView = ObjectsRootView(store: store, pairingKey: pairingKey.intValue) }
-    public override func layoutSubviews() { super.layoutSubviews(); host?.view.frame = bounds }
 }

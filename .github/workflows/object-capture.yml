@@ -5,12 +5,16 @@ on:
     paths:
       - 'apps/mobile/modules/object-capture/**'
       - 'apps/mobile/scripts/native-object-capture-tests/**'
+      # The in-hand recorder and the retry paths it checks live in the app.
+      - 'apps/mobile/ios/ScanToMake/Objects/**'
       - '.github/workflows/object-capture.yml'
   push:
     branches: [main]
     paths:
       - 'apps/mobile/modules/object-capture/**'
       - 'apps/mobile/scripts/native-object-capture-tests/**'
+      # The in-hand recorder and the retry paths it checks live in the app.
+      - 'apps/mobile/ios/ScanToMake/Objects/**'
       - '.github/workflows/object-capture.yml'
 permissions:
   contents: read

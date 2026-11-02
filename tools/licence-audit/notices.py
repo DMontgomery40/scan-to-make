@@ -13,7 +13,7 @@ import re
 import sys
 from typing import Any
 
-from inventory import inventory_cocoapods, inventory_mobile_npm, inventory_workspace_npm
+from inventory import inventory_cocoapods, inventory_mobile_embedded_modules, inventory_mobile_npm, inventory_workspace_npm
 from spdx import FIRST_PARTY, UNKNOWN
 
 _SPDX_URL_SAFE_RE = re.compile(r"^[A-Za-z0-9.\-+]+$")
@@ -71,6 +71,9 @@ def generate_third_party_notices(repo_root: Path, policy: dict[str, Any]) -> str
         if item.get("scope") == "app" and item.get("production")
     ]
     cocoapods = inventory_cocoapods(repo_root, policy)
+    embedded_modules = inventory_mobile_embedded_modules(repo_root)
+    mobile_lock = (repo_root / "apps" / "mobile" / "package-lock.json").is_file()
+    pods_lock = (repo_root / "apps" / "mobile" / "ios" / "Podfile.lock").is_file()
 
     # Register verbatim licence texts keyed by normalized SHA-256 prefix
     notice_texts: dict[str, str] = {}
@@ -98,7 +101,7 @@ def generate_third_party_notices(repo_root: Path, policy: dict[str, Any]) -> str
     # 2. External production npm dependencies deduplicated by (name, version)
     npm_by_key: dict[tuple[str, str], dict[str, Any]] = {}
 
-    for item in mobile_npm + app_workspace_npm:
+    for item in mobile_npm + app_workspace_npm + embedded_modules:
         if item.get("firstParty"):
             continue
         pkg_path = str(item.get("packagePath") or "")
@@ -183,12 +186,15 @@ def generate_third_party_notices(repo_root: Path, policy: dict[str, Any]) -> str
             }
         )
 
+    sources = ["embedded modules (`apps/mobile/modules/*` with `LICENSE.txt` and `PROVENANCE.md`)"]
+    if mobile_lock:
+        sources.append("`apps/mobile/package-lock.json` (production dependency closure) and linked workspace package lockfiles")
+    if pods_lock:
+        sources.append("`apps/mobile/ios/Podfile.lock`")
     out: list[str] = [
         "# Third-Party Notices (`apps/mobile`)",
         "",
-        "This file lists third-party software packages and native pods resolved from",
-        "`apps/mobile/package-lock.json` (production dependency closure), linked workspace",
-        "package lockfiles, and `apps/mobile/ios/Podfile.lock`.",
+        "This file lists the third-party software in the iPhone and iPad app: " + ", ".join(sources) + ".",
         "",
         "- Regenerate: `python3 tools/licence-audit/audit.py notices --write`",
         "- Verify freshness: `python3 tools/licence-audit/audit.py notices --check`",
@@ -211,41 +217,44 @@ def generate_third_party_notices(repo_root: Path, policy: dict[str, Any]) -> str
             )
         out.append("")
 
-    out.extend(
-        [
-            "## iOS CocoaPods (`apps/mobile/ios/Podfile.lock`)",
-            "",
-            "| Pod | Version | Licence | Source | Notice |",
-            "| --- | --- | --- | --- | --- |",
-        ]
-    )
-    if pod_rows:
-        for row in sorted(pod_rows, key=lambda r: (r["name"].lower(), r["name"], r["version"])):
-            out.append(
-                f"| `{_escape_md_cell(row['name'])}` | `{_escape_md_cell(row['version'])}` "
-                f"| `{_escape_md_cell(row['licence'])}` | {row['source']} | {row['noticeRef']} |"
-            )
-    else:
-        out.append("| _None_ | — | — | — | — |")
-    out.append("")
+    # The Swift app has no CocoaPods or npm closure; their sections appear only when those lockfiles exist.
+    if pods_lock or pod_rows:
+        out.extend(
+            [
+                "## iOS CocoaPods (`apps/mobile/ios/Podfile.lock`)",
+                "",
+                "| Pod | Version | Licence | Source | Notice |",
+                "| --- | --- | --- | --- | --- |",
+            ]
+        )
+        if pod_rows:
+            for row in sorted(pod_rows, key=lambda r: (r["name"].lower(), r["name"], r["version"])):
+                out.append(
+                    f"| `{_escape_md_cell(row['name'])}` | `{_escape_md_cell(row['version'])}` "
+                    f"| `{_escape_md_cell(row['licence'])}` | {row['source']} | {row['noticeRef']} |"
+                )
+        else:
+            out.append("| _None_ | — | — | — | — |")
+        out.append("")
 
-    out.extend(
-        [
-            "## Production npm Packages (`apps/mobile/package-lock.json`)",
-            "",
-            "| Package | Version | Licence | Source | Notice |",
-            "| --- | --- | --- | --- | --- |",
-        ]
-    )
-    if npm_rows:
-        for row in sorted(npm_rows, key=lambda r: (r["name"].lower(), r["name"], r["version"])):
-            out.append(
-                f"| `{_escape_md_cell(row['name'])}` | `{_escape_md_cell(row['version'])}` "
-                f"| `{_escape_md_cell(row['licence'])}` | {row['source']} | {row['noticeRef']} |"
-            )
-    else:
-        out.append("| _None_ | — | — | — | — |")
-    out.append("")
+    if mobile_lock or npm_rows:
+        out.extend(
+            [
+                "## Production npm Packages (`apps/mobile/package-lock.json`)",
+                "",
+                "| Package | Version | Licence | Source | Notice |",
+                "| --- | --- | --- | --- | --- |",
+            ]
+        )
+        if npm_rows:
+            for row in sorted(npm_rows, key=lambda r: (r["name"].lower(), r["name"], r["version"])):
+                out.append(
+                    f"| `{_escape_md_cell(row['name'])}` | `{_escape_md_cell(row['version'])}` "
+                    f"| `{_escape_md_cell(row['licence'])}` | {row['source']} | {row['noticeRef']} |"
+                )
+        else:
+            out.append("| _None_ | — | — | — | — |")
+        out.append("")
 
     out.extend(
         [
