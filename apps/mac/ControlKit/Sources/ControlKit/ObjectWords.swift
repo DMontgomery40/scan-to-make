@@ -34,13 +34,16 @@ public enum ObjectAction: Sendable, Equatable {
 
 /// The sidebar's sections (PRD §7.2), in order. Every stage belongs to exactly one.
 public enum ProjectGroup: Int, Sendable, Equatable, CaseIterable, Comparable {
-    case now, needsYou, ready, printed
+    /// Done: the person said it works (PRD §5.4). Archived: hidden from the others, collapsed, everything kept.
+    case now, needsYou, ready, done, printed, archived
     public var title: String {
         switch self {
         case .now: return "Now"
         case .needsYou: return "Needs you"
         case .ready: return "Ready"
+        case .done: return "Done"
         case .printed: return "Printed"
+        case .archived: return "Archived"
         }
     }
     public static func < (a: Self, b: Self) -> Bool { a.rawValue < b.rawValue }
@@ -64,6 +67,8 @@ public struct ObjectWords: Sendable, Equatable {
     /// Printing progress, 0…1, when the printer reports it.
     public let progress: Double?
     public let actions: [ObjectAction]
+    /// The person said it works (`confirmed`, PRD §5.4): it shows under Done with the ✓, and can be printed again.
+    public let done: Bool
 
     /// "38 min", "1 h 12 min".
     public static func formatMinutes(_ minutes: Double) -> String { Format.duration(max(0, minutes) * 60) ?? "0 min" }
@@ -90,16 +95,19 @@ public struct ObjectWords: Sendable, Equatable {
         // ("Sending to your Mac") rather than as a phone's unsent draft.
         let words = ProjectWords(project, sending: object.state == .new, printerName: printer, now: now)
         title = words.title
+        done = object.status?.phase == "confirmed" || object.state.rawValue == "confirmed"
         // The printer asking for a yes needs the person, also from a companion that doesn't write its own phase yet.
-        stage = object.printConfirmation != nil && object.status == nil ? .needsYou : words.phase
-        status = words.line
+        stage = object.printConfirmation != nil && object.status == nil ? .needsYou : done ? .confirmed : words.phase
+        status = done ? (object.status?.text.isEmpty == false ? object.status!.text : "It works") : words.line
         // A new project waits on the phone; the Mac can't tell an upload from an abandoned draft, so it isn't busy
         // (it would keep the Mac awake and polling for good).
         busy = object.state == .new ? false : words.busy || words.phase.isRunning
         size = words.size
-        actions = words.actions.compactMap(ObjectAction.init)
-        capsule = stage.label
-        group = Self.group(stage)
+        // Done stays printable ("Print Another…") and changeable, as a printed project is.
+        actions = done && object.current != nil ? [object.print?.uncertain == true ? .printChecked : .print, .correct]
+            : words.actions.compactMap(ObjectAction.init)
+        capsule = done ? "Done" : stage.label
+        group = done ? .done : Self.group(stage)
         if object.printConfirmation != nil {
             question = "\(printer ?? "Your printer") needs a yes before printing"
         } else if stage == .needsYou || object.state == .needsCloseup {
@@ -120,7 +128,8 @@ public struct ObjectWords: Sendable, Equatable {
         case .draft, .sending, .working, .preparing, .printing, .unknown: return .now
         case .needsYou, .failed: return .needsYou
         case .ready: return .ready
-        case .printed, .sent, .confirmed: return .printed
+        case .confirmed: return .done
+        case .printed, .sent: return .printed
         }
     }
 }

@@ -35,8 +35,11 @@ public struct PrintSettings: Sendable, Equatable {
     public var quality: Quality
     public var strength: Strength
     public var colour: Colour?
-    public init(quality: Quality = .standard, strength: Strength = .standard, colour: Colour? = nil) {
-        self.quality = quality; self.strength = strength; self.colour = colour
+    /// How many on the plate (`capabilities.printCopies`), only when the person picked a number: nil sends nothing,
+    /// so the printer profile's own count applies (one named overrides a profile set to three, KAN-214 #230).
+    public var copies: Int?
+    public init(quality: Quality = .standard, strength: Strength = .standard, colour: Colour? = nil, copies: Int? = nil) {
+        self.quality = quality; self.strength = strength; self.colour = colour; self.copies = copies
     }
     /// The `objects.print` fields: standard values are left out.
     public var params: [String: JSONValue] {
@@ -50,6 +53,7 @@ public struct PrintSettings: Sendable, Equatable {
         case .material(let material)?: params["colour"] = .object(["material": .string(material)])
         case nil: break
         }
+        if let copies { params["copies"] = .number(Double(copies)) }
         return params
     }
 }
@@ -316,14 +320,16 @@ public struct PrinterCapabilities: Decodable, Sendable, Equatable {
     public let pause: Bool, resume: Bool, cancel: Bool
     public let quality: Bool, strength: Bool
     public let multiColour: Bool?
+    /// This printer's MCP can put several on the plate (`slice_stl` `repetitions`, KAN-214 PR 8b).
+    public let copies: Bool?
     public let missing: [String]?
     public let update: Update?
     public init(server: Server? = nil, progress: Bool = true, layers: Bool? = nil, camera: String = "none", filaments: String = "none",
                 pause: Bool = false, resume: Bool = false, cancel: Bool = false, quality: Bool = false, strength: Bool = false,
-                multiColour: Bool? = nil, missing: [String]? = nil, update: Update? = nil) {
+                multiColour: Bool? = nil, copies: Bool? = nil, missing: [String]? = nil, update: Update? = nil) {
         self.server = server; self.progress = progress; self.layers = layers; self.camera = camera; self.filaments = filaments
         self.pause = pause; self.resume = resume; self.cancel = cancel; self.quality = quality; self.strength = strength
-        self.multiColour = multiColour; self.missing = missing; self.update = update
+        self.multiColour = multiColour; self.copies = copies; self.missing = missing; self.update = update
     }
 }
 public struct PrinterCatalog: Decodable, Sendable, Equatable {
@@ -331,5 +337,36 @@ public struct PrinterCatalog: Decodable, Sendable, Equatable {
     public let defaultDestinationId: String
     public init(destinations: [PrinterDestination], defaultDestinationId: String) {
         self.destinations = destinations; self.defaultDestinationId = defaultDestinationId
+    }
+}
+
+public extension PrintSettings {
+    /// Print Another (PRD §5.4): the settings the last print was sent with, so a reprint is the same print. Standard,
+    /// and the suggested colour, for what it didn't record.
+    init(last: Project.Print?) {
+        let saved = last?.settings
+        var colour: Colour?
+        if case .object(let value)? = saved?.colour {
+            if case .number(let slot)? = value["amsSlot"] { colour = .amsSlot(Int(slot)) }
+            else if value["external"] == .bool(true) { colour = .external }
+            else if case .string(let material)? = value["material"] { colour = .material(material) }
+            else if value["auto"] == .bool(true) { colour = .auto }
+        }
+        self.init(quality: saved?.quality.flatMap(Quality.init(rawValue:)) ?? .standard,
+                  strength: saved?.strength.flatMap(Strength.init(rawValue:)) ?? .standard, colour: colour)
+    }
+
+    /// The spool the last print used: the same slot when it is the same printer, or a loaded spool of the material it
+    /// was sliced for (the suggested one first). Nil for the suggestion again, or when nothing loaded matches.
+    static func lastSlot(_ colour: Colour?, lastPrinter: String?, printer: String?, in filaments: [PrinterFilament]) -> Int? {
+        let samePrinter = lastPrinter != nil && lastPrinter == printer
+        switch colour {
+        case .amsSlot(let slot)? where samePrinter: return filaments.first { $0.slot == slot && !$0.external }?.slot
+        case .external? where samePrinter: return filaments.first(where: \.external)?.slot
+        case .material(let material)?:
+            let matching = filaments.filter { $0.material.caseInsensitiveCompare(material) == .orderedSame }
+            return (matching.first { $0.suggested == true } ?? matching.first)?.slot
+        default: return nil
+        }
     }
 }

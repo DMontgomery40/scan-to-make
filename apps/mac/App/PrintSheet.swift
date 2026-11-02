@@ -21,10 +21,25 @@ struct PrintSheet: View {
     @State private var keptSuggestion = true
     @State private var quality = PrintSettings.Quality.standard
     @State private var strength = PrintSettings.Strength.standard
+    @State private var copies = 1
+    /// The person changed Copies; until then the printer profile's own count applies.
+    @State private var copiesPicked = false
     @State private var checked = false
     @State private var estimate: PrintEstimate?
     @State private var estimateState = Loading.idle
     enum Loading: Equatable { case idle, loading, done, failed(String) }
+
+    /// The last print's colour, chosen again when its printer and spool are (Print Another, PRD §5.4).
+    private let lastColour: PrintSettings.Colour?
+
+    init(opened: Project, model: ObjectsModel) {
+        self.opened = opened
+        _model = ObservedObject(wrappedValue: model)
+        let last = PrintSettings(last: opened.print)
+        _quality = State(initialValue: last.quality)
+        _strength = State(initialValue: last.strength)
+        lastColour = last.colour
+    }
 
     private var object: Project { model.objects.first { $0.id == opened.id } ?? opened }
     private var printer: PrinterDestination? { model.printer(for: object) }
@@ -61,7 +76,13 @@ struct PrintSheet: View {
                         Text("Max").tag(PrintSettings.Strength.max)
                     }
                     .pickerStyle(.segmented).labelsHidden().disabled(!offersStrength)
+                    if offersCopies {
+                        Stepper(value: Binding(get: { copies }, set: { copies = $0; copiesPicked = true }), in: 1...64) {
+                            Text(copiesPicked ? "Copies: \(copies)" : "Copies: as the printer profile says").font(.headline)
+                        }
+                    }
                     estimateLine
+                    if offersCopies && copiesPicked && copies > 1 { Text("The estimate is for one.").font(.caption).foregroundStyle(.secondary) }
                 }
             }
             if uncertain {
@@ -159,6 +180,8 @@ struct PrintSheet: View {
 
     private var offersQuality: Bool { settingsServed && (printer?.capabilities?.quality ?? true) }
     private var offersStrength: Bool { settingsServed && (printer?.capabilities?.strength ?? true) }
+    /// Copies need the companion (`printCopies`) and this printer's MCP (`capabilities.copies`): copies are per printer.
+    private var offersCopies: Bool { model.capabilities?.printCopies == true && printer?.capabilities?.copies == true }
 
     @ViewBuilder private var estimateLine: some View {
         switch estimateState {
@@ -204,7 +227,8 @@ struct PrintSheet: View {
     }
 
     private func send() {
-        let settings = PrintSettings(quality: offersQuality ? quality : .standard, strength: offersStrength ? strength : .standard, colour: colour)
+        let settings = PrintSettings(quality: offersQuality ? quality : .standard, strength: offersStrength ? strength : .standard, colour: colour,
+                                     copies: offersCopies && copiesPicked ? copies : nil)
         let filament = chosen
         Task { if await model.print(object.id, checked: uncertain && checked, settings: settings, filament: filament) { dismiss() } }
     }
@@ -216,8 +240,13 @@ struct PrintSheet: View {
             guard !Task.isCancelled else { return }
             filaments = list
             let suggested = list.first { $0.suggested == true }
-            slot = suggested?.slot ?? (list.count == 1 ? list[0].slot : nil)
-            keptSuggestion = suggested != nil
+            if let last = PrintSettings.lastSlot(lastColour, lastPrinter: opened.print?.destinationId, printer: printer?.id, in: list) {
+                slot = last
+                keptSuggestion = false
+            } else {
+                slot = suggested?.slot ?? (list.count == 1 ? list[0].slot : nil)
+                keptSuggestion = suggested != nil
+            }
             filamentState = .done
         } catch {
             guard !Task.isCancelled else { return }

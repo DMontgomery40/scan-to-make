@@ -34,6 +34,8 @@ protocol ObjectsCompanion: Sendable {
     func objectsWithExtras() async throws -> (projects: [Project], extras: [String: PublishedExtras])
     func answerAsk(_ id: String, askId: String, choices: [String]) async throws -> Project
     func createPublished(url: String, instructions: String?) async throws -> Project
+    /// Project Settings (PRD §5.4): `status` or `archived`.
+    func setProjectSettings(_ id: String, _ patch: [String: JSONValue]) async throws -> Project
 }
 
 extension ObjectsCompanion {
@@ -60,6 +62,7 @@ extension ObjectsCompanion {
     func objectsWithExtras() async throws -> (projects: [Project], extras: [String: PublishedExtras]) { (try await objects(), [:]) }
     func answerAsk(_ id: String, askId: String, choices: [String]) async throws -> Project { throw ControlClientError.unavailable }
     func createPublished(url: String, instructions: String?) async throws -> Project { throw ControlClientError.unavailable }
+    func setProjectSettings(_ id: String, _ patch: [String: JSONValue]) async throws -> Project { throw ControlClientError.unavailable }
 }
 
 /// The control socket. A fresh client per call, so a missing socket fails that call, not the model.
@@ -79,6 +82,9 @@ struct SocketObjects: ObjectsCompanion {
     }
     func createPublished(url: String, instructions: String?) async throws -> Project {
         try await ControlClient(socketPath:path).createPublished(url:url, instructions:instructions)
+    }
+    func setProjectSettings(_ id: String, _ patch: [String: JSONValue]) async throws -> Project {
+        try await ControlClient(socketPath:path).setProjectSettings(id, patch)
     }
     func correct(_ id: String, note: String) async throws -> Project { try await ControlClient(socketPath:path).correctObject(id, note:note) }
     func answerCloseup(_ id: String, bestGuess: Bool) async throws -> Project { try await ControlClient(socketPath:path).answerCloseup(id, bestGuess:bestGuess) }
@@ -158,7 +164,8 @@ struct SocketObjects: ObjectsCompanion {
 
     /// The sidebar (PRD §7.2): Now, Needs you, Ready, Printed, each newest first. Empty groups are left out.
     var groups: [(group: ProjectGroup, objects: [Project])] {
-        let words = Dictionary(uniqueKeysWithValues:objects.map { ($0.id, $0.words.group) })
+        // An archived project leaves its group for Archived, whatever its status (which Unarchive restores).
+        let words = Dictionary(uniqueKeysWithValues:objects.map { ($0.id, extras[$0.id]?.archived == true ? .archived : $0.words.group) })
         return ProjectGroup.allCases.compactMap { group in
             let members = objects.filter { words[$0.id] == group }
             return members.isEmpty ? nil : (group, members)
@@ -374,6 +381,21 @@ struct SocketObjects: ObjectsCompanion {
         await change(id) { try await self.companion.addFile(id, kind:"model", path:file.path) }
     }
 
+    /// Project Settings' Status (PRD §5.4): `not-printed`, `printed`, `works` (Done), `needs-changes`.
+    @discardableResult func setStatus(_ status: String, for id: String) async -> Bool {
+        guard capabilities?.projectSettings == true else { return false }
+        let done = await change(id) { try await self.companion.setProjectSettings(id, ["status": .string(status)]) }
+        if done { await refresh() } // the settings the sidebar and "Did it fit?" read
+        return done
+    }
+    /// Archive hides a project from the sidebar's groups and keeps everything; Unarchive brings its status back.
+    @discardableResult func setArchived(_ archived: Bool, for id: String) async -> Bool {
+        guard capabilities?.projectSettings == true else { return false }
+        let done = await change(id) { try await self.companion.setProjectSettings(id, ["archived": .bool(archived)]) }
+        if done { await refresh() }
+        return done
+    }
+
     /// Answers a `choice` Ask (plates, objects, colours) with the options picked.
     @discardableResult func answerAsk(_ id: String, askId: String, choices: [String]) async -> Bool {
         guard !choices.isEmpty else { return false }
@@ -495,4 +517,17 @@ struct SocketObjects: ObjectsCompanion {
 
 private extension String {
     var nilIfEmpty: String? { isEmpty ? nil : self }
+}
+
+/// PRD §5.4: after printing, "Did it fit?" It works marks the project Done (`status: works`); Needs changes starts Ask
+/// for changes with "After printing: " and keeps the print history. Asked once per print: an answer, or Not Now, ends
+/// it until the next print finishes.
+enum DidItFit {
+    /// This project's last print.
+    static func key(_ object: Project) -> String { "fit.dismissed.\(object.id).\(object.print?.printId ?? object.print?.bundleId ?? "")" }
+    /// Whether to ask: not once it's answered (Needs changes is the answer the companion keeps) or set aside.
+    static func asks(_ object: Project, _ extras: PublishedExtras?, defaults: UserDefaults = .standard) -> Bool {
+        extras?.status != "needs-changes" && !defaults.bool(forKey: key(object))
+    }
+    static func dismiss(_ object: Project, defaults: UserDefaults = .standard) { defaults.set(true, forKey: key(object)) }
 }

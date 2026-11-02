@@ -34,6 +34,7 @@
 		3C44C99FC2ED039D691F25C6 /* MacStatusModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 81F869DA19C2B26065AAF581 /* MacStatusModel.swift */; };
 		3DC3AA5F72A5359487CBF13A /* PairingWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D69C6D9C935E91492BF71E4 /* PairingWindow.swift */; };
 		41E6E16B1111A02496D50670 /* UnixTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = F883FAAC0FC2F4C62EA7B853 /* UnixTransport.swift */; };
+		4A6BFE051577702B7680A03E /* BlenderBridgeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F97236849B06E8C6E6FE33F7 /* BlenderBridgeTests.swift */; };
 		4EE9B641DE5C7C16CF7343A5 /* ModelMesh.swift in Sources */ = {isa = PBXBuildFile; fileRef = A23E6083F6062B543A95EE19 /* ModelMesh.swift */; };
 		4FC608CAB60EF4726FCB47E8 /* ObjectsModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5F06994F3DC2679FF8587BB /* ObjectsModel.swift */; };
 		52B7AB859F3BB9583DD551AF /* ModelAccess.swift in Sources */ = {isa = PBXBuildFile; fileRef = 395FAD075324D0E7AA16BA42 /* ModelAccess.swift */; };
@@ -65,6 +66,7 @@
 		A03BE4C208A3F744C58E2033 /* NoBedCheckTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B5969ACC53D7C5EA38A1FD2 /* NoBedCheckTests.swift */; };
 		A0E5DD6215B393751ABBF3DE /* UnixTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = F883FAAC0FC2F4C62EA7B853 /* UnixTransport.swift */; };
 		A2B32923C3B51ACAF1B96258 /* Events.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5843CF243A6B90D769EE203F /* Events.swift */; };
+		A796400E932A3592C2F1CD6F /* BlenderBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33A62B559A27E940358D1924 /* BlenderBridge.swift */; };
 		AA8A4960648DEA5F67A8ACB2 /* PairingSessionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 666DD15803F0A0C9F25C5AB3 /* PairingSessionTests.swift */; };
 		AB148F95612F23763B83F124 /* CompanionSettingsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 65E3A0D63F7083BD2ECAB4E5 /* CompanionSettingsTests.swift */; };
 		AE855366D17081C32A3DF4E9 /* Diagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1496538ABC8C1B43DD7C1B15 /* Diagnostics.swift */; };
@@ -74,6 +76,7 @@
 		BA0F02ADB0934148886ED85D /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = 1D14D3233B33902B236A90C8 /* Sparkle */; };
 		BAF1A1C7C03E0182232FEFA5 /* ModelKeychain.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F489172C7C02B2C5FD93371 /* ModelKeychain.swift */; };
 		BDC8064662448F9AD28A1E09 /* ModelAccessModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA5042DB008B425E2606B911 /* ModelAccessModel.swift */; };
+		C2DB30294BD395175341B8E5 /* BlenderBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33A62B559A27E940358D1924 /* BlenderBridge.swift */; };
 		C4EA24E23D16F3944224C11D /* Confirmation.swift in Sources */ = {isa = PBXBuildFile; fileRef = D25DA0A9EC41FEC7B93D7FC6 /* Confirmation.swift */; };
 		C50E045E8C794D5DBE750B9A /* NotificationPrefs.swift in Sources */ = {isa = PBXBuildFile; fileRef = 04530A8CA650F101ADAE8AB8 /* NotificationPrefs.swift */; };
 		C6B573A4A78875903AD76ED9 /* ModelAccessModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA5042DB008B425E2606B911 /* ModelAccessModel.swift */; };
@@ -157,6 +160,7 @@
 		2E2BD0F29478556FD0C62A83 /* MacStatusModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacStatusModelTests.swift; sourceTree = "<group>"; };
 		2E40641D5842346F76EB19B3 /* NetworkAddresses.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkAddresses.swift; sourceTree = "<group>"; };
 		3319AED6056A50D85042664F /* Inspector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Inspector.swift; sourceTree = "<group>"; };
+		33A62B559A27E940358D1924 /* BlenderBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BlenderBridge.swift; sourceTree = "<group>"; };
 		395FAD075324D0E7AA16BA42 /* ModelAccess.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelAccess.swift; sourceTree = "<group>"; };
 		3B814B01D67995804A9C7A30 /* PrintSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrintSheet.swift; sourceTree = "<group>"; };
 		3CA7B62CECAFC01E6A31515A /* NearbyModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NearbyModel.swift; sourceTree = "<group>"; };
@@ -208,6 +212,7 @@
 		F42D3DDC4E340B3763151AD3 /* ModelAccess.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelAccess.swift; sourceTree = "<group>"; };
 		F6F496F4AF4B9CFF607CE85C /* NearbyViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NearbyViews.swift; sourceTree = "<group>"; };
 		F883FAAC0FC2F4C62EA7B853 /* UnixTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnixTransport.swift; sourceTree = "<group>"; };
+		F97236849B06E8C6E6FE33F7 /* BlenderBridgeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BlenderBridgeTests.swift; sourceTree = "<group>"; };
 		FBB383B9DEFCA66744C36B14 /* ControlClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ControlClient.swift; sourceTree = "<group>"; };
 		FD9DBB2EF82457ECF76708AF /* LocalNetworkAccess.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalNetworkAccess.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -312,6 +317,7 @@
 			isa = PBXGroup;
 			children = (
 				AD88AEEFC08611A87FA75FE2 /* Assets.xcassets */,
+				33A62B559A27E940358D1924 /* BlenderBridge.swift */,
 				82E682F2C777DDBCE67DFA31 /* CloudSync.swift */,
 				C7E10258D71E1A28BE7C0F61 /* CompanionModel.swift */,
 				C3DD660C3DBD81EE6B5FCF9A /* CompanionSettingsModel.swift */,
@@ -351,6 +357,7 @@
 		CD945642CB7F8D1164371067 /* AppTests */ = {
 			isa = PBXGroup;
 			children = (
+				F97236849B06E8C6E6FE33F7 /* BlenderBridgeTests.swift */,
 				65E3A0D63F7083BD2ECAB4E5 /* CompanionSettingsTests.swift */,
 				41E2E1E9E7D4F8125FC6CDC2 /* EventRelayTests.swift */,
 				2E2BD0F29478556FD0C62A83 /* MacStatusModelTests.swift */,
@@ -530,6 +537,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A796400E932A3592C2F1CD6F /* BlenderBridge.swift in Sources */,
 				7B20A7488495F67499D47A1B /* CloudSync.swift in Sources */,
 				CDAC222A911270AB01F443E8 /* CompanionModel.swift in Sources */,
 				790A649A81726C39D2C2D1A1 /* CompanionSettingsModel.swift in Sources */,
@@ -579,6 +587,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				685F7884CACEC1D1FA9A8105 /* AgentManagerTests.swift in Sources */,
+				C2DB30294BD395175341B8E5 /* BlenderBridge.swift in Sources */,
+				4A6BFE051577702B7680A03E /* BlenderBridgeTests.swift in Sources */,
 				AB148F95612F23763B83F124 /* CompanionSettingsTests.swift in Sources */,
 				C4EA24E23D16F3944224C11D /* Confirmation.swift in Sources */,
 				D64FFB6E46FFDF1015F113A5 /* ControlClient.swift in Sources */,

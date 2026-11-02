@@ -63,7 +63,14 @@ final class ObjectWordsTests: XCTestCase {
         XCTAssertEqual(object(["state": "archived"]).words.group, .now)
         XCTAssertEqual(object(["state": "failed"]).words.group, .needsYou)
         XCTAssertEqual(ObjectWords.group(.draft), .now)
-        XCTAssertEqual(Set(ProjectStage.allCases.map(ObjectWords.group)), Set(ProjectGroup.allCases))
+        XCTAssertTrue(Set(ProjectStage.allCases.map(ObjectWords.group)).isSubset(of: Set(ProjectGroup.allCases)))
+        let done = ready(["state": "confirmed", "status": ["phase": "confirmed", "text": "It works", "symbol": "checkmark.circle.fill", "tint": "green"]]).words
+        XCTAssertTrue(done.done)
+        XCTAssertEqual(done.group, .done, "the person said it works: Done, with the ✓")
+        XCTAssertEqual(done.capsule, "Done")
+        XCTAssertEqual(done.status, "It works")
+        XCTAssertTrue(done.actions.contains(.print), "a Done project can be printed again")
+        XCTAssertFalse(ready(["state": "printed"]).words.done)
         XCTAssertEqual(ProjectStage.needsYou.rawValue, "needs-you", "the companion's phase, the phone's and CloudKit's")
     }
 
@@ -159,6 +166,41 @@ final class PrintSettingsTests: XCTestCase {
         XCTAssertEqual(chosen["colour"], .object(["amsSlot": .number(2)]))
         XCTAssertEqual(PrintSettings(colour: .auto).params["colour"], .object(["auto": .bool(true)]), "the user kept the preselection")
         XCTAssertEqual(PrintSettings(colour: .external).params["colour"], .object(["external": .bool(true)]))
+        XCTAssertNil(PrintSettings().params["copies"], "untouched Copies: the printer profile's own count")
+        XCTAssertEqual(PrintSettings(copies: 1).params["copies"], .number(1), "one picked overrides a profile set to three")
+    }
+
+    /// Print Another (PRD §5.4) opens with what the last print was sent with.
+    func testPrintAnotherStartsFromTheLastPrintsSettings() throws {
+        let last = try JSONDecoder().decode(Project.Print.self, from: Data("""
+        {"bundleId":"b","destinationId":"x1c","settings":{"quality":"fine","strength":"max","colour":{"amsSlot":3}}}
+        """.utf8))
+        let settings = PrintSettings(last: last)
+        XCTAssertEqual(settings.quality, .fine)
+        XCTAssertEqual(settings.strength, .max)
+        XCTAssertEqual(settings.colour, .amsSlot(3))
+        XCTAssertEqual(PrintSettings(last: nil), PrintSettings(), "a first print starts at Standard")
+        let spools = [PrinterFilament(slot: 1, colour: "#fff", material: "PLA", name: "White", filamentId: "a", destinationId: "x1c", suggested: true),
+                      PrinterFilament(slot: 3, colour: "#000", material: "PETG", name: "Black", filamentId: "b", destinationId: "x1c"),
+                      PrinterFilament(slot: 254, colour: "#f00", material: "TPU", name: "Red", filamentId: "c", destinationId: "x1c")]
+        XCTAssertEqual(PrintSettings.lastSlot(.amsSlot(3), lastPrinter: "x1c", printer: "x1c", in: spools), 3)
+        XCTAssertEqual(PrintSettings.lastSlot(.external, lastPrinter: "x1c", printer: "x1c", in: spools), 254)
+        XCTAssertNil(PrintSettings.lastSlot(.amsSlot(3), lastPrinter: "x1c", printer: "a1", in: spools), "slots belong to their printer")
+        XCTAssertNil(PrintSettings.lastSlot(.amsSlot(4), lastPrinter: "x1c", printer: "x1c", in: spools), "that spool is gone")
+        XCTAssertNil(PrintSettings.lastSlot(.auto, lastPrinter: "x1c", printer: "x1c", in: spools), "the suggestion again")
+        XCTAssertEqual(PrintSettings.lastSlot(.material("petg"), lastPrinter: "x1c", printer: "a1", in: spools), 3,
+                       "the material it was sliced for, on any printer, never the PLA suggestion")
+        XCTAssertNil(PrintSettings.lastSlot(.material("ASA"), lastPrinter: "x1c", printer: "x1c", in: spools), "nothing loaded matches")
+        let petg = try JSONDecoder().decode(Project.Print.self, from: Data(#"{"bundleId":"b","settings":{"colour":{"material":"PETG"}}}"#.utf8))
+        XCTAssertEqual(PrintSettings(last: petg).colour, .material("PETG"))
+    }
+
+    /// Copies are per printer (KAN-214 PR 8b): an MCP without `slice_stl` repetitions doesn't say `copies`.
+    func testCopiesAreAPrintersOwnCapability() throws {
+        let with = try JSONDecoder().decode(PrinterCapabilities.self, from: Data(#"{"progress":true,"camera":"none","filaments":"ams","pause":true,"resume":true,"cancel":true,"quality":true,"strength":true,"copies":true}"#.utf8))
+        XCTAssertEqual(with.copies, true)
+        let without = try JSONDecoder().decode(PrinterCapabilities.self, from: Data(#"{"progress":true,"camera":"none","filaments":"none","pause":false,"resume":false,"cancel":false,"quality":false,"strength":false}"#.utf8))
+        XCTAssertNil(without.copies)
     }
 
     func testTheEstimateAndSuggestedTrayDecodeFromTheCompanion() throws {

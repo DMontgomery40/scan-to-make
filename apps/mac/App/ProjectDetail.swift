@@ -13,19 +13,37 @@ struct ProjectDetail: View {
     @ObservedObject var model: ObjectsModel
     let print: () -> Void
     @State private var note = ""
+    @FocusState private var noteFocused: Bool
     @State private var photos: [URL] = []
     @State private var dropProblem: String?
     @State private var targeted = false
     @State private var stopping = false
 
     private var words: ObjectWords { object.words }
+
+    /// The state; with Project Settings, also the menu that sets it (Done for something printed elsewhere, PRD §5.4).
+    @ViewBuilder private var statusCapsule: some View {
+        if model.capabilities?.projectSettings == true {
+            Menu {
+                ProjectStatusItems(object: object, model: model)
+            } label: {
+                StatusCapsule(stage: words.stage, text: words.capsule, done: words.done, menu: true)
+            }
+            .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
+            .disabled(working)
+            .help("Set the status: Not Printed, Printed, Done or Needs Changes")
+            .accessibilityLabel("Status: \(words.capsule)")
+        } else {
+            StatusCapsule(stage: words.stage, text: words.capsule, done: words.done)
+        }
+    }
     private var working: Bool { model.working.contains(object.id) }
     private var takesPhotos: Bool { model.capabilities?.objectsCreate == true }
 
     var body: some View {
         ZStack(alignment: .bottom) {
             stage
-                .overlay(alignment: .topLeading) { StatusCapsule(stage: words.stage, text: words.capsule).padding(.top, 70).padding(.leading, 24) }
+                .overlay(alignment: .topLeading) { statusCapsule.padding(.top, 70).padding(.leading, 24) }
                 .overlay(alignment: .topTrailing) {
                     if let size = words.size {
                         Text(size).font(.callout.monospacedDigit().weight(.semibold))
@@ -97,6 +115,13 @@ struct ProjectDetail: View {
                 FileAskCard(object: object, ask: model.extras[object.id]!.fileAsk!, model: model)
             case .needsYou where model.extras[object.id]?.choiceAsk != nil:
                 ChoiceAskCard(object: object, ask: model.extras[object.id]!.choiceAsk!, model: model).id(model.extras[object.id]!.choiceAsk!.id)
+            case .printed where !words.done && model.capabilities?.projectSettings == true && DidItFit.asks(object, model.extras[object.id]):
+                DidItFitCard(object: object, model: model, published: model.extras[object.id]?.credit != nil) {
+                    // Keep a correction the person had already started.
+                    if note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { note = "After printing: " }
+                    noteFocused = true
+                }
+                .id(DidItFit.key(object))
             case .needsYou: needsYou
             case .working, .sending, .preparing: progressCard
             case .printing: printingCard
@@ -215,7 +240,7 @@ struct ProjectDetail: View {
                             }
                     }
                     TextField(takesPhotos ? "Ask for changes. Drop photos here too…" : "Ask for changes…", text: $note)
-                        .textFieldStyle(.plain)
+                        .textFieldStyle(.plain).focused($noteFocused)
                         .onSubmit(send)
                         .disabled(!canCorrect)
                     if !note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !photos.isEmpty {
@@ -230,7 +255,7 @@ struct ProjectDetail: View {
                 if words.actions.contains(.retry) && object.current == nil {
                     EmptyView()
                 } else {
-                    Button(action: print) { Label("Print…", systemImage: "printer.fill").padding(.horizontal, 6).frame(height: 30) }
+                    Button(action: print) { Label(words.done ? "Print Another…" : "Print…", systemImage: "printer.fill").padding(.horizontal, 6).frame(height: 30) }
                         .buttonStyle(.glassProminent).controlSize(.extraLarge)
                         .disabled(!canPrint)
                         .help(model.printer(for: object) == nil ? "No printer found in your printer MCP’s settings." : "")
@@ -504,5 +529,41 @@ private struct ChoiceAskCard: View {
 
     private func send(_ choices: [String]) {
         Task { await model.answerAsk(object.id, askId: ask.id, choices: choices) }
+    }
+}
+
+private struct DidItFitCard: View {
+    let object: Project
+    @ObservedObject var model: ObjectsModel
+    /// A published model: "Did it come out right?" (PRD §8.11).
+    let published: Bool
+    let needsChanges: () -> Void
+    @State private var hidden = false
+    private var working: Bool { model.working.contains(object.id) }
+
+    var body: some View {
+        if !hidden {
+            HStack(spacing: 12) {
+                Image(systemName: "questionmark.circle.fill").font(.title2).foregroundStyle(Color.filament)
+                Text(published ? "Did it come out right?" : "Did it fit?").font(.subheadline.weight(.semibold))
+                Spacer()
+                Button("Not Now") { DidItFit.dismiss(object); hidden = true }.buttonStyle(.plain).foregroundStyle(.secondary)
+                Button("Needs Changes") {
+                    Task {
+                        guard await model.setStatus("needs-changes", for: object.id) else { return }
+                        DidItFit.dismiss(object)
+                        hidden = true
+                        needsChanges()
+                    }
+                }
+                .buttonStyle(.glass).disabled(working)
+                Button {
+                    Task { if await model.setStatus("works", for: object.id) { DidItFit.dismiss(object); hidden = true } }
+                } label: { Label("It Works", systemImage: "checkmark.circle.fill") }
+                    .buttonStyle(.glassProminent).disabled(working)
+            }
+            .padding(12).frame(maxWidth: .infinity, alignment: .leading)
+            .glassEffect(.regular, in: .rect(cornerRadius: 14))
+        }
     }
 }

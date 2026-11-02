@@ -45,14 +45,19 @@ public struct ControlStatus: Decodable, Sendable {
         public let mcpUpdates: Bool
         /// Published models (PRD §8.11): `objects.create {url}`, `file` and `choice` Asks, `kind: "model"` files.
         public let publishedModels: Bool
-        private enum CodingKeys: String, CodingKey { case capture, cleanup, printerHandoff, nearbyPairing, objectsCreate, events, printControl, printSettings, structuredPasses, genericConfirmations, mcpUpdates, publishedModels }
+        /// Project Settings (PRD §5.4): `objects.settings.set {id, status | archived}`, the Done state.
+        public let projectSettings: Bool
+        /// `copies` on `objects.print` and `objects.estimate`.
+        public let printCopies: Bool
+        private enum CodingKeys: String, CodingKey { case capture, cleanup, printerHandoff, nearbyPairing, objectsCreate, events, printControl, printSettings, structuredPasses, genericConfirmations, mcpUpdates, publishedModels, projectSettings, printCopies }
         public init(capture: Bool = true, cleanup: Bool = true, printerHandoff: Bool = true, nearbyPairing: Bool = false,
                     objectsCreate: Bool = false, events: Bool = false, printControl: Bool = false, printSettings: Bool = false,
-                    structuredPasses: Bool = false, genericConfirmations: Bool = false, mcpUpdates: Bool = false, publishedModels: Bool = false) {
+                    structuredPasses: Bool = false, genericConfirmations: Bool = false, mcpUpdates: Bool = false, publishedModels: Bool = false,
+                    projectSettings: Bool = false, printCopies: Bool = false) {
             self.capture = capture; self.cleanup = cleanup; self.printerHandoff = printerHandoff; self.nearbyPairing = nearbyPairing
             self.objectsCreate = objectsCreate; self.events = events; self.printControl = printControl; self.printSettings = printSettings
             self.structuredPasses = structuredPasses; self.genericConfirmations = genericConfirmations; self.mcpUpdates = mcpUpdates
-            self.publishedModels = publishedModels
+            self.publishedModels = publishedModels; self.projectSettings = projectSettings; self.printCopies = printCopies
         }
         public init(from decoder: Decoder) throws {
             let values = try decoder.container(keyedBy: CodingKeys.self)
@@ -68,6 +73,8 @@ public struct ControlStatus: Decodable, Sendable {
             genericConfirmations = try values.decodeIfPresent(Bool.self, forKey: .genericConfirmations) ?? false
             mcpUpdates = try values.decodeIfPresent(Bool.self, forKey: .mcpUpdates) ?? false
             publishedModels = try values.decodeIfPresent(Bool.self, forKey: .publishedModels) ?? false
+            projectSettings = try values.decodeIfPresent(Bool.self, forKey: .projectSettings) ?? false
+            printCopies = try values.decodeIfPresent(Bool.self, forKey: .printCopies) ?? false
         }
     }
     public let protocolVersion: Int

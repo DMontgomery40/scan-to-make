@@ -9,6 +9,35 @@ private actor FakeObjects: ObjectsCompanion {
     private(set) var calls: [String] = []
     private(set) var confirmationAnswer: PrintConfirmationAnswer?
     func set(_ items: [[String: Any]]) { self.items = items }
+    private(set) var settingsPatches: [String: [String: JSONValue]] = [:]
+    private var capabilities: ControlStatus.Capabilities?
+    func setCapabilities(_ capabilities: ControlStatus.Capabilities) { self.capabilities = capabilities }
+    func status() async throws -> ControlStatus {
+        guard let capabilities else { throw ControlClientError.unavailable }
+        return ControlStatus(companionVersion: "test", pairedDeviceCount: 1, capabilities: capabilities)
+    }
+    func objectsWithExtras() async throws -> (projects: [Project], extras: [String: PublishedExtras]) {
+        let list = try await objects()
+        var extras: [String: PublishedExtras] = [:]
+        for item in items {
+            if let id = item["id"] as? String, let data = try? JSONSerialization.data(withJSONObject: item),
+               let found = try? JSONDecoder().decode(PublishedExtras.self, from: data), found != PublishedExtras() { extras[id] = found }
+        }
+        return (list, extras)
+    }
+    func setProjectSettings(_ id: String, _ patch: [String: JSONValue]) async throws -> Project {
+        settingsPatches[id, default: [:]].merge(patch) { $1 }
+        let item = items.first { $0["id"] as? String == id }
+        var settings = item?["settings"] as? [String: Any] ?? ["status": "printed", "archived": false]
+        var fields: [String: Any] = [:]
+        if case .string(let status)? = patch["status"] {
+            if status == "archived" { settings["archived"] = true } else { settings["status"] = status }
+            if status == "works" { fields["state"] = "confirmed"; fields["status"] = ["phase": "confirmed", "text": "It works", "symbol": "checkmark.circle.fill", "tint": "green"] }
+        }
+        if case .bool(let archived)? = patch["archived"] { settings["archived"] = archived }
+        fields["settings"] = settings
+        return try change(id, "settings", fields)
+    }
     func failList(with error: Error?) { listError = error }
     func failActions(with error: Error?) { actionError = error }
 
@@ -46,6 +75,10 @@ private actor FakeObjects: ObjectsCompanion {
 private func item(_ id: String, _ state: String, _ fields: [String: Any] = [:]) -> [String: Any] {
     ["id": id, "createdAtMs": 1, "updatedAtMs": 1, "state": state, "photos": [], "passes": [], "directory": "/tmp/\(id)",
      "current": ["model": "current/model.stl", "renders": []]].merging(fields) { $1 }
+}
+
+private func project(_ item: [String: Any]) throws -> Project {
+    try JSONDecoder().decode(Project.self, from: JSONSerialization.data(withJSONObject: item))
 }
 
 @MainActor final class ObjectsModelTests: XCTestCase {
@@ -297,4 +330,42 @@ private func item(_ id: String, _ state: String, _ fields: [String: Any] = [:]) 
         XCTAssertEqual(model.selection, "b")
         XCTAssertEqual(model.problem, ObjectsModel.Problem(id:"b", text:"This is printing. Delete it once the print is done."))
     }
+
+    func testDoneIsAStatusTheSidebarShowsAndArchiveIsSeparate() async {
+        let companion = FakeObjects()
+        await companion.set([item("m", "printed", ["current": ["model": "current/model.stl", "renders": []],
+                                                    "print": ["bundleId": "b", "monitor": ["phase": "ended", "endState": "done"]]])])
+        await companion.setCapabilities(.init(objectsCreate: true, projectSettings: true))
+        let model = ObjectsModel(companion: companion)
+        await model.refresh()
+        XCTAssertEqual(model.groups.map(\.group), [.printed])
+        let done = await model.setStatus("works", for: "m")
+        XCTAssertTrue(done)
+        let patches = await companion.settingsPatches
+        XCTAssertEqual(patches["m"], ["status": .string("works")], "Done is the `works` status, set through Project Settings")
+        await model.refresh()
+        XCTAssertEqual(model.groups.map(\.group), [.done], "It works moves it to Done")
+        XCTAssertTrue(model.objects[0].words.actions.contains(.print), "Done stays printable: Print Another…")
+        _ = await model.setArchived(true, for: "m")
+        XCTAssertEqual(model.groups.map(\.group), [.archived], "Archive hides it in Archived, separate from Done")
+        let archive = await companion.settingsPatches
+        XCTAssertEqual(archive["m"]?["archived"], .bool(true), "a flag, not a status")
+        XCTAssertEqual(archive["m"]?["status"], .string("works"), "Archive never changes the status")
+        _ = await model.setArchived(false, for: "m")
+        XCTAssertEqual(model.groups.map(\.group), [.done], "Unarchive brings Done back")
+    }
+
+    /// "Did it fit?" is asked once per print: answering Needs Changes (or Not Now) ends it until the next print.
+    func testDidItFitIsAskedOncePerPrint() throws {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: "fit-\(UUID().uuidString)"))
+        let first = try project(item("m", "printed", ["print": ["bundleId": "b1", "printId": "p1"]]))
+        XCTAssertTrue(DidItFit.asks(first, nil, defaults: defaults))
+        let answered = try JSONDecoder().decode(PublishedExtras.self, from: Data(#"{"settings":{"status":"needs-changes","archived":false}}"#.utf8))
+        XCTAssertFalse(DidItFit.asks(first, answered, defaults: defaults), "Needs Changes is an answer")
+        DidItFit.dismiss(first, defaults: defaults)
+        XCTAssertFalse(DidItFit.asks(first, nil, defaults: defaults), "Not Now sets this print aside")
+        let next = try project(item("m", "printed", ["print": ["bundleId": "b2", "printId": "p2"]]))
+        XCTAssertTrue(DidItFit.asks(next, nil, defaults: defaults), "the next print asks again")
+    }
+
 }
