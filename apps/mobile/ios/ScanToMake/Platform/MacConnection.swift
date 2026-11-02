@@ -31,8 +31,8 @@ typealias MacError = CompanionError
     func create(_ instructions: String, kind: String? = nil) async throws -> StmObject { try await client.create(instructions, kind: kind) }
     func updateDraft(_ id: String, instructions: String) async throws -> StmObject { try await client.updateDraft(id, instructions: instructions) }
     func start(_ id: String, captureManifest: [String: Any]? = nil) async throws -> StmObject { try await client.start(id, captureManifest: captureManifest) }
-    func correct(_ id: String, _ note: String) async throws -> StmObject { try await client.correct(id, note) }
-    func closeup(_ id: String, bestGuess: Bool) async throws -> StmObject { try await client.answerAsk(id, bestGuess: bestGuess) }
+    func correct(_ id: String, _ note: String, photoNames: [String]? = nil) async throws -> StmObject { try await client.correct(id, note, photoNames: photoNames) }
+    func closeup(_ id: String, bestGuess: Bool, photoNames: [String] = []) async throws -> StmObject { try await client.answerAsk(id, bestGuess: bestGuess, photoNames: photoNames) }
     func answerPrintConfirmation(_ id: String, response: PrintConfirmationResponse) async throws -> StmObject {
         try await client.answerPrintConfirmation(id, response: response)
     }
@@ -114,22 +114,23 @@ typealias MacError = CompanionError
     }
 
     /// Sends chosen photos; they leave this phone's cache once the Mac has every one.
-    func sendChosen(_ id: String, _ photos: [ChosenPhoto]) async throws {
+    func sendChosen(_ id: String, _ photos: [ChosenPhoto], forMessage: Bool = false) async throws {
         guard !photos.isEmpty else { return }
         let files = photos.map { UploadFile.image($0.url, name: "photo-\($0.id)") }
-        try await uploader.send(files, to: id)
+        try await uploader.send(files, to: id, forMessage: forMessage)
         for photo in photos { try? FileManager.default.removeItem(at: photo.url) }
     }
 
     /// Close-ups for a project that asked for them, sent as soon as they're taken or picked.
-    func addCloseups(_ id: String, camera: Bool) async throws -> Int {
+    func addCloseups(_ id: String, camera: Bool, forMessage: Bool = false) async throws -> [String] {
         let photos: [PickedPhoto]
         if camera { photos = try await PhotoSources.takePhoto().map { [$0] } ?? [] }
         else { photos = try await PhotoSources.pick(limit: 12) }
-        guard !photos.isEmpty else { return 0 }
+        guard !photos.isEmpty else { return [] }
         let files = photos.map { UploadFile(kind: .photo, name: PhotoSources.closeupName($0.ext), source: .bytes($0.data),
                                             type: $0.ext == "png" ? "image/png" : $0.ext == "heic" ? "image/heic" : "image/jpeg") }
-        return try await uploader.send(files, to: id)
+        _ = try await uploader.send(files, to: id, forMessage: forMessage)
+        return files.map(\.name)
     }
 
     // MARK: Scans
@@ -140,11 +141,15 @@ typealias MacError = CompanionError
         return status["supported"] as? Bool == true && status["lidar"] as? Bool != false
     }
 
-    /// Opens the walk-around scan for a project. The run id when it finished with a model, else nil.
+    /// Opens the walk-around scan. Returns a ready run only when Add to this project was chosen.
     func scan(_ id: String) async throws -> String? {
+        // A new capture choice replaces an earlier failed Send. Keep for later must not inherit that
+        // old automatic-resume request; the files remain available when Send is explicitly pressed.
+        try? FileManager.default.removeItem(at: Self.requestedFile(id))
         do {
             let draft = try await NativeCaptureCoordinator.shared.start(NativeCaptureDestination(projectId: id, revision: 0, snapshot: "{}", context: nil))
-            return draft["status"] as? String == "ready" ? draft["runID"] as? String : nil
+            guard draft["addRequested"] as? Bool == true, draft["status"] as? String == "ready" else { return nil }
+            return draft["runID"] as? String
         } catch {
             throw MacError(code: "capture-error", message: error.localizedDescription)
         }
@@ -153,8 +158,10 @@ typealias MacError = CompanionError
     /// A finished scan for this project still on the phone, so a send cut short can resume.
     func finishedScan(_ id: String) async -> String? {
         let drafts = (try? NativeCaptureCoordinator.shared.drafts()) ?? []
-        let draft = drafts.first { ($0["origin"] as? [String: Any])?["projectId"] as? String == id }
-        return draft?["status"] as? String == "ready" ? draft?["runID"] as? String : nil
+        let draft = drafts.first {
+            $0["status"] as? String == "ready" && ($0["origin"] as? [String: Any])?["projectId"] as? String == id
+        }
+        return draft?["runID"] as? String
     }
 
     /// The walk-around scan's model while it's still on this phone: the project page shows it until the Mac
@@ -164,7 +171,9 @@ typealias MacError = CompanionError
         if let folder = Fixtures.folder { return folder.appending(path: "scanB.usdz") }
         #endif
         let drafts = (try? NativeCaptureCoordinator.shared.drafts()) ?? []
-        guard let run = drafts.first(where: { ($0["origin"] as? [String: Any])?["projectId"] as? String == id })?["runID"] as? String,
+        guard let run = drafts.first(where: {
+            $0["status"] as? String == "ready" && ($0["origin"] as? [String: Any])?["projectId"] as? String == id
+        })?["runID"] as? String,
               UUID(uuidString: run) != nil, run == run.lowercased() else { return nil }
         let model = URL.documentsDirectory.appending(path: "NativeCaptures/\(run)/Models/model-mobile.usdz")
         return (try? model.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true ? model : nil

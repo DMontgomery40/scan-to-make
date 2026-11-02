@@ -96,6 +96,34 @@ import CounterpartKit
         XCTAssertEqual(LastTray.slot(id, destinationId: "current"), 254)
     }
 
+    func testRequestedSendSurvivesANewerDraftRefreshButNotAPairingReset() throws {
+        let store = AppModel(store: Fixtures.store()).projects
+        let draft = Project(id: "draft", createdAtMs: 1, updatedAtMs: 2, state: .new)
+        let sendTicket = store.startRequest()
+        var refreshed = draft; refreshed.title = "Newer title"
+        store.replace(refreshed, ticket: store.startRequest())
+        let send = try XCTUnwrap(store.prepareDraftSend(draft, ticket: sendTicket))
+        XCTAssertEqual(send.state, .new, "a rejected UI snapshot must still send the requested files")
+        XCTAssertEqual(send.title, "Newer title", "presentation keeps the newer refresh")
+        XCTAssertTrue(store.requestIsCurrent(sendTicket))
+        store.reset()
+        XCTAssertNil(store.prepareDraftSend(draft, ticket: sendTicket), "a previous Mac must not receive the send")
+        XCTAssertFalse(store.requestIsCurrent(sendTicket))
+        XCTAssertTrue(store.projects.isEmpty)
+    }
+
+    func testRequestedSendOpensAnAlreadyStartedProjectWithoutUploadingAgain() throws {
+        let store = AppModel(store: Fixtures.store()).projects
+        let draft = Project(id: "draft", createdAtMs: 1, updatedAtMs: 2, state: .new)
+        let sendTicket = store.startRequest()
+        var started = draft; started.state = .touchingUp
+        store.replace(started, ticket: store.startRequest())
+        XCTAssertEqual(try XCTUnwrap(store.prepareDraftSend(draft, ticket: sendTicket)).state, .touchingUp)
+        store.replace(draft, ticket: store.startRequest())
+        XCTAssertEqual(try XCTUnwrap(store.prepareDraftSend(started, ticket: sendTicket)).state, .touchingUp,
+                       "the draft response may itself prove Start succeeded even when its display ticket is old")
+    }
+
     /// Codex on #218: a refused AI choice keeps its reason and isn't tested; a read that works clears a failed read,
     /// but not a refusal.
     func testMacSettingsKeepARefusalAndDropAFailedReadOnceTheMacAnswers() async {

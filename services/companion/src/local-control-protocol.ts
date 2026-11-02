@@ -42,6 +42,7 @@ export const parameters = {
   'events.wait': z.strictObject({after: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER), timeoutMs: z.number().int().min(0).max(25000).optional(), limit: z.number().int().min(0).max(500).optional()}),
   'liveActivity.tokens': empty,
   'pairing.create': z.strictObject({login: z.string().min(1).max(256).optional()}),
+  'pairing.icloudToken': empty,
   'pairing.isActive': z.strictObject({code: z.string().regex(/^[A-Za-z0-9_-]{32}$/)}),
   'nearby.list': empty,
   'nearby.answer': z.strictObject({id: z.uuid(), allow: z.boolean()}),
@@ -55,15 +56,15 @@ export const parameters = {
   'objects.selectPrinter': z.strictObject({id: z.uuid(), destinationId: z.string().min(1).max(256)}),
   'objects.get': z.strictObject({id: z.uuid()}),
   'objects.settings.get': z.strictObject({id: z.uuid()}),
-  'objects.settings.set': z.strictObject({id: z.uuid(), status: z.enum(['not-printed', 'printed', 'works', 'needs-changes', 'archived']).optional(), archived: z.boolean().optional()})
-    .refine(value => value.status !== undefined || value.archived !== undefined),
+  'objects.settings.set': z.strictObject({id: z.uuid(), status: z.enum(['not-printed', 'printed', 'works', 'needs-changes', 'archived']).optional(), archived: z.boolean().optional(), title: z.string().trim().min(1).max(120).regex(/^[^\u0000-\u001f\u007f]+$/).optional()})
+    .refine(value => value.status !== undefined || value.archived !== undefined || value.title !== undefined),
   'objects.passActivity': z.strictObject({id: z.uuid(), index: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER)}),
   'objects.start': z.strictObject({id: z.uuid()}),
   'objects.delete': z.strictObject({id: z.uuid()}),
-  'objects.correct': z.strictObject({id: z.uuid(), note: z.string().trim().min(1).max(4000), photos: z.array(z.string().min(2).max(4096)).max(24).optional()}),
+  'objects.correct': z.strictObject({id: z.uuid(), note: z.string().trim().min(1).max(4000), photoNames: z.array(z.string().min(1).max(128)).max(100).optional(), photos: z.array(z.string().min(2).max(4096)).max(24).optional()}),
   'objects.create': z.strictObject({instructions: z.string().max(8000).optional(), kind: z.enum(['fit', 'copy']).optional()}),
-  'objects.addFile': z.strictObject({id: z.uuid(), kind: z.enum(['photos', 'scan']), path: z.string().min(2).max(4096)}),
-  'objects.answerCloseup': z.strictObject({id: z.uuid(), bestGuess: z.boolean(), text: z.string().trim().min(1).max(2000).optional()}),
+  'objects.addFile': z.strictObject({id: z.uuid(), kind: z.enum(['photos', 'scan']), path: z.string().min(2).max(4096), forMessage: z.boolean().optional()}),
+  'objects.answerCloseup': z.strictObject({id: z.uuid(), bestGuess: z.boolean(), photoNames: z.array(z.string().min(1).max(128)).max(100).optional(), text: z.string().trim().min(1).max(2000).optional()}),
   'objects.print': z.strictObject({id: z.uuid(), checked: z.boolean().optional(), filament: z.strictObject({
     slot:z.number().int().min(0).max(255), colour:z.string().regex(/^#[0-9A-F]{6}$/), material:z.string().min(1).max(128),
     name:z.string().max(256), filamentId:z.string().max(128), destinationId:z.string().min(1).max(256), suggested:z.boolean().optional(),
@@ -76,6 +77,7 @@ export const parameters = {
   'objects.cancelPrint': z.strictObject({id: z.uuid()}),
   'objects.camera': z.strictObject({id: z.uuid()}),
   'printers.camera': z.strictObject({destinationId: z.string().min(1).max(256)}),
+  'printers.updateMcp': z.strictObject({mcpId: z.string().regex(/^mcp-[0-9a-f]{16}$/), fresh: z.boolean().optional()}),
   'settings.get': empty,
   'settings.set': z.strictObject({milestones: MilestonesSchema}),
   'objects.answerPrintConfirmation': z.strictObject({id: z.uuid(), confirmationId: z.uuid(), answer: z.union([

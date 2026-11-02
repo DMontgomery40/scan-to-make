@@ -25,6 +25,30 @@ private func failure(_ request: [String: Any], _ code: String) throws -> Data {
 }
 
 final class ObjectsClientTests: XCTestCase {
+    func testInitialFileUploadDoesNotClaimMessageOwnership() async throws {
+        let server = try UnixFixture { request in
+            XCTAssertNil((request["params"] as? [String: Any])?["forMessage"])
+            return [try objectReply(request)]
+        }
+        _ = try await ControlClient(socketPath: server.path).addFile(id, kind: "photos", path: "/tmp/retry.jpg")
+        withExtendedLifetime(server) {}
+    }
+
+    func testPhotoUploadUsesItsReceiptInsteadOfOtherPendingProjectPhotos() async throws {
+        let server = try UnixFixture { request in
+            XCTAssertEqual(request["method"] as? String, "objects.addFile")
+            XCTAssertEqual((request["params"] as? [String: Any])?["path"] as? String, "/tmp/answer.jpg")
+            XCTAssertEqual((request["params"] as? [String: Any])?["forMessage"] as? Bool, true)
+            return [try reply(request, result: ["object": ready.merging(["photos": ["queued.jpg", "answer-2.jpg", "later.jpg"]]) { $1 }, "photoName": "answer-2.jpg"])]
+        }
+        let name = try await ControlClient(socketPath: server.path).addPhotoFile(id, path: "/tmp/answer.jpg", forMessage: true)
+        XCTAssertEqual(name, "answer-2.jpg")
+        let old = try UnixFixture { request in [try objectReply(request)] }
+        do { _ = try await ControlClient(socketPath: old.path).addPhotoFile(id, path: "/tmp/answer.jpg"); XCTFail("No guessing from the project's photos") }
+        catch let error as ControlRemoteError { XCTAssertEqual(error.code, "not-supported") }
+        withExtendedLifetime((server, old)) {}
+    }
+
     func testFilamentChoiceRoundTripsToThePrintRequest() async throws {
         let choice: [String: Any] = ["slot":1, "colour":"#FEC600", "material":"PLA", "name":"Yellow PLA", "filamentId":"GFA00", "destinationId":"p1s"]
         let inventory = try UnixFixture { request in
@@ -198,7 +222,7 @@ final class ObjectsClientTests: XCTestCase {
             ("objects.get", ["id": id], { try await $0.object(id) }),
             ("objects.start", ["id": id], { try await $0.startObject(id) }),
             ("objects.correct", ["id": id, "note": "the clip is 3 mm thicker"], { try await $0.correctObject(id, note: "the clip is 3 mm thicker") }),
-            ("objects.answerCloseup", ["id": id, "bestGuess": true], { try await $0.answerCloseup(id, bestGuess: true) }),
+            ("objects.answerCloseup", ["id": id, "bestGuess": true, "photoNames": [String]()], { try await $0.answerCloseup(id, bestGuess: true) }),
             ("objects.print", ["id": id], { try await $0.printObject(id) }),
             ("objects.print", ["id": id, "checked": true], { try await $0.printObject(id, checked: true) }),
         ]

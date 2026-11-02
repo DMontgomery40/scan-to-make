@@ -99,7 +99,7 @@ struct PhoneCommand: Equatable {
     /// - Parameters:
     ///   - acceptsText: the companion takes a typed answer to an Ask (`capabilities.structuredPasses`).
     ///   - printSettings: the companion takes quality, strength and colour (`capabilities.printSettings`).
-    func call(photos: [String] = [], acceptsText: Bool = false, printSettings: Bool = false) -> (method: String, params: [String: JSONValue])? {
+    func call(photos: [String] = [], uploadedPhotoNames: [String] = [], acceptsText: Bool = false, printSettings: Bool = false) -> (method: String, params: [String: JSONValue])? {
         var params: [String: JSONValue] = ["id": .string(projectId)]
         switch type {
         case "print":
@@ -116,6 +116,7 @@ struct PhoneCommand: Equatable {
         case "correct":
             guard case .string(let note)? = payload["note"], !note.isEmpty else { return nil }
             params["note"] = .string(note)
+            params["photoNames"] = .array([]) // only photos imported with this command, never the pending pool
             if !photos.isEmpty { params["photos"] = .array(photos.map(JSONValue.string)) }
             return ("objects.correct", params)
         case "answerAsk":
@@ -123,8 +124,10 @@ struct PhoneCommand: Equatable {
             // photos or an explicit best guess still answer, and a typed answer alone can't be sent.
             let text = acceptsText ? payload["text"] : nil
             if payload["text"] != nil, text == nil, photos.isEmpty, payload["bestGuess"] == nil { return nil }
+            guard !photos.isEmpty || text != nil || payload["bestGuess"] == .bool(true) else { return nil }
             if let text { params["text"] = text }
-            params["bestGuess"] = payload["bestGuess"] ?? .bool(photos.isEmpty && text == nil)
+            params["bestGuess"] = payload["bestGuess"] ?? .bool(false)
+            params["photoNames"] = .array(uploadedPhotoNames.map(JSONValue.string))
             return ("objects.answerCloseup", params)
         case "confirm":
             guard let confirmation = payload["confirmationId"], let answer = payload["answer"] else { return nil }
@@ -138,10 +141,22 @@ struct PhoneCommand: Equatable {
         }
     }
 
+    /// Upload an Ask's assets first and select only the names returned for those exact uploads.
+    /// Validation happens before uploading; a failed upload never dispatches an incomplete answer.
+    func preparedCall(photos: [String], acceptsText: Bool, printSettings: Bool,
+                      addPhoto: (String) async throws -> String) async throws -> (method: String, params: [String: JSONValue])? {
+        guard let initial = call(photos: photos, acceptsText: acceptsText, printSettings: printSettings) else { return nil }
+        guard type == "answerAsk" else { return initial }
+        var uploaded: [String] = []
+        for photo in photos { uploaded.append(try await addPhoto(photo)) }
+        return call(photos: photos, uploadedPhotoNames: uploaded, acceptsText: acceptsText, printSettings: printSettings)
+    }
+
     /// Why `call` returned nil, in words for the phone.
     var refusal: String {
         switch type {
-        case "answerAsk": return "Your Mac can't take a typed answer yet. Send a photo, or choose Best Guess."
+        case "answerAsk": return payload["text"] != nil ? "Your Mac can't take a typed answer yet. Send a photo, or choose Best Guess."
+            : "This answer has no photos or words. Choose photos, answer in words, or use Best Guess."
         case "print": return "Your Mac can't print with those settings yet. Update Counterpart on your Mac, or print at standard settings."
         default: return "This Mac doesn't run \(type) commands."
         }

@@ -155,6 +155,10 @@ struct CounterpartCommands: Commands {
                 .disabled(newProject == nil)
             Button("Add a Phone…") { NSApp.activate(); openWindow(id:"pairing") }
         }
+        CommandGroup(replacing: .help) {
+            Link("Counterpart Help", destination: CounterpartIdentifiers.helpPage)
+            Link("Print the scan rig by Kass 3D", destination: CounterpartIdentifiers.scanRig)
+        }
         CommandGroup(replacing:.appTermination) {
             // Delivery to the phone runs in this app (PRD §8.8), so quitting says what stops.
             Button("Quit Counterpart (your phone stops getting updates)") { NSApp.terminate(nil) }

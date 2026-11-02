@@ -40,10 +40,13 @@ export interface ControlServices {
   printHandoff?: PrintHandoffServices;
   /** The running server's v2 details (pairing link v2, MAC-5). Without them pairing.create mints v1. */
   pairingLink?: () => {addresses: string[]; publicKeySha256: string; name?: string};
+  /** PRD §5.10: the enrolment token and this Mac's addresses, for the CloudKit `CounterpartMac` record. */
+  icloudToken?: () => Promise<{token: string; expiresAt: string; macId: string; spkiSha256: string; addresses: {kind: 'lan' | 'mdns' | 'tailscale'; host: string; port: number}[]}>;
   /** The event log (PRD §8.7). */
   events?: import('./events/log.js').EventLog;
   liveActivityTokens?: import('./devices/live-activity-tokens.js').LiveActivityTokenStore;
   presence?: import('./devices/presence.js').DevicePresence;
+  mcpUpdates?: import('./printing/mcp-updates.js').McpUpdater;
   /** Nearby pairing requests waiting for Allow (MAC-5), when the server has nearby pairing on. */
   nearby?: {pending(): NearbyRequest[]; answer(id: string, allow: boolean): Promise<boolean>};
 }
@@ -152,7 +155,17 @@ export function createControlDispatcher(services: ControlServices) {
         case 'status.get': return {protocolVersion:1,companionVersion:services.companionVersion,...(services.name?{name:services.name}:{}),transport:auth.transport,
           pairedDeviceCount:(await auth.listDevices()).length,capabilities:{capture:!!capture?.captures,cleanup:!!capture?.scanProcessing,printerHandoff:!!printHandoff,nearbyPairing:!!services.nearby,
             objectsCreate:!!services.objects,printSettings:!!services.objects?.printSettingsAvailable,printControl:!!services.objects?.printSettingsAvailable,
-            events:!!services.events&&!!services.liveActivityTokens,structuredPasses:!!services.objects,genericConfirmations:!!services.objects,materialChoice:!!services.objects,projectSettings:!!services.objects,printCopies:!!services.objects?.printCopiesAvailable}};
+            events:!!services.events&&!!services.liveActivityTokens,structuredPasses:!!services.objects,genericConfirmations:!!services.objects,materialChoice:!!services.objects,projectSettings:!!services.objects,projectRename:!!services.objects,messagePhotos:!!services.objects,mcpUpdates:!!services.mcpUpdates,printCopies:!!services.objects?.printCopiesAvailable}};
+        case 'printers.updateMcp': {
+          if(!services.mcpUpdates)throw new ControlFailure('unavailable');
+          const {mcpId,fresh}=parameters[method].parse(raw);
+          try { return {update: await services.mcpUpdates.update(mcpId, fresh !== undefined ? {fresh} : {})}; }
+          catch (error) {
+            const {McpUpdateError} = await import('./printing/mcp-updates.js');
+            if (error instanceof McpUpdateError) throw new ControlFailure(error.code === 'not-found' ? 'not-found' : 'unavailable', error.message);
+            throw error;
+          }
+        }
         case 'devices.list': {
           const devices = await auth.listDevices();
           const legacy = await auth.legacyDeviceIds?.() ?? new Set<string>();
@@ -179,6 +192,11 @@ export function createControlDispatcher(services: ControlServices) {
           await services.liveActivityTokens?.removeDevice(deviceId).catch(() => undefined);
           await services.presence?.forget(deviceId).catch(() => undefined);
           return {removed:true};
+        }
+        case 'pairing.icloudToken': {
+          parameters[method].parse(raw);
+          if (!services.icloudToken) throw new ControlFailure('unavailable');
+          return services.icloudToken();
         }
         case 'pairing.create': {
           let {login} = parameters[method].parse(raw);
@@ -228,9 +246,10 @@ export function createControlDispatcher(services: ControlServices) {
           try {
             const {projectSettingsView} = await import('./objects/http.js');
             if (method === 'objects.settings.get') return {settings: projectSettingsView(await objects.get(parameters[method].parse(raw).id))};
-            const {id, status, archived} = parameters[method].parse(raw);
+            const {id, status, archived, title} = parameters[method].parse(raw);
             let updated = status !== undefined ? await objects.setStatus(id, status) : await objects.get(id);
             if (archived !== undefined) updated = await objects.setArchived(id, archived);
+            if (title !== undefined) updated = await objects.rename(id, title);
             return {settings: projectSettingsView(updated), object: {...publicObject(updated), directory: objects.dir(updated.id)}};
           } catch (error) {
             if (error instanceof ObjectNotFoundError) throw new ControlFailure('not-found');
@@ -281,12 +300,13 @@ export function createControlDispatcher(services: ControlServices) {
             if (method === 'settings.get') return {settings: await objects.settings()};
             if (method === 'settings.set') return {settings: await objects.updateSettings(parameters[method].parse(raw))};
             if (method === 'objects.addFile') {
-              const {id, kind, path} = parameters[method].parse(raw);
-              return {object: local(await objects.addFile(id, kind, path))};
+              const {id, kind, path, forMessage} = parameters[method].parse(raw);
+              const receipt = await objects.addFileReceipt(id, kind, path, forMessage);
+              return {...receipt, object: local(receipt.object)};
             }
             if (method === 'objects.correct') {
-              const {id, note, photos} = parameters[method].parse(raw);
-              return {object: local(await objects.correct(id, note, photos))};
+              const {id, note, photos, photoNames} = parameters[method].parse(raw);
+              return {object: local(await objects.correct(id, note, photos, photoNames))};
             }
             if (method === 'objects.answerPrintConfirmation') {
               const {id, confirmationId, answer} = parameters[method].parse(raw);
@@ -296,7 +316,7 @@ export function createControlDispatcher(services: ControlServices) {
             const object = method === 'objects.get' ? await objects.view(params.id)
               : method === 'objects.selectPrinter' ? await objects.selectPrinter(params.id, params.destinationId!)
               : method === 'objects.start' ? await objects.start(params.id)
-              : method === 'objects.answerCloseup' ? await objects.answerCloseup(params.id, {bestGuess: params.bestGuess!, ...((params as {text?: string}).text ? {text: (params as {text?: string}).text} : {})})
+              : method === 'objects.answerCloseup' ? await objects.answerCloseup(params.id, {bestGuess: params.bestGuess!, photoNames: (params as {photoNames?: string[]}).photoNames, ...((params as {text?: string}).text ? {text: (params as {text?: string}).text} : {})})
               : await objects.print(params.id, (({id: _id, ...options}) => options)(params));
             return {object: local(object)};
           } catch (error) {

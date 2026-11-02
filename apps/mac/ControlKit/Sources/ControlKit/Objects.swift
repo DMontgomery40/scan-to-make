@@ -98,7 +98,7 @@ public enum EstimateOutcome: Sendable, Equatable {
 /// folder on this Mac, which only the control socket sends. These are the files the Mac shows from that folder.
 public extension Project {
     /// A file named by the companion, kept inside the project's folder.
-    private func file(_ relative: String) -> URL? {
+    func file(_ relative: String) -> URL? {
         let parts = relative.split(separator: "/", omittingEmptySubsequences: false)
         guard let directory, directory.hasPrefix("/"), !relative.isEmpty, !relative.hasPrefix("/"),
               !parts.contains(where: { $0 == ".." || $0 == "." || $0.isEmpty }) else { return nil }
@@ -159,10 +159,12 @@ public extension ControlClient {
     }
     /// Sends a correction back to the touch-up; the object returns to touching up. `photos` are absolute paths on
     /// this Mac, sent only to a companion with `objectsCreate` (it copies them into the project).
-    func correctObject(_ id: String, note: String, photos: [String] = []) async throws -> Project {
+    func correctObject(_ id: String, note: String, photos: [String] = [], photoNames: [String]? = nil) async throws -> Project {
         var params: [String: JSONValue] = ["id": .string(id), "note": .string(note)]
         if !photos.isEmpty { params["photos"] = .array(photos.map(JSONValue.string)) }
-        let result: ObjectReply = try await call("objects.correct", params); return result.object
+        if let photoNames { params["photoNames"] = .array(photoNames.map(JSONValue.string)) }
+        let client = try ControlClient(socketPath: socketPath, timeout: max(timeout, Self.timeout(for: "objects.correct")))
+        let result: ObjectReply = try await client.call("objects.correct", params); return result.object
     }
     /// A new project started on this Mac (`capabilities.objectsCreate`). Files follow with `addFile`, then `startObject`.
     /// `kind` (`fit` or `copy`) only to a companion with `structuredPasses`; an older one refuses the field.
@@ -173,12 +175,25 @@ public extension ControlClient {
         let result: ObjectReply = try await call("objects.create", params); return result.object
     }
     /// Copies a file on this Mac into the project: `photos` (JPEG, HEIC, PNG) or `scan` (STL, 3MF, USDZ).
-    func addFile(_ id: String, kind: String, path: String) async throws -> Project {
-        let result: ObjectReply = try await call("objects.addFile", ["id": .string(id), "kind": .string(kind), "path": .string(path)])
+    func addFile(_ id: String, kind: String, path: String, forMessage: Bool = false) async throws -> Project {
+        var params: [String: JSONValue] = ["id": .string(id), "kind": .string(kind), "path": .string(path)]
+        if forMessage { params["forMessage"] = .bool(true) }
+        let result: ObjectReply = try await call("objects.addFile", params)
         return result.object
     }
-    func answerCloseup(_ id: String, bestGuess: Bool) async throws -> Project {
-        let result: ObjectReply = try await call("objects.answerCloseup", ["id": .string(id), "bestGuess": .bool(bestGuess)]); return result.object
+    /// The companion may sanitize or disambiguate a local filename. Only its receipt identifies this upload.
+    func addPhotoFile(_ id: String, path: String, forMessage: Bool = false) async throws -> String {
+        struct Receipt: Decodable { let photoName: String? }
+        var params: [String: JSONValue] = ["id": .string(id), "kind": .string("photos"), "path": .string(path)]
+        if forMessage { params["forMessage"] = .bool(true) }
+        let receipt: Receipt = try await call("objects.addFile", params)
+        guard let name = receipt.photoName, !name.isEmpty else {
+            throw ControlRemoteError(code: "not-supported", message: "Update Counterpart on your Mac to answer with these photos.")
+        }
+        return name
+    }
+    func answerCloseup(_ id: String, bestGuess: Bool, photoNames: [String] = []) async throws -> Project {
+        let result: ObjectReply = try await call("objects.answerCloseup", ["id": .string(id), "bestGuess": .bool(bestGuess), "photoNames": .array(photoNames.map(JSONValue.string))]); return result.object
     }
     /// Prints the current model. `checked` only after an
     /// uncertain print, once the user has looked at the printer. Like every mutation, a deadline after

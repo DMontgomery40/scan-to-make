@@ -75,3 +75,57 @@ test('installer certificate and init-lan CLI agree with the persisted registry a
  assert.throws(()=>execFileSync(process.execPath,[cli,'init-lan',join(f.root,'mismatch'),'https://127.0.0.2:9077',join(tls,'cert.pem')],{stdio:'pipe'}));
  await assert.rejects(()=>RemoteAuthStore.open(join(f.root,'mismatch')));
 });
+
+test('PRD §5.10: a phone enrols with the Mac\'s iCloud token: once, while current, for this Mac only, replacing its own install', async t => {
+ const {IcloudEnrolment, ENROLMENT_TOKEN_LIFETIME_MS, ENROLMENT_TOKEN_REPLACE_MS} = await import('../dist/icloud-enrolment.js');
+ const {DevicePresence} = await import('../dist/devices/presence.js');
+ const f = await fixture(t);
+ const clock = {now: Date.now()};
+ const icloud = new IcloudEnrolment(join(f.root, 'auth', 'mac-id'), {now: () => clock.now});
+ const presence = new DevicePresence(join(f.root, 'auth', 'device-presence.json'));
+ const server = await startCompanionServer({remoteAuth: f.store, lanTls: {cert: f.cert, key: f.key}, icloud, presence}); t.after(() => server.close());
+ const install = 'i'.repeat(43);
+ const enrol = body => wire(server.url, f.cert, '/v1/pair/icloud', {method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify(body)});
+ const first = await icloud.token();
+ assert.equal((await icloud.token()).token, first.token, 'the same token until it is 5 minutes old');
+ assert.match(first.macId, /^[0-9a-f-]{36}$/);
+ assert.equal(await new IcloudEnrolment(join(f.root, 'auth', 'mac-id')).macId(), first.macId, 'macId is kept');
+ const body = {macId: first.macId, enrolmentToken: first.token, installId: install, deviceName: 'David’s iPhone', model: 'iPhone18,2'};
+ // Wrong Mac: refused, and the token is still good.
+ assert.equal((await enrol({...body, macId: '00000000-0000-4000-8000-000000000000'})).status, 401);
+ const ok = await enrol(body);
+ assert.equal(ok.status, 200);
+ const credential = JSON.parse(ok.body);
+ assert.deepEqual(Object.keys(credential).sort(), ['deviceId', 'expiresAt', 'protocolVersion', 'scopes', 'token']);
+ const qr = await f.store.createPairing('lan');
+ assert.deepEqual(credential.scopes, (await f.store.listDevices()).find(device => device.deviceId === credential.deviceId).scopes);
+ assert.ok(qr.code, 'QR pairing still works beside it');
+ assert.equal((await presence.get(credential.deviceId)).model, 'iPhone18,2');
+ // Single use.
+ assert.equal((await enrol(body)).status, 401);
+ // Re-enrolling the same install replaces its record, never adds one.
+ clock.now += ENROLMENT_TOKEN_REPLACE_MS;
+ const second = await icloud.token();
+ assert.notEqual(second.token, first.token);
+ const again = JSON.parse((await enrol({...body, enrolmentToken: second.token, deviceName: 'David’s iPhone 17'})).body);
+ assert.equal(again.deviceId, credential.deviceId);
+ assert.equal((await f.store.listDevices()).filter(device => device.deviceName.startsWith('David’s iPhone')).length, 1);
+ // Expired: a token older than 10 minutes is refused.
+ const old = await (async () => { clock.now += ENROLMENT_TOKEN_REPLACE_MS; return icloud.token(); })();
+ clock.now += ENROLMENT_TOKEN_LIFETIME_MS;
+ assert.equal(await icloud.redeem(old.macId, old.token), false, 'expired');
+ // Malformed: 400.
+ assert.equal((await enrol({...body, enrolmentToken: 'short'})).status, 400);
+});
+
+test('failed iCloud enrolment attempts are rate-limited like pairing attempts', async t => {
+ const {IcloudEnrolment} = await import('../dist/icloud-enrolment.js');
+ const f = await fixture(t);
+ const icloud = new IcloudEnrolment(join(f.root, 'auth', 'mac-id'));
+ const server = await startCompanionServer({remoteAuth: f.store, lanTls: {cert: f.cert, key: f.key}, icloud}); t.after(() => server.close());
+ const {macId} = await icloud.token();
+ const statuses = [];
+ for (let i = 0; i < 6; i++) statuses.push((await wire(server.url, f.cert, '/v1/pair/icloud', {method: 'POST', headers: {'content-type': 'application/json'},
+  body: JSON.stringify({macId, enrolmentToken: 'x'.repeat(43), installId: 'i'.repeat(43), deviceName: 'Guess'})})).status);
+ assert.deepEqual(statuses, [401, 401, 401, 401, 401, 429]);
+});

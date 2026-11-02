@@ -13,6 +13,8 @@ struct ProjectDetail: View {
     @ObservedObject var model: ObjectsModel
     let print: () -> Void
     @State private var note = ""
+    @State private var renaming = false
+    @State private var projectName = ""
     @FocusState private var noteFocused: Bool
     @State private var photos: [URL] = []
     @State private var dropProblem: String?
@@ -62,6 +64,21 @@ struct ProjectDetail: View {
         }
         .navigationTitle(words.title)
         .navigationSubtitle(words.subtitle(request: object.instructions))
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                Button { projectName = words.title; renaming = true } label: { Text(words.title).font(.headline) }
+                    .buttonStyle(.plain).disabled(working || model.capabilities?.projectRename != true)
+                    .help("Rename Project").accessibilityLabel("Rename \(words.title)")
+            }
+        }
+        .alert("Rename Project", isPresented: $renaming) {
+            TextField("Project name", text: $projectName)
+            Button("Cancel", role: .cancel) {}
+            Button("Save") {
+                let title = projectName.trimmingCharacters(in: .whitespacesAndNewlines)
+                Task { await model.rename(object.id, title: title) }
+            }.disabled(!Project.validName(projectName))
+        }
     }
 
     // MARK: Stage
@@ -96,6 +113,32 @@ struct ProjectDetail: View {
 
     /// What the Mac needs, or what it is doing, in one glass card above the bar. Nothing when it's ready.
     @ViewBuilder private var card: some View {
+        if model.corrections.failures[object.id] != nil, object.pendingFollowup == nil {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Your change is saved. Check the result before trying again.").font(.subheadline)
+                HStack {
+                    Button("Try Again") { model.retryQueuedChange(object) }.disabled(object.changesWait)
+                    Button("Discard Saved Change") { model.discardQueuedChange(object) }
+                }.disabled(working)
+            }.padding(12).glassEffect(.regular, in: .rect(cornerRadius: 14))
+        }
+        if let pending = object.pendingFollowup {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Message saved").font(.headline)
+                Text(pending).font(.subheadline).textSelection(.enabled)
+                HStack {
+                    Button("Try Again") { Task { await model.perform(.correct, on: object.id, note: pending) } }
+                    Button("Mark Done") { Task { await model.setStatus("works", for: object.id) } }
+                }.disabled(working)
+            }.padding(12).glassEffect(.regular, in: .rect(cornerRadius: 14))
+        }
+        if let previous = object.completionUndoStatus {
+            HStack {
+                Label("Marked Done", systemImage: "checkmark.circle.fill")
+                Spacer()
+                Button("Undo") { Task { await model.setStatus(previous.rawValue, for: object.id) } }.disabled(working)
+            }.padding(12).glassEffect(.regular, in: .rect(cornerRadius: 14))
+        }
         if let problem = model.problem, problem.id == object.id {
             Label(problem.text, systemImage: "exclamationmark.circle.fill")
                 .foregroundStyle(.red).textSelection(.enabled)
@@ -219,7 +262,7 @@ struct ProjectDetail: View {
 
     // MARK: The bar
 
-    private var canCorrect: Bool { words.actions.contains(.correct) && !working }
+    private var canCorrect: Bool { object.canAskForChanges && !working }
     private var canPrint: Bool {
         (words.actions.contains(.print) || words.actions.contains(.printChecked)) && !working && model.printer(for: object) != nil
     }
@@ -238,7 +281,7 @@ struct ProjectDetail: View {
                                     .buttonStyle(.plain).font(.caption2).offset(x: 5, y: -5).accessibilityLabel("Remove photo")
                             }
                     }
-                    TextField(takesPhotos ? "Ask for changes. Drop photos here too…" : "Ask for changes…", text: $note)
+                    TextField(model.corrections.pending(object.id) != nil ? "Will send when this step finishes" : takesPhotos ? "Ask for changes. Drop photos here too…" : "Ask for changes…", text: $note)
                         .textFieldStyle(.plain).focused($noteFocused)
                         .onSubmit(send)
                         .disabled(!canCorrect)
@@ -281,7 +324,7 @@ struct ProjectDetail: View {
         guard canCorrect, !text.isEmpty || !photos.isEmpty else { return }
         let sent = photos
         Task {
-            if await model.perform(.correct, on: object.id, note: text, photos: sent) { note = ""; photos = [] }
+            if await model.requestChanges(object.id, note: text, photos: sent) { note = ""; photos = [] }
         }
     }
 }

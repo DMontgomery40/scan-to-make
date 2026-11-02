@@ -317,10 +317,15 @@ export class PrinterHandoffRunner {
           || (slicer.repetitions !== undefined && slicer.repetitions > 1 && (!Object.hasOwn(sliceProperties, 'repetitions') || !isBambuSlicing(this.#config, selection, slicer)))) fail('print-settings-unsupported');
     }
     let orientedStlPath = input.stlPath;
-    const laidFlat = session.hasTool('lay_flat');
-    if (laidFlat) {
+    let laidFlat = false;
+    if (session.hasTool('lay_flat')) {
       await progress('orienting');
-      orientedStlPath = absolutePath(await call(session, 'lay_flat', {stl_path: input.stlPath}, local));
+      const orientation = await call(session, 'lay_flat', {stl_path: input.stlPath}, local);
+      orientedStlPath = absolutePath(orientation);
+      // Newer MCPs explicitly return the unchanged model when no face can rest
+      // on the bed. Let the slicer orient it; older path-only results retain
+      // their established behavior.
+      laidFlat = orientation.structuredContent?.laid_flat !== false;
       step('lay_flat');
     }
     await progress('slicing');

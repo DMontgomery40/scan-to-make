@@ -15,12 +15,7 @@ struct HomeView: View {
     @State private var showArchived = false
 
     private var searched: [Project] {
-        let text = query.trimmingCharacters(in: .whitespaces)
-        guard !text.isEmpty else { return store.projects }
-        return store.projects.filter { project in
-            [ProjectWords.title(project), project.instructions ?? "", store.printerName(project) ?? ""]
-                .contains { $0.localizedCaseInsensitiveContains(text) }
-        }
+        store.projects.filter { $0.matchesSearch(query, additional: [store.printerName($0) ?? ""]) }
     }
     /// Archived projects stay out of every section but their own (PRD §5.4).
     private var filtered: [Project] { searched.filter { !$0.isArchived } }
@@ -365,9 +360,9 @@ struct AskButtons: View {
 
     private func answer(camera: Bool) {
         act {
-            let sent = try await store.mac.addCloseups(project.id, camera: camera)
-            guard sent > 0 else { return nil }
-            return try await store.mac.closeup(project.id, bestGuess: false)
+            let sent = try await store.mac.addCloseups(project.id, camera: camera, forMessage: true)
+            guard !sent.isEmpty else { return nil }
+            return try await store.mac.closeup(project.id, bestGuess: false, photoNames: sent)
         }
     }
     private func bestGuess() { act { try await store.mac.closeup(project.id, bestGuess: true) } }
@@ -377,7 +372,7 @@ struct AskButtons: View {
         working = true; problem = nil
         Task {
             defer { working = false }
-            do { if let next = try await body() { store.replace(next) } }
+            do { let ticket = store.startRequest(); if let next = try await body() { store.replace(next, ticket: ticket) } }
             catch let failure as CompanionError {
                 if failure.code == "cancelled" { return }
                 if failure.needsPairing { store.onPair(); return }
@@ -464,7 +459,7 @@ struct ArchivedRow: View {
                 working = true; problem = nil
                 Task {
                     defer { working = false }
-                    do { if let next = try await store.archive(project, false) { store.replace(next) } else { await store.reload(project.id) } }
+                    do { let ticket = store.startRequest(); if let next = try await store.archive(project, false) { store.replace(next, ticket: ticket) } else { await store.reload(project.id) } }
                     catch let failure as CompanionError { problem = failure.message }
                     catch { problem = CompanionError.unreachable.message }
                 }

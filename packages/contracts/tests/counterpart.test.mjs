@@ -6,13 +6,16 @@ import * as c from '../dist/counterpart.js';
 const fixture = JSON.parse(await readFile(new URL('../fixtures/counterpart-v1.json', import.meta.url), 'utf8'));
 
 test('the wire fixtures cover every event type once, in order, and each one validates', () => {
-  // `events` keeps the 20 samples the apps' decode tests count; later types are in their own keys.
-  const all = [...fixture.events, ...fixture.projectEvents];
+  // `events` keeps the 20 samples the apps' decode tests count; later types are in their own keys,
+  // and `macEvents` have no projectId (PRD §8.10).
+  const all = [...fixture.events, ...fixture.projectEvents, ...fixture.macEvents];
   assert.deepEqual(all.map(event => event.type).sort(), [...c.COUNTERPART_EVENT_TYPES].sort());
   assert.equal(new Set(all.map(event => event.type)).size, all.length, 'each type once');
   for (const event of all) c.CounterpartEventSchema.parse(event);
   assert.deepEqual(all.map(event => event.seq), all.map((_, index) => index + 1));
   assert.equal(fixture.events.length, 20);
+  assert.ok([...fixture.events, ...fixture.projectEvents].every(event => event.projectId) && fixture.macEvents.every(event => !('projectId' in event)));
+  for (const update of fixture.mcpUpdates) c.McpUpdateSchema.parse(update);
   // PRD §5.6: there is no bed check; Bambu's own bed levelling finds a full plate.
   assert.ok(!c.COUNTERPART_EVENT_TYPES.includes('plate.blocked'));
 });

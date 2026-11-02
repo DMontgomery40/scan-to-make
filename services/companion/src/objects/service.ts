@@ -9,6 +9,7 @@ import {DispatchedPrintError, PrinterMcpError, readPrintReport, routeArgs, slice
 import type {PrintEstimate, PrintSettings, ProjectStatus} from '@scan-to-make/contracts/counterpart';
 import {PrintMonitorRunner, matchJob, milestonesFor, type EventDraft, type MonitorClock, type MonitorEnd, type MonitorTarget} from '../printing/monitor.js';
 import {CameraFrames, CameraUnavailableError, type CameraFrame} from '../printing/camera.js';
+import {PrinterUpdatingError, type PrintGate} from '../printing/print-gate.js';
 import {sliceOverrides, settingsUnsupported} from '../printing/print-settings.js';
 import type {CompanionSettingsStore} from '../settings.js';
 import {PRINT_LOG, printEndFailure, projectTitle, sizeText} from '../events/words.js';
@@ -105,6 +106,8 @@ export interface ObjectServiceDeps {
   stlInfo: (stlPath: string) => Promise<[number, number, number] | undefined>;
   claudePath: string;
   handoff: PrinterHandoffConfig;
+  /** The handoff profile as the companion runs it now: after an MCP update (PRD §8.10) it carries that update's command. */
+  runningHandoff?: () => PrinterHandoffConfig;
   printerCatalog?: PrinterCatalog;
   /** Live destination state and capabilities, from each destination's long-lived session. */
   printers?: PrinterDirectory;
@@ -120,6 +123,8 @@ export interface ObjectServiceDeps {
   settings?: CompanionSettingsStore;
   /** Where print and pass events go (the event log, PRD §8.7). */
   events?: {emit(draft: EventDraft): Promise<void>};
+  /** PRD §8.10: prints and MCP updates on a printer exclude each other. */
+  printGate?: PrintGate;
   /** The printers' cameras, through their sessions, with a shared 3 s cache. */
   camera?: CameraFrames;
   /** Tests only. */
@@ -128,6 +133,7 @@ export interface ObjectServiceDeps {
   passTimings?: PassTimings;
   /** A short title for a request ("Mic mount"), best effort; the worker names it otherwise. */
   titleFor?: (request: string) => Promise<string | undefined>;
+  reportsCompletion?: (note: string) => Promise<'works' | 'changes' | 'unknown'>;
 }
 
 /** What the print sheet sends with Print (PRD §8.5). */
@@ -245,32 +251,49 @@ export class ObjectService {
    * `works` → state `confirmed`; `printed`; `not-printed` → `ready`; `needs-changes`; `archived` hides it, keeping everything.
    */
   setStatus(id: string, status: ProjectStatus): Promise<StmObject> {
+    return this.#gate(id, () => this.#setStatusNow(id, status));
+  }
+  async #setStatusNow(id: string, status: ProjectStatus): Promise<StmObject> {
+    const object = await this.get(id);
+    // Already there (the state itself, not just the label: a sent project marked printed is a real change).
+    // `archived` is its own flag (setArchived); the status alias `archived` still hides it.
+    if (status === 'archived') return this.#setArchivedNow(id, object, true);
+    const clean = !object.outcome;
+    const there = {works: object.state === 'confirmed', printed: object.state === 'printed' && clean,
+      'needs-changes': object.outcome === 'needs-changes',
+      'not-printed': clean && (object.current ? object.state === 'ready' : !['printed', 'confirmed', 'sent'].includes(object.state))}[status];
+    if (there && !(status === 'works' && object.pendingFollowup)) return object;
+    if (object.state === 'touching-up' || object.state === 'printing') throw new InvalidStateError('Wait until the current step finishes.');
+    if ((status === 'works' || status === 'printed') && !object.current) throw new InvalidStateError("There's no model yet, so it can't be marked printed.");
+    const updated = await this.#deps.store.update(id, o => {
+      const {outcome: _outcome, ...rest} = o;
+      if (status === 'works') {
+        const message = o.messages?.find(item => item.id === o.pendingMessageId);
+        if (message) rest.completion = {messageId: message.id, note: message.text, atMs: message.atMs, previousStatus: projectStatus(o)};
+        rest.pendingFollowup = undefined; rest.pendingMessageId = undefined;
+      }
+      if (status !== 'works' && rest.completion) rest.completion = {...rest.completion, undone: true};
+      // A person saying it printed (or works) settles a print Counterpart couldn't follow.
+      const settled = o.print?.uncertain ? {print: {...o.print, uncertain: undefined}} : {};
+      switch (status) {
+        // Hide from Home: the project keeps its status (Done stays Done) and gets it back when unhidden.
+        case 'works': return {...rest, ...settled, state: o.state === 'printing' ? o.state : 'confirmed', outcome: 'works'};
+        case 'printed': return {...rest, ...settled, state: 'printed'};
+        // Without a model, only the flags clear: a draft stays a draft.
+        case 'not-printed': return {...rest, ...(o.current ? {state: 'ready' as const} : {})};
+        case 'needs-changes': return {...rest, outcome: 'needs-changes', ...(o.state === 'confirmed' ? {state: 'printed' as const} : {})};
+      }
+    });
+    await this.#emit({id: randomUUID(), type: 'project.updated', projectId: id, data: {keys: ['status']}});
+    return this.#changed(updated);
+  }
+
+
+  /** A person's name wins over a title generator or a pass still finishing in the background. */
+  rename(id: string, title: string): Promise<StmObject> {
     return this.#gate(id, async () => {
-      const object = await this.get(id);
-      // Already there (the state itself, not just the label: a sent project marked printed is a real change).
-      // `archived` is its own flag (setArchived); the status alias `archived` still hides it.
-      if (status === 'archived') return this.#setArchivedNow(id, object, true);
-      const clean = !object.outcome;
-      const there = {works: object.state === 'confirmed', printed: object.state === 'printed' && clean,
-        'needs-changes': object.outcome === 'needs-changes',
-        'not-printed': clean && (object.current ? object.state === 'ready' : !['printed', 'confirmed', 'sent'].includes(object.state))}[status];
-      if (there) return object;
-      if (object.state === 'touching-up' || object.state === 'printing') throw new InvalidStateError('Wait until the current step finishes.');
-      if ((status === 'works' || status === 'printed') && !object.current) throw new InvalidStateError("There's no model yet, so it can't be marked printed.");
-      const updated = await this.#deps.store.update(id, o => {
-        const {outcome: _outcome, ...rest} = o;
-        // A person saying it printed (or works) settles a print Counterpart couldn't follow.
-        const settled = o.print?.uncertain ? {print: {...o.print, uncertain: undefined}} : {};
-        switch (status) {
-          // Hide from Home: the project keeps its status (Done stays Done) and gets it back when unhidden.
-          case 'works': return {...rest, ...settled, state: o.state === 'printing' ? o.state : 'confirmed', outcome: 'works'};
-          case 'printed': return {...rest, ...settled, state: 'printed'};
-          // Without a model, only the flags clear: a draft stays a draft.
-          case 'not-printed': return {...rest, ...(o.current ? {state: 'ready' as const} : {})};
-          case 'needs-changes': return {...rest, outcome: 'needs-changes', ...(o.state === 'confirmed' ? {state: 'printed' as const} : {})};
-        }
-      });
-      await this.#emit({id: randomUUID(), type: 'project.updated', projectId: id, data: {keys: ['status']}});
+      const updated = await this.#deps.store.update(id, object => ({...object, title}));
+      await this.#emit({id: randomUUID(), type: 'project.updated', projectId: id, data: {keys: ['title']}});
       return this.#changed(updated);
     });
   }
@@ -491,21 +514,33 @@ export class ObjectService {
   }
 
   /** Photos are welcome at any time; one added while a pass runs is used by the next pass ("late photos"). */
-  async addPhoto(id: string, name: string, bytes: Buffer): Promise<StmObject> {
+  async addPhoto(id: string, name: string, bytes: Buffer, forMessage = false): Promise<StmObject> {
     await this.get(id);
     await this.#deps.store.addFile(id, 'photos', name, bytes);
-    return this.#changed(await this.#deps.store.update(id, o => ({...o, photos: o.photos.includes(name) ? o.photos : [...o.photos, name]})));
+    return this.#changed(await this.#deps.store.update(id, o => {
+      if (o.photos.includes(name)) return o;
+      // With no model after an initial failure, added evidence is for Try Again.
+      // Preserve the sender's message ownership even if its upload arrives after failure.
+      const requestEvidence = !forMessage && ((o.state === 'new' && o.passes.length === 0) || (o.state === 'failed' && !o.current));
+      return {...o, photos: [...o.photos, name], ...(requestEvidence
+        ? {requestPhotos: [...(o.requestPhotos ?? []), name]}
+        : {pendingPhotos: [...(o.pendingPhotos ?? []), name]})};
+    }));
   }
 
   /**
    * Copies a file on this Mac into the object (the Mac app's New Project and drop targets).
    * The control socket can't carry file bytes, so the companion reads the path itself.
    */
-  addFile(id: string, kind: 'photos' | 'scan', path: string): Promise<StmObject> {
+  addFile(id: string, kind: 'photos' | 'scan', path: string, forMessage = false): Promise<StmObject> {
     // One at a time per object, so two files with the same name can't take the same slot.
-    return this.#gate(id, () => this.#addFile(id, kind, path));
+    return this.addFileReceipt(id, kind, path, forMessage).then(receipt => receipt.object);
   }
-  async #addFile(id: string, kind: 'photos' | 'scan', path: string): Promise<StmObject> {
+  /** The exact name assigned to this upload, independent of other pending evidence. */
+  addFileReceipt(id: string, kind: 'photos' | 'scan', path: string, forMessage = false): Promise<{object: StmObject; photoName?: string}> {
+    return this.#gate(id, () => this.#addFileReceipt(id, kind, path, forMessage));
+  }
+  async #addFileReceipt(id: string, kind: 'photos' | 'scan', path: string, forMessage = false): Promise<{object: StmObject; photoName?: string}> {
     const rule = FILE_KINDS[kind];
     if (!isAbsolute(path) || path.includes('\0')) throw new InvalidFileError('Choose a file on this Mac.');
     const extension = extname(path).toLowerCase();
@@ -520,8 +555,9 @@ export class ObjectService {
       bytes = await handle.readFile();
     } finally { await handle.close(); }
     if (bytes.length > rule.limit || !looksLike(extension, bytes.subarray(0, 84))) throw new InvalidFileError(`That isn't ${rule.words}.`);
-    if (kind === 'scan') return this.addScan(id, `scan${extension}`, bytes);
-    return this.addPhoto(id, photoName(path, (await this.get(id)).photos), bytes);
+    if (kind === 'scan') return {object: await this.addScan(id, `scan${extension}`, bytes)};
+    const name = photoName(path, (await this.get(id)).photos);
+    return {object: await this.addPhoto(id, name, bytes, forMessage), photoName: name};
   }
 
   /** The inputs are complete: start the touch-up. Starting again while it runs changes nothing. */
@@ -580,27 +616,82 @@ export class ObjectService {
   }
 
   /** Asks for changes; `photos` are files on this Mac added first (the Mac app's drop target). */
-  correct(id: string, note: string, photos: string[] = []): Promise<StmObject> { return this.#gate(id, () => this.#correct(id, note, photos)); }
-  async #correct(id: string, note: string, photos: string[]): Promise<StmObject> {
+  correct(id: string, note: string, photos: string[] = [], photoNames?: string[]): Promise<StmObject> { return this.#gate(id, () => this.#correct(id, note, photos, photoNames)); }
+  async #correct(id: string, note: string, photos: string[], photoNames?: string[]): Promise<StmObject> {
     let object = await this.get(id);
     if (object.state === 'touching-up' || object.state === 'printing') throw new InvalidStateError('Wait until the current step finishes.');
     if (!object.current && object.state !== 'failed') throw new InvalidStateError('There is no model to correct yet.');
-    for (const path of photos) object = await this.#addFile(id, 'photos', path);
-    // New photos sent with the request make it a late-photos pass.
-    return this.#pass(object, {note: note.trim(), trigger: photos.length ? 'late-photos' : 'changes'});
+    const imported: string[] = [];
+    for (const path of photos) {
+      const receipt = await this.#addFileReceipt(id, 'photos', path, true);
+      object = receipt.object;
+      if (receipt.photoName) imported.push(receipt.photoName);
+    }
+    const held = object.messages?.find(message => message.id === object.pendingMessageId && message.text === note.trim());
+    // A retry owns its original evidence; later uploads belong to the next message unless explicitly selected.
+    const attached = [...new Set([...(photoNames ?? held?.photos ?? object.pendingPhotos ?? []), ...imported])];
+    object = await this.#message(object, note.trim(), attached);
+    const message = object.messages!.find(item => item.id === object.pendingMessageId)!;
+    // Photos can document a successful print too. They must not force a mesh-changing pass.
+    if (object.current && !object.question && object.ask?.status !== 'open' && this.#deps.reportsCompletion) {
+      const intent = await this.#deps.reportsCompletion(note).catch(() => 'unknown' as const);
+      if (intent === 'unknown') {
+        this.#changed(object);
+        await this.#emit({id: randomUUID(), type: 'project.updated', projectId: id, data: {keys: ['pendingFollowup']}});
+        throw new InvalidStateError("Your message is saved, but I couldn't tell whether it marks Done or asks for changes. Try sending it again, or set Status to Done.");
+      }
+      if (intent === 'works') {
+        const previousStatus = projectStatus(object);
+        await this.#deps.store.update(id, o => ({...o, pendingFollowup: undefined, pendingMessageId: undefined,
+          completion: {messageId: message.id, note: message.text, atMs: message.atMs, previousStatus}}));
+        return this.#setStatusNow(id, 'works');
+      }
+    }
+    return this.#pass(object, {note: note.trim(), messageId: message.id, photos: message.photos,
+      trigger: message.photos.length ? 'late-photos' : 'changes'});
+  }
+
+  /** Record only known attachment ownership. Retry of a held message keeps its identity and timestamp. */
+  async #message(object: StmObject, text: string, photos: string[], reusePending = true): Promise<StmObject> {
+    if (photos.some(name => !object.photos.includes(name))) throw new InvalidFileError('That photo is not in this project.');
+    return this.#deps.store.update(object.id, o => {
+      const previous = reusePending ? o.messages?.find(item => item.id === o.pendingMessageId && item.text === text) : undefined;
+      const message = previous ? {...previous, photos: [...new Set([...previous.photos, ...photos])]}
+        : {id: randomUUID(), text, photos, atMs: Date.now()};
+      return {...o, messages: [...(o.messages ?? []).filter(item => item.id !== message.id), message],
+        pendingFollowup: text, pendingMessageId: message.id,
+        pendingPhotos: (o.pendingPhotos ?? []).filter(name => !photos.includes(name))};
+    });
   }
 
   /** Answers the open Ask: with a photo (uploaded first), Best guess, or the person's own words. */
-  answerCloseup(id: string, answer: {bestGuess?: boolean; text?: string}): Promise<StmObject> { return this.#gate(id, () => this.#answerCloseup(id, answer)); }
-  async #answerCloseup(id: string, answer: {bestGuess?: boolean; text?: string}): Promise<StmObject> {
+  answerCloseup(id: string, answer: {bestGuess?: boolean; text?: string; photoNames?: string[]}): Promise<StmObject> { return this.#gate(id, () => this.#answerCloseup(id, answer)); }
+  async #answerCloseup(id: string, answer: {bestGuess?: boolean; text?: string; photoNames?: string[]}): Promise<StmObject> {
+    // Claim the install before consuming the Ask or its photos. The admitted pass takes its own
+    // counted reservation through worker cleanup; this one only covers the answer transaction.
+    let release = () => {};
+    try { release = this.#deps.printGate?.hold('current') ?? release; }
+    catch (error) { if (error instanceof PrinterUpdatingError) throw new InvalidStateError(error.message); throw error; }
+    try { return await this.#reservedAnswerCloseup(id, answer); }
+    finally { release(); }
+  }
+
+  async #reservedAnswerCloseup(id: string, answer: {bestGuess?: boolean; text?: string; photoNames?: string[]}): Promise<StmObject> {
     const object = await this.get(id);
     if (object.state !== 'needs-closeup') throw new InvalidStateError('No close-up was asked for.');
     // Carry on with what the asking pass was doing: a correction keeps its note and its model.
+    // Only this answer's explicit attachments belong to it. Other pending photos may already
+    // be reserved by a correction queued on either client; Best Guess and text claim none.
+    const photos = [...new Set(answer.photoNames ?? [])];
+    if (!photos.length && !answer.bestGuess && !answer.text?.trim()) throw new InvalidStateError('Choose photos for this answer, answer in words, or use Best Guess. If you already chose photos, update Counterpart and try again.');
+    if (photos.some(name => !object.photos.includes(name))) throw new InvalidStateError('That photo is not in this project.');
     const asked = object.passes.at(-1)?.note;
     const said = answer.text?.trim() ? `Answer to "${object.ask?.question ?? object.question?.closeup ?? 'your question'}": ${answer.text.trim()}` : undefined;
     const parts = [asked, said, answer.bestGuess && !asked?.includes(BEST_GUESS_NOTE) ? BEST_GUESS_NOTE : undefined].filter(Boolean);
     if (object.ask) await this.#deps.store.update(id, o => o.ask ? {...o, ask: {...o.ask, status: 'answered'}} : o);
-    return this.#pass(await this.get(id), {...(parts.length ? {note: parts.join('\n')} : {}), trigger: 'ask-answer'});
+    const updated = await this.#message(await this.get(id), answer.text?.trim() ?? (answer.bestGuess ? 'Use your best guess.' : ''), photos, false);
+    const message = updated.messages!.find(item => item.id === updated.pendingMessageId)!;
+    return this.#pass(updated, {...(parts.length ? {note: parts.join('\n')} : {}), messageId: message.id, photos: message.photos, trigger: 'ask-answer'});
   }
 
   /**
@@ -634,6 +725,8 @@ export class ObjectService {
     if (destinationId && (!destination || !config)) throw new InvalidStateError('That printer is no longer available. Choose another printer.');
     const services = destinationId ? configured.destinations?.get(destinationId) : configured.services;
     if (!services || (config && services.runner.backend !== config.backend)) throw new InvalidStateError('Printing is not set up for this printer.');
+    const gated = destination?.id ?? destinationId ?? 'current';
+    if (this.#deps.printGate?.updating(gated)) throw new InvalidStateError(new PrinterUpdatingError().message);
     // Keep the exact route and identity for this dispatch and every later confirmation.
     const printing = {...configured, services};
     const printDestination = destination ? {id: destination.id, name: destination.name} : undefined;
@@ -652,7 +745,12 @@ export class ObjectService {
     const printId = randomUUID();
     const print = {bundleId: manifest.id, printId, ...(printDestination ? {destination: printDestination, destinationId: printDestination.id} : {}),
       ...(Object.keys(settings).length ? {settings} : {})};
-    const started = await this.#deps.store.update(id, o => ({...o, state: 'printing', progress: 'Connecting to your printer service…', print, printConfirmation: undefined, failure: undefined}));
+    // PRD §8.10: held from here until the dispatch ends, so the printer's MCP isn't updated under it.
+    let release: () => void = () => undefined;
+    try { release = this.#deps.printGate?.hold(gated) ?? release; }
+    catch (error) { throw error instanceof PrinterUpdatingError ? new InvalidStateError(error.message) : error; }
+    const started = await this.#deps.store.update(id, o => ({...o, state: 'printing', progress: 'Connecting to your printer service…', print, printConfirmation: undefined, failure: undefined}))
+      .catch(error => { release(); throw error; });
     // Only this print's questions: other prints share the relay.
     const unsubscribe = relay.subscribe(pending => {
       if (pending.bundleId === manifest.id) void this.#confirm(id, pending, printing).catch(() => { relay.respond(pending.id, {action: 'cancel'}); });
@@ -692,6 +790,7 @@ export class ObjectService {
         })
       .then(o => this.#changed(o))
       .finally(() => {
+        release();
         unsubscribe(); this.#running.delete(id); this.#controllers.delete(id);
         clearTimeout(this.#confirmations.get(id)?.timer); this.#confirmations.delete(id);
         this.#cancelledPrints.delete(id);
@@ -879,6 +978,17 @@ export class ObjectService {
     const camera = this.#deps.camera;
     if (!camera || signal?.aborted) return undefined;
     return camera.frame(destinationId, session, {model: session.config.selection?.model}).catch(() => undefined);
+  }
+
+  /** PRD §8.10: a print is being prepared or monitored on this printer, so its MCP isn't updated now. */
+  async printerBusy(destinationId: string): Promise<boolean> {
+    const canonical = this.#deps.printerCatalog?.canonical(destinationId) ?? destinationId;
+    for (const object of await this.#deps.store.list()) {
+      if (object.state !== 'printing') continue;
+      const target = object.print?.destinationId ?? object.print?.destination?.id ?? this.#destinationId(object);
+      if (target && (this.#deps.printerCatalog?.canonical(target) ?? target) === canonical) return true;
+    }
+    return false;
   }
 
   /** A client opened this project: while it prints (or the printer asks something), warm its printer's camera. */
@@ -1072,14 +1182,26 @@ export class ObjectService {
     return (await this.#running.get(id)) ?? this.get(id);
   }
 
-  async #pass(object: StmObject, opts: {note?: string; trigger?: NonNullable<StmObject['passes'][number]['trigger']>}): Promise<StmObject> {
+  async #pass(object: StmObject, opts: {note?: string; messageId?: string; photos?: string[]; trigger?: NonNullable<StmObject['passes'][number]['trigger']>}): Promise<StmObject> {
+    // Design/cleanup workers use the current MCP too. Reserve before any await so an update cannot
+    // swap its files while this pass is admitted, queued, running, saving, or closing its helper.
+    let release = () => {};
+    try { release = this.#deps.printGate?.hold('current') ?? release; }
+    catch (error) { if (error instanceof PrinterUpdatingError) throw new InvalidStateError(error.message); throw error; }
+    try { return await this.#reservedPass(object, opts, release); }
+    catch (error) { release(); throw error; }
+  }
+
+  async #reservedPass(object: StmObject, opts: {note?: string; messageId?: string; photos?: string[]; trigger?: NonNullable<StmObject['passes'][number]['trigger']>}, release: () => void): Promise<StmObject> {
     await this.#requireCaptureCompletion(object);
     const store = this.#deps.store, dir = store.dir(object.id);
     const fromCurrent = opts.note !== undefined && object.current !== undefined;
     // A handheld scan is rebuilt into scan/scan.usdz first, once; its photos also show the touch-up the object.
     const build = !fromCurrent && !object.scan && (object.capture?.length ?? 0) > 0;
     const capturePhotos = (object.capture ?? []).map(name => join(dir, 'capture', name));
-    const photos = spreadPick([...object.photos.map(name => join(dir, 'photos', name)), ...capturePhotos], PHOTOS_PER_PASS);
+    // Preserve the original/prior context, but never let a later queued message's uploads influence this pass.
+    const pending = new Set(object.pendingPhotos ?? []);
+    const photos = spreadPick([...object.photos.filter(name => !pending.has(name)).map(name => join(dir, 'photos', name)), ...capturePhotos], PHOTOS_PER_PASS);
     const startedAtMs = Date.now();
     // PRD §8.9: copies are cleaned up in Blender; a new design may use Fusion (the touch-up decides).
     const kind: PassKind = passKind(object);
@@ -1087,9 +1209,10 @@ export class ObjectService {
     let engine: DesignEngine = 'blender';
     let typical = await this.#typical(kind, engine);
     const first: PassStage = {id: plan[0]!, words: stageWords(plan[0]!, engine, kind), startedAtMs, typicalSec: typical[plan[0]!]};
-    const running = await store.update(object.id, o => ({...o, state: 'touching-up', question: undefined, failure: undefined,
+    const running = await store.update(object.id, o => ({...o, state: 'touching-up', question: undefined, failure: undefined, pendingFollowup: undefined, pendingMessageId: undefined,
+      ...(o.completion ? {completion: {...o.completion, undone: true}} : {}),
       ...(build ? {progress: 'Building the model from your photos.'} : {progress: undefined}),
-      passes: [...o.passes, {startedAtMs, trigger: opts.trigger ?? 'new', stages: [first], estimate: passEstimate([first], plan, typical, startedAtMs),
+      passes: [...o.passes, {startedAtMs, ...(opts.messageId ? {messageId: opts.messageId, photos: opts.photos ?? []} : {}), trigger: opts.trigger ?? 'new', stages: [first], estimate: passEstimate([first], plan, typical, startedAtMs),
         ...(opts.note ? {note: opts.note} : {})}]}));
     this.#changed(running);
     await this.#emit({id: randomUUID(), type: 'pass.started', projectId: object.id, data: {stage: first.words, estimateSec: passEstimate([first], plan, typical, startedAtMs).remainingSec}});
@@ -1130,7 +1253,7 @@ export class ObjectService {
       let scanName = object.scan;
       if (build) scanName = await this.#build(object.id, dir, controller.signal);
       const scan = fromCurrent ? [join(dir, object.current!.model)] : scanName ? [join(dir, 'scan', scanName)] : [];
-      const input: TouchupInput = {root: join(dir, 'passes'), objectId: 'pass', scan, photos, currentModel: fromCurrent, handoff: this.#deps.handoff, claudePath: this.#deps.claudePath,
+      const input: TouchupInput = {root: join(dir, 'passes'), objectId: 'pass', scan, photos, currentModel: fromCurrent, handoff: this.#handoff(), claudePath: this.#deps.claudePath,
         kind, onStage: (id, chosen) => stage(id, chosen),
         ...(fromCurrent && object.current?.engine === 'fusion' && object.current.design
           ? {design: {f3d: join(dir, object.current.design.f3d), ...(object.current.design.parameters ? {parameters: join(dir, object.current.design.parameters)} : {})}} : {}),
@@ -1140,7 +1263,7 @@ export class ObjectService {
       finally { stage('saving'); await writing; }
     })()
       .then(result => this.#finish(object.id, startedAtMs, result, kind), error => this.#fail(object.id, startedAtMs, error))
-      .finally(() => { this.#running.delete(object.id); this.#controllers.delete(object.id); });
+      .finally(() => { release(); this.#running.delete(object.id); this.#controllers.delete(object.id); });
     this.#running.set(object.id, work);
     return running;
   }
@@ -1298,7 +1421,8 @@ export class ObjectService {
     return [...previous, ...clean].slice(-200);
   }
 
-  #publicText(text: string): string { return publicTouchupText(text, {...process.env, ...this.#deps.handoff.process.env}); }
+  #handoff(): PrinterHandoffConfig { return this.#deps.runningHandoff?.() ?? this.#deps.handoff; }
+  #publicText(text: string): string { return publicTouchupText(text, {...process.env, ...this.#handoff().process.env}); }
 
   #changed(object: StmObject): StmObject { this.#deps.onChange?.(object); return object; }
 }

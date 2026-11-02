@@ -9,6 +9,36 @@ export interface PublicDestination extends PrinterDestination {
   state?: Readiness;
   stateCheckedAt?: string;
   capabilities?: PrinterCapabilities;
+  mcpId?: string;
+}
+
+/** PRD §8.10: which install a destination runs, and the newest published version (McpUpdater). */
+export interface McpVersions {
+  mcpId(destinationId: string): string | undefined;
+  latestVersion(pkg: string, options?: {view?: boolean}): string | undefined;
+}
+const PACKAGE_LABELS: Record<string, string> = {'bambu-printer-mcp': 'bambu-printer-mcp', 'mcp-3d-printer-server': 'mcp-3D-printer-server'};
+/** Whether version a is newer than b (major.minor.patch). */
+export function newerVersion(a: string, b: string): boolean {
+  // Semantic versions: major.minor.patch, then a release beats its prereleases (1.2.0 > 1.2.0-dev).
+  const parse = (v: string) => {
+    const [core = '', pre] = v.replace(/^v/, '').split('+')[0]!.split(/-(.*)/s);
+    return {core: core.split('.').slice(0, 3).map(n => Number.parseInt(n, 10) || 0), pre: pre ? pre.split('.') : []};
+  };
+  const x = parse(a), y = parse(b);
+  for (let i = 0; i < 3; i++) if ((x.core[i] ?? 0) !== (y.core[i] ?? 0)) return (x.core[i] ?? 0) > (y.core[i] ?? 0);
+  if (!x.pre.length || !y.pre.length) return !x.pre.length && !!y.pre.length;
+  for (let i = 0; i < Math.max(x.pre.length, y.pre.length); i++) {
+    const [p, q] = [x.pre[i], y.pre[i]];
+    if (p === undefined) return false;
+    if (q === undefined) return true;
+    if (p === q) continue;
+    const [m, n] = [Number(p), Number(q)];
+    if (Number.isInteger(m) && Number.isInteger(n)) return m > n;
+    if (Number.isInteger(m) !== Number.isInteger(n)) return !Number.isInteger(m);
+    return p > q;
+  }
+  return false;
 }
 
 /** How often a list request may start a background read of one destination. */
@@ -26,12 +56,16 @@ export class PrinterDirectory {
   readonly #reports = new Map<string, {report?: PrintReport; state: Readiness; checkedAt: number}>();
   readonly #refreshing = new Map<string, Promise<void>>();
   readonly #now: () => number;
+  #versions?: McpVersions;
 
   constructor(catalog: PrinterCatalog, session: (destinationId: string) => PrinterSession | undefined, options: {now?: () => number} = {}) {
     this.catalog = catalog;
     this.#session = session;
     this.#now = options.now ?? Date.now;
   }
+
+  /** Set once the updater exists: adds `mcpId` and `update.latestVersion` to the list. */
+  useVersions(versions: McpVersions): void { this.#versions = versions; }
 
   /** The session of the destination an id stands for (a duplicate's winner). */
   session(destinationId: string): PrinterSession | undefined {
@@ -63,6 +97,20 @@ export class PrinterDirectory {
     this.#reports.set(id, {...(report ? {report} : {}), state: failed ? 'offline' : readiness(report), checkedAt: this.#now()});
   }
 
+  /**
+   * PRD §8.10: the printer itself says a print is running: any print, the phone's handoff or one started
+   * elsewhere, which Counterpart has no project for. Read now, not from the cache. A printer that can't be read
+   * isn't printing (and its MCP may be what needs the update).
+   */
+  async printing(destinationId: string): Promise<boolean> {
+    const id = this.catalog.canonical(destinationId);
+    const session = id ? this.#session(id) : undefined;
+    if (!id || !session) return false;
+    const report = await readPrintReport(session, {failFast: true, signal: AbortSignal.timeout(20_000)}).catch(() => undefined);
+    this.record(id, report, !report);
+    return readiness(report) === 'busy';
+  }
+
   /** Reads the destination's state in the background, at most once per READINESS_REFRESH_MS. */
   refresh(destinationId: string): Promise<void> {
     const id = this.catalog.canonical(destinationId);
@@ -84,9 +132,21 @@ export class PrinterDirectory {
     return {defaultDestinationId: this.catalog.defaultDestinationId, destinations: this.catalog.destinations.map(destination => {
       void this.refresh(destination.id);
       const known = this.#reports.get(destination.id), capabilities = this.#capabilities.get(destination.id);
+      const mcpId = this.#versions?.mcpId(destination.id);
       return {...destination, state: known?.state ?? 'unknown',
         ...(known ? {stateCheckedAt: new Date(known.checkedAt).toISOString()} : {}),
-        ...(capabilities ? {capabilities: structuredClone(capabilities)} : {})};
+        ...(capabilities ? {capabilities: this.#withLatest(structuredClone(capabilities), destination.backend)} : {}),
+        ...(mcpId ? {mcpId} : {})};
     })};
+  }
+
+  /** A newer published version shows as `update`, with `latestVersion`, even when no feature is missing. */
+  #withLatest(capabilities: PrinterCapabilities, backend: string): PrinterCapabilities {
+    const latest = this.#versions?.latestVersion(backend, {view: true});
+    if (!latest) return capabilities;
+    const newer = newerVersion(latest, capabilities.server.version);
+    if (capabilities.update) return {...capabilities, update: {...capabilities.update, latestVersion: latest}};
+    if (!newer) return capabilities;
+    return {...capabilities, update: {message: `Update ${PACKAGE_LABELS[backend] ?? backend} to ${latest}.`, package: backend as 'bambu-printer-mcp', latestVersion: latest}};
   }
 }

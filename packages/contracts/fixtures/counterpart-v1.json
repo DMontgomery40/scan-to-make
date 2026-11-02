@@ -601,10 +601,12 @@
       "install",
       "-g",
       "bambu-printer-mcp@latest"
-     ]
+     ],
+     "latestVersion": "1.1.50"
     },
     "detectedAt": "2026-11-01T18:00:00.000Z"
-   }
+   },
+   "mcpId": "mcp-10cc07925221a48f"
   },
   {
    "id": "mcp-0123456789abcdef01234567",
@@ -613,7 +615,8 @@
    "address": "voron.local:7125",
    "source": "mcp-profile",
    "origin": "codex",
-   "state": "unknown"
+   "state": "unknown",
+   "mcpId": "mcp-10cc07925221a48f"
   }
  ],
  "ask": {
@@ -728,6 +731,108 @@
    "text": "Done · it works",
    "symbol": "checkmark.circle.fill",
    "tint": "green"
+  },
+  {
+   "phase": "draft",
+   "text": "Add photos or a scan",
+   "symbol": "square.and.pencil",
+   "tint": "secondary"
+  }
+ ],
+ "macEvents": [
+  {
+   "v": 1,
+   "seq": 22,
+   "id": "00000000-0000-4000-8000-000000000021",
+   "at": "2026-11-01T19:01:00.000Z",
+   "type": "mcp.update.started",
+   "destinationId": "current",
+   "printerName": "Bambu Lab P1S",
+   "title": "Updating bambu-printer-mcp",
+   "body": "1.1.46 to 1.1.50 · Bambu Lab P1S",
+   "notify": "none",
+   "data": {
+    "mcpId": "mcp-10cc07925221a48f",
+    "fromVersion": "1.1.46",
+    "toVersion": "1.1.50"
+   }
+  },
+  {
+   "v": 1,
+   "seq": 23,
+   "id": "00000000-0000-4000-8000-000000000022",
+   "at": "2026-11-01T19:02:00.000Z",
+   "type": "mcp.update.waiting",
+   "destinationId": "current",
+   "printerName": "Bambu Lab P1S",
+   "title": "bambu-printer-mcp updates after the current print",
+   "body": "1.1.46 to 1.1.50 · Bambu Lab P1S",
+   "notify": "none",
+   "data": {
+    "mcpId": "mcp-10cc07925221a48f",
+    "fromVersion": "1.1.46",
+    "toVersion": "1.1.50"
+   }
+  },
+  {
+   "v": 1,
+   "seq": 24,
+   "id": "00000000-0000-4000-8000-000000000023",
+   "at": "2026-11-01T19:03:00.000Z",
+   "type": "mcp.update.done",
+   "destinationId": "current",
+   "printerName": "Bambu Lab P1S",
+   "title": "Updated bambu-printer-mcp to 1.1.50",
+   "body": "Bambu Lab P1S uses it now.",
+   "notify": "passive",
+   "data": {
+    "mcpId": "mcp-10cc07925221a48f",
+    "fromVersion": "1.1.46",
+    "toVersion": "1.1.50"
+   }
+  },
+  {
+   "v": 1,
+   "seq": 25,
+   "id": "00000000-0000-4000-8000-000000000024",
+   "at": "2026-11-01T19:04:00.000Z",
+   "type": "mcp.update.failed",
+   "destinationId": "current",
+   "printerName": "Bambu Lab P1S",
+   "title": "Couldn't update bambu-printer-mcp",
+   "body": "1.1.46 is still in use. Try again, or install a fresh copy.",
+   "notify": "active",
+   "data": {
+    "mcpId": "mcp-10cc07925221a48f",
+    "fromVersion": "1.1.46",
+    "toVersion": "1.1.50",
+    "log": "npm ERR! code ENOTFOUND\nnpm ERR! network request to https://registry.npmjs.org/bambu-printer-mcp failed"
+   }
+  }
+ ],
+ "mcpUpdates": [
+  {
+   "mcpId": "mcp-10cc07925221a48f",
+   "state": "started",
+   "fromVersion": "1.1.46",
+   "toVersion": "1.1.50"
+  },
+  {
+   "mcpId": "mcp-10cc07925221a48f",
+   "state": "waiting",
+   "fromVersion": "1.1.46",
+   "toVersion": "1.1.50"
+  },
+  {
+   "mcpId": "mcp-10cc07925221a48f",
+   "state": "current",
+   "fromVersion": "1.1.50",
+   "toVersion": "1.1.50"
+  },
+  {
+   "mcpId": "mcp-0123456789abcdef",
+   "state": "unresolved",
+   "found": "/opt/tools/printer-wrapper.sh, which isn't an install of bambu-printer-mcp Counterpart recognises"
   }
  ]
 }

@@ -134,11 +134,12 @@ import ControlKit
         }
         do {
             let client = try ControlClient(socketPath: socket, timeout: ControlClient.timeout(for: call.method))
-            // An answer with photos: the photos join the project first, so the pass that resumes uses them.
-            if command.type == "answerAsk" {
-                for photo in photos { _ = try await client.addFile(command.projectId, kind: "photos", path: photo) }
+            guard let prepared = try await command.preparedCall(photos: photos, acceptsText: capabilities?.structuredPasses ?? false,
+                                                               printSettings: capabilities?.printSettings ?? false,
+                                                               addPhoto: { try await client.addPhotoFile(command.projectId, path: $0, forMessage: true) }) else {
+                return (false, command.refusal)
             }
-            _ = try await client.run(call.method, call.params)
+            _ = try await client.run(prepared.method, prepared.params)
             return (true, "Done on your Mac.")
         } catch let error as ControlRemoteError {
             return (false, error.code == "conflict" && !error.message.isEmpty ? error.message : ObjectsModel.sentence(for: error))

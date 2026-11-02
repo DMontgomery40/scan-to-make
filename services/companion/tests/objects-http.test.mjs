@@ -11,7 +11,7 @@ import {createControlDispatcher} from '../dist/local-control-services.js';
 
 const STL = 'solid m\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 1 0 0\nvertex 0 1 0\nendloop\nendfacet\nendsolid m\n';
 
-async function fixture(t, {denied = [], reconstruct} = {}) {
+async function fixture(t, {denied = [], reconstruct, reportsCompletion} = {}) {
   const root = await mkdtemp(join(tmpdir(), 'objects-http-'));
   const store = new ObjectStore(join(root, 'objects'));
   const runTouchup = async () => {
@@ -20,7 +20,7 @@ async function fixture(t, {denied = [], reconstruct} = {}) {
     return {status: 'done', summary: 'Fixed.', model: join(out, 'touched.stl'), renders: [join(out, 'front.png')], checkpoints: [], stats: {seconds: 1, toolCalls: 1}, passDir: join(root, 'pass')};
   };
   const events = [];
-  const service = new ObjectService({store, runTouchup, stlInfo: async () => [60.6, 45.2, 21.7], claudePath: '/c', handoff: {backend: 'bambu-printer-mcp', process: {command: '/usr/bin/true'}}, ...(reconstruct ? {reconstruct} : {}),
+  const service = new ObjectService({store, runTouchup, reportsCompletion, stlInfo: async () => [60.6, 45.2, 21.7], claudePath: '/c', handoff: {backend: 'bambu-printer-mcp', process: {command: '/usr/bin/true'}}, ...(reconstruct ? {reconstruct} : {}),
     events: {emit: async draft => { events.push(draft); }}});
   const routes = createObjectRoutes(service);
   const scopes = [], devices = [];
@@ -400,5 +400,200 @@ test('the Mac sets Status over the control socket; project.updated tells the app
   assert.deepEqual([set.settings.status, set.object.state, set.object.status.phase], ['works', 'confirmed', 'confirmed']);
   assert.deepEqual(events.map(event => [event.type, event.data]), [['project.updated', {keys: ['status']}]]);
   assert.equal((await dispatch('status.get', {})).capabilities.projectSettings, true);
+  assert.equal((await dispatch('status.get', {})).capabilities.projectRename, true);
   await assert.rejects(dispatch('objects.settings.set', {id: object.id, status: 'done'}));
+});
+
+
+test('a name set on either device persists and does not start or stop a pass', async t => {
+  const {call, store, service, events} = await fixture(t);
+  const object = await service.create('A mic mount');
+  await store.update(object.id, o => ({...o, state: 'touching-up', passes: [{startedAtMs: 1, note: 'Tighten the clip'}]}));
+  const renamed = await call('PATCH', `/v1/objects/${object.id}/settings`, {title: '  Studio microphone mount  '});
+  assert.equal(renamed.status, 200);
+  assert.equal(renamed.json.object.title, 'Studio microphone mount');
+  assert.equal(renamed.json.object.state, 'touching-up');
+  assert.equal(renamed.json.object.passes.length, 1);
+  const dispatch = createControlDispatcher({auth: {transport: 'lan', listDevices: async () => []}, companionVersion: 'test', objects: service});
+  assert.equal((await dispatch('objects.get', {id: object.id})).object.title, 'Studio microphone mount');
+  const changed = await dispatch('objects.settings.set', {id: object.id, title: 'Desk mount'});
+  assert.equal(changed.object.title, 'Desk mount');
+  assert.equal((await call('GET', `/v1/objects/${object.id}`)).json.object.title, 'Desk mount');
+  assert.equal((await store.get(object.id)).title, 'Desk mount');
+  assert.deepEqual(events.filter(e => e.type === 'project.updated').map(e => e.data), [{keys: ['title']}, {keys: ['title']}]);
+  for (const title of ['', '   ', 'x'.repeat(121), 'hidden\u0000name', 42]) {
+    assert.equal((await call('PATCH', `/v1/objects/${object.id}/settings`, {title})).status, 400);
+    await assert.rejects(dispatch('objects.settings.set', {id: object.id, title}));
+  }
+  assert.equal((await store.get(object.id)).title, 'Desk mount');
+});
+
+
+test('Done-only messages mark Works without a pass; undo and mixed requests still work', async t => {
+  const classified = [];
+  const {call, service, store} = await fixture(t, {reportsCompletion: async note => { classified.push(note); return note === 'DONE. mounted and working. thanks!!' ? 'works' : 'changes'; }});
+  const project = await service.create('A mic mount');
+  await service.start(project.id); await service.settled(project.id);
+  const before = await store.get(project.id);
+  const done = await call('POST', `/v1/objects/${project.id}/corrections`, {note: 'DONE. mounted and working. thanks!!'});
+  assert.equal(done.status, 200);
+  assert.equal(done.json.object.state, 'confirmed');
+  assert.equal(done.json.object.passes.length, before.passes.length);
+  assert.deepEqual(done.json.object.current, before.current);
+  assert.equal(done.json.object.completion.note, 'DONE. mounted and working. thanks!!');
+  assert.equal(done.json.object.completion.previousStatus, 'not-printed');
+  await call('PATCH', `/v1/objects/${project.id}/settings`, {status: done.json.object.completion.previousStatus});
+  assert.equal((await service.get(project.id)).state, 'ready');
+  const changed = await call('POST', `/v1/objects/${project.id}/corrections`, {note: 'It works, but widen the flange'});
+  assert.equal(changed.json.object.state, 'touching-up');
+  await service.settled(project.id);
+  assert.equal((await service.get(project.id)).passes.length, before.passes.length + 1);
+  assert.deepEqual(classified, ['DONE. mounted and working. thanks!!', 'It works, but widen the flange']);
+});
+
+
+test('unavailable or uncertain classification saves the note without changing the model or starting a pass', async t => {
+  for (const [index, reportsCompletion] of [async () => 'unknown', async () => { throw new Error('timed out'); }].entries()) {
+    const {call, service, store} = await fixture(t, {reportsCompletion});
+    const project = await service.create('A mic mount');
+    await service.start(project.id); await service.settled(project.id);
+    if (index === 1) await service.setStatus(project.id, 'works');
+    const before = await store.get(project.id);
+    const reply = await call('POST', `/v1/objects/${project.id}/corrections`, {note: 'DONE. mounted and working. thanks!!'});
+    assert.equal(reply.status, 409);
+    assert.match(reply.json.error.message, /message is saved/);
+    const after = await store.get(project.id);
+    assert.equal(after.pendingFollowup, 'DONE. mounted and working. thanks!!');
+    assert.equal(after.state, before.state);
+    assert.deepEqual(after.current, before.current);
+    assert.deepEqual(after.passes, before.passes);
+    await service.setStatus(project.id, 'works');
+    assert.equal((await store.get(project.id)).pendingFollowup, undefined);
+    assert.equal((await store.get(project.id)).pendingMessageId, undefined);
+    assert.equal((await store.get(project.id)).completion.messageId, after.messages[0].id);
+  }
+});
+
+test('message photos stay with their follow-up and a finished-part photo does not start a pass', async t => {
+  const {call, service, store} = await fixture(t, {reportsCompletion: async note => note === 'DONE' ? 'works' : 'changes'});
+  const project = await service.create('A mount');
+  await service.addPhoto(project.id, 'initial.jpg', Buffer.from('photo'));
+  await service.start(project.id); await service.settled(project.id);
+  await service.addPhoto(project.id, 'change.jpg', Buffer.from('photo'));
+  await service.addPhoto(project.id, 'finished.jpg', Buffer.from('photo'));
+  const change = await call('POST', `/v1/objects/${project.id}/corrections`, {note: 'Widen it', photoNames: ['change.jpg']});
+  assert.equal(change.status, 200);
+  await service.settled(project.id);
+  const before = await store.get(project.id);
+  assert.deepEqual(before.requestPhotos, ['initial.jpg']);
+  assert.deepEqual(before.passes.at(-1).photos, ['change.jpg']);
+  assert.deepEqual(before.pendingPhotos, ['finished.jpg']);
+  const done = await call('POST', `/v1/objects/${project.id}/corrections`, {note: 'DONE', photoNames: ['finished.jpg']});
+  assert.equal(done.status, 200);
+  assert.equal(done.json.object.state, 'confirmed');
+  assert.deepEqual(done.json.object.current, before.current);
+  assert.equal(done.json.object.passes.length, before.passes.length);
+  assert.deepEqual(done.json.object.messages.map(message => [message.text, message.photos]), [['Widen it', ['change.jpg']], ['DONE', ['finished.jpg']]]);
+  assert.equal(done.json.object.completion.messageId, done.json.object.messages.at(-1).id);
+});
+
+test('uncertain message retries preserve photo ownership and message identity', async t => {
+  let intent = 'unknown';
+  const {call, service, store} = await fixture(t, {reportsCompletion: async () => intent});
+  const project = await service.create('A mount');
+  await service.start(project.id); await service.settled(project.id);
+  await service.addPhoto(project.id, 'finished.jpg', Buffer.from('photo'));
+  assert.equal((await call('POST', `/v1/objects/${project.id}/corrections`, {note: 'DONE'})).status, 409);
+  const saved = await store.get(project.id);
+  await service.addPhoto(project.id, 'next-change.jpg', Buffer.from('photo'));
+  intent = 'works';
+  const done = await call('POST', `/v1/objects/${project.id}/corrections`, {note: 'DONE'});
+  assert.equal(done.status, 200);
+  assert.equal(done.json.object.messages.length, 1);
+  assert.equal(done.json.object.messages[0].id, saved.messages[0].id);
+  assert.deepEqual(done.json.object.messages[0].photos, ['finished.jpg']);
+  assert.deepEqual(done.json.object.pendingPhotos, ['next-change.jpg'], 'retry must not claim a later message’s upload');
+});
+
+test('Mac local photo evidence is copied and attached before marking Done without a pass', async t => {
+  const {service, store} = await fixture(t, {reportsCompletion: async () => 'works'});
+  const project = await service.create('A mount');
+  await service.start(project.id); await service.settled(project.id);
+  const before = await store.get(project.id);
+  const evidence = join(store.dir(project.id), 'finished.jpg');
+  await writeFile(evidence, Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0, 0, 0]));
+  const done = await service.correct(project.id, 'DONE', [evidence]);
+  assert.equal(done.state, 'confirmed');
+  assert.equal(done.passes.length, before.passes.length);
+  assert.deepEqual(done.current, before.current);
+  assert.deepEqual(done.messages[0].photos, ['finished.jpg']);
+});
+
+
+test('Ask photo selection is validated before consuming the question through HTTP and local control', async t => {
+  const {call, service, store} = await fixture(t);
+  const dispatch = createControlDispatcher({objects: service});
+  for (const local of [false, true]) {
+    const object = await service.create('A mount', 'fit');
+    await store.update(object.id, o => ({...o, state: 'needs-closeup', ask: {id: 'ask', question: 'Underside?', answers: ['photos'], status: 'open', askedAtMs: 1}}));
+    await service.addPhoto(object.id, 'queued.jpg', Buffer.from('queue'));
+    await service.addPhoto(object.id, 'answer.jpg', Buffer.from('answer'));
+    const before = await store.get(object.id);
+    if (local) {
+      await assert.rejects(dispatch('objects.answerCloseup', {id: object.id, bestGuess: false, photoNames: ['missing.jpg']}), /not in this project/);
+      await assert.rejects(dispatch('objects.answerCloseup', {id: object.id, bestGuess: false, photoNames: [4]}));
+    } else {
+      assert.equal((await call('POST', `/v1/objects/${object.id}/closeup`, {photoNames: ['missing.jpg']})).status, 409);
+      assert.equal((await call('POST', `/v1/objects/${object.id}/closeup`, {photoNames: [4]})).status, 400);
+    }
+    assert.deepEqual(await store.get(object.id), before);
+    if (local) await dispatch('objects.answerCloseup', {id: object.id, bestGuess: false, photoNames: ['answer.jpg']});
+    else assert.equal((await call('POST', `/v1/objects/${object.id}/closeup`, {photoNames: ['answer.jpg']})).status, 200);
+    const after = await service.settled(object.id);
+    assert.deepEqual(after.messages.at(-1).photos, ['answer.jpg']);
+    assert.deepEqual(after.pendingPhotos, ['queued.jpg']);
+  }
+});
+
+
+test('local photo upload returns its exact renamed receipt without selecting other pending evidence', async t => {
+  const {service, store} = await fixture(t);
+  const dispatch = createControlDispatcher({objects: service});
+  const project = await service.create('A mount', 'fit');
+  await store.update(project.id, o => ({...o, state: 'needs-closeup', ask: {id: 'ask', question: 'Underside?', answers: ['photos'], status: 'open', askedAtMs: 1}}));
+  await service.addPhoto(project.id, 'answer.jpg', Buffer.from('other message'));
+  await service.addPhoto(project.id, 'queued.jpg', Buffer.from('queued'));
+  const local = join(store.dir(project.id), 'answer.jpg');
+  await writeFile(local, Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0, 0, 0]));
+  const uploaded = await dispatch('objects.addFile', {id: project.id, kind: 'photos', path: local});
+  assert.equal(uploaded.photoName, 'answer-2.jpg');
+  await service.addPhoto(project.id, 'later.jpg', Buffer.from('later'));
+  await dispatch('objects.answerCloseup', {id: project.id, bestGuess: false, photoNames: [uploaded.photoName]});
+  const after = await service.settled(project.id);
+  assert.deepEqual(after.messages.at(-1).photos, ['answer-2.jpg']);
+  assert.deepEqual(after.pendingPhotos, ['answer.jpg', 'queued.jpg', 'later.jpg']);
+});
+
+
+test('HTTP and local photo uploads preserve explicit message intent after an initial failure', async t => {
+  const {call, service, store} = await fixture(t);
+  const dispatch = createControlDispatcher({objects: service});
+  for (const local of [false, true]) {
+    const project = await service.create('A mount', 'fit');
+    await store.update(project.id, o => ({...o, state: 'failed', failure: 'Initial work failed'}));
+    if (local) {
+      const file = join(store.dir(project.id), 'queued.jpg');
+      await writeFile(file, Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0, 0, 0]));
+      const receipt = await dispatch('objects.addFile', {id: project.id, kind: 'photos', path: file, forMessage: true});
+      assert.equal(receipt.photoName, 'queued.jpg');
+      await dispatch('objects.addFile', {id: project.id, kind: 'photos', path: file});
+    } else {
+      assert.equal((await call('POST', `/v1/objects/${project.id}/photos?name=queued.jpg&forMessage=true`, Buffer.from('queue'), 'image/jpeg')).status, 200);
+      assert.equal((await call('POST', `/v1/objects/${project.id}/photos?name=retry.jpg`, Buffer.from('retry'), 'image/jpeg')).status, 200);
+      assert.equal((await call('POST', `/v1/objects/${project.id}/photos?name=invalid.jpg&forMessage=yes`, Buffer.from('bad'), 'image/jpeg')).status, 400);
+    }
+    const after = await store.get(project.id);
+    assert.deepEqual(after.pendingPhotos, ['queued.jpg']);
+    assert.deepEqual(after.requestPhotos, [local ? 'queued-2.jpg' : 'retry.jpg']);
+  }
 });

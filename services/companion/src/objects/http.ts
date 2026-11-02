@@ -4,7 +4,7 @@ import {basename, join} from 'node:path';
 import type {RemoteScope} from '../remote-auth.js';
 import {InvalidAnswerError, InvalidCaptureManifestError, InvalidStateError, projectStatus, type ObjectService} from './service.js';
 import {CameraUnavailableError, type CameraFrame} from '../printing/camera.js';
-import {MilestonesSchema, ProjectStatusSchema, type ObjectStatus, type ProjectStatus} from '@scan-to-make/contracts/counterpart';
+import {MilestonesSchema, type ObjectStatus, type ProjectStatus} from '@scan-to-make/contracts/counterpart';
 import {objectStatus, projectTitle} from '../events/words.js';
 import {ObjectNotFoundError, type ObjectPass, type StmObject} from './store.js';
 import {RECONSTRUCTION_FAILED} from './reconstruct.js';
@@ -112,11 +112,12 @@ export function createObjectRoutes(service: ObjectService) {
           if (method !== 'PATCH') throw new HttpFailure(405, 'method-not-allowed');
           await authorize(WRITE);
           const input = await json<Record<string, unknown>>(request);
-          const status = input.status === undefined ? undefined : ProjectStatusSchema.safeParse(input.status);
-          if ((status && !status.success) || (input.archived !== undefined && typeof input.archived !== 'boolean') || (!status && input.archived === undefined)
-            || Object.keys(input).some(key => key !== 'status' && key !== 'archived')) throw new HttpFailure(400, 'invalid-request');
-          let updated = status?.success ? await service.setStatus(id, status.data) : await service.get(id);
-          if (typeof input.archived === 'boolean') updated = await service.setArchived(id, input.archived);
+          const parsed = parameters['objects.settings.set'].safeParse({...input, id});
+          if (!parsed.success || 'id' in input) throw new HttpFailure(400, 'invalid-request');
+          const {status, archived, title} = parsed.data;
+          let updated = status !== undefined ? await service.setStatus(id, status) : await service.get(id);
+          if (archived !== undefined) updated = await service.setArchived(id, archived);
+          if (title !== undefined) updated = await service.rename(id, title);
           return send(response, 200, {settings: projectSettingsView(updated), object: publicObject(updated)});
         }
         if (!id) {
@@ -257,11 +258,13 @@ export function createObjectRoutes(service: ObjectService) {
           }
           case 'photos':
           case 'capture': {
+            const messageIntent = url.searchParams.get('forMessage');
+            if (action === 'photos' && messageIntent !== null && !['true', 'false'].includes(messageIntent)) throw new HttpFailure(400, 'invalid-for-message');
             const name = url.searchParams.get('name') ?? '';
             if (!/^[A-Za-z0-9][A-Za-z0-9._ -]{0,127}$/.test(name) || name.includes('..')) throw new HttpFailure(400, 'invalid-name');
             object = await service.receive(id, async () => {
               const bytes = await body(request, MAX_PHOTO);
-              return action === 'capture' ? service.addCapturePhoto(id, name, bytes) : service.addPhoto(id, name, bytes);
+              return action === 'capture' ? service.addCapturePhoto(id, name, bytes) : service.addPhoto(id, name, bytes, messageIntent === 'true');
             });
             break;
           }
@@ -278,15 +281,17 @@ export function createObjectRoutes(service: ObjectService) {
             break;
           }
           case 'corrections': {
-            const {note} = await json<{note?: unknown}>(request);
+            const {note, photoNames} = await json<{note?: unknown; photoNames?: unknown}>(request);
             if (typeof note !== 'string' || !note.trim() || note.length > 4000) throw new HttpFailure(400, 'invalid-request');
-            object = await service.correct(id, note);
+            if (photoNames !== undefined && (!Array.isArray(photoNames) || photoNames.length > 100 || photoNames.some(name => typeof name !== 'string' || name.length > 128))) throw new HttpFailure(400, 'invalid-request');
+            object = await service.correct(id, note, [], photoNames as string[] | undefined);
             break;
           }
           case 'closeup': {
-            const input = await json<{bestGuess?: unknown; text?: unknown}>(request);
+            const input = await json<{bestGuess?: unknown; text?: unknown; photoNames?: unknown}>(request);
             if (input.text !== undefined && (typeof input.text !== 'string' || !input.text.trim() || input.text.length > 2000)) throw new HttpFailure(400, 'invalid-request');
-            object = await service.answerCloseup(id, {bestGuess: input.bestGuess === true, ...(typeof input.text === 'string' ? {text: input.text} : {})});
+            if (input.photoNames !== undefined && (!Array.isArray(input.photoNames) || input.photoNames.length > 100 || input.photoNames.some(name => typeof name !== 'string' || !name || name.length > 128))) throw new HttpFailure(400, 'invalid-request');
+            object = await service.answerCloseup(id, {photoNames: input.photoNames as string[] | undefined, bestGuess: input.bestGuess === true, ...(typeof input.text === 'string' ? {text: input.text} : {})});
             break;
           }
           case 'print': {

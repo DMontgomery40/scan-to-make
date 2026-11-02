@@ -7,6 +7,8 @@ private actor FakeObjects: ObjectsCompanion {
     var listError: Error?
     var actionError: Error?
     private(set) var calls: [String] = []
+    private(set) var correctionPhotoNames: [[String]?] = []
+    private(set) var messageUploadFlags: [Bool] = []
     private(set) var confirmationAnswer: PrintConfirmationAnswer?
     func set(_ items: [[String: Any]]) { self.items = items }
     private(set) var settingsPatches: [String: [String: JSONValue]] = [:]
@@ -30,6 +32,7 @@ private actor FakeObjects: ObjectsCompanion {
         let item = items.first { $0["id"] as? String == id }
         var settings = item?["settings"] as? [String: Any] ?? ["status": "printed", "archived": false]
         var fields: [String: Any] = [:]
+        if case .string(let title)? = patch["title"] { fields["title"] = title }
         if case .string(let status)? = patch["status"] {
             if status == "archived" { settings["archived"] = true } else { settings["status"] = status }
             if status == "works" { fields["state"] = "confirmed"; fields["status"] = ["phase": "confirmed", "text": "It works", "symbol": "checkmark.circle.fill", "tint": "green"] }
@@ -56,7 +59,20 @@ private actor FakeObjects: ObjectsCompanion {
         if let listError { throw listError }
         return try items.map(decode)
     }
-    func correct(_ id: String, note: String) async throws -> Project { try change(id, "correct:\(note)", ["state": "touching-up"]) }
+    func correct(_ id: String, note: String) async throws -> Project {
+        correctionPhotoNames.append(nil)
+        return try change(id, "correct:\(note)", ["state": "touching-up"])
+    }
+    func correct(_ id: String, note: String, photos: [String], photoNames: [String]) async throws -> Project {
+        correctionPhotoNames.append(photoNames)
+        return try change(id, "correct:\(note)", ["state": "touching-up"])
+    }
+    func addPhotoFile(_ id: String, path: String, forMessage: Bool) async throws -> String {
+        messageUploadFlags.append(forMessage)
+        // The initial worker fails while this queued upload is in flight; another message's photo also arrives.
+        _ = try change(id, "upload", ["state": "failed", "current": NSNull(), "photos": ["other.jpg", "renamed-evidence.jpg"], "pendingPhotos": ["other.jpg", "renamed-evidence.jpg"]])
+        return "renamed-evidence.jpg"
+    }
     func answerCloseup(_ id: String, bestGuess: Bool) async throws -> Project { try change(id, "closeup:\(bestGuess)", ["state": "touching-up"]) }
     func print(_ id: String, checked: Bool) async throws -> Project { try change(id, "print:\(checked)", ["state": "printing"]) }
     func answerPrintConfirmation(_ id: String, confirmationId: String, answer: PrintConfirmationAnswer) async throws -> Project {
@@ -82,6 +98,86 @@ private func project(_ item: [String: Any]) throws -> Project {
 }
 
 @MainActor final class ObjectsModelTests: XCTestCase {
+    func testQueuedPhotoKeepsItsIntentAndExactReceiptWhenInitialPassFailsDuringUpload() async throws {
+        let companion = FakeObjects()
+        await companion.set([item("queued", "touching-up", ["current": NSNull(), "pendingPhotos": ["other.jpg"]])])
+        let model = ObjectsModel(companion: companion, defaults: UserDefaults(suiteName: UUID().uuidString)!)
+        await model.refresh()
+        let accepted = await model.requestChanges("queued", note: "Widen this", photos: [URL(fileURLWithPath: "/tmp/evidence.jpg")])
+        XCTAssertTrue(accepted)
+        let flags = await companion.messageUploadFlags
+        XCTAssertEqual(flags, [true])
+        await model.refresh()
+        XCTAssertEqual(model.objects.first?.state, .failed)
+        XCTAssertEqual(model.corrections.messages["queued"]?.first?.photos, ["renamed-evidence.jpg"], "never claim unrelated pending photos")
+        XCTAssertEqual(model.corrections.pending("queued"), "Widen this", "a failed initial pass cannot consume the queued correction")
+    }
+
+    func testChangesWrittenDuringAPassAreSavedAndSentOnceWhenItEnds() async throws {
+        let defaults = UserDefaults(suiteName: "counterpart-queue-\(UUID().uuidString)")!
+        let companion = FakeObjects()
+        await companion.set([item("queued", "touching-up")])
+        let model = ObjectsModel(companion: companion, defaults: defaults)
+        await model.refresh()
+        let accepted = await model.requestChanges("queued", note: "Widen the flange")
+        XCTAssertTrue(accepted)
+        XCTAssertEqual(model.corrections.pending("queued"), "Widen the flange")
+        let before = await companion.calls
+        XCTAssertFalse(before.contains("correct:Widen the flange"))
+        XCTAssertEqual(CorrectionQueue(saved: defaults.dictionary(forKey: "CounterpartQueuedNotes")).pending("queued"), "Widen the flange")
+        await companion.set([item("queued", "ready")])
+        await model.refresh()
+        for _ in 0..<100 where model.corrections.pending("queued") != nil { await Task.yield() }
+        XCTAssertNil(model.corrections.pending("queued"))
+        XCTAssertEqual(model.objects.first?.state, .touchingUp)
+        let after = await companion.calls
+        XCTAssertEqual(after.filter { $0 == "correct:Widen the flange" }.count, 1)
+    }
+
+    func testRetryOfASavedMessageDoesNotSelectLaterUploadedPhotos() async throws {
+        let suite = "counterpart-saved-retry-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let companion = FakeObjects()
+        let held = item("saved", "ready", [
+            "photos": ["a.jpg", "b.jpg"], "pendingPhotos": ["b.jpg"],
+            "pendingFollowup": "DONE", "pendingMessageId": "message-a",
+            "messages": [["id": "message-a", "text": "DONE", "atMs": 1, "photos": ["a.jpg"]]]
+        ])
+        await companion.set([held])
+        await companion.setCapabilities(.init(messagePhotos: true))
+        let model = ObjectsModel(companion: companion, defaults: defaults)
+        await model.refresh()
+        let retried = await model.perform(.correct, on: "saved", note: " DONE ")
+        XCTAssertTrue(retried)
+        let retryRequests = await companion.correctionPhotoNames
+        XCTAssertEqual(retryRequests.count, 1)
+        XCTAssertNil(retryRequests[0], "Omit photoNames so the companion retains A's own evidence instead of claiming pending B")
+        // A genuinely new message still explicitly claims the pending photo.
+        await companion.set([held])
+        await model.refresh()
+        let changed = await model.perform(.correct, on: "saved", note: "Use the new photo for this change")
+        XCTAssertTrue(changed)
+        let allRequests = await companion.correctionPhotoNames
+        XCTAssertEqual(allRequests.last!, ["b.jpg"])
+    }
+
+    func testRenameUsesItsOwnCapabilityAndKeepsTheRequest() async {
+        let companion = FakeObjects()
+        await companion.set([item("rename", "ready", ["instructions": "A mount for the pole"])])
+        await companion.setCapabilities(.init(projectSettings: true, projectRename: true))
+        let model = ObjectsModel(companion: companion)
+        await model.refresh()
+        let renamed = await model.rename("rename", title: "Studio mic mount")
+        XCTAssertTrue(renamed)
+        XCTAssertEqual(model.objects.first?.title, "Studio mic mount")
+        XCTAssertEqual(model.objects.first?.instructions, "A mount for the pole")
+        XCTAssertEqual(model.objects.first?.state, .ready)
+        let older = ObjectsModel(companion: companion)
+        let refused = await older.rename("rename", title: "Should wait for capability")
+        XCTAssertFalse(refused)
+    }
+
     func testConfirmationRejectsStaleAndIncompleteAnswers() async {
         let companion = FakeObjects()
         var question: [String: Any] = ["id":"q1", "message":"Check the actual printer.", "expiresAtMs":Date().timeIntervalSince1970 * 1000 + 60_000,

@@ -1,5 +1,66 @@
 # Handoff: how to pick up Counterpart work
 
+## Integration snapshot — 2026-11-02, 06:55 MT
+
+Codex owns `feat/integrated-recovery`, PR #259. The competing Claude executors were stopped;
+Claude has subsequently been used only with tools disabled. The full 40-item backlog remains open
+where device acceptance is missing; see `asks.md`.
+
+**Installed:** `/Applications/Counterpart.app`, signed build `202611020645`, source `3b8ea525`.
+Its renamed embedded companion is registered and running. Davica3 has signed phone build
+`202611020630` (source `fd9be649`; the later updater change is Mac backend only). The phone remains
+locked, so no camera/Face ID, Lock Screen or phone UI acceptance is claimed.
+
+The six projects, seven pairing identities, TLS files, companion configuration, current models and
+photos match before/after migration checksums. Evidence lives under
+`~/scan-to-make-work/codex-deploy-20261102`. The existing local SSH printer forced command referenced
+Node inside the removed `Scan to Make.app`; its runtime path was updated to `Counterpart.app`,
+with the existing key/restrictions unchanged. The real P1S is Ready through MCP 1.1.51.
+Installed Mac checks passed rename (then restored the original name), search by a follow-up's
+“25 inches” text, and Print Again preparation with loaded PLA, 3 h 20 m and 109 g. No print was sent.
+Advanced Settings now reports iCloud sync and same-account Mac discovery On. Actual phone enrollment
+and notification delivery remain unchecked.
+
+Local workflow evidence: `codex-recovery-checks-3`, `codex-companion-updater-final` (both Node 22/24
+pass at `3b8ea525`), `codex-relay-checks`, signed Mac/phone build logs and native regression logs.
+Hosted Actions still cannot start because of account billing; there are no required checks.
+The latest review found Ask answers claiming photos reserved by queued corrections; a minimal
+fix is being prepared before merge. Earlier ordering, terminal cloud state, retry attachment,
+foreground activity and updater-deadline findings are fixed and their threads resolved.
+
+The installed batch combines capture intent/error handling, rename/search/ordered reads, queued
+corrections, Done classification, conversation/photo ownership, Counterpart identity, Help links,
+MCP updates, owned Blender cleanup, enrollment and phone CloudKit/ActivityKit support. Full project
+settings, efficient streaming and reconstruction audit are separate follow-ups. Recorded in-hand
+reconstruction captured the hand, not the object; both recorded walk-around models have an incomplete
+rear. Producing a valid mesh is not scan acceptance. The audit is on `feat/capture-reconstruction-audit`.
+
+The APNs Sandbox key review page is prepared but Register has not been pressed. Confirmation to
+create that credential and configure/deploy the Cloudflare relay is pending. The current signed
+phone has development APNs entitlement; its relay must use the Sandbox APNs origin.
+
+Old KAN-217 prototypes are retained as `archive/20261102-camera-recovery-prototype` and
+`archive/20261102-project-state-prototype` tags. Integrated agent source branches were retired.
+
+## Mobile cloud consumer audit — 2026-11-02
+
+Local Live Activity follow-up: the phone now has `PrintAttributes` matching the relay JSON, a WidgetKit Lock Screen/Dynamic Island extension, foreground print activity creation, timestamped progress/end updates, and token observers. Tokens register with the authenticated companion and as a private `CounterpartDevice` snapshot. Ended-token removals survive relaunch; user-dismissed activities are not recreated; a remote/local start race keeps one activity. Pairing changes cannot send the old activity tokens to a new Mac. CloudKit project changes update existing activities during system-granted background runtime only. When updates stop, the activity becomes stale after five minutes and says it is waiting. The relay is still off/unprovisioned; independent remote start/continuous updates are not claimed.
+
+Validation for this follow-up: CounterpartKit 104 tests passed; unsigned simulator and generic-device app + both extensions built. Tests cover the relay's Date epoch and keys, terminal project state overriding an old printer report, foreground/dismissal rules, token registration/removal payloads and invalid token rejection. Root reviewed token/pairing lifecycle. Physical Lock Screen display and remote delivery remain acceptance checks for the integration owner. Development APNs tokens require `APNS_ORIGIN=https://api.sandbox.push.apple.com` at the relay; the default Worker origin is production.
+
+The phone now discovers `CounterpartMac` records on the same Apple Account and enrolls through the pinned `/v1/pair/icloud` contract. One Mac connects automatically; multiple Macs require a choice; code pairing remains available without opening the camera during discovery. The companion enrollment backend is a separate integration dependency (reviewed original `ba08c9b2`).
+
+Added CloudKit alert subscriptions, launch/tap routing, and a notification service extension that fetches event text and camera-frame assets. This is code/build coverage, **not observed delivery**. The device and extension still need valid CloudKit provisioning; `CounterpartEvent.type` must be Queryable in the development schema. Production schema deployment remains separate. Unsigned simulator/fixture runs do not access CloudKit.
+
+CloudKit query alerts are shared across a user's devices. An existing false phone preference pauses shared alerts; unknown preferences never create subscriptions. Temporary Mac unreachability leaves established subscriptions unchanged. Saved preferences are preserved, and unsupported individual phone toggles are disabled with an explanation. Correct extension suppression requires Apple's restricted `com.apple.developer.usernotifications.filtering` approval, or a different delivery path. The system notification switch and Mac milestone frequency remain usable. Background command actions, offline mirrored-project screens, and per-device filtering are not complete.
+
+Validation: CounterpartKit 101 tests passed (enrollment pin, expiry, stable identity, fallback, no working-pair replacement; subscription category coverage and opt-out safety). Unsigned generic device and simulator app/notification-extension builds succeeded. These checks do not prove actual iCloud enrollment, alert delivery to phone/Watch, or model scan quality.
+
+Live Activity code was absent, rather than merely waiting on deployment. The relay Worker is not present in the configured Cloudflare account, and no local APNs `.p8` was found in the bounded home search. No credentials were printed or changed. Apple's current ActivityKit docs support local updates during available background runtime; APNs remains necessary for independent remote delivery.
+
+Sources: [CloudKit query subscriptions](https://developer.apple.com/documentation/cloudkit/ckquerysubscription), [notification filtering entitlement](https://developer.apple.com/documentation/bundleresources/entitlements/com.apple.developer.usernotifications.filtering), [ActivityKit updates](https://developer.apple.com/documentation/activitykit/activity/update(_:)).
+
+
 Read this first if you're a new agent session on scan-to-make. It used to live in a session's
 `/private/tmp` scratchpad, where nobody could find it. **Handoffs go here now, not in temp folders
 or agent memory.** Update this file when you hand off.
@@ -39,14 +100,10 @@ or agent memory.** Update this file when you hand off.
 
 ## People and sessions
 
-- **The lead** is a Claude Desktop session named `scan-to-make-0d` (reach it with SendMessage). It
-  owns integration and the builder seats:
-  - **KAN-214:** companion, `services/`, `packages/`;
-  - **KAN-217:** iPhone app;
-  - **KAN-220:** Mac app;
-  - **KAN-215:** bambu-printer-mcp.
-- **Codex sessions** also work on these repos; their uncommitted changes sit in the MCP repos' main
-  checkouts and in `~/.codex/worktrees/`.
+- Codex is integrating #259 and performing installation/acceptance. Follow-up agents use separate
+  branches for project settings, camera efficiency and offline capture reconstruction.
+- Historical KAN branches and unrelated dirty MCP checkouts remain available; they are not current
+  release evidence. The former Claude execution sessions are stopped.
 
 ## The product
 
@@ -131,6 +188,20 @@ State at 2026-11-02 04:35 MT: **the camera works with Counterpart installed and 
   healthy boots too, so neither is a diagnosis by itself.
 
 ### Scanning (row 7)
+
+Nov 2 capture audit (`feat/capture-recovery`; device acceptance still required):
+- A later stopped attempt hid an older ready scan in `finishedScan` and `localScan`; both now select
+  a ready capture for the project. `scan` now honors **Keep for later** instead of returning that run
+  as an immediate-send request. Terminal capture failures reach the capture screen's error display.
+- The pairing QR scanner now surfaces VisionKit startup and interruption failures, with **Try Camera
+  Again** creating a fresh controller. Dismissed/background scanners cannot deliver a stale failure.
+  No camera entitlement was added, and no automatic phone restart is suggested.
+- Host capture checks exercise production lifecycle, selection and QR methods against controlled
+  platform boundaries. These checks do not establish physical camera health or an end-to-end upload.
+- The backed-up native capture `ce42012e-ed16-4f6f-9268-5c9f9ac7bb8b` completed on **Oct 31, 05:48Z**
+  (iPhone18,2, iOS 27.2): 117 images, three passes/two flips, a 7,088,924-byte USDZ matching its
+  manifest SHA-256. It logged `stitchingIncomplete`; completeness/fit remain unverified. This is older
+  phone reconstruction evidence, not proof that the current app sends it to the Mac successfully.
 
 - **Walk-around** is Apple's `ObjectCaptureSession` with the GuidedCapture sample's view. On Davica3 it reaches
   "ready" with LiDAR depth. The flip pass (`beginNewScanPassAfterFlip()`) is already in the sample flow.

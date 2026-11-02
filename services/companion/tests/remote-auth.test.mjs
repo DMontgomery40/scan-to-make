@@ -335,7 +335,7 @@ test('HTTP source-derived Serve fixture pairs a phone that then passes the authe
   });
   assert.equal(health.status, 200);
   // capabilities is additive; without the objects service there are no generic confirmations to answer.
-  assert.deepEqual(health.body, { status: 'ok', protocolVersion: '0.1.0', capabilities: { genericConfirmations: false, materialChoice: false, projectSettings: false, printCopies: false } });
+  assert.deepEqual(health.body, { status: 'ok', protocolVersion: '0.1.0', capabilities: { genericConfirmations: false, materialChoice: false, projectSettings: false, mcpUpdates: false, printCopies: false, projectRename: false, messagePhotos: false } });
 });
 
 test('HTTP rejects missing, wrong and duplicated identity, browser origins, Funnel and local-mode fallback', async (t) => {
@@ -954,4 +954,25 @@ test('/healthz says which Mac it is, by the name people know it, when the compan
   const { macDisplayName } = await import('../dist/lan-addresses.js');
   const name = macDisplayName();
   assert.ok(name === undefined || (name.length > 0 && name.length <= 64 && !/\.local\.?$/i.test(name)), 'never the .local host name');
+});
+
+test('an MCP update rechecks a phone revoked while its request body was arriving', async t => {
+  const {store} = await fixture(t);
+  const phone = await exchange(store, 'alice@example.test', ['projects:write']);
+  const authorize = store.authorize.bind(store);
+  let checked = false, updates = 0;
+  store.authorize = async (...args) => {
+    await authorize(...args);
+    if (!checked) { checked = true; await store.revoke(phone.deviceId); }
+  };
+  const {startCompanionServer} = await import('../dist/server.js');
+  const server = await startCompanionServer({port: 0, remoteAuth: store, mcpUpdates: {
+    async update(mcpId) { updates++; return {mcpId, state: 'started'}; },
+  }});
+  t.after(() => server.close());
+  const reply = await wire(server, '/v1/printers/mcp/mcp-0000000000000001/update', {
+    method: 'POST', headers: {...credentials(phone), 'content-type': 'application/json'}, body: '{}',
+  });
+  assert.equal(reply.status, 401);
+  assert.equal(updates, 0);
 });

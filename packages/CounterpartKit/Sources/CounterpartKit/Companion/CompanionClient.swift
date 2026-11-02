@@ -214,14 +214,17 @@ public final class CompanionClient: @unchecked Sendable {
         try await request("POST", "/v1/objects/\(id)/start", json: captureManifest.map { ["captureManifest": $0] } ?? [:], as: One.self).object
     }
     /// Ask for changes: a new pass with your text. Upload new photos first.
-    public func correct(_ id: String, _ note: String) async throws -> Project {
-        try await request("POST", "/v1/objects/\(id)/corrections", json: ["note": note], as: One.self).object
+    public func correct(_ id: String, _ note: String, photoNames: [String]? = nil) async throws -> Project {
+        var json: [String: Any] = ["note": note]
+        if let photoNames { json["photoNames"] = photoNames }
+        return try await request("POST", "/v1/objects/\(id)/corrections", json: json, as: One.self).object
     }
-    /// Answers the open Ask: after uploading a photo (`{}`), as a best guess, or in words (PR 4).
-    public func answerAsk(_ id: String, bestGuess: Bool = false, text: String? = nil) async throws -> Project {
+    /// Answers the open Ask with explicitly named uploaded photos, a best guess, or words.
+    public func answerAsk(_ id: String, bestGuess: Bool = false, text: String? = nil, photoNames: [String] = []) async throws -> Project {
         var json: [String: Any] = [:]
         if bestGuess { json["bestGuess"] = true }
         if let text { json["text"] = text }
+        json["photoNames"] = photoNames
         return try await request("POST", "/v1/objects/\(id)/closeup", json: json, as: One.self).object
     }
     private struct MaybeOne: Decodable { var object: Project? }
@@ -233,6 +236,9 @@ public final class CompanionClient: @unchecked Sendable {
     /// Hides it from Home or shows it again, keeping its status (a Mac whose settings carry `archived`).
     public func setArchived(_ id: String, _ archived: Bool) async throws -> Project? {
         try await changeProjectSettings(id, ["archived": archived])
+    }
+    public func rename(_ id: String, title: String) async throws -> Project? {
+        try await changeProjectSettings(id, ["title": title])
     }
     private func changeProjectSettings(_ id: String, _ patch: [String: Any]) async throws -> Project? {
         let reply = try await send("PATCH", "/v1/objects/\(id)/settings", body: try JSONSerialization.data(withJSONObject: patch))

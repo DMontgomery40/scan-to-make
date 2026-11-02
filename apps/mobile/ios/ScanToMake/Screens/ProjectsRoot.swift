@@ -125,7 +125,7 @@ struct SidebarList: View {
     @State private var showArchived = false
 
     private func matches(_ project: Project) -> Bool {
-        query.isEmpty || ProjectWords.title(project).localizedCaseInsensitiveContains(query) || (project.instructions ?? "").localizedCaseInsensitiveContains(query)
+        project.matchesSearch(query, additional: [store.printerName(project) ?? ""])
     }
 
     /// The projects in these phases, in the order the phases are given (printing before working, as on Home).
@@ -156,7 +156,7 @@ struct SidebarList: View {
                             .listRowBackground(selection == project.id ? Color.filament.opacity(0.32) : nil)
                             .contextMenu {
                                 Button("Unarchive", systemImage: "tray.and.arrow.up") {
-                                    Task { if let next = try? await store.archive(project, false) { store.replace(next) } else { await store.reload(project.id) } }
+                                    Task { let ticket = store.startRequest(); if let next = try? await store.archive(project, false) { store.replace(next, ticket: ticket) } else { await store.reload(project.id) } }
                                 }
                                 DeleteProjectButton(store: store, project: project)
                             }

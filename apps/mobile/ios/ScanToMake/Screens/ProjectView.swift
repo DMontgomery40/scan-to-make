@@ -20,6 +20,8 @@ struct ProjectView: View {
     var openPrinting: (String) -> Void = { _ in }
     @State private var section = ProjectSection.result
     @State private var note = ""
+    @State private var renaming = false
+    @State private var projectName = ""
     @State private var working = false
     @State private var problem: String?
     @State private var fetchProblem: String?
@@ -55,7 +57,8 @@ struct ProjectView: View {
         .dropDestination(for: Data.self) { items, _ in
             // One action at a time: a drop while something runs is refused, not quietly lost.
             guard let object, !working else { return false }
-            Task { await addDropped(items, to: object.id) }
+            let forMessage = object.current != nil || object.changesWait || object.openAsk != nil
+            Task { await addDropped(items, to: object.id, forMessage: forMessage) }
             return !items.isEmpty
         }
         .task(id: object.map { store.words($0).busy } ?? false) {
@@ -72,12 +75,12 @@ struct ProjectView: View {
     }
 
     private func reload() async {
-        do { store.replace(try await store.mac.get(id)); fetchProblem = nil }
+        do { let ticket = store.startRequest(); store.replace(try await store.mac.get(id), ticket: ticket); fetchProblem = nil }
         catch let failure as CompanionError { if failure.code != "cancelled" { fetchProblem = failure.message } }
         catch { fetchProblem = CompanionError.unreachable.message }
     }
 
-    private func addDropped(_ items: [Data], to id: String) async {
+    private func addDropped(_ items: [Data], to id: String, forMessage: Bool) async {
         let photos = items.prefix(NewObjectView.photoLimit).compactMap { data -> ChosenPhoto? in
             let png = data.starts(with: [0x89, 0x50, 0x4E, 0x47])
             guard let image = UIImage(data: data) else { return nil }
@@ -85,7 +88,7 @@ struct ProjectView: View {
         }
         guard !photos.isEmpty else { return }
         act {
-            try await store.mac.sendChosen(id, photos)
+            try await store.mac.sendChosen(id, photos, forMessage: forMessage)
             notice = photos.count == 1 ? "Added a photo. Your Mac uses it in the next change." : "Added \(photos.count) photos. Your Mac uses them in the next change."
             return try await store.mac.get(id)
         }
@@ -122,7 +125,7 @@ struct ProjectView: View {
         working = true; problem = nil
         Task {
             defer { working = false }
-            do { if let next = try await body() { store.replace(next) } else { await reload() } }
+            do { let ticket = store.startRequest(); if let next = try await body() { store.replace(next, ticket: ticket) } else { await reload() } }
             catch let failure as CompanionError {
                 if failure.code == "cancelled" { return }
                 if failure.needsPairing { store.onPair(); return }
@@ -154,7 +157,12 @@ struct ProjectView: View {
                         Spacer()
                         Text(Format.when(object.updatedAt)).font(.caption).foregroundStyle(.secondary)
                     }
-                    Text(words.title).font(.largeTitle.bold()).fixedSize(horizontal: false, vertical: true)
+                    Button { projectName = words.title; renaming = true } label: {
+                        Text(words.title).font(.largeTitle.bold()).fixedSize(horizontal: false, vertical: true)
+                    }
+                    .buttonStyle(.plain).disabled(working || !store.projectRename)
+                    .accessibilityIdentifier("project-title")
+                    .accessibilityLabel(words.title).accessibilityHint("Rename project")
                     if let request = object.instructions, !request.isEmpty, request != words.title {
                         Text(request).font(.body).foregroundStyle(.secondary).textSelection(.enabled)
                     }
@@ -167,6 +175,41 @@ struct ProjectView: View {
                 if let notice, problem == nil {
                     Label(notice, systemImage: "photo.badge.checkmark").font(.subheadline).foregroundStyle(.secondary).padding(.horizontal, 20)
                 }
+                if store.corrections.failures[object.id] != nil, object.pendingFollowup == nil {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Your change is saved. Check the result before trying again.").font(.subheadline)
+                        HStack {
+                            Button("Try Again") { store.retryQueuedChange(object) }.disabled(object.changesWait)
+                            Button("Discard Saved Change") { store.discardQueuedChange(object) }
+                        }.disabled(working)
+                    }.padding(.horizontal, 20)
+                }
+                if let pending = object.pendingFollowup {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Message saved").font(.headline)
+                        Text(pending).font(.subheadline).textSelection(.enabled)
+                        HStack {
+                            Button("Try Again") { act {
+                                let next = try await store.mac.correct(object.id, pending)
+                                store.corrections.sent(pending, for: object.id)
+                                return next
+                            } }
+                            Button("Mark Done") { act {
+                                let next = try await store.mac.client.setStatus(object.id, .works)
+                                store.corrections.sent(pending, for: object.id)
+                                return next
+                            } }
+                        }.disabled(working)
+                    }.padding(.horizontal, 20)
+                }
+                if let previous = object.completionUndoStatus {
+                    HStack {
+                        Label("Marked Done", systemImage: "checkmark.circle.fill")
+                        Spacer()
+                        Button("Undo") { act { try await store.mac.client.setStatus(object.id, previous) } }
+                            .disabled(working)
+                    }.font(.subheadline).padding(.horizontal, 20)
+                }
                 stateCard(object, words).padding(.horizontal, 16)
 
                 Picker("Section", selection: $section) {
@@ -178,7 +221,7 @@ struct ProjectView: View {
                 Group {
                     switch section {
                     case .result: ResultSection(store: store, project: object)
-                    case .inputs: InputsSection(project: object)
+                    case .inputs: InputsSection(project: object, queued: store.corrections.messages[object.id] ?? [], queueFailed: store.corrections.failures[object.id] != nil)
                     case .activity: ActivitySection(store: store, project: object)
                     }
                 }
@@ -205,6 +248,9 @@ struct ProjectView: View {
             }
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
+                    if store.projectRename {
+                        Button("Rename Project", systemImage: "pencil") { projectName = words.title; renaming = true }
+                    }
                     if store.projectSettings {
                         statusChoices(object, words)
                         Divider()
@@ -219,7 +265,15 @@ struct ProjectView: View {
         }
         .safeAreaBar(edge: .bottom) {
             // A failed pass that left an earlier model still offers changes and Print; with no model, the failed card's Try Again is the way on.
-            if words.phase != .needsYou && !(words.phase == .failed && object.current == nil) { bottomBar(object, words) }
+            if object.canAskForChanges || (words.phase != .needsYou && !(words.phase == .failed && object.current == nil)) { bottomBar(object, words) }
+        }
+        .alert("Rename Project", isPresented: $renaming) {
+            TextField("Project name", text: $projectName)
+            Button("Cancel", role: .cancel) {}
+            Button("Save") {
+                let title = projectName.trimmingCharacters(in: .whitespacesAndNewlines)
+                act { try await store.mac.client.rename(object.id, title: title) }
+            }.disabled(!Project.validName(projectName))
         }
         .confirmationDialog("Delete this project from your Mac?", isPresented: $confirmDelete, titleVisibility: .visible) {
             Button("Delete Project", role: .destructive) {
@@ -446,7 +500,7 @@ struct ProjectView: View {
         askWorking = true; askProblem = nil
         Task {
             defer { askWorking = false }
-            do { store.replace(try await store.mac.client.answerAsk(object.id, text: String(text.prefix(2000)))); askText = "" }
+            do { let ticket = store.startRequest(); store.replace(try await store.mac.client.answerAsk(object.id, text: String(text.prefix(2000))), ticket: ticket); askText = "" }
             catch let failure as CompanionError { askProblem = failure.message }
             catch { askProblem = CompanionError.unreachable.message }
         }
@@ -544,14 +598,14 @@ struct ProjectView: View {
 
     @ViewBuilder private func bottomBar(_ object: Project, _ words: ProjectWords) -> some View {
         // While the Mac works, a change waits and goes in when this pass finishes.
-        let canCorrect = words.actions.contains(.correct) || words.phase == .working
+        let canCorrect = object.canAskForChanges
         let canPrint = words.actions.contains(.print) || words.actions.contains(.printChecked)
         if canCorrect || canPrint {
             GlassEffectContainer(spacing: 10) {
                 HStack(spacing: 10) {
                     if canCorrect {
                         HStack {
-                            TextField(store.queuedNotes[object.id] != nil ? "Your change goes in when this pass finishes" : "Ask for changes…", text: $note, axis: .vertical)
+                            TextField(store.corrections.pending(object.id) != nil ? "Will send when this step finishes" : "Ask for changes…", text: $note, axis: .vertical)
                                 .lineLimit(1...4)
                                 .focused($writing)
                                 .submitLabel(.send)
@@ -598,7 +652,7 @@ struct ProjectView: View {
                 ? (try await PhotoSources.takePhoto()).flatMap(MacConnection.keep).map { [$0] } ?? []
                 : try await store.mac.choosePhotos(limit: NewObjectView.photoLimit)
             guard !photos.isEmpty else { return object }
-            try await store.mac.sendChosen(object.id, photos)
+            try await store.mac.sendChosen(object.id, photos, forMessage: true)
             notice = photos.count == 1 ? "Added a photo. Your Mac uses it in the next change." : "Added \(photos.count) photos. Your Mac uses them in the next change."
             return try await store.mac.get(object.id)
         }
@@ -608,16 +662,23 @@ struct ProjectView: View {
         let text = note.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         writing = false
-        if store.words(object).phase == .working {
+        if object.changesWait {
             // The Mac takes changes between passes; this one is sent the moment the pass ends.
             store.queue(note: text, for: object.id)
             note = ""
             return
         }
         act {
-            let next = try await store.mac.correct(object.id, text)
-            note = ""; section = .activity
-            return next
+            do {
+                let next = try await store.mac.correct(object.id, text, photoNames: store.corrections.availablePhotos(object))
+                store.corrections.sent(text, for: object.id)
+                note = ""; section = .activity
+                return next
+            } catch let failure as CompanionError where CorrectionQueue.waits(failure) {
+                store.queue(note: text, for: object.id)
+                note = ""
+                return nil
+            }
         }
     }
 }
@@ -713,39 +774,24 @@ struct ChangeRow: View {
 /// Your request, every photo and scan full size, and your follow-ups.
 struct InputsSection: View {
     let project: Project
+    var queued: [CorrectionQueue.Message] = []
+    var queueFailed = false
     @State private var viewing: String?
 
-    private var images: [String] { project.photos.map { "photos/\($0)" } + (project.capture ?? []).map { "capture/\($0)" } }
-
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("Your request").font(.headline)
-            Text(project.instructions?.isEmpty == false ? project.instructions! : project.hasScan ? "A copy of the scanned object." : "No description was sent.")
-                .textSelection(.enabled)
-                .padding(16).frame(maxWidth: .infinity, alignment: .leading).background(Color.card, in: .rect(cornerRadius: 22))
-            Text("Photos and scans").font(.headline)
+        let conversation = ProjectConversation(project: project, queued: queued, queueFailed: queueFailed)
+        LazyVStack(alignment: .leading, spacing: 16) {
+            ForEach(conversation.entries) { entry in
+                ConversationBubble(entry: entry) { pictures(entry.photos) }
+            }
+            if conversation.entries.isEmpty { Text("No request was saved with this project.").foregroundStyle(.secondary) }
             if project.scan != nil {
                 Label("Walk-around scan, saved on your Mac", systemImage: "cube.transparent").font(.subheadline).foregroundStyle(.secondary)
             }
-            if images.isEmpty {
-                Text(project.scan != nil ? "No photos besides the scan." : "No photos were sent.").font(.subheadline).foregroundStyle(.secondary)
-            } else {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 100), spacing: 8)], spacing: 8) {
-                    ForEach(images, id: \.self) { path in
-                        Button { viewing = path } label: {
-                            ProjectImage(project: project, path: path, maxPixelSize: 400).frame(height: 110).clipShape(.rect(cornerRadius: 14))
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel(path.hasPrefix("photos/") ? "Photo" : "Scan image")
-                    }
-                }
-            }
-            let followUps = project.passes.compactMap { pass in pass.note.map { ($0, pass.startedAtMs) } }
-            if !followUps.isEmpty {
-                Text("Your follow-ups").font(.headline)
-                ForEach(Array(followUps.enumerated()), id: \.offset) { _, item in
-                    Text("“\(item.0)”  · \(Format.clock(Date(timeIntervalSince1970: item.1 / 1000)))").font(.subheadline).foregroundStyle(.secondary)
-                }
+            if !conversation.otherPhotos.isEmpty {
+                Text("Other project photos").font(.headline)
+                Text("These photos aren't linked to a message.").font(.caption).foregroundStyle(.secondary)
+                pictures(conversation.otherPhotos)
             }
         }
         .sheet(item: Binding(get: { viewing.map(IdentifiedPath.init) }, set: { viewing = $0?.id })) { item in
@@ -755,6 +801,19 @@ struct InputsSection: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(Color.black)
                     .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { viewing = nil } } }
+            }
+        }
+    }
+
+    @ViewBuilder private func pictures(_ paths: [String]) -> some View {
+        if !paths.isEmpty {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 90), spacing: 8)], spacing: 8) {
+                ForEach(paths, id: \.self) { path in
+                    Button { viewing = path } label: {
+                        ProjectImage(project: project, path: path, maxPixelSize: 400).frame(height: 110).clipShape(.rect(cornerRadius: 12))
+                    }
+                    .buttonStyle(.plain).accessibilityLabel(path.hasPrefix("photos/") ? "Photo" : "Scan image")
+                }
             }
         }
     }

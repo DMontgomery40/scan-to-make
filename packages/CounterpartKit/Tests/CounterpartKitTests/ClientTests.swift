@@ -198,6 +198,24 @@ private final class SlowTransport: HTTPTransport, @unchecked Sendable {
 }
 
 final class CompanionClientTests: XCTestCase {
+    func testLiveActivityTokenContractAndRemoval() async throws {
+        let fake = FakeTransport { _, _ in json(200, ["stored": true]) }
+        let client = try client(fake)
+        let token = String(repeating: "ab", count: 32)
+        let printId = "11111111-1111-4111-8111-111111111111"
+        try await client.registerLiveActivity(pushToStart: token)
+        try await client.registerLiveActivity(printId: printId, token: token)
+        try await client.registerLiveActivity(printId: printId, token: nil)
+        let bodies = try fake.calls.map { try XCTUnwrap(JSONSerialization.jsonObject(with: $0.request.httpBody!) as? [String: Any]) }
+        XCTAssertEqual(bodies[0]["pushToStart"] as? String, token)
+        XCTAssertEqual((bodies[1]["activity"] as? [String: String])?["printId"], printId)
+        XCTAssertTrue((bodies[2]["activity"] as? [String: Any])?["token"] is NSNull)
+        XCTAssertTrue(fake.calls.allSatisfy { $0.request.url?.path == "/v1/devices/live-activity-tokens" && $0.request.httpMethod == "POST" })
+        do { try await client.registerLiveActivity(printId: "bad", token: token); XCTFail() } catch {}
+        do { try await client.registerLiveActivity(pushToStart: "bad"); XCTFail() } catch {}
+        XCTAssertEqual(fake.calls.count, 3, "invalid tokens never leave the phone")
+    }
+
     private func client(_ fake: FakeTransport, record: PairingRecord = v2Record()) throws -> CompanionClient {
         let store = PairingStore(store: MemoryStore(), defaults: UserDefaults(suiteName: "cc-\(UUID().uuidString)")!)
         try store.save(record, notify: false)
@@ -212,6 +230,20 @@ final class CompanionClientTests: XCTestCase {
         let older = FakeTransport { _, _ in HTTPReply(status: 200, body: Data(#"{"status":"ok","protocolVersion":"0.1.0"}"#.utf8)) }
         let none = try await client(older).capabilities()
         XCTAssertEqual(none, [], "an older Mac lists none")
+    }
+
+    func testAskAnswersNameOnlyTheirOwnPhotosAndBestGuessNamesNone() async throws {
+        let id = "0b6f0f43-7c35-4b8a-9a3c-8f0b4c4b2a11"
+        let object: [String: Any] = ["id": id, "createdAtMs": 1, "updatedAtMs": 2, "state": "ready", "photos": [], "passes": []]
+        let fake = FakeTransport { _, _ in json(200, ["object": object]) }
+        let c = try client(fake)
+        _ = try await c.answerAsk(id, bestGuess: true)
+        _ = try await c.answerAsk(id, text: "The underside is flat.")
+        _ = try await c.answerAsk(id, photoNames: ["closeup.jpg"])
+        let bodies = try fake.calls.map { try XCTUnwrap(JSONSerialization.jsonObject(with: $0.request.httpBody!) as? [String: Any]) }
+        XCTAssertEqual(bodies[0]["photoNames"] as? [String], [])
+        XCTAssertEqual(bodies[1]["photoNames"] as? [String], [])
+        XCTAssertEqual(bodies[2]["photoNames"] as? [String], ["closeup.jpg"])
     }
 
     func testCreateSendsTheKindYouPicked() async throws {
@@ -377,6 +409,21 @@ final class CompanionClientTests: XCTestCase {
         do { _ = try await c.download(p, "plate.jpg"); XCTFail("there's no plate photo to fetch") } catch {}
         XCTAssertEqual(fake.calls.count, 1)
         do { _ = try await c.download(p, "../../etc/passwd"); XCTFail() } catch {}
+    }
+
+    func testMessageUploadIntentSurvivesAnInitialPassFailingBeforeTheUpload() async throws {
+        let id = "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a02"
+        var uploads: [URL] = []
+        let fake = FakeTransport { request, _ in
+            if request.httpMethod != "GET" { uploads.append(request.url!) }
+            return json(200, ["object": ["id": id, "createdAtMs": 1, "updatedAtMs": 2, "state": "failed", "photos": [], "passes": []]])
+        }
+        let uploader = ProjectUploader(client: try client(fake))
+        let photo = UploadFile(kind: .photo, name: "evidence.jpg", source: .bytes(Data("jpeg".utf8)), type: "image/jpeg")
+        _ = try await uploader.send([photo], to: id, forMessage: true)
+        _ = try await uploader.send([photo], to: id)
+        XCTAssertEqual(uploads.map(\.query), ["name=evidence.jpg&forMessage=true", "name=evidence.jpg"],
+                       "message intent comes from the action; the same failed state also permits initial retry evidence")
     }
 
     func testUploadsSkipWhatTheMacHas() async throws {

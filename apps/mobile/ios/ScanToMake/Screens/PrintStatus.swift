@@ -59,7 +59,7 @@ struct PrintStatusCard: View {
         working = true; problem = nil
         Task {
             defer { working = false }
-            do { if let next = try await body() { store.replace(next) } }
+            do { let ticket = store.startRequest(); if let next = try await body() { store.replace(next, ticket: ticket) } }
             catch let failure as CompanionError { if failure.code != "cancelled" { problem = failure.message } }
             catch { problem = CompanionError.unreachable.message }
         }

@@ -126,3 +126,22 @@ test('a view never waits on the camera when a recent frame exists, and opening o
   assert.equal(session.health().holders, 0, 'closing lets the session go');
   await session.close();
 });
+
+test('PRD §8.10: printing() asks the printer now, so a print with no project (the phone handoff) still counts', async () => {
+  let state = 'RUNNING', now = 1_000_000;
+  const d = destination({tools: [tool('get_printer_status')], status: () => ({connected: true, raw: {gcode_state: state}})});
+  const directory = new PrinterDirectory(catalog, id => id === 'current' ? d.session : undefined, {now: () => now});
+  d.set(directory);
+  assert.equal(await directory.printing('current'), true);
+  assert.equal(await directory.printing('old-duplicate'), true, 'a duplicate id is the same printer');
+  state = 'FINISH';
+  // Not from the 30 s cache: the second read sees the print end at once.
+  assert.equal(await directory.printing('current'), false);
+  assert.equal(d.reads.length, 3);
+  assert.equal(await directory.printing('nowhere'), false);
+  // A printer that can't be read isn't printing.
+  const down = destination({tools: [tool('get_printer_status')], status: () => ({}), failing: () => true});
+  const offline = new PrinterDirectory(catalog, id => id === 'current' ? down.session : undefined, {now: () => now});
+  down.set(offline);
+  assert.equal(await offline.printing('current'), false);
+});

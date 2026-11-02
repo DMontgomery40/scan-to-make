@@ -109,7 +109,7 @@ final class ProjectWordsTests: XCTestCase {
 
     func testEveryStateInPlainWords() {
         XCTAssertEqual(ProjectWords(project(["scan": "scan.usdz"])).status, "Draft saved. Finish sending to begin.")
-        XCTAssertEqual(ProjectWords(project([:])).status, "Waiting for a scan or photos.")
+        XCTAssertEqual(ProjectWords(project([:])).status, "Add photos or a scan.")
         XCTAssertEqual(ProjectWords(project(["scan": "scan.usdz", "state": "touching-up"])).status,
                        "Touching up your scan. You can leave this project and return to it while your Mac works.")
         XCTAssertEqual(ProjectWords(project(["instructions": "A hook", "state": "touching-up"])).status,
@@ -167,6 +167,17 @@ final class ProjectWordsTests: XCTestCase {
     }
 
     // MARK: PRD §4 phases
+
+    func testSavedDraftDoesNotLookLikeAnActiveUploadAndThePhoneCanStillShowSending() {
+        let idle = project(["status": ["phase": "draft", "text": "Add photos or a scan", "symbol": "square.and.pencil", "tint": "secondary"]])
+        XCTAssertEqual(ProjectWords(idle).phase, .draft)
+        XCTAssertEqual(ProjectWords(idle).line, "Add photos or a scan")
+        XCTAssertFalse(ProjectWords(idle).busy)
+        XCTAssertFalse(ProjectWords(idle).phase.isRunning)
+        XCTAssertEqual(ProjectWords(idle, sending: true).phase, .sending)
+        XCTAssertTrue(ProjectWords(idle, sending: true).busy)
+        XCTAssertEqual(ProjectWords(idle, sending: true).line, "Sending to your Mac")
+    }
 
     func testPhasesFollowThePRDTable() {
         XCTAssertEqual(ProjectWords(project([:])).phase, .draft)

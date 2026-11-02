@@ -25,6 +25,7 @@ Errors use `{v:1,id,error:{code,message}}`; malformed envelopes may have `id:nul
 | `devices.remove` | `{deviceId}` | `{removed:true}`; an unknown device returns `not-found`. Existing device credentials are revoked. |
 | `pairing.create` | `{login?}` | Existing invitation `{version:1,baseUrl,code,expiresAt,certificateSha256?,qrPayload}` with capture and printer-handoff scopes. LAN selects `lan`; Tailscale defaults to the first retained allowed login. An explicit login must be allowed. When the companion answers on every address (`SCAN_TO_MAKE_LAN_ALL_ADDRESSES=1`), `qrPayload` is a pairing link v2 (`@scan-to-make/contracts/pairing-link`) listing those addresses; the JSON fields keep their v1 shape. |
 | `pairing.isActive` | `{code}` | `{active:boolean}`; false after consumption or expiry. |
+| `pairing.icloudToken` | `{}` | LAN mode: `{token,expiresAt,macId,spkiSha256,addresses}` for the Mac app's private CloudKit record. `expiresAt` is an ISO timestamp; each address has `{kind,host,port}`. The token lasts ten minutes, rotates after five, and may enroll one phone. Unavailable without LAN TLS. |
 | `nearby.list` | `{}` | `{items:[{id,deviceName,code,expiresAt}]}`: nearby pairing requests waiting for **Allow** (`@scan-to-make/contracts/nearby-pairing`). `code` is the 6 digits the phone shows. Empty when nearby pairing is off (`capabilities.nearbyPairing`). |
 | `nearby.answer` | `{id,allow}` | `{answered:true}`. Allow mints one pairing code for that request only; the phone that made it collects it. An unknown, expired or already answered `id` returns `not-found`; with nearby pairing off, `unavailable`. |
 | `confirmations.list` | `{}` | `{items:[PendingElicitation]}` using the existing relay's fields, including original schema/photo and expiry. |
@@ -71,6 +72,7 @@ The Mac app shows the same projects as the phone and drives them through these m
 | `projectSettings` | `objects.settings.get`/`objects.settings.set` (Status), object `settings.status`, the `confirmed` phase, `project.updated`. Also in `GET /healthz` `capabilities`. | PR 8a |
 | `printCopies` | `objects.print` and `objects.estimate` take `copies`: true when a configured printer's MCP takes `repetitions` (destination `capabilities.copies`). Also in `GET /healthz`. | PR 8b |
 | `genericConfirmations` | `printConfirmation.fields[]` may be text, number, integer and choice fields as well as yes/no, and `objects.answerPrintConfirmation` takes and checks those answers (below). The phone reads the same flag from `GET /healthz` `capabilities` ([objects-api.md](objects-api.md)). | PR 5 |
+| `mcpUpdates` | `printers.updateMcp` and `POST /v1/printers/mcp/<mcpId>/update`, destination `mcpId` and `capabilities.update.latestVersion`, the `mcp.update.*` events. Also in `GET /healthz` `capabilities`. | PR 6 |
 | `materialChoice` | `objects.print` `colour: {material}` is accepted on every printer ("What's loaded?"): sliced with a profile the printer reports for that material, or refused with a sentence saying what to do. Also in `GET /healthz` `capabilities`. | PR 5 |
 
 Destination `capabilities.materialChoice` (PR 5) says the same per printer; what each MCP is sent, and when it is refused, is in [objects-api.md](objects-api.md#print-settings-pr-2). `objects.get` of a printing project and `objects.printers` warm the printers' cameras as the phone's routes do, so `objects.camera` and `printers.camera` answer from a recent frame (objects-api.md, "Camera timing").
@@ -84,10 +86,10 @@ Destination `capabilities.materialChoice` (PR 5) says the same per printer; what
 | `objects.settings.get` | `{id}` | `{settings: {status, archived}}` | PR 8a, 8b |
 | `objects.settings.set` | `{id, status?: "not-printed"\|"printed"\|"works"\|"needs-changes", archived?: boolean}`, at least one | `{settings, object}`; as `PATCH /v1/objects/<id>/settings` (objects-api.md). A refusal is `conflict` with its sentence. | PR 8a, 8b |
 | `objects.create` | `{instructions?: string ≤ 8000, kind?: "fit"\|"copy"}` | `{object}` (`kind` from PR 4) | PR 1 |
-| `objects.addFile` | `{id, kind: "photos"\|"scan", path}` | `{object}` | PR 1 |
+| `objects.addFile` | `{id, kind: "photos"\|"scan", path, forMessage?: boolean}` | `{object, photoName?}` | PR 1 |
 | `objects.start` | `{id}` | `{object}` | |
-| `objects.correct` | `{id, note: string 1–4000, photos?: [path] ≤ 24}` | `{object}`: a new pass (`photos` PR 1) | |
-| `objects.answerCloseup` | `{id, bestGuess: boolean, text?: string ≤ 2000}` | `{object}`: a new pass (`text` PR 4) | |
+| `objects.correct` | `{id, note: string 1–4000, photoNames?: string[] ≤ 100, photos?: [path] ≤ 24}` | `{object}`: a new pass (`photos` PR 1) | |
+| `objects.answerCloseup` | `{id, bestGuess: boolean, text?: string ≤ 2000, photoNames?: string[] ≤ 100}` (omitted names select none; an empty answer is refused) | `{object}`: a new pass (`text` PR 4) | |
 | `objects.delete` | `{id}` | `{deleted: true}` | |
 | `objects.passActivity` | `{id, index}` | `{activity}` | |
 | `objects.printers` | `{}` | `{defaultDestinationId, destinations: [PrinterDestination]}`; `origin`, `state`, `stateCheckedAt`, `capabilities` from PR 1 | |
@@ -99,6 +101,7 @@ Destination `capabilities.materialChoice` (PR 5) says the same per printer; what
 | `objects.pausePrint`, `objects.resumePrint`, `objects.cancelPrint` | `{id}` | `{object}` | PR 2 |
 | `objects.camera` | `{id}` | `{format: "jpeg", base64, capturedAt}` from the project's printer | PR 2 |
 | `printers.camera` | `{destinationId}` | `{format: "jpeg", base64, capturedAt}` | PR 2 |
+| `printers.updateMcp` | `{mcpId, fresh?: boolean}` | `{update: {mcpId, state: "started"\|"waiting"\|"current"\|"unresolved", fromVersion?, toVersion?, found?}}`. Unknown `mcpId`: `not-found`; npm unreachable: `unavailable` with the sentence. It answers within about 7 s: when npm is slower, `unavailable` "npm is slow to answer…" (try again; the lookup keeps going and is cached). What runs and when: objects-api.md, "Updating the printer MCPs". | PR 6 |
 | `settings.get` | `{}` | `{settings: {milestones}}` | PR 2 |
 | `settings.set` | `{milestones: "off"\|"50"\|"25-50-75"\|"every-10"}` | `{settings}` | PR 2 |
 | `events.wait` | `{after: integer ≥ 0, timeoutMs?: 0–25000 (default 25000), limit?: 0–500}` | `EventsPage` `{events, next, latest, truncated?, reset?}` | PR 3 |
@@ -107,7 +110,12 @@ Destination `capabilities.materialChoice` (PR 5) says the same per printer; what
 
 **Deadlines.** Every connection still carries one request. Its deadline is 10 s, except `events.wait` (its `timeoutMs` plus 5 s) and `objects.estimate` (180 s, because it slices). A camera read gives up after 10 s.
 
-**`objects.addFile`.** `path` is an absolute path on this Mac: the companion reads the file itself because requests are capped at 64 KiB. It must be a regular file (a symlink is followed), its extension and first bytes must agree, and:
+**`objects.addFile`.** `path` is an absolute path on this Mac: the companion reads the file itself because requests are capped at 64 KiB. It must be a regular file (a symlink is followed), and its extension and first bytes must agree.
+
+For correction queues and Ask answers, send `forMessage: true` when importing photos. This preserves
+the attachment's purpose if the initial pass fails before the upload finishes. Other photos added
+after an initial failure with no current model are request evidence for Try Again. Use the returned
+`photoName` to select this upload; do not infer its name from the whole pending-photo list.
 
 | `kind` | Accepted | Limit | Stored as | When |
 |---|---|---|---|---|
@@ -233,3 +241,11 @@ The cleanup pipeline's attempt/judge/export wiring is a separate change; this
 plumbing does not substitute a model into existing scripted cleanup stages.
 Non-app deployments can persist preferences but cannot resolve Mac Keychain
 references; checks fail as unavailable until a signed worker is configured.
+
+
+Photo imports through `objects.addFile` additionally return `photoName`, the exact sanitized/unique name
+assigned to that upload. Cloud Ask answers collect those receipts and send only them as `photoNames`;
+they never infer ownership from the whole project photo list. Cloud corrections send an explicit empty
+`photoNames` plus their local asset paths, so only newly imported assets (and a held message's existing
+owned evidence) belong to the correction. A cloud answer without text, photos or explicit Best Guess is
+refused; missing downloaded assets never imply permission to guess.

@@ -1,15 +1,20 @@
 import XCTest
 
-/// The app launches as a SwiftUI app and, with no Mac paired, opens on Find your Mac.
+/// The app opens same-account discovery with an explicit code fallback when no Mac is paired.
 final class LaunchUITests: XCTestCase {
     func testFirstLaunchOpensFindYourMac() throws {
         let app = XCUIApplication()
         app.launch()
-        // First run starts with Welcome; Continue goes on to Find your Mac.
+        // First run starts with Welcome; Continue goes on to same-account discovery.
         let welcome = app.buttons["welcome-continue"]
         if welcome.waitForExistence(timeout: 20) { welcome.tap() }
-        XCTAssertTrue(app.staticTexts["Find your Mac"].waitForExistence(timeout: 20) || app.staticTexts["Your Mac"].exists
-                      || app.buttons["new-project"].exists, "the app shows pairing or, when already paired, the projects")
+        let codeFallback = app.buttons["Use Your Mac's Code"]
+        if codeFallback.waitForExistence(timeout: 20) {
+            XCTAssertTrue(app.staticTexts["Connect to your Mac"].exists)
+            XCTAssertTrue(codeFallback.isEnabled, "an unavailable iCloud account keeps code pairing available")
+        } else {
+            XCTAssertTrue(app.buttons["new-project"].exists, "an already paired app opens its projects")
+        }
     }
 }
 
@@ -48,7 +53,8 @@ final class ProjectScreensUITests: XCTestCase {
 
     func testAReadyProjectOffersPrintAndChanges() {
         let app = launch("ready")
-        XCTAssertTrue(app.staticTexts["Mic mount"].waitForExistence(timeout: 20))
+        XCTAssertTrue(app.buttons["project-title"].waitForExistence(timeout: 20))
+        XCTAssertEqual(app.buttons["project-title"].label, "Mic mount")
         XCTAssertTrue(app.staticTexts["Ready to print"].exists)
         XCTAssertTrue(app.buttons["print"].exists)
         XCTAssertTrue(app.staticTexts["What changed"].exists)
@@ -57,7 +63,8 @@ final class ProjectScreensUITests: XCTestCase {
 
     func testAWorkingProjectSaysSo() {
         let app = launch("working")
-        XCTAssertTrue(app.staticTexts["Crochet potato"].waitForExistence(timeout: 20))
+        XCTAssertTrue(app.buttons["project-title"].waitForExistence(timeout: 20))
+        XCTAssertEqual(app.buttons["project-title"].label, "Crochet potato")
         XCTAssertTrue(app.staticTexts["Your Mac is working on it"].exists)
         XCTAssertFalse(app.buttons["print"].exists, "nothing to print while the Mac works")
     }

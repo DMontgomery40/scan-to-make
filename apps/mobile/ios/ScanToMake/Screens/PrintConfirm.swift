@@ -107,7 +107,7 @@ struct PrintConfirmSheet: View {
                 problem = "This printer question has changed or expired. Review the current question before continuing."
                 return
             }
-            do { store.replace(try await store.mac.answerPrintConfirmation(project.id, response: response)); dismiss() }
+            do { let ticket = store.startRequest(); store.replace(try await store.mac.answerPrintConfirmation(project.id, response: response), ticket: ticket); dismiss() }
             catch let failure as CompanionError { problem = failure.message }
             catch { problem = CompanionError.unreachable.message }
         }
@@ -215,7 +215,7 @@ struct AnswerOnMacSheet: View {
             guard let response = question.response(confirmationId: question.id, action: .cancel, content: [:], atMs: Date().timeIntervalSince1970 * 1000) else {
                 await store.reload(project.id); dismiss(); return
             }
-            do { store.replace(try await store.mac.answerPrintConfirmation(project.id, response: response)); dismiss() }
+            do { let ticket = store.startRequest(); store.replace(try await store.mac.answerPrintConfirmation(project.id, response: response), ticket: ticket); dismiss() }
             catch let failure as CompanionError { problem = failure.message }
             catch { problem = CompanionError.unreachable.message }
         }

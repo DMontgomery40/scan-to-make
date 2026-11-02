@@ -185,7 +185,7 @@ test('pending depth completion cannot be bypassed by failed retry, correction or
   await assert.rejects(service.correct(object.id, 'Use the saved scan.'), /completed file list/);
   await store.update(object.id, o => ({...o, state: 'needs-closeup', question: {closeup: 'Closer.'}}));
   await assert.rejects(service.start(object.id), /completed file list/);
-  await assert.rejects(service.answerCloseup(object.id, {}), /completed file list/);
+  await assert.rejects(service.answerCloseup(object.id, {bestGuess: true}), /completed file list/);
   assert.equal(builds.length, 0);
   assert.equal(touchups.length, 0);
   assert.equal((await service.get(object.id)).passes.length, 0);

@@ -7,6 +7,8 @@ import CounterpartKit
     let companion: CompanionClient
     let nearby: NearbyPairing
     let projects: ProjectsStore
+    let cloud = MobileCloud()
+    let activities = MobileActivities()
 
     /// Nil until the stored pairing has been read once.
     private(set) var status: PairingStatus?
@@ -73,6 +75,16 @@ import CounterpartKit
             readStatus()
             pairingKey += 1
         }
+    }
+
+    func refreshCloud() async {
+        guard !needsMac else { return }
+        await cloud.refresh()
+        guard MobileCloud.configured else { return }
+        // A missed push is recovered on foreground refresh, before any unavailable LAN request.
+        await activities.reconcile(cloud.printUpdates, mayStart: true)
+        let settings = try? await companion.settings()
+        await cloud.configureAlerts(settings: settings, localChoices: NotificationChoices.all.map { NotificationChoices.isOn($0.id) })
     }
 
     /// After pairing finishes on the pairing screen.

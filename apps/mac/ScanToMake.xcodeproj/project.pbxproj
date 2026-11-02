@@ -34,6 +34,7 @@
 		3C44C99FC2ED039D691F25C6 /* MacStatusModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 81F869DA19C2B26065AAF581 /* MacStatusModel.swift */; };
 		3DC3AA5F72A5359487CBF13A /* PairingWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D69C6D9C935E91492BF71E4 /* PairingWindow.swift */; };
 		41E6E16B1111A02496D50670 /* UnixTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = F883FAAC0FC2F4C62EA7B853 /* UnixTransport.swift */; };
+		490ED6F7FE661E9B32DC7473 /* ConversationBubble.swift in Sources */ = {isa = PBXBuildFile; fileRef = 539C6C11D481ABB819D6551C /* ConversationBubble.swift */; };
 		4A6BFE051577702B7680A03E /* BlenderBridgeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F97236849B06E8C6E6FE33F7 /* BlenderBridgeTests.swift */; };
 		4EE9B641DE5C7C16CF7343A5 /* ModelMesh.swift in Sources */ = {isa = PBXBuildFile; fileRef = A23E6083F6062B543A95EE19 /* ModelMesh.swift */; };
 		4FC608CAB60EF4726FCB47E8 /* ObjectsModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5F06994F3DC2679FF8587BB /* ObjectsModel.swift */; };
@@ -171,11 +172,11 @@
 		41E2E1E9E7D4F8125FC6CDC2 /* EventRelayTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventRelayTests.swift; sourceTree = "<group>"; };
 		45CABA4399301F85B9574DC6 /* EventRelayPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventRelayPolicy.swift; sourceTree = "<group>"; };
 		4B0EFAE6EE67455FAFBEF608 /* SettingsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsTests.swift; sourceTree = "<group>"; };
+		539C6C11D481ABB819D6551C /* ConversationBubble.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationBubble.swift; sourceTree = "<group>"; };
 		5843CF243A6B90D769EE203F /* Events.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Events.swift; sourceTree = "<group>"; };
 		597C236AD2F8BEAB989B447D /* ModelAccessViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelAccessViews.swift; sourceTree = "<group>"; };
 		59A8B37FDCCE714A49CB678C /* FileImagesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileImagesTests.swift; sourceTree = "<group>"; };
 		5A63BE8D6BD19AFFDA3F5D4E /* SettingsViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsViews.swift; sourceTree = "<group>"; };
-		5CB3C16A5015E911EF835644 /* ScanToMake.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ScanToMake.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		6085C88754126EAB39C66248 /* Objects.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Objects.swift; sourceTree = "<group>"; };
 		65E3A0D63F7083BD2ECAB4E5 /* CompanionSettingsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompanionSettingsTests.swift; sourceTree = "<group>"; };
 		666DD15803F0A0C9F25C5AB3 /* PairingSessionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingSessionTests.swift; sourceTree = "<group>"; };
@@ -187,6 +188,7 @@
 		81F869DA19C2B26065AAF581 /* MacStatusModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacStatusModel.swift; sourceTree = "<group>"; };
 		82E682F2C777DDBCE67DFA31 /* CloudSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudSync.swift; sourceTree = "<group>"; };
 		83292C1F55412BA76639A23B /* LiveActivityRelay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveActivityRelay.swift; sourceTree = "<group>"; };
+		858423DEC2651EE35F1E3C28 /* Counterpart.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Counterpart.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		887E68D99AD15299EF044892 /* Style.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Style.swift; sourceTree = "<group>"; };
 		8D09E6767AA8F339A8F92FF7 /* ModelStage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelStage.swift; sourceTree = "<group>"; };
 		90D981FAC780ABCF386D18D0 /* DesignFixtures.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignFixtures.swift; sourceTree = "<group>"; };
@@ -250,7 +252,7 @@
 			children = (
 				084617C3A2280F650DFB14EA /* AgentKit.framework */,
 				B8FC0CEA3CCA9AA8B21FB7AF /* AgentKitTests.xctest */,
-				5CB3C16A5015E911EF835644 /* ScanToMake.app */,
+				858423DEC2651EE35F1E3C28 /* Counterpart.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -326,6 +328,7 @@
 				82E682F2C777DDBCE67DFA31 /* CloudSync.swift */,
 				C7E10258D71E1A28BE7C0F61 /* CompanionModel.swift */,
 				C3DD660C3DBD81EE6B5FCF9A /* CompanionSettingsModel.swift */,
+				539C6C11D481ABB819D6551C /* ConversationBubble.swift */,
 				90D981FAC780ABCF386D18D0 /* DesignFixtures.swift */,
 				1496538ABC8C1B43DD7C1B15 /* Diagnostics.swift */,
 				CF2310321F74FA746A9806F7 /* EventRelay.swift */,
@@ -403,7 +406,7 @@
 				9C3781E485F9980822ADA4B0 /* CounterpartKit */,
 			);
 			productName = ScanToMake;
-			productReference = 5CB3C16A5015E911EF835644 /* ScanToMake.app */;
+			productReference = 858423DEC2651EE35F1E3C28 /* Counterpart.app */;
 			productType = "com.apple.product-type.application";
 		};
 		305D149FE05FB56F981D5974 /* AgentKitTests */ = {
@@ -550,6 +553,7 @@
 				790A649A81726C39D2C2D1A1 /* CompanionSettingsModel.swift in Sources */,
 				8E48F6039DED4418C9F28F98 /* Confirmation.swift in Sources */,
 				CD8C26ED361E938070BEC7CA /* ControlClient.swift in Sources */,
+				490ED6F7FE661E9B32DC7473 /* ConversationBubble.swift in Sources */,
 				D60BE76E1942A334905A2BAA /* DesignFixtures.swift in Sources */,
 				EBF8E2C1A689A4388EEF82CC /* Diagnostics.swift in Sources */,
 				35B0A87F5842970A2E221D59 /* EventRelay.swift in Sources */,
@@ -783,7 +787,7 @@
 					"@executable_path/../Frameworks",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = "com.scantomake.mac$(STM_VARIANT)";
-				PRODUCT_NAME = "Scan to Make";
+				PRODUCT_NAME = Counterpart;
 				SDKROOT = macosx;
 			};
 			name = Debug;
@@ -802,7 +806,7 @@
 					"@executable_path/../Frameworks",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = "com.scantomake.mac$(STM_VARIANT)";
-				PRODUCT_NAME = "Scan to Make";
+				PRODUCT_NAME = Counterpart;
 				SDKROOT = macosx;
 			};
 			name = Release;

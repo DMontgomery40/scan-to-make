@@ -95,3 +95,43 @@ export async function resetBlenderScene(client: BridgeClient, signal?: AbortSign
     await client.close().catch(() => undefined);
   }
 }
+
+const STOP_OWNED_CODE = `import bpy
+if bpy.app.driver_namespace.get("scan_to_make_owned"):
+    def _counterpart_quit():
+        if bpy.app.driver_namespace.get("scan_to_make_owned"):
+            bpy.ops.wm.quit_blender()
+        return None
+    bpy.app.timers.register(_counterpart_quit, first_interval=0.2)
+    print("COUNTERPART_BLENDER_STOPPING")
+else:
+    print("COUNTERPART_BLENDER_USER_OWNED")
+`;
+
+/** Quit only our Blender, through the same bridge used for the pass, and await its closed listener. */
+export async function stopOwnedBlender(client: BridgeClient, opts: {port?: number; timeoutMs?: number} = {}): Promise<void> {
+  const port = opts.port ?? BLENDER_MCP_PORT, timeoutMs = opts.timeoutMs ?? 10_000;
+  if (!await listening(port)) return;
+  // Cleanup must still run after the pass's own signal was cancelled.
+  const signal = AbortSignal.timeout(timeoutMs);
+  try {
+    await client.connect(signal);
+    if (!client.hasTool('blender_mcp_call')) throw new BlenderBridgeUnavailableError();
+    const result = await client.callTool('blender_mcp_call', {tool_name: 'execute_blender_code',
+      arguments: {code: STOP_OWNED_CODE, user_prompt: 'Close only the Blender Counterpart started after its last queued pass'}}, {signal, timeoutMs});
+    if (result.isError) throw new Error(`Blender could not close: ${toolErrorText(result)}`);
+    const words = (result.content ?? []).flatMap(item => item.type === 'text' ? [item.text] : []).join('\n');
+    if (words.includes('COUNTERPART_BLENDER_USER_OWNED')) return;
+    // Older installed add-ons return {executed:true} without Python stdout. The bridge reports this
+    // exact success text; the ownership guard still runs, and only a closed listener proves shutdown.
+    const legacySuccess = words.trim() === 'Code executed successfully:';
+    if (!words.includes('COUNTERPART_BLENDER_STOPPING') && !legacySuccess) throw new Error('Blender did not acknowledge its shutdown.');
+    while (!signal.aborted) {
+      if (!await listening(port)) return;
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+    throw new Error('Blender did not close after its pass.');
+  } finally {
+    await client.close().catch(() => undefined);
+  }
+}

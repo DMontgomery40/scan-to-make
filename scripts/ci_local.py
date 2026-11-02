@@ -437,6 +437,12 @@ def main():
     if args.worker:
         config = json.loads(args.worker.read_text()); result = execute_job(config['spec'], Path(config['workspace']), Path(config['directory'])); return result['status']=='FAIL'
     if args.launch_macos: mac_launch(args.launch_macos); return 0
+    # Remote lanes run a git archive: listing workflows must not require a .git
+    # directory. Executing checks and selecting changed paths still require Git.
+    if args.dry_run and not args.changed_only:
+        root = Path(__file__).resolve().parents[1]
+        print(json.dumps(read_workflows(root, args.workflow), indent=2))
+        return 0
     root = Path(output(['git', 'rev-parse', '--show-toplevel'])).resolve()
     sha = output(['git', '-C', str(root), 'rev-parse', 'HEAD'])
     if not args.dry_run and output(['git','-C',str(root),'status','--porcelain','--untracked-files=all']):

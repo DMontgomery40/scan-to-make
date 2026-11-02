@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {mkdtemp, mkdir, readFile, rm, writeFile} from 'node:fs/promises';
-import {join} from 'node:path';
+import {basename, join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {createServer} from 'node:http';
 import {ObjectStore} from '../dist/objects/store.js';
@@ -220,4 +220,53 @@ test('a correction that changes nothing keeps a Done project Done', async t => {
   assert.deepEqual([kept.state, kept.outcome, kept.passes.at(-1).status], ['confirmed', 'works', 'unchanged']);
   const {projectStatus} = await import('../dist/objects/service.js');
   assert.equal(projectStatus(kept), 'works');
+});
+
+
+test('a person renaming during a pass wins over the worker title', async t => {
+  const f = await setup(t, [{wait: true, result: {title: 'Generated holder'}}]);
+  const object = await f.service.create('A holder for the desk');
+  await f.service.start(object.id);
+  await until(() => f.inputs.length === 1);
+  await f.service.rename(object.id, 'My desk holder');
+  f.release();
+  assert.equal((await f.service.settled(object.id)).title, 'My desk holder');
+});
+
+test('a person renaming while the title generator answers keeps their name', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'title-race-'));
+  t.after(() => rm(root, {recursive: true, force: true, maxRetries: 10, retryDelay: 20}));
+  const store = new ObjectStore(join(root, 'objects'));
+  const object = await store.update((await store.create('A holder')).id, o => ({...o, state: 'ready'}));
+  let answer;
+  const changes = [];
+  const service = new ObjectService({store, runTouchup: async () => { throw new Error('unused'); }, stlInfo: async () => undefined, claudePath: '/unused',
+    handoff: {backend: 'bambu-printer-mcp', process: {command: '/usr/bin/true'}}, onChange: o => changes.push(o.title),
+    titleFor: async () => new Promise(resolve => { answer = resolve; })});
+  t.after(() => service.close());
+  await service.list(); await until(() => answer);
+  await service.rename(object.id, 'My own name');
+  changes.length = 0;
+  answer('Generated name');
+  await until(() => changes.length);
+  assert.deepEqual(changes, ['My own name']);
+  assert.equal((await store.get(object.id)).title, 'My own name');
+});
+
+
+test('a pass uses its claimed photos and prior context, never a later queued message’s uploads', async t => {
+  const f = await setup(t, [{}, {}, {}]);
+  const object = await f.service.create('A mount');
+  await f.service.addPhoto(object.id, 'initial.jpg', JPEG);
+  await f.service.start(object.id); await f.service.settled(object.id);
+  await f.service.addPhoto(object.id, 'a.jpg', JPEG);
+  await f.service.addPhoto(object.id, 'b.jpg', JPEG);
+  await f.service.correct(object.id, 'Change A', [], ['a.jpg']);
+  await f.service.settled(object.id);
+  assert.deepEqual(f.inputs[1].photos.map(path => basename(path)), ['initial.jpg', 'a.jpg']);
+  assert.deepEqual((await f.store.get(object.id)).pendingPhotos, ['b.jpg']);
+  await f.service.correct(object.id, 'Change B', [], ['b.jpg']);
+  await f.service.settled(object.id);
+  assert.deepEqual(f.inputs[2].photos.map(path => basename(path)), ['initial.jpg', 'a.jpg', 'b.jpg']);
+  assert.deepEqual((await f.store.get(object.id)).pendingPhotos, []);
 });

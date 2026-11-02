@@ -214,15 +214,18 @@ struct NewObjectView: View {
         guard canSend else { askedForDescription = true; describing = true; return }
         describing = false
         await run("make") {
-            let object = try await object()
+            let ticket = store.startRequest()
+            let returned = try await object()
+            guard let object = store.prepareDraftSend(returned, ticket: ticket) else { return }
             guard object.state == .new else { started(object); return }
             let chosen = photos, mac = store.mac
-            store.replace(object)
             instructions = ""
             draftId = ""
             started(object)
             await store.sendInBackground(object.id) { [store] in
-                store.replace(try await mac.sendProject(object.id, photos: chosen))
+                guard store.requestIsCurrent(ticket) else { return }
+                let sendTicket = store.startRequest()
+                store.replace(try await mac.sendProject(object.id, photos: chosen), ticket: sendTicket)
             }
         }
     }

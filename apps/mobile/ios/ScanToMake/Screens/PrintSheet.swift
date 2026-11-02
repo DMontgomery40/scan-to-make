@@ -315,7 +315,8 @@ struct PrintSheet: View {
         busy = "load"; problem = nil
         defer { busy = nil }
         do {
-            store.replace(try await store.mac.selectPrinter(projectId, destinationId: id))
+            let ticket = store.startRequest()
+            store.replace(try await store.mac.selectPrinter(projectId, destinationId: id), ticket: ticket)
             destinationId = id
             slice.forget()
         } catch let failure as CompanionError { problem = failure.message; return }
@@ -390,7 +391,8 @@ struct PrintSheet: View {
                                  strength: printer?.offersStrength == true ? strength : .standard,
                                  checked: uncertain && checked, copies: offersCopies ? copies : nil)
         do {
-            store.replace(try await store.mac.client.print(projectId, choice: choice))
+            let ticket = store.startRequest()
+            store.replace(try await store.mac.client.print(projectId, choice: choice), ticket: ticket)
             if case .tray(let tray)? = colour { LastTray.save(projectId, destinationId: destinationId, slot: tray.slot) }
             dismiss()
         } catch let failure as CompanionError {

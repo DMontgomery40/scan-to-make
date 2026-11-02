@@ -35,7 +35,7 @@ public actor ProjectUploader {
     /// Sends whatever of `files` the Mac doesn't have yet, one after another, stopping at the first failure.
     /// Returns how many photos or frames were sent (the scan isn't counted).
     @discardableResult
-    public func send(_ files: [UploadFile], to projectId: String) async throws -> Int {
+    public func send(_ files: [UploadFile], to projectId: String, forMessage: Bool = false) async throws -> Int {
         guard !sending.contains(projectId) else { throw CompanionError(code: "busy", message: "This is already being sent.") }
         sending.insert(projectId)
         defer { sending.remove(projectId) }
@@ -68,7 +68,7 @@ public actor ProjectUploader {
             else {
                 let route = file.kind == .depth ? "capture-depth" : file.kind == .capture ? "capture" : "photos"
                 let name = file.name.addingPercentEncoding(withAllowedCharacters: Self.queryValue) ?? file.name
-                path = "/v1/objects/\(projectId)/\(route)?name=\(name)"; method = "POST"
+                path = "/v1/objects/\(projectId)/\(route)?name=\(name)" + (file.kind == .photo && forMessage ? "&forMessage=true" : ""); method = "POST"
             }
             let reply = try await client.send(method, path, body: bytes, contentType: file.type)
             if reply.status == 409 { throw CompanionError(code: "conflict", message: "This is already being touched up.") }

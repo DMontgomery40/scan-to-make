@@ -55,6 +55,15 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
     public var outcome: String?
     /// Hidden from Home (Archive). Kept beside `settings.status`.
     public var archived: Bool?
+    /// Published model attribution and files from the companion, retained for shared search.
+    public var credit: JSONValue?
+    public var files: JSONValue?
+    public var completion: Completion?
+    public var pendingFollowup: String?
+    public var pendingMessageId: String?
+    public var messages: [Message]?
+    public var requestPhotos: [String]?
+    public var pendingPhotos: [String]?
 
     public init(id: String, createdAtMs: Double, updatedAtMs: Double, instructions: String? = nil, state: State, scan: String? = nil,
                 photos: [String] = [], capture: [String]? = nil, progress: String? = nil, passes: [Pass] = [], current: Result? = nil,
@@ -72,7 +81,7 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case id, createdAtMs, updatedAtMs, instructions, state, scan, photos, capture, captureDepth, progress, passes, current, question
-        case failure, print, printerDestinationId, printConfirmation, status, title, kind, ask, directory, settings, outcome, archived
+        case failure, print, printerDestinationId, printConfirmation, status, title, kind, ask, directory, settings, outcome, archived, credit, files, completion, pendingFollowup, pendingMessageId, messages, requestPhotos, pendingPhotos
     }
 
     /// One odd object never drops out of the list: missing lists are empty, and an optional that doesn't
@@ -85,6 +94,14 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
         createdAtMs = try c.decode(Double.self, forKey: .createdAtMs)
         updatedAtMs = try c.decode(Double.self, forKey: .updatedAtMs)
         state = try c.decode(State.self, forKey: .state)
+        pendingFollowup = optional(String.self, .pendingFollowup)
+        pendingMessageId = optional(String.self, .pendingMessageId)
+        messages = optional([Message].self, .messages)
+        requestPhotos = optional([String].self, .requestPhotos)
+        pendingPhotos = optional([String].self, .pendingPhotos)
+        completion = optional(Completion.self, .completion)
+        credit = optional(JSONValue.self, .credit)
+        files = optional(JSONValue.self, .files)
         instructions = optional(String.self, .instructions)
         scan = optional(String.self, .scan)
         photos = optional([String].self, .photos) ?? []
@@ -139,6 +156,30 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
 
     /// The open question, structured (PR 4) or the older close-up question.
     public var openAsk: Ask? { ask.flatMap { $0.status == "answered" ? nil : $0 } }
+
+    public var completionUndoStatus: ProjectStatus? {
+        guard state == .confirmed, let completion, completion.undone != true,
+              let previous = ProjectStatus(rawValue: completion.previousStatus), previous != .works else { return nil }
+        return previous
+    }
+
+    public struct Message: Codable, Equatable, Identifiable, Sendable {
+        public var id: String
+        public var text: String
+        public var atMs: Double
+        public var photos: [String]
+        public init(id: String, text: String, atMs: Double, photos: [String] = []) {
+            self.id = id; self.text = text; self.atMs = atMs; self.photos = photos
+        }
+    }
+
+    public struct Completion: Codable, Equatable, Sendable {
+        public var messageId: String?
+        public var note: String
+        public var atMs: Double
+        public var previousStatus: String
+        public var undone: Bool?
+    }
 
     // MARK: Nested types
 
@@ -211,6 +252,8 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
 
     /// One round of work on the Mac.
     public struct Pass: Codable, Equatable, Sendable {
+        public var messageId: String?
+        public var photos: [String]?
         public var startedAtMs: Double
         public var endedAtMs: Double?
         /// Your follow-up that started it, if any.
