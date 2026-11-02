@@ -337,41 +337,16 @@ final class HandheldDepthRecorder: NSObject, AVCaptureDataOutputSynchronizerDele
               configuration.maximumFrames <= 10000, configuration.maximumBytes > 0 else {
             throw HandheldDepthFrameCodec.RecorderError("Invalid RGB-D recording configuration.")
         }
-        struct Choice {
-            let video: AVCaptureDevice.Format, depth: AVCaptureDevice.Format
-            let width: Int32, height: Int32, depthWidth: Int32, depthHeight: Int32
-            let depthFPS: Double
+        // Formats only, as Apple's LiDAR depth sample does ("Capturing depth using the LiDAR camera"): never a
+        // frame duration. Writing activeVideoMin/MaxFrameDuration or activeDepthDataMinFrameDuration on the LiDAR
+        // camera reprograms its sync generator ("SetExternalSyncFrameRateRational … 0/1") and leaves every app's
+        // camera black until a reboot (KAN-217 P0, Davica3 syslog 2026-11-01).
+        guard let choice = Self.formats(device.formats, maximumWidth: configuration.preferredMaximumVideoWidth) else {
+            throw HandheldDepthFrameCodec.RecorderError("No compatible rear LiDAR video and depth format is available.")
         }
-        var choices: [Choice] = []
-        for format in device.formats where format.videoSupportedFrameRateRanges.contains(where: { $0.minFrameRate <= 30 && $0.maxFrameRate >= 30 }) {
-            let size = CMVideoFormatDescriptionGetDimensions(format.formatDescription)
-            for depth in format.supportedDepthDataFormats {
-                let depthSize = CMVideoFormatDescriptionGetDimensions(depth.formatDescription)
-                let rates = depth.videoSupportedFrameRateRanges.compactMap { range -> Double? in
-                    let rate = min(30, range.maxFrameRate)
-                    return rate >= range.minFrameRate && rate > 0 ? rate : nil
-                }
-                guard let rate = rates.max() else { continue }
-                choices.append(Choice(video: format, depth: depth, width: size.width, height: size.height,
-                                      depthWidth: depthSize.width, depthHeight: depthSize.height, depthFPS: rate))
-            }
-        }
-        let bounded = choices.filter { $0.width <= configuration.preferredMaximumVideoWidth }
-        let candidates = bounded.isEmpty ? choices.sorted { $0.width * $0.height < $1.width * $1.height }.prefix(1).map { $0 } : bounded
-        guard let choice = candidates.max(by: { a, b in
-            // Prefer depth cadence that can supply the requested saves, then colour/depth resolution.
-            let aRate = min(a.depthFPS, configuration.targetFPS), bRate = min(b.depthFPS, configuration.targetFPS)
-            if aRate != bRate { return aRate < bRate }
-            if a.width * a.height != b.width * b.height { return a.width * a.height < b.width * b.height }
-            return a.depthWidth * a.depthHeight < b.depthWidth * b.depthHeight
-        }) else { throw HandheldDepthFrameCodec.RecorderError("No compatible rear LiDAR video and depth format is available.") }
-        session.sessionPreset = .inputPriority
         try device.lockForConfiguration()
         device.activeFormat = choice.video
         device.activeDepthDataFormat = choice.depth
-        device.activeVideoMinFrameDuration = CMTime(value: 1, timescale: 30)
-        device.activeVideoMaxFrameDuration = CMTime(value: 1, timescale: 30)
-        device.activeDepthDataMinFrameDuration = CMTime(seconds: 1 / choice.depthFPS, preferredTimescale: 60000)
         device.unlockForConfiguration()
         if !session.outputs.contains(where: { $0 === videoOutput }) {
             guard session.canAddOutput(videoOutput) else { throw HandheldDepthFrameCodec.RecorderError("The camera cannot supply RGB frames.") }
@@ -379,8 +354,10 @@ final class HandheldDepthRecorder: NSObject, AVCaptureDataOutputSynchronizerDele
         }
         videoOutput.videoSettings = [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarFullRange]
         videoOutput.alwaysDiscardsLateVideoFrames = true
-        guard session.canAddOutput(depthOutput) else { throw HandheldDepthFrameCodec.RecorderError("The camera cannot supply synchronized depth.") }
-        session.addOutput(depthOutput)
+        if !session.outputs.contains(where: { $0 === depthOutput }) {
+            guard session.canAddOutput(depthOutput) else { throw HandheldDepthFrameCodec.RecorderError("The camera cannot supply synchronized depth.") }
+            session.addOutput(depthOutput)
+        }
         depthOutput.isFilteringEnabled = false
         depthOutput.alwaysDiscardsLateDepthData = true
         for connection in [videoOutput.connection(with: .video), depthOutput.connection(with: .depthData)].compactMap({ $0 }) {
@@ -400,11 +377,48 @@ final class HandheldDepthRecorder: NSObject, AVCaptureDataOutputSynchronizerDele
         let sync = AVCaptureDataOutputSynchronizer(dataOutputs: [depthOutput, videoOutput])
         synchronizer = sync
         sync.setDelegate(self, queue: eventQueue)
+        // The rates the device runs at by default, read and never set.
+        let videoFPS = Self.rate(device.activeVideoMinFrameDuration) ?? 30
+        let depthFPS = choice.depth.videoSupportedFrameRateRanges.map(\.maxFrameRate).max() ?? videoFPS
         runtime = RuntimeConfiguration(videoWidth: choice.width, videoHeight: choice.height,
                                        depthWidth: choice.depthWidth, depthHeight: choice.depthHeight,
-                                       videoFPS: 30, depthMaximumFPS: choice.depthFPS, targetSavedFPS: configuration.targetFPS,
+                                       videoFPS: videoFPS, depthMaximumFPS: depthFPS, targetSavedFPS: configuration.targetFPS,
                                        maximumFrames: configuration.maximumFrames, maximumBytes: configuration.maximumBytes,
                                        depthFiltering: false)
+    }
+
+    struct FormatChoice {
+        let video: AVCaptureDevice.Format, depth: AVCaptureDevice.Format
+        let width: Int32, height: Int32, depthWidth: Int32, depthHeight: Int32
+    }
+
+    /// The video format with depth, as large as allowed (not binned), and its largest Float16/Float32 depth format.
+    /// Chosen by size alone: frame rates stay the device's defaults.
+    static func formats(_ formats: [AVCaptureDevice.Format], maximumWidth: Int32) -> FormatChoice? {
+        let depthTypes: Set<FourCharCode> = [kCVPixelFormatType_DepthFloat16, kCVPixelFormatType_DepthFloat32]
+        let choices: [FormatChoice] = formats.compactMap { format in
+            let size = CMVideoFormatDescriptionGetDimensions(format.formatDescription)
+            let depths = format.supportedDepthDataFormats.filter { depthTypes.contains(CMFormatDescriptionGetMediaSubType($0.formatDescription)) }
+            guard let depth = depths.max(by: { area($0) < area($1) }) else { return nil }
+            let depthSize = CMVideoFormatDescriptionGetDimensions(depth.formatDescription)
+            return FormatChoice(video: format, depth: depth, width: size.width, height: size.height, depthWidth: depthSize.width, depthHeight: depthSize.height)
+        }
+        let unbinned = choices.filter { !$0.video.isVideoBinned }
+        let pool = unbinned.isEmpty ? choices : unbinned
+        let bounded = pool.filter { $0.width <= maximumWidth }
+        if bounded.isEmpty { return pool.min { $0.width * $0.height < $1.width * $1.height } }
+        return bounded.max { a, b in
+            a.width * a.height != b.width * b.height ? a.width * a.height < b.width * b.height
+                : a.depthWidth * a.depthHeight < b.depthWidth * b.depthHeight
+        }
+    }
+    private static func area(_ format: AVCaptureDevice.Format) -> Int32 {
+        let size = CMVideoFormatDescriptionGetDimensions(format.formatDescription)
+        return size.width * size.height
+    }
+    private static func rate(_ duration: CMTime) -> Double? {
+        let seconds = CMTimeGetSeconds(duration)
+        return seconds.isFinite && seconds > 0 ? 1 / seconds : nil
     }
 
     /// Explicit recovery precedes the user's Resume/Save decision; it never opens the camera.
