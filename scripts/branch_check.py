@@ -36,6 +36,10 @@ def merge(a, b):
     return lines[0], (lines[1:] if done.returncode == 1 else [])
 
 
+def is_ancestor(a, b):
+    return subprocess.run(['git', 'merge-base', '--is-ancestor', a, b]).returncode == 0
+
+
 def commit_of(tree, parent):
     return git('commit-tree', tree, '-p', parent, '-m', 'branch_check scratch').stdout.strip()
 
@@ -92,6 +96,13 @@ def main():
         problems.append('conflicts with main in: ' + ', '.join(b['conflicts']))
     for other in sorted(active - {name}):
         o = branches[other]
+        # Stacked branches land in ancestor order, so the reverse order is impossible and not a conflict.
+        if is_ancestor(o['ref'], b['ref']):
+            problems.append(f'stacked on {other}: merge {other} first (merging this one now would land {other}\'s unmerged commits too).')
+            continue
+        if is_ancestor(b['ref'], o['ref']):
+            warnings.append(f'{other} is stacked on this branch: it lands after it.')
+            continue
         shared = sorted(b['changes'] & o['changes'])
         if not shared or o['conflicts']:
             continue  # nothing in common, or the other branch can't land as-is (its own row says so)

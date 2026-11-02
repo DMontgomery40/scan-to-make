@@ -62,6 +62,15 @@ class BranchCheckTests(unittest.TestCase):
         code, out = self.check('--merge', 'top')
         self.assertEqual(code, 0, out); self.assertIn('warning: shares a.txt with bottom', out)
 
+    def test_stacked_branches_land_in_order_not_as_a_conflict(self):
+        self.branch('base-work', {'a.txt': 'one\nBASE\nthree\n'})
+        self.branch('stacked', {'a.txt': 'one\nSTACKED\nthree\n'}, base='base-work')
+        code, out = self.check('--merge', 'base-work')
+        self.assertEqual(code, 0, out); self.assertIn('stacked is stacked on this branch: it lands after it', out)
+        code, out = self.check('--merge', 'stacked')
+        self.assertEqual(code, 1); self.assertIn('stacked on base-work: merge base-work first', out)
+        self.assertNotIn('conflicts with', out)
+
     def test_squash_merged_branch_is_not_live(self):
         self.branch('done', {'b.txt': 'b changed\n'})
         self.git('checkout', '-q', '-B', 'main', 'origin/main'); self.write('b.txt', 'b changed\n'); self.commit('squash of done')
