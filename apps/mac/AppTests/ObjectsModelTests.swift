@@ -30,6 +30,7 @@ private actor FakeObjects: ObjectsCompanion {
         let item = items.first { $0["id"] as? String == id }
         var settings = item?["settings"] as? [String: Any] ?? ["status": "printed", "archived": false]
         var fields: [String: Any] = [:]
+        if case .string(let title)? = patch["title"] { fields["title"] = title }
         if case .string(let status)? = patch["status"] {
             if status == "archived" { settings["archived"] = true } else { settings["status"] = status }
             if status == "works" { fields["state"] = "confirmed"; fields["status"] = ["phase": "confirmed", "text": "It works", "symbol": "checkmark.circle.fill", "tint": "green"] }
@@ -82,6 +83,43 @@ private func project(_ item: [String: Any]) throws -> Project {
 }
 
 @MainActor final class ObjectsModelTests: XCTestCase {
+    func testChangesWrittenDuringAPassAreSavedAndSentOnceWhenItEnds() async throws {
+        let defaults = UserDefaults(suiteName: "counterpart-queue-\(UUID().uuidString)")!
+        let companion = FakeObjects()
+        await companion.set([item("queued", "touching-up")])
+        let model = ObjectsModel(companion: companion, defaults: defaults)
+        await model.refresh()
+        let accepted = await model.requestChanges("queued", note: "Widen the flange")
+        XCTAssertTrue(accepted)
+        XCTAssertEqual(model.corrections.pending("queued"), "Widen the flange")
+        let before = await companion.calls
+        XCTAssertFalse(before.contains("correct:Widen the flange"))
+        XCTAssertEqual(CorrectionQueue(saved: defaults.dictionary(forKey: "CounterpartQueuedNotes")).pending("queued"), "Widen the flange")
+        await companion.set([item("queued", "ready")])
+        await model.refresh()
+        for _ in 0..<100 where model.corrections.pending("queued") != nil { await Task.yield() }
+        XCTAssertNil(model.corrections.pending("queued"))
+        XCTAssertEqual(model.objects.first?.state, .touchingUp)
+        let after = await companion.calls
+        XCTAssertEqual(after.filter { $0 == "correct:Widen the flange" }.count, 1)
+    }
+
+    func testRenameUsesItsOwnCapabilityAndKeepsTheRequest() async {
+        let companion = FakeObjects()
+        await companion.set([item("rename", "ready", ["instructions": "A mount for the pole"])])
+        await companion.setCapabilities(.init(projectSettings: true, projectRename: true))
+        let model = ObjectsModel(companion: companion)
+        await model.refresh()
+        let renamed = await model.rename("rename", title: "Studio mic mount")
+        XCTAssertTrue(renamed)
+        XCTAssertEqual(model.objects.first?.title, "Studio mic mount")
+        XCTAssertEqual(model.objects.first?.instructions, "A mount for the pole")
+        XCTAssertEqual(model.objects.first?.state, .ready)
+        let older = ObjectsModel(companion: companion)
+        let refused = await older.rename("rename", title: "Should wait for capability")
+        XCTAssertFalse(refused)
+    }
+
     func testConfirmationRejectsStaleAndIncompleteAnswers() async {
         let companion = FakeObjects()
         var question: [String: Any] = ["id":"q1", "message":"Check the actual printer.", "expiresAtMs":Date().timeIntervalSince1970 * 1000 + 60_000,

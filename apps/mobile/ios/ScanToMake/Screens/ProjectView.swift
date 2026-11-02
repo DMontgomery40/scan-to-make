@@ -74,7 +74,7 @@ struct ProjectView: View {
     }
 
     private func reload() async {
-        do { store.replace(try await store.mac.get(id)); fetchProblem = nil }
+        do { let ticket = store.startRequest(); store.replace(try await store.mac.get(id), ticket: ticket); fetchProblem = nil }
         catch let failure as CompanionError { if failure.code != "cancelled" { fetchProblem = failure.message } }
         catch { fetchProblem = CompanionError.unreachable.message }
     }
@@ -124,7 +124,7 @@ struct ProjectView: View {
         working = true; problem = nil
         Task {
             defer { working = false }
-            do { if let next = try await body() { store.replace(next) } else { await reload() } }
+            do { let ticket = store.startRequest(); if let next = try await body() { store.replace(next, ticket: ticket) } else { await reload() } }
             catch let failure as CompanionError {
                 if failure.code == "cancelled" { return }
                 if failure.needsPairing { store.onPair(); return }
@@ -159,8 +159,9 @@ struct ProjectView: View {
                     Button { projectName = words.title; renaming = true } label: {
                         Text(words.title).font(.largeTitle.bold()).fixedSize(horizontal: false, vertical: true)
                     }
-                    .buttonStyle(.plain).disabled(working || !store.projectSettings)
-                    .accessibilityLabel("Rename \(words.title)")
+                    .buttonStyle(.plain).disabled(working || !store.projectRename)
+                    .accessibilityIdentifier("project-title")
+                    .accessibilityLabel(words.title).accessibilityHint("Rename project")
                     if let request = object.instructions, !request.isEmpty, request != words.title {
                         Text(request).font(.body).foregroundStyle(.secondary).textSelection(.enabled)
                     }
@@ -178,8 +179,16 @@ struct ProjectView: View {
                         Text("Message saved").font(.headline)
                         Text(pending).font(.subheadline).textSelection(.enabled)
                         HStack {
-                            Button("Try Again") { act { try await store.mac.correct(object.id, pending) } }
-                            Button("Mark Done") { act { try await store.mac.client.setStatus(object.id, .works) } }
+                            Button("Try Again") { act {
+                                let next = try await store.mac.correct(object.id, pending)
+                                store.corrections.sent(pending, for: object.id)
+                                return next
+                            } }
+                            Button("Mark Done") { act {
+                                let next = try await store.mac.client.setStatus(object.id, .works)
+                                store.corrections.sent(pending, for: object.id)
+                                return next
+                            } }
                         }.disabled(working)
                     }.padding(.horizontal, 20)
                 }
@@ -229,8 +238,10 @@ struct ProjectView: View {
             }
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
-                    if store.projectSettings {
+                    if store.projectRename {
                         Button("Rename Project", systemImage: "pencil") { projectName = words.title; renaming = true }
+                    }
+                    if store.projectSettings {
                         statusChoices(object, words)
                         Divider()
                     }
@@ -244,7 +255,7 @@ struct ProjectView: View {
         }
         .safeAreaBar(edge: .bottom) {
             // A failed pass that left an earlier model still offers changes and Print; with no model, the failed card's Try Again is the way on.
-            if words.phase != .needsYou && !(words.phase == .failed && object.current == nil) { bottomBar(object, words) }
+            if object.canAskForChanges || (words.phase != .needsYou && !(words.phase == .failed && object.current == nil)) { bottomBar(object, words) }
         }
         .alert("Rename Project", isPresented: $renaming) {
             TextField("Project name", text: $projectName)
@@ -479,7 +490,7 @@ struct ProjectView: View {
         askWorking = true; askProblem = nil
         Task {
             defer { askWorking = false }
-            do { store.replace(try await store.mac.client.answerAsk(object.id, text: String(text.prefix(2000)))); askText = "" }
+            do { let ticket = store.startRequest(); store.replace(try await store.mac.client.answerAsk(object.id, text: String(text.prefix(2000))), ticket: ticket); askText = "" }
             catch let failure as CompanionError { askProblem = failure.message }
             catch { askProblem = CompanionError.unreachable.message }
         }
@@ -577,14 +588,14 @@ struct ProjectView: View {
 
     @ViewBuilder private func bottomBar(_ object: Project, _ words: ProjectWords) -> some View {
         // While the Mac works, a change waits and goes in when this pass finishes.
-        let canCorrect = words.actions.contains(.correct) || words.phase == .working
+        let canCorrect = object.canAskForChanges
         let canPrint = words.actions.contains(.print) || words.actions.contains(.printChecked)
         if canCorrect || canPrint {
             GlassEffectContainer(spacing: 10) {
                 HStack(spacing: 10) {
                     if canCorrect {
                         HStack {
-                            TextField(store.queuedNotes[object.id] != nil ? "Your change goes in when this pass finishes" : "Ask for changes…", text: $note, axis: .vertical)
+                            TextField(store.corrections.pending(object.id) != nil ? "Will send when this step finishes" : "Ask for changes…", text: $note, axis: .vertical)
                                 .lineLimit(1...4)
                                 .focused($writing)
                                 .submitLabel(.send)
@@ -641,16 +652,23 @@ struct ProjectView: View {
         let text = note.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         writing = false
-        if store.words(object).phase == .working {
+        if object.changesWait {
             // The Mac takes changes between passes; this one is sent the moment the pass ends.
             store.queue(note: text, for: object.id)
             note = ""
             return
         }
         act {
-            let next = try await store.mac.correct(object.id, text)
-            note = ""; section = .activity
-            return next
+            do {
+                let next = try await store.mac.correct(object.id, text)
+                store.corrections.sent(text, for: object.id)
+                note = ""; section = .activity
+                return next
+            } catch let failure as CompanionError where CorrectionQueue.waits(failure) {
+                store.queue(note: text, for: object.id)
+                note = ""
+                return nil
+            }
         }
     }
 }

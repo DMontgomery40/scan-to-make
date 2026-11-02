@@ -67,7 +67,7 @@ struct ProjectDetail: View {
         .toolbar {
             ToolbarItem(placement: .principal) {
                 Button { projectName = words.title; renaming = true } label: { Text(words.title).font(.headline) }
-                    .buttonStyle(.plain).disabled(working || model.capabilities?.projectSettings != true)
+                    .buttonStyle(.plain).disabled(working || model.capabilities?.projectRename != true)
                     .help("Rename Project").accessibilityLabel("Rename \(words.title)")
             }
         }
@@ -253,7 +253,7 @@ struct ProjectDetail: View {
 
     // MARK: The bar
 
-    private var canCorrect: Bool { words.actions.contains(.correct) && !working }
+    private var canCorrect: Bool { object.canAskForChanges && !working }
     private var canPrint: Bool {
         (words.actions.contains(.print) || words.actions.contains(.printChecked)) && !working && model.printer(for: object) != nil
     }
@@ -272,7 +272,7 @@ struct ProjectDetail: View {
                                     .buttonStyle(.plain).font(.caption2).offset(x: 5, y: -5).accessibilityLabel("Remove photo")
                             }
                     }
-                    TextField(takesPhotos ? "Ask for changes. Drop photos here too…" : "Ask for changes…", text: $note)
+                    TextField(model.corrections.pending(object.id) != nil ? "Will send when this step finishes" : takesPhotos ? "Ask for changes. Drop photos here too…" : "Ask for changes…", text: $note)
                         .textFieldStyle(.plain).focused($noteFocused)
                         .onSubmit(send)
                         .disabled(!canCorrect)
@@ -315,7 +315,7 @@ struct ProjectDetail: View {
         guard canCorrect, !text.isEmpty || !photos.isEmpty else { return }
         let sent = photos
         Task {
-            if await model.perform(.correct, on: object.id, note: text, photos: sent) { note = ""; photos = [] }
+            if await model.requestChanges(object.id, note: text, photos: sent) { note = ""; photos = [] }
         }
     }
 }

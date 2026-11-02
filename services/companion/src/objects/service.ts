@@ -257,7 +257,7 @@ export class ObjectService {
     const there = {works: object.state === 'confirmed', printed: object.state === 'printed' && clean,
       'needs-changes': object.outcome === 'needs-changes',
       'not-printed': clean && (object.current ? object.state === 'ready' : !['printed', 'confirmed', 'sent'].includes(object.state))}[status];
-    if (there) return object;
+    if (there && !(status === 'works' && object.pendingFollowup)) return object;
     if (object.state === 'touching-up' || object.state === 'printing') throw new InvalidStateError('Wait until the current step finishes.');
     if ((status === 'works' || status === 'printed') && !object.current) throw new InvalidStateError("There's no model yet, so it can't be marked printed.");
     const updated = await this.#deps.store.update(id, o => {

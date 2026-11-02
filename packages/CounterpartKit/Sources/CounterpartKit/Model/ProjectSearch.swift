@@ -12,9 +12,31 @@ extension Project {
     public func matchesSearch(_ query: String, additional: [String] = []) -> Bool {
         let terms = query.split(whereSeparator: \.isWhitespace).map(String.init)
         guard !terms.isEmpty else { return true }
-        let encoded = (try? JSONEncoder().encode(self)).flatMap(JSONValue.object(from:)) ?? [:]
-        let values = encoded.filter { $0.key != "directory" }.values.flatMap(Self.searchValues)
-        let text = (values + [ProjectWords.title(self)] + additional).joined(separator: "\n")
+        var values = [ProjectWords.title(self)] + additional
+        values += [instructions, progress, failure, kind, completion?.note, pendingFollowup,
+                   question?.closeup, ask?.question, status?.text, outcome].compactMap { $0 }
+        for pass in passes {
+            values += [pass.note, pass.summary, pass.engine].compactMap { $0 }
+            values += (pass.stages ?? []).map(\.words)
+            values += (pass.activity ?? []).map(\.text)
+        }
+        values += [current?.summary, current?.engine].compactMap { $0 }
+        values += (current?.changes ?? []).map(\.text)
+        if let size = current?.sizeMm { values += size.map { $0.formatted(.number.grouping(.never)) } }
+        values += [print?.destination?.name, print?.jobName, print?.printerStatus?.job,
+                   print?.live?.job?.name, print?.live?.job?.stage, print?.live?.activeFilament?.material,
+                   print?.live?.activeFilament?.color, printConfirmation?.message].compactMap { $0 }
+        values += (print?.events ?? []).map(\.message)
+        values += (print?.live?.problems ?? []).map(\.message)
+        if let settings = print?.settings, let bytes = try? JSONEncoder().encode(settings), let json = JSONValue.object(from: bytes) {
+            values += json.values.flatMap(Self.searchValues)
+        }
+        if let credit = credit?.object {
+            values += ["title", "designer", "site", "licence", "url"].compactMap { credit[$0] }.flatMap(Self.searchValues)
+        }
+        let files = photos + (capture ?? []) + (self.files.map(Self.searchValues) ?? [])
+        values += files.map { URL(fileURLWithPath: $0).lastPathComponent }
+        let text = values.joined(separator: "\n")
         return terms.allSatisfy { text.range(of: $0, options: [.caseInsensitive, .diacriticInsensitive], locale: .current) != nil }
     }
 

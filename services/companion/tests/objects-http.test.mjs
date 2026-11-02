@@ -400,6 +400,7 @@ test('the Mac sets Status over the control socket; project.updated tells the app
   assert.deepEqual([set.settings.status, set.object.state, set.object.status.phase], ['works', 'confirmed', 'confirmed']);
   assert.deepEqual(events.map(event => [event.type, event.data]), [['project.updated', {keys: ['status']}]]);
   assert.equal((await dispatch('status.get', {})).capabilities.projectSettings, true);
+  assert.equal((await dispatch('status.get', {})).capabilities.projectRename, true);
   await assert.rejects(dispatch('objects.settings.set', {id: object.id, status: 'done'}));
 });
 
@@ -452,10 +453,11 @@ test('Done-only messages mark Works without a pass; undo and mixed requests stil
 
 
 test('unavailable or uncertain classification saves the note without changing the model or starting a pass', async t => {
-  for (const reportsCompletion of [async () => 'unknown', async () => { throw new Error('timed out'); }]) {
+  for (const [index, reportsCompletion] of [async () => 'unknown', async () => { throw new Error('timed out'); }].entries()) {
     const {call, service, store} = await fixture(t, {reportsCompletion});
     const project = await service.create('A mic mount');
     await service.start(project.id); await service.settled(project.id);
+    if (index === 1) await service.setStatus(project.id, 'works');
     const before = await store.get(project.id);
     const reply = await call('POST', `/v1/objects/${project.id}/corrections`, {note: 'DONE. mounted and working. thanks!!'});
     assert.equal(reply.status, 409);

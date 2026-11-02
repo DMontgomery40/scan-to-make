@@ -156,7 +156,7 @@ struct SidebarList: View {
                             .listRowBackground(selection == project.id ? Color.filament.opacity(0.32) : nil)
                             .contextMenu {
                                 Button("Unarchive", systemImage: "tray.and.arrow.up") {
-                                    Task { if let next = try? await store.archive(project, false) { store.replace(next) } else { await store.reload(project.id) } }
+                                    Task { let ticket = store.startRequest(); if let next = try? await store.archive(project, false) { store.replace(next, ticket: ticket) } else { await store.reload(project.id) } }
                                 }
                                 DeleteProjectButton(store: store, project: project)
                             }
