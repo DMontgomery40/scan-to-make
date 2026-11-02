@@ -3,7 +3,7 @@
 import {Server} from '@modelcontextprotocol/sdk/server/index.js';
 import {StdioServerTransport} from '@modelcontextprotocol/sdk/server/stdio.js';
 import {CallToolRequestSchema, ListToolsRequestSchema} from '@modelcontextprotocol/sdk/types.js';
-import {appendFileSync, writeFileSync, mkdtempSync, rmSync} from 'node:fs';
+import {appendFileSync, readFileSync, writeFileSync, mkdtempSync, rmSync} from 'node:fs';
 import {basename, dirname, join} from 'node:path';
 import {tmpdir} from 'node:os';
 
@@ -112,9 +112,13 @@ server.setRequestHandler(CallToolRequestSchema, async request => {
     return text(path);
   }
   if (name === 'slice_stl') {
+    // A real Bambu Studio result.json, returned as bambu-printer-mcp's slicer_result (verbatim).
+    const slicerResult = process.env.HANDOFF_FIXTURE_SLICER_RESULT ? JSON.parse(readFileSync(process.env.HANDOFF_FIXTURE_SLICER_RESULT, 'utf8')) : undefined;
+    if (slicerResult && slicerResult.return_code !== 0) return {isError: true, structuredContent: {slicer_result: slicerResult},
+      content: [{type: 'text', text: `Slicer failed: the slicer exited with code 156 (${slicerResult.error_string} [${slicerResult.return_code}]). Command failed: /Applications/BambuStudio.app/Contents/MacOS/BambuStudio --slice 0`}]};
     const path = join(directory, mode === 'generic-gcode' ? 'sliced.gcode' : 'sliced.3mf');
     writeFileSync(path, path.endsWith('.3mf') ? `fixture 3mf ${Date.now()}-${Math.random()}` : `; fixture gcode ${Date.now()}-${Math.random()}\n`);
-    return text(path);
+    return slicerResult ? {...text(path), structuredContent: {path, slicer_result: slicerResult}} : text(path);
   }
   if (name === 'inspect_print_file') {
     return text({dispatchAuthorized: false, inspection: {model: args.bambu_model, plate: args.plate_index ?? 0}});

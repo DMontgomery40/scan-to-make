@@ -5,6 +5,7 @@ import {Ajv, type ValidateFunction} from 'ajv';
 import {appOwnedPrinterProcess} from './node-runtime.js';
 import {timeoutsFor, type PrinterHandoffConfig} from './config.js';
 import type {ElicitationContext, ElicitationRelay} from './elicitation.js';
+import {slicerReport} from './slicer-report.js';
 
 export class PrinterMcpError extends Error {
   readonly code: string;
@@ -253,6 +254,9 @@ export class PrinterMcpClient {
     // must be reconciled at the printer before another print is attempted.
     if (options.dispatchSensitive && this.#declinedElicitations === declinedBefore
       && (result.isError || Buffer.byteLength(JSON.stringify(result)) > MAX_RESULT_BYTES)) fail('dispatch-uncertain', undefined, failureDetail(result, this.#config));
+    // Bambu Studio's own refusal, word for word, when the MCP passes the slicer's result.json (slicer_result).
+    const refused = result.isError && name === 'slice_stl' ? slicerReport(result.structuredContent) : undefined;
+    if (refused?.failed) fail('slicer-error', undefined, refused.message);
     if (result.isError) fail('tool-failed', undefined, failureDetail(result, this.#config));
     if (Buffer.byteLength(JSON.stringify(result)) > MAX_RESULT_BYTES) fail('result-limit');
     return structuredClone(result);

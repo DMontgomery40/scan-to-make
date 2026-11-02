@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp, mkdir, readFile, writeFile} from 'node:fs/promises';
+import {mkdtemp, mkdir, readFile, rm, writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {DispatchedPrintError, HandoffBundleStore, InMemoryElicitationRelay} from '@scan-to-make/printer-handoff';
@@ -324,4 +324,54 @@ test('the Mac answers any flat MCP question; a wrong answer comes back as invali
   await dispatch('objects.answerPrintConfirmation', {id: object.id, confirmationId: question.id, answer: {action: 'accept', content: {confirmed: true, bambu_model: 'p1s'}}});
   await service.settled(object.id);
   assert.deepEqual(answers[0].result.content, {confirmed: true, bambu_model: 'p1s'});
+});
+
+// Bambu Studio's own result.json (KAN-221), through the real runner and the fixture printer MCP.
+test("Bambu Studio's words reach the project: its error is the failure, its warning is a question that needs a yes", async t => {
+  const {createPrintHandoffServices} = await import('../dist/print-handoff-http.js');
+  const fixtures = new URL('../../printer-handoff/tests/fixtures/', import.meta.url);
+  const studio = async name => JSON.parse(await readFile(new URL(`slicer-results/${name}.json`, fixtures), 'utf8'));
+  const run = async result => {
+    const root = await mkdtemp(join(tmpdir(), 'objects-print-studio-'));
+    t.after(() => rm(root, {recursive: true, force: true}));
+    const log = join(root, 'calls.jsonl');
+    await writeFile(log, '');
+    const services = createPrintHandoffServices({backend: 'bambu-printer-mcp',
+      process: {command: process.execPath, args: [new URL('fixture-printer-server.mjs', fixtures).pathname, 'bambu', log], cwd: root,
+        env: {HANDOFF_FIXTURE_SLICER_RESULT: new URL(`slicer-results/${result}.json`, fixtures).pathname}},
+      selection: {model: 'p1s', nozzleDiameterMm: 0.4, nozzleType: 'hardened_steel', bedType: 'textured_plate', material: 'PLA', plateIndex: 0},
+      timeouts: {connectMs: 5000, toolMs: 5000, elicitationMs: 10000}}, join(root, 'bundles'));
+    const store = new ObjectStore(join(root, 'objects'));
+    const service = new ObjectService({store, runTouchup: async () => { throw new Error('not used'); }, stlInfo: async () => undefined, claudePath: '/c',
+      handoff: {backend: 'bambu-printer-mcp', process: {command: '/usr/bin/true'}}, print: {services}});
+    const object = await store.create('A stove gap filler.');
+    await mkdir(join(store.dir(object.id), 'current'), {recursive: true});
+    await writeFile(join(store.dir(object.id), 'current', 'model.stl'), STL);
+    await store.update(object.id, o => ({...o, state: 'ready', current: {model: 'current/model.stl', renders: []}}));
+    await service.print(object.id);
+    const tools = async () => (await readFile(log, 'utf8')).trim().split('\n').filter(Boolean).map(JSON.parse).filter(entry => entry.tool).map(entry => entry.tool);
+    return {service, id: object.id, tools};
+  };
+  // The empty-layer error: the project fails with Studio's words and nothing is asked or sent.
+  const failing = await studio('orient-empty-layers');
+  const refused = await run('orient-empty-layers');
+  const failed = await refused.service.settled(refused.id);
+  assert.equal(failed.state, 'failed');
+  assert.equal(failed.failure, `${failing.error_string}\n${failing.sliced_plates[0].warning_message}`);
+  assert.equal(failed.printConfirmation, undefined);
+  assert.deepEqual(await refused.tools(), ['lay_flat', 'slice_stl']);
+  // The floating cantilever: Studio's words as a native question with one "Print anyway" switch, then the printer's own.
+  const words = (await studio('lay-flat-floating-cantilever')).sliced_plates[0].warning_message;
+  const warned = await run('lay-flat-floating-cantilever');
+  const question = await until(async () => (await warned.service.get(warned.id)).printConfirmation);
+  assert.equal(question.message, words);
+  assert.equal(question.supported, true);
+  assert.deepEqual(question.fields.map(field => [field.name, field.title, field.required]), [['confirmed', 'Print anyway', true]]);
+  assert.equal((await warned.tools()).includes('print_3mf'), false, 'nothing sent before the yes');
+  await warned.service.answerPrintConfirmation(warned.id, question.id, {action: 'accept', content: {confirmed: true}});
+  const printer = await until(async () => { const asked = (await warned.service.get(warned.id)).printConfirmation; return asked && asked.id !== question.id ? asked : undefined; });
+  assert.match(printer.message, /^Fixture bed-clearance confirmation/);
+  await warned.service.answerPrintConfirmation(warned.id, printer.id, {action: 'accept', content: {confirmed: true}});
+  await warned.service.settled(warned.id);
+  assert.deepEqual(await warned.tools(), ['lay_flat', 'slice_stl', 'inspect_print_file', 'print_3mf']);
 });
