@@ -15,12 +15,7 @@ struct HomeView: View {
     @State private var showArchived = false
 
     private var searched: [Project] {
-        let text = query.trimmingCharacters(in: .whitespaces)
-        guard !text.isEmpty else { return store.projects }
-        return store.projects.filter { project in
-            [ProjectWords.title(project), project.instructions ?? "", store.printerName(project) ?? ""]
-                .contains { $0.localizedCaseInsensitiveContains(text) }
-        }
+        store.projects.filter { $0.matchesSearch(query, additional: [store.printerName($0) ?? ""]) }
     }
     /// Archived projects stay out of every section but their own (PRD §5.4).
     private var filtered: [Project] { searched.filter { !$0.isArchived } }

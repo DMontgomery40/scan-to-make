@@ -183,6 +183,7 @@ private struct Sidebar: View {
     @Binding var deleting: Project?
     @Binding var stopping: Project?
     @State private var showArchived = false
+    @State private var query = ""
 
     private func rows(_ objects: [Project]) -> some View {
         ForEach(objects) { object in
@@ -218,11 +219,14 @@ private struct Sidebar: View {
     var body: some View {
         List(selection: $model.selection) {
             ForEach(model.groups, id: \.group) { entry in
-                if entry.group == .archived {
-                    // Archived: everything kept, out of the way until asked for.
-                    Section(isExpanded: $showArchived) { rows(entry.objects) } header: { Text(entry.group.title) }
-                } else {
-                    Section(entry.group.title) { rows(entry.objects) }
+                let matches = entry.objects.filter { $0.matchesSearch(query, additional: [model.printer(for: $0)?.name ?? ""]) }
+                if !matches.isEmpty {
+                    if entry.group == .archived {
+                        // Search opens matching archived projects without changing their saved visibility.
+                        Section(isExpanded: Binding(get: { showArchived || !query.isEmpty }, set: { showArchived = $0 })) { rows(matches) } header: { Text(entry.group.title) }
+                    } else {
+                        Section(entry.group.title) { rows(matches) }
+                    }
                 }
             }
             if let printers = model.printerCatalog?.destinations, !printers.isEmpty {
@@ -236,6 +240,7 @@ private struct Sidebar: View {
                 }
             }
         }
+        .searchable(text: $query, prompt: "Projects, printers, notes")
         .listStyle(.sidebar)
         .navigationSplitViewColumnWidth(min: 240, ideal: 260)
         .onDeleteCommand { deleting = model.selected }

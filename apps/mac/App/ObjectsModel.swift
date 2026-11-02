@@ -414,6 +414,9 @@ struct SocketObjects: ObjectsCompanion {
         if done { await refresh() } // the settings the sidebar and "Did it fit?" read
         return done
     }
+    @discardableResult func rename(_ id: String, title: String) async -> Bool {
+        await change(id) { try await self.companion.setProjectSettings(id, ["title": .string(title)]) }
+    }
     /// Archive hides a project from the sidebar's groups and keeps everything; Unarchive brings its status back.
     @discardableResult func setArchived(_ archived: Bool, for id: String) async -> Bool {
         guard capabilities?.projectSettings == true else { return false }

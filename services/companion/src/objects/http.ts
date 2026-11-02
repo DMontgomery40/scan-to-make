@@ -4,7 +4,7 @@ import {basename, join} from 'node:path';
 import type {RemoteScope} from '../remote-auth.js';
 import {InvalidAnswerError, InvalidCaptureManifestError, InvalidStateError, projectStatus, type ObjectService} from './service.js';
 import {CameraUnavailableError, type CameraFrame} from '../printing/camera.js';
-import {MilestonesSchema, ProjectStatusSchema, type ObjectStatus, type ProjectStatus} from '@scan-to-make/contracts/counterpart';
+import {MilestonesSchema, type ObjectStatus, type ProjectStatus} from '@scan-to-make/contracts/counterpart';
 import {objectStatus, projectTitle} from '../events/words.js';
 import {ObjectNotFoundError, type ObjectPass, type StmObject} from './store.js';
 import {RECONSTRUCTION_FAILED} from './reconstruct.js';
@@ -112,11 +112,12 @@ export function createObjectRoutes(service: ObjectService) {
           if (method !== 'PATCH') throw new HttpFailure(405, 'method-not-allowed');
           await authorize(WRITE);
           const input = await json<Record<string, unknown>>(request);
-          const status = input.status === undefined ? undefined : ProjectStatusSchema.safeParse(input.status);
-          if ((status && !status.success) || (input.archived !== undefined && typeof input.archived !== 'boolean') || (!status && input.archived === undefined)
-            || Object.keys(input).some(key => key !== 'status' && key !== 'archived')) throw new HttpFailure(400, 'invalid-request');
-          let updated = status?.success ? await service.setStatus(id, status.data) : await service.get(id);
-          if (typeof input.archived === 'boolean') updated = await service.setArchived(id, input.archived);
+          const parsed = parameters['objects.settings.set'].safeParse({...input, id});
+          if (!parsed.success || 'id' in input) throw new HttpFailure(400, 'invalid-request');
+          const {status, archived, title} = parsed.data;
+          let updated = status !== undefined ? await service.setStatus(id, status) : await service.get(id);
+          if (archived !== undefined) updated = await service.setArchived(id, archived);
+          if (title !== undefined) updated = await service.rename(id, title);
           return send(response, 200, {settings: projectSettingsView(updated), object: publicObject(updated)});
         }
         if (!id) {

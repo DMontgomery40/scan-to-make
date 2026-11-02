@@ -13,6 +13,8 @@ struct ProjectDetail: View {
     @ObservedObject var model: ObjectsModel
     let print: () -> Void
     @State private var note = ""
+    @State private var renaming = false
+    @State private var projectName = ""
     @FocusState private var noteFocused: Bool
     @State private var photos: [URL] = []
     @State private var dropProblem: String?
@@ -62,6 +64,21 @@ struct ProjectDetail: View {
         }
         .navigationTitle(words.title)
         .navigationSubtitle(words.subtitle(request: object.instructions))
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                Button { projectName = words.title; renaming = true } label: { Text(words.title).font(.headline) }
+                    .buttonStyle(.plain).disabled(working || model.capabilities?.projectSettings != true)
+                    .help("Rename Project").accessibilityLabel("Rename \(words.title)")
+            }
+        }
+        .alert("Rename Project", isPresented: $renaming) {
+            TextField("Project name", text: $projectName)
+            Button("Cancel", role: .cancel) {}
+            Button("Save") {
+                let title = projectName.trimmingCharacters(in: .whitespacesAndNewlines)
+                Task { await model.rename(object.id, title: title) }
+            }.disabled(!Project.validName(projectName))
+        }
     }
 
     // MARK: Stage

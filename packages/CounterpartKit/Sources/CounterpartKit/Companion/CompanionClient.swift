@@ -234,6 +234,9 @@ public final class CompanionClient: @unchecked Sendable {
     public func setArchived(_ id: String, _ archived: Bool) async throws -> Project? {
         try await changeProjectSettings(id, ["archived": archived])
     }
+    public func rename(_ id: String, title: String) async throws -> Project? {
+        try await changeProjectSettings(id, ["title": title])
+    }
     private func changeProjectSettings(_ id: String, _ patch: [String: Any]) async throws -> Project? {
         let reply = try await send("PATCH", "/v1/objects/\(id)/settings", body: try JSONSerialization.data(withJSONObject: patch))
             .checked(path: "/v1/objects/\(id)/settings")

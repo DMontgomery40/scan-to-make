@@ -275,6 +275,15 @@ export class ObjectService {
     });
   }
 
+  /** A person's name wins over a title generator or a pass still finishing in the background. */
+  rename(id: string, title: string): Promise<StmObject> {
+    return this.#gate(id, async () => {
+      const updated = await this.#deps.store.update(id, object => ({...object, title}));
+      await this.#emit({id: randomUUID(), type: 'project.updated', projectId: id, data: {keys: ['title']}});
+      return this.#changed(updated);
+    });
+  }
+
   create(instructions?: string, kind?: 'fit' | 'copy') { return this.#deps.store.create(instructions, kind).then(o => this.#changed(o)); }
   async list() {
     const objects = await Promise.all((await this.#deps.store.list()).map(o => this.get(o.id)));
