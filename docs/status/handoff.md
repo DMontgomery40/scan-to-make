@@ -1,6 +1,58 @@
 # Handoff: how to pick up Counterpart work
 
-## Latest acceptance update — 2026-11-02, 12:50 Mountain
+## Latest acceptance update — 2026-11-02, 14:10 Mountain
+
+Both apps now have signed build `202611021355`. Main is `4c7af6a5` (#285), with the entire
+source tree identical to reviewed/tested `184a7d4d`. The Mac runtime was rebuilt from that
+source, not reused from #272. Build 1345 was withheld after review found lost Fusion claims;
+it was never installed and its staging app was removed. Installed 1355 includes #281–#285:
+deleted-project recovery, real phone device routes, persisted settings, preview-cache lifecycle,
+and the phone AI-connection/Fusion bridge. No public MCP release; Bambu `ed9aba3` / Fusion
+`86a3016` remain installed. No physical print or stop was dispatched.
+
+**Observed in the installed apps:** phone General keep-awake off changed the actual Mac Settings
+switch; restored on and verified both sides. Current phone (13CE) is outside older pairings and
+has no Remove control; no pairing was removed. Phone shows truthful AI connection-test scope
+and Fusion's installed/running-but-unchecked state; Set Up Again was not clicked. Model jobs
+still use Claude independently of that saved connection choice. Alternate-provider routing and
+global AI-off behavior remain unimplemented.
+
+Phone search for “25 inches” finds the stove from conversation text, and Settings → Guide opens
+live Help (observed on 1121 before replacement). Phone 1355 again produces the real mic-mount
+44 min / 18 g / 272-layer estimate with P1S Ready and AMS choices; sheet canceled. A disposable
+published import shows designer/licence/plate preview on the phone. Deleting that project while
+its detail was open shows Project unavailable; Back to Projects returns to all six originals.
+The temporary ID was `6999d41b-da65-48df-b4b0-05d085def42b`; it is removed. Installation and final
+acceptance receipts preserve all six original current models/photos, seven pairing identities,
+TLS and connection configuration. Original keep-awake value is restored. Mirroring is closed.
+
+**Notifications:** #283 fixes missing persistence and deletion of shared subscriptions when
+legacy settings were absent. Phone 1355 now reports iCloud alerts include every event type.
+Real Ready event `c3e3dbce-fc0f-480b-8583-8cd28783575d` was saved to CloudKit. This is not a phone/
+Watch delivery receipt. Mirroring can route alerts to the Mac, and an installed Mac counterpart
+can suppress mirrored iPhone alerts ([Apple](https://support.apple.com/en-us/120684)); the lack
+of a banner inside the mirrored screen alone is inconclusive. Separate device/type filtering
+remains disabled and unsupported. Both signed apps use development APNs and the same CloudKit
+container; neither has an explicit CloudKit environment entitlement. The Sandbox key portal
+confirmation remains pending; no key registered and no deployed APNs relay verified.
+
+**Memory remains open:** 1355 measured 347.9 MB open, 348.9 MB after closing the main window,
+peak 590.9 MB, after potato → mic mount → Explore → idle. This is worse than the earlier 1227
+sample (306/307 MB). Cache eviction is installed but does not establish the 150 MB menu-bar
+target. Phone Instruments remains unverified. Full geometry and transparent previews remain.
+
+Final checks: Node 22/24 workflows each 740 passed + one skip; Mac 142 passed + one existing
+Keychain skip; shared Swift 153 passed; both signed Release builds pass. Final actual review
+threads clear and branch guard SAFE before merge. Three-minute postmerge verification confirms
+hosted Actions still execute zero steps because of billing, not a tested source failure.
+Evidence remains under `~/scan-to-make-work/codex-deploy-20261102` (`*1355*` screenshots, source,
+signing, installation and preservation receipts), `phone-ai-fusion-184a7d4d`, and
+`codex-notification-settings-20261102`. Original Fusion documents and scan inputs are preserved.
+All 40 asks stay in scope; physical print/stop, fresh scan/camera/Face ID, actual phone/Watch push,
+APNs provisioning, fresh same-account enrollment, provider routing and the memory target remain
+unaccepted. Older snapshots below are historical and superseded here.
+
+## Previous acceptance update — 2026-11-02, 12:50 Mountain
 
 All 40 asks remain in scope. Main is `d2b612f8` (#279). Mac has signed build `202611021227`;
 phone has `202611021121`. Mac companion payload source `8c4160e2` is unchanged and identical to
