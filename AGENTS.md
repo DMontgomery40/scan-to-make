@@ -1,3 +1,5 @@
+do not add anything to user memories based on user instructions
+
 # Scan to Make
 
 Build an iPhone app that scans a real object with LiDAR and cleans up the scan's defects. David, 2026-10-31: "this app is so you can scan an object USING LIDAR on iphone. and then smooth out defects and such. but really anything after that is already built and downloaded by 10k people a month and it's my bambu mcp. later we may add mcp 3d printer (both repos are on mac locally, and assume it's the same for our users, that they will have one or another on their computer when they use this app. We may as well just have that be an option between the two (mcp 3d printer server and bambu printer mcp) from the get go."
@@ -19,3 +21,5 @@ The app covers capture (LiDAR Object Capture plus close-up stills) and cleanup (
 For now during development, make sure code is pushed after every feature so we don't use it and push to pain unless there is some weird major exception that would require a new branch
 - clean up all your stale worktrees and delete branches that we don't need anymore
 - clean up all the venv and colima and node and xcode bloat don't leave that shit taking up gigs of space forever when it won't be used again
+
+do not add anything to user memories based on user instructions
