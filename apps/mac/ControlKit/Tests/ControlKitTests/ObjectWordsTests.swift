@@ -2,7 +2,7 @@ import XCTest
 import Foundation
 @testable import ControlKit
 
-/// The same cases as the phone's `objectsModel.test.ts` (KAN-204), so both apps say the same thing.
+/// PRD §4's state table, as the Mac says it. When CounterpartKit lands these move with the words.
 private func object(_ fields: [String: Any]) -> StmObject {
     var json: [String: Any] = ["id": "0b6f0f43-7c35-4b8a-9a3c-8f0b4c4b2a11", "createdAtMs": 1, "updatedAtMs": 1,
                                "state": "new", "photos": [], "passes": [], "directory": "/tmp/object"]
@@ -12,104 +12,131 @@ private func object(_ fields: [String: Any]) -> StmObject {
 private let readyFields: [String: Any] = [
     "scan": "scan.usdz", "state": "ready",
     "passes": [["startedAtMs": 1, "endedAtMs": 2, "status": "done"]],
-    "current": ["model": "current/model.stl", "renders": ["current/renders/front.png"], "sizeMm": [61.6, 75.2, 49.4],
+    "current": ["model": "current/model.stl", "renders": ["current/renders/front.png"], "sizeMm": [48.2, 50.4, 53.6],
                 "summary": "Added the two eyes."],
 ]
 private func ready(_ fields: [String: Any] = [:]) -> StmObject { object(readyFields.merging(fields) { $1 }) }
-private let waitLine = " You can leave this project and return to it while your Mac works."
 
 final class ObjectWordsTests: XCTestCase {
-    func testNamesAnObjectByItsInstructionsOrAsACopyOfAScan() {
-        XCTAssertEqual(object(["instructions": "A hook for a 25 mm tube. It should hold a cup."]).words.title,
+    func testNamesAProjectByItsGeneratedTitleThenItsRequest() {
+        XCTAssertEqual(object(["title": "Mic mount", "instructions": "Something that holds this mic."]).words.title, "Mic mount")
+        XCTAssertEqual(object(["title": "  ", "instructions": "A hook for a 25 mm tube. It should hold a cup."]).words.title,
                        "A hook for a 25 mm tube")
         XCTAssertEqual(object(["scan": "scan.usdz"]).words.title, "Copy of your scan")
-        XCTAssertEqual(object([:]).words.title, "Unfinished project")
-        XCTAssertEqual(object(["instructions": "   "]).words.title, "Unfinished project")
+        XCTAssertEqual(object(["photos": ["a.jpg"]]).words.title, "Project from your photos")
+        XCTAssertEqual(object([:]).words.title, "New project")
         XCTAssertEqual(object(["instructions": "a bracket, 3 mm thick, with two holes, for the shelf"]).words.title,
-                       "a bracket, 3 mm thick, with two holes", "two clauses at most; a comma before a number isn't a clause")
-        XCTAssertEqual(object(["instructions": "A wall bracket\nfor the router"]).words.title, "A wall bracket")
+                       "a bracket, 3 mm thick, with two holes")
         let long = object(["instructions": "A replacement knob for the bathroom cabinet that matches the others exactly"]).words.title
         XCTAssertEqual(long, "A replacement knob for the bathroom cabinet that matches…")
-        XCTAssertLessThanOrEqual(long.count, 60)
     }
 
-    func testSaysWhatIsHappeningInPlainWordsForEveryState() {
-        XCTAssertEqual(object(["scan": "scan.usdz"]).words.status, "Draft saved. Continue on your iPhone.")
-        XCTAssertEqual(object(["photos": ["one.heic"]]).words.status, "Draft saved. Continue on your iPhone.")
-        XCTAssertEqual(object(["instructions": "A hook"]).words.status, "Draft saved. Continue on your iPhone.",
-                       "nothing has arrived from the phone yet")
-        XCTAssertEqual(object(["scan": "scan.usdz", "state": "touching-up"]).words.status, "Touching up your scan." + waitLine)
-        XCTAssertEqual(object(["instructions": "A hook", "state": "touching-up"]).words.status, "Making it." + waitLine)
-        let correcting = ready(["state": "touching-up",
-                                "passes": [["startedAtMs": 1, "endedAtMs": 2, "status": "done"], ["startedAtMs": 3, "note": "thicker"]]])
-        XCTAssertEqual(correcting.words.status, "Making your changes." + waitLine)
-        XCTAssertEqual(ready().words.status, "Ready to print")
-        XCTAssertEqual(ready(["state": "printing"]).words.status, "Preparing print…")
-        XCTAssertEqual(ready(["state": "printed"]).words.status, "Print request accepted")
+    func testEveryStateHasItsPRDWordsAndOneSidebarGroup() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        func words(_ o: StmObject) -> ObjectWords { ObjectWords(o, now: now) }
+        XCTAssertEqual(words(object([:])).status, "Sending to your Mac")
+        XCTAssertEqual(words(object([:])).group, .now)
+        XCTAssertEqual(words(object(["state": "touching-up"])).status, "Your Mac is working")
+        XCTAssertEqual(words(object(["state": "touching-up", "progress": "Matching your photos…"])).status, "Matching your photos")
+        let estimated = object(["state": "touching-up", "progress": "Getting Blender ready",
+                                "passes": [["startedAtMs": 1, "estimate": ["remainingSec": 230, "endsAtMs": (now.timeIntervalSince1970 + 230) * 1000],
+                                            "stages": [["id": "building", "words": "Building the model", "startedAtMs": 1, "endedAtMs": 2, "typicalSec": 60],
+                                                       ["id": "working", "words": "Matching your photos", "startedAtMs": 2, "typicalSec": 200]]]]])
+        XCTAssertEqual(words(estimated).status, "Matching your photos · about 4 min", "the running stage's words, then the time left")
+        XCTAssertEqual(words(ready()).status, "Ready to print · 48 × 50 × 54 mm")
+        XCTAssertEqual(words(ready()).group, .ready)
+        XCTAssertEqual(words(ready(["state": "printing"])).status, "Getting the print ready")
+        XCTAssertEqual(words(ready(["state": "printing"])).stage, .preparing)
+        let printing = ready(["state": "printing", "print": ["bundleId": "b", "destination": ["id": "p", "name": "P1S"],
+                              "printerStatus": ["state": "RUNNING", "checkedAtMs": 1, "percent": 42, "remainingMinutes": 38]]])
+        XCTAssertEqual(words(printing).status, "Printing on P1S · 42% · 38 min left")
+        XCTAssertEqual(words(printing).progress, 0.42)
+        XCTAssertEqual(words(printing).group, .now)
+        let monitor: [String: Any] = ["bundleId": "b", "destination": ["id": "p", "name": "P1S"], "monitor": ["phase": "ended", "endState": "done"]]
+        let printed = ready(["state": "printed", "updatedAtMs": (now.timeIntervalSince1970 - 86_400) * 1000, "print": monitor])
+        XCTAssertEqual(words(printed).status, "Printed yesterday")
+        XCTAssertEqual(words(printed).group, .printed)
+        XCTAssertEqual(words(ready(["state": "printed", "updatedAtMs": now.timeIntervalSince1970 * 1000, "print": monitor])).status, "Printed today")
+        // Before the print monitor, `printed` only meant the printer took the job.
+        let sent = ready(["state": "printed", "updatedAtMs": now.timeIntervalSince1970 * 1000, "print": ["bundleId": "b", "destination": ["id": "p", "name": "P1S"]]])
+        XCTAssertEqual(words(sent).status, "Sent to P1S today")
+        let running = ready(["state": "printed", "updatedAtMs": now.timeIntervalSince1970 * 1000, "print": ["bundleId": "b", "destination": ["id": "p", "name": "P1S"],
+                             "printerStatus": ["state": "RUNNING", "checkedAtMs": 1, "percent": 12, "remainingMinutes": 50]]])
+        XCTAssertEqual(words(running).status, "Sent to P1S today",
+                       "the printer's report isn't tied to this job, so it never makes an old project look like it's printing")
     }
 
-    func testAsksForACloseUpInOneSentenceAndOffersTheGuess() {
-        let words = ready(["state": "needs-closeup", "question": ["closeup": "the clip on the left side"]]).words
-        XCTAssertEqual(words.status, "Can you send me a close-up of the clip on the left side? I can't see what's happening there.")
-        XCTAssertEqual(words.actions, [.bestGuess], "the Mac has no camera step in v1: photos come from the iPhone")
-        XCTAssertEqual(words.headline, "Need a close-up of the clip on the left side")
-        XCTAssertEqual(ready(["state": "needs-closeup"]).words.status,
-                       "Can you send me a close-up of the part I missed? I can't see what's happening there.")
+    func testTheCompanionsOwnStatusLineWinsOnceServed() {
+        let served = ready(["state": "printing", "status": ["phase": "printing", "text": "Printing on Bambu Lab P1S · 42% · 1 h 5 min left",
+                                                              "symbol": "printer.fill", "tint": "green"]]).words
+        XCTAssertEqual(served.status, "Printing on Bambu Lab P1S · 42% · 1 h 5 min left")
+        XCTAssertEqual(served.stage, .printing)
+        let future = ready(["status": ["phase": "archived", "text": "Archived"]]).words
+        XCTAssertEqual(future.stage, .ready, "an unknown phase keeps the app's own reading")
+        let live = ready(["state": "printing", "print": ["bundleId": "b", "destination": ["id": "p", "name": "P1S"],
+                          "live": ["source": "counterpart", "observedAt": "2026-11-01T10:00:00Z", "state": "paused",
+                                   "job": ["name": "mic", "progress": 61.4, "remainingSec": 1500], "problems": []]]]).words
+        XCTAssertEqual(live.status, "Paused on P1S · 61% · 25 min left")
+        let ask = ready(["state": "needs-closeup", "question": ["closeup": "old"],
+                         "ask": ["id": "0b6f0f43-7c35-4b8a-9a3c-8f0b4c4b2a12", "question": "Needs a close-up of the underside",
+                                 "answers": ["camera", "best-guess"], "status": "open", "askedAtMs": 1]]).words
+        XCTAssertEqual(ask.question, "Needs a close-up of the underside")
     }
 
-    func testShowsThePlateOnlyWhenSomethingIsOnItWithTheOverride() {
-        let blocked = ready(["state": "printing", "plate": ["item": "a printed part", "photo": true]]).words
-        XCTAssertEqual(blocked.status, "Looks like there's a printed part on your plate. Can you take it off first?")
-        XCTAssertEqual(blocked.actions, [.plateClear])
-        XCTAssertEqual(ready(["state": "printing", "plate": [:]]).words.status,
-                       "Looks like there's something on your plate. Can you take it off first?")
-        let noCamera = ready(["state": "printing", "plate": ["noCamera": true, "item": "ignored"]]).words
-        XCTAssertEqual(noCamera.status, "Check the plate is clear.")
-        XCTAssertEqual(noCamera.actions, [.plateClear])
-        XCTAssertEqual(ready(["state": "printing"]).words.actions, [])
+    func testNothingFallsOutOfTheSidebar() {
+        let states = ["new", "touching-up", "needs-closeup", "ready", "printing", "printed", "failed", "archived"]
+        for state in states { XCTAssertTrue(ProjectGroup.allCases.contains(ready(["state": state]).words.group), state) }
+        XCTAssertEqual(object(["state": "archived"]).words.group, .now)
+        XCTAssertEqual(object(["state": "failed"]).words.group, .needsYou)
+        XCTAssertEqual(Set(ProjectStage.allCases.map(ObjectWords.group)), Set(ProjectGroup.allCases))
     }
 
-    func testPendingPrintConfirmationReplacesPlateOnlyAction() {
-        for supported in [true, false] {
-            let words = ready(["state":"printing", "plate":["noCamera":true, "photo":true],
-                "printConfirmation":["id":"q", "message":"Check the printer.", "expiresAtMs":2000, "fields":[], "supported":supported]]).words
-            XCTAssertEqual(words.status, "Waiting for your print confirmation.")
-            XCTAssertEqual(words.tone, .accent)
-            XCTAssertEqual(words.actions, [])
-            XCTAssertTrue(words.busy, "Keep polling while the human confirmation is pending")
-        }
+    func testNeedsYouAsksOneSpecificQuestion() {
+        let closeup = ready(["state": "needs-closeup", "question": ["closeup": "the underside"]]).words
+        XCTAssertEqual(closeup.status, "Needs a close-up of the underside")
+        XCTAssertEqual(closeup.stage, .needsYou)
+        XCTAssertEqual(closeup.group, .needsYou)
+        XCTAssertEqual(closeup.actions, [.bestGuess])
+        XCTAssertEqual(closeup.subtitle(request: "Copy this plush. Include the bottom."),
+                       "Needs you · Needs a close-up of the underside · copy this plush")
+        let plate = ready(["state": "printing", "plate": ["item": "a printed part", "photo": true]]).words
+        XCTAssertEqual(plate.status, "Something's on the plate: a printed part")
+        XCTAssertEqual(plate.actions, [.plateClear])
+        XCTAssertEqual(plate.group, .needsYou)
+        XCTAssertEqual(ready(["state": "printing", "plate": ["noCamera": true]]).words.status, "Check the plate is clear")
+        let confirm = ready(["state": "printing", "print": ["bundleId": "b", "destination": ["id": "p", "name": "P1S"]],
+                             "printConfirmation": ["id": "q", "message": "Check.", "expiresAtMs": 2000, "fields": [], "supported": true]]).words
+        XCTAssertEqual(confirm.status, "P1S needs a yes before printing")
+        XCTAssertEqual(confirm.actions, [], "the confirmation itself is answered, never Plate clear")
+        XCTAssertTrue(confirm.busy)
     }
 
-    func testAReadyObjectPrintsOrTakesCorrectionsWithItsLidarSize() {
-        let words = ready().words
-        XCTAssertEqual(words.actions, [.print, .correct])
-        XCTAssertEqual(words.size, "62 × 75 × 49 mm, ready to print")
+    func testAReadyProjectPrintsOrTakesChanges() {
+        XCTAssertEqual(ready().words.actions, [.print, .correct])
+        XCTAssertEqual(ready().words.size, "48 × 50 × 54 mm")
         XCTAssertEqual(ObjectWords.formatSize([10.4, 20.5, 3]), "10 × 21 × 3 mm")
-        XCTAssertNil(object(["state": "touching-up"]).words.size)
-        XCTAssertEqual(ready(["state": "printed"]).words.actions, [.print, .correct])
+        XCTAssertEqual(ObjectWords.formatMinutes(72), "1 h 12 min")
+        XCTAssertEqual(ready(["title": "Mic mount"]).words.subtitle(request: "Something that holds the mic. Both are in the photos."),
+                       "Ready to print · something that holds the mic", "the size has its own capsule")
     }
 
-    func testAFailureSaysWhyAndOffersWhatFixesIt() {
-        let touchUp = object(["scan": "scan.usdz", "state": "failed", "failure": "Blender is not open on your Mac."]).words
-        XCTAssertEqual(touchUp.status, "Blender is not open on your Mac.")
-        XCTAssertEqual(touchUp.actions, [.retry, .correct], "a touch-up that failed with no model can start again")
-        let print = ready(["state": "failed", "failure": "The printer is busy."]).words
-        XCTAssertEqual(print.status, "The printer is busy.")
-        XCTAssertEqual(print.actions, [.print, .correct])
-        XCTAssertEqual(object(["state": "failed"]).words.status, "Something went wrong on your Mac.")
-        XCTAssertEqual(object(["state": "failed", "failure": "  "]).words.status, "Something went wrong on your Mac.")
+    func testAFailureSaysWhatHappenedAndWhatToDo() {
+        let touchUp = object(["scan": "scan.usdz", "state": "failed", "failure": "blender is not open on your Mac."]).words
+        XCTAssertEqual(touchUp.status, "Blender is not open on your Mac · Try again")
+        XCTAssertEqual(touchUp.actions, [.retry, .correct])
+        XCTAssertEqual(ready(["state": "failed", "failure": "The printer is busy."]).words.status,
+                       "The printer is busy · Print again or ask for changes")
+        XCTAssertEqual(object(["state": "failed", "failure": "  "]).words.status, "Something went wrong on your Mac · Try again")
     }
 
     func testAPrintThatMayHaveStartedIsSentAgainOnlyAfterTheUserChecks() {
-        let uncertain = ready(["state": "failed", "failure": "The printer may have started this print. Check the printer before printing again.",
+        let uncertain = ready(["state": "failed", "failure": "The printer may have started this print.",
                                "print": ["bundleId": "b1", "uncertain": true]]).words
-        XCTAssertEqual(uncertain.actions, [.printChecked, .correct], "a plain Print would be refused")
-        XCTAssertEqual(uncertain.headline, "The printer may have started this print.")
-        XCTAssertEqual(ready(["print": ["bundleId": "b1", "uncertain": true]]).words.actions, [.printChecked, .correct])
+        XCTAssertEqual(uncertain.actions, [.printChecked, .correct])
         XCTAssertEqual(ready(["print": ["bundleId": "b1"]]).words.actions, [.print, .correct])
     }
 
-    func testBusyStatesAreMarkedSoThePageKeepsItselfUpToDate() {
+    func testBusyStatesKeepThePageUpToDate() {
         XCTAssertFalse(object([:]).words.busy)
         XCTAssertTrue(object(["state": "touching-up"]).words.busy)
         XCTAssertTrue(ready(["state": "printing"]).words.busy)
@@ -117,27 +144,22 @@ final class ObjectWordsTests: XCTestCase {
         XCTAssertFalse(ready(["state": "needs-closeup"]).words.busy)
     }
 
-    func testCardsShowTheFirstSentence() {
-        XCTAssertEqual(object(["scan": "scan.usdz", "state": "touching-up"]).words.headline, "Touching up your scan.")
-        XCTAssertEqual(ready(["state": "printing", "plate": ["item": "a printed part"]]).words.headline,
-                       "Looks like there's a printed part on your plate.")
-        XCTAssertEqual(ready().words.headline, "Ready to print")
-        XCTAssertEqual(object(["state": "new", "scan": "scan.usdz"]).words.headline, "Draft saved.")
-        XCTAssertEqual(object(["state": "new"]).words.headline, "Draft saved.")
-    }
-
-    func testAStateThisAppDoesNotKnowAsksForAnUpdate() {
-        let words = object(["state": "archived"]).words
-        XCTAssertEqual(words.status, "Update Counterpart to see this one.")
-        XCTAssertEqual(words.actions, [])
-        XCTAssertFalse(words.busy)
+    func testDecodesTheFieldsTheCompanionIsAddingWithoutRequiringThem() {
+        let o = ready(["current": ["model": "m.stl", "renders": [],
+                                   "changes": [["tag": "added", "text": "Cup"], ["tag": "estimated", "text": "Pole", "toleranceMm": 0.5]]],
+                       "print": ["bundleId": "b", "printId": "p1", "events": [["atMs": 1, "message": "Started"]]]])
+        XCTAssertEqual(o.current?.changes.map(\.tag), ["added", "estimated"])
+        XCTAssertEqual(o.print?.events?.first?.message, "Started")
+        XCTAssertEqual(ready(["current": ["model": "m.stl", "renders": [], "changes": "garbled"]]).current?.changes, [],
+                       "a bad optional never hides the project")
+        XCTAssertEqual(ready(["scan": "scan.usdz"]).scanURL?.path, "/tmp/object/scan/scan.usdz")
     }
 
     func testCopyNeverNamesTheMachinery() {
         let all = [object([:]), object(["state": "touching-up"]), ready(), ready(["state": "printing", "plate": ["noCamera": true]]),
                    ready(["state": "needs-closeup"]), object(["state": "failed"]), object(["state": "archived"])]
         for words in all.map(\.words) {
-            for text in [words.title, words.status, words.headline] {
+            for text in [words.title, words.status, words.stage.label] {
                 for banned in ["companion", "MCP", "job"] { XCTAssertFalse(text.localizedCaseInsensitiveContains(banned), text) }
             }
         }

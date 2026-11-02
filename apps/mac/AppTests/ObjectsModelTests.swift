@@ -182,26 +182,55 @@ private func item(_ id: String, _ state: String, _ fields: [String: Any] = [:]) 
         XCTAssertFalse(model.isPolling, "focusing a closed window doesn't start reading")
     }
 
-    func testThe3DViewStartsWithTheWholeModelInView() throws {
-        // A box is the hardest shape to frame: its corners reach furthest from the centre.
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("cube-\(UUID().uuidString).stl")
-        let s = 50.0, v = [(-s,-s,-s),(s,-s,-s),(s,s,-s),(-s,s,-s),(-s,-s,s),(s,-s,s),(s,s,s),(-s,s,s)]
+    func testAnASCIIOrBinarySTLStandsUprightInMetres() throws {
+        // A 100 mm box, Z-up in millimetres as slicers write it.
+        let s: Float = 50, v: [SIMD3<Float>] = [[-s,-s,-s],[s,-s,-s],[s,s,-s],[-s,s,-s],[-s,-s,s],[s,-s,s],[s,s,s],[-s,s,s]]
         let faces = [(0,2,1),(0,3,2),(4,5,6),(4,6,7),(0,1,5),(0,5,4),(2,3,7),(2,7,6),(1,2,6),(1,6,5),(0,4,7),(0,7,3)]
-        var stl = "solid cube\n"
+        var ascii = "solid cube\n"
         for (a, b, c) in faces {
-            stl += "facet normal 0 0 0\nouter loop\n"
-            for i in [a, b, c] { stl += "vertex \(v[i].0) \(v[i].1) \(v[i].2)\n" }
-            stl += "endloop\nendfacet\n"
+            ascii += "facet normal 0 0 0\nouter loop\n"
+            for i in [a, b, c] { ascii += "vertex \(v[i].x) \(v[i].y) \(v[i].z + 50)\n" }
+            ascii += "endloop\nendfacet\n"
         }
-        try (stl + "endsolid cube\n").write(to:url, atomically:true, encoding:.utf8)
-        defer { try? FileManager.default.removeItem(at:url) }
-        let scene = try XCTUnwrap(ModelScene.load(url))
-        let eye = try XCTUnwrap(scene.rootNode.childNode(withName:"eye", recursively:false))
-        let camera = try XCTUnwrap(eye.camera)
-        let p = eye.position, distance = (Double(p.x) * Double(p.x) + Double(p.y) * Double(p.y) + Double(p.z) * Double(p.z)).squareRoot()
-        let halfDiagonal = (3 * 100.0 * 100.0).squareRoot() / 2
-        // The whole box sits inside a sphere of half its diagonal; that sphere must fit the narrower view angle.
-        XCTAssertGreaterThanOrEqual(distance * sin(Double(camera.fieldOfView) / 2 * .pi / 180), halfDiagonal)
+        let fromText = try XCTUnwrap(ModelMesh.stl(Data((ascii + "endsolid cube\n").utf8)))
+        XCTAssertEqual(fromText.triangleCount, 12)
+        XCTAssertEqual(fromText.bounds.min.y, 0, accuracy: 1e-6, "Z-up 0…100 mm becomes Y-up 0…0.1 m")
+        XCTAssertEqual(fromText.bounds.max.y, 0.1, accuracy: 1e-6)
+        var binary = Data(count: 80)
+        binary.append(contentsOf: withUnsafeBytes(of: UInt32(faces.count).littleEndian, Array.init))
+        for (a, b, c) in faces {
+            let values: [Float] = [0, 0, 0] + [v[a], v[b], v[c]].flatMap { [$0.x, $0.y, $0.z + 50] }
+            for value in values {
+                binary.append(contentsOf: withUnsafeBytes(of: value.bitPattern.littleEndian, Array.init))
+            }
+            binary.append(contentsOf: [0, 0])
+        }
+        let fromBinary = try XCTUnwrap(ModelMesh.stl(binary))
+        XCTAssertEqual(fromBinary.positions, fromText.positions, "both encodings read the same triangles")
+        XCTAssertNil(ModelMesh.stl(Data("not a model".utf8)))
+        XCTAssertNil(ModelMesh.stl(binary.dropLast(10)), "a truncated binary file is refused, not half drawn")
+    }
+
+    func testTheSidebarGroupsEveryProjectAndStartsAtTheTop() async {
+        let companion = FakeObjects()
+        await companion.set([item("p", "printed"), item("r", "ready"), item("n", "needs-closeup"), item("w", "touching-up"),
+                             item("f", "failed"), item("x", "archived")])
+        let model = ObjectsModel(companion:companion)
+        await model.refresh()
+        XCTAssertEqual(model.groups.map(\.group), [.now, .needsYou, .ready, .printed])
+        XCTAssertEqual(model.groups.map { $0.objects.map(\.id) }, [["w", "x"], ["n", "f"], ["r"], ["p"]])
+        XCTAssertEqual(model.ordered.count, 6, "no project falls out of the sidebar")
+        XCTAssertEqual(model.selection, "w", "the first row in the sidebar is shown first")
+    }
+
+    func testANewProjectWaitsForACompanionThatCanStartOne() async {
+        let model = ObjectsModel(companion:FakeObjects())
+        await model.refresh()
+        let refused = await model.startProject(instructions:"A hook", files:[])
+        XCTAssertEqual(refused, ObjectsModel.createUnavailable, "an older companion: say so, never fail silently")
+        XCTAssertEqual(ObjectsModel.fileKind(URL(fileURLWithPath:"/a/b.HEIC")), "photos")
+        XCTAssertEqual(ObjectsModel.fileKind(URL(fileURLWithPath:"/a/b.3mf")), "scan")
+        XCTAssertNil(ObjectsModel.fileKind(URL(fileURLWithPath:"/a/b.pdf")))
     }
 
     func testErrorSentencesNeverDumpTheError() {

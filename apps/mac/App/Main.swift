@@ -9,13 +9,6 @@ import ControlKit
 @main enum EntryPoint {
     static func main() {
         if CommandLine.arguments.dropFirst().first == "--model-worker" { launchModelWorker(Installation(bundle:.main)) }
-        #if DEBUG
-        // Design QA only: draws the objects window with fixture objects to PNGs, then exits.
-        if let index = CommandLine.arguments.firstIndex(of:"--render-objects-design"), index + 1 < CommandLine.arguments.count {
-            let steady = MainActor.assumeIsolated { ObjectsDesign.render(to:URL(fileURLWithPath:CommandLine.arguments[index + 1])) }
-            exit(steady ? 0 : 2)
-        }
-        #endif
         if CommandLine.arguments.contains("--companion-agent") { launchAgent(Installation(bundle:.main)) }
         if CommandLine.arguments.contains("--unregister-agent") {
             do { try Installation(bundle:.main).service.unregister(); exit(0) }
@@ -29,129 +22,165 @@ import ControlKit
             RunLoop.main.run()
             return
         }
-        ScanToMakeApp.main()
+        #if DEBUG
+        // Design QA only: the real app, on screen, with the mockup's projects read from a folder of assets.
+        if let index = CommandLine.arguments.firstIndex(of:"--design-fixtures"), index + 1 < CommandLine.arguments.count {
+            DesignFixtures.assets = URL(fileURLWithPath:CommandLine.arguments[index + 1], isDirectory:true)
+            DesignFixtures.screen = CommandLine.arguments.firstIndex(of:"--design-screen").flatMap {
+                $0 + 1 < CommandLine.arguments.count ? CommandLine.arguments[$0 + 1] : nil } ?? "main"
+        }
+        #endif
+        CounterpartApp.main()
     }
 }
 
-struct ScanToMakeApp: App {
+/// Where the app's models come from: the companion's control socket, or (Debug design QA) fixtures.
+@MainActor enum AppModels {
+    static let objects: ObjectsModel = {
+        #if DEBUG
+        if let companion = DesignFixtures.companion() {
+            let model = ObjectsModel(companion:companion)
+            model.selection = DesignFixtures.selected
+            return model
+        }
+        #endif
+        return ObjectsModel(companion:SocketObjects(path:ModelAccessModel.socketPath(for:Installation(bundle:.main))))
+    }()
+    static let modelAccess = ModelAccessModel(installation:Installation(bundle:.main))
+}
+
+/// Asks for a window from places that can't reach SwiftUI's `openWindow` (the app delegate, Dock reopen).
+/// The menu bar label, which always exists, carries the request out.
+@MainActor final class AppRouter: ObservableObject {
+    static let shared = AppRouter()
+    enum Destination: Equatable { case main, pairing, settings, qaPopover }
+    @Published private(set) var pending: Destination?
+    func open(_ destination: Destination) { pending = destination }
+    func handled() { pending = nil }
+    /// First run shows the pairing code (then setup) until a phone is paired and set up; after that, the window.
+    var home: Destination { UserDefaults.standard.bool(forKey:"setupFinished") ? .main : .pairing }
+}
+
+/// The app's Dock icon, from Settings → General. Set once at launch and when the setting changes, never per window.
+enum DockIcon {
+    static let key = "showInDock"
+    static var shown: Bool { UserDefaults.standard.object(forKey:key) as? Bool ?? true }
+    @MainActor static func apply() { NSApp.setActivationPolicy(shown ? .regular : .accessory) }
+}
+
+struct CounterpartApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
-    @StateObject private var model = CompanionModel.shared
+    @StateObject private var objects = AppModels.objects
     @StateObject private var nearby = NearbyModel.shared
+    @StateObject private var pairing = PairingFlow.shared
     @State private var isInserted = true
+
     var body: some Scene {
+        Window("Counterpart", id:"main") {
+            MainWindow(model:objects)
+        }
+        .defaultLaunchBehavior(.suppressed)
+        // The app decides when its window opens (never at a login launch), so the system doesn't restore it.
+        .restorationBehavior(.disabled)
+        .defaultSize(width:1320, height:820)
+        .windowToolbarStyle(.unified)
+        .commands { CounterpartCommands() }
+
+        Window("Add a Phone", id:"pairing") {
+            PairingWindow(flow:pairing)
+        }
+        .defaultLaunchBehavior(.suppressed)
+        .windowResizability(.contentSize)
+        .windowStyle(.hiddenTitleBar)
+        .restorationBehavior(.disabled)
+
+        Settings {
+            SettingsView(mac:MacStatusModel.shared, cleanup:AppModels.modelAccess)
+        }
+
         MenuBarExtra(isInserted:$isInserted) {
-            MenuBarPopover(nearby:nearby, mac:MacStatusModel.shared) { PairingView(model:model, side:232) }
+            MenuBarPopover(nearby:nearby, mac:MacStatusModel.shared) { PairingView(model:CompanionModel.shared, side:232) }
         } label: {
-            // A dot on the cube while a phone waits for Allow, so the request is seen with the popover closed.
-            Image(nsImage:nearby.requests.isEmpty ? .menuBarCube : .menuBarCubeWaiting)
-        }.menuBarExtraStyle(.window)
+            MenuBarLabel(nearby:nearby, router:AppRouter.shared)
+        }
+        .menuBarExtraStyle(.window)
+
+        #if DEBUG
+        // Design QA only: screenshots can't open a menu bar extra, so its content can open as a window.
+        Window("Popover (QA)", id:"qa-popover") {
+            MenuBarPopover(nearby:nearby, mac:MacStatusModel.shared) { PairingView(model:CompanionModel.shared, side:232) }
+        }
+        .defaultLaunchBehavior(.suppressed)
+        .windowResizability(.contentSize)
+        #endif
     }
 }
 
-/// The pairing code and nothing else (journey.md §3.4, mockup 09): no title, caption or status line.
-/// Without a code it shows a spinner, or one plain sentence and Try again.
-struct PairingView: View {
-    @ObservedObject var model: CompanionModel
-    let side: CGFloat
-    @State private var presentationID = UUID()
+/// The menu bar's cube (with a dot while a phone waits for Allow). It is always on screen, so it also opens
+/// the windows the app delegate asks for.
+private struct MenuBarLabel: View {
+    @ObservedObject var nearby: NearbyModel
+    @ObservedObject var router: AppRouter
+    @Environment(\.openWindow) private var openWindow
+    @Environment(\.openSettings) private var openSettings
+
     var body: some View {
-        ZStack {
-            if let qr = model.qr {
-                Image(nsImage:qr).interpolation(.none).resizable().scaledToFit()
-                    .accessibilityLabel("Pairing QR code")
-            } else if let message = failureMessage {
-                VStack(spacing:14) {
-                    Text(message).font(.system(size:13)).foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center).fixedSize(horizontal:false,vertical:true)
-                    Button("Try again") { Task { await model.preparePairing() } }.disabled(model.working)
-                }
-                .padding(.horizontal,12)
-            } else {
-                ProgressView().controlSize(.small)
-            }
-        }
-        .frame(width:side,height:side)
-        .environment(\.colorScheme,.light)
-        .task { await model.presentPairing(presentationID) }
-        .onDisappear { model.hidePairing(presentationID) }
+        Image(nsImage:nearby.requests.isEmpty ? .menuBarCube : .menuBarCubeWaiting)
+            .onAppear { route(router.pending) }
+            .onChange(of:router.pending) { _, destination in route(destination) }
     }
-    private var failureMessage: String? {
-        guard let failure = model.failure else { return nil }
-        switch failure as? AgentError {
-        case .approvalRequired?: return "Allow Counterpart in System Settings → General → Login Items."
-        case .companionUnavailable?: return "Counterpart couldn’t start in the background."
-        default: return "Counterpart couldn’t make a code."
+
+    private func route(_ destination: AppRouter.Destination?) {
+        guard let destination else { return }
+        router.handled()
+        NSApp.activate()
+        switch destination {
+        case .main: openWindow(id:"main")
+        case .pairing: openWindow(id:"pairing")
+        case .settings: openSettings()
+        case .qaPopover: openWindow(id:"qa-popover")
         }
     }
 }
 
-/// Mockup 09's QR-only window: 360 wide, white, the code at 292 pt. The title bar is transparent over the
-/// white window, so the traffic lights are the only chrome; its 32 pt plus the top padding make the mockup's 49.
-struct PairingWindowContent: View {
-    @ObservedObject var model: CompanionModel
-    var body: some View {
-        PairingView(model:model,side:292)
-            .padding(EdgeInsets(top:17,leading:34,bottom:51,trailing:34))
-            .background(Color.white)
-    }
-}
+struct CounterpartCommands: Commands {
+    @FocusedValue(\.newProjectAction) private var newProject
+    @Environment(\.openWindow) private var openWindow
 
-extension NSImage {
-    /// Mockup 08's `logo-mono` cube (24-unit viewBox), drawn as a template so the menu bar tints it.
-    static let menuBarCube = cube(dot:false)
-    /// The same cube with a dot cut into its corner while a phone waits for Allow.
-    static let menuBarCubeWaiting = cube(dot:true)
-    private static func cube(dot: Bool) -> NSImage {
-        let image = NSImage(size:NSSize(width:18,height:18), flipped:true) { _ in
-            let scale: CGFloat = 18.0 / 24.0
-            func point(_ x: CGFloat, _ y: CGFloat) -> NSPoint { NSPoint(x:x * scale, y:y * scale) }
-            let path = NSBezierPath()
-            path.move(to:point(12,3)); path.line(to:point(20,7.6)); path.line(to:point(20,16.4))
-            path.line(to:point(12,21)); path.line(to:point(4,16.4)); path.line(to:point(4,7.6)); path.close()
-            path.move(to:point(4,7.6)); path.line(to:point(12,12.2)); path.line(to:point(20,7.6))
-            path.move(to:point(12,12.2)); path.line(to:point(12,21))
-            path.lineWidth = 1.7 * scale
-            path.lineJoinStyle = .round
-            NSColor.black.setStroke()
-            path.stroke()
-            if dot {
-                NSGraphicsContext.current?.compositingOperation = .clear
-                NSBezierPath(ovalIn:NSRect(x:11.75, y:-0.25, width:7, height:7)).fill()
-                NSGraphicsContext.current?.compositingOperation = .sourceOver
-                NSColor.black.setFill()
-                NSBezierPath(ovalIn:NSRect(x:13, y:1, width:4.5, height:4.5)).fill()
-            }
-            return true
+    var body: some Commands {
+        CommandGroup(replacing:.newItem) {
+            Button("New Project…") { newProject?() }
+                .keyboardShortcut("n")
+                .disabled(newProject == nil)
+            Button("Add a Phone…") { NSApp.activate(); openWindow(id:"pairing") }
         }
-        image.isTemplate = true
-        image.accessibilityDescription = dot ? "Counterpart, a phone is waiting to pair" : "Counterpart"
-        return image
+        CommandGroup(replacing:.appTermination) {
+            // Delivery to the phone runs in this app (PRD §8.8), so quitting says what stops.
+            Button("Quit Counterpart (your phone stops getting updates)") { NSApp.terminate(nil) }
+                .keyboardShortcut("q")
+        }
     }
 }
 
-@MainActor final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
-    private var window: NSWindow?
-    private var phoneWatch: Task<Void, Never>?
-    private var showingSetup = false
-    private lazy var setupModel = ModelAccessModel(installation:Installation(bundle:.main))
+@MainActor final class AppDelegate: NSObject, NSApplicationDelegate {
     private let updates = Updates()
     private let localNetwork = LocalNetworkAccess()
-    /// A MenuBarExtra window can become key without activating an LSUIElement
-    /// app. Bring the app forward only for its first permission request.
-    private func permissionProbeForeground() -> Bool {
-        if !localNetwork.hasAttempted, !NSApp.isActive, NSApp.keyWindow?.isVisible == true,
-           !NetworkAddresses.current().lan.isEmpty { NSApp.activate(ignoringOtherApps:true) }
-        return NSApp.isActive
+
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        DockIcon.apply()
     }
-    @objc private func windowBecameKey(_ notification: Notification) {
-        localNetwork.requestIfNeeded(isForeground:permissionProbeForeground(),hasLAN:!NetworkAddresses.current().lan.isEmpty)
-    }
-    func applicationDidBecomeActive(_ notification: Notification) {
-        localNetwork.requestIfNeeded(isForeground:NSApp.isActive,hasLAN:!NetworkAddresses.current().lan.isEmpty)
-    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
+        #if DEBUG
+        if DesignFixtures.assets != nil {
+            NSApp.appearance = NSAppearance(named:.darkAqua) // the mockups are rendered in dark mode
+            AppRouter.shared.open(DesignFixtures.screen == "popover" ? .qaPopover : DesignFixtures.screen == "settings" ? .settings : .main)
+            DesignSnapshot.scheduleIfAsked()
+            return
+        }
+        #endif
         localNetwork.observeNetwork { [weak self] in self?.permissionProbeForeground() ?? false }
-        NotificationCenter.default.addObserver(self,selector:#selector(windowBecameKey(_:)),name:NSWindow.didBecomeKeyNotification,object:nil)
+        NotificationCenter.default.addObserver(self, selector:#selector(windowBecameKey(_:)), name:NSWindow.didBecomeKeyNotification, object:nil)
         if Installation(bundle:.main).variant.isEmpty && SMAppService.mainApp.status == .notRegistered {
             try? SMAppService.mainApp.register()
         }
@@ -159,104 +188,28 @@ extension NSImage {
         let loginLaunch = event?.eventID == kAEOpenApplication
             && event?.paramDescriptor(forKeyword:keyAEPropData)?.enumCodeValue == keyAELaunchedAsLogInItem
         NearbyModel.shared.start()
-        if !loginLaunch { showMain() }
-        #if DEBUG
-        // Design QA only: computer-use can't open menu-bar extras, so show the popover's content in a window.
-        if ProcessInfo.processInfo.environment["SCAN_TO_MAKE_QA_POPOVER_WINDOW"] == "1" { showPopoverForQA() }
-        #endif
+        // At login the app stays in the menu bar; opened by hand, it shows its window (or the pairing code first).
+        if !loginLaunch { AppRouter.shared.open(AppRouter.shared.home) }
     }
-    #if DEBUG
-    private var popoverQAWindow: NSWindow?
-    private func showPopoverForQA() {
-        let window = NSWindow(contentRect:NSRect(x:0, y:0, width:372, height:520), styleMask:[.titled, .closable],
-                              backing:.buffered, defer:false)
-        window.title = "Popover (QA)"
-        window.isReleasedWhenClosed = false
-        window.contentView = NSHostingView(rootView:MenuBarPopover(nearby:NearbyModel.shared, mac:MacStatusModel.shared) {
-            PairingView(model:CompanionModel.shared, side:232)
-        })
-        window.setFrameTopLeftPoint(NSPoint(x:80, y:(NSScreen.main?.visibleFrame.maxY ?? 900) - 40))
-        window.makeKeyAndOrderFront(nil)
-        popoverQAWindow = window
-    }
-    #endif
-    func windowWillClose(_ notification: Notification) {
-        phoneWatch?.cancel()
-        showingSetup = false
-        window?.contentView = nil
-    }
+
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        showMain(); return true
+        if !flag { AppRouter.shared.open(AppRouter.shared.home) }
+        return true
     }
-    /// Until a phone has been paired and set up, opening the app shows the pairing code (and then
-    /// setup); after that it opens the objects window. The popover always keeps the code for more phones.
-    private func showMain() {
-        if UserDefaults.standard.bool(forKey:"setupFinished") && !showingSetup { ObjectsWindow.shared.show() }
-        else { showPairing() }
+
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+
+    /// The first Local Network request needs the app in front; a menu bar window can be key without that.
+    private func permissionProbeForeground() -> Bool {
+        if !localNetwork.hasAttempted, !NSApp.isActive, NSApp.keyWindow?.isVisible == true,
+           !NetworkAddresses.current().lan.isEmpty { NSApp.activate() }
+        return NSApp.isActive
     }
-    /// Mockup 09: once a phone connects, the QR window becomes the setup questions (first run only).
-    private func watchForPhone() {
-        phoneWatch?.cancel()
-        let socket = ModelAccessModel.socketPath(for:Installation(bundle:.main))
-        phoneWatch = Task { [weak self] in
-            var baseline: Int?
-            while !Task.isCancelled {
-                if let count = try? await ControlClient(socketPath:socket).status().pairedDeviceCount {
-                    // A new phone, or a phone paired before setup was finished.
-                    let unfinished = !UserDefaults.standard.bool(forKey:"setupFinished")
-                    if let baseline, count > baseline { self?.phoneConnected(); return }
-                    if baseline == nil, count > 0, unfinished { self?.phoneConnected(); return }
-                    baseline = baseline ?? count
-                }
-                try? await Task.sleep(for:.seconds(2))
-            }
-        }
+    @objc private func windowBecameKey(_ notification: Notification) {
+        localNetwork.requestIfNeeded(isForeground:permissionProbeForeground(), hasLAN:!NetworkAddresses.current().lan.isEmpty)
     }
-    private func phoneConnected() {
-        guard let window, window.isVisible else { return }
-        guard !UserDefaults.standard.bool(forKey:"setupFinished") else { window.close(); ObjectsWindow.shared.show(); return }
-        showingSetup = true
-        window.backgroundColor = .windowBackgroundColor
-        window.appearance = nil
-        window.contentView = NSHostingView(rootView:SetupView(model:setupModel) { [weak self] in
-            UserDefaults.standard.set(true, forKey:"setupFinished")
-            self?.window?.close()
-            ObjectsWindow.shared.show()
-        })
-        // Mockup 09: setup is 720 × 520. Grow from the code's window around its centre; the hosting
-        // view alone doesn't resize a window whose content was swapped after it was shown.
-        var frame = window.frameRect(forContentRect:NSRect(x:0, y:0, width:720, height:520))
-        frame.origin = NSPoint(x:window.frame.midX - frame.width / 2, y:window.frame.midY - frame.height / 2)
-        window.setFrame(window.constrainFrameRect(frame, to:window.screen), display:true, animate:true)
-    }
-    private func showPairing() {
-        // Reopening the app brings an open setup forward instead of replacing it with the code.
-        if showingSetup, let window, window.isVisible {
-            window.makeKeyAndOrderFront(nil)
-            NSApp.activate(ignoringOtherApps:true)
-            return
-        }
-        if window == nil {
-            let window = NSWindow(contentRect:NSRect(x:0,y:0,width:360,height:360),
-                                  styleMask:[.titled,.closable],backing:.buffered,defer:false)
-            window.title = "Counterpart" // Window menu and VoiceOver only; never drawn.
-            window.titleVisibility = .hidden
-            window.titlebarAppearsTransparent = true
-            window.backgroundColor = .white
-            window.appearance = NSAppearance(named:.aqua)
-            window.isMovableByWindowBackground = true
-            window.isReleasedWhenClosed = false
-            window.delegate = self
-            window.center()
-            self.window = window
-        }
-        window?.backgroundColor = .white
-        window?.appearance = NSAppearance(named:.aqua)
-        window?.setContentSize(NSSize(width:360, height:360)) // back from setup's 720 × 520
-        window?.contentView = NSHostingView(rootView:PairingWindowContent(model:CompanionModel.shared))
-        watchForPhone()
-        window?.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps:true)
+    func applicationDidBecomeActive(_ notification: Notification) {
+        localNetwork.requestIfNeeded(isForeground:NSApp.isActive, hasLAN:!NetworkAddresses.current().lan.isEmpty)
     }
 }
 
@@ -296,5 +249,4 @@ extension NSImage {
         }
         return true
     }
-
 }

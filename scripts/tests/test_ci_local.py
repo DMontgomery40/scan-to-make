@@ -27,6 +27,22 @@ class LocalWorkflowTests(unittest.TestCase):
                     review.assert_not_called()
                     self.assertIn('--untracked-files=all', output.call_args.args[0])
 
+    def test_xcode_image_labels_run_on_the_mac_like_macos_labels(self):
+        for label in ('macos-15', 'xcode-27'):
+            spec={'workflow':'mac','key':'build','matrix':{},'job':{'runs-on':label,'steps':[]}}
+            passed={'spec':spec,'status':'PASS','steps':[]}
+            for system, local in (('Linux', False), ('Darwin', True)):
+                with self.subTest(label=label, system=system), tempfile.TemporaryDirectory() as folder, \
+                     patch.object(sys, 'argv', ['ci_local.py', 'mac', '--output', folder]), \
+                     patch.object(ci, 'output', side_effect=[str(ROOT), 'head-sha', '']), \
+                     patch.object(ci, 'read_workflows', return_value=[spec]), \
+                     patch.object(ci.platform, 'system', return_value=system), \
+                     patch.object(ci, 'run_mac', return_value=passed) as remote, \
+                     patch.object(ci, 'execute_job', return_value=passed) as here:
+                    self.assertEqual(ci.main(), 0)
+                    (here if local else remote).assert_called_once()
+                    (remote if local else here).assert_not_called()
+
     def test_repeated_output_preserves_old_evidence_and_uses_fresh_directory(self):
         with tempfile.TemporaryDirectory() as folder:
             first=ci.evidence_directory(Path(folder)/'evidence')

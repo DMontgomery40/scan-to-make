@@ -74,6 +74,7 @@ struct GeneralSettings: View {
                 if let problem = mac.problem { Text(problem).foregroundStyle(Color(nsColor:.systemRed)) }
             }
             Section("Counterpart on This Mac") {
+                Toggle("Show in Dock", isOn:Binding(get:{ DockIcon.shown }, set:{ UserDefaults.standard.set($0, forKey:DockIcon.key); DockIcon.apply() }))
                 LabeledContent("Status") { ConnectionLabel(connection:mac.connection) }
                 if let address = mac.address {
                     LabeledContent("Address") { Text(address).textSelection(.enabled) }
@@ -196,10 +197,10 @@ struct MenuBarPopover<Code: View>: View {
                 .padding(.bottom, 14)
             Divider().padding(.horizontal, 12)
             VStack(spacing:0) {
-                PopoverRow(title:"Open Counterpart", symbol:"macwindow", key:"O") { ObjectsWindow.shared.show() }
-                PopoverRow(title:"Settings…", symbol:"gearshape", key:",") { SettingsWindow.shared.show() }
+                PopoverRow(title:"Open Counterpart", symbol:"macwindow", key:"O") { AppRouter.shared.open(.main) }
+                PopoverRow(title:"Settings…", symbol:"gearshape", key:",") { AppRouter.shared.open(.settings) }
                 Divider().padding(.horizontal, 6).padding(.vertical, 4)
-                PopoverRow(title:"Quit Counterpart", symbol:"power", key:"Q") { NSApp.terminate(nil) }
+                PopoverRow(title:"Quit Counterpart (your phone stops getting updates)", symbol:"power", key:"Q") { NSApp.terminate(nil) }
             }
             .padding(6)
         }

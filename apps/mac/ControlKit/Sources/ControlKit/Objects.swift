@@ -23,29 +23,93 @@ public struct StmObject: Decodable, Sendable, Identifiable, Equatable {
         public let text: String
     }
     public struct Pass: Decodable, Sendable, Equatable {
+        /// One named step of a pass (PRD §4): `building`, `preparing`, `working` or `saving`, with its words.
+        public struct Stage: Decodable, Sendable, Equatable {
+            public let id: String
+            public let words: String
+            public let startedAtMs: Double
+            public let endedAtMs: Double?
+            public let typicalSec: Double?
+        }
+        public struct Estimate: Decodable, Sendable, Equatable { public let remainingSec: Double; public let endsAtMs: Double }
         public let startedAtMs: Double
         public let endedAtMs: Double?
         public let note: String?, status: String?, summary: String?
         public let activity: [Activity]?
         public let activityCount: Int?
+        /// `new`, `changes`, `late-photos` or `ask-answer`.
+        public let trigger: String?
+        public let stages: [Stage]?
+        /// While the pass runs: time left, from real timings on this Mac.
+        public let estimate: Estimate?
+        /// `blender` or `fusion`.
+        public let engine: String?
+        private enum CodingKeys: String, CodingKey { case startedAtMs, endedAtMs, note, status, summary, activity, activityCount, trigger, stages, estimate, engine }
+        public init(from decoder: Decoder) throws {
+            let values = try decoder.container(keyedBy: CodingKeys.self)
+            startedAtMs = try values.decode(Double.self, forKey: .startedAtMs)
+            endedAtMs = try values.decodeIfPresent(Double.self, forKey: .endedAtMs)
+            note = try values.decodeIfPresent(String.self, forKey: .note)
+            status = try values.decodeIfPresent(String.self, forKey: .status)
+            summary = try values.decodeIfPresent(String.self, forKey: .summary)
+            activity = try values.decodeIfPresent([Activity].self, forKey: .activity)
+            activityCount = try values.decodeIfPresent(Int.self, forKey: .activityCount)
+            trigger = try? values.decodeIfPresent(String.self, forKey: .trigger)
+            stages = try? values.decodeIfPresent([Stage].self, forKey: .stages)
+            estimate = try? values.decodeIfPresent(Estimate.self, forKey: .estimate)
+            engine = try? values.decodeIfPresent(String.self, forKey: .engine)
+        }
     }
     public struct Current: Decodable, Sendable, Equatable {
+        /// One line of "what changed" (PRD §4), tagged `added`, `changed`, `assumed` or `estimated`.
+        public struct Change: Decodable, Sendable, Equatable {
+            public let tag: String
+            public let text: String
+            public let toleranceMm: Double?
+        }
         /// Relative to `directory`, like `renders`.
         public let model: String
         public let renders: [String]
         /// Bounding box in millimetres, from the printer's own STL info.
         public let sizeMm: [Double]?
         public let summary: String?
-        private enum CodingKeys: String, CodingKey { case model, renders, sizeMm, summary }
+        /// Structured "what changed", once the companion serves it; `summary` is the fallback.
+        public let changes: [Change]
+        /// `blender` or `fusion`.
+        public let engine: String?
+        private enum CodingKeys: String, CodingKey { case model, renders, sizeMm, summary, changes, engine }
         public init(from decoder: Decoder) throws {
             let values = try decoder.container(keyedBy: CodingKeys.self)
             model = try values.decode(String.self, forKey: .model)
             renders = try values.decodeIfPresent([String].self, forKey: .renders) ?? []
             sizeMm = try values.decodeIfPresent([Double].self, forKey: .sizeMm)
             summary = try values.decodeIfPresent(String.self, forKey: .summary)
+            changes = (try? values.decodeIfPresent([Change].self, forKey: .changes)) ?? []
+            engine = try? values.decodeIfPresent(String.self, forKey: .engine)
         }
     }
     public struct Question: Decodable, Sendable, Equatable { public let closeup: String? }
+    /// A question from the Mac (PRD §4), with the picture and the region it is about.
+    public struct Ask: Decodable, Sendable, Equatable {
+        public struct Region: Decodable, Sendable, Equatable { public let x, y, width, height: Double }
+        public let id: String
+        public let question: String
+        /// Relative to `directory`.
+        public let photo: String?
+        public let region: Region?
+        /// `camera`, `photos`, `best-guess`, `text`.
+        public let answers: [String]
+        /// `open` or `answered`.
+        public let status: String
+    }
+    /// The companion's own status line (PRD §4), written once for the phone and the Mac.
+    public struct Status: Decodable, Sendable, Equatable {
+        /// `sending`, `working`, `needs-you`, `ready`, `preparing`, `printing`, `printed` or `failed`.
+        public let phase: String
+        public let text: String
+        public let symbol: String?
+        public let tint: String?
+    }
     /// The printer MCP's original human confirmation, tied to one pending request.
     public struct PrintConfirmation: Decodable, Sendable, Equatable, Identifiable {
         public struct Field: Decodable, Sendable, Equatable {
@@ -66,6 +130,8 @@ public struct StmObject: Decodable, Sendable, Identifiable, Equatable {
     public struct Plate: Decodable, Sendable, Equatable {
         public let item: String?
         public let noCamera: Bool?
+        /// Look again is retaking and judging a frame.
+        public let checking: Bool?
         /// `plate.jpg` is in the object's folder while this is true.
         public let photo: Bool?
     }
@@ -73,7 +139,35 @@ public struct StmObject: Decodable, Sendable, Identifiable, Equatable {
     public struct PrintDestination: Decodable, Sendable, Equatable { public let id: String; public let name: String }
     public struct PrinterStatus: Decodable, Sendable, Equatable { public let state: String; public let job: String?; public let checkedAtMs: Double; public let percent: Double?; public let remainingMinutes: Double? }
     public struct PrintEstimate: Decodable, Sendable, Equatable { public let seconds: Double?; public let grams: Double? }
+    public struct PrintEvent: Decodable, Sendable, Equatable { public let atMs: Double; public let message: String }
+    /// The latest normalized printer report for this print (PRD §8.6), replacing `printerStatus` once present.
+    public struct PrintLive: Decodable, Sendable, Equatable {
+        public struct Job: Decodable, Sendable, Equatable {
+            public let name: String?
+            public let progress: Double?
+            public let remainingSec: Double?
+            public let layer: Int?
+            public let totalLayers: Int?
+            public let stage: String?
+        }
+        public struct Problem: Decodable, Sendable, Equatable { public let code: String; public let severity: String?; public let message: String }
+        /// `idle`, `preparing`, `printing`, `paused`, `finished`, `failed`, `cancelled`, `offline`, `busy`.
+        public let state: String
+        public let observedAt: String?
+        public let job: Job?
+        public let endsAt: String?
+        public let problems: [Problem]?
+    }
+    /// The companion's print monitor (PRD §8.6): `starting`, `watching` or `ended`, and how it ended.
+    public struct PrintMonitor: Decodable, Sendable, Equatable {
+        public let phase: String
+        public let endState: String?
+    }
     public struct Print: Decodable, Sendable, Equatable {
+        public let printId: String?
+        public let monitor: PrintMonitor?
+        public let events: [PrintEvent]?
+        public let live: PrintLive?
         public let printerStatus: PrinterStatus?
         public let sliced: Bool?
         public let estimate: PrintEstimate?
@@ -84,6 +178,12 @@ public struct StmObject: Decodable, Sendable, Identifiable, Equatable {
 
     public let id: String
     public let createdAtMs: Double, updatedAtMs: Double
+    /// The short generated title ("Mic mount"), once the companion serves one.
+    public let title: String?
+    /// `fit` or `copy`.
+    public let kind: String?
+    public let status: Status?
+    public let ask: Ask?
     public let instructions: String?
     public let state: State
     public let scan: String?
@@ -102,13 +202,17 @@ public struct StmObject: Decodable, Sendable, Identifiable, Equatable {
     public let directory: String
 
     private enum CodingKeys: String, CodingKey {
-        case id, createdAtMs, updatedAtMs, instructions, state, scan, photos, capture, progress, passes, current, question, plate, printConfirmation, failure, print, printerDestinationId, directory
+        case id, createdAtMs, updatedAtMs, title, kind, status, ask, instructions, state, scan, photos, capture, progress, passes, current, question, plate, printConfirmation, failure, print, printerDestinationId, directory
     }
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         id = try values.decode(String.self, forKey: .id)
         createdAtMs = try values.decodeIfPresent(Double.self, forKey: .createdAtMs) ?? 0
         updatedAtMs = try values.decodeIfPresent(Double.self, forKey: .updatedAtMs) ?? createdAtMs
+        title = try? values.decodeIfPresent(String.self, forKey: .title)
+        kind = try? values.decodeIfPresent(String.self, forKey: .kind)
+        status = try? values.decodeIfPresent(Status.self, forKey: .status)
+        ask = try? values.decodeIfPresent(Ask.self, forKey: .ask)
         instructions = try values.decodeIfPresent(String.self, forKey: .instructions)
         state = try values.decodeIfPresent(State.self, forKey: .state) ?? .unknown
         scan = try values.decodeIfPresent(String.self, forKey: .scan)
@@ -140,6 +244,12 @@ public struct StmObject: Decodable, Sendable, Identifiable, Equatable {
     public var captureURLs: [URL] { (capture ?? []).compactMap { file("capture/\($0)") } }
     /// The printer camera's photo of the plate, while the print waits on what it shows.
     public var platePhotoURL: URL? { plate?.photo == true ? file("plate.jpg") : nil }
+    /// The Ask's picture, with `ask.region` to highlight on it.
+    public var askPhotoURL: URL? { ask?.photo.flatMap(file) }
+    /// A file the companion names relative to this project's folder (an event's `frame`).
+    public func projectFile(_ relative: String) -> URL? { file(relative) }
+    /// The scan as it arrived (a USDZ under scan/), shown until there is a model.
+    public var scanURL: URL? { scan.flatMap { file("scan/\($0)") } }
 }
 
 public extension ControlClient {
@@ -172,9 +282,25 @@ public extension ControlClient {
     func startObject(_ id: String) async throws -> StmObject {
         let result: ObjectReply = try await call("objects.start", ["id": .string(id)]); return result.object
     }
-    /// Sends a correction back to the touch-up; the object returns to touching up.
-    func correctObject(_ id: String, note: String) async throws -> StmObject {
-        let result: ObjectReply = try await call("objects.correct", ["id": .string(id), "note": .string(note)]); return result.object
+    /// Sends a correction back to the touch-up; the object returns to touching up. `photos` are absolute paths on
+    /// this Mac, sent only to a companion with `objectsCreate` (it copies them into the project).
+    func correctObject(_ id: String, note: String, photos: [String] = []) async throws -> StmObject {
+        var params: [String: JSONValue] = ["id": .string(id), "note": .string(note)]
+        if !photos.isEmpty { params["photos"] = .array(photos.map(JSONValue.string)) }
+        let result: ObjectReply = try await call("objects.correct", params); return result.object
+    }
+    /// A new project started on this Mac (`capabilities.objectsCreate`). Files follow with `addFile`, then `startObject`.
+    /// `kind` (`fit` or `copy`) only to a companion with `structuredPasses`; an older one refuses the field.
+    func createObject(instructions: String?, kind: String? = nil) async throws -> StmObject {
+        var params: [String: JSONValue] = [:]
+        if let instructions, !instructions.isEmpty { params["instructions"] = .string(instructions) }
+        if let kind { params["kind"] = .string(kind) }
+        let result: ObjectReply = try await call("objects.create", params); return result.object
+    }
+    /// Copies a file on this Mac into the project: `photos` (JPEG, HEIC, PNG) or `scan` (STL, 3MF, USDZ).
+    func addFile(_ id: String, kind: String, path: String) async throws -> StmObject {
+        let result: ObjectReply = try await call("objects.addFile", ["id": .string(id), "kind": .string(kind), "path": .string(path)])
+        return result.object
     }
     func answerCloseup(_ id: String, bestGuess: Bool) async throws -> StmObject {
         let result: ObjectReply = try await call("objects.answerCloseup", ["id": .string(id), "bestGuess": .bool(bestGuess)]); return result.object
@@ -238,8 +364,61 @@ public struct PrinterDestination: Decodable, Sendable, Identifiable, Equatable {
     public let model: String?
     public let address: String?
     public let source: String
+    /// `ready`, `busy`, `offline` or `unknown`, once the companion's printer sessions report it.
+    public let state: String?
+    /// Which client config it came from: `printer-handoff`, `claude-code`, `claude-desktop`, `cursor`, `codemode`, `codex`.
+    public let origin: String?
+    public let capabilities: PrinterCapabilities?
+    /// The MCP that reaches this printer, as people know it.
+    public var mcpName: String {
+        switch backend {
+        case "bambu", "bambu-printer-mcp": return "bambu-printer-mcp"
+        default: return "mcp-3D-printer-server"
+        }
+    }
+    private enum CodingKeys: String, CodingKey { case id, name, backend, model, address, source, state, origin, capabilities }
+    public init(id: String, name: String, backend: String, model: String? = nil, address: String? = nil, source: String = "mcp-profile",
+                state: String? = nil, origin: String? = nil, capabilities: PrinterCapabilities? = nil) {
+        self.id = id; self.name = name; self.backend = backend; self.model = model; self.address = address; self.source = source
+        self.state = state; self.origin = origin; self.capabilities = capabilities
+    }
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decode(String.self, forKey: .id)
+        name = try values.decode(String.self, forKey: .name)
+        backend = try values.decode(String.self, forKey: .backend)
+        model = try values.decodeIfPresent(String.self, forKey: .model)
+        address = try values.decodeIfPresent(String.self, forKey: .address)
+        source = try values.decodeIfPresent(String.self, forKey: .source) ?? "mcp-profile"
+        state = try? values.decodeIfPresent(String.self, forKey: .state)
+        origin = try? values.decodeIfPresent(String.self, forKey: .origin)
+        capabilities = try? values.decodeIfPresent(PrinterCapabilities.self, forKey: .capabilities)
+    }
+}
+
+/// What a printer's installed MCP can do (PRD §8.2), read by the companion from its tool list.
+public struct PrinterCapabilities: Decodable, Sendable, Equatable {
+    public struct Update: Decodable, Sendable, Equatable {
+        public let message: String
+        public let package: String
+        public let command: [String]?
+    }
+    public let progress: Bool
+    public let layers: Bool?
+    /// `bambu-tcp`, `rtsp`, `http-snapshot` or `none`.
+    public let camera: String
+    /// `ams`, `single` or `none`.
+    public let filaments: String
+    public let pause: Bool, resume: Bool, cancel: Bool
+    public let quality: Bool, strength: Bool
+    public let multiColour: Bool?
+    public let missing: [String]?
+    public let update: Update?
 }
 public struct PrinterCatalog: Decodable, Sendable, Equatable {
     public let destinations: [PrinterDestination]
     public let defaultDestinationId: String
+    public init(destinations: [PrinterDestination], defaultDestinationId: String) {
+        self.destinations = destinations; self.defaultDestinationId = defaultDestinationId
+    }
 }
