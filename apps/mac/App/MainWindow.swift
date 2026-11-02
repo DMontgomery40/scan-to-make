@@ -232,10 +232,14 @@ private struct Sidebar: View {
             if let printers = model.printerCatalog?.destinations, !printers.isEmpty {
                 Section("Printers") {
                     ForEach(printers) { printer in
-                        Label {
-                            HStack { Text(printer.name); Spacer(); ReadyDot(state: printer.state) }
-                        } icon: { Image(systemName: printer.mcpName == "bambu-printer-mcp" ? "printer.fill" : "printer").foregroundStyle(.blue) }
-                        .help("\(printer.model ?? printer.name) through \(printer.mcpName)")
+                        Button { SettingsTab.open(.printers) } label: {
+                            Label {
+                                HStack { Text(printer.name); Spacer(); ReadyDot(state: printer.state) }
+                            } icon: { Image(systemName: printer.mcpName == "bambu-printer-mcp" ? "printer.fill" : "printer").foregroundStyle(.blue) }
+                        }
+                        .buttonStyle(.plain)
+                        .selectionDisabled()
+                        .help("Open printer settings for \(printer.name)")
                     }
                 }
             }
