@@ -31,13 +31,12 @@ async function openLog(t, {now = () => Date.now(), context = async () => ({title
 test('events get a monotonic seq, the words from one place, and survive a restart', async t => {
   const {log, path, reopen} = await openLog(t);
   const a = await log.append(draft('print.milestone', {data: {progress: 50, remainingSec: 1140, layer: 37, totalLayers: 74, state: 'printing'}, frame: `prints/${PRINT}/frames/${randomUUID()}.jpg`}));
-  const b = await log.append(draft('plate.blocked', {detail: {item: 'a printed part'}}));
+  const b = await log.append(draft('print.paused', {data: {problems: [{code: 'x', message: 'AMS slot 1 ran out of filament'}]}}));
   assert.deepEqual([a.seq, b.seq], [1, 2]);
   assert.equal(a.title, 'Mic mount is halfway');
   assert.equal(a.body, '19 min left · layer 37 of 74 · Bambu Lab P1S');
   assert.equal(a.notify, 'active');
-  assert.equal(b.title, "Something's on the Bambu Lab P1S plate");
-  assert.equal(b.body, "Looks like there's a printed part on your plate. Can you take it off first?");
+  assert.equal(b.title, 'Bambu Lab P1S paused Mic mount');
   assert.equal(b.notify, 'timeSensitive');
   for (const line of (await readFile(path, 'utf8')).trim().split('\n')) CounterpartEventSchema.parse(JSON.parse(line));
   assert.equal((await stat(path)).mode & 0o777, 0o600);

@@ -30,7 +30,6 @@ import {ModelAccessService} from './model-access.js';
 import {createPrinterCheck} from './printer-check.js';
 import {ObjectStore} from './objects/store.js';
 import {ObjectService} from './objects/service.js';
-import {judgePlate} from './objects/bedcheck.js';
 import {generateTitle} from './objects/title.js';
 import {PassTimings} from './touchup/stages.js';
 import {printerStlSize} from './objects/stl-size.js';
@@ -107,7 +106,7 @@ if(handoffConfig&&printHandoff&&captureDirectory&&claudePath){
   printerDirectory=new PrinterDirectory(printerCatalog,id=>destinations.get(id)?.runner.session);
   objects=new ObjectService({store:objectStore,runTouchup:input=>runTouchup(input),claudePath,handoff:handoffConfig,printerCatalog,printers:printerDirectory,
     stlInfo:path=>printerStlSize(handoffConfig,path),
-    print:{services:printHandoff,destinations,judgePlate:photo=>judgePlate(photo,claudePath)},
+    print:{services:printHandoff,destinations},
     settings:companionSettings,camera:new CameraFrames(),
     passTimings:new PassTimings(join(dataRoot,'pass-timings.json')),titleFor:request=>generateTitle(request,claudePath),
     ...(eventLog?{events:{emit:async draft=>{await eventLog.append(draft);}}}:{})});

@@ -95,7 +95,6 @@ Destination `capabilities.materialChoice` (PR 5) says the same per printer; what
 | `objects.estimate` | `{id, destinationId?, quality?: "draft"\|"standard"\|"fine", strength?: "standard"\|"strong"\|"max"}` | `PrintEstimate` `{destinationId, quality, strength, seconds?, grams?, layers?, layerHeightMm?, infillPercent?, wallLoops?, slicedAt}` | PR 2 |
 | `objects.print` | `{id, checked?, filament?, quality?, strength?, colour?: {auto: true}\|{amsSlot}\|{external: true}\|{material}}` | `{object}` (settings PR 2; `material` on every printer PR 5) | |
 | `objects.answerPrintConfirmation` | `{id, confirmationId, answer: {action: "accept", content: {<field>: boolean\|string ≤ 4096\|number}}\|{action: "decline"\|"cancel"}}` | `{object}`. An answer that doesn't fit the question is `invalid-request` with the field and reason as `message`. | strings and numbers PR 5 |
-| `objects.answerPlate` | `{id}` | Always `conflict`: a clear plate alone never approves a print. Answer the printer MCP's own question with `objects.answerPrintConfirmation`. (Plate answers and alerts were removed with ac44431.) | |
 | `objects.pausePrint`, `objects.resumePrint`, `objects.cancelPrint` | `{id}` | `{object}` | PR 2 |
 | `objects.camera` | `{id}` | `{format: "jpeg", base64, capturedAt}` from the project's printer | PR 2 |
 | `printers.camera` | `{destinationId}` | `{format: "jpeg", base64, capturedAt}` | PR 2 |
@@ -118,13 +117,13 @@ The file is copied; the original is never changed. Then call `objects.start`. A 
 
 **`objects.estimate`.** Slices the current model with the same settings a Print would use, through the destination's MCP session; it never prints. The default destination is the project's chosen printer. A repeated call with the same model and settings returns the cached estimate at once. Quality or strength the MCP can't apply is `conflict` with a sentence naming the update.
 
-**Printer questions.** `printConfirmation` and the checks on an answer are in [objects-api.md](objects-api.md) ("Printer questions"). A question whose schema isn't a flat set of yes/no, text, number and choice fields has `supported: false` and can only be cancelled. A camera frame never answers one.
+**Printer questions.** `printConfirmation` and the checks on an answer are in [objects-api.md](objects-api.md) ("Printer questions"). A question whose schema isn't a flat set of yes/no, text, number and choice fields has `supported: false` and can only be cancelled. 
 
 **Device names.** A phone that sends `X-Scan-Device-Name` (objects-api.md, "Headers the phone sends") keeps its `deviceName` in `devices.list` current: a renamed iPhone shows its new name after its next request.
 
 **Legacy devices.** Pairings made before stable installation identity have no installation key, so each re-pair of the same phone added a row (audit M4: several "My phone" rows). `devices.list` marks those `legacy: true`; a device paired with an installation key never is. The companion removes a legacy device, its Live Activity tokens and its presence once it has made no authenticated request for 14 days. The 14 days count from its last request, or, when it has made none since this version started keeping presence, from that start (recorded as `since` in `auth/device-presence.json`, which survives restarts). The check runs at start and every 6 hours. A legacy device that makes a request is recognised like any other: it gets `lastSeenAt` and `model` (from `X-Scan-Device-Model`) and stays as long as it keeps being used. Re-pairing turns it into a current device with the same `deviceId` only when the app sends an installation key together with the old `deviceId` and its still-valid token; any other re-pair adds a new device, and the old row is removed by this rule. The 14 days also count from the device's pairing or last token refresh when either is later, so a legacy pairing made after this release gets its own 14 days. (Independently, any credential lapses 30 days after its last refresh.) `auth.json` itself is only changed through the store; removal is the same as `devices.remove`.
 
-**Plate check.** None beyond what `main` already does: the printer MCP's own confirmation, with its camera frame when it sends one, is relayed as `printConfirmation` and answered with `objects.answerPrintConfirmation`. Plate prompts were removed from the apps in ac44431; plate alerts, "It's clear" notes and a plate-check setting are not part of KAN-214.
+**No bed check** (PRD §5.6). Counterpart doesn't look at the plate before a print: Bambu's own bed levelling finds a full plate. The printer MCP's own confirmation is relayed as `printConfirmation` and answered with `objects.answerPrintConfirmation`; the camera is for the Printing screen and event frames only.
 
 ## Swift integration
 

@@ -13,7 +13,7 @@ import {parameters} from '../local-control-protocol.js';
 const READ: RemoteScope = 'projects:read', WRITE: RemoteScope = 'captures:import', PRINT: RemoteScope = 'printer-handoff:use';
 const MAX_SCAN = 64 * 1024 * 1024, MAX_PHOTO = 25 * 1024 * 1024, MAX_JSON = 16 * 1024;
 const MAX_DEPTH = 8 * 1024 * 1024;
-const PATH = /^\/v1\/objects(?:\/([0-9a-f-]{36})(?:\/(scan|settings|photos|capture|capture-depth|start|corrections|closeup|print|print\/pause|print\/resume|print\/cancel|estimate|camera\.jpg|prints\/[0-9a-f-]{36}\/frames\/[0-9a-f-]{36}\.jpg|asks\/[0-9a-f-]{36}\.jpg|filaments|print-confirmation|printer|plate\.jpg|plate|model\.stl|passes\/[^/]+\/activity|(?:renders|photos|capture)\/[^/]+))?)?$/;
+const PATH = /^\/v1\/objects(?:\/([0-9a-f-]{36})(?:\/(scan|settings|photos|capture|capture-depth|start|corrections|closeup|print|print\/pause|print\/resume|print\/cancel|estimate|camera\.jpg|prints\/[0-9a-f-]{36}\/frames\/[0-9a-f-]{36}\.jpg|asks\/[0-9a-f-]{36}\.jpg|filaments|print-confirmation|printer|model\.stl|passes\/[^/]+\/activity|(?:renders|photos|capture)\/[^/]+))?)?$/;
 const PRINTER_CAMERA = /^\/v1\/objects\/printers\/([A-Za-z0-9_-]{1,256})\/camera\.jpg$/;
 const SETTINGS: RemoteScope = 'projects:write';
 
@@ -218,16 +218,6 @@ export function createObjectRoutes(service: ObjectService) {
           await json<unknown>(request);
           return send(response, 200, {object: publicObject(await service.control(id, action.slice('print/'.length) as 'pause' | 'resume' | 'cancel'))});
         }
-        if (action === 'plate.jpg') {
-          if (method !== 'GET') throw new HttpFailure(405, 'method-not-allowed');
-          await authorize(PRINT);
-          if (!(await service.get(id)).plate?.photo) throw new HttpFailure(404, 'not-found');
-          const bytes = await readFile(join(service.dir(id), 'plate.jpg')).catch(() => { throw new HttpFailure(404, 'not-found'); });
-          response.statusCode = 200;
-          response.setHeader('content-type', 'image/jpeg');
-          response.end(bytes);
-          return;
-        }
         if (action === 'model.stl' || action.startsWith('renders/')) {
           if (method !== 'GET') throw new HttpFailure(405, 'method-not-allowed');
           await authorize(READ);
@@ -242,7 +232,7 @@ export function createObjectRoutes(service: ObjectService) {
           return;
         }
         if (method !== (action === 'scan' ? 'PUT' : 'POST')) throw new HttpFailure(405, 'method-not-allowed');
-        await authorize(['print', 'printer', 'plate', 'print-confirmation'].includes(action) ? PRINT : WRITE);
+        await authorize(['print', 'printer', 'print-confirmation'].includes(action) ? PRINT : WRITE);
         let object: StmObject;
         switch (action) {
           case 'scan': {
@@ -305,11 +295,6 @@ export function createObjectRoutes(service: ObjectService) {
             const {confirmationId, answer} = input as {confirmationId?: unknown; answer?: unknown};
             if (typeof confirmationId !== 'string' || !/^[0-9a-f-]{36}$/i.test(confirmationId)) throw new HttpFailure(400, 'invalid-request');
             object = await service.answerPrintConfirmation(id, confirmationId, answer);
-            break;
-          }
-          case 'plate': {
-            if ((await json<{clear?: unknown}>(request)).clear !== true) throw new HttpFailure(400, 'invalid-request');
-            object = await service.answerPlate(id, {clear: true});
             break;
           }
           default: throw new HttpFailure(404, 'not-found');

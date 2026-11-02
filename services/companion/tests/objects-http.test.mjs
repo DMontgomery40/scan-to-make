@@ -182,15 +182,18 @@ test('printing needs the printer scope', async t => {
   assert.equal((await call('POST', `/v1/objects/${id}/print`)).status, 403);
 });
 
-test('the plate photo downloads only while the plate check is waiting', async t => {
+test('there are no plate routes: no plate photo, no plate answer (PRD §5.6)', async t => {
   const {call, store} = await fixture(t);
   const id = (await call('POST', '/v1/objects', {})).json.object.id;
-  assert.equal((await call('GET', `/v1/objects/${id}/plate.jpg`)).status, 404);
   await writeFile(join(store.dir(id), 'plate.jpg'), 'jpeg');
-  await store.update(id, o => ({...o, state: 'printing', plate: {item: 'a spool', photo: true}}));
-  const photo = await call('GET', `/v1/objects/${id}/plate.jpg`);
-  assert.equal(photo.status, 200);
-  assert.equal(photo.bytes.toString(), 'jpeg');
+  assert.equal((await call('GET', `/v1/objects/${id}/plate.jpg`)).status, 404);
+  assert.equal((await call('POST', `/v1/objects/${id}/plate`, {clear: true})).status, 404);
+  // An older companion's saved plate observation is dropped on load.
+  const {readFile: read, writeFile: write} = await import('node:fs/promises');
+  const path = join(store.dir(id), 'object.json');
+  await write(path, JSON.stringify({...JSON.parse(await read(path, 'utf8')), plate: {item: 'a spool', photo: true}}));
+  assert.equal('plate' in (await store.get(id)), false);
+  assert.equal('plate' in (await call('GET', `/v1/objects/${id}`)).json.object, false);
 });
 
 test('printing again after an uncertain print says the user checked', async t => {

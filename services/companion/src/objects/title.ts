@@ -10,7 +10,7 @@ const SCHEMA = {type: 'object', additionalProperties: false, required: ['title']
 
 /**
  * A short title for a request ("Mic mount"), from the user's own Claude login
- * with the same model as the plate judge. Best effort: undefined on any failure.
+ * with a small, fast model. Best effort: undefined on any failure.
  */
 export async function generateTitle(request: string, claudePath: string, opts: {timeoutMs?: number} = {}): Promise<string | undefined> {
   const dir = await mkdtemp(join(tmpdir(), 'stm-title-'));

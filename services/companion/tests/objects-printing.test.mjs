@@ -25,7 +25,7 @@ const until = async check => { for (let i = 0; i < 300; i++) { const value = awa
  * A P1S behind a fake MCP session, a fake print runner, and a monitor clock the
  * test steps by hand: every printer report and every wait is scripted.
  */
-async function setup(t, {tools = ['get_printer_status', 'camera_snapshot', 'pause_print', 'resume_print', 'cancel_print', 'slice_stl'], sliceArgs = false, reports = [], judge = async () => ({clear: true}), camera = true} = {}) {
+async function setup(t, {tools = ['get_printer_status', 'camera_snapshot', 'pause_print', 'resume_print', 'cancel_print', 'slice_stl'], sliceArgs = false, reports = []} = {}) {
   const root = await mkdtemp(join(tmpdir(), 'objects-printing-'));
   t.after(() => rm(root, {recursive: true, force: true, maxRetries: 10, retryDelay: 20}));
   const calls = [], events = [], runs = [];
@@ -73,7 +73,7 @@ async function setup(t, {tools = ['get_printer_status', 'camera_snapshot', 'paus
       runs.push({id, options, selection: (await store.read(id)).selection});
       for (const phase of ['slicing', 'checking-printer']) await options.onProgress?.({phase});
       const answer = await relay.request({method: 'elicitation/create', params: {mode: 'form', message: 'Printer: P1S. Plate clear?', requestedSchema: CONFIRM}},
-        {bundleId: id, ...(camera && options.cameraSnapshot !== false ? {cameraSnapshot: {format: 'jpeg', base64: JPEG.toString('base64')}} : {})});
+        {bundleId: id});
       if (answer.action !== 'accept') throw new Error('declined');
       await store.setStatus(id, 'printed');
       return {manifest: await store.read(id), result: {dispatch: {jobName: JOB}}};
@@ -90,7 +90,7 @@ async function setup(t, {tools = ['get_printer_status', 'camera_snapshot', 'paus
   const settings = new CompanionSettingsStore(join(root, 'settings.json'));
   await settings.load();
   const deps = {store, handoff: config, printerCatalog: catalog, printers: directory, claudePath: '/unused', runTouchup: async () => { throw new Error('unused'); }, stlInfo: async () => undefined,
-    print: {services, destinations: new Map([['current', services]]), judgePlate: judge}, settings, camera: new CameraFrames(),
+    print: {services, destinations: new Map([['current', services]])}, settings, camera: new CameraFrames(),
     events: {emit: async draft => { events.push(draft); }}, monitorClock: clock};
   const service = new ObjectService(deps);
   t.after(() => service.close());

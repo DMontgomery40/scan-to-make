@@ -73,7 +73,6 @@ export const parameters = {
   'printers.camera': z.strictObject({destinationId: z.string().min(1).max(256)}),
   'settings.get': empty,
   'settings.set': z.strictObject({milestones: MilestonesSchema}),
-  'objects.answerPlate': z.strictObject({id: z.uuid()}),
   'objects.answerPrintConfirmation': z.strictObject({id: z.uuid(), confirmationId: z.uuid(), answer: z.union([
     // Any elicitation primitive; checked field by field against the pending question's own schema.
     z.strictObject({action: z.literal('accept'), content: z.record(z.string().max(128), z.union([z.boolean(), z.string().max(4096), z.number().finite()]))}),

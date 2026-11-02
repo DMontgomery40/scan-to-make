@@ -61,8 +61,6 @@ Wire types are zod schemas in `packages/contracts/src/counterpart.ts` (`@scan-to
 | `POST /v1/objects/<id>/estimate` | PRINT | `{destinationId?, quality?, strength?}` (PR 2) | `PrintEstimate` (below), unwrapped. Slices through the printer's MCP; can take up to 150 s. |
 | `POST /v1/objects/<id>/print` | PRINT | `{checked?, filament?, quality?, strength?, colour?}` (settings PR 2) | `{object}` with `state: "printing"` |
 | `POST /v1/objects/<id>/print-confirmation` | PRINT | `{confirmationId, answer: {action: "accept", content: {<field>: boolean \| string \| number}} \| {action: "decline"\|"cancel"}}` (strings and numbers PR 5) | `{object}`. An answer that doesn't fit the question is 400 `invalid-request`, and `message` names the field and the reason (below). |
-| `POST /v1/objects/<id>/plate` | PRINT | `{clear: true}` | Always 409: a clear plate alone never approves a print (unchanged from `main`). Answer `…/print-confirmation` instead. |
-| `GET /v1/objects/<id>/plate.jpg` | PRINT | | The frame the plate check judged |
 | `GET /v1/objects/<id>/camera.jpg` | PRINT | | A JPEG from the camera of the printer this project is printing on, or its chosen printer (PR 2). Same cache, codes and header as the printer camera route. |
 | `POST /v1/objects/<id>/print/pause`, `…/print/resume`, `…/print/cancel` | PRINT | `{}` | `{object}` (PR 2). 409 when nothing of this project's is printing, or the MCP lacks the tool. The MCP's own confirmation, if it asks, arrives as `printConfirmation` exactly as for Print. The app asks "Stop the print?" before posting cancel. |
 | `GET /v1/objects/<id>/prints/<printId>/frames/<eventId>.jpg` | READ | | An event's camera frame (PR 3); the event's `frame` field gives the path. |
@@ -120,7 +118,7 @@ While the printer's MCP asks something (MCP elicitation, form mode), the object 
 | a `required` field left out | `"<title>" needs an answer.` |
 | accepting a `supported: false` question | `This printer question can only be cancelled here.` |
 
-A rejected answer leaves the question open, so the person can correct it and send again. `decline` and `cancel` take no content. Only a person's answer is sent: a camera frame or plate check never approves a question, and nothing is answered on the person's behalf.
+A rejected answer leaves the question open, so the person can correct it and send again. `decline` and `cancel` take no content. Only a person's answer is sent: nothing is answered on the person's behalf.
 
 ### Camera timing (PR 5)
 
