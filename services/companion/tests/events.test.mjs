@@ -10,11 +10,13 @@ import {EventLog, EVENT_RETENTION_MS} from '../dist/events/log.js';
 import {eventWords, objectStatus, NOTIFY} from '../dist/events/words.js';
 import {LiveActivityTokenStore} from '../dist/devices/live-activity-tokens.js';
 import {DevicePresence} from '../dist/devices/presence.js';
-import {RemoteAuthStore} from '../dist/remote-auth.js';
+import {RemoteAuthStore, deviceNameFromHeader} from '../dist/remote-auth.js';
 import {startCompanionServer} from '../dist/server.js';
 import {createControlDispatcher} from '../dist/local-control-services.js';
+import {pruneLegacyDevices, LEGACY_DEVICE_IDLE_MS} from '../dist/devices/legacy.js';
 import {methodDeadlineMs} from '../dist/local-control.js';
 
+const until = async check => { for (let i = 0; i < 300; i++) { if (await check()) return; await new Promise(resolve => setTimeout(resolve, 5)); } throw new Error('timed out'); };
 const PROJECT = '3f1c2a9e-5b7d-4e21-9a6f-0c8d1e2f3a4b', PRINT = '8a2b4c6d-1e3f-4a5b-8c7d-9e0f1a2b3c4d';
 const draft = (type, extra = {}) => ({id: randomUUID(), type, projectId: PROJECT, printId: PRINT, destinationId: 'current', printerName: 'Bambu Lab P1S', ...extra});
 async function openLog(t, {now = () => Date.now(), context = async () => ({title: 'Mic mount', size: '60 × 45 × 22 mm'})} = {}) {
@@ -229,4 +231,122 @@ test('two first requests at once both leave their device\'s presence', async t =
   const fresh = new DevicePresence(join(root, 'device-presence.json'));
   assert.equal((await fresh.get(a)).model, 'iPhone18,2');
   assert.equal((await fresh.get(b)).model, 'iPad16,3');
+});
+
+const DAY = 24 * 60 * 60 * 1000;
+async function devicesFixture(t, start) {
+  const root = await mkdtemp(join(tmpdir(), 'legacy-devices-'));
+  t.after(() => rm(root, {recursive: true, force: true, maxRetries: 3}));
+  const clock = {now: start};
+  const auth = await RemoteAuthStore.create(join(root, 'auth'), {host: 'companion.example-tail.ts.net', allowedLogins: ['alice@example.test']}, () => clock.now);
+  const pair = async (deviceName, installationKey) => auth.exchange('alice@example.test', {code: (await auth.createPairing('alice@example.test')).code, deviceName,
+    ...(installationKey ? {installationKey} : {})});
+  const presencePath = join(root, 'auth', 'device-presence.json');
+  const presence = () => new DevicePresence(presencePath, {now: () => clock.now});
+  const tokens = new LiveActivityTokenStore(join(root, 'live-activity-tokens.json'));
+  return {root, auth, pair, clock, presence, presencePath, tokens};
+}
+
+test('devices.list marks pairings from before stable install identity as legacy', async t => {
+  const f = await devicesFixture(t, Date.now());
+  const old = await f.pair('My phone'), current = await f.pair('David’s iPhone', 'k'.repeat(43));
+  const dispatch = createControlDispatcher({auth: f.auth, companionVersion: 'test', presence: f.presence()});
+  const listed = Object.fromEntries((await dispatch('devices.list', {})).devices.map(device => [device.deviceId, device]));
+  assert.equal(listed[old.deviceId].legacy, true);
+  assert.equal('legacy' in listed[current.deviceId], false, 'a device with an install identity is never legacy');
+  assert.deepEqual(await f.auth.legacyDeviceIds(), new Set([old.deviceId]));
+});
+
+test('legacy devices unused for 14 days from this release are removed; a used one stays until it goes quiet', async t => {
+  const release = Date.UTC(2026, 10, 1);
+  const f = await devicesFixture(t, release);
+  const idle = await f.pair('My phone'), used = await f.pair('My phone'), current = await f.pair('David’s iPhone', 'k'.repeat(43));
+  await f.tokens.store(idle.deviceId, {pushToStart: 'a'.repeat(64)});
+  let presence = f.presence();
+  assert.equal(await presence.since(), release, 'the 14 days count from the first run of this version');
+  f.clock.now = release + 10 * DAY;
+  await presence.seen(used.deviceId, 'iPhone15,2');
+  f.clock.now = release + LEGACY_DEVICE_IDLE_MS - 1;
+  assert.deepEqual(await pruneLegacyDevices(f.auth, presence, {now: () => f.clock.now, tokens: f.tokens}), [], 'nothing before 14 days');
+  // A restart keeps the start of the 14 days.
+  presence = f.presence();
+  f.clock.now = release + LEGACY_DEVICE_IDLE_MS;
+  assert.equal(await presence.since(), release);
+  assert.deepEqual(await pruneLegacyDevices(f.auth, presence, {now: () => f.clock.now, tokens: f.tokens}), [idle.deviceId]);
+  const left = (await f.auth.listDevices()).map(device => device.deviceId).sort();
+  assert.deepEqual(left, [used.deviceId, current.deviceId].sort(), 'a recently used legacy device and a current one stay');
+  assert.deepEqual((await f.tokens.list()).pushToStart, [], 'its Live Activity tokens go with it');
+  await assert.rejects(f.auth.authorize('alice@example.test', idle.deviceId, idle.token, 'projects:read'));
+  // The used one goes 14 days after its last request; a current device never does.
+  f.clock.now = release + 10 * DAY + LEGACY_DEVICE_IDLE_MS;
+  assert.deepEqual(await pruneLegacyDevices(f.auth, presence, {now: () => f.clock.now, tokens: f.tokens}), [used.deviceId]);
+  // (29 days: still inside the 30-day credential lifetime, after which any unrefreshed pairing lapses by itself.)
+  f.clock.now = release + 29 * DAY;
+  assert.deepEqual(await pruneLegacyDevices(f.auth, presence, {now: () => f.clock.now}), []);
+  assert.deepEqual((await f.auth.listDevices()).map(device => device.deviceId), [current.deviceId]);
+});
+
+test('a legacy pairing made after this release gets its own 14 days from pairing, even before its first request', async t => {
+  const release = Date.UTC(2026, 10, 1);
+  const f = await devicesFixture(t, release);
+  const presence = f.presence();
+  assert.equal(await presence.since(), release);
+  // An older app pairs (no installation key) 20 days after the release and makes no request yet.
+  const later = await RemoteAuthStore.open(join(f.root, 'auth'), () => release + 20 * DAY);
+  const phone = await later.exchange('alice@example.test', {code: (await later.createPairing('alice@example.test')).code, deviceName: 'My phone'});
+  f.clock.now = release + 21 * DAY;
+  assert.deepEqual(await pruneLegacyDevices(f.auth, presence, {now: () => f.clock.now}), [], 'paired a day ago');
+  f.clock.now = release + 20 * DAY + LEGACY_DEVICE_IDLE_MS;
+  assert.deepEqual(await pruneLegacyDevices(f.auth, presence, {now: () => f.clock.now}), [phone.deviceId]);
+});
+
+test('a legacy device that makes a request is recognised: last seen and model recorded, and it is kept', async t => {
+  const release = Date.UTC(2026, 10, 1);
+  const f = await devicesFixture(t, release);
+  const phone = await f.pair('My phone');
+  // Presence written by the previous version (a plain map) counts from this release too, and keeps what it knew.
+  await writeFile(f.presencePath, JSON.stringify({[phone.deviceId]: {lastSeenAt: release - 30 * DAY}}));
+  f.clock.now = release + DAY;
+  const presence = f.presence();
+  assert.equal(await presence.since(), release + DAY);
+  const server = await startCompanionServer({port: 0, remoteAuth: f.auth, presence});
+  t.after(() => server.close());
+  const status = await new Promise((resolve, reject) => {
+    const req = httpRequest(server.url + '/healthz', {headers: {...forwarded, authorization: `Bearer ${phone.token}`, 'x-scan-device': phone.deviceId, 'x-scan-device-model': 'iPhone16,1'}},
+      res => { res.resume(); res.on('end', () => resolve(res.statusCode)); });
+    req.on('error', reject);
+    req.end();
+  });
+  assert.equal(status, 200);
+  await new Promise(resolve => setTimeout(resolve, 30));
+  const dispatch = createControlDispatcher({auth: f.auth, companionVersion: 'test', presence});
+  const [listed] = (await dispatch('devices.list', {})).devices;
+  assert.deepEqual([listed.legacy, listed.model, listed.lastSeenAt], [true, 'iPhone16,1', release + DAY]);
+  f.clock.now = release + DAY + LEGACY_DEVICE_IDLE_MS - 1;
+  assert.deepEqual(await pruneLegacyDevices(f.auth, presence, {now: () => f.clock.now}), []);
+  assert.equal(JSON.parse(await readFile(f.presencePath, 'utf8')).version, 2);
+});
+
+test('a phone\'s X-Scan-Device-Name renames its device when it changes, never to nothing, at most 64 characters', async t => {
+  const f = await devicesFixture(t, Date.now());
+  const phone = await f.pair('My phone');
+  const server = await startCompanionServer({port: 0, remoteAuth: f.auth, presence: f.presence()});
+  t.after(() => server.close());
+  const health = name => new Promise((resolve, reject) => {
+    const req = httpRequest(server.url + '/healthz', {headers: {...forwarded, authorization: `Bearer ${phone.token}`, 'x-scan-device': phone.deviceId, 'x-scan-device-name': name}},
+      res => { res.resume(); res.on('end', () => resolve(res.statusCode)); });
+    req.on('error', reject);
+    req.end();
+  });
+  // Read the file itself: listDevices takes the store's lock, which a rename then can't get.
+  const name = async () => JSON.parse(await readFile(join(f.root, 'auth', 'auth.json'), 'utf8')).devices.find(device => device.deviceId === phone.deviceId).deviceName;
+  assert.equal(await health(encodeURIComponent('David’s iPhone 17 Pro')), 200);
+  await until(async () => await name() === 'David’s iPhone 17 Pro');
+  await health(encodeURIComponent('   '));
+  await health('%E0%A4%A');
+  await new Promise(resolve => setTimeout(resolve, 30));
+  assert.equal(await name(), 'David’s iPhone 17 Pro', 'an empty or broken name never replaces one');
+  assert.equal(deviceNameFromHeader('x'.repeat(100)).length, 64);
+  assert.equal(deviceNameFromHeader(Buffer.from('Ada’s iPad', 'utf8').toString('latin1')), 'Ada’s iPad', 'raw UTF-8 bytes too');
+  assert.equal(deviceNameFromHeader('a%0Ab'), 'ab');
 });

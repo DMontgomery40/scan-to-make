@@ -33,7 +33,11 @@ try {
   const health = await fetchLocal(`${base}/healthz`, {headers: {...headers,
     authorization: `Bearer ${device.token}`, 'x-scan-device': device.deviceId}, signal: AbortSignal.timeout(5000)});
   assert.equal(health.status, 200);
-  assert.deepEqual(await health.json(), {status: 'ok', protocolVersion: '0.1.0'});
+  // Extra keys are additive (KAN-214 capabilities); clients read status and protocolVersion.
+  const body = await health.json();
+  assert.equal(body.status, 'ok');
+  assert.equal(body.protocolVersion, '0.1.0');
+  if ('capabilities' in body) assert.ok(body.capabilities && typeof body.capabilities === 'object' && !Array.isArray(body.capabilities));
   const anonymous = await fetchLocal(`${base}/healthz`, {signal: AbortSignal.timeout(5000)});
   assert.equal(anonymous.status, 403);
   console.log('Paired /healthz passed; anonymous request rejected');

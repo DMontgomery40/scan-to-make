@@ -245,6 +245,8 @@ export class PrinterHandoffRunner {
   async #run(session: PrinterSession, shared: boolean, input: PrintRunInput): Promise<PrintRunResult> {
     const selection: PrinterSelection = {...this.#config.selection, ...input.selection};
     const slicer: PrinterSlicer = {...this.#config.slicer, ...input.slicer};
+    // A chosen spool's profile (load_filaments) replaces the configured filament alias: MCPs refuse the two when they differ.
+    if (input.slicer?.loadFilaments && input.slicer.filamentProfile === undefined) delete slicer.filamentProfile;
     const printOptions: PrinterPrintOptions = {...this.#config.print, ...input.printOptions};
     const steps: PrintStep[] = [];
     const step = (name: PrintStep) => { steps.push(name); this.#onStep?.(name); };

@@ -217,6 +217,7 @@ export interface PrinterCapabilities {
   filaments: 'ams' | 'single' | 'none';
   pause: boolean; resume: boolean; cancel: boolean;
   quality: boolean; strength: boolean; multiColour: boolean;
+  materialChoice: boolean;
   missing: CapabilityFeature[];
   update?: {message: string; package: PrinterBackend; command?: string[]};
   detectedAt: string;
@@ -287,6 +288,9 @@ export function detectCapabilities(config: PrinterHandoffConfig, catalog: Printe
     ...(info ? {contract: 'counterpart/1' as const} : {}),
     progress, layers: progress && (info?.capabilities.layers ?? bambu),
     camera, filaments, pause, resume, cancel, quality, strength, multiColour,
+    // Every printer can be told what's loaded: the companion slices it with the profile of a spool the printer
+    // reports for it (mcp-3D-printer-server: the profile its filament report gives), or refuses with what to do.
+    materialChoice: true,
     missing,
     ...(missing.length ? {update: {message: `Update ${PACKAGE_NAMES[config.backend]} to ${sentence(phrases)}.`, package: config.backend, ...(command ? {command} : {})}} : {}),
     detectedAt: at.toISOString(),

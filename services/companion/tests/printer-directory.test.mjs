@@ -4,6 +4,7 @@ import {PrinterSession} from '@scan-to-make/printer-handoff';
 import {PrinterDirectory, READINESS_REFRESH_MS} from '../dist/printing/directory.js';
 
 const tool = (name, properties = {}) => ({name, inputSchema: {type: 'object', properties}});
+const until = async check => { for (let i = 0; i < 400; i++) { if (await check()) return; await new Promise(resolve => setTimeout(resolve, 5)); } throw new Error('timed out'); };
 function destination({tools, status, failing = () => false}) {
   let directory;
   const reads = [];
@@ -68,4 +69,60 @@ test('camera frames go to the destination\'s own route on mcp-3D-printer-server'
   })});
   await new CameraFrames().frame('voron', session);
   assert.deepEqual(calls, [{host: 'voron.local', type: 'klipper', port: '7125', timeout_ms: 8000}]);
+});
+
+test('a view never waits on the camera when a recent frame exists, and opening one warms the session and the first frame', async () => {
+  const {CameraFrames, CAMERA_STALE_MS} = await import('../dist/printing/camera.js');
+  const frameOf = n => Buffer.concat([Buffer.from([0xff, 0xd8, 0xff]), Buffer.alloc(8, n)]);
+  let calls = 0, gate;
+  const tools = [tool('camera_snapshot', {timeout_ms: {}})];
+  const session = new PrinterSession('p1s', {backend: 'bambu-printer-mcp', process: {command: '/usr/bin/true'}}, {clientFactory: () => ({
+    catalog: undefined,
+    async connect() { this.catalog = {server: {name: 'bambu-printer-mcp', version: '1'}, tools}; return this.catalog; },
+    hasTool: name => tools.some(item => item.name === name), getTool: name => tools.find(item => item.name === name),
+    async callTool() {
+      const n = ++calls;
+      if (n > 1) await new Promise(resolve => { gate = resolve; });
+      return {content: [{type: 'text', text: JSON.stringify({format: 'image/jpeg', base64: frameOf(n).toString('base64'), capturedAt: new Date(Date.UTC(2026, 10, 1, 0, 0, n)).toISOString()})}]};
+    },
+    async close() {},
+  })});
+  const clock = {t: 1_000_000};
+  const camera = new CameraFrames({now: () => clock.t});
+  const view = {view: true};
+  const first = await camera.frame('p1s', session, view);
+  assert.equal(first.bytes[4], 1);
+  assert.equal(session.health().holders, 1, 'a viewer holds the session');
+  // 5 s later: the last frame at once, with when it was really taken, while the next one is fetched.
+  clock.t += 5000;
+  const meanwhile = await camera.frame('p1s', session, view);
+  assert.equal(meanwhile.capturedAt, first.capturedAt);
+  await until(() => calls === 2);
+  clock.t += 1000;
+  assert.equal((await camera.frame('p1s', session, view)).capturedAt, first.capturedAt, 'one fetch at a time');
+  assert.equal(calls, 2);
+  // An event's frame (no `view`) waits for the fetch in flight rather than taking the older one.
+  const forEvent = camera.frame('p1s', session);
+  gate();
+  assert.equal((await forEvent).bytes[4], 2);
+  assert.equal(calls, 2);
+  await until(async () => (await camera.frame('p1s', session, view)).bytes[4] === 2);
+  // Too old to show: wait for a fresh one.
+  clock.t += CAMERA_STALE_MS + 1;
+  const waiting = camera.frame('p1s', session);
+  await until(() => calls === 3);
+  gate();
+  assert.equal((await waiting).bytes[4], 3);
+  // Opening a view with nothing recent fetches ahead, once a minute at most; the request then reads the cache.
+  const fresh = new CameraFrames({now: () => clock.t});
+  fresh.warm('p1s', session);
+  fresh.warm('p1s', session);
+  await until(() => calls === 4);
+  gate();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal((await fresh.frame('p1s', session)).bytes[4], 4);
+  assert.equal(calls, 4);
+  camera.close(); fresh.close();
+  assert.equal(session.health().holders, 0, 'closing lets the session go');
+  await session.close();
 });

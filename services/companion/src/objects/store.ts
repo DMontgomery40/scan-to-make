@@ -14,7 +14,13 @@ export interface ObjectPrintConfirmation {
   id: string;
   message: string;
   expiresAtMs: number;
-  fields: {name: string; title: string; description?: string; required: boolean}[];
+  /**
+   * One per property of the MCP's schema. `type` is absent for booleans (older
+   * clients read only name/title/description/required).
+   */
+  fields: {name: string; title: string; description?: string; required: boolean;
+    type?: 'string' | 'number' | 'integer'; enum?: string[]; enumNames?: string[]; default?: string | number | boolean;
+    minimum?: number; maximum?: number; minLength?: number; maxLength?: number; format?: 'email' | 'uri' | 'date' | 'date-time'}[];
   supported: boolean;
 }
 
