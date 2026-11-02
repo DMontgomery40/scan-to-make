@@ -20,13 +20,30 @@ struct ProjectDetail: View {
     @State private var stopping = false
 
     private var words: ObjectWords { object.words }
+
+    /// The state; with Project Settings, also the menu that sets it (Done for something printed elsewhere, PRD §5.4).
+    @ViewBuilder private var statusCapsule: some View {
+        if model.capabilities?.projectSettings == true {
+            Menu {
+                ProjectStatusItems(object: object, model: model)
+            } label: {
+                StatusCapsule(stage: words.stage, text: words.capsule, done: words.done, menu: true)
+            }
+            .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
+            .disabled(working)
+            .help("Set the status: Not Printed, Printed, Done or Needs Changes")
+            .accessibilityLabel("Status: \(words.capsule)")
+        } else {
+            StatusCapsule(stage: words.stage, text: words.capsule, done: words.done)
+        }
+    }
     private var working: Bool { model.working.contains(object.id) }
     private var takesPhotos: Bool { model.capabilities?.objectsCreate == true }
 
     var body: some View {
         ZStack(alignment: .bottom) {
             stage
-                .overlay(alignment: .topLeading) { StatusCapsule(stage: words.stage, text: words.capsule, done: words.done).padding(.top, 70).padding(.leading, 24) }
+                .overlay(alignment: .topLeading) { statusCapsule.padding(.top, 70).padding(.leading, 24) }
                 .overlay(alignment: .topTrailing) {
                     if let size = words.size {
                         Text(size).font(.callout.monospacedDigit().weight(.semibold))

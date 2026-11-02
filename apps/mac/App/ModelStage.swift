@@ -51,13 +51,14 @@ struct ModelStage: View {
                     .gesture(DragGesture(minimumDistance: 2).onChanged { _ in wake() })
                     .simultaneousGesture(MagnifyGesture().onChanged { _ in wake() })
                 if interactive {
+                    // Top right, under the size: the bottom belongs to the card and the Ask and Print bar.
                     VStack {
-                        Spacer()
                         HStack {
                             Spacer()
                             Button { wake() } label: { Label("Explore in 3D", systemImage: "rotate.3d") }
-                                .buttonStyle(.glass).padding(16)
+                                .buttonStyle(.glass).padding(.top, 108).padding(.trailing, 24)
                         }
+                        Spacer()
                     }
                 }
             }

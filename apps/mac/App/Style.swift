@@ -34,10 +34,14 @@ struct StatusCapsule: View {
     var text: String? = nil
     /// Done (PRD §5.4): the green ✓.
     var done = false
+    /// It opens the status menu: a chevron says so.
+    var menu = false
     var body: some View {
-        Label(text ?? stage.label, systemImage: done ? "checkmark.circle.fill" : stage.symbol)
+        HStack(spacing: 4) {
+            Label(text ?? stage.label, systemImage: done ? "checkmark.circle.fill" : stage.symbol).labelStyle(.titleAndIcon)
+            if menu { Image(systemName: "chevron.down").font(.caption2.weight(.bold)).opacity(0.7) }
+        }
             .font(.caption.weight(.semibold))
-            .labelStyle(.titleAndIcon)
             .foregroundStyle(done ? Color.okGreen : stage.tint)
             .padding(.horizontal, 10).padding(.vertical, 5)
             .glassEffect(.regular, in: .capsule)

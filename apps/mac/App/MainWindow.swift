@@ -389,8 +389,18 @@ extension FocusedValues {
     }
 }
 
-/// PRD §5.4: Status, set by hand (Done is `works`), and Archive, which hides a project and keeps its status.
+/// PRD §5.4: Status, set by hand (Done is `works`), and Archive, which hides a project and keeps its status. The
+/// sidebar row's context menu, and the status capsule on the project page.
 struct ProjectStatusMenu: View {
+    let object: Project
+    @ObservedObject var model: ObjectsModel
+    var body: some View {
+        Menu("Status") { ProjectStatusItems(object: object, model: model) }
+            .disabled(model.working.contains(object.id))
+    }
+}
+
+struct ProjectStatusItems: View {
     let object: Project
     @ObservedObject var model: ObjectsModel
     static let statuses: [(value: String, label: String)] = [("not-printed", "Not Printed"), ("printed", "Printed"), ("works", "Done"),
@@ -398,19 +408,16 @@ struct ProjectStatusMenu: View {
     var body: some View {
         let current = model.extras[object.id]?.status ?? (object.words.done ? "works" : nil)
         let archived = model.extras[object.id]?.archived == true
-        Menu("Status") {
-            ForEach(Self.statuses, id: \.value) { status in
-                Button { Task { await model.setStatus(status.value, for: object.id) } } label: {
-                    if current == status.value { Label(status.label, systemImage: "checkmark") } else { Text(status.label) }
-                }
-            }
-            Divider()
-            if archived {
-                Button("Unarchive") { Task { await model.setArchived(false, for: object.id) } }
-            } else {
-                Button("Archive (Hide from Sidebar)") { Task { await model.setArchived(true, for: object.id) } }
+        ForEach(Self.statuses, id: \.value) { status in
+            Button { Task { await model.setStatus(status.value, for: object.id) } } label: {
+                if current == status.value { Label(status.label, systemImage: "checkmark") } else { Text(status.label) }
             }
         }
-        .disabled(model.working.contains(object.id))
+        Divider()
+        if archived {
+            Button("Unarchive") { Task { await model.setArchived(false, for: object.id) } }
+        } else {
+            Button("Archive (Hide from Sidebar)") { Task { await model.setArchived(true, for: object.id) } }
+        }
     }
 }
