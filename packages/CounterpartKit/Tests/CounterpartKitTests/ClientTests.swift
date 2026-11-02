@@ -324,7 +324,7 @@ final class CompanionClientTests: XCTestCase {
         XCTAssertEqual(PrinterFilament(slot: 254, colour: "#FFFFFF", material: "PETG", name: "Generic PETG #FFFFFF", filamentId: "", destinationId: "x").slotLabel, "Ext")
     }
 
-    func testDownloadsAreCachedPerVersionExceptThePlate() async throws {
+    func testDownloadsAreCachedPerVersion() async throws {
         let data = try fixture("objects.json")
         struct List: Decodable { var objects: [Project] }
         let p = try JSONDecoder().decode(List.self, from: data).objects[0]
@@ -334,8 +334,8 @@ final class CompanionClientTests: XCTestCase {
         let second = try await c.download(p, "renders/1_overview.png")
         XCTAssertEqual(first, second)
         XCTAssertEqual(fake.calls.count, 1)
-        _ = try await c.download(p, "plate.jpg"); _ = try await c.download(p, "plate.jpg")
-        XCTAssertEqual(fake.calls.count, 3)
+        do { _ = try await c.download(p, "plate.jpg"); XCTFail("there's no plate photo to fetch") } catch {}
+        XCTAssertEqual(fake.calls.count, 1)
         do { _ = try await c.download(p, "../../etc/passwd"); XCTFail() } catch {}
     }
 

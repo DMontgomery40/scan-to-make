@@ -34,7 +34,6 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
     public var current: Result?
     /// The older close-up question: which part the Mac couldn't see. Still set beside `ask`.
     public var question: Question?
-    public var plate: Plate?
     public var failure: String?
     public var print: Print?
     public var printerDestinationId: String?
@@ -52,18 +51,18 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
 
     public init(id: String, createdAtMs: Double, updatedAtMs: Double, instructions: String? = nil, state: State, scan: String? = nil,
                 photos: [String] = [], capture: [String]? = nil, progress: String? = nil, passes: [Pass] = [], current: Result? = nil,
-                question: Question? = nil, plate: Plate? = nil, failure: String? = nil, print: Print? = nil,
+                question: Question? = nil, failure: String? = nil, print: Print? = nil,
                 printerDestinationId: String? = nil, printConfirmation: PrintConfirmation? = nil,
                 status: Status? = nil, title: String? = nil, kind: String? = nil, ask: Ask? = nil, directory: String? = nil) {
         self.id = id; self.createdAtMs = createdAtMs; self.updatedAtMs = updatedAtMs; self.instructions = instructions
         self.state = state; self.scan = scan; self.photos = photos; self.capture = capture; self.progress = progress
-        self.passes = passes; self.current = current; self.question = question; self.plate = plate; self.failure = failure
+        self.passes = passes; self.current = current; self.question = question; self.failure = failure
         self.print = print; self.printerDestinationId = printerDestinationId; self.printConfirmation = printConfirmation
         self.status = status; self.title = title; self.kind = kind; self.ask = ask; self.directory = directory
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, createdAtMs, updatedAtMs, instructions, state, scan, photos, capture, captureDepth, progress, passes, current, question, plate
+        case id, createdAtMs, updatedAtMs, instructions, state, scan, photos, capture, captureDepth, progress, passes, current, question
         case failure, print, printerDestinationId, printConfirmation, status, title, kind, ask, directory
     }
 
@@ -86,7 +85,6 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
         passes = optional([Pass].self, .passes) ?? []
         current = optional(Result.self, .current)
         question = optional(Question.self, .question)
-        plate = optional(Plate.self, .plate)
         failure = optional(String.self, .failure)
         print = optional(Print.self, .print)
         printerDestinationId = optional(String.self, .printerDestinationId)
@@ -252,17 +250,6 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
         public var askedAtMs: Double?
         public init(id: String, question: String, photo: String? = nil, region: Region? = nil, answers: [String], status: String = "open", askedAtMs: Double? = nil) {
             self.id = id; self.question = question; self.photo = photo; self.region = region; self.answers = answers; self.status = status; self.askedAtMs = askedAtMs
-        }
-    }
-
-    /// What the printer camera reported on the plate, shown beside the printer's own confirmation. Never a
-    /// prompt to clear it (main ac44431).
-    public struct Plate: Codable, Equatable, Sendable {
-        public var item: String?
-        public var noCamera: Bool?
-        public var photo: Bool?
-        public init(item: String? = nil, noCamera: Bool? = nil, photo: Bool? = nil) {
-            self.item = item; self.noCamera = noCamera; self.photo = photo
         }
     }
 

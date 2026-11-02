@@ -13,7 +13,7 @@ public enum SettingsSchema {
         public let mac: Bool
     }
 
-    /// One switch per type, in this order (PRD §8.8, §9.1). `plate.blocked` has none: it isn't emitted.
+    /// One switch per type, in this order (PRD §8.8, §9.1).
     public static let notificationTypes: [NotificationType] = [
         .init(id: "pass.ready", label: "Ready to print", phone: true, mac: true),
         .init(id: "pass.ask", label: "Needs a photo or an answer", phone: true, mac: true),

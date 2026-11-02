@@ -113,7 +113,8 @@ final class PrintScreensUITests: XCTestCase {
         let start = app.buttons["start-print"]
         XCTAssertTrue(start.waitForExistence(timeout: 20))
         XCTAssertFalse(start.isEnabled, "nothing goes to the printer until the switch is on")
-        XCTAssertTrue(app.staticTexts["The build plate is clear"].exists)
+        XCTAssertTrue(app.staticTexts["Start a checked print on P1S?"].exists, "the MCP's own question")
+        XCTAssertFalse(app.staticTexts["Check at the printer"].exists, "no checklist of the app's own")
         app.switches.firstMatch.tap()
         XCTAssertTrue(start.isEnabled)
     }
@@ -223,7 +224,7 @@ final class SettingsAndFirstRunUITests: XCTestCase {
         XCTAssertTrue(started.waitForExistence(timeout: 20))
         XCTAssertEqual(started.value as? String, "0")
         XCTAssertTrue(app.switches["Ready to print"].firstMatch.exists)
-        XCTAssertFalse(app.switches["Something's on the plate"].exists, "no plate check (ac44431)")
+        XCTAssertFalse(app.switches.matching(NSPredicate(format: "label CONTAINS[c] 'plate'")).firstMatch.exists, "no plate notification")
     }
 
     func testEveryMacSettingIsHere() {

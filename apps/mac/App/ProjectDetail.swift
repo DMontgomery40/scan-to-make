@@ -96,12 +96,7 @@ struct ProjectDetail: View {
 
     private var needsYou: some View {
         HStack(alignment: .top, spacing: 12) {
-            if let photo = object.platePhotoURL {
-                FillImage(url: photo, version: object.updatedAtMs).frame(width: 150, height: 110).clipShape(.rect(cornerRadius: 10))
-                    .accessibilityLabel("The printer camera’s photo of the plate")
-            } else {
-                Image(systemName: "hand.raised.fill").foregroundStyle(.orange)
-            }
+            Image(systemName: "hand.raised.fill").foregroundStyle(.orange)
             VStack(alignment: .leading, spacing: 4) {
                 Text(words.question ?? words.status).font(.subheadline.weight(.semibold))
                 Text(object.state == .needsCloseup ? "Asked on your iPhone too. Send a close-up from it, or let your Mac make its best guess."
@@ -306,14 +301,6 @@ struct PrintConfirmationForm: View {
     private func details(working: Bool, expired: Bool) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             Text(verbatim: question.message).font(.callout).textSelection(.enabled).lineLimit(nil)
-            if let item = object.plate?.item, !item.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                Label("The printer camera reported \(item) on the plate.", systemImage: "exclamationmark.triangle.fill")
-                    .font(.callout).foregroundStyle(.orange).lineLimit(nil)
-            }
-            if let photo = object.platePhotoURL {
-                FileImage(url: photo, version: object.updatedAtMs, contentMode: .fit).frame(maxWidth: 280, maxHeight: 180)
-                    .clipShape(.rect(cornerRadius: 10)).accessibilityLabel("Printer camera photo, for reference")
-            }
             if question.isRenderable {
                 ForEach(question.fields, id: \.name) { field in
                     ConfirmationFieldRow(field: field, draft: $draft).disabled(working || expired)

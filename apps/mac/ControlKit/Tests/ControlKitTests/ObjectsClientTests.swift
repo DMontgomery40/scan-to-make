@@ -187,14 +187,9 @@ final class ObjectsClientTests: XCTestCase {
     func testFilesResolveInsideTheObjectFolderOnly() throws {
         var object = ready
         object["current"] = ["model": "current/model.stl", "renders": ["current/renders/front.png", "../../elsewhere.png", "/etc/hosts", ""]]
-        object["plate"] = ["item": "a printed part", "photo": true]
         let decoded = try JSONDecoder().decode(Project.self, from: JSONSerialization.data(withJSONObject: object))
         XCTAssertEqual(decoded.modelURL?.path, folder + "/current/model.stl")
         XCTAssertEqual(decoded.renderURLs.map(\.path), [folder + "/current/renders/front.png"])
-        XCTAssertEqual(decoded.platePhotoURL?.path, folder + "/plate.jpg")
-        object["plate"] = ["item": "a printed part"]
-        let noPhoto = try JSONDecoder().decode(Project.self, from: JSONSerialization.data(withJSONObject: object))
-        XCTAssertNil(noPhoto.platePhotoURL, "the plate photo exists only while plate.photo is true")
     }
 
     func testEachActionSendsExactlyItsParams() async throws {

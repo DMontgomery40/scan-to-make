@@ -29,7 +29,6 @@ public enum CloudKitRecords {
     public static let subscriptions: [(id: String, types: [String], category: String)] = [
         ("ev-ready", ["pass.ready"], "READY"),
         ("ev-ask", ["pass.ask"], "ASK"),
-        ("ev-plate", ["plate.blocked"], "PLATE"),
         ("ev-confirm", ["print.confirm"], "CONFIRM"),
         ("ev-progress", ["print.first-layer", "print.milestone"], "PROGRESS"),
         ("ev-done", ["print.done"], "DONE"),

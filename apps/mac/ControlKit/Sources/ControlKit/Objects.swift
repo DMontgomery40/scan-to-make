@@ -84,8 +84,6 @@ public extension Project {
     var renderURLs: [URL] { current?.renders.compactMap(file) ?? [] }
     var photoURLs: [URL] { photos.compactMap { file("photos/\($0)") } }
     var captureURLs: [URL] { (capture ?? []).compactMap { file("capture/\($0)") } }
-    /// The printer camera's photo, kept beside the printer's own confirmation while it waits (advisory only).
-    var platePhotoURL: URL? { plate?.photo == true ? file("plate.jpg") : nil }
     /// The Ask's picture, with `ask.region` to highlight on it.
     var askPhotoURL: URL? { ask?.photo.flatMap(file) }
     /// A file the companion names relative to this project's folder (an event's `frame`).
