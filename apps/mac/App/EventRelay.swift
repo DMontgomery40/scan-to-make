@@ -91,7 +91,7 @@ import ControlKit
         let prefs = NotificationPrefs(defaults: defaults)
         let now = Date()
         for (index, event) in events.enumerated() {
-            let project = projects[event.projectId]
+            let project = event.projectId.flatMap { projects[$0] }
             let later = events[(index + 1)...].filter { $0.projectId == event.projectId }.map(\.type)
             if CatchUp.shouldNotify(event, now: now, prefs: prefs, alreadyNotified: notified.contains(event.id), later: later,
                                     state: project?.state.rawValue) {
@@ -151,8 +151,8 @@ import ControlKit
         let content = UNMutableNotificationContent()
         content.title = event.title
         content.body = event.body
-        content.threadIdentifier = event.projectId
-        content.userInfo = ["projectId": event.projectId, "eventId": event.id]
+        content.threadIdentifier = event.projectId ?? event.type
+        content.userInfo = ["eventId": event.id].merging(event.projectId.map { ["projectId": $0] } ?? [:]) { $1 }
         content.sound = event.notify == "passive" ? nil : .default
         content.interruptionLevel = event.notify == "timeSensitive" ? .timeSensitive : event.notify == "passive" ? .passive : .active
         if let frame = event.frame.flatMap({ project?.projectFile($0) }), FileManager.default.fileExists(atPath: frame.path) {

@@ -30,7 +30,8 @@ public struct CounterpartEvent: Codable, Sendable, Equatable, Identifiable {
     /// ISO 8601 with an offset.
     public let at: String
     public let type: String
-    public let projectId: String
+    /// Absent for an event that isn't about one project (`mcp.update.*`, PRD §8.10).
+    public let projectId: String?
     public let printId: String?
     public let destinationId: String?
     public let printerName: String?
@@ -42,7 +43,7 @@ public struct CounterpartEvent: Codable, Sendable, Equatable, Identifiable {
     /// `prints/<printId>/frames/<eventId>.jpg`, relative to the project's folder.
     public let frame: String?
 
-    public init(seq: Int, id: String, at: String, type: String, projectId: String, printId: String? = nil, destinationId: String? = nil,
+    public init(seq: Int, id: String, at: String, type: String, projectId: String?, printId: String? = nil, destinationId: String? = nil,
                 printerName: String? = nil, title: String, body: String, notify: String, data: Data? = nil, frame: String? = nil) {
         self.seq = seq; self.id = id; self.at = at; self.type = type; self.projectId = projectId; self.printId = printId
         self.destinationId = destinationId; self.printerName = printerName; self.title = title; self.body = body
@@ -58,14 +59,34 @@ public struct CounterpartEvent: Codable, Sendable, Equatable, Identifiable {
 }
 
 /// `events.wait`: the events after a cursor, the next cursor, and whether the log was pruned or recreated.
+/// Events are read one by one: one this app can't read is skipped (counted in `skipped`), never the whole page, and
+/// `next` still moves past it.
 public struct EventsPage: Decodable, Sendable, Equatable {
     public let events: [CounterpartEvent]
     public let next: Int
     public let latest: Int
     public let truncated: Bool?
     public let reset: Bool?
-    public init(events: [CounterpartEvent], next: Int, latest: Int, truncated: Bool? = nil, reset: Bool? = nil) {
-        self.events = events; self.next = next; self.latest = latest; self.truncated = truncated; self.reset = reset
+    /// Events on this page that couldn't be read.
+    public let skipped: Int
+    public init(events: [CounterpartEvent], next: Int, latest: Int, truncated: Bool? = nil, reset: Bool? = nil, skipped: Int = 0) {
+        self.events = events; self.next = next; self.latest = latest; self.truncated = truncated; self.reset = reset; self.skipped = skipped
+    }
+
+    private struct Lossy: Decodable {
+        let event: CounterpartEvent?
+        init(from decoder: Decoder) throws { event = try? CounterpartEvent(from: decoder) }
+    }
+    private enum CodingKeys: String, CodingKey { case events, next, latest, truncated, reset }
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let read = try c.decodeIfPresent([Lossy].self, forKey: .events) ?? []
+        events = read.compactMap(\.event)
+        skipped = read.count - events.count
+        next = try c.decode(Int.self, forKey: .next)
+        latest = try c.decode(Int.self, forKey: .latest)
+        truncated = try c.decodeIfPresent(Bool.self, forKey: .truncated)
+        reset = try c.decodeIfPresent(Bool.self, forKey: .reset)
     }
 }
 
