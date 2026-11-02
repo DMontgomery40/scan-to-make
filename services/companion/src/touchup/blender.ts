@@ -122,7 +122,10 @@ export async function stopOwnedBlender(client: BridgeClient, opts: {port?: numbe
     if (result.isError) throw new Error(`Blender could not close: ${toolErrorText(result)}`);
     const words = (result.content ?? []).flatMap(item => item.type === 'text' ? [item.text] : []).join('\n');
     if (words.includes('COUNTERPART_BLENDER_USER_OWNED')) return;
-    if (!words.includes('COUNTERPART_BLENDER_STOPPING')) throw new Error('Blender did not acknowledge its shutdown.');
+    // Older installed add-ons return {executed:true} without Python stdout. The bridge reports this
+    // exact success text; the ownership guard still runs, and only a closed listener proves shutdown.
+    const legacySuccess = words.trim() === 'Code executed successfully:';
+    if (!words.includes('COUNTERPART_BLENDER_STOPPING') && !legacySuccess) throw new Error('Blender did not acknowledge its shutdown.');
     while (!signal.aborted) {
       if (!await listening(port)) return;
       await new Promise(resolve => setTimeout(resolve, 50));
