@@ -36,6 +36,7 @@ struct FindYourMacView: View {
     @State private var attempt = 0
     @State private var nearbyOwned = false
     @State private var camera: CameraAccess?
+    @State private var scanner = ScannerRecovery()
     /// The name the Mac lists this phone under (chosen in Settings, else the device's own name).
     @State private var deviceName = "iPhone"
     @State private var replacing = false
@@ -122,25 +123,30 @@ struct FindYourMacView: View {
         .foregroundStyle(.white)
     }
 
+    static let cameraDown = "Camera unavailable — restart your iPhone."
+
+    private func scannerStopped() { scanner.stopped() }
+
     /// The live camera reading the code, or why it can't.
     @ViewBuilder private var cameraView: some View {
-        if camera == .allowed && QRScanner.isSupported {
-            QRScanner(armed: armed) { use($0) }
+        if camera == .allowed && QRScanner.isSupported && !scanner.down {
+            QRScanner(armed: armed, found: { use($0) }, unavailable: scannerStopped)
+                .id(scanner.restarts)
                 .accessibilityLabel("Camera, looking for your Mac's code")
         } else {
             ZStack {
                 Color.black
                 RadialGradient(colors: [Color.filament.opacity(0.18), .clear], center: .init(x: 0.5, y: 0.42), startRadius: 10, endRadius: 320)
                 VStack(spacing: 12) {
-                    Image(systemName: camera == .denied ? "camera.badge.ellipsis" : "qrcode.viewfinder").font(.system(size: 40))
+                    Image(systemName: camera == .denied || scanner.down ? "camera.badge.ellipsis" : "qrcode.viewfinder").font(.system(size: 40))
                         .foregroundStyle(.secondary)
-                    Text(camera == .denied ? "Counterpart can't use the camera." : camera == nil ? "Starting the camera…" : "This device can't read codes with its camera.")
+                    Text(scanner.down ? Self.cameraDown : camera == .denied ? "Counterpart can't use the camera." : camera == nil ? "Starting the camera…" : "This device can't read codes with its camera.")
                         .font(.headline).multilineTextAlignment(.center)
-                    if camera == .denied {
-                        Button("Open Settings") { openSettings() }.buttonStyle(.glass)
-                    } else if camera == .unavailable {
+                    if scanner.down || camera == .unavailable {
                         Text("Open the link from your Mac, or pair with a Mac nearby.").font(.subheadline)
                             .foregroundStyle(.secondary).multilineTextAlignment(.center)
+                    } else if camera == .denied {
+                        Button("Open Settings") { openSettings() }.buttonStyle(.glass)
                     }
                 }
                 .frame(width: 230)

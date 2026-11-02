@@ -96,6 +96,17 @@ import CounterpartKit
         XCTAssertEqual(LastTray.slot(id, destinationId: "current"), 254)
     }
 
+    /// KAN-217 P0: the pairing camera that stops gets one fresh start, then says it's unavailable, never black.
+    func testThePairingCameraRestartsOnceThenSaysItsUnavailable() {
+        var scanner = ScannerRecovery()
+        XCTAssertEqual(scanner.restarts, 0); XCTAssertFalse(scanner.down)
+        scanner.stopped()
+        XCTAssertEqual(scanner.restarts, 1, "a fresh scanner"); XCTAssertFalse(scanner.down)
+        scanner.stopped()
+        XCTAssertTrue(scanner.down, "then the message, not another black camera")
+        XCTAssertEqual(FindYourMacView.cameraDown, "Camera unavailable — restart your iPhone.")
+    }
+
     /// Codex on #218: a refused AI choice keeps its reason and isn't tested; a read that works clears a failed read,
     /// but not a refusal.
     func testMacSettingsKeepARefusalAndDropAFailedReadOnceTheMacAnswers() async {

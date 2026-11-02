@@ -7,6 +7,8 @@ import AVFoundation
 struct QRScanner: UIViewControllerRepresentable {
     var armed: Bool
     var found: (String) -> Void
+    /// The camera stopped or couldn't start (VisionKit's `becameUnavailableWithError`, or `startScanning` threw).
+    var unavailable: () -> Void = {}
 
     /// DataScanner needs a supported device with camera access; the Simulator has neither.
     @MainActor static var isSupported: Bool { DataScannerViewController.isSupported }
@@ -22,7 +24,11 @@ struct QRScanner: UIViewControllerRepresentable {
 
     func updateUIViewController(_ scanner: DataScannerViewController, context: Context) {
         context.coordinator.found = found
-        if armed, !scanner.isScanning, DataScannerViewController.isAvailable { try? scanner.startScanning() }
+        context.coordinator.unavailable = unavailable
+        if armed, !scanner.isScanning, DataScannerViewController.isAvailable {
+            // Not during this view update: the screen changes state in answer.
+            do { try scanner.startScanning() } catch { DispatchQueue.main.async { unavailable() } }
+        }
         if !armed, scanner.isScanning { scanner.stopScanning() }
     }
 
@@ -30,11 +36,12 @@ struct QRScanner: UIViewControllerRepresentable {
         if scanner.isScanning { scanner.stopScanning() }
     }
 
-    func makeCoordinator() -> Coordinator { Coordinator(found: found) }
+    func makeCoordinator() -> Coordinator { Coordinator(found: found, unavailable: unavailable) }
 
     @MainActor final class Coordinator: NSObject, DataScannerViewControllerDelegate {
         var found: (String) -> Void
-        init(found: @escaping (String) -> Void) { self.found = found }
+        var unavailable: () -> Void
+        init(found: @escaping (String) -> Void, unavailable: @escaping () -> Void) { self.found = found; self.unavailable = unavailable }
 
         private func use(_ items: [RecognizedItem]) {
             for item in items {
@@ -43,7 +50,20 @@ struct QRScanner: UIViewControllerRepresentable {
         }
         func dataScanner(_ scanner: DataScannerViewController, didAdd addedItems: [RecognizedItem], allItems: [RecognizedItem]) { use(addedItems) }
         func dataScanner(_ scanner: DataScannerViewController, didTapOn item: RecognizedItem) { use([item]) }
+        func dataScanner(_ scanner: DataScannerViewController, becameUnavailableWithError error: DataScannerViewController.ScanningUnavailable) {
+            let unavailable = unavailable
+            DispatchQueue.main.async { unavailable() }
+        }
     }
+}
+
+/// The pairing camera stopping on its own (KAN-217 P0): it gets one fresh scanner, then the screen says the
+/// camera is unavailable instead of showing a black view.
+struct ScannerRecovery: Equatable {
+    /// Bumped to make a fresh scanner (the view's identity).
+    private(set) var restarts = 0
+    private(set) var down = false
+    mutating func stopped() { if restarts == 0 { restarts = 1 } else { down = true } }
 }
 
 /// Whether the camera may be used, asking once with the reason in Info.plist.
