@@ -2,9 +2,9 @@ import type {IncomingMessage, ServerResponse} from 'node:http';
 import {readFile} from 'node:fs/promises';
 import {basename, join} from 'node:path';
 import type {RemoteScope} from '../remote-auth.js';
-import {InvalidAnswerError, InvalidCaptureManifestError, InvalidStateError, type ObjectService} from './service.js';
+import {InvalidAnswerError, InvalidCaptureManifestError, InvalidStateError, projectStatus, type ObjectService} from './service.js';
 import {CameraUnavailableError, type CameraFrame} from '../printing/camera.js';
-import {MilestonesSchema, type ObjectStatus} from '@scan-to-make/contracts/counterpart';
+import {MilestonesSchema, ProjectStatusSchema, type ObjectStatus, type ProjectStatus} from '@scan-to-make/contracts/counterpart';
 import {objectStatus, projectTitle} from '../events/words.js';
 import {ObjectNotFoundError, type ObjectPass, type StmObject} from './store.js';
 import {RECONSTRUCTION_FAILED} from './reconstruct.js';
@@ -13,7 +13,7 @@ import {parameters} from '../local-control-protocol.js';
 const READ: RemoteScope = 'projects:read', WRITE: RemoteScope = 'captures:import', PRINT: RemoteScope = 'printer-handoff:use';
 const MAX_SCAN = 64 * 1024 * 1024, MAX_PHOTO = 25 * 1024 * 1024, MAX_JSON = 16 * 1024;
 const MAX_DEPTH = 8 * 1024 * 1024;
-const PATH = /^\/v1\/objects(?:\/([0-9a-f-]{36})(?:\/(scan|photos|capture|capture-depth|start|corrections|closeup|print|print\/pause|print\/resume|print\/cancel|estimate|camera\.jpg|prints\/[0-9a-f-]{36}\/frames\/[0-9a-f-]{36}\.jpg|asks\/[0-9a-f-]{36}\.jpg|filaments|print-confirmation|printer|plate\.jpg|plate|model\.stl|passes\/[^/]+\/activity|(?:renders|photos|capture)\/[^/]+))?)?$/;
+const PATH = /^\/v1\/objects(?:\/([0-9a-f-]{36})(?:\/(scan|settings|photos|capture|capture-depth|start|corrections|closeup|print|print\/pause|print\/resume|print\/cancel|estimate|camera\.jpg|prints\/[0-9a-f-]{36}\/frames\/[0-9a-f-]{36}\.jpg|asks\/[0-9a-f-]{36}\.jpg|filaments|print-confirmation|printer|plate\.jpg|plate|model\.stl|passes\/[^/]+\/activity|(?:renders|photos|capture)\/[^/]+))?)?$/;
 const PRINTER_CAMERA = /^\/v1\/objects\/printers\/([A-Za-z0-9_-]{1,256})\/camera\.jpg$/;
 const SETTINGS: RemoteScope = 'projects:write';
 
@@ -37,7 +37,7 @@ async function json<T>(request: IncomingMessage, limit = MAX_JSON): Promise<T> {
   try { return JSON.parse(bytes.toString('utf8')) as T; } catch { throw new HttpFailure(400, 'invalid-request'); }
 }
 
-export type PublicObject = Omit<StmObject, 'passes' | 'title'> & {title: string; status: ObjectStatus; passes: (Omit<ObjectPass, 'dir' | 'activity'> & {activityCount: number})[]};
+export type PublicObject = Omit<StmObject, 'passes' | 'title'> & {title: string; status: ObjectStatus; settings: {status: ProjectStatus}; passes: (Omit<ObjectPass, 'dir' | 'activity'> & {activityCount: number})[]};
 
 // Earlier generic failures asserted a capture mistake without evidence. Correct the displayed
 // advice for those retained attempts too, leaving their original stored records intact.
@@ -51,6 +51,7 @@ export function publicObject(object: StmObject): PublicObject {
   const failure = currentFailureText(object.failure);
   // Never null: until a title is generated (or backfilled for an older project), the request's first words.
   return {...object, title: projectTitle(object), failure, status: objectStatus({...object, ...(failure !== undefined ? {failure} : {})}, object.updatedAtMs),
+    settings: {status: projectStatus(object)},
     passes: object.passes.map(({dir: _dir, activity, ...pass}) => ({...pass,
       summary: currentFailureText(pass.summary), activityCount: activity?.length ?? 0}))};
 }
@@ -100,6 +101,17 @@ export function createObjectRoutes(service: ObjectService) {
         if (!match) throw new HttpFailure(404, 'not-found');
         const [, id, action] = match;
         const method = request.method ?? 'GET';
+        if (action === 'settings' && id) {
+          // PRD §5.4 Project Settings. This version takes Status; the other settings come later.
+          if (method === 'GET') { await authorize(READ); return send(response, 200, {settings: {status: projectStatus(await service.get(id))}}); }
+          if (method !== 'PATCH') throw new HttpFailure(405, 'method-not-allowed');
+          await authorize(WRITE);
+          const input = await json<Record<string, unknown>>(request);
+          const status = ProjectStatusSchema.safeParse(input.status);
+          if (!status.success || Object.keys(input).some(key => key !== 'status')) throw new HttpFailure(400, 'invalid-request');
+          const updated = await service.setStatus(id, status.data);
+          return send(response, 200, {settings: {status: projectStatus(updated)}, object: publicObject(updated)});
+        }
         if (!id) {
           if (method === 'GET') { await authorize(READ); return send(response, 200, {objects: (await service.list()).map(publicObject)}); }
           if (method === 'POST') {

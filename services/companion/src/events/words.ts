@@ -78,6 +78,7 @@ export const NOTIFY: Record<CounterpartEventType, NotifyLevel> = {
   'print.status': 'none', 'print.first-layer': 'passive', 'print.milestone': 'active', 'print.paused': 'timeSensitive',
   'print.resumed': 'none', 'print.done': 'active', 'print.failed': 'timeSensitive', 'print.cancelled': 'passive',
   'print.not-started': 'timeSensitive', 'print.unreachable': 'passive', 'print.sent': 'passive',
+  'project.updated': 'none',
 };
 
 export function sizeText(sizeMm: readonly number[] | undefined): string | undefined {
@@ -121,6 +122,7 @@ export function eventWords(type: CounterpartEventType, data: CounterpartEvent['d
     case 'print.cancelled': title = `${t} was cancelled`; body = 'Nothing more will print.'; break;
     case 'print.not-started': title = `${printer} didn't start ${t}`; body = 'Nothing was sent twice. Check the printer, then press Print again.'; break;
     case 'print.unreachable': title = `Lost contact with ${printer}`; body = 'Still trying.'; break;
+    case 'project.updated': title = t; body = 'Project updated'; break;
     case 'print.sent': title = `Sent ${t} to ${printer}`; body = context.reason === 'bambu-connect' ? 'Finish on your Mac: press Print in Bambu Connect.' : "Counterpart can't follow this print."; break;
   }
   return {title: title.slice(0, 200), body: body.slice(0, 500), notify: NOTIFY[type]};
@@ -170,6 +172,8 @@ export function objectStatus(object: StatusSource, updatedAtMs?: number): Object
       const at = object.print?.monitor?.endedAt ?? object.print?.dispatchedAt ?? (updatedAtMs ? new Date(updatedAtMs).toISOString() : undefined);
       return {phase: 'printed', text: at ? `Printed ${formatDate(at)}` : 'Printed', symbol: 'shippingbox', tint: 'secondary'};
     }
+    // PRD §5.4: marked Works (Done on Home and in the Mac sidebar).
+    case 'confirmed': return {phase: 'confirmed', text: 'It works', symbol: 'checkmark.circle.fill', tint: 'green'};
     case 'sent': return {phase: 'sent', text: sentWords(object.print?.destination?.name ?? 'your printer', object.print?.sentVia === 'bambu-connect'), symbol: 'paperplane', tint: 'secondary'};
     default: return {phase: 'failed', text: (object.failure ?? 'Something went wrong. Try again.').slice(0, 300), symbol: 'exclamationmark.triangle', tint: 'red'};
   }

@@ -58,6 +58,7 @@ type CounterpartEvent = {
 | `print.not-started` | Our job didn't appear within 180 s of dispatch | "*Printer* didn't start *Title*" | "Nothing was sent twice. Check the printer, then press Print again." | timeSensitive | |
 | `print.unreachable` | 3 failed reads in a row, or offline for ≥ 60 s | "Lost contact with *Printer*" | "Still trying." | passive | |
 | `print.sent` | The printer has the print but Counterpart can't follow it (objects-api.md, `sent`) | "Sent *Title* to *Printer*" | "Counterpart can't follow this print." / Bambu Connect: "Finish on your Mac: press Print in Bambu Connect." | passive | |
+| `project.updated` | A project's Status (later, its settings) changed, on either device (PR 8a) | *Title* | "Project updated" | none | `data.keys`: what changed, e.g. `["status"]` |
 
 `notify` is the default level from PRD §9.1. The Mac app applies its own Settings → Notifications switches on top; progress events are off by default on the Mac.
 

@@ -148,7 +148,7 @@ export function createControlDispatcher(services: ControlServices) {
         case 'status.get': return {protocolVersion:1,companionVersion:services.companionVersion,transport:auth.transport,
           pairedDeviceCount:(await auth.listDevices()).length,capabilities:{capture:!!capture?.captures,cleanup:!!capture?.scanProcessing,printerHandoff:!!printHandoff,nearbyPairing:!!services.nearby,
             objectsCreate:!!services.objects,printSettings:!!services.objects?.printSettingsAvailable,printControl:!!services.objects?.printSettingsAvailable,
-            events:!!services.events&&!!services.liveActivityTokens,structuredPasses:!!services.objects,genericConfirmations:!!services.objects,materialChoice:!!services.objects}};
+            events:!!services.events&&!!services.liveActivityTokens,structuredPasses:!!services.objects,genericConfirmations:!!services.objects,materialChoice:!!services.objects,projectSettings:!!services.objects}};
         case 'devices.list': {
           const devices = await auth.listDevices();
           const legacy = await auth.legacyDeviceIds?.() ?? new Set<string>();
@@ -218,6 +218,20 @@ export function createControlDispatcher(services: ControlServices) {
           return {answered:true};
         }
         case 'doors.prepare': return await prepareDoor(parameters[method].parse(raw));
+        case 'objects.settings.get': case 'objects.settings.set': {
+          const objects = services.objects;
+          if (!objects) throw new ControlFailure('unavailable');
+          try {
+            if (method === 'objects.settings.get') return {settings: {status: (await import('./objects/service.js')).projectStatus(await objects.get(parameters[method].parse(raw).id))}};
+            const {id, status} = parameters[method].parse(raw);
+            const updated = await objects.setStatus(id, status);
+            return {settings: {status: (await import('./objects/service.js')).projectStatus(updated)}, object: {...publicObject(updated), directory: objects.dir(updated.id)}};
+          } catch (error) {
+            if (error instanceof ObjectNotFoundError) throw new ControlFailure('not-found');
+            if (error instanceof InvalidStateError) throw new ControlFailure('conflict', error.message);
+            throw error;
+          }
+        }
         case 'objects.list': case 'objects.printers': case 'objects.filaments': case 'objects.selectPrinter': case 'objects.get': case 'objects.passActivity': case 'objects.start': case 'objects.delete': case 'objects.correct': case 'objects.answerCloseup': case 'objects.print': case 'objects.answerPlate': case 'objects.answerPrintConfirmation':
         case 'objects.create': case 'objects.addFile':
         case 'objects.estimate': case 'objects.pausePrint': case 'objects.resumePrint': case 'objects.cancelPrint': case 'objects.camera': case 'printers.camera': case 'settings.get': case 'settings.set': {

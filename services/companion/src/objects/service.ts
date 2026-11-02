@@ -6,7 +6,7 @@ import {promisify} from 'node:util';
 import {basename, extname, isAbsolute, join} from 'node:path';
 import {DispatchedPrintError, PrinterMcpError, readPrintReport, routeArgs, sliceEstimate,
   type PrintProgress, type PendingElicitation, type PrinterHandoffConfig, type PrinterSelection, type PrinterSlicer, type PrintReport, type PrinterSession} from '@scan-to-make/printer-handoff';
-import type {PrintEstimate, PrintSettings} from '@scan-to-make/contracts/counterpart';
+import type {PrintEstimate, PrintSettings, ProjectStatus} from '@scan-to-make/contracts/counterpart';
 import {PrintMonitorRunner, matchJob, milestonesFor, type EventDraft, type MonitorClock, type MonitorEnd, type MonitorTarget} from '../printing/monitor.js';
 import {CameraFrames, CameraUnavailableError, type CameraFrame} from '../printing/camera.js';
 import {sliceOverrides, settingsUnsupported} from '../printing/print-settings.js';
@@ -165,6 +165,15 @@ export function passKind(object: Pick<StmObject, 'kind' | 'scan' | 'capture' | '
   return object.instructions?.trim() ? 'fit' : 'copy';
 }
 
+/** PRD §5.4: the Status Project Settings shows, from the project's state and what the person set. */
+export function projectStatus(object: Pick<StmObject, 'state' | 'archived' | 'outcome'>): ProjectStatus {
+  if (object.archived) return 'archived';
+  if (object.state === 'confirmed') return 'works';
+  if (object.outcome === 'needs-changes') return 'needs-changes';
+  if (object.state === 'printed' || object.state === 'sent') return 'printed';
+  return 'not-printed';
+}
+
 export class ObjectService {
   readonly #deps: ObjectServiceDeps;
   readonly #running = new Map<string, Promise<StmObject>>();
@@ -206,6 +215,37 @@ export class ObjectService {
   async updateSettings(patch: {milestones?: 'off' | '50' | '25-50-75' | 'every-10'}) {
     if (!this.#deps.settings) throw new InvalidStateError('Settings are unavailable on this Mac.');
     return this.#deps.settings.update(patch);
+  }
+
+  /**
+   * PRD §5.4 Status, set by hand at any time (for example to mark something done that printed elsewhere):
+   * `works` → state `confirmed`; `printed`; `not-printed` → `ready`; `needs-changes`; `archived` hides it, keeping everything.
+   */
+  setStatus(id: string, status: ProjectStatus): Promise<StmObject> {
+    return this.#gate(id, async () => {
+      const object = await this.get(id);
+      // Already there (the state itself, not just the label: a sent project marked printed is a real change).
+      const clean = !object.archived && !object.outcome;
+      const there = {works: object.state === 'confirmed' && !object.archived, printed: object.state === 'printed' && clean, archived: !!object.archived,
+        'needs-changes': object.outcome === 'needs-changes' && !object.archived,
+        'not-printed': clean && (object.current ? object.state === 'ready' : !['printed', 'confirmed', 'sent'].includes(object.state))}[status];
+      if (there) return object;
+      if (object.state === 'touching-up' || object.state === 'printing') throw new InvalidStateError('Wait until the current step finishes.');
+      if ((status === 'works' || status === 'printed') && !object.current) throw new InvalidStateError("There's no model yet, so it can't be marked printed.");
+      const updated = await this.#deps.store.update(id, o => {
+        const {outcome: _outcome, archived: _archived, ...rest} = o;
+        switch (status) {
+          case 'archived': return {...o, archived: true};
+          case 'works': return {...rest, state: 'confirmed', outcome: 'works'};
+          case 'printed': return {...rest, state: 'printed'};
+          // Without a model, only the flags clear: a draft stays a draft.
+          case 'not-printed': return {...rest, ...(o.current ? {state: 'ready' as const} : {})};
+          case 'needs-changes': return {...rest, outcome: 'needs-changes', ...(o.state === 'confirmed' ? {state: 'printed' as const} : {})};
+        }
+      });
+      await this.#emit({id: randomUUID(), type: 'project.updated', projectId: id, data: {keys: ['status']}});
+      return this.#changed(updated);
+    });
   }
 
   create(instructions?: string, kind?: 'fit' | 'copy') { return this.#deps.store.create(instructions, kind).then(o => this.#changed(o)); }

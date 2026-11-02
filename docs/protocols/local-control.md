@@ -68,6 +68,7 @@ The Mac app shows the same projects as the phone and drives them through these m
 | `printControl` | `objects.pausePrint`, `objects.resumePrint`, `objects.cancelPrint`, `objects.camera`, `printers.camera`, the print monitor | PR 2 |
 | `events` | `events.wait`, `liveActivity.tokens`, device `model` and `lastSeenAt`, object `status` | PR 3 |
 | `structuredPasses` | object `title`, `kind`, `ask`, `current.changes`, pass `stages` and `estimate`, the design engine | PR 4 |
+| `projectSettings` | `objects.settings.get`/`objects.settings.set` (Status), object `settings.status`, the `confirmed` phase, `project.updated`. Also in `GET /healthz` `capabilities`. | PR 8a |
 | `genericConfirmations` | `printConfirmation.fields[]` may be text, number, integer and choice fields as well as yes/no, and `objects.answerPrintConfirmation` takes and checks those answers (below). The phone reads the same flag from `GET /healthz` `capabilities` ([objects-api.md](objects-api.md)). | PR 5 |
 | `materialChoice` | `objects.print` `colour: {material}` is accepted on every printer ("What's loaded?"): sliced with a profile the printer reports for that material, or refused with a sentence saying what to do. Also in `GET /healthz` `capabilities`. | PR 5 |
 
@@ -79,6 +80,8 @@ Destination `capabilities.materialChoice` (PR 5) says the same per printer; what
 |---|---|---|---|
 | `objects.list` | `{}` | `{objects: [object]}` | |
 | `objects.get` | `{id}` | `{object}` | |
+| `objects.settings.get` | `{id}` | `{settings: {status}}` | PR 8a |
+| `objects.settings.set` | `{id, status: "not-printed"\|"printed"\|"works"\|"needs-changes"\|"archived"}` | `{settings, object}`; as `PATCH /v1/objects/<id>/settings` (objects-api.md). A refusal is `conflict` with its sentence. | PR 8a |
 | `objects.create` | `{instructions?: string ≤ 8000, kind?: "fit"\|"copy"}` | `{object}` (`kind` from PR 4) | PR 1 |
 | `objects.addFile` | `{id, kind: "photos"\|"scan", path}` | `{object}` | PR 1 |
 | `objects.start` | `{id}` | `{object}` | |

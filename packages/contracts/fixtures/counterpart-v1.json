@@ -704,5 +704,31 @@
     "updatedAt": "2026-11-01T18:10:00.000Z"
    }
   ]
- }
+ },
+ "projectEvents": [
+  {
+   "v": 1,
+   "seq": 21,
+   "id": "00000000-0000-4000-8000-000000000021",
+   "at": "2026-11-02T05:00:00.000Z",
+   "type": "project.updated",
+   "projectId": "3f1c2a9e-5b7d-4e21-9a6f-0c8d1e2f3a4b",
+   "title": "Mic mount",
+   "body": "Marked as works",
+   "notify": "none",
+   "data": {
+    "keys": [
+     "status"
+    ]
+   }
+  }
+ ],
+ "newStatuses": [
+  {
+   "phase": "confirmed",
+   "text": "It works",
+   "symbol": "checkmark.circle.fill",
+   "tint": "green"
+  }
+ ]
 }

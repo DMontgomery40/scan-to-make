@@ -37,6 +37,8 @@ Wire types are zod schemas in `packages/contracts/src/counterpart.ts` (`@scan-to
 | `GET /v1/objects/<id>` | READ | | `{object}` |
 | `PATCH /v1/objects/<id>` | WRITE | `{instructions}`; only while `state` is `new` | `{object}` |
 | `DELETE /v1/objects/<id>` | WRITE | | `{deleted: true}`; 409 while a pass or print runs |
+| `GET /v1/objects/<id>/settings` | READ | | `{settings: {status}}` (PR 8a). Project Settings; this version has Status. |
+| `PATCH /v1/objects/<id>/settings` | WRITE | `{status: "not-printed"\|"printed"\|"works"\|"needs-changes"\|"archived"}`; other keys are 400 for now | `{settings, object}`. Status set by hand, any time (PRD §5.4): `works` makes the state `confirmed` ("It works", Done on Home); `printed`; `not-printed` makes it `ready`; `needs-changes`; `archived` hides it from Home, keeping everything. 409 while a pass or print runs, or (for works/printed/not-printed) before there is a model. Emits `project.updated`. |
 | `PUT /v1/objects/<id>/scan` | WRITE | The scan's bytes (≤ 64 MiB). Optional `?name=scan.usdz\|scan.stl\|scan.3mf` (PR 1; default `scan.usdz`) | `{object}`; only while `state` is `new` |
 | `POST /v1/objects/<id>/photos?name=<file>` | WRITE | JPEG, PNG or HEIC bytes (≤ 25 MiB) | `{object}`. From PR 1 photos are accepted in every state except while the project is being deleted; photos added after a pass started are used by the next pass ("late photos"). |
 | `POST /v1/objects/<id>/capture?name=NNNN.heic`, `…/capture-depth?name=NNNN.depth.plist` | WRITE | In-hand capture frames | `{object}` |
@@ -166,7 +168,8 @@ Live, P1S through bambu-printer-mcp 1.1.46: cold first frame 5.3 s; then 0 to 1 
 
 | Field | Type | Status |
 |---|---|---|
-| `status` | `ObjectStatus` `{phase, text, symbol, tint}`: the PRD §4 state line, written by the companion. Show `text` as is. `phase` is `sending`, `working`, `needs-you`, `ready`, `preparing`, `printing`, `printed`, `failed` or `sent` (symbol `paperplane`, tint `secondary`). | PR 3 |
+| `status` | `ObjectStatus` `{phase, text, symbol, tint}`: the PRD §4 state line, written by the companion. Show `text` as is. `phase` is `sending`, `working`, `needs-you`, `ready`, `preparing`, `printing`, `printed`, `failed` or `sent` (symbol `paperplane`, tint `secondary`). From PR 8a also `confirmed` ("It works", symbol `checkmark.circle.fill`, tint `green`). | PR 3 |
+| `settings.status` | `not-printed`, `printed`, `works`, `needs-changes` or `archived`: Project Settings' Status (PRD §5.4), from the state and what the person set. `archived: true` and `outcome` are kept on the object too. | PR 8a |
 | `title` | The short title ("Mic mount"). Always a string: generated at the first pass, and for a project from before titles the first time it is listed (once, in the background, then saved). Until then it is the request's first six words ("A mount for my mic stand…"), or "Your scan" / "Your project" without a request. | PR 4 |
 | `kind` | `fit` (make something that fits) or `copy` (copy an object). Set at creation (send it: the phone's New flow knows which job it is), else from the first pass: a project with a scan or a handheld capture is a `copy` even with a request ("Copy this. Close up the bottom."), and a request with photos alone is a `fit`. A copy is always cleaned up in Blender; a design uses Fusion when the printer MCP's `fusion_mcp_status` reports it connected and a new design opens, else Blender. | PR 4 |
 | `ask` | `Ask` `{id, question, photo?, region?, answers, status, askedAtMs}` while `state` is `needs-closeup` (and kept, `status: "answered"`, after). The old `question.closeup` is still set for older apps. | PR 4 |
