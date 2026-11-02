@@ -11,6 +11,13 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
     @State private var checking = false
+    /// The Mac's own settings, shown here as they are there.
+    @State private var macSettings: MacSettingsModel
+
+    init(store: ProjectsStore) {
+        self.store = store
+        _macSettings = State(initialValue: MacSettingsModel(store: store))
+    }
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -34,6 +41,7 @@ struct SettingsView: View {
                     }
                     .padding(.vertical, 2)
                     .accessibilityElement(children: .combine)
+                    .accessibilityIdentifier("mac-status")
                     GlassEffectContainer(spacing: 8) {
                         HStack(spacing: 8) {
                             Button { check() } label: { Text("Check Connection").minimumScaleFactor(0.75).frame(maxWidth: .infinity) }
@@ -51,11 +59,13 @@ struct SettingsView: View {
                             SettingsIcon(symbol: "bell.badge.fill", tint: .red)
                             VStack(alignment: .leading, spacing: 1) {
                                 Text("Notifications")
-                                Text(NotificationChoices.summary).font(.caption).foregroundStyle(.secondary)
+                                Text(notificationSummary).font(.caption).foregroundStyle(.secondary)
                             }
                         }
                     }
                 }
+
+                MacSettingsSections(model: macSettings)
 
                 Section {
                     link(CounterpartIdentifiers.docsSite, SettingsLinkRow(symbol: "book.fill", tint: .blue, title: "Guide", detail: nil))
@@ -83,8 +93,14 @@ struct SettingsView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button(role: .confirm) { dismiss() } } }
             .navigationDestination(for: String.self) { page in
-                if page == "about" { AboutView() } else { NotificationSettingsView(store: store) }
+                if page == "about" { AboutView() }
+                // A Mac that keeps every setting shows this iPhone's and its own switches; an older one, these.
+                else if macSettings.settings?.isFull == true { MacNotificationSettings(model: macSettings) }
+                else { NotificationSettingsView(store: store) }
             }
+            .task { await macSettings.load() }
+            .onChange(of: store.settingsChanges) { Task { await macSettings.load() } }
+            .refreshable { await macSettings.load(); await store.loadPrinters() }
         }
         #if DEBUG
         .task {
@@ -92,6 +108,14 @@ struct SettingsView: View {
             app.debugSettings = nil
         }
         #endif
+    }
+
+    /// "All on · progress at halfway", from the Mac's settings when it keeps them.
+    private var notificationSummary: String {
+        guard let settings = macSettings.settings, settings.isFull, let id = macSettings.deviceId else { return NotificationChoices.summary }
+        let off = SettingsSchema.notificationTypes.filter { !settings.phoneNotifies($0.id, deviceId: id) }.count
+        let state = off == 0 ? "All on" : off == SettingsSchema.notificationTypes.count ? "All off" : "\(SettingsSchema.notificationTypes.count - off) of \(SettingsSchema.notificationTypes.count) on"
+        return "\(state) · progress \(SettingsSchema.milestoneLabel(settings.milestones).lowercased())"
     }
 
     private func link<Label: View>(_ url: URL, _ label: Label) -> some View {

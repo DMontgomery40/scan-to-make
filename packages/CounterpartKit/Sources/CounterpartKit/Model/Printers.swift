@@ -18,10 +18,16 @@ public struct PrinterDestination: Codable, Identifiable, Equatable, Hashable, Se
     public var stateCheckedAt: String?
     /// What its installed MCP can do. Absent until the MCP has connected once since the Mac started (PR 1).
     public var capabilities: Capabilities?
+    /// The MCP install that serves it, for `POST /v1/printers/mcp/<mcpId>/update` (PRD §8.10).
+    public var mcpId: String?
 
     public struct Capabilities: Codable, Equatable, Hashable, Sendable {
         public struct Server: Codable, Equatable, Hashable, Sendable { public var name: String; public var version: String }
-        public struct Update: Codable, Equatable, Hashable, Sendable { public var message: String; public var package: String?; public var command: [String]? }
+        public struct Update: Codable, Equatable, Hashable, Sendable {
+            public var message: String; public var package: String?; public var command: [String]?
+            /// The newest published version, when the Mac knows it (PRD §8.10).
+            public var latestVersion: String?
+        }
         public var server: Server?
         public var contract: String?
         public var progress: Bool
@@ -188,3 +194,23 @@ public struct PrintChoice: Equatable, Sendable {
         String(format: "%.2f mm layers · %d walls · %d%% infill", quality.layerHeightMm, strength.walls, strength.infillPercent)
     }
 }
+
+extension PrinterDestination {
+    /// "1.4.2 → 1.5.0" when the installed MCP is behind the newest version; nil when it's current or unknown.
+    public var updateWords: String? {
+        guard let installed = capabilities?.server?.version, let latest = capabilities?.update?.latestVersion,
+              Self.isOlder(installed, than: latest) else { return nil }
+        return "\(installed) → \(latest)"
+    }
+
+    /// Dotted version order: 1.4.10 is newer than 1.4.9.
+    public static func isOlder(_ a: String, than b: String) -> Bool {
+        let x = a.split(separator: ".").map { Int($0.prefix { $0.isNumber }) ?? 0 }, y = b.split(separator: ".").map { Int($0.prefix { $0.isNumber }) ?? 0 }
+        for i in 0..<max(x.count, y.count) {
+            let l = i < x.count ? x[i] : 0, r = i < y.count ? y[i] : 0
+            if l != r { return l < r }
+        }
+        return false
+    }
+}
+

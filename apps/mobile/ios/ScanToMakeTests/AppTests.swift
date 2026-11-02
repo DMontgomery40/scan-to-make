@@ -84,5 +84,60 @@ import CounterpartKit
         XCTAssertEqual(FirstRunStep.step(statusKnown: fresh.status != nil, paired: !fresh.needsMac, holdPairing: false, welcomed: false,
                                          justPaired: false, notificationsUndecided: nil, askedNotifications: false), .welcome)
     }
+
+    /// Codex on #218: a refused AI choice keeps its reason and isn't tested; a read that works clears a failed read,
+    /// but not a refusal.
+    func testMacSettingsKeepARefusalAndDropAFailedReadOnceTheMacAnswers() async {
+        let mac = SettingsMac()
+        let pairing = PairingClient(store: PairingStore(store: Fixtures.store()), transport: mac)
+        let store = ProjectsStore(mac: MacConnection(client: CompanionClient(pairing: pairing, transport: mac)), pairing: pairing)
+        let model = MacSettingsModel(store: store)
+
+        mac.answers = false
+        await model.load()
+        XCTAssertNotNil(model.problem, "a failed read says so")
+        mac.answers = true
+        await model.load()
+        XCTAssertNil(model.problem, "the Mac answers again: the old failure goes")
+        XCTAssertEqual(model.settings?.ai?.choice?.kind, "claude-code")
+
+        mac.refuseAI = true
+        await model.chooseAI("codex-cli")
+        XCTAssertEqual(model.problem, SettingsMac.refusal)
+        XCTAssertFalse(mac.requests.contains("POST /v1/settings/ai/test"), "a refused choice isn't tested")
+        await model.load()
+        XCTAssertEqual(model.problem, SettingsMac.refusal, "a read keeps the refusal on screen")
+
+        mac.refuseAI = false
+        await model.chooseAI("codex-cli")
+        XCTAssertNil(model.problem)
+        XCTAssertTrue(mac.requests.contains("POST /v1/settings/ai/test"), "an accepted choice is tested")
+    }
 }
 
+/// A Mac that serves settings, can stop answering, and can refuse an AI choice.
+private final class SettingsMac: HTTPTransport, @unchecked Sendable {
+    static let refusal = "The AI choice changed on another device. Choose again."
+    private let lock = NSLock()
+    private var _answers = true, _refuseAI = false, _requests: [String] = []
+    var answers: Bool { get { lock.withLock { _answers } } set { lock.withLock { _answers = newValue } } }
+    var refuseAI: Bool { get { lock.withLock { _refuseAI } } set { lock.withLock { _refuseAI = newValue } } }
+    var requests: [String] { lock.withLock { _requests } }
+
+    func send(_ request: URLRequest, trust: TrustPolicy, limit: Int, resourceTimeout: TimeInterval) async throws -> HTTPReply {
+        let line = "\(request.httpMethod ?? "GET") \(request.url?.path ?? "")"
+        let (answers, refuseAI) = lock.withLock { _requests.append(line); return (_answers, _refuseAI) }
+        guard answers else { throw URLError(.cannotConnectToHost) }
+        func json(_ value: Any, _ status: Int = 200) -> HTTPReply { HTTPReply(status: status, body: (try? JSONSerialization.data(withJSONObject: value)) ?? Data()) }
+        let settings: [String: Any] = ["milestones": "50", "ai": ["revision": "r1", "choice": ["kind": "claude-code"], "check": ["state": "connected"]]]
+        switch line {
+        case "GET /v1/settings": return json(["settings": settings])
+        case "PATCH /v1/settings":
+            if refuseAI { return json(["error": ["code": "revision-changed", "message": Self.refusal]], 409) }
+            return json(["settings": ["milestones": "50", "ai": ["revision": "r2", "choice": ["kind": "codex-cli"], "check": ["state": "connected"]]]])
+        case "POST /v1/settings/ai/test": return json(["check": ["state": "checking"]], 202)
+        case "GET /v1/devices": return json(["devices": []])
+        default: return json(["error": ["code": "not-found", "message": "Not found"]], 404)
+        }
+    }
+}
