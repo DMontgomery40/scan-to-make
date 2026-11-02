@@ -122,7 +122,7 @@ Screenshot, empty state: `screens/phone-home-empty.jpg`.
 - **Needs you.** One card for each open Ask, with the question, its picture, and the **Camera**, **Photos** and **Best guess** buttons inline. You can answer without opening the project.
 - **All projects.** A two-column grid of real renders, each with a status capsule. Ready projects come first, then the rest by recency.
 - **Bottom toolbar:**
-  - search ("Projects, printers, notes"), using the iOS 27 bottom search placement;
+  - search ("Projects, printers, notes"), using the iOS 27 bottom search placement. It matches every word typed, anywhere in: the title, the request, every follow-up note, the "What changed" lines, Ask questions and answers, the printer, the filament, and a published model's name and designer. David, 2026-11-02: "search doesn't really work, it doesn't search notes or anything";
   - a prominent **New** button at the bottom trailing edge, in the accent colour. It's the only prominent control on the screen.
   - If a build uses a tab bar, New becomes `Tab(role: .prominent)` (new in iOS 27). Either way it stays bottom-trailing.
 - **Empty state.** Show the two jobs as two illustrated cards ("Make something that fits" and "Copy something"), each one tap from the New sheet with that job preselected.
@@ -135,7 +135,7 @@ Screenshot, empty state: `screens/phone-home-empty.jpg`.
 Screenshot: `screens/phone-new.jpg`.
 
 **Layout.** A large sheet:
-- **What do you need?** A multiline field with dictation. The hint: "Describe it, scan it, or both. Your Mac can look up published sizes."
+- **What do you need?** A multiline field. Dictation is the keyboard's own mic; there is no separate mic button. The hint: "Describe it, scan it, or both. Your Mac can look up published sizes."
 - **Show it.** Five choices, all visible at once:
   - **On a scan rig** (a full-width card first, marked *Best quality*): "Clamp your phone to the 360° rig and swing it around." Underneath it: "Don't have one? Print the rig by Kass 3D →", which opens the model's MakerWorld page (§11.1).
   - **Scan it**: walk around it; LiDAR measures it.
@@ -189,7 +189,7 @@ Screenshots:
   - **What you sent:** your request, every photo and scan full size, and your follow-ups with times.
   - **Activity:** the passes as a stage timeline. The current stage pulses, and each step expands to show the worker's plain-language note and tool lines.
 - **Bottom bar:**
-  - an **Ask for changes…** field with dictation and attachments, which sends a new pass with your text;
+  - an **Ask for changes…** field with attachments, which sends a new pass with your text. Dictation is the keyboard's own mic. No icon is ever drawn that doesn't do something: David, 2026-11-02, "the microphone button in the diaglogue box, is decoration and hitting it doesn't do anything… just kinda janky to show fake icons";
   - **Print**, shown when the project is ready.
   - When the project needs you, the Ask card replaces this bar.
 - **Menu (•••):**
