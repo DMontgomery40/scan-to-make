@@ -94,7 +94,7 @@ class LocalWorkflowTests(unittest.TestCase):
 
     def test_steps_keep_environment_cwd_failure_handler_and_pipefail(self):
         with tempfile.TemporaryDirectory() as folder:
-            root=Path(folder); (root/'sub').mkdir()
+            root=Path(folder).resolve(); (root/'sub').mkdir()
             job={'workflow':'fixture','key':'test','matrix':{},'env':{'FOO':'workflow'},'defaults':{},'job':{
                 'runs-on':'ubuntu-latest','env':{'FOO':'job'},'defaults':{'run':{'working-directory':'sub'}},'steps':[
                 {'run':'test "$FOO" = job; echo "NEXT=from-first" >> "$GITHUB_ENV"; printf "LONG<<EOF\\na\\nb\\nEOF\\n" >> "$GITHUB_ENV"'},
@@ -108,6 +108,34 @@ class LocalWorkflowTests(unittest.TestCase):
             self.assertEqual(result['status'],'FAIL')
             self.assertFalse((root/'sub/must-not-exist').exists()); self.assertTrue((root/'sub/failure-ran').exists())
             self.assertEqual(json.loads((root/'logs/result.json').read_text())['status'],'FAIL')
+
+    def test_mac_jobs_hold_the_ios_lock_and_linux_jobs_do_not(self):
+        probe = 'python3 -c "import fcntl,os,sys\nf=open(os.environ[\'STM_IOS_LOCK\'],\'a\')\ntry: fcntl.flock(f,fcntl.LOCK_EX|fcntl.LOCK_NB)\nexcept BlockingIOError: sys.exit(7)"'
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder).resolve()
+            with patch.dict(os.environ,{'STM_IOS_LOCK':str(root/'ios.lock')}), patch.object(ci.platform,'system',return_value='Darwin'):
+                for label, expected in (('macos-27','PASS'),('xcode-27.2','PASS'),('ubuntu-latest','FAIL')):
+                    job={'workflow':'fixture','key':label,'matrix':{},'env':{},'defaults':{},'job':{'runs-on':label,'steps':[{'run':'set +e; '+probe+'; test $? -eq 7'}]}}
+                    result=ci.execute_job(job,root,root/('logs-'+label))
+                    self.assertEqual(result['status'],expected,label)
+                self.assertEqual((root/'ios.lock').read_text(),'')
+
+    def test_ios_lock_command_waits_for_the_holder_then_runs(self):
+        import fcntl
+        with tempfile.TemporaryDirectory() as folder:
+            lock=Path(folder)/'ios.lock'; marker=Path(folder)/'ran'
+            env=dict(os.environ,STM_IOS_LOCK=str(lock))
+            with lock.open('a+') as held:
+                fcntl.flock(held,fcntl.LOCK_EX); held.write('123 other-seat since 00:00:00\n'); held.flush()
+                child=subprocess.Popen([sys.executable,str(MODULE),'--ios-lock','touch',str(marker)],env=env,stdout=subprocess.PIPE,text=True)
+                try:
+                    child.wait(timeout=1.5); self.fail('ran without the lock')
+                except subprocess.TimeoutExpired: pass
+                self.assertFalse(marker.exists())
+                fcntl.flock(held,fcntl.LOCK_UN)
+            out,_=child.communicate(timeout=20)
+            self.assertEqual(child.returncode,0); self.assertTrue(marker.exists())
+            self.assertIn('held by: 123 other-seat',out)
 
     def test_unknown_action_fails_job_and_preserves_error(self):
         with tempfile.TemporaryDirectory() as folder:

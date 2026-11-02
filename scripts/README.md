@@ -32,3 +32,12 @@ The private directory must contain `codex-review-rubric.md` and `cursor-bugbot-r
 
 The first review uses native `codex review --base origin/main`, which supplies its stock rubric. The second supplies the stored Cursor prompt verbatim plus the diff to Muse Wonder Full at xhigh; for a Muse author it uses Codex in read-only mode instead. `--author` is required so the second review comes from another lab. CLI authentication must already be configured. Review processes run locally and synchronously; they do not push or request GitHub reviews. Read both logs and resolve actionable findings: successful process exit means the review completed, not that it found no bugs.
 
+
+## One iOS job at a time on the Mac
+
+Every `macos`/`xcode-` job, whether started on the Mac or sent from a Linux box, holds `~/.stm-ios.lock` (flock) for its whole run; a second one waits and prints who holds it. Wrap any other xcodebuild or simulator run the same way:
+
+```
+python3 scripts/ci_local.py --ios-lock xcodebuild test ...
+/usr/bin/lockf -k ~/.stm-ios.lock xcodebuild test ...   # same lock
+```
