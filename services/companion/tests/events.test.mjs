@@ -107,7 +107,8 @@ test('every event type has words within the limits, and the state line matches t
   assert.equal(eventWords('print.milestone', {progress: 25, remainingSec: 3900}, context).body, '1 h 5 min left · Bambu Lab P1S');
   assert.equal(eventWords('print.paused', {problems: [{code: 'x', message: 'AMS slot 1 ran out of filament'}]}, context).body, 'AMS slot 1 ran out of filament');
   assert.equal(eventWords('print.not-started', undefined, context).title, "Bambu Lab P1S didn't start Mic mount");
-  assert.equal(objectStatus({state: 'new', photos: []}).text, 'Sending to your Mac');
+  assert.deepEqual(objectStatus({state: 'new', photos: []}), {phase: 'draft', text: 'Add photos or a scan', symbol: 'square.and.pencil', tint: 'secondary'});
+  assert.equal(objectStatus({state: 'new', capture: ['0001.heic']}).text, 'Draft saved · finish sending to begin');
   assert.equal(objectStatus({state: 'ready', current: {sizeMm: [60.2, 45.1, 21.7]}}).text, 'Ready to print · 60 × 45 × 22 mm');
   assert.equal(objectStatus({state: 'printing', print: {destination: {name: 'Bambu Lab P1S'}}}).phase, 'preparing');
   const printing = objectStatus({state: 'printing', print: {destination: {name: 'Bambu Lab P1S'}, dispatchedAt: '2026-11-01T18:00:00Z',

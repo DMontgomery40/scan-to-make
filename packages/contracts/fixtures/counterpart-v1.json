@@ -731,6 +731,12 @@
    "text": "Done · it works",
    "symbol": "checkmark.circle.fill",
    "tint": "green"
+  },
+  {
+   "phase": "draft",
+   "text": "Add photos or a scan",
+   "symbol": "square.and.pencil",
+   "tint": "secondary"
   }
  ],
  "macEvents": [
