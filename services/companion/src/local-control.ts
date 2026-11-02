@@ -35,6 +35,8 @@ async function removeStaleSocket(path: string) {
 export function methodDeadlineMs(method: ControlMethod, params: unknown): number | undefined {
   if (method === 'objects.correct') return 25_000; // a completion classification is bounded to 20 s
   if (method === 'objects.estimate') return 180_000;
+  // It answers within 7 s (a slow npm is reported, and asked again next time); the update runs after the reply.
+  if (method === 'printers.updateMcp') return 15_000;
   // The printer MCP may ask its own confirmation; the call waits up to 120 s for it.
   if (method === 'objects.pausePrint' || method === 'objects.resumePrint' || method === 'objects.cancelPrint') return 130_000;
   if (method === 'events.wait') {

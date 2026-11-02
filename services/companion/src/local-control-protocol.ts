@@ -42,6 +42,7 @@ export const parameters = {
   'events.wait': z.strictObject({after: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER), timeoutMs: z.number().int().min(0).max(25000).optional(), limit: z.number().int().min(0).max(500).optional()}),
   'liveActivity.tokens': empty,
   'pairing.create': z.strictObject({login: z.string().min(1).max(256).optional()}),
+  'pairing.icloudToken': empty,
   'pairing.isActive': z.strictObject({code: z.string().regex(/^[A-Za-z0-9_-]{32}$/)}),
   'nearby.list': empty,
   'nearby.answer': z.strictObject({id: z.uuid(), allow: z.boolean()}),
@@ -76,6 +77,7 @@ export const parameters = {
   'objects.cancelPrint': z.strictObject({id: z.uuid()}),
   'objects.camera': z.strictObject({id: z.uuid()}),
   'printers.camera': z.strictObject({destinationId: z.string().min(1).max(256)}),
+  'printers.updateMcp': z.strictObject({mcpId: z.string().regex(/^mcp-[0-9a-f]{16}$/), fresh: z.boolean().optional()}),
   'settings.get': empty,
   'settings.set': z.strictObject({milestones: MilestonesSchema}),
   'objects.answerPrintConfirmation': z.strictObject({id: z.uuid(), confirmationId: z.uuid(), answer: z.union([

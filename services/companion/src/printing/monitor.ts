@@ -26,7 +26,8 @@ export const MONITOR = {
 export interface EventDraft {
   id: string;
   type: CounterpartEventType;
-  projectId: string;
+  /** Absent for an event about the Mac, not a project (mcp.update.*). */
+  projectId?: string;
   printId?: string;
   destinationId?: string;
   printerName?: string;
@@ -34,7 +35,7 @@ export interface EventDraft {
   /** Relative to the project directory. */
   frame?: string;
   /** Facts only the words need (they end up in title and body, not in `data`). */
-  detail?: {item?: string; question?: string; size?: string; reason?: string; message?: string; title?: string};
+  detail?: {item?: string; question?: string; size?: string; reason?: string; message?: string; title?: string; package?: string};
 }
 
 export interface MonitorClock {
