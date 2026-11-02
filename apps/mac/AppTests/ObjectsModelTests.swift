@@ -392,4 +392,16 @@ private func project(_ item: [String: Any]) throws -> Project {
         XCTAssertFalse(model.apply(read: stale, [try project(item("s", "ready"))], [:]))
         XCTAssertEqual(model.objects.first?.state.rawValue, "touching-up")
     }
+
+    /// A poll whose list loses to a newer read still reads the printers and recovers the availability.
+    func testARefreshThatLosesToANewerReadStillDoesTheRest() async throws {
+        let companion = FakeObjects()
+        await companion.set([item("s", "ready")])
+        let model = ObjectsModel(companion: companion)
+        XCTAssertTrue(model.apply(read: model.startRead() + 100, [try project(item("s", "touching-up"))], [:]))
+        await model.refresh()
+        XCTAssertEqual(model.objects.first?.state.rawValue, "touching-up", "the newer read stays")
+        XCTAssertEqual(model.availability, .ready)
+        XCTAssertEqual(model.selection, "s", "the first read still picks the top project")
+    }
 }

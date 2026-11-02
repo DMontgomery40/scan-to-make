@@ -291,10 +291,13 @@ struct SocketObjects: ObjectsCompanion {
     @discardableResult func refresh() async -> Double {
         do {
             let read = startRead()
-            let (list, extras) = try await companion.objectsWithExtras()
+            let (fetched, extras) = try await companion.objectsWithExtras()
             failures = 0
-            guard apply(read: read, list, extras) else { return objects.contains { $0.words.busy } ? Self.busyDelay : Self.idleDelay }
-            DownloadsWatcher.shared.follow(extras, titles: Dictionary(uniqueKeysWithValues: list.map { ($0.id, $0.words.title) }))
+            // A newer read may already be shown (the event relay's): this one's list is dropped, the rest still runs.
+            if apply(read: read, fetched, extras) {
+                DownloadsWatcher.shared.follow(extras, titles: Dictionary(uniqueKeysWithValues: fetched.map { ($0.id, $0.words.title) }))
+            }
+            let list = objects
             let catalog = try? await companion.printers()
             if printerCatalog != catalog { printerCatalog = catalog }
             if availability != .ready { availability = .ready }

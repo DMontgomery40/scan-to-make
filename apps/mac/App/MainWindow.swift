@@ -190,12 +190,16 @@ private struct Sidebar: View {
                 .contextMenu {
                     if object.words.printRunning && model.capabilities?.printControl == true {
                         let capabilities = model.printer(for: object)?.capabilities
-                        if object.print?.live?.state == "paused" {
-                            if capabilities?.resume ?? true { Button("Resume Print") { Task { await model.control(object.id, .resume) } } }
-                        } else if capabilities?.pause ?? true {
-                            Button("Pause Print") { Task { await model.control(object.id, .pause) } }
+                        // One command at a time, as on the project page: a second would be dropped while the first runs.
+                        Group {
+                            if object.print?.live?.state == "paused" {
+                                if capabilities?.resume ?? true { Button("Resume Print") { Task { await model.control(object.id, .resume) } } }
+                            } else if capabilities?.pause ?? true {
+                                Button("Pause Print") { Task { await model.control(object.id, .pause) } }
+                            }
+                            if capabilities?.cancel ?? true { Button("Stop Print…", role: .destructive) { stopping = object } }
                         }
-                        if capabilities?.cancel ?? true { Button("Stop Print…", role: .destructive) { stopping = object } }
+                        .disabled(model.working.contains(object.id))
                         Divider()
                     }
                     if model.capabilities?.projectSettings == true { ProjectStatusMenu(object: object, model: model) }
@@ -443,6 +447,7 @@ private struct StopPrintDialog: ViewModifier {
         content.confirmationDialog("Stop the print?", isPresented: Binding(get: { stopping != nil }, set: { if !$0 { stopping = nil } }),
                                    titleVisibility: .visible, presenting: stopping) { object in
             Button("Stop Printing", role: .destructive) { Task { await model.control(object.id, .cancel) } }
+                .disabled(model.working.contains(object.id))
             Button("Keep Printing", role: .cancel) {}
         }
     }
