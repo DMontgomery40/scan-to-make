@@ -48,6 +48,8 @@ struct PrintSheet: View {
     private var words: ObjectWords { object.words }
     private var uncertain: Bool { object.print?.uncertain == true }
     private var chosen: PrinterFilament? { filaments.first { $0.slot == slot } }
+    /// The current model's file version (a correction rewrites the same file), or the project's when it can't be read.
+    private var modelVersion: Double { object.modelURL.map { FileVersion.of($0, else: object.updatedAtMs) } ?? object.updatedAtMs }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -112,7 +114,9 @@ struct PrintSheet: View {
         .frame(width: 720)
         .tint(.filament)
         .task(id: printer?.id) { await loadFilaments() }
-        .task(id: "\(printer?.id ?? "")|\(quality)|\(strength)|\(object.current?.model ?? "")") { await loadEstimate() }
+        // The model's version too: a correction rewrites the same current/model.stl, and a refusal of the old one
+        // must not hold Print for the new one.
+        .task(id: "\(printer?.id ?? "")|\(quality)|\(strength)|\(object.current?.model ?? "")|\(modelVersion)") { await loadEstimate() }
     }
 
     // MARK: Printers
