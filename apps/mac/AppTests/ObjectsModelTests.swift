@@ -1,5 +1,6 @@
 import XCTest
 import CounterpartKit
+import RealityKit
 
 /// One companion's objects, as the control socket serves them.
 private actor FakeObjects: ObjectsCompanion {
@@ -429,6 +430,40 @@ private func project(_ item: [String: Any]) throws -> Project {
         XCTAssertEqual(fromBinary.positions, fromText.positions, "both encodings read the same triangles")
         XCTAssertNil(ModelMesh.stl(Data("not a model".utf8)))
         XCTAssertNil(ModelMesh.stl(binary.dropLast(10)), "a truncated binary file is refused, not half drawn")
+    }
+
+    func testNativePreviewKeepsEveryVertexNormalAndRenderedPixel() async throws {
+        // A non-coplanar corner makes incorrect strides, normals or index winding visible.
+        let positions: [SIMD3<Float>] = [[0,0,0],[0.1,0,0],[0,0.1,0], [0,0,0],[0,0.1,0],[0,0,0.1]]
+        let normals: [SIMD3<Float>] = [[0,0,1],[0,0,1],[0,0,1], [1,0,0],[1,0,0],[1,0,0]]
+        let mesh = ModelMesh(positions: positions, normals: normals)
+        let loaded = await mesh.resource()
+        let resource = try XCTUnwrap(loaded)
+        let buffers = try XCTUnwrap(resource.lowLevelMesh)
+        buffers.withUnsafeBytes(bufferIndex: 0) { bytes in
+            let values = bytes.bindMemory(to: Float.self)
+            for i in positions.indices {
+                XCTAssertEqual(Array(values[(i * 6)..<(i * 6 + 6)]), [positions[i].x, positions[i].y, positions[i].z, normals[i].x, normals[i].y, normals[i].z])
+            }
+        }
+        buffers.withUnsafeIndices { bytes in
+            XCTAssertEqual(Array(bytes.bindMemory(to: UInt32.self).prefix(positions.count)), Array(0..<UInt32(positions.count)))
+        }
+        var descriptor = MeshDescriptor()
+        descriptor.positions = MeshBuffers.Positions(positions)
+        descriptor.normals = MeshBuffers.Normals(normals)
+        descriptor.primitives = .triangles(Array(0..<UInt32(positions.count)))
+        let previous = try await MeshResource(from: [descriptor])
+        var material = PhysicallyBasedMaterial()
+        material.baseColor = .init(tint: .gray)
+        material.faceCulling = .none
+        let expected = await ModelPoster.image(key: "preview-descriptor", model: ModelEntity(mesh: previous, materials: [material]), yaw: 0.6, pitch: -0.35, fit: 0.15)
+        let actual = await ModelPoster.image(key: "preview-native", model: ModelEntity(mesh: resource, materials: [material]), yaw: 0.6, pitch: -0.35, fit: 0.15)
+        let oldBytes = try XCTUnwrap(expected?.dataProvider?.data) as Data
+        let newBytes = try XCTUnwrap(actual?.dataProvider?.data) as Data
+        XCTAssertEqual(oldBytes.count, newBytes.count)
+        XCTAssertGreaterThan(stride(from: 3, to: newBytes.count, by: 4).filter { newBytes[$0] > 240 }.count, 100)
+        XCTAssertLessThanOrEqual(zip(oldBytes, newBytes).map { abs(Int($0) - Int($1)) }.max() ?? 0, 1, "Only GPU channel rounding may differ; keep geometry, lighting and transparency")
     }
 
     func testTheSidebarGroupsEveryProjectAndStartsAtTheTop() async {

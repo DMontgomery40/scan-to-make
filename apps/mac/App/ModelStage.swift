@@ -134,7 +134,7 @@ struct ModelStage: View {
     }
 
     /// Loaded once per file version: going live again reuses the mesh instead of reading and building it again.
-    @MainActor private static let cache = ModelEntityCache(limit: 2)
+    @MainActor private static let cache = ModelEntityCache(limit: 1)
     @MainActor static func cached(_ url: URL, version: Double) async -> Entity? {
         await cache.load(key: "\(url.path)#\(version)") { await load(url) }
     }
@@ -143,11 +143,7 @@ struct ModelStage: View {
     @MainActor static func load(_ url: URL) async -> Entity? {
         if url.pathExtension.lowercased() == "stl" {
             guard let mesh = await Task.detached(priority: .userInitiated, operation: { ModelMesh.read(url) }).value else { return nil }
-            var descriptor = MeshDescriptor()
-            descriptor.positions = MeshBuffers.Positions(mesh.positions)
-            descriptor.normals = MeshBuffers.Normals(mesh.normals)
-            descriptor.primitives = .triangles(Array(0..<UInt32(mesh.positions.count)))
-            guard let resource = try? await MeshResource(from: [descriptor]) else { return nil }
+            guard let resource = await mesh.resource() else { return nil }
             var material = PhysicallyBasedMaterial()
             material.baseColor = .init(tint: NSColor(red: 0.58, green: 0.58, blue: 0.60, alpha: 1))
             material.roughness = 0.55
