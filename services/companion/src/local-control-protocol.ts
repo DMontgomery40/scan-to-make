@@ -37,6 +37,8 @@ export const parameters = {
   'jobs.list': z.strictObject({projectId: projectId.optional(), cursor: z.string().max(1024).optional(), limit: z.number().int().min(1).max(100).default(50)}),
   'devices.list': empty,
   'devices.remove': z.strictObject({deviceId: z.uuid()}),
+  'events.wait': z.strictObject({after: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER), timeoutMs: z.number().int().min(0).max(25000).optional(), limit: z.number().int().min(0).max(500).optional()}),
+  'liveActivity.tokens': empty,
   'pairing.create': z.strictObject({login: z.string().min(1).max(256).optional()}),
   'pairing.isActive': z.strictObject({code: z.string().regex(/^[A-Za-z0-9_-]{32}$/)}),
   'nearby.list': empty,
