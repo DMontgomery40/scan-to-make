@@ -39,7 +39,6 @@ enum NotificationSwitch: String, CaseIterable, Identifiable {
     }
 
     /// The order the switches appear in Settings, with Progress after First layer's down.
-    /// No plate switch: plate-clearance prompts are gone (main `ac44431`); the printer's own confirmation covers it.
     static let ordered: [NotificationSwitch] = [.ready, .ask, .confirm, .firstLayer, .paused, .done, .problem, .lost]
 }
 

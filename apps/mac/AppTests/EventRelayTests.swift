@@ -9,7 +9,7 @@ final class EventRelayTests: XCTestCase {
     private func event(_ type: String, minutesAgo: Double = 0, notify: String = "active", project: String = "p1", id: String = UUID().uuidString,
                        data: CounterpartEvent.Data? = nil, printId: String? = nil) -> CounterpartEvent {
         CounterpartEvent(seq: 1, id: id, at: ISO8601DateFormatter().string(from: now.addingTimeInterval(-minutesAgo * 60)), type: type,
-                         projectId: project, printId: printId, printerName: "P1S", title: "Mic mount is done", body: "Take it off the plate.",
+                         projectId: project, printId: printId, printerName: "P1S", title: "Mic mount is done", body: "Ready to collect.",
                          notify: notify, data: data)
     }
     private func prefs() throws -> NotificationPrefs {
@@ -32,7 +32,7 @@ final class EventRelayTests: XCTestCase {
     func testAMixedPageKeepsWhatItCanReadAndMovesPastTheRest() throws {
         let json = #"""
         {"events":[
-          {"v":1,"seq":41,"id":"e1","at":"2026-11-01T10:00:00Z","type":"print.done","projectId":"p1","printId":"print-1","title":"Mic mount is done","body":"Take it off the plate.","notify":"active"},
+          {"v":1,"seq":41,"id":"e1","at":"2026-11-01T10:00:00Z","type":"print.done","projectId":"p1","printId":"print-1","title":"Mic mount is done","body":"Ready to collect.","notify":"active"},
           {"v":1,"seq":42,"id":"e2","at":"2026-11-01T10:00:01Z","type":"mcp.update.done","title":"bambu-printer-mcp updated","body":"1.5.0","notify":"passive","data":{"mcpId":"bambu"}},
           {"v":1,"seq":"forty-three","id":"e3","type":"print.status"},
           {"v":1,"seq":44,"id":"e4","at":"2026-11-01T10:00:03Z","type":"pass.ready","projectId":"p2","title":"Hook is ready to print","body":"Ready to print","notify":"active","data":{"progress":"lots"}}],
@@ -78,8 +78,6 @@ final class EventRelayTests: XCTestCase {
     func testAfterARestartOnlyStandingTerminalEventsNotifyOnce() throws {
         let prefs = try prefs()
         // Older than ten minutes: synced, not shown...
-        XCTAssertFalse(CatchUp.shouldNotify(event("plate.blocked", minutesAgo: 1), now: now, prefs: prefs, alreadyNotified: false, later: [], state: nil),
-                       "no plate prompts: never emitted, and no default if it were")
         XCTAssertFalse(CatchUp.shouldNotify(event("print.paused", minutesAgo: 30), now: now, prefs: prefs, alreadyNotified: false, later: [], state: nil))
         // ...except a terminal event that still stands.
         XCTAssertTrue(CatchUp.shouldNotify(event("print.done", minutesAgo: 30), now: now, prefs: prefs, alreadyNotified: false, later: [], state: "printed"))
@@ -133,7 +131,6 @@ final class EventRelayTests: XCTestCase {
         XCTAssertEqual(call("correct", ["note": .string("thicker")]), "objects.correct")
         XCTAssertNil(call("correct"), "a correction needs its note")
         XCTAssertEqual(call("answerAsk"), "objects.answerCloseup")
-        XCTAssertNil(call("plate", ["answer": .string("look-again")]), "plate-clearance prompts are gone")
         XCTAssertEqual(call("confirm", ["confirmationId": .string("q"), "answer": .object(["action": .string("accept")])]), "objects.answerPrintConfirmation")
         XCTAssertNil(call("confirm"), "a confirmation answers one exact question")
         XCTAssertEqual(call("pause"), "objects.pausePrint")
@@ -222,10 +219,10 @@ final class EventRelayTests: XCTestCase {
     }
 
     func testTheMirrorCarriesThePrintersQuestionWhole() throws {
-        let json = #"{"id":"q1","message":"Print Mic mount on P1S?","expiresAtMs":1800000000000,"supported":true,"fields":[{"name":"confirm","title":"Print it","required":true},{"name":"note","title":"Plate","description":"Clear","required":false}]}"#
+        let json = #"{"id":"q1","message":"Print Mic mount on P1S?","expiresAtMs":1800000000000,"supported":true,"fields":[{"name":"confirm","title":"Print it","required":true},{"name":"note","title":"Spool","description":"Loaded","required":false}]}"#
         let confirmation = try JSONDecoder().decode(Project.PrintConfirmation.self, from: Data(json.utf8))
         let text = try XCTUnwrap(MirroredConfirmation.fieldsJSON(confirmation.fields))
-        XCTAssertEqual(text, #"[{"name":"confirm","required":true,"title":"Print it"},{"description":"Clear","name":"note","required":false,"title":"Plate"}]"#)
+        XCTAssertEqual(text, #"[{"name":"confirm","required":true,"title":"Print it"},{"description":"Loaded","name":"note","required":false,"title":"Spool"}]"#)
         // The phone's `confirm` command built from it reaches the one control method that answers it.
         let answer = PhoneCommand(id: "c", type: "confirm", projectId: "p",
                                   payload: ["confirmationId": .string(confirmation.id), "answer": .object(["action": .string("accept"), "content": .object(["confirm": .bool(true)])])])

@@ -6,8 +6,9 @@ import ControlKit
 #endif
 
 // The print sheet (PRD §7.3, screens/mac-print.jpg): the same choices as the phone's (§5.5) laid out as a
-// sheet. Printer cards, the plate preview, colours, quality and strength, and Print on *printer*. (No plate
-// prompt: the printer MCP's own confirmation, with any camera observation it gives, is what the person answers.) The printer MCP slices and prints; the companion gives the estimate and carries the settings.
+// sheet. Printer cards, the model's preview, colours, quality and strength, and Print on *printer*. The printer MCP's
+// own confirmation is what the person answers. The printer MCP slices and prints; the companion gives the estimate and
+// carries the settings.
 
 struct PrintSheet: View {
     /// The project as it was when the sheet opened; `object` reads the current one, so a printer change shows at once.

@@ -49,11 +49,11 @@ private func item(_ id: String, _ state: String, _ fields: [String: Any] = [:]) 
 }
 
 @MainActor final class ObjectsModelTests: XCTestCase {
-    func testConfirmationRejectsStaleIncompleteAndPlateOnlyAnswers() async {
+    func testConfirmationRejectsStaleAndIncompleteAnswers() async {
         let companion = FakeObjects()
         var question: [String: Any] = ["id":"q1", "message":"Check the actual printer.", "expiresAtMs":Date().timeIntervalSince1970 * 1000 + 60_000,
-            "supported":true, "fields":[["name":"bed_clear", "title":"Bed is clear", "required":true]]]
-        await companion.set([item("a", "printing", ["printConfirmation":question, "plate":["noCamera":true]])])
+            "supported":true, "fields":[["name":"spool_loaded", "title":"The spool is loaded", "required":true]]]
+        await companion.set([item("a", "printing", ["printConfirmation":question])])
         let model = ObjectsModel(companion:companion)
         await model.refresh()
         let incomplete = await model.answerPrintConfirmation("a", confirmationId:"q1", answer:.init(action:.accept))
@@ -61,16 +61,16 @@ private func item(_ id: String, _ state: String, _ fields: [String: Any] = [:]) 
         question["id"] = "q2"
         await companion.set([item("a", "printing", ["printConfirmation":question])])
         await model.refresh()
-        let stale = await model.answerPrintConfirmation("a", confirmationId:"q1", answer:.init(action:.accept, content:["bed_clear":.bool(true)]))
+        let stale = await model.answerPrintConfirmation("a", confirmationId:"q1", answer:.init(action:.accept, content:["spool_loaded":.bool(true)]))
         XCTAssertFalse(stale)
         let before = await companion.calls
-        XCTAssertFalse(before.contains { $0.hasPrefix("confirmation:") || $0 == "plate" })
-        let accepted = await model.answerPrintConfirmation("a", confirmationId:"q2", answer:.init(action:.accept, content:["bed_clear":.bool(true)]))
+        XCTAssertFalse(before.contains { $0.hasPrefix("confirmation:") })
+        let accepted = await model.answerPrintConfirmation("a", confirmationId:"q2", answer:.init(action:.accept, content:["spool_loaded":.bool(true)]))
         XCTAssertTrue(accepted)
         let calls = await companion.calls
         XCTAssertEqual(calls.last, "confirmation:q2:accept")
         let answer = await companion.confirmationAnswer
-        XCTAssertEqual(answer?.content, ["bed_clear":.bool(true)])
+        XCTAssertEqual(answer?.content, ["spool_loaded":.bool(true)])
         XCTAssertNil(model.selected?.printConfirmation)
     }
 

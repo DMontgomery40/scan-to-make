@@ -98,7 +98,6 @@ final class ObjectWordsTests: XCTestCase {
         XCTAssertEqual(confirm.group, .needsYou)
         XCTAssertEqual(confirm.actions, [], "the confirmation itself is answered")
         XCTAssertTrue(confirm.busy)
-        XCTAssertEqual(ready(["state": "printing", "plate": ["noCamera": true]]).words.actions, [], "no plate answer: plate prompts are gone")
     }
 
     func testAReadyProjectPrintsOrTakesChanges() {
@@ -141,7 +140,7 @@ final class ObjectWordsTests: XCTestCase {
     }
 
     func testCopyNeverNamesTheMachinery() {
-        let all = [object([:]), object(["state": "touching-up"]), ready(), ready(["state": "printing", "plate": ["noCamera": true]]),
+        let all = [object([:]), object(["state": "touching-up"]), ready(), ready(["state": "printing"]),
                    ready(["state": "needs-closeup"]), object(["state": "failed"]), object(["state": "archived"])]
         for words in all.map(\.words) {
             for text in [words.title, words.status, words.stage.label] {
@@ -158,7 +157,6 @@ final class PrintSettingsTests: XCTestCase {
         XCTAssertEqual(chosen["quality"], .string("fine"))
         XCTAssertEqual(chosen["strength"], .string("max"))
         XCTAssertEqual(chosen["colour"], .object(["amsSlot": .number(2)]))
-        XCTAssertNil(chosen["plateCheck"], "no plate prompt: the printer MCP's own confirmation is the check")
         XCTAssertEqual(PrintSettings(colour: .auto).params["colour"], .object(["auto": .bool(true)]), "the user kept the preselection")
         XCTAssertEqual(PrintSettings(colour: .external).params["colour"], .object(["external": .bool(true)]))
     }

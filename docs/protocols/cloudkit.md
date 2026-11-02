@@ -88,7 +88,7 @@ The phone overwrites its one record whenever a token changes. The Mac reads it t
 
 ## `CounterpartCommand` (the phone writes)
 
-Written by the phone when it can't reach the Mac directly (PRD §9.3). There is no plate command: plate-clearance prompts were removed (main `ac44431`); the printer MCP's own confirmation, answered with `confirm`, is the check.
+Written by the phone when it can't reach the Mac directly (PRD §9.3). The printer MCP's own confirmation is answered with `confirm`.
 
 | Field | Type | Notes |
 |---|---|---|

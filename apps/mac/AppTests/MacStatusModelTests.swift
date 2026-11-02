@@ -156,7 +156,7 @@ private func phone(_ id: String, _ name: String, pairedAt: Double = 1_700_000_00
                      "print.confirm", "pass.failed"] {
             XCTAssertTrue(prefs.shouldNotify(type:type), type)
         }
-        for type in ["plate.blocked", "print.first-layer", "print.unreachable", "print.status", "print.started", "pass.started", "pass.stage",
+        for type in ["print.first-layer", "print.unreachable", "print.status", "print.started", "pass.started", "pass.stage",
                      "print.resumed", "print.cancelled", "print.preparing", "something.new"] {
             XCTAssertFalse(prefs.shouldNotify(type:type), type)
         }

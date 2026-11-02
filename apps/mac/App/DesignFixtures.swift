@@ -63,7 +63,7 @@ import ControlKit
         ]
         let p1s: [String: Any] = ["id": "p1s", "name": "P1S"]
         let printedOnP1S: [String: Any] = ["bundleId": "b0", "destination": p1s, "monitor": ["phase": "ended", "endState": "done"],
-                                           "events": [["atMs": now - 90_000_000, "message": "Plate checked: clear"],
+                                           "events": [["atMs": now - 90_000_000, "message": "Sliced"],
                                                       ["atMs": now - 89_900_000, "message": "Started"],
                                                       ["atMs": now - 86_500_000, "message": "Done"]]]
         let items: [[String: Any]] = [

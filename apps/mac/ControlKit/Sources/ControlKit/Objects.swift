@@ -155,7 +155,7 @@ public extension ControlClient {
     func answerCloseup(_ id: String, bestGuess: Bool) async throws -> Project {
         let result: ObjectReply = try await call("objects.answerCloseup", ["id": .string(id), "bestGuess": .bool(bestGuess)]); return result.object
     }
-    /// Prints the current model; the plate is checked in the background. `checked` only after an
+    /// Prints the current model. `checked` only after an
     /// uncertain print, once the user has looked at the printer. Like every mutation, a deadline after
     /// sending has an unknown outcome: read the object again, never resend.
     func printObject(_ id: String, checked: Bool = false) async throws -> Project {
