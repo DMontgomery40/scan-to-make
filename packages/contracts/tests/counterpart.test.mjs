@@ -24,6 +24,9 @@ test('every other wire fixture validates against its schema', () => {
   c.PrintMonitorSchema.parse(fixture.printMonitor);
   c.PrintSettingsSchema.parse(fixture.printSettings);
   c.PrintEstimateSchema.parse(fixture.estimate);
+  // KAN-224: Bambu Studio's warning, verbatim, up to the 2000 characters printer-handoff keeps.
+  c.PrintEstimateSchema.parse({...fixture.estimate, slicerWarning: 'It seems object clean_flat.stl has floating cantilever. Please re-orient the object or enable support generation.'});
+  assert.throws(() => c.PrintEstimateSchema.parse({...fixture.estimate, slicerWarning: 'x'.repeat(2001)}));
   for (const destination of fixture.destinations) c.PrinterDestinationSchema.parse(destination);
   c.AskSchema.parse(fixture.ask);
   for (const change of fixture.changes) c.ChangeSchema.parse(change);

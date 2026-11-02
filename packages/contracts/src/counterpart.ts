@@ -190,6 +190,8 @@ export const PrintEstimateSchema = z.strictObject({
   wallLoops: z.number().int().nonnegative().optional(),
   /** How many on the plate; time and grams cover every copy. */
   copies: z.number().int().min(1).max(64).optional(),
+  /** Bambu Studio's own warning on this slice, verbatim (KAN-223), e.g. a floating cantilever. Print asks before sending. */
+  slicerWarning: text(2000).optional(),
   slicedAt: iso,
 });
 export type PrintEstimate = z.infer<typeof PrintEstimateSchema>;

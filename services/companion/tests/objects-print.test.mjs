@@ -9,6 +9,7 @@ import {ObjectService, InvalidStateError} from '../dist/objects/service.js';
 import {createControlDispatcher} from '../dist/local-control-services.js';
 import {createObjectRoutes} from '../dist/objects/http.js';
 import {createServer} from 'node:http';
+import {PrintEstimateSchema} from '@scan-to-make/contracts/counterpart';
 
 const STL = Buffer.from('solid m\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 1 0 0\nvertex 0 1 0\nendloop\nendfacet\nendsolid m\n' + ' '.repeat(40));
 // The advertised Bambu hardware-confirmation schema (including its unchecked default).
@@ -374,4 +375,51 @@ test("Bambu Studio's words reach the project: its error is the failure, its warn
   await warned.service.answerPrintConfirmation(warned.id, printer.id, {action: 'accept', content: {confirmed: true}});
   await warned.service.settled(warned.id);
   assert.deepEqual(await warned.tools(), ['lay_flat', 'slice_stl', 'inspect_print_file', 'print_3mf']);
+});
+
+// KAN-224: the print sheet's estimate says what Print would, in Bambu Studio's words, through the same real runner.
+test("an estimate carries Bambu Studio's words: its warning as slicerWarning, its error as the refusal; nothing is asked or sent", async t => {
+  const {createPrintHandoffServices} = await import('../dist/print-handoff-http.js');
+  const fixtures = new URL('../../printer-handoff/tests/fixtures/', import.meta.url);
+  const studio = async name => JSON.parse(await readFile(new URL(`slicer-results/${name}.json`, fixtures), 'utf8'));
+  const estimate = async result => {
+    const root = await mkdtemp(join(tmpdir(), 'objects-estimate-studio-'));
+    t.after(() => rm(root, {recursive: true, force: true}));
+    const log = join(root, 'calls.jsonl');
+    await writeFile(log, '');
+    const services = createPrintHandoffServices({backend: 'bambu-printer-mcp',
+      process: {command: process.execPath, args: [new URL('fixture-printer-server.mjs', fixtures).pathname, 'bambu', log], cwd: root,
+        env: {HANDOFF_FIXTURE_SLICER_RESULT: new URL(`slicer-results/${result}.json`, fixtures).pathname}},
+      selection: {model: 'p1s', nozzleDiameterMm: 0.4, nozzleType: 'hardened_steel', bedType: 'textured_plate', material: 'PLA', plateIndex: 0},
+      timeouts: {connectMs: 5000, toolMs: 5000, elicitationMs: 10000}}, join(root, 'bundles'));
+    const store = new ObjectStore(join(root, 'objects'));
+    const service = new ObjectService({store, runTouchup: async () => { throw new Error('not used'); }, stlInfo: async () => undefined, claudePath: '/c',
+      handoff: {backend: 'bambu-printer-mcp', process: {command: '/usr/bin/true'}}, print: {services}});
+    const object = await store.create('A stove gap filler.');
+    await mkdir(join(store.dir(object.id), 'current'), {recursive: true});
+    await writeFile(join(store.dir(object.id), 'current', 'model.stl'), STL);
+    await store.update(object.id, o => ({...o, state: 'ready', current: {model: 'current/model.stl', renders: []}}));
+    const tools = async () => (await readFile(log, 'utf8')).trim().split('\n').filter(Boolean).map(JSON.parse).filter(entry => entry.tool).map(entry => entry.tool);
+    const outcome = await service.estimate(object.id).then(value => ({value}), error => ({error}));
+    const after = await store.get(object.id);
+    assert.equal(after.state, 'ready', 'an estimate never changes the project');
+    assert.equal(after.printConfirmation, undefined, 'an estimate asks nothing');
+    assert.equal((await tools()).includes('print_3mf'), false, 'an estimate sends nothing');
+    return outcome;
+  };
+  // The floating cantilever on the lay_flat output: the estimate comes back, with Studio's warning word for word.
+  const words = (await studio('lay-flat-floating-cantilever')).sliced_plates[0].warning_message;
+  const warned = await estimate('lay-flat-floating-cantilever');
+  assert.equal(warned.error, undefined);
+  assert.equal(warned.value.slicerWarning, words);
+  PrintEstimateSchema.parse(warned.value);
+  // A clean slice has no warning.
+  const clean = await estimate('cap-down-clean');
+  assert.equal(clean.error, undefined);
+  assert.equal('slicerWarning' in clean.value, false);
+  // The empty-layer error: refused with exactly the failure a Print of the same model gets, not a generic one.
+  const failing = await studio('orient-empty-layers');
+  const refused = await estimate('orient-empty-layers');
+  assert.ok(refused.error instanceof InvalidStateError);
+  assert.equal(refused.error.message, `${failing.error_string}\n${failing.sliced_plates[0].warning_message}`);
 });
