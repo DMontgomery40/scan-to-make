@@ -353,13 +353,17 @@ public extension PrintSettings {
                   strength: saved?.strength.flatMap(Strength.init(rawValue:)) ?? .standard, colour: colour)
     }
 
-    /// The spool the last print used, when it is on the same printer and still loaded.
+    /// The spool the last print used: the same slot when it is the same printer, or a loaded spool of the material it
+    /// was sliced for (the suggested one first). Nil for the suggestion again, or when nothing loaded matches.
     static func lastSlot(_ colour: Colour?, lastPrinter: String?, printer: String?, in filaments: [PrinterFilament]) -> Int? {
-        guard let colour, lastPrinter != nil, lastPrinter == printer else { return nil }
+        let samePrinter = lastPrinter != nil && lastPrinter == printer
         switch colour {
-        case .amsSlot(let slot): return filaments.first { $0.slot == slot && !$0.external }?.slot
-        case .external: return filaments.first(where: \.external)?.slot
-        case .auto, .material: return nil
+        case .amsSlot(let slot)? where samePrinter: return filaments.first { $0.slot == slot && !$0.external }?.slot
+        case .external? where samePrinter: return filaments.first(where: \.external)?.slot
+        case .material(let material)?:
+            let matching = filaments.filter { $0.material.caseInsensitiveCompare(material) == .orderedSame }
+            return (matching.first { $0.suggested == true } ?? matching.first)?.slot
+        default: return nil
         }
     }
 }

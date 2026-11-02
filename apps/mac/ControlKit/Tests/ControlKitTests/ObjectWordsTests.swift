@@ -186,6 +186,11 @@ final class PrintSettingsTests: XCTestCase {
         XCTAssertNil(PrintSettings.lastSlot(.amsSlot(3), lastPrinter: "x1c", printer: "a1", in: spools), "slots belong to their printer")
         XCTAssertNil(PrintSettings.lastSlot(.amsSlot(4), lastPrinter: "x1c", printer: "x1c", in: spools), "that spool is gone")
         XCTAssertNil(PrintSettings.lastSlot(.auto, lastPrinter: "x1c", printer: "x1c", in: spools), "the suggestion again")
+        XCTAssertEqual(PrintSettings.lastSlot(.material("petg"), lastPrinter: "x1c", printer: "a1", in: spools), 3,
+                       "the material it was sliced for, on any printer, never the PLA suggestion")
+        XCTAssertNil(PrintSettings.lastSlot(.material("ASA"), lastPrinter: "x1c", printer: "x1c", in: spools), "nothing loaded matches")
+        let petg = try JSONDecoder().decode(Project.Print.self, from: Data(#"{"bundleId":"b","settings":{"colour":{"material":"PETG"}}}"#.utf8))
+        XCTAssertEqual(PrintSettings(last: petg).colour, .material("PETG"))
     }
 
     func testTheEstimateAndSuggestedTrayDecodeFromTheCompanion() throws {
