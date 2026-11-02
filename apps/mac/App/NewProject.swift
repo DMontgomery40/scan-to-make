@@ -39,37 +39,41 @@ struct NewProjectPane: View {
     var body: some View {
         ZStack {
             StageBackground().ignoresSafeArea()
-            VStack(alignment: .leading, spacing: 18) {
-                Picker("", selection: $kind) {
-                    Text("Make something that fits").tag("fit")
-                    Text("Copy something").tag("copy")
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    Picker("", selection: $kind) {
+                        Text("Make something that fits").tag("fit")
+                        Text("Copy something").tag("copy")
+                    }
+                    .pickerStyle(.segmented).labelsHidden().frame(width: 380)
+                    dropZone
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("What do you need?").font(.headline)
+                        TextField(kind == "fit" ? "A hook for my stroller handle…" : "Copy this, and close up the bottom…", text: $request, axis: .vertical)
+                            .textFieldStyle(.plain).lineLimit(3...5)
+                            .padding(14).glassEffect(.regular.interactive(), in: .rect(cornerRadius: 16))
+                    }
+                    if let link { LinkCard(url: link) }
+                    if !available {
+                        Label(ObjectsModel.createUnavailable, systemImage: "iphone").font(.callout).foregroundStyle(.secondary)
+                    }
+                    if let problem { Label(problem, systemImage: "exclamationmark.circle.fill").font(.callout).foregroundStyle(.red) }
+                    HStack {
+                        Label(model.latestDevice.map { "It shows up on \($0.deviceName) too." } ?? "It shows up on your iPhone too.", systemImage: "iphone")
+                            .font(.callout).foregroundStyle(.secondary)
+                        Spacer()
+                        if starting { ProgressView().controlSize(.small) }
+                        Button("Cancel", action: close).controlSize(.extraLarge).keyboardShortcut(.cancelAction)
+                        Button { start() } label: { Text(link == nil ? "Create Project" : "Get This Model").padding(.horizontal, 6) }
+                            .buttonStyle(.glassProminent).controlSize(.extraLarge).keyboardShortcut(.defaultAction)
+                            .disabled(!available || starting || empty)
+                    }
                 }
-                .pickerStyle(.segmented).labelsHidden().frame(width: 380)
-                dropZone
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("What do you need?").font(.headline)
-                    TextField(kind == "fit" ? "A hook for my stroller handle…" : "Copy this, and close up the bottom…", text: $request, axis: .vertical)
-                        .textFieldStyle(.plain).lineLimit(3...5)
-                        .padding(14).glassEffect(.regular.interactive(), in: .rect(cornerRadius: 16))
-                }
-                if let link { LinkCard(url: link) }
-                if !available {
-                    Label(ObjectsModel.createUnavailable, systemImage: "iphone").font(.callout).foregroundStyle(.secondary)
-                }
-                if let problem { Label(problem, systemImage: "exclamationmark.circle.fill").font(.callout).foregroundStyle(.red) }
-                HStack {
-                    Label(model.latestDevice.map { "It shows up on \($0.deviceName) too." } ?? "It shows up on your iPhone too.", systemImage: "iphone")
-                        .font(.callout).foregroundStyle(.secondary)
-                    Spacer()
-                    if starting { ProgressView().controlSize(.small) }
-                    Button("Cancel", action: close).controlSize(.extraLarge).keyboardShortcut(.cancelAction)
-                    Button { start() } label: { Text(link == nil ? "Create Project" : "Get This Model").padding(.horizontal, 6) }
-                        .buttonStyle(.glassProminent).controlSize(.extraLarge).keyboardShortcut(.defaultAction)
-                        .disabled(!available || starting || empty)
-                }
+                .frame(maxWidth: 640)
+                .padding(32)
+                .frame(maxWidth: .infinity)
             }
-            .frame(maxWidth: 640)
-            .padding(32)
+            .defaultScrollAnchor(.center, for: .alignment)
         }
         .environment(\.colorScheme, .dark)
         .navigationTitle("New Project")
