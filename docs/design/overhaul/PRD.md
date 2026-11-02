@@ -209,6 +209,31 @@ Screenshots:
 - The same two answers are actions on the `print.done` notification (§9.1). Done projects can still be printed again or changed.
 - Projects nobody answers stay `printed` and are never nagged about again after the first card.
 
+
+**Names.** Every project has a real name, never "Your project", "Your scan" or "Unfinished project".
+- **Naming:** the moment a project is created, the user's own Claude names it in two to four words from whatever there is: the request text, the link's page title, or the first photo. That's one short call with the same model the plate check uses. No reasoning step, and nothing waits on it.
+- **Fallbacks:** until the name arrives, the project shows the first words of the request. A published model takes the model's own name.
+- **Old projects:** projects created before this get named the same way, once, the first time the companion starts with this change.
+- **Renaming:** tap the name on the project page (phone and Mac), or use **Rename** in its menu or in Project Settings. A name the user set is never replaced.
+
+**Project Settings** (••• → **Project Settings**, on the phone and the Mac; stored in the companion, so the same on both):
+
+| Setting | What it does |
+|---|---|
+| Name | Rename. |
+| Status | Not printed yet, Printed, **Works**, Needs changes, Archived. Set it by hand any time, for example to mark something done that was printed elsewhere. |
+| Printer | The printer this project prints on by default. |
+| Colours | The default colour per part or filament (AMS slot or loaded spool), reused for every reprint. |
+| Quality and strength | The default Draft/Standard/Fine and Standard/Strong/Max. |
+| Copies | How many to put on the plate (`slice_stl` `repetitions`). |
+| Design engine | Blender or Fusion for this project's next changes (when Fusion is set up). |
+| Notifications | Follow this project's prints (milestones and done), or only problems. |
+| Files | Show in Finder (Mac); share or export STL, 3MF or USDZ; the original files; the designer credit for a published model. |
+| Duplicate | A new project from this one's current model and settings. |
+| Archive / Delete | Archive hides it from Home and keeps everything. Delete removes it from the Mac, with a confirmation. |
+
+Home and the Mac sidebar group projects as Now, Needs you, Ready, **Done** (Works) and Printed, with Archived behind a filter. Marking a project **Works** moves it to Done.
+
 ### 5.5 Print
 
 Screenshot: `screens/phone-print.jpg`. The flow is modelled on Bambu Handy and MakerWorld's Prepare to Print.
