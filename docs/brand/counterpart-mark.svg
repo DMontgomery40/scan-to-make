@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
+  <!-- Counterpart mark: an object (solid) and its counterpart (outline), overlapping.
+       Single-colour geometry for embossing or inlaying on prints. 100 x 100 units; scale to size. -->
+  <rect x="23" y="25" width="34" height="50" rx="8" fill="#000"/>
+  <rect x="46.5" y="34.5" width="27" height="43" rx="5" fill="none" stroke="#000" stroke-width="7"/>
+</svg>
