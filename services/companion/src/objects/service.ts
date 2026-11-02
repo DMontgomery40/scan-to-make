@@ -616,7 +616,9 @@ export class ObjectService {
     if (!object.current && object.state !== 'failed') throw new InvalidStateError('There is no model to correct yet.');
     const before = new Set(object.photos);
     for (const path of photos) object = await this.#addFile(id, 'photos', path);
-    const attached = [...new Set([...(photoNames ?? object.pendingPhotos ?? []), ...object.photos.filter(name => !before.has(name))])];
+    const held = object.messages?.find(message => message.id === object.pendingMessageId && message.text === note.trim());
+    // A retry owns its original evidence; later uploads belong to the next message unless explicitly selected.
+    const attached = [...new Set([...(photoNames ?? held?.photos ?? object.pendingPhotos ?? []), ...object.photos.filter(name => !before.has(name))])];
     object = await this.#message(object, note.trim(), attached);
     const message = object.messages!.find(item => item.id === object.pendingMessageId)!;
     // Photos can document a successful print too. They must not force a mesh-changing pass.
@@ -1171,7 +1173,9 @@ export class ObjectService {
     // A handheld scan is rebuilt into scan/scan.usdz first, once; its photos also show the touch-up the object.
     const build = !fromCurrent && !object.scan && (object.capture?.length ?? 0) > 0;
     const capturePhotos = (object.capture ?? []).map(name => join(dir, 'capture', name));
-    const photos = spreadPick([...object.photos.map(name => join(dir, 'photos', name)), ...capturePhotos], PHOTOS_PER_PASS);
+    // Preserve the original/prior context, but never let a later queued message's uploads influence this pass.
+    const pending = new Set(object.pendingPhotos ?? []);
+    const photos = spreadPick([...object.photos.filter(name => !pending.has(name)).map(name => join(dir, 'photos', name)), ...capturePhotos], PHOTOS_PER_PASS);
     const startedAtMs = Date.now();
     // PRD §8.9: copies are cleaned up in Blender; a new design may use Fusion (the touch-up decides).
     const kind: PassKind = passKind(object);

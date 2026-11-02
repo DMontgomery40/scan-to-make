@@ -505,12 +505,14 @@ test('uncertain message retries preserve photo ownership and message identity', 
   await service.addPhoto(project.id, 'finished.jpg', Buffer.from('photo'));
   assert.equal((await call('POST', `/v1/objects/${project.id}/corrections`, {note: 'DONE'})).status, 409);
   const saved = await store.get(project.id);
+  await service.addPhoto(project.id, 'next-change.jpg', Buffer.from('photo'));
   intent = 'works';
   const done = await call('POST', `/v1/objects/${project.id}/corrections`, {note: 'DONE'});
   assert.equal(done.status, 200);
   assert.equal(done.json.object.messages.length, 1);
   assert.equal(done.json.object.messages[0].id, saved.messages[0].id);
   assert.deepEqual(done.json.object.messages[0].photos, ['finished.jpg']);
+  assert.deepEqual(done.json.object.pendingPhotos, ['next-change.jpg'], 'retry must not claim a later message’s upload');
 });
 
 test('Mac local photo evidence is copied and attached before marking Done without a pass', async t => {
