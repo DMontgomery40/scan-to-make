@@ -13,7 +13,7 @@ import {readBoundedCaptureFile} from './capture-import.js';
 import {RemoteAuthStore, RemoteAuthFailure} from './remote-auth.js';
 import type {ModelAccessService} from './model-access.js';
 import type {NearbyRequest} from '@scan-to-make/contracts/nearby-pairing';
-import {InvalidStateError, type ObjectService} from './objects/service.js';
+import {InvalidFileError, InvalidStateError, type ObjectService} from './objects/service.js';
 import {ObjectNotFoundError} from './objects/store.js';
 import {publicObject} from './objects/http.js';
 import type {createPrinterCheck} from './printer-check.js';
@@ -141,7 +141,8 @@ export function createControlDispatcher(services: ControlServices) {
           return services.printerCheck.get(parameters[method].parse(raw).start);
         }
         case 'status.get': return {protocolVersion:1,companionVersion:services.companionVersion,transport:auth.transport,
-          pairedDeviceCount:(await auth.listDevices()).length,capabilities:{capture:!!capture?.captures,cleanup:!!capture?.scanProcessing,printerHandoff:!!printHandoff,nearbyPairing:!!services.nearby}};
+          pairedDeviceCount:(await auth.listDevices()).length,capabilities:{capture:!!capture?.captures,cleanup:!!capture?.scanProcessing,printerHandoff:!!printHandoff,nearbyPairing:!!services.nearby,
+            objectsCreate:!!services.objects}};
         case 'devices.list': return {devices:await auth.listDevices()};
         case 'devices.remove': {
           const {deviceId} = parameters[method].parse(raw);
@@ -190,7 +191,8 @@ export function createControlDispatcher(services: ControlServices) {
           return {answered:true};
         }
         case 'doors.prepare': return await prepareDoor(parameters[method].parse(raw));
-        case 'objects.list': case 'objects.printers': case 'objects.filaments': case 'objects.selectPrinter': case 'objects.get': case 'objects.passActivity': case 'objects.start': case 'objects.delete': case 'objects.correct': case 'objects.answerCloseup': case 'objects.print': case 'objects.answerPlate': case 'objects.answerPrintConfirmation': {
+        case 'objects.list': case 'objects.printers': case 'objects.filaments': case 'objects.selectPrinter': case 'objects.get': case 'objects.passActivity': case 'objects.start': case 'objects.delete': case 'objects.correct': case 'objects.answerCloseup': case 'objects.print': case 'objects.answerPlate': case 'objects.answerPrintConfirmation':
+        case 'objects.create': case 'objects.addFile': {
           const objects = services.objects;
           if (!objects) throw new ControlFailure('unavailable');
           try {
@@ -204,6 +206,15 @@ export function createControlDispatcher(services: ControlServices) {
               return {activity: await objects.passActivity(id, index)};
             }
             if (method === 'objects.delete') { await objects.delete((parameters[method].parse(raw) as {id: string}).id); return {deleted: true}; }
+            if (method === 'objects.create') return {object: local(await objects.create(parameters[method].parse(raw).instructions))};
+            if (method === 'objects.addFile') {
+              const {id, kind, path} = parameters[method].parse(raw);
+              return {object: local(await objects.addFile(id, kind, path))};
+            }
+            if (method === 'objects.correct') {
+              const {id, note, photos} = parameters[method].parse(raw);
+              return {object: local(await objects.correct(id, note, photos))};
+            }
             if (method === 'objects.answerPrintConfirmation') {
               const {id, confirmationId, answer} = parameters[method].parse(raw);
               return {object: local(await objects.answerPrintConfirmation(id, confirmationId, answer))};
@@ -212,7 +223,6 @@ export function createControlDispatcher(services: ControlServices) {
             const object = method === 'objects.get' ? await objects.get(params.id)
               : method === 'objects.selectPrinter' ? await objects.selectPrinter(params.id, params.destinationId!)
               : method === 'objects.start' ? await objects.start(params.id)
-              : method === 'objects.correct' ? await objects.correct(params.id, params.note!)
               : method === 'objects.answerCloseup' ? await objects.answerCloseup(params.id, {bestGuess: params.bestGuess!})
               : method === 'objects.print' ? await objects.print(params.id, {checked:params.checked, filament:params.filament})
               : await objects.answerPlate(params.id, {clear: true});
@@ -220,7 +230,7 @@ export function createControlDispatcher(services: ControlServices) {
           } catch (error) {
             if (error instanceof ObjectNotFoundError) throw new ControlFailure('not-found');
             // Its sentence is written for the person ("There is no model to print yet.").
-            if (error instanceof InvalidStateError) throw new ControlFailure('conflict', error.message);
+            if (error instanceof InvalidStateError || error instanceof InvalidFileError) throw new ControlFailure('conflict', error.message);
             throw error;
           }
         }

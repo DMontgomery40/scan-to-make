@@ -154,7 +154,12 @@ export function createObjectRoutes(service: ObjectService) {
         await authorize(['print', 'printer', 'plate', 'print-confirmation'].includes(action) ? PRINT : WRITE);
         let object: StmObject;
         switch (action) {
-          case 'scan': object = await service.addScan(id, 'scan.usdz', await body(request, MAX_SCAN)); break;
+          case 'scan': {
+            const name = url.searchParams.get('name') ?? 'scan.usdz';
+            if (!/^scan\.(usdz|stl|3mf)$/.test(name)) throw new HttpFailure(400, 'invalid-name');
+            object = await service.addScan(id, name, await body(request, MAX_SCAN));
+            break;
+          }
           case 'capture-depth': {
             const name = url.searchParams.get('name') ?? '';
             if (!/^[0-9]{4}\.depth\.plist$/.test(name)) throw new HttpFailure(400, 'invalid-name');

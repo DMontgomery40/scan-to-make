@@ -26,7 +26,7 @@ test('current destination inherits metadata without rewriting its working SSH co
   const f = await fixture(t);
   const catalog = await loadPrinterCatalog(f.current, f.options([]));
   assert.equal(catalog.defaultDestinationId, 'current');
-  assert.deepEqual(catalog.destinations, [{id: 'current', name: 'Bambu Lab P1S', backend: 'bambu-printer-mcp', model: 'p1s', address: '192.0.2.1', source: 'current'}]);
+  assert.deepEqual(catalog.destinations, [{id: 'current', name: 'Bambu Lab P1S', backend: 'bambu-printer-mcp', model: 'p1s', address: '192.0.2.1', source: 'current', origin: 'printer-handoff'}]);
   assert.deepEqual(catalog.resolve('current'), f.current);
   const retained = catalog.resolve('current');
   retained.process.env.MCP_TRANSPORT = 'changed';
@@ -162,4 +162,96 @@ test('same profile name in different client projects retains distinct selectable
   const destinations = catalog.destinations.slice(1);
   assert.equal(new Set(destinations.map(d => d.id)).size, 2);
   for (const destination of destinations) assert.equal(catalog.resolve(destination.id).process.env.PRINTER_HOST, destination.address);
+});
+
+test("Codex's config.toml profiles are read: enabled stdio servers only, with their env tables", async t => {
+  const f = await fixture(t);
+  const node = process.execPath;
+  const source = await f.put('.codex/config.toml', `model = "gpt"
+[projects."/Users/x"]
+trust_level = 'trusted'
+
+[mcp_servers.voron]
+command = "/usr/local/bin/mcp-3d-printer-server"
+args = []
+cwd = "/opt/voron"
+
+[mcp_servers.voron.env]
+PRINTER_HOST = "voron.local"
+PRINTER_PORT = "7125"
+PRINTER_TYPE = "klipper"
+
+[mcp_servers.bambu]
+command = "${node}"
+args = ["/x/lib/node_modules/npm/bin/npx-cli.js", "-y", "bambu-printer-mcp"]
+env = { BAMBU_PRINTER_HOST = "192.0.2.90", BAMBU_PRINTER_SERIAL = "serial-90", BAMBU_PRINTER_MODEL = "a1" }
+
+[mcp_servers.off]
+command = "/usr/local/bin/mcp-3d-printer-server"
+enabled = false
+env = { PRINTER_HOST = "off.local", PRINTER_TYPE = "octoprint" }
+
+[mcp_servers.relative]
+command = "/usr/local/bin/mcp-3d-printer-server"
+cwd = "."
+env = { PRINTER_HOST = "relative.local" }
+
+[mcp_servers.remote]
+url = "https://example.test/mcp"
+
+[[skills.config]]
+path = "/x"
+`);
+  const catalog = await loadPrinterCatalog(f.current, f.options([source]));
+  const listed = catalog.destinations.slice(1);
+  assert.deepEqual(listed.map(d => [d.name, d.backend, d.address, d.origin]), [
+    ['voron', 'mcp-3d-printer-server', 'voron.local', 'codex'],
+    ['bambu', 'bambu-printer-mcp', '192.0.2.90', 'codex'],
+  ]);
+  assert.deepEqual(catalog.resolve(listed[0].id).process, {command: '/usr/local/bin/mcp-3d-printer-server', args: [], cwd: '/opt/voron',
+    env: {PRINTER_HOST: 'voron.local', PRINTER_PORT: '7125', PRINTER_TYPE: 'klipper'}});
+  assert.equal((await loadPrinterCatalog(f.current, f.options([await f.put('broken.toml', 'a = "unterminated')]))).destinations.length, 1);
+});
+
+test('one printer is one destination: keyed by Bambu serial, else host and port, routed to the right MCP', async t => {
+  const f = await fixture(t);
+  const generic = '/usr/local/bin/mcp-3d-printer-server';
+  const claude = await f.put('.claude.json', {mcpServers: {
+    // The current P1S again through mcp-3D-printer-server: bambu-printer-mcp (current) keeps it.
+    'P1S via generic': {command: generic, env: {PRINTER_HOST: '192.0.2.1', PRINTER_TYPE: 'bambu', BAMBU_SERIAL: 'PRIVATE-SERIAL-ONE'}},
+    // A second Bambu printer only mcp-3D-printer-server knows: it is used.
+    'A1 via generic': {command: generic, env: {PRINTER_HOST: '192.0.2.50', PRINTER_TYPE: 'bambu', BAMBU_SERIAL: 'serial-50'}},
+    'Voron': {command: generic, env: {PRINTER_HOST: 'Voron.local', PRINTER_PORT: '7125', PRINTER_TYPE: 'klipper'}},
+    'Octo on same host': {command: generic, env: {PRINTER_HOST: 'voron.local', PRINTER_PORT: '80', PRINTER_TYPE: 'octoprint'}},
+  }});
+  const cursor = await f.put('.cursor/mcp.json', {mcpServers: {
+    'Voron again': {command: generic, env: {PRINTER_HOST: 'voron.local', PRINTER_PORT: '7125', PRINTER_TYPE: 'klipper'}},
+    // bambu-printer-mcp later reaches the A1 too: it wins over the earlier generic profile.
+    'A1': {command: 'node', args: ['/opt/bambu-printer-mcp/dist/index.js'], env: {BAMBU_PRINTER_HOST: '192.0.2.50', BAMBU_PRINTER_SERIAL: 'SERIAL-50', BAMBU_PRINTER_MODEL: 'a1'}},
+  }});
+  const catalog = await loadPrinterCatalog(f.current, f.options([claude, cursor]));
+  assert.deepEqual(catalog.destinations.map(d => [d.name, d.backend, d.origin]), [
+    ['Bambu Lab P1S', 'bambu-printer-mcp', 'printer-handoff'],
+    ['Voron', 'mcp-3d-printer-server', 'claude-code'],
+    ['Octo on same host', 'mcp-3d-printer-server', 'claude-code'],
+    ['A1', 'bambu-printer-mcp', 'cursor'],
+  ]);
+  const idOf = name => catalog.destinations.find(d => d.name === name)?.id;
+  // Losing profiles still resolve, and stand for their printer's winner.
+  assert.equal(catalog.canonical('current'), 'current');
+  assert.equal(catalog.canonical(idOf('A1')), idOf('A1'));
+  assert.equal(catalog.canonical('nope'), undefined);
+});
+
+test('when another profile wins over the Mac app\'s own config, the default follows it and old choices still resolve', async t => {
+  const f = await fixture(t);
+  const current = {backend: 'mcp-3d-printer-server', process: {command: '/usr/local/bin/mcp-3d-printer-server', env: {PRINTER_HOST: '192.0.2.60', PRINTER_TYPE: 'bambu', BAMBU_SERIAL: 'S60'}}};
+  const source = await f.put('mcp.json', {mcpServers: {'X1C': {command: 'node', args: ['/opt/bambu-printer-mcp/dist/index.js'],
+    env: {BAMBU_PRINTER_HOST: '192.0.2.60', BAMBU_PRINTER_SERIAL: 's60', BAMBU_PRINTER_MODEL: 'x1c'}}}});
+  const catalog = await loadPrinterCatalog(current, f.options([source]));
+  assert.equal(catalog.destinations.length, 1);
+  assert.equal(catalog.destinations[0].name, 'X1C');
+  assert.equal(catalog.defaultDestinationId, catalog.destinations[0].id);
+  assert.equal(catalog.canonical('current'), catalog.destinations[0].id);
+  assert.equal(catalog.resolve('current').backend, 'mcp-3d-printer-server');
 });

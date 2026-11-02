@@ -12,6 +12,8 @@ import {
   type ElicitationRelay,
   type HandoffManifest,
   type PrinterHandoffConfig,
+  type PrinterSessionPool,
+  type PrinterToolCatalog,
 } from '@scan-to-make/printer-handoff';
 import {RemoteAuthFailure, type RemoteScope} from './remote-auth.js';
 
@@ -83,18 +85,24 @@ function send(response: ServerResponse, bytes: Buffer | string): Promise<void> {
 export interface PrintHandoffServices {
   store: HandoffBundleStore;
   relay: ElicitationRelay;
-  runner: Pick<PrinterHandoffRunner, 'runBundle' | 'backend'> & Partial<Pick<PrinterHandoffRunner, 'filaments' | 'status'>>;
+  runner: Pick<PrinterHandoffRunner, 'runBundle' | 'backend'> & Partial<Pick<PrinterHandoffRunner, 'filaments' | 'status' | 'session' | 'run'>>;
   selection?: PrinterHandoffConfig['selection'];
 }
 
-/** Builds the production services from an operator printer-handoff config. */
-export function createPrintHandoffServices(configInput: PrinterHandoffConfig, bundlesDirectory: string): PrintHandoffServices {
+/**
+ * Builds the production services from an operator printer-handoff config.
+ * With a pool, every call to this destination goes through its one long-lived
+ * MCP session (PRD §8.3); without one, each run opens and closes its own.
+ */
+export function createPrintHandoffServices(configInput: PrinterHandoffConfig, bundlesDirectory: string,
+  shared?: {pool: PrinterSessionPool; destinationId: string; onConnect?: (catalog: PrinterToolCatalog) => void}): PrintHandoffServices {
   const config = printerHandoffConfigSchema.parse(structuredClone(configInput));
   const relay = new InMemoryElicitationRelay({timeoutMs: timeoutsFor(config).elicitationMs});
+  const session = shared?.pool.session(shared.destinationId, config, {relay, ...(shared.onConnect ? {onConnect: shared.onConnect} : {})});
   return {
     store: new HandoffBundleStore(bundlesDirectory),
     relay,
-    runner: new PrinterHandoffRunner(config, {relay}),
+    runner: new PrinterHandoffRunner(config, {relay, ...(session ? {session} : {})}),
     selection: config.selection,
   };
 }

@@ -5,6 +5,7 @@ import {homedir} from 'node:os';
 import {basename, delimiter, dirname, isAbsolute, join, resolve} from 'node:path';
 import {parseEnv} from 'node:util';
 import {printerHandoffConfigSchema, printerSelectionSchema, type PrinterBackend, type PrinterHandoffConfig, type PrinterMcpProcess} from '@scan-to-make/printer-handoff';
+import {parseToml} from './toml.js';
 
 /** Configured destinations, not claims about live printer connectivity. */
 export interface PrinterDestination {
@@ -14,13 +15,22 @@ export interface PrinterDestination {
   model?: string;
   address?: string;
   source: 'current' | 'mcp-profile';
+  /** The client config it came from. */
+  origin?: PrinterOrigin;
 }
+
+export type PrinterOrigin = 'printer-handoff' | 'claude-code' | 'claude-desktop' | 'cursor' | 'codemode' | 'codex';
 
 export interface PrinterCatalog {
   defaultDestinationId: string;
   destinations: PrinterDestination[];
-  /** Only companion code receives process settings; callers get a defensive copy. */
+  /** Only companion code receives process settings; callers get a defensive copy. Duplicates still resolve. */
   resolve(id: string): PrinterHandoffConfig | undefined;
+  /**
+   * The listed destination that an id now stands for: itself, or the
+   * destination that won over it for the same printer. Undefined for an unknown id.
+   */
+  canonical(id: string): string | undefined;
 }
 
 export interface PrinterCatalogOptions {
@@ -59,7 +69,18 @@ function defaultSources(home: string): string[] {
     '.codex/mcp/codemode-servers.json', '.claude-desktop/mcp/codemode-servers.json',
     // This installed Codemode wrapper reads configDirectories from this file.
     '.config/codemode-mcp/codemode-mcp-temp/codemode-config.json',
+    // Codex: [mcp_servers.<name>] tables with command, args, env and cwd.
+    '.codex/config.toml',
   ].map(path => join(home, path));
+}
+
+function originOf(path: string): PrinterOrigin {
+  const name = basename(path);
+  if (name === 'config.toml' || name.endsWith('.toml')) return 'codex';
+  if (name === 'claude_desktop_config.json') return 'claude-desktop';
+  if (name === '.claude.json' || name === 'claude.json') return 'claude-code';
+  if (path.includes('/.cursor/')) return 'cursor';
+  return 'codemode';
 }
 
 /** Identify the actual supported package entry point, never just a profile's name. */
@@ -72,6 +93,8 @@ function backendFor(command: string, args: string[]): PrinterBackend | undefined
   const direct = packageName(executable);
   if (direct) return direct;
   if (executable === 'node' || executable === 'nodejs') {
+    // Codex runs npx through node: node …/npm/bin/npx-cli.js -y <package>.
+    if (/(?:^|\/)npx-cli\.js$/.test(args[0] ?? '')) return backendFor('npx', args.slice(1));
     const match = /(?:^|\/)(bambu-printer-mcp|mcp-3d-printer-server)\/dist\/index\.js$/i.exec(args[0] ?? '');
     return match?.[1]?.toLowerCase() as PrinterBackend | undefined;
   }
@@ -109,12 +132,19 @@ async function metadata(config: PrinterHandoffConfig, envPath?: string) {
   const serial = (bambu ? text(env.BAMBU_PRINTER_SERIAL) : undefined) ?? text(env.BAMBU_SERIAL);
   const model = config.selection?.model ?? (bambu ? text(env.BAMBU_PRINTER_MODEL) : undefined) ?? text(env.BAMBU_MODEL);
   const address = publicAddress(host);
-  // Different generic API ports can represent distinct printers on one host.
-  const port = config.selection?.port ?? text(env.PRINTER_PORT) ?? '';
-  const identity = address ? JSON.stringify([config.backend, address.toLowerCase(), port, serial ?? '']) : undefined;
   const printerType = printerSelectionSchema.shape.printerType.safeParse(bambu ? 'bambu' : text(env.PRINTER_TYPE)?.toLowerCase());
+  const bambuKind = bambu || serial !== undefined || (printerType.success && printerType.data === 'bambu');
+  // One printer, one destination (PRD §8.2): the Bambu serial when known, else
+  // the lowercased host:port. A Bambu printer's address is its host (its ports are fixed);
+  // different generic API ports can represent distinct printers on one host.
+  const port = config.selection?.port ?? text(env.PRINTER_PORT) ?? '';
+  const hostKey = address?.toLowerCase();
+  const keys = [
+    ...(serial ? [`serial:${serial.toUpperCase()}`] : []),
+    ...(hostKey ? [bambuKind ? `bambu-host:${hostKey.replace(/:\d+$/, '')}` : `host:${port && !/:\d+$/.test(hostKey) ? `${hostKey}:${port}` : hostKey}`] : []),
+  ];
   return {address, model: model && /^[a-zA-Z0-9 _.-]{1,64}$/.test(model) ? model.toLowerCase() : undefined,
-    printerType: printerType.success ? printerType.data : undefined, identity};
+    printerType: printerType.success ? printerType.data : undefined, keys, bambuKind};
 }
 
 function defaultName(backend: PrinterBackend, model?: string): string {
@@ -142,27 +172,76 @@ function profileEntries(document: RecordValue, scope: string[] = []): {key: stri
   return entries;
 }
 
+interface Candidate {
+  id: string;
+  name: string;
+  backend: PrinterBackend;
+  model?: string;
+  address?: string;
+  source: PrinterDestination['source'];
+  origin?: PrinterOrigin;
+  keys: string[];
+  bambuKind: boolean;
+  config: PrinterHandoffConfig;
+}
+
+async function readDocument(path: string): Promise<RecordValue | undefined> {
+  const contents = await readText(path);
+  if (contents === undefined) return undefined;
+  try { return record(path.endsWith('.toml') ? parseToml(contents) : JSON.parse(contents)); } catch { return undefined; }
+}
+
+/**
+ * Picks the destination for each printer (PRD §8.2 routing rule): a Bambu
+ * printer uses bambu-printer-mcp, and mcp-3D-printer-server only when no
+ * bambu-printer-mcp profile reaches it; every other printer uses
+ * mcp-3D-printer-server. Within one MCP, the Mac app's own config wins, then
+ * the first source found.
+ */
+function winners(candidates: Candidate[]): Map<Candidate, Candidate> {
+  const parent = candidates.map((_, index) => index);
+  const find = (index: number): number => parent[index] === index ? index : (parent[index] = find(parent[index]!));
+  const owner = new Map<string, number>();
+  candidates.forEach((candidate, index) => {
+    for (const key of candidate.keys) {
+      const other = owner.get(key);
+      if (other === undefined) owner.set(key, index);
+      else parent[find(index)] = find(other);
+    }
+  });
+  const groups = new Map<number, Candidate[]>();
+  candidates.forEach((candidate, index) => { const root = find(index); groups.set(root, [...(groups.get(root) ?? []), candidate]); });
+  const result = new Map<Candidate, Candidate>();
+  for (const group of groups.values()) {
+    const bambu = group.some(candidate => candidate.bambuKind) && group.some(candidate => candidate.backend === 'bambu-printer-mcp');
+    const eligible = group.filter(candidate => candidate.backend === (bambu ? 'bambu-printer-mcp' : 'mcp-3d-printer-server'));
+    const pool = eligible.length ? eligible : group;
+    const winner = pool.find(candidate => candidate.source === 'current') ?? pool[0]!;
+    for (const candidate of group) result.set(candidate, winner);
+  }
+  return result;
+}
+
 /** Reads configured profiles only. Does not start MCP processes or contact printers. */
 export async function loadPrinterCatalog(current: PrinterHandoffConfig, options: PrinterCatalogOptions = {}): Promise<PrinterCatalog> {
   const home = options.homeDirectory ?? homedir();
   const currentConfig = printerHandoffConfigSchema.parse(structuredClone(current));
   const currentMetadata = await metadata(currentConfig, options.currentEnvPath);
-  const configs = new Map<string, PrinterHandoffConfig>([['current', currentConfig]]);
-  const identities = new Set(currentMetadata.identity ? [currentMetadata.identity] : []);
-  const destinations: PrinterDestination[] = [{id: 'current', name: defaultName(currentConfig.backend, currentMetadata.model), backend: currentConfig.backend,
-    ...(currentMetadata.model ? {model: currentMetadata.model} : {}), ...(currentMetadata.address ? {address: currentMetadata.address} : {}), source: 'current'}];
-  const queue = (options.sourcePaths ?? defaultSources(home)).map(path => expand(path, home, home));
+  const candidates: Candidate[] = [{id: 'current', name: defaultName(currentConfig.backend, currentMetadata.model), backend: currentConfig.backend,
+    ...(currentMetadata.model ? {model: currentMetadata.model} : {}), ...(currentMetadata.address ? {address: currentMetadata.address} : {}),
+    source: 'current', origin: 'printer-handoff', keys: currentMetadata.keys, bambuKind: currentMetadata.bambuKind, config: currentConfig}];
+  const queue = (options.sourcePaths ?? defaultSources(home)).map(path => ({path: expand(path, home, home), origin: undefined as PrinterOrigin | undefined}));
   const visited = new Set<string>();
+  const seenProfiles = new Set<string>();
   while (queue.length && visited.size < 128) {
-    const path = queue.shift()!;
+    const {path, origin: inherited} = queue.shift()!;
     if (visited.has(path)) continue;
     visited.add(path);
-    const contents = await readText(path);
-    let document: RecordValue | undefined;
-    try { document = contents === undefined ? undefined : record(JSON.parse(contents)); } catch { continue; }
+    const document = await readDocument(path);
     if (!document) continue;
+    const origin = inherited ?? originOf(path);
     if (Array.isArray(document.configDirectories)) for (const directory of document.configDirectories) {
-      if (typeof directory === 'string') queue.push(join(expand(directory, home, dirname(path)), '.mcp.json'));
+      if (typeof directory === 'string') queue.push({path: join(expand(directory, home, dirname(path)), '.mcp.json'), origin: 'codemode'});
     }
     for (const {key, name, value: raw} of profileEntries(document)) {
       const profile = record(raw);
@@ -176,7 +255,7 @@ export async function loadPrinterCatalog(current: PrinterHandoffConfig, options:
       if (profile.env !== undefined && (!env || !Object.values(env).every(value => typeof value === 'string'))) continue;
       // The client's existing Codemode source is a reference, not a copied config.
       const codemodePath = text(env?.CODEMODE_SERVERS);
-      if (codemodePath && isAbsolute(codemodePath)) queue.push(codemodePath);
+      if (codemodePath && isAbsolute(codemodePath)) queue.push({path: codemodePath, origin: 'codemode'});
       const backend = backendFor(command, args);
       if (!backend) continue;
       if (profile.cwd !== undefined && (typeof profile.cwd !== 'string' || !isAbsolute(profile.cwd))) continue;
@@ -189,22 +268,30 @@ export async function loadPrinterCatalog(current: PrinterHandoffConfig, options:
       const config = parsed.data;
       const meta = await metadata(config);
       // A package installation without a configured target is not another printer.
-      if (!meta.address || (meta.identity && identities.has(meta.identity))) continue;
+      if (!meta.address) continue;
+      // The same profile reached through two sources (a copied file) is listed once.
+      const sameProfile = JSON.stringify([backend, processConfig]);
+      if (seenProfiles.has(sameProfile)) continue;
+      seenProfiles.add(sameProfile);
       // Tool schemas require these explicit arguments before the MCP can apply its own env defaults.
       // Carry only the existing profile's model/type; retain its complete process configuration unchanged.
       if (meta.model || meta.printerType) config.selection = {
         ...(meta.model ? {model: meta.model} : {}), ...(meta.printerType ? {printerType: meta.printerType} : {}),
       };
-      if (meta.identity) identities.add(meta.identity);
       const id = `mcp-${createHash('sha256').update(`${path}\0${key}`).digest('hex').slice(0, 24)}`;
       const label = name.trim().replace(/[\u0000-\u001f\u007f]/g, '').slice(0, 120);
-      destinations.push({id, name: label || defaultName(backend, meta.model), backend, address: meta.address,
-        ...(meta.model ? {model: meta.model} : {}), source: 'mcp-profile'});
-      configs.set(id, config);
+      candidates.push({id, name: label || defaultName(backend, meta.model), backend, address: meta.address,
+        ...(meta.model ? {model: meta.model} : {}), source: 'mcp-profile', origin, keys: meta.keys, bambuKind: meta.bambuKind, config});
     }
   }
-  return {defaultDestinationId: 'current', destinations, resolve(id) {
-    const config = configs.get(id);
-    return config ? structuredClone(config) : undefined;
-  }};
+  const chosen = winners(candidates);
+  const configs = new Map(candidates.map(candidate => [candidate.id, candidate.config] as const));
+  const canonical = new Map(candidates.map(candidate => [candidate.id, chosen.get(candidate)!.id] as const));
+  const listed = candidates.filter(candidate => chosen.get(candidate) === candidate);
+  const defaultDestinationId = canonical.get('current')!;
+  const destinations: PrinterDestination[] = [...listed.filter(item => item.id === defaultDestinationId), ...listed.filter(item => item.id !== defaultDestinationId)]
+    .map(({id, name, backend, model, address, source, origin}) => ({id, name, backend, ...(model ? {model} : {}), ...(address ? {address} : {}), source, origin}));
+  return {defaultDestinationId, destinations,
+    resolve(id) { const config = configs.get(id); return config ? structuredClone(config) : undefined; },
+    canonical(id) { return canonical.get(id); }};
 }

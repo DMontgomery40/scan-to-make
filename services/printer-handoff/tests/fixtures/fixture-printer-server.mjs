@@ -15,6 +15,7 @@ if (ephemeral) {
 
 const [mode, log] = process.argv.slice(2);
 const record = entry => appendFileSync(log, JSON.stringify(entry) + '\n');
+if (process.env.HANDOFF_FIXTURE_PID === '1') record({started: process.pid});
 const string = {type: 'string'};
 const number = {type: 'number'};
 const integer = {type: 'integer'};

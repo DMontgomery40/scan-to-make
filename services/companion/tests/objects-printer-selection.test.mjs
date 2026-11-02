@@ -23,7 +23,8 @@ async function fixture(t) {
     {id: 'current', name: 'Current printer', backend: current.backend, source: 'current'},
     {id: 'second', name: 'Other printer', backend: second.backend, source: 'mcp-profile', address: 'second.local'},
   ];
-  const catalog = {destinations, defaultDestinationId: 'current', resolve: id => id === 'current' ? structuredClone(current) : id === 'second' ? structuredClone(second) : undefined};
+  const catalog = {destinations, defaultDestinationId: 'current', resolve: id => id === 'current' ? structuredClone(current) : id === 'second' ? structuredClone(second) : undefined,
+    canonical: id => ['current', 'second'].includes(id) ? id : undefined};
   const calls = [], answers = [], routes = new Map();
   for (const destination of destinations) {
     const config = catalog.resolve(destination.id), relay = new InMemoryElicitationRelay({timeoutMs: 2000});

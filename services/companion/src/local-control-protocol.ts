@@ -52,7 +52,9 @@ export const parameters = {
   'objects.passActivity': z.strictObject({id: z.uuid(), index: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER)}),
   'objects.start': z.strictObject({id: z.uuid()}),
   'objects.delete': z.strictObject({id: z.uuid()}),
-  'objects.correct': z.strictObject({id: z.uuid(), note: z.string().trim().min(1).max(4000)}),
+  'objects.correct': z.strictObject({id: z.uuid(), note: z.string().trim().min(1).max(4000), photos: z.array(z.string().min(2).max(4096)).max(24).optional()}),
+  'objects.create': z.strictObject({instructions: z.string().max(8000).optional()}),
+  'objects.addFile': z.strictObject({id: z.uuid(), kind: z.enum(['photos', 'scan']), path: z.string().min(2).max(4096)}),
   'objects.answerCloseup': z.strictObject({id: z.uuid(), bestGuess: z.boolean()}),
   'objects.print': z.strictObject({id: z.uuid(), checked: z.boolean().optional(), filament: z.strictObject({
     slot:z.number().int().min(0).max(255), colour:z.string().regex(/^#[0-9A-F]{6}$/), material:z.string().min(1).max(128),

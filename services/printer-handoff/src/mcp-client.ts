@@ -59,6 +59,21 @@ export interface PrinterMcpClientOptions {
   relay?: ElicitationRelay;
   /** Receives bounded chunks of the MCP server's stderr, for field diagnosis. */
   onStderr?: (chunk: string) => void;
+  /** Called once when an established connection ends without close() (the MCP process exited or its pipe broke). */
+  onClose?: () => void;
+}
+
+export interface PrinterToolCallOptions {
+  signal?: AbortSignal;
+  timeoutMs?: number;
+  dispatchSensitive?: boolean;
+  beforeDispatch?: () => Promise<void>;
+  /**
+   * Tags the server's questions asked during this call. The caller must make
+   * this call the only one that can elicit (a session mutex), because the
+   * server's elicitation requests carry no reference to the call that caused them.
+   */
+  elicitationContext?: ElicitationContext;
 }
 
 /** One stdio MCP session against the operator-configured printer server. */
@@ -73,15 +88,20 @@ export class PrinterMcpClient {
   readonly #validators = new Map<Tool, ValidateFunction>();
   readonly #ajv = new Ajv({strict: false});
   readonly #onStderr?: (chunk: string) => void;
+  readonly #onClose?: () => void;
   readonly #outstandingElicitations = new Set<string>();
+  #closing = false;
 
   constructor(config: PrinterHandoffConfig, options: PrinterMcpClientOptions = {}) {
     this.#config = structuredClone(config);
     this.#relay = options.relay;
     this.#onStderr = options.onStderr;
+    this.#onClose = options.onClose;
   }
 
   get catalog(): PrinterToolCatalog | undefined { return this.#catalog; }
+  /** Connected, listed and not closed since. */
+  get connected(): boolean { return this.#catalog !== undefined && this.#client !== undefined; }
   setElicitationContext(context: ElicitationContext): void { this.#elicitationContext = context; }
   clearElicitationContext(): void { this.#elicitationContext = {}; }
 
@@ -145,6 +165,11 @@ export class PrinterMcpClient {
         if (page === MAX_PAGES - 1) fail('catalog-limit');
       }
       this.#catalog = freeze({server: {name: server.name, version: server.version}, tools});
+      // A process that exits later ends this session; the owner reconnects on its next call.
+      client.onclose = () => {
+        if (this.#closing || this.#client !== client) return;
+        void this.close().catch(() => undefined).finally(() => this.#onClose?.());
+      };
       return this.#catalog;
     } catch (error) {
       await this.close().catch(() => undefined);
@@ -173,7 +198,22 @@ export class PrinterMcpClient {
     if (!compiled(args)) fail('invalid-tool-arguments');
   }
 
-  async callTool(name: string, args: Record<string, unknown> = {}, options: {signal?: AbortSignal; timeoutMs?: number; dispatchSensitive?: boolean; beforeDispatch?: () => Promise<void>} = {}): Promise<CallToolResult> {
+  async callTool(name: string, args: Record<string, unknown> = {}, options: PrinterToolCallOptions = {}): Promise<CallToolResult> {
+    if (!options.elicitationContext) return this.#callTool(name, args, options);
+    const previous = this.#elicitationContext, before = new Set(this.#outstandingElicitations);
+    this.#elicitationContext = options.elicitationContext;
+    try { return await this.#callTool(name, args, options); }
+    finally {
+      if (this.#elicitationContext === options.elicitationContext) this.#elicitationContext = previous;
+      // A call that ended (answered, aborted or timed out) leaves no question of its own behind.
+      for (const id of [...this.#outstandingElicitations].filter(id => !before.has(id))) {
+        this.#outstandingElicitations.delete(id);
+        try { this.#relay?.respond(id, {action: 'cancel'}); } catch { /* Already answered. */ }
+      }
+    }
+  }
+
+  async #callTool(name: string, args: Record<string, unknown>, options: PrinterToolCallOptions): Promise<CallToolResult> {
     if (!this.#client || !this.#catalog) fail('not-connected');
     const tool = this.getTool(name);
     this.#validate(tool, args);
@@ -212,6 +252,11 @@ export class PrinterMcpClient {
   }
 
   async close(): Promise<void> {
+    this.#closing = true;
+    try { await this.#close(); } finally { this.#closing = false; }
+  }
+
+  async #close(): Promise<void> {
     const client = this.#client, transport = this.#transport, pid = transport?.pid ?? null;
     this.#client = undefined; this.#transport = undefined; this.#catalog = undefined;
     this.#elicitationContext = {};

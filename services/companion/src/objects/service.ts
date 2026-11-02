@@ -1,6 +1,6 @@
-import {copyFile, mkdir, readFile, rm, stat, writeFile} from 'node:fs/promises';
+import {copyFile, mkdir, open, readFile, rm, stat, writeFile} from 'node:fs/promises';
 import {createHash} from 'node:crypto';
-import {basename, join} from 'node:path';
+import {basename, extname, isAbsolute, join} from 'node:path';
 import {DispatchedPrintError, PrinterMcpError, sliceEstimate, type PrintProgress, type PendingElicitation, type PrinterHandoffConfig} from '@scan-to-make/printer-handoff';
 import type {PrintHandoffServices} from '../print-handoff-http.js';
 import type {PlateVerdict} from './bedcheck.js';
@@ -9,6 +9,7 @@ import {publicTouchupText, type TouchupActivity, type TouchupResult} from '../to
 import {ObjectNotFoundError, ObjectStore, type ObjectPrintConfirmation, type StmObject} from './store.js';
 import {macReconstructRunner, type Reconstruct} from './reconstruct.js';
 import type {PrinterCatalog} from './printers.js';
+import type {PrinterDirectory, PublicDestination} from '../printing/directory.js';
 
 /** How many of an object's photos go to one touch-up pass. More only costs time. */
 export const PHOTOS_PER_PASS = 24;
@@ -24,6 +25,35 @@ export class InvalidCaptureManifestError extends Error {
 }
 
 export interface CaptureManifest {version: 1; images: string[]; depthRequired: boolean}
+
+/** A file on this Mac that `objects.addFile` refuses: the sentence says why. */
+export class InvalidFileError extends Error {
+  constructor(message: string) { super(message); this.name = 'InvalidFileError'; }
+}
+const FILE_KINDS = {
+  photos: {extensions: ['.jpg', '.jpeg', '.png', '.heic'], limit: 25 * 1024 * 1024, words: 'a JPEG, PNG or HEIC photo'},
+  scan: {extensions: ['.stl', '.3mf', '.usdz'], limit: 64 * 1024 * 1024, words: 'an STL, 3MF or USDZ file'},
+} as const;
+/** The first bytes must agree with the extension. */
+function looksLike(extension: string, head: Buffer): boolean {
+  switch (extension) {
+    case '.jpg': case '.jpeg': return head[0] === 0xff && head[1] === 0xd8 && head[2] === 0xff;
+    case '.png': return head.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+    case '.heic': return head.subarray(4, 8).toString('latin1') === 'ftyp' && /^(heic|heix|hevc|hevx|mif1|msf1|heim|heis)$/.test(head.subarray(8, 12).toString('latin1'));
+    case '.3mf': case '.usdz': return head[0] === 0x50 && head[1] === 0x4b && head[2] === 0x03 && head[3] === 0x04;
+    case '.stl': return head.length >= 84 || head.subarray(0, 5).toString('latin1').toLowerCase() === 'solid';
+    default: return false;
+  }
+}
+/** A plain, unique file name for a photo copied in from this Mac. */
+function photoName(path: string, taken: string[]): string {
+  const extension = extname(path).toLowerCase();
+  let stem = basename(path, extname(path)).replace(/[^A-Za-z0-9._ -]/g, '-').replace(/^[^A-Za-z0-9]+/, '').replace(/\.\.+/g, '.').slice(0, 100) || 'photo';
+  if (!/^[A-Za-z0-9]/.test(stem)) stem = 'photo';
+  let name = `${stem}${extension}`, n = 2;
+  while (taken.includes(name)) name = `${stem}-${n++}${extension}`;
+  return name;
+}
 const CAPTURE_PENDING = 'The capture is still missing camera or depth files, or its completed file list. Resume sending it from the phone that recorded it.';
 
 function parseCaptureManifest(value: unknown): CaptureManifest {
@@ -49,6 +79,8 @@ export interface ObjectServiceDeps {
   claudePath: string;
   handoff: PrinterHandoffConfig;
   printerCatalog?: PrinterCatalog;
+  /** Live destination state and capabilities, from each destination's long-lived session. */
+  printers?: PrinterDirectory;
   onChange?: (object: StmObject) => void;
   /** Rebuilds a handheld scan from its photos (`mac-reconstruct samples`). Defaults to the bundled tool. */
   reconstruct?: Reconstruct;
@@ -181,15 +213,23 @@ export class ObjectService {
     return pass.activity ?? [];
   }
 
-  printers(): {defaultDestinationId?: string; destinations: PrinterCatalog['destinations']} {
+  printers(): {defaultDestinationId?: string; destinations: PublicDestination[]} {
+    if (this.#deps.printers) return this.#deps.printers.list();
     const catalog = this.#deps.printerCatalog;
-    return {defaultDestinationId: catalog?.defaultDestinationId, destinations: catalog?.destinations.map(({id, name, backend, model, address, source}) =>
-      ({id, name, backend, ...(model ? {model} : {}), ...(address ? {address} : {}), source})) ?? []};
+    return {defaultDestinationId: catalog?.defaultDestinationId, destinations: catalog?.destinations.map(({id, name, backend, model, address, source, origin}) =>
+      ({id, name, backend, ...(model ? {model} : {}), ...(address ? {address} : {}), source, ...(origin ? {origin} : {})})) ?? []};
+  }
+
+  /** The listed destination an object's choice stands for now (a duplicate resolves to its winner). */
+  #destinationId(object: StmObject): string | undefined {
+    const catalog = this.#deps.printerCatalog;
+    const chosen = object.printerDestinationId ?? catalog?.defaultDestinationId;
+    return chosen === undefined ? undefined : catalog?.canonical(chosen) ?? chosen;
   }
 
   private async liveFilaments(id: string): Promise<LiveFilament[]> {
-    const object = await this.get(id), configured = this.#deps.print, catalog = this.#deps.printerCatalog;
-    const destinationId = object.printerDestinationId ?? catalog?.defaultDestinationId;
+    const object = await this.get(id), configured = this.#deps.print;
+    const destinationId = this.#destinationId(object);
     const services = destinationId ? configured?.destinations?.get(destinationId) : configured?.services;
     if (!services || services.runner.backend !== 'bambu-printer-mcp' || !services.runner.filaments) throw new InvalidStateError('Filament choices are unavailable for this printer. Open the model in your slicer to choose a material.');
     let inventory: unknown;
@@ -215,9 +255,10 @@ export class ObjectService {
     return this.#gate(id, async () => {
       const object = await this.get(id), catalog = this.#deps.printerCatalog;
       if (object.state === 'touching-up' || object.state === 'printing') throw new InvalidStateError('Wait until the current step finishes before changing printers.');
-      if (!catalog?.destinations.some(destination => destination.id === destinationId) || !catalog.resolve(destinationId))
+      const chosen = catalog?.canonical(destinationId);
+      if (!chosen || !catalog?.destinations.some(destination => destination.id === chosen) || !catalog.resolve(chosen))
         throw new InvalidStateError('That printer is no longer available. Choose another printer.');
-      return this.#changed(await this.#deps.store.update(id, o => ({...o, printerDestinationId: destinationId})));
+      return this.#changed(await this.#deps.store.update(id, o => ({...o, printerDestinationId: chosen})));
     });
   }
 
@@ -266,11 +307,34 @@ export class ObjectService {
     });
   }
 
+  /** Photos are welcome at any time; one added while a pass runs is used by the next pass ("late photos"). */
   async addPhoto(id: string, name: string, bytes: Buffer): Promise<StmObject> {
-    const object = await this.get(id);
-    if (object.state !== 'new' && object.state !== 'needs-closeup') throw new InvalidStateError('Photos can only be added before the touch-up starts, or when a close-up was asked for.');
+    await this.get(id);
     await this.#deps.store.addFile(id, 'photos', name, bytes);
     return this.#changed(await this.#deps.store.update(id, o => ({...o, photos: o.photos.includes(name) ? o.photos : [...o.photos, name]})));
+  }
+
+  /**
+   * Copies a file on this Mac into the object (the Mac app's New Project and drop targets).
+   * The control socket can't carry file bytes, so the companion reads the path itself.
+   */
+  async addFile(id: string, kind: 'photos' | 'scan', path: string): Promise<StmObject> {
+    const rule = FILE_KINDS[kind];
+    if (!isAbsolute(path) || path.includes('\0')) throw new InvalidFileError('Choose a file on this Mac.');
+    const extension = extname(path).toLowerCase();
+    if (!(rule.extensions as readonly string[]).includes(extension)) throw new InvalidFileError(`That isn't ${rule.words}.`);
+    let bytes: Buffer;
+    const handle = await open(path, 'r').catch(() => { throw new ObjectNotFoundError(); });
+    try {
+      const info = await handle.stat();
+      if (!info.isFile()) throw new InvalidFileError(`That isn't ${rule.words}.`);
+      if (info.size > rule.limit) throw new InvalidFileError(`That file is larger than ${rule.limit / 1024 / 1024} MB.`);
+      if (info.size === 0) throw new InvalidFileError('That file is empty.');
+      bytes = await handle.readFile();
+    } finally { await handle.close(); }
+    if (bytes.length > rule.limit || !looksLike(extension, bytes.subarray(0, 84))) throw new InvalidFileError(`That isn't ${rule.words}.`);
+    if (kind === 'scan') return this.addScan(id, `scan${extension}`, bytes);
+    return this.addPhoto(id, photoName(path, (await this.get(id)).photos), bytes);
   }
 
   /** The inputs are complete: start the touch-up. Starting again while it runs changes nothing. */
@@ -325,11 +389,13 @@ export class ObjectService {
     await this.#captureFilesPresent(object);
   }
 
-  correct(id: string, note: string): Promise<StmObject> { return this.#gate(id, () => this.#correct(id, note)); }
-  async #correct(id: string, note: string): Promise<StmObject> {
-    const object = await this.get(id);
+  /** Asks for changes; `photos` are files on this Mac added first (the Mac app's drop target). */
+  correct(id: string, note: string, photos: string[] = []): Promise<StmObject> { return this.#gate(id, () => this.#correct(id, note, photos)); }
+  async #correct(id: string, note: string, photos: string[]): Promise<StmObject> {
+    let object = await this.get(id);
     if (object.state === 'touching-up' || object.state === 'printing') throw new InvalidStateError('Wait until the current step finishes.');
     if (!object.current && object.state !== 'failed') throw new InvalidStateError('There is no model to correct yet.');
+    for (const path of photos) object = await this.addFile(id, 'photos', path);
     return this.#pass(object, {note: note.trim()});
   }
 
@@ -362,7 +428,7 @@ export class ObjectService {
     const configured = this.#deps.print;
     if (!configured) throw new InvalidStateError('Printing is not set up on this Mac.');
     const catalog = this.#deps.printerCatalog;
-    const destinationId = object.printerDestinationId ?? catalog?.defaultDestinationId;
+    const destinationId = this.#destinationId(object);
     const destination = catalog?.destinations.find(item => item.id === destinationId);
     const config = destinationId ? catalog?.resolve(destinationId) : undefined;
     if (destinationId && (!destination || !config)) throw new InvalidStateError('That printer is no longer available. Choose another printer.');
