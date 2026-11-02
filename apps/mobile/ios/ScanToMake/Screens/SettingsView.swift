@@ -110,13 +110,7 @@ struct SettingsView: View {
         #endif
     }
 
-    /// "All on · progress at halfway", from the Mac's settings when it keeps them.
-    private var notificationSummary: String {
-        guard let settings = macSettings.settings, settings.isFull, let id = macSettings.deviceId else { return NotificationChoices.summary }
-        let off = SettingsSchema.notificationTypes.filter { !settings.phoneNotifies($0.id, deviceId: id) }.count
-        let state = off == 0 ? "All on" : off == SettingsSchema.notificationTypes.count ? "All off" : "\(SettingsSchema.notificationTypes.count - off) of \(SettingsSchema.notificationTypes.count) on"
-        return "\(state) · progress \(SettingsSchema.milestoneLabel(settings.milestones).lowercased())"
-    }
+    private var notificationSummary: String { app.cloud.alertsMessage }
 
     private func link<Label: View>(_ url: URL, _ label: Label) -> some View {
         Button { openURL(url) } label: { label }.foregroundStyle(.primary)
@@ -229,6 +223,7 @@ enum NotificationChoices {
 /// Settings → Notifications (PRD §9.1, screens/phone-settings-notifications.jpg): one switch per kind, and the
 /// progress milestones, which the Mac keeps.
 struct NotificationSettingsView: View {
+    @Environment(AppModel.self) private var app
     let store: ProjectsStore
     @State private var on: [String: Bool] = Dictionary(uniqueKeysWithValues: NotificationChoices.all.map { ($0.id, NotificationChoices.isOn($0.id)) })
     @State private var milestones = NotificationChoices.milestones
@@ -242,7 +237,9 @@ struct NotificationSettingsView: View {
     var body: some View {
         List {
             NotificationPermissionRow()
-            Section { ForEach(NotificationChoices.projects) { row($0) } } header: { Text("Projects") }
+            Section { ForEach(NotificationChoices.projects) { row($0) } } header: { Text("Projects") } footer: {
+                Text(app.cloud.alertsMessage + " Your saved choices are kept; individual alert types cannot be changed here yet.")
+            }
             Section { ForEach(NotificationChoices.beforePrint) { row($0) } } header: { Text("Before a print") }
             Section {
                 ForEach(NotificationChoices.whilePrinting) { row($0) }
@@ -293,6 +290,7 @@ struct NotificationSettingsView: View {
                 }
             }
         }
+        .disabled(true)
         .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
     }
 
