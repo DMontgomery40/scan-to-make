@@ -192,12 +192,15 @@ private struct Sidebar: View {
                         let capabilities = model.printer(for: object)?.capabilities
                         // One command at a time, as on the project page: a second would be dropped while the first runs.
                         Group {
+                            // The project is shown first, so a refusal appears where the person is looking.
                             if object.print?.live?.state == "paused" {
-                                if capabilities?.resume ?? true { Button("Resume Print") { Task { await model.control(object.id, .resume) } } }
+                                if capabilities?.resume ?? true {
+                                    Button("Resume Print") { model.selection = object.id; Task { await model.control(object.id, .resume) } }
+                                }
                             } else if capabilities?.pause ?? true {
-                                Button("Pause Print") { Task { await model.control(object.id, .pause) } }
+                                Button("Pause Print") { model.selection = object.id; Task { await model.control(object.id, .pause) } }
                             }
-                            if capabilities?.cancel ?? true { Button("Stop Print…", role: .destructive) { stopping = object } }
+                            if capabilities?.cancel ?? true { Button("Stop Print…", role: .destructive) { model.selection = object.id; stopping = object } }
                         }
                         .disabled(model.working.contains(object.id))
                         Divider()
