@@ -1,0 +1,23 @@
+{
+  "name": "@scan-to-make/relay",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "npm run typecheck && vitest run",
+    "smoke": "node scripts/smoke.mjs",
+    "check": "node scripts/check.mjs",
+    "build": "wrangler deploy --dry-run --outdir .wrangler/dry-run",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-plugin": "1.4.6",
+    "@cloudflare/workers-types": "5.20261019.1",
+    "typescript": "5.9.3",
+    "vite": "7.3.6",
+    "vitest": "4.1.12",
+    "wrangler": "4.151.3"
+  }
+}

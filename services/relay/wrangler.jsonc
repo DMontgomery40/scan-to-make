@@ -1,0 +1,29 @@
+// Counterpart Live Activity relay (docs/design/overhaul/PRD.md §8.8).
+// The Mac app posts one Live Activity push; this Worker validates it, rate-limits it in a
+// SQLite-backed Durable Object, and forwards it to APNs with the team's key.
+//
+// Routing: site/wrangler.jsonc serves counterpart.dtmont.com as a Custom Domain. A route on the
+// same hostname takes precedence over a Custom Domain, so this route answers /relay/* and every
+// other path still reaches the docs Worker unchanged.
+//
+// Deploy (David, after the README's one manual step): cd services/relay && npx wrangler deploy
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "counterpart-relay",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-19",
+  "workers_dev": false,
+  "preview_urls": false,
+  "routes": [{ "pattern": "counterpart.dtmont.com/relay/*", "zone_name": "dtmont.com" }],
+  "durable_objects": {
+    "bindings": [{ "name": "LIMITER", "class_name": "RelayLimiter" }]
+  },
+  // The free plan only offers SQLite-backed Durable Objects.
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["RelayLimiter"] }],
+  "vars": {
+    // Pushes accepted per UTC day across all callers. Sized so the free plan's 100,000 Durable Object
+    // rows written per day can't run out: a worst-case push costs 7 writes (README, "Free plan").
+    "GLOBAL_DAILY_CAP": 14000
+  }
+  // Secrets (wrangler secret put): APNS_KEY_P8, APNS_KEY_ID, TEAM_ID.
+}
