@@ -20,7 +20,7 @@ const selection = {
   bedType: 'textured_plate', material: 'PLA', plateIndex: 0,
 };
 
-async function setup(t, {mode = 'bambu', backend = 'bambu-printer-mcp', answer = 'accept', relayTimeoutMs = 5000, dispatch, ephemeral = false, noColour = false, crypto = false, noConnectionType = false, settings = false, remote = false} = {}) {
+async function setup(t, {mode = 'bambu', backend = 'bambu-printer-mcp', answer = 'accept', relayTimeoutMs = 5000, dispatch, ephemeral = false, noColour = false, crypto = false, noConnectionType = false, settings = false, remote = false, slicer} = {}) {
   const root = await mkdtemp(join(tmpdir(), 'printer-handoff-'));
   t.after(() => rm(root, {recursive: true, force: true}));
   const log = join(root, 'calls.jsonl');
@@ -32,6 +32,7 @@ async function setup(t, {mode = 'bambu', backend = 'bambu-printer-mcp', answer =
     process: {command: process.execPath, args: [fixture, mode, log], cwd: root,
       env: {...(settings ? {HANDOFF_FIXTURE_SLICE_SETTINGS:'1'} : {}), ...(remote ? {HANDOFF_FIXTURE_REMOTE:'1'} : {}), ...(noConnectionType ? {HANDOFF_FIXTURE_NO_CONNECTION_TYPE:'1'} : {}), ...(crypto ? {HANDOFF_FIXTURE_CRYPTO:'1'} : {}), ...(dispatch ? {HANDOFF_FIXTURE_DISPATCH: dispatch} : {}), ...(ephemeral ? {HANDOFF_FIXTURE_EPHEMERAL: '1'} : {}), ...(noColour ? {HANDOFF_FIXTURE_NO_COLOUR:'1'} : {})}},
     selection,
+    ...(slicer ? {slicer} : {}),
     timeouts: {connectMs: 5000, toolMs: 5000, elicitationMs: relayTimeoutMs},
   };
   const seen = [];
@@ -501,4 +502,21 @@ test('quality and strength reach slice_stl as process overrides, and are refused
   const h = await setup(t, {settings: true, remote: true});
   await h.runner.run({stlPath: h.stlPath, slicer: {repetitions: 3}});
   assert.equal((await h.calls()).find(call => call.tool === 'slice_stl').arguments.repetitions, 3);
+});
+
+test('named copies override the config: repetitions 3 in the profile, one copy asked for, one sliced (print and estimate)', async t => {
+  const f = await setup(t, {settings: true, remote: true, slicer: {repetitions: 3}});
+  const slices = async () => (await f.calls()).filter(call => call.tool === 'slice_stl').map(call => call.arguments.repetitions);
+  await f.runner.run({stlPath: f.stlPath, slicer: {repetitions: 1}});
+  assert.deepEqual(await slices(), [1]);
+  // The estimate slices exactly as Print would (its fixture 3MF has no estimate to read).
+  await f.runner.estimate({stlPath: f.stlPath, slicer: {repetitions: 1}}).catch(() => undefined);
+  assert.deepEqual(await slices(), [1, 1]);
+  // Nothing named: the profile's own repetitions.
+  await f.runner.run({stlPath: f.stlPath});
+  assert.deepEqual(await slices(), [1, 1, 3]);
+  // An MCP without repetitions: one copy is its default, so nothing is sent and nothing refused.
+  const g = await setup(t, {});
+  await g.runner.run({stlPath: g.stlPath, slicer: {repetitions: 1}});
+  assert.equal((await g.calls()).find(call => call.tool === 'slice_stl').arguments.repetitions, undefined);
 });

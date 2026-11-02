@@ -409,3 +409,27 @@ test('copies reach the estimate and the print only where the MCP takes them, and
   assert.equal(two.copies, 2);
   assert.equal(g.runs.at(-1).estimate.slicer.repetitions, 2);
 });
+
+test('one copy named is sent as repetitions 1, so it overrides a printer profile set to 3, on Print and on Estimate', async t => {
+  // The printer-handoff runner merges the profile's slicer under these overrides (printer-handoff.test.mjs checks that 1 wins).
+  const f = await setup(t, {copies: true, reports: [status('PREPARE', 0), status('RUNNING', 3), status('FINISH', 100)]});
+  await f.service.estimate(f.object.id, {copies: 1});
+  assert.equal(f.runs.at(-1).estimate.slicer.repetitions, 1);
+  // Not the cached answer for "nothing named": that one is the profile's own count.
+  await f.service.estimate(f.object.id, {});
+  assert.equal(f.runs.at(-1).estimate.slicer?.repetitions, undefined);
+  const printing = await f.service.print(f.object.id, {copies: 1});
+  const run = await until(() => f.runs.find(entry => entry.id === printing.print.bundleId));
+  assert.equal(run.options.slicer.repetitions, 1);
+  assert.equal(printing.print.settings?.copies, undefined, 'one copy is the default, recorded as nothing');
+  await f.approve();
+  await f.service.settled(f.object.id);
+  // An MCP without repetitions: one copy is still fine (it slices one), never refused.
+  const g = await setup(t, {sliceArgs: true});
+  await g.service.estimate(g.object.id, {copies: 1});
+  assert.equal(g.runs.at(-1).estimate.slicer.repetitions, 1);
+  const plain = await g.service.print(g.object.id, {copies: 1});
+  assert.equal(plain.state, 'printing');
+  await g.approve();
+  await g.service.settled(g.object.id);
+});

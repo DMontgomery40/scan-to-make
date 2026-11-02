@@ -12,7 +12,8 @@ export function sliceOverrides(settings: Pick<PrintSettings, 'quality' | 'streng
   return {
     ...(quality !== 'standard' ? {layerHeightMm: Math.round(QUALITY_LAYER_MM[quality] * scale * 100) / 100} : {}),
     ...(strength !== 'standard' ? STRENGTH[strength] : {}),
-    ...(settings.copies !== undefined && settings.copies > 1 ? {repetitions: settings.copies} : {}),
+    // Named copies are always sent, 1 included, so they override a printer config's own `slicer.repetitions`.
+    ...(settings.copies !== undefined ? {repetitions: settings.copies} : {}),
   };
 }
 

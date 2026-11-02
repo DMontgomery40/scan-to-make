@@ -307,7 +307,9 @@ export class PrinterHandoffRunner {
       layer_height: slicer.layerHeightMm,
       wall_loops: slicer.wallLoops,
       sparse_infill_density: slicer.sparseInfillDensity,
-      repetitions: slicer.repetitions !== undefined && slicer.repetitions > 1 ? slicer.repetitions : undefined,
+      // Sent whenever it is set and the tool takes it, 1 included: a request for one copy overrides a configured 3.
+      repetitions: slicer.repetitions !== undefined && (slicer.repetitions > 1 || Object.hasOwn(session.getTool('slice_stl').inputSchema.properties ?? {}, 'repetitions'))
+        ? slicer.repetitions : undefined,
       use_printer_filaments: false,
       // lay_flat already chose the flat face; otherwise let the slicer orient.
       orient: !laidFlat,
