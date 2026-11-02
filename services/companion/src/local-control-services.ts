@@ -31,6 +31,7 @@ export interface ControlServices {
   objects?: ObjectService;
   printerCheck?: ReturnType<typeof createPrinterCheck>;
   modelAccess?: ModelAccessService;
+  runtimeSettings?: import('./runtime-settings.js').RuntimeSettings;
   auth: RemoteAuthStore;
   companionVersion: string;
   /** The Mac's name as people know it ("Mac mini"), as in /healthz. */
@@ -218,6 +219,12 @@ export function createControlDispatcher(services: ControlServices) {
           if (!auth.allowsLogin(login)) throw new ControlFailure('invalid-request');
           // The invitation JSON keeps its v1 fields; with the server's v2 details the QR is a v2 link.
           return await auth.createPairing(login,undefined,services.pairingLink?.());
+        }
+        case 'fusion.report': case 'fusion.claimSetup': case 'fusion.setupDone': {
+          if (!services.runtimeSettings) throw new ControlFailure('unavailable');
+          if (method === 'fusion.report') return services.runtimeSettings.reportFusion(parameters[method].parse(raw));
+          if (method === 'fusion.setupDone') return services.runtimeSettings.completeFusion(parameters[method].parse(raw));
+          return services.runtimeSettings.claimFusion(parameters[method].parse(raw).claimantId);
         }
         case 'modelAccess.get': {
           if (!services.modelAccess) throw new ControlFailure('unavailable');

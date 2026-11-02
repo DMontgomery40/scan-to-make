@@ -278,7 +278,7 @@ export async function startCompanionServer(
         const blender=action==='update'?options.blenderAddon.update():action==='check'?options.blenderAddon.requestCheck():options.blenderAddon.current();
         response.writeHead(200,{'content-type':'application/json'});response.end(JSON.stringify({blender}));return;
       }
-      if(objectRoutes&&(request.url==='/v1/objects'||request.url?.startsWith('/v1/objects/')||request.url?.startsWith('/v1/objects?')||request.url==='/v1/settings')){
+      if(objectRoutes&&(request.url==='/v1/objects'||request.url?.startsWith('/v1/objects/')||request.url?.startsWith('/v1/objects?')||request.url==='/v1/settings'||request.url?.startsWith('/v1/settings/'))){
         await objectRoutes.handle(request,response,authorize,name=>singleHeader(request,name));return;
       }
       if(eventRoutes&&(request.url==='/v1/events'||request.url?.startsWith('/v1/events?'))){

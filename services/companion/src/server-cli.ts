@@ -32,6 +32,7 @@ import { IcloudEnrolment } from './icloud-enrolment.js';
 import {startLocalControl} from './local-control.js';
 import {createControlDispatcher, companionVersion} from './local-control-services.js';
 import type {CaptureServices} from './capture-http.js';
+import {RuntimeSettings} from './runtime-settings.js';
 import {ModelAccessService} from './model-access.js';
 import {createPrinterCheck} from './printer-check.js';
 import {ObjectStore} from './objects/store.js';
@@ -107,6 +108,7 @@ const eventLog=remoteAuth?await new EventLog(join(dataRoot,'events.ndjson'),{con
   return {title:projectTitle(object),...(size?{size}:{}),...(object.question?.closeup?{question:`Can you take a close-up of ${object.question.closeup}?`}:{}),
     ...(object.failure?{reason:object.failure}:{})};
 }}).open():undefined;
+const runtimeSettings=remoteAuth&&eventLog?new RuntimeSettings({modelAccess,emit:async draft=>{await eventLog.append(draft);}}):undefined;
 const liveActivityTokens=remoteAuth?new LiveActivityTokenStore(join(dataRoot,'live-activity-tokens.json')):undefined;
 const presence=remoteAuth?new DevicePresence(join(remoteAuth.directory,'device-presence.json')):undefined;
 // Audit M4: legacy device rows (paired before stable identity) unused for 14 days are removed; checked at start and every 6 h.
@@ -130,7 +132,7 @@ if(handoffConfig&&printHandoff&&captureDirectory&&claudePath){
   objects=new ObjectService({store:objectStore,runTouchup:input=>runTouchup(input),claudePath,handoff:handoffConfig,runningHandoff:()=>runningHandoff()!,printerCatalog,printers:printerDirectory,
     stlInfo:path=>printerStlSize(runningHandoff()!,path),
     print:{services:printHandoff,destinations},
-    settings:companionSettings,camera:new CameraFrames(),printGate,
+    settings:companionSettings,runtimeSettings,camera:new CameraFrames(),printGate,
     passTimings:new PassTimings(join(dataRoot,'pass-timings.json')),titleFor:request=>generateTitle(request,claudePath), reportsCompletion:note=>reportsCompletion(note,claudePath),
     ...(eventLog?{events:{emit:async draft=>{await eventLog.append(draft);}}}:{})});
   await companionSettings.load();
@@ -208,7 +210,7 @@ try {
   if (remoteAuth) control = await startLocalControl({
     // The auth directory is private even when its state/volume parent is not.
     path:process.env.SCAN_TO_MAKE_CONTROL_SOCKET ?? join(remoteAuth.directory,'control.sock'),
-    dispatch:createControlDispatcher({auth:remoteAuth,modelAccess,printerCheck,companionVersion:await companionVersion(),...(displayName?{name:displayName}:{}),capture,
+    dispatch:createControlDispatcher({auth:remoteAuth,modelAccess,runtimeSettings,printerCheck,companionVersion:await companionVersion(),...(displayName?{name:displayName}:{}),capture,
       captureDirectory:captureDirectory ? join(captureDirectory,'captures') : undefined,printHandoff,
       ...(objects ? {objects} : {}),
       ...(eventLog ? {events: eventLog} : {}),

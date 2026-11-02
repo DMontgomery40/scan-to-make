@@ -18,7 +18,25 @@ import ControlKit
     @Published var problem: String?
     private var readAt: Date?
     private var lastAIOutcome: String?
-    private var settingUpFusion = false
+    private lazy var phoneFusion = PhoneFusionSetup(
+        report: { [weak self] in
+            guard let self else { return }
+            let installed = FusionSetup.installedFusion() != nil
+            let running = NSWorkspace.shared.runningApplications.contains { ["com.autodesk.fusion360", "com.autodesk.mas.fusion360"].contains($0.bundleIdentifier ?? "") }
+            try await ControlClient(socketPath: self.socket).reportFusion(installed: installed,
+                configured: FusionSetup.isSetUp(state: Installation(bundle: .main).state), running: running)
+        },
+        claim: { [weak self] claimant in guard let self else { return nil }; return try await ControlClient(socketPath: self.socket).claimFusionSetup(claimantId: claimant) },
+        install: {
+            do {
+                let result = try await FusionSetup.install(state: Installation(bundle: .main).state)
+                return (result.status.ok, result.status.phoneMessage)
+            } catch { return (false, "Fusion setup did not finish. Check Counterpart on your Mac, then try again.") }
+        },
+        complete: { [weak self] id, ok, message in
+            guard let self else { return }
+            try await ControlClient(socketPath: self.socket).fusionSetupDone(requestId: id, ok: ok, message: message)
+        })
 
     /// The companion keeps General (`general.*`).
     var keepsGeneral: Bool { settings?.general != nil }
@@ -42,6 +60,7 @@ import ControlKit
         }
         #endif
         if !force, let readAt, Date().timeIntervalSince(readAt) < 30 { return }
+        await phoneFusion.refresh()
         guard let read = try? await ControlClient(socketPath: socket).companionSettings() else { return }
         readAt = Date()
         // The first time the companion keeps them, this Mac's own choices go up rather than its defaults coming down.
@@ -89,7 +108,7 @@ import ControlKit
     /// `settings.changed` (docs/protocols/settings.md): read the new values, and run what only this Mac can.
     func changed(_ event: CounterpartEvent) async {
         await refresh(force: true)
-        if event.data?.action == "fusion.setup" { await setUpFusionForPhone() }
+
     }
 
     /// Makes this Mac match the settings.
@@ -133,19 +152,4 @@ import ControlKit
         }
     }
 
-    /// The phone asked for Design with Fusion's Set Up (PRD §8.9): it installs an add-in here, then reports back.
-    private func setUpFusionForPhone() async {
-        guard !settingUpFusion else { return }
-        settingUpFusion = true
-        defer { settingUpFusion = false }
-        let client = try? ControlClient(socketPath: socket, timeout: 30)
-        do {
-            let report = try await FusionSetup.install(state: Installation(bundle: .main).state)
-            // The phone shows what Fusion said, in the same words as Settings here.
-            try? await client?.fusionSetupDone(ok: report.status.ok, message: report.status.ok ? nil : report.status.words)
-        } catch {
-            try? await client?.fusionSetupDone(ok: false, message: error.localizedDescription)
-        }
-        await refresh(force: true)
-    }
 }

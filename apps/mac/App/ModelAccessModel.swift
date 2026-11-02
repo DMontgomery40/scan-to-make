@@ -28,7 +28,7 @@ extension ModelAccessChoice {
     /// The plain name shown to the user.
     var displayName: String {
         switch self {
-        case .none: return "No AI"
+        case .none: return "None"
         case .claudeCode: return "Claude Code"
         case .codexCLI: return "Codex"
         case let .api(provider, _, _): return provider == .anthropic ? "Anthropic" : "OpenAI"
@@ -38,7 +38,7 @@ extension ModelAccessChoice {
     /// The provider alone, for the window's footer ("Claude").
     var providerName: String {
         switch self {
-        case .none: return "No AI"
+        case .none: return "None"
         case .claudeCode: return "Claude"
         case .codexCLI: return "Codex"
         case let .api(provider, _, _): return provider == .anthropic ? "Claude" : "OpenAI"
@@ -103,7 +103,7 @@ extension ModelAccessChoice {
                     secret:secret.isEmpty ? nil : secret)
     }
 
-    /// "Continue without AI" must reach the companion even when this model's snapshot is stale:
+    /// "Skip connection test" must reach the companion even when this model's snapshot is stale:
     /// another window may have turned AI on. Read the current revision, submit "none", and retry
     /// on a conflict. True only once the companion confirms "none".
     func skipAI() async -> Bool {

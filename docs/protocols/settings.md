@@ -37,11 +37,6 @@ fields or a saved opt-out never delete shared subscriptions or enable new visibl
 existing shared alerts retain their configuration. Silent project reconciliation remains
 available. No APNs credentials, entitlements or relay targeting change in this patch.
 
-AI/Fusion settings projections and setup/test routes are not supplied by this settings
-store. Their existing Swift models are not evidence of an implemented backend. Device
-management is a separate endpoint. General and notification controls do not imply those
-other capabilities are available.
-
 Apple documents subscriptions as per-user in [QA1917](https://developer.apple.com/library/archive/qa/qa1917/_index.html).
 Apple's [notification-filtering entitlement](https://developer.apple.com/documentation/BundleResources/Entitlements/com.apple.developer.usernotifications.filtering)
 requires permission before an extension may silence delivered pushes. This app does not
@@ -56,3 +51,41 @@ keeps its requested state; unknown status does not request registration. Apple's
 [Service Management status documentation](https://developer.apple.com/documentation/servicemanagement/smappservice/status-swift.enum)
 distinguishes registration from permission. Counterpart reports required system approval
 without changing that permission.
+
+## AI and Fusion runtime bridge
+
+`ai` projects the existing ModelAccessService revision, choice metadata and check result,
+with `scope: "connection-test"`. This saves/tests a connection only. Current ObjectService
+cleanup, design and correction jobs still use their configured Claude Code executable;
+ModelAccessService.run is not wired into those jobs. Choosing None does not disable them.
+The phone names this section AI connection test and explains the scope. Provider routing
+for actual model jobs remains separate unfinished work; no Codex worker is introduced here.
+Keychain references and credentials stay on the Mac. A standalone AI PATCH requires
+`ai.expectedRevision` and accepts only `none`, `claude-code` or `codex-cli`; other sections
+cannot share that PATCH. Stale revisions return conflict. `POST /v1/settings/ai/test`
+accepts `{revision}` and uses the same app worker as the Mac's Test button. API and endpoint
+choices remain configurable only on the Mac; their nonsensitive metadata can be displayed.
+
+`fusion` is ephemeral Mac-reported installation/running state, not a saved assertion that
+a connection still works. Passive settings refresh never launches an MCP or Fusion and
+never reads a design. The last explicit setup result is labeled as such. Reports expire
+after 90 seconds; an absent Mac reports unavailable.
+
+`POST /v1/settings/fusion/setup` requires projects:write and a recent installed-Fusion report.
+It creates one pending request and emits settings.changed. The signed Mac claims it through
+local `fusion.claimSetup {claimantId}` (one immutable UUID per app coordinator), runs the existing FusionSetup installer/check asynchronously,
+and completes through local `fusion.setupDone` with that exact request ID. A transient
+socket failure retains the result for retry; an explicit stale conflict clears it without
+rerunning the installer. Passive reports emit settings.changed only when their public
+state/message changes, never for heartbeat timestamps alone. The callback
+sends controlled words, not arbitrary diagnostic text. A lost claim response can be replayed by that same claimant; another app instance cannot
+take an active claim. The coordinator guards prevent replay from reinstalling;
+a request expires after ten minutes and old completions cannot settle a newer request.
+A companion restart discards pending requests. Restarting only the Mac app creates a new
+claimant; it cannot take over active work and must wait for the ten-minute expiry, then
+accept a new explicit setup request. No lease or automatic takeover is introduced. Neither HTTP nor a phone can report or
+complete GUI work. Manual and phone setup share the existing Mac install operation guard.
+
+The phone shows Set Up Again for an installed but unchecked setup, and preserves the exact
+failure message when setup needs attention. Transport/unit tests do not establish live
+provider login, live Fusion setup, or native phone acceptance.

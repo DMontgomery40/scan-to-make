@@ -343,11 +343,16 @@ export const CompanionSettingsSchema = z.strictObject({
   general: GeneralSettingsSchema.optional(),
 });
 export type CompanionSettings = z.infer<typeof CompanionSettingsSchema>;
+export const PhoneAIChangeSchema = z.strictObject({
+  expectedRevision: z.uuid(), choice: z.strictObject({kind: z.enum(['none', 'claude-code', 'codex-cli'])}),
+});
 export const CompanionSettingsPatchSchema = z.strictObject({
   milestones: MilestonesSchema.optional(),
+  ai: PhoneAIChangeSchema.optional(),
   notifications: z.strictObject({mac: NotificationChoicesSchema.optional(), devices: NotificationDevicesSchema.optional()}).optional(),
   general: GeneralSettingsSchema.optional(),
-}).refine(value => Object.keys(value).length > 0, 'A setting is required');
+}).refine(value => Object.keys(value).length > 0, 'A setting is required')
+  .refine(value => !value.ai || Object.keys(value).length === 1, 'Change AI separately from other settings');
 export type CompanionSettingsPatch = z.infer<typeof CompanionSettingsPatchSchema>;
 
 /** PRD §5.4 Status, set by hand: `PATCH /v1/objects/<id>/settings {status}` / `objects.settings.set {id, status}`. */

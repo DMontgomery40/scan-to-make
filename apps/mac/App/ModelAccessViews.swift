@@ -4,7 +4,7 @@ import AgentKit
 import ControlKit
 #endif
 
-// The AI cleanup setting (journey.md §3.6, mockup 09): one default, the user's own Claude Code
+// Saved AI connection tests: the user's own Claude Code
 // or Codex login, and a small "Other options" door for an API key or a custom endpoint.
 // Choices go to the companion over the control socket; keys go straight into ModelKeychain.
 
@@ -26,7 +26,7 @@ extension ModelAccessModel {
     }
 }
 
-/// The AI cleanup pane, shared by first run and Settings.
+/// Connection checks shared by first run and Settings; current model jobs use Claude.
 struct ModelAccessPane: View {
     enum Context { case firstRun, settings }
     @ObservedObject var model: ModelAccessModel
@@ -46,9 +46,9 @@ struct ModelAccessPane: View {
 
     var body: some View {
         VStack(alignment:.leading, spacing:0) {
-            Text(context == .firstRun ? "Sharper details with AI (optional)" : "AI cleanup")
+            Text("AI connection test")
                 .font(.system(size:20, weight:.semibold))
-            Text("AI looks at your photos and tweaks the scan to match. Your scan and photos go to the AI service you pick.")
+            Text("Save and test an AI connection. Current scan cleanup, designs and corrections use Claude Code independently of this choice.")
                 .font(.system(size:13)).foregroundStyle(.secondary)
                 .fixedSize(horizontal:false, vertical:true)
                 .padding(.top,6).padding(.bottom,18)
@@ -96,11 +96,11 @@ struct ModelAccessPane: View {
                 .disabled(model.saving)
                 statusRow
             }
-            // First run skips with its footer button; Settings needs a way back to no AI.
+            // First run skips with its footer button; Settings can clear the saved test connection.
             if context == .settings {
                 card(selected:choice == .none && door == nil,
-                     title:"Don't use AI",
-                     caption:"Cleanup still fills the gaps. The scanned surface stays as captured.",
+                     title:"No connection selected",
+                     caption:"Clear this saved test connection. Model jobs continue using Claude Code.",
                      select:{ door = nil; if choice != .none { Task { await model.choose(.none) } } }) { EmptyView() }
             }
             DisclosureGroup("Other options", isExpanded:$otherOptions) {
@@ -193,8 +193,8 @@ struct ModelAccessPane: View {
     private var footer: some View {
         HStack {
             Spacer()
-            // Finish only once the companion confirms "no AI"; a failed save keeps setup open with its message.
-            Button("Continue without AI") {
+            // Finish only once the companion confirms no saved test connection; a failed save keeps setup open with its message.
+            Button("Skip connection test") {
                 Task { if await model.skipAI() { onDone() } }
             }
             .disabled(model.saving)
@@ -244,7 +244,7 @@ struct SetupView: View {
                 }
                 Text("Set up your Mac").font(.system(size:12)).foregroundStyle(.secondary)
                 Label("Your iPhone", systemImage:"checkmark.circle.fill").foregroundStyle(.secondary)
-                Label("AI cleanup", systemImage:"circle.inset.filled").foregroundStyle(.primary)
+                Label("AI connections", systemImage:"circle.inset.filled").foregroundStyle(.primary)
                 Spacer()
             }
             .font(.system(size:13))
@@ -259,7 +259,7 @@ struct SetupView: View {
     }
 }
 
-/// Settings → AI cleanup (M3). The other tabs arrive with their plumbing.
+/// Settings → AI connections (M3). The other tabs arrive with their plumbing.
 struct ModelSettingsView: View {
     @ObservedObject var model: ModelAccessModel
     var body: some View {

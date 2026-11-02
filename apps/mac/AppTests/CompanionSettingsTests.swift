@@ -104,4 +104,84 @@ final class CompanionSettingsTests: XCTestCase {
         XCTAssertTrue(SettingsMigration.patch(defaults: defaults, companion: CompanionSettings(milestones: "50")).isEmpty,
                       "an older companion that keeps neither gets nothing")
     }
+    @MainActor func testPhoneFusionClaimsOnceWithoutBlockingEventReader() async throws {
+        var claims = 0, installs = 0, reports = 0
+        var finish: CheckedContinuation<(Bool, String?), Never>?
+        let started = expectation(description: "Setup started")
+        let completed = expectation(description: "Completion sent")
+        let bridge = PhoneFusionSetup(report: { reports += 1 }, claim: { _ in claims += 1; return "request-one" }, install: {
+            installs += 1
+            return await withCheckedContinuation { finish = $0; started.fulfill() }
+        }, complete: { id, ok, message in
+            XCTAssertEqual(id, "request-one"); XCTAssertTrue(ok); XCTAssertNil(message)
+            completed.fulfill()
+        })
+        await bridge.refresh()
+        await fulfillment(of: [started], timeout: 2)
+        await bridge.refresh()
+        XCTAssertEqual(claims, 1); XCTAssertEqual(installs, 1); XCTAssertEqual(reports, 2)
+        finish?.resume(returning: (true, nil))
+        await fulfillment(of: [completed], timeout: 2)
+    }
+
+    @MainActor func testNoClaimNeverRunsFusionAndPrivateDiagnosticsStayOnMac() async {
+        var installs = 0
+        let bridge = PhoneFusionSetup(report: {}, claim: { _ in nil }, install: { installs += 1; return (true, nil) }, complete: { _, _, _ in XCTFail("No request") })
+        await bridge.refresh()
+        XCTAssertEqual(installs, 0)
+        XCTAssertFalse(FusionSetup.Status.unreachable("PRIVATE_TOKEN /private/path").phoneMessage?.contains("PRIVATE") ?? true)
+        XCTAssertFalse(FusionSetup.Status.notConnected("PRIVATE_TOKEN").phoneMessage?.contains("PRIVATE") ?? true)
+    }
+
+    @MainActor func testPhoneFusionRetriesLostCompletionWithoutReinstalling() async {
+        var attempts = 0, installs = 0, claims = 0
+        let first = expectation(description: "Completion transport failed")
+        let bridge = PhoneFusionSetup(report: {}, claim: { _ in claims += 1; return claims == 1 ? "request" : nil }, install: {
+            installs += 1; return (true, nil)
+        }, complete: { id, ok, _ in
+            XCTAssertEqual(id, "request"); XCTAssertTrue(ok)
+            attempts += 1
+            if attempts == 1 { first.fulfill(); throw URLError(.cannotConnectToHost) }
+        })
+        await bridge.refresh()
+        await fulfillment(of: [first], timeout: 2)
+        await bridge.refresh()
+        XCTAssertEqual(attempts, 2, "The saved result must be retried after a transient socket failure")
+        XCTAssertEqual(installs, 1); XCTAssertEqual(claims, 1)
+        await bridge.refresh()
+        XCTAssertEqual(attempts, 2, "An acknowledged completion is not sent again")
+    }
+
+    @MainActor func testPhoneFusionDropsOnlyExplicitlyStaleCompletion() async throws {
+        var attempts = 0, installs = 0, claims = 0
+        let first = expectation(description: "Completion rejected as stale")
+        let conflict = try JSONDecoder().decode(ControlRemoteError.self, from: Data(#"{"code":"conflict","message":"Stale request"}"#.utf8))
+        let bridge = PhoneFusionSetup(report: {}, claim: { _ in claims += 1; return claims == 1 ? "old-request" : nil }, install: {
+            installs += 1; return (true, nil)
+        }, complete: { _, _, _ in attempts += 1; first.fulfill(); throw conflict })
+        await bridge.refresh()
+        await fulfillment(of: [first], timeout: 2)
+        await bridge.refresh()
+        XCTAssertEqual(attempts, 1); XCTAssertEqual(installs, 1)
+        XCTAssertEqual(claims, 2, "A stale completion does not block future request claims")
+    }
+
+    @MainActor func testPhoneFusionRetriesClaimWithOneInstanceIdentity() async {
+        var owners: [String] = [], installs = 0
+        let completed = expectation(description: "Recovered claim completes")
+        let bridge = PhoneFusionSetup(report: {}, claim: { owner in
+            owners.append(owner)
+            if owners.count == 1 { throw URLError(.networkConnectionLost) }
+            return "recovered-request"
+        }, install: { installs += 1; return (true, nil) }, complete: { id, _, _ in
+            XCTAssertEqual(id, "recovered-request"); completed.fulfill()
+        })
+        await bridge.refresh()
+        XCTAssertEqual(installs, 0)
+        await bridge.refresh()
+        await fulfillment(of: [completed], timeout: 2)
+        XCTAssertEqual(owners.count, 2); XCTAssertEqual(Set(owners).count, 1)
+        XCTAssertNotNil(UUID(uuidString: owners[0])); XCTAssertEqual(installs, 1)
+    }
+
 }

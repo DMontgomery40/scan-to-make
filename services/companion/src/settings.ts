@@ -39,6 +39,7 @@ export class CompanionSettingsStore {
   async update(input: CompanionSettingsPatch): Promise<CompanionSettings> {
     const write = this.#writing.catch(() => undefined).then(async () => {
       const patch = CompanionSettingsPatchSchema.parse(input);
+      if (patch.ai) throw new Error('AI choices belong to ModelAccessService');
       const previous = await this.load();
       const devices = structuredClone(previous.notifications?.devices ?? {});
       for (const [id, choices] of Object.entries(patch.notifications?.devices ?? {})) {

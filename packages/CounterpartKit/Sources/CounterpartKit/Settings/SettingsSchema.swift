@@ -94,6 +94,8 @@ public struct CompanionSettings: Codable, Equatable, Sendable {
             public var outcome: String?
             public var message: String?
         }
+        /// What this selection controls; current companion supports connection-test only.
+        public var scope: String?
         public var revision: String?
         public var choice: Choice?
         public var check: Check?

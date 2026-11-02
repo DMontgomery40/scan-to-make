@@ -392,6 +392,18 @@ final class CompanionClientTests: XCTestCase {
         XCTAssertTrue(CloudNotificationSubscriptions.changes(settings: settings, localChoices: [true]).saving.contains { $0.subscriptionID == "ev-ready" })
     }
 
+    func testRealRuntimeSettingsResponseExposesPhoneAIAndFusion() async throws {
+        let url = try XCTUnwrap(Bundle.module.url(forResource: "runtime-settings", withExtension: "json", subdirectory: "Fixtures"))
+        let bytes = try Data(contentsOf: url)
+        let transport = FakeTransport { _, _ in HTTPReply(status: 200, body: bytes) }
+        let settings = try await client(transport).settings()
+        XCTAssertEqual(settings.ai?.choice?.kind, "none")
+        XCTAssertEqual(settings.ai?.scope, "connection-test")
+        XCTAssertEqual(settings.ai?.revision, "11111111-1111-4111-8111-111111111111")
+        XCTAssertEqual(settings.fusion?.state, "unavailable")
+        XCTAssertEqual(settings.fusion?.message, "Open Counterpart on your Mac to check Fusion setup.")
+    }
+
     func testScopes() {
         let id = "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a01"
         XCTAssertEqual(CompanionClient.scope("GET", "/v1/objects"), "projects:read")
