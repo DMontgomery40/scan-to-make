@@ -607,7 +607,7 @@ export class ObjectService {
     const overrides = sliceOverrides(options, selected?.nozzleDiameterMm);
     const capabilities = destinationId ? this.#deps.printers?.capabilities(destinationId) : undefined;
     if (capabilities && ((overrides.layerHeightMm !== undefined && !capabilities.quality) || (overrides.wallLoops !== undefined && !capabilities.strength)
-        || (overrides.repetitions !== undefined && !capabilities.copies)))
+        || (overrides.repetitions !== undefined && overrides.repetitions > 1 && !capabilities.copies)))
       throw new InvalidStateError(settingsUnsupported(runner.backend, options));
     const settings: PrintSettings = {...(options.quality ? {quality: options.quality} : {}), ...(options.strength ? {strength: options.strength} : {}),
       ...(options.colour ? {colour: options.colour} : {}), ...(options.copies && options.copies > 1 ? {copies: options.copies} : {})};
@@ -932,13 +932,14 @@ export class ObjectService {
     if (!services?.runner.estimate) throw new InvalidStateError('Estimates are unavailable for this printer.');
     const quality = request.quality ?? 'standard', strength = request.strength ?? 'standard';
     const copies = request.copies && request.copies > 1 ? request.copies : undefined;
-    const overrides = sliceOverrides({quality, strength, ...(copies ? {copies} : {})}, services.selection?.nozzleDiameterMm);
+    // Exactly as Print: named copies (1 included) override the printer config's own repetitions.
+    const overrides = sliceOverrides({quality, strength, ...(request.copies !== undefined ? {copies: request.copies} : {})}, services.selection?.nozzleDiameterMm);
     const capabilities = destinationId ? this.#deps.printers?.capabilities(destinationId) : undefined;
     if (capabilities && ((overrides.layerHeightMm !== undefined && !capabilities.quality) || (overrides.wallLoops !== undefined && !capabilities.strength)
         || (copies && !capabilities.copies)))
       throw new InvalidStateError(settingsUnsupported(services.runner.backend, {quality, strength, ...(copies ? {copies} : {})}));
     const model = await readFile(join(this.dir(id), object.current.model));
-    const key = JSON.stringify([createHash('sha256').update(model).digest('hex'), destinationId ?? 'default', quality, strength, copies ?? 1]);
+    const key = JSON.stringify([createHash('sha256').update(model).digest('hex'), destinationId ?? 'default', quality, strength, request.copies ?? 'configured']);
     let running = this.#estimates2.get(key);
     if (!running) {
       const runner = services.runner;
