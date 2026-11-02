@@ -15,6 +15,8 @@ export const WAIT_POLL_MS = 15_000;
 export const LOG_TAIL_BYTES = 4096;
 /** How long Update waits for npm before answering (the Mac app's control requests give up after 10 s). */
 export const LOOKUP_TIMEOUT_MS = 7000;
+/** Leave room inside the Mac's 10 s RPC deadline after the bounded npm lookup. */
+export const ADMISSION_CHECK_MS = 250;
 
 export type McpUpdateStateName = 'started' | 'waiting' | 'current' | 'unresolved';
 export interface McpUpdate {mcpId: string; state: McpUpdateStateName; fromVersion?: string; toVersion?: string; found?: string}
@@ -250,17 +252,34 @@ export class McpUpdater {
     if (!options.fresh && fromVersion && !newer(latest, fromVersion)) return {mcpId, state: 'current', fromVersion, toVersion: latest};
     const update: McpUpdate = {mcpId, state: 'started', ...(fromVersion ? {fromVersion} : {}), toVersion: latest};
     this.#active.set(mcpId, update);
-    let claimed: boolean;
-    try { claimed = await this.#claim(mcpId, options); }
-    catch {
+    const claiming = this.#claim(mcpId, options);
+    const pending = Symbol('checking printers');
+    let admissionTimer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const claimed = await Promise.race([claiming, new Promise<typeof pending>(resolve => {
+        admissionTimer = setTimeout(() => resolve(pending), ADMISSION_CHECK_MS);
+      })]);
+      if (claimed === pending) {
+        // The update is admitted, and #claim retains PrintGate while its printer reads finish.
+        // Report later failures through the existing event channel, not a timed-out request that
+        // falsely suggests the user should tap Update again while work is still running.
+        void claiming.then(value => this.#finishAdmission(mcpId, options, latest, pkg, update, value)).catch(async () => {
+          this.#active.delete(mcpId);
+          await this.#emit('mcp.update.failed', pkg, update, BUSY_UNKNOWN(pkg));
+        });
+      } else await this.#finishAdmission(mcpId, options, latest, pkg, update, claimed);
+      return update;
+    } catch {
       this.#active.delete(mcpId);
       throw new McpUpdateError('unavailable', BUSY_UNKNOWN(pkg));
-    }
-    if (claimed) { void this.#perform(mcpId, options, latest); return update; }
+    } finally { clearTimeout(admissionTimer); }
+  }
+
+  async #finishAdmission(mcpId: string, options: {fresh?: boolean}, latest: string, pkg: string, update: McpUpdate, claimed: boolean): Promise<void> {
+    if (claimed) { void this.#perform(mcpId, options, latest); return; }
     update.state = 'waiting';
     await this.#emit('mcp.update.waiting', pkg, update);
     void this.#waitThenRun(mcpId, options, latest, pkg);
-    return update;
   }
 
   /** Marks the install's printers as updating (no print can start), then makes sure none is printing. */

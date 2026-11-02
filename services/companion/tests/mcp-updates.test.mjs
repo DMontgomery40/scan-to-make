@@ -581,3 +581,71 @@ test('an update reserves the install before its async busy check, so a correctio
   assert.equal((await service.get(object.id)).state, 'failed', 'no pass was admitted or added');
   assert.equal((await service.get(object.id)).passes.length, 0);
 });
+
+test('slow printer admission returns an accepted update before client deadlines while preserving the print reservation', {timeout: 5000}, async t => {
+  const gate = new PrintGate(), busy = Promise.withResolvers();
+  let f;
+  t.after(async () => { busy.resolve(false); await f?.done(); });
+  f = await updater(t, {gate, profile: bambu('/opt/homebrew/bin/node', ['/opt/homebrew/lib/node_modules/bambu-printer-mcp/dist/index.js']), files: {
+    '/opt/homebrew/lib/node_modules/bambu-printer-mcp/package.json': pkgJson('1.1.40'),
+    '/opt/homebrew/lib/node_modules/bambu-printer-mcp/dist/index.js': '',
+  }, busy: () => busy.promise});
+  let deadline;
+  const result = await Promise.race([f.updates.update(f.mcpId), new Promise(resolve => { deadline = setTimeout(() => resolve('client-timeout'), 1000); })])
+    .finally(() => clearTimeout(deadline));
+  assert.notEqual(result, 'client-timeout', 'a busy check must not spend the remaining RPC deadline');
+  assert.equal(result.state, 'started');
+  assert.equal(gate.updating('p1s'), true);
+  assert.throws(() => gate.hold('p1s'), /software is updating/);
+  assert.deepEqual(await f.updates.update(f.mcpId), result, 'a second tap observes the admitted update');
+  assert.equal(f.commands.some(command => command.includes(' install ')), false, 'no files change before the safety check answers');
+  busy.resolve(false);
+  await f.done();
+  assert.equal(f.events.at(-1).type, 'mcp.update.done');
+  assert.equal(f.commands.filter(command => command.includes(' install ')).length, 1);
+  assert.equal(gate.updating('p1s'), false);
+});
+
+test('a slow admitted printer check reports failure by event and releases its reservation without installing', {timeout: 5000}, async t => {
+  const gate = new PrintGate(), busy = Promise.withResolvers();
+  let f;
+  t.after(async () => { busy.reject(new Error('printer unavailable')); await f?.done(); });
+  f = await updater(t, {gate, profile: bambu('/opt/homebrew/bin/node', ['/opt/homebrew/lib/node_modules/bambu-printer-mcp/dist/index.js']), files: {
+    '/opt/homebrew/lib/node_modules/bambu-printer-mcp/package.json': pkgJson('1.1.40'),
+    '/opt/homebrew/lib/node_modules/bambu-printer-mcp/dist/index.js': '',
+  }, busy: () => busy.promise});
+  let deadline;
+  const result = await Promise.race([f.updates.update(f.mcpId), new Promise(resolve => { deadline = setTimeout(() => resolve('client-timeout'), 1000); })])
+    .finally(() => clearTimeout(deadline));
+  assert.notEqual(result, 'client-timeout');
+  busy.reject(new Error('printer unavailable'));
+  await f.done();
+  assert.equal(f.events.at(-1).type, 'mcp.update.failed');
+  assert.match(f.events.at(-1).data.log, /couldn't check whether a print is running/);
+  assert.equal(gate.updating('p1s'), false);
+  assert.equal(f.commands.some(command => command.includes(' install ')), false);
+  gate.hold('p1s')();
+});
+
+
+test('a delayed busy answer queues an already admitted update until printing finishes', {timeout: 5000}, async t => {
+  const gate = new PrintGate(), checking = Promise.withResolvers();
+  let busy = true, firstCheck = true, f;
+  t.after(async () => { busy = false; checking.resolve(false); await f?.done(); });
+  f = await updater(t, {gate, profile: bambu('/opt/homebrew/bin/npx', ['-y', 'bambu-printer-mcp@1.1.40']), busy: () => {
+    if (firstCheck) return checking.promise;
+    return busy;
+  }});
+  const accepted = await f.updates.update(f.mcpId);
+  assert.equal(accepted.state, 'started');
+  firstCheck = false;
+  checking.resolve(true);
+  await until(() => f.events.some(event => event.type === 'mcp.update.waiting'));
+  assert.equal((await f.updates.update(f.mcpId)).state, 'waiting');
+  assert.equal(f.restarts.length, 0, 'no MCP restarts while the printer is busy');
+  busy = false;
+  await f.done();
+  assert.equal(f.events.filter(event => event.type === 'mcp.update.started').length, 1);
+  assert.equal(f.events.at(-1).type, 'mcp.update.done');
+  assert.equal(gate.updating('p1s'), false);
+});
