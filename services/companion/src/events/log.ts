@@ -108,6 +108,8 @@ export class EventLog {
     const words = eventWords(draft.type, draft.data, {...context, ...(draft.printerName ? {printer: draft.printerName} : {}),
       ...(draft.detail?.item ? {item: draft.detail.item} : {}), ...(draft.detail?.question ? {question: draft.detail.question} : {}),
       ...(draft.detail?.size ? {size: draft.detail.size} : {}), ...(draft.detail?.reason ? {reason: draft.detail.reason} : {}),
+      // A deleted project can't be read back, so its event carries the title it had.
+      ...(draft.detail?.title ? {title: draft.detail.title} : {}),
       ...(draft.type === 'print.sent' && draft.detail?.message === 'bambu-connect' ? {reason: 'bambu-connect'} : {})});
     const written = this.#writing.catch(() => undefined).then(async () => {
       const event = CounterpartEventSchema.parse({v: 1, seq: this.#lastSeq + 1, id: draft.id, at: new Date(this.#now()).toISOString(), type: draft.type,

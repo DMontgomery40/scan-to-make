@@ -7,9 +7,9 @@ import {ObjectStore} from '../dist/objects/store.js';
 import {ObjectService} from '../dist/objects/service.js';
 import {createControlDispatcher} from '../dist/local-control-services.js';
 
-async function dispatcher() {
+async function dispatcher(events) {
   const store = new ObjectStore(join(await mkdtemp(join(tmpdir(), 'objects-ctl-')), 'objects'));
-  const objects = new ObjectService({store, runTouchup: async () => { throw new Error('unused'); }, stlInfo: async () => undefined, claudePath: '/c', handoff: {backend: 'bambu-printer-mcp', process: {command: '/usr/bin/true'}}});
+  const objects = new ObjectService({store, runTouchup: async () => { throw new Error('unused'); }, stlInfo: async () => undefined, claudePath: '/c', handoff: {backend: 'bambu-printer-mcp', process: {command: '/usr/bin/true'}}, ...(events ? {events} : {})});
   return {dispatch: createControlDispatcher({auth: {}, companionVersion: 'test', objects}), objects};
 }
 
@@ -42,11 +42,13 @@ test('the Mac app can start a touch-up again, and a refusal says why in plain wo
   await objects.settled(object.id);
 });
 
-test('the Mac app can delete an object', async () => {
-  const {dispatch, objects} = await dispatcher();
+test('the Mac app can delete an object, and the event says the Mac did', async () => {
+  const events = [];
+  const {dispatch, objects} = await dispatcher({emit: async draft => { events.push(draft); }});
   const object = await objects.create('A hook.');
   assert.deepEqual(await dispatch('objects.delete', {id: object.id}), {deleted: true});
   await assert.rejects(dispatch('objects.get', {id: object.id}), error => error.code === 'not-found');
+  assert.deepEqual(events.filter(event => event.type === 'project.deleted').map(event => [event.projectId, event.data]), [[object.id, {by: 'mac'}]]);
 });
 
 test('New Project on the Mac: create, copy a scan and photos in from paths, then ask for changes with more photos', async t => {

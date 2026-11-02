@@ -79,7 +79,7 @@ function send(response: ServerResponse, status: number, value: unknown): void {
 /** Phone-facing objects: start something, send its scan and photos, follow it, correct it, print it. */
 export function createObjectRoutes(service: ObjectService) {
   return {
-    async handle(request: IncomingMessage, response: ServerResponse, authorize: (scope: RemoteScope) => Promise<void>, _header: (name: string) => string | undefined): Promise<void> {
+    async handle(request: IncomingMessage, response: ServerResponse, authorize: (scope: RemoteScope) => Promise<void>, header: (name: string) => string | undefined): Promise<void> {
       const url = new URL(request.url ?? '/', 'http://localhost');
       const match = PATH.exec(url.pathname);
       try {
@@ -139,7 +139,8 @@ export function createObjectRoutes(service: ObjectService) {
           }
           if (method === 'DELETE') {
             await authorize(WRITE);
-            await service.delete(id);
+            // The device id authorize() just checked: the event says which phone deleted it.
+            await service.delete(id, header('x-scan-device'));
             return send(response, 200, {deleted: true});
           }
           if (method !== 'GET') throw new HttpFailure(405, 'method-not-allowed');

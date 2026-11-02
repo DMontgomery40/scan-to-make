@@ -19,7 +19,9 @@ async function fixture(t, {denied = [], reconstruct} = {}) {
     await writeFile(join(out, 'touched.stl'), STL); await writeFile(join(out, 'front.png'), 'png');
     return {status: 'done', summary: 'Fixed.', model: join(out, 'touched.stl'), renders: [join(out, 'front.png')], checkpoints: [], stats: {seconds: 1, toolCalls: 1}, passDir: join(root, 'pass')};
   };
-  const service = new ObjectService({store, runTouchup, stlInfo: async () => [60.6, 45.2, 21.7], claudePath: '/c', handoff: {backend: 'bambu-printer-mcp', process: {command: '/usr/bin/true'}}, ...(reconstruct ? {reconstruct} : {})});
+  const events = [];
+  const service = new ObjectService({store, runTouchup, stlInfo: async () => [60.6, 45.2, 21.7], claudePath: '/c', handoff: {backend: 'bambu-printer-mcp', process: {command: '/usr/bin/true'}}, ...(reconstruct ? {reconstruct} : {}),
+    events: {emit: async draft => { events.push(draft); }}});
   const routes = createObjectRoutes(service);
   const scopes = [], devices = [];
   const server = createServer(async (request, response) => {
@@ -31,12 +33,12 @@ async function fixture(t, {denied = [], reconstruct} = {}) {
   t.after(() => server.close());
   const base = `http://127.0.0.1:${server.address().port}`;
   const call = async (method, path, body, type = 'application/json', device = 'source-phone') => {
-    const response = await fetch(base + path, {method, headers: {'content-type': type, 'x-test-device': device}, ...(body !== undefined ? {body: typeof body === 'string' || Buffer.isBuffer(body) ? body : JSON.stringify(body)} : {})});
+    const response = await fetch(base + path, {method, headers: {'content-type': type, 'x-test-device': device, 'x-scan-device': device}, ...(body !== undefined ? {body: typeof body === 'string' || Buffer.isBuffer(body) ? body : JSON.stringify(body)} : {})});
     const bytes = Buffer.from(await response.arrayBuffer());
     let json; try { json = JSON.parse(bytes.toString()); } catch {}
     return {status: response.status, json, bytes, type: response.headers.get('content-type')};
   };
-  return {call, scopes, devices, service, store};
+  return {call, scopes, devices, service, store, events};
 }
 
 test('create, list and get an object', async t => {
@@ -205,12 +207,13 @@ test('printing again after an uncertain print says the user checked', async t =>
   assert.match(refused.json.error.message, /Check the printer/);
 });
 
-test('DELETE removes an object', async t => {
-  const {call} = await fixture(t);
+test('DELETE removes an object, and the event names the phone that deleted it', async t => {
+  const {call, events} = await fixture(t);
   const id = (await call('POST', '/v1/objects', {instructions: 'A hook.'})).json.object.id;
-  const deleted = await call('DELETE', `/v1/objects/${id}`);
+  const deleted = await call('DELETE', `/v1/objects/${id}`, undefined, 'application/json', 'phone-device-7');
   assert.equal(deleted.status, 200);
   assert.equal((await call('GET', `/v1/objects/${id}`)).status, 404);
+  assert.deepEqual(events.filter(event => event.type === 'project.deleted').map(event => [event.projectId, event.data]), [[id, {by: 'phone-device-7'}]]);
 });
 
 test('retained photos and capture images download with their image types and read scope', async t => {

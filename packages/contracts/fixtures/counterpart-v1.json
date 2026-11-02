@@ -706,7 +706,22 @@
    }
   ]
  },
- "projectEvents": [],
+ "projectEvents": [
+  {
+   "v": 1,
+   "seq": 21,
+   "id": "00000000-0000-4000-8000-000000000021",
+   "at": "2026-11-02T05:05:00.000Z",
+   "type": "project.deleted",
+   "projectId": "3f1c2a9e-5b7d-4e21-9a6f-0c8d1e2f3a4b",
+   "title": "Mic mount",
+   "body": "Project deleted",
+   "notify": "none",
+   "data": {
+    "by": "mac"
+   }
+  }
+ ],
  "newStatuses": [
   {
    "phase": "confirmed",
