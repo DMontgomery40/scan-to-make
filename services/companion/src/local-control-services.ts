@@ -315,7 +315,7 @@ export function createControlDispatcher(services: ControlServices) {
             const object = method === 'objects.get' ? await objects.view(params.id)
               : method === 'objects.selectPrinter' ? await objects.selectPrinter(params.id, params.destinationId!)
               : method === 'objects.start' ? await objects.start(params.id)
-              : method === 'objects.answerCloseup' ? await objects.answerCloseup(params.id, {bestGuess: params.bestGuess!, ...((params as {text?: string}).text ? {text: (params as {text?: string}).text} : {})})
+              : method === 'objects.answerCloseup' ? await objects.answerCloseup(params.id, {bestGuess: params.bestGuess!, photoNames: (params as {photoNames?: string[]}).photoNames, ...((params as {text?: string}).text ? {text: (params as {text?: string}).text} : {})})
               : await objects.print(params.id, (({id: _id, ...options}) => options)(params));
             return {object: local(object)};
           } catch (error) {

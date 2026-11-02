@@ -528,3 +528,29 @@ test('Mac local photo evidence is copied and attached before marking Done withou
   assert.deepEqual(done.current, before.current);
   assert.deepEqual(done.messages[0].photos, ['finished.jpg']);
 });
+
+
+test('Ask photo selection is validated before consuming the question through HTTP and local control', async t => {
+  const {call, service, store} = await fixture(t);
+  const dispatch = createControlDispatcher({objects: service});
+  for (const local of [false, true]) {
+    const object = await service.create('A mount', 'fit');
+    await store.update(object.id, o => ({...o, state: 'needs-closeup', ask: {id: 'ask', question: 'Underside?', answers: ['photos'], status: 'open', askedAtMs: 1}}));
+    await service.addPhoto(object.id, 'queued.jpg', Buffer.from('queue'));
+    await service.addPhoto(object.id, 'answer.jpg', Buffer.from('answer'));
+    const before = await store.get(object.id);
+    if (local) {
+      await assert.rejects(dispatch('objects.answerCloseup', {id: object.id, bestGuess: false, photoNames: ['missing.jpg']}), /not in this project/);
+      await assert.rejects(dispatch('objects.answerCloseup', {id: object.id, bestGuess: false, photoNames: [4]}));
+    } else {
+      assert.equal((await call('POST', `/v1/objects/${object.id}/closeup`, {photoNames: ['missing.jpg']})).status, 409);
+      assert.equal((await call('POST', `/v1/objects/${object.id}/closeup`, {photoNames: [4]})).status, 400);
+    }
+    assert.deepEqual(await store.get(object.id), before);
+    if (local) await dispatch('objects.answerCloseup', {id: object.id, bestGuess: false, photoNames: ['answer.jpg']});
+    else assert.equal((await call('POST', `/v1/objects/${object.id}/closeup`, {photoNames: ['answer.jpg']})).status, 200);
+    const after = await service.settled(object.id);
+    assert.deepEqual(after.messages.at(-1).photos, ['answer.jpg']);
+    assert.deepEqual(after.pendingPhotos, ['queued.jpg']);
+  }
+});

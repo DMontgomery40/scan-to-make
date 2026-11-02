@@ -361,8 +361,8 @@ struct AskButtons: View {
     private func answer(camera: Bool) {
         act {
             let sent = try await store.mac.addCloseups(project.id, camera: camera)
-            guard sent > 0 else { return nil }
-            return try await store.mac.closeup(project.id, bestGuess: false)
+            guard !sent.isEmpty else { return nil }
+            return try await store.mac.closeup(project.id, bestGuess: false, photoNames: sent)
         }
     }
     private func bestGuess() { act { try await store.mac.closeup(project.id, bestGuess: true) } }
