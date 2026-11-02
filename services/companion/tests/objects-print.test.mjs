@@ -429,3 +429,18 @@ test("an estimate carries Bambu Studio's words: its warning as slicerWarning, it
   const fine = createControlDispatcher({auth: {}, companionVersion: 'test', objects: warned.service});
   assert.equal((await fine('objects.estimate', {id: warned.id})).slicerWarning, words, 'a warning is an estimate, not a refusal');
 });
+
+
+test('a retained checkpoint in a failed capped project remains available for explicit manual printing', async t => {
+  const {service, store, object, runs} = await setup();
+  t.after(() => service.close());
+  await store.update(object.id, value => ({...value, state: 'failed',
+    failure: 'Stopped at the step limit. Try again or review the saved checkpoint.',
+    passes: [{startedAtMs: 1, endedAtMs: 2, status: 'capped'}]}));
+  await service.print(object.id);
+  assert.equal(runs.length, 1);
+  await approve(service, object.id);
+  const sent = await service.settled(object.id);
+  assert.equal(sent.state, 'sent');
+  assert.equal(await readFile(join(store.dir(object.id), sent.current.model), 'utf8'), STL.toString());
+});

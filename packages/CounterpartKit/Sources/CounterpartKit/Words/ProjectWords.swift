@@ -246,7 +246,9 @@ public struct ProjectWords: Equatable, Sendable {
                 }
             case .failed:
                 let failure = (project.failure ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-                (status, busy, actions) = (failure.isEmpty ? "Something went wrong on your Mac." : failure, false, made.isEmpty ? [.retry, .correct] : made)
+                let recovery: [ProjectAction] = made.isEmpty ? [.retry, .correct]
+                    : project.canRetryCleanup == true ? [.retry] + made : made
+                (status, busy, actions) = (failure.isEmpty ? "Something went wrong on your Mac." : failure, false, recovery)
                 line = failure.isEmpty ? "Didn't finish · try again" : (failure.components(separatedBy: ". ").first ?? failure)
             case .unknown:
                 (status, busy, actions) = ("Update Counterpart to see this one.", false, [])

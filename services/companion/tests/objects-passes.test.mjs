@@ -270,3 +270,50 @@ test('a pass uses its claimed photos and prior context, never a later queued mes
   assert.deepEqual(f.inputs[2].photos.map(path => basename(path)), ['initial.jpg', 'a.jpg', 'b.jpg']);
   assert.deepEqual((await f.store.get(object.id)).pendingPhotos, []);
 });
+
+
+for (const [limit, reason] of [['step', 'stopped at the 120 tool-call limit'], ['time', 'stopped at the 900 s time limit']]) {
+  for (const checkpoint of [true, false]) {
+    test(`a ${limit}-capped pass ${checkpoint ? 'with' : 'without'} a checkpoint fails without announcing Ready`, async t => {
+      const f = await setup(t, [
+        {status: 'capped', result: {reason, ...(checkpoint ? {} : {model: undefined})}},
+        {status: 'done', result: {summary: 'Finished on retry.'}},
+      ]);
+      const object = await f.service.create('Repair this scan.', 'copy');
+      await f.service.addScan(object.id, 'scan.usdz', Buffer.from('original capture'));
+      await f.service.start(object.id);
+      const stopped = await f.service.settled(object.id);
+      const expected = `Stopped at the ${limit} limit. ${checkpoint ? 'Try again or review the saved checkpoint.' : 'Try again.'}`;
+      assert.equal(stopped.state, 'failed');
+      assert.equal(publicObject(stopped).status.phase, 'failed');
+      assert.equal(stopped.failure, expected);
+      assert.equal(stopped.passes.at(-1).status, 'capped');
+      assert.equal(stopped.passes.at(-1).activity.at(-1).text, expected);
+      assert.equal(f.events.at(-1).type, 'pass.failed');
+      assert.equal(f.events.at(-1).detail.reason, expected);
+      assert.equal(f.events.some(event => event.type === 'pass.ready'), false);
+      if (checkpoint) {
+        assert.equal(await readFile(join(f.service.dir(object.id), stopped.current.model), 'utf8'), STL);
+        assert.equal(await readFile(join(stopped.passes.at(-1).dir, 'out', 'touched.stl'), 'utf8'), STL);
+        assert.match(stopped.current.summary, new RegExp(`${limit} limit`));
+      } else assert.equal(stopped.current, undefined);
+      await f.service.start(object.id);
+      const retried = await f.service.settled(object.id);
+      assert.equal(retried.state, 'ready');
+      assert.equal(retried.failure, undefined);
+      assert.equal(f.events.at(-1).type, 'pass.ready');
+      assert.deepEqual(f.inputs[1].scan, f.inputs[0].scan, 'Retry starts from the original source; it does not promise checkpoint continuation');
+    });
+  }
+}
+
+
+test('the shared Swift capped-retry fixture is the exact public projection without activity', async () => {
+  const rows = JSON.parse(await readFile(new URL('../../../packages/CounterpartKit/Tests/CounterpartKitTests/Fixtures/capped-projects.json', import.meta.url), 'utf8'));
+  for (const row of rows) {
+    const actual = JSON.parse(JSON.stringify(publicObject(row.input)));
+    assert.deepEqual(actual, row.expected, row.name);
+    assert.equal(actual.canRetryCleanup, row.retry, row.name);
+    assert.ok(actual.passes.every(pass => !('activity' in pass)), row.name);
+  }
+});

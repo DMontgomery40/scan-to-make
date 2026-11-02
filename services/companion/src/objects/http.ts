@@ -56,7 +56,7 @@ async function json<T>(request: IncomingMessage, limit = MAX_JSON): Promise<T> {
   try { return JSON.parse(bytes.toString('utf8')) as T; } catch { throw new HttpFailure(400, 'invalid-request'); }
 }
 
-export type PublicObject = Omit<StmObject, 'passes' | 'title'> & {title: string; status: ObjectStatus; settings: ReturnType<typeof projectSettingsView>; passes: (Omit<ObjectPass, 'dir' | 'activity'> & {activityCount: number})[]};
+export type PublicObject = Omit<StmObject, 'passes' | 'title'> & {title: string; canRetryCleanup: boolean; status: ObjectStatus; settings: ReturnType<typeof projectSettingsView>; passes: (Omit<ObjectPass, 'dir' | 'activity'> & {activityCount: number})[]};
 
 // Earlier generic failures asserted a capture mistake without evidence. Correct the displayed
 // advice for those retained attempts too, leaving their original stored records intact.
@@ -73,8 +73,13 @@ export function projectSettingsView(object: StmObject) {
 
 export function publicObject(object: StmObject): PublicObject {
   const failure = currentFailureText(object.failure);
+  // Pass activity is omitted below. Carry the current capped failure's retry decision to both apps;
+  // a later printer failure must not inherit Retry from an older capped pass.
+  const lastPass = object.passes.at(-1);
+  const canRetryCleanup = object.state === 'failed' && lastPass?.status === 'capped'
+    && !!object.failure && lastPass.activity?.at(-1)?.text === object.failure;
   // Never null: until a title is generated (or backfilled for an older project), the request's first words.
-  return {...object, title: projectTitle(object), failure, status: objectStatus({...object, ...(failure !== undefined ? {failure} : {})}, object.updatedAtMs),
+  return {...object, title: projectTitle(object), failure, canRetryCleanup, status: objectStatus({...object, ...(failure !== undefined ? {failure} : {})}, object.updatedAtMs),
     settings: projectSettingsView(object),
     passes: object.passes.map(({dir: _dir, activity, ...pass}) => ({...pass,
       summary: currentFailureText(pass.summary), activityCount: activity?.length ?? 0}))};

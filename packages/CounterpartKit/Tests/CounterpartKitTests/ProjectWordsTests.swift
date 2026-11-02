@@ -145,6 +145,23 @@ final class ProjectWordsTests: XCTestCase {
         XCTAssertFalse(ProjectWords(ready()).busy)
     }
 
+    func testCappedRetryUsesActualPublicProjectJSONWithoutPassActivity() throws {
+        struct Row: Decodable {
+            var name: String
+            var expected: Project
+            var retry: Bool
+            var checkedPrint: Bool
+        }
+        let rows = try JSONDecoder().decode([Row].self, from: fixture("capped-projects.json"))
+        for row in rows {
+            XCTAssertTrue(row.expected.passes.allSatisfy { $0.activity == nil }, row.name)
+            let actions = ProjectWords(row.expected).actions
+            XCTAssertEqual(actions.contains(.retry), row.retry, row.name)
+            XCTAssertTrue(actions.contains(.correct), row.name)
+            XCTAssertTrue(actions.contains(row.checkedPrint ? .printChecked : .print), row.name)
+        }
+    }
+
     func testSizeIsWholeMillimetres() {
         XCTAssertEqual(ProjectWords(ready()).size, "62 × 75 × 49 mm")
         XCTAssertNil(ProjectWords(project([:])).size)

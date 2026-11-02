@@ -54,6 +54,8 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
     /// The older close-up question: which part the Mac couldn't see. Still set beside `ask`.
     public var question: Question?
     public var failure: String?
+    /// The companion exposes this decision because terminal pass activity is omitted from project responses.
+    public var canRetryCleanup: Bool?
     public var print: Print?
     public var printerDestinationId: String?
     public var printConfirmation: PrintConfirmation?
@@ -99,7 +101,7 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case id, createdAtMs, updatedAtMs, instructions, state, scan, photos, capture, captureDepth, progress, passes, current, question
-        case failure, print, printerDestinationId, printConfirmation, status, title, kind, ask, directory, settings, outcome, archived, credit, files, completion, pendingFollowup, pendingMessageId, messages, requestPhotos, pendingPhotos
+        case failure, canRetryCleanup, print, printerDestinationId, printConfirmation, status, title, kind, ask, directory, settings, outcome, archived, credit, files, completion, pendingFollowup, pendingMessageId, messages, requestPhotos, pendingPhotos
     }
 
     /// One odd object never drops out of the list: missing lists are empty, and an optional that doesn't
@@ -130,6 +132,7 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
         current = optional(Result.self, .current)
         question = optional(Question.self, .question)
         failure = optional(String.self, .failure)
+        canRetryCleanup = optional(Bool.self, .canRetryCleanup)
         print = optional(Print.self, .print)
         printerDestinationId = optional(String.self, .printerDestinationId)
         printConfirmation = optional(PrintConfirmation.self, .printConfirmation)
