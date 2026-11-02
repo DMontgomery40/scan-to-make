@@ -72,6 +72,7 @@ export const runCommand: CommandRunner = (command, args, options) => new Promise
   });
 });
 
+const BUSY_UNKNOWN = (pkg: string) => `Counterpart couldn't check whether a print is running, so it didn't update ${pkg}. Try Update again.`;
 const tail = (text: string) => { const bytes = Buffer.from(text); return bytes.length <= LOG_TAIL_BYTES ? text : bytes.subarray(bytes.length - LOG_TAIL_BYTES).toString('utf8').replace(/^�+/, ''); };
 const newer = newerVersion;
 
@@ -240,10 +241,16 @@ export class McpUpdater {
     if (!options.fresh && fromVersion && !newer(latest, fromVersion)) return {mcpId, state: 'current', fromVersion, toVersion: latest};
     const update: McpUpdate = {mcpId, state: 'started', ...(fromVersion ? {fromVersion} : {}), toVersion: latest};
     this.#active.set(mcpId, update);
-    if (await this.#claim(mcpId, options)) { void this.#perform(mcpId, options, latest); return update; }
+    let claimed: boolean;
+    try { claimed = await this.#claim(mcpId, options); }
+    catch {
+      this.#active.delete(mcpId);
+      throw new McpUpdateError('unavailable', BUSY_UNKNOWN(pkg));
+    }
+    if (claimed) { void this.#perform(mcpId, options, latest); return update; }
     update.state = 'waiting';
     await this.#emit('mcp.update.waiting', pkg, update);
-    void this.#waitThenRun(mcpId, options, latest);
+    void this.#waitThenRun(mcpId, options, latest, pkg);
     return update;
   }
 
@@ -256,15 +263,26 @@ export class McpUpdater {
       ...(options.fresh && target ? [mcpIdFor(this.#freshInstall(target.config), target.config)] : [])])];
     if (keys.some(key => this.#changing.has(key) && this.#changing.get(key) !== mcpId)) return false;
     if (gate && !gate.beginUpdate(ids)) return false;
-    const busy = (await Promise.all(ids.map(id => this.#deps.busy(id)))).some(Boolean);
+    let busy: boolean;
+    // A check that fails can't say no print is running: the printers are released and the caller says so.
+    try { busy = (await Promise.all(ids.map(id => this.#deps.busy(id)))).some(Boolean); }
+    catch (error) { gate?.endUpdate(ids); throw error; }
     if (busy || keys.some(key => this.#changing.has(key) && this.#changing.get(key) !== mcpId)) { gate?.endUpdate(ids); return false; }
     for (const key of keys) this.#changing.set(key, mcpId);
     return true;
   }
 
-  async #waitThenRun(mcpId: string, options: {fresh?: boolean}, latest: string): Promise<void> {
-    do await new Promise(resolve => { const timer = setTimeout(resolve, this.#deps.waitPollMs ?? WAIT_POLL_MS); timer.unref?.(); });
-    while (!await this.#claim(mcpId, options));
+  async #waitThenRun(mcpId: string, options: {fresh?: boolean}, latest: string, pkg: string): Promise<void> {
+    try {
+      do await new Promise(resolve => { const timer = setTimeout(resolve, this.#deps.waitPollMs ?? WAIT_POLL_MS); timer.unref?.(); });
+      while (!await this.#claim(mcpId, options));
+    } catch {
+      // Nothing ran and nothing is held: the update ends, saying why.
+      const update = this.#active.get(mcpId);
+      this.#active.delete(mcpId);
+      if (update) await this.#emit('mcp.update.failed', pkg, update, BUSY_UNKNOWN(pkg));
+      return;
+    }
     const update = this.#active.get(mcpId);
     if (update) update.state = 'started';
     await this.#perform(mcpId, options, latest);
@@ -338,7 +356,13 @@ export class McpUpdater {
         }
       }
       for (const member of members) await this.#deps.session(member.id)?.restart(this.#deps.overrides.apply(member.config, this.#deps.overrides.peek(member.id, member.config)));
-      const catalog = await this.#deps.session(first.id)?.connect();
+      // Every printer on these files starts the new version before the previous one is removed: one that can't
+      // start it puts everything back.
+      let catalog: Awaited<ReturnType<PrinterSession['connect']>> | undefined;
+      for (const member of members) {
+        const connected = await this.#deps.session(member.id)?.connect();
+        if (member.id === first.id) catalog = connected;
+      }
       await finish?.().catch(() => undefined);
       this.#active.delete(mcpId);
       await this.#emit('mcp.update.done', pkg, {...update, toVersion: catalog?.server.version ?? latest});

@@ -83,7 +83,7 @@ test('shell command lines: quotes, escapes, cd and variables', () => {
 });
 
 /** A scripted updater: commands are recorded, sessions are fakes, versions come from a fake registry. */
-async function updater(t, {profile, profiles, files = {}, links = {}, busy = () => false, latest = '1.1.50', fail, gate, failRename, installed = {}} = {}) {
+async function updater(t, {profile, profiles, files = {}, links = {}, busy = () => false, latest = '1.1.50', fail, gate, failRename, installed = {}, connectFail} = {}) {
   const root = await mkdtemp(join(tmpdir(), 'mcp-updates-'));
   t.after(() => rm(root, {recursive: true, force: true}));
   const env = mac({'/opt/homebrew/bin/npm': '', '/opt/homebrew/lib/node_modules/npm/bin/npm-cli.js': '', ...files}, {'/opt/homebrew/bin/npm': '/opt/homebrew/lib/node_modules/npm/bin/npm-cli.js', ...links});
@@ -91,7 +91,7 @@ async function updater(t, {profile, profiles, files = {}, links = {}, busy = () 
   let version = '1.1.46';
   const session = id => ({
     restart: async config => { restarts.push({id, ...config}); },
-    connect: async () => ({server: {name: 'bambu-printer-mcp', version}, tools: []}),
+    connect: async () => { if (connectFail?.(id)) throw new Error('spawn ENOENT'); return {server: {name: 'bambu-printer-mcp', version}, tools: []}; },
   });
   const overrides = new McpOverrides(join(root, 'overrides.json'));
   await overrides.load();
@@ -455,4 +455,38 @@ test('review fixes, round four: bare commands come from PATH, ::1 is this Mac, u
   // A profile changed since the update is used as it is.
   const changed = bambu('/opt/homebrew/bin/npx', ['-y', 'bambu-printer-mcp@1.9.0']);
   assert.deepEqual(f.updates.effective('a1', changed), changed);
+});
+
+test('review fixes, round five: every printer on the files starts the new version first; a failed print check releases the printers', async t => {
+  const prefix = `${APP}/printers/bambu`, live = `${prefix}/lib/node_modules/bambu-printer-mcp`;
+  const files = {[`${live}/package.json`]: pkgJson('1.1.46'), [`${live}/dist/index.js`]: ''};
+  // The second printer on the same copy can't start the new version: the update fails and the old copy goes back.
+  const f = await updater(t, {profile: bambu('/x/node', [`${live}/dist/index.js`]), files, connectFail: id => id === 'a1'});
+  await f.updates.update(f.mcpId);
+  await f.done();
+  assert.equal(f.events.at(-1).type, 'mcp.update.failed');
+  const kept = f.moves.find(move => move[0] === 'rename' && move[1] === live)[2];
+  const back = f.moves.findIndex(move => move[0] === 'rename' && move[1] === kept && move[2] === live);
+  assert.ok(back >= 0, 'the previous copy is moved back');
+  assert.ok(f.moves.slice(0, back).every(move => !(move[0] === 'rm' && move[1].includes('.counterpart-update-'))), 'nothing of the previous copy was removed first');
+  // The print check fails: Update says so, and the printers aren't left marked as updating.
+  const {PrintGate} = await import('../dist/printing/print-gate.js');
+  const {McpUpdateError} = await import('../dist/printing/mcp-updates.js');
+  const gate = new PrintGate();
+  const g = await updater(t, {gate, profile: bambu('/opt/homebrew/bin/npx', ['-y', 'bambu-printer-mcp@1.1.40']), installed: {p1s: '1.1.40', a1: '1.1.40'},
+    busy: () => { throw new Error('EIO: objects'); }});
+  await assert.rejects(g.updates.update(g.mcpId), error => error instanceof McpUpdateError && error.code === 'unavailable' && /couldn't check whether a print is running/.test(error.message));
+  assert.deepEqual([gate.updating('p1s'), gate.updating('a1')], [false, false]);
+  gate.hold('p1s')();
+  // The same while waiting: the update ends with mcp.update.failed, and a new request is a new update.
+  let checks = 0;
+  const gate2 = new PrintGate();
+  const h = await updater(t, {gate: gate2, profile: bambu('/opt/homebrew/bin/npx', ['-y', 'bambu-printer-mcp@1.1.40']), installed: {p1s: '1.1.40', a1: '1.1.40'},
+    busy: () => { checks++; if (checks <= 2) return true; throw new Error('EIO: objects'); }});
+  assert.equal((await h.updates.update(h.mcpId)).state, 'waiting');
+  await h.done();
+  assert.equal(h.events.at(-1).type, 'mcp.update.failed');
+  assert.match(h.events.at(-1).data.log, /couldn't check whether a print is running/);
+  assert.deepEqual([gate2.updating('p1s'), gate2.updating('a1')], [false, false]);
+  assert.equal(h.commands.filter(command => command.includes('install')).length, 0, 'nothing ran');
 });
