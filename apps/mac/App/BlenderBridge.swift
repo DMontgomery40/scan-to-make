@@ -1,13 +1,8 @@
 import Foundation
-import Darwin
 
-/// The Blender MCP add-on's local socket (localhost:9876, `{"type": "execute_code", "params": {"code": …}}`), used to
-/// import a model into the Blender the person already has open. Nothing else is sent to it.
+/// Open in Blender's own Blender (PRD §9.6). It is never reached through the Blender MCP port: that port (9876) is the
+/// companion's touch-up Blender during a pass, and a model sent there would land in the pass's scene.
 enum BlenderBridge {
-    static let port: UInt16 = 9876
-
-    // MARK: Counterpart's own Blender
-
     /// The folder the Blender Counterpart starts watches: every STL put here is imported into its scene, then removed.
     static var inbox: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -75,58 +70,4 @@ enum BlenderBridge {
         return 1.0
     bpy.app.timers.register(counterpart_inbox, first_interval=0.2, persistent=True)
     """
-
-    // MARK: The Blender MCP add-on
-
-    /// The Python that imports one STL into the open scene; the path is a quoted literal, never code.
-    static func importCode(_ file: URL) -> String {
-        let path = file.path.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "'", with: "\\'")
-            .replacingOccurrences(of: "\n", with: "\\n")
-        return "import bpy; bpy.ops.wm.stl_import(filepath='\(path)')"
-    }
-
-    enum Outcome: Equatable, Sendable {
-        case imported
-        /// Nothing was imported: nothing listens, or the add-on answered with an error.
-        case refused
-        /// Sent, but no whole answer in time: it may still import, so it is never sent another way as well.
-        case uncertain
-    }
-
-    /// Imports through the add-on. A large scan can take a while, so the answer gets 8 s.
-    static func importSTL(_ file: URL, port: UInt16 = port, answerWithin seconds: Int = 8) async -> Outcome {
-        guard let body = try? JSONSerialization.data(withJSONObject: ["type": "execute_code", "params": ["code": importCode(file)]]) else { return .refused }
-        return await Task.detached { () -> Outcome in
-            let socket = Darwin.socket(AF_INET, SOCK_STREAM, 0)
-            guard socket >= 0 else { return .refused }
-            defer { close(socket) }
-            var timeout = timeval(tv_sec: 3, tv_usec: 0)
-            setsockopt(socket, SOL_SOCKET, SO_SNDTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
-            var answer = timeval(tv_sec: seconds, tv_usec: 0)
-            setsockopt(socket, SOL_SOCKET, SO_RCVTIMEO, &answer, socklen_t(MemoryLayout<timeval>.size))
-            var address = sockaddr_in()
-            address.sin_family = sa_family_t(AF_INET)
-            address.sin_port = in_port_t(port).bigEndian
-            address.sin_addr.s_addr = inet_addr("127.0.0.1")
-            let connected = withUnsafePointer(to: &address) {
-                $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { connect(socket, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) }
-            }
-            guard connected == 0 else { return .refused }
-            let sent = body.withUnsafeBytes { send(socket, $0.baseAddress, body.count, 0) }
-            guard sent > 0 else { return .refused }
-            guard sent == body.count else { return .uncertain }
-            // The answer can arrive in pieces: read until it is whole JSON (or the 3 s timeout ends it).
-            var reply = Data()
-            var buffer = [UInt8](repeating: 0, count: 16_384)
-            while reply.count < 1_048_576 {
-                let read = recv(socket, &buffer, buffer.count, 0)
-                guard read > 0 else { return .uncertain }
-                reply.append(contentsOf: buffer[0..<read])
-                if let object = try? JSONSerialization.jsonObject(with: reply) as? [String: Any] {
-                    return (object["status"] as? String) == "success" ? .imported : .refused
-                }
-            }
-            return .uncertain
-        }.value
-    }
 }

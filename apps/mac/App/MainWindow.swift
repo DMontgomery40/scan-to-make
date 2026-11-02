@@ -293,30 +293,17 @@ enum ModelEditor {
     static let blenderId = "org.blenderfoundation.blender"
 
     /// Open in Blender (PRD §9.6): never a new Blender per click, and at most one that Counterpart started.
-    /// 1. The person's Blender with the Blender MCP add-on listening: imported into the scene they have open.
-    /// 2. The Blender Counterpart started, still open: it imports from its inbox.
-    /// 3. Otherwise one starts, watching the inbox, and later clicks reuse it. When the person's own Blender is open
-    ///    without the add-on, nothing can tell it to import, so this one is a separate instance.
-    /// The copy keeps the project's own file untouched.
+    /// The Blender Counterpart started for editing, while it is open, imports from its inbox; otherwise one starts,
+    /// watching the inbox, and later clicks reuse it. Any other Blender (the person's own, or the companion's touch-up
+    /// Blender during a pass) is never sent anything: this one is then its own instance. The copy keeps the project's
+    /// own file untouched.
     @MainActor static func openInBlender(_ source: URL) async -> Result<String, Problem> {
         let workspace = NSWorkspace.shared
         guard let application = workspace.urlForApplication(withBundleIdentifier: blenderId) else {
             return .failure(Problem(text: "Blender isn’t on this Mac. Install it, or choose a slicer."))
         }
         guard let copy = try? editorCopy(source) else { return .failure(Problem(text: "The model couldn’t be copied for Blender.")) }
-        var running = NSRunningApplication.runningApplications(withBundleIdentifier: blenderId).filter { !$0.isTerminated }
-        if !running.isEmpty && !launching {
-            switch await BlenderBridge.importSTL(copy) {
-            case .imported:
-                (running.first { $0 != ownBlender() } ?? running.first)?.activate()
-                return .success("Opened in Blender")
-            case .uncertain:
-                running.first?.activate()
-                return .success("Sent to Blender")
-            case .refused: break
-            }
-            running = NSRunningApplication.runningApplications(withBundleIdentifier: blenderId).filter { !$0.isTerminated }
-        }
+        let running = NSRunningApplication.runningApplications(withBundleIdentifier: blenderId).filter { !$0.isTerminated }
         // No await from here until `launching` is set, so a second click can't start a second Blender.
         do {
             if let ours = ownBlender() {
