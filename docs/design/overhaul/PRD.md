@@ -1014,6 +1014,23 @@ Screenshots: `screens/phone-widgets.jpg` and `screens/phone-widgets-lock.jpg` (a
 - **Spotlight:** projects are indexed (`IndexedEntity`).
 - **Share extension:** photos or a product web page shared from Photos or Safari open New with them attached.
 
+### 9.6 Performance budgets
+
+Counterpart runs all day in the menu bar and on the phone, so it has to be cheap when nothing is happening.
+
+| State | CPU | Memory (physical footprint) | GPU |
+|---|---|---|---|
+| Mac, menu bar only | < 1% | < 150 MB | none |
+| Mac, window open, idle on a project | < 3% | < 350 MB | no continuous frames |
+| Mac companion (node), idle | < 1% | < 120 MB | none |
+| iPhone, Home or a project, idle | < 5% (Instruments) | < 250 MB | no continuous frames |
+
+- **3D models show as a still image by default.** That's the companion's render or a one-time snapshot, cached per file version. The live RealityKit view runs only while the user drags, pinches or taps **Explore in 3D**, and returns to the still image about 3 s after the last touch.
+- **One live 3D view per window at most.** It pauses when the window or app isn't visible.
+- **Models are loaded once per file version** and never rebuilt by a refresh. Lists update only what changed.
+- **Only Release builds are installed**, never Debug builds or ones that include Xcode Previews.
+- **Every UI PR reports its numbers:** `top -l 5 -pid`, `footprint`, and an Instruments energy log for the phone.
+
 ## 10. Visual system
 
 - **Accent:** one warm "filament orange", used only for the primary action, selection and Ready. Status colours are fixed: blue for working, orange for needs you, green for printing, red for failed. Each is always paired with a symbol and words.
