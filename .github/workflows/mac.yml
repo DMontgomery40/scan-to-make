@@ -2,9 +2,9 @@ name: Mac app
 on:
   push:
     branches: [main]
-    paths: ['apps/mac/**', 'services/companion/src/local-control*', 'services/companion/src/model-access*', 'packages/contracts/src/model-access.ts', 'packages/contracts/fixtures/model-access*.json', '.github/workflows/mac.yml']
+    paths: ['apps/mac/**', 'packages/CounterpartKit/**', 'services/companion/src/local-control*', 'services/companion/src/model-access*', 'packages/contracts/src/model-access.ts', 'packages/contracts/fixtures/model-access*.json', '.github/workflows/mac.yml']
   pull_request:
-    paths: ['apps/mac/**', 'services/companion/src/local-control*', 'services/companion/src/model-access*', 'packages/contracts/src/model-access.ts', 'packages/contracts/fixtures/model-access*.json', '.github/workflows/mac.yml']
+    paths: ['apps/mac/**', 'packages/CounterpartKit/**', 'services/companion/src/local-control*', 'services/companion/src/model-access*', 'packages/contracts/src/model-access.ts', 'packages/contracts/fixtures/model-access*.json', '.github/workflows/mac.yml']
 permissions:
   contents: read
 jobs:

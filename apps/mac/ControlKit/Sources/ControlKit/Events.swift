@@ -94,6 +94,17 @@ public extension ControlClient {
     }
     func liveActivityTokens() async throws -> LiveActivityTokens { try await call("liveActivity.tokens") }
 
+    /// The print monitor's milestones (PRD §8.6), shared by every device: "off", "50", "25-50-75" or "every-10".
+    func milestones() async throws -> String {
+        struct Reply: Decodable { struct Settings: Decodable { let milestones: String }; let settings: Settings }
+        let reply: Reply = try await call("settings.get")
+        return reply.settings.milestones
+    }
+    func setMilestones(_ value: String) async throws {
+        struct Reply: Decodable {}
+        let _: Reply = try await call("settings.set", ["milestones": .string(value)])
+    }
+
     /// Runs one control method by name with JSON parameters: commands from the phone (PRD §9.3) name existing methods.
     func run(_ method: String, _ params: [String: JSONValue]) async throws -> JSONValue { try await call(method, params) }
 }

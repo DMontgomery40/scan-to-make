@@ -39,13 +39,15 @@ public struct ControlStatus: Decodable, Sendable {
         public let printSettings: Bool
         /// Title, kind, Ask, what changed, pass stages and estimates, and the design engine.
         public let structuredPasses: Bool
-        private enum CodingKeys: String, CodingKey { case capture, cleanup, printerHandoff, nearbyPairing, objectsCreate, events, printControl, printSettings, structuredPasses }
+        /// The printer's confirmation is relayed with every elicitation field type, and answered with typed values.
+        public let genericConfirmations: Bool
+        private enum CodingKeys: String, CodingKey { case capture, cleanup, printerHandoff, nearbyPairing, objectsCreate, events, printControl, printSettings, structuredPasses, genericConfirmations }
         public init(capture: Bool = true, cleanup: Bool = true, printerHandoff: Bool = true, nearbyPairing: Bool = false,
                     objectsCreate: Bool = false, events: Bool = false, printControl: Bool = false, printSettings: Bool = false,
-                    structuredPasses: Bool = false) {
+                    structuredPasses: Bool = false, genericConfirmations: Bool = false) {
             self.capture = capture; self.cleanup = cleanup; self.printerHandoff = printerHandoff; self.nearbyPairing = nearbyPairing
             self.objectsCreate = objectsCreate; self.events = events; self.printControl = printControl; self.printSettings = printSettings
-            self.structuredPasses = structuredPasses
+            self.structuredPasses = structuredPasses; self.genericConfirmations = genericConfirmations
         }
         public init(from decoder: Decoder) throws {
             let values = try decoder.container(keyedBy: CodingKeys.self)
@@ -58,6 +60,7 @@ public struct ControlStatus: Decodable, Sendable {
             printControl = try values.decodeIfPresent(Bool.self, forKey: .printControl) ?? false
             printSettings = try values.decodeIfPresent(Bool.self, forKey: .printSettings) ?? false
             structuredPasses = try values.decodeIfPresent(Bool.self, forKey: .structuredPasses) ?? false
+            genericConfirmations = try values.decodeIfPresent(Bool.self, forKey: .genericConfirmations) ?? false
         }
     }
     public let protocolVersion: Int
@@ -82,11 +85,16 @@ public struct ControlDevice: Decodable, Sendable, Identifiable {
     public let model: String?
     /// The device's last authenticated request (ms), once the companion records it.
     public let lastSeenAt: Double?
+    /// A pairing from before devices had a stable identity (KAN-214): never shown as connected, and the companion
+    /// removes it after 14 idle days. Absent from a companion that doesn't mark them.
+    public let legacy: Bool?
     public var id: String { deviceId }
     public init(deviceId: String, deviceName: String, scopes: [String] = [], pairedAt: Double, lastRefreshedAt: Double,
-                expiresAt: Double, pairedVia: PairedVia = .init(transport: "lan", login: "lan"), model: String? = nil, lastSeenAt: Double? = nil) {
+                expiresAt: Double, pairedVia: PairedVia = .init(transport: "lan", login: "lan"), model: String? = nil, lastSeenAt: Double? = nil,
+                legacy: Bool? = nil) {
         self.deviceId = deviceId; self.deviceName = deviceName; self.scopes = scopes; self.pairedAt = pairedAt
         self.lastRefreshedAt = lastRefreshedAt; self.expiresAt = expiresAt; self.pairedVia = pairedVia; self.model = model; self.lastSeenAt = lastSeenAt
+        self.legacy = legacy
     }
     /// The best evidence of when it was last heard from.
     public var seenAt: Double { max(lastSeenAt ?? 0, lastRefreshedAt) }

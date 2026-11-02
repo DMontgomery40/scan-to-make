@@ -41,7 +41,7 @@ The Mac deletes its own event records 7 days after `createdAt` (a daily sweep ov
 |---|---|---|
 | `projectId` | String | |
 | `title` | String | |
-| `state` | String | the PRD §4 stage: `sending`, `working`, `needsYou`, `ready`, `preparing`, `printing`, `printed`, `sent`, `failed`, `unknown` |
+| `state` | String | the PRD §4 stage, as CounterpartKit's `ProjectPhase` and the companion's `status.phase` spell it: `draft`, `sending`, `working`, `needs-you`, `ready`, `preparing`, `printing`, `printed`, `sent`, `failed`, `unknown` |
 | `stateText` | String | the status line, e.g. "Printing on P1S · 42% · 38 min left" |
 | `updatedAt` | Date | |
 | `openAsk` | String? | the question while the project needs the person |

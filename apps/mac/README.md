@@ -67,6 +67,29 @@ pairing or probing the network. `--design-select 1…6`, `--design-tab request|a
 app's own windows (through ScreenCaptureKit's `currentProcess`, which needs no Screen Recording grant) for the
 side-by-side comparison with `docs/design/overhaul/screens/mac-*.jpg`. Build a design run with
 `STM_VARIANT=.design STM_USE_LEGACY_COMPANION=NO` so it never shares the installed app's identity.
+Without fixtures, `--design-project <id> [--design-screen print]` opens one real project (and its print sheet, which
+asks the real printer for an estimate and never prints) for the same snapshot against the running companion.
+`--design-legacy` adds three pairings from before stable identity to the fixtures' Phones and iPads.
+
+The words for a project come from `packages/CounterpartKit` (`ProjectWords`, shared with the phone); the Mac adds only
+its sidebar sections, capsule and actions (`ControlKit/Sources/ControlKit/ObjectWords.swift`).
+
+**Running a build from DerivedData next to the installed app.** The companion is an `SMAppService` agent whose
+program launchd resolves from the bundle identifier `com.scantomake.mac`. After a copy of the app outside
+/Applications has run (a DerivedData build, a moved-aside old app), launchd can keep resolving the agent to that copy:
+`launchctl kickstart -k gui/$UID/com.scantomake.mac.companion` restarts it from there, `lsregister -u` on the copy
+doesn't change that, and moving the copy away leaves the agent failing with `EX_CONFIG` (78). The order that works:
+
+```sh
+LSR=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
+"$LSR" -u "<the other copy>.app"
+"$LSR" -f "/Applications/Scan to Make.app"
+open "/Applications/Scan to Make.app"          # first: the installed app launches
+launchctl kickstart -k "gui/$(id -u)/com.scantomake.mac.companion"
+lsof -p "$(launchctl print "gui/$(id -u)/com.scantomake.mac.companion" | awk '/^\tpid =/{print $3}')" | grep 'txt.*MacOS'
+```
+
+The last line should name `/Applications/Scan to Make.app`.
 
 ```sh
 swift test --package-path apps/mac

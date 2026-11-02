@@ -35,6 +35,7 @@
 		4EE9B641DE5C7C16CF7343A5 /* ModelMesh.swift in Sources */ = {isa = PBXBuildFile; fileRef = A23E6083F6062B543A95EE19 /* ModelMesh.swift */; };
 		4FC608CAB60EF4726FCB47E8 /* ObjectsModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5F06994F3DC2679FF8587BB /* ObjectsModel.swift */; };
 		52B7AB859F3BB9583DD551AF /* ModelAccess.swift in Sources */ = {isa = PBXBuildFile; fileRef = 395FAD075324D0E7AA16BA42 /* ModelAccess.swift */; };
+		63E97B5537218BF3EC17EB05 /* CounterpartKit in Frameworks */ = {isa = PBXBuildFile; productRef = 9E8C01A4BBA1C6DDB8368206 /* CounterpartKit */; };
 		685F7884CACEC1D1FA9A8105 /* AgentManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 910E4B0114E7E04F953E42A1 /* AgentManagerTests.swift */; };
 		6864F6F6BA0E296FAE5E85AD /* EventRelayPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 45CABA4399301F85B9574DC6 /* EventRelayPolicy.swift */; };
 		6A1364A94FD373B88332345B /* Inspector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3319AED6056A50D85042664F /* Inspector.swift */; };
@@ -49,6 +50,7 @@
 		7D832B15B62FF2048489D655 /* ModelStage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D09E6767AA8F339A8F92FF7 /* ModelStage.swift */; };
 		8591EC1044C78F60778FCC71 /* PairingSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 296E8C1354818E038DD4E375 /* PairingSession.swift */; };
 		879AC1D559DCB7BD49228BB3 /* EventRelayPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 45CABA4399301F85B9574DC6 /* EventRelayPolicy.swift */; };
+		8E48F6039DED4418C9F28F98 /* Confirmation.swift in Sources */ = {isa = PBXBuildFile; fileRef = D25DA0A9EC41FEC7B93D7FC6 /* Confirmation.swift */; };
 		9142992D660F78023F63F515 /* SettingsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B0EFAE6EE67455FAFBEF608 /* SettingsTests.swift */; };
 		91AEFAB97B2FBEA45135656F /* MacStatusModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E2BD0F29478556FD0C62A83 /* MacStatusModelTests.swift */; };
 		99E76E033BE4502FE5AB835B /* Objects.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6085C88754126EAB39C66248 /* Objects.swift */; };
@@ -63,6 +65,7 @@
 		BA0F02ADB0934148886ED85D /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = 1D14D3233B33902B236A90C8 /* Sparkle */; };
 		BAF1A1C7C03E0182232FEFA5 /* ModelKeychain.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F489172C7C02B2C5FD93371 /* ModelKeychain.swift */; };
 		BDC8064662448F9AD28A1E09 /* ModelAccessModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA5042DB008B425E2606B911 /* ModelAccessModel.swift */; };
+		C4EA24E23D16F3944224C11D /* Confirmation.swift in Sources */ = {isa = PBXBuildFile; fileRef = D25DA0A9EC41FEC7B93D7FC6 /* Confirmation.swift */; };
 		C50E045E8C794D5DBE750B9A /* NotificationPrefs.swift in Sources */ = {isa = PBXBuildFile; fileRef = 04530A8CA650F101ADAE8AB8 /* NotificationPrefs.swift */; };
 		C6B573A4A78875903AD76ED9 /* ModelAccessModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA5042DB008B425E2606B911 /* ModelAccessModel.swift */; };
 		C71FDEDE0E5E3F04EBABDC85 /* InfoPlist.strings in Resources */ = {isa = PBXBuildFile; fileRef = 87778C7477AB7FC555B4F7F8 /* InfoPlist.strings */; };
@@ -82,6 +85,7 @@
 		F6BF783263E183A6877B0CC9 /* ProjectDetail.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1B4CAC0C434F5FAB667272B0 /* ProjectDetail.swift */; };
 		F7C6B30924946562ED38E49A /* AgentManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7B0BA880A7A95145CB837BE /* AgentManager.swift */; };
 		FB6A3B989070FD8E00280732 /* Objects.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6085C88754126EAB39C66248 /* Objects.swift */; };
+		FC239A7E21B63E4DD6E6CE1C /* CounterpartKit in Frameworks */ = {isa = PBXBuildFile; productRef = 9C3781E485F9980822ADA4B0 /* CounterpartKit */; };
 		FEC965F8C46620AD288BA7C3 /* NetworkAddresses.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E40641D5842346F76EB19B3 /* NetworkAddresses.swift */; };
 /* End PBXBuildFile section */
 
@@ -177,9 +181,11 @@
 		BA5042DB008B425E2606B911 /* ModelAccessModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelAccessModel.swift; sourceTree = "<group>"; };
 		C7E10258D71E1A28BE7C0F61 /* CompanionModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompanionModel.swift; sourceTree = "<group>"; };
 		CF2310321F74FA746A9806F7 /* EventRelay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventRelay.swift; sourceTree = "<group>"; };
+		D25DA0A9EC41FEC7B93D7FC6 /* Confirmation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Confirmation.swift; sourceTree = "<group>"; };
 		D7B0BA880A7A95145CB837BE /* AgentManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentManager.swift; sourceTree = "<group>"; };
 		DC5F2C1001F7210EDDAC44F0 /* ModelAccessModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelAccessModelTests.swift; sourceTree = "<group>"; };
 		E82C534F4897E3ACC66A7C81 /* ObjectWords.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ObjectWords.swift; sourceTree = "<group>"; };
+		EBCFAFBD33747C304862AC24 /* CounterpartKit */ = {isa = PBXFileReference; lastKnownFileType = folder; name = CounterpartKit; path = ../../packages/CounterpartKit; sourceTree = SOURCE_ROOT; };
 		F42D3DDC4E340B3763151AD3 /* ModelAccess.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelAccess.swift; sourceTree = "<group>"; };
 		F6F496F4AF4B9CFF607CE85C /* NearbyViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NearbyViews.swift; sourceTree = "<group>"; };
 		F883FAAC0FC2F4C62EA7B853 /* UnixTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnixTransport.swift; sourceTree = "<group>"; };
@@ -193,6 +199,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				20680B926C59DC5E0AE1AA44 /* AgentKit.framework in Frameworks */,
+				63E97B5537218BF3EC17EB05 /* CounterpartKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -202,6 +209,7 @@
 			files = (
 				D097633E54D1939A031FABDD /* AgentKit.framework in Frameworks */,
 				BA0F02ADB0934148886ED85D /* Sparkle in Frameworks */,
+				FC239A7E21B63E4DD6E6CE1C /* CounterpartKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -216,6 +224,14 @@
 				5CB3C16A5015E911EF835644 /* ScanToMake.app */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		76A0725C936CD36491318342 /* Packages */ = {
+			isa = PBXGroup;
+			children = (
+				EBCFAFBD33747C304862AC24 /* CounterpartKit */,
+			);
+			name = Packages;
 			sourceTree = "<group>";
 		};
 		7803AFB3CBE44726266F669A /* AgentKit */ = {
@@ -249,6 +265,7 @@
 				8C2EFD7461A2779836CE7443 /* App */,
 				CD945642CB7F8D1164371067 /* AppTests */,
 				8843F00558AC16610B857576 /* ControlKit */,
+				76A0725C936CD36491318342 /* Packages */,
 				783A56ABECAEA7A53B3A8A35 /* Tests */,
 				763AC8A31A6FF6107CAB6571 /* Products */,
 			);
@@ -257,6 +274,7 @@
 		8843F00558AC16610B857576 /* ControlKit */ = {
 			isa = PBXGroup;
 			children = (
+				D25DA0A9EC41FEC7B93D7FC6 /* Confirmation.swift */,
 				FBB383B9DEFCA66744C36B14 /* ControlClient.swift */,
 				5843CF243A6B90D769EE203F /* Events.swift */,
 				F42D3DDC4E340B3763151AD3 /* ModelAccess.swift */,
@@ -341,6 +359,7 @@
 			name = ScanToMake;
 			packageProductDependencies = (
 				1D14D3233B33902B236A90C8 /* Sparkle */,
+				9C3781E485F9980822ADA4B0 /* CounterpartKit */,
 			);
 			productName = ScanToMake;
 			productReference = 5CB3C16A5015E911EF835644 /* ScanToMake.app */;
@@ -361,6 +380,7 @@
 			);
 			name = AgentKitTests;
 			packageProductDependencies = (
+				9E8C01A4BBA1C6DDB8368206 /* CounterpartKit */,
 			);
 			productName = AgentKitTests;
 			productReference = B8FC0CEA3CCA9AA8B21FB7AF /* AgentKitTests.xctest */;
@@ -418,6 +438,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				7CE2902FF2BDD1171FF2FB31 /* XCRemoteSwiftPackageReference "Sparkle" */,
+				06B2436EBA349A2198625DE0 /* XCLocalSwiftPackageReference "../../packages/CounterpartKit" */,
 			);
 			preferredProjectObjectVersion = 77;
 			projectDirPath = "";
@@ -484,6 +505,7 @@
 			files = (
 				7B20A7488495F67499D47A1B /* CloudSync.swift in Sources */,
 				CDAC222A911270AB01F443E8 /* CompanionModel.swift in Sources */,
+				8E48F6039DED4418C9F28F98 /* Confirmation.swift in Sources */,
 				CD8C26ED361E938070BEC7CA /* ControlClient.swift in Sources */,
 				D60BE76E1942A334905A2BAA /* DesignFixtures.swift in Sources */,
 				EBF8E2C1A689A4388EEF82CC /* Diagnostics.swift in Sources */,
@@ -526,6 +548,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				685F7884CACEC1D1FA9A8105 /* AgentManagerTests.swift in Sources */,
+				C4EA24E23D16F3944224C11D /* Confirmation.swift in Sources */,
 				D64FFB6E46FFDF1015F113A5 /* ControlClient.swift in Sources */,
 				AE855366D17081C32A3DF4E9 /* Diagnostics.swift in Sources */,
 				6864F6F6BA0E296FAE5E85AD /* EventRelayPolicy.swift in Sources */,
@@ -880,6 +903,13 @@
 		};
 /* End XCConfigurationList section */
 
+/* Begin XCLocalSwiftPackageReference section */
+		06B2436EBA349A2198625DE0 /* XCLocalSwiftPackageReference "../../packages/CounterpartKit" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../../packages/CounterpartKit;
+		};
+/* End XCLocalSwiftPackageReference section */
+
 /* Begin XCRemoteSwiftPackageReference section */
 		7CE2902FF2BDD1171FF2FB31 /* XCRemoteSwiftPackageReference "Sparkle" */ = {
 			isa = XCRemoteSwiftPackageReference;
@@ -896,6 +926,14 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 7CE2902FF2BDD1171FF2FB31 /* XCRemoteSwiftPackageReference "Sparkle" */;
 			productName = Sparkle;
+		};
+		9C3781E485F9980822ADA4B0 /* CounterpartKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = CounterpartKit;
+		};
+		9E8C01A4BBA1C6DDB8368206 /* CounterpartKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = CounterpartKit;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

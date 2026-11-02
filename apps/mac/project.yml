@@ -7,6 +7,9 @@ packages:
   Sparkle:
     url: https://github.com/sparkle-project/Sparkle
     exactVersion: 2.9.3
+  # The shared domain model and status words (KAN-217), so the Mac and the phone say the same thing.
+  CounterpartKit:
+    path: ../../packages/CounterpartKit
 settings:
   base:
     SWIFT_VERSION: '5.0'
@@ -37,6 +40,7 @@ targets:
     dependencies:
       - target: AgentKit
       - package: Sparkle
+      - package: CounterpartKit
     settings:
       PRODUCT_NAME: Scan to Make
       PRODUCT_BUNDLE_IDENTIFIER: com.scantomake.mac$(STM_VARIANT)
@@ -68,6 +72,7 @@ targets:
       - ControlKit/Sources/ControlKit
     dependencies:
       - target: AgentKit
+      - package: CounterpartKit
     settings:
       GENERATE_INFOPLIST_FILE: YES
 schemes:

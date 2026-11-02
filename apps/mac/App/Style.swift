@@ -1,4 +1,5 @@
 import SwiftUI
+import CounterpartKit
 #if canImport(ControlKit)
 import ControlKit
 #endif
@@ -14,13 +15,14 @@ extension Color {
 }
 
 extension ProjectStage {
+    /// The shared tone (CounterpartKit), in this app's fixed colours.
     var tint: Color {
-        switch self {
-        case .sending, .working: return .blue
+        switch tone {
+        case .working: return .blue
         case .needsYou: return .orange
-        case .ready, .preparing: return .filament
+        case .accent: return .filament
         case .printing: return .okGreen
-        case .printed, .sent, .unknown: return .secondary
+        case .secondary: return .secondary
         case .failed: return .red
         }
     }

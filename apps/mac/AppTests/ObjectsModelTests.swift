@@ -1,4 +1,5 @@
 import XCTest
+import CounterpartKit
 
 /// One companion's objects, as the control socket serves them.
 private actor FakeObjects: ObjectsCompanion {
@@ -11,30 +12,29 @@ private actor FakeObjects: ObjectsCompanion {
     func failList(with error: Error?) { listError = error }
     func failActions(with error: Error?) { actionError = error }
 
-    private func decode(_ item: [String: Any]) throws -> StmObject {
-        try JSONDecoder().decode(StmObject.self, from:JSONSerialization.data(withJSONObject:item))
+    private func decode(_ item: [String: Any]) throws -> Project {
+        try JSONDecoder().decode(Project.self, from:JSONSerialization.data(withJSONObject:item))
     }
-    private func change(_ id: String, _ call: String, _ fields: [String: Any]) throws -> StmObject {
+    private func change(_ id: String, _ call: String, _ fields: [String: Any]) throws -> Project {
         calls.append(call)
         if let actionError { throw actionError }
         guard let index = items.firstIndex(where: { $0["id"] as? String == id }) else { throw ControlRemoteError(code:"not-found", message:"gone") }
         items[index].merge(fields) { $1 }
         return try decode(items[index])
     }
-    func objects() async throws -> [StmObject] {
+    func objects() async throws -> [Project] {
         calls.append("list")
         if let listError { throw listError }
         return try items.map(decode)
     }
-    func correct(_ id: String, note: String) async throws -> StmObject { try change(id, "correct:\(note)", ["state": "touching-up"]) }
-    func answerCloseup(_ id: String, bestGuess: Bool) async throws -> StmObject { try change(id, "closeup:\(bestGuess)", ["state": "touching-up"]) }
-    func print(_ id: String, checked: Bool) async throws -> StmObject { try change(id, "print:\(checked)", ["state": "printing"]) }
-    func answerPlate(_ id: String) async throws -> StmObject { try change(id, "plate", ["plate": NSNull()]) }
-    func answerPrintConfirmation(_ id: String, confirmationId: String, answer: PrintConfirmationAnswer) async throws -> StmObject {
+    func correct(_ id: String, note: String) async throws -> Project { try change(id, "correct:\(note)", ["state": "touching-up"]) }
+    func answerCloseup(_ id: String, bestGuess: Bool) async throws -> Project { try change(id, "closeup:\(bestGuess)", ["state": "touching-up"]) }
+    func print(_ id: String, checked: Bool) async throws -> Project { try change(id, "print:\(checked)", ["state": "printing"]) }
+    func answerPrintConfirmation(_ id: String, confirmationId: String, answer: PrintConfirmationAnswer) async throws -> Project {
         confirmationAnswer = answer
         return try change(id, "confirmation:\(confirmationId):\(answer.action.rawValue)", ["printConfirmation":NSNull()])
     }
-    func start(_ id: String) async throws -> StmObject { try change(id, "start", ["state": "touching-up"]) }
+    func start(_ id: String) async throws -> Project { try change(id, "start", ["state": "touching-up"]) }
     func delete(_ id: String) async throws {
         calls.append("delete:\(id)")
         if let actionError { throw actionError }
@@ -56,24 +56,37 @@ private func item(_ id: String, _ state: String, _ fields: [String: Any] = [:]) 
         await companion.set([item("a", "printing", ["printConfirmation":question, "plate":["noCamera":true]])])
         let model = ObjectsModel(companion:companion)
         await model.refresh()
-        let plate = await model.perform(.plateClear, on:"a")
         let incomplete = await model.answerPrintConfirmation("a", confirmationId:"q1", answer:.init(action:.accept))
-        XCTAssertFalse(plate)
         XCTAssertFalse(incomplete)
         question["id"] = "q2"
         await companion.set([item("a", "printing", ["printConfirmation":question])])
         await model.refresh()
-        let stale = await model.answerPrintConfirmation("a", confirmationId:"q1", answer:.init(action:.accept, content:["bed_clear":true]))
+        let stale = await model.answerPrintConfirmation("a", confirmationId:"q1", answer:.init(action:.accept, content:["bed_clear":.bool(true)]))
         XCTAssertFalse(stale)
         let before = await companion.calls
         XCTAssertFalse(before.contains { $0.hasPrefix("confirmation:") || $0 == "plate" })
-        let accepted = await model.answerPrintConfirmation("a", confirmationId:"q2", answer:.init(action:.accept, content:["bed_clear":true]))
+        let accepted = await model.answerPrintConfirmation("a", confirmationId:"q2", answer:.init(action:.accept, content:["bed_clear":.bool(true)]))
         XCTAssertTrue(accepted)
         let calls = await companion.calls
         XCTAssertEqual(calls.last, "confirmation:q2:accept")
         let answer = await companion.confirmationAnswer
-        XCTAssertEqual(answer?.content, ["bed_clear":true])
+        XCTAssertEqual(answer?.content, ["bed_clear":.bool(true)])
         XCTAssertNil(model.selected?.printConfirmation)
+    }
+
+    func testATypedAnswerGoesThroughTheSharedChecks() async {
+        let companion = FakeObjects()
+        let question: [String: Any] = ["id":"q1", "message":"Set the bed temperature.", "expiresAtMs":Date().timeIntervalSince1970 * 1000 + 60_000,
+                                       "supported":true, "fields":[["name":"temp", "title":"Bed temperature", "type":"integer", "minimum":40, "maximum":110, "required":true]]]
+        await companion.set([item("a", "printing", ["printConfirmation":question])])
+        let model = ObjectsModel(companion:companion)
+        await model.refresh()
+        let outOfRange = await model.answerPrintConfirmation("a", confirmationId:"q1", answer:.init(action:.accept, content:["temp":.number(120)]))
+        XCTAssertFalse(outOfRange)
+        let accepted = await model.answerPrintConfirmation("a", confirmationId:"q1", answer:.init(action:.accept, content:["temp":.number(60)]))
+        XCTAssertTrue(accepted)
+        let answer = await companion.confirmationAnswer
+        XCTAssertEqual(answer?.content, ["temp":.number(60)])
     }
 
     func testUnsupportedAndExpiredConfirmationCanBeCanceledButNotAccepted() async {

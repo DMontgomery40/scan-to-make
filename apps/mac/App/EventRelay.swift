@@ -1,6 +1,7 @@
 import Foundation
 import AppKit
 import UserNotifications
+import CounterpartKit
 #if canImport(ControlKit)
 import ControlKit
 #endif
@@ -23,7 +24,7 @@ import ControlKit
     let relay = LiveActivityRelay()
     private let notifier = MacNotifier()
     private let awake = AwakeKeeper()
-    private var projects: [String: StmObject] = [:]
+    private var projects: [String: Project] = [:]
     private var projectsReadAt: Date?
 
     func start() {
@@ -54,15 +55,19 @@ import ControlKit
                 // First run: take the log's position first, then mirror every project as it is now. History isn't
                 // replayed, and an event logged while the mirror uploads comes after the cursor, so the next read has it.
                 let page = try await client.waitForEvents(after: 0, timeoutMs: 0, limit: 0)
-                await refreshProjects(client, force: true)
+                guard await refreshProjects(client, force: true) else { return 5 }
                 await cloud.mirror(Array(projects.values))
                 cursor.value = page.latest
                 return 0
             }
             let page = try await client.waitForEvents(after: current, timeoutMs: Self.waitMs)
             let (next, resync) = EventCursor.advance(from: current, page: page)
-            if resync { await refreshProjects(client, force: true); await cloud.mirror(Array(projects.values)) }
-            if !page.events.isEmpty { await refreshProjects(client, force: true) }
+            // The page is acknowledged only once the projects it is about were read: a terminal event is never
+            // mirrored or pushed against an old snapshot. The same page is read again after a failed read.
+            if resync || !page.events.isEmpty {
+                guard await refreshProjects(client, force: true) else { return 5 }
+            }
+            if resync { await cloud.mirror(Array(projects.values)) }
             await handle(page.events, client: client)
             cursor.value = next
             return 0
@@ -71,12 +76,14 @@ import ControlKit
         }
     }
 
-    private func refreshProjects(_ client: ControlClient, force: Bool) async {
-        if !force, let at = projectsReadAt, Date().timeIntervalSince(at) < 30 { return }
-        guard let list = try? await client.objects() else { return }
+    /// Reads the projects (at most every 30 s unless forced). Returns whether this snapshot is current.
+    @discardableResult private func refreshProjects(_ client: ControlClient, force: Bool) async -> Bool {
+        if !force, let at = projectsReadAt, Date().timeIntervalSince(at) < 30 { return true }
+        guard let list = try? await client.objects() else { return false }
         projects = Dictionary(uniqueKeysWithValues: list.map { ($0.id, $0) })
         projectsReadAt = Date()
         awake.set(busy: list.contains { $0.words.busy })
+        return true
     }
 
     private func handle(_ events: [CounterpartEvent], client: ControlClient) async {
@@ -100,6 +107,8 @@ import ControlKit
             if let project, upserts.allow(projectId: project.id, printId: event.printId, state: state, now: now) {
                 await cloud.mirror([project])
             }
+            // A start replayed after a restart, for a print that has since ended, would start an activity nothing ends.
+            if event.type == "print.started", !LiveActivityStart.stillRunning(event, project: project) { continue }
             await relay.deliver(event, title: project?.words.title ?? event.title, client: client, cloudTokens: cloud.deviceTokens)
         }
     }
@@ -138,7 +147,7 @@ import ControlKit
         center.requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in }
     }
 
-    func post(_ event: CounterpartEvent, project: StmObject?) {
+    func post(_ event: CounterpartEvent, project: Project?) {
         let content = UNMutableNotificationContent()
         content.title = event.title
         content.body = event.body

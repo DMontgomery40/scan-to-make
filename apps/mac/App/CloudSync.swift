@@ -3,6 +3,7 @@ import AppKit
 import CloudKit
 import ImageIO
 import UniformTypeIdentifiers
+import CounterpartKit
 #if canImport(ControlKit)
 import ControlKit
 #endif
@@ -93,7 +94,7 @@ import ControlKit
     }
 
     /// Called on every relay cycle: retry what iCloud refused, and run the daily sweep when it's due.
-    func tick(projects: [String: StmObject]) async {
+    func tick(projects: [String: Project]) async {
         guard database != nil else { return }
         await prepare()
         await retryPending(projects: projects)
@@ -156,12 +157,12 @@ import ControlKit
     }
 
     /// Upserts each project's summary, or keeps its id to send again with whatever it is by then.
-    func mirror(_ projects: [StmObject]) async {
+    func mirror(_ projects: [Project]) async {
         guard database != nil, !projects.isEmpty else { return }
         pendingProjects.formUnion(await upsert(projects))
     }
 
-    private func retryPending(projects: [String: StmObject]) async {
+    private func retryPending(projects: [String: Project]) async {
         let events = pendingEvents
         if !events.isEmpty {
             var left: [Pending] = []
@@ -178,7 +179,7 @@ import ControlKit
 
     /// Title, state, words, the open question, print progress, and the thumbnail only when it changed. Returns the ids
     /// that weren't saved, to send again.
-    private func upsert(_ projects: [StmObject]) async -> Set<String> {
+    private func upsert(_ projects: [Project]) async -> Set<String> {
         guard let database else { return Set(projects.map(\.id)) }
         await prepare()
         var temporary: [URL] = []

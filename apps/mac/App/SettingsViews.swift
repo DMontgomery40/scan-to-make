@@ -3,6 +3,7 @@ import AppKit
 import ServiceManagement
 import UniformTypeIdentifiers
 import AgentKit
+import CounterpartKit
 #if canImport(ControlKit)
 import ControlKit
 #endif
@@ -67,6 +68,11 @@ struct GeneralSettings: View {
     @State private var dock = DockIcon.shown
     @State private var switches: [NotificationSwitch: Bool] = Dictionary(uniqueKeysWithValues:NotificationSwitch.allCases.map { ($0, NotificationPrefs().isOn($0)) })
     @State private var progress = NotificationPrefs().progress
+    /// The shared milestones as the companion has them, once read; nil while unknown or unreachable.
+    @State private var shared: String?
+    @State private var progressProblem: String?
+    /// One change to the shared milestones at a time, so a slower earlier write never lands after a newer choice.
+    @State private var savingMilestones = false
 
     var body: some View {
         Form {
@@ -81,9 +87,14 @@ struct GeneralSettings: View {
                 ForEach(NotificationSwitch.ordered) { item in
                     Toggle(item.title, isOn:Binding(get:{ switches[item] ?? item.defaultOn }, set:{ switches[item] = $0; NotificationPrefs().set(item, $0) }))
                     if item == .firstLayer {
-                        Picker("Progress", selection:Binding(get:{ progress }, set:{ progress = $0; NotificationPrefs().progress = $0 })) {
+                        Picker(selection:Binding(get:{ progress }, set:{ choose($0) })) {
                             ForEach(ProgressNotifications.allCases) { Text($0.title).tag($0) }
+                        } label: {
+                            Text("Progress")
+                            Text(progressProblem ?? (shared == "off" ? "Off on your iPhone too. Choosing a level turns them on for both."
+                                                     : "The milestones are shared with your iPhone."))
                         }
+                        .disabled(savingMilestones)
                     }
                 }
             } header: { Text("Notifications on this Mac") } footer: {
@@ -96,6 +107,43 @@ struct GeneralSettings: View {
         .formStyle(.grouped)
         .focusEffectDisabled()
         .frame(height:620)
+        .task { await readMilestones() }
+    }
+
+    /// Shows the shared level while this Mac's Progress is on, so both devices say the same.
+    private func readMilestones() async {
+        #if DEBUG
+        if DesignFixtures.assets != nil { return }
+        #endif
+        guard let value = try? await Self.client().milestones() else { return }
+        shared = value
+        if progress != .off, let level = ProgressNotifications(milestones:value), level != progress {
+            progress = level
+            NotificationPrefs().progress = level
+        }
+    }
+
+    /// A level turns Progress on here and sets the shared milestones; Off turns it off on this Mac only.
+    private func choose(_ level: ProgressNotifications) {
+        let previous = progress
+        progress = level
+        NotificationPrefs().progress = level
+        progressProblem = nil
+        guard let milestones = level.milestones, milestones != shared else { return }
+        savingMilestones = true
+        Task {
+            defer { savingMilestones = false }
+            do { try await Self.client().setMilestones(milestones); shared = milestones }
+            catch {
+                progress = previous
+                NotificationPrefs().progress = previous
+                progressProblem = "Counterpart couldn't change the milestones. Try again."
+            }
+        }
+    }
+
+    private static func client() throws -> ControlClient {
+        try ControlClient(socketPath:ModelAccessModel.socketPath(for:Installation(bundle:.main)))
     }
 
     private func setLogin(_ on: Bool) {
@@ -118,6 +166,8 @@ struct DevicesSettings: View {
     @Environment(\.openWindow) private var openWindow
     @State private var removing: DeviceGroup?
     @State private var removingOlder: DeviceGroup?
+    @State private var removingLegacy: ControlDevice?
+    @State private var removingAllLegacy = false
 
     var body: some View {
         Form {
@@ -143,10 +193,32 @@ struct DevicesSettings: View {
             } header: { Text("Phones and iPads") } footer: {
                 Text("Pairing a phone again replaces its row. It never adds a second one.").font(.caption).foregroundStyle(.secondary)
             }
+            if !mac.legacy.isEmpty {
+                Section {
+                    ForEach(mac.legacy) { device in
+                        HStack(spacing:12) {
+                            Image(systemName:"iphone.slash").font(.title2).foregroundStyle(.secondary).frame(width:30)
+                            VStack(alignment:.leading, spacing:2) {
+                                Text(device.deviceName).font(.body.weight(.medium))
+                                Text("Last used \(Self.day(device.seenAt)) · paired \(Self.day(device.pairedAt))").font(.caption).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Button("Remove…") { removingLegacy = device }
+                        }
+                    }
+                    HStack {
+                        Spacer()
+                        Button("Remove All Older Pairings…") { removingAllLegacy = true }
+                    }
+                } header: { Text("Older pairings") } footer: {
+                    Text("Pairings from before this version. Counterpart removes them after 14 days without use.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
         }
         .formStyle(.grouped)
         .focusEffectDisabled()
-        .frame(height:300)
+        .frame(height:mac.legacy.isEmpty ? 300 : 620)
         // A phone paired in the Add a Phone window shows here as soon as Settings is in front again.
         .onReceive(NotificationCenter.default.publisher(for:NSWindow.didBecomeKeyNotification)) { _ in Task { await mac.refresh() } }
         .onChange(of:PairingFlow.shared.finished) { _, done in if done { Task { await mac.refresh() } } }
@@ -158,6 +230,21 @@ struct DevicesSettings: View {
         } message: { _ in
             Text("It can’t reach this Mac until you pair it again.")
         }
+        .confirmationDialog(removingLegacy.map { "Remove “\($0.deviceName)”?" } ?? "Remove?",
+                            isPresented:Binding(get:{ removingLegacy != nil }, set:{ if !$0 { removingLegacy = nil } }),
+                            titleVisibility:.visible, presenting:removingLegacy) { device in
+            Button("Remove", role:.destructive) { Task { await mac.remove([device.deviceId]) } }
+            Button("Cancel", role:.cancel) {}
+        } message: { _ in
+            Text("A phone that still uses this pairing will need pairing again.")
+        }
+        .confirmationDialog("Remove \(mac.legacy.count) older pairing\(mac.legacy.count == 1 ? "" : "s")?", isPresented:$removingAllLegacy,
+                            titleVisibility:.visible) {
+            Button("Remove All", role:.destructive) { Task { await mac.remove(mac.legacy.map(\.deviceId)) } }
+            Button("Cancel", role:.cancel) {}
+        } message: {
+            Text("They’re from before this version. A phone that still uses one will need pairing again.")
+        }
         .confirmationDialog(removingOlder.map { "Remove \($0.older) older pairing\($0.older == 1 ? "" : "s") of “\($0.primary.deviceName)”?" } ?? "Remove?",
                             isPresented:Binding(get:{ removingOlder != nil }, set:{ if !$0 { removingOlder = nil } }),
                             titleVisibility:.visible, presenting:removingOlder) { group in
@@ -167,6 +254,10 @@ struct DevicesSettings: View {
             Text("They haven’t been used since this phone paired again. A phone that still uses one will need pairing again.")
         }
     }
+}
+
+extension DevicesSettings {
+    static func day(_ ms: Double) -> String { Date(timeIntervalSince1970: ms / 1000).formatted(.dateTime.month(.abbreviated).day()) }
 }
 
 private struct DeviceRow: View {
@@ -624,8 +715,8 @@ struct MenuBarPopover: View {
     @Environment(\.openWindow) private var openWindow
     @Environment(\.openSettings) private var openSettings
 
-    private var running: [StmObject] { objects.objects.filter { [.working, .printing, .preparing, .sending].contains($0.words.stage) } }
-    private var asking: [StmObject] { objects.objects.filter { $0.words.group == .needsYou } }
+    private var running: [Project] { objects.objects.filter { [.working, .printing, .preparing, .sending].contains($0.words.stage) } }
+    private var asking: [Project] { objects.objects.filter { $0.words.group == .needsYou } }
 
     var body: some View {
         VStack(alignment:.leading, spacing:12) {
@@ -714,7 +805,7 @@ struct MenuBarPopover: View {
     }
 
     /// "Plush needs a close-up", "P1S needs a yes before printing".
-    static func ask(_ object: StmObject) -> String {
+    static func ask(_ object: Project) -> String {
         let words = object.words
         if words.stage == .failed { return "\(words.title) didn’t finish" }
         if object.state == .needsCloseup { return "\(words.title) needs a close-up" }
@@ -724,7 +815,7 @@ struct MenuBarPopover: View {
 
 /// One running project in the popover: its title and, for a print, the bar; for a pass, the time left and stage.
 private struct RunningLine: View {
-    let object: StmObject
+    let object: Project
     var body: some View {
         let words = object.words
         VStack(alignment:.leading, spacing:4) {
