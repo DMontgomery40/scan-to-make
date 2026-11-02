@@ -135,3 +135,29 @@ public extension ControlClient {
     /// Runs one control method by name with JSON parameters: commands from the phone (PRD §9.3) name existing methods.
     func run(_ method: String, _ params: [String: JSONValue]) async throws -> JSONValue { try await call(method, params) }
 }
+
+/// `pairing.icloudToken` (PRD §5.10): what this Mac publishes in its `CounterpartMac` record so a phone on the same
+/// Apple Account enrols by itself. The token is single-use, valid for 10 minutes, and replaced every 5.
+public struct ICloudEnrolment: Decodable, Sendable, Equatable {
+    public struct Address: Codable, Sendable, Equatable, Hashable {
+        /// `lan`, `mdns` or `tailscale`.
+        public let kind: String
+        public let host: String
+        public let port: Int?
+        public init(kind: String, host: String, port: Int? = nil) { self.kind = kind; self.host = host; self.port = port }
+    }
+    public let token: String
+    /// ISO 8601.
+    public let expiresAt: String
+    public let macId: String
+    public let spkiSha256: String
+    public let addresses: [Address]
+    public init(token: String, expiresAt: String, macId: String, spkiSha256: String, addresses: [Address]) {
+        self.token = token; self.expiresAt = expiresAt; self.macId = macId; self.spkiSha256 = spkiSha256; self.addresses = addresses
+    }
+    public var expiresAtDate: Date? { CounterpartEvent.parse(expiresAt) }
+}
+
+public extension ControlClient {
+    func icloudEnrolment() async throws -> ICloudEnrolment { try await call("pairing.icloudToken") }
+}

@@ -265,4 +265,34 @@ final class EventRelayTests: XCTestCase {
         record["confirmationId"] = nil as String?
         XCTAssertEqual(Set(record.changedKeys()), ["title", "openAsk", "confirmationId"])
     }
+
+    // MARK: This Mac in iCloud (PRD §5.10)
+
+    func testTheMacRecordCarriesWhatAPhoneNeedsToEnrol() throws {
+        let enrolment = ICloudEnrolment(token: "tok", expiresAt: "2026-11-01T10:10:00Z", macId: "mac-1", spkiSha256: "abc",
+                                        addresses: [.init(kind: "lan", host: "192.168.1.20", port: 9077), .init(kind: "mdns", host: "mac-mini.local", port: 9077),
+                                                    .init(kind: "tailscale", host: "100.64.0.2", port: 9077)])
+        let fields = MacPublication.fields(enrolment, name: "Mac mini", now: now)
+        XCTAssertEqual(fields["macId"] as? String, "mac-1")
+        XCTAssertEqual(fields["name"] as? String, "Mac mini")
+        XCTAssertEqual(fields["enrolmentToken"] as? String, "tok")
+        XCTAssertEqual(fields["spkiSha256"] as? String, "abc")
+        XCTAssertEqual((fields["tokenExpiresAt"] as? Date)?.timeIntervalSince1970 ?? 0, 1_793_527_800, accuracy: 1)
+        let addresses = try JSONDecoder().decode([ICloudEnrolment.Address].self, from: Data(try XCTUnwrap(fields["addresses"] as? String).utf8))
+        XCTAssertEqual(addresses.map(\.kind), ["lan", "mdns", "tailscale"], "every address, in the order to try them")
+        let decoded = try JSONDecoder().decode(ICloudEnrolment.self, from: Data(#"{"token":"t","expiresAt":"2026-11-01T10:10:00.000Z","macId":"m","spkiSha256":"s","addresses":[{"kind":"lan","host":"10.0.0.2","port":9077}]}"#.utf8))
+        XCTAssertNotNil(decoded.expiresAtDate, "ISO 8601, with or without fractions")
+    }
+
+    func testTheRecordIsRewrittenOnLaunchOnAnAddressChangeAndEveryFiveMinutes() {
+        XCTAssertTrue(MacPublication.isDue(lastWritten: nil, lastAddresses: nil, addresses: "a", tokenExpires: nil, now: now), "on launch")
+        let written = now.addingTimeInterval(-60)
+        XCTAssertFalse(MacPublication.isDue(lastWritten: written, lastAddresses: "a", addresses: "a", tokenExpires: now.addingTimeInterval(540), now: now))
+        XCTAssertTrue(MacPublication.isDue(lastWritten: written, lastAddresses: "a", addresses: "b", tokenExpires: now.addingTimeInterval(540), now: now),
+                      "an address changed")
+        XCTAssertTrue(MacPublication.isDue(lastWritten: now.addingTimeInterval(-300), lastAddresses: "a", addresses: "a", tokenExpires: now.addingTimeInterval(540), now: now),
+                      "every 5 minutes")
+        XCTAssertTrue(MacPublication.isDue(lastWritten: written, lastAddresses: "a", addresses: "a", tokenExpires: now.addingTimeInterval(120), now: now),
+                      "before the published token runs out")
+    }
 }
