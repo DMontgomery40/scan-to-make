@@ -45,22 +45,20 @@ export function printPreparing(state: string | undefined, job?: {layer?: number;
   return job?.layer !== undefined ? job.layer < 1 : PREPARING_STAGE.test(job?.stage?.trim() ?? '');
 }
 
-export interface PrinterProblem {code: string; message?: string; url?: string}
-/** Bambu's page for an HMS code (the link Bambu Studio opens): AAAA_BBBB_CCCC_DDDD. */
-export function problemUrl(problem: PrinterProblem): string | undefined {
-  if (problem.url) return problem.url;
-  return /^[0-9A-F]{4}(?:_[0-9A-F]{4}){3}$/i.test(problem.code)
-    ? `https://e.bambulab.com/index.php?e=${problem.code.replaceAll('_', '').toUpperCase()}&s=device_hms&lang=en` : undefined;
-}
+export interface PrinterProblem {code: string; message?: string}
 /** A message that says nothing beyond the code (Bambu has no text for it, or only the code came through). */
 const noText = (problem: PrinterProblem) => {
   const message = problem.message?.trim() ?? '';
   return !message || message === problem.code || /no description|^the printer reported (?:problem|error) /i.test(message);
 };
-/** "The printer stopped: <its message>", or, when Bambu has no words for the code, where to look. */
+/**
+ * The printer's own words: "The printer stopped: <its message>", or "The printer stopped (<code>)" when it has
+ * none. Nothing more: no advice and no guessed cause (David, 2026-11-02: Counterpart sends the print; the printer
+ * runs its own checks). The project offers Print Again.
+ */
 export function printerStopped(problem: PrinterProblem | undefined): string {
-  if (!problem) return "The printer stopped. Check the printer's screen.";
-  return noText(problem) ? `The printer stopped (${problem.code}). Check the printer's screen.` : `The printer stopped: ${problem.message?.trim()}`;
+  if (!problem) return 'The printer stopped.';
+  return noText(problem) ? `The printer stopped (${problem.code}).` : `The printer stopped: ${problem.message?.trim()}`;
 }
 
 /** The failure sentence for a print that ended without finishing (PRD §8.6). */
@@ -177,8 +175,8 @@ export interface StatusSource extends TitleSource {
   failure?: string;
   passes?: {stages?: {words: string; endedAtMs?: number}[]; estimate?: {remainingSec: number}; endedAtMs?: number}[];
   print?: {destination?: {name: string}; dispatchedAt?: string; sentVia?: string;
-    live?: {state: string; job?: {progress?: number; remainingSec?: number; layer?: number; stage?: string}; problems?: PrinterProblem[]};
-    monitor?: {phase: string; endedAt?: string; endState?: string}};
+    live?: {state: string; job?: {progress?: number; remainingSec?: number; layer?: number; stage?: string}};
+    monitor?: {phase: string; endedAt?: string}};
 }
 
 const formatDate = (iso: string) => new Intl.DateTimeFormat('en-US', {month: 'short', day: 'numeric'}).format(new Date(iso));
@@ -216,11 +214,6 @@ export function objectStatus(object: StatusSource, updatedAtMs?: number): Object
     // PRD §5.4: marked Works (Done on Home and in the Mac sidebar).
     case 'confirmed': return {phase: 'confirmed', text: 'Done · it works', symbol: 'checkmark.circle.fill', tint: 'green'};
     case 'sent': return {phase: 'sent', text: sentWords(object.print?.destination?.name ?? 'your printer', object.print?.sentVia === 'bambu-connect'), symbol: 'paperplane', tint: 'secondary'};
-    default: {
-      // A print the printer stopped links to Bambu's page for its code.
-      const problem = object.print?.monitor?.endState === 'failed' ? object.print.live?.problems?.[0] : undefined;
-      const url = problem ? problemUrl(problem) : undefined;
-      return {phase: 'failed', text: (object.failure ?? 'Something went wrong. Try again.').slice(0, 300), symbol: 'exclamationmark.triangle', tint: 'red', ...(url ? {url} : {})};
-    }
+    default: return {phase: 'failed', text: (object.failure ?? 'Something went wrong. Try again.').slice(0, 300), symbol: 'exclamationmark.triangle', tint: 'red'};
   }
 }

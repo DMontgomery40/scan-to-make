@@ -1,7 +1,7 @@
 import {randomUUID} from 'node:crypto';
 import type {PrintReport} from '@scan-to-make/printer-handoff';
 import type {CounterpartEventType, PrintLive, PrintMonitor} from '@scan-to-make/contracts/counterpart';
-import {printPreparing, problemUrl} from '../events/words.js';
+import {printPreparing} from '../events/words.js';
 
 /** PRD §8.6 cadence. */
 export const MONITOR = {
@@ -150,10 +150,7 @@ function eventData(report: PrintReport): EventDraft['data'] {
     ...(job?.layer !== undefined && !preparing ? {layer: job.layer} : {}),
     ...(job?.totalLayers !== undefined && !preparing ? {totalLayers: job.totalLayers} : {}),
     ...(job?.stage ? {stage: job.stage} : {}),
-    ...(report.problems.length ? {problems: report.problems.slice(0, 16).map(problem => {
-      const url = problemUrl(problem);
-      return {code: problem.code, message: problem.message, ...(url ? {url} : {})};
-    })} : {}),
+    ...(report.problems.length ? {problems: report.problems.slice(0, 16).map(({code, message}) => ({code, message}))} : {}),
   };
 }
 

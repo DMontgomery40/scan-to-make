@@ -434,7 +434,7 @@ test('one copy named is sent as repetitions 1, so it overrides a printer profile
   await g.service.settled(g.object.id);
 });
 
-test('the stove gap filler, end to end: "Getting ready" while it levels, then the printer stops it; failed, says why, links Bambu, and prints again', async t => {
+test('the stove gap filler, end to end: "Getting ready" while it levels, then the printer stops it; failed in its own words, and prints again', async t => {
   // HMS 0300_0D00_0002_0001 at layer 0 of 52, 3 %, then the job is gone (the real abort of 2026-11-02, as get_printer_status reports it).
   const hms = {attr: 0x03000D00, code: 0x00020001};
   const levelling = {connected: true, print: {filename: JOB, progress: 3, timeRemaining: 175, currentLayer: 0, totalLayers: 52}, raw: {gcode_state: 'RUNNING', subtask_name: JOB, task_id: '0', hms: [hms]}};
@@ -449,15 +449,14 @@ test('the stove gap filler, end to end: "Getting ready" while it levels, then th
   assert.equal(getting.print.printerStatus.percent, undefined, 'no percent while it gets ready');
   for (let i = 0; i < 2; i++) await f.tick();
   const failed = await until(async () => { const o = await f.service.get(f.object.id); return o.print?.monitor?.phase === 'ended' ? o : undefined; });
-  // The state really flips to failed, with the words and Bambu's page for the code.
+  // The state really flips to failed, in the printer's own words (this report has only the code).
   assert.equal(failed.state, 'failed');
-  assert.equal(failed.failure, "The printer stopped (0300_0D00_0002_0001). Check the printer's screen.");
-  assert.deepEqual(objectStatus(failed), {phase: 'failed', text: failed.failure, symbol: 'exclamationmark.triangle', tint: 'red',
-    url: 'https://e.bambulab.com/index.php?e=03000D0000020001&s=device_hms&lang=en'});
+  assert.equal(failed.failure, 'The printer stopped (0300_0D00_0002_0001).');
+  assert.deepEqual(objectStatus(failed), {phase: 'failed', text: failed.failure, symbol: 'exclamationmark.triangle', tint: 'red'});
   const event = f.events.find(item => item.type === 'print.failed');
   assert.ok(event?.frame, 'with the camera frame');
   assert.equal(eventWords(event.type, event.data, {title: 'Stove gap filler', printer: 'Bambu Lab P1S'}).notify, 'timeSensitive');
-  assert.equal(event.data.problems[0].url, 'https://e.bambulab.com/index.php?e=03000D0000020001&s=device_hms&lang=en');
+  assert.equal(eventWords(event.type, event.data, {title: 'Stove gap filler', printer: 'Bambu Lab P1S'}).body, 'The printer stopped (0300_0D00_0002_0001).');
   // Print Again: a failed project with its model prints again.
   const again = await f.service.print(f.object.id);
   assert.equal(again.state, 'printing');

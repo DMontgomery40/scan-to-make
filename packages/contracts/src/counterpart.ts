@@ -29,8 +29,7 @@ export type CounterpartEventType = z.infer<typeof CounterpartEventTypeSchema>;
 export const NotifyLevelSchema = z.enum(['none', 'passive', 'active', 'timeSensitive']);
 export type NotifyLevel = z.infer<typeof NotifyLevelSchema>;
 
-/** `url`: a page about the code (Bambu's page for an HMS code), when there is one. */
-export const EventProblemSchema = z.strictObject({ code: text(64), message: text(500), url: z.url().optional() });
+export const EventProblemSchema = z.strictObject({ code: text(64), message: text(500) });
 
 export const CounterpartEventDataSchema = z.strictObject({
   progress: z.number().min(0).max(100).optional(),
@@ -97,8 +96,6 @@ export const ObjectStatusSchema = z.strictObject({
   /** SF Symbol name from the PRD §4 table. */
   symbol: text(64),
   tint: z.enum(['blue', 'orange', 'accent', 'green', 'secondary', 'red']),
-  /** `failed` after the printer stopped a print: the page about its problem code (Bambu's page for an HMS code). */
-  url: z.url().optional(),
 });
 export type ObjectStatus = z.infer<typeof ObjectStatusSchema>;
 

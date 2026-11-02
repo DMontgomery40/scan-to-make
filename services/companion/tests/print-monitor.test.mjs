@@ -257,10 +257,10 @@ const STOVE_REPLAY = [
   [stove(3, 10500, 'Cleaning nozzle tip', [HMS]), 'print.status', 'Stove gap filler', 'Getting ready · Cleaning nozzle tip', 'Getting ready · Cleaning nozzle tip'],
   [stove(3, 10500, 'Auto bed leveling', [HMS]), 'print.status', 'Stove gap filler', 'Getting ready · Auto bed leveling', 'Getting ready · Auto bed leveling'],
   // 07:08:04 the job is gone: the printer is idle with the code that stopped it.
-  [{state: 'idle', problems: [HMS]}, 'print.failed', 'Bambu Lab P1S stopped Stove gap filler', "The printer stopped (0300_0D00_0002_0001). Check the printer's screen.", undefined],
+  [{state: 'idle', problems: [HMS]}, 'print.failed', 'Bambu Lab P1S stopped Stove gap filler', 'The printer stopped (0300_0D00_0002_0001).', undefined],
 ];
 
-test('the stove gap filler replay: getting ready is never "Printing · 3%", and the abort says what to do', async () => {
+test('the stove gap filler replay: getting ready is never "Printing · 3%", and the abort is the printer\'s own words', async () => {
   const {eventWords, objectStatus, printEndFailure} = await import('../dist/events/words.js');
   const h = harness({reports: STOVE_REPLAY.map(([report]) => report)});
   const context = {title: 'Stove gap filler', printer: 'Bambu Lab P1S'};
@@ -286,21 +286,20 @@ test('the stove gap filler replay: getting ready is never "Printing · 3%", and 
   // Preparing never counted as the first layer or the halfway mark (the started report showed 100% and 30 of 30).
   assert.deepEqual([h.monitor.state.firstLayerSent, h.monitor.state.milestonesSent], [false, []]);
   assert.equal(h.types().includes('print.first-layer'), false);
-  // The failure is loud and useful: time-sensitive, with the camera frame and Bambu's page for the code.
+  // The failure is loud: time-sensitive, with the camera frame, in the printer's own words and nothing more.
   const failed = h.events.at(-1);
   assert.equal(eventWords('print.failed', failed.data, context).notify, 'timeSensitive');
   assert.match(failed.frame, /^prints\/p\/frames\/.+\.jpg$/);
-  assert.deepEqual(failed.data.problems, [{code: HMS.code, message: HMS.message, url: HMS.url}]);
+  assert.deepEqual(failed.data.problems, [{code: HMS.code, message: HMS.message}]);
   assert.deepEqual(h.ends.map(end => end.end), ['failed']);
-  // The project's line and its link, as the service records the ending.
+  // The project's line, as the service records the ending.
   const failure = printEndFailure('failed', {...context, problem: HMS});
-  assert.equal(failure, "The printer stopped (0300_0D00_0002_0001). Check the printer's screen.");
-  const status = objectStatus({state: 'failed', failure, print: {monitor: {phase: 'ended', endState: 'failed'}, live: h.saves.at(-1).live}});
-  assert.deepEqual(status, {phase: 'failed', text: failure, symbol: 'exclamationmark.triangle', tint: 'red', url: HMS.url});
+  assert.equal(failure, 'The printer stopped (0300_0D00_0002_0001).');
+  assert.deepEqual(objectStatus({state: 'failed', failure}), {phase: 'failed', text: failure, symbol: 'exclamationmark.triangle', tint: 'red'});
 });
 
-test('getting ready ends at layer 1: then it is "Printing · N% · T left"; a code with words says them; a code without a link gets Bambu\'s', async () => {
-  const {eventWords, objectStatus, printerStopped, problemUrl, printPreparing} = await import('../dist/events/words.js');
+test('getting ready ends at layer 1: then it is "Printing · N% · T left"; a stopped print says the printer\'s words', async () => {
+  const {eventWords, objectStatus, printerStopped, printPreparing} = await import('../dist/events/words.js');
   const live = {state: 'printing', job: {progress: 4, remainingSec: 9900, layer: 1, totalLayers: 52}};
   const status = objectStatus({state: 'printing', print: {destination: {name: 'Bambu Lab P1S'}, dispatchedAt: '2026-11-02T06:56:24Z', monitor: {phase: 'watching'}, live}});
   assert.equal(status.text, 'Printing on Bambu Lab P1S · 4% · 2 h 45 min left');
@@ -311,9 +310,8 @@ test('getting ready ends at layer 1: then it is "Printing · N% · T left"; a co
   assert.equal(printPreparing('printing', {stage: 'Heating nozzle', layer: 20}), false, 'from layer 1 it prints');
   assert.equal(printPreparing('paused', {layer: 0}), false, 'paused says paused');
   assert.equal(printerStopped({code: '0700_2000_0002_0001', message: 'AMS A slot 1 ran out of filament.'}), 'The printer stopped: AMS A slot 1 ran out of filament.');
-  assert.equal(printerStopped({code: '0300_8003', message: 'The printer reported error 0300_8003.'}), "The printer stopped (0300_8003). Check the printer's screen.");
-  assert.equal(problemUrl({code: '0300_0D00_0002_0001'}), 'https://e.bambulab.com/index.php?e=03000D0000020001&s=device_hms&lang=en');
-  assert.equal(problemUrl({code: 'x'}), undefined);
+  assert.equal(printerStopped({code: '0300_8003', message: 'The printer reported error 0300_8003.'}), 'The printer stopped (0300_8003).');
+  assert.equal(printerStopped(undefined), 'The printer stopped.');
 });
 
 test('a print that reaches layer 1 after getting ready raises its first layer and milestones as before', async () => {
