@@ -251,8 +251,8 @@ test('the camera route serves one frame per 3 s to every viewer, and 404s a prin
   assert.equal(f.calls.filter(c => c.name === 'camera_snapshot').length, 1);
   assert.equal((await fetch(`${base}/objects/printers/nope/camera.jpg`)).status, 404);
   const settings = await fetch(`${base}/settings`, {method: 'PATCH', headers: {'content-type': 'application/json'}, body: JSON.stringify({milestones: '25-50-75'})});
-  assert.deepEqual(await settings.json(), {settings: {milestones: '25-50-75'}});
-  assert.deepEqual(await (await fetch(`${base}/settings`)).json(), {settings: {milestones: '25-50-75'}});
+  assert.deepEqual(await settings.json(), {settings: {milestones: '25-50-75', notifications: {mac: {}, devices: {}}, general: {}}});
+  assert.deepEqual(await (await fetch(`${base}/settings`)).json(), {settings: {milestones: '25-50-75', notifications: {mac: {}, devices: {}}, general: {}}});
   assert.equal((await fetch(`${base}/settings`, {method: 'PATCH', headers: {'content-type': 'application/json'}, body: JSON.stringify({milestones: '33'})})).status, 400);
   const blind = await setup(t, {tools: ['get_printer_status']});
   await assert.rejects(blind.service.camera(blind.object.id), error => error.reason === 'no-camera');

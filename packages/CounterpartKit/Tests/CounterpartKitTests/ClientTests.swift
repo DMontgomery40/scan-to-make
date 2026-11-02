@@ -379,6 +379,19 @@ final class CompanionClientTests: XCTestCase {
         XCTAssertNil(snapshot.etag)
     }
 
+    func testRealSettingsResponseSurvivesClientDecodingAndRetainsReadySubscription() async throws {
+        let url = try XCTUnwrap(Bundle.module.url(forResource: "notification-settings", withExtension: "json", subdirectory: "Fixtures"))
+        let bytes = try Data(contentsOf: url)
+        let transport = FakeTransport { request, _ in
+            XCTAssertEqual(request.url?.path, "/v1/settings")
+            return HTTPReply(status: 200, body: bytes)
+        }
+        let settings = try await client(transport).settings()
+        XCTAssertNotNil(settings.general)
+        XCTAssertEqual(settings.notifications?.mac, [:])
+        XCTAssertTrue(CloudNotificationSubscriptions.changes(settings: settings, localChoices: [true]).saving.contains { $0.subscriptionID == "ev-ready" })
+    }
+
     func testScopes() {
         let id = "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a01"
         XCTAssertEqual(CompanionClient.scope("GET", "/v1/objects"), "projects:read")

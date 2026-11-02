@@ -46,7 +46,9 @@ import ControlKit
         readAt = Date()
         // The first time the companion keeps them, this Mac's own choices go up rather than its defaults coming down.
         if !UserDefaults.standard.bool(forKey: Self.migratedKey), read.general != nil || read.notificationsMac != nil {
-            let patch = SettingsMigration.patch(defaults: .standard, companion: read)
+            let patch = SettingsMigration.patch(defaults: .standard, companion: read, currentGeneral: SettingsMigration.currentGeneral(
+                loginStatus: SMAppService.mainApp.status, showInDock: DockIcon.shown,
+                keepAwake: EventRelay.shared.awake.allowed))
             if patch.isEmpty {
                 UserDefaults.standard.set(true, forKey: Self.migratedKey)
             } else if let after = try? await ControlClient(socketPath: socket).setSettings(patch) {
@@ -118,13 +120,14 @@ import ControlKit
     private func applyLogin(_ on: Bool) {
         UserDefaults.standard.set(!on, forKey: "openAtLoginOff")
         guard Installation(bundle: .main).variant.isEmpty else { return }
-        let status = SMAppService.mainApp.status
-        let enabled = status == .enabled
-        // Waiting on the person in System Settings → Login Items: asking again every read changes nothing.
-        if on && status == .requiresApproval { problem = "Allow Counterpart in System Settings → General → Login Items."; return }
         do {
-            if on && !enabled { try SMAppService.mainApp.register() }
-            if !on && enabled { try SMAppService.mainApp.unregister() }
+            switch LoginRegistrationAction.resolve(on: on, status: SMAppService.mainApp.status) {
+            case .none: break
+            case .register: try SMAppService.mainApp.register()
+            case .unregister: try SMAppService.mainApp.unregister()
+            case .approvalRequired: problem = "Allow Counterpart in System Settings → General → Login Items."
+            case .unavailable: problem = "Counterpart couldn't check its login setting. Try again from Settings on this Mac."
+            }
         } catch {
             problem = "Allow Counterpart in System Settings → General → Login Items."
         }

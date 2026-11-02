@@ -1,6 +1,6 @@
 import {z} from 'zod';
 import {ModelAccessChoiceSchema} from './model-access-protocol.js';
-import {MilestonesSchema, ProjectSettingsPatchSchema, PrintColourSchema, PrintQualitySchema, PrintStrengthSchema} from '@scan-to-make/contracts/counterpart';
+import {CompanionSettingsPatchSchema, ProjectSettingsPatchSchema, PrintColourSchema, PrintQualitySchema, PrintStrengthSchema} from '@scan-to-make/contracts/counterpart';
 
 export const MAX_REQUEST_BYTES = 64 * 1024;
 export const MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
@@ -83,7 +83,7 @@ export const parameters = {
   'printers.camera': z.strictObject({destinationId: z.string().min(1).max(256)}),
   'printers.updateMcp': z.strictObject({mcpId: z.string().regex(/^mcp-[0-9a-f]{16}$/), fresh: z.boolean().optional()}),
   'settings.get': empty,
-  'settings.set': z.strictObject({milestones: MilestonesSchema}),
+  'settings.set': CompanionSettingsPatchSchema,
   'objects.answerPrintConfirmation': z.strictObject({id: z.uuid(), confirmationId: z.uuid(), answer: z.union([
     // Any elicitation primitive; checked field by field against the pending question's own schema.
     z.strictObject({action: z.literal('accept'), content: z.record(z.string().max(128), z.union([z.boolean(), z.string().max(4096), z.number().finite()]))}),

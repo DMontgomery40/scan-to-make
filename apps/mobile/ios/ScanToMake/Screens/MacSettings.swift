@@ -93,7 +93,7 @@ struct MacNotificationSettings: View {
         List {
             // Skipped or denied: Turn On, or the way to iOS Settings.
             NotificationPermissionRow()
-            if let settings = model.settings, settings.isFull, let deviceId = model.deviceId {
+            if let settings = model.settings, settings.notifications != nil, let deviceId = model.deviceId {
                 Section {
                     ForEach(SettingsSchema.notificationTypes) { type in
                         toggle(type.label, settings.phoneNotifies(type.id, deviceId: deviceId)) { on in
@@ -123,7 +123,7 @@ struct MacNotificationSettings: View {
         .navigationTitle("Notifications")
         .navigationBarTitleDisplayMode(.inline)
         .disabled(model.working != nil)
-        .task { await model.load() }
+        .task { await app.refreshCloud(); await model.load() }
     }
 
     private func toggle(_ label: String, _ on: Bool, _ patch: @escaping (Bool) -> [String: Any]) -> some View {
@@ -274,8 +274,13 @@ struct MacSettingsSections: View {
     private func generalSection(_ general: CompanionSettings.General?) -> some View {
         Section {
             ForEach(SettingsSchema.general, id: \.key) { item in
-                Toggle(item.label, isOn: Binding(get: { general?[item.key] ?? true },
-                                                 set: { on in Task { await model.change(item.key, SettingsPatch.general(item.key, on)) } }))
+                if let value = general?[item.key] {
+                    Toggle(item.label, isOn: Binding(get: { value },
+                        set: { on in Task { await model.change(item.key, SettingsPatch.general(item.key, on)) } }))
+                }
+            }
+            if general == nil || SettingsSchema.general.allSatisfy({ general?[$0.key] == nil }) {
+                Text("Open Counterpart on your Mac to share its current General settings.").foregroundStyle(.secondary)
             }
         } header: { Text("General") } footer: { Text("Each one changes \(model.macName).") }
         .disabled(model.working != nil)

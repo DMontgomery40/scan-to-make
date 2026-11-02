@@ -199,7 +199,7 @@ public struct CompanionSettings: Decodable, Sendable, Equatable {
     }
     public struct Fusion: Decodable, Sendable, Equatable { public let state: String; public let message: String?; public let version: String? }
     public let milestones: String?
-    /// `notifications.mac`: one switch per event type, every type filled in by the companion.
+    /// `notifications.mac`: explicit overrides; omitted types retain their platform defaults.
     public let notificationsMac: [String: Bool]?
     public let general: General?
     public let fusion: Fusion?
