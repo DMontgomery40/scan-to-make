@@ -71,7 +71,7 @@ final class ProjectScreensUITests: XCTestCase {
         app.buttons["Fine"].tap()
         let copies = app.steppers["project-settings-copies"]
         XCTAssertTrue(copies.waitForExistence(timeout: 5))
-        let increment = copies.buttons["Increment"]
+        let increment = copies.buttons["project-settings-copies-Increment"]
         XCTAssertEqual(XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: increment)], timeout: 5), .completed)
         increment.tap()
         XCTAssertEqual(XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS %@", "Copies: 2"), object: copies)], timeout: 5), .completed)
@@ -82,7 +82,8 @@ final class ProjectScreensUITests: XCTestCase {
         app.buttons["project-settings-done"].tap()
         app.buttons["print"].tap()
         XCTAssertTrue(app.buttons["print-now"].waitForExistence(timeout: 10))
-        XCTAssertTrue(app.segmentedControls["Quality"].buttons["Fine"].isSelected, "Print consumes the saved default")
+        XCTAssertTrue(app.segmentedControls.buttons["Fine"].isSelected, "Print consumes the saved default")
+        XCTAssertTrue(app.steppers["copies"].label.contains("2"), "Print consumes the saved copy count")
     }
 
     func testProjectSettingsDuplicateOpensAnIndependentReadyProject() {

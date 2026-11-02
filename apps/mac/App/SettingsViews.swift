@@ -360,7 +360,7 @@ struct PrintersSettings: View {
         Form {
             Section {
                 if printers.isEmpty {
-                    Text("No printer found. Counterpart uses the printers in your bambu-printer-mcp or mcp-3D-printer-server settings.")
+                    Text(objects.missingPrinterText)
                         .foregroundStyle(.secondary)
                 }
                 ForEach(printers) { printer in

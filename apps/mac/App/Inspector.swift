@@ -303,7 +303,7 @@ private struct PrintTab: View {
                     ReadyDot(state: printer.state, size: 8)
                 }
             } else {
-                Text("No printer found in your printer MCP’s settings.").font(.callout).foregroundStyle(.secondary)
+                Text(model.missingPrinterText).font(.callout).foregroundStyle(.secondary)
             }
             if let estimate = object.print?.estimate, estimate.seconds != nil || estimate.grams != nil {
                 SectionHeading("Profile")

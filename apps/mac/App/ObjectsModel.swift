@@ -158,6 +158,26 @@ struct SocketObjects: ObjectsCompanion {
     /// One sentence about an action that didn't go through, shown on that object's page.
     struct Problem: Equatable { let id: String, text: String }
 
+    enum DiscoveryState { case loading, ready, failed }
+    @Published private(set) var printerDiscovery = DiscoveryState.loading
+    @Published private(set) var phoneDiscovery = DiscoveryState.loading
+    var missingPhoneText: String {
+        if availability == .notRunning { return "Not running" }
+        switch phoneDiscovery {
+        case .loading: return "Checking paired phones…"
+        case .ready: return "No phone paired yet"
+        case .failed: return "Couldn't read paired phones."
+        }
+    }
+    var missingPrinterText: String {
+        if availability == .notRunning { return "Your companion isn't running." }
+        switch printerDiscovery {
+        case .loading: return "Reading your printer settings…"
+        case .ready: return "No printer found in your printer MCP’s settings."
+        case .failed: return "Couldn't read your printer settings."
+        }
+    }
+
     static let busyDelay: Double = 3, idleDelay: Double = 15
 
     @Published private(set) var objects: [Project] = []
@@ -332,6 +352,7 @@ struct SocketObjects: ObjectsCompanion {
             for project in objects { sendQueuedNote(project) }
             let list = objects
             let catalog = try? await companion.printers()
+            printerDiscovery = catalog == nil ? .failed : .ready
             if printerCatalog != catalog { printerCatalog = catalog }
             if availability != .ready { availability = .ready }
             // The first read shows the top project; later, only a project that went away moves the selection.
@@ -361,7 +382,10 @@ struct SocketObjects: ObjectsCompanion {
         if let extrasReadAt, Date().timeIntervalSince(extrasReadAt) < Self.extrasDelay { return }
         extrasReadAt = Date()
         if let status = try? await companion.status(), capabilities != status.capabilities { capabilities = status.capabilities }
-        if let devices = try? await companion.devices(), devices.map(\.id) != self.devices.map(\.id) || devices.map(\.seenAt) != self.devices.map(\.seenAt) { self.devices = devices }
+        if let devices = try? await companion.devices() {
+            if devices.map(\.id) != self.devices.map(\.id) || devices.map(\.seenAt) != self.devices.map(\.seenAt) { self.devices = devices }
+            phoneDiscovery = .ready
+        } else { phoneDiscovery = .failed }
         aiProvider = await companion.aiProvider()
     }
 
@@ -469,6 +493,7 @@ struct SocketObjects: ObjectsCompanion {
         defer { working.remove(id) }
         let copied = try await companion.duplicate(id)
         readApplied = startRead()
+        objects.removeAll { $0.id == copied.id }
         objects.insert(copied, at: 0)
         selection = copied.id
         wake()

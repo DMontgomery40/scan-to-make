@@ -311,7 +311,7 @@ struct ProjectDetail: View {
                                                        systemImage: "printer.fill").padding(.horizontal, 6).frame(height: 30) }
                         .buttonStyle(.glassProminent).controlSize(.extraLarge)
                         .disabled(!canPrint)
-                        .help(model.printer(for: object) == nil ? "No printer found in your printer MCP’s settings." : "")
+                        .help(model.printer(for: object) == nil ? model.missingPrinterText : "")
                 }
             }
         }

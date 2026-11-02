@@ -57,7 +57,7 @@ public struct ProjectSettingsForm: View {
     private var defaults: PrintSettings { project.settings?.printDefaults ?? project.print?.settings ?? PrintSettings() }
     private var printer: Printer? { context?.printers.first { $0.id == (project.printerDestinationId ?? context?.defaultPrinter) } }
     private var busyProject: Bool { project.state == .touchingUp || project.state == .printing }
-    private var copy: Bool { project.kind == "copy" || project.scan != nil || !(project.capture ?? []).isEmpty }
+    private var copy: Bool { project.usesCopyWorkflow }
     private var selectedColour: String { context?.colours.first { $0.value == defaults.colour }?.id ?? (defaults.colour == nil ? "profile" : "saved") }
 
     public var body: some View {

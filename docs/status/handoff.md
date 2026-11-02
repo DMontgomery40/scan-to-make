@@ -2,7 +2,7 @@
 
 ## Project Settings follow-up — 2026-11-02
 
-`feat/project-settings` is separate from release PR #259. Both clients use one native grouped Form from
+PR [#260](https://github.com/DMontgomery40/scan-to-make/pull/260), `feat/project-settings`, is separate from the merged release PR #259. Both clients use one native grouped Form from
 CounterpartKit, with thin transport/file adapters. Preferences save immediately in the companion;
 `projectPreferences` gates the entry point. No settings control starts printing or a design pass.
 Print sheets consume saved defaults and send explicit Standard/one-copy overrides. Duplicate copies
@@ -24,28 +24,38 @@ completion when a newer display refresh wins, while connection resets still inva
 Original scan labels are format-neutral and exports serve retained STL, 3MF and USDZ with correct MIME
 types. Follow-up checks: 123 CounterpartKit, 44 ControlKit and 35 companion HTTP tests passed.
 
+After stacking on camera PR #262 (`6f4f4ebc`), 133 shared Swift tests and 68 Node 22 object-service/HTTP
+tests passed. The Mac model/relay suite passed 48 tests for review fixes: duplicate replies cannot
+insert an identity twice, explicit fit/copy intent wins over legacy inference, and startup discovery
+does not claim empty phone/printer lists before successful reads. Two fixture-only iPhone Simulator
+UI tests passed: saved Fine/two-copy defaults persist and reach Print, and Duplicate opens ready.
+The test simulator was isolated and deleted afterward; no live project or printer was contacted.
+Project Settings is not yet installed or accepted on the physical devices.
+
 [Apple's ActivityKit push documentation](https://developer.apple.com/documentation/ActivityKit/starting-and-updating-live-activities-with-activitykit-push-notifications)
 requires an alert for push-to-start. Muted project events therefore skip remote start, while existing
 activities still receive silent updates/end. This does not claim the currently undeployed relay works live.
 
-## Integration snapshot — 2026-11-02, 06:55 MT
+## Integration snapshot — 2026-11-02, after release installation
 
-Codex owns `feat/integrated-recovery`, PR #259. The competing Claude executors were stopped;
+PR #259 (`feat/integrated-recovery`) merged as `85c88423`. The competing Claude executors were stopped;
 Claude has subsequently been used only with tools disabled. The full 40-item backlog remains open
 where device acceptance is missing; see `asks.md`.
 
-**Installed:** `/Applications/Counterpart.app`, signed build `202611020645`, source `3b8ea525`.
-Its renamed embedded companion is registered and running. Davica3 has signed phone build
-`202611020630` (source `fd9be649`; the later updater change is Mac backend only). The phone remains
-locked, so no camera/Face ID, Lock Screen or phone UI acceptance is claimed.
+**Installed:** `/Applications/Counterpart.app` and Davica3 both have signed build `202611020750`
+from `b3b66b96`. The agent is running the new parent version. The phone remains locked, so no
+camera/Face ID, Lock Screen or phone UI acceptance is claimed.
 
 The six projects, seven pairing identities, TLS files, companion configuration, current models and
 photos match before/after migration checksums. Evidence lives under
 `~/scan-to-make-work/codex-deploy-20261102`. The existing local SSH printer forced command referenced
 Node inside the removed `Scan to Make.app`; its runtime path was updated to `Counterpart.app`,
-with the existing key/restrictions unchanged. The real P1S is Ready through MCP 1.1.51.
+with the existing key/restrictions unchanged. The configured SSH now reports P1S Ready with reviewed
+local Bambu MCP 1.1.52 from PR #95 commit `16787aa`. Public npm remains 1.1.51; nothing was published.
+Projects, pairings, TLS and configuration receipts remained unchanged. This installs the native
+streaming prerequisite. App streaming PR #262 merged as `6ac25742`; its combined app installation is pending.
 Installed Mac checks passed rename (then restored the original name), search by a follow-up's
-“25 inches” text, and Print Again preparation with loaded PLA, 3 h 20 m and 109 g. No print was sent.
+“25 inches” text, and Print Again preparation with P1S Ready, loaded PLA, 3 h 20 m, 109 g, 0.28 mm layers and 15% infill. The sheet was canceled; no print was sent.
 Advanced Settings now reports iCloud sync and same-account Mac discovery On. Actual phone enrollment
 and notification delivery remain unchecked.
 

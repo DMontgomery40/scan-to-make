@@ -259,7 +259,7 @@ private struct Sidebar: View {
                     if recent { Text("\(device.deviceName) connected") }
                     else { Text("\(device.deviceName) · seen \(Date(timeIntervalSince1970: device.seenAt / 1000), format: .relative(presentation: .named))") }
                 } else {
-                    Text(model.availability == .notRunning ? "Not running" : "No phone paired yet")
+                    Text(model.missingPhoneText)
                 }
             }
             .font(.caption).lineLimit(1)

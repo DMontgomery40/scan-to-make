@@ -14,6 +14,14 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
         }
     }
 
+    /// An explicit fit can use a scan as reference; only legacy records infer their job from capture evidence.
+    public var usesCopyWorkflow: Bool {
+        if kind == "fit" { return false }
+        if kind == "copy" { return true }
+        if scan != nil || !(capture ?? []).isEmpty { return true }
+        return instructions?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false
+    }
+
     public var id: String
     public var createdAtMs: Double
     public var updatedAtMs: Double

@@ -142,7 +142,7 @@ struct PrintSheet: View {
         }
         .overlay {
             if model.printerCatalog?.destinations.isEmpty ?? true {
-                Text("No printer found in your printer MCP’s settings.").foregroundStyle(.secondary)
+                Text(model.missingPrinterText).foregroundStyle(.secondary)
             }
         }
         .frame(minHeight: 72)

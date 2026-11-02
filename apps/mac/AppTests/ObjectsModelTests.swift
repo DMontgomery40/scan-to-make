@@ -9,6 +9,19 @@ private actor FakeObjects: ObjectsCompanion {
     private(set) var calls: [String] = []
     private(set) var correctionPhotoNames: [[String]?] = []
     private(set) var messageUploadFlags: [Bool] = []
+    private var beforeDuplicateReply: (@Sendable () async -> Void)?
+    func beforeDuplicateReturns(_ action: @escaping @Sendable () async -> Void) { beforeDuplicateReply = action }
+    private var discoveryAvailable = false
+    func enableDiscovery() { discoveryAvailable = true }
+    func printers() async throws -> PrinterCatalog {
+        guard discoveryAvailable else { throw ControlClientError.unavailable }
+        return .init(destinations: [], defaultDestinationId: "current")
+    }
+    func devices() async throws -> [ControlDevice] {
+        guard discoveryAvailable else { throw ControlClientError.unavailable }
+        return []
+    }
+
     private(set) var confirmationAnswer: PrintConfirmationAnswer?
     func set(_ items: [[String: Any]]) { self.items = items }
     private(set) var settingsPatches: [String: [String: JSONValue]] = [:]
@@ -50,6 +63,7 @@ private actor FakeObjects: ObjectsCompanion {
         copied["id"] = "copied"; copied["state"] = "ready"
         items.append(copied)
         calls.append("duplicate")
+        await beforeDuplicateReply?()
         return try decode(copied)
     }
     func failList(with error: Error?) { listError = error }
@@ -109,6 +123,37 @@ private func project(_ item: [String: Any]) throws -> Project {
 }
 
 @MainActor final class ObjectsModelTests: XCTestCase {
+    func testDiscoveryDoesNotClaimEmptyPhonesOrPrintersBeforeSuccessfulReads() async {
+        let failed = ObjectsModel(companion: FakeObjects())
+        XCTAssertEqual(failed.missingPhoneText, "Checking paired phones…")
+        XCTAssertEqual(failed.missingPrinterText, "Reading your printer settings…")
+        await failed.refresh()
+        XCTAssertEqual(failed.missingPhoneText, "Couldn't read paired phones.")
+        XCTAssertEqual(failed.missingPrinterText, "Couldn't read your printer settings.")
+        let companion = FakeObjects()
+        await companion.enableDiscovery()
+        let empty = ObjectsModel(companion: companion)
+        await empty.refresh()
+        XCTAssertEqual(empty.missingPhoneText, "No phone paired yet")
+        XCTAssertEqual(empty.missingPrinterText, "No printer found in your printer MCP’s settings.")
+    }
+
+    func testDuplicateReplyDoesNotInsertASecondIdentityAfterBackgroundRefresh() async throws {
+        let companion = FakeObjects()
+        await companion.set([item("source", "ready")])
+        await companion.setCapabilities(.init(projectPreferences: true))
+        let model = ObjectsModel(companion: companion)
+        await model.refresh()
+        await companion.beforeDuplicateReturns { _ = await model.refresh() }
+        try await model.duplicate("source")
+        let ids = model.objects.map(\.id)
+        guard Set(ids).count == ids.count else { return XCTFail("Duplicate reply inserted an already observed project twice") }
+        XCTAssertEqual(ids.filter { $0 == "copied" }.count, 1)
+        XCTAssertEqual(model.selection, "copied")
+        await model.refresh() // building the next identity dictionary must remain safe
+        XCTAssertEqual(model.objects.count, 2)
+    }
+
     func testQueuedPhotoKeepsItsIntentAndExactReceiptWhenInitialPassFailsDuringUpload() async throws {
         let companion = FakeObjects()
         await companion.set([item("queued", "touching-up", ["current": NSNull(), "pendingPhotos": ["other.jpg"]])])
