@@ -30,7 +30,7 @@ struct WelcomeView: View {
                             .padding(.top, 8).padding(.horizontal, 28)
 
                         VStack(spacing: 14) {
-                            WelcomeJobCard(model: ("example-fit", "stl"), image: nil, title: "Make something that fits",
+                            WelcomeJobCard(model: nil, image: "example-fit", title: "Make something that fits",
                                            detail: "Describe it and show what it fits. Your Mac designs the part.",
                                            chips: [("text.bubble", "Describe"), ("camera", "Show")])
                             WelcomeJobCard(model: nil, image: "example-copy", title: "Copy something",

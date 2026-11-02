@@ -224,10 +224,12 @@ struct ProjectView: View {
 
     @ViewBuilder private func hero(_ object: Project, _ words: ProjectWords) -> some View {
         Group {
-            if object.current != nil {
-                ModelStage(url: modelURL, twoTone: false)
-            } else if let scanURL {
-                ModelStage(url: scanURL, twoTone: false)
+            // A picture until you turn it: the Mac's render (or your scan's own photo) stands in for the live model.
+            if object.current != nil || scanURL != nil {
+                PosterModel(url: object.current != nil ? modelURL : scanURL) {
+                    if let path = object.thumbnailPath { ProjectImage(project: object, path: path, maxPixelSize: 1200) }
+                    else { StageBackground() }
+                }
             } else if let path = object.thumbnailPath {
                 ProjectImage(project: object, path: path, maxPixelSize: 1200)
             } else {
@@ -268,12 +270,7 @@ struct ProjectView: View {
                 scanSize = Format.size([Double(e.x), Double(e.z), Double(e.y)].map { $0 * 1000 })
             }
         }
-        .overlay(alignment: .topTrailing) {
-            if object.current != nil || scanURL != nil {
-                Image(systemName: "rotate.3d").font(.caption).padding(8).glassEffect(.regular, in: .circle).padding(.top, 104).padding(.trailing, 14)
-                    .accessibilityHidden(true)
-            }
-        }
+
         .ignoresSafeArea(edges: .top)
     }
 

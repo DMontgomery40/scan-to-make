@@ -418,7 +418,7 @@ struct EmptyHome: View {
         VStack(alignment: .leading, spacing: 14) {
             Text("What do you want to make?").font(.title3.weight(.bold)).padding(.top, 6)
             Button { start(.fit) } label: {
-                JobHeroCard(illustration: .model("example-fit", "stl"), title: "Make something that fits",
+                JobHeroCard(illustration: .image("example-fit"), title: "Make something that fits",
                             detail: "Describe it and show what it fits. Your Mac designs the part.",
                             steps: [("text.bubble.fill", "Describe it"), ("camera.fill", "Show it"), ("printer.fill", "Print it")])
             }

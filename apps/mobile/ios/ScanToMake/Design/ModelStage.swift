@@ -17,6 +17,8 @@ struct ModelStage: View {
     var backdrop: Color? = nil
     /// Two-tone like a two-colour AMS print: the upper part in a warm tone (the mic-mount mockup).
     var twoTone = false
+    /// Called while someone turns it, so a poster wrapper knows it's in use.
+    var onInteract: (() -> Void)? = nil
 
     @State private var holder = PivotHolder()
     @State private var turn: CGSize = .zero
@@ -58,7 +60,7 @@ struct ModelStage: View {
         .id(url)
         .background { if let backdrop { backdrop } else { StageBackground() } }
         .gesture(DragGesture(minimumDistance: 4)
-            .onChanged { turn = CGSize(width: settled.width + $0.translation.width, height: settled.height + $0.translation.height) }
+            .onChanged { turn = CGSize(width: settled.width + $0.translation.width, height: settled.height + $0.translation.height); onInteract?() }
             .onEnded { _ in settled = turn }, isEnabled: interactive)
         .allowsHitTesting(interactive)
         .accessibilityElement()
@@ -72,12 +74,21 @@ struct ModelStage: View {
         return simd_quatf(angle: p, axis: [1, 0, 0]) * simd_quatf(angle: y, axis: [0, 1, 0])
     }
 
+    /// Loaded once per file version (path, size and modification date) and colour; later stages get a clone.
     @MainActor static func load(_ url: URL, tint: UIColor?, twoTone: Bool) async -> Entity? {
-        switch url.pathExtension.lowercased() {
-        case "usdz", "usd", "usdc", "reality": return try? await Entity(contentsOf: url)
-        default: return stl(url, tint: tint, twoTone: twoTone)
+        let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey])
+        let key = "\(url.path)#\(values?.fileSize ?? 0)#\(values?.contentModificationDate?.timeIntervalSince1970 ?? 0)#\(tint?.description ?? "")#\(twoTone)"
+        if let cached = entities[key] { return cached.clone(recursive: true) }
+        let loaded: Entity? = switch url.pathExtension.lowercased() {
+        case "usdz", "usd", "usdc", "reality": try? await Entity(contentsOf: url)
+        default: stl(url, tint: tint, twoTone: twoTone)
         }
+        guard let loaded else { return nil }
+        if entities.count > 8 { entities.removeAll() }
+        entities[key] = loaded
+        return loaded.clone(recursive: true)
     }
+    @MainActor private static var entities: [String: Entity] = [:]
 
     /// STL (binary or ASCII) to a RealityKit mesh. STL is Z-up millimetres; RealityKit is Y-up metres.
     @MainActor static func stl(_ url: URL, tint: UIColor?, twoTone: Bool) -> Entity? {
@@ -173,3 +184,50 @@ enum STLMesh {
         return stride(from: 0, to: vertices.count - vertices.count % 3, by: 3).map { (vertices[$0], vertices[$0 + 1], vertices[$0 + 2]) }
     }
 }
+
+/// A model that's a still until someone touches it, to save battery and heat: a live RealityView renders every
+/// frame. The poster shows by default; dragging it, or Explore in 3D, makes it live, and about 3 s after the
+/// last touch, or when the app leaves the foreground or the view goes away, it settles back to the poster.
+/// Screens use one of these for their model, so at most one RealityView is live per screen.
+struct PosterModel<Poster: View>: View {
+    let url: URL?
+    var twoTone = false
+    @ViewBuilder let poster: () -> Poster
+    @State private var live = false
+    @State private var lastTouch = Date()
+    @Environment(\.scenePhase) private var phase
+
+    var body: some View {
+        ZStack {
+            if live, phase == .active, let url {
+                ModelStage(url: url, twoTone: twoTone, onInteract: { lastTouch = Date() })
+                    .transition(.opacity)
+            } else {
+                poster()
+                    .contentShape(Rectangle())
+                    .gesture(DragGesture(minimumDistance: 4).onChanged { _ in goLive() }, isEnabled: url != nil)
+                    .accessibilityAction(named: "Explore in 3D") { goLive() }
+            }
+        }
+        .overlay(alignment: .topTrailing) {
+            if url != nil {
+                Button { live ? (live = false) : goLive() } label: { Image(systemName: live ? "photo" : "rotate.3d").font(.caption) }
+                    .buttonStyle(.glass).buttonBorderShape(.circle)
+                    .padding(.top, 104).padding(.trailing, 14)
+                    .accessibilityLabel(live ? "Show the picture" : "Explore in 3D")
+            }
+        }
+        .task(id: live) {
+            guard live else { return }
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(1))
+                if Date().timeIntervalSince(lastTouch) > 3 { withAnimation { live = false }; return }
+            }
+        }
+        .onChange(of: phase) { _, now in if now != .active { live = false } }
+        .onDisappear { live = false }
+    }
+
+    private func goLive() { lastTouch = Date(); withAnimation { live = true } }
+}
+

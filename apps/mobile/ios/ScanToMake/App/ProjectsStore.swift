@@ -70,7 +70,10 @@ import CounterpartKit
         do {
             let latest = try await mac.list()
             guard !Task.isCancelled else { return }
-            projects = latest; error = nil; reachable = true
+            // Only what changed is published: an unchanged poll redraws nothing.
+            if projects != latest { projects = latest }
+            if error != nil { error = nil }
+            if reachable != true { reachable = true }
             for project in latest where queuedNotes[project.id] != nil { sendQueuedNote(project) }
         } catch let failure as CompanionError {
             guard !Task.isCancelled, failure.code != "cancelled" else { return }
@@ -93,7 +96,8 @@ import CounterpartKit
         do {
             let latest = try await mac.printers()
             guard !Task.isCancelled else { return }
-            catalog = latest; printerProblem = nil
+            if catalog != latest { catalog = latest }
+            if printerProblem != nil { printerProblem = nil }
         } catch {
             guard !Task.isCancelled else { return }
             if catalog == nil { printerProblem = "Couldn't read the printers configured on your Mac." }
@@ -101,7 +105,8 @@ import CounterpartKit
     }
 
     func replace(_ project: Project) {
-        if let index = projects.firstIndex(where: { $0.id == project.id }) { projects[index] = project } else { projects.insert(project, at: 0) }
+        if let index = projects.firstIndex(where: { $0.id == project.id }) { if projects[index] != project { projects[index] = project } }
+        else { projects.insert(project, at: 0) }
         sendQueuedNote(project)
     }
 
