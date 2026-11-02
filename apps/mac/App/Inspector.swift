@@ -54,6 +54,18 @@ private struct RequestTab: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
+            // PRD §8.11: a published model credits its designer and links back to the page.
+            if let credit = model.extras[object.id]?.credit {
+                SectionHeading("Model")
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(verbatim: credit.title ?? object.words.title).font(.body.weight(.semibold))
+                    if let line = credit.line { Text(verbatim: line).font(.callout).foregroundStyle(.secondary) }
+                    if let licence = credit.licence { Text(verbatim: licence).font(.caption).foregroundStyle(.secondary) }
+                    if let page = URL(string: credit.url) {
+                        Link("Open the model page", destination: page).font(.callout)
+                    }
+                }
+            }
             SectionHeading("Your request")
             Text(request).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
             let pictures = object.photoURLs.isEmpty ? Array(object.captureURLs.prefix(8)) : object.photoURLs

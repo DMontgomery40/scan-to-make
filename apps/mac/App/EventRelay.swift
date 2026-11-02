@@ -81,8 +81,10 @@ import ControlKit
     /// Reads the projects (at most every 30 s unless forced). Returns whether this snapshot is current.
     @discardableResult private func refreshProjects(_ client: ControlClient, force: Bool) async -> Bool {
         if !force, let at = projectsReadAt, Date().timeIntervalSince(at) < 30 { return true }
-        guard let list = try? await client.objects() else { return false }
+        guard let (list, extras) = try? await client.objectsAndExtras() else { return false }
         projects = Dictionary(uniqueKeysWithValues: list.map { ($0.id, $0) })
+        // The ~/Downloads watch follows the projects' Asks while no window is open, too (PRD §8.11).
+        DownloadsWatcher.shared.follow(extras, titles: Dictionary(uniqueKeysWithValues: list.map { ($0.id, $0.words.title) }))
         projectsReadAt = Date()
         awake.set(busy: list.contains { $0.words.busy })
         return true
