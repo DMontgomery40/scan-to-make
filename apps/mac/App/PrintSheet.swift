@@ -45,7 +45,7 @@ struct PrintSheet: View {
     }
 
     private var object: Project { model.objects.first { $0.id == opened.id } ?? opened }
-    private var published: Bool { object.kind == "published" }
+    private var published: Bool { object.preservesPublishedFilaments }
     private var slicedOriginal: Bool { object.publishedSelection?.sliced == true }
     private var printer: PrinterDestination? { model.printer(for: object) }
     private var settingsServed: Bool { model.capabilities?.printSettings == true }

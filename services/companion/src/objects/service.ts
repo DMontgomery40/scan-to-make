@@ -800,7 +800,11 @@ export class ObjectService {
   print(id: string, options: PrintOptions = {}): Promise<StmObject> { return this.#gate(id, () => this.#print(id, options)); }
   async #print(id: string, options: PrintOptions): Promise<StmObject> {
     const object = await this.get(id);
-    options = {...object.preferences?.printDefaults, ...options, ...(options.filament ? {colour: undefined} : {})};
+    // A 3MF owns its filament assignments; the sheets do not offer a single-spool override.
+    // Keep the saved preference for other models, but do not silently apply it here.
+    const defaults = {...object.preferences?.printDefaults};
+    if (object.kind === 'published' && object.current?.model.toLowerCase().endsWith('.3mf')) delete defaults.colour;
+    options = {...defaults, ...options, ...(options.filament ? {colour: undefined} : {})};
     if (!object.current) throw new InvalidStateError('There is no model to print yet.');
     if (object.ask?.status === 'open' && object.ask.type === 'choice') throw new InvalidStateError('Choose the model’s file and plate before printing.');
     this.#publishedSettings(object, options);
@@ -825,7 +829,7 @@ export class ObjectService {
     const {selection: colourSelection, slicer} = await this.#colour(id, options, services.selection, runner.backend);
     const selected = object.publishedSelection ? {...colourSelection, plateIndex: object.publishedSelection.plateIndex} : colourSelection;
     const overrides = object.publishedSelection?.sliced ? {} : sliceOverrides(options, selected?.nozzleDiameterMm);
-    if (object.kind === 'published') {
+    if (object.kind === 'published' && object.current.model.toLowerCase().endsWith('.3mf')) {
       if (!options.quality || options.quality === 'standard') delete overrides.layerHeightMm;
       if (!options.strength || options.strength === 'standard') { delete overrides.wallLoops; delete overrides.sparseInfillDensity; }
     }
@@ -837,7 +841,7 @@ export class ObjectService {
       ...(options.colour ? {colour: options.colour} : {}), ...(options.copies !== undefined ? {copies: options.copies} : {})};
     const sliced = {...slicer, ...overrides};
     const stl = await this.#modelBytes(object);
-    const manifest = await bundles.create({...(object.kind === 'published' ? {model: {bytes: stl, format: object.current.model.endsWith('.3mf') ? '3mf' as const : 'stl' as const}} : {stl}), prompt: '', backend: runner.backend, ...(selected ? {selection:selected} : {})});
+    const manifest = await bundles.create({...(object.kind === 'published' ? {model: {bytes: stl, format: object.current.model.toLowerCase().endsWith('.3mf') ? '3mf' as const : 'stl' as const}} : {stl}), prompt: '', backend: runner.backend, ...(selected ? {selection:selected} : {})});
     const printId = randomUUID();
     const print = {bundleId: manifest.id, printId, ...(printDestination ? {destination: printDestination, destinationId: printDestination.id} : {}),
       ...(Object.keys(settings).length ? {settings} : {})};
@@ -1202,7 +1206,7 @@ export class ObjectService {
     const copies = request.copies && request.copies > 1 ? request.copies : undefined;
     // Exactly as Print: named copies (1 included) override the printer config's own repetitions.
     const overrides = object.publishedSelection?.sliced ? {} : sliceOverrides({quality, strength, ...(request.copies !== undefined ? {copies: request.copies} : {})}, services.selection?.nozzleDiameterMm);
-    if (object.kind === 'published') {
+    if (object.kind === 'published' && object.current.model.toLowerCase().endsWith('.3mf')) {
       if (quality === 'standard') delete overrides.layerHeightMm;
       if (strength === 'standard') { delete overrides.wallLoops; delete overrides.sparseInfillDensity; }
     }
@@ -1211,14 +1215,14 @@ export class ObjectService {
         || (copies && !capabilities.copies)))
       throw new InvalidStateError(settingsUnsupported(services.runner.backend, {quality, strength, ...(copies ? {copies} : {})}));
     const model = await this.#modelBytes(object);
-    const key = JSON.stringify([createHash('sha256').update(model).digest('hex'), destinationId ?? 'default', quality, strength, request.copies ?? 'configured']);
+    const key = JSON.stringify([createHash('sha256').update(model).digest('hex'), destinationId ?? 'default', quality, strength, request.copies ?? 'configured', object.publishedSelection?.plateIndex ?? services.selection?.plateIndex ?? 0]);
     let running = this.#estimates2.get(key);
     if (!running) {
       const runner = services.runner;
       running = (async () => {
         const work = await mkdtemp(join(tmpdir(), 'counterpart-estimate-'));
         try {
-          const stlPath = join(work, object.current!.model.endsWith('.3mf') ? 'model.3mf' : 'model.stl');
+          const stlPath = join(work, object.current!.model.toLowerCase().endsWith('.3mf') ? 'model.3mf' : 'model.stl');
           await writeFile(stlPath, model);
           const {estimate, settings, slicerWarning} = await runner.estimate!({stlPath, ...((services.selection || object.publishedSelection) ? {selection: {...services.selection, ...(object.publishedSelection ? {plateIndex: object.publishedSelection.plateIndex} : {})}} : {}), ...(Object.keys(overrides).length ? {slicer: overrides} : {}),
             signal: AbortSignal.timeout(150_000)});
@@ -1381,7 +1385,8 @@ export class ObjectService {
         try { return await this.#getPublished(object, opts.note, photos, startedAtMs, controller.signal, onProgress, id => stage(id)); }
         finally { stage('saving'); await writing; }
       })()
-        .then(result => this.#finishPublished(object.id, startedAtMs, result), error => this.#fail(object.id, startedAtMs, error))
+        .then(result => this.#finishPublished(object.id, startedAtMs, result))
+        .catch(error => this.#fail(object.id, startedAtMs, error))
         .finally(() => { release(); this.#running.delete(object.id); this.#controllers.delete(object.id); });
       this.#running.set(object.id, published);
       return running;

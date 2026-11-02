@@ -31,7 +31,7 @@ struct PrintSheet: View {
     @State private var spools: [String: [PrinterFilament]] = [:]
 
     private var project: Project? { store.project(projectId) }
-    private var published: Bool { project?.kind == "published" }
+    private var published: Bool { project?.preservesPublishedFilaments == true }
     private var slicedOriginal: Bool { project?.publishedSelection?.sliced == true }
     private var title: String { project.map { ProjectWords.title($0) } ?? "Model" }
     private var destinations: [PrinterDestination] { store.catalog?.destinations ?? [] }
