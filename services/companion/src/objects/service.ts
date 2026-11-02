@@ -799,7 +799,9 @@ export class ObjectService {
   /** The object after its print's monitor ended. */
   #ended(o: StmObject, end: MonitorEnd, report: PrintReport | undefined): StmObject {
     const base = {...o, progress: undefined, printConfirmation: undefined};
-    const context = {title: projectTitle(o), printer: o.print?.destination?.name ?? 'Your printer', ...(report?.problems[0] ? {problem: report.problems[0].message} : {})};
+    // The problem that stopped it: an error over a warning; its code and Bambu's link go with the words.
+    const stopped = report?.problems.find(problem => problem.severity === 'fatal' || problem.severity === 'error') ?? report?.problems[0];
+    const context = {title: projectTitle(o), printer: o.print?.destination?.name ?? 'Your printer', ...(stopped ? {problem: stopped} : {})};
     switch (end) {
       // A Done project printed again is still Done (PRD §5.4): the part is known to work.
       // A new print after changes asks "Did it fit?" again: needs-changes ends with it (KAN-217).

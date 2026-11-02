@@ -1,6 +1,7 @@
 import {randomUUID} from 'node:crypto';
 import type {PrintReport} from '@scan-to-make/printer-handoff';
 import type {CounterpartEventType, PrintLive, PrintMonitor} from '@scan-to-make/contracts/counterpart';
+import {printPreparing, problemUrl} from '../events/words.js';
 
 /** PRD §8.6 cadence. */
 export const MONITOR = {
@@ -118,12 +119,18 @@ export function matchJob(target: Pick<MonitorTarget, 'taskId' | 'jobName' | 'fil
   return 'none';
 }
 
+/**
+ * The report as Counterpart shows it. Until the first layer the printer is getting ready (PRD §8.6): the state is
+ * `preparing` and there is no percent or time left (Bambu reports a few percent and the whole print's time then).
+ */
 function liveFrom(report: PrintReport): PrintLive {
-  const remaining = report.job?.remainingSec;
+  const preparing = printPreparing(report.state, report.job);
+  const job = report.job && preparing ? (({progress: _progress, remainingSec: _remaining, ...rest}) => rest)(report.job) : report.job;
+  const remaining = job?.remainingSec;
   const observed = Date.parse(report.observedAt);
   return {
-    source: report.source, observedAt: report.observedAt, state: report.state,
-    ...(report.job ? {job: structuredClone(report.job)} : {}),
+    source: report.source, observedAt: report.observedAt, state: preparing ? 'preparing' : report.state,
+    ...(job ? {job: structuredClone(job)} : {}),
     ...(remaining !== undefined && Number.isFinite(observed) ? {endsAt: new Date(observed + remaining * 1000).toISOString()} : {}),
     ...(report.temps ? {temps: structuredClone(report.temps)} : {}),
     ...(report.activeFilament ? {activeFilament: structuredClone(report.activeFilament)} : {}),
@@ -132,16 +139,21 @@ function liveFrom(report: PrintReport): PrintLive {
 }
 
 function eventData(report: PrintReport): EventDraft['data'] {
-  const job = report.job, live = liveFrom(report);
+  const live = liveFrom(report), job = live.job;
+  // Getting ready: the stage only (a layer count then is 0, or the previous job's).
+  const preparing = live.state === 'preparing';
   return {
-    state: report.state,
+    state: live.state,
     ...(job?.progress !== undefined ? {progress: job.progress} : {}),
     ...(job?.remainingSec !== undefined ? {remainingSec: Math.round(job.remainingSec)} : {}),
     ...(live.endsAt ? {endsAt: live.endsAt} : {}),
-    ...(job?.layer !== undefined ? {layer: job.layer} : {}),
-    ...(job?.totalLayers !== undefined ? {totalLayers: job.totalLayers} : {}),
+    ...(job?.layer !== undefined && !preparing ? {layer: job.layer} : {}),
+    ...(job?.totalLayers !== undefined && !preparing ? {totalLayers: job.totalLayers} : {}),
     ...(job?.stage ? {stage: job.stage} : {}),
-    ...(report.problems.length ? {problems: report.problems.slice(0, 16).map(({code, message}) => ({code, message}))} : {}),
+    ...(report.problems.length ? {problems: report.problems.slice(0, 16).map(problem => {
+      const url = problemUrl(problem);
+      return {code: problem.code, message: problem.message, ...(url ? {url} : {})};
+    })} : {}),
   };
 }
 
@@ -166,7 +178,7 @@ export class PrintMonitorRunner {
   #failures = 0;
   #offlineSince?: number;
   #lastGoodAt?: number;
-  #lastStatus?: {at: number; progress?: number; state: string; layer?: number; problems: string};
+  #lastStatus?: {at: number; progress?: number; state: string; layer?: number; stage?: string; problems: string};
   #lastState?: string;
   #live?: PrintLive;
 
@@ -286,7 +298,7 @@ export class PrintMonitorRunner {
       }});
       this.#lastState = report.state;
       this.#lastStatus = {at: now, ...(report.job?.progress !== undefined ? {progress: report.job.progress} : {}), state: report.state,
-        ...(report.job?.layer !== undefined ? {layer: report.job.layer} : {}), problems: problemsKey(report)};
+        ...(report.job?.layer !== undefined ? {layer: report.job.layer} : {}), ...(report.job?.stage !== undefined ? {stage: report.job.stage} : {}), problems: problemsKey(report)};
       // A print that was already well under way when first seen (a restart) records its milestones silently.
       await this.#progressEvents(report, true, signal);
       await this.#terminal(report, signal);
@@ -308,15 +320,16 @@ export class PrintMonitorRunner {
     if (previous === 'paused' && (report.state === 'printing' || report.state === 'preparing')) await this.#emit('print.resumed', report, {signal});
     await this.#progressEvents(report, quiet, signal);
     if (await this.#terminal(report, signal)) return;
-    const status = {progress: report.job?.progress, state: report.state, layer: report.job?.layer, problems: problemsKey(report)};
+    const status = {progress: report.job?.progress, state: report.state, layer: report.job?.layer, stage: report.job?.stage, problems: problemsKey(report)};
     const last = this.#lastStatus;
-    const changed = recovered || !last || last.state !== status.state || last.layer !== status.layer || last.problems !== status.problems
+    // A new stage is news too: while it gets ready, "Heating" → "Cleaning" → "Auto bed leveling" is all there is to say.
+    const changed = recovered || !last || last.state !== status.state || last.layer !== status.layer || last.stage !== status.stage || last.problems !== status.problems
       || (status.progress !== undefined && (last.progress === undefined || Math.abs(status.progress - last.progress) >= 1))
       || now - last.at >= MONITOR.statusEveryMs;
     await this.#save();
     if (changed) {
       this.#lastStatus = {at: now, ...(status.progress !== undefined ? {progress: status.progress} : {}), state: status.state,
-        ...(status.layer !== undefined ? {layer: status.layer} : {}), problems: status.problems};
+        ...(status.layer !== undefined ? {layer: status.layer} : {}), ...(status.stage !== undefined ? {stage: status.stage} : {}), problems: status.problems};
       await this.#emit('print.status', report, {signal});
     }
   }
@@ -335,6 +348,9 @@ export class PrintMonitorRunner {
 
   /** First layer and milestones. `quiet` records them as sent without an event (no back-fill). */
   async #progressEvents(report: PrintReport, quiet: boolean, signal: AbortSignal) {
+    // Getting ready isn't printing: no first layer or milestone from it (nor from the previous job's numbers a
+    // printer still shows while it prepares the next one).
+    if (printPreparing(report.state, report.job)) return;
     if (report.state === 'finished' || report.state === 'failed' || report.state === 'cancelled') quiet = true;
     const job = report.job;
     if (!this.#state.firstLayerSent) {
