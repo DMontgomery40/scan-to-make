@@ -1,5 +1,25 @@
 # Handoff: how to pick up Counterpart work
 
+## Integration snapshot — 2026-11-02, 06:15 MT
+
+Codex owns the current integration in `feat/integrated-recovery`, PR #259. The competing Claude
+executors were stopped at David's request; Claude has subsequently been used only with tools disabled.
+The installed Mac app and phone have not yet received this batch. See `asks.md` for all 40 asks and
+what is actually verified. The latest local workflow evidence is under
+`~/scan-to-make-work/codex-recovery-checks-3`; final companion checks are under
+`~/scan-to-make-work/codex-companion-final-2`.
+
+The batch combines capture intent/error handling, rename/search/ordered reads, queued corrections,
+Done classification, conversation/photo ownership, Counterpart app identity, Help links, MCP updates,
+owned Blender cleanup, same-account enrollment and the phone CloudKit/ActivityKit consumer. Review
+fixes now cover draft-send ordering, cloud terminal print state and Mac saved-message attachment
+selection, with regressions passing. No physical scan/print acceptance is inferred from tests or historical captures.
+
+The two old KAN-217 camera/state prototypes are retired as active branches and retained in
+`archive/20261102-camera-recovery-prototype` and `archive/20261102-project-state-prototype` tags.
+Their replacement implementations are in #259. Integrated agent source branches were also retired;
+active follow-up work covers full project settings, camera efficiency and reconstruction evidence.
+
 ## Mobile cloud consumer audit — 2026-11-02
 
 Local Live Activity follow-up: the phone now has `PrintAttributes` matching the relay JSON, a WidgetKit Lock Screen/Dynamic Island extension, foreground print activity creation, timestamped progress/end updates, and token observers. Tokens register with the authenticated companion and as a private `CounterpartDevice` snapshot. Ended-token removals survive relaunch; user-dismissed activities are not recreated; a remote/local start race keeps one activity. Pairing changes cannot send the old activity tokens to a new Mac. CloudKit project changes update existing activities during system-granted background runtime only. When updates stop, the activity becomes stale after five minutes and says it is waiting. The relay is still off/unprovisioned; independent remote start/continuous updates are not claimed.
@@ -58,14 +78,10 @@ or agent memory.** Update this file when you hand off.
 
 ## People and sessions
 
-- **The lead** is a Claude Desktop session named `scan-to-make-0d` (reach it with SendMessage). It
-  owns integration and the builder seats:
-  - **KAN-214:** companion, `services/`, `packages/`;
-  - **KAN-217:** iPhone app;
-  - **KAN-220:** Mac app;
-  - **KAN-215:** bambu-printer-mcp.
-- **Codex sessions** also work on these repos; their uncommitted changes sit in the MCP repos' main
-  checkouts and in `~/.codex/worktrees/`.
+- Codex is integrating #259 and performing installation/acceptance. Follow-up agents use separate
+  branches for project settings, camera efficiency and offline capture reconstruction.
+- Historical KAN branches and unrelated dirty MCP checkouts remain available; they are not current
+  release evidence. The former Claude execution sessions are stopped.
 
 ## The product
 
