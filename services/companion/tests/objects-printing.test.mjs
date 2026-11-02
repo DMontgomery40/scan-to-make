@@ -323,3 +323,24 @@ test('a material the printer has no loaded spool for is refused instead of print
   await f.approve();
   await f.service.settled(f.object.id);
 });
+
+test('an event\'s frame is served from the project folder, and every object carries its status line', async t => {
+  const f = await setup(t);
+  const eventId = '00000000-0000-4000-8000-000000000011', printId = '8a2b4c6d-1e3f-4a5b-8c7d-9e0f1a2b3c4d';
+  await mkdir(join(f.service.dir(f.object.id), 'prints', printId, 'frames'), {recursive: true});
+  await writeFile(join(f.service.dir(f.object.id), 'prints', printId, 'frames', `${eventId}.jpg`), JPEG);
+  const routes = createObjectRoutes(f.service);
+  const scopes = [];
+  const server = createServer((request, response) => void routes.handle(request, response, async scope => { scopes.push(scope); }, () => undefined));
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  const base = `http://127.0.0.1:${server.address().port}/v1/objects/${f.object.id}`;
+  const frame = await fetch(`${base}/prints/${printId}/frames/${eventId}.jpg`);
+  assert.equal(frame.status, 200);
+  assert.deepEqual(Buffer.from(await frame.arrayBuffer()), JPEG);
+  assert.equal((await fetch(`${base}/prints/${printId}/frames/00000000-0000-4000-8000-000000000012.jpg`)).status, 404);
+  assert.equal((await fetch(`${base}/prints/../frames/x.jpg`)).status, 404);
+  assert.deepEqual(scopes, ['projects:read', 'projects:read']);
+  const {object} = await (await fetch(base)).json();
+  assert.deepEqual(object.status, {phase: 'ready', text: 'Ready to print', symbol: 'checkmark.seal', tint: 'accent'});
+});

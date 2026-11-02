@@ -36,7 +36,7 @@ export function methodDeadlineMs(method: ControlMethod, params: unknown): number
   if (method === 'objects.estimate') return 180_000;
   // The printer MCP may ask its own confirmation; the call waits up to 120 s for it.
   if (method === 'objects.pausePrint' || method === 'objects.resumePrint' || method === 'objects.cancelPrint') return 130_000;
-  if ((method as string) === 'events.wait') {
+  if (method === 'events.wait') {
     const timeout = (params as {timeoutMs?: unknown})?.timeoutMs;
     return (typeof timeout === 'number' && Number.isFinite(timeout) ? Math.min(Math.max(timeout, 0), 25_000) : 25_000) + 5_000;
   }

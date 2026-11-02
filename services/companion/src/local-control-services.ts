@@ -38,6 +38,10 @@ export interface ControlServices {
   printHandoff?: PrintHandoffServices;
   /** The running server's v2 details (pairing link v2, MAC-5). Without them pairing.create mints v1. */
   pairingLink?: () => {addresses: string[]; publicKeySha256: string; name?: string};
+  /** The event log (PRD §8.7). */
+  events?: import('./events/log.js').EventLog;
+  liveActivityTokens?: import('./devices/live-activity-tokens.js').LiveActivityTokenStore;
+  presence?: import('./devices/presence.js').DevicePresence;
   /** Nearby pairing requests waiting for Allow (MAC-5), when the server has nearby pairing on. */
   nearby?: {pending(): NearbyRequest[]; answer(id: string, allow: boolean): Promise<boolean>};
 }
@@ -143,12 +147,32 @@ export function createControlDispatcher(services: ControlServices) {
         }
         case 'status.get': return {protocolVersion:1,companionVersion:services.companionVersion,transport:auth.transport,
           pairedDeviceCount:(await auth.listDevices()).length,capabilities:{capture:!!capture?.captures,cleanup:!!capture?.scanProcessing,printerHandoff:!!printHandoff,nearbyPairing:!!services.nearby,
-            objectsCreate:!!services.objects,printSettings:!!services.objects?.printSettingsAvailable,printControl:!!services.objects?.printSettingsAvailable}};
-        case 'devices.list': return {devices:await auth.listDevices()};
+            objectsCreate:!!services.objects,printSettings:!!services.objects?.printSettingsAvailable,printControl:!!services.objects?.printSettingsAvailable,
+            events:!!services.events&&!!services.liveActivityTokens}};
+        case 'devices.list': {
+          const devices = await auth.listDevices();
+          return {devices: await Promise.all(devices.map(async device => {
+            const seen = await services.presence?.get(device.deviceId) ?? {};
+            return {...device, ...(seen.model ? {model: seen.model} : {}), ...(seen.lastSeenAt !== undefined ? {lastSeenAt: seen.lastSeenAt} : {})};
+          }))};
+        }
+        case 'events.wait': {
+          if (!services.events) throw new ControlFailure('unavailable');
+          const {after, timeoutMs, limit} = parameters[method].parse(raw);
+          return await services.events.wait(after, {waitMs: timeoutMs ?? 25000, ...(limit !== undefined ? {limit} : {})});
+        }
+        case 'liveActivity.tokens': {
+          if (!services.liveActivityTokens) throw new ControlFailure('unavailable');
+          return await services.liveActivityTokens.list(new Set((await auth.listDevices()).map(device => device.deviceId)));
+        }
         case 'devices.remove': {
           const {deviceId} = parameters[method].parse(raw);
           if (!(await auth.listDevices()).some(device => device.deviceId === deviceId)) throw new ControlFailure('not-found');
-          await auth.revoke(deviceId); return {removed:true};
+          await auth.revoke(deviceId);
+          // Its Live Activity tokens and presence go with it.
+          await services.liveActivityTokens?.removeDevice(deviceId).catch(() => undefined);
+          await services.presence?.forget(deviceId).catch(() => undefined);
+          return {removed:true};
         }
         case 'pairing.create': {
           let {login} = parameters[method].parse(raw);

@@ -1,3 +1,5 @@
+import type {CounterpartEvent, CounterpartEventType, NotifyLevel, ObjectStatus} from '@scan-to-make/contracts/counterpart';
+
 /**
  * Every sentence Counterpart shows about a project's progress comes from here
  * (PRD §8.7), so the Mac, the phone, the Lock Screen and the menu bar all say
@@ -55,3 +57,120 @@ export const PRINT_LOG: Record<string, string> = {
   'print.unreachable': 'Lost contact with the printer. Still trying.',
   'print.sent': "Sent. Counterpart can't follow this print.",
 };
+
+// ---------------------------------------------------------------------------
+// Event words (PRD §9.1; docs/protocols/events.md "Types, words and levels")
+
+
+export interface WordsContext {
+  title: string;
+  printer?: string;
+  /** "60 × 45 × 22 mm" */
+  size?: string;
+  item?: string;
+  question?: string;
+  reason?: string;
+}
+
+export const NOTIFY: Record<CounterpartEventType, NotifyLevel> = {
+  'pass.started': 'none', 'pass.stage': 'none', 'pass.ready': 'active', 'pass.ask': 'active', 'pass.failed': 'active',
+  'print.preparing': 'none', 'plate.blocked': 'timeSensitive', 'print.confirm': 'timeSensitive', 'print.started': 'passive',
+  'print.status': 'none', 'print.first-layer': 'passive', 'print.milestone': 'active', 'print.paused': 'timeSensitive',
+  'print.resumed': 'none', 'print.done': 'active', 'print.failed': 'timeSensitive', 'print.cancelled': 'passive',
+  'print.not-started': 'timeSensitive', 'print.unreachable': 'passive', 'print.sent': 'passive',
+};
+
+export function sizeText(sizeMm: readonly number[] | undefined): string | undefined {
+  if (!sizeMm || sizeMm.length !== 3 || !sizeMm.every(value => Number.isFinite(value) && value > 0)) return undefined;
+  return `${sizeMm.map(value => Math.round(value)).join(' × ')} mm`;
+}
+
+function milestoneTitle(title: string, progress: number | undefined): string {
+  if (progress === 50) return `${title} is halfway`;
+  if (progress === 25) return `${title} is a quarter done`;
+  if (progress === 75) return `${title} is three-quarters done`;
+  return `${title} is ${Math.round(progress ?? 0)}% done`;
+}
+const joined = (...parts: (string | undefined | false)[]) => parts.filter(Boolean).join(' · ');
+
+/** Title and body for one event, from its type, its data and what the project says. */
+export function eventWords(type: CounterpartEventType, data: CounterpartEvent['data'], context: WordsContext): {title: string; body: string; notify: NotifyLevel} {
+  const t = context.title, printer = context.printer ?? 'Your printer';
+  const remaining = data?.remainingSec !== undefined ? duration(data.remainingSec) : undefined;
+  const layers = data?.layer !== undefined && data.totalLayers ? `layer ${data.layer} of ${data.totalLayers}` : undefined;
+  const problem = data?.problems?.[0]?.message;
+  const minutes = data?.estimateSec !== undefined ? Math.max(1, Math.round(data.estimateSec / 60)) : undefined;
+  let title: string, body: string;
+  switch (type) {
+    case 'pass.started': title = `Your Mac is working on ${t}`; body = minutes ? `About ${minutes} min. You can put your phone down.` : "You can put your phone down. We'll let you know when it's ready."; break;
+    case 'pass.stage': title = t; body = joined(data?.stage, minutes ? `about ${minutes} min` : undefined) || 'Working on it'; break;
+    case 'pass.ready': title = `${t} is ready to print`; body = context.size ?? 'Ready to print'; break;
+    case 'pass.ask': title = `${t}: ${context.question ?? 'can you take a close-up?'}`; body = 'Take a photo, choose one, or let your Mac make its best guess.'; break;
+    case 'pass.failed': title = `${t} didn't finish`; body = context.reason ?? 'Something went wrong on your Mac. Try again.'; break;
+    case 'print.preparing': title = `Getting ${t} ready`; body = data?.stage ?? 'Preparing the print'; break;
+    case 'plate.blocked': title = `Something's on the ${printer} plate`; body = `Looks like there's ${context.item ?? 'something'} on your plate. Can you take it off first?`; break;
+    case 'print.confirm': title = `${printer} needs a yes before printing ${t}`; body = 'Open Counterpart to answer.'; break;
+    case 'print.started': title = `Printing ${t} on ${printer}`; body = data?.stage ?? 'Started'; break;
+    case 'print.status': title = t; body = joined(data?.progress !== undefined ? `${Math.round(data.progress)}%` : undefined, remaining ? `${remaining} left` : undefined, layers) || (data?.state ?? 'Printing'); break;
+    case 'print.first-layer': title = `${t}: first layer's down`; body = remaining ? `${remaining} left on ${printer}` : printer; break;
+    case 'print.milestone': title = milestoneTitle(t, data?.progress); body = joined(remaining ? `${remaining} left` : undefined, layers, printer); break;
+    case 'print.paused': title = `${printer} paused ${t}`; body = problem ?? 'Open Counterpart to resume.'; break;
+    case 'print.resumed': title = t; body = `Printing again on ${printer}`; break;
+    case 'print.done': title = `${t} is done`; body = 'Take it off the plate.'; break;
+    case 'print.failed': title = `${printer} stopped ${t}`; body = problem ?? 'Check the printer, then try again.'; break;
+    case 'print.cancelled': title = `${t} was cancelled`; body = 'Nothing more will print.'; break;
+    case 'print.not-started': title = `${printer} didn't start ${t}`; body = 'Nothing was sent twice. Check the printer, then press Print again.'; break;
+    case 'print.unreachable': title = `Lost contact with ${printer}`; body = 'Still trying.'; break;
+    case 'print.sent': title = `Sent ${t} to ${printer}`; body = context.reason === 'bambu-connect' ? 'Finish on your Mac: press Print in Bambu Connect.' : "Counterpart can't follow this print."; break;
+  }
+  return {title: title.slice(0, 200), body: body.slice(0, 500), notify: NOTIFY[type]};
+}
+
+// ---------------------------------------------------------------------------
+// The project's status line (PRD §4 state table)
+
+export interface StatusSource extends TitleSource {
+  state: string;
+  progress?: string;
+  question?: {closeup?: string};
+  ask?: {question: string; status: string};
+  current?: {sizeMm?: readonly number[]};
+  failure?: string;
+  passes?: {stages?: {words: string; endedAtMs?: number}[]; estimate?: {remainingSec: number}; endedAtMs?: number}[];
+  print?: {destination?: {name: string}; dispatchedAt?: string; sentVia?: string; live?: {state: string; job?: {progress?: number; remainingSec?: number}}; monitor?: {phase: string; endedAt?: string}};
+}
+
+const formatDate = (iso: string) => new Intl.DateTimeFormat('en-US', {month: 'short', day: 'numeric'}).format(new Date(iso));
+
+/** The §4 line for a project, with its symbol and colour. */
+export function objectStatus(object: StatusSource, updatedAtMs?: number): ObjectStatus {
+  const printer = object.print?.destination?.name ?? 'your printer';
+  switch (object.state) {
+    case 'new': return {phase: 'sending', text: 'Sending to your Mac', symbol: 'arrow.up.circle', tint: 'blue'};
+    case 'touching-up': {
+      const pass = object.passes?.at(-1);
+      const stage = pass?.stages?.filter(item => item.endedAtMs === undefined).at(-1)?.words ?? object.progress;
+      const minutes = pass?.estimate ? Math.max(1, Math.round(pass.estimate.remainingSec / 60)) : undefined;
+      return {phase: 'working', text: joined('Your Mac is working', stage, minutes ? `about ${minutes} min` : undefined).slice(0, 300), symbol: 'wand.and.sparkles', tint: 'blue'};
+    }
+    case 'needs-closeup': {
+      const question = object.ask?.question ?? (object.question?.closeup ? `Can you take a close-up of ${object.question.closeup}?` : undefined);
+      return {phase: 'needs-you', text: joined('Needs you', question).slice(0, 300), symbol: 'hand.raised', tint: 'orange'};
+    }
+    case 'ready': return {phase: 'ready', text: joined('Ready to print', sizeText(object.current?.sizeMm)), symbol: 'checkmark.seal', tint: 'accent'};
+    case 'printing': {
+      const live = object.print?.live, watching = object.print?.monitor?.phase === 'watching';
+      if (!object.print?.dispatchedAt || !watching || !live) return {phase: 'preparing', text: 'Getting the print ready', symbol: 'gearshape', tint: 'accent'};
+      const progress = live.job?.progress !== undefined ? `${Math.round(live.job.progress)}%` : undefined;
+      const left = live.job?.remainingSec !== undefined ? `${duration(live.job.remainingSec)} left` : undefined;
+      const paused = live.state === 'paused';
+      return {phase: 'printing', text: joined(`${paused ? 'Paused' : 'Printing'} on ${printer}`, progress, paused ? undefined : left).slice(0, 300), symbol: 'printer.fill', tint: 'green'};
+    }
+    case 'printed': {
+      const at = object.print?.monitor?.endedAt ?? object.print?.dispatchedAt ?? (updatedAtMs ? new Date(updatedAtMs).toISOString() : undefined);
+      return {phase: 'printed', text: at ? `Printed ${formatDate(at)}` : 'Printed', symbol: 'shippingbox', tint: 'secondary'};
+    }
+    case 'sent': return {phase: 'sent', text: sentWords(object.print?.destination?.name ?? 'your printer', object.print?.sentVia === 'bambu-connect'), symbol: 'paperplane', tint: 'secondary'};
+    default: return {phase: 'failed', text: (object.failure ?? 'Something went wrong. Try again.').slice(0, 300), symbol: 'exclamationmark.triangle', tint: 'red'};
+  }
+}

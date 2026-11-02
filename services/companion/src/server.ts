@@ -1,4 +1,9 @@
 import {createObjectRoutes} from './objects/http.js';
+import {createEventRoutes} from './events/http.js';
+import type {EventLog} from './events/log.js';
+import type {LiveActivityTokenStore} from './devices/live-activity-tokens.js';
+import type {DevicePresence} from './devices/presence.js';
+import {LiveActivityTokenUploadSchema} from '@scan-to-make/contracts/counterpart';
 import type {ObjectService} from './objects/service.js';
 import {createCaptureRoutes,type CaptureServices} from './capture-http.js';
 import {createPrintHandoffRoutes,type PrintHandoffServices} from './print-handoff-http.js';
@@ -111,6 +116,12 @@ export async function startCompanionServer(
     printHandoff?: PrintHandoffServices;
     /** Objects (scan or instructions → touch-up → print), when touch-ups are set up. */
     objects?: ObjectService;
+    /** The event log behind GET /v1/events (PRD §8.7). */
+    events?: EventLog;
+    /** Live Activity tokens from phones, for the Mac app (PRD §8.8). */
+    liveActivityTokens?: LiveActivityTokenStore;
+    /** Last seen and model per device. */
+    presence?: DevicePresence;
     /** Extra addresses to bind beside the configured one; looked up again every `rediscoverMs`. */
     lanAddresses?: () => LanAddresses;
     /** The Mac's `.local` name, accepted as a Host and listed in v2 links. */
@@ -172,6 +183,7 @@ export async function startCompanionServer(
   const captureRoutes=options.capture?createCaptureRoutes(options.capture):undefined;
   const printHandoffRoutes=options.printHandoff?createPrintHandoffRoutes(options.printHandoff):undefined;
   const objectRoutes=options.objects?createObjectRoutes(options.objects):undefined;
+  const eventRoutes=options.events?createEventRoutes(options.events):undefined;
   let authority = '';
   const handler: RequestListener = async (request, response) => {
     response.setHeader('Content-Type', 'application/json');
@@ -217,6 +229,7 @@ export async function startCompanionServer(
         if (!auth) return;
         const { deviceId, token } = credential();
         await auth.authorize(login, deviceId, token, scope);
+        if (deviceId) void options.presence?.seen(deviceId, singleHeader(request, 'x-scan-device-model')).catch(() => undefined);
       };
       if (request.url === '/healthz' && request.method === 'GET') {
         // Scope name kept from the first protocol so existing pairings still parse.
@@ -229,6 +242,24 @@ export async function startCompanionServer(
       }
       if(objectRoutes&&(request.url==='/v1/objects'||request.url?.startsWith('/v1/objects/')||request.url?.startsWith('/v1/objects?')||request.url==='/v1/settings')){
         await objectRoutes.handle(request,response,authorize,name=>singleHeader(request,name));return;
+      }
+      if(eventRoutes&&(request.url==='/v1/events'||request.url?.startsWith('/v1/events?'))){
+        await eventRoutes.handle(request,response,authorize);return;
+      }
+      if(options.liveActivityTokens&&request.url==='/v1/devices/live-activity-tokens'){
+        if(request.method!=='POST')throw new ServerFailure('method-not-allowed');
+        await authorize('projects:write');
+        if(!/^application\/json(?:;\s*charset=utf-8)?$/i.test(request.headers['content-type']??''))throw new ServerFailure('unsupported-media-type');
+        const controller=new AbortController();
+        const abort=()=>controller.abort();
+        response.once('close',abort);
+        let input:unknown;
+        try{input=await readBody(request,controller.signal,4096);}finally{response.off('close',abort);}
+        const parsed=LiveActivityTokenUploadSchema.safeParse(input);
+        if(!parsed.success)throw new ServerFailure('invalid-request');
+        await authorize('projects:write');
+        await options.liveActivityTokens.store(credential().deviceId!,parsed.data);
+        response.end(JSON.stringify({stored:true}));return;
       }
       if(printHandoffRoutes&&request.url?.startsWith('/v1/printer-handoff/')){
         await printHandoffRoutes.handle(request,response,authorize,name=>singleHeader(request,name));return;

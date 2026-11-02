@@ -18,6 +18,10 @@ import { PrinterSessionPool, readPrinterHandoffConfig } from '@scan-to-make/prin
 import { PrinterDirectory } from './printing/directory.js';
 import { CameraFrames } from './printing/camera.js';
 import { CompanionSettingsStore } from './settings.js';
+import { EventLog } from './events/log.js';
+import { projectTitle, sizeText } from './events/words.js';
+import { LiveActivityTokenStore } from './devices/live-activity-tokens.js';
+import { DevicePresence } from './devices/presence.js';
 import {startLocalControl} from './local-control.js';
 import {createControlDispatcher, companionVersion} from './local-control-services.js';
 import type {CaptureServices} from './capture-http.js';
@@ -69,8 +73,20 @@ let objects:ObjectService|undefined;
 // The app's data root (~/Library/Application Support/Scan to Make), the parent of the auth directory.
 const dataRoot=remoteAuth?dirname(remoteAuth.directory):join(process.cwd(),'.counterpart');
 const companionSettings=new CompanionSettingsStore(join(dataRoot,'settings.json'));
+// PRD §8.7: every user-visible change is one event, with its words, in <data root>/events.ndjson.
+let objectStoreForEvents:ObjectStore|undefined;
+const eventLog=remoteAuth?await new EventLog(join(dataRoot,'events.ndjson'),{context:async draft=>{
+  const object=await objectStoreForEvents?.get(draft.projectId).catch(()=>undefined);
+  if(!object)return {title:'Your project'};
+  const size=sizeText(object.current?.sizeMm);
+  return {title:projectTitle(object),...(size?{size}:{}),...(object.question?.closeup?{question:`Can you take a close-up of ${object.question.closeup}?`}:{}),
+    ...(object.failure?{reason:object.failure}:{})};
+}}).open():undefined;
+const liveActivityTokens=remoteAuth?new LiveActivityTokenStore(join(dataRoot,'live-activity-tokens.json')):undefined;
+const presence=remoteAuth?new DevicePresence(join(remoteAuth.directory,'device-presence.json')):undefined;
 if(handoffConfig&&printHandoff&&captureDirectory&&claudePath){
   const objectStore=new ObjectStore(join(captureDirectory,'objects'));
+  objectStoreForEvents=objectStore;
   // Dispatched prints keep printing: ObjectService.resume() picks their monitors back up.
   await objectStore.recoverInterrupted({keepPrinting:true});
   const printerCatalog=await loadPrinterCatalog(handoffConfig);
@@ -83,7 +99,8 @@ if(handoffConfig&&printHandoff&&captureDirectory&&claudePath){
   objects=new ObjectService({store:objectStore,runTouchup:input=>runTouchup(input),claudePath,handoff:handoffConfig,printerCatalog,printers:printerDirectory,
     stlInfo:path=>printerStlSize(handoffConfig,path),
     print:{services:printHandoff,destinations,judgePlate:photo=>judgePlate(photo,claudePath)},
-    settings:companionSettings,camera:new CameraFrames()});
+    settings:companionSettings,camera:new CameraFrames(),
+    ...(eventLog?{events:{emit:async draft=>{await eventLog.append(draft);}}}:{})});
   await companionSettings.load();
   await objects.resume();
 }
@@ -113,6 +130,9 @@ const server = await startCompanionServer({
   capture,
   printHandoff,
   ...(objects ? {objects} : {}),
+  ...(eventLog ? {events: eventLog} : {}),
+  ...(liveActivityTokens ? {liveActivityTokens} : {}),
+  ...(presence ? {presence} : {}),
   remoteAuth,
   port:
     process.env.SCAN_TO_MAKE_GENERATION_PORT === undefined
@@ -127,6 +147,9 @@ try {
     dispatch:createControlDispatcher({auth:remoteAuth,modelAccess,printerCheck,companionVersion:await companionVersion(),capture,
       captureDirectory:captureDirectory ? join(captureDirectory,'captures') : undefined,printHandoff,
       ...(objects ? {objects} : {}),
+      ...(eventLog ? {events: eventLog} : {}),
+      ...(liveActivityTokens ? {liveActivityTokens} : {}),
+      ...(presence ? {presence} : {}),
       // With every address answering, the Mac's QR is a v2 link from the live list.
       ...(allAddresses === '1' && server.publicKeySha256 ? {pairingLink:() => ({addresses:server.addresses(),publicKeySha256:server.publicKeySha256!,
         ...(macName ? {name:instanceName(macName)} : {})})} : {}),
@@ -145,6 +168,8 @@ process.stdout.write(
 for (const signal of ['SIGINT', 'SIGTERM'] as const)
   process.once(signal, () => {
     modelAccess?.close();
+    // Wake every waiting events.wait and /v1/events first, so shutdown never waits out a long poll.
+    eventLog?.close();
     void Promise.all([printerCheck?.close(),control?.close(),server.close()]).then(()=>printerPool.close()).catch(() => {
       process.exitCode = 1;
     });
