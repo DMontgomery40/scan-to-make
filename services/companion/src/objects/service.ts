@@ -532,9 +532,13 @@ export class ObjectService {
    */
   addFile(id: string, kind: 'photos' | 'scan', path: string): Promise<StmObject> {
     // One at a time per object, so two files with the same name can't take the same slot.
-    return this.#gate(id, () => this.#addFile(id, kind, path));
+    return this.addFileReceipt(id, kind, path).then(receipt => receipt.object);
   }
-  async #addFile(id: string, kind: 'photos' | 'scan', path: string): Promise<StmObject> {
+  /** The exact name assigned to this upload, independent of other pending evidence. */
+  addFileReceipt(id: string, kind: 'photos' | 'scan', path: string): Promise<{object: StmObject; photoName?: string}> {
+    return this.#gate(id, () => this.#addFileReceipt(id, kind, path));
+  }
+  async #addFileReceipt(id: string, kind: 'photos' | 'scan', path: string): Promise<{object: StmObject; photoName?: string}> {
     const rule = FILE_KINDS[kind];
     if (!isAbsolute(path) || path.includes('\0')) throw new InvalidFileError('Choose a file on this Mac.');
     const extension = extname(path).toLowerCase();
@@ -549,8 +553,9 @@ export class ObjectService {
       bytes = await handle.readFile();
     } finally { await handle.close(); }
     if (bytes.length > rule.limit || !looksLike(extension, bytes.subarray(0, 84))) throw new InvalidFileError(`That isn't ${rule.words}.`);
-    if (kind === 'scan') return this.addScan(id, `scan${extension}`, bytes);
-    return this.addPhoto(id, photoName(path, (await this.get(id)).photos), bytes);
+    if (kind === 'scan') return {object: await this.addScan(id, `scan${extension}`, bytes)};
+    const name = photoName(path, (await this.get(id)).photos);
+    return {object: await this.addPhoto(id, name, bytes), photoName: name};
   }
 
   /** The inputs are complete: start the touch-up. Starting again while it runs changes nothing. */
@@ -614,11 +619,15 @@ export class ObjectService {
     let object = await this.get(id);
     if (object.state === 'touching-up' || object.state === 'printing') throw new InvalidStateError('Wait until the current step finishes.');
     if (!object.current && object.state !== 'failed') throw new InvalidStateError('There is no model to correct yet.');
-    const before = new Set(object.photos);
-    for (const path of photos) object = await this.#addFile(id, 'photos', path);
+    const imported: string[] = [];
+    for (const path of photos) {
+      const receipt = await this.#addFileReceipt(id, 'photos', path);
+      object = receipt.object;
+      if (receipt.photoName) imported.push(receipt.photoName);
+    }
     const held = object.messages?.find(message => message.id === object.pendingMessageId && message.text === note.trim());
     // A retry owns its original evidence; later uploads belong to the next message unless explicitly selected.
-    const attached = [...new Set([...(photoNames ?? held?.photos ?? object.pendingPhotos ?? []), ...object.photos.filter(name => !before.has(name))])];
+    const attached = [...new Set([...(photoNames ?? held?.photos ?? object.pendingPhotos ?? []), ...imported])];
     object = await this.#message(object, note.trim(), attached);
     const message = object.messages!.find(item => item.id === object.pendingMessageId)!;
     // Photos can document a successful print too. They must not force a mesh-changing pass.

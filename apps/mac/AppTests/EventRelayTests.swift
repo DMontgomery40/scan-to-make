@@ -130,7 +130,8 @@ final class EventRelayTests: XCTestCase {
         XCTAssertEqual(call("print", ["checked": .bool(true)]), "objects.print")
         XCTAssertEqual(call("correct", ["note": .string("thicker")]), "objects.correct")
         XCTAssertNil(call("correct"), "a correction needs its note")
-        XCTAssertEqual(call("answerAsk"), "objects.answerCloseup")
+        XCTAssertNil(call("answerAsk"), "missing assets never turn into an implicit Best Guess")
+        XCTAssertEqual(call("answerAsk", ["bestGuess": .bool(true)]), "objects.answerCloseup")
         XCTAssertEqual(call("confirm", ["confirmationId": .string("q"), "answer": .object(["action": .string("accept")])]), "objects.answerPrintConfirmation")
         XCTAssertNil(call("confirm"), "a confirmation answers one exact question")
         XCTAssertEqual(call("pause"), "objects.pausePrint")
@@ -146,6 +147,37 @@ final class EventRelayTests: XCTestCase {
         XCTAssertEqual(typed.call(acceptsText: true)?.params["text"], .string("It's 25 mm"))
         XCTAssertEqual(typed.call(acceptsText: true)?.params["bestGuess"], .bool(false))
         XCTAssertNil(typed.call(photos: ["/tmp/a.jpg"])?.params["text"], "photos still answer it on an older companion")
+    }
+
+    func testCloudAskSelectsOnlyItsUploadReceiptsIncludingRenamedFiles() async throws {
+        let command = PhoneCommand(id: "c", type: "answerAsk", projectId: "p", payload: [:])
+        var uploadedPaths: [String] = []
+        let call = try await command.preparedCall(photos: ["/tmp/a.jpg", "/tmp/b.jpg"], acceptsText: true, printSettings: true) { path in
+            uploadedPaths.append(path)
+            return path == "/tmp/a.jpg" ? "a-2.jpg" : "b-3.jpg"
+        }
+        XCTAssertEqual(uploadedPaths, ["/tmp/a.jpg", "/tmp/b.jpg"])
+        XCTAssertEqual(call?.method, "objects.answerCloseup")
+        XCTAssertEqual(call?.params["photoNames"], .array([.string("a-2.jpg"), .string("b-3.jpg")]))
+        XCTAssertEqual(call?.params["bestGuess"], .bool(false))
+        let guess = try await PhoneCommand(id: "g", type: "answerAsk", projectId: "p", payload: ["bestGuess": .bool(true)])
+            .preparedCall(photos: [], acceptsText: true, printSettings: true) { _ in XCTFail("No upload for Best Guess"); return "wrong.jpg" }
+        XCTAssertEqual(guess?.params["photoNames"], .array([]))
+        let correction = PhoneCommand(id: "c", type: "correct", projectId: "p", payload: ["note": .string("thicker")]).call(photos: ["/tmp/a.jpg"])
+        XCTAssertEqual(correction?.params["photoNames"], .array([]), "a cloud correction imports only its own local assets")
+    }
+
+    func testCloudAskNeverDispatchesAfterAnUploadFails() async {
+        let command = PhoneCommand(id: "c", type: "answerAsk", projectId: "p", payload: [:])
+        var uploads = 0
+        do {
+            _ = try await command.preparedCall(photos: ["a.jpg", "b.jpg"], acceptsText: true, printSettings: true) { _ in
+                uploads += 1
+                if uploads == 2 { throw ControlRemoteError(code: "unavailable", message: "Upload failed") }
+                return "a-2.jpg"
+            }
+            XCTFail("No prepared answer after an upload failure")
+        } catch { XCTAssertEqual(uploads, 2) }
     }
 
     // MARK: The relay's request

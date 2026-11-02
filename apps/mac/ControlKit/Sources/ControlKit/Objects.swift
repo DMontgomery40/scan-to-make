@@ -179,6 +179,15 @@ public extension ControlClient {
         let result: ObjectReply = try await call("objects.addFile", ["id": .string(id), "kind": .string(kind), "path": .string(path)])
         return result.object
     }
+    /// The companion may sanitize or disambiguate a local filename. Only its receipt identifies this upload.
+    func addPhotoFile(_ id: String, path: String) async throws -> String {
+        struct Receipt: Decodable { let photoName: String? }
+        let receipt: Receipt = try await call("objects.addFile", ["id": .string(id), "kind": .string("photos"), "path": .string(path)])
+        guard let name = receipt.photoName, !name.isEmpty else {
+            throw ControlRemoteError(code: "not-supported", message: "Update Counterpart on your Mac to answer with these photos.")
+        }
+        return name
+    }
     func answerCloseup(_ id: String, bestGuess: Bool, photoNames: [String] = []) async throws -> Project {
         let result: ObjectReply = try await call("objects.answerCloseup", ["id": .string(id), "bestGuess": .bool(bestGuess), "photoNames": .array(photoNames.map(JSONValue.string))]); return result.object
     }

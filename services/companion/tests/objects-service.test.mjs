@@ -388,3 +388,26 @@ test('an Ask answer does not reuse an unrelated held message with identical text
   assert.notEqual(after.messages[1].id, 'held-message');
   assert.deepEqual(after.messages[1].photos, []);
 });
+
+
+test('a concurrent unrelated photo upload never enters a local-file correction receipt', async () => {
+  const {service, object, store, calls} = await setup();
+  await service.start(object.id); await service.settled(object.id);
+  const local = join(store.dir(object.id), 'local.jpg');
+  await writeFile(local, Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0, 0, 0]));
+  const addFile = store.addFile.bind(store);
+  let injected = false;
+  store.addFile = async (id, kind, name, bytes) => {
+    if (name === 'local.jpg' && !injected) {
+      injected = true;
+      await service.addPhoto(id, 'other-message.jpg', Buffer.from('queued on another phone'));
+    }
+    return addFile(id, kind, name, bytes);
+  };
+  await service.correct(object.id, 'Make this thicker.', [local], []);
+  const after = await service.settled(object.id);
+  assert.equal(injected, true);
+  assert.deepEqual(after.messages.at(-1).photos, ['local.jpg']);
+  assert.deepEqual(after.pendingPhotos, ['other-message.jpg']);
+  assert.deepEqual(calls[1].photos.map(path => path.split('/').at(-1)), ['local.jpg']);
+});
