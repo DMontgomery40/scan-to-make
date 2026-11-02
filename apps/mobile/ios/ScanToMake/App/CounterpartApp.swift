@@ -22,34 +22,52 @@ struct CounterpartApp: App {
     }
 }
 
-/// First run (PRD §5.10): Welcome, then Find your Mac until a Mac is paired, then the notifications
-/// question once, then the projects.
+/// Which first-run step shows (PRD §5.10). A paired phone always shows Home, whatever else is undecided:
+/// Welcome is only for an unpaired first launch, and the notifications question only comes straight after
+/// pairing on this phone. Nothing here waits on the system, so no state can leave the window empty.
+enum FirstRunStep: Equatable {
+    case loading, welcome, pair, notify, home
+
+    static func step(statusKnown: Bool, paired: Bool, holdPairing: Bool, welcomed: Bool, justPaired: Bool,
+                     notificationsUndecided: Bool?, askedNotifications: Bool) -> FirstRunStep {
+        guard statusKnown else { return .loading }
+        if !paired { return welcomed ? .pair : .welcome }
+        // The pairing screen holds its success state for a moment after pairing.
+        if holdPairing { return .pair }
+        if justPaired && !askedNotifications && notificationsUndecided == true { return .notify }
+        return .home
+    }
+}
+
 struct RootView: View {
     @Environment(AppModel.self) private var app
     @AppStorage(FirstRun.welcomedKey) private var welcomed = false
     @AppStorage(FirstRun.notificationsAskedKey) private var askedNotifications = false
     /// Nil until the system says whether it has asked before.
     @State private var notificationsUndecided: Bool?
+    /// A Mac was paired during this run: the moment to ask about notifications.
+    @State private var justPaired = false
     /// DEBUG: `-CounterpartScreen welcome` shows Welcome over a paired canned Mac.
     @State private var debugWelcome = false
+
+    private var step: FirstRunStep {
+        FirstRunStep.step(statusKnown: app.status != nil, paired: !app.needsMac, holdPairing: app.holdPairingScreen, welcomed: welcomed,
+                          justPaired: justPaired, notificationsUndecided: notificationsUndecided, askedNotifications: askedNotifications)
+    }
 
     var body: some View {
         @Bindable var app = app
         Group {
-            if app.status == nil {
-                Color(uiColor: .systemBackground).ignoresSafeArea()
-            } else if debugWelcome {
+            if debugWelcome {
                 WelcomeView { debugWelcome = false }
-            } else if app.needsMac || app.holdPairingScreen {
-                if !welcomed && app.needsMac && !app.holdPairingScreen { WelcomeView { withAnimation { welcomed = true } } }
-                else { FindYourMacView(mode: .firstRun) }
-            } else if notificationsUndecided == nil {
-                // Until the system says whether it asked before, nothing mounts that could take a pending route.
-                Color(uiColor: .systemBackground).ignoresSafeArea()
-            } else if notificationsUndecided == true && !askedNotifications {
-                NotifyPermissionView { withAnimation { askedNotifications = true } }
             } else {
-                ProjectsRoot(store: app.projects, pairingKey: app.pairingKey)
+                switch step {
+                case .loading: Color(uiColor: .systemBackground).ignoresSafeArea()
+                case .welcome: WelcomeView { withAnimation { welcomed = true } }
+                case .pair: FindYourMacView(mode: .firstRun)
+                case .notify: NotifyPermissionView { withAnimation { askedNotifications = true } }
+                case .home: ProjectsRoot(store: app.projects, pairingKey: app.pairingKey)
+                }
             }
         }
         .fullScreenCover(isPresented: $app.showPairing) {
@@ -57,20 +75,13 @@ struct RootView: View {
                 .environment(app)
                 .tint(.filament)
         }
-        .task {
-            // Someone upgrading with a Mac already paired has seen what Welcome says.
-            if app.status?.state == .paired { welcomed = true }
-            notificationsUndecided = await UNUserNotificationCenter.current().notificationSettings().authorizationStatus == .notDetermined
-            #if DEBUG
-            if app.debugFirstRun == nil, Fixtures.folder != nil { askedNotifications = true }
-            #endif
-        }
+        .onChange(of: app.needsMac) { wasUnpaired, unpaired in if wasUnpaired && !unpaired { justPaired = true } }
+        .task { notificationsUndecided = await UNUserNotificationCenter.current().notificationSettings().authorizationStatus == .notDetermined }
         #if DEBUG
-        // The debug route can arrive after the first look at the notification settings.
         .onChange(of: app.debugFirstRun, initial: true) { _, step in
             switch step {
             case "welcome": debugWelcome = true
-            case "notify": notificationsUndecided = true; askedNotifications = false
+            case "notify": justPaired = true; notificationsUndecided = true; askedNotifications = false
             default: break
             }
         }
