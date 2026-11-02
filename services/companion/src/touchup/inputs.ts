@@ -4,6 +4,7 @@ import {existsSync} from 'node:fs';
 import {copyFile, mkdir, readFile} from 'node:fs/promises';
 import {basename, join, resolve} from 'node:path';
 import {promisify} from 'node:util';
+import {fileURLToPath} from 'node:url';
 
 const run = promisify(execFile);
 const SIPS = '/usr/bin/sips';
@@ -16,6 +17,8 @@ export interface TouchupPass {
   scanPaths: string[];
   photosDir: string;
   photoPaths: string[];
+  /** Numbered, uncropped sheets covering every photo, in the same order. */
+  photoOverviewPaths: string[];
   outDir: string;
   checkpointsDir: string;
 }
@@ -78,5 +81,17 @@ export async function prepareTouchupPass(input: {root: string; objectId: string;
   for (const [index, file] of input.photos.entries()) {
     photoPaths.push(await writePhoto(file, join(photosDir, `photo-${String(index + 1).padStart(2, '0')}`), input.photoTool ?? DEFAULT_PHOTO_TOOL));
   }
-  return {dir, scanDir, scanPaths, photosDir, photoPaths, outDir, checkpointsDir};
+  const photoOverviewPaths: string[] = [];
+  if (photoPaths.length) {
+    const helper = fileURLToPath(new URL('../../python/photo_overview.py', import.meta.url));
+    const {stdout} = await run(process.env.SCAN_TO_MAKE_CAPTURE_PYTHON || 'python3',
+      ['-E', '-P', helper, '--out', photosDir, ...photoPaths], {timeout: 300_000, maxBuffer: 1024 * 1024});
+    const names: unknown = JSON.parse(stdout);
+    if (!Array.isArray(names) || names.length !== Math.ceil(photoPaths.length / 24)
+      || names.some((name, index) => name !== `overview-${String(index + 1).padStart(2, '0')}.jpg`)) {
+      throw new Error('The photo overview could not be prepared.');
+    }
+    photoOverviewPaths.push(...names.map(name => join(photosDir, name as string)));
+  }
+  return {dir, scanDir, scanPaths, photosDir, photoPaths, photoOverviewPaths, outDir, checkpointsDir};
 }
