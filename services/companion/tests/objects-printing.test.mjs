@@ -27,7 +27,8 @@ const until = async check => { for (let i = 0; i < 300; i++) { const value = awa
  */
 async function setup(t, {tools = ['get_printer_status', 'camera_snapshot', 'pause_print', 'resume_print', 'cancel_print', 'slice_stl'], sliceArgs = false, copies = false, reports = []} = {}) {
   const root = await mkdtemp(join(tmpdir(), 'objects-printing-'));
-  t.after(() => rm(root, {recursive: true, force: true, maxRetries: 10, retryDelay: 20}));
+  let service;
+  t.after(async () => { await service?.close(); await rm(root, {recursive: true, force: true, maxRetries: 10, retryDelay: 20}); });
   const calls = [], events = [], runs = [];
   const queue = [...reports];
   const relay = new InMemoryElicitationRelay({timeoutMs: 5000});
@@ -93,8 +94,7 @@ async function setup(t, {tools = ['get_printer_status', 'camera_snapshot', 'paus
   const deps = {store, handoff: config, printerCatalog: catalog, printers: directory, claudePath: '/unused', runTouchup: async () => { throw new Error('unused'); }, stlInfo: async () => undefined,
     print: {services, destinations: new Map([['current', services]])}, settings, camera: new CameraFrames(),
     events: {emit: async draft => { events.push(draft); }}, monitorClock: clock};
-  const service = new ObjectService(deps);
-  t.after(() => service.close());
+  service = new ObjectService(deps);
   const object = await store.create('A mic mount for the stand');
   await mkdir(join(store.dir(object.id), 'current'));
   await writeFile(join(store.dir(object.id), 'current', 'model.stl'), STL);
