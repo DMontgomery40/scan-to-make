@@ -125,7 +125,7 @@ struct SidebarList: View {
     @State private var showArchived = false
 
     private func matches(_ project: Project) -> Bool {
-        query.isEmpty || ProjectWords.title(project).localizedCaseInsensitiveContains(query) || (project.instructions ?? "").localizedCaseInsensitiveContains(query)
+        project.matchesSearch(query, additional: [store.printerName(project) ?? ""])
     }
 
     /// The projects in these phases, in the order the phases are given (printing before working, as on Home).

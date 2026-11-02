@@ -20,6 +20,8 @@ struct ProjectView: View {
     var openPrinting: (String) -> Void = { _ in }
     @State private var section = ProjectSection.result
     @State private var note = ""
+    @State private var renaming = false
+    @State private var projectName = ""
     @State private var working = false
     @State private var problem: String?
     @State private var fetchProblem: String?
@@ -154,7 +156,11 @@ struct ProjectView: View {
                         Spacer()
                         Text(Format.when(object.updatedAt)).font(.caption).foregroundStyle(.secondary)
                     }
-                    Text(words.title).font(.largeTitle.bold()).fixedSize(horizontal: false, vertical: true)
+                    Button { projectName = words.title; renaming = true } label: {
+                        Text(words.title).font(.largeTitle.bold()).fixedSize(horizontal: false, vertical: true)
+                    }
+                    .buttonStyle(.plain).disabled(working || !store.projectSettings)
+                    .accessibilityLabel("Rename \(words.title)")
                     if let request = object.instructions, !request.isEmpty, request != words.title {
                         Text(request).font(.body).foregroundStyle(.secondary).textSelection(.enabled)
                     }
@@ -206,6 +212,7 @@ struct ProjectView: View {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
                     if store.projectSettings {
+                        Button("Rename Project", systemImage: "pencil") { projectName = words.title; renaming = true }
                         statusChoices(object, words)
                         Divider()
                     }
@@ -220,6 +227,14 @@ struct ProjectView: View {
         .safeAreaBar(edge: .bottom) {
             // A failed pass that left an earlier model still offers changes and Print; with no model, the failed card's Try Again is the way on.
             if words.phase != .needsYou && !(words.phase == .failed && object.current == nil) { bottomBar(object, words) }
+        }
+        .alert("Rename Project", isPresented: $renaming) {
+            TextField("Project name", text: $projectName)
+            Button("Cancel", role: .cancel) {}
+            Button("Save") {
+                let title = projectName.trimmingCharacters(in: .whitespacesAndNewlines)
+                act { try await store.mac.client.rename(object.id, title: title) }
+            }.disabled(!Project.validName(projectName))
         }
         .confirmationDialog("Delete this project from your Mac?", isPresented: $confirmDelete, titleVisibility: .visible) {
             Button("Delete Project", role: .destructive) {

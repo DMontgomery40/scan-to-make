@@ -228,9 +228,10 @@ export function createControlDispatcher(services: ControlServices) {
           try {
             const {projectSettingsView} = await import('./objects/http.js');
             if (method === 'objects.settings.get') return {settings: projectSettingsView(await objects.get(parameters[method].parse(raw).id))};
-            const {id, status, archived} = parameters[method].parse(raw);
+            const {id, status, archived, title} = parameters[method].parse(raw);
             let updated = status !== undefined ? await objects.setStatus(id, status) : await objects.get(id);
             if (archived !== undefined) updated = await objects.setArchived(id, archived);
+            if (title !== undefined) updated = await objects.rename(id, title);
             return {settings: projectSettingsView(updated), object: {...publicObject(updated), directory: objects.dir(updated.id)}};
           } catch (error) {
             if (error instanceof ObjectNotFoundError) throw new ControlFailure('not-found');

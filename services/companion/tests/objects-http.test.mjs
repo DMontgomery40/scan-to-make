@@ -402,3 +402,27 @@ test('the Mac sets Status over the control socket; project.updated tells the app
   assert.equal((await dispatch('status.get', {})).capabilities.projectSettings, true);
   await assert.rejects(dispatch('objects.settings.set', {id: object.id, status: 'done'}));
 });
+
+
+test('a name set on either device persists and does not start or stop a pass', async t => {
+  const {call, store, service, events} = await fixture(t);
+  const object = await service.create('A mic mount');
+  await store.update(object.id, o => ({...o, state: 'touching-up', passes: [{startedAtMs: 1, note: 'Tighten the clip'}]}));
+  const renamed = await call('PATCH', `/v1/objects/${object.id}/settings`, {title: '  Studio microphone mount  '});
+  assert.equal(renamed.status, 200);
+  assert.equal(renamed.json.object.title, 'Studio microphone mount');
+  assert.equal(renamed.json.object.state, 'touching-up');
+  assert.equal(renamed.json.object.passes.length, 1);
+  const dispatch = createControlDispatcher({auth: {transport: 'lan', listDevices: async () => []}, companionVersion: 'test', objects: service});
+  assert.equal((await dispatch('objects.get', {id: object.id})).object.title, 'Studio microphone mount');
+  const changed = await dispatch('objects.settings.set', {id: object.id, title: 'Desk mount'});
+  assert.equal(changed.object.title, 'Desk mount');
+  assert.equal((await call('GET', `/v1/objects/${object.id}`)).json.object.title, 'Desk mount');
+  assert.equal((await store.get(object.id)).title, 'Desk mount');
+  assert.deepEqual(events.filter(e => e.type === 'project.updated').map(e => e.data), [{keys: ['title']}, {keys: ['title']}]);
+  for (const title of ['', '   ', 'x'.repeat(121), 'hidden\u0000name', 42]) {
+    assert.equal((await call('PATCH', `/v1/objects/${object.id}/settings`, {title})).status, 400);
+    await assert.rejects(dispatch('objects.settings.set', {id: object.id, title}));
+  }
+  assert.equal((await store.get(object.id)).title, 'Desk mount');
+});
