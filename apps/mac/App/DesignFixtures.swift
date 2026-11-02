@@ -184,7 +184,7 @@ actor FixtureObjects: ObjectsCompanion {
     func status() async throws -> ControlStatus {
         ControlStatus(companionVersion: "fixture", pairedDeviceCount: 1,
                       capabilities: .init(nearbyPairing: true, objectsCreate: true, events: true, printControl: true, printSettings: true,
-                                          mcpUpdates: true))
+                                          mcpUpdates: true, projectSettings: true, printCopies: true))
     }
     func devices() async throws -> [ControlDevice] {
         [ControlDevice(deviceId: "0b6f0f43-7c35-4b8a-9a3c-0000000000d1", deviceName: "David's iPhone", pairedAt: now - 2 * 86_400_000,
