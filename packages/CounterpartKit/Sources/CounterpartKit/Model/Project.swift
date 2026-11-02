@@ -283,42 +283,167 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
     }
 
     /// The printer MCP's own question before printing. Only an explicit answer to this id approves it.
+    /// The printer MCP's own question (MCP elicitation), answered on the phone or the Mac. Only an explicit
+    /// answer to this id approves it. Fields are the elicitation schema's primitive properties; anything a
+    /// field doesn't describe is checked by the companion again.
     public struct PrintConfirmation: Codable, Equatable, Sendable {
         public struct Field: Codable, Equatable, Sendable {
-            public var name: String; public var title: String; public var description: String?; public var required: Bool
-            public init(name: String, title: String, description: String? = nil, required: Bool) {
-                self.name = name; self.title = title; self.description = description; self.required = required
+            /// The JSON Schema primitive. Absent means boolean; a type from a newer MCP is `unknown` and can't be answered here.
+            public enum Kind: String, Codable, Equatable, Sendable {
+                case boolean, string, number, integer, unknown
+                public init(from decoder: Decoder) throws {
+                    self = Kind(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .unknown
+                }
+            }
+            public var name: String
+            public var title: String
+            public var description: String?
+            public var required: Bool
+            public var type: Kind
+            /// Allowed values of a string field, and their display names in the same order.
+            public var enumValues: [String]?
+            public var enumNames: [String]?
+            public var defaultValue: JSONValue?
+            public var minimum: Double?
+            public var maximum: Double?
+            public var minLength: Int?
+            public var maxLength: Int?
+            /// email, uri, date or date-time.
+            public var format: String?
+
+            public init(name: String, title: String, description: String? = nil, required: Bool, type: Kind = .boolean,
+                        enumValues: [String]? = nil, enumNames: [String]? = nil, defaultValue: JSONValue? = nil,
+                        minimum: Double? = nil, maximum: Double? = nil, minLength: Int? = nil, maxLength: Int? = nil, format: String? = nil) {
+                self.name = name; self.title = title; self.description = description; self.required = required; self.type = type
+                self.enumValues = enumValues; self.enumNames = enumNames; self.defaultValue = defaultValue
+                self.minimum = minimum; self.maximum = maximum; self.minLength = minLength; self.maxLength = maxLength; self.format = format
+            }
+
+            private enum CodingKeys: String, CodingKey {
+                case name, title, description, required, type, enumValues = "enum", enumNames, defaultValue = "default"
+                case minimum, maximum, minLength, maxLength, format
+            }
+            public init(from decoder: Decoder) throws {
+                let c = try decoder.container(keyedBy: CodingKeys.self)
+                name = try c.decode(String.self, forKey: .name)
+                title = try c.decodeIfPresent(String.self, forKey: .title) ?? name
+                description = try c.decodeIfPresent(String.self, forKey: .description)
+                required = try c.decodeIfPresent(Bool.self, forKey: .required) ?? false
+                type = try c.decodeIfPresent(Kind.self, forKey: .type) ?? .boolean
+                enumValues = try? c.decodeIfPresent([String].self, forKey: .enumValues)
+                enumNames = try? c.decodeIfPresent([String].self, forKey: .enumNames)
+                defaultValue = try c.decodeIfPresent(JSONValue.self, forKey: .defaultValue)
+                minimum = try? c.decodeIfPresent(Double.self, forKey: .minimum)
+                maximum = try? c.decodeIfPresent(Double.self, forKey: .maximum)
+                minLength = try? c.decodeIfPresent(Int.self, forKey: .minLength)
+                maxLength = try? c.decodeIfPresent(Int.self, forKey: .maxLength)
+                format = try c.decodeIfPresent(String.self, forKey: .format)
+            }
+
+            /// The value this field starts with: its default when it has one of the right type, else off for a switch.
+            public var initialValue: JSONValue? {
+                if let defaultValue, accepts(defaultValue) { return defaultValue }
+                return type == .boolean ? .bool(false) : nil
+            }
+
+            /// "Low (0.2 mm)" for an enum value, else the value itself.
+            public func displayName(of value: String) -> String {
+                guard let values = enumValues, let index = values.firstIndex(of: value), let names = enumNames, index < names.count else { return value }
+                return names[index]
+            }
+
+            /// True when `value` is the right type and within this field's limits.
+            public func accepts(_ value: JSONValue) -> Bool {
+                switch (type, value) {
+                case (.boolean, .bool): return true
+                case (.string, .string(let text)):
+                    if let values = enumValues, !values.contains(text) { return false }
+                    // JSON Schema counts code points, not what reads as one character.
+                    let length = text.unicodeScalars.count
+                    if let minLength, length < minLength { return false }
+                    if let maxLength, length > maxLength { return false }
+                    return Self.matches(format, text)
+                case (.number, .number(let number)), (.integer, .number(let number)):
+                    guard number.isFinite, type == .number || number.rounded() == number else { return false }
+                    if let minimum, number < minimum { return false }
+                    if let maximum, number > maximum { return false }
+                    return true
+                default: return false
+                }
+            }
+
+            /// A real calendar day: 2026-02-30 doesn't round-trip.
+            private static let day: DateFormatter = {
+                let f = DateFormatter(); f.calendar = Calendar(identifier: .iso8601); f.locale = Locale(identifier: "en_US_POSIX")
+                f.timeZone = TimeZone(identifier: "UTC"); f.dateFormat = "yyyy-MM-dd"; f.isLenient = false; return f
+            }()
+
+            private static func matches(_ format: String?, _ text: String) -> Bool {
+                switch format {
+                case "email": return text.wholeMatch(of: #/[^@\s]+@[^@\s]+\.[^@\s]+/#) != nil
+                case "uri": return URL(string: text)?.scheme != nil
+                case "date": return text.wholeMatch(of: #/\d{4}-\d{2}-\d{2}/#) != nil && Self.day.date(from: text).map(Self.day.string) == text
+                case "date-time": return ISO.date(text) != nil
+                default: return true
+                }
             }
         }
         public var id: String
         public var message: String
         public var expiresAtMs: Double
         public var fields: [Field]
+        /// The companion can take an answer to this schema.
         public var supported: Bool
         public init(id: String, message: String, expiresAtMs: Double, fields: [Field], supported: Bool) {
             self.id = id; self.message = message; self.expiresAtMs = expiresAtMs; self.fields = fields; self.supported = supported
         }
 
-        public func canAccept(_ content: [String: Bool], atMs: Double) -> Bool {
-            supported && expiresAtMs > atMs && fields.allSatisfy { !$0.required || content[$0.name] == true }
+        /// The app can show every field natively. Otherwise the question goes to the Mac (or Don't Print).
+        public var isRenderable: Bool { supported && fields.allSatisfy { $0.type != .unknown } }
+
+        /// Every required field has a valid value (a default counts), and every value given is valid.
+        public func canAccept(_ content: [String: JSONValue], atMs: Double) -> Bool {
+            guard isRenderable, expiresAtMs > atMs else { return false }
+            return fields.allSatisfy { field in
+                guard let value = content[field.name] ?? field.defaultValue else { return !field.required }
+                if field.type == .boolean && field.required { return value == .bool(true) }
+                return field.accepts(value)
+            }
         }
 
-        /// An answer belongs to exactly one live question. Checks never carry over to its replacement.
-        public func response(confirmationId: String, action: PrintConfirmationResponse.Action, content: [String: Bool], atMs: Double) -> PrintConfirmationResponse? {
+        /// An answer belongs to exactly one live question. Values never carry over to its replacement.
+        public func response(confirmationId: String, action: PrintConfirmationResponse.Action, content: [String: JSONValue], atMs: Double) -> PrintConfirmationResponse? {
             guard confirmationId == id, expiresAtMs > atMs else { return nil }
             if action == .accept && !canAccept(content, atMs: atMs) { return nil }
-            var checked: [String: Bool] = [:]
-            for field in fields { checked[field.name] = content[field.name] ?? false }
-            return .init(confirmationId: id, answer: .init(action: action, content: action == .accept ? checked : nil))
+            var answer: [String: JSONValue] = [:]
+            for field in fields {
+                if let value = content[field.name] ?? field.defaultValue, field.accepts(value) { answer[field.name] = value }
+                else if field.type == .boolean { answer[field.name] = .bool(false) }
+            }
+            return .init(confirmationId: id, answer: .init(action: action, content: action == .accept ? answer : nil))
+        }
+
+        /// Switches only, as the first confirmations were.
+        @_disfavoredOverload
+        public func canAccept(_ content: [String: Bool], atMs: Double) -> Bool { canAccept(content.mapValues(JSONValue.bool), atMs: atMs) }
+        @_disfavoredOverload
+        public func response(confirmationId: String, action: PrintConfirmationResponse.Action, content: [String: Bool], atMs: Double) -> PrintConfirmationResponse? {
+            response(confirmationId: confirmationId, action: action, content: content.mapValues(JSONValue.bool), atMs: atMs)
         }
     }
 }
 
 public struct PrintConfirmationResponse: Codable, Equatable, Sendable {
     public enum Action: String, Codable, Sendable { case accept, decline, cancel }
-    public struct Answer: Codable, Equatable, Sendable { public var action: Action; public var content: [String: Bool]? }
+    public struct Answer: Codable, Equatable, Sendable {
+        public var action: Action
+        /// A string, number or bool per field.
+        public var content: [String: JSONValue]?
+        public init(action: Action, content: [String: JSONValue]? = nil) { self.action = action; self.content = content }
+    }
     public var confirmationId: String
     public var answer: Answer
+    public init(confirmationId: String, answer: Answer) { self.confirmationId = confirmationId; self.answer = answer }
 }
 
 /// The latest normalized printer report for a print (`PrintLive`, PRD §8.4).
