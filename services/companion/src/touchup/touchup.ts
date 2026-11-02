@@ -4,7 +4,7 @@ import {randomUUID} from 'node:crypto';
 import {homedir} from 'node:os';
 import {dirname, join} from 'node:path';
 import {PrinterMcpClient, type PrinterHandoffConfig} from '@scan-to-make/printer-handoff';
-import {defaultBlenderLaunch, ensureBlenderMcp, resetBlenderScene} from './blender.js';
+import {defaultBlenderLaunch, ensureBlenderMcp, resetBlenderScene, stopOwnedBlender} from './blender.js';
 import {prepareTouchupPass, type TouchupPass} from './inputs.js';
 import {buildTouchupInvocation, type DesignEngine, type TouchupInvocation} from './invocation.js';
 import {toolErrorText} from './blender.js';
@@ -40,6 +40,7 @@ export interface EngineChoice {engine: DesignEngine; note?: string}
 export interface TouchupDeps {
   ensureBlender?: () => Promise<unknown>;
   resetScene?: (client: ReturnType<NonNullable<TouchupDeps['client']>>, signal?: AbortSignal) => Promise<void>;
+  stopBlender?: typeof stopOwnedBlender;
   client?: (handoff: PrinterHandoffConfig) => Pick<PrinterMcpClient, 'connect' | 'callTool' | 'close' | 'hasTool'>;
   prepare?: typeof prepareTouchupPass;
   run?: (inv: TouchupInvocation, pass: TouchupPass, opts: Parameters<typeof runTouchupWorker>[2]) => Promise<TouchupResult>;
@@ -49,6 +50,8 @@ export interface TouchupDeps {
 
 /** One Blender, one scene: touch-ups run strictly one at a time, within this process (queue) and across processes (lock file). */
 let queue: Promise<unknown> = Promise.resolve();
+let queuedPasses = 0;
+let idleBlender: {input: TouchupInput; deps: TouchupDeps} | undefined;
 export const BLENDER_LOCK_PATH = join(homedir(), 'Library', 'Caches', 'scan-to-make', 'blender.lock');
 /** One open Fusion document: design passes take turns across companion processes too. */
 export const FUSION_LOCK_PATH = join(homedir(), 'Library', 'Caches', 'scan-to-make', 'fusion.lock');
@@ -146,6 +149,7 @@ async function touchUp(input: TouchupInput, deps: TouchupDeps): Promise<TouchupR
 
 async function touchUpLocked(input: TouchupInput, deps: TouchupDeps, choice: EngineChoice): Promise<TouchupResult & {passDir: string}> {
   if (choice.engine === 'blender') {
+    idleBlender = {input, deps};
     await (deps.ensureBlender ?? (() => ensureBlenderMcp({launch: defaultBlenderLaunch()})))();
     const client = (deps.client ?? (handoff => new PrinterMcpClient(handoff)))(input.handoff);
     await (deps.resetScene ?? resetBlenderScene)(client, input.signal);
@@ -171,7 +175,32 @@ async function touchUpLocked(input: TouchupInput, deps: TouchupDeps, choice: Eng
 
 /** Touches up one scan pass through the user's printer MCP's Blender bridge. */
 export function runTouchup(input: TouchupInput, deps: TouchupDeps = {}): Promise<TouchupResult & {passDir: string} & Partial<EngineChoice>> {
-  const next = queue.then(() => touchUp(input, deps));
+  queuedPasses++;
+  const next = queue.then(async () => {
+    try { return await touchUp(input, deps); }
+    finally {
+      queuedPasses--;
+      await closeIdleBlender();
+    }
+  });
   queue = next.catch(() => undefined);
   return next;
+}
+
+/** A batch may finish in Fusion after using Blender: retain the Blender route until the whole queue drains. */
+async function closeIdleBlender(): Promise<void> {
+  const idle = idleBlender;
+  if (queuedPasses || !idle) return;
+  let release: (() => Promise<void>) | undefined;
+  try {
+    release = await acquireBlenderLock(idle.deps.lockPath);
+    // Another caller may have joined the queue while we waited for another companion's pass.
+    if (queuedPasses) return;
+    idleBlender = undefined;
+    const client = (idle.deps.client ?? (handoff => new PrinterMcpClient(handoff)))(idle.input.handoff);
+    await (idle.deps.stopBlender ?? stopOwnedBlender)(client);
+  } catch {
+    // The generated part remains usable even if the bridge disappeared during cleanup.
+    console.error('Counterpart could not close its idle Blender. Check the Blender MCP connection.');
+  } finally { await release?.(); }
 }
