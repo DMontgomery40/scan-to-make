@@ -19,6 +19,7 @@ parser.add_argument('--evidence', type=Path, required=True)
 args = parser.parse_args()
 os.environ['DEVELOPER_DIR'] = '/Applications/Xcode.app/Contents/Developer'
 args.evidence.mkdir(parents=True, exist_ok=True)
+subprocess.run([sys.executable, str(HERE / 'qr-scanner.py'), '--evidence', str(args.evidence / 'qr-scanner')], check=True)
 subprocess.run([sys.executable, str(HERE / 'retry.py'), '--evidence', str(args.evidence / 'retry')], check=True)
 subprocess.run([sys.executable, str(HERE / 'handheld.py'), '--evidence', str(args.evidence / 'handheld')], check=True)
 subprocess.run([sys.executable, str(HERE / 'depth-recorder.py'), '--evidence', str(args.evidence / 'depth-recorder')], check=True)

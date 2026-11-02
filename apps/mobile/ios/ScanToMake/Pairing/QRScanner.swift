@@ -7,6 +7,7 @@ import AVFoundation
 struct QRScanner: UIViewControllerRepresentable {
     var armed: Bool
     var found: (String) -> Void
+    var unavailable: () -> Void
 
     /// DataScanner needs a supported device with camera access; the Simulator has neither.
     @MainActor static var isSupported: Bool { DataScannerViewController.isSupported }
@@ -22,19 +23,42 @@ struct QRScanner: UIViewControllerRepresentable {
 
     func updateUIViewController(_ scanner: DataScannerViewController, context: Context) {
         context.coordinator.found = found
-        if armed, !scanner.isScanning, DataScannerViewController.isAvailable { try? scanner.startScanning() }
+        context.coordinator.unavailable = unavailable
+        context.coordinator.armed = armed
+        if armed, !scanner.isScanning {
+            guard DataScannerViewController.isAvailable else { context.coordinator.reportUnavailable(); return }
+            do { try scanner.startScanning() } catch { context.coordinator.reportUnavailable() }
+        }
         if !armed, scanner.isScanning { scanner.stopScanning() }
     }
 
     static func dismantleUIViewController(_ scanner: DataScannerViewController, coordinator: Coordinator) {
+        coordinator.dismantled = true
         if scanner.isScanning { scanner.stopScanning() }
     }
 
-    func makeCoordinator() -> Coordinator { Coordinator(found: found) }
+    func makeCoordinator() -> Coordinator { Coordinator(found: found, unavailable: unavailable) }
 
     @MainActor final class Coordinator: NSObject, DataScannerViewControllerDelegate {
         var found: (String) -> Void
-        init(found: @escaping (String) -> Void) { self.found = found }
+        var unavailable: () -> Void
+        var armed = false
+        var dismantled = false
+        private var failureReported = false
+        init(found: @escaping (String) -> Void, unavailable: @escaping () -> Void) {
+            self.found = found; self.unavailable = unavailable
+        }
+
+        func reportUnavailable() {
+            guard armed, !dismantled, !failureReported else { return }
+            failureReported = true
+            // A representable update must finish before its owner changes the view hierarchy.
+            DispatchQueue.main.async { [weak self] in
+                guard let self, !self.dismantled else { return }
+                guard self.armed else { self.failureReported = false; return }
+                self.unavailable()
+            }
+        }
 
         private func use(_ items: [RecognizedItem]) {
             for item in items {
@@ -43,6 +67,9 @@ struct QRScanner: UIViewControllerRepresentable {
         }
         func dataScanner(_ scanner: DataScannerViewController, didAdd addedItems: [RecognizedItem], allItems: [RecognizedItem]) { use(addedItems) }
         func dataScanner(_ scanner: DataScannerViewController, didTapOn item: RecognizedItem) { use([item]) }
+        func dataScanner(_ scanner: DataScannerViewController, becameUnavailableWithError error: DataScannerViewController.ScanningUnavailable) {
+            reportUnavailable()
+        }
     }
 }
 
