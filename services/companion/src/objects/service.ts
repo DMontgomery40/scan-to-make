@@ -1,6 +1,8 @@
 import {copyFile, mkdir, mkdtemp, open, readFile, rm, stat, writeFile} from 'node:fs/promises';
 import {createHash, randomUUID} from 'node:crypto';
 import {tmpdir} from 'node:os';
+import {execFile} from 'node:child_process';
+import {promisify} from 'node:util';
 import {basename, extname, isAbsolute, join} from 'node:path';
 import {DispatchedPrintError, PrinterMcpError, readPrintReport, routeArgs, sliceEstimate,
   type PrintProgress, type PendingElicitation, type PrinterHandoffConfig, type PrinterSelection, type PrinterSlicer, type PrintReport, type PrinterSession} from '@scan-to-make/printer-handoff';
@@ -9,7 +11,9 @@ import {PrintMonitorRunner, matchJob, milestonesFor, type EventDraft, type Monit
 import {CameraFrames, CameraUnavailableError, type CameraFrame} from '../printing/camera.js';
 import {sliceOverrides, settingsUnsupported} from '../printing/print-settings.js';
 import type {CompanionSettingsStore} from '../settings.js';
-import {PRINT_LOG, printEndFailure, projectTitle} from '../events/words.js';
+import {PRINT_LOG, printEndFailure, projectTitle, sizeText} from '../events/words.js';
+import {PassTimings, STAGE_DEFAULT_SEC, passEstimate, stageWords, type PassKind, type PassStage, type StageId} from '../touchup/stages.js';
+import type {DesignEngine} from '../touchup/invocation.js';
 import type {PrintHandoffServices} from '../print-handoff-http.js';
 import type {PlateVerdict} from './bedcheck.js';
 import type {TouchupInput} from '../touchup/touchup.js';
@@ -18,6 +22,19 @@ import {ObjectNotFoundError, ObjectStore, type ObjectPrintConfirmation, type Stm
 import {macReconstructRunner, type Reconstruct} from './reconstruct.js';
 import type {PrinterCatalog} from './printers.js';
 import type {PrinterDirectory, PublicDestination} from '../printing/directory.js';
+
+const STAGE_DEFAULTS = (kind: PassKind) => ({...STAGE_DEFAULT_SEC[kind]});
+
+/** Copies an Ask's picture as JPEG: PNG through macOS's sips; where there is no sips, the bytes as they are. */
+async function askPicture(source: string, target: string): Promise<void> {
+  const bytes = await readFile(source);
+  const png = bytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+  if (png && await stat('/usr/bin/sips').then(() => true, () => false)) {
+    await promisify(execFile)('/usr/bin/sips', ['-s', 'format', 'jpeg', source, '--out', target]);
+    return;
+  }
+  await writeFile(target, bytes);
+}
 
 /** How many of an object's photos go to one touch-up pass. More only costs time. */
 export const PHOTOS_PER_PASS = 24;
@@ -108,6 +125,10 @@ export interface ObjectServiceDeps {
   camera?: CameraFrames;
   /** Tests only. */
   monitorClock?: MonitorClock;
+  /** This Mac's real stage durations, for pass estimates. */
+  passTimings?: PassTimings;
+  /** A short title for a request ("Mic mount"), best effort; the worker names it otherwise. */
+  titleFor?: (request: string) => Promise<string | undefined>;
 }
 
 /** What the print sheet sends with Print (PRD §8.5). */
@@ -154,6 +175,17 @@ export function spreadPick<T>(items: T[], count: number): T[] {
 }
 
 /** The object lifecycle: inputs arrive, the touch-up runs by itself, and the result is ready to print. */
+/**
+ * PRD §8.9: a copy is cleaned up in Blender; a new design may use Fusion. Set at creation; otherwise a project
+ * with a scan (LiDAR or a handheld capture) is a copy, even with a request ("Copy this. Close up the bottom."),
+ * since the phone sends only the request; a request with photos alone is a new design.
+ */
+export function passKind(object: Pick<StmObject, 'kind' | 'scan' | 'capture' | 'instructions'>): PassKind {
+  if (object.kind) return object.kind;
+  if (object.scan || object.capture?.length) return 'copy';
+  return object.instructions?.trim() ? 'fit' : 'copy';
+}
+
 export class ObjectService {
   readonly #deps: ObjectServiceDeps;
   readonly #running = new Map<string, Promise<StmObject>>();
@@ -196,12 +228,19 @@ export class ObjectService {
     return this.#deps.settings.update(patch);
   }
 
-  create(instructions?: string) { return this.#deps.store.create(instructions).then(o => this.#changed(o)); }
-  async list() { return Promise.all((await this.#deps.store.list()).map(o => this.get(o.id))); }
+  create(instructions?: string, kind?: 'fit' | 'copy') { return this.#deps.store.create(instructions, kind).then(o => this.#changed(o)); }
+  async list() {
+    const objects = await Promise.all((await this.#deps.store.list()).map(o => this.get(o.id)));
+    // Projects from before titles get one, once and in the background, the first time they're listed.
+    // (A new project gets its title at its first pass, from the request as it is then.)
+    for (const object of objects) if (object.state !== 'new') this.#title(object, {backfill: true});
+    return objects;
+  }
   readonly #printerReports = new Map<string, {atMs: number; value: Promise<{state: string; job?: string; checkedAtMs: number; percent?: number; remainingMinutes?: number} | undefined>}>();
   readonly #estimates = new Map<string, {seconds?: number; grams?: number}>();
   async get(id: string): Promise<StmObject> {
     let object = await this.#deps.store.get(id);
+    if (object.state === 'touching-up') object = await this.#freshEstimate(object);
     if (!object.print) return object;
     // A watched print reads its monitor's last report instead of asking the printer again.
     if (object.print.live) {
@@ -453,17 +492,21 @@ export class ObjectService {
     if (object.state === 'touching-up' || object.state === 'printing') throw new InvalidStateError('Wait until the current step finishes.');
     if (!object.current && object.state !== 'failed') throw new InvalidStateError('There is no model to correct yet.');
     for (const path of photos) object = await this.#addFile(id, 'photos', path);
-    return this.#pass(object, {note: note.trim()});
+    // New photos sent with the request make it a late-photos pass.
+    return this.#pass(object, {note: note.trim(), trigger: photos.length ? 'late-photos' : 'changes'});
   }
 
-  answerCloseup(id: string, answer: {bestGuess?: boolean}): Promise<StmObject> { return this.#gate(id, () => this.#answerCloseup(id, answer)); }
-  async #answerCloseup(id: string, answer: {bestGuess?: boolean}): Promise<StmObject> {
+  /** Answers the open Ask: with a photo (uploaded first), Best guess, or the person's own words. */
+  answerCloseup(id: string, answer: {bestGuess?: boolean; text?: string}): Promise<StmObject> { return this.#gate(id, () => this.#answerCloseup(id, answer)); }
+  async #answerCloseup(id: string, answer: {bestGuess?: boolean; text?: string}): Promise<StmObject> {
     const object = await this.get(id);
     if (object.state !== 'needs-closeup') throw new InvalidStateError('No close-up was asked for.');
     // Carry on with what the asking pass was doing: a correction keeps its note and its model.
     const asked = object.passes.at(-1)?.note;
-    const parts = [asked, answer.bestGuess && !asked?.includes(BEST_GUESS_NOTE) ? BEST_GUESS_NOTE : undefined].filter(Boolean);
-    return this.#pass(object, parts.length ? {note: parts.join('\n')} : {});
+    const said = answer.text?.trim() ? `Answer to "${object.ask?.question ?? object.question?.closeup ?? 'your question'}": ${answer.text.trim()}` : undefined;
+    const parts = [asked, said, answer.bestGuess && !asked?.includes(BEST_GUESS_NOTE) ? BEST_GUESS_NOTE : undefined].filter(Boolean);
+    if (object.ask) await this.#deps.store.update(id, o => o.ask ? {...o, ask: {...o.ask, status: 'answered'}} : o);
+    return this.#pass(await this.get(id), {...(parts.length ? {note: parts.join('\n')} : {}), trigger: 'ask-answer'});
   }
 
   /** Deletes the object and its files. Not while a touch-up or print is running. */
@@ -908,7 +951,7 @@ export class ObjectService {
     return (await this.#running.get(id)) ?? this.get(id);
   }
 
-  async #pass(object: StmObject, opts: {note?: string}): Promise<StmObject> {
+  async #pass(object: StmObject, opts: {note?: string; trigger?: NonNullable<StmObject['passes'][number]['trigger']>}): Promise<StmObject> {
     await this.#requireCaptureCompletion(object);
     const store = this.#deps.store, dir = store.dir(object.id);
     const fromCurrent = opts.note !== undefined && object.current !== undefined;
@@ -917,13 +960,38 @@ export class ObjectService {
     const capturePhotos = (object.capture ?? []).map(name => join(dir, 'capture', name));
     const photos = spreadPick([...object.photos.map(name => join(dir, 'photos', name)), ...capturePhotos], PHOTOS_PER_PASS);
     const startedAtMs = Date.now();
+    // PRD §8.9: copies are cleaned up in Blender; a new design may use Fusion (the touch-up decides).
+    const kind: PassKind = passKind(object);
+    const plan: StageId[] = [...(build ? ['building' as const] : []), 'preparing', 'working', 'saving'];
+    let engine: DesignEngine = 'blender';
+    let typical = await this.#typical(kind, engine);
+    const first: PassStage = {id: plan[0]!, words: stageWords(plan[0]!, engine, kind), startedAtMs, typicalSec: typical[plan[0]!]};
     const running = await store.update(object.id, o => ({...o, state: 'touching-up', question: undefined, failure: undefined,
       ...(build ? {progress: 'Building the model from your photos.'} : {progress: undefined}),
-      passes: [...o.passes, {startedAtMs, ...(opts.note ? {note: opts.note} : {})}]}));
+      passes: [...o.passes, {startedAtMs, trigger: opts.trigger ?? 'new', stages: [first], estimate: passEstimate([first], plan, typical, startedAtMs),
+        ...(opts.note ? {note: opts.note} : {})}]}));
     this.#changed(running);
+    await this.#emit({id: randomUUID(), type: 'pass.started', projectId: object.id, data: {stage: first.words, estimateSec: passEstimate([first], plan, typical, startedAtMs).remainingSec}});
+    this.#title(running);
     const controller = new AbortController();
     this.#controllers.set(object.id, controller);
     let writing = Promise.resolve();
+    /** Moves the pass to its next stage: closes the current one, records its real time, re-estimates, announces it. */
+    const stage = (id: StageId, nextEngine: DesignEngine = engine) => {
+      writing = writing.then(async () => {
+        const now = Date.now();
+        if (nextEngine !== engine) { engine = nextEngine; typical = await this.#typical(kind, engine); }
+        const latest = (await store.get(object.id)).passes.find(p => p.startedAtMs === startedAtMs);
+        const previous = latest?.stages?.at(-1);
+        if (previous?.id === id) return;
+        if (previous && previous.endedAtMs === undefined) void this.#deps.passTimings?.record(kind, engine, previous.id, (now - previous.startedAtMs) / 1000).catch(() => undefined);
+        const next: PassStage = {id, words: stageWords(id, engine, kind), startedAtMs: now, typicalSec: typical[id]};
+        const stages = [...(latest?.stages ?? []).map(item => item.endedAtMs === undefined ? {...item, endedAtMs: now} : item), next];
+        const estimate = passEstimate(stages, plan, typical, now);
+        this.#changed(await store.update(object.id, o => ({...o, passes: o.passes.map(p => p.startedAtMs !== startedAtMs ? p : {...p, stages, estimate, engine})})));
+        await this.#emit({id: randomUUID(), type: 'pass.stage', projectId: object.id, data: {stage: next.words, estimateSec: estimate.remainingSec}});
+      }).catch(() => undefined);
+    };
     const onProgress: NonNullable<TouchupInput['onProgress']> = progress => {
       if (!progress.activity?.length) return;
       const entries = this.#activity([], progress.activity);
@@ -942,12 +1010,15 @@ export class ObjectService {
       if (build) scanName = await this.#build(object.id, dir, controller.signal);
       const scan = fromCurrent ? [join(dir, object.current!.model)] : scanName ? [join(dir, 'scan', scanName)] : [];
       const input: TouchupInput = {root: join(dir, 'passes'), objectId: 'pass', scan, photos, currentModel: fromCurrent, handoff: this.#deps.handoff, claudePath: this.#deps.claudePath,
+        kind, onStage: (id, chosen) => stage(id, chosen),
+        ...(fromCurrent && object.current?.engine === 'fusion' && object.current.design
+          ? {design: {f3d: join(dir, object.current.design.f3d), ...(object.current.design.parameters ? {parameters: join(dir, object.current.design.parameters)} : {})}} : {}),
         ...(object.instructions ? {instructions: object.instructions} : {}),
         ...(opts.note !== undefined ? {note: opts.note, ...(object.current?.summary ? {summary: object.current.summary} : {})} : {})};
       try { return await this.#deps.runTouchup({...input, signal: controller.signal, onProgress}); }
-      finally { await writing; }
+      finally { stage('saving'); await writing; }
     })()
-      .then(result => this.#finish(object.id, startedAtMs, result), error => this.#fail(object.id, startedAtMs, error))
+      .then(result => this.#finish(object.id, startedAtMs, result, kind), error => this.#fail(object.id, startedAtMs, error))
       .finally(() => { this.#running.delete(object.id); this.#controllers.delete(object.id); });
     this.#running.set(object.id, work);
     return running;
@@ -971,7 +1042,44 @@ export class ObjectService {
     return 'scan.usdz';
   }
 
-  async #finish(id: string, startedAtMs: number, result: TouchupResult & {passDir: string}): Promise<StmObject> {
+  /** A running pass's time left, recomputed at every read so it counts down (and never shows an expired estimate). */
+  async #freshEstimate(object: StmObject): Promise<StmObject> {
+    const pass = object.passes.at(-1);
+    if (!pass?.stages?.length || pass.endedAtMs !== undefined) return object;
+    const kind: PassKind = passKind(object);
+    const typical = {...await this.#typical(kind, pass.engine ?? 'blender')};
+    for (const stage of pass.stages) typical[stage.id] = stage.typicalSec;
+    const plan: StageId[] = [...(pass.stages.some(stage => stage.id === 'building') ? ['building' as const] : []), 'preparing', 'working', 'saving'];
+    const estimate = passEstimate(pass.stages, plan, typical, Date.now());
+    return {...object, passes: [...object.passes.slice(0, -1), {...pass, estimate}]};
+  }
+
+  async #typical(kind: PassKind, engine: DesignEngine) {
+    return this.#deps.passTimings ? this.#deps.passTimings.typical(kind, engine).catch(() => STAGE_DEFAULTS(kind)) : STAGE_DEFAULTS(kind);
+  }
+
+  readonly #titling = new Set<string>();
+  #backfills: Promise<unknown> = Promise.resolve();
+  /**
+   * A quick title for a request, if the project has none yet: at its first pass, or (backfill) when an older
+   * project is listed. Tried once per project per run; backfills run one at a time. Never holds anything up.
+   */
+  #title(object: StmObject, options: {backfill?: boolean} = {}): void {
+    const request = object.instructions?.trim(), titleFor = this.#deps.titleFor;
+    if (object.title || !request || !titleFor || this.#titling.has(object.id)) return;
+    this.#titling.add(object.id);
+    const save = async (title: string | undefined) => {
+      const clean = title?.replace(/[\u0000-\u001f\u007f"]/g, '').replace(/[.!]+$/, '').trim().slice(0, 40);
+      if (clean) this.#changed(await this.#deps.store.update(object.id, o => o.title ? o : {...o, title: clean}));
+    };
+    if (!options.backfill) { void titleFor(request).then(save).catch(() => undefined); return; }
+    this.#backfills = this.#backfills.then(async () => {
+      if ((await this.#deps.store.get(object.id).catch(() => undefined))?.title) return;
+      await save(await titleFor(request));
+    }).catch(() => undefined);
+  }
+
+  async #finish(id: string, startedAtMs: number, result: TouchupResult & {passDir: string; engine?: DesignEngine; note?: string}, kind: PassKind = 'copy'): Promise<StmObject> {
     const store = this.#deps.store, dir = store.dir(id);
     result = {...result,
       summary: result.summary === undefined ? undefined : this.#publicText(result.summary),
@@ -992,26 +1100,69 @@ export class ObjectService {
       const summary = result.status === 'unchanged' ? result.summary ?? 'Nothing needed changing.'
         : result.status === 'capped' ? `Stopped at the ${result.reason?.includes('time') ? 'time limit' : 'step limit'}; this is the last saved version.${result.summary ? ' ' + result.summary : ''}`
         : result.summary;
-      current = {model: join('current', 'model.stl'), renders, ...(sizeMm ? {sizeMm} : {}), ...(summary ? {summary} : {})};
+      const engine = result.engine ?? 'blender';
+      let design: {f3d: string; parameters?: string} | undefined;
+      if (engine === 'fusion' && result.design) {
+        await copyFile(result.design.f3d, join(currentDir, 'design.f3d'));
+        if (result.design.parameters) await copyFile(result.design.parameters, join(currentDir, 'parameters.json')).catch(() => undefined);
+        design = {f3d: join('current', 'design.f3d'), ...(result.design.parameters ? {parameters: join('current', 'parameters.json')} : {})};
+      }
+      current = {model: join('current', 'model.stl'), renders, ...(sizeMm ? {sizeMm} : {}), ...(summary ? {summary} : {}),
+        ...(result.changes?.length ? {changes: result.changes} : {}), engine, ...(design ? {design} : {})};
     }
+    const ask = result.status === 'needs_closeup' ? await this.#ask(id, result) : undefined;
     const state: StmObject['state'] = result.status === 'needs_closeup' ? 'needs-closeup'
       : current && result.status !== 'failed' ? 'ready' : 'failed';
+    const now = Date.now();
     const updated = await store.update(id, o => ({...o, state, progress: undefined,
       ...(current ? {current} : {}),
-      ...(state === 'needs-closeup' ? {question: {closeup: result.closeup ?? 'a part of the object'}} : {}),
+      ...(!o.title && result.title ? {title: result.title} : {}),
+      ...(o.kind ? {} : {kind}),
+      ...(ask ? {ask} : {}),
+      ...(state === 'needs-closeup' ? {question: {closeup: result.closeup ?? result.ask?.question ?? 'a part of the object'}} : {}),
       ...(state === 'failed' ? {failure: result.reason ?? 'The touch-up stopped without a model.'} : {}),
-      passes: o.passes.map(p => p.startedAtMs !== startedAtMs ? p : {...p, endedAtMs: Date.now(), status: result.status,
+      passes: o.passes.map(({estimate: _estimate, ...p}) => p.startedAtMs !== startedAtMs ? {...p, ...(_estimate ? {estimate: _estimate} : {})} : {...p, endedAtMs: now, status: result.status,
+        stages: p.stages?.map(item => item.endedAtMs === undefined ? {...item, endedAtMs: now} : item),
+        ...(result.engine ? {engine: result.engine} : {}), ...(result.note ? {engineNote: this.#publicText(result.note)} : {}),
         ...(state === 'failed' ? {activity: this.#activity(p.activity, [{atMs: Date.now(), kind: 'message', text: result.reason ?? 'The touch-up stopped without a model.'}])} : {}),
         ...(result.summary ? {summary: result.summary} : {}), seconds: result.stats.seconds,
         ...(result.stats.costUsd !== undefined ? {costUsd: result.stats.costUsd} : {}), dir: result.passDir})}));
+    const saving = updated.passes.find(p => p.startedAtMs === startedAtMs)?.stages?.find(item => item.id === 'saving');
+    if (saving?.endedAtMs !== undefined) void this.#deps.passTimings?.record(kind, result.engine ?? 'blender', 'saving', (saving.endedAtMs - saving.startedAtMs) / 1000).catch(() => undefined);
+    const size = sizeText(updated.current?.sizeMm);
+    if (state === 'ready') await this.#emit({id: randomUUID(), type: 'pass.ready', projectId: id, ...(size ? {detail: {size}} : {})});
+    else if (state === 'needs-closeup') await this.#emit({id: randomUUID(), type: 'pass.ask', projectId: id, ...(ask ? {data: {askId: ask.id}} : {}),
+      detail: {question: ask?.question ?? `Can you take a close-up of ${result.closeup ?? 'a part of the object'}?`}});
+    else await this.#emit({id: randomUUID(), type: 'pass.failed', projectId: id, detail: {reason: updated.failure ?? 'The touch-up stopped without a model.'}});
     return this.#changed(updated);
+  }
+
+  /** The structured Ask: one question, the picture it is about (copied into asks/), and the answers allowed. */
+  async #ask(id: string, result: TouchupResult & {passDir: string}): Promise<NonNullable<StmObject['ask']>> {
+    const askId = randomUUID();
+    const question = result.ask?.question ?? `Can you take a close-up of ${result.closeup ?? 'a part of the object'}?`;
+    let photo: string | undefined;
+    const name = result.ask?.photo;
+    if (name && /\.(png|jpe?g)$/i.test(name)) {
+      // Always asks/<id>.jpg (docs/protocols/objects-api.md): a PNG render is converted on the Mac.
+      const target = join('asks', `${askId}.jpg`);
+      for (const folder of ['photos', 'out']) {
+        const source = join(result.passDir, folder, name);
+        if (await mkdir(join(this.dir(id), 'asks'), {recursive: true}).then(() => askPicture(source, join(this.dir(id), target))).then(() => true, () => false)) { photo = target; break; }
+      }
+    }
+    return {id: askId, question: question.slice(0, 300), ...(photo ? {photo} : {}), ...(photo && result.ask?.region ? {region: result.ask.region} : {}),
+      answers: ['camera', 'photos', 'best-guess', 'text'], status: 'open', askedAtMs: Date.now()};
   }
 
   async #fail(id: string, startedAtMs: number, error: unknown): Promise<StmObject> {
     const message = this.#publicText(error instanceof Error ? error.message : String(error));
+    const now = Date.now();
     const updated = await this.#deps.store.update(id, o => ({...o, state: 'failed', failure: message, progress: undefined,
-      passes: o.passes.map(p => p.startedAtMs !== startedAtMs ? p : {...p, endedAtMs: Date.now(), status: 'failed',
-        activity: this.#activity(p.activity, [{atMs: Date.now(), kind: 'message', text: message}])})}));
+      passes: o.passes.map(({estimate: _estimate, ...p}) => p.startedAtMs !== startedAtMs ? {...p, ...(_estimate ? {estimate: _estimate} : {})} : {...p, endedAtMs: now, status: 'failed',
+        stages: p.stages?.map(item => item.endedAtMs === undefined ? {...item, endedAtMs: now} : item),
+        activity: this.#activity(p.activity, [{atMs: now, kind: 'message', text: message}])})}));
+    await this.#emit({id: randomUUID(), type: 'pass.failed', projectId: id, detail: {reason: message}});
     return this.#changed(updated);
   }
 

@@ -1,7 +1,10 @@
 import {randomUUID} from 'node:crypto';
 import {mkdir, readdir, readFile, rename, rm, writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
-import type {TouchupActivity} from '../touchup/runner.js';
+import type {TouchupActivity, TouchupChange} from '../touchup/runner.js';
+import type {PassStage} from '../touchup/stages.js';
+import type {DesignEngine} from '../touchup/invocation.js';
+import type {Ask} from '@scan-to-make/contracts/counterpart';
 import type {PrintLive, PrintMonitor, PrintSettings} from '@scan-to-make/contracts/counterpart';
 
 /** `sent`: the printer accepted the print, but Counterpart can't follow it to the end (no evidence it printed). */
@@ -26,6 +29,15 @@ export interface ObjectPass {
   dir?: string;
   /** The most recent public worker messages and tool names, in stream order. */
   activity?: TouchupActivity[];
+  /** What started it: a new project, Ask for changes, a late photo, an answered Ask. */
+  trigger?: 'new' | 'changes' | 'late-photos' | 'ask-answer';
+  /** Stages with real start and end times and this Mac's typical duration for each (PRD §4). */
+  stages?: PassStage[];
+  /** While it runs: time left from the stages' typical durations. */
+  estimate?: {remainingSec: number; endsAtMs: number};
+  engine?: DesignEngine;
+  /** Why a design pass used Blender when Fusion was wanted. */
+  engineNote?: string;
 }
 
 /** One thing the user scanned or asked to have made, as the phone and the Mac app both show it. */
@@ -37,6 +49,12 @@ export interface StmObject {
   /** A configured destination id; process settings and credentials stay in the companion. */
   printerDestinationId?: string;
   state: ObjectState;
+  /** The short generated title ("Mic mount"). */
+  title?: string;
+  /** Make something that fits, or copy an object (PRD §1). */
+  kind?: 'fit' | 'copy';
+  /** The Mac's open (or last) question, with its picture and allowed answers (PRD §4 Ask). */
+  ask?: Ask;
   /** File name under scan/. */
   scan?: string;
   /** File names under photos/, in upload order. */
@@ -50,7 +68,12 @@ export interface StmObject {
   /** What the Mac is doing right now, in words, while it is longer than a moment (building a handheld scan). */
   progress?: string;
   passes: ObjectPass[];
-  current?: {model: string; renders: string[]; sizeMm?: [number, number, number]; summary?: string};
+  current?: {model: string; renders: string[]; sizeMm?: [number, number, number]; summary?: string;
+    /** What changed, each tagged (PRD §4 Result). */
+    changes?: TouchupChange[];
+    engine?: DesignEngine;
+    /** A Fusion pass keeps its parametric design for the next "Ask for changes" (PRD §8.9). */
+    design?: {f3d: string; parameters?: string}};
   question?: {closeup: string};
   /** Set while a print waits for the user: something is on the plate, or the printer has no camera. */
   plate?: {item?: string; noCamera?: boolean; photo?: boolean};
@@ -96,10 +119,10 @@ export class ObjectStore {
     return join(this.#root, id);
   }
 
-  async create(instructions?: string): Promise<StmObject> {
+  async create(instructions?: string, kind?: 'fit' | 'copy'): Promise<StmObject> {
     const now = Date.now();
     const object: StmObject = {id: randomUUID(), createdAtMs: now, updatedAtMs: now, state: 'new', photos: [], passes: [],
-      ...(instructions?.trim() ? {instructions: instructions.trim()} : {})};
+      ...(instructions?.trim() ? {instructions: instructions.trim()} : {}), ...(kind ? {kind} : {})};
     await mkdir(this.dir(object.id), {recursive: true});
     await this.#write(object);
     return object;

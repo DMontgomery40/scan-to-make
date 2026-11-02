@@ -259,7 +259,7 @@ export const AskSchema = z.strictObject({
   id: uuid,
   question: text(300),
   /** Relative to the project's directory; served at GET /v1/objects/<id>/asks/<askId>.jpg. */
-  photo: z.string().regex(/^asks\/[0-9a-f-]{36}\.(jpg|png)$/).optional(),
+  photo: z.string().regex(/^asks\/[0-9a-f-]{36}\.jpg$/).optional(),
   /** The region to highlight on `photo`, as fractions of its width and height (origin top-left). */
   region: z.strictObject({ x: z.number().min(0).max(1), y: z.number().min(0).max(1), width: z.number().min(0).max(1), height: z.number().min(0).max(1) }).optional(),
   answers: z.array(z.enum(['camera', 'photos', 'best-guess', 'text'])).min(1).max(4),

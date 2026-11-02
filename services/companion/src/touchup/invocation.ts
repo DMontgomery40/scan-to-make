@@ -18,13 +18,35 @@ export const TOUCHUP_RESULT_SCHEMA = {
     status: {enum: ['done', 'needs_closeup', 'failed']},
     closeup: {type: 'string', description: 'What to photograph, in a few plain words'},
     summary: {type: 'string', description: 'What you changed, in one or two plain sentences the person will read: no file names, tool or Blender details. When status is failed: what went wrong, in one sentence.'},
+    title: {type: 'string', maxLength: 40, description: 'A short name for the thing, two to four words, like "Mic mount" or "Crochet potato"'},
+    changes: {type: 'array', maxItems: 12, description: 'What changed, one short line each, for the person to check',
+      items: {type: 'object', additionalProperties: false, required: ['tag', 'text'], properties: {
+        tag: {enum: ['added', 'changed', 'assumed', 'estimated'], description: 'added: new geometry; changed: altered geometry; assumed: a choice made without evidence; estimated: a size not measured or published'},
+        text: {type: 'string', maxLength: 200},
+        toleranceMm: {type: 'number', minimum: 0, description: 'For estimated sizes: plus or minus this many millimetres'},
+      }}},
+    ask: {type: 'object', additionalProperties: false, required: ['question'], description: 'When status is needs_closeup: the one question, and where to look',
+      properties: {
+        question: {type: 'string', maxLength: 200, description: 'One plain question, like "Can you take a close-up of the clip on the left side?"'},
+        photo: {type: 'string', description: 'The file name of one supplied photo or one of your renders in out/ that shows the region'},
+        region: {type: 'object', additionalProperties: false, required: ['x', 'y', 'width', 'height'], description: 'The region on that photo, as fractions of its width and height from the top-left',
+          properties: {x: {type: 'number', minimum: 0, maximum: 1}, y: {type: 'number', minimum: 0, maximum: 1}, width: {type: 'number', minimum: 0, maximum: 1}, height: {type: 'number', minimum: 0, maximum: 1}}},
+      }},
   },
 } as const;
 
-export const TOUCHUP_SYSTEM_RULES = `You are making a useful 3D object for a person. Understand what they want it to do, the things it must fit, and how they will assemble and use it. Deliver a complete model that answers that request.
-- Reach Blender only through the printer MCP's blender_mcp_* tools. Start in the empty scene you are given, and work only with objects in the current scene (bpy.context.scene.objects).
+/** The design engine for a pass (PRD §8.9): Blender always for copies; Fusion for new designs when it's connected. */
+export type DesignEngine = 'blender' | 'fusion';
+
+const FUSION_RULES = `- Design it in Autodesk Fusion through the printer MCP's fusion_mcp_* tools: fusion_mcp_call reaches Fusion's own tools (create_sketch, extrude, revolve, fillet, shell, boolean_operation, create_parameter, set_parameter, get_parameters, check_interference, …). A new parametric design is open.
+- Make every functional dimension a named user parameter, so a later change is one set_parameter.
+- When the design is finished, call fusion_mcp_export with output_dir set to the output folder and name "touched": it writes touched.stl, touched.f3d and touched.parameters.json. Use body_name when the design has more than one body.
+- If you can, save clear PNG views of the design to the output folder, named so the clearest overall view sorts first.`;
+
+const SYSTEM_RULES_TEMPLATE = `You are making a useful 3D object for a person. Understand what they want it to do, the things it must fit, and how they will assemble and use it. Deliver a complete model that answers that request.
+- ENGINE_RULES
 - Read every supplied reference photo and the user's request before modeling. Identify the functional interfaces: what holds what, contact surfaces, clearances, access, and how the part attaches without obstructing the real objects.
-- For a new design, construct the complete functional geometry using Blender through MCP. Procedural modeling, profiles, booleans, curves, modifiers and multiple iterations are available. A collection of rough primitives is a starting sketch, not a finished mount, clip, bracket or enclosure.
+- For a new design, construct the complete functional geometry ENGINE_NAME. Procedural modeling, profiles, booleans, curves, modifiers and multiple iterations are available. A collection of rough primitives is a starting sketch, not a finished mount, clip, bracket or enclosure.
 - For a captured object, fix defects supported by the photos with targeted edits: raise features that are missing or too faint, and flatten or smooth surfaces the photos show are flat or smooth. Keep real surface detail the photos confirm, including texture, stitches and edges. Use Blender's existing sculpt and modifier tools for that cleanup.
 - Use measured or published dimensions when available. Distinguish measurements from estimates. Make reasonable choices for noncritical details; ask for a close-up or measurement when a missing interface dimension prevents a useful fit.
 - Don't do print preparation: no flat bases, re-orientation or supports.
@@ -91,7 +113,17 @@ function prompt(pass: TouchupPass, instructions?: string, note?: string, summary
 }
 
 /** The lean, isolated `claude -p` call for one touch-up pass. Writes the pass's MCP config file. */
-export function buildTouchupInvocation(input: {pass: TouchupPass; printer: PrinterMcpProcess; claudePath: string; instructions?: string; note?: string; summary?: string; currentModel?: boolean; sourceEnv?: NodeJS.ProcessEnv}): TouchupInvocation {
+export const BLENDER_RULES = "- Reach Blender only through the printer MCP's blender_mcp_* tools. Start in the empty scene you are given, and work only with objects in the current scene (bpy.context.scene.objects).";
+/** The system rules for an engine. */
+export function systemRules(engine: DesignEngine = 'blender'): string {
+  return SYSTEM_RULES_TEMPLATE.replace('- ENGINE_RULES', engine === 'fusion' ? FUSION_RULES : BLENDER_RULES)
+    .replace('ENGINE_NAME', engine === 'fusion' ? 'in Fusion through the printer MCP (only its fusion_mcp_* tools)' : 'using Blender through MCP');
+}
+/** The Blender rules, as every copy and every Blender design pass gets them. */
+export const TOUCHUP_SYSTEM_RULES = systemRules('blender');
+
+export function buildTouchupInvocation(input: {pass: TouchupPass; printer: PrinterMcpProcess; claudePath: string; instructions?: string; note?: string; summary?: string; currentModel?: boolean; sourceEnv?: NodeJS.ProcessEnv;
+  engine?: DesignEngine; design?: {f3d: string; parameters?: string}}): TouchupInvocation {
   const {pass} = input;
   const mcpConfig = {mcpServers: {printer: printerServer(input.printer)}};
   const mcpConfigPath = join(pass.dir, 'mcp.json');
@@ -107,11 +139,12 @@ export function buildTouchupInvocation(input: {pass: TouchupPass; printer: Print
     '--disable-slash-commands',
     '--setting-sources', '',
     '--settings', '{"disableAllHooks":true}',
-    '--append-system-prompt', TOUCHUP_SYSTEM_RULES,
+    '--append-system-prompt', systemRules(input.engine),
     '--json-schema', JSON.stringify(TOUCHUP_RESULT_SCHEMA),
     '--output-format', 'stream-json',
     '--verbose',
-    prompt(pass, input.instructions, input.note, input.summary, input.currentModel),
+    prompt(pass, input.instructions, input.note, input.summary, input.currentModel) + (input.engine === 'fusion' && input.design
+      ? `\n\nThe current design is a parametric Fusion design: ${input.design.f3d}${input.design.parameters ? ` (its parameters: ${input.design.parameters})` : ''}. Open it in Fusion and change its parameters rather than the mesh.` : ''),
   ];
   return {command: input.claudePath, args, env: isolatedClaudeEnv(input.sourceEnv ?? process.env), cwd: pass.dir, mcpConfigPath, mcpConfig};
 }

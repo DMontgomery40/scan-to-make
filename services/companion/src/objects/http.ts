@@ -5,7 +5,7 @@ import type {RemoteScope} from '../remote-auth.js';
 import {InvalidCaptureManifestError, InvalidStateError, type ObjectService} from './service.js';
 import {CameraUnavailableError, type CameraFrame} from '../printing/camera.js';
 import {MilestonesSchema, type ObjectStatus} from '@scan-to-make/contracts/counterpart';
-import {objectStatus} from '../events/words.js';
+import {objectStatus, projectTitle} from '../events/words.js';
 import {ObjectNotFoundError, type ObjectPass, type StmObject} from './store.js';
 import {RECONSTRUCTION_FAILED} from './reconstruct.js';
 import {parameters} from '../local-control-protocol.js';
@@ -13,7 +13,7 @@ import {parameters} from '../local-control-protocol.js';
 const READ: RemoteScope = 'projects:read', WRITE: RemoteScope = 'captures:import', PRINT: RemoteScope = 'printer-handoff:use';
 const MAX_SCAN = 64 * 1024 * 1024, MAX_PHOTO = 25 * 1024 * 1024, MAX_JSON = 16 * 1024;
 const MAX_DEPTH = 8 * 1024 * 1024;
-const PATH = /^\/v1\/objects(?:\/([0-9a-f-]{36})(?:\/(scan|photos|capture|capture-depth|start|corrections|closeup|print|print\/pause|print\/resume|print\/cancel|estimate|camera\.jpg|prints\/[0-9a-f-]{36}\/frames\/[0-9a-f-]{36}\.jpg|filaments|print-confirmation|printer|plate\.jpg|plate|model\.stl|passes\/[^/]+\/activity|(?:renders|photos|capture)\/[^/]+))?)?$/;
+const PATH = /^\/v1\/objects(?:\/([0-9a-f-]{36})(?:\/(scan|photos|capture|capture-depth|start|corrections|closeup|print|print\/pause|print\/resume|print\/cancel|estimate|camera\.jpg|prints\/[0-9a-f-]{36}\/frames\/[0-9a-f-]{36}\.jpg|asks\/[0-9a-f-]{36}\.jpg|filaments|print-confirmation|printer|plate\.jpg|plate|model\.stl|passes\/[^/]+\/activity|(?:renders|photos|capture)\/[^/]+))?)?$/;
 const PRINTER_CAMERA = /^\/v1\/objects\/printers\/([A-Za-z0-9_-]{1,256})\/camera\.jpg$/;
 const SETTINGS: RemoteScope = 'projects:write';
 
@@ -37,7 +37,7 @@ async function json<T>(request: IncomingMessage, limit = MAX_JSON): Promise<T> {
   try { return JSON.parse(bytes.toString('utf8')) as T; } catch { throw new HttpFailure(400, 'invalid-request'); }
 }
 
-export type PublicObject = Omit<StmObject, 'passes'> & {status: ObjectStatus; passes: (Omit<ObjectPass, 'dir' | 'activity'> & {activityCount: number})[]};
+export type PublicObject = Omit<StmObject, 'passes' | 'title'> & {title: string; status: ObjectStatus; passes: (Omit<ObjectPass, 'dir' | 'activity'> & {activityCount: number})[]};
 
 // Earlier generic failures asserted a capture mistake without evidence. Correct the displayed
 // advice for those retained attempts too, leaving their original stored records intact.
@@ -49,7 +49,8 @@ function currentFailureText(message: string | undefined): string | undefined {
 /** Project metadata stays small; retained activity is read one pass at a time. */
 export function publicObject(object: StmObject): PublicObject {
   const failure = currentFailureText(object.failure);
-  return {...object, failure, status: objectStatus({...object, ...(failure !== undefined ? {failure} : {})}, object.updatedAtMs),
+  // Never null: until a title is generated (or backfilled for an older project), the request's first words.
+  return {...object, title: projectTitle(object), failure, status: objectStatus({...object, ...(failure !== undefined ? {failure} : {})}, object.updatedAtMs),
     passes: object.passes.map(({dir: _dir, activity, ...pass}) => ({...pass,
       summary: currentFailureText(pass.summary), activityCount: activity?.length ?? 0}))};
 }
@@ -103,9 +104,10 @@ export function createObjectRoutes(service: ObjectService) {
           if (method === 'GET') { await authorize(READ); return send(response, 200, {objects: (await service.list()).map(publicObject)}); }
           if (method === 'POST') {
             await authorize(WRITE);
-            const {instructions} = await json<{instructions?: unknown}>(request);
+            const {instructions, kind} = await json<{instructions?: unknown; kind?: unknown}>(request);
             if (instructions !== undefined && (typeof instructions !== 'string' || instructions.length > 8000)) throw new HttpFailure(400, 'invalid-request');
-            return send(response, 201, {object: publicObject(await service.create(instructions))});
+            if (kind !== undefined && kind !== 'fit' && kind !== 'copy') throw new HttpFailure(400, 'invalid-request');
+            return send(response, 201, {object: publicObject(await service.create(instructions, kind))});
           }
           throw new HttpFailure(405, 'method-not-allowed');
         }
@@ -154,6 +156,21 @@ export function createObjectRoutes(service: ObjectService) {
           response.setHeader('content-type', type);
           response.setHeader('x-content-type-options', 'nosniff');
           response.setHeader('cache-control', 'private, no-store');
+          response.end(bytes);
+          return;
+        }
+        if (action.startsWith('asks/')) {
+          if (method !== 'GET') throw new HttpFailure(405, 'method-not-allowed');
+          await authorize(READ);
+          const object = await service.get(id);
+          // The Ask's own picture only, never another file under the project.
+          if (!object.ask?.photo || object.ask.photo !== action) throw new HttpFailure(404, 'not-found');
+          const bytes = await readFile(join(service.dir(id), action)).catch(() => { throw new HttpFailure(404, 'not-found'); });
+          response.statusCode = 200;
+          // JPEG, except on a host without sips, where a PNG render is passed on as it is.
+          response.setHeader('content-type', bytes[0] === 0x89 && bytes[1] === 0x50 ? 'image/png' : 'image/jpeg');
+          response.setHeader('cache-control', 'private, no-store');
+          response.setHeader('x-content-type-options', 'nosniff');
           response.end(bytes);
           return;
         }
@@ -254,7 +271,12 @@ export function createObjectRoutes(service: ObjectService) {
             object = await service.correct(id, note);
             break;
           }
-          case 'closeup': object = await service.answerCloseup(id, {bestGuess: (await json<{bestGuess?: unknown}>(request)).bestGuess === true}); break;
+          case 'closeup': {
+            const input = await json<{bestGuess?: unknown; text?: unknown}>(request);
+            if (input.text !== undefined && (typeof input.text !== 'string' || !input.text.trim() || input.text.length > 2000)) throw new HttpFailure(400, 'invalid-request');
+            object = await service.answerCloseup(id, {bestGuess: input.bestGuess === true, ...(typeof input.text === 'string' ? {text: input.text} : {})});
+            break;
+          }
           case 'print': {
             const input = await json<unknown>(request);
             if (!input || typeof input !== 'object' || Array.isArray(input)) throw new HttpFailure(400, 'invalid-request');

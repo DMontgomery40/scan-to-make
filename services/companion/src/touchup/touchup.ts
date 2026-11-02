@@ -6,7 +6,8 @@ import {dirname, join} from 'node:path';
 import {PrinterMcpClient, type PrinterHandoffConfig} from '@scan-to-make/printer-handoff';
 import {defaultBlenderLaunch, ensureBlenderMcp, resetBlenderScene} from './blender.js';
 import {prepareTouchupPass, type TouchupPass} from './inputs.js';
-import {buildTouchupInvocation, type TouchupInvocation} from './invocation.js';
+import {buildTouchupInvocation, type DesignEngine, type TouchupInvocation} from './invocation.js';
+import {toolErrorText} from './blender.js';
 import {runTouchupWorker, type TouchupProgress, type TouchupResult} from './runner.js';
 
 export interface TouchupInput {
@@ -26,7 +27,16 @@ export interface TouchupInput {
   currentModel?: boolean;
   onProgress?: (progress: TouchupProgress) => void;
   signal?: AbortSignal;
+  /** "fit" (make something that fits) may design in Fusion; "copy" always uses Blender (PRD §8.9). */
+  kind?: 'fit' | 'copy';
+  /** The previous Fusion design, so a change starts from its parameters. */
+  design?: {f3d: string; parameters?: string};
+  /** Stage changes: getting the engine ready, then the worker. */
+  onStage?: (stage: 'preparing' | 'working', engine: DesignEngine) => void;
 }
+
+/** Which engine ran, and why it isn't Fusion when Fusion was wanted. */
+export interface EngineChoice {engine: DesignEngine; note?: string}
 export interface TouchupDeps {
   ensureBlender?: () => Promise<unknown>;
   resetScene?: (client: ReturnType<NonNullable<TouchupDeps['client']>>, signal?: AbortSignal) => Promise<void>;
@@ -34,11 +44,14 @@ export interface TouchupDeps {
   prepare?: typeof prepareTouchupPass;
   run?: (inv: TouchupInvocation, pass: TouchupPass, opts: Parameters<typeof runTouchupWorker>[2]) => Promise<TouchupResult>;
   lockPath?: string;
+  fusionLockPath?: string;
 }
 
 /** One Blender, one scene: touch-ups run strictly one at a time, within this process (queue) and across processes (lock file). */
 let queue: Promise<unknown> = Promise.resolve();
 export const BLENDER_LOCK_PATH = join(homedir(), 'Library', 'Caches', 'scan-to-make', 'blender.lock');
+/** One open Fusion document: design passes take turns across companion processes too. */
+export const FUSION_LOCK_PATH = join(homedir(), 'Library', 'Caches', 'scan-to-make', 'fusion.lock');
 
 function alive(pid: number): boolean {
   try { process.kill(pid, 0); return true; } catch (error) { return (error as NodeJS.ErrnoException).code === 'EPERM'; }
@@ -84,22 +97,67 @@ async function stlSha256(scan: string[]): Promise<string | undefined> {
   return createHash('sha256').update(await readFile(scan[0]!)).digest('hex');
 }
 
-async function touchUp(input: TouchupInput, deps: TouchupDeps): Promise<TouchupResult & {passDir: string}> {
+/**
+ * PRD §8.9: a copy is cleaned up in Blender. A new design uses Fusion when the
+ * printer MCP's bridge reports it connected (after `launch: true`) and a new
+ * design opens; otherwise Blender, with the reason recorded.
+ */
+export async function chooseEngine(input: Pick<TouchupInput, 'handoff' | 'kind' | 'signal'>, deps: Pick<TouchupDeps, 'client'> = {}): Promise<EngineChoice> {
+  if (input.kind !== 'fit') return {engine: 'blender'};
+  const client = (deps.client ?? (handoff => new PrinterMcpClient(handoff)))(input.handoff);
+  try {
+    await client.connect(input.signal);
+    if (!client.hasTool('fusion_mcp_status')) return {engine: 'blender'};
+    const status = await client.callTool('fusion_mcp_status', {launch: true, timeout_ms: 90_000}, {signal: input.signal, timeoutMs: 120_000});
+    if (status.isError) return {engine: 'blender', note: `Fusion isn't reachable: ${toolErrorText(status).slice(0, 200)}`};
+    const value = JSON.parse((status.content ?? []).flatMap(item => item.type === 'text' ? [item.text] : []).join('') || '{}') as {connected?: unknown; configured?: unknown; error?: unknown};
+    if (value.configured === false) return {engine: 'blender'};
+    if (value.connected !== true) return {engine: 'blender', note: `Fusion isn't connected${typeof value.error === 'string' && value.error ? `: ${value.error.slice(0, 200)}` : ''}.`};
+    if (!client.hasTool('fusion_mcp_new_design')) return {engine: 'blender', note: "This printer MCP can't open a new Fusion design."};
+    // faust-machines/fusion360-mcp-server#12: opening a design can fail with none open.
+    const opened = await client.callTool('fusion_mcp_new_design', {}, {signal: input.signal, timeoutMs: 120_000});
+    if (opened.isError) return {engine: 'blender', note: `Fusion couldn't open a new design: ${toolErrorText(opened).slice(0, 200)}`};
+    return {engine: 'fusion'};
+  } catch (error) {
+    if (input.signal?.aborted) throw error;
+    return {engine: 'blender', note: `Fusion isn't reachable: ${error instanceof Error ? error.message.slice(0, 200) : String(error).slice(0, 200)}`};
+  } finally {
+    await client.close().catch(() => undefined);
+  }
+}
+
+async function touchUp(input: TouchupInput, deps: TouchupDeps): Promise<TouchupResult & {passDir: string} & EngineChoice> {
+  input.onStage?.('preparing', 'blender');
+  // A design may open a new Fusion document: hold Fusion from that call to the end of the worker.
+  const releaseFusion = input.kind === 'fit' ? await acquireBlenderLock(deps.fusionLockPath ?? FUSION_LOCK_PATH) : undefined;
+  let choice: EngineChoice;
+  try { choice = await chooseEngine(input, deps); }
+  catch (error) { await releaseFusion?.(); throw error; }
+  // Fusion passes don't touch Blender: no Blender lock, no launch, no scene reset.
+  if (choice.engine === 'fusion') {
+    try { return {...await touchUpLocked(input, deps, choice), ...choice}; }
+    finally { await releaseFusion?.(); }
+  }
+  await releaseFusion?.();
   const release = await acquireBlenderLock(deps.lockPath);
-  try { return await touchUpLocked(input, deps); }
+  try { return {...await touchUpLocked(input, deps, choice), ...choice}; }
   finally { await release(); }
 }
 
-async function touchUpLocked(input: TouchupInput, deps: TouchupDeps): Promise<TouchupResult & {passDir: string}> {
-  await (deps.ensureBlender ?? (() => ensureBlenderMcp({launch: defaultBlenderLaunch()})))();
-  const client = (deps.client ?? (handoff => new PrinterMcpClient(handoff)))(input.handoff);
-  await (deps.resetScene ?? resetBlenderScene)(client, input.signal);
+async function touchUpLocked(input: TouchupInput, deps: TouchupDeps, choice: EngineChoice): Promise<TouchupResult & {passDir: string}> {
+  if (choice.engine === 'blender') {
+    await (deps.ensureBlender ?? (() => ensureBlenderMcp({launch: defaultBlenderLaunch()})))();
+    const client = (deps.client ?? (handoff => new PrinterMcpClient(handoff)))(input.handoff);
+    await (deps.resetScene ?? resetBlenderScene)(client, input.signal);
+  }
   const pass = await (deps.prepare ?? prepareTouchupPass)({root: input.root, objectId: input.objectId, scan: input.scan, photos: input.photos,
     requirePhotos: !(input.instructions?.trim() || input.note?.trim())});
   // Older CLI callers use a note plus a single STL for a revision. The object
   // service supplies the explicit flag, including false for failed first passes.
   const currentModel = input.currentModel ?? (input.note !== undefined && input.scan.length === 1 && input.scan[0]!.toLowerCase().endsWith('.stl'));
-  const inv = buildTouchupInvocation({pass, printer: input.handoff.process, claudePath: input.claudePath, currentModel,
+  input.onStage?.('working', choice.engine);
+  const inv = buildTouchupInvocation({pass, printer: input.handoff.process, claudePath: input.claudePath, currentModel, engine: choice.engine,
+    ...(choice.engine === 'fusion' && input.design ? {design: input.design} : {}),
     ...(input.instructions !== undefined ? {instructions: input.instructions} : {}),
     ...(input.note !== undefined ? {note: input.note} : {}), ...(input.summary !== undefined ? {summary: input.summary} : {})});
   const inputStlSha256 = await stlSha256(input.scan);
@@ -112,7 +170,7 @@ async function touchUpLocked(input: TouchupInput, deps: TouchupDeps): Promise<To
 }
 
 /** Touches up one scan pass through the user's printer MCP's Blender bridge. */
-export function runTouchup(input: TouchupInput, deps: TouchupDeps = {}): Promise<TouchupResult & {passDir: string}> {
+export function runTouchup(input: TouchupInput, deps: TouchupDeps = {}): Promise<TouchupResult & {passDir: string} & Partial<EngineChoice>> {
   const next = queue.then(() => touchUp(input, deps));
   queue = next.catch(() => undefined);
   return next;
