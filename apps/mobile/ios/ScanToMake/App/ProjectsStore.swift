@@ -64,14 +64,17 @@ import CounterpartKit
 
     var anyRunning: Bool { projects.contains { words($0).busy } || !sending.isEmpty }
 
+    private var reads = ProjectReads()
+
     // MARK: Reading
 
     func load() async {
         do {
+            let ticket = reads.start()
             let latest = try await mac.list()
             guard !Task.isCancelled else { return }
-            projects = latest; error = nil; reachable = true
-            for project in latest where queuedNotes[project.id] != nil { sendQueuedNote(project) }
+            projects = reads.merge(latest, ticket: ticket, current: projects); error = nil; reachable = true
+            for project in projects where queuedNotes[project.id] != nil { sendQueuedNote(project) }
         } catch let failure as CompanionError {
             guard !Task.isCancelled, failure.code != "cancelled" else { return }
             error = failure
@@ -82,7 +85,8 @@ import CounterpartKit
     }
 
     func reload(_ id: String) async {
-        if let latest = try? await mac.get(id) { replace(latest) }
+        let ticket = reads.start()
+        if let latest = try? await mac.get(id), reads.accept(id, ticket: ticket) { show(latest) }
     }
 
     /// The Mac keeps Project Settings (PRD §5.4): status, Did it fit?, Done.
@@ -116,6 +120,11 @@ import CounterpartKit
     }
 
     func replace(_ project: Project) {
+        _ = reads.accept(project.id, ticket: reads.start())
+        show(project)
+    }
+
+    private func show(_ project: Project) {
         if let index = projects.firstIndex(where: { $0.id == project.id }) { projects[index] = project } else { projects.insert(project, at: 0) }
         sendQueuedNote(project)
     }
@@ -137,10 +146,11 @@ import CounterpartKit
         }
     }
     private var correcting: Set<String> = []
-    func remove(_ id: String) { projects.removeAll { $0.id == id } }
+    func remove(_ id: String) { reads.remove(id); projects.removeAll { $0.id == id } }
 
     /// Clears everything read from the previous Mac.
     func reset() {
+        reads.reset()
         projects = []; loaded = false; error = nil; catalog = nil; printerProblem = nil; reachable = nil; events = nil; spools = [:]; macCapabilities = []; mcpUpdates = [:]
         sendFailures = [:]
     }
