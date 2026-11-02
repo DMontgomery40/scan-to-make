@@ -8,6 +8,7 @@ import CounterpartKit
     let nearby: NearbyPairing
     let projects: ProjectsStore
     let cloud = MobileCloud()
+    let activities = MobileActivities()
 
     /// Nil until the stored pairing has been read once.
     private(set) var status: PairingStatus?
