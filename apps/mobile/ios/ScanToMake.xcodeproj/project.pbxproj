@@ -74,6 +74,7 @@
 		AC0A2C5E26F46ADB470C83F8 /* PrintStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = 510069BB85EC1645E845D872 /* PrintStatus.swift */; };
 		AD50A761FCB76CF9CC0C29AE /* GuidedObjectCapture.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 9D2907A997F1327C99EDBFE1 /* GuidedObjectCapture.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		B15E942B8EB2B262DE6FADC9 /* ScanTutorial-iPad-Area.mp4 in Resources */ = {isa = PBXBuildFile; fileRef = 72D780A8AF2666F5A12F293C /* ScanTutorial-iPad-Area.mp4 */; };
+		B1E297636604AF846BD0CF87 /* ConversationBubble.swift in Sources */ = {isa = PBXBuildFile; fileRef = 70A7D0DBA9EE3A73FD25D09F /* ConversationBubble.swift */; };
 		B595B83E2CFD8903E41B6A11 /* ScanPasses-iPhone-FixedHeight-1.mp4 in Resources */ = {isa = PBXBuildFile; fileRef = F011665A66F3AC69F266FC94 /* ScanPasses-iPhone-FixedHeight-1.mp4 */; };
 		B8BF4A410E764E9DE5970D5D /* AppDataModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F75EABD59D72AFE6318BE2E8 /* AppDataModel.swift */; };
 		BA0F02ADB0934148886ED85D /* CounterpartKit in Frameworks */ = {isa = PBXBuildFile; productRef = 9C3781E485F9980822ADA4B0 /* CounterpartKit */; };
@@ -202,6 +203,7 @@
 		668B7EE5735002D15D701BD0 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
 		6A063F0AF1467023BC266CD3 /* QRScanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QRScanner.swift; sourceTree = "<group>"; };
 		6E83FA80CCD9E3C6EC327839 /* PrintingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrintingView.swift; sourceTree = "<group>"; };
+		70A7D0DBA9EE3A73FD25D09F /* ConversationBubble.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationBubble.swift; sourceTree = "<group>"; };
 		72D780A8AF2666F5A12F293C /* ScanTutorial-iPad-Area.mp4 */ = {isa = PBXFileReference; path = "ScanTutorial-iPad-Area.mp4"; sourceTree = "<group>"; };
 		734A7560D792799195C81953 /* CaptureOverlayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureOverlayView.swift; sourceTree = "<group>"; };
 		7B243DA4559B80A720D8FEA1 /* OnboardingStateMachine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingStateMachine.swift; sourceTree = "<group>"; };
@@ -428,6 +430,7 @@
 		90590B10CDD3977003761A17 /* Screens */ = {
 			isa = PBXGroup;
 			children = (
+				70A7D0DBA9EE3A73FD25D09F /* ConversationBubble.swift */,
 				CFEE621E7C7B88738E9C985B /* HomeView.swift */,
 				1AD28B8C6794C839BCDA98B9 /* MacSettings.swift */,
 				3FB944AB913161CA44843077 /* NewProjectView.swift */,
@@ -828,6 +831,7 @@
 			files = (
 				8F26AFE65ED0BD6954AA6AFD /* AppModel.swift in Sources */,
 				FA61FDA2987122046286A377 /* CloudPairingView.swift in Sources */,
+				B1E297636604AF846BD0CF87 /* ConversationBubble.swift in Sources */,
 				38A279B8CC7BAFF042F50011 /* CounterpartApp.swift in Sources */,
 				3ED148F8FD2D8C058FF37C49 /* Design.swift in Sources */,
 				54B41807E6403360CEFF31EF /* FindYourMacView.swift in Sources */,
