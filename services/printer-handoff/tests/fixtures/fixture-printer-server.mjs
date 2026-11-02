@@ -107,9 +107,13 @@ server.setRequestHandler(CallToolRequestSchema, async request => {
   record({tool: name, arguments: args});
   const directory = ephemeral ?? dirname(args.stl_path ?? args.three_mf_path ?? args.gcode_path ?? process.cwd());
   if (name === 'lay_flat') {
+    if (process.env.HANDOFF_FIXTURE_LAID_FLAT === 'false') return {
+      ...text(args.stl_path), structuredContent: {path: args.stl_path, laid_flat: false, message: 'No face lies on the model’s lowest plane; unchanged.'},
+    };
     const path = join(directory, `${basename(args.stl_path, '.stl')}_flat.stl`);
     writeFileSync(path, 'solid flat\nendsolid flat\n');
-    return text(path);
+    return process.env.HANDOFF_FIXTURE_LAID_FLAT === 'true'
+      ? {...text(path), structuredContent: {path, laid_flat: true}} : text(path);
   }
   if (name === 'slice_stl') {
     // A real Bambu Studio result.json, returned as bambu-printer-mcp's slicer_result (verbatim).

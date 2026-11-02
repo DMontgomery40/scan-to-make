@@ -25,7 +25,7 @@ const selection = {
   bedType: 'textured_plate', material: 'PLA', plateIndex: 0,
 };
 
-async function setup(t, {mode = 'bambu', backend = 'bambu-printer-mcp', answer = 'accept', relayTimeoutMs = 5000, dispatch, ephemeral = false, noColour = false, crypto = false, noConnectionType = false, settings = false, remote = false, slicer, slicerResult} = {}) {
+async function setup(t, {mode = 'bambu', backend = 'bambu-printer-mcp', answer = 'accept', relayTimeoutMs = 5000, dispatch, ephemeral = false, noColour = false, crypto = false, noConnectionType = false, settings = false, remote = false, slicer, slicerResult, laidFlat} = {}) {
   const root = await mkdtemp(join(tmpdir(), 'printer-handoff-'));
   t.after(() => rm(root, {recursive: true, force: true}));
   const log = join(root, 'calls.jsonl');
@@ -35,7 +35,7 @@ async function setup(t, {mode = 'bambu', backend = 'bambu-printer-mcp', answer =
   const config = {
     backend,
     process: {command: process.execPath, args: [fixture, mode, log], cwd: root,
-      env: {...(slicerResult ? {HANDOFF_FIXTURE_SLICER_RESULT: join(slicerResults, `${slicerResult}.json`)} : {}), ...(settings ? {HANDOFF_FIXTURE_SLICE_SETTINGS:'1'} : {}), ...(remote ? {HANDOFF_FIXTURE_REMOTE:'1'} : {}), ...(noConnectionType ? {HANDOFF_FIXTURE_NO_CONNECTION_TYPE:'1'} : {}), ...(crypto ? {HANDOFF_FIXTURE_CRYPTO:'1'} : {}), ...(dispatch ? {HANDOFF_FIXTURE_DISPATCH: dispatch} : {}), ...(ephemeral ? {HANDOFF_FIXTURE_EPHEMERAL: '1'} : {}), ...(noColour ? {HANDOFF_FIXTURE_NO_COLOUR:'1'} : {})}},
+      env: {...(laidFlat !== undefined ? {HANDOFF_FIXTURE_LAID_FLAT: String(laidFlat)} : {}), ...(slicerResult ? {HANDOFF_FIXTURE_SLICER_RESULT: join(slicerResults, `${slicerResult}.json`)} : {}), ...(settings ? {HANDOFF_FIXTURE_SLICE_SETTINGS:'1'} : {}), ...(remote ? {HANDOFF_FIXTURE_REMOTE:'1'} : {}), ...(noConnectionType ? {HANDOFF_FIXTURE_NO_CONNECTION_TYPE:'1'} : {}), ...(crypto ? {HANDOFF_FIXTURE_CRYPTO:'1'} : {}), ...(dispatch ? {HANDOFF_FIXTURE_DISPATCH: dispatch} : {}), ...(ephemeral ? {HANDOFF_FIXTURE_EPHEMERAL: '1'} : {}), ...(noColour ? {HANDOFF_FIXTURE_NO_COLOUR:'1'} : {})}},
     selection,
     ...(slicer ? {slicer} : {}),
     timeouts: {connectMs: 5000, toolMs: 5000, elicitationMs: relayTimeoutMs},
@@ -59,6 +59,20 @@ async function setup(t, {mode = 'bambu', backend = 'bambu-printer-mcp', answer =
   const runner = new PrinterHandoffRunner(config, {relay, onStep: step => steps.push(step)});
   const calls = async () => (await readFile(log, 'utf8')).trim().split('\n').filter(Boolean).map(JSON.parse);
   return {root, log, stlPath, config, relay, runner, seen, steps, calls};
+}
+
+for (const laidFlat of [false, true]) {
+  test(`slicing respects lay_flat's explicit laid_flat=${laidFlat} result`, async t => {
+    const f = await setup(t, {laidFlat});
+    const result = await f.runner.run({stlPath: f.stlPath, print: false});
+    const slice = (await f.calls()).find(call => call.tool === 'slice_stl');
+    assert.equal(slice.arguments.orient, !laidFlat,
+      'the slicer must orient when the MCP could not find a resting face');
+    assert.equal(slice.arguments.stl_path, result.orientedStlPath);
+    if (!laidFlat) assert.equal(result.orientedStlPath, f.stlPath,
+      'the MCP returns the original model when no pose qualifies');
+    assert.ok(!(await f.calls()).some(call => call.tool === 'print_3mf'));
+  });
 }
 
 test('config file parses backend, process, selection and timeouts', async t => {
