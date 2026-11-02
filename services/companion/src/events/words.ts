@@ -147,6 +147,7 @@ export interface StatusSource extends TitleSource {
   failure?: string;
   passes?: {stages?: {words: string; endedAtMs?: number}[]; estimate?: {remainingSec: number}; endedAtMs?: number}[];
   print?: {destination?: {name: string}; dispatchedAt?: string; sentVia?: string; live?: {state: string; job?: {progress?: number; remainingSec?: number}}; monitor?: {phase: string; endedAt?: string}};
+  outcome?: {result: string; atMs: number};
 }
 
 const formatDate = (iso: string) => new Intl.DateTimeFormat('en-US', {month: 'short', day: 'numeric'}).format(new Date(iso));
@@ -177,7 +178,11 @@ export function objectStatus(object: StatusSource, updatedAtMs?: number): Object
     }
     case 'printed': {
       const at = object.print?.monitor?.endedAt ?? object.print?.dispatchedAt ?? (updatedAtMs ? new Date(updatedAtMs).toISOString() : undefined);
-      return {phase: 'printed', text: at ? `Printed ${formatDate(at)}` : 'Printed', symbol: 'shippingbox', tint: 'secondary'};
+      return {phase: 'printed', text: at ? `Printed ${formatDate(at)} · Did it fit?` : 'Printed · Did it fit?', symbol: 'shippingbox', tint: 'secondary'};
+    }
+    case 'confirmed': {
+      const at = object.outcome?.atMs ?? updatedAtMs;
+      return {phase: 'confirmed', text: at ? `Works · ${formatDate(new Date(at).toISOString())}` : 'Works', symbol: 'checkmark.circle.fill', tint: 'green'};
     }
     case 'sent': return {phase: 'sent', text: sentWords(object.print?.destination?.name ?? 'your printer', object.print?.sentVia === 'bambu-connect'), symbol: 'paperplane', tint: 'secondary'};
     default: return {phase: 'failed', text: (object.failure ?? 'Something went wrong. Try again.').slice(0, 300), symbol: 'exclamationmark.triangle', tint: 'red'};

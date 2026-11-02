@@ -55,6 +55,7 @@ export const parameters = {
   'objects.passActivity': z.strictObject({id: z.uuid(), index: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER)}),
   'objects.start': z.strictObject({id: z.uuid()}),
   'objects.delete': z.strictObject({id: z.uuid()}),
+  'objects.setOutcome': z.strictObject({id: z.uuid(), result: z.enum(['works', 'needs-changes']), note: z.string().max(4000).optional()}),
   'objects.correct': z.strictObject({id: z.uuid(), note: z.string().trim().min(1).max(4000), photos: z.array(z.string().min(2).max(4096)).max(24).optional()}),
   'objects.create': z.strictObject({instructions: z.string().max(8000).optional(), kind: z.enum(['fit', 'copy', 'published']).optional(), url: z.string().max(2048).optional()}),
   'objects.answerAsk': z.strictObject({id: z.uuid(), askId: z.uuid(), choices: z.array(z.string().min(1).max(64)).min(1).max(32)}),
