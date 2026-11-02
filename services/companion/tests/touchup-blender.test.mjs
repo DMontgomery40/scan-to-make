@@ -110,8 +110,8 @@ test('the startup script marks the Blender it launches as app-owned', async () =
   assert.match(await readFile(BLENDER_STARTUP_SCRIPT, 'utf8'), /driver_namespace\["scan_to_make_owned"\] = True/);
 });
 
-for (const owned of [false, true]) {
-  test(`idle cleanup ${owned ? 'closes Counterpart’s Blender' : 'leaves the user’s Blender open'}`, async t => {
+for (const owned of [false, true]) for (const legacy of [false, true]) {
+  test(`idle cleanup ${owned ? 'closes Counterpart’s Blender' : 'leaves the user’s Blender open'}${legacy ? ' with a legacy addon that drops stdout' : ''}`, async t => {
     const {stopOwnedBlender} = await import('../dist/touchup/blender.js');
     const {execFile} = await import('node:child_process');
     const {promisify} = await import('node:util');
@@ -133,9 +133,11 @@ print(json.dumps({'quit': quit_calls}))`;
       const {stdout} = await promisify(execFile)('python3', ['-c', python, args.arguments.code]);
       assert.deepEqual(JSON.parse(stdout.trim().split('\n').at(-1)).quit, owned ? ['quit'] : []);
       if (owned) setTimeout(() => server.close(), 20);
-      return {content: [{type: 'text', text: stdout}]};
+      return {content: [{type: 'text', text: legacy ? 'Code executed successfully: ' : stdout}]};
     };
-    await stopOwnedBlender(client, {port: server.address().port, timeoutMs: 2000});
+    const stopping = stopOwnedBlender(client, {port: server.address().port, timeoutMs: 250});
+    if (legacy && !owned) await assert.rejects(stopping, /did not close/);
+    else await stopping;
     assert.equal(server.listening, !owned);
     assert.equal(client.closed, 1);
     assert.equal(calls.length, 1);
