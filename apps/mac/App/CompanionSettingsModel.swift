@@ -137,8 +137,9 @@ import ControlKit
         defer { settingUpFusion = false }
         let client = try? ControlClient(socketPath: socket, timeout: 30)
         do {
-            _ = try await FusionSetup.install(state: Installation(bundle: .main).state)
-            try? await client?.fusionSetupDone(ok: true, message: nil)
+            let report = try await FusionSetup.install(state: Installation(bundle: .main).state)
+            // The phone shows what Fusion said, in the same words as Settings here.
+            try? await client?.fusionSetupDone(ok: report.status.ok, message: report.status.ok ? nil : report.status.words)
         } catch {
             try? await client?.fusionSetupDone(ok: false, message: error.localizedDescription)
         }
