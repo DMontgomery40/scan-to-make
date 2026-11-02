@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Counterpart Help</title>
+<meta name="description" content="How to set up Counterpart, start a project, print it, and fix common problems.">
+<link rel="icon" href="favicon.png" type="image/png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600&family=Barlow:ital,wght@0,400;0,500;0,600;1,400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+<style>
+  .help-main { max-width: 46rem; }
+  .help-main h2 { margin-top: 2.6rem; }
+  .help-main h3 { margin: 1.4rem 0 .4rem; }
+  .help-main p, .help-main li { line-height: 1.55; }
+  .toc { columns: 2; padding-left: 1.1rem; }
+  .soon { font-size: .8em; font-weight: 600; padding: .05rem .4rem; border-radius: .3rem; border: 1px solid currentColor; opacity: .75; white-space: nowrap; }
+  kbd { font: inherit; font-weight: 600; }
+</style>
+</head>
+<body>
+<header class="masthead">
+  <a class="brand" href="./"><img src="icon-256.png" alt="" width="36" height="36"><span>Counterpart</span></a>
+  <nav aria-label="Site">
+    <a href="./#how">How it works</a>
+    <a href="./#need">What you need</a>
+    <a href="help.html" aria-current="page">Help</a>
+  </nav>
+</header>
+
+<main class="help-main">
+  <h1>Counterpart Help</h1>
+  <p class="lede">Counterpart makes a part that fits something you have, or a copy of it, or prints a model someone published. Your iPhone captures and asks. Your Mac does the work with your own Claude Code and prints on your own printer.</p>
+
+  <ul class="toc">
+    <li><a href="#setup">Set up</a></li>
+    <li><a href="#start">Start a project</a></li>
+    <li><a href="#scan">Scanning</a></li>
+    <li><a href="#working">While your Mac works</a></li>
+    <li><a href="#print">Printing</a></li>
+    <li><a href="#after">After it prints</a></li>
+    <li><a href="#settings">Settings and updates</a></li>
+    <li><a href="#notifications">Notifications</a></li>
+    <li><a href="#trouble">Troubleshooting</a></li>
+    <li><a href="#privacy">Privacy</a></li>
+    <li><a href="#credits">Credits</a></li>
+  </ul>
+
+  <section id="setup">
+    <h2>Set up</h2>
+    <ol>
+      <li><strong>On your Mac:</strong> open Counterpart. It lives in the menu bar and has a main window for your projects.</li>
+      <li><strong>Sign in to Claude Code</strong> on that Mac. Counterpart uses your own login to design and edit models.</li>
+      <li><strong>Install your printer's MCP server</strong>, if you don't have it yet. Use <a href="https://dmontgomery40.github.io/bambu-printer-mcp/">bambu-printer-mcp</a> for Bambu Lab printers, and <a href="https://dmontgomery40.github.io/mcp-3D-printer-server/">mcp-3D-printer-server</a> for OctoPrint, Klipper, Duet, Repetier, PrusaLink and Creality. With both, Bambu printers use the first and everything else the second.</li>
+      <li><strong>Install Blender.</strong> Counterpart opens it only while it's working on one of your projects and quits it afterwards.</li>
+      <li><strong>On your iPhone:</strong> open Counterpart. If your iPhone and Mac use the same Apple Account, they find each other by themselves. Otherwise click the Counterpart icon in the Mac's menu bar and scan the code it shows.</li>
+    </ol>
+  </section>
+
+  <section id="start">
+    <h2>Start a project</h2>
+    <p>Tap <kbd>+</kbd> on your iPhone, or <kbd>New</kbd> on your Mac. Start any of these ways and add as much or as little as you like:</p>
+    <ul>
+      <li><strong>Scan it</strong> with a LiDAR iPhone or iPad. See <a href="#scan">Scanning</a>.</li>
+      <li><strong>Photograph it.</strong> One or two photos and a sentence. A ruler or caliper in the picture helps with sizes.</li>
+      <li><strong>Describe it.</strong> “A hook for a 25 mm tube that holds a mug.” If it's a known product, name it: Counterpart looks up its published dimensions.</li>
+      <li><strong>Paste a link</strong> to a published model, for example on MakerWorld or Printables. Counterpart prints the designer's own file, credits the designer, and only changes what you ask it to. If the site needs you to be signed in to download, it downloads through your own browser, or picks up the file you downloaded to your Downloads folder.</li>
+    </ul>
+    <p>Counterpart names each project for you. <span class="soon">Coming next</span> Tap the name to change it.</p>
+  </section>
+
+  <section id="scan">
+    <h2>Scanning</h2>
+    <h3>Walk around it</h3>
+    <p>Put the object on a table with some space around it, in good, even light. Walk slowly around it, following the guide on screen, then flip it over if you need the bottom. Matte objects scan best; shiny, clear or very dark ones are hard for any scanner.</p>
+    <h3>With a scan rig</h3>
+    <p>For small objects, a turntable rig gives steadier scans. Counterpart recommends <a href="https://makerworld.com/models/1531561">Kass 3D's scan rig on MakerWorld</a>, which you can print yourself. Its designer describes it as a rig for casual scanning and photography, not professional equipment.</p>
+    <h3>Scan in hand <span class="soon">Being fixed</span></h3>
+    <p>Holding the object and turning it in front of the camera doesn't work yet. Use the walk-around scan or photos for now.</p>
+    <h3>Close-ups and sizes</h3>
+    <p>Phone scans are good to a few millimetres. For a part that has to fit exactly, measure the important size with a caliper and say it in plain words, or include the caliper in a photo.</p>
+  </section>
+
+  <section id="working">
+    <h2>While your Mac works</h2>
+    <ul>
+      <li>Each project shows what it's doing and roughly how long it has left. You can put your phone down; it tells you when it's ready.</li>
+      <li>If your Mac can't see part of the object well enough, it asks: <strong>Camera</strong> to take a close-up, <strong>Photos</strong> to pick one, or <strong>Best Guess</strong> to carry on without one.</li>
+      <li>When it's ready, check the pictures and the size in millimetres, and turn it in 3D or AR. <strong>Ask for changes</strong> in plain words, like “make it 2 mm wider” or “the clip is too tight”.</li>
+    </ul>
+  </section>
+
+  <section id="print">
+    <h2>Printing</h2>
+    <ol>
+      <li>Tap <kbd>Print</kbd>. Choose the printer, then quality, strength and the number of copies.</li>
+      <li>Choose filament from what's loaded on the printer. For multi-colour Bambu prints, each colour goes to the AMS slot that holds it.</li>
+      <li>Counterpart slices it and shows the time and filament before anything starts.</li>
+      <li>Your printer service asks for its own confirmation. Counterpart shows it as it is, and nothing prints until you answer it.</li>
+    </ol>
+    <p>Counterpart doesn't check the build plate for you: the printer does its own checks. Clear the plate before you print, as you normally would.</p>
+    <p>While it prints, the project shows progress, the layer, the time left and the printer's camera, with <kbd>Pause</kbd>, <kbd>Resume</kbd> and <kbd>Cancel</kbd>.</p>
+  </section>
+
+  <section id="after">
+    <h2>After it prints</h2>
+    <ul>
+      <li>Counterpart asks <strong>Did it fit?</strong> <kbd>It Works</kbd> marks the project <strong>Done</strong>. <kbd>Needs Changes</kbd> opens Ask for changes, so you can say what's wrong.</li>
+      <li>You can set a project's status yourself any time: open the project, then <kbd>…</kbd> › <kbd>Status</kbd>.</li>
+      <li>Done projects stay printable: <kbd>Print Another</kbd> prints it again.</li>
+      <li><kbd>Hide from Home</kbd> tidies a project away without deleting it. It's still in your projects, and still Done.</li>
+    </ul>
+  </section>
+
+  <section id="settings">
+    <h2>Settings and updates</h2>
+    <p>Every Mac setting is also on your iPhone: printers, AI, notifications, paired devices and general options. Changing one on either device changes it on the Mac.</p>
+    <p>When a newer version of your printer's MCP server is out, <kbd>Settings</kbd> › <kbd>Printers</kbd> shows <kbd>Update</kbd>.</p>
+  </section>
+
+  <section id="notifications">
+    <h2>Notifications</h2>
+    <p>Counterpart tells you when a project is ready, when your Mac has a question, when a print is halfway (with a frame from the printer's camera), when it finishes, and when something goes wrong. Each one can be switched off in <kbd>Settings</kbd> › <kbd>Notifications</kbd>, on either device.</p>
+  </section>
+
+  <section id="trouble">
+    <h2>Troubleshooting</h2>
+    <div class="faq">
+      <details>
+        <summary>My iPhone can't find my Mac</summary>
+        <p>Check that Counterpart is running on your Mac (its icon is in the menu bar). If both use the same Apple Account, give it a few seconds after opening the app. On the same Wi-Fi, also check iPhone Settings › Counterpart › Local Network is on. Otherwise, pair with the code from the Mac's menu bar.</p>
+      </details>
+      <details>
+        <summary>My iPhone camera went black after scanning</summary>
+        <p>An earlier test version of Counterpart could leave the camera unusable after Scan in hand. Restart your iPhone to fix it. Current versions don't do this.</p>
+      </details>
+      <details>
+        <summary>Making it stopped with an error</summary>
+        <p>The project says what went wrong. The usual cause is Claude Code not being signed in on your Mac. Fix that, then open the project and tap <kbd>Try Again</kbd>.</p>
+      </details>
+      <details>
+        <summary>The print didn't start</summary>
+        <p>Open the project: it shows what the printer said. If the printer shows an error on its own screen, clear it there, then print again.</p>
+      </details>
+      <details>
+        <summary>The size is a little off</summary>
+        <p>Measure the size that matters with a caliper and tell it in Ask for changes, like “the tube is 25.4 mm across”. It redoes that part only.</p>
+      </details>
+      <details>
+        <summary>I don't see a button this page mentions</summary>
+        <p>Your iPhone app shows a feature only when the Counterpart on your Mac supports it. Update Counterpart on the Mac, then reopen the app on your iPhone.</p>
+      </details>
+    </div>
+  </section>
+
+  <section id="privacy">
+    <h2>Privacy</h2>
+    <p>Counterpart has no accounts and no servers of its own. Your scans, photos and projects stay on your Mac. Your iPhone reaches it on your Wi-Fi, or through your own private iCloud when you're away. Models are made with your own Claude Code login.</p>
+  </section>
+
+  <section id="credits">
+    <h2>Credits</h2>
+    <ul>
+      <li>Scan rig: <a href="https://makerworld.com/models/1531561">Kass 3D on MakerWorld</a>.</li>
+      <li>Published models you print are credited to their designers on the project, with a link back to the original.</li>
+      <li>Printing: <a href="https://github.com/DMontgomery40/bambu-printer-mcp">bambu-printer-mcp</a> and <a href="https://github.com/DMontgomery40/mcp-3D-printer-server">mcp-3D-printer-server</a>.</li>
+      <li>3D work: <a href="https://www.blender.org">Blender</a>. Open-source licences are listed in the app under <kbd>Settings</kbd> › <kbd>About</kbd>.</li>
+    </ul>
+  </section>
+</main>
+<footer class="foot">
+  <p>Counterpart runs on your own Mac and printer, with your own Claude Code account.</p>
+</footer>
+</body>
+</html>
