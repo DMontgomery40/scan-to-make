@@ -319,6 +319,68 @@ public final class CompanionClient: @unchecked Sendable {
         let id = destinationId.addingPercentEncoding(withAllowedCharacters: .alphanumerics.union(.init(charactersIn: "-_."))) ?? destinationId
         return try await camera(path: "/v1/objects/printers/\(id)/camera.jpg", fullScreen: fullScreen, previous: previous)
     }
+    public func cameraFrames(project id: String, fullScreen: Bool = false) -> AsyncThrowingStream<CameraFrame, Error> {
+        cameraFrames(path: "/v1/objects/\(id)/camera.jpg", fullScreen: fullScreen)
+    }
+    public func cameraFrames(printer destinationId: String, fullScreen: Bool = false) -> AsyncThrowingStream<CameraFrame, Error> {
+        let id = destinationId.addingPercentEncoding(withAllowedCharacters: .alphanumerics.union(.init(charactersIn: "-_."))) ?? destinationId
+        return cameraFrames(path: "/v1/objects/printers/\(id)/camera.jpg", fullScreen: fullScreen)
+    }
+    private func cameraFrames(path: String, fullScreen: Bool) -> AsyncThrowingStream<CameraFrame, Error> {
+        AsyncThrowingStream(bufferingPolicy: .bufferingNewest(1)) { continuation in
+            let task = Task {
+                do {
+                    guard let scope = Self.scope("GET", path) else { throw CompanionError.transport("invalid-request") }
+                    let paired = try record(scope)
+                    guard let base = paired.requestBaseURL, let token = paired.token, let device = paired.deviceId,
+                          let url = URL(string: path + "?stream=1" + (fullScreen ? "&size=full" : ""), relativeTo: base)?.absoluteURL
+                    else { throw CompanionError.transport("invalid-request") }
+                    var request = URLRequest(url: url, timeoutInterval: 35)
+                    request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+                    request.setValue(device, forHTTPHeaderField: "X-Scan-Device")
+                    request.setValue("application/x-ndjson", forHTTPHeaderField: "Accept")
+                    if let deviceModel { request.setValue(deviceModel, forHTTPHeaderField: "X-Scan-Device-Model") }
+                    if let deviceName { request.setValue(deviceName, forHTTPHeaderField: "X-Scan-Device-Name") }
+                    func checkPairing() throws {
+                        try Task.checkCancellation()
+                        guard paired.isSamePairing(as: try? pairing.store.read()) else { throw CompanionError.transport("pairing-changed") }
+                        _ = try record(scope)
+                    }
+                    var decoder = CameraFrameDecoder(fullScreen: fullScreen)
+                    try await transport.lines(request, trust: .record(paired), lineLimit: 65_536, response: { reply in
+                        try checkPairing()
+                        let type = reply.header("Content-Type")?.components(separatedBy: ";").first?.lowercased()
+                        if reply.status == 200, type == "image/jpeg" { throw CompanionError.unsupported }
+                        if reply.status == 404, JSONValue.object(from: reply.body)?["error"]?.object?["code"]?.string == "not-supported" {
+                            throw CompanionError.unsupported
+                        }
+                        guard reply.status == 200 else {
+                            let error = Self.refusal(reply, path: path)
+                            throw error.isUnsupported ? CompanionError(code: "unavailable", message: error.message) : error
+                        }
+                        guard type == "application/x-ndjson", reply.header("X-Camera-Protocol") == "1" else {
+                            throw CompanionError(code: "invalid-response", message: "Your Mac sent an unsupported camera stream. Update both apps.")
+                        }
+                    }, line: { data in
+                        try checkPairing()
+                        if let frame = try decoder.decode(data) { continuation.yield(frame) }
+                    })
+                    throw CompanionError(code: "unavailable", message: "The printer's camera connection ended. Reconnecting…")
+                } catch let error as TransportError {
+                    // Preserve the snapshot client's address recovery when the phone changes networks.
+                    if !Task.isCancelled, ["network", "timeout"].contains(error.code),
+                       let known = try? record("printer-handoff:use"), (known.addresses?.count ?? 0) > 1 {
+                        _ = try? await pairing.check()
+                    }
+                    continuation.finish(throwing: CompanionError.transport(error.code))
+                }
+                catch is CancellationError { continuation.finish(throwing: CompanionError.cancelled) }
+                catch { continuation.finish(throwing: error) }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+
     private func camera(path: String, fullScreen: Bool, previous: CameraFrame?) async throws -> CameraFrame {
         let reply = try await send("GET", path + (fullScreen ? "?size=full" : ""), limit: Self.photoLimit, timeout: 20, ifNoneMatch: previous?.etag)
         if reply.status == 304, let previous {
@@ -411,3 +473,22 @@ extension HTTPReply {
     }
 }
 
+
+/// A single HTTP stream has ordered frames; heartbeats carry no image and never refresh its timestamp.
+struct CameraFrameDecoder {
+    let fullScreen: Bool
+    private var lastSequence: Int64 = -1
+    init(fullScreen: Bool) { self.fullScreen = fullScreen }
+    private struct Wire: Decodable { let v: Int; let seq: Int64; let capturedAt: String; let base64: String }
+    mutating func decode(_ line: Data) throws -> CompanionClient.CameraFrame? {
+        if line.isEmpty || line == Data([13]) { return nil }
+        guard line.count < 65_536, let wire = try? JSONDecoder().decode(Wire.self, from: line),
+              wire.v == 1, wire.seq >= 0, wire.seq > lastSequence, let capturedAt = ISO.date(wire.capturedAt),
+              let jpeg = Data(base64Encoded: wire.base64), jpeg.count <= (fullScreen ? 42_000 : 20_000),
+              jpeg.starts(with: [0xff, 0xd8, 0xff]) else {
+            throw CompanionError(code: "invalid-response", message: "Your Mac sent an invalid camera frame. Update both apps.")
+        }
+        lastSequence = wire.seq
+        return .init(jpeg: jpeg, capturedAt: capturedAt, streaming: true)
+    }
+}
