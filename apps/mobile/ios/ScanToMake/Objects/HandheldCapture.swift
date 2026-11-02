@@ -43,6 +43,9 @@ enum HandheldCapture {
     static let minimumPhotos = 24
 
     static var backCamera: AVCaptureDevice? { AVCaptureDevice.default(.builtInLiDARDepthCamera, for: .video, position: .back) }
+    /// Whether New offers Scan in hand. Off until it's rebuilt on Apple's still-photo capture (KAN-217 P0).
+    static let offered = false
+
     static var isAvailable: Bool {
         #if targetEnvironment(simulator)
         return true   // so the screens can be checked in the Simulator, which has no camera to capture with
@@ -174,7 +177,21 @@ private let depthReadinessGate = AnalysisGate()
     private var restartInProgress = false
     private var didFinish = false
 
-    init(folder: URL) { self.folder = folder; super.init() }
+    init(folder: URL) {
+        self.folder = folder
+        super.init()
+        // The LiDAR session must never outlive the app's time on screen: going to the background (which
+        // swiping the app away passes through) or the scene going away stops it at once (KAN-217 P0: a session
+        // left running when the app was killed left every app's camera black).
+        let center = NotificationCenter.default
+        for name in [UIApplication.didEnterBackgroundNotification, UIScene.didDisconnectNotification] {
+            lifecycle.append(center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.close() }
+            })
+        }
+    }
+    @ObservationIgnored private var lifecycle: [NSObjectProtocol] = []
+    isolated deinit { lifecycle.forEach(NotificationCenter.default.removeObserver) }
 
     var canStart: Bool {
         let now = ProcessInfo.processInfo.systemUptime
@@ -523,6 +540,7 @@ struct HandheldCaptureView: View {
     private let keepAwake: Bool
     @State private var camera: HandheldCamera
     @State private var previousIdleTimerDisabled: Bool?
+    @Environment(\.scenePhase) private var scenePhase
 
     fileprivate init(folder: URL, preview: Bool = false, diagnosticSeconds: Int? = nil, keepAwake: Bool = false, done: @escaping (Bool) -> Void) {
         self.folder = folder
@@ -654,6 +672,11 @@ struct HandheldCaptureView: View {
                 previousIdleTimerDisabled = UIApplication.shared.isIdleTimerDisabled
                 UIApplication.shared.isIdleTimerDisabled = true
             }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            // Leaving the foreground ends the capture: the camera is released and the screen closes, with
+            // whatever was saved kept for the next open.
+            if phase == .background { camera.close(); done(false) }
         }
         .onDisappear {
             camera.close()
