@@ -51,6 +51,7 @@ test('private Unix endpoint handles fragmented/half-closed clients and removes i
   assert.equal((await stat(f.server.path)).isSocket(),true);
   const id=randomUUID(); const response=await wire(f.server.path,{v:1,id,method:'status.get',params:{}},true);
   assert.equal(response.id,id);assert.equal(response.result.transport,'tailscale');assert.equal(response.result.pairedDeviceCount,0);
+  assert.equal('name' in response.result,false,'no name unless the companion has one');
   await assert.rejects(startLocalControl({path:f.server.path,dispatch:async()=>({})}),e=>e.code==='conflict');
   await f.server.close();await assert.rejects(stat(f.server.path),e=>e.code==='ENOENT');
 });
@@ -242,4 +243,9 @@ test('long methods get their own socket deadline; everything else keeps 10 s', a
   assert.equal(methodDeadlineMs('objects.estimate', {}), 180000);
   assert.equal(methodDeadlineMs('objects.cancelPrint', {}), 130000);
   assert.equal(methodDeadlineMs('objects.get', {}), undefined);
+});
+
+test('status.get names the Mac as people know it ("Mac mini"), as /healthz does',async t=>{
+  const f=await fixture(t,{name:'Mac mini'});
+  assert.equal((await f.call('status.get')).result.name,'Mac mini');
 });

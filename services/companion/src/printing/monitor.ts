@@ -126,7 +126,7 @@ export function matchJob(target: Pick<MonitorTarget, 'taskId' | 'jobName' | 'fil
 function liveFrom(report: PrintReport): PrintLive {
   const preparing = printPreparing(report.state, report.job);
   const job = report.job && preparing ? (({progress: _progress, remainingSec: _remaining, ...rest}) => rest)(report.job) : report.job;
-  const remaining = job?.remainingSec;
+  const remaining = preparing ? undefined : report.job?.remainingSec;
   const observed = Date.parse(report.observedAt);
   return {
     source: report.source, observedAt: report.observedAt, state: preparing ? 'preparing' : report.state,
@@ -219,6 +219,9 @@ export class PrintMonitorRunner {
 
   async #finish(end: MonitorEnd, report: PrintReport | undefined, signal: AbortSignal) {
     const now = this.#clock.now();
+    // A failure's own report is the record: its problems are what stopped the print (an idle report after the
+    // job is gone carries the code that stopped it), not the last report while it ran.
+    if (report && end === 'failed') this.#observe(report);
     this.#state = {...this.#state, phase: 'ended', endState: end, endedAt: new Date(now).toISOString()};
     delete this.#state.unreachableSince;
     const events: Partial<Record<MonitorEnd, [CounterpartEventType, boolean]>> = {

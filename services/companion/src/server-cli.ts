@@ -11,7 +11,7 @@ import {DetailStillStore} from './detail-stills.js';
 import {createCaptureConverter} from './capture-converter.js';
 import { startCompanionServer } from './server.js';
 import { instanceName } from './bonjour.js';
-import { computerName, discoverAddresses, localHostName } from './lan-addresses.js';
+import { computerName, discoverAddresses, localHostName, macDisplayName } from './lan-addresses.js';
 import { RemoteAuthStore } from './remote-auth.js';
 import { createPrintHandoffServices } from './print-handoff-http.js';
 import { PrinterSessionPool, readPrinterHandoffConfig } from '@scan-to-make/printer-handoff';
@@ -132,8 +132,11 @@ const nearbyPairing = process.env.SCAN_TO_MAKE_NEARBY_PAIRING;
 if (nearbyPairing !== undefined && (nearbyPairing !== '1' || allAddresses !== '1'))
   throw new Error('SCAN_TO_MAKE_NEARBY_PAIRING must be 1 when set, with SCAN_TO_MAKE_LAN_ALL_ADDRESSES=1');
 const macName = allAddresses === '1' ? computerName() : undefined;
+// The Mac's name for people ("Mac mini"): /healthz and status.get.
+const displayName = macDisplayName();
 const server = await startCompanionServer({
   lanTls,
+  ...(displayName ? { name: displayName } : {}),
   ...(allAddresses === '1' ? { lanAddresses: () => discoverAddresses(), localName: localHostName() } : {}),
   ...(nearbyPairing === '1' ? { nearby: { name: macName ?? 'Scan to Make' } } : {}),
   capture,
@@ -153,7 +156,7 @@ try {
   if (remoteAuth) control = await startLocalControl({
     // The auth directory is private even when its state/volume parent is not.
     path:process.env.SCAN_TO_MAKE_CONTROL_SOCKET ?? join(remoteAuth.directory,'control.sock'),
-    dispatch:createControlDispatcher({auth:remoteAuth,modelAccess,printerCheck,companionVersion:await companionVersion(),capture,
+    dispatch:createControlDispatcher({auth:remoteAuth,modelAccess,printerCheck,companionVersion:await companionVersion(),...(displayName?{name:displayName}:{}),capture,
       captureDirectory:captureDirectory ? join(captureDirectory,'captures') : undefined,printHandoff,
       ...(objects ? {objects} : {}),
       ...(eventLog ? {events: eventLog} : {}),

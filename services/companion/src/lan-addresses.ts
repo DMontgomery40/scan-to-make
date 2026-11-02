@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { isIP } from 'node:net';
-import { networkInterfaces, type NetworkInterfaceInfo } from 'node:os';
+import { hostname, networkInterfaces, type NetworkInterfaceInfo } from 'node:os';
 import { PAIRING_LINK_MAX_ADDRESSES } from '@scan-to-make/contracts/pairing-link';
 import { isLanAddress } from './lan-transport.js';
 
@@ -59,6 +59,12 @@ export function computerName(): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+/** The Mac's name as people know it ("Mac mini"): the Computer Name, else the host name without `.local`. */
+export function macDisplayName(): string | undefined {
+  const name = (computerName() ?? hostname().replace(/\.local\.?$/i, '')).trim();
+  return name ? name.slice(0, 64) : undefined;
 }
 
 /** The Host form of host:port as clients send it: lowercase, with the default port 443 left off. */

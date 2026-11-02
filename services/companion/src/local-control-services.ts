@@ -33,6 +33,8 @@ export interface ControlServices {
   modelAccess?: ModelAccessService;
   auth: RemoteAuthStore;
   companionVersion: string;
+  /** The Mac's name as people know it ("Mac mini"), as in /healthz. */
+  name?: string;
   capture?: CaptureServices;
   captureDirectory?: string;
   printHandoff?: PrintHandoffServices;
@@ -145,7 +147,7 @@ export function createControlDispatcher(services: ControlServices) {
           if(!services.printerCheck)throw new ControlFailure('unavailable');
           return services.printerCheck.get(parameters[method].parse(raw).start);
         }
-        case 'status.get': return {protocolVersion:1,companionVersion:services.companionVersion,transport:auth.transport,
+        case 'status.get': return {protocolVersion:1,companionVersion:services.companionVersion,...(services.name?{name:services.name}:{}),transport:auth.transport,
           pairedDeviceCount:(await auth.listDevices()).length,capabilities:{capture:!!capture?.captures,cleanup:!!capture?.scanProcessing,printerHandoff:!!printHandoff,nearbyPairing:!!services.nearby,
             objectsCreate:!!services.objects,printSettings:!!services.objects?.printSettingsAvailable,printControl:!!services.objects?.printSettingsAvailable,
             events:!!services.events&&!!services.liveActivityTokens,structuredPasses:!!services.objects,genericConfirmations:!!services.objects,materialChoice:!!services.objects,projectSettings:!!services.objects,printCopies:!!services.objects?.printCopiesAvailable}};

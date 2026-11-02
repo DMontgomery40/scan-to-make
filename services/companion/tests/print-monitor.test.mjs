@@ -326,3 +326,16 @@ test('a print that reaches layer 1 after getting ready raises its first layer an
   assert.equal(h.events[2].data.state, 'printing');
   assert.equal(h.events[2].data.progress, 1);
 });
+
+test('a failure takes its words from its own report: preparing with no problems, then idle with the code that stopped it', async () => {
+  const {printEndFailure} = await import('../dist/events/words.js');
+  const h = harness({reports: [{state: 'preparing', job: {name: JOB, stage: 'Auto bed leveling'}}, {state: 'idle', problems: [HMS]}]});
+  await h.steps(2);
+  assert.deepEqual(h.types(), ['print.started', 'print.failed']);
+  // The ending report, not the last one while it ran, is what the service and the saved record see.
+  assert.deepEqual(h.ends[0].state, 'idle');
+  assert.deepEqual(h.saves.at(-1).live.problems.map(problem => problem.code), [HMS.code]);
+  assert.deepEqual(h.events.at(-1).data.problems.map(problem => problem.code), [HMS.code]);
+  assert.equal(printEndFailure('failed', {title: 'Stove gap filler', printer: 'Bambu Lab P1S', problem: h.saves.at(-1).live.problems[0]}),
+    'The printer stopped (0300_0D00_0002_0001).');
+});

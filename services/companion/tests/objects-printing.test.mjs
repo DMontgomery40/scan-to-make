@@ -461,3 +461,16 @@ test('the stove gap filler, end to end: "Getting ready" while it levels, then th
   const again = await f.service.print(f.object.id);
   assert.equal(again.state, 'printing');
 });
+
+test('the failure sentence and code come from the report that ended the print (Codex repro: preparing, then idle with the code)', async t => {
+  const hms = {attr: 0x03000D00, code: 0x00020001};
+  const f = await setup(t, {reports: [status('PREPARE', 0), {connected: true, print: {}, raw: {gcode_state: 'IDLE', hms: [hms]}}]});
+  await f.service.print(f.object.id);
+  await f.approve();
+  await f.service.settled(f.object.id);
+  for (let i = 0; i < 2; i++) await f.tick();
+  const failed = await until(async () => { const o = await f.service.get(f.object.id); return o.print?.monitor?.phase === 'ended' ? o : undefined; });
+  assert.deepEqual([failed.state, failed.failure], ['failed', 'The printer stopped (0300_0D00_0002_0001).']);
+  // The saved record is that ending report too, not the last one while it got ready.
+  assert.deepEqual(failed.print.live.problems.map(problem => problem.code), ['0300_0D00_0002_0001']);
+});

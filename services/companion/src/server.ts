@@ -132,6 +132,8 @@ export async function startCompanionServer(
      * `_scantomake._tcp` advert under `name` (the Mac's name, also the v2 link's `n=`).
      */
     nearby?: {name: string; advertise?: typeof advertise};
+    /** The Mac's name as people know it ("Mac mini"), in /healthz so the phone can say which Mac it reached. */
+    name?: string;
   } = {}
 ): Promise<{
   url: string;
@@ -237,7 +239,7 @@ export async function startCompanionServer(
         // Scope name kept from the first protocol so existing pairings still parse.
         await authorize('generation:health');
         // Additive: older phones read only status and protocolVersion.
-        response.end(JSON.stringify({ status: 'ok', protocolVersion: '0.1.0', capabilities: { genericConfirmations: !!options.objects, materialChoice: !!options.objects, projectSettings: !!options.objects, printCopies: !!options.objects?.printCopiesAvailable } }));
+        response.end(JSON.stringify({ status: 'ok', protocolVersion: '0.1.0', ...(options.name ? { name: options.name } : {}), capabilities: { genericConfirmations: !!options.objects, materialChoice: !!options.objects, projectSettings: !!options.objects, printCopies: !!options.objects?.printCopiesAvailable } }));
         return;
       }
       if(captureRoutes&&request.url?.startsWith('/v1/saved-projects/')){

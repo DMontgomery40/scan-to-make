@@ -19,7 +19,7 @@ Wire types are zod schemas in `packages/contracts/src/counterpart.ts` (`@scan-to
 
 **Status.** "PR 1" to "PR 5" mark the KAN-214 pull request that adds a route or field; the rest exists on `main`. Until a PR merges, its routes return 404 and its fields are absent. `status.get` on the control socket reports the matching capability flags (local-control.md).
 
-**What this companion supports.** `GET /healthz` (READ) replies `{status: "ok", protocolVersion: "0.1.0", capabilities: {genericConfirmations: true, materialChoice: true}}` from PR 5. `capabilities` is absent on older companions, so treat a missing flag as false. `genericConfirmations` means the printer questions below may carry text, number and choice fields, and `…/print-confirmation` takes those answers. Without it, show only yes/no questions and send booleans. `materialChoice` means `colour: {material}` is accepted ("What's loaded?", below).
+**What this companion supports.** `GET /healthz` (READ) replies `{status: "ok", protocolVersion: "0.1.0", capabilities: {genericConfirmations: true, materialChoice: true}}` from PR 5. `capabilities` is absent on older companions, so treat a missing flag as false. `name` (when present) is the Mac's name as people know it, its Computer Name ("Mac mini"), else its host name without `.local`: say "Mac mini connected" rather than "Your Mac". `genericConfirmations` means the printer questions below may carry text, number and choice fields, and `…/print-confirmation` takes those answers. Without it, show only yes/no questions and send booleans. `materialChoice` means `colour: {material}` is accepted ("What's loaded?", below).
 
 ## Headers the phone sends
 
