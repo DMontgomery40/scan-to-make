@@ -266,6 +266,8 @@ export class PrinterSession {
         this.#client = client;
         this.#lastCatalog = catalog;
         this.#options.onConnect?.(catalog);
+        // Every caller may have given up while it opened: the idle close still applies.
+        queueMicrotask(() => this.#scheduleIdle());
         return client;
       } catch (error) {
         if (!this.#closed) this.#failed((error as {code?: string}).code ?? 'connection-failed');

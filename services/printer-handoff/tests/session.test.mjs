@@ -249,3 +249,26 @@ test('a caller that gives up while the shared connection opens does not cancel t
   assert.equal(clients.length, 1);
   assert.equal(session.health().connected, true);
 });
+
+test('a connection that finishes opening after every caller gave up still closes when idle', async () => {
+  let open;
+  const opened = new Promise(resolve => { open = resolve; });
+  const clock = new FakeClock();
+  const {clients, factory} = fakes();
+  const slow = (config, options) => {
+    const client = factory(config, options);
+    const connect = client.connect.bind(client);
+    client.connect = async () => { await opened; return connect(); };
+    return client;
+  };
+  const session = new PrinterSession('p1s', config, {clientFactory: slow, clock});
+  const impatient = new AbortController();
+  const status = session.call('get_printer_status', {}, {signal: impatient.signal});
+  impatient.abort();
+  await assert.rejects(status, {code: 'cancelled'});
+  open();
+  await flush(); await flush();
+  assert.equal(session.health().connected, true);
+  await clock.advance(SESSION_IDLE_CLOSE_MS);
+  assert.equal(clients[0].closed, true);
+});

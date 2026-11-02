@@ -132,7 +132,8 @@ async function metadata(config: PrinterHandoffConfig, envPath?: string) {
   const serial = (bambu ? text(env.BAMBU_PRINTER_SERIAL) : undefined) ?? text(env.BAMBU_SERIAL);
   const model = config.selection?.model ?? (bambu ? text(env.BAMBU_PRINTER_MODEL) : undefined) ?? text(env.BAMBU_MODEL);
   const address = publicAddress(host);
-  const printerType = printerSelectionSchema.shape.printerType.safeParse(bambu ? 'bambu' : text(env.PRINTER_TYPE)?.toLowerCase());
+  // The configured selection outranks the MCP's environment.
+  const printerType = printerSelectionSchema.shape.printerType.safeParse(bambu ? 'bambu' : config.selection?.printerType ?? text(env.PRINTER_TYPE)?.toLowerCase());
   const bambuKind = bambu || serial !== undefined || (printerType.success && printerType.data === 'bambu');
   // One printer, one destination (PRD §8.2): the Bambu serial when known, else
   // the lowercased host:port. A Bambu printer's address is its host (its ports are fixed);
@@ -144,7 +145,7 @@ async function metadata(config: PrinterHandoffConfig, envPath?: string) {
     ...(hostKey ? [bambuKind ? `bambu-host:${hostKey.replace(/:\d+$/, '')}` : `host:${port && !/:\d+$/.test(hostKey) ? `${hostKey}:${port}` : hostKey}`] : []),
   ];
   return {address, model: model && /^[a-zA-Z0-9 _.-]{1,64}$/.test(model) ? model.toLowerCase() : undefined,
-    printerType: printerType.success ? printerType.data : undefined, keys, bambuKind};
+    printerType: printerType.success ? printerType.data : undefined, keys, bambuKind, ...(serial ? {serial: serial.toUpperCase()} : {})};
 }
 
 function defaultName(backend: PrinterBackend, model?: string): string {
@@ -182,6 +183,7 @@ interface Candidate {
   origin?: PrinterOrigin;
   keys: string[];
   bambuKind: boolean;
+  serial?: string;
   config: PrinterHandoffConfig;
 }
 
@@ -201,12 +203,18 @@ async function readDocument(path: string): Promise<RecordValue | undefined> {
 function winners(candidates: Candidate[]): Map<Candidate, Candidate> {
   const parent = candidates.map((_, index) => index);
   const find = (index: number): number => parent[index] === index ? index : (parent[index] = find(parent[index]!));
+  // A known serial identifies the printer: a shared address never merges two different serials
+  // (an old profile can keep an IP that DHCP has since given to another printer).
+  const serials = candidates.map(candidate => candidate.serial);
   const owner = new Map<string, number>();
   candidates.forEach((candidate, index) => {
     for (const key of candidate.keys) {
       const other = owner.get(key);
-      if (other === undefined) owner.set(key, index);
-      else parent[find(index)] = find(other);
+      if (other === undefined) { owner.set(key, index); continue; }
+      const a = find(index), b = find(other);
+      if (a === b || (serials[a] && serials[b] && serials[a] !== serials[b])) continue;
+      parent[a] = b;
+      serials[b] ??= serials[a];
     }
   });
   const groups = new Map<number, Candidate[]>();
@@ -229,7 +237,8 @@ export async function loadPrinterCatalog(current: PrinterHandoffConfig, options:
   const currentMetadata = await metadata(currentConfig, options.currentEnvPath);
   const candidates: Candidate[] = [{id: 'current', name: defaultName(currentConfig.backend, currentMetadata.model), backend: currentConfig.backend,
     ...(currentMetadata.model ? {model: currentMetadata.model} : {}), ...(currentMetadata.address ? {address: currentMetadata.address} : {}),
-    source: 'current', origin: 'printer-handoff', keys: currentMetadata.keys, bambuKind: currentMetadata.bambuKind, config: currentConfig}];
+    source: 'current', origin: 'printer-handoff', keys: currentMetadata.keys, bambuKind: currentMetadata.bambuKind,
+    ...(currentMetadata.serial ? {serial: currentMetadata.serial} : {}), config: currentConfig}];
   const queue = (options.sourcePaths ?? defaultSources(home)).map(path => ({path: expand(path, home, home), origin: undefined as PrinterOrigin | undefined}));
   const visited = new Set<string>();
   const seenProfiles = new Set<string>();
@@ -281,7 +290,8 @@ export async function loadPrinterCatalog(current: PrinterHandoffConfig, options:
       const id = `mcp-${createHash('sha256').update(`${path}\0${key}`).digest('hex').slice(0, 24)}`;
       const label = name.trim().replace(/[\u0000-\u001f\u007f]/g, '').slice(0, 120);
       candidates.push({id, name: label || defaultName(backend, meta.model), backend, address: meta.address,
-        ...(meta.model ? {model: meta.model} : {}), source: 'mcp-profile', origin, keys: meta.keys, bambuKind: meta.bambuKind, config});
+        ...(meta.model ? {model: meta.model} : {}), source: 'mcp-profile', origin, keys: meta.keys, bambuKind: meta.bambuKind,
+        ...(meta.serial ? {serial: meta.serial} : {}), config});
     }
   }
   const chosen = winners(candidates);

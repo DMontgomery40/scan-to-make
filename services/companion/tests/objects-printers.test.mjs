@@ -255,3 +255,19 @@ test('when another profile wins over the Mac app\'s own config, the default foll
   assert.equal(catalog.canonical('current'), catalog.destinations[0].id);
   assert.equal(catalog.resolve('current').backend, 'mcp-3d-printer-server');
 });
+
+test('a shared address never merges two printers with different serials, and the configured printer type counts', async t => {
+  const f = await fixture(t);
+  const source = await f.put('mcp.json', {mcpServers: {
+    // An old profile still has the current P1S's IP, but its own serial: a different printer.
+    'Old A1': {command: 'node', args: ['/opt/bambu-printer-mcp/dist/index.js'], env: {BAMBU_PRINTER_HOST: '192.0.2.1', BAMBU_PRINTER_SERIAL: 'another-serial', BAMBU_PRINTER_MODEL: 'a1'}},
+  }});
+  const catalog = await loadPrinterCatalog(f.current, f.options([source]));
+  assert.equal(catalog.destinations.length, 2);
+  // A generic default whose selection says Bambu yields to bambu-printer-mcp at the same address.
+  const generic = {backend: 'mcp-3d-printer-server', process: {command: '/usr/local/bin/mcp-3d-printer-server', env: {PRINTER_HOST: '192.0.2.77'}}, selection: {printerType: 'bambu'}};
+  const bambu = await f.put('bambu.json', {mcpServers: {'P1P': {command: 'node', args: ['/opt/bambu-printer-mcp/dist/index.js'], env: {BAMBU_PRINTER_HOST: '192.0.2.77', BAMBU_PRINTER_MODEL: 'p1p'}}}});
+  const routed = await loadPrinterCatalog(generic, f.options([bambu]));
+  assert.deepEqual(routed.destinations.map(d => d.name), ['P1P']);
+  assert.equal(routed.canonical('current'), routed.destinations[0].id);
+});

@@ -50,8 +50,10 @@ function photoName(path: string, taken: string[]): string {
   const extension = extname(path).toLowerCase();
   let stem = basename(path, extname(path)).replace(/[^A-Za-z0-9._ -]/g, '-').replace(/^[^A-Za-z0-9]+/, '').replace(/\.\.+/g, '.').slice(0, 100) || 'photo';
   if (!/^[A-Za-z0-9]/.test(stem)) stem = 'photo';
+  // macOS volumes are usually case-insensitive: Photo.jpg and photo.jpg are one file.
+  const used = new Set(taken.map(item => item.toLowerCase()));
   let name = `${stem}${extension}`, n = 2;
-  while (taken.includes(name)) name = `${stem}-${n++}${extension}`;
+  while (used.has(name.toLowerCase())) name = `${stem}-${n++}${extension}`;
   return name;
 }
 const CAPTURE_PENDING = 'The capture is still missing camera or depth files, or its completed file list. Resume sending it from the phone that recorded it.';
@@ -367,6 +369,9 @@ export class ObjectService {
     // Photos only show what something looks like; without a scan, the description says what to make.
     if (!object.scan && !object.capture?.length && !object.captureDepth?.length && !object.instructions?.trim() && object.state === 'new')
       throw new InvalidStateError('Describe what to make, or add a scan.');
+    // A touch-up works from photos; a model with neither photos nor a request has nothing to go on.
+    if (object.scan && !object.photos.length && !object.capture?.length && !object.instructions?.trim() && (object.state === 'new' || object.state === 'failed'))
+      throw new InvalidStateError("Add photos of it, or describe what you'd like changed.");
     if (object.state === 'touching-up') return object;
     if (object.state === 'needs-closeup') return this.#pass(object, {});
     if (object.state !== 'new' && object.state !== 'failed') throw new InvalidStateError('This object has already been touched up.');

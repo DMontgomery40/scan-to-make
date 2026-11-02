@@ -93,9 +93,24 @@ test('two photos with the same name added at once are both kept', async t => {
   const folder = await mkdtemp(join(tmpdir(), 'objects-race-'));
   t.after(() => rm(folder, {recursive: true, force: true}));
   const jpeg = n => Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(60, n)]);
-  for (const sub of ['a', 'b', 'c']) { await mkdir(join(folder, sub)); await writeFile(join(folder, sub, 'photo.jpg'), jpeg(sub.charCodeAt(0))); }
+  for (const sub of ['a', 'b', 'c']) { await mkdir(join(folder, sub)); await writeFile(join(folder, sub, sub === 'b' ? 'Photo.JPG' : 'photo.jpg'), jpeg(sub.charCodeAt(0))); }
   const object = await objects.create('x');
-  await Promise.all(['a', 'b', 'c'].map(sub => dispatch('objects.addFile', {id: object.id, kind: 'photos', path: join(folder, sub, 'photo.jpg')})));
+  await Promise.all(['a', 'b', 'c'].map(sub => dispatch('objects.addFile', {id: object.id, kind: 'photos', path: join(folder, sub, sub === 'b' ? 'Photo.JPG' : 'photo.jpg')})));
   const photos = (await objects.get(object.id)).photos;
-  assert.deepEqual([...photos].sort(), ['photo-2.jpg', 'photo-3.jpg', 'photo.jpg']);
+  // Unique even on a case-insensitive volume (Photo.jpg and photo.jpg are one file there).
+  assert.equal(new Set(photos.map(name => name.toLowerCase())).size, 3);
+  const {readFile: read} = await import('node:fs/promises');
+  const contents = await Promise.all(photos.map(name => read(join(objects.dir(object.id), 'photos', name))));
+  assert.equal(new Set(contents.map(bytes => bytes[10])).size, 3, 'no photo overwrote another');
+});
+
+test('a model dropped on its own needs photos or a request before it can start', async t => {
+  const {dispatch} = await dispatcher();
+  const {writeFile, rm} = await import('node:fs/promises');
+  const folder = await mkdtemp(join(tmpdir(), 'objects-model-only-'));
+  t.after(() => rm(folder, {recursive: true, force: true}));
+  await writeFile(join(folder, 'part.stl'), Buffer.concat([Buffer.alloc(80), Buffer.from([1, 0, 0, 0]), Buffer.alloc(50)]));
+  const {object} = await dispatch('objects.create', {});
+  await dispatch('objects.addFile', {id: object.id, kind: 'scan', path: join(folder, 'part.stl')});
+  await assert.rejects(dispatch('objects.start', {id: object.id}), error => error.code === 'conflict' && /Add photos of it, or describe/.test(error.message));
 });

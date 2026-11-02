@@ -51,8 +51,12 @@ export const counterpartPrintProgressSchema = z.object({
 });
 export type CounterpartPrintProgress = z.infer<typeof counterpartPrintProgressSchema>;
 
-/** A normalized printer report; `source` says which tool it came from. */
-export type PrintReport = Omit<CounterpartPrintProgress, 'contract'> & {source: 'counterpart' | 'status-fallback'};
+/**
+ * A normalized printer report; `source` says which tool it came from.
+ * `stateKnown: false` marks a firmware state that says nothing about printing
+ * (Moonraker's Klippy "ready" holds while it prints).
+ */
+export type PrintReport = Omit<CounterpartPrintProgress, 'contract'> & {source: 'counterpart' | 'status-fallback'; stateKnown?: false};
 
 const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
 const finite = (value: unknown): number | undefined => typeof value === 'number' && Number.isFinite(value) ? value : undefined;
@@ -130,8 +134,20 @@ export function genericStatusReport(input: unknown, observedAt: Date): PrintRepo
   const at = observedAt.toISOString();
   const base = {source: 'status-fallback' as const, observedAt: at, problems: []};
   if (!record(value)) return {...base, state: 'offline'};
-  // Moonraker answers {result: {state}}; PrusaLink {printer: {state}}.
-  if (record(value.result)) value = value.result;
+  // Moonraker /printer/info answers {result: {state}} with Klippy's own state, which stays
+  // "ready" while it prints: only its error states say anything.
+  if (record(value.result) && typeof value.result.state === 'string') {
+    const klippy = value.result.state.toLowerCase();
+    return {...base, state: klippy === 'shutdown' || klippy === 'error' ? 'busy' : 'idle', stateKnown: false};
+  }
+  // Duet /machine/status: {state: {status}}.
+  if (record(value.state) && typeof value.state.status === 'string') {
+    const duet = value.state.status.toLowerCase();
+    const state = duet === 'processing' || duet === 'simulating' ? 'printing' : duet === 'paused' || duet === 'pausing' || duet === 'resuming' ? 'paused'
+      : duet === 'idle' ? 'idle' : duet === 'off' ? 'offline' : 'busy';
+    return {...base, state};
+  }
+  // PrusaLink {printer: {state}}.
   if (record(value) && record(value.printer) && typeof value.printer.state === 'string') value = {state: value.printer.state};
   if (!record(value)) return {...base, state: 'offline'};
   const state = record(value.state) ? value.state : undefined;
@@ -275,8 +291,8 @@ export function detectCapabilities(config: PrinterHandoffConfig, catalog: Printe
 }
 
 /** Destination readiness for the print sheet's printer cards. */
-export function readiness(report: Pick<PrintReport, 'state'> | undefined): 'ready' | 'busy' | 'offline' | 'unknown' {
-  if (!report) return 'unknown';
+export function readiness(report: Pick<PrintReport, 'state' | 'stateKnown'> | undefined): 'ready' | 'busy' | 'offline' | 'unknown' {
+  if (!report || (report.stateKnown === false && report.state === 'idle')) return 'unknown';
   switch (report.state) {
     case 'idle': case 'finished': case 'failed': case 'cancelled': return 'ready';
     case 'offline': return 'offline';

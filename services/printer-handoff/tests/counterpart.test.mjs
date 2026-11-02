@@ -35,8 +35,13 @@ test("mcp-3D-printer-server's raw printer endpoint gives only a state", () => {
   assert.equal(genericStatusReport({state: {flags: {ready: true, operational: true}}}, at).state, 'idle');
   assert.equal(genericStatusReport({state: 'ready', state_message: 'Printer is ready'}, at).state, 'idle');
   // Moonraker's /printer/info and PrusaLink's /api/v1/status wrap their state.
-  assert.equal(genericStatusReport({result: {state: 'ready', state_message: 'Printer is ready', hostname: 'voron'}}, at).state, 'idle');
+  // Klippy's "ready" holds while printing: it is not a print state.
+  const klippy = genericStatusReport({result: {state: 'ready', state_message: 'Printer is ready', hostname: 'voron'}}, at);
+  assert.equal(readiness(klippy), 'unknown');
   assert.equal(genericStatusReport({result: {state: 'shutdown'}}, at).state, 'busy');
+  assert.equal(genericStatusReport({state: {status: 'idle'}}, at).state, 'idle');
+  assert.equal(genericStatusReport({state: {status: 'processing'}}, at).state, 'printing');
+  assert.equal(genericStatusReport({state: {status: 'pausing'}}, at).state, 'paused');
   assert.equal(genericStatusReport({printer: {state: 'PRINTING'}}, at).state, 'printing');
   assert.equal(genericStatusReport({printer: {state: 'ATTENTION'}}, at).state, 'paused');
   assert.equal(genericStatusReport('nope', at).state, 'offline');
