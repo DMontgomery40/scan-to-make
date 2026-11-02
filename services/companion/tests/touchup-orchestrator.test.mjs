@@ -23,6 +23,7 @@ function recorder(log, runDelayMs = 0) {
     lockPath: join(mkdtempSync(join(tmpdir(), 'touchup-orch-lock-')), 'blender.lock'),
     ensureBlender: async () => { log.push('ensureBlender'); return 'already-running'; },
     resetScene: async () => { log.push('resetScene'); },
+    stopBlender: async () => { log.push('stopBlender'); },
     client: () => ({}),
     prepare: async args => { log.push('prepare'); return prepareTouchupPass(args); },
     run: async (inv, pass) => { log.push('run:start'); await new Promise(r => setTimeout(r, runDelayMs)); log.push('run:end'); return {...done(pass), inv}; },
@@ -32,7 +33,7 @@ function recorder(log, runDelayMs = 0) {
 test('order', async () => {
   const log = [];
   const result = await runTouchup(await input(), recorder(log));
-  assert.deepEqual(log, ['ensureBlender', 'resetScene', 'prepare', 'run:start', 'run:end']);
+  assert.deepEqual(log, ['ensureBlender', 'resetScene', 'prepare', 'run:start', 'run:end', 'stopBlender']);
   assert.equal(result.status, 'done');
   assert.ok(result.passDir.length > 0);
 });
@@ -41,14 +42,14 @@ test('bridge missing stops early', async () => {
   const log = [];
   const deps = {...recorder(log), resetScene: async () => { log.push('resetScene'); throw new BlenderBridgeUnavailableError(); }};
   await assert.rejects(runTouchup(await input(), deps), BlenderBridgeUnavailableError);
-  assert.deepEqual(log, ['ensureBlender', 'resetScene']);
+  assert.deepEqual(log, ['ensureBlender', 'resetScene', 'stopBlender']);
 });
 
 test('one at a time', async () => {
   const log = [];
   const deps = recorder(log, 100);
   await Promise.all([runTouchup(await input(), deps), runTouchup(await input(), deps)]);
-  assert.deepEqual(log, ['ensureBlender', 'resetScene', 'prepare', 'run:start', 'run:end', 'ensureBlender', 'resetScene', 'prepare', 'run:start', 'run:end']);
+  assert.deepEqual(log, ['ensureBlender', 'resetScene', 'prepare', 'run:start', 'run:end', 'ensureBlender', 'resetScene', 'prepare', 'run:start', 'run:end', 'stopBlender']);
 });
 
 test('a failed touch-up does not block the next one', async () => {
@@ -57,6 +58,7 @@ test('a failed touch-up does not block the next one', async () => {
   await assert.rejects(runTouchup(await input(), failing), /worker crashed/);
   const result = await runTouchup(await input(), recorder(log));
   assert.equal(result.status, 'done');
+  assert.equal(log.filter(item => item === 'stopBlender').length, 2, 'a crashed pass and its replacement each release Blender');
 });
 
 test('correction pass', async () => {
@@ -133,4 +135,47 @@ for (let i = 0; i < 8; i++) { const release = await acquireBlenderLock(${JSON.st
   const lines = (await readFile(logPath, 'utf8')).trim().split('\n');
   assert.equal(lines.length, 128);
   for (let i = 0; i < lines.length; i += 2) assert.deepEqual([lines[i], lines[i + 1]], ['in', 'out'], `overlap at line ${i}`);
+});
+
+
+test('cancelled workers release Blender before the pass finishes', async () => {
+  const log = [], controller = new AbortController();
+  const deps = {...recorder(log), run: async () => { controller.abort(); throw new Error('cancelled'); }};
+  await assert.rejects(runTouchup(await input({signal: controller.signal}), deps), /cancelled/);
+  assert.equal(log.at(-1), 'stopBlender');
+});
+
+test('an unsuccessful Blender shutdown preserves the completed model and unlocks the next pass', async () => {
+  const log = [];
+  const deps = {...recorder(log), stopBlender: async () => { throw new Error('shutdown failed'); }};
+  const result = await runTouchup(await input(), deps);
+  assert.equal(result.status, 'done');
+  assert.equal((await runTouchup(await input(), recorder(log))).status, 'done');
+});
+
+test('a batch ending in Fusion still releases the Blender used by its earlier pass', async () => {
+  const log = [];
+  const blender = recorder(log, 50);
+  const fusion = {...recorder(log),
+    fusionLockPath: join(mkdtempSync(join(tmpdir(), 'touchup-mixed-lock-')), 'fusion.lock'),
+    client: () => ({connect: async () => {}, close: async () => {}, hasTool: () => true,
+      callTool: async () => ({content: [{type: 'text', text: JSON.stringify({connected: true})}]})}),
+  };
+  const first = await input(), last = await input({kind: 'fit'});
+  await Promise.all([runTouchup(first, blender), runTouchup(last, fusion)]);
+  assert.equal(log.filter(item => item === 'ensureBlender').length, 1);
+  assert.equal(log.filter(item => item === 'stopBlender').length, 1);
+  assert.equal(log.at(-1), 'stopBlender');
+});
+
+test('shutdown holds the same Blender lock as the pass', async () => {
+  const {readFile} = await import('node:fs/promises');
+  const deps = recorder([]);
+  let stopped = false;
+  deps.stopBlender = async () => {
+    assert.equal(await readFile(deps.lockPath, 'utf8'), String(process.pid));
+    stopped = true;
+  };
+  await runTouchup(await input(), deps);
+  assert.equal(stopped, true);
 });
