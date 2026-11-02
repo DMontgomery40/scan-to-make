@@ -15,6 +15,7 @@ enum CaptureFixture {
     static let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
 }
 @MainActor final class MacConnection {
+    static func requestedFile(_ id: String) -> URL { CaptureFixture.root.appendingPathComponent("sending-\(id)") }
     // CAPTURE_METHODS
 }
 
@@ -42,7 +43,11 @@ enum CaptureFixture {
         try Data("retained model".utf8).write(to: output)
         check(mac.localScan("project-one") == output, "preview uses the same ready scan as resumed sending")
         coordinator.result = draft(readyRun, "ready").merging(["addRequested": false]) { _, new in new }
+        let oldRequest = MacConnection.requestedFile("project-one")
+        try Data().write(to: oldRequest)
         check(try await mac.scan("project-one") == nil, "Keep for later does not request an immediate send")
+        check(!FileManager.default.fileExists(atPath: oldRequest.path), "a new scan clears old failed-send intent so Keep for later cannot auto-resume")
+        check(await mac.finishedScan("project-one") == readyRun, "a kept scan remains available for an explicit later Send")
         coordinator.result["addRequested"] = true
         check(try await mac.scan("project-one") == readyRun, "Add to this project returns its ready scan")
         coordinator.result["status"] = "failed"
