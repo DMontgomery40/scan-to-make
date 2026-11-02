@@ -36,6 +36,8 @@ struct FindYourMacView: View {
     @State private var attempt = 0
     @State private var nearbyOwned = false
     @State private var camera: CameraAccess?
+    @State private var cameraUnavailable = false
+    @State private var scannerID = UUID()
     /// The name the Mac lists this phone under (chosen in Settings, else the device's own name).
     @State private var deviceName = "iPhone"
     @State private var replacing = false
@@ -124,8 +126,9 @@ struct FindYourMacView: View {
 
     /// The live camera reading the code, or why it can't.
     @ViewBuilder private var cameraView: some View {
-        if camera == .allowed && QRScanner.isSupported {
-            QRScanner(armed: armed) { use($0) }
+        if camera == .allowed && QRScanner.isSupported && !cameraUnavailable {
+            QRScanner(armed: armed, found: { use($0) }, unavailable: { cameraUnavailable = true })
+                .id(scannerID)
                 .accessibilityLabel("Camera, looking for your Mac's code")
         } else {
             ZStack {
@@ -134,13 +137,16 @@ struct FindYourMacView: View {
                 VStack(spacing: 12) {
                     Image(systemName: camera == .denied ? "camera.badge.ellipsis" : "qrcode.viewfinder").font(.system(size: 40))
                         .foregroundStyle(.secondary)
-                    Text(camera == .denied ? "Counterpart can't use the camera." : camera == nil ? "Starting the camera…" : "This device can't read codes with its camera.")
+                    Text(camera == .denied ? "Counterpart can't use the camera." : cameraUnavailable ? "Camera unavailable" : camera == nil ? "Starting the camera…" : "This device can't read codes with its camera.")
                         .font(.headline).multilineTextAlignment(.center)
                     if camera == .denied {
                         Button("Open Settings") { openSettings() }.buttonStyle(.glass)
-                    } else if camera == .unavailable {
+                    } else if cameraUnavailable || camera == .unavailable {
                         Text("Open the link from your Mac, or pair with a Mac nearby.").font(.subheadline)
                             .foregroundStyle(.secondary).multilineTextAlignment(.center)
+                        if cameraUnavailable {
+                            Button("Try Camera Again") { scannerID = UUID(); cameraUnavailable = false }.buttonStyle(.glass)
+                        }
                     }
                 }
                 .frame(width: 230)

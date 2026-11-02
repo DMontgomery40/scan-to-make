@@ -136,6 +136,20 @@ State at 2026-11-02 04:35 MT: **the camera works with Counterpart installed and 
 
 ### Scanning (row 7)
 
+Nov 2 capture audit (`feat/capture-recovery`; device acceptance still required):
+- A later stopped attempt hid an older ready scan in `finishedScan` and `localScan`; both now select
+  a ready capture for the project. `scan` now honors **Keep for later** instead of returning that run
+  as an immediate-send request. Terminal capture failures reach the capture screen's error display.
+- The pairing QR scanner now surfaces VisionKit startup and interruption failures, with **Try Camera
+  Again** creating a fresh controller. Dismissed/background scanners cannot deliver a stale failure.
+  No camera entitlement was added, and no automatic phone restart is suggested.
+- Host capture checks exercise production lifecycle, selection and QR methods against controlled
+  platform boundaries. These checks do not establish physical camera health or an end-to-end upload.
+- The backed-up native capture `ce42012e-ed16-4f6f-9268-5c9f9ac7bb8b` completed on **Oct 31, 05:48Z**
+  (iPhone18,2, iOS 27.2): 117 images, three passes/two flips, a 7,088,924-byte USDZ matching its
+  manifest SHA-256. It logged `stitchingIncomplete`; completeness/fit remain unverified. This is older
+  phone reconstruction evidence, not proof that the current app sends it to the Mac successfully.
+
 - **Walk-around** is Apple's `ObjectCaptureSession` with the GuidedCapture sample's view. On Davica3 it reaches
   "ready" with LiDAR depth. The flip pass (`beginNewScanPassAfterFlip()`) is already in the sample flow.
   Upload → companion → model on the Mac is being proven with David's real capture from the phone backup
