@@ -70,6 +70,7 @@ public final class CompanionClient: @unchecked Sendable {
         func is_(_ pattern: String) -> Bool { Pattern(pattern).matches(path) }
         switch method {
         case "GET":
+            if path == "/v1/blender" { return "projects:read" }
             if is_("/v1/objects(?:/printers)?") || is_(one) || is_(one + "/passes/(0|[1-9][0-9]{0,15})/activity") { return "projects:read" }
             if is_("/healthz") { return "generation:health" }
             if is_("/v1/events") || is_("/v1/settings") || is_("/v1/devices") { return "projects:read" }
@@ -85,6 +86,7 @@ public final class CompanionClient: @unchecked Sendable {
         case "PUT":
             if is_(one + "/scan") { return "captures:import" }
         case "POST":
+            if is_("/v1/blender/(check|update)") { return "projects:write" }
             if is_("/v1/objects") || is_(one + "/(start|duplicate|corrections|closeup|photos|capture|capture-depth)") { return "captures:import" }
             if is_(one + "/(print|printer|print-confirmation|estimate|print/pause|print/resume|print/cancel)") { return "printer-handoff:use" }
             if is_("/v1/devices/live-activity-tokens") { return "projects:write" }
@@ -427,6 +429,13 @@ public final class CompanionClient: @unchecked Sendable {
 
     private struct UpdateReply: Decodable { var update: MCPUpdate }
     /// Updates a printer MCP on the Mac (PRD §8.10). `fresh` installs a fresh copy when the install couldn't be told.
+    public func blenderAddon(_ action: BlenderAddonStatus.Action = .status) async throws -> BlenderAddonStatus {
+        struct Reply: Decodable { let blender: BlenderAddonStatus }
+        let path = action == .status ? "/v1/blender" : "/v1/blender/" + action.rawValue
+        let response = try await send(action == .status ? "GET" : "POST", path, body: action == .status ? nil : Data("{}".utf8)).checked(path: path)
+        return try JSONDecoder().decode(Reply.self, from: response.body).blender
+    }
+
     public func updateMCP(_ mcpId: String, fresh: Bool = false) async throws -> MCPUpdate {
         let id = mcpId.addingPercentEncoding(withAllowedCharacters: .alphanumerics.union(.init(charactersIn: "-_."))) ?? mcpId
         return try await request("POST", "/v1/printers/mcp/\(id)/update", json: fresh ? ["fresh": true] : [:], as: UpdateReply.self).update

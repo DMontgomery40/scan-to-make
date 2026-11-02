@@ -16,7 +16,7 @@ import { instanceName } from './bonjour.js';
 import { computerName, discoverAddresses, localHostName, macDisplayName } from './lan-addresses.js';
 import { RemoteAuthStore } from './remote-auth.js';
 import { createPrintHandoffServices } from './print-handoff-http.js';
-import { PrinterSessionPool, readPrinterHandoffConfig } from '@scan-to-make/printer-handoff';
+import { PrinterMcpClient, PrinterSessionPool, readPrinterHandoffConfig } from '@scan-to-make/printer-handoff';
 import { PrinterDirectory } from './printing/directory.js';
 import { CameraFrames } from './printing/camera.js';
 import { CompanionSettingsStore } from './settings.js';
@@ -39,7 +39,10 @@ import {ObjectService} from './objects/service.js';
 import {generateTitle} from './objects/title.js';
 import {PassTimings} from './touchup/stages.js';
 import {printerStlSize} from './objects/stl-size.js';
-import {runTouchup} from './touchup/touchup.js';
+import {runTouchup, acquireBlenderLock} from './touchup/touchup.js';
+import {readBlenderAddonStatus, listening, BLENDER_MCP_PORT} from './touchup/blender.js';
+import {BlenderAddonRepair} from './touchup/addon-repair.js';
+import {ConfiguredAddonInstaller} from './touchup/addon-installer.js';
 import {loadPrinterCatalog} from './objects/printers.js';
 
 // Presence is explicit opt-in. Invalid/empty configuration must fail, never fall back.
@@ -69,6 +72,7 @@ if((handoffConfigPath===undefined)!==(handoffDirectory===undefined))throw new Er
 if(handoffConfigPath!==undefined&&(!remoteAuth||!isAbsolute(handoffConfigPath)||!isAbsolute(handoffDirectory!)))throw new Error('Printer handoff requires authentication and absolute config and directory paths');
 const handoffConfig=handoffConfigPath===undefined?undefined:await readPrinterHandoffConfig(handoffConfigPath);
 let mcpUpdates:McpUpdater|undefined;
+let blenderAddon:BlenderAddonRepair|undefined;
 // PRD §8.10: every process started from the Mac's own profile runs the version an Update installed.
 const runningHandoff=()=>handoffConfig&&mcpUpdates?mcpUpdates.effective('current',handoffConfig):handoffConfig;
 const printerCheck=handoffConfig===undefined?undefined:createPrinterCheck(()=>runningHandoff()!);
@@ -145,6 +149,15 @@ if(handoffConfig&&printHandoff&&captureDirectory&&claudePath){
   printerDirectory.useVersions(mcpUpdates);
   await mcpUpdates.applyOverrides();
   mcpUpdates.start();
+  const addonInstaller=new ConfiguredAddonInstaller(()=>runningHandoff()!,hostEnvironment(dataRoot));
+  blenderAddon=new BlenderAddonRepair({gate:printGate,workRoot:dataRoot,listening:()=>listening(BLENDER_MCP_PORT),
+    inspect:version=>addonInstaller.inspect(version),stage:directory=>addonInstaller.stage(directory),
+    lock:()=>acquireBlenderLock(undefined,{signal:AbortSignal.timeout(10_000)}),
+    probe:async()=>{
+      const client=new PrinterMcpClient(runningHandoff()!);
+      const signal=AbortSignal.timeout(15_000);
+      try{await client.connect(signal);return await readBlenderAddonStatus(client,signal);}finally{await client.close().catch(()=>{});}
+    }});
   await objects.resume();
 }
 if(capture?.scanProcessing&&captureDirectory)capture.modelSize=new ModelSizeStore(capture.storage,capture.scanProcessing,join(captureDirectory,'captures'),
@@ -182,6 +195,7 @@ const server = await startCompanionServer({
   ...(liveActivityTokens ? {liveActivityTokens} : {}),
   ...(presence ? {presence} : {}),
   ...(mcpUpdates ? {mcpUpdates} : {}),
+  ...(blenderAddon ? {blenderAddon} : {}),
   ...(icloud ? {icloud} : {}),
   remoteAuth,
   port:
@@ -201,6 +215,7 @@ try {
       ...(liveActivityTokens ? {liveActivityTokens} : {}),
       ...(presence ? {presence} : {}),
       ...(mcpUpdates ? {mcpUpdates} : {}),
+  ...(blenderAddon ? {blenderAddon} : {}),
       // With every address answering, the Mac's QR is a v2 link from the live list.
       ...(allAddresses === '1' && server.publicKeySha256 ? {pairingLink:() => ({addresses:server.addresses(),publicKeySha256:server.publicKeySha256!,
         ...(macName ? {name:instanceName(macName)} : {})})} : {}),

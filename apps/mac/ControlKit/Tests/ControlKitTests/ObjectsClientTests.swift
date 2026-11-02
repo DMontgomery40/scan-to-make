@@ -25,6 +25,17 @@ private func failure(_ request: [String: Any], _ code: String) throws -> Data {
 }
 
 final class ObjectsClientTests: XCTestCase {
+    func testBlenderRepairUsesCompanionStatusAndActions() async throws {
+        let server = try UnixFixture { request in
+            XCTAssertEqual(request["method"] as? String, "blender.update")
+            return [try reply(request, result: ["blender": ["state": "updating", "message": "Updating…", "canUpdate": false]])]
+        }
+        let status = try await ControlClient(socketPath: server.path).blenderAddon(.update)
+        XCTAssertTrue(status.isWorking)
+        XCTAssertFalse(status.canUpdate)
+        withExtendedLifetime(server) {}
+    }
+
     func testInitialFileUploadDoesNotClaimMessageOwnership() async throws {
         let server = try UnixFixture { request in
             XCTAssertNil((request["params"] as? [String: Any])?["forMessage"])

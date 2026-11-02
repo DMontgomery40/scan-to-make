@@ -138,6 +138,9 @@ struct MacSettingsSections: View {
 
     var body: some View {
         printers
+        if model.store.macCapabilities.contains("blenderAddon") {
+            BlenderAddonSettingsSection { action in try await model.store.mac.client.blenderAddon(action) }
+        }
         if let settings = model.settings, settings.isFull {
             if let ai = settings.ai { aiSection(ai) }
             if let fusion = settings.fusion { fusionSection(fusion) }

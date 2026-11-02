@@ -18,7 +18,7 @@ export class BlenderBridgeUnavailableError extends Error {
   constructor() { super("Blender isn't set up in your printer MCP. Add BLENDER_MCP_COMMAND and BLENDER_MCP_ARGS to its config."); this.name = 'BlenderBridgeUnavailableError'; }
 }
 
-function listening(port: number): Promise<boolean> {
+export function listening(port: number): Promise<boolean> {
   return new Promise(resolve => {
     const socket = connect({port, host: '127.0.0.1'});
     socket.once('connect', () => { socket.destroy(); resolve(true); });

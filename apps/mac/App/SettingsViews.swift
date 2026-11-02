@@ -522,6 +522,10 @@ struct AISettings: View {
                 }
                 if let problem = model.problem { Text(problem).font(.caption).foregroundStyle(.red) }
             }
+            BlenderAddonSettingsSection { action in
+                let socket = ModelAccessModel.socketPath(for: Installation(bundle: .main))
+                return try await ControlClient(socketPath: socket).blenderAddon(action)
+            }
             Section {
                 HStack(alignment:.center, spacing:12) {
                     Image(systemName:"cube.transparent.fill").font(.title2).foregroundStyle(fusion == .notInstalled ? .secondary : Color.filament)
@@ -567,7 +571,7 @@ struct AISettings: View {
         }
         .formStyle(.grouped)
         .focusEffectDisabled()
-        .frame(height:500)
+        .frame(minHeight:500)
         .task { await model.refresh(); checkFusion() }
         .onChange(of:model.status) { _, status in
             guard status == .connected, let started = testStarted else { return }

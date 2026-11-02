@@ -135,6 +135,7 @@ export async function startCompanionServer(
     /** Last seen and model per device. */
     presence?: DevicePresence;
     /** PRD §8.10: Update for the printer MCPs. */
+    blenderAddon?: import('./touchup/addon-repair.js').BlenderAddonRepair;
     mcpUpdates?: McpUpdater;
     /** PRD §5.10: enrolment through the owner's iCloud (LAN mode only). */
     icloud?: IcloudEnrolment;
@@ -257,11 +258,25 @@ export async function startCompanionServer(
         // Scope name kept from the first protocol so existing pairings still parse.
         await authorize('generation:health');
         // Additive: older phones read only status and protocolVersion.
-        response.end(JSON.stringify({ status: 'ok', protocolVersion: '0.1.0', ...(options.name ? { name: options.name } : {}), capabilities: { genericConfirmations: !!options.objects, materialChoice: !!options.objects, projectSettings: !!options.objects, projectPreferences: !!options.objects, projectRename: !!options.objects, messagePhotos: !!options.objects, mcpUpdates: !!options.mcpUpdates, printCopies: !!options.objects?.printCopiesAvailable } }));
+        response.end(JSON.stringify({ status: 'ok', protocolVersion: '0.1.0', ...(options.name ? { name: options.name } : {}), capabilities: { genericConfirmations: !!options.objects, materialChoice: !!options.objects, projectSettings: !!options.objects, projectPreferences: !!options.objects, projectRename: !!options.objects, messagePhotos: !!options.objects, mcpUpdates: !!options.mcpUpdates, blenderAddon: !!options.blenderAddon, printCopies: !!options.objects?.printCopiesAvailable } }));
         return;
       }
       if(captureRoutes&&request.url?.startsWith('/v1/saved-projects/')){
         await captureRoutes.handle(request,response,authorize,name=>singleHeader(request,name));return;
+      }
+      if(options.blenderAddon && ['/v1/blender','/v1/blender/check','/v1/blender/update'].includes(request.url??'')) {
+        const action=request.url!.split('/').at(-1);
+        await authorize(action==='blender'?'projects:read':'projects:write');
+        if((action==='blender'&&request.method!=='GET')||(action!=='blender'&&request.method!=='POST')) {response.writeHead(405).end();return;}
+        if(action!=='blender') {
+          const controller=new AbortController();const abort=()=>controller.abort();response.once('close',abort);
+          let input:unknown={};
+          try {if(request.headers['content-length']!=='0'&&request.headers['content-type'])input=await readBody(request,controller.signal,1024);}
+          finally {response.off('close',abort);}
+          if(input!==null&&(typeof input!=='object'||Array.isArray(input)||Object.keys(input).length))throw new ServerFailure('invalid-request');
+        }
+        const blender=action==='update'?options.blenderAddon.update():action==='check'?options.blenderAddon.requestCheck():options.blenderAddon.current();
+        response.writeHead(200,{'content-type':'application/json'});response.end(JSON.stringify({blender}));return;
       }
       if(objectRoutes&&(request.url==='/v1/objects'||request.url?.startsWith('/v1/objects/')||request.url?.startsWith('/v1/objects?')||request.url==='/v1/settings')){
         await objectRoutes.handle(request,response,authorize,name=>singleHeader(request,name));return;
