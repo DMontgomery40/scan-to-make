@@ -89,17 +89,6 @@ started only "BackSparseTimeOfFlight Camera" and "Back Camera". Then:
 - The phone was restarted. **The camera works** (`acc-040430.log` from 04:04:32).
 - With the app installed, the camera had stayed black across two restarts.
 
-## Rule for UI tests and the phone's camera
-
-XCTest records the screen during UI tests unless told not to. On the phone, that recording connects
-virtual displays, and while one is connected the phone blackens every camera frame, LiDAR included:
-`The continuity display is connected. Will start blackening frames.` That is what made the 03:47 run black.
-
-- Turn XCTest's diagnostic screen recording off for any UI test run on the phone. The runner reads the
-  `DisableDiagnosticScreenRecordings` default (seen in its log at 03:47:05); it is unset unless you set it.
-- Before trusting any frame, photo, depth result or "the camera works" from a run, grep the device log for
-  `blackening`. A run with that line measured the recording, not the app.
-
 ## What was installed
 
 The Release (`c2eb1e0`) and Debug (`34fa520`) `ScanToMake.app` have the same Info.plist. None of the
