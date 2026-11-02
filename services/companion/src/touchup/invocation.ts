@@ -68,6 +68,8 @@ export interface TouchupInvocation {
   env: NodeJS.ProcessEnv;
   cwd: string;
   mcpConfigPath: string;
+  /** Runner-only redaction inputs; never forwarded to the worker or adapter environment. */
+  redactionEnv?: NodeJS.ProcessEnv;
   mcpConfig: {mcpServers: Record<string, McpServerEntry>};
 }
 
@@ -156,5 +158,5 @@ export function buildTouchupInvocation(input: {pass: TouchupPass; printer: Print
     prompt(pass, input.instructions, input.note, input.summary, input.currentModel) + (input.engine === 'fusion' && input.design
       ? `\n\nThe current design is a parametric Fusion design: ${input.design.f3d}${input.design.parameters ? ` (its parameters: ${input.design.parameters})` : ''}. A separate copy is already imported into this pass's bound document. Change its parameters rather than opening the archive again or editing the mesh.` : ''),
   ];
-  return {command: input.claudePath, args, env: isolatedClaudeEnv(input.sourceEnv ?? process.env), cwd: pass.dir, mcpConfigPath, mcpConfig};
+  return {command: input.claudePath, args, env: isolatedClaudeEnv(input.sourceEnv ?? process.env), cwd: pass.dir, mcpConfigPath, mcpConfig, redactionEnv: {...input.printer.env}};
 }

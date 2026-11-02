@@ -24,9 +24,15 @@ The bounded fix uses the configured printer transport, including localhost SSH:
   so it also works with forced SSH commands. Worker arguments cannot replace the token.
   An old bridge is rejected before new-document dispatch and the existing engine fallback
   records the reason. No token is selected by the worker prompt.
-- A completed pass closes only its bound document after the runner validates both final
-  STL and F3D artifacts. Failed/capped/incomplete work stays open for recovery. A failed
-  close leaves the completed artifacts and result intact.
+- A completed pass reopens its saved F3D into a separate bound verification document through
+  Fusion's native importer. Only after that succeeds does it close the verification document
+  and original owned document. Empty, invalid, or unconfirmed imports retain the original
+  recovery document and mark the pass failed while keeping its saved STL. Failed/capped/
+  incomplete work stays open. A cleanup failure after successful validation preserves the
+  completed artifacts and reports which closure could not be confirmed.
+- The configured printer environment remains runner-only redaction metadata after the adapter
+  replaces its MCP entry. Activity, summary, changes, Ask, close-up and failure text use the
+  same redactor; these metadata values are not forwarded into worker/adapter environments.
 - Existing arbitrary `execute_code` remains a trusted Python capability, not a sandbox.
   Its supplied `design`, `component`, `document`, and application context are bound;
   explicitly reacquiring global Autodesk APIs is outside that contextual guarantee.

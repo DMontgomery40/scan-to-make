@@ -1,5 +1,5 @@
 import {createHash} from 'node:crypto';
-import {link, mkdir, readFile, rename, unlink, writeFile} from 'node:fs/promises';
+import {link, lstat, mkdir, readFile, rename, unlink, writeFile} from 'node:fs/promises';
 import {randomUUID} from 'node:crypto';
 import {homedir} from 'node:os';
 import {dirname, join} from 'node:path';
@@ -135,17 +135,39 @@ export async function chooseEngine(input: Pick<TouchupInput, 'handoff' | 'kind' 
   }
 }
 
-/** Only close the session-created document once the runner validated both final artifacts.
- * A failed/capped pass keeps its unsaved document available for recovery. */
-async function closeCompletedFusionDocument(input: TouchupInput, deps: TouchupDeps, documentId: string): Promise<void> {
+/** Reopen the saved archive with Fusion before discarding the original recovery document.
+ * Native import understands Fusion's archive compression and validates the editable design. */
+async function closeCompletedFusionDocument(input: TouchupInput, deps: TouchupDeps, documentId: string, archive: string): Promise<{valid: boolean; note?: string}> {
   const client = (deps.client ?? (handoff => new PrinterMcpClient(handoff)))(input.handoff);
-  const signal = AbortSignal.timeout(10_000);
+  const signal = AbortSignal.timeout(120_000);
+  let valid = false, verificationId: string | undefined;
+  const close = async (id: string) => {
+    const reply = await client.callTool('fusion_mcp_call', {tool_name: 'close_document', arguments: {}, document_id: id}, {signal, timeoutMs: 10_000});
+    if (reply.isError) throw new Error('close refused');
+  };
   try {
+    const file = await lstat(archive);
+    if (!file.isFile() || file.size === 0) throw new Error('missing archive');
     await client.connect(signal);
-    const result = await client.callTool('fusion_mcp_call', {tool_name: 'close_document', arguments: {}, document_id: documentId}, {signal, timeoutMs: 10_000});
-    if (result.isError) throw new Error('close refused');
+    const imported = await client.callTool('fusion_mcp_new_design', {bind_document: true, source_f3d: archive}, {signal, timeoutMs: 120_000});
+    if (imported.isError) throw new Error('archive import refused');
+    const receipt = JSON.parse((imported.content ?? []).flatMap(item => item.type === 'text' ? [item.text] : []).join('') || '{}') as {document_binding?: unknown; document_id?: unknown};
+    if (receipt.document_binding !== 1 || typeof receipt.document_id !== 'string' || !receipt.document_id.trim() || receipt.document_id === documentId)
+      throw new Error('archive import did not confirm a separate owned document');
+    verificationId = receipt.document_id;
+    valid = true;
+    await close(verificationId);
+    verificationId = undefined;
+    await close(documentId);
+    return {valid};
   } catch {
-    process.stderr.write('Counterpart saved the design but could not close its owned Fusion document.\n');
+    const note = !valid
+      ? 'The editable Fusion archive could not be reopened. The original Fusion document remains open for recovery.'
+      : verificationId
+        ? 'The design files were verified. The original Fusion document remains open because closing the verification document could not be confirmed.'
+        : 'The design files were verified. The original Fusion document may still be open because closing it could not be confirmed.';
+    process.stderr.write(`Counterpart: ${note}\n`);
+    return {valid, note};
   } finally {
     await client.close().catch(() => undefined);
   }
@@ -162,8 +184,14 @@ async function touchUp(input: TouchupInput, deps: TouchupDeps): Promise<TouchupR
   if (choice.engine === 'fusion') {
     try {
       const result = await touchUpLocked(input, deps, choice);
-      if ((result.status === 'done' || result.status === 'unchanged') && result.model && result.design?.f3d && choice.documentId)
-        await closeCompletedFusionDocument(input, deps, choice.documentId);
+      if ((result.status === 'done' || result.status === 'unchanged') && result.model && result.design?.f3d && choice.documentId) {
+        const checked = await closeCompletedFusionDocument(input, deps, choice.documentId, result.design.f3d);
+        if (!checked.valid) {
+          const {design: _invalidArchive, ...savedMesh} = result;
+          return {...savedMesh, ...choice, status: 'failed', reason: checked.note};
+        }
+        return {...result, ...choice, ...(checked.note ? {note: checked.note} : {})};
+      }
       return {...result, ...choice};
     }
     finally { await releaseFusion?.(); }

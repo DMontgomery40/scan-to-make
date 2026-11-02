@@ -23,7 +23,7 @@ function bridge(results, tools = ['blender_mcp_status', 'blender_mcp_call', 'fus
     async connect() {}, async close() {},
     hasTool: name => tools.includes(name),
     getTool: name => ({name, inputSchema: {type: "object", properties: {bind_document: {type: "boolean"}}}}),
-    async callTool(name, args) { calls.push({name, args}); return results[name] ?? text(name === "fusion_mcp_new_design" ? {document_binding: 1, document_id: "owned-token"} : {}); },
+    async callTool(name, args) { calls.push({name, args}); return (typeof results[name] === 'function' ? results[name](args) : results[name]) ?? text(name === "fusion_mcp_new_design" ? {document_binding: 1, document_id: "owned-token"} : {}); },
   })};
 }
 
@@ -89,12 +89,13 @@ test('the worker is told its engine, and a later change starts from the Fusion d
   for (const field of ['title', 'changes', 'ask']) assert.ok(TOUCHUP_RESULT_SCHEMA.properties[field], field);
 });
 
-function fakeWorker(answer) {
+function fakeWorker(answer, message) {
   return () => {
     const child = new EventEmitter();
     child.pid = undefined;
     child.stdout = new PassThrough(); child.stderr = new PassThrough();
     setImmediate(() => {
+      if (message) child.stdout.write(JSON.stringify({type: 'assistant', message: {content: [{type: 'text', text: message}]}}) + '\n');
       child.stdout.end(JSON.stringify({type: 'result', structured_output: answer}) + '\n');
       setImmediate(() => child.emit('close', 0));
     });
@@ -175,19 +176,58 @@ test('Fusion worker config carries the binding independently of configured SSH a
 });
 
 for (const outcome of [
-  {status: 'done', archive: true, close: true},
-  {status: 'done', archive: true, close: true, closeFailure: true},
-  {status: 'failed', archive: true, close: false},
-  {status: 'capped', archive: true, close: false},
-  {status: 'done', archive: false, close: false},
-]) test(`Fusion document lifecycle preserves recovery unless ${outcome.status}/archive=${outcome.archive}/closeFailure=${Boolean(outcome.closeFailure)} is complete`, async () => {
+  {status: 'done', archive: 'valid', closed: ['verification-token', 'owned-token']},
+  {status: 'unchanged', archive: 'valid', closed: ['verification-token', 'owned-token']},
+  {status: 'done', archive: 'valid', closeFailure: 'verification-token', closed: ['verification-token']},
+  {status: 'done', archive: 'valid', closeFailure: 'owned-token', closed: ['verification-token', 'owned-token']},
+  {status: 'failed', archive: 'valid', closed: []},
+  {status: 'capped', archive: 'valid', closed: []},
+  {status: 'done', archive: undefined, closed: []},
+  {status: 'done', archive: 'empty', closed: [], rejected: true},
+  {status: 'done', archive: 'truncated', closed: [], rejected: true},
+  {status: 'done', archive: 'valid', returnedId: 'owned-token', closed: [], rejected: true},
+]) test(`Fusion archive validation ${JSON.stringify(outcome)}`, async () => {
   const root = await mkdtemp(join(tmpdir(), 'fusion-owned-lifecycle-'));
-  const fusion = bridge({fusion_mcp_status: text({configured: true, connected: true}), ...(outcome.closeFailure ? {fusion_mcp_call: error('already disconnected')} : {})});
+  const fusion = bridge({
+    fusion_mcp_status: text({configured: true, connected: true}),
+    fusion_mcp_new_design: args => args.source_f3d
+      ? outcome.archive === 'truncated' ? error('The archive could not be imported') : text({document_binding: 1, document_id: outcome.returnedId ?? 'verification-token'})
+      : text({document_binding: 1, document_id: 'owned-token'}),
+    fusion_mcp_call: args => args.document_id === outcome.closeFailure ? error('close refused') : text({}),
+  });
   const result = await runTouchup({root, objectId: 'o', scan: [], photos: [], instructions: 'A small box', handoff, claudePath: '/claude', kind: 'fit'}, {
     client: fusion.client, fusionLockPath: join(root, 'fusion.lock'),
-    run: async (_inv, pass) => ({status: outcome.status, model: join(pass.outDir, 'touched.stl'), ...(outcome.archive ? {design: {f3d: join(pass.outDir, 'touched.f3d')}} : {}), renders: [], checkpoints: [], stats: {seconds: 1, toolCalls: 1}}),
+    run: async (_inv, pass) => {
+      const f3d = join(pass.outDir, 'touched.f3d');
+      if (outcome.archive) await writeFile(f3d, outcome.archive === 'empty' ? '' : outcome.archive);
+      return {status: outcome.status, model: join(pass.outDir, 'touched.stl'), ...(outcome.archive ? {design: {f3d}} : {}), renders: [], checkpoints: [], stats: {seconds: 1, toolCalls: 1}};
+    },
   });
-  assert.equal(result.status, outcome.status);
+  assert.equal(result.status, outcome.rejected ? 'failed' : outcome.status);
   const close = fusion.calls.filter(call => call.name === 'fusion_mcp_call' && call.args.tool_name === 'close_document');
-  assert.deepEqual(close, outcome.close ? [{name: 'fusion_mcp_call', args: {tool_name: 'close_document', arguments: {}, document_id: 'owned-token'}}] : []);
+  assert.deepEqual(close.map(call => call.args.document_id), outcome.closed);
+  if (outcome.rejected) { assert.equal(result.design, undefined); assert.match(result.reason, /archive.*original.*open/i); }
+  if (outcome.closeFailure) assert.match(result.note, /document.*open/i);
+  if (outcome.closed.length) assert.deepEqual(fusion.calls.find(call => call.name === 'fusion_mcp_new_design' && call.args.source_f3d)?.args,
+    {bind_document: true, source_f3d: result.design.f3d});
+});
+
+test('bound Fusion workers redact configured credentials without receiving them in their environment', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'fusion-redaction-'));
+  const pass = await prepareTouchupPass({root, objectId: 'o', scan: [], photos: [], requirePhotos: false});
+  const secret = 'private-printer-credential';
+  const config = {...handoff, process: {...handoff.process, env: {ACCESS_CODE: secret}}};
+  const inv = buildTouchupInvocation({pass, printer: config.process, handoff: config, claudePath: '/claude', engine: 'fusion', documentId: 'owned-token', instructions: 'A cube'});
+  assert.ok(!JSON.stringify(inv.env).includes(secret));
+  assert.ok(!JSON.stringify(inv.mcpConfig).includes(secret));
+  const progress = [];
+  const result = await runTouchupWorker(inv, pass, {spawn: fakeWorker({status: 'needs_closeup', summary: `Message ${secret}`, closeup: `Closeup ${secret}`, changes: [{tag: 'changed', text: `Used ${secret}`}], ask: {question: `Explain ${secret}`}}, `Progress ${secret}`), onProgress: value => progress.push(value)});
+  assert.ok(!JSON.stringify({result, progress}).includes(secret));
+  assert.match(result.summary, /\[redacted\]/);
+  assert.equal(progress[0].lastText, 'Progress [redacted]');
+  assert.equal(result.changes[0].text, 'Used [redacted]');
+  assert.equal(result.ask.question, 'Explain [redacted]');
+  assert.equal(result.closeup, 'Closeup [redacted]');
+  const failed = await runTouchupWorker(inv, pass, {spawn: fakeWorker({status: 'failed', summary: `Failure ${secret}`})});
+  assert.equal(failed.reason, 'Failure [redacted]');
 });
