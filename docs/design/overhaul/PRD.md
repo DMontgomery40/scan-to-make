@@ -14,12 +14,13 @@
 
 ## 1. The product
 
-Counterpart makes physical things that fit your life, using your iPhone, your Mac and your 3D printer. It has two jobs:
+Counterpart makes physical things that fit your life, using your iPhone, your Mac and your 3D printer. It has three jobs:
 
 1. **Make something that fits.** You need a part that attaches to, holds or fits something you own. Describe it, and show the thing with a scan or a few photos, or with nothing when its size is published. Your Mac designs the part.
 2. **Copy an object.** Scan it. Your Mac fixes what the scanner missed, checks the result against your photos and makes it printable.
+3. **Print a published model.** Paste or share a link to a model someone else designed (MakerWorld, Printables, Thingiverse), with any choices in plain words ("the 150 mm one, with the depth gauge, in black and yellow"). Counterpart prints the designer's own file as published. It never redesigns it.
 
-Either way you get a notification when it's ready. You look at it, print it or ask for changes, and you're told when the print is done.
+Every way, you get a notification when it's ready. You look at it, print it or ask for changes, and you're told when the print is done.
 
 The work happens on the user's Mac, through the printer MCP they already have (bambu-printer-mcp or mcp-3D-printer-server) and its Blender bridge. Counterpart never re-implements slicing, printing or print safety. It is the interface to those tools.
 
@@ -824,6 +825,36 @@ Screenshots: `screens/mac-settings-ai.jpg` and `screens/mac-settings-ai-nofusion
 - **After an update:** the companion closes that MCP's sessions, opens one again, re-reads its capabilities (§8.2) and shows the new version.
 - **On failure:** the previous version stays in use (npm and git leave it intact), and the log is attached to `mcp.update.failed`.
 - **The same flow** updates the Fusion MCP pin (§8.9) once a new pin has passed its acceptance check.
+
+### 8.11 Print a published model
+
+**When this job applies.** The request contains a link to a model page, or a 3MF or STL was shared or dropped together with a link or a model name. The companion sets `kind: "published"`. This job never goes to the Blender or Fusion design pass.
+
+**Rules:**
+- **Never rebuild a published model from its pictures** when the designer's file exists. Pictures on a model page are for picking a variant, never geometry to copy.
+- **Print what the designer published,** with only the user's choices applied: variant, plate, colours, quality.
+- **Credit the designer.** The project's title is the model's name; the project page shows "by *designer* on *site*" and links back to the page. Printing goes through the user's own download, and Counterpart never re-hosts the files.
+
+**Flow:**
+
+1. **Read the page** (`kind: "published"`, stage "Reading the model page").
+   - The companion fetches the page through the user's own browser session, never a scraper. That means Safari on the Mac, or a `WKWebView` the user can see.
+   - It extracts the title, the designer, the licence, and the list of print profiles and files with their names, plates and sizes.
+   - If the page can't be read, the project goes straight to step 2 with the link.
+2. **Get the designer's file** (state `needs-you`, Ask type `file`). MakerWorld and similar sites don't allow scripted downloads, so the user downloads the file:
+   - **The ask:** "Download *model name* from *site*, then share it with Counterpart."
+   - **Open the page:** **Open in Safari** on the phone, **Open in Browser** on the Mac.
+   - **Attach the file:** the phone's Share sheet ("Counterpart") or Files picker, or dropping it on the Mac's project.
+   - **On the Mac, nothing to attach:** the companion watches `~/Downloads` for a new `.3mf`/`.stl` whose name matches the model, and asks "Use *file name*?" with one tap.
+   - **When the site has a print-profile choice:** the ask names the profile to pick, chosen from the user's words in step 3.
+3. **Pick the variant and plate** (stage "Choosing the parts").
+   - Use the file's plates and objects (`list_3mf_plate_objects`) and the profile names, matched to the user's words. Example: "150 mm" plus "depth gauge" picks the plates and objects whose names contain those words.
+   - Several objects requested "on one plate" are arranged with `slice_stl` `arrange: true`.
+   - If the words are ambiguous or don't match anything, raise an Ask that lists the file's plates and objects by name, with thumbnails.
+4. **Colours.** Map the user's colours ("black and yellow") to AMS slots with `get_printer_filaments`. Keep the file's own filament assignment per object (`load_filament_ids`), and apply `ams_mapping` at `print_3mf`. A colour that isn't loaded raises an Ask: "Yellow isn't loaded. Use *closest*, or load it first?"
+5. **Print.** Use the normal print sheet (§5.5), with the file's profile settings preselected. `slice_stl` slices with `slice_plate` set to the chosen plate. The print, monitor and notifications work as for every other job (§8.5–8.8). "Did it fit?" (§5.4) becomes "Did it come out right?".
+
+**What the user sees.** The New sheet (§5.2) accepts a pasted link. Typing or pasting a URL turns the field into a link card with the page's title and thumbnail, and the action becomes **Get this model**. The Share sheet from Safari or the MakerWorld app does the same.
 
 ## 9. Notifications and Live Activities
 
