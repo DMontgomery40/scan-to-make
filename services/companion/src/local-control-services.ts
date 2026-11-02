@@ -155,7 +155,7 @@ export function createControlDispatcher(services: ControlServices) {
         case 'status.get': return {protocolVersion:1,companionVersion:services.companionVersion,...(services.name?{name:services.name}:{}),transport:auth.transport,
           pairedDeviceCount:(await auth.listDevices()).length,capabilities:{capture:!!capture?.captures,cleanup:!!capture?.scanProcessing,printerHandoff:!!printHandoff,nearbyPairing:!!services.nearby,
             objectsCreate:!!services.objects,printSettings:!!services.objects?.printSettingsAvailable,printControl:!!services.objects?.printSettingsAvailable,
-            events:!!services.events&&!!services.liveActivityTokens,structuredPasses:!!services.objects,genericConfirmations:!!services.objects,materialChoice:!!services.objects,projectSettings:!!services.objects,projectRename:!!services.objects,mcpUpdates:!!services.mcpUpdates,printCopies:!!services.objects?.printCopiesAvailable}};
+            events:!!services.events&&!!services.liveActivityTokens,structuredPasses:!!services.objects,genericConfirmations:!!services.objects,materialChoice:!!services.objects,projectSettings:!!services.objects,projectRename:!!services.objects,messagePhotos:!!services.objects,mcpUpdates:!!services.mcpUpdates,printCopies:!!services.objects?.printCopiesAvailable}};
         case 'printers.updateMcp': {
           if(!services.mcpUpdates)throw new ControlFailure('unavailable');
           const {mcpId,fresh}=parameters[method].parse(raw);
@@ -304,8 +304,8 @@ export function createControlDispatcher(services: ControlServices) {
               return {object: local(await objects.addFile(id, kind, path))};
             }
             if (method === 'objects.correct') {
-              const {id, note, photos} = parameters[method].parse(raw);
-              return {object: local(await objects.correct(id, note, photos))};
+              const {id, note, photos, photoNames} = parameters[method].parse(raw);
+              return {object: local(await objects.correct(id, note, photos, photoNames))};
             }
             if (method === 'objects.answerPrintConfirmation') {
               const {id, confirmationId, answer} = parameters[method].parse(raw);

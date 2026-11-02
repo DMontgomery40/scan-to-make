@@ -267,7 +267,11 @@ export class ObjectService {
     if ((status === 'works' || status === 'printed') && !object.current) throw new InvalidStateError("There's no model yet, so it can't be marked printed.");
     const updated = await this.#deps.store.update(id, o => {
       const {outcome: _outcome, ...rest} = o;
-      if (status === 'works') rest.pendingFollowup = undefined;
+      if (status === 'works') {
+        const message = o.messages?.find(item => item.id === o.pendingMessageId);
+        if (message) rest.completion = {messageId: message.id, note: message.text, atMs: message.atMs, previousStatus: projectStatus(o)};
+        rest.pendingFollowup = undefined; rest.pendingMessageId = undefined;
+      }
       if (status !== 'works' && rest.completion) rest.completion = {...rest.completion, undone: true};
       // A person saying it printed (or works) settles a print Counterpart couldn't follow.
       const settled = o.print?.uncertain ? {print: {...o.print, uncertain: undefined}} : {};
@@ -513,7 +517,13 @@ export class ObjectService {
   async addPhoto(id: string, name: string, bytes: Buffer): Promise<StmObject> {
     await this.get(id);
     await this.#deps.store.addFile(id, 'photos', name, bytes);
-    return this.#changed(await this.#deps.store.update(id, o => ({...o, photos: o.photos.includes(name) ? o.photos : [...o.photos, name]})));
+    return this.#changed(await this.#deps.store.update(id, o => {
+      if (o.photos.includes(name)) return o;
+      const initial = o.state === 'new' && o.passes.length === 0;
+      return {...o, photos: [...o.photos, name], ...(initial
+        ? {requestPhotos: [...(o.requestPhotos ?? []), name]}
+        : {pendingPhotos: [...(o.pendingPhotos ?? []), name]})};
+    }));
   }
 
   /**
@@ -599,30 +609,46 @@ export class ObjectService {
   }
 
   /** Asks for changes; `photos` are files on this Mac added first (the Mac app's drop target). */
-  correct(id: string, note: string, photos: string[] = []): Promise<StmObject> { return this.#gate(id, () => this.#correct(id, note, photos)); }
-  async #correct(id: string, note: string, photos: string[]): Promise<StmObject> {
+  correct(id: string, note: string, photos: string[] = [], photoNames?: string[]): Promise<StmObject> { return this.#gate(id, () => this.#correct(id, note, photos, photoNames)); }
+  async #correct(id: string, note: string, photos: string[], photoNames?: string[]): Promise<StmObject> {
     let object = await this.get(id);
     if (object.state === 'touching-up' || object.state === 'printing') throw new InvalidStateError('Wait until the current step finishes.');
     if (!object.current && object.state !== 'failed') throw new InvalidStateError('There is no model to correct yet.');
-    // A success report is a project outcome, not a request to change its mesh (PRD §5.4).
-    // Attached evidence still takes the normal pass path; the classifier only handles text-only reports.
-    if (object.current && !photos.length && !object.question && object.ask?.status !== 'open' && this.#deps.reportsCompletion) {
+    const before = new Set(object.photos);
+    for (const path of photos) object = await this.#addFile(id, 'photos', path);
+    const attached = [...new Set([...(photoNames ?? object.pendingPhotos ?? []), ...object.photos.filter(name => !before.has(name))])];
+    object = await this.#message(object, note.trim(), attached);
+    const message = object.messages!.find(item => item.id === object.pendingMessageId)!;
+    // Photos can document a successful print too. They must not force a mesh-changing pass.
+    if (object.current && !object.question && object.ask?.status !== 'open' && this.#deps.reportsCompletion) {
       const intent = await this.#deps.reportsCompletion(note).catch(() => 'unknown' as const);
       if (intent === 'unknown') {
-        const saved = await this.#deps.store.update(id, o => ({...o, pendingFollowup: note.trim()}));
-        this.#changed(saved);
+        this.#changed(object);
         await this.#emit({id: randomUUID(), type: 'project.updated', projectId: id, data: {keys: ['pendingFollowup']}});
         throw new InvalidStateError("Your message is saved, but I couldn't tell whether it marks Done or asks for changes. Try sending it again, or set Status to Done.");
       }
       if (intent === 'works') {
         const previousStatus = projectStatus(object);
-        await this.#deps.store.update(id, o => ({...o, pendingFollowup: undefined, completion: {note: note.trim(), atMs: Date.now(), previousStatus}}));
+        await this.#deps.store.update(id, o => ({...o, pendingFollowup: undefined, pendingMessageId: undefined,
+          completion: {messageId: message.id, note: message.text, atMs: message.atMs, previousStatus}}));
         return this.#setStatusNow(id, 'works');
       }
     }
-    for (const path of photos) object = await this.#addFile(id, 'photos', path);
-    // New photos sent with the request make it a late-photos pass.
-    return this.#pass(object, {note: note.trim(), trigger: photos.length ? 'late-photos' : 'changes'});
+    return this.#pass(object, {note: note.trim(), messageId: message.id, photos: message.photos,
+      trigger: message.photos.length ? 'late-photos' : 'changes'});
+  }
+
+  /** Record only known attachment ownership. Retry of a held message keeps its identity and timestamp. */
+  async #message(object: StmObject, text: string, photos: string[]): Promise<StmObject> {
+    if (photos.some(name => !object.photos.includes(name))) throw new InvalidFileError('That photo is not in this project.');
+    return this.#deps.store.update(object.id, o => {
+      const previous = o.messages?.find(item => item.id === o.pendingMessageId && item.text === text);
+      const message = previous ? {...previous, photos: [...new Set([...previous.photos, ...photos])]}
+        : {id: randomUUID(), text, photos, atMs: Date.now()};
+      return {...o, messages: [...(o.messages ?? []).filter(item => item.id !== message.id), message],
+        pendingFollowup: text, pendingMessageId: message.id,
+        pendingPhotos: (o.pendingPhotos ?? []).filter(name => !photos.includes(name))};
+    });
   }
 
   /** Answers the open Ask: with a photo (uploaded first), Best guess, or the person's own words. */
@@ -635,7 +661,9 @@ export class ObjectService {
     const said = answer.text?.trim() ? `Answer to "${object.ask?.question ?? object.question?.closeup ?? 'your question'}": ${answer.text.trim()}` : undefined;
     const parts = [asked, said, answer.bestGuess && !asked?.includes(BEST_GUESS_NOTE) ? BEST_GUESS_NOTE : undefined].filter(Boolean);
     if (object.ask) await this.#deps.store.update(id, o => o.ask ? {...o, ask: {...o.ask, status: 'answered'}} : o);
-    return this.#pass(await this.get(id), {...(parts.length ? {note: parts.join('\n')} : {}), trigger: 'ask-answer'});
+    const updated = await this.#message(await this.get(id), answer.text?.trim() ?? (answer.bestGuess ? 'Use your best guess.' : ''), object.pendingPhotos ?? []);
+    const message = updated.messages!.find(item => item.id === updated.pendingMessageId)!;
+    return this.#pass(updated, {...(parts.length ? {note: parts.join('\n')} : {}), messageId: message.id, photos: message.photos, trigger: 'ask-answer'});
   }
 
   /**
@@ -1126,7 +1154,7 @@ export class ObjectService {
     return (await this.#running.get(id)) ?? this.get(id);
   }
 
-  async #pass(object: StmObject, opts: {note?: string; trigger?: NonNullable<StmObject['passes'][number]['trigger']>}): Promise<StmObject> {
+  async #pass(object: StmObject, opts: {note?: string; messageId?: string; photos?: string[]; trigger?: NonNullable<StmObject['passes'][number]['trigger']>}): Promise<StmObject> {
     await this.#requireCaptureCompletion(object);
     const store = this.#deps.store, dir = store.dir(object.id);
     const fromCurrent = opts.note !== undefined && object.current !== undefined;
@@ -1141,10 +1169,10 @@ export class ObjectService {
     let engine: DesignEngine = 'blender';
     let typical = await this.#typical(kind, engine);
     const first: PassStage = {id: plan[0]!, words: stageWords(plan[0]!, engine, kind), startedAtMs, typicalSec: typical[plan[0]!]};
-    const running = await store.update(object.id, o => ({...o, state: 'touching-up', question: undefined, failure: undefined, pendingFollowup: undefined,
+    const running = await store.update(object.id, o => ({...o, state: 'touching-up', question: undefined, failure: undefined, pendingFollowup: undefined, pendingMessageId: undefined,
       ...(o.completion ? {completion: {...o.completion, undone: true}} : {}),
       ...(build ? {progress: 'Building the model from your photos.'} : {progress: undefined}),
-      passes: [...o.passes, {startedAtMs, trigger: opts.trigger ?? 'new', stages: [first], estimate: passEstimate([first], plan, typical, startedAtMs),
+      passes: [...o.passes, {startedAtMs, ...(opts.messageId ? {messageId: opts.messageId, photos: opts.photos ?? []} : {}), trigger: opts.trigger ?? 'new', stages: [first], estimate: passEstimate([first], plan, typical, startedAtMs),
         ...(opts.note ? {note: opts.note} : {})}]}));
     this.#changed(running);
     await this.#emit({id: randomUUID(), type: 'pass.started', projectId: object.id, data: {stage: first.words, estimateSec: passEstimate([first], plan, typical, startedAtMs).remainingSec}});

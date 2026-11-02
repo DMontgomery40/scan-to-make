@@ -220,7 +220,7 @@ struct ProjectView: View {
                 Group {
                     switch section {
                     case .result: ResultSection(store: store, project: object)
-                    case .inputs: InputsSection(project: object)
+                    case .inputs: InputsSection(project: object, queued: store.corrections.messages[object.id] ?? [], queueFailed: store.corrections.failures[object.id] != nil)
                     case .activity: ActivitySection(store: store, project: object)
                     }
                 }
@@ -669,7 +669,7 @@ struct ProjectView: View {
         }
         act {
             do {
-                let next = try await store.mac.correct(object.id, text)
+                let next = try await store.mac.correct(object.id, text, photoNames: store.corrections.availablePhotos(object))
                 store.corrections.sent(text, for: object.id)
                 note = ""; section = .activity
                 return next
@@ -773,39 +773,24 @@ struct ChangeRow: View {
 /// Your request, every photo and scan full size, and your follow-ups.
 struct InputsSection: View {
     let project: Project
+    var queued: [CorrectionQueue.Message] = []
+    var queueFailed = false
     @State private var viewing: String?
 
-    private var images: [String] { project.photos.map { "photos/\($0)" } + (project.capture ?? []).map { "capture/\($0)" } }
-
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("Your request").font(.headline)
-            Text(project.instructions?.isEmpty == false ? project.instructions! : project.hasScan ? "A copy of the scanned object." : "No description was sent.")
-                .textSelection(.enabled)
-                .padding(16).frame(maxWidth: .infinity, alignment: .leading).background(Color.card, in: .rect(cornerRadius: 22))
-            Text("Photos and scans").font(.headline)
+        let conversation = ProjectConversation(project: project, queued: queued, queueFailed: queueFailed)
+        LazyVStack(alignment: .leading, spacing: 16) {
+            ForEach(conversation.entries) { entry in
+                ConversationBubble(entry: entry) { pictures(entry.photos) }
+            }
+            if conversation.entries.isEmpty { Text("No request was saved with this project.").foregroundStyle(.secondary) }
             if project.scan != nil {
                 Label("Walk-around scan, saved on your Mac", systemImage: "cube.transparent").font(.subheadline).foregroundStyle(.secondary)
             }
-            if images.isEmpty {
-                Text(project.scan != nil ? "No photos besides the scan." : "No photos were sent.").font(.subheadline).foregroundStyle(.secondary)
-            } else {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 100), spacing: 8)], spacing: 8) {
-                    ForEach(images, id: \.self) { path in
-                        Button { viewing = path } label: {
-                            ProjectImage(project: project, path: path, maxPixelSize: 400).frame(height: 110).clipShape(.rect(cornerRadius: 14))
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel(path.hasPrefix("photos/") ? "Photo" : "Scan image")
-                    }
-                }
-            }
-            let followUps = project.passes.compactMap { pass in pass.note.map { ($0, pass.startedAtMs) } }
-            if !followUps.isEmpty {
-                Text("Your follow-ups").font(.headline)
-                ForEach(Array(followUps.enumerated()), id: \.offset) { _, item in
-                    Text("“\(item.0)”  · \(Format.clock(Date(timeIntervalSince1970: item.1 / 1000)))").font(.subheadline).foregroundStyle(.secondary)
-                }
+            if !conversation.otherPhotos.isEmpty {
+                Text("Other project photos").font(.headline)
+                Text("These photos aren't linked to a message.").font(.caption).foregroundStyle(.secondary)
+                pictures(conversation.otherPhotos)
             }
         }
         .sheet(item: Binding(get: { viewing.map(IdentifiedPath.init) }, set: { viewing = $0?.id })) { item in
@@ -815,6 +800,19 @@ struct InputsSection: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(Color.black)
                     .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { viewing = nil } } }
+            }
+        }
+    }
+
+    @ViewBuilder private func pictures(_ paths: [String]) -> some View {
+        if !paths.isEmpty {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 90), spacing: 8)], spacing: 8) {
+                ForEach(paths, id: \.self) { path in
+                    Button { viewing = path } label: {
+                        ProjectImage(project: project, path: path, maxPixelSize: 400).frame(height: 110).clipShape(.rect(cornerRadius: 12))
+                    }
+                    .buttonStyle(.plain).accessibilityLabel(path.hasPrefix("photos/") ? "Photo" : "Scan image")
+                }
             }
         }
     }

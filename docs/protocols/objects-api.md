@@ -275,3 +275,19 @@ Tokens are stored for the calling device (`X-Scan-Device`) in `<data root>/live-
 ## Events (PR 3)
 
 `GET /v1/events?after=<seq>&wait=<0–25>&limit=<0–500>` (READ). See [events.md](events.md).
+
+### Message photo ownership
+
+New projects record `requestPhotos` explicitly. Photos uploaded after a project starts enter
+`pendingPhotos`. A correction may send `photoNames: string[]` to claim only those uploaded names;
+omitting the field uses the currently pending names. Mac control `objects.correct` also accepts
+`photoNames` when `capabilities.messagePhotos` is true, alongside local `photos` file paths.
+
+The companion retains each new follow-up or Ask answer in `messages` as
+`{id, text, atMs, photos}`. A resulting pass stores `messageId` and `photos`, while its worker `note`
+may contain additional Ask context. Success reports store the same `messageId` on `completion`
+and do not start a pass, even with photo evidence. An uncertain report keeps `pendingMessageId`
+and `pendingFollowup`; retrying it retains its message and photos. Both clients persist queued
+messages with their timestamps and claimed photo names, so later queued photos cannot attach to
+an earlier message. Old photos without recorded ownership remain separate; their association is
+not guessed from file order or a project's modification time.

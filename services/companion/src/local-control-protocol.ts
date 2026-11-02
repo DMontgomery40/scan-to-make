@@ -61,7 +61,7 @@ export const parameters = {
   'objects.passActivity': z.strictObject({id: z.uuid(), index: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER)}),
   'objects.start': z.strictObject({id: z.uuid()}),
   'objects.delete': z.strictObject({id: z.uuid()}),
-  'objects.correct': z.strictObject({id: z.uuid(), note: z.string().trim().min(1).max(4000), photos: z.array(z.string().min(2).max(4096)).max(24).optional()}),
+  'objects.correct': z.strictObject({id: z.uuid(), note: z.string().trim().min(1).max(4000), photoNames: z.array(z.string().min(1).max(128)).max(100).optional(), photos: z.array(z.string().min(2).max(4096)).max(24).optional()}),
   'objects.create': z.strictObject({instructions: z.string().max(8000).optional(), kind: z.enum(['fit', 'copy']).optional()}),
   'objects.addFile': z.strictObject({id: z.uuid(), kind: z.enum(['photos', 'scan']), path: z.string().min(2).max(4096)}),
   'objects.answerCloseup': z.strictObject({id: z.uuid(), bestGuess: z.boolean(), text: z.string().trim().min(1).max(2000).optional()}),

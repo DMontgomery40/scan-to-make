@@ -24,7 +24,12 @@ export interface ObjectPrintConfirmation {
   supported: boolean;
 }
 
+export interface ObjectMessage { id: string; text: string; atMs: number; photos: string[] }
+
 export interface ObjectPass {
+  messageId?: string;
+  /** Photos explicitly sent with this message, never inferred from old project files. */
+  photos?: string[];
   startedAtMs: number;
   endedAtMs?: number;
   note?: string;
@@ -59,8 +64,12 @@ export interface StmObject {
   outcome?: 'works' | 'needs-changes';
   /** A message held for retry when intent classification was unavailable or uncertain. */
   pendingFollowup?: string;
+  pendingMessageId?: string;
+  messages?: ObjectMessage[];
+  requestPhotos?: string[];
+  pendingPhotos?: string[];
   /** The success report that marked this project Done without a design pass. */
-  completion?: {note: string; atMs: number; previousStatus: import('@scan-to-make/contracts/counterpart').ProjectStatus; undone?: boolean};
+  completion?: {messageId?: string; note: string; atMs: number; previousStatus: import('@scan-to-make/contracts/counterpart').ProjectStatus; undone?: boolean};
   archived?: boolean;
   /** The short generated title ("Mic mount"). */
   title?: string;
@@ -132,7 +141,7 @@ export class ObjectStore {
 
   async create(instructions?: string, kind?: 'fit' | 'copy'): Promise<StmObject> {
     const now = Date.now();
-    const object: StmObject = {id: randomUUID(), createdAtMs: now, updatedAtMs: now, state: 'new', photos: [], passes: [],
+    const object: StmObject = {id: randomUUID(), createdAtMs: now, updatedAtMs: now, state: 'new', photos: [], requestPhotos: [], pendingPhotos: [], messages: [], passes: [],
       ...(instructions?.trim() ? {instructions: instructions.trim()} : {}), ...(kind ? {kind} : {})};
     await mkdir(this.dir(object.id), {recursive: true});
     await this.#write(object);
