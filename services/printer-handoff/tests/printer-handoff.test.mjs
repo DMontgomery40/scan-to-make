@@ -516,7 +516,7 @@ test('named copies override the config: repetitions 3 in the profile, one copy a
   await f.runner.run({stlPath: f.stlPath});
   assert.deepEqual(await slices(), [1, 1, 3]);
   // An MCP without repetitions: one copy is its default, so nothing is sent and nothing refused.
-  const g = await setup(t, {settings: true});
+  const g = await setup(t, {});
   await g.runner.run({stlPath: g.stlPath, slicer: {repetitions: 1}});
   assert.equal((await g.calls()).find(call => call.tool === 'slice_stl').arguments.repetitions, undefined);
 });
