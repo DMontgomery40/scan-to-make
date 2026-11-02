@@ -26,8 +26,11 @@ public enum CloudNotificationSubscriptions {
             info.alertLocalizationKey = "%1$@"; info.alertLocalizationArgs = ["body"]
             info.category = group.category; info.soundName = "default"
             info.shouldSendMutableContent = true; info.shouldSendContentAvailable = true
-            info.desiredKeys = ["eventId", "projectId", "printId", "type", "notify", "progress", "remainingSec"]
-            if group.id == "ev-progress" { info.collapseIDKey = "printId" }
+            // CloudKit allows at most three extra fields. The service extension fetches the full
+            // event for its frame and presentation; these preserve routing if that fetch fails.
+            info.desiredKeys = ["eventId", "projectId", "type"]
+            // Do not share a constant collapse ID across different prints. The extension groups
+            // delivered alerts by project using threadIdentifier.
             subscription.notificationInfo = info
             return subscription
         }
