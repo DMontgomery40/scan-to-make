@@ -205,9 +205,19 @@ final class CompanionClientTests: XCTestCase {
         return CompanionClient(pairing: PairingClient(store: store, transport: fake), transport: fake, deviceModel: "iPhone18,2", cache: cache)
     }
 
+    func testCapabilityFlagsFromHealth() async throws {
+        let fake = FakeTransport { _, _ in HTTPReply(status: 200, body: Data(#"{"status":"ok","protocolVersion":"0.1.0","capabilities":{"genericConfirmations":true,"structuredPasses":false}}"#.utf8)) }
+        let flags = try await client(fake).capabilities()
+        XCTAssertEqual(flags, ["genericConfirmations"])
+        let older = FakeTransport { _, _ in HTTPReply(status: 200, body: Data(#"{"status":"ok","protocolVersion":"0.1.0"}"#.utf8)) }
+        let none = try await client(older).capabilities()
+        XCTAssertEqual(none, [], "an older Mac lists none")
+    }
+
     func testScopes() {
         let id = "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a01"
         XCTAssertEqual(CompanionClient.scope("GET", "/v1/objects"), "projects:read")
+        XCTAssertEqual(CompanionClient.scope("GET", "/healthz"), "generation:health")
         XCTAssertEqual(CompanionClient.scope("GET", "/v1/objects/printers"), "projects:read")
         XCTAssertEqual(CompanionClient.scope("GET", "/v1/objects/\(id)/filaments"), "printer-handoff:use")
         XCTAssertEqual(CompanionClient.scope("GET", "/v1/objects/\(id)/camera.jpg"), "printer-handoff:use")
@@ -286,6 +296,11 @@ final class CompanionClientTests: XCTestCase {
         XCTAssertEqual(more["quality"] as? String, "fine")
         XCTAssertEqual(more["strength"] as? String, "strong")
         XCTAssertNil(more["plateCheck"], "no plate check (main ac44431)")
+        XCTAssertEqual(PrintChoice(colour: .auto).body["colour"] as? [String: Bool], ["auto": true])
+        XCTAssertEqual(PrintChoice(colour: .external).body["colour"] as? [String: Bool], ["external": true])
+        XCTAssertEqual(PrintChoice(colour: .material("PETG")).body["colour"] as? [String: String], ["material": "PETG"])
+        XCTAssertNil(PrintChoice(colour: .material("PETG")).body["filament"], "filament or colour, never both")
+        XCTAssertEqual(Set(PrintChoice(colour: nil).body.keys), ["checked"])
         XCTAssertEqual(PrintChoice(filament: filament).settingsLine, "0.20 mm layers · 2 walls · 15% infill")
         XCTAssertEqual(filament.displayName, "Bambu PLA Basic")
         XCTAssertEqual(PrinterFilament(slot: 254, colour: "#FFFFFF", material: "PETG", name: "Generic PETG #FFFFFF", filamentId: "", destinationId: "x").slotLabel, "Ext")

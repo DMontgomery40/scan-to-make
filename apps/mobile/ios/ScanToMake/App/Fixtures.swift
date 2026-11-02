@@ -13,6 +13,12 @@ enum Fixtures {
     }
     /// `-CounterpartFixtureSet empty` shows a Mac with no projects yet.
     static var set: String { UserDefaults.standard.string(forKey: "CounterpartFixtureSet") ?? "all" }
+    /// The mic mount's printer: the print sheet's selection, and what `-CounterpartScreen print-noams` starts on.
+    nonisolated(unsafe) static var printer = "current"
+    /// `supported` or `unsupported`: the mic mount is waiting on its printer's own question.
+    nonisolated(unsafe) static var confirmation: String?
+    /// `-CounterpartScreen confirm-mac-answers`: the Mac answers any printer question.
+    nonisolated(unsafe) static var macAnswers = false
 
     static let ids = (mic: "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a01", potato: "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a02",
                       clip: "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a03", plush: "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a04",
@@ -51,7 +57,17 @@ enum Fixtures {
                                      ["tag": "added", "text": "Added a snap cradle that holds the mic level, ports left clear"],
                                      ["tag": "assumed", "text": "Used published size for the mic: 21 mm × 108 mm"],
                                      ["tag": "estimated", "text": "Pole diameter estimated from photos. Print a test ring first?", "toleranceMm": 0.5]]],
-             "print": ["bundleId": "b0", "destination": p1s, "estimate": ["seconds": 4320, "grams": 22]], "printerDestinationId": "current"],
+             "print": ["bundleId": "b0", "destination": p1s, "estimate": ["seconds": 4320, "grams": 22], "jobName": "mic-mount.3mf"],
+             "printerDestinationId": printer]
+                .merging(confirmation.map { kind in
+                    ["state": "printing", "printConfirmation": ["id": "9c1f1c1e-2d1e-4c3a-9a51-0e7a0b9e1a09", "expiresAtMs": ms + 572_000, "supported": kind != "unsupported",
+                        "message": "Start a checked print on P1S (01P00A451200123)? Nozzles: 0.4 mm. Materials: PLA. Peak targets: nozzle 220°C, bed 55°C, chamber 0°C. File SHA-256: 4f9c0b1e2d3a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f9012e21a. Confirm the physical spool labels and that the build plate is clear.",
+                        "fields": kind == "unsupported" ? [] as [[String: Any]] : (kind == "generic" ? [
+                            ["name": "speed", "title": "Print speed", "type": "string", "required": true, "enum": ["silent", "standard", "sport"],
+                             "enumNames": ["Silent", "Standard", "Sport"], "default": "standard"],
+                            ["name": "bed", "title": "Bed temperature (°C)", "type": "number", "required": false, "minimum": 40, "maximum": 110],
+                        ] : []) + [["name": "confirmed", "title": "I checked the printer and confirm this operation", "required": true]]]] as [String: Any]
+                } ?? [:]) { _, new in new },
             ["id": ids.potato, "createdAtMs": ago(8), "updatedAtMs": ago(0.2), "state": "touching-up", "title": "Crochet potato", "kind": "copy",
              "instructions": potatoRequest, "scan": "scan.usdz", "photos": [], "capture": ["potato.jpg"],
              "passes": [["startedAtMs": ago(6), "trigger": "new", "activityCount": 5,
@@ -110,9 +126,23 @@ enum Fixtures {
              "capabilities": ["progress": true, "layers": false, "camera": "none", "filaments": "single", "pause": true, "resume": true, "cancel": true,
                               "quality": true, "strength": true, "multiColour": false, "missing": [],
                               "server": ["name": "mcp-3d-printer-server", "version": "1.2.17"]]],
-            ["id": "mcp-ender", "name": "Ender", "backend": "mcp-3d-printer-server", "model": "Creality Ender-3 V3", "source": "mcp-profile", "origin": "claude-desktop", "state": "offline"],
+            ["id": "mcp-ender", "name": "Ender", "backend": "mcp-3d-printer-server", "model": "Creality Ender-3 V3", "source": "mcp-profile", "origin": "claude-desktop", "state": "ready",
+             "capabilities": ["progress": false, "layers": false, "camera": "none", "filaments": "none", "pause": false, "resume": false, "cancel": true,
+                              "quality": false, "strength": false, "multiColour": false, "missing": ["progress", "camera", "pause"],
+                              "update": ["message": "Update mcp-3D-printer-server to see progress and camera.", "package": "mcp-3d-printer-server",
+                                         "command": ["npm", "install", "-g", "mcp-3d-printer-server@latest"]],
+                              "server": ["name": "mcp-3d-printer-server", "version": "1.2.9"]]],
         ],
     ]
+
+    /// What each printer reports: the P1S's AMS, the MK4's one spool, nothing from the Ender.
+    static func filaments(for destination: String) -> [[String: Any]] {
+        switch destination {
+        case "mcp-garage": [["slot": 0, "colour": "#2B2B38", "material": "PLA", "name": "Galaxy Black", "filamentId": "", "destinationId": "mcp-garage"]]
+        case "mcp-ender": []
+        default: filaments
+        }
+    }
 
     static let filaments: [[String: Any]] = [
         ["slot": 0, "colour": "#141414", "material": "PLA", "name": "Black", "filamentId": "GFA00", "destinationId": "current", "suggested": true],
@@ -144,15 +174,32 @@ struct FixtureTransport: HTTPTransport {
         let objects = Fixtures.objects()
         func object(_ id: String) -> [String: Any]? { objects.first { $0["id"] as? String == id } }
         let parts = path.split(separator: "/").map(String.init)
-        if path == "/healthz" { return json(["protocolVersion": "0.1.0"]) }
+        if path == "/healthz" { return json(["status": "ok", "protocolVersion": "0.1.0", "capabilities": ["genericConfirmations": Fixtures.macAnswers]]) }
         if path == "/v1/objects/printers" { return json(Fixtures.catalog) }
+        if path.hasPrefix("/v1/objects/printers/"), path.hasSuffix("/camera.jpg") {
+            guard path.contains("/current/") else { return json(["error": ["code": "not-found", "message": "This printer has no camera"]], 404) }
+            var reply = HTTPReply(status: 200, body: try Data(contentsOf: folder.appending(path: "bed.jpg")))
+            reply.headers["X-Captured-At"] = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-3))
+            return reply
+        }
         if path == "/v1/events" { return json(["error": ["code": "not-found", "message": "Not found"]], 404) }
         if path == "/v1/objects" && method == "GET" { return json(["objects": objects]) }
         if parts.count >= 3, parts[0] == "v1", parts[1] == "objects" {
             if parts.count == 4 && parts[2] == "printers" { return json(["error": ["code": "not-found"]], 404) }
             let id = parts[2]
             if parts.count == 3 { return object(id).map { json(["object": $0]) } ?? json(["error": ["code": "not-found"]], 404) }
-            if parts[3] == "filaments" { return json(["filaments": Fixtures.filaments]) }
+            if parts[3] == "filaments" { return json(["filaments": Fixtures.filaments(for: id == Fixtures.ids.mic ? Fixtures.printer : "current")]) }
+            if parts[3] == "printer", method == "POST",
+               let body = request.httpBody.flatMap({ try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }), let destination = body["destinationId"] as? String {
+                if id == Fixtures.ids.mic { Fixtures.printer = destination }
+                return json(["object": Fixtures.objects().first { $0["id"] as? String == id } ?? [:]])
+            }
+            if parts[3] == "estimate", method == "POST" {
+                let destination = id == Fixtures.ids.mic ? Fixtures.printer : "current"
+                let seconds: Double = destination == "mcp-garage" ? 3900 : destination == "mcp-ender" ? 6480 : 4320
+                return json(["destinationId": destination, "quality": "standard", "strength": "standard", "seconds": seconds, "grams": 22, "layers": 212,
+                             "layerHeightMm": 0.2, "infillPercent": 15, "wallLoops": 2, "slicedAt": ISO8601DateFormatter().string(from: Date())])
+            }
             if parts[3] == "passes" {
                 return json(["activity": [
                     ["atMs": Date().timeIntervalSince1970 * 1000 - 60_000, "kind": "message", "text": "Photo 3 shows stitches on the left side the scan smoothed over. Restoring them there only."],

@@ -22,6 +22,10 @@ import CounterpartKit
     var queuedNotes: [String: String] = (UserDefaults.standard.dictionary(forKey: "CounterpartQueuedNotes") as? [String: String]) ?? [:] {
         didSet { UserDefaults.standard.set(queuedNotes, forKey: "CounterpartQueuedNotes") }
     }
+    /// The companion's capability flags (`genericConfirmations` means the Mac can answer any printer question).
+    var macCapabilities: Set<String> = []
+    /// What each printer last reported loaded, from a print sheet (the Mac reports spools per project).
+    var spools: [String: [PrinterFilament]] = [:]
     /// The Mac serves `/v1/events`; false after it answered "not supported".
     var events: Bool?
     var onPair: () -> Void = {}
@@ -32,6 +36,22 @@ import CounterpartKit
 
     func words(_ project: Project) -> ProjectWords {
         ProjectWords(project, sending: sending.contains(project.id), printerName: printerName(project))
+    }
+
+    /// Spools for the printers, read fresh each time (spools get swapped): the Mac reports them for a project's
+    /// printer, so ask through a project that uses each one. A printer no project uses yet shows its spools
+    /// after its first print sheet.
+    func loadSpools() async {
+        for destination in catalog?.destinations ?? [] where destination.capabilities?.filaments != "none" {
+            guard let project = projects.first(where: { ($0.printerDestinationId ?? catalog?.defaultDestinationId) == destination.id }) else { continue }
+            if let reported = try? await mac.filaments(project.id), !reported.isEmpty { spools[destination.id] = reported }
+        }
+    }
+
+    /// The project printing (or getting ready) on this printer, if any.
+    func printing(on destinationId: String) -> Project? {
+        projects.first { ($0.print?.destinationId ?? $0.print?.destination?.id ?? $0.printerDestinationId) == destinationId
+            && [.printing, .preparing].contains(words($0).phase) }
     }
 
     func printerName(_ project: Project) -> String? {
@@ -59,6 +79,10 @@ import CounterpartKit
 
     func reload(_ id: String) async {
         if let latest = try? await mac.get(id) { replace(latest) }
+    }
+
+    func loadCapabilities() async {
+        if let names = try? await mac.client.capabilities() { macCapabilities = names }
     }
 
     func loadPrinters() async {
@@ -98,7 +122,7 @@ import CounterpartKit
 
     /// Clears everything read from the previous Mac.
     func reset() {
-        projects = []; loaded = false; error = nil; catalog = nil; printerProblem = nil; reachable = nil; events = nil
+        projects = []; loaded = false; error = nil; catalog = nil; printerProblem = nil; reachable = nil; events = nil; spools = [:]; macCapabilities = []
         sendFailures = [:]
     }
 

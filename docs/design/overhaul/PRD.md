@@ -686,17 +686,17 @@ For every event with `notify ≠ none`:
 
 Scan cleanup always uses Blender. Designing a part from scratch ("make something that fits") uses Autodesk Fusion when the user has Fusion installed and set up; otherwise it uses Blender, as it does today. Both are reached the same way: through a bridge inside the user's printer MCP. The design pass only ever talks to the printer MCP, so nothing changes in the app's UI.
 
-**The Fusion MCP: [faust-machines/fusion360-mcp-server](https://github.com/faust-machines/fusion360-mcp-server)** (MIT). Starting candidate. **The server that passes the acceptance check below wins.** Popularity doesn't decide it. If faust fails the check, try frankhommers/autodesk-fusion-mcp next, then the others in this table. Activity as of 2026-11-01:
+**The Fusion MCP: [faust-machines/fusion360-mcp-server](https://github.com/faust-machines/fusion360-mcp-server)** (MIT). Chosen 2026-11-01 as the most-used and most-maintained community server:
 
 | Server | Stars | Forks | Contributors | Commits since Sept | Last push |
 |---|---|---|---|---|---|
-| **faust-machines** (tried first) | 141 | 33 | 6 | 7 | 2026-10-06 |
+| **faust-machines** (chosen) | 141 | 33 | 6 | 7 | 2026-10-06 |
 | imranduratbegovic/fusion-mcp | 55 | 8 | 1 | 0 | 2026-03-14 |
 | Joe-Spencer/fusion-mcp-server (GPL-3.0) | 50 | 9 | 1 | 0 | 2025-04-22 |
 | Joelalbon/Fusion-MCP-Server | 41 | 7 | 3 | 0 | 2025-06-12 |
 | frankhommers/autodesk-fusion-mcp | 37 | 4 | 3 | 17 | 2026-09-26 |
 
-**Why it goes first:**
+**Why this one:**
 - It is tested on macOS arm64.
 - It offers 93 explicit CAD tools that suit an agent working with nobody watching:
   - `create_sketch`, `extrude`, `revolve`, `create_hole`, `create_thread`, `fillet`, `shell`, `boolean_operation`;

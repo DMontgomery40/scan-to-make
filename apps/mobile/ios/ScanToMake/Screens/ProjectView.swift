@@ -31,6 +31,8 @@ struct ProjectView: View {
     @State private var scanSize: String?
     @State private var askWorking = false
     @State private var askProblem: String?
+    /// The printer's own question, shown as a sheet once when it arrives and again from Review.
+    @State private var confirming: IdentifiedProject?
     @FocusState private var writing: Bool
     private var object: Project? { store.project(id) }
 
@@ -46,6 +48,7 @@ struct ProjectView: View {
             #endif
             await resumeSavedCapture()
         }
+        .modifier(PrinterQuestion(store: store, project: object, confirming: $confirming))
         .task(id: object.map { store.words($0).busy } ?? false) {
             guard let object, store.words(object).busy, store.events != true else { return }
             while !Task.isCancelled {
@@ -257,7 +260,8 @@ struct ProjectView: View {
         case .failed: failedCard(object, words)
         case .draft: draftCard(object, words)
         case .sent: sentCard(words)
-        case .preparing, .printing: PrintStatusCard(store: store, project: object, working: $working, openPrinting: { openPrinting(object.id) })
+        case .preparing, .printing: PrintStatusCard(store: store, project: object, working: $working, openPrinting: { openPrinting(object.id) },
+                                                    openConfirmation: { confirming = object.printConfirmation.map { IdentifiedProject(id: $0.id) } })
         default: EmptyView()
         }
     }

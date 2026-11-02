@@ -9,6 +9,7 @@ struct ProjectsRoot: View {
     let pairingKey: Int
     @Environment(\.horizontalSizeClass) private var width
     @State private var path: [String] = []
+    @State private var detailPath: [String] = []
     @State private var selected: String?
     @State private var newSheet: NewSheetRequest?
     @State private var printing: IdentifiedProject?
@@ -27,7 +28,7 @@ struct ProjectsRoot: View {
             }
             .presentationDetents([.large])
         }
-        .sheet(item: $printing) { item in PhonePrintPreparation(store: store, objectId: item.id) }
+        .sheet(item: $printing) { item in PrintSheet(store: store, projectId: item.id) }
         .sheet(isPresented: $showSettings) { SettingsView(store: store) }
         .sheet(isPresented: $showPrinters) { NavigationStack { PrintersView(store: store) } }
         .task(id: pairingKey) {
@@ -40,13 +41,15 @@ struct ProjectsRoot: View {
             #endif
             await store.load()
             await store.loadPrinters()
+            await store.loadCapabilities()
         }
         .task(id: pairingKey) { await store.follow() }
         .onChange(of: app.route, initial: true) { _, route in
             guard let route else { return }
             app.route = nil
             switch route {
-            case .project(let id), .camera(let id), .printing(let id): open(id)
+            case .project(let id), .camera(let id): open(id)
+            case .printing(let id): open(id); if width == .regular { detailPath = [Page.printing(id)] } else { path.append(Page.printing(id)) }
             case .print(let id): open(id); printing = IdentifiedProject(id: id)
             case .newProject: newSheet = NewSheetRequest(job: nil)
             case .printers: showPrinters = true
@@ -63,17 +66,21 @@ struct ProjectsRoot: View {
         NavigationStack(path: $path) {
             HomeView(store: store, path: $path, newProject: { newSheet = NewSheetRequest(job: $0) },
                      openPrinters: { showPrinters = true }, openSettings: { showSettings = true })
-                .navigationDestination(for: String.self) { id in projectPage(id) { path.removeAll() } }
+                .navigationDestination(for: String.self) { id in page(id) { path.removeAll() } }
         }
     }
 
     private var split: some View {
         NavigationSplitView {
-            SidebarList(store: store, selection: $selected, newProject: { newSheet = NewSheetRequest(job: nil) },
+            SidebarList(store: store, selection: Binding(get: { selected }, set: { selected = $0; detailPath = [] }), newProject: { newSheet = NewSheetRequest(job: nil) },
                         openPrinters: { showPrinters = true }, openSettings: { showSettings = true })
         } detail: {
             if let selected {
-                NavigationStack { projectPage(selected) { self.selected = nil } }.id(selected)
+                NavigationStack(path: $detailPath) {
+                    projectPage(selected) { self.selected = nil }
+                        .navigationDestination(for: String.self) { id in page(id) { detailPath.removeAll() } }
+                }
+                .id(selected)
             } else if store.loaded && store.projects.isEmpty {
                 ScrollView { EmptyHome { newSheet = NewSheetRequest(job: $0) }.padding(24).frame(maxWidth: 640) }.background(Color.black)
             } else {
@@ -84,8 +91,20 @@ struct ProjectsRoot: View {
     }
 
     private func projectPage(_ id: String, close: @escaping () -> Void) -> some View {
-        ProjectView(store: store, id: id, close: close, openPrint: { printing = IdentifiedProject(id: $0) }, openPrinting: { _ in })
+        ProjectView(store: store, id: id, close: close, openPrint: { printing = IdentifiedProject(id: $0) },
+                    openPrinting: { id in if width == .regular { detailPath.append(Page.printing(id)) } else { path.append(Page.printing(id)) } })
     }
+
+    /// A pushed page: a project, or a print's Printing screen.
+    @ViewBuilder private func page(_ value: String, close: @escaping () -> Void) -> some View {
+        if let id = Page.printingId(value) { PrintingView(store: store, id: id) } else { projectPage(value, close: close) }
+    }
+}
+
+/// Navigation values are strings: a project id, or `printing:<id>` for its Printing screen.
+enum Page {
+    static func printing(_ id: String) -> String { "printing:" + id }
+    static func printingId(_ value: String) -> String? { value.hasPrefix("printing:") ? String(value.dropFirst("printing:".count)) : nil }
 }
 
 struct NewSheetRequest: Identifiable { let id = UUID(); let job: NewProjectJob? }

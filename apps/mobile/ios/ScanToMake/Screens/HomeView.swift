@@ -46,7 +46,8 @@ struct HomeView: View {
                         SectionTitle("Now")
                         VStack(spacing: 12) {
                             ForEach(running) { project in
-                                Button { path.append(project.id) } label: {
+                                // A print opens the Printing screen; anything else, its project page.
+                                Button { path.append(store.words(project).phase == .printing ? Page.printing(project.id) : project.id) } label: {
                                     if [.printing, .preparing].contains(store.words(project).phase) { NowPrintingCard(store: store, project: project) }
                                     else { NowWorkingCard(store: store, project: project) }
                                 }

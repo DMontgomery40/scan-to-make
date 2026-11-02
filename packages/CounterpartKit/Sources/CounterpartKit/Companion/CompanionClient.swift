@@ -60,6 +60,7 @@ public final class CompanionClient: @unchecked Sendable {
         switch method {
         case "GET":
             if is_("/v1/objects(?:/printers)?") || is_(one) || is_(one + "/passes/(0|[1-9][0-9]{0,15})/activity") { return "projects:read" }
+            if is_("/healthz") { return "generation:health" }
             if is_("/v1/events") || is_("/v1/settings") { return "projects:read" }
             if is_(one + "/(model\\.stl|renders/[^/]+|photos/[^/]+|capture/[^/]+|asks/[^/]+|prints/[^/]+/frames/[^/]+)") { return "projects:read" }
             if is_(one + "/(filaments|plate\\.jpg|camera\\.jpg)") || is_("/v1/objects/printers/[^/]+/camera\\.jpg") { return "printer-handoff:use" }
@@ -208,6 +209,14 @@ public final class CompanionClient: @unchecked Sendable {
     }
 
     // MARK: Printing
+
+    /// What the running companion can do, as the names of its true capability flags (`genericConfirmations`, …),
+    /// from `GET /healthz`. Empty from a Mac that doesn't list them.
+    public func capabilities() async throws -> Set<String> {
+        struct Health: Decodable { var capabilities: [String: JSONValue]? }
+        let health = try await request("GET", "/healthz", as: Health.self)
+        return Set((health.capabilities ?? [:]).compactMap { $0.value == .bool(true) ? $0.key : nil })
+    }
 
     public func printers() async throws -> PrinterCatalog { try await request("GET", "/v1/objects/printers", as: PrinterCatalog.self) }
     public func filaments(_ id: String) async throws -> [PrinterFilament] {
