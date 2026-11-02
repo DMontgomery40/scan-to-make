@@ -1,5 +1,7 @@
 import Foundation
 
+// PROJECT_READS
+
 struct Project {
     enum State { case new, touchingUp }
     var id = "object-1"
@@ -90,10 +92,13 @@ struct ChosenPhoto: Equatable { var id: String }
     var sending: Set<String> = []
     var failure: Error?
     var latest: Project?
-    private var request = 0
-    func startRequest() -> Int { request += 1; return request }
+    private var reads = ProjectReads()
+    func startRequest() -> Int { reads.start() }
+    func reset() { reads.reset(); latest = nil }
+    func project(_ id: String) -> Project? { latest?.id == id ? latest : nil }
+    // DRAFT_SEND_METHODS
     @discardableResult func replace(_ project: Project, ticket: Int) -> Bool {
-        guard ticket == request else { return false }
+        guard reads.accept(project.id, ticket: ticket) else { return false }
         latest = project
         return true
     }
@@ -124,7 +129,8 @@ struct ChosenPhoto: Equatable { var id: String }
     @FixtureState var draft = Project()
     @FixtureState var result: Project? = nil
     @FixtureState var failure: Error? = nil
-    func object(scanning: Bool = false) async throws -> Project { draft }
+    @FixtureState var beforeObjectReturn: (() -> Void)? = nil
+    func object(scanning: Bool = false) async throws -> Project { beforeObjectReturn?(); return draft }
     func started(_ object: Project) { result = object }
     func run(_ kind: String, _ body: () async throws -> Void) async {
         do { try await body() } catch { failure = error }
@@ -146,6 +152,24 @@ struct ChosenPhoto: Equatable { var id: String }
     @MainActor static func main() async throws {
         var failures: [String] = []
         func check(_ value: Bool, _ message: String) { if !value { failures.append(message) } }
+
+        // A background refresh can finish while draft creation/update awaits its reply.
+        let refreshed = NewObjectView()
+        refreshed.beforeObjectReturn = { refreshed.store.replace(Project(), ticket: refreshed.store.startRequest()) }
+        await refreshed.make()
+        check(refreshed.store.mac.events.contains("start"), "newer draft refresh cancelled the requested Send")
+        check(refreshed.result != nil, "requested Send never opened the project")
+
+        let refreshedStarted = NewObjectView()
+        refreshedStarted.beforeObjectReturn = { refreshedStarted.store.replace(Project(state: .touchingUp), ticket: refreshedStarted.store.startRequest()) }
+        await refreshedStarted.make()
+        check(refreshedStarted.store.mac.events.isEmpty, "already-started refresh uploaded the draft twice")
+        check(refreshedStarted.result?.state == .touchingUp, "already-started refresh did not open the project")
+
+        let reset = NewObjectView()
+        reset.beforeObjectReturn = { reset.store.reset() }
+        await reset.make()
+        check(reset.store.mac.events.isEmpty && reset.result == nil, "pairing reset allowed an old draft to send or navigate")
 
         // New: a scan attaches; Send sends it in the background; a send cut short resends only what's missing.
         HandheldCapture.reset()

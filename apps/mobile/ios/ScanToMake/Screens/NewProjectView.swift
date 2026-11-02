@@ -215,14 +215,15 @@ struct NewObjectView: View {
         describing = false
         await run("make") {
             let ticket = store.startRequest()
-            let object = try await object()
+            let returned = try await object()
+            guard let object = store.prepareDraftSend(returned, ticket: ticket) else { return }
             guard object.state == .new else { started(object); return }
             let chosen = photos, mac = store.mac
-            guard store.replace(object, ticket: ticket) else { return }
             instructions = ""
             draftId = ""
             started(object)
             await store.sendInBackground(object.id) { [store] in
+                guard store.requestIsCurrent(ticket) else { return }
                 let sendTicket = store.startRequest()
                 store.replace(try await mac.sendProject(object.id, photos: chosen), ticket: sendTicket)
             }
