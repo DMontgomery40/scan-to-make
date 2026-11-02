@@ -490,6 +490,8 @@ struct AISettings: View {
     @State private var other = false
     @State private var fusion = FusionState.checking
     @State private var fusionProblem: String?
+    /// What Fusion said after Set Up (`fusion_mcp_status`), in plain words.
+    @State private var fusionStatus: FusionSetup.Status?
     @AppStorage("ai.lastTestAt") private var lastTestAt: Double = 0
     @AppStorage("ai.lastTestSeconds") private var lastTestSeconds: Double = 0
     @State private var testStarted: Date?
@@ -528,13 +530,20 @@ struct AISettings: View {
                         Text("Design with Fusion").font(.body.weight(.semibold))
                         switch fusion {
                         case .checking: Text("Looking for Fusion…").font(.caption).foregroundStyle(.secondary)
-                        case .notInstalled: Label("Fusion isn't installed", systemImage:"minus.circle").font(.caption).foregroundStyle(.secondary)
+                        case .notInstalled:
+                            HStack(spacing:6) {
+                                Label("Fusion isn't installed", systemImage:"minus.circle").font(.caption).foregroundStyle(.secondary)
+                                Link("Get Fusion", destination:FusionSetup.download).font(.caption)
+                            }
                         case .found, .settingUp: Label("Fusion found", systemImage:"checkmark.circle.fill").font(.caption).foregroundStyle(Color.okGreen)
                         case .setUp: Label("Fusion is set up", systemImage:"checkmark.circle.fill").font(.caption).foregroundStyle(Color.okGreen)
                         }
                     }
                     Spacer()
-                    if fusion == .settingUp { ProgressView().controlSize(.small) }
+                    if fusion == .settingUp {
+                        ProgressView().controlSize(.small)
+                        Text("Setting up and starting Fusion…").font(.caption).foregroundStyle(.secondary)
+                    }
                     Button(fusion == .setUp ? "Set Up Again…" : "Set Up…") { setUpFusion() }
                         .buttonStyle(.glassProminent).disabled(fusion != .found && fusion != .setUp)
                 }
@@ -543,6 +552,10 @@ struct AISettings: View {
                      : "Set Up adds the Fusion360MCP add-in to Fusion, and five FUSION_MCP settings next to Blender's in your printer MCP's env file. New designs then use Fusion when it's running.")
                     .font(.caption).foregroundStyle(.secondary)
                 if let fusionProblem { Text(fusionProblem).font(.caption).foregroundStyle(.red) }
+                if let fusionStatus, fusion == .setUp {
+                    Label(fusionStatus.words, systemImage:fusionStatus.ok ? "checkmark.circle.fill" : "exclamationmark.circle")
+                        .font(.caption).foregroundStyle(fusionStatus.ok ? Color.okGreen : Color.orange)
+                }
                 LabeledContent("Make something that fits") {
                     Text(fusion == .notInstalled ? "Blender" : "Fusion, or Blender if Fusion can't start").foregroundStyle(.secondary)
                 }
@@ -621,10 +634,10 @@ struct AISettings: View {
         let state = Installation(bundle:.main).state
         Task {
             do {
-                let changed = try await FusionSetup.install(state:state)
+                let report = try await FusionSetup.install(state:state)
                 fusion = .setUp
                 fusionProblem = nil
-                _ = changed
+                fusionStatus = report.status
             } catch {
                 fusion = .found
                 fusionProblem = error.localizedDescription
