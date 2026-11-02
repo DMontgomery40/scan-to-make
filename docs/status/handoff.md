@@ -45,7 +45,6 @@ or agent memory.** Update this file when you hand off.
   - **KAN-217:** iPhone app;
   - **KAN-220:** Mac app;
   - **KAN-215:** bambu-printer-mcp.
-- Ask the lead what to own. Don't write into another seat's worktree or branch.
 - **Codex sessions** also work on these repos; their uncommitted changes sit in the MCP repos' main
   checkouts and in `~/.codex/worktrees/`.
 
