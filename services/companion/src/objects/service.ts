@@ -8,7 +8,7 @@ import {DispatchedPrintError, PrinterMcpError, readPrintReport, routeArgs, slice
   type PrintProgress, type PendingElicitation, type PrinterHandoffConfig, type PrinterSelection, type PrinterSlicer, type PrintReport, type PrinterSession} from '@scan-to-make/printer-handoff';
 import type {PrintEstimate, PrintSettings, ProjectStatus} from '@scan-to-make/contracts/counterpart';
 import {PrintMonitorRunner, matchJob, milestonesFor, type EventDraft, type MonitorClock, type MonitorEnd, type MonitorTarget} from '../printing/monitor.js';
-import {CameraFrames, CameraUnavailableError, type CameraFrame} from '../printing/camera.js';
+import {CameraFrames, CameraUnavailableError, type CameraFrame, type CameraSize} from '../printing/camera.js';
 import {PrinterUpdatingError, type PrintGate} from '../printing/print-gate.js';
 import {sliceOverrides, settingsUnsupported} from '../printing/print-settings.js';
 import type {CompanionSettingsStore} from '../settings.js';
@@ -990,16 +990,16 @@ export class ObjectService {
   async view(id: string): Promise<StmObject> { return this.get(id); }
 
   /** The camera of the project's printer (the one printing it, else its chosen one). */
-  async camera(id: string): Promise<CameraFrame> {
+  async camera(id: string, options: {size?: CameraSize} = {}): Promise<CameraFrame> {
     const object = await this.get(id);
     const destinationId = object.state === 'printing' ? object.print?.destinationId ?? object.print?.destination?.id ?? this.#destinationId(object) : this.#destinationId(object);
     if (!destinationId) throw new CameraUnavailableError('no-camera');
-    return this.printerCamera(destinationId);
+    return this.printerCamera(destinationId, options);
   }
-  async printerCamera(destinationId: string): Promise<CameraFrame> {
+  async printerCamera(destinationId: string, options: {size?: CameraSize} = {}): Promise<CameraFrame> {
     const session = this.#deps.printers?.session(destinationId), camera = this.#deps.camera;
     if (!session || !camera) throw new CameraUnavailableError('no-camera');
-    return camera.frame(this.#deps.printerCatalog?.canonical(destinationId) ?? destinationId, session, {model: session.config.selection?.model, view: true});
+    return camera.frame(this.#deps.printerCatalog?.canonical(destinationId) ?? destinationId, session, {model: session.config.selection?.model, view: true, ...options});
   }
 
   /** Pause, resume or stop this project's print, through the destination's mutex (PRD §8.6). */

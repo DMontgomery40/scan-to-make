@@ -300,6 +300,32 @@ final class CompanionClientTests: XCTestCase {
         XCTAssertEqual(sent.last?.2 as NSDictionary?, ["archived": true] as NSDictionary)
     }
 
+    func testCameraConditionalResponseKeepsTheImageAndNegotiatesStreamCadence() async throws {
+        let bytes = Data([255, 216, 255, 1])
+        var count = 0
+        let fake = FakeTransport { request, _ in
+            count += 1
+            XCTAssertEqual(request.url?.query, "size=full")
+            if count == 1 {
+                XCTAssertNil(request.value(forHTTPHeaderField: "If-None-Match"))
+                return HTTPReply(status: 200, body: bytes, headers: ["ETag": "quoted-hash", "X-Camera-Stream": "1", "X-Captured-At": "2026-11-02T12:00:00Z"])
+            }
+            XCTAssertEqual(request.value(forHTTPHeaderField: "If-None-Match"), "quoted-hash")
+            return HTTPReply(status: 304, body: Data(), headers: ["ETag": "quoted-hash", "X-Camera-Stream": "1"])
+        }
+        let c = try client(fake)
+        let first = try await c.camera(printer: "printer-one", fullScreen: true)
+        let next = try await c.camera(printer: "printer-one", fullScreen: true, previous: first)
+        XCTAssertEqual(next.jpeg, bytes)
+        XCTAssertEqual(next.capturedAt, first.capturedAt)
+        XCTAssertTrue(next.streaming)
+        XCTAssertEqual(fake.calls.count, 2)
+        let legacy = try client(FakeTransport { _, _ in HTTPReply(status: 200, body: bytes) })
+        let snapshot = try await legacy.camera(printer: "printer-one")
+        XCTAssertFalse(snapshot.streaming)
+        XCTAssertNil(snapshot.etag)
+    }
+
     func testScopes() {
         let id = "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a01"
         XCTAssertEqual(CompanionClient.scope("GET", "/v1/objects"), "projects:read")

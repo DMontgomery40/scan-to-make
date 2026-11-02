@@ -87,19 +87,25 @@ struct ProjectImage: View {
     var unsupported = false
 
     func run(_ client: CompanionClient, project: String? = nil, printer: String? = nil, every seconds: Double, maxPixelSize: Int = 1200) async {
+        var previous: CompanionClient.CameraFrame?
+        let fullScreen = seconds < 10
         while !Task.isCancelled {
             do {
-                let frame = project != nil ? try await client.camera(project: project!) : try await client.camera(printer: printer!)
-                let size = maxPixelSize
-                let decoded = await Task.detached { ImageMemory.thumbnail(data: frame.jpeg, maxPixelSize: size) }.value
-                guard !Task.isCancelled else { return }
-                if let decoded { image = decoded; capturedAt = frame.capturedAt ?? Date(); problem = nil }
+                let frame = project != nil ? try await client.camera(project: project!, fullScreen: fullScreen, previous: previous)
+                    : try await client.camera(printer: printer!, fullScreen: fullScreen, previous: previous)
+                if previous == nil || frame.etag == nil || frame.etag != previous?.etag {
+                    let size = fullScreen ? maxPixelSize : 300
+                    let decoded = await Task.detached { ImageMemory.thumbnail(data: frame.jpeg, maxPixelSize: size) }.value
+                    guard !Task.isCancelled else { return }
+                    if let decoded { image = decoded; capturedAt = frame.capturedAt ?? Date() }
+                }
+                previous = frame; problem = nil
             } catch let error as CompanionError {
                 guard !Task.isCancelled else { return }
                 if error.isUnsupported || error.code == "no-camera" { unsupported = true; problem = error.message; return }
                 problem = error.message
             } catch { return }
-            try? await Task.sleep(for: .seconds(seconds))
+            try? await Task.sleep(for: .seconds(fullScreen && previous?.streaming == true ? 2 : seconds))
         }
     }
 }

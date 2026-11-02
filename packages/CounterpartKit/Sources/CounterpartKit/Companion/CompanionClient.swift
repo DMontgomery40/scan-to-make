@@ -106,7 +106,7 @@ public final class CompanionClient: @unchecked Sendable {
 
     /// One request: pinned, size-limited, and refused afterwards if the pairing changed while it ran.
     public func send(_ method: String, _ path: String, body: Data? = nil, contentType: String = "application/json",
-                     limit: Int = CompanionClient.jsonLimit, timeout: TimeInterval = 90) async throws -> HTTPReply {
+                     limit: Int = CompanionClient.jsonLimit, timeout: TimeInterval = 90, ifNoneMatch: String? = nil) async throws -> HTTPReply {
         guard let scope = Self.scope(method, path.components(separatedBy: "?")[0]) else { throw CompanionError.transport("invalid-request") }
         var attempt = try record(scope)
         // A GET that can't reach the Mac checks its other addresses once, moving to whichever answers.
@@ -116,6 +116,7 @@ public final class CompanionClient: @unchecked Sendable {
             var request = URLRequest(url: url, timeoutInterval: timeout)
             request.httpMethod = method
             request.httpBody = body
+            if let ifNoneMatch { request.setValue(ifNoneMatch, forHTTPHeaderField: "If-None-Match") }
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
             request.setValue(device, forHTTPHeaderField: "X-Scan-Device")
             if let deviceModel { request.setValue(deviceModel, forHTTPHeaderField: "X-Scan-Device-Model") }
@@ -300,19 +301,32 @@ public final class CompanionClient: @unchecked Sendable {
         try await request("POST", "/v1/objects/\(id)/print/\(action.rawValue)", json: [:], as: One.self).object
     }
 
-    /// A still from the camera, and when it was taken (PR 2): the printer this project is printing on, or
-    /// a printer by id. Shared 3 s cache on the Mac.
-    public struct CameraFrame: Sendable { public var jpeg: Data; public var capturedAt: Date? }
-    public func camera(project id: String) async throws -> CameraFrame { try await camera(path: "/v1/objects/\(id)/camera.jpg") }
-    public func camera(printer destinationId: String) async throws -> CameraFrame {
-        let id = destinationId.addingPercentEncoding(withAllowedCharacters: .alphanumerics.union(.init(charactersIn: "-_."))) ?? destinationId
-        return try await camera(path: "/v1/objects/printers/\(id)/camera.jpg")
+    /// A watched camera frame. New companions use shared MCP streams and conditional responses;
+    /// older companions keep their snapshot behavior.
+    public struct CameraFrame: Sendable {
+        public var jpeg: Data
+        public var capturedAt: Date?
+        public var etag: String?
+        public var streaming: Bool
+        public init(jpeg: Data, capturedAt: Date? = nil, etag: String? = nil, streaming: Bool = false) {
+            self.jpeg = jpeg; self.capturedAt = capturedAt; self.etag = etag; self.streaming = streaming
+        }
     }
-    private func camera(path: String) async throws -> CameraFrame {
-        let reply = try await send("GET", path, limit: Self.photoLimit, timeout: 20)
+    public func camera(project id: String, fullScreen: Bool = false, previous: CameraFrame? = nil) async throws -> CameraFrame {
+        try await camera(path: "/v1/objects/\(id)/camera.jpg", fullScreen: fullScreen, previous: previous)
+    }
+    public func camera(printer destinationId: String, fullScreen: Bool = false, previous: CameraFrame? = nil) async throws -> CameraFrame {
+        let id = destinationId.addingPercentEncoding(withAllowedCharacters: .alphanumerics.union(.init(charactersIn: "-_."))) ?? destinationId
+        return try await camera(path: "/v1/objects/printers/\(id)/camera.jpg", fullScreen: fullScreen, previous: previous)
+    }
+    private func camera(path: String, fullScreen: Bool, previous: CameraFrame?) async throws -> CameraFrame {
+        let reply = try await send("GET", path + (fullScreen ? "?size=full" : ""), limit: Self.photoLimit, timeout: 20, ifNoneMatch: previous?.etag)
+        if reply.status == 304, let previous {
+            return CameraFrame(jpeg: previous.jpeg, capturedAt: previous.capturedAt, etag: previous.etag, streaming: reply.header("X-Camera-Stream") == "1")
+        }
         guard reply.status == 200 else { throw Self.refusal(reply, path: path) }
         guard !reply.body.isEmpty else { throw CompanionError(code: "unavailable", message: "The printer's camera isn't answering right now.") }
-        return CameraFrame(jpeg: reply.body, capturedAt: reply.header("X-Captured-At").flatMap(ISO.date))
+        return CameraFrame(jpeg: reply.body, capturedAt: reply.header("X-Captured-At").flatMap(ISO.date), etag: reply.header("ETag"), streaming: reply.header("X-Camera-Stream") == "1")
     }
 
     // MARK: Settings and events

@@ -1,3 +1,4 @@
+import {createHash} from 'node:crypto';
 import type {IncomingMessage, ServerResponse} from 'node:http';
 import {readFile} from 'node:fs/promises';
 import {basename, join} from 'node:path';
@@ -61,13 +62,16 @@ export function publicObject(object: StmObject): PublicObject {
       summary: currentFailureText(pass.summary), activityCount: activity?.length ?? 0}))};
 }
 
-function sendFrame(response: ServerResponse, frame: CameraFrame): void {
-  response.statusCode = 200;
+function sendFrame(response: ServerResponse, frame: CameraFrame, match?: string): void {
+  const etag = `"${createHash('sha256').update(frame.bytes).digest('base64url')}"`;
+  response.statusCode = match === etag ? 304 : 200;
+  response.setHeader('etag', etag);
+  if (frame.stream) response.setHeader('x-camera-stream', '1');
   response.setHeader('content-type', 'image/jpeg');
   response.setHeader('cache-control', 'private, no-store');
   response.setHeader('x-captured-at', frame.capturedAt);
   response.setHeader('x-content-type-options', 'nosniff');
-  response.end(frame.bytes);
+  response.end(response.statusCode === 304 ? undefined : frame.bytes);
 }
 
 function send(response: ServerResponse, status: number, value: unknown): void {
@@ -92,7 +96,7 @@ export function createObjectRoutes(service: ObjectService) {
         if (printerCamera) {
           if (request.method !== 'GET') throw new HttpFailure(405, 'method-not-allowed');
           await authorize(PRINT);
-          return sendFrame(response, await service.printerCamera(printerCamera[1]!));
+          return sendFrame(response, await service.printerCamera(printerCamera[1]!, {size: url.searchParams.get('size') === 'full' ? 'full' : 'card'}), header('if-none-match'));
         }
         if (url.pathname === '/v1/settings') {
           if (request.method === 'GET') { await authorize(READ); return send(response, 200, {settings: await service.settings()}); }
@@ -210,7 +214,7 @@ export function createObjectRoutes(service: ObjectService) {
         if (action === 'camera.jpg') {
           if (method !== 'GET') throw new HttpFailure(405, 'method-not-allowed');
           await authorize(PRINT);
-          return sendFrame(response, await service.camera(id));
+          return sendFrame(response, await service.camera(id, {size: url.searchParams.get('size') === 'full' ? 'full' : 'card'}), header('if-none-match'));
         }
         if (action === 'estimate') {
           if (method !== 'POST') throw new HttpFailure(405, 'method-not-allowed');
