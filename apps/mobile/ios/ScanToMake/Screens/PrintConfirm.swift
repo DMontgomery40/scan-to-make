@@ -37,7 +37,6 @@ struct PrintConfirmSheet: View {
                             }
                         }
                         messageCard
-                        if !words.checks.isEmpty || (!words.notes.isEmpty && words.isStructured) || project.plate?.item != nil { checksCard }
                         ForEach(question.fields, id: \.name) { field in
                             ConfirmationFieldView(field: field, value: Binding(get: { values[field.name] ?? field.initialValue }, set: { values[field.name] = $0 }))
                                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -81,6 +80,8 @@ struct PrintConfirmSheet: View {
             if let question = words.question { Text(question).font(.headline) }
             ForEach(words.facts, id: \.label) { fact in FactRow(symbol: fact.symbol, label: fact.label, value: fact.value) }
             if words.isStructured {
+                // The rest of what the MCP said, in its own words.
+                ForEach(words.notes, id: \.self) { Text(verbatim: $0).font(.subheadline).fixedSize(horizontal: false, vertical: true) }
                 DisclosureGroup("Full message") {
                     Text(verbatim: question.message).font(.caption.monospaced()).foregroundStyle(.secondary).textSelection(.enabled).padding(.top, 6)
                 }
@@ -92,24 +93,6 @@ struct PrintConfirmSheet: View {
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .glassEffect(.regular, in: .rect(cornerRadius: 24))
-    }
-
-    private var checksCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Check at the printer").font(.headline)
-            ForEach(words.checks, id: \.self) { check in
-                Label(check, systemImage: check.contains("plate") ? "square.dashed" : "tag.fill")
-            }
-            if words.isStructured { ForEach(words.notes, id: \.self) { Text($0).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) } }
-            if let item = project.plate?.item, !item.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                Label("The printer camera reported \(item) on the plate.", systemImage: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
-            }
-        }
-        .font(.subheadline)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(16)
-        .glassEffect(.regular.tint(.orange.opacity(0.12)), in: .rect(cornerRadius: 24))
     }
 
     static func clock(_ seconds: Double) -> String { String(format: "%d:%02d", Int(seconds) / 60, Int(seconds) % 60) }

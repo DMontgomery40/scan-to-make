@@ -51,7 +51,7 @@ public struct CounterpartEvent: Codable, Equatable, Identifiable, Sendable {
     public var seq: Int
     public var id: String
     public var at: String
-    /// `pass.*`, `print.*`, `mcp.update.*` or `plate.blocked`; an unknown type from a newer Mac is kept as its string.
+    /// `pass.*`, `print.*` or `mcp.update.*`; an unknown type from a newer Mac is kept as its string.
     public var type: String
     /// Absent on events about the Mac rather than a project (`mcp.update.*`).
     public var projectId: String?

@@ -74,7 +74,7 @@ public final class CompanionClient: @unchecked Sendable {
             if is_("/healthz") { return "generation:health" }
             if is_("/v1/events") || is_("/v1/settings") || is_("/v1/devices") { return "projects:read" }
             if is_(one + "/(model\\.stl|renders/[^/]+|photos/[^/]+|capture/[^/]+|asks/[^/]+|prints/[^/]+/frames/[^/]+)") { return "projects:read" }
-            if is_(one + "/(filaments|plate\\.jpg|camera\\.jpg)") || is_("/v1/objects/printers/[^/]+/camera\\.jpg") { return "printer-handoff:use" }
+            if is_(one + "/(filaments|camera\\.jpg)") || is_("/v1/objects/printers/[^/]+/camera\\.jpg") { return "printer-handoff:use" }
         case "PATCH":
             if is_(one) { return "captures:import" }
             if is_("/v1/settings") { return "projects:write" }
@@ -314,14 +314,13 @@ public final class CompanionClient: @unchecked Sendable {
     // MARK: Files
 
     /// Downloads one project file into the cache, once per project version, and returns where it is.
-    /// `plate.jpg` is never cached: it changes while a print waits.
     public func download(_ project: Project, _ name: String) async throws -> URL {
-        let allowed = Pattern(#"model\.stl|plate\.jpg|renders/[A-Za-z0-9][A-Za-z0-9._-]{0,120}\.png|asks/[a-f0-9-]{36}\.(jpg|png)|prints/[a-f0-9-]{36}/frames/[a-f0-9-]{36}\.jpg|(?:photos|capture)/[A-Za-z0-9][A-Za-z0-9._ -]{0,127}"#)
+        let allowed = Pattern(#"model\.stl|renders/[A-Za-z0-9][A-Za-z0-9._-]{0,120}\.png|asks/[a-f0-9-]{36}\.(jpg|png)|prints/[a-f0-9-]{36}/frames/[a-f0-9-]{36}\.jpg|(?:photos|capture)/[A-Za-z0-9][A-Za-z0-9._ -]{0,127}"#)
         guard Pattern(Self.uuid).matches(project.id), allowed.matches(name), !name.contains("..") else { throw CompanionError.transport("invalid-request") }
         let version = String(Int64(project.mediaVersion))
         let folder = cache.appending(path: project.id, directoryHint: .isDirectory).appending(path: version, directoryHint: .isDirectory)
         let target = folder.appending(path: name.replacingOccurrences(of: "/", with: "_"))
-        if name != "plate.jpg", FileManager.default.fileExists(atPath: target.path) { return target }
+        if FileManager.default.fileExists(atPath: target.path) { return target }
         let encoded = name.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? name
         // The Ask's picture is served by its id; the field gives `asks/<id>.<ext>`.
         let path = "/v1/objects/\(project.id)/\(encoded)"

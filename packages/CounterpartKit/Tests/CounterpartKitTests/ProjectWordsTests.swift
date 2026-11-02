@@ -12,32 +12,32 @@ final class ProjectWordsTests: XCTestCase {
     private var confirmation: [String: Any] { [
         "id": "question-1", "message": "Check the printer.\nConfirm **each** item before continuing.",
         "expiresAtMs": 1000, "supported": true,
-        "fields": [["name": "plate_clear", "title": "Build plate is clear", "description": "Remove the previous print.", "required": true],
+        "fields": [["name": "spools", "title": "The spools match", "description": "Check the loaded filament.", "required": true],
                    ["name": "watch", "title": "Watch the first layer", "required": false]]
     ] }
 
-    func testPrinterConfirmationPreservesTheQuestionAndReplacesLegacyPlateAction() throws {
-        let p = ready(["state": "printing", "plate": ["noCamera": true, "photo": true], "printConfirmation": confirmation])
+    func testPrinterConfirmationPreservesTheQuestion() throws {
+        let p = ready(["state": "printing", "printConfirmation": confirmation])
         let question = try XCTUnwrap(p.printConfirmation)
         XCTAssertEqual(question.message, "Check the printer.\nConfirm **each** item before continuing.")
-        XCTAssertEqual(question.fields.first?.description, "Remove the previous print.")
+        XCTAssertEqual(question.fields.first?.description, "Check the loaded filament.")
         XCTAssertEqual(ProjectWords(p).status, "Your printer needs your confirmation.")
         XCTAssertTrue(ProjectWords(p).busy)
-        XCTAssertTrue(ProjectWords(p).actions.isEmpty, "a camera/legacy plate answer cannot answer the MCP question")
+        XCTAssertTrue(ProjectWords(p).actions.isEmpty, "only the sheet answers the MCP question")
         XCTAssertNil(ready().printConfirmation, "older companion responses still decode")
     }
 
     func testPrinterConfirmationRequiresExplicitChecksAndCurrentQuestion() throws {
         let question = try XCTUnwrap(ready(["printConfirmation": confirmation]).printConfirmation)
         XCTAssertFalse(question.canAccept([:], atMs: 999))
-        XCTAssertFalse(question.canAccept(["plate_clear": false], atMs: 999))
-        XCTAssertTrue(question.canAccept(["plate_clear": true], atMs: 999))
-        XCTAssertFalse(question.canAccept(["plate_clear": true], atMs: 1000))
-        XCTAssertNil(question.response(confirmationId: "old", action: .accept, content: ["plate_clear": true], atMs: 999))
+        XCTAssertFalse(question.canAccept(["spools": false], atMs: 999))
+        XCTAssertTrue(question.canAccept(["spools": true], atMs: 999))
+        XCTAssertFalse(question.canAccept(["spools": true], atMs: 1000))
+        XCTAssertNil(question.response(confirmationId: "old", action: .accept, content: ["spools": true], atMs: 999))
         XCTAssertNil(question.response(confirmationId: question.id, action: .accept, content: [:], atMs: 999))
         let accepted = try XCTUnwrap(question.response(confirmationId: question.id, action: .accept,
-                                                       content: ["plate_clear": true, "unrelated": true], atMs: 999))
-        XCTAssertEqual(accepted.answer.content, ["plate_clear": true, "watch": false])
+                                                       content: ["spools": true, "unrelated": true], atMs: 999))
+        XCTAssertEqual(accepted.answer.content, ["spools": true, "watch": false])
         let json = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(accepted)) as? [String: Any])
         XCTAssertEqual(json["confirmationId"] as? String, question.id)
         XCTAssertEqual((json["answer"] as? [String: Any])?["action"] as? String, "accept")
@@ -48,9 +48,9 @@ final class ProjectWordsTests: XCTestCase {
         var unknown = confirmation
         unknown["supported"] = false
         let question = try XCTUnwrap(ready(["printConfirmation": unknown]).printConfirmation)
-        XCTAssertFalse(question.canAccept(["plate_clear": true], atMs: 999))
-        XCTAssertNil(question.response(confirmationId: question.id, action: .accept, content: ["plate_clear": true], atMs: 999))
-        let cancelled = try XCTUnwrap(question.response(confirmationId: question.id, action: .cancel, content: ["plate_clear": true], atMs: 999))
+        XCTAssertFalse(question.canAccept(["spools": true], atMs: 999))
+        XCTAssertNil(question.response(confirmationId: question.id, action: .accept, content: ["spools": true], atMs: 999))
+        let cancelled = try XCTUnwrap(question.response(confirmationId: question.id, action: .cancel, content: ["spools": true], atMs: 999))
         XCTAssertEqual(cancelled.answer.action, .cancel)
         XCTAssertNil(cancelled.answer.content)
     }
@@ -127,8 +127,8 @@ final class ProjectWordsTests: XCTestCase {
         XCTAssertEqual(ProjectWords(project(["state": "needs-closeup", "question": ["closeup": "the underside"]])).actions, [.openCamera, .attachPhotos, .bestGuess])
         XCTAssertEqual(ProjectWords(project(["state": "needs-closeup", "question": ["closeup": "the underside"]])).status,
                        "Can you send me a close-up of the underside? I can't see what's happening there.")
-        XCTAssertEqual(ProjectWords(ready(["state": "printing", "plate": ["item": "a spool", "photo": true]])).status, "Preparing print…")
-        XCTAssertEqual(ProjectWords(ready(["state": "printing", "plate": ["noCamera": true]])).actions, [])
+        XCTAssertEqual(ProjectWords(ready(["state": "printing"])).status, "Preparing print…")
+        XCTAssertEqual(ProjectWords(ready(["state": "printing"])).actions, [])
         XCTAssertEqual(ProjectWords(ready(["state": "failed", "failure": "x", "print": ["bundleId": "b", "uncertain": true]])).actions, [.printChecked, .correct])
         XCTAssertEqual(ProjectWords(project(["state": "failed", "failure": "Blender is not open on your Mac."])).actions, [.retry, .correct])
         XCTAssertEqual(ProjectWords(project(["scan": "scan.usdz"])).actions, [.finishSending])
@@ -147,13 +147,18 @@ final class ProjectWordsTests: XCTestCase {
         XCTAssertEqual(ProjectWords.sent(project(["instructions": "A hook"])), "Just the description")
     }
 
-    /// A plate the camera reported isn't a prompt to clear it (main ac44431): the print is still being prepared.
-    func testPlateReportsDontAskYouToClearThePlate() {
-        let reported = ProjectWords(ready(["state": "printing", "plate": ["item": "a spool", "photo": true]]))
-        XCTAssertEqual(reported.status, "Preparing print…")
-        XCTAssertEqual(reported.phase, .preparing)
-        XCTAssertEqual(reported.actions, [])
-        XCTAssertEqual(ProjectWords(ready(["state": "printing", "plate": ["noCamera": true]])).actions, [])
+    /// An older companion still sends a `plate` object. It's ignored: the project decodes, nothing asks about it,
+    /// and the print is still being prepared.
+    func testAnOlderCompanionsPlateObjectIsIgnored() throws {
+        let older = ready(["state": "printing", "plate": ["item": "a spool", "noCamera": true, "photo": true]])
+        XCTAssertEqual(older.id, ready().id)
+        XCTAssertEqual(ProjectWords(older).status, "Preparing print…")
+        XCTAssertEqual(ProjectWords(older).phase, .preparing)
+        XCTAssertEqual(ProjectWords(older).actions, [])
+        let encoded = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(older)) as? [String: Any])
+        XCTAssertNil(encoded["plate"], "never kept or sent back")
+        // An odd value of any type decodes too.
+        XCTAssertEqual(ProjectWords(ready(["state": "printing", "plate": "blocked"])).phase, .preparing)
     }
 
     func testUnknownStatesFromANewerMacStillDecode() {

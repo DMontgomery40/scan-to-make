@@ -61,7 +61,7 @@ enum Fixtures {
              "printerDestinationId": printer]
                 .merging(confirmation.map { kind in
                     ["state": "printing", "printConfirmation": ["id": "9c1f1c1e-2d1e-4c3a-9a51-0e7a0b9e1a09", "expiresAtMs": ms + 572_000, "supported": kind != "unsupported",
-                        "message": "Start a checked print on P1S (01P00A451200123)? Nozzles: 0.4 mm. Materials: PLA. Peak targets: nozzle 220°C, bed 55°C, chamber 0°C. File SHA-256: 4f9c0b1e2d3a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f9012e21a. Confirm the physical spool labels and that the build plate is clear.",
+                        "message": "Start a checked print on P1S (01P00A451200123)? Nozzles: 0.4 mm. Materials: PLA. Peak targets: nozzle 220°C, bed 55°C, chamber 0°C. File SHA-256: 4f9c0b1e2d3a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f9012e21a.",
                         "fields": kind == "unsupported" ? [] as [[String: Any]] : (kind == "generic" ? [
                             ["name": "speed", "title": "Print speed", "type": "string", "required": true, "enum": ["silent", "standard", "sport"],
                              "enumNames": ["Silent", "Standard", "Sport"], "default": "standard"],
@@ -168,7 +168,7 @@ enum Fixtures {
     /// The file a fixture path serves, from the assets folder.
     static func file(_ path: String) -> String? {
         if path.hasSuffix("/model.stl") { return "mic.stl" }
-        if path.hasSuffix("/camera.jpg") || path.hasSuffix("/plate.jpg") { return "bed.jpg" }
+        if path.hasSuffix("/camera.jpg") { return "bed.jpg" }
         if path.contains("/renders/mic.png") { return "thumb-mic.png" }
         if path.contains("/renders/potato.png") || path.contains("/asks/") || path.hasSuffix("/capture/potato.jpg") { return "thumb-potato.png" }
         if path.contains("/renders/clip.png") { return "bed.jpg" }

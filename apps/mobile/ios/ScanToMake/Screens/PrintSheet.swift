@@ -2,7 +2,7 @@ import SwiftUI
 import CounterpartKit
 
 /// The print sheet (PRD §5.5, screens/phone-print-one.jpg, phone-print-noams.jpg, phone-print-loaded.jpg): pick
-/// the printer, see the sliced estimate on the plate, choose the filament the printer reports (or the material,
+/// the printer, see the model and its sliced estimate, choose the filament the printer reports (or the material,
 /// when it doesn't say), quality and strength when its MCP takes them, then Print. The printer's own
 /// confirmation follows on the project page.
 ///
@@ -45,7 +45,7 @@ struct PrintSheet: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 22) {
                         printers
-                        plate
+                        preview
                         if case .failed(let message) = slice.shown(for: estimateKey, fallback: project?.print?.estimate) {
                             Label(message, systemImage: "exclamationmark.triangle.fill").font(.footnote).foregroundStyle(.orange)
                                 .fixedSize(horizontal: false, vertical: true)
@@ -115,11 +115,11 @@ struct PrintSheet: View {
         .onChange(of: destinationId, initial: true) { _, id in if !id.isEmpty { withAnimation { shownPrinter = id } } }
     }
 
-    private var plate: some View {
+    private var preview: some View {
         ZStack(alignment: .bottomLeading) {
             ModelStage(url: modelURL, yaw: 0.9, pitch: -0.5, interactive: false, tint: UIColor(spoolColour))
                 .frame(height: 220)
-                .overlay(alignment: .bottom) { PlateGrid().frame(height: 70).opacity(0.5).allowsHitTesting(false) }
+                .overlay(alignment: .bottom) { BedGrid().frame(height: 70).opacity(0.5).allowsHitTesting(false) }
                 .clipShape(.rect(cornerRadius: 24))
             HStack(spacing: 8) {
                 switch slice.shown(for: estimateKey, fallback: project?.print?.estimate) {
@@ -444,7 +444,7 @@ struct MaterialChip: View {
 }
 
 /// The print bed's perspective lines under the model.
-struct PlateGrid: View {
+struct BedGrid: View {
     var body: some View {
         Canvas { ctx, size in
             for i in 0...14 {
@@ -485,7 +485,7 @@ struct FlowRow: Layout {
     }
 }
 
-/// What the plate preview's estimate shows: a slice for exactly these settings, pending while it runs, or the
+/// What the preview's estimate shows: a slice for exactly these settings, pending while it runs, or the
 /// failure. The pass's own estimate stands in only on a Mac without the estimate route.
 struct EstimateState: Equatable {
     enum Shown: Equatable { case pending, failed(String), ready(seconds: Double?, grams: Double?, layers: Int?) }
