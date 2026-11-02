@@ -58,7 +58,11 @@ export interface StmObject {
   /** The short generated title ("Mic mount"). */
   title?: string;
   /** Make something that fits, or copy an object (PRD §1). */
-  kind?: 'fit' | 'copy';
+  kind?: 'fit' | 'copy' | 'published';
+  /** PRD §8.11: the published model this project prints, credited on the project page (`thumbnail` relative to its folder). */
+  credit?: {url: string; designer?: string; site?: string; title?: string; licence?: string; thumbnail?: string};
+  /** PRD §8.11: the designer's files as published, and the one that prints. Relative to the project's folder. */
+  files?: {original: string[]; current: string};
   /** The Mac's open (or last) question, with its picture and allowed answers (PRD §4 Ask). */
   ask?: Ask;
   /** File name under scan/. */
@@ -75,6 +79,7 @@ export interface StmObject {
   progress?: string;
   passes: ObjectPass[];
   current?: {model: string; renders: string[]; sizeMm?: [number, number, number]; summary?: string;
+
     /** What changed, each tagged (PRD §4 Result). */
     changes?: TouchupChange[];
     engine?: DesignEngine;
@@ -125,7 +130,7 @@ export class ObjectStore {
     return join(this.#root, id);
   }
 
-  async create(instructions?: string, kind?: 'fit' | 'copy'): Promise<StmObject> {
+  async create(instructions?: string, kind?: 'fit' | 'copy' | 'published'): Promise<StmObject> {
     const now = Date.now();
     const object: StmObject = {id: randomUUID(), createdAtMs: now, updatedAtMs: now, state: 'new', photos: [], passes: [],
       ...(instructions?.trim() ? {instructions: instructions.trim()} : {}), ...(kind ? {kind} : {})};

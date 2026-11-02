@@ -13,7 +13,7 @@ import {parameters} from '../local-control-protocol.js';
 const READ: RemoteScope = 'projects:read', WRITE: RemoteScope = 'captures:import', PRINT: RemoteScope = 'printer-handoff:use';
 const MAX_SCAN = 64 * 1024 * 1024, MAX_PHOTO = 25 * 1024 * 1024, MAX_JSON = 16 * 1024;
 const MAX_DEPTH = 8 * 1024 * 1024;
-const PATH = /^\/v1\/objects(?:\/([0-9a-f-]{36})(?:\/(scan|photos|capture|capture-depth|start|corrections|closeup|print|print\/pause|print\/resume|print\/cancel|estimate|camera\.jpg|prints\/[0-9a-f-]{36}\/frames\/[0-9a-f-]{36}\.jpg|asks\/[0-9a-f-]{36}\.jpg|filaments|print-confirmation|printer|plate\.jpg|plate|model\.stl|passes\/[^/]+\/activity|(?:renders|photos|capture)\/[^/]+))?)?$/;
+const PATH = /^\/v1\/objects(?:\/([0-9a-f-]{36})(?:\/(scan|model|ask|photos|capture|capture-depth|start|corrections|closeup|print|print\/pause|print\/resume|print\/cancel|estimate|camera\.jpg|prints\/[0-9a-f-]{36}\/frames\/[0-9a-f-]{36}\.jpg|asks\/[0-9a-f-]{36}\.jpg|filaments|print-confirmation|printer|plate\.jpg|plate|model\.stl|passes\/[^/]+\/activity|(?:renders|photos|capture)\/[^/]+))?)?$/;
 const PRINTER_CAMERA = /^\/v1\/objects\/printers\/([A-Za-z0-9_-]{1,256})\/camera\.jpg$/;
 const SETTINGS: RemoteScope = 'projects:write';
 
@@ -104,10 +104,11 @@ export function createObjectRoutes(service: ObjectService) {
           if (method === 'GET') { await authorize(READ); return send(response, 200, {objects: (await service.list()).map(publicObject)}); }
           if (method === 'POST') {
             await authorize(WRITE);
-            const {instructions, kind} = await json<{instructions?: unknown; kind?: unknown}>(request);
+            const {instructions, kind, url: link} = await json<{instructions?: unknown; kind?: unknown; url?: unknown}>(request);
             if (instructions !== undefined && (typeof instructions !== 'string' || instructions.length > 8000)) throw new HttpFailure(400, 'invalid-request');
-            if (kind !== undefined && kind !== 'fit' && kind !== 'copy') throw new HttpFailure(400, 'invalid-request');
-            return send(response, 201, {object: publicObject(await service.create(instructions, kind))});
+            if (kind !== undefined && kind !== 'fit' && kind !== 'copy' && kind !== 'published') throw new HttpFailure(400, 'invalid-request');
+            if (link !== undefined && (typeof link !== 'string' || link.length > 2048)) throw new HttpFailure(400, 'invalid-request');
+            return send(response, 201, {object: publicObject(await service.create(instructions, kind, link))});
           }
           throw new HttpFailure(405, 'method-not-allowed');
         }
@@ -237,6 +238,21 @@ export function createObjectRoutes(service: ObjectService) {
             const name = url.searchParams.get('name') ?? 'scan.usdz';
             if (!/^scan\.(usdz|stl|3mf)$/.test(name)) throw new HttpFailure(400, 'invalid-name');
             object = await service.addScan(id, name, await body(request, MAX_SCAN));
+            break;
+          }
+          case 'ask': {
+            // A choice Ask's answer (PR 7): {askId, choices: [optionId]}.
+            const input = await json<{askId?: unknown; choices?: unknown}>(request);
+            if (typeof input.askId !== 'string' || !/^[0-9a-f-]{36}$/.test(input.askId) || !Array.isArray(input.choices) || input.choices.length > 32
+              || input.choices.some(choice => typeof choice !== 'string' || choice.length > 64)) throw new HttpFailure(400, 'invalid-request');
+            object = await service.answerAsk(id, input.askId, input.choices as string[]);
+            break;
+          }
+          case 'model': {
+            // PRD §8.11: the designer's file, shared for a file Ask (3MF or STL, ≤ 64 MiB).
+            const name = url.searchParams.get('name') ?? '';
+            if (!/^[A-Za-z0-9][A-Za-z0-9._ ()-]{0,127}\.(3mf|stl)$/i.test(name) || name.includes('..')) throw new HttpFailure(400, 'invalid-name');
+            object = await service.addModelFile(id, name, await body(request, MAX_SCAN));
             break;
           }
           case 'capture-depth': {

@@ -33,7 +33,7 @@ Wire types are zod schemas in `packages/contracts/src/counterpart.ts` (`@scan-to
 | Method and path | Scope | Body | Reply |
 |---|---|---|---|
 | `GET /v1/objects` | READ | | `{objects: Object[]}`, newest first |
-| `POST /v1/objects` | WRITE | `{instructions?: string ≤ 8000, kind?: "fit"\|"copy"}` (`kind` PR 4) | 201 `{object}` |
+| `POST /v1/objects` | WRITE | `{instructions?: string ≤ 8000, kind?: "fit"\|"copy"\|"published", url?: string ≤ 2048}` (`kind` PR 4; `published` and `url` PR 7). A `url` alone on a known model site makes the project `published` (below). | 201 `{object}` |
 | `GET /v1/objects/<id>` | READ | | `{object}` |
 | `PATCH /v1/objects/<id>` | WRITE | `{instructions}`; only while `state` is `new` | `{object}` |
 | `DELETE /v1/objects/<id>` | WRITE | | `{deleted: true}`; 409 while a pass or print runs |
@@ -42,6 +42,8 @@ Wire types are zod schemas in `packages/contracts/src/counterpart.ts` (`@scan-to
 | `POST /v1/objects/<id>/capture?name=NNNN.heic`, `…/capture-depth?name=NNNN.depth.plist` | WRITE | In-hand capture frames | `{object}` |
 | `POST /v1/objects/<id>/start` | WRITE | `{captureManifest?}` | `{object}` |
 | `POST /v1/objects/<id>/corrections` | WRITE | `{note: string 1–4000}`. Upload any new photos first with `…/photos`. | `{object}` (a new pass) |
+| `POST /v1/objects/<id>/model?name=<file>.3mf\|.stl` | WRITE | The model file's bytes (≤ 64 MiB; a 3MF must be a zip). Answers a `file` Ask (PR 7). | `{object}` with `state: "ready"` |
+| `POST /v1/objects/<id>/ask` | WRITE | `{askId, choices: [optionId]}`: answers a `choice` Ask (PR 7); one choice unless `multiple`. 409 for an unknown option or an Ask that was answered or replaced. | `{object}` (the next pass) |
 | `POST /v1/objects/<id>/closeup` | WRITE | `{bestGuess?: boolean, text?: string ≤ 2000}` (`text` PR 4). Answers the open Ask: upload the photo first, then post `{}`; or `{bestGuess: true}`; or `{text}`. | `{object}` (a new pass) |
 | `GET /v1/objects/<id>/passes/<n>/activity` | READ | | `{activity: [{atMs, kind: "message"\|"tool", text}]}` |
 | `GET /v1/objects/<id>/model.stl`, `…/renders/<name>` | READ | | the file |
@@ -199,8 +201,10 @@ Then the companion restarts every session on that install (each waits for any pr
 |---|---|---|
 | `status` | `ObjectStatus` `{phase, text, symbol, tint}`: the PRD §4 state line, written by the companion. Show `text` as is. `phase` is `sending`, `working`, `needs-you`, `ready`, `preparing`, `printing`, `printed`, `failed` or `sent` (symbol `paperplane`, tint `secondary`). | PR 3 |
 | `title` | The short title ("Mic mount"). Always a string: generated at the first pass, and for a project from before titles the first time it is listed (once, in the background, then saved). Until then it is the request's first six words ("A mount for my mic stand…"), or "Your scan" / "Your project" without a request. | PR 4 |
-| `kind` | `fit` (make something that fits) or `copy` (copy an object). Set at creation (send it: the phone's New flow knows which job it is), else from the first pass: a project with a scan or a handheld capture is a `copy` even with a request ("Copy this. Close up the bottom."), and a request with photos alone is a `fit`. A copy is always cleaned up in Blender; a design uses Fusion when the printer MCP's `fusion_mcp_status` reports it connected and a new design opens, else Blender. | PR 4 |
-| `ask` | `Ask` `{id, question, photo?, region?, answers, status, askedAtMs}` while `state` is `needs-closeup` (and kept, `status: "answered"`, after). The old `question.closeup` is still set for older apps. | PR 4 |
+| `kind` | `fit` (make something that fits), `copy` (copy an object) or `published` (print a published model, PR 7, below). Set at creation (send it: the phone's New flow knows which job it is), else from the first pass: a project with a scan or a handheld capture is a `copy` even with a request ("Copy this. Close up the bottom."), and a request with photos alone is a `fit`. A copy is always cleaned up in Blender; a design uses Fusion when the printer MCP's `fusion_mcp_status` reports it connected and a new design opens, else Blender. | PR 4 |
+| `ask` | `Ask` `{id, question, photo?, region?, answers, status, askedAtMs}` while `state` is `needs-closeup` (and kept, `status: "answered"`, after). The old `question.closeup` is still set for older apps. From PR 7 an Ask has a `type` (below). | PR 4 |
+| `credit` | `{url, designer?, site?, title?, licence?, thumbnail?}`: the published model's page and designer, shown as "by *designer* on *site*" with a link. `thumbnail` is relative to the project's folder. | PR 7 |
+| `files` | `{original: [path], current: "current/model.3mf"}`: the designer's files exactly as published (`original/…`), and the file that prints. Paths are relative to the project's folder (`directory` on the Mac). | PR 7 |
 | `current.changes` | `[{tag: "added"\|"changed"\|"assumed"\|"estimated", text, toleranceMm?}]`: the what-changed list | PR 4 |
 | `current.engine` | `blender` or `fusion` | PR 4 |
 | `current.design` | `{f3d, parameters}` paths (relative) when the engine was Fusion | PR 4 |
@@ -248,6 +252,27 @@ Then the companion restarts every session on that install (each waits for any pr
 A `sent` print raises one `print.sent` event (passive) and no first-layer, milestone or done events. Its status line is "Sent to *printer* · Counterpart can't follow this print". Older apps that don't know `sent` decode it as an unknown state.
 
 After a companion restart, a print whose monitor is `starting` or `watching` resumes watching (no milestone is sent twice and missed ones are not back-filled; the end state is still delivered). A print that was still being prepared is marked `failed` ("interrupted when your Mac restarted the app"); if it had reached the dispatch step, `print.uncertain` is set and Print needs `checked: true`.
+
+## Published models (PR 7, PRD §8.11)
+
+A request with a link to a model page on MakerWorld, Printables (or PrusaPrinters), Thingiverse, Thangs, Cults, MyMiniFactory or Creality Cloud, or a project created with `kind: "published"` or with `url` on one of those sites, prints the designer's own file. An explicit `kind` always wins. **It never goes to the design pass**: no Blender or Fusion design runs for it, and its worker has no tool that builds geometry.
+
+The pass has the stages "Reading the model page", "Getting the designer's file" and "Saving the result". The worker runs on the person's Mac with their own logins: `Read`, `Glob`, `WebSearch`, `WebFetch`, the printer MCP (without its `blender_*`/`fusion_*` tools), and Claude in Chrome (`claude --chrome`) when its native host is installed. In order, it:
+1. looks in `~/Downloads` for the files the request needs (the person may have downloaded them already);
+2. uses a printer MCP tool that downloads from that site, when there is one;
+3. opens the page in the person's own Chrome, picks the profile the request names, and downloads it to `~/Downloads`.
+
+It reports the files by name. The companion takes them only when every named file exists (whenever it was downloaded); otherwise the project asks for the file, offering what it found (or the newest model file downloaded since the pass began) as `candidate`. It copies them in byte for byte: `files.original` keeps every one, and the first is `current/model.3mf` (or `.stl`). The title becomes the model's own name and `credit` the page the person gave. When it can't get the file, the project asks for it (`file` Ask). It never makes a look-alike.
+
+**Asks** (`ask.type`; absent means `closeup`):
+
+| `type` | Fields | Answered with |
+|---|---|---|
+| `closeup` | as above (`photo`, `region`, `answers`) | `POST …/closeup` / `objects.answerCloseup` |
+| `file` | `{type: "file", question, url?, modelName?, site?, accepts: ["3mf","stl"], candidate?: {path, name}}`. Show **Open in Safari** with `url`. `candidate` is a likely file the Mac found but isn't sure of (a path on the Mac): offer it. | `POST …/model?name=` / `objects.addFile {id, kind: "model", path}`; the companion copies the file in and goes on |
+| `choice` | `{type: "choice", question, options: [{id, label, detail?, thumbnail?}], multiple?}`; `choices` holds the answer once given | `POST …/ask {askId, choices}` / `objects.answerAsk {id, askId, choices}`; the next pass goes on with the picked options |
+
+`answers` is still present on every Ask (`["file"]`, `["choice"]`) for older apps. `capabilities.publishedModels` (`GET /healthz`, `status.get`) says this companion takes all of this. Choosing the plate, arranging several files on one plate and mapping colours to the AMS come in PR 7b. Until then Print and Estimate of a published 3MF are refused (409, "This is the designer's 3MF. Printing it from Counterpart with its plates and colours comes in the next update; until then, open it in Bambu Studio."): it is never sliced as an STL. A project created with only `url` starts like any other.
 
 ## Settings (PR 2)
 

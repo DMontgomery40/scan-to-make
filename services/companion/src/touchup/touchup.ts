@@ -6,6 +6,7 @@ import {dirname, join} from 'node:path';
 import {PrinterMcpClient, type PrinterHandoffConfig} from '@scan-to-make/printer-handoff';
 import {defaultBlenderLaunch, ensureBlenderMcp, resetBlenderScene} from './blender.js';
 import {prepareTouchupPass, type TouchupPass} from './inputs.js';
+import {chromeAvailable} from '../published/published.js';
 import {buildTouchupInvocation, type DesignEngine, type TouchupInvocation} from './invocation.js';
 import {toolErrorText} from './blender.js';
 import {runTouchupWorker, type TouchupProgress, type TouchupResult} from './runner.js';
@@ -28,7 +29,7 @@ export interface TouchupInput {
   onProgress?: (progress: TouchupProgress) => void;
   signal?: AbortSignal;
   /** "fit" (make something that fits) may design in Fusion; "copy" always uses Blender (PRD §8.9). */
-  kind?: 'fit' | 'copy';
+  kind?: 'fit' | 'copy' | 'published';
   /** The previous Fusion design, so a change starts from its parameters. */
   design?: {f3d: string; parameters?: string};
   /** Stage changes: getting the engine ready, then the worker. */
@@ -38,6 +39,8 @@ export interface TouchupInput {
 /** Which engine ran, and why it isn't Fusion when Fusion was wanted. */
 export interface EngineChoice {engine: DesignEngine; note?: string}
 export interface TouchupDeps {
+  /** Whether Claude in Chrome is set up (PRD §8.11). */
+  chrome?: () => boolean;
   ensureBlender?: () => Promise<unknown>;
   resetScene?: (client: ReturnType<NonNullable<TouchupDeps['client']>>, signal?: AbortSignal) => Promise<void>;
   client?: (handoff: PrinterHandoffConfig) => Pick<PrinterMcpClient, 'connect' | 'callTool' | 'close' | 'hasTool'>;
@@ -157,6 +160,7 @@ async function touchUpLocked(input: TouchupInput, deps: TouchupDeps, choice: Eng
   const currentModel = input.currentModel ?? (input.note !== undefined && input.scan.length === 1 && input.scan[0]!.toLowerCase().endsWith('.stl'));
   input.onStage?.('working', choice.engine);
   const inv = buildTouchupInvocation({pass, printer: input.handoff.process, claudePath: input.claudePath, currentModel, engine: choice.engine,
+    chrome: (deps.chrome ?? chromeAvailable)(),
     ...(choice.engine === 'fusion' && input.design ? {design: input.design} : {}),
     ...(input.instructions !== undefined ? {instructions: input.instructions} : {}),
     ...(input.note !== undefined ? {note: input.note} : {}), ...(input.summary !== undefined ? {summary: input.summary} : {})});

@@ -4,21 +4,22 @@ import {dirname} from 'node:path';
 import type {DesignEngine} from './invocation.js';
 
 export type StageId = 'building' | 'preparing' | 'working' | 'saving';
-export type PassKind = 'fit' | 'copy';
+export type PassKind = 'fit' | 'copy' | 'published';
 export interface PassStage {id: StageId; words: string; startedAtMs: number; endedAtMs?: number; typicalSec: number}
 
 /** Until this Mac has real timings for a stage, these stand in (PRD: estimates come from real timings). */
 export const STAGE_DEFAULT_SEC: Record<PassKind, Record<StageId, number>> = {
   fit: {building: 300, preparing: 20, working: 420, saving: 10},
   copy: {building: 300, preparing: 20, working: 300, saving: 10},
+  published: {building: 0, preparing: 30, working: 120, saving: 10},
 };
 const SAMPLES = 20;
 
 export function stageWords(id: StageId, engine: DesignEngine, kind: PassKind): string {
   switch (id) {
     case 'building': return 'Building the model from your photos';
-    case 'preparing': return engine === 'fusion' ? 'Getting Fusion ready' : 'Getting Blender ready';
-    case 'working': return kind === 'fit' ? 'Designing it' : 'Fixing the scan';
+    case 'preparing': return kind === 'published' ? 'Reading the model page' : engine === 'fusion' ? 'Getting Fusion ready' : 'Getting Blender ready';
+    case 'working': return kind === 'published' ? "Getting the designer's file" : kind === 'fit' ? 'Designing it' : 'Fixing the scan';
     case 'saving': return 'Saving the result';
   }
 }

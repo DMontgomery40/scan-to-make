@@ -69,6 +69,7 @@ The Mac app shows the same projects as the phone and drives them through these m
 | `events` | `events.wait`, `liveActivity.tokens`, device `model` and `lastSeenAt`, object `status` | PR 3 |
 | `structuredPasses` | object `title`, `kind`, `ask`, `current.changes`, pass `stages` and `estimate`, the design engine | PR 4 |
 | `genericConfirmations` | `printConfirmation.fields[]` may be text, number, integer and choice fields as well as yes/no, and `objects.answerPrintConfirmation` takes and checks those answers (below). The phone reads the same flag from `GET /healthz` `capabilities` ([objects-api.md](objects-api.md)). | PR 5 |
+| `publishedModels` | `kind: "published"`, `objects.create` `url`, `credit` and `files`, Ask `type` `file` and `choice`, `objects.answerAsk`, `objects.addFile` `model`. Also in `GET /healthz`. | PR 7 |
 | `mcpUpdates` | `printers.updateMcp` and `POST /v1/printers/mcp/<mcpId>/update`, destination `mcpId` and `capabilities.update.latestVersion`, the `mcp.update.*` events. Also in `GET /healthz` `capabilities`. | PR 6 |
 | `materialChoice` | `objects.print` `colour: {material}` is accepted on every printer ("What's loaded?"): sliced with a profile the printer reports for that material, or refused with a sentence saying what to do. Also in `GET /healthz` `capabilities`. | PR 5 |
 
@@ -80,8 +81,9 @@ Destination `capabilities.materialChoice` (PR 5) says the same per printer; what
 |---|---|---|---|
 | `objects.list` | `{}` | `{objects: [object]}` | |
 | `objects.get` | `{id}` | `{object}` | |
-| `objects.create` | `{instructions?: string ≤ 8000, kind?: "fit"\|"copy"}` | `{object}` (`kind` from PR 4) | PR 1 |
-| `objects.addFile` | `{id, kind: "photos"\|"scan", path}` | `{object}` | PR 1 |
+| `objects.create` | `{instructions?: string ≤ 8000, kind?: "fit"\|"copy"\|"published", url?: string ≤ 2048}` | `{object}` (`kind` from PR 4; `published` and `url` PR 7) | PR 1 |
+| `objects.addFile` | `{id, kind: "photos"\|"scan"\|"model", path}` | `{object}`. `model` (PR 7): a 3MF or STL answering a `file` Ask | PR 1 |
+| `objects.answerAsk` | `{id, askId, choices: [optionId]}` | `{object}`: answers a `choice` Ask (objects-api.md, "Published models") | PR 7 |
 | `objects.start` | `{id}` | `{object}` | |
 | `objects.correct` | `{id, note: string 1–4000, photos?: [path] ≤ 24}` | `{object}`: a new pass (`photos` PR 1) | |
 | `objects.answerCloseup` | `{id, bestGuess: boolean, text?: string ≤ 2000}` | `{object}`: a new pass (`text` PR 4) | |

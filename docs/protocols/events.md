@@ -68,6 +68,8 @@ type CounterpartEvent = {
 
 `notify` is the default level from PRD §9.1. The Mac app applies its own Settings → Notifications switches on top; progress events are off by default on the Mac.
 
+**Published models (PR 7).** A published project's pass has the same events as any other; its `pass.stage` words are "Reading the model page" and "Getting the designer's file". `pass.ask` carries the `askId` of a `file` or `choice` Ask, and its title is the Ask's question.
+
 **Events about the Mac (PR 6).** `mcp.update.*` have no `projectId`: they are about an MCP install, named by `data.mcpId` (objects-api.md, "Updating the printer MCPs"). They carry `fromVersion` and `toVersion` when known, and `mcp.update.failed` carries `log`, the last 4 KB of what the update printed. Both apps decode events without `projectId` from #210 and #211. The companion emits them by default; `SCAN_TO_MAKE_PROJECTLESS_EVENTS=0` in its environment turns them off (for a client that can't decode them), and the update then reports only through its method's reply. The project fixtures stay in `events`; these samples are in `macEvents` (`packages/contracts/fixtures/counterpart-v1.json`).
 
 `data` per type: print events carry `state`, `progress`, `remainingSec`, `endsAt`, `layer`, `totalLayers` and `stage` whenever the printer reported them, and `problems` when there are any. `print.started` also carries the slice `estimateSec` and `grams`. `pass.started` and `pass.stage` carry `stage` (the stage's words) and `estimateSec` (the pass's time left). `pass.ask` carries `askId`. `print.confirm` carries `confirmationId` and `expiresAt`.

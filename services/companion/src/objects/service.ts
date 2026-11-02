@@ -10,6 +10,7 @@ import type {PrintEstimate, PrintSettings} from '@scan-to-make/contracts/counter
 import {PrintMonitorRunner, matchJob, milestonesFor, type EventDraft, type MonitorClock, type MonitorEnd, type MonitorTarget} from '../printing/monitor.js';
 import {CameraFrames, CameraUnavailableError, type CameraFrame} from '../printing/camera.js';
 import {PrinterUpdatingError, type PrintGate} from '../printing/print-gate.js';
+import {defaultRunPublished, publishedLink, type PublishedModel, type PublishedPassInput, type PublishedResult} from '../published/published.js';
 import {sliceOverrides, settingsUnsupported} from '../printing/print-settings.js';
 import type {CompanionSettingsStore} from '../settings.js';
 import {PRINT_LOG, printEndFailure, projectTitle, sizeText} from '../events/words.js';
@@ -57,9 +58,12 @@ export interface CaptureManifest {version: 1; images: string[]; depthRequired: b
 export class InvalidFileError extends Error {
   constructor(message: string) { super(message); this.name = 'InvalidFileError'; }
 }
+const PUBLISHED_3MF_NOT_YET = "This is the designer's 3MF. Printing it from Counterpart with its plates and colours comes in the next update; until then, open it in Bambu Studio.";
 const FILE_KINDS = {
   photos: {extensions: ['.jpg', '.jpeg', '.png', '.heic'], limit: 25 * 1024 * 1024, words: 'a JPEG, PNG or HEIC photo'},
   scan: {extensions: ['.stl', '.3mf', '.usdz'], limit: 64 * 1024 * 1024, words: 'an STL, 3MF or USDZ file'},
+  /** PRD §8.11: a published model's own file, shared for a file Ask. */
+  model: {extensions: ['.stl', '.3mf'], limit: 64 * 1024 * 1024, words: 'a 3MF or STL model'},
 } as const;
 /** The first bytes must agree with the extension. */
 function looksLike(extension: string, head: Buffer): boolean {
@@ -125,6 +129,8 @@ export interface ObjectServiceDeps {
   events?: {emit(draft: EventDraft): Promise<void>};
   /** PRD §8.10: prints and MCP updates on a printer exclude each other. */
   printGate?: PrintGate;
+  /** PRD §8.11: the worker that gets a published model's file (tests swap it). */
+  runPublished?: (input: PublishedPassInput) => Promise<PublishedResult>;
   /** The printers' cameras, through their sessions, with a shared 3 s cache. */
   camera?: CameraFrames;
   /** Tests only. */
@@ -164,6 +170,8 @@ export function spreadPick<T>(items: T[], count: number): T[] {
  */
 export function passKind(object: Pick<StmObject, 'kind' | 'scan' | 'capture' | 'instructions'>): PassKind {
   if (object.kind) return object.kind;
+  // PRD §8.11: a link to a published model's page prints the designer's file; it is never designed.
+  if (publishedLink(object.instructions)) return 'published';
   if (object.scan || object.capture?.length) return 'copy';
   return object.instructions?.trim() ? 'fit' : 'copy';
 }
@@ -211,7 +219,13 @@ export class ObjectService {
     return this.#deps.settings.update(patch);
   }
 
-  create(instructions?: string, kind?: 'fit' | 'copy') { return this.#deps.store.create(instructions, kind).then(o => this.#changed(o)); }
+  /** `url` (PR 7): a published model's page; alone, a known model site makes the project `published`. */
+  async create(instructions?: string, kind?: 'fit' | 'copy' | 'published', url?: string) {
+    const link = url ? publishedLink(url) ?? (() => { try { const parsed = new URL(url); return /^https?:$/.test(parsed.protocol) ? {url: parsed.toString(), site: parsed.hostname} : undefined; } catch { return undefined; } })() : undefined;
+    if (url && !link) throw new InvalidStateError('That link isn\'t a web page.');
+    const created = await this.#deps.store.create(instructions, kind ?? (link && publishedLink(link.url) ? 'published' : undefined));
+    return this.#changed(link ? await this.#deps.store.update(created.id, o => ({...o, credit: {url: link.url, site: link.site}})) : created);
+  }
   async list() {
     const objects = await Promise.all((await this.#deps.store.list()).map(o => this.get(o.id)));
     // Projects from before titles get one, once and in the background, the first time they're listed.
@@ -412,11 +426,11 @@ export class ObjectService {
    * Copies a file on this Mac into the object (the Mac app's New Project and drop targets).
    * The control socket can't carry file bytes, so the companion reads the path itself.
    */
-  addFile(id: string, kind: 'photos' | 'scan', path: string): Promise<StmObject> {
+  addFile(id: string, kind: 'photos' | 'scan' | 'model', path: string): Promise<StmObject> {
     // One at a time per object, so two files with the same name can't take the same slot.
     return this.#gate(id, () => this.#addFile(id, kind, path));
   }
-  async #addFile(id: string, kind: 'photos' | 'scan', path: string): Promise<StmObject> {
+  async #addFile(id: string, kind: 'photos' | 'scan' | 'model', path: string): Promise<StmObject> {
     const rule = FILE_KINDS[kind];
     if (!isAbsolute(path) || path.includes('\0')) throw new InvalidFileError('Choose a file on this Mac.');
     const extension = extname(path).toLowerCase();
@@ -432,6 +446,7 @@ export class ObjectService {
     } finally { await handle.close(); }
     if (bytes.length > rule.limit || !looksLike(extension, bytes.subarray(0, 84))) throw new InvalidFileError(`That isn't ${rule.words}.`);
     if (kind === 'scan') return this.addScan(id, `scan${extension}`, bytes);
+    if (kind === 'model') return this.#addModelFile(id, basename(path), bytes);
     return this.addPhoto(id, photoName(path, (await this.get(id)).photos), bytes);
   }
 
@@ -457,7 +472,7 @@ export class ObjectService {
       }
     }
     // Photos only show what something looks like; without a scan, the description says what to make.
-    if (!object.scan && !object.capture?.length && !object.captureDepth?.length && !object.instructions?.trim() && object.state === 'new')
+    if (!object.scan && !object.capture?.length && !object.captureDepth?.length && !object.instructions?.trim() && !object.credit?.url && object.state === 'new')
       throw new InvalidStateError('Describe what to make, or add a scan.');
     // A touch-up works from photos; a model with neither photos nor a request has nothing to go on.
     if (object.scan && !object.photos.length && !object.capture?.length && !object.instructions?.trim() && (object.state === 'new' || object.state === 'failed'))
@@ -528,6 +543,8 @@ export class ObjectService {
   async #print(id: string, options: PrintOptions): Promise<StmObject> {
     const object = await this.get(id);
     if (!object.current) throw new InvalidStateError('There is no model to print yet.');
+    // Printing a published 3MF as published (its plates, parts and colours) comes with PR 7b; never as an STL.
+    if (!object.current.model.toLowerCase().endsWith('.stl')) throw new InvalidStateError(PUBLISHED_3MF_NOT_YET);
     if (object.state === 'touching-up' || object.state === 'printing') throw new InvalidStateError('Wait until the current step finishes.');
     if (object.print?.uncertain && !options.checked) throw new InvalidStateError("The printer may already be printing this. Check the printer, then print again if it isn't.");
     if (options.filament && options.colour) throw new InvalidStateError('Choose one colour.');
@@ -880,6 +897,7 @@ export class ObjectService {
   async estimate(id: string, request: {destinationId?: string; quality?: PrintSettings['quality']; strength?: PrintSettings['strength']} = {}): Promise<PrintEstimate> {
     const object = await this.get(id);
     if (!object.current) throw new InvalidStateError('There is no model to print yet.');
+    if (!object.current.model.toLowerCase().endsWith('.stl')) throw new InvalidStateError(PUBLISHED_3MF_NOT_YET);
     const catalog = this.#deps.printerCatalog;
     const destinationId = request.destinationId ? catalog?.canonical(request.destinationId) : this.#destinationId(object);
     if (request.destinationId && !destinationId) throw new InvalidStateError('That printer is no longer available. Choose another printer.');
@@ -1004,13 +1022,13 @@ export class ObjectService {
     await this.#requireCaptureCompletion(object);
     const store = this.#deps.store, dir = store.dir(object.id);
     const fromCurrent = opts.note !== undefined && object.current !== undefined;
+    const kind: PassKind = passKind(object);
     // A handheld scan is rebuilt into scan/scan.usdz first, once; its photos also show the touch-up the object.
-    const build = !fromCurrent && !object.scan && (object.capture?.length ?? 0) > 0;
+    const build = kind !== 'published' && !fromCurrent && !object.scan && (object.capture?.length ?? 0) > 0;
     const capturePhotos = (object.capture ?? []).map(name => join(dir, 'capture', name));
     const photos = spreadPick([...object.photos.map(name => join(dir, 'photos', name)), ...capturePhotos], PHOTOS_PER_PASS);
     const startedAtMs = Date.now();
     // PRD §8.9: copies are cleaned up in Blender; a new design may use Fusion (the touch-up decides).
-    const kind: PassKind = passKind(object);
     const plan: StageId[] = [...(build ? ['building' as const] : []), 'preparing', 'working', 'saving'];
     let engine: DesignEngine = 'blender';
     let typical = await this.#typical(kind, engine);
@@ -1021,7 +1039,8 @@ export class ObjectService {
         ...(opts.note ? {note: opts.note} : {})}]}));
     this.#changed(running);
     await this.#emit({id: randomUUID(), type: 'pass.started', projectId: object.id, data: {stage: first.words, estimateSec: passEstimate([first], plan, typical, startedAtMs).remainingSec}});
-    this.#title(running);
+    // A published model's title is its own name (PRD §8.11), set when the file arrives.
+    if (kind !== 'published') this.#title(running);
     const controller = new AbortController();
     this.#controllers.set(object.id, controller);
     let writing = Promise.resolve();
@@ -1054,6 +1073,17 @@ export class ObjectService {
       // The worker callback is synchronous; the pass awaits this chain before its final state.
       void writing.catch(() => undefined);
     };
+    if (kind === 'published') {
+      // PRD §8.11: never the design pass. The worker gets the designer's own file, or the project asks for it.
+      const published = (async () => {
+        try { return await this.#getPublished(object, opts.note, photos, startedAtMs, controller.signal, onProgress, id => stage(id)); }
+        finally { stage('saving'); await writing; }
+      })()
+        .then(result => this.#finishPublished(object.id, startedAtMs, result), error => this.#fail(object.id, startedAtMs, error))
+        .finally(() => { this.#running.delete(object.id); this.#controllers.delete(object.id); });
+      this.#running.set(object.id, published);
+      return running;
+    }
     const work = (async () => {
       let scanName = object.scan;
       if (build) scanName = await this.#build(object.id, dir, controller.signal);
@@ -1071,6 +1101,110 @@ export class ObjectService {
       .finally(() => { this.#running.delete(object.id); this.#controllers.delete(object.id); });
     this.#running.set(object.id, work);
     return running;
+  }
+
+  /** Runs the published-model worker for the project's link (or the one in a correction). */
+  async #getPublished(object: StmObject, note: string | undefined, photos: string[], startedAtMs: number, signal: AbortSignal,
+    onProgress: NonNullable<TouchupInput['onProgress']>, stage: (id: StageId) => void): Promise<PublishedResult> {
+    const link = publishedLink(note) ?? publishedLink(object.instructions) ?? (object.credit ? {url: object.credit.url, site: object.credit.site ?? new URL(object.credit.url).hostname} : undefined);
+    if (!link) return {status: 'needs_file'};
+    const request = [object.instructions?.trim(), note?.trim()].filter(Boolean).join('\n\n');
+    const run = this.#deps.runPublished ?? (input => defaultRunPublished(input));
+    const session = this.#deps.printers?.session(this.#destinationId(object) ?? 'current');
+    return run({root: join(this.dir(object.id), 'passes'), photos, request, link, handoff: this.#deps.handoff, claudePath: this.#deps.claudePath,
+      designTools: (session?.catalog?.tools ?? []).map(tool => tool.name).filter(name => /^(blender|fusion)_/.test(name)),
+      startedAtMs, signal, onProgress, onStage: stage});
+  }
+
+  /** Keeps the designer's file as published (original and current), credits the designer, or asks for the file. */
+  async #finishPublished(id: string, startedAtMs: number, result: PublishedResult): Promise<StmObject> {
+    const store = this.#deps.store, dir = store.dir(id), now = Date.now();
+    const endPass = (o: StmObject, status: string, summary?: string) => o.passes.map(({estimate: _estimate, ...p}) => p.startedAtMs !== startedAtMs
+      ? {...p, ...(_estimate ? {estimate: _estimate} : {})}
+      : {...p, endedAtMs: now, status, stages: p.stages?.map(item => item.endedAtMs === undefined ? {...item, endedAtMs: now} : item), ...(summary ? {summary: this.#publicText(summary)} : {})});
+    const credit = result.model ? {url: result.model.url, site: result.model.site, title: result.model.title, ...(result.model.designer ? {designer: result.model.designer} : {}),
+      ...(result.model.licence ? {licence: result.model.licence} : {})} : undefined;
+    if (result.status === 'failed') {
+      const message = this.#publicText(result.reason);
+      const updated = await store.update(id, o => ({...o, state: 'failed', failure: message, progress: undefined, ...(credit ? {credit} : {}), passes: endPass(o, 'failed', message)}));
+      await this.#emit({id: randomUUID(), type: 'pass.failed', projectId: id, detail: {reason: message}});
+      return this.#changed(updated);
+    }
+    if (result.status === 'needs_file') {
+      const object = await store.get(id);
+      const site = result.model?.site ?? object.credit?.site ?? publishedLink(object.instructions)?.site;
+      const url = result.model?.url ?? object.credit?.url ?? publishedLink(object.instructions)?.url;
+      const modelName = result.model?.title ?? object.credit?.title;
+      const ask = {id: randomUUID(), type: 'file' as const, question: `Download ${modelName ?? 'the model'} from ${site ?? 'its page'} and share it here.`.slice(0, 300),
+        ...(url ? {url} : {}), ...(modelName ? {modelName} : {}), ...(site ? {site} : {}), accepts: ['3mf' as const, 'stl' as const],
+        ...(result.candidate ? {candidate: {path: result.candidate, name: basename(result.candidate)}} : {}),
+        answers: ['file' as const], status: 'open' as const, askedAtMs: now};
+      const updated = await store.update(id, o => ({...o, state: 'needs-closeup', progress: undefined, ask, question: undefined, kind: 'published' as const,
+        ...(result.model ? {title: result.model.title} : {}), ...(credit ? {credit} : {}), passes: endPass(o, 'needs_file', result.summary)}));
+      await this.#emit({id: randomUUID(), type: 'pass.ask', projectId: id, data: {askId: ask.id}, detail: {question: ask.question}});
+      return this.#changed(updated);
+    }
+    const summary = [result.summary, result.profile ? `Profile: ${result.profile}.` : undefined].filter(Boolean).join(' ');
+    return this.#keepPublished(id, result.files, {startedAtMs, now, ...(result.model ? {model: result.model} : {}), ...(summary ? {summary} : {}), ...(credit ? {credit} : {})});
+  }
+
+  /** The designer's file becomes the project's model, exactly as published: original/<name> and current/model.<ext>. */
+  async #keepPublished(id: string, files: string[], info: {startedAtMs?: number; now?: number; model?: PublishedModel; summary?: string; credit?: StmObject['credit']}): Promise<StmObject> {
+    const store = this.#deps.store, dir = store.dir(id), now = info.now ?? Date.now();
+    // Every file the request needs, as published; the first is the model, the rest go on its plate (the print sheet arranges them).
+    const names = files.map(file => basename(file).replace(/[^A-Za-z0-9._ ()-]/g, '_').slice(-120) || 'model.3mf');
+    await mkdir(join(dir, 'original'), {recursive: true});
+    await mkdir(join(dir, 'current'), {recursive: true});
+    for (const [index, file] of files.entries()) await copyFile(file, join(dir, 'original', names[index]!));
+    const extension = extname(names[0]!).toLowerCase() === '.stl' ? '.stl' : '.3mf';
+    await copyFile(files[0]!, join(dir, 'current', `model${extension}`));
+    const sizeMm = extension === '.stl' ? await this.#deps.stlInfo(join(dir, 'current', 'model.stl')).catch(() => undefined) : undefined;
+    const summary = info.summary ? this.#publicText(info.summary) : undefined;
+    const current = {model: join('current', `model${extension}`), renders: [], ...(sizeMm ? {sizeMm} : {}), ...(summary ? {summary} : {})};
+    const published = {original: names.map(name => join('original', name)), current: current.model};
+    const updated = await store.update(id, o => ({...o, state: 'ready', progress: undefined, failure: undefined, kind: 'published', current, files: published,
+      ...(info.model ? {title: info.model.title} : {}), ...(info.credit ? {credit: info.credit} : {}),
+      ...(o.ask?.status === 'open' ? {ask: {...o.ask, status: 'answered' as const}} : {}),
+      passes: info.startedAtMs === undefined ? o.passes : o.passes.map(({estimate: _estimate, ...p}) => p.startedAtMs !== info.startedAtMs ? {...p, ...(_estimate ? {estimate: _estimate} : {})}
+        : {...p, endedAtMs: now, status: 'done', stages: p.stages?.map(item => item.endedAtMs === undefined ? {...item, endedAtMs: now} : item), ...(summary ? {summary} : {})})}));
+    const size = sizeText(updated.current?.sizeMm);
+    await this.#emit({id: randomUUID(), type: 'pass.ready', projectId: id, ...(size ? {detail: {size}} : {})});
+    return this.#changed(updated);
+  }
+
+  /**
+   * A `choice` Ask, answered (PR 7): the picked option ids are kept on the Ask, and the next pass goes on with them
+   * (for a published model: the plate, the parts or the colours the person picked).
+   */
+  answerAsk(id: string, askId: string, choices: string[]): Promise<StmObject> {
+    return this.#gate(id, async () => {
+      const object = await this.get(id);
+      const ask = object.ask;
+      if (!ask || ask.id !== askId || ask.status !== 'open' || ask.type !== 'choice') throw new InvalidStateError('That question has been answered or replaced. Look again.');
+      const known = new Set((ask.options ?? []).map(option => option.id));
+      if (!choices.length || choices.some(choice => !known.has(choice)) || (!ask.multiple && choices.length > 1)) throw new InvalidStateError('Pick one of the choices.');
+      const labels = choices.map(choice => ask.options!.find(option => option.id === choice)!.label);
+      const answered = await this.#deps.store.update(id, o => ({...o, ask: {...o.ask!, status: 'answered' as const, choices}}));
+      this.#changed(answered);
+      return this.#pass(answered, {note: `${ask.question} The person chose: ${labels.join(', ')}.`, trigger: 'ask-answer'});
+    });
+  }
+
+  /** PRD §8.11's file Ask, answered: the person shared the designer's file (phone upload or a path on this Mac). */
+  addModelFile(id: string, name: string, bytes: Buffer): Promise<StmObject> { return this.#gate(id, () => this.#addModelFile(id, name, bytes)); }
+  #addModelFile(id: string, name: string, bytes: Buffer): Promise<StmObject> {
+    return (async () => {
+      const object = await this.get(id);
+      if (object.state === 'touching-up' || object.state === 'printing') throw new InvalidStateError('Wait until the current step finishes.');
+      if (!/\.(3mf|stl)$/i.test(name)) throw new InvalidStateError('Share the model as a 3MF or STL file.');
+      if (/\.3mf$/i.test(name) ? !(bytes[0] === 0x50 && bytes[1] === 0x4b) : bytes.length < 84) throw new InvalidStateError("That file isn't a 3MF or STL model.");
+      const folder = join(this.dir(id), 'incoming');
+      await mkdir(folder, {recursive: true});
+      const path = join(folder, basename(name));
+      await writeFile(path, bytes, {mode: 0o600});
+      const credit = object.credit ?? (() => { const link = publishedLink(object.instructions); return link ? {url: link.url, site: link.site} : undefined; })();
+      return this.#keepPublished(id, [path], credit ? {credit} : {});
+    })();
   }
 
   /** Rebuilds a handheld scan on this Mac, showing progress in words, and records it as the object's scan. */

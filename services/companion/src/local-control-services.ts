@@ -149,7 +149,7 @@ export function createControlDispatcher(services: ControlServices) {
         case 'status.get': return {protocolVersion:1,companionVersion:services.companionVersion,transport:auth.transport,
           pairedDeviceCount:(await auth.listDevices()).length,capabilities:{capture:!!capture?.captures,cleanup:!!capture?.scanProcessing,printerHandoff:!!printHandoff,nearbyPairing:!!services.nearby,
             objectsCreate:!!services.objects,printSettings:!!services.objects?.printSettingsAvailable,printControl:!!services.objects?.printSettingsAvailable,
-            events:!!services.events&&!!services.liveActivityTokens,structuredPasses:!!services.objects,genericConfirmations:!!services.objects,materialChoice:!!services.objects,mcpUpdates:!!services.mcpUpdates}};
+            events:!!services.events&&!!services.liveActivityTokens,structuredPasses:!!services.objects,genericConfirmations:!!services.objects,materialChoice:!!services.objects,mcpUpdates:!!services.mcpUpdates,publishedModels:!!services.objects}};
         case 'printers.updateMcp': {
           if(!services.mcpUpdates)throw new ControlFailure('unavailable');
           const {mcpId,fresh}=parameters[method].parse(raw);
@@ -229,7 +229,7 @@ export function createControlDispatcher(services: ControlServices) {
           return {answered:true};
         }
         case 'doors.prepare': return await prepareDoor(parameters[method].parse(raw));
-        case 'objects.list': case 'objects.printers': case 'objects.filaments': case 'objects.selectPrinter': case 'objects.get': case 'objects.passActivity': case 'objects.start': case 'objects.delete': case 'objects.correct': case 'objects.answerCloseup': case 'objects.print': case 'objects.answerPlate': case 'objects.answerPrintConfirmation':
+        case 'objects.answerAsk': case 'objects.list': case 'objects.printers': case 'objects.filaments': case 'objects.selectPrinter': case 'objects.get': case 'objects.passActivity': case 'objects.start': case 'objects.delete': case 'objects.correct': case 'objects.answerCloseup': case 'objects.print': case 'objects.answerPlate': case 'objects.answerPrintConfirmation':
         case 'objects.create': case 'objects.addFile':
         case 'objects.estimate': case 'objects.pausePrint': case 'objects.resumePrint': case 'objects.cancelPrint': case 'objects.camera': case 'printers.camera': case 'settings.get': case 'settings.set': {
           const objects = services.objects;
@@ -246,8 +246,8 @@ export function createControlDispatcher(services: ControlServices) {
             }
             if (method === 'objects.delete') { await objects.delete((parameters[method].parse(raw) as {id: string}).id); return {deleted: true}; }
             if (method === 'objects.create') {
-              const {instructions, kind} = parameters[method].parse(raw);
-              return {object: local(await objects.create(instructions, kind))};
+              const {instructions, kind, url} = parameters[method].parse(raw);
+              return {object: local(await objects.create(instructions, kind, url))};
             }
             if (method === 'objects.estimate') {
               const {id, ...request} = parameters[method].parse(raw);
@@ -275,6 +275,10 @@ export function createControlDispatcher(services: ControlServices) {
             if (method === 'objects.correct') {
               const {id, note, photos} = parameters[method].parse(raw);
               return {object: local(await objects.correct(id, note, photos))};
+            }
+            if (method === 'objects.answerAsk') {
+              const {id, askId, choices} = parameters[method].parse(raw);
+              return {object: local(await objects.answerAsk(id, askId, choices))};
             }
             if (method === 'objects.answerPrintConfirmation') {
               const {id, confirmationId, answer} = parameters[method].parse(raw);

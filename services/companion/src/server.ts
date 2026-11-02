@@ -242,7 +242,7 @@ export async function startCompanionServer(
         // Scope name kept from the first protocol so existing pairings still parse.
         await authorize('generation:health');
         // Additive: older phones read only status and protocolVersion.
-        response.end(JSON.stringify({ status: 'ok', protocolVersion: '0.1.0', capabilities: { genericConfirmations: !!options.objects, materialChoice: !!options.objects, mcpUpdates: !!options.mcpUpdates } }));
+        response.end(JSON.stringify({ status: 'ok', protocolVersion: '0.1.0', capabilities: { genericConfirmations: !!options.objects, materialChoice: !!options.objects, mcpUpdates: !!options.mcpUpdates, publishedModels: !!options.objects } }));
         return;
       }
       if(captureRoutes&&request.url?.startsWith('/v1/saved-projects/')){

@@ -73,7 +73,7 @@ export interface TouchupInvocation {
 const quote = (value: string) => `'${value.replace(/'/g, `'\\''`)}'`;
 
 /** The user's printer MCP exactly as configured. A working directory needs a shell wrapper because MCP configs have no cwd field. */
-function printerServer(printer: PrinterMcpProcess): McpServerEntry {
+export function printerServer(printer: PrinterMcpProcess): McpServerEntry {
   const args = printer.args ?? [];
   const entry: McpServerEntry = printer.cwd
     ? {command: '/bin/sh', args: ['-c', `cd ${quote(printer.cwd)} && exec ${[printer.command, ...args].map(quote).join(' ')}`]}
@@ -123,7 +123,9 @@ export function systemRules(engine: DesignEngine = 'blender'): string {
 export const TOUCHUP_SYSTEM_RULES = systemRules('blender');
 
 export function buildTouchupInvocation(input: {pass: TouchupPass; printer: PrinterMcpProcess; claudePath: string; instructions?: string; note?: string; summary?: string; currentModel?: boolean; sourceEnv?: NodeJS.ProcessEnv;
-  engine?: DesignEngine; design?: {f3d: string; parameters?: string}}): TouchupInvocation {
+  engine?: DesignEngine; design?: {f3d: string; parameters?: string};
+  /** PRD §8.11: Claude in Chrome, when it's set up, for every job (specs, pages, downloads with the person's own logins). */
+  chrome?: boolean}): TouchupInvocation {
   const {pass} = input;
   const mcpConfig = {mcpServers: {printer: printerServer(input.printer)}};
   const mcpConfigPath = join(pass.dir, 'mcp.json');
@@ -134,8 +136,9 @@ export function buildTouchupInvocation(input: {pass: TouchupPass; printer: Print
     '--effort', 'high',
     '--mcp-config', mcpConfigPath,
     '--strict-mcp-config',
+    ...(input.chrome ? ['--chrome'] : []),
     '--tools', 'Read,WebSearch,WebFetch',
-    '--allowedTools', 'Read,WebSearch,WebFetch,mcp__printer',
+    '--allowedTools', `Read,WebSearch,WebFetch,mcp__printer${input.chrome ? ',mcp__claude-in-chrome' : ''}`,
     '--disable-slash-commands',
     '--setting-sources', '',
     '--settings', '{"disableAllHooks":true}',
