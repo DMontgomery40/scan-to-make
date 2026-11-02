@@ -115,6 +115,27 @@ private func phone(_ id: String, _ name: String, pairedAt: Double = 1_700_000_00
         XCTAssertEqual(DeviceGroup.groups([iPad, phone]).count, 2, "different hardware is never folded together")
     }
 
+    func testOlderPairingsFromBeforeStableIdentityAreListedApartAndNeverConnected() throws {
+        let now = Date().timeIntervalSince1970 * 1000
+        let phone = ControlDevice(deviceId:"real", deviceName:"David's iPhone", pairedAt:now - 86_400_000, lastRefreshedAt:now, expiresAt:0,
+                                  model:"iPhone18,2", lastSeenAt:now - 1_000, legacy:false)
+        let old = (0..<6).map { ControlDevice(deviceId:"old\($0)", deviceName:"David's iPhone", pairedAt:now - Double(10 + $0) * 86_400_000,
+                                              lastRefreshedAt:now - 1_000, expiresAt:0, lastSeenAt:now - 1_000, legacy:true) }
+        let unmarked = ControlDevice(deviceId:"plain", deviceName:"iPad", pairedAt:now, lastRefreshedAt:now, expiresAt:0)
+        let all = [phone] + old + [unmarked]
+        let groups = DeviceGroup.groups(all.filter { $0.legacy != true })
+        XCTAssertEqual(Set(groups.map(\.id)), ["real", "plain"], "a companion that doesn't mark them keeps every row as before")
+        XCTAssertTrue(groups.allSatisfy { $0.older == 0 }, "older pairings never fold into the real phone's row")
+        let legacyRow = DeviceGroup(primary:old[0], ids:["old0"])
+        XCTAssertFalse(legacyRow.connectedNow(at:Date()), "never shown as connected, however recently it was refreshed")
+        XCTAssertFalse(legacyRow.detail(at:Date()).contains("connected"))
+        let decoded = try JSONDecoder().decode([ControlDevice].self, from:Data(#"""
+        [{"deviceId":"a","deviceName":"x","scopes":[],"pairedAt":1,"lastRefreshedAt":1,"expiresAt":1,"pairedVia":{"transport":"lan","login":"lan"},"legacy":true},
+         {"deviceId":"b","deviceName":"y","scopes":[],"pairedAt":1,"lastRefreshedAt":1,"expiresAt":1,"pairedVia":{"transport":"lan","login":"lan"}}]
+        """#.utf8))
+        XCTAssertEqual(decoded.map(\.legacy), [true, nil])
+    }
+
     func testARowSaysConnectedOnlyOnARecentRequest() throws {
         let now = Date(timeIntervalSince1970:1_800_000_000)
         func device(seen: Double?, model: String? = "iPhone18,2") -> DeviceGroup {
@@ -142,7 +163,11 @@ private func phone(_ id: String, _ name: String, pairedAt: Double = 1_700_000_00
         XCTAssertFalse(prefs.shouldNotify(type:"print.milestone", progress:50), "progress is off on the Mac by default")
         prefs.progress = .quarters
         XCTAssertTrue(prefs.shouldNotify(type:"print.milestone", progress:75))
-        XCTAssertFalse(prefs.shouldNotify(type:"print.milestone", progress:60))
+        XCTAssertTrue(prefs.shouldNotify(type:"print.milestone", progress:60), "the shared setting decided which milestones exist")
+        XCTAssertEqual(ProgressNotifications.quarters.milestones, "25-50-75")
+        XCTAssertEqual(ProgressNotifications(milestones:"every-10"), .every10)
+        XCTAssertNil(ProgressNotifications.off.milestones, "Off on the Mac never turns the phone's milestones off")
+        XCTAssertNil(ProgressNotifications(milestones:"off"), "the phone turned them off: there is no level to show")
         prefs.set(.done, false)
         XCTAssertFalse(prefs.shouldNotify(type:"print.done"))
     }

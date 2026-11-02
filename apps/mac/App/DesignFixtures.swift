@@ -1,5 +1,6 @@
 #if DEBUG
 import Foundation
+import CounterpartKit
 #if canImport(ControlKit)
 import ControlKit
 #endif
@@ -11,6 +12,13 @@ import ControlKit
 @MainActor enum DesignFixtures {
     static var assets: URL?
     static var screen = "main"
+    /// `--design-project <id> [--design-screen print]`, without fixtures: design QA of a Debug build against the real
+    /// companion, on one real project (its print sheet asks the real printer for an estimate; it never prints).
+    static var realProject: String? {
+        guard assets == nil else { return nil }
+        return CommandLine.arguments.firstIndex(of: "--design-project").flatMap { $0 + 1 < CommandLine.arguments.count ? CommandLine.arguments[$0 + 1] : nil }
+    }
+    static var realScreen: String? { CommandLine.arguments.firstIndex(of: "--design-screen").flatMap { $0 + 1 < CommandLine.arguments.count ? CommandLine.arguments[$0 + 1] : nil } }
     /// `--design-select 1…6`: the mockup's project number to show (1, Mic mount, by default).
     static var selected: String {
         let number = CommandLine.arguments.firstIndex(of: "--design-select").flatMap { Int(CommandLine.arguments[$0 + 1]) } ?? 1
@@ -50,7 +58,9 @@ import ControlKit
             ["id": "0b6f0f43-7c35-4b8a-9a3c-000000000003", "createdAtMs": now - 1_000, "updatedAtMs": now, "title": "Cable clip",
              "instructions": "Copy this clip, 20% bigger.", "state": "printing", "photos": [], "passes": [],
              "current": ["model": "current/model.stl", "renders": ["current/renders/front.jpg"], "sizeMm": [22, 14, 9]],
-             "print": ["bundleId": "b3", "destination": p1s, "printerStatus": ["state": "RUNNING", "checkedAtMs": now, "percent": 42, "remainingMinutes": 38]],
+             "print": ["bundleId": "b3", "printId": "print-3", "destination": p1s, "monitor": ["phase": "watching"],
+                       "live": ["source": "counterpart", "state": "printing", "job": ["name": "Cable clip", "progress": 42, "remainingSec": 2_280]],
+                       "printerStatus": ["state": "RUNNING", "checkedAtMs": now, "percent": 42, "remainingMinutes": 38]],
              "directory": folder("c3", ["current/model.stl": "mic.stl", "current/renders/front.jpg": "bed.jpg"])],
             ["id": "0b6f0f43-7c35-4b8a-9a3c-000000000002", "createdAtMs": now - 2_000, "updatedAtMs": now, "title": "Crochet potato",
              "instructions": "Copy this. Close up the bottom and keep the stitches.", "state": "touching-up", "photos": ["potato.png"], "scan": "scan.usdz",
@@ -125,6 +135,11 @@ struct FixtureMac: MacStatusSource {
                               lastRefreshedAt: now - 30_000, expiresAt: now + 86_400_000, model: "iPhone18,2", lastSeenAt: now - 10_000),
                 ControlDevice(deviceId: "0b6f0f43-7c35-4b8a-9a3c-0000000000d2", deviceName: "David's iPad Pro", pairedAt: day(10, 31),
                               lastRefreshedAt: now - 86_400_000, expiresAt: now + 86_400_000, model: "iPad16,3", lastSeenAt: now - 86_400_000)]
+            // `--design-legacy`: the live Mac's pairings from before stable identity (KAN-214 PR 5 marks them).
+            + (CommandLine.arguments.contains("--design-legacy") ? (1...3).map { index in
+                ControlDevice(deviceId: "0b6f0f43-7c35-4b8a-9a3c-0000000000e\(index)", deviceName: "David's iPhone", pairedAt: day(10, 20 + index),
+                              lastRefreshedAt: day(10, 22 + index), expiresAt: now + 86_400_000, legacy: true)
+            } : [])
     }
     func removeDevice(_ id: String) async throws {}
     func address() -> String? { "mac-mini.local:9077" }
@@ -137,15 +152,15 @@ actor FixtureObjects: ObjectsCompanion {
     private let now: Double
     init(items: [[String: Any]], catalog: PrinterCatalog, now: Double) { self.items = items; self.catalog = catalog; self.now = now }
 
-    private func decode(_ item: [String: Any]) throws -> StmObject {
-        try JSONDecoder().decode(StmObject.self, from: JSONSerialization.data(withJSONObject: item))
+    private func decode(_ item: [String: Any]) throws -> Project {
+        try JSONDecoder().decode(Project.self, from: JSONSerialization.data(withJSONObject: item))
     }
-    private func change(_ id: String, _ fields: [String: Any]) throws -> StmObject {
+    private func change(_ id: String, _ fields: [String: Any]) throws -> Project {
         guard let index = items.firstIndex(where: { $0["id"] as? String == id }) else { throw ControlRemoteError(code: "not-found", message: "") }
         items[index].merge(fields) { $1 }
         return try decode(items[index])
     }
-    func objects() async throws -> [StmObject] { try items.map(decode) }
+    func objects() async throws -> [Project] { try items.map(decode) }
     func printers() async throws -> PrinterCatalog { catalog }
     func filaments(_ id: String) async throws -> [PrinterFilament] {
         [PrinterFilament(slot: 0, colour: "#141414", material: "PLA", name: "Black", filamentId: "GFA00", destinationId: "p1s", suggested: true),
@@ -169,11 +184,10 @@ actor FixtureObjects: ObjectsCompanion {
                                    "infillPercent": strength == .max ? 40 : strength == .strong ? 25 : 15, "slicedAt": "2026-11-01T12:00:00Z"]
         return try JSONDecoder().decode(PrintEstimate.self, from: JSONSerialization.data(withJSONObject: json))
     }
-    func correct(_ id: String, note: String) async throws -> StmObject { try change(id, ["state": "touching-up"]) }
-    func answerCloseup(_ id: String, bestGuess: Bool) async throws -> StmObject { try change(id, ["state": "touching-up"]) }
-    func print(_ id: String, checked: Bool) async throws -> StmObject { try change(id, ["state": "printing"]) }
-    func answerPlate(_ id: String) async throws -> StmObject { try change(id, ["plate": NSNull()]) }
-    func start(_ id: String) async throws -> StmObject { try change(id, ["state": "touching-up"]) }
+    func correct(_ id: String, note: String) async throws -> Project { try change(id, ["state": "touching-up"]) }
+    func answerCloseup(_ id: String, bestGuess: Bool) async throws -> Project { try change(id, ["state": "touching-up"]) }
+    func print(_ id: String, checked: Bool) async throws -> Project { try change(id, ["state": "printing"]) }
+    func start(_ id: String) async throws -> Project { try change(id, ["state": "touching-up"]) }
     func delete(_ id: String) async throws { items.removeAll { $0["id"] as? String == id } }
 }
 #endif

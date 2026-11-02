@@ -2,6 +2,7 @@ import SwiftUI
 import Sparkle
 import ServiceManagement
 import AgentKit
+import CounterpartKit
 #if canImport(ControlKit)
 import ControlKit
 #endif

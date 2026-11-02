@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
+import CounterpartKit
 #if canImport(ControlKit)
 import ControlKit
 #endif
@@ -12,9 +13,9 @@ import ControlKit
 struct MainWindow: View {
     @ObservedObject var model: ObjectsModel
     @State private var inspector = true
-    @State private var deleting: StmObject?
+    @State private var deleting: Project?
     @State private var newProject: NewProjectDraft?
-    @State private var printing: StmObject?
+    @State private var printing: Project?
     @State private var editorError: String?
 
     var body: some View {
@@ -50,6 +51,13 @@ struct MainWindow: View {
             if DesignFixtures.assets != nil, DesignFixtures.screen == "new" { startNewProject(NewProjectDraft()) }
             if DesignFixtures.assets != nil, DesignFixtures.screen == "print" {
                 Task { try? await Task.sleep(for: .seconds(2)); printing = model.selected }
+            }
+            if let id = DesignFixtures.realProject {
+                Task {
+                    try? await Task.sleep(for: .seconds(2))
+                    model.selection = id
+                    if DesignFixtures.realScreen == "print" { printing = model.selected }
+                }
             }
             #endif
         }
@@ -135,7 +143,7 @@ struct MainWindow: View {
 
     private func showInFinder() {
         guard let object = model.selected else { return }
-        let target = object.modelURL ?? object.scanURL ?? URL(fileURLWithPath: object.directory, isDirectory: true)
+        guard let target = object.modelURL ?? object.scanURL ?? object.folderURL else { return }
         NSWorkspace.shared.activateFileViewerSelecting([target])
     }
 
@@ -149,7 +157,7 @@ struct MainWindow: View {
 
 private struct Sidebar: View {
     @ObservedObject var model: ObjectsModel
-    @Binding var deleting: StmObject?
+    @Binding var deleting: Project?
 
     var body: some View {
         List(selection: $model.selection) {
@@ -158,7 +166,8 @@ private struct Sidebar: View {
                     ForEach(entry.objects) { object in
                         ProjectRow(object: object, selected: model.selection == object.id).tag(object.id)
                             .contextMenu {
-                                Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: object.directory, isDirectory: true)]) }
+                                Button("Show in Finder") { if let folder = object.folderURL { NSWorkspace.shared.activateFileViewerSelecting([folder]) } }
+                                    .disabled(object.folderURL == nil)
                                 Divider()
                                 Button("Delete…", role: .destructive) { deleting = object }
                                     .disabled(model.working.contains(object.id))
@@ -208,7 +217,7 @@ private struct Sidebar: View {
 
 /// One sidebar row: the real render, the title and the status line in the state's colour.
 struct ProjectRow: View {
-    let object: StmObject
+    let object: Project
     /// Inside the selected row's accent highlight a state colour would vanish, so the line goes secondary there.
     var selected = false
     var body: some View {
@@ -229,7 +238,7 @@ struct ProjectRow: View {
 
 /// The first render, else the first photo, else a quiet symbol on the stage colour. Never a fake picture.
 struct ProjectThumbnail: View {
-    let object: StmObject
+    let object: Project
     var body: some View {
         ZStack {
             Color.stageBottom

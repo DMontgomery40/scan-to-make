@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
+import CounterpartKit
 #if canImport(ControlKit)
 import ControlKit
 #endif

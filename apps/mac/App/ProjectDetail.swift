@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import CounterpartKit
 #if canImport(ControlKit)
 import ControlKit
 #endif
@@ -7,7 +8,7 @@ import ControlKit
 /// One project (PRD §7.2): the model full height on the dark stage, the state in a glass capsule, the size,
 /// what the Mac needs or is doing in one glass card, and a glass bar with Ask for changes… and Print….
 struct ProjectDetail: View {
-    let object: StmObject
+    let object: Project
     @ObservedObject var model: ObjectsModel
     let print: () -> Void
     @State private var note = ""
@@ -253,22 +254,23 @@ struct ProjectDetail: View {
     }
 }
 
-/// The printer MCP's own confirmation, answered here exactly as asked (PRD §5.5): each check is the
-/// person's to tick; the camera photo is only a reference.
+/// The printer MCP's own confirmation, answered here exactly as asked (PRD §5.5): every field it asks, with its own
+/// title and description, as a checkbox, a choice, text or a number (CounterpartKit's schema and checks, shared with
+/// the phone). Each check is the person's to tick; the camera photo is only a reference.
 struct PrintConfirmationForm: View {
-    let object: StmObject
-    let question: StmObject.PrintConfirmation
+    let object: Project
+    let question: Project.PrintConfirmation
     @ObservedObject var model: ObjectsModel
     @State private var draft: PrintConfirmationDraft
 
-    init(object: StmObject, question: StmObject.PrintConfirmation, model: ObjectsModel) {
+    init(object: Project, question: Project.PrintConfirmation, model: ObjectsModel) {
         self.object = object; self.question = question; self.model = model
         _draft = State(initialValue: PrintConfirmationDraft(question))
     }
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { context in
-            let answer = draft.answer(for: question, at: context.date.timeIntervalSince1970 * 1000)
+            let answer = draft.answer(question, at: context.date.timeIntervalSince1970 * 1000)
             let expired = question.expiresAtMs <= context.date.timeIntervalSince1970 * 1000
             let working = model.working.contains(object.id)
             VStack(alignment: .leading, spacing: 10) {
@@ -287,9 +289,9 @@ struct PrintConfirmationForm: View {
                         Task { await model.answerPrintConfirmation(object.id, confirmationId: question.id, answer: .init(action: .cancel)) }
                     }
                     .buttonStyle(.glass).disabled(working || expired)
-                    if question.supported {
+                    if question.isRenderable {
                         Button("Print") {
-                            guard let answer = draft.answer(for: question, at: Date().timeIntervalSince1970 * 1000) else { return }
+                            guard let answer = draft.answer(question, at: Date().timeIntervalSince1970 * 1000) else { return }
                             Task { await model.answerPrintConfirmation(object.id, confirmationId: question.id, answer: answer) }
                         }
                         .buttonStyle(.glassProminent).disabled(working || answer == nil)
@@ -303,31 +305,84 @@ struct PrintConfirmationForm: View {
 
     private func details(working: Bool, expired: Bool) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-                Text(verbatim: question.message).font(.callout).textSelection(.enabled).lineLimit(nil)
-                if let item = object.plate?.item, !item.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    Label("The printer camera reported \(item) on the plate.", systemImage: "exclamationmark.triangle.fill")
-                        .font(.callout).foregroundStyle(.orange).lineLimit(nil)
+            Text(verbatim: question.message).font(.callout).textSelection(.enabled).lineLimit(nil)
+            if let item = object.plate?.item, !item.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Label("The printer camera reported \(item) on the plate.", systemImage: "exclamationmark.triangle.fill")
+                    .font(.callout).foregroundStyle(.orange).lineLimit(nil)
+            }
+            if let photo = object.platePhotoURL {
+                FileImage(url: photo, version: object.updatedAtMs, contentMode: .fit).frame(maxWidth: 280, maxHeight: 180)
+                    .clipShape(.rect(cornerRadius: 10)).accessibilityLabel("Printer camera photo, for reference")
+            }
+            if question.isRenderable {
+                ForEach(question.fields, id: \.name) { field in
+                    ConfirmationFieldRow(field: field, draft: $draft).disabled(working || expired)
                 }
-                if let photo = object.platePhotoURL {
-                    FileImage(url: photo, version: object.updatedAtMs, contentMode: .fit).frame(maxWidth: 280, maxHeight: 180)
-                        .clipShape(.rect(cornerRadius: 10)).accessibilityLabel("Printer camera photo, for reference")
-                }
-                if question.supported {
-                    ForEach(question.fields, id: \.name) { field in
-                        Toggle(isOn: Binding(get: { draft.values[field.name] ?? false }, set: { draft.values[field.name] = $0 })) {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(verbatim: field.title)
-                                if let description = field.description { Text(verbatim: description).font(.caption).foregroundStyle(.secondary) }
-                            }
-                            .lineLimit(nil)
-                        }
-                        .toggleStyle(.checkbox).disabled(working || expired)
-                    }
-                } else {
-                    Text("This question can’t be answered here. Cancel the print to continue.").font(.callout).foregroundStyle(.secondary)
-                }
-                if expired { Text("This question has expired.").font(.callout).foregroundStyle(.secondary) }
+            } else {
+                Text("This question can’t be answered here. Cancel the print to continue.").font(.callout).foregroundStyle(.secondary)
+            }
+            if expired { Text("This question has expired.").font(.callout).foregroundStyle(.secondary) }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// One field of the printer's form, as its type asks: a checkbox, a choice, text, or a number.
+private struct ConfirmationFieldRow: View {
+    let field: Project.PrintConfirmation.Field
+    @Binding var draft: PrintConfirmationDraft
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            switch field.type {
+            case .boolean:
+                Toggle(isOn: Binding(get: { draft.values[field.name] == .bool(true) }, set: { draft.values[field.name] = .bool($0) })) { label }
+                    .toggleStyle(.checkbox)
+            case .string where field.enumValues != nil:
+                Picker(selection: Binding(get: { if case .string(let value)? = draft.values[field.name] { return value } else { return "" } },
+                                          set: { draft.values[field.name] = $0.isEmpty ? nil : .string($0) })) {
+                    if !field.required || draft.values[field.name] == nil { Text("Choose…").tag("") }
+                    ForEach(field.enumValues ?? [], id: \.self) { value in Text(verbatim: field.displayName(of: value)).tag(value) }
+                } label: { label }
+                .pickerStyle(.menu).fixedSize()
+            case .string, .number, .integer:
+                label
+                TextField(field.title, text: Binding(get: { draft.text[field.name] ?? "" }, set: { draft.text[field.name] = $0 }),
+                          prompt: prompt.map { Text($0) })
+                    .textFieldStyle(.roundedBorder).labelsHidden().frame(maxWidth: field.type == .string ? 360 : 140, alignment: .leading)
+            case .unknown:
+                label
+            }
+            if let problem = draft.problem(field) { Text(problem).font(.caption).foregroundStyle(.orange) }
+        }
+    }
+
+    private var label: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(verbatim: field.title + (field.required && field.type != .boolean ? " (required)" : ""))
+            if let description = field.description { Text(verbatim: description).font(.caption).foregroundStyle(.secondary) }
+        }
+        .lineLimit(nil)
+    }
+
+    /// A hint at what fits: the range for a number, the shape for a formatted string.
+    private var prompt: String? {
+        switch field.type {
+        case .number, .integer:
+            switch (field.minimum, field.maximum) {
+            case let (low?, high?): return "\(PrintConfirmationDraft.plain(low))–\(PrintConfirmationDraft.plain(high))"
+            case let (low?, nil): return "\(PrintConfirmationDraft.plain(low)) or more"
+            case let (nil, high?): return "up to \(PrintConfirmationDraft.plain(high))"
+            default: return field.type == .integer ? "a whole number" : nil
+            }
+        default:
+            switch field.format {
+            case "email": return "name@example.com"
+            case "uri": return "https://"
+            case "date": return "2026-11-01"
+            case "date-time": return "2026-11-01T10:00:00Z"
+            default: return nil
+            }
+        }
     }
 }

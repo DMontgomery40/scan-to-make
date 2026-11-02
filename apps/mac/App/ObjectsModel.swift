@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import CounterpartKit
 #if canImport(ControlKit)
 import ControlKit
 #endif
@@ -8,70 +9,68 @@ import ControlKit
 protocol ObjectsCompanion: Sendable {
     func printers() async throws -> PrinterCatalog
     func filaments(_ id: String) async throws -> [PrinterFilament]
-    func print(_ id: String, checked: Bool, filament: PrinterFilament) async throws -> StmObject
-    func passActivity(_ id: String, index: Int) async throws -> [StmObject.Activity]
-    func selectPrinter(_ id: String, destinationId: String) async throws -> StmObject
-    func objects() async throws -> [StmObject]
-    func correct(_ id: String, note: String) async throws -> StmObject
-    func answerCloseup(_ id: String, bestGuess: Bool) async throws -> StmObject
-    func print(_ id: String, checked: Bool) async throws -> StmObject
-    func answerPlate(_ id: String) async throws -> StmObject
-    func answerPrintConfirmation(_ id: String, confirmationId: String, answer: PrintConfirmationAnswer) async throws -> StmObject
-    func start(_ id: String) async throws -> StmObject
+    func print(_ id: String, checked: Bool, filament: PrinterFilament) async throws -> Project
+    func passActivity(_ id: String, index: Int) async throws -> [Project.Activity]
+    func selectPrinter(_ id: String, destinationId: String) async throws -> Project
+    func objects() async throws -> [Project]
+    func correct(_ id: String, note: String) async throws -> Project
+    func answerCloseup(_ id: String, bestGuess: Bool) async throws -> Project
+    func print(_ id: String, checked: Bool) async throws -> Project
+    func answerPrintConfirmation(_ id: String, confirmationId: String, answer: PrintConfirmationAnswer) async throws -> Project
+    func start(_ id: String) async throws -> Project
     func delete(_ id: String) async throws
     /// What the companion can do (capability flags) and the phones paired with it, for the footer and gating.
     func status() async throws -> ControlStatus
     func devices() async throws -> [ControlDevice]
     /// The AI that does the work ("Claude Code"), nil when none is chosen or it can't be read.
     func aiProvider() async -> String?
-    func create(instructions: String?, kind: String?) async throws -> StmObject
-    func addFile(_ id: String, kind: String, path: String) async throws -> StmObject
-    func correct(_ id: String, note: String, photos: [String]) async throws -> StmObject
-    func print(_ id: String, checked: Bool, settings: PrintSettings) async throws -> StmObject
+    func create(instructions: String?, kind: String?) async throws -> Project
+    func addFile(_ id: String, kind: String, path: String) async throws -> Project
+    func correct(_ id: String, note: String, photos: [String]) async throws -> Project
+    func print(_ id: String, checked: Bool, settings: PrintSettings) async throws -> Project
     func estimate(_ id: String, destinationId: String?, quality: PrintSettings.Quality, strength: PrintSettings.Strength) async throws -> PrintEstimate
-    func control(_ id: String, _ action: PrintControl) async throws -> StmObject
+    func control(_ id: String, _ action: PrintControl) async throws -> Project
 }
 
 extension ObjectsCompanion {
     func filaments(_ id: String) async throws -> [PrinterFilament] { throw ControlClientError.unavailable }
-    func print(_ id: String, checked: Bool, filament: PrinterFilament) async throws -> StmObject { throw ControlClientError.unavailable }
-    func answerPrintConfirmation(_ id: String, confirmationId: String, answer: PrintConfirmationAnswer) async throws -> StmObject { throw ControlClientError.unavailable }
-    func passActivity(_ id: String, index: Int) async throws -> [StmObject.Activity] { throw ControlClientError.unavailable }
+    func print(_ id: String, checked: Bool, filament: PrinterFilament) async throws -> Project { throw ControlClientError.unavailable }
+    func answerPrintConfirmation(_ id: String, confirmationId: String, answer: PrintConfirmationAnswer) async throws -> Project { throw ControlClientError.unavailable }
+    func passActivity(_ id: String, index: Int) async throws -> [Project.Activity] { throw ControlClientError.unavailable }
     func printers() async throws -> PrinterCatalog { throw ControlClientError.unavailable }
-    func selectPrinter(_ id: String, destinationId: String) async throws -> StmObject { throw ControlClientError.unavailable }
+    func selectPrinter(_ id: String, destinationId: String) async throws -> Project { throw ControlClientError.unavailable }
     func status() async throws -> ControlStatus { throw ControlClientError.unavailable }
     func devices() async throws -> [ControlDevice] { throw ControlClientError.unavailable }
     func aiProvider() async -> String? { nil }
-    func create(instructions: String?, kind: String?) async throws -> StmObject { throw ControlClientError.unavailable }
-    func addFile(_ id: String, kind: String, path: String) async throws -> StmObject { throw ControlClientError.unavailable }
-    func correct(_ id: String, note: String, photos: [String]) async throws -> StmObject {
+    func create(instructions: String?, kind: String?) async throws -> Project { throw ControlClientError.unavailable }
+    func addFile(_ id: String, kind: String, path: String) async throws -> Project { throw ControlClientError.unavailable }
+    func correct(_ id: String, note: String, photos: [String]) async throws -> Project {
         guard photos.isEmpty else { throw ControlClientError.unavailable }
         return try await correct(id, note: note)
     }
-    func print(_ id: String, checked: Bool, settings: PrintSettings) async throws -> StmObject { throw ControlClientError.unavailable }
+    func print(_ id: String, checked: Bool, settings: PrintSettings) async throws -> Project { throw ControlClientError.unavailable }
     func estimate(_ id: String, destinationId: String?, quality: PrintSettings.Quality, strength: PrintSettings.Strength) async throws -> PrintEstimate {
         throw ControlClientError.unavailable
     }
-    func control(_ id: String, _ action: PrintControl) async throws -> StmObject { throw ControlClientError.unavailable }
+    func control(_ id: String, _ action: PrintControl) async throws -> Project { throw ControlClientError.unavailable }
 }
 
 /// The control socket. A fresh client per call, so a missing socket fails that call, not the model.
 struct SocketObjects: ObjectsCompanion {
     let path: String
-    func passActivity(_ id: String, index: Int) async throws -> [StmObject.Activity] { try await ControlClient(socketPath:path).passActivity(id, index:index) }
+    func passActivity(_ id: String, index: Int) async throws -> [Project.Activity] { try await ControlClient(socketPath:path).passActivity(id, index:index) }
     func printers() async throws -> PrinterCatalog { try await ControlClient(socketPath:path).printers() }
     func filaments(_ id: String) async throws -> [PrinterFilament] { try await ControlClient(socketPath:path, timeout:30).filaments(id) }
-    func print(_ id: String, checked: Bool, filament: PrinterFilament) async throws -> StmObject { try await ControlClient(socketPath:path, timeout:30).printObject(id, checked:checked, filament:filament) }
-    func selectPrinter(_ id: String, destinationId: String) async throws -> StmObject { try await ControlClient(socketPath:path).selectPrinter(id, destinationId:destinationId) }
-    func objects() async throws -> [StmObject] { try await ControlClient(socketPath:path).objects() }
-    func correct(_ id: String, note: String) async throws -> StmObject { try await ControlClient(socketPath:path).correctObject(id, note:note) }
-    func answerCloseup(_ id: String, bestGuess: Bool) async throws -> StmObject { try await ControlClient(socketPath:path).answerCloseup(id, bestGuess:bestGuess) }
-    func print(_ id: String, checked: Bool) async throws -> StmObject { try await ControlClient(socketPath:path).printObject(id, checked:checked) }
-    func answerPlate(_ id: String) async throws -> StmObject { try await ControlClient(socketPath:path).answerPlate(id) }
-    func answerPrintConfirmation(_ id: String, confirmationId: String, answer: PrintConfirmationAnswer) async throws -> StmObject {
+    func print(_ id: String, checked: Bool, filament: PrinterFilament) async throws -> Project { try await ControlClient(socketPath:path, timeout:30).printObject(id, checked:checked, filament:filament) }
+    func selectPrinter(_ id: String, destinationId: String) async throws -> Project { try await ControlClient(socketPath:path).selectPrinter(id, destinationId:destinationId) }
+    func objects() async throws -> [Project] { try await ControlClient(socketPath:path).objects() }
+    func correct(_ id: String, note: String) async throws -> Project { try await ControlClient(socketPath:path).correctObject(id, note:note) }
+    func answerCloseup(_ id: String, bestGuess: Bool) async throws -> Project { try await ControlClient(socketPath:path).answerCloseup(id, bestGuess:bestGuess) }
+    func print(_ id: String, checked: Bool) async throws -> Project { try await ControlClient(socketPath:path).printObject(id, checked:checked) }
+    func answerPrintConfirmation(_ id: String, confirmationId: String, answer: PrintConfirmationAnswer) async throws -> Project {
         try await ControlClient(socketPath:path).answerPrintConfirmation(id, confirmationId:confirmationId, answer:answer)
     }
-    func start(_ id: String) async throws -> StmObject { try await ControlClient(socketPath:path).startObject(id) }
+    func start(_ id: String) async throws -> Project { try await ControlClient(socketPath:path).startObject(id) }
     func delete(_ id: String) async throws { try await ControlClient(socketPath:path).deleteObject(id) }
     func status() async throws -> ControlStatus { try await ControlClient(socketPath:path).status() }
     func devices() async throws -> [ControlDevice] { try await ControlClient(socketPath:path).devices() }
@@ -79,22 +78,22 @@ struct SocketObjects: ObjectsCompanion {
         guard let snapshot = try? await ControlClient(socketPath:path).modelAccess(), snapshot.choice != .none else { return nil }
         return snapshot.choice.providerName
     }
-    func create(instructions: String?, kind: String?) async throws -> StmObject {
+    func create(instructions: String?, kind: String?) async throws -> Project {
         try await ControlClient(socketPath:path).createObject(instructions:instructions, kind:kind)
     }
-    func addFile(_ id: String, kind: String, path file: String) async throws -> StmObject {
+    func addFile(_ id: String, kind: String, path file: String) async throws -> Project {
         try await ControlClient(socketPath:path, timeout:30).addFile(id, kind:kind, path:file)
     }
-    func correct(_ id: String, note: String, photos: [String]) async throws -> StmObject {
+    func correct(_ id: String, note: String, photos: [String]) async throws -> Project {
         try await ControlClient(socketPath:path, timeout:30).correctObject(id, note:note, photos:photos)
     }
-    func print(_ id: String, checked: Bool, settings: PrintSettings) async throws -> StmObject {
+    func print(_ id: String, checked: Bool, settings: PrintSettings) async throws -> Project {
         try await ControlClient(socketPath:path, timeout:30).printObject(id, checked:checked, settings:settings)
     }
     func estimate(_ id: String, destinationId: String?, quality: PrintSettings.Quality, strength: PrintSettings.Strength) async throws -> PrintEstimate {
         try await ControlClient(socketPath:path, timeout:ControlClient.timeout(for:"objects.estimate")).estimate(id, destinationId:destinationId, quality:quality, strength:strength)
     }
-    func control(_ id: String, _ action: PrintControl) async throws -> StmObject {
+    func control(_ id: String, _ action: PrintControl) async throws -> Project {
         try await ControlClient(socketPath:path, timeout:ControlClient.timeout(for:action.method)).controlPrint(id, action)
     }
 }
@@ -115,7 +114,7 @@ struct SocketObjects: ObjectsCompanion {
 
     static let busyDelay: Double = 3, idleDelay: Double = 15
 
-    @Published private(set) var objects: [StmObject] = []
+    @Published private(set) var objects: [Project] = []
     @Published private(set) var printerCatalog: PrinterCatalog?
     /// What this Mac's companion can do; nil until it answers. Features it lacks show why instead of failing.
     @Published private(set) var capabilities: ControlStatus.Capabilities?
@@ -137,10 +136,10 @@ struct SocketObjects: ObjectsCompanion {
 
     init(companion: any ObjectsCompanion) { self.companion = companion }
 
-    var selected: StmObject? { objects.first { $0.id == selection } }
+    var selected: Project? { objects.first { $0.id == selection } }
 
     /// The sidebar (PRD §7.2): Now, Needs you, Ready, Printed, each newest first. Empty groups are left out.
-    var groups: [(group: ProjectGroup, objects: [StmObject])] {
+    var groups: [(group: ProjectGroup, objects: [Project])] {
         let words = Dictionary(uniqueKeysWithValues:objects.map { ($0.id, $0.words.group) })
         return ProjectGroup.allCases.compactMap { group in
             let members = objects.filter { words[$0.id] == group }
@@ -148,13 +147,14 @@ struct SocketObjects: ObjectsCompanion {
         }
     }
     /// In sidebar order.
-    var ordered: [StmObject] { groups.flatMap(\.objects) }
+    var ordered: [Project] { groups.flatMap(\.objects) }
 
     /// The phone people know, for the footer: the most recently seen paired device, one row per name.
-    var latestDevice: ControlDevice? { devices.max { $0.seenAt < $1.seenAt } }
+    /// The phone heard from most recently; a pairing from before stable identity is never the one shown.
+    var latestDevice: ControlDevice? { devices.filter { $0.legacy != true }.max { $0.seenAt < $1.seenAt } }
     var isPolling: Bool { loop != nil }
 
-    func passActivity(_ id: String, index: Int) async throws -> [StmObject.Activity] {
+    func passActivity(_ id: String, index: Int) async throws -> [Project.Activity] {
         try await companion.passActivity(id, index:index)
     }
 
@@ -185,7 +185,7 @@ struct SocketObjects: ObjectsCompanion {
         defer { working.remove(id) }
         problem = nil
         do {
-            let updated: StmObject
+            let updated: Project
             if capabilities?.printSettings == true { updated = try await companion.print(id, checked:checked, settings:settings) }
             else if let filament { updated = try await companion.print(id, checked:checked, filament:filament) }
             else { updated = try await companion.print(id, checked:checked) }
@@ -222,7 +222,7 @@ struct SocketObjects: ObjectsCompanion {
         }
     }
 
-    func printer(for object: StmObject) -> PrinterDestination? {
+    func printer(for object: Project) -> PrinterDestination? {
         guard let catalog = printerCatalog else { return nil }
         return catalog.destinations.first { $0.id == object.printerDestinationId }
             ?? catalog.destinations.first { $0.id == catalog.defaultDestinationId }
@@ -343,15 +343,11 @@ struct SocketObjects: ObjectsCompanion {
     /// Runs one action on one object. Returns whether it went through.
     @discardableResult func perform(_ action: ObjectAction, on id: String, note: String = "", photos: [URL] = []) async -> Bool {
         guard !working.contains(id) else { return false }
-        if action == .plateClear, objects.first(where:{ $0.id == id })?.printConfirmation != nil {
-            problem = Problem(id:id, text:"Review the printer's confirmation before continuing.")
-            return false
-        }
         working.insert(id)
         defer { working.remove(id) }
         if problem?.id == id { problem = nil }
         do {
-            let updated: StmObject
+            let updated: Project
             switch action {
             case .print: updated = try await companion.print(id, checked:false)
             case .printChecked: updated = try await companion.print(id, checked:true)
@@ -360,7 +356,6 @@ struct SocketObjects: ObjectsCompanion {
                 updated = photos.isEmpty ? try await companion.correct(id, note:text)
                     : try await companion.correct(id, note:text.isEmpty ? "See the photos I added." : text, photos:photos.map(\.path))
             case .bestGuess: updated = try await companion.answerCloseup(id, bestGuess:true)
-            case .plateClear: updated = try await companion.answerPlate(id)
             case .retry: updated = try await companion.start(id)
             }
             if let index = objects.firstIndex(where: { $0.id == id }) { objects[index] = updated }
@@ -380,7 +375,9 @@ struct SocketObjects: ObjectsCompanion {
             problem = Problem(id:id, text:"That print confirmation has changed. Review the current request.")
             return false
         }
-        if answer.action == .accept, !question.canAccept(answer.content ?? [:], at:Date().timeIntervalSince1970 * 1000) {
+        // The shared checks, last before sending: never an accept that skips a required field, answers an expired
+        // question, or one this Mac can't show.
+        if answer.action == .accept, !question.canAccept(answer.content ?? [:], atMs: Date().timeIntervalSince1970 * 1000) {
             problem = Problem(id:id, text:"Complete the required checks before confirming this print. The request may have expired.")
             return false
         }

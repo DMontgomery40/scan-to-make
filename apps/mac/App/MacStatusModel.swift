@@ -76,7 +76,10 @@ struct SocketMacStatus: MacStatusSource {
     }
 
     /// One row per phone or iPad (Settings → Phones and iPads).
-    var groups: [DeviceGroup] { DeviceGroup.groups(devices) }
+    /// One row per phone, from the pairings with a stable identity.
+    var groups: [DeviceGroup] { DeviceGroup.groups(devices.filter { $0.legacy != true }) }
+    /// Pairings from before stable identity, when the companion marks them: listed apart, never as connected.
+    var legacy: [ControlDevice] { devices.filter { $0.legacy == true }.sorted { $0.seenAt > $1.seenAt } }
 }
 
 /// One row in Settings → Phones and iPads. Re-pairing the same installation keeps one device on a current
@@ -123,7 +126,7 @@ struct DeviceGroup: Identifiable, Equatable {
 
     /// Seen within five minutes on evidence of a request: connected now. Otherwise when it was last heard from.
     func connectedNow(at now: Date) -> Bool {
-        guard let seen = primary.lastSeenAt else { return false }
+        guard primary.legacy != true, let seen = primary.lastSeenAt else { return false }
         return now.timeIntervalSince1970 * 1000 - seen < 5 * 60_000
     }
 

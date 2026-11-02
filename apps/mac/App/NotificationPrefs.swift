@@ -40,25 +40,30 @@ enum NotificationSwitch: String, CaseIterable, Identifiable {
     static let ordered: [NotificationSwitch] = [.ready, .ask, .confirm, .firstLayer, .paused, .done, .problem, .lost]
 }
 
-/// `print.milestone` on the Mac: off by default. The companion's own milestone setting decides which exist at all.
+/// `print.milestone` on the Mac: off by default. Which milestones exist is one setting shared with the iPhone (the
+/// print monitor's, PRD §8.6, default halfway); choosing a level here sets it, and Off turns them off on this Mac only.
 enum ProgressNotifications: String, CaseIterable, Identifiable {
     case off, halfway, quarters, every10
     var id: String { rawValue }
+    /// The print monitor's value (`settings.set {milestones}`); nil for Off, which never turns them off for the phone.
+    var milestones: String? {
+        switch self {
+        case .off: return nil
+        case .halfway: return "50"
+        case .quarters: return "25-50-75"
+        case .every10: return "every-10"
+        }
+    }
+    init?(milestones: String) {
+        guard let level = Self.allCases.first(where: { $0.milestones == milestones }) else { return nil }
+        self = level
+    }
     var title: String {
         switch self {
         case .off: return "Off"
         case .halfway: return "Halfway"
         case .quarters: return "25, 50 and 75%"
         case .every10: return "Every 10%"
-        }
-    }
-    func includes(percent: Double) -> Bool {
-        let whole = Int(percent.rounded())
-        switch self {
-        case .off: return false
-        case .halfway: return whole == 50
-        case .quarters: return [25, 50, 75].contains(whole)
-        case .every10: return whole % 10 == 0
         }
     }
 }
@@ -80,9 +85,10 @@ struct NotificationPrefs {
         nonmutating set { defaults.set(newValue.rawValue, forKey: Self.progressKey) }
     }
 
-    /// Whether an event of this type (and, for a milestone, this percent) makes a Mac notification.
+    /// Whether an event of this type makes a Mac notification. A milestone notifies whenever Progress is on here: the
+    /// shared setting already decided which milestones exist.
     func shouldNotify(type: String, progress percent: Double? = nil) -> Bool {
-        if type == "print.milestone" { return percent.map(progress.includes(percent:)) ?? false }
+        if type == "print.milestone" { return progress != .off }
         guard let item = NotificationSwitch.allCases.first(where: { $0.eventTypes.contains(type) }) else { return false }
         return isOn(item)
     }

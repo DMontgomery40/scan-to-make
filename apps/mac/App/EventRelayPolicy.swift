@@ -1,4 +1,5 @@
 import Foundation
+import CounterpartKit
 #if canImport(ControlKit)
 import ControlKit
 #endif
@@ -251,7 +252,7 @@ enum RelayRetry {
 /// home answers it with `confirm`, which needs its exact id and every required field.
 enum MirroredConfirmation {
     /// `[{name, title, description?, required}]`, as JSON text.
-    static func fieldsJSON(_ fields: [StmObject.PrintConfirmation.Field]) -> String? {
+    static func fieldsJSON(_ fields: [Project.PrintConfirmation.Field]) -> String? {
         let list: [[String: JSONValue]] = fields.map { field in
             var item: [String: JSONValue] = ["name": .string(field.name), "title": .string(field.title), "required": .bool(field.required)]
             if let description = field.description { item["description"] = .string(description) }
@@ -260,5 +261,14 @@ enum MirroredConfirmation {
         let encoder = JSONEncoder()
         encoder.outputFormatting = .sortedKeys
         return (try? encoder.encode(list)).flatMap { String(data: $0, encoding: .utf8) }
+    }
+}
+
+/// Whether a `print.started` may still start a Live Activity: only while that same print is still running. After a
+/// restart the log replays starts for prints that have since ended, and an activity started then would never end.
+enum LiveActivityStart {
+    static func stillRunning(_ event: CounterpartEvent, project: Project?) -> Bool {
+        guard let project, let printId = event.printId, project.print?.printId == printId, project.state == .printing else { return false }
+        return project.print?.monitor?.phase != "ended"
     }
 }

@@ -1,4 +1,6 @@
 import XCTest
+import CounterpartKit
+import CloudKit
 
 /// PRD §8.8 and §9.3 rules for delivery, tested apart from the socket, CloudKit and the relay.
 final class EventRelayTests: XCTestCase {
@@ -201,12 +203,46 @@ final class EventRelayTests: XCTestCase {
 
     func testTheMirrorCarriesThePrintersQuestionWhole() throws {
         let json = #"{"id":"q1","message":"Print Mic mount on P1S?","expiresAtMs":1800000000000,"supported":true,"fields":[{"name":"confirm","title":"Print it","required":true},{"name":"note","title":"Plate","description":"Clear","required":false}]}"#
-        let confirmation = try JSONDecoder().decode(StmObject.PrintConfirmation.self, from: Data(json.utf8))
+        let confirmation = try JSONDecoder().decode(Project.PrintConfirmation.self, from: Data(json.utf8))
         let text = try XCTUnwrap(MirroredConfirmation.fieldsJSON(confirmation.fields))
         XCTAssertEqual(text, #"[{"name":"confirm","required":true,"title":"Print it"},{"description":"Clear","name":"note","required":false,"title":"Plate"}]"#)
         // The phone's `confirm` command built from it reaches the one control method that answers it.
         let answer = PhoneCommand(id: "c", type: "confirm", projectId: "p",
                                   payload: ["confirmationId": .string(confirmation.id), "answer": .object(["action": .string("accept"), "content": .object(["confirm": .bool(true)])])])
         XCTAssertEqual(answer.call()?.params["confirmationId"], .string("q1"))
+    }
+
+    // MARK: Replays after a restart
+
+    private func project(_ state: String, printId: String?, monitor: String?) throws -> Project {
+        var print: [String: Any] = ["bundleId": "b"]
+        if let printId { print["printId"] = printId }
+        if let monitor { print["monitor"] = ["phase": monitor] }
+        let json: [String: Any] = ["id": "p1", "createdAtMs": 1, "updatedAtMs": 1, "state": state, "photos": [], "passes": [],
+                                   "directory": "/tmp/p1", "print": print]
+        return try JSONDecoder().decode(Project.self, from: JSONSerialization.data(withJSONObject: json))
+    }
+
+    func testAReplayedStartNeverStartsAnActivityForAPrintThatEnded() throws {
+        let start = event("print.started", notify: "passive", printId: "print-1")
+        XCTAssertTrue(LiveActivityStart.stillRunning(start, project: try project("printing", printId: "print-1", monitor: "watching")))
+        XCTAssertFalse(LiveActivityStart.stillRunning(start, project: try project("printed", printId: "print-1", monitor: "ended")),
+                       "it finished while the Mac app was closed")
+        XCTAssertFalse(LiveActivityStart.stillRunning(start, project: try project("printing", printId: "print-2", monitor: "watching")),
+                       "a newer print replaced it")
+        XCTAssertFalse(LiveActivityStart.stillRunning(start, project: try project("printing", printId: "print-1", monitor: "ended")))
+        XCTAssertFalse(LiveActivityStart.stillRunning(start, project: nil))
+    }
+
+    // MARK: The mirror clears what is gone
+
+    func testAClearedFieldIsSentAsAChange() {
+        // Each upsert builds a new record and saves it with `.changedKeys`: a key set to nil must count as changed, or an
+        // answered question would stay on the phone.
+        let record = CKRecord(recordType: "CounterpartProject", recordID: CKRecord.ID(recordName: "p1", zoneID: CKRecordZone.ID(zoneName: "Counterpart")))
+        record["title"] = "Mic mount"
+        record["openAsk"] = nil as String?
+        record["confirmationId"] = nil as String?
+        XCTAssertEqual(Set(record.changedKeys()), ["title", "openAsk", "confirmationId"])
     }
 }

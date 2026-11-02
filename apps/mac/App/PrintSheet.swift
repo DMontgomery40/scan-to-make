@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import CounterpartKit
 #if canImport(ControlKit)
 import ControlKit
 #endif
@@ -10,7 +11,7 @@ import ControlKit
 
 struct PrintSheet: View {
     /// The project as it was when the sheet opened; `object` reads the current one, so a printer change shows at once.
-    let opened: StmObject
+    let opened: Project
     @ObservedObject var model: ObjectsModel
     @Environment(\.dismiss) private var dismiss
     @State private var filaments: [PrinterFilament] = []
@@ -24,7 +25,7 @@ struct PrintSheet: View {
     @State private var estimateState = Loading.idle
     enum Loading: Equatable { case idle, loading, done, failed(String) }
 
-    private var object: StmObject { model.objects.first { $0.id == opened.id } ?? opened }
+    private var object: Project { model.objects.first { $0.id == opened.id } ?? opened }
     private var printer: PrinterDestination? { model.printer(for: object) }
     private var settingsServed: Bool { model.capabilities?.printSettings == true }
     private var words: ObjectWords { object.words }

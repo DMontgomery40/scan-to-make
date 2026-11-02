@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import CounterpartKit
 #if canImport(ControlKit)
 import ControlKit
 #endif
@@ -7,7 +8,7 @@ import ControlKit
 /// The inspector (PRD §7.2): Request (what you asked for, your photos, what changed), Activity (each pass,
 /// its stages and tool lines) and Print (printer, settings, colours and the last print's events).
 struct InspectorView: View {
-    let object: StmObject
+    let object: Project
     @ObservedObject var model: ObjectsModel
     let print: () -> Void
     @State private var tab = Tab.initial
@@ -47,7 +48,7 @@ struct InspectorView: View {
 // MARK: Request
 
 private struct RequestTab: View {
-    let object: StmObject
+    let object: Project
     @ObservedObject var model: ObjectsModel
     @State private var shown: URL?
 
@@ -66,10 +67,10 @@ private struct RequestTab: View {
                 }
             }
             if let current = object.current {
-                if !current.changes.isEmpty || current.summary?.isEmpty == false { SectionHeading("What changed") }
-                if !current.changes.isEmpty {
+                if !(current.changes ?? []).isEmpty || current.summary?.isEmpty == false { SectionHeading("What changed") }
+                if !(current.changes ?? []).isEmpty {
                     VStack(alignment: .leading, spacing: 8) {
-                        ForEach(Array(current.changes.enumerated()), id: \.offset) { _, change in ChangeLine(change: change) }
+                        ForEach(Array((current.changes ?? []).enumerated()), id: \.offset) { _, change in ChangeLine(change: change) }
                     }
                     .font(.callout)
                 } else if let summary = current.summary, !summary.isEmpty {
@@ -104,7 +105,7 @@ private struct RequestTab: View {
 
 /// One line of "what changed", with its tag as a symbol and (for guesses) a colour.
 private struct ChangeLine: View {
-    let change: StmObject.Current.Change
+    let change: Project.Change
     var body: some View {
         switch change.tag {
         case "added": Label(change.text, systemImage: "plus.circle.fill")
@@ -123,7 +124,7 @@ enum ToolLine {
         formatter.dateFormat = "HH:mm:ss"
         return formatter
     }()
-    static func format(_ entry: StmObject.Activity) -> String {
+    static func format(_ entry: Project.Activity) -> String {
         let time = clock.string(from: Date(timeIntervalSince1970: entry.atMs / 1000))
         return "\(time)  \(entry.text)"
     }
@@ -132,7 +133,7 @@ enum ToolLine {
 // MARK: Activity
 
 private struct ActivityTab: View {
-    let object: StmObject
+    let object: Project
     @ObservedObject var model: ObjectsModel
 
     var body: some View {
@@ -165,7 +166,7 @@ private struct ActivityTab: View {
         }
     }
 
-    static func trigger(_ pass: StmObject.Pass, first: Bool) -> String {
+    static func trigger(_ pass: Project.Pass, first: Bool) -> String {
         switch pass.trigger {
         case "changes": return "Ask for changes"
         case "late-photos": return "New photos"
@@ -175,12 +176,12 @@ private struct ActivityTab: View {
         }
     }
     static func clock(_ ms: Double) -> String { Date(timeIntervalSince1970: ms / 1000).formatted(date: .omitted, time: .shortened) }
-    static func span(_ pass: StmObject.Pass) -> String {
+    static func span(_ pass: Project.Pass) -> String {
         guard let ended = pass.endedAtMs else { return "since \(clock(pass.startedAtMs))" }
         let minutes = max(1, Int(((ended - pass.startedAtMs) / 60_000).rounded()))
         return "\(clock(ended)) · \(minutes) min"
     }
-    static func outcome(_ pass: StmObject.Pass) -> String {
+    static func outcome(_ pass: Project.Pass) -> String {
         switch pass.status {
         case "done"?, "ready"?: return "Finished"
         case "needs-closeup"?: return "Asked for a close-up"
@@ -230,13 +231,13 @@ private struct StageRow: View {
 
 /// A pass's tool lines in a dark block: the last few at once, every one when opened.
 private struct PassToolLines: View {
-    let object: StmObject
+    let object: Project
     let model: ObjectsModel
     let index: Int
     let count: Int
-    let preview: [StmObject.Activity]
+    let preview: [Project.Activity]
     let open: Bool
-    @State private var all: [StmObject.Activity]?
+    @State private var all: [Project.Activity]?
     @State private var failed = false
 
     var body: some View {
@@ -268,7 +269,7 @@ private struct PassToolLines: View {
 // MARK: Print
 
 private struct PrintTab: View {
-    let object: StmObject
+    let object: Project
     @ObservedObject var model: ObjectsModel
     let print: () -> Void
 
