@@ -91,36 +91,60 @@ Status lives in [`asks.md`](asks.md). These are the technical details behind row
 
 ### The phone camera (row 8)
 
-- Symptom: black viewfinder; stills came out solid green, then black. Restarting the phone clears it.
-- The first camera bug (fixed in `8a5b1c1`, #231) was hand-set frame durations on the LiDAR device.
-  That set the LiDAR sync pulse ("MSG") to 0/1 and wedged the camera system until reboot. It came
-  back after that fix; #246 then turned Scan in hand off and ended capture when the app leaves the
-  screen.
-- To diagnose, capture a syslog after a reboot with
-  `~/Library/Python/3.12/bin/pymobiledevice3 syslog live`, reproduce, and look for:
-  - our `captureSession_StartRunning` / `StopRunning`;
-  - `SetExternalSyncFrameRateRational`;
-  - `Cannot change the external pulse rate`;
-  - `-12684`;
-  - `-12681` after our last stop. Face ID errors (`-12681`) *while our session runs* are normal.
-- Check script: `apps/mobile/ios/scripts/check-lidar-sync.py`.
-- Acceptance on Davica3: reboot, open and close the scanner, then the Camera app and Face ID work.
-- **UI tests and the camera** (`docs/status/camera-incident-2026-11-02.md`): XCTest's screen recording makes
-  the phone blacken every camera frame (`The continuity display is connected. Will start blackening
-  frames.`). Turn it off (`DisableDiagnosticScreenRecordings`) for any UI test run on the phone, and grep the
-  device log for `blackening` before trusting any frame.
+State at 2026-11-02 04:35 MT: **the camera works with Counterpart installed and running.** Facts are in
+[`camera-incident-2026-11-02.md`](camera-incident-2026-11-02.md); this is what to do next.
+
+- **Symptoms David saw:** a black viewfinder, then stills that came out flat green (R=0, G≈93, B≈9:
+  zero-filled frames, with auto-exposure running at 1/40 s ISO 1000), then black stills with no
+  exposure data at all (exposure 0, ISO 0). Every lens was affected, and it survived reboots.
+- **Cause 1, found and removed:** Xcode's DeviceHub (`/Applications/Xcode.app/Contents/Applications/DeviceHub.app`,
+  the Devices window's live device view) held an AVConference link to Davica3 from at least Nov 1 20:36 and
+  reconnected after every reboot. While it's connected iOS blackens every camera frame
+  (`setBlackenFramesForContinuityDisplayConnected`). Quit at 04:19 with David's approval; the next photo
+  (IMG_2133) was real. **Don't open Xcode's Devices window while the phone is plugged in.**
+- **Cause 2, the same mechanism:** XCTest's automatic screen recording. For UI tests on the phone, set
+  `PreferredScreenCaptureFormat = screenshots` and `SystemAttachmentLifetime`/`UserAttachmentLifetime =
+  keepNever` on each target in the `.xctestrun` (format 1: top-level target keys), and pass
+  `-collect-test-diagnostics never`. Grep the device log for `blackening` before trusting any frame.
+- **Not explained:** the green photos (Nov 2, 02:08–02:11; no camera-daemon logs survive for that window),
+  and David's report that the problem started about two weeks ago. Xcode's Devices window and iPhone Mirroring
+  were first used heavily on Oct 14 (knowledgeC), but the unified log only goes back to Nov 1 20:49.
+- **Matching public report:** Apple Community thread 256189919, iPhone 17 Pro Max on iOS 26.1+, with a blank
+  camera on front and back, fixed by a restart, recurring every few days. Reported fixes are toggling
+  Settings → Camera → "Lock Screen Swipe to Open Camera" plus a restart; Apple Diagnostics found sensor faults
+  for some; one person did a restore as a new phone. iOS 27.2 also tightened CoreMedia camera access
+  (CVE-2026-86990); no side effects have been reported.
+- **Acceptance that passed** (04:29–04:32, Debug build-for-testing of main `ae2da73` plus the test
+  `apps/mobile/ios/ScanToMakeUITests/DeviceCameraAcceptanceUITests.swift`, run by
+  `~/scan-to-make-work/kan217/lead-run-all.sh`). After each step the test takes a Camera photo, pulls it over
+  AFC, and checks it with `photostat.swift`:
+  - step 0, app idle: IMG_2135, 1/40 s, mean RGB 164/133/105;
+  - step 1, walk-around 15 s then Stop: IMG_2136, real image;
+  - step 2, walk-around then Home and kill: real image.
+
+  Object Capture went from running to ready. "No depth map" appears only in the first ~5 s, until the LiDAR's
+  first frame.
+- **In progress (KAN-217):** handle camera interruptions in every capture path. Restart once, then show
+  "Camera unavailable", never a black view. Use `isMultitaskingCameraAccessEnabled` with the Multitasking
+  Camera Access capability where our own `AVCaptureSession` allows it.
+- **Seeing the phone without asking David:** `xcrun devicectl device capture screenshot`, the iPhone
+  Mirroring window (which can be captured while a session is connected), photos over
+  `pymobiledevice3 afc`, and the live log with `pymobiledevice3 syslog live`.
+- The old LiDAR sync-pulse bug (fixed in `8a5b1c1`, #231) and its log markers (`SetExternalSyncFrameRateRational`,
+  `-12684`) still apply when hand-setting device formats. Face ID logs MSG 0/1 and `targetFNumber` asserts on
+  healthy boots too, so neither is a diagnosis by itself.
 
 ### Scanning (row 7)
 
-- Walk-around uses Apple's `ObjectCaptureSession`. Whether it reaches a finished model end to end
-  is unverified.
-- In-hand has never produced a model. It uses a hand-rolled `AVCaptureSession` RGB+LiDAR recorder
-  (`HandheldCapture.swift`, `HandheldDepthRecorder.swift`) and a custom Mac pipeline
-  (`tools/mac-reconstruct samples`, Vision hand masks in `HandheldKit/ObjectMasker.swift`).
-- **Order:** prove a walk-around scan becomes a model on his Mac first, then move in-hand onto
-  Apple's `PhotogrammetrySession` with `isObjectMaskingEnabled` (Codex's opinion is in `asks.md`).
-- His failed in-hand project `485defc7` vanished from disk: not in the Trash, the events log or
-  backups. Unresolved.
+- **Walk-around** is Apple's `ObjectCaptureSession` with the GuidedCapture sample's view. On Davica3 it reaches
+  "ready" with LiDAR depth. The flip pass (`beginNewScanPassAfterFlip()`) is already in the sample flow.
+  Upload → companion → model on the Mac is being proven with David's real capture from the phone backup
+  (`~/scan-to-make-work/davica3-counterpart-backup-20261102-0401/Documents/NativeCaptures/`).
+- **In-hand is off** (`HandheldCapture.offered = false`). A stills test with `PhotogrammetrySession` failed:
+  Apple's masking kept the hand; a Vision person mask removed the held object along with the hand.
+  Don't rebuild custom segmentation; use the flip pass instead.
+- Project `485defc7` is an in-hand capture that stayed on the phone. It's in the backup above, under
+  `HandheldCaptures/`. It was never deleted.
 
 ## Infrastructure
 
