@@ -44,6 +44,44 @@ public final class PairingClient: @unchecked Sendable {
         catch is CancellationError { throw PairingError(.cancelled) }
     }
 
+    /// Enrols using a record read from the owner's private iCloud, with the same key pin and installation
+    /// identity as QR pairing. Automatic discovery never replaces a working pairing.
+    public func enrol(_ mac: CloudMac, deviceName: String) async throws -> PairingStatus {
+        do { return try await gate.run { try await self.enrolNow(mac, deviceName: deviceName) } }
+        catch is CancellationError { throw PairingError(.cancelled) }
+    }
+
+    private func enrolNow(_ mac: CloudMac, deviceName: String) async throws -> PairingStatus {
+        let started = currentGeneration
+        guard mac.isCurrent(now: now()) else { throw PairingError(.expiredInvitation) }
+        guard isPlainText(deviceName, max: 80) else { throw PairingError(.invalidDeviceName) }
+        guard try store.status(now: now()).state != .paired else { throw PairingError(.busy) }
+        let installation = try store.installationKey()
+        var failure: String?
+        for (index, address) in mac.addresses.enumerated() {
+            try Task.checkCancellation()
+            guard mac.isCurrent(now: now()) else { throw PairingError(.expiredInvitation) }
+            let pending = PairingRecord(fields: ["addresses": .array(mac.addresses.map(JSONValue.string)),
+                                                "publicKeySha256": .string(mac.publicKeySha256), "baseUrl": .string(address)])
+            guard let base = pending.requestBaseURL else { throw PairingError(.invalidInvitation) }
+            var request = URLRequest(url: base.appending(path: "v1/pair/icloud"), timeoutInterval: 10)
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = JSONValue.data(["macId": .string(mac.id), "enrolmentToken": .string(mac.enrolmentToken),
+                                              "installId": .string(installation), "deviceName": .string(deviceName)])
+            do {
+                let reply = try await transport.send(request, trust: .pending(pending), limit: Self.maxReply, resourceTimeout: 15)
+                return try acceptPairing(reply, pending: pending, since: started)
+            } catch let error as TransportError {
+                let code = error.code == "too-large" ? "invalid-response" : error.code
+                if failure == nil || ["network", "timeout"].contains(code) { failure = code }
+                if index < mac.addresses.count - 1 && CompanionAddress.tryNext(after: code) { continue }
+                throw Self.error(failure ?? code)
+            }
+        }
+        throw Self.error(failure ?? "network")
+    }
+
     /// Forgets the paired Mac at once. A call still answering never brings the pairing back.
     public func forget() throws {
         lock.lock(); defer { lock.unlock() }
@@ -117,6 +155,10 @@ public final class PairingClient: @unchecked Sendable {
             request.setValue(device, forHTTPHeaderField: "X-Scan-Device")
         }
         let reply = try await transport.send(request, trust: .pending(pending), limit: Self.maxReply, resourceTimeout: 15)
+        return try acceptPairing(reply, pending: pending, since: started)
+    }
+
+    private func acceptPairing(_ reply: HTTPReply, pending: PairingRecord, since started: Int) throws -> PairingStatus {
         try Self.check(reply.status)
         guard var fields = JSONValue.object(from: reply.body) else { throw PairingError(.invalidResponse) }
         // The address, pin and address list come from the invitation, never the response.

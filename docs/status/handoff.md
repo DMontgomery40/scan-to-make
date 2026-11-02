@@ -1,5 +1,20 @@
 # Handoff: how to pick up Counterpart work
 
+## Mobile cloud consumer audit — 2026-11-02
+
+The phone now discovers `CounterpartMac` records on the same Apple Account and enrolls through the pinned `/v1/pair/icloud` contract. One Mac connects automatically; multiple Macs require a choice; code pairing remains available without opening the camera during discovery. The companion enrollment backend is a separate integration dependency (reviewed original `ba08c9b2`).
+
+Added CloudKit alert subscriptions, launch/tap routing, and a notification service extension that fetches event text and camera-frame assets. This is code/build coverage, **not observed delivery**. The device and extension still need valid CloudKit provisioning; `CounterpartEvent.type` must be Queryable in the development schema. Production schema deployment remains separate. Unsigned simulator/fixture runs do not access CloudKit.
+
+CloudKit query alerts are shared across a user's devices. An existing false phone preference pauses shared alerts; unknown preferences never create subscriptions. Temporary Mac unreachability leaves established subscriptions unchanged. Saved preferences are preserved, and unsupported individual phone toggles are disabled with an explanation. Correct extension suppression requires Apple's restricted `com.apple.developer.usernotifications.filtering` approval, or a different delivery path. The system notification switch and Mac milestone frequency remain usable. Background command actions, offline mirrored-project screens, and per-device filtering are not complete.
+
+Validation: CounterpartKit 101 tests passed (enrollment pin, expiry, stable identity, fallback, no working-pair replacement; subscription category coverage and opt-out safety). Unsigned generic device and simulator app/notification-extension builds succeeded. These checks do not prove actual iCloud enrollment, alert delivery to phone/Watch, or model scan quality.
+
+Live Activity code was absent, rather than merely waiting on deployment. The relay Worker is not present in the configured Cloudflare account, and no local APNs `.p8` was found in the bounded home search. No credentials were printed or changed. Apple's current ActivityKit docs support local updates during available background runtime; APNs remains necessary for independent remote delivery.
+
+Sources: [CloudKit query subscriptions](https://developer.apple.com/documentation/cloudkit/ckquerysubscription), [notification filtering entitlement](https://developer.apple.com/documentation/bundleresources/entitlements/com.apple.developer.usernotifications.filtering), [ActivityKit updates](https://developer.apple.com/documentation/activitykit/activity/update(_:)).
+
+
 Read this first if you're a new agent session on scan-to-make. It used to live in a session's
 `/private/tmp` scratchpad, where nobody could find it. **Handoffs go here now, not in temp folders
 or agent memory.** Update this file when you hand off.

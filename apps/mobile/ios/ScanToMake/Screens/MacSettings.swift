@@ -86,6 +86,7 @@ import CounterpartKit
 
 /// Settings → Notifications: this iPhone's switches and the Mac's, and the progress updates (PRD §9.1).
 struct MacNotificationSettings: View {
+    @Environment(AppModel.self) private var app
     let model: MacSettingsModel
 
     var body: some View {
@@ -97,9 +98,11 @@ struct MacNotificationSettings: View {
                     ForEach(SettingsSchema.notificationTypes) { type in
                         toggle(type.label, settings.phoneNotifies(type.id, deviceId: deviceId)) { on in
                             SettingsPatch.phoneNotification(type.id, on, deviceId: deviceId)
-                        }
+                        }.disabled(true)
                     }
-                } header: { Text("On this iPhone") }
+                } header: { Text("Saved iPhone preferences") } footer: {
+                    Text(app.cloud.alertsMessage + " Your saved choices are kept. Use iOS Settings to control all alerts.")
+                }
                 Section {
                     ForEach(SettingsSchema.notificationTypes) { type in
                         toggle(type.label, settings.macNotifies(type.id)) { on in SettingsPatch.macNotification(type.id, on) }

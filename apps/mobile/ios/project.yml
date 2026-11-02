@@ -41,6 +41,7 @@ targets:
     dependencies:
       - package: CounterpartKit
       - target: GuidedObjectCapture
+      - target: CounterpartNotificationService
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.scantomake
@@ -48,9 +49,26 @@ targets:
         INFOPLIST_FILE: ScanToMake/Info.plist
         TARGETED_DEVICE_FAMILY: "1,2"
         CODE_SIGN_STYLE: Automatic
+        CODE_SIGN_ENTITLEMENTS: ScanToMake/ScanToMake.entitlements
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         SUPPORTS_MACCATALYST: NO
         SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: NO
+  CounterpartNotificationService:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: CounterpartNotificationService
+        excludes: [Info.plist]
+    dependencies:
+      - package: CounterpartKit
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.scantomake.notifications
+        INFOPLIST_FILE: CounterpartNotificationService/Info.plist
+        CODE_SIGN_ENTITLEMENTS: CounterpartNotificationService/CounterpartNotificationService.entitlements
+        CODE_SIGN_STYLE: Automatic
+        APPLICATION_EXTENSION_API_ONLY: YES
+        SKIP_INSTALL: YES
   # The walk-around Object Capture module: Apple's sample, unchanged, plus its entry and exit, in its own
   # module as it always was (the sample's own type names stay out of the app's namespace).
   GuidedObjectCapture:

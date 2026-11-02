@@ -5,6 +5,7 @@ import CounterpartKit
 /// Counterpart for iPhone and iPad: a SwiftUI app, no other runtime (PRD §3).
 @main
 struct CounterpartApp: App {
+    @UIApplicationDelegateAdaptor(MobileNotifications.self) private var notifications
     @State private var app = AppModel()
     @Environment(\.scenePhase) private var scenePhase
 
@@ -14,10 +15,15 @@ struct CounterpartApp: App {
                 .environment(app)
                 .tint(.filament)
                 .onOpenURL { app.open($0) }
-                .task { await app.keepFresh() }
-                .onChange(of: scenePhase) { _, phase in
-                    if phase == .active { Task { await app.keepFresh() } }
+                .task(id: app.pairingKey) {
+                    notifications.attach(app)
+                    await app.keepFresh()
+                    await app.refreshCloud()
                 }
+                .onChange(of: scenePhase) { _, phase in
+                    if phase == .active { Task { await app.keepFresh(); await app.refreshCloud() } }
+                }
+                .onChange(of: app.projects.settingsChanges) { _, _ in Task { await app.refreshCloud() } }
         }
     }
 }
@@ -64,7 +70,7 @@ struct RootView: View {
                 switch step {
                 case .loading: Color(uiColor: .systemBackground).ignoresSafeArea()
                 case .welcome: WelcomeView { withAnimation { welcomed = true } }
-                case .pair: FindYourMacView(mode: .firstRun)
+                case .pair: CloudPairingView()
                 case .notify: NotifyPermissionView { withAnimation { askedNotifications = true } }
                 case .home: ProjectsRoot(store: app.projects, pairingKey: app.pairingKey)
                 }
