@@ -103,10 +103,10 @@ final class ObjectWordsTests: XCTestCase {
         XCTAssertEqual(closeup.subtitle(request: "Copy this plush. Include the bottom."),
                        "Needs you · Needs a close-up of the underside · copy this plush")
         let plate = ready(["state": "printing", "plate": ["item": "a printed part", "photo": true]]).words
-        XCTAssertEqual(plate.status, "Something's on the plate: a printed part")
-        XCTAssertEqual(plate.actions, [.plateClear])
-        XCTAssertEqual(plate.group, .needsYou)
-        XCTAssertEqual(ready(["state": "printing", "plate": ["noCamera": true]]).words.status, "Check the plate is clear")
+        XCTAssertEqual(plate.status, "Getting the print ready")
+        XCTAssertEqual(plate.actions, [])
+        XCTAssertEqual(plate.group, .now)
+        XCTAssertEqual(ready(["state": "printing", "plate": ["noCamera": true]]).words.status, "Getting the print ready")
         let confirm = ready(["state": "printing", "print": ["bundleId": "b", "destination": ["id": "p", "name": "P1S"]],
                              "printConfirmation": ["id": "q", "message": "Check.", "expiresAtMs": 2000, "fields": [], "supported": true]]).words
         XCTAssertEqual(confirm.status, "P1S needs a yes before printing")

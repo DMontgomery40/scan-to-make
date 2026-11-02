@@ -109,7 +109,6 @@ struct ProjectDetail: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .layoutPriority(1)
             if words.actions.contains(.bestGuess) { answer("Best Guess", .bestGuess) }
-            if words.actions.contains(.plateClear) { answer(object.plate?.noCamera == true ? "The Plate Is Clear" : "It’s Actually Clear", .plateClear) }
         }
         .padding(12).frame(maxWidth: .infinity, alignment: .leading)
         .glassEffect(.regular.tint(.orange.opacity(0.15)), in: .rect(cornerRadius: 14))
@@ -282,7 +281,7 @@ struct PrintConfirmationForm: View {
         VStack(alignment: .leading, spacing: 10) {
                 Text(verbatim: question.message).font(.callout).textSelection(.enabled).lineLimit(nil)
                 if let item = object.plate?.item, !item.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    Label("The camera check saw \(item) on the plate. Check and clear it before you say yes.", systemImage: "exclamationmark.triangle.fill")
+                    Label("The printer camera reported \(item) on the plate.", systemImage: "exclamationmark.triangle.fill")
                         .font(.callout).foregroundStyle(.orange).lineLimit(nil)
                 }
                 if let photo = object.platePhotoURL {
