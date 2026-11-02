@@ -1,6 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {mkdtemp, rm} from 'node:fs/promises';
+import {ObjectStore} from '../dist/objects/store.js';
+import {ObjectService} from '../dist/objects/service.js';
+import {runTouchup} from '../dist/touchup/touchup.js';
+import {PrintGate} from '../dist/printing/print-gate.js';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {resolveMcpInstall, shellCommand, forcedCommand, mcpIdFor, installedVersion, findNpm} from '../dist/printing/mcp-install.js';
@@ -525,4 +529,55 @@ test('review fixes, round seven: a previous npm copy that cannot be put back is 
   const words = eventWords('mcp.update.failed', failed.data, {title: 'Counterpart', package: 'bambu-printer-mcp', reason: failed.reason});
   assert.doesNotMatch(words.body, /still in use/);
   assert.match(eventWords('mcp.update.failed', {mcpId: 'x', fromVersion: '1.1.46'}, {title: 'Counterpart', package: 'bambu-printer-mcp'}).body, /1\.1\.46 is still in use/);
+});
+
+
+test('updates wait for admitted design passes, their queue, and helper shutdown on the shared install', {timeout: 10_000}, async t => {
+  const root = await mkdtemp(join(tmpdir(), 'mcp-pass-reservation-'));
+  const gate = new PrintGate(), first = Promise.withResolvers(), second = Promise.withResolvers(), cleanup = Promise.withResolvers();
+  const prefix = `${APP}/printers/bambu`, profile = bambu('/x/node', [`${prefix}/lib/node_modules/bambu-printer-mcp/dist/index.js`]);
+  const f = await updater(t, {gate, profiles: [{id: 'current', config: profile}, {id: 'p1s', config: profile}],
+    files: {[`${prefix}/lib/node_modules/bambu-printer-mcp/package.json`]: pkgJson('1.1.46')}});
+  let runs = 0, stopping = false;
+  const service = new ObjectService({store: new ObjectStore(join(root, 'objects')), handoff: profile, printGate: gate, claudePath: '/c',
+    runTouchup: input => runTouchup(input, {
+      lockPath: join(root, 'blender.lock'), fusionLockPath: join(root, 'fusion.lock'), ensureBlender: async () => {}, resetScene: async () => {}, client: () => ({connect: async () => {}, hasTool: () => false, close: async () => {}}),
+      run: async () => { runs++; await (runs === 1 ? first.promise : second.promise); return {status: 'failed', reason: 'test result', renders: [], checkpoints: [], stats: {seconds: 1, toolCalls: 0}}; },
+      stopBlender: async () => { stopping = true; await cleanup.promise; },
+    }),
+  });
+  const a = await service.create('Make a small hook.'), b = await service.create('Make another hook.');
+  t.after(async () => { first.resolve(); second.resolve(); cleanup.resolve(); await Promise.all([service.settled(a.id), service.settled(b.id)]); await rm(root, {recursive: true, force: true}); });
+  await service.start(a.id); await until(() => runs === 1);
+  await service.start(b.id);
+  assert.equal((await f.updates.update(f.mcpId)).state, 'waiting', 'design pass reserves the same install as its printer');
+  first.resolve(); await until(() => runs === 2);
+  assert.equal(gate.held('current'), true, 'queued pass retains the install when the first finishes');
+  assert.equal(f.commands.some(command => command.includes(' install ')), false);
+  second.resolve(); await until(() => stopping);
+  assert.equal(gate.held('current'), true, 'shutdown still needs the MCP executable');
+  assert.equal(f.commands.some(command => command.includes(' install ')), false);
+  cleanup.resolve(); await service.settled(b.id); await f.done();
+  assert.equal(gate.held('current'), false);
+  assert.equal(f.commands.filter(command => command.includes(' install ')).length, 1);
+});
+
+test('an update reserves the install before its async busy check, so a correction cannot start under it', {timeout: 10_000}, async t => {
+  const root = await mkdtemp(join(tmpdir(), 'mcp-pass-admission-'));
+  t.after(() => rm(root, {recursive: true, force: true}));
+  const gate = new PrintGate(), checking = Promise.withResolvers();
+  const profile = bambu('/opt/homebrew/bin/npx', ['-y', 'bambu-printer-mcp@1.1.40']);
+  const f = await updater(t, {gate, profiles: [{id: 'current', config: profile}, {id: 'p1s', config: profile}], busy: () => checking.promise});
+  let calls = 0;
+  const store = new ObjectStore(join(root, 'objects'));
+  const service = new ObjectService({store, handoff: profile, printGate: gate, claudePath: '/c', runTouchup: async () => { calls++; throw new Error('must not start'); }});
+  const object = await service.create('Make a hook.');
+  await store.update(object.id, o => ({...o, state: 'failed'}));
+  const updating = f.updates.update(f.mcpId);
+  t.after(async () => { checking.resolve(false); await updating; await f.done(); });
+  await until(() => gate.updating('current'));
+  await assert.rejects(service.correct(object.id, 'Make it wider.'), /software is updating/);
+  assert.equal(calls, 0);
+  assert.equal((await service.get(object.id)).state, 'failed', 'no pass was admitted or added');
+  assert.equal((await service.get(object.id)).passes.length, 0);
 });
