@@ -51,6 +51,7 @@ struct PrintConfirmSheet: View {
                     .frame(maxWidth: 640)
                     .frame(maxWidth: .infinity)
                 }
+                .scrollEdgeEffectStyle(.soft, for: .bottom)
                 .safeAreaBar(edge: .bottom) {
                     VStack(spacing: 8) {
                         Button { answer(.accept) } label: {
@@ -178,7 +179,7 @@ struct AnswerOnMacSheet: View {
                     if store.macCapabilities.contains("genericConfirmations") {
                         Text("Answer it on \(store.macName ?? "your Mac").").fontWeight(.semibold)
                     } else {
-                        Text("Counterpart can't answer this kind on your Mac yet either, so the way on is to stop this print.")
+                        Text("Counterpart can't answer this kind on your Mac yet either, so the only way forward is to stop this print.")
                             .foregroundStyle(.secondary)
                     }
                 }

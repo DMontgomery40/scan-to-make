@@ -178,6 +178,15 @@ public final class PairingStore: @unchecked Sendable {
         return name
     }
 
+    /// The phone's own name ("David's iPhone"), or nil when iOS reports only the generic "iPhone" (the app
+    /// lacks the user-assigned device name entitlement). Never the hashed fallback: the Mac then uses the model.
+    public func userAssignedName() -> String? {
+        if let chosen = defaults.string(forKey: Self.deviceNameKey), isPlainText(chosen, max: 80) { return chosen }
+        let name = systemName()
+        guard isPlainText(name, max: 70), !["iPhone", "iPad", "iPod touch"].contains(name) else { return nil }
+        return name
+    }
+
     public func setDeviceName(_ name: String) throws -> String {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard isPlainText(trimmed, max: 80) else { throw PairingError(.invalidDeviceName) }

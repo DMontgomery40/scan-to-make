@@ -121,18 +121,32 @@ enum Fixtures {
             ["id": "current", "name": "P1S", "backend": "bambu-printer-mcp", "model": "Bambu Lab P1S", "source": "current", "state": "ready",
              "capabilities": ["progress": true, "layers": true, "camera": "bambu-tcp", "filaments": "ams", "pause": true, "resume": true, "cancel": true,
                               "quality": true, "strength": true, "multiColour": false, "missing": [],
-                              "server": ["name": "bambu-printer-mcp", "version": "1.1.46"]]],
+                              "server": ["name": "bambu-printer-mcp", "version": "1.1.48"]]],
             ["id": "mcp-garage", "name": "Garage MK4", "backend": "mcp-3d-printer-server", "model": "Prusa MK4S", "source": "mcp-profile", "origin": "claude-code", "state": "ready",
              "capabilities": ["progress": true, "layers": false, "camera": "none", "filaments": "single", "pause": true, "resume": true, "cancel": true,
                               "quality": true, "strength": true, "multiColour": false, "missing": [],
-                              "server": ["name": "mcp-3d-printer-server", "version": "1.2.17"]]],
-            ["id": "mcp-ender", "name": "Ender", "backend": "mcp-3d-printer-server", "model": "Creality Ender-3 V3", "source": "mcp-profile", "origin": "claude-desktop", "state": "ready",
+                              "server": ["name": "mcp-3d-printer-server", "version": "1.2.22"]]],
+            ["id": "mcp-ender", "mcpId": "mcp-3d", "name": "Ender", "backend": "mcp-3d-printer-server", "model": "Creality Ender-3 V3", "source": "mcp-profile", "origin": "claude-desktop", "state": "ready",
              "capabilities": ["progress": false, "layers": false, "camera": "none", "filaments": "none", "pause": false, "resume": false, "cancel": true,
                               "quality": false, "strength": false, "multiColour": false, "missing": ["progress", "camera", "pause"],
                               "update": ["message": "Update mcp-3D-printer-server to see progress and camera.", "package": "mcp-3d-printer-server",
-                                         "command": ["npm", "install", "-g", "mcp-3d-printer-server@latest"]],
+                                         "command": ["npm", "install", "-g", "mcp-3d-printer-server@latest"], "latestVersion": "1.2.22"],
                               "server": ["name": "mcp-3d-printer-server", "version": "1.2.9"]]],
         ],
+    ]
+
+    /// Every Mac setting, as KAN-214's settings.md shows them.
+    static let settings: [String: Any] = [
+        "milestones": "50",
+        "notifications": ["mac": ["pass.ready": true, "print.milestone": false], "devices": ["0b6f0f43-7c35-4b8a-9a3c-8f0b4c4b2a99": ["print.started": false]]],
+        "general": ["openAtLogin": true, "showInDock": true, "keepAwake": true],
+        "ai": ["revision": "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1aa1", "choice": ["kind": "claude-code"], "check": ["state": "connected"]],
+        "fusion": ["state": "not-set-up", "message": "Not set up. Set Up installs the Fusion add-in."],
+    ]
+    static let devices: [[String: Any]] = [
+        ["deviceId": "0b6f0f43-7c35-4b8a-9a3c-8f0b4c4b2a99", "deviceName": "David's iPhone", "current": true, "model": "iPhone18,2"],
+        ["deviceId": "1b6f0f43-7c35-4b8a-9a3c-8f0b4c4b2a98", "deviceName": "David's iPad", "model": "iPad16,3", "lastSeenAt": "2026-10-31T09:00:00Z"],
+        ["deviceId": "2b6f0f43-7c35-4b8a-9a3c-8f0b4c4b2a97", "deviceName": "iPhone", "legacy": true],
     ]
 
     /// What each printer reports: the P1S's AMS, the MK4's one spool, nothing from the Ender.
@@ -174,7 +188,7 @@ struct FixtureTransport: HTTPTransport {
         let objects = Fixtures.objects()
         func object(_ id: String) -> [String: Any]? { objects.first { $0["id"] as? String == id } }
         let parts = path.split(separator: "/").map(String.init)
-        if path == "/healthz" { return json(["status": "ok", "protocolVersion": "0.1.0", "capabilities": ["genericConfirmations": Fixtures.macAnswers]]) }
+        if path == "/healthz" { return json(["status": "ok", "protocolVersion": "0.1.0", "capabilities": ["genericConfirmations": Fixtures.macAnswers, "mcpUpdates": true]]) }
         if path == "/v1/objects/printers" { return json(Fixtures.catalog) }
         if path.hasPrefix("/v1/objects/printers/"), path.hasSuffix("/camera.jpg") {
             guard path.contains("/current/") else { return json(["error": ["code": "not-found", "message": "This printer has no camera"]], 404) }
@@ -182,7 +196,11 @@ struct FixtureTransport: HTTPTransport {
             reply.headers["X-Captured-At"] = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-3))
             return reply
         }
-        if path == "/v1/settings" { return json(["settings": ["milestones": "50"]]) }
+        if path == "/v1/settings" { return json(["settings": Fixtures.settings]) }
+        if path == "/v1/devices" && method == "GET" { return json(["devices": Fixtures.devices]) }
+        if path.hasPrefix("/v1/devices/") && method == "DELETE" { return json(["removed": true]) }
+        if path.hasPrefix("/v1/settings/") && method == "POST" { return json(["check": ["state": "checking"]]) }
+        if path.hasPrefix("/v1/printers/mcp/") && method == "POST" { return json(["update": ["mcpId": "mcp-3d", "state": "waiting", "fromVersion": "1.2.9", "toVersion": "1.2.22"]]) }
         if path == "/v1/events" { return json(["error": ["code": "not-found", "message": "Not found"]], 404) }
         if path == "/v1/objects" && method == "GET" { return json(["objects": objects]) }
         if parts.count >= 3, parts[0] == "v1", parts[1] == "objects" {

@@ -31,14 +31,20 @@ struct PrintingView: View {
                     tiles(project).padding(.horizontal, 16)
                     if let problems = live?.problems, !problems.isEmpty { problemsCard(problems).padding(.horizontal, 16) }
                     if let problem { Label(problem, systemImage: "exclamationmark.triangle.fill").font(.subheadline).foregroundStyle(.red).padding(.horizontal, 20) }
-                    Text(footer(project)).font(.footnote).foregroundStyle(.secondary).padding(.horizontal, 20)
                 }
                 .padding(.bottom, 16)
             }
         }
+        .scrollEdgeEffectStyle(.soft, for: .bottom)
+        // The note rides in the bar with the controls, so nothing it says is ever under them.
+        .safeAreaBar(edge: .bottom) {
+            VStack(spacing: 8) {
+                if let project { Text(footer(project)).font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center).padding(.horizontal, 20) }
+                controls
+            }
+        }
         .background(Color.black)
         .navigationBarTitleDisplayMode(.inline)
-        .safeAreaBar(edge: .bottom) { controls }
         .confirmationDialog("Stop the print?", isPresented: $confirmStop, titleVisibility: .visible) {
             Button("Stop Print", role: .destructive) { act(.cancel) }
         } message: { Text("\(printerName) stops \(project.map { ProjectWords.title($0) } ?? "the print") and can't pick it up again.") }

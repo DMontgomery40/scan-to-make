@@ -38,6 +38,8 @@ public final class CompanionClient: @unchecked Sendable {
     public let cache: URL
     /// `X-Scan-Device-Model`: the hardware identifier ("iPhone18,2"), shown in the Mac's device list.
     public let deviceModel: String?
+    /// `X-Scan-Device-Name`: the phone's own name, percent-encoded UTF-8; absent when iOS gives only "iPhone".
+    public let deviceName: String?
 
     public static let jsonLimit = 4 * 1024 * 1024
     public static let scanLimit = 64 * 1024 * 1024
@@ -45,10 +47,19 @@ public final class CompanionClient: @unchecked Sendable {
     public static let depthLimit = 8 * 1024 * 1024
     static let uuid = "[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}"
 
-    public init(pairing: PairingClient, transport: HTTPTransport = PinnedTransport(), deviceModel: String? = DeviceModel.identifier,
+    public init(pairing: PairingClient, transport: HTTPTransport = PinnedTransport(), deviceModel: String? = DeviceModel.identifier, deviceName: String? = nil,
                 cache: URL = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appending(path: "Objects", directoryHint: .isDirectory)) {
         self.pairing = pairing; self.transport = transport; self.cache = cache
         self.deviceModel = deviceModel.flatMap { Pattern("[A-Za-z0-9,._ -]{1,64}").matches($0) ? $0 : nil }
+        // Percent-encoded as JavaScript's encodeURIComponent does, so "David’s iPhone" survives the header.
+        self.deviceName = deviceName.flatMap { $0.count <= 80 ? Self.encodeURIComponent($0) : nil }
+    }
+
+    /// `encodeURIComponent`: everything but ASCII letters, digits and `-_.!~*'()` is percent-encoded (UTF-8).
+    static func encodeURIComponent(_ text: String) -> String? {
+        var allowed = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
+        allowed.insert(charactersIn: "-_.!~*'()")
+        return text.addingPercentEncoding(withAllowedCharacters: allowed)
     }
 
     // MARK: Routes and scopes
@@ -61,7 +72,7 @@ public final class CompanionClient: @unchecked Sendable {
         case "GET":
             if is_("/v1/objects(?:/printers)?") || is_(one) || is_(one + "/passes/(0|[1-9][0-9]{0,15})/activity") { return "projects:read" }
             if is_("/healthz") { return "generation:health" }
-            if is_("/v1/events") || is_("/v1/settings") { return "projects:read" }
+            if is_("/v1/events") || is_("/v1/settings") || is_("/v1/devices") { return "projects:read" }
             if is_(one + "/(model\\.stl|renders/[^/]+|photos/[^/]+|capture/[^/]+|asks/[^/]+|prints/[^/]+/frames/[^/]+)") { return "projects:read" }
             if is_(one + "/(filaments|plate\\.jpg|camera\\.jpg)") || is_("/v1/objects/printers/[^/]+/camera\\.jpg") { return "printer-handoff:use" }
         case "PATCH":
@@ -69,12 +80,15 @@ public final class CompanionClient: @unchecked Sendable {
             if is_("/v1/settings") { return "projects:write" }
         case "DELETE":
             if is_(one) { return "captures:import" }
+            if is_("/v1/devices/[^/]+") { return "projects:write" }
         case "PUT":
             if is_(one + "/scan") { return "captures:import" }
         case "POST":
             if is_("/v1/objects") || is_(one + "/(start|corrections|closeup|photos|capture|capture-depth)") { return "captures:import" }
             if is_(one + "/(print|printer|print-confirmation|estimate|print/pause|print/resume|print/cancel)") { return "printer-handoff:use" }
             if is_("/v1/devices/live-activity-tokens") { return "projects:write" }
+            if is_("/v1/settings/(ai/test|fusion/setup)") { return "projects:write" }
+            if is_("/v1/printers/mcp/[^/]+/update") { return "printer-handoff:use" }
         default: break
         }
         return nil
@@ -104,6 +118,7 @@ public final class CompanionClient: @unchecked Sendable {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
             request.setValue(device, forHTTPHeaderField: "X-Scan-Device")
             if let deviceModel { request.setValue(deviceModel, forHTTPHeaderField: "X-Scan-Device-Model") }
+            if let deviceName { request.setValue(deviceName, forHTTPHeaderField: "X-Scan-Device-Name") }
             if body != nil { request.setValue(contentType, forHTTPHeaderField: "Content-Type") }
             do {
                 let reply = try await transport.send(request, trust: .record(attempt), limit: limit,
@@ -268,12 +283,32 @@ public final class CompanionClient: @unchecked Sendable {
 
     // MARK: Settings and events
 
-    public struct CompanionSettings: Codable, Equatable, Sendable { public var milestones: String }
     private struct SettingsReply: Codable { var settings: CompanionSettings }
-    /// The Mac's print-milestone choice (PR 2): off, 50, 25-50-75 or every-10.
+    /// Every setting the Mac has (docs/protocols/settings.md); an older Mac returns only `milestones`.
     public func settings() async throws -> CompanionSettings { try await request("GET", "/v1/settings", as: SettingsReply.self).settings }
-    public func setMilestones(_ value: String) async throws -> CompanionSettings {
-        try await request("PATCH", "/v1/settings", json: ["milestones": value], as: SettingsReply.self).settings
+    /// Changes only the keys `patch` names (`SettingsPatch`). Something only the Mac can do is refused with
+    /// the sentence to show.
+    public func changeSettings(_ patch: [String: Any]) async throws -> CompanionSettings {
+        try await request("PATCH", "/v1/settings", json: patch, as: SettingsReply.self).settings
+    }
+    public func setMilestones(_ value: String) async throws -> CompanionSettings { try await changeSettings(SettingsPatch.milestones(value)) }
+    /// Tests the AI choice at `revision`; its progress shows in `settings.ai.check`.
+    public func testAI(revision: String) async throws { _ = try await send("POST", "/v1/settings/ai/test", body: try JSONSerialization.data(withJSONObject: ["revision": revision])).checked(path: "/v1/settings/ai/test") }
+    /// Asks the Mac to set up Fusion (it installs an add-in there).
+    public func setUpFusion() async throws { _ = try await send("POST", "/v1/settings/fusion/setup", body: Data("{}".utf8)).checked(path: "/v1/settings/fusion/setup") }
+
+    private struct DevicesReply: Decodable { var devices: [CompanionDevice] }
+    public func devices() async throws -> [CompanionDevice] { try await request("GET", "/v1/devices", as: DevicesReply.self).devices }
+    public func removeDevice(_ deviceId: String) async throws {
+        let id = deviceId.addingPercentEncoding(withAllowedCharacters: .alphanumerics.union(.init(charactersIn: "-"))) ?? deviceId
+        _ = try await send("DELETE", "/v1/devices/\(id)").checked(path: "/v1/devices/\(id)")
+    }
+
+    private struct UpdateReply: Decodable { var update: MCPUpdate }
+    /// Updates a printer MCP on the Mac (PRD §8.10). `fresh` installs a fresh copy when the install couldn't be told.
+    public func updateMCP(_ mcpId: String, fresh: Bool = false) async throws -> MCPUpdate {
+        let id = mcpId.addingPercentEncoding(withAllowedCharacters: .alphanumerics.union(.init(charactersIn: "-_."))) ?? mcpId
+        return try await request("POST", "/v1/printers/mcp/\(id)/update", json: fresh ? ["fresh": true] : [:], as: UpdateReply.self).update
     }
 
     // MARK: Files
@@ -320,3 +355,12 @@ public enum DeviceModel {
         return text.isEmpty ? nil : text
     }()
 }
+
+extension HTTPReply {
+    /// The reply when the Mac accepted the request; its refusal otherwise.
+    func checked(path: String) throws -> HTTPReply {
+        guard (200..<300).contains(status) else { throw CompanionClient.refusal(self, path: path) }
+        return self
+    }
+}
+

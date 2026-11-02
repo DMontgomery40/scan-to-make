@@ -18,6 +18,9 @@ struct PrintSheet: View {
     @State private var quality = PrintQuality.standard
     @State private var strength = PrintStrength.standard
     @State private var slice = EstimateState()
+    @State private var shownPrinter: String?
+    @Environment(\.horizontalSizeClass) private var widthClass
+    private var wide: Bool { widthClass == .regular }
     @State private var checked = false
     @State private var busy: String?
     @State private var problem: String?
@@ -62,6 +65,9 @@ struct PrintSheet: View {
                     .frame(maxWidth: 640)
                     .frame(maxWidth: .infinity)
                 }
+                // The bar belongs to this scroll view: its content insets above it and fades under it.
+                .scrollEdgeEffectStyle(.soft, for: .bottom)
+                .safeAreaBar(edge: .bottom) { printButton }
                 .navigationTitle("Print \(title)")
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
@@ -72,7 +78,7 @@ struct PrintSheet: View {
                     }
                 }
             }
-            .safeAreaBar(edge: .bottom) { printButton }
+
         }
         .presentationDetents([.large])
         .task { await start() }
@@ -82,7 +88,6 @@ struct PrintSheet: View {
     // MARK: Sections
 
     private var printers: some View {
-        ScrollViewReader { row in
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 10) {
                 ForEach(destinations) { destination in
@@ -92,6 +97,8 @@ struct PrintSheet: View {
                     .buttonStyle(.plain)
                     .disabled(busy != nil || destination.isOffline)
                     .accessibilityAddTraits(destination.id == destinationId ? .isSelected : [])
+                    // Two whole cards across a phone (three on a wide screen): none is ever cut off at an edge.
+                    .containerRelativeFrame(.horizontal, count: wide ? 3 : 2, spacing: 10)
                     .id(destination.id)
                 }
                 if destinations.isEmpty {
@@ -100,13 +107,12 @@ struct PrintSheet: View {
             }
             .scrollTargetLayout()
         }
-        // Cards snap whole, inset from both edges, so none is ever cut off.
         .scrollTargetBehavior(.viewAligned)
-        .contentMargins(.horizontal, 20, for: .scrollContent)
+        .contentMargins(.horizontal, 16, for: .scrollContent)
+        .scrollPosition(id: $shownPrinter, anchor: .leading)
         .padding(.horizontal, -20)
-        // The chosen printer is in view, even when it's last in the row.
-        .onChange(of: destinationId, initial: true) { _, id in if !id.isEmpty { withAnimation { row.scrollTo(id, anchor: .center) } } }
-        }
+        // The chosen printer is in view, snapped whole to the leading edge.
+        .onChange(of: destinationId, initial: true) { _, id in if !id.isEmpty { withAnimation { shownPrinter = id } } }
     }
 
     private var plate: some View {
@@ -378,7 +384,7 @@ struct PrinterChoice: View {
                 }
             }
         }
-        .frame(width: 136, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(14)
         .glassEffect(selected ? .regular.tint(Color.filament.opacity(0.35)).interactive() : .regular.interactive(), in: .rect(cornerRadius: 22))
         .overlay { if selected { RoundedRectangle(cornerRadius: 22).strokeBorder(Color.filament, lineWidth: 2) } }

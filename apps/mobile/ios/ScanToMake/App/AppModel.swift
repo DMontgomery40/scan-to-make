@@ -41,7 +41,7 @@ import CounterpartKit
         #endif
         let pairingStore = PairingStore(store: store)
         pairing = PairingClient(store: pairingStore, transport: transport)
-        companion = CompanionClient(pairing: pairing, transport: transport)
+        companion = CompanionClient(pairing: pairing, transport: transport, deviceName: pairing.store.userAssignedName())
         nearby = NearbyPairing(client: pairing, transport: transport)
         projects = ProjectsStore(mac: MacConnection(client: companion), pairing: pairing)
         observer = NotificationCenter.default.addObserver(forName: PairingStore.changed, object: nil, queue: .main) { [weak self] _ in

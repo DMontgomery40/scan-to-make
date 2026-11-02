@@ -181,7 +181,11 @@ final class PrintScreensUITests: XCTestCase {
     func testThePrintingFooterClearsPauseAndStop() {
         let app = launch("printing")
         let footer = app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "a notification when it's done")).firstMatch
-        assertLastControlClearsTheBar(app, last: footer, bar: app.buttons["Pause"], "printing")
+        XCTAssertTrue(footer.waitForExistence(timeout: 20))
+        // At rest, before any scrolling: the note sits above Pause and Stop, never under them.
+        XCTAssertLessThanOrEqual(footer.frame.maxY, app.buttons["Pause"].frame.minY + 1, "the note is under the controls at rest")
+        let speed = app.staticTexts["Speed"]
+        assertLastControlClearsTheBar(app, last: speed, bar: footer, "printing")
     }
 
     func testAPrinterNamesTheUpdateItsMCPNeeds() {
@@ -204,24 +208,47 @@ final class SettingsAndFirstRunUITests: XCTestCase {
 
     func testSettingsShowsTheMacHelpAndAbout() {
         let app = launch("settings")
-        XCTAssertTrue(app.staticTexts["Connected now"].waitForExistence(timeout: 20))
+        let mac = app.descendants(matching: .any)["mac-status"]
+        XCTAssertTrue(mac.waitForExistence(timeout: 20))
+        XCTAssertTrue(mac.label.contains("Connected now"), mac.label)
         XCTAssertTrue(app.buttons["Check Connection"].exists)
         XCTAssertTrue(app.buttons["Connect a Different Mac"].exists)
-        XCTAssertTrue(app.staticTexts["Print the scan rig"].exists)
+        XCTAssertTrue(reach(app, app.staticTexts["Print the scan rig"]))
     }
 
-    func testNotificationsHaveASwitchEachAndTheMilestones() {
+    func testNotificationsForThisIPhoneAndTheMac() {
         let app = launch("notifications")
-        XCTAssertTrue(app.switches["Ready to print"].waitForExistence(timeout: 20))
+        // This iPhone's switches come from the Mac's settings for this device: "Print started" is off there.
+        let started = app.switches["Print started"].firstMatch
+        XCTAssertTrue(started.waitForExistence(timeout: 20))
+        XCTAssertEqual(started.value as? String, "0")
+        XCTAssertTrue(app.switches["Ready to print"].firstMatch.exists)
         XCTAssertFalse(app.switches["Something's on the plate"].exists, "no plate check (ac44431)")
-        XCTAssertTrue(app.buttons["Progress"].exists || app.staticTexts["Progress"].exists)
+    }
+
+    func testEveryMacSettingIsHere() {
+        let app = launch("settings")
+        XCTAssertTrue(app.descendants(matching: .any)["mac-status"].waitForExistence(timeout: 20))
+        XCTAssertTrue(app.buttons.containing(NSPredicate(format: "label CONTAINS %@", "1.2.9 → 1.2.22")).firstMatch.waitForExistence(timeout: 10),
+                      "the printer MCP that's behind offers its update")
+        XCTAssertTrue(reach(app, app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "Set Up installs the Fusion add-in")).firstMatch))
+        XCTAssertTrue(reach(app, app.staticTexts["David's iPad"]))
+        XCTAssertTrue(reach(app, app.switches["Keep the Mac awake while working"]))
+    }
+
+    /// Scrolls down until `element` is on screen.
+    private func reach(_ app: XCUIApplication, _ element: XCUIElement) -> Bool {
+        for _ in 0..<10 {
+            if element.exists && element.isHittable { return true }
+            app.swipeUp()
+        }
+        return element.exists
     }
 
     func testAboutCreditsTheRigAndListsNotices() {
         let app = launch("about")
-        XCTAssertTrue(app.staticTexts["Counterpart"].waitForExistence(timeout: 20))
-        XCTAssertTrue(app.buttons["Open-source notices"].exists)
-        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS 'Kass 3D'")).firstMatch.exists)
+        XCTAssertTrue(app.buttons["Open-source notices"].waitForExistence(timeout: 30))
+        XCTAssertTrue(app.staticTexts["Scan rig"].exists, "Kass 3D's rig is credited")
     }
 
     func testWelcomeShowsTheTwoJobs() {

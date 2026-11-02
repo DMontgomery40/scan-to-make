@@ -24,6 +24,10 @@ import CounterpartKit
     }
     /// The companion's capability flags (`genericConfirmations` means the Mac can answer any printer question).
     var macCapabilities: Set<String> = []
+    /// Bumped by `settings.changed`: Settings reads again.
+    var settingsChanges = 0
+    /// What each printer MCP's update is doing, from `mcp.update.*` events and the Update reply.
+    var mcpUpdates: [String: MCPUpdateProgress] = [:]
     /// What each printer last reported loaded, from a print sheet (the Mac reports spools per project).
     var spools: [String: [PrinterFilament]] = [:]
     /// The Mac serves `/v1/events`; false after it answered "not supported".
@@ -122,7 +126,7 @@ import CounterpartKit
 
     /// Clears everything read from the previous Mac.
     func reset() {
-        projects = []; loaded = false; error = nil; catalog = nil; printerProblem = nil; reachable = nil; events = nil; spools = [:]; macCapabilities = []
+        projects = []; loaded = false; error = nil; catalog = nil; printerProblem = nil; reachable = nil; events = nil; spools = [:]; macCapabilities = []; mcpUpdates = [:]
         sendFailures = [:]
     }
 
@@ -137,8 +141,11 @@ import CounterpartKit
                     case .resync: await load(); await loadPrinters()
                     case .event(let event):
                         if let project = event.projectId { await reload(project) }
-                        // Events about the Mac, not a project (a printer MCP updating): the printers changed.
-                        else if event.type.hasPrefix("mcp.") { await loadPrinters() }
+                        // Events about the Mac, not a project: a printer MCP updating, or a setting changed elsewhere.
+                        else if event.type.hasPrefix("mcp.update.") {
+                            if let id = event.data?.mcpId { mcpUpdates[id] = MCPUpdateProgress(event) }
+                            await loadPrinters()
+                        } else if event.type == "settings.changed" { settingsChanges += 1 }
                     }
                 }
             } catch let failure as CompanionError {
@@ -183,3 +190,34 @@ import CounterpartKit
     var macName: String? { UserDefaults.standard.string(forKey: Self.macNameKey).flatMap { $0.isEmpty ? nil : $0 } }
     nonisolated static let macNameKey = "CounterpartMacName"
 }
+
+/// A printer MCP's update, in words (PRD §8.10).
+struct MCPUpdateProgress: Equatable {
+    /// started, waiting, done, failed, current, unresolved
+    var state: String
+    var fromVersion: String?
+    var toVersion: String?
+    var found: String?
+    var log: String?
+
+    init(_ event: CounterpartEvent) {
+        state = String(event.type.dropFirst("mcp.update.".count))
+        fromVersion = event.data?.fromVersion; toVersion = event.data?.toVersion; log = event.data?.log
+    }
+    init(_ update: MCPUpdate) { state = update.state; fromVersion = update.fromVersion; toVersion = update.toVersion; found = update.found }
+
+    var words: String {
+        let versions = [fromVersion, toVersion].compactMap { $0 }.joined(separator: " → ")
+        switch state {
+        case "started": return "Updating" + (versions.isEmpty ? "…" : " \(versions)…")
+        case "waiting": return "Updates after the current print"
+        case "done": return "Updated" + (toVersion.map { " to \($0)" } ?? "")
+        case "current": return "Already the latest version"
+        case "unresolved": return "Counterpart couldn't tell how this is installed" + (found.map { " (found \($0))" } ?? "") + "."
+        case "failed": return "The update didn't finish."
+        default: return state
+        }
+    }
+    var isRunning: Bool { state == "started" || state == "waiting" }
+}
+
