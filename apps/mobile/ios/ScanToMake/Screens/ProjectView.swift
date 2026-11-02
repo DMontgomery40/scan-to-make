@@ -31,6 +31,7 @@ struct ProjectView: View {
     @State private var scanSize: String?
     @State private var askWorking = false
     @State private var askProblem: String?
+    @State private var askText = ""
     @State private var notice: String?
     /// The printer's own question, shown as a sheet once when it arrives and again from Review.
     @State private var confirming: IdentifiedProject?
@@ -339,10 +340,34 @@ struct ProjectView: View {
                     .font(.footnote).foregroundStyle(.secondary)
             }
             AskButtons(store: store, project: object, working: $askWorking, problem: $askProblem)
+            // The Mac takes a typed answer when it says so (KAN-214 #204, `answers` includes "text").
+            if object.openAsk?.answers.contains("text") == true {
+                HStack(spacing: 8) {
+                    TextField("Or answer in words…", text: $askText, axis: .vertical)
+                        .lineLimit(1...4).padding(10).glassEffect(.regular, in: .rect(cornerRadius: 16))
+                        .accessibilityIdentifier("ask-text")
+                    Button { answerInWords(object) } label: { Image(systemName: "arrow.up").fontWeight(.semibold).frame(width: 36, height: 36) }
+                        .buttonStyle(.glassProminent).buttonBorderShape(.circle)
+                        .disabled(askWorking || askText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        .accessibilityLabel("Send answer")
+                }
+            }
             if let askProblem { Text(askProblem).font(.footnote).foregroundStyle(.red) }
         }
         .padding(16)
         .glassEffect(.regular.tint(.orange.opacity(0.15)), in: .rect(cornerRadius: 24))
+    }
+
+    private func answerInWords(_ object: Project) {
+        let text = askText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, !askWorking else { return }
+        askWorking = true; askProblem = nil
+        Task {
+            defer { askWorking = false }
+            do { store.replace(try await store.mac.client.answerAsk(object.id, text: String(text.prefix(2000)))); askText = "" }
+            catch let failure as CompanionError { askProblem = failure.message }
+            catch { askProblem = CompanionError.unreachable.message }
+        }
     }
 
     /// What happened and what to do, in plain words; the raw record stays under Details (PRD §2.6).
