@@ -554,3 +554,22 @@ test('Ask photo selection is validated before consuming the question through HTT
     assert.deepEqual(after.pendingPhotos, ['queued.jpg']);
   }
 });
+
+
+test('local photo upload returns its exact renamed receipt without selecting other pending evidence', async t => {
+  const {service, store} = await fixture(t);
+  const dispatch = createControlDispatcher({objects: service});
+  const project = await service.create('A mount', 'fit');
+  await store.update(project.id, o => ({...o, state: 'needs-closeup', ask: {id: 'ask', question: 'Underside?', answers: ['photos'], status: 'open', askedAtMs: 1}}));
+  await service.addPhoto(project.id, 'answer.jpg', Buffer.from('other message'));
+  await service.addPhoto(project.id, 'queued.jpg', Buffer.from('queued'));
+  const local = join(store.dir(project.id), 'answer.jpg');
+  await writeFile(local, Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0, 0, 0]));
+  const uploaded = await dispatch('objects.addFile', {id: project.id, kind: 'photos', path: local});
+  assert.equal(uploaded.photoName, 'answer-2.jpg');
+  await service.addPhoto(project.id, 'later.jpg', Buffer.from('later'));
+  await dispatch('objects.answerCloseup', {id: project.id, bestGuess: false, photoNames: [uploaded.photoName]});
+  const after = await service.settled(project.id);
+  assert.deepEqual(after.messages.at(-1).photos, ['answer-2.jpg']);
+  assert.deepEqual(after.pendingPhotos, ['answer.jpg', 'queued.jpg', 'later.jpg']);
+});

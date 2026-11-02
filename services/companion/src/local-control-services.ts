@@ -301,7 +301,8 @@ export function createControlDispatcher(services: ControlServices) {
             if (method === 'settings.set') return {settings: await objects.updateSettings(parameters[method].parse(raw))};
             if (method === 'objects.addFile') {
               const {id, kind, path} = parameters[method].parse(raw);
-              return {object: local(await objects.addFile(id, kind, path))};
+              const receipt = await objects.addFileReceipt(id, kind, path);
+              return {...receipt, object: local(receipt.object)};
             }
             if (method === 'objects.correct') {
               const {id, note, photos, photoNames} = parameters[method].parse(raw);

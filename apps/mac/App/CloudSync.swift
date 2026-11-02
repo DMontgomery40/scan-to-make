@@ -440,6 +440,11 @@ import ControlKit
 
     /// Runs a claimed command. Its results are written in order through the one serialized writer.
     private func run(_ record: CKRecord, photos: [String]) async {
+        guard photos.count == (record["photos"] as? [CKAsset] ?? []).count else {
+            photos.forEach { try? FileManager.default.removeItem(atPath: $0) }
+            await result(record.recordID.recordName, status: "failed", message: "Some photos couldn't be saved on your Mac. Choose them again before sending this answer.")
+            return
+        }
         guard CommandFreshness.isFresh(created: record.creationDate, now: Date()) else {
             photos.forEach { try? FileManager.default.removeItem(atPath: $0) }
             await result(record.recordID.recordName, status: "failed", message: "This was more than 10 minutes old, so your Mac didn't run it.")

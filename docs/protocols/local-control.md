@@ -236,3 +236,11 @@ The cleanup pipeline's attempt/judge/export wiring is a separate change; this
 plumbing does not substitute a model into existing scripted cleanup stages.
 Non-app deployments can persist preferences but cannot resolve Mac Keychain
 references; checks fail as unavailable until a signed worker is configured.
+
+
+Photo imports through `objects.addFile` additionally return `photoName`, the exact sanitized/unique name
+assigned to that upload. Cloud Ask answers collect those receipts and send only them as `photoNames`;
+they never infer ownership from the whole project photo list. Cloud corrections send an explicit empty
+`photoNames` plus their local asset paths, so only newly imported assets (and a held message's existing
+owned evidence) belong to the correction. A cloud answer without text, photos or explicit Best Guess is
+refused; missing downloaded assets never imply permission to guess.
