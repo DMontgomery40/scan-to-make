@@ -9,7 +9,7 @@ function fixture(t, streaming=true) {
   const calls=[];
   const properties={host:{},bambu_model:{},fps:{},idle_timeout_ms:{},since_seq:{},wait_ms:{},max_width:{},max_bytes:{},changed_only:{},min_change:{},timeout_ms:{}};
   const session={config:{backend:'mcp-3d-printer-server',selection:{host:'printer.local',model:'p1s'}},
-    async connect(){},hold(){holds++;return()=>holds--;},hasTool:name=>name==='camera_snapshot'||streaming,
+    async connect(){},hold(){holds++;return()=>holds--;},hasTool:name=>name==='camera_snapshot'||(streaming && ['camera_stream_start','camera_frame','camera_stream_stop'].includes(name)),
     getTool:()=>({inputSchema:{properties}}),async call(name,args){calls.push({name,args});
       return {structuredContent:name==='camera_stream_start'?{status:'running',startedAt}:name==='camera_snapshot'?{base64:jpeg.toString('base64')}:args.since_seq===seq?{status:'unchanged',seq}:{status:'frame',seq,base64:jpeg.toString('base64'),capturedAt:'2026-11-02T12:00:00Z'}};
     }};
@@ -125,4 +125,56 @@ test('an open HTTP camera stops before another frame when authorization is revok
   const reply=await fetch(`http://127.0.0.1:${server.address().port}/v1/objects/printers/p/camera.jpg?stream=1`);
   const lines=(await reply.text()).trim().split('\n');
   assert.equal(lines.length,1);assert.equal(JSON.parse(lines[0]).seq,1);assert.equal(stopped,true);assert.equal(authorized,3);
+});
+
+
+test('explicit runtime capability refusal keeps working snapshots without starting a stream', async t => {
+  const f = fixture(t), hasTool = f.session.hasTool, call = f.session.call;
+  f.session.catalog = {};
+  f.session.hasTool = name => name === 'counterpart_printer_info' || hasTool(name);
+  let reads = 0;
+  f.session.call = async (name, args, options) => {
+    if (name !== 'counterpart_printer_info') return call(name, args, options);
+    reads++;
+    assert.equal(options.timeoutMs,10000); assert.ok(options.signal instanceof AbortSignal);
+    return {structuredContent: {contract:'counterpart/1',server:{name:'generic',version:'2'},printer:{kind:'octoprint',host:'printer.local'},
+      capabilities:{progress:true,layers:true,camera:'http-snapshot',cameraStream:false,filaments:'single',pause:true,resume:true,cancel:true,print3mf:false,gcode:true}}};
+  };
+  const iterator = f.camera.watch('p', f.session, {signal:new AbortController().signal});
+  await assert.rejects(iterator.next(), error => error.reason === 'not-supported');
+  const frame = await f.camera.frame('p', f.session, {view:true});
+  assert.deepEqual(frame.bytes,jpeg); assert.equal(frame.stream,undefined);
+  assert.deepEqual(f.calls.map(c=>c.name),['camera_snapshot']); assert.equal(reads,1);
+  f.session.catalog = {};
+  await f.camera.frame('p', f.session, {view:true,fresh:true});
+  assert.equal(reads,2,'a new connection rechecks its runtime');
+});
+
+test('structured unsupported start falls back but real source failures do not', async t => {
+  for (const status of ['not-supported','unavailable']) {
+    const f = fixture(t), call = f.session.call;
+    f.session.catalog = {};
+    f.session.call = async (name,args,options) => name === 'camera_stream_start'
+      ? {structuredContent:{status,reason:status==='not-supported'?'runtime':'auth'}} : call(name,args,options);
+    await assert.rejects(f.camera.watch('p',f.session,{signal:new AbortController().signal}).next(),
+      error => error.reason === (status==='not-supported'?'not-supported':'unreachable'));
+    if (status==='not-supported') {
+      assert.deepEqual((await f.camera.frame('p',f.session,{view:true})).bytes,jpeg);
+      assert.equal(f.calls.at(-1).name,'camera_snapshot');
+    } else {
+      await assert.rejects(f.camera.frame('p',f.session,{view:true}), error=>error.reason==='unreachable');
+      assert.equal(f.calls.length,0,'authentication failures never invoke snapshot fallback');
+    }
+  }
+});
+
+
+test('capability lookup failures do not become sticky unsupported or trigger snapshots', async t => {
+  const f=fixture(t),hasTool=f.session.hasTool;
+  f.session.hasTool=name=>name==='counterpart_printer_info'||hasTool(name);
+  let reads=0;
+  f.session.call=async name=>{assert.equal(name,'counterpart_printer_info');reads++;throw Error('connection failed');};
+  await assert.rejects(f.camera.watch('p',f.session,{signal:new AbortController().signal}).next(),error=>error.reason==='unreachable');
+  await assert.rejects(f.camera.frame('p',f.session,{view:true}),error=>error.reason==='unreachable');
+  assert.equal(reads,2,'the next request can recover from a temporary discovery error');
 });

@@ -1,5 +1,5 @@
 import {setTimeout as delay} from 'node:timers/promises';
-import {routeArgs, toolResultJson, type PrinterSession} from '@scan-to-make/printer-handoff';
+import {readPrinterInfo, routeArgs, toolResultJson, type PrinterSession} from '@scan-to-make/printer-handoff';
 
 export const CAMERA_CACHE_MS = 3000;
 export const CAMERA_TIMEOUT_MS = 8000;
@@ -30,6 +30,7 @@ export class CameraFrames {
   readonly #holds = new Map<string, {release: () => void; timer: ReturnType<typeof setTimeout>}>();
   readonly #streams = new Map<string, {session: PrinterSession; startedAt: string}>();
   readonly #cursors = new Map<string, number>();
+  readonly #streamSupport = new WeakMap<PrinterSession, {catalog: PrinterSession['catalog']; supported: Promise<boolean>}>();
   readonly #viewers = new Map<string, {count: number; controller: AbortController; release: () => void}>();
   readonly #now: () => number;
   constructor(options: {now?: () => number} = {}) { this.#now = options.now ?? Date.now; }
@@ -41,7 +42,7 @@ export class CameraFrames {
   async frame(destinationId: string, session: PrinterSession, options: {model?: string; fresh?: boolean; view?: boolean; size?: CameraSize; watch?: boolean; signal?: AbortSignal} = {}): Promise<CameraFrame> {
     if (options.view && !options.watch) this.#hold(destinationId, session);
     await session.connect({failFast: true}).catch(() => { throw new CameraUnavailableError('unreachable'); });
-    const streaming = !!options.view && this.#supportsStream(session);
+    const streaming = !!options.view && await this.#supportsStream(session);
     const key = streaming ? `${destinationId}:${options.size ?? 'card'}` : destinationId;
     const last = this.#last.get(key), age = last ? this.#now() - last.atMs : Infinity;
     if (!options.fresh && last && age < (streaming ? 1500 : CAMERA_CACHE_MS)) return last.frame;
@@ -49,19 +50,34 @@ export class CameraFrames {
     // Only a person looking gets the older frame meanwhile; an event's frame is saved for good, so it waits for a new one.
     if (!streaming && !options.fresh && options.view && last && age < CAMERA_STALE_MS) { next.catch(() => undefined); return last.frame; }
     try { return await next; }
-    catch (error) { throw error instanceof CameraUnavailableError ? error : new CameraUnavailableError('unreachable'); }
+    catch (error) {
+      if (!options.watch && error instanceof CameraUnavailableError && error.reason === 'not-supported') return this.frame(destinationId, session, options);
+      throw error instanceof CameraUnavailableError ? error : new CameraUnavailableError('unreachable');
+    }
   }
 
-  #supportsStream(session: PrinterSession): boolean {
-    return ['camera_stream_start', 'camera_frame', 'camera_stream_stop'].every(name => session.hasTool(name))
-      && Object.hasOwn(this.#properties(session, 'camera_frame'), 'max_bytes');
+  async #supportsStream(session: PrinterSession): Promise<boolean> {
+    if (!['camera_stream_start', 'camera_frame', 'camera_stream_stop'].every(name => session.hasTool(name))
+      || !Object.hasOwn(this.#properties(session, 'camera_frame'), 'max_bytes')) return false;
+    let entry = this.#streamSupport.get(session);
+    if (!entry || entry.catalog !== session.catalog) {
+      // Tool discovery can succeed while an optional native runtime is unavailable.
+      // Cache only for this connection; an MCP update must recheck capabilities.
+      entry = {catalog: session.catalog, supported: readPrinterInfo(session, {failFast: true, timeoutMs: CAMERA_CAP_MS, signal: AbortSignal.timeout(CAMERA_CAP_MS)}).then(info => info?.capabilities.cameraStream !== false)};
+      this.#streamSupport.set(session, entry);
+    }
+    try { return await entry.supported; }
+    catch {
+      if (this.#streamSupport.get(session) === entry) this.#streamSupport.delete(session);
+      throw new CameraUnavailableError('unreachable');
+    }
   }
 
   /** One authenticated HTTP viewer. MCP long polls are shared; each viewer owns only its lease. */
   async *watch(destinationId: string, session: PrinterSession, options: {model?: string; size?: CameraSize; signal: AbortSignal}): AsyncGenerator<CameraFrame> {
     options.signal.throwIfAborted();
     await session.connect({failFast: true});
-    if (!this.#supportsStream(session)) throw new CameraUnavailableError('not-supported');
+    if (!await this.#supportsStream(session)) throw new CameraUnavailableError('not-supported');
     let viewers = this.#viewers.get(destinationId);
     if (!viewers) {
       const release = session.hold();
@@ -125,7 +141,11 @@ export class CameraFrames {
   async #stream(key: string, destinationId: string, session: PrinterSession, model: string | undefined, size: CameraSize, signal?: AbortSignal): Promise<CameraFrame> {
     const call = (name: string, args: Record<string, unknown>) => session.call(name, this.#args(session, name, args),
       {failFast: true, timeoutMs: CAMERA_CAP_MS, signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(CAMERA_CAP_MS)]) : AbortSignal.timeout(CAMERA_CAP_MS)});
-    const started = toolResultJson<{startedAt?: string}>(await call('camera_stream_start', {bambu_model: model, fps: 1, idle_timeout_ms: CAMERA_HOLD_MS}));
+    const started = toolResultJson<{status?: string; startedAt?: string}>(await call('camera_stream_start', {bambu_model: model, fps: 1, idle_timeout_ms: CAMERA_HOLD_MS}));
+    if (started.status === 'not-supported') {
+      this.#streamSupport.set(session, {catalog: session.catalog, supported: Promise.resolve(false)});
+      throw new CameraUnavailableError('not-supported');
+    }
     const previous = this.#streams.get(destinationId);
     if (!started.startedAt) throw new CameraUnavailableError('unreachable');
     if (previous?.session !== session || previous.startedAt !== started.startedAt) {

@@ -22,6 +22,7 @@ export const counterpartPrinterInfoSchema = z.object({
   capabilities: z.object({
     progress: z.boolean(), layers: z.boolean(),
     camera: z.enum(['bambu-tcp', 'rtsp', 'http-snapshot', 'none']),
+    cameraStream: z.boolean().optional(),
     filaments: z.enum(['ams', 'single', 'none']),
     pause: z.boolean(), resume: z.boolean(), cancel: z.boolean(), print3mf: z.boolean(), gcode: z.boolean(),
   }),
