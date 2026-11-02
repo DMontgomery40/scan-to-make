@@ -1,13 +1,14 @@
 import {copyFile, mkdtemp, readFile, rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {basename, isAbsolute, join} from 'node:path';
-import type {Tool} from '@modelcontextprotocol/sdk/types.js';
+import type {ElicitResult, Tool} from '@modelcontextprotocol/sdk/types.js';
 import {
   printerHandoffConfigSchema,
   type PrinterHandoffConfig, type PrinterSelection, type PrinterSlicer, type PrinterPrintOptions,
 } from './config.js';
 import type {ElicitationContext, ElicitationRelay} from './elicitation.js';
 import {sliceEstimate, sliceSettings, type SliceEstimate, type SliceSettings} from './slice-estimate.js';
+import {slicerReport} from './slicer-report.js';
 import type {HandoffBundleStore} from './bundle.js';
 import {PrinterMcpError, toolResultJson, toolResultText, type PrinterToolCatalog} from './mcp-client.js';
 import {PrinterSession} from './session.js';
@@ -48,6 +49,8 @@ export interface PrintRunResult {
   orientedStlPath: string;
   slicedPath: string;
   inspection?: {tool: string; result: unknown};
+  /** Bambu Studio's warning on this slice, word for word (slice_stl's `slicer_result`); printing it needed the user's go. */
+  slicerWarning?: string;
   print?: unknown;
   steps: PrintStep[];
 }
@@ -171,16 +174,16 @@ export class PrinterHandoffRunner {
    * Lays the model flat and slices it exactly as a print would, then reads the
    * time, grams and settings from the sliced file. Never prints.
    */
-  async estimate(input: {stlPath: string; selection?: PrinterSelection; slicer?: PrinterSlicer; signal?: AbortSignal}): Promise<{estimate?: SliceEstimate; settings: SliceSettings}> {
+  async estimate(input: {stlPath: string; selection?: PrinterSelection; slicer?: PrinterSlicer; signal?: AbortSignal}): Promise<{estimate?: SliceEstimate; settings: SliceSettings; slicerWarning?: string}> {
     let sliced: Buffer | undefined;
     const plate = {...this.#config.selection, ...input.selection}.plateIndex ?? 0;
-    await this.run({stlPath: input.stlPath, print: false, ...(input.selection ? {selection: input.selection} : {}), ...(input.slicer ? {slicer: input.slicer} : {}),
+    const {slicerWarning} = await this.run({stlPath: input.stlPath, print: false, ...(input.selection ? {selection: input.selection} : {}), ...(input.slicer ? {slicer: input.slicer} : {}),
       ...(input.signal ? {signal: input.signal} : {}),
       // Read the output while the MCP is alive: a one-shot backend may delete it when it closes.
       persistOutput: async output => { sliced = await readFile(output.slicedPath); return output; }});
     if (!sliced) fail('invalid-output-path');
     const estimate = await sliceEstimate(sliced, plate);
-    return {...(estimate ? {estimate} : {}), settings: await sliceSettings(sliced, plate)};
+    return {...(estimate ? {estimate} : {}), settings: await sliceSettings(sliced, plate), ...(slicerWarning ? {slicerWarning} : {})};
   }
 
   /** Connects and lists the server's tools without calling one (a one-shot session then disconnects). */
@@ -229,6 +232,35 @@ export class PrinterHandoffRunner {
       return {tool: 'confirm_temperatures', result: toolResultJson(result)};
     }
     return undefined;
+  }
+
+  /**
+   * Asks the user, through the relay that carries the printer's own questions, whether to print
+   * despite Bambu Studio's warning. The question is Studio's words; only an explicit yes goes on,
+   * and a decline, a timeout or an abort stops before the printer is asked anything.
+   */
+  async #slicerGo(warning: string, context: ElicitationContext, signal?: AbortSignal): Promise<void> {
+    const declined = () => new PrinterMcpError('slicer-warning-declined', undefined, warning);
+    const relay = this.#relay;
+    if (!relay) throw declined();
+    if (signal?.aborted) fail('cancelled');
+    // The relay announces a question synchronously as it is asked: the first announcement is this one.
+    let id: string | undefined;
+    const stop = relay.subscribe(pending => { id ??= pending.id; });
+    let answer: Promise<ElicitResult>;
+    try {
+      answer = relay.request({method: 'elicitation/create', params: {mode: 'form', message: warning, requestedSchema: {
+        type: 'object', required: ['confirmed'],
+        properties: {confirmed: {type: 'boolean', title: 'Print anyway', default: false}},
+      }}}, context);
+    } finally { stop(); }
+    const abort = () => { if (id) relay.respond(id, {action: 'cancel'}); };
+    signal?.addEventListener('abort', abort, {once: true});
+    try {
+      const result = await answer;
+      if (signal?.aborted) fail('cancelled');
+      if (result.action !== 'accept' || result.content?.confirmed !== true) throw declined();
+    } finally { signal?.removeEventListener('abort', abort); }
   }
 
   /**
@@ -292,7 +324,7 @@ export class PrinterHandoffRunner {
       step('lay_flat');
     }
     await progress('slicing');
-    let slicedPath = absolutePath(await call(session, 'slice_stl', {
+    const sliced = await call(session, 'slice_stl', {
       stl_path: orientedStlPath,
       bambu_model: isBambuSlicing(this.#config, selection, slicer) ? selection.model : undefined,
       nozzle_diameter: selection.nozzleDiameterMm === undefined ? undefined : String(selection.nozzleDiameterMm),
@@ -315,16 +347,24 @@ export class PrinterHandoffRunner {
       orient: !laidFlat,
       arrange: true,
       ensure_on_bed: true,
-    }, local));
+    }, local);
+    let slicedPath = absolutePath(sliced);
     step('slice_stl');
+    // Studio's own verdict on this slice (absent from an MCP that returns only the path): an error is
+    // never printed, and a warning is printed only on the user's explicit go, as in Studio.
+    const report = slicerReport(sliced.structuredContent);
+    if (report?.failed) throw new PrinterMcpError('slicer-error', undefined, report.message);
+    const slicerWarning = report?.message;
     const estimate = await sliceEstimate(await readFile(slicedPath), selection.plateIndex ?? 0);
     await progress('inspecting', estimate);
     const inspection = await this.inspect(session, slicedPath, selection, local);
     if (inspection) step('inspect');
     if (input.persistOutput) ({slicedPath, orientedStlPath} = await input.persistOutput({slicedPath, orientedStlPath}));
     await progress('slice-ready', estimate);
-    const common = {backend: this.#config.backend, catalog, stlPath: input.stlPath, orientedStlPath, slicedPath, inspection, steps};
+    const common = {backend: this.#config.backend, catalog, stlPath: input.stlPath, orientedStlPath, slicedPath, inspection, steps,
+      ...(slicerWarning ? {slicerWarning} : {})};
     if (input.print === false) return common;
+    if (slicerWarning) await this.#slicerGo(slicerWarning, tag, signal);
 
     await progress('checking-printer');
     // PRD §5.6: no bed check. Bambu's own bed levelling finds a full plate; the MCP's own confirmation is relayed as it asks.

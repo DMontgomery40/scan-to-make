@@ -42,6 +42,21 @@ This package does not reimplement slicing or printer control.
   - mcp-3D-printer-server, Bambu: `lay_flat` → `slice_stl` → `print_3mf`.
   - `processAndPrint` runs the generic server's one-call
     `process_and_print_stl` extend-and-print pipeline.
+- Bambu Studio's own verdict on the slice. When `slice_stl` returns the
+  CLI's `result.json` as `structuredContent.slicer_result`, parsed verbatim
+  (`slicer-report.ts`), the runner acts on it the way Studio does:
+  - a `return_code` other than 0 is `slicer-error`. Nothing is inspected,
+    asked or sent, and the error's detail is Studio's `error_string` followed
+    by each plate's `warning_message`, word for word;
+  - a `warning_message` on a slice that worked (for example "It seems object
+    x.stl has floating cantilever. Please re-orient the object or enable
+    support generation.") becomes a question on the relay before the printer
+    is asked anything. The question is Studio's words, with one "Print anyway"
+    switch. Only an explicit yes goes on; a decline, a timeout or an abort is
+    `slicer-warning-declined` and nothing is sent;
+  - an MCP without `slicer_result` behaves as before. bambu-printer-mcp
+    releases up to today return only the path, so the gate switches on with
+    the release that adds the field.
 
 The Bambu camera snapshot, when available, is attached to the pending
 confirmation so the phone prompt can show the bed before the user confirms.

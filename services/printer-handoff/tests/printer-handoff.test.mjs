@@ -14,13 +14,18 @@ import {
 } from '../dist/index.js';
 
 const fixture = fileURLToPath(new URL('./fixtures/fixture-printer-server.mjs', import.meta.url));
+// Real Bambu Studio 02.08.02.61 result.json files from David's stove gap filler (bundle 4dd27c10), sliced by
+// bambu-printer-mcp's own sliceSTL: --orient 1 (empty layers), the lay_flat output and the scan as it is
+// (floating cantilever), and the lay_flat output turned cap-down (clean).
+const slicerResults = fileURLToPath(new URL('./fixtures/slicer-results/', import.meta.url));
+const studio = async name => JSON.parse(await readFile(join(slicerResults, `${name}.json`), 'utf8'));
 const stl = Buffer.from('solid fixture\n' + ' facet\n'.repeat(20) + 'endsolid fixture\n');
 const selection = {
   model: 'p1s', nozzleDiameterMm: 0.4, nozzleType: 'hardened_steel',
   bedType: 'textured_plate', material: 'PLA', plateIndex: 0,
 };
 
-async function setup(t, {mode = 'bambu', backend = 'bambu-printer-mcp', answer = 'accept', relayTimeoutMs = 5000, dispatch, ephemeral = false, noColour = false, crypto = false, noConnectionType = false, settings = false, remote = false, slicer} = {}) {
+async function setup(t, {mode = 'bambu', backend = 'bambu-printer-mcp', answer = 'accept', relayTimeoutMs = 5000, dispatch, ephemeral = false, noColour = false, crypto = false, noConnectionType = false, settings = false, remote = false, slicer, slicerResult} = {}) {
   const root = await mkdtemp(join(tmpdir(), 'printer-handoff-'));
   t.after(() => rm(root, {recursive: true, force: true}));
   const log = join(root, 'calls.jsonl');
@@ -30,7 +35,7 @@ async function setup(t, {mode = 'bambu', backend = 'bambu-printer-mcp', answer =
   const config = {
     backend,
     process: {command: process.execPath, args: [fixture, mode, log], cwd: root,
-      env: {...(settings ? {HANDOFF_FIXTURE_SLICE_SETTINGS:'1'} : {}), ...(remote ? {HANDOFF_FIXTURE_REMOTE:'1'} : {}), ...(noConnectionType ? {HANDOFF_FIXTURE_NO_CONNECTION_TYPE:'1'} : {}), ...(crypto ? {HANDOFF_FIXTURE_CRYPTO:'1'} : {}), ...(dispatch ? {HANDOFF_FIXTURE_DISPATCH: dispatch} : {}), ...(ephemeral ? {HANDOFF_FIXTURE_EPHEMERAL: '1'} : {}), ...(noColour ? {HANDOFF_FIXTURE_NO_COLOUR:'1'} : {})}},
+      env: {...(slicerResult ? {HANDOFF_FIXTURE_SLICER_RESULT: join(slicerResults, `${slicerResult}.json`)} : {}), ...(settings ? {HANDOFF_FIXTURE_SLICE_SETTINGS:'1'} : {}), ...(remote ? {HANDOFF_FIXTURE_REMOTE:'1'} : {}), ...(noConnectionType ? {HANDOFF_FIXTURE_NO_CONNECTION_TYPE:'1'} : {}), ...(crypto ? {HANDOFF_FIXTURE_CRYPTO:'1'} : {}), ...(dispatch ? {HANDOFF_FIXTURE_DISPATCH: dispatch} : {}), ...(ephemeral ? {HANDOFF_FIXTURE_EPHEMERAL: '1'} : {}), ...(noColour ? {HANDOFF_FIXTURE_NO_COLOUR:'1'} : {})}},
     selection,
     ...(slicer ? {slicer} : {}),
     timeouts: {connectMs: 5000, toolMs: 5000, elicitationMs: relayTimeoutMs},
@@ -519,4 +524,104 @@ test('named copies override the config: repetitions 3 in the profile, one copy a
   const g = await setup(t, {});
   await g.runner.run({stlPath: g.stlPath, slicer: {repetitions: 1}});
   assert.equal((await g.calls()).find(call => call.tool === 'slice_stl').arguments.repetitions, undefined);
+});
+
+for (const name of ['lay-flat-floating-cantilever', 'as-scanned-floating-cantilever']) {
+  test(`Bambu Studio's warning (${name}) is shown word for word and printed only on the user's explicit go`, async t => {
+    const words = (await studio(name)).sliced_plates[0].warning_message;
+    assert.match(words, /has floating cantilever\. Please re-orient the object or enable support generation\.$/);
+    const f = await setup(t, {slicerResult: name});
+    const result = await f.runner.run({stlPath: f.stlPath});
+    assert.equal(result.slicerWarning, words);
+    // Studio's question first, in its own words, tagged like the printer's; then the MCP's own print confirmation.
+    assert.equal(f.seen.length, 2);
+    assert.equal(f.seen[0].message, words);
+    assert.deepEqual(f.seen[0].requestedSchema, {type: 'object', required: ['confirmed'],
+      properties: {confirmed: {type: 'boolean', title: 'Print anyway', default: false}}});
+    assert.equal(result.print.dispatch, 'started');
+    const tools = (await f.calls()).filter(entry => entry.tool).map(entry => entry.tool);
+    assert.deepEqual(tools, ['lay_flat', 'slice_stl', 'inspect_print_file', 'print_3mf']);
+  });
+}
+
+test("declining or not answering Bambu Studio's warning stops before the printer is asked anything", async t => {
+  const words = (await studio('lay-flat-floating-cantilever')).sliced_plates[0].warning_message;
+  const declined = await setup(t, {slicerResult: 'lay-flat-floating-cantilever', answer: 'decline'});
+  const store = new HandoffBundleStore(join(declined.root, 'declined-warning'));
+  const bundle = await store.create({stl, prompt: '', backend: 'bambu-printer-mcp', selection});
+  await assert.rejects(declined.runner.runBundle(store, bundle.id), error => {
+    assert.equal(error.code, 'slicer-warning-declined');
+    assert.equal(error.detail, words);
+    return true;
+  });
+  assert.equal((await store.read(bundle.id)).failure, 'slicer-warning-declined');
+  const timedOut = await setup(t, {slicerResult: 'lay-flat-floating-cantilever', answer: 'none', relayTimeoutMs: 50});
+  await assert.rejects(timedOut.runner.run({stlPath: timedOut.stlPath}), {code: 'slicer-warning-declined'});
+  for (const f of [declined, timedOut]) {
+    assert.equal(f.seen.length, 1, 'only Studio\'s question was asked');
+    assert.deepEqual((await f.calls()).filter(entry => entry.tool).map(entry => entry.tool), ['lay_flat', 'slice_stl', 'inspect_print_file']);
+    assert.equal(f.relay.pending().length, 0);
+  }
+});
+
+test("aborting a print waiting on Bambu Studio's warning withdraws the question", async t => {
+  const f = await setup(t, {slicerResult: 'lay-flat-floating-cantilever', answer: 'none', relayTimeoutMs: 60000});
+  const controller = new AbortController();
+  const run = f.runner.run({stlPath: f.stlPath, signal: controller.signal});
+  for (let attempt = 0; attempt < 200 && f.relay.pending().length === 0; attempt++) await new Promise(resolve => setTimeout(resolve, 10));
+  assert.equal(f.relay.pending().length, 1);
+  controller.abort();
+  await assert.rejects(run, {code: 'cancelled'});
+  assert.deepEqual(f.relay.pending(), []);
+  assert.equal((await f.calls()).filter(entry => entry.tool === 'print_3mf').length, 0);
+});
+
+test("Bambu Studio's slicing error blocks the print and keeps its own words", async t => {
+  const result = await studio('orient-empty-layers');
+  const words = `${result.error_string}\n${result.sliced_plates[0].warning_message}`;
+  assert.match(words, /^Failed slicing the model\. .*\nObject can't be printed for empty layer between 18\.2 and 24\.4\./s);
+  const f = await setup(t, {slicerResult: 'orient-empty-layers'});
+  const store = new HandoffBundleStore(join(f.root, 'slicer-error'));
+  const bundle = await store.create({stl, prompt: '', backend: 'bambu-printer-mcp', selection});
+  await assert.rejects(f.runner.runBundle(store, bundle.id), error => {
+    assert.equal(error.code, 'slicer-error');
+    assert.equal(error.detail, words);
+    return true;
+  });
+  const read = await store.read(bundle.id);
+  assert.equal(read.status, 'failed');
+  assert.equal(read.failure, 'slicer-error');
+  assert.equal(read.artifacts.sliced, undefined, 'no sliced file to print');
+  assert.deepEqual((await f.calls()).filter(entry => entry.tool).map(entry => entry.tool), ['lay_flat', 'slice_stl']);
+  assert.equal(f.seen.length, 0, 'nothing to confirm: there is no print');
+  // The estimate refuses the same slice, so the print sheet never offers it.
+  await assert.rejects(f.runner.estimate({stlPath: f.stlPath}), {code: 'slicer-error', detail: words});
+});
+
+test('a clean Bambu Studio slice goes straight to the printer\'s own confirmation, as before', async t => {
+  assert.equal((await studio('cap-down-clean')).sliced_plates[0].warning_message, '');
+  const f = await setup(t, {slicerResult: 'cap-down-clean'});
+  const result = await f.runner.run({stlPath: f.stlPath});
+  assert.equal('slicerWarning' in result, false);
+  assert.equal(f.seen.length, 1);
+  assert.match(f.seen[0].message, /^Fixture bed-clearance confirmation/);
+  assert.deepEqual((await f.calls()).filter(entry => entry.tool).map(entry => entry.tool), ['lay_flat', 'slice_stl', 'inspect_print_file', 'print_3mf']);
+});
+
+test("an estimate reports Bambu Studio's warning without asking anything", async t => {
+  const f = await setup(t, {slicerResult: 'as-scanned-floating-cantilever'});
+  const result = await f.runner.run({stlPath: f.stlPath, print: false});
+  assert.equal(result.slicerWarning, (await studio('as-scanned-floating-cantilever')).sliced_plates[0].warning_message);
+  assert.equal(f.seen.length, 0);
+});
+
+test('slicer reports fail closed and keep Studio\'s words', async () => {
+  const {slicerReport} = await import('../dist/index.js');
+  assert.equal(slicerReport(undefined), undefined);
+  assert.equal(slicerReport({path: '/x.3mf'}), undefined, 'an MCP without slicer_result: unchanged');
+  assert.deepEqual(slicerReport({slicer_result: {return_code: 0, error_string: 'Success.', sliced_plates: [{warning_message: ''}]}}), {failed: false});
+  assert.deepEqual(slicerReport({slicer_result: {error_string: 'Success.'}}), {failed: true, message: 'Success.'}, 'no return code is not success');
+  assert.deepEqual(slicerReport({slicer_result: {return_code: -52}}), {failed: true, message: 'Bambu Studio could not slice this model (return code -52).'});
+  assert.deepEqual(slicerReport({slicer_result: {return_code: 0, sliced_plates: [{warning_message: 'A.\r\nB.\u0007'}, {warning_message: 'A.\r\nB.\u0007'}]}}),
+    {failed: false, message: 'A.\nB.'}, 'line breaks kept, other control characters dropped, one copy per message');
 });
