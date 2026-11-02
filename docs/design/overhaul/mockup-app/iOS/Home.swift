@@ -2,11 +2,14 @@ import SwiftUI
 
 struct HomeView: View {
     @State var showNew = false
+    /// No projects yet: the two jobs as cards (PRD §5.1 empty state).
+    var empty = false
     @State private var query = ""
 
     var body: some View {
         NavigationStack {
             ScrollView {
+                if empty { EmptyHome().padding(.horizontal, 16).padding(.bottom, 24) } else {
                 VStack(alignment: .leading, spacing: 26) {
                     SectionTitle("Now")
                     VStack(spacing: 12) {
@@ -22,6 +25,7 @@ struct HomeView: View {
                 }
                 .padding(.horizontal, 16)
                 .padding(.bottom, 24)
+                }
             }
             .background(Color.black)
             .navigationTitle("Counterpart")
@@ -30,7 +34,7 @@ struct HomeView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { } label: { Image(systemName: "printer.fill") }
-                        .badge(1)
+                        .badge(empty ? 0 : 1)
                 }
                 ToolbarSpacer(.fixed, placement: .topBarTrailing)
                 ToolbarItem(placement: .topBarTrailing) {
@@ -45,6 +49,55 @@ struct HomeView: View {
             }
             .sheet(isPresented: $showNew) { NewSheet().presentationDetents([.large]) }
         }
+    }
+}
+
+/// Home with no projects: each card opens New with that job preselected.
+struct EmptyHome: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("What do you want to make?").font(.title3.weight(.bold)).padding(.top, 6)
+            JobHeroCard(thumb: .mic, title: "Make something that fits",
+                        detail: "Describe it and show what it fits. Your Mac designs the part.",
+                        steps: [("text.bubble.fill", "Describe it"), ("camera.fill", "Show it"), ("printer.fill", "Print it")])
+            JobHeroCard(thumb: .scanB, title: "Copy something",
+                        detail: "Scan it. Your Mac fixes what the scanner missed.",
+                        steps: [("cube.transparent.fill", "Scan it"), ("wand.and.sparkles", "Fixed for you"), ("printer.fill", "Print it")])
+            Label("You'll get a notification when it's ready.", systemImage: "bell.badge")
+                .font(.footnote).foregroundStyle(.secondary).padding(.top, 4).padding(.horizontal, 4)
+        }
+    }
+}
+
+struct JobHeroCard: View {
+    let thumb: Thumb, title: String, detail: String
+    let steps: [(String, String)]
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ModelStage(thumb: thumb, yaw: thumb == .mic ? 0.75 : 1.25, pitch: -0.3, interactive: false, fit: thumb == .mic ? 0.2 : 0.22)
+                .frame(height: 132)
+                .overlay(alignment: .bottomLeading) {
+                    HStack(spacing: 6) {
+                        ForEach(steps, id: \.1) { s in
+                            Label(s.1, systemImage: s.0).labelStyle(.titleAndIcon).font(.caption2.weight(.semibold))
+                                .padding(.horizontal, 9).padding(.vertical, 5).glassEffect(.regular, in: .capsule)
+                        }
+                    }
+                    .padding(12)
+                }
+            HStack(alignment: .center, spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title).font(.title3.weight(.semibold))
+                    Text(detail).font(.subheadline).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "arrow.right").font(.headline).foregroundStyle(.white)
+                    .frame(width: 40, height: 40).glassEffect(.regular.tint(Color.filament).interactive(), in: .circle)
+            }
+            .padding(.horizontal, 16).padding(.vertical, 14)
+        }
+        .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 28))
+        .clipShape(.rect(cornerRadius: 28))
     }
 }
 

@@ -2,11 +2,35 @@ import SwiftUI
 
 // MARK: Print sheet
 
+/// The colour section depends on what the printer's MCP reports (PRD §5.5, §8.4).
+enum PrintVariant { case multi, oneColor, noAMS, whatsLoaded }
+
 struct PrintSheet: View {
-    @State private var printer = 1
+    var variant: PrintVariant = .multi
     @State private var quality = 1
     @State private var strength = 0
     @State private var checkPlate = true
+    @State private var material = "PLA"
+
+    private var printers: [PrinterInfo] { variant == .whatsLoaded ? [Mock.printers[0], Mock.printers[1], Mock.enderOnline] : Mock.printers }
+    private var selected: PrinterInfo { printers[variant == .noAMS ? 1 : (variant == .whatsLoaded ? 2 : 0)] }
+    private var mono: PlatformColor? {
+        switch variant {
+        case .multi: nil
+        case .oneColor: PlatformColor(red: 0.42, green: 0.45, blue: 0.52, alpha: 1)
+        case .noAMS: PlatformColor(red: 0.17, green: 0.17, blue: 0.22, alpha: 1)
+        case .whatsLoaded: PlatformColor(white: 0.72, alpha: 1)
+        }
+    }
+    private var estimate: (time: String, done: String) {
+        switch variant {
+        case .noAMS: ("1 h 05 m", "1:17 PM")
+        case .whatsLoaded: ("1 h 48 m", "2:00 PM")
+        default: ("1 h 12 m", "1:24 PM")
+        }
+    }
+    /// The installed MCP lacks the quality arguments: only the preset's own values (PRD §8.5).
+    private var presetOnly: Bool { variant == .whatsLoaded }
 
     var body: some View {
         NavigationStack {
@@ -15,64 +39,69 @@ struct PrintSheet: View {
                     // Printer picker
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 10) {
-                            ForEach(Mock.printers) { p in PrinterChoice(printer: p, selected: p.id == printer) }
+                            ForEach(printers) { p in PrinterChoice(printer: p, selected: p.id == selected.id) }
                         }
                         .padding(.horizontal, 20)
                     }
                     .padding(.horizontal, -20)
+                    .defaultScrollAnchor(variant == .whatsLoaded ? .trailing : .leading)
 
                     // Plate preview
                     ZStack(alignment: .bottomLeading) {
-                        ModelStage(thumb: .mic, yaw: 0.9, pitch: -0.5, interactive: false)
+                        ModelStage(thumb: .mic, yaw: 0.9, pitch: -0.5, interactive: false, mono: mono)
                             .frame(height: 220)
                             .overlay(alignment: .bottom) { PlateGrid().frame(height: 70).opacity(0.5).allowsHitTesting(false) }
                             .clipShape(.rect(cornerRadius: 24))
                         HStack(spacing: 8) {
-                            Metric(symbol: "clock", text: "1 h 12 m")
+                            Metric(symbol: "clock", text: estimate.time)
                             Metric(symbol: "scalemass", text: "22 g")
                             Metric(symbol: "square.stack.3d.up", text: "212 layers")
                         }
                         .padding(12)
                     }
 
-                    // Colours
-                    VStack(alignment: .leading, spacing: 12) {
-                        HStack { Text("Colors").font(.headline); Spacer(); Text("AMS · 4 slots").font(.caption).foregroundStyle(.secondary) }
-                        ColorMapRow(part: "Cup", partColor: Color(white: 0.16), spool: Mock.ams[0], grams: "14 g")
-                        ColorMapRow(part: "Cradle", partColor: Color(red: 0.8, green: 0.62, blue: 0.36), spool: Mock.ams[1], grams: "8 g")
-                        HStack(spacing: 16) {
-                            ForEach(Mock.ams) { s in
-                                VStack(spacing: 4) {
-                                    SpoolDot(spool: s, size: 34, selected: s.id == "A2")
-                                    Text("\(s.id) \(s.material)").font(.caption2).foregroundStyle(.secondary)
-                                }
-                            }
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.top, 4)
-                    }
-                    .padding(16)
-                    .glassEffect(.regular, in: .rect(cornerRadius: 24))
+                    colorSection
+                        .padding(16)
+                        .glassEffect(.regular, in: .rect(cornerRadius: 24))
 
                     // Quality
                     VStack(alignment: .leading, spacing: 12) {
-                        Text("Quality").font(.headline)
-                        Picker("Quality", selection: $quality) { Text("Draft").tag(0); Text("Standard").tag(1); Text("Fine").tag(2) }.pickerStyle(.segmented)
-                        Text("Strength").font(.headline)
-                        Picker("Strength", selection: $strength) { Text("Standard").tag(0); Text("Strong").tag(1); Text("Max").tag(2) }.pickerStyle(.segmented)
-                        Text("0.20 mm layers · 2 walls · 15% infill · Bambu PLA Basic profile").font(.caption).foregroundStyle(.secondary)
+                        if presetOnly {
+                            HStack { Text("Quality").font(.headline); Spacer(); Text("Standard").foregroundStyle(.secondary) }
+                            Text("Draft, Fine and Strength need a newer mcp-3D-printer-server on your Mac. Until then the printer's preset is used.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        } else {
+                            Text("Quality").font(.headline)
+                            Picker("Quality", selection: $quality) { Text("Draft").tag(0); Text("Standard").tag(1); Text("Fine").tag(2) }.pickerStyle(.segmented)
+                            Text("Strength").font(.headline)
+                            Picker("Strength", selection: $strength) { Text("Standard").tag(0); Text("Strong").tag(1); Text("Max").tag(2) }.pickerStyle(.segmented)
+                        }
+                        Text(profileLine).font(.caption).foregroundStyle(.secondary)
                     }
                     .padding(16)
                     .glassEffect(.regular, in: .rect(cornerRadius: 24))
 
-                    Toggle(isOn: $checkPlate) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Check the plate first")
-                            Text("Your Mac looks through the printer camera. You'll only hear about it if something's there.").font(.caption).foregroundStyle(.secondary)
+                    if selected.camera {
+                        Toggle(isOn: $checkPlate) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Check the plate first")
+                                Text("Your Mac looks through the printer camera. You'll only hear about it if something's there.").font(.caption).foregroundStyle(.secondary)
+                            }
                         }
+                        .padding(16)
+                        .glassEffect(.regular, in: .rect(cornerRadius: 24))
+                    } else {
+                        HStack(alignment: .top, spacing: 12) {
+                            Image(systemName: "video.slash").foregroundStyle(.secondary).frame(width: 22)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("No plate check on \(selected.name)")
+                                Text("It has no camera your Mac can use. Make sure the plate is clear before you print.").font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(16)
+                        .glassEffect(.regular, in: .rect(cornerRadius: 24))
                     }
-                    .padding(16)
-                    .glassEffect(.regular, in: .rect(cornerRadius: 24))
                 }
                 .padding(20)
                 .padding(.bottom, 80)
@@ -86,8 +115,8 @@ struct PrintSheet: View {
             .safeAreaInset(edge: .bottom) {
                 Button { } label: {
                     VStack(spacing: 0) {
-                        Text("Print on P1S").fontWeight(.semibold)
-                        Text("Done around 1:24 PM").font(.caption).opacity(0.8)
+                        Text("Print on \(selected.name)").fontWeight(.semibold)
+                        Text("Done around \(estimate.done)").font(.caption).opacity(0.8)
                     }
                     .frame(maxWidth: .infinity).frame(height: 44)
                 }
@@ -97,6 +126,104 @@ struct PrintSheet: View {
             }
         }
         .presentationDetents([.large])
+    }
+
+    private var profileLine: String {
+        switch variant {
+        case .noAMS: "0.20 mm layers · 2 walls · 15% infill · Prusament PLA profile"
+        case .whatsLoaded: "0.20 mm layers · Generic \(material) profile · from OctoPrint's slicer settings"
+        default: "0.20 mm layers · 2 walls · 15% infill · Bambu PLA Basic profile"
+        }
+    }
+
+    @ViewBuilder private var colorSection: some View {
+        switch variant {
+        case .multi:
+            VStack(alignment: .leading, spacing: 12) {
+                HStack { Text("Colors").font(.headline); Spacer(); Text("AMS · 4 slots").font(.caption).foregroundStyle(.secondary) }
+                ColorMapRow(part: "Cup", partColor: Color(white: 0.16), spool: Mock.ams[0], grams: "14 g")
+                ColorMapRow(part: "Cradle", partColor: Color(red: 0.8, green: 0.62, blue: 0.36), spool: Mock.ams[1], grams: "8 g")
+                SpoolPickerRow(selectedID: "A2")
+            }
+        case .oneColor:
+            VStack(alignment: .leading, spacing: 12) {
+                HStack { Text("Color").font(.headline); Spacer(); Text("AMS · 4 slots").font(.caption).foregroundStyle(.secondary) }
+                HStack(spacing: 12) {
+                    SpoolDot(spool: Mock.ams[3], size: 34)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("A4 · PLA Blue Grey").font(.body.weight(.medium))
+                        Text("22 g · matches the profile's PLA").font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                }
+                SpoolPickerRow(selectedID: "A4", external: true)
+            }
+        case .noAMS:
+            VStack(alignment: .leading, spacing: 12) {
+                HStack { Text("Filament").font(.headline); Spacer(); Text("No AMS").font(.caption).foregroundStyle(.secondary) }
+                HStack(spacing: 12) {
+                    SpoolDot(spool: Mock.printers[1].spools[0], size: 34)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Uses the loaded filament: PLA Galaxy Black").font(.body.weight(.medium)).fixedSize(horizontal: false, vertical: true)
+                        Text("22 g").font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                Label("Want a different one? Change the spool on Garage MK4 before you print.", systemImage: "arrow.triangle.2.circlepath")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        case .whatsLoaded:
+            VStack(alignment: .leading, spacing: 12) {
+                HStack { Text("What's loaded?").font(.headline); Spacer(); Text("22 g").font(.caption).foregroundStyle(.secondary) }
+                Text("Ender doesn't say which filament it has. Pick the material so your Mac slices at the right temperatures.")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                GlassEffectContainer(spacing: 8) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(spacing: 8) { ForEach(["PLA", "PETG", "ABS"], id: \.self) { MaterialChip(name: $0, selected: $0 == material, note: $0 == "PLA" ? "Profile" : nil) } }
+                        HStack(spacing: 8) { ForEach(["ASA", "TPU", "PLA-CF", "Other"], id: \.self) { MaterialChip(name: $0, selected: false, note: nil) } }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// The AMS slots plus the external spool, with the chosen one ringed.
+struct SpoolPickerRow: View {
+    let selectedID: String
+    var external = false
+    var body: some View {
+        HStack(spacing: 16) {
+            ForEach(Mock.ams) { s in
+                VStack(spacing: 4) {
+                    SpoolDot(spool: s, size: 34, selected: s.id == selectedID)
+                    Text("\(s.id) \(s.material)").font(.caption2).foregroundStyle(.secondary)
+                }
+            }
+            if external {
+                VStack(spacing: 4) {
+                    Image(systemName: "plus").font(.caption.weight(.bold)).foregroundStyle(.secondary)
+                        .frame(width: 34, height: 34).overlay { Circle().strokeBorder(.secondary, style: .init(lineWidth: 1.5, dash: [3, 3])) }
+                    Text("External").font(.caption2).foregroundStyle(.secondary)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.top, 4)
+    }
+}
+
+struct MaterialChip: View {
+    let name: String, selected: Bool, note: String?
+    var body: some View {
+        HStack(spacing: 5) {
+            if selected { Image(systemName: "checkmark").font(.caption.weight(.bold)) }
+            Text(name).font(.subheadline.weight(.semibold))
+            if let note { Text(note).font(.caption2.weight(.semibold)).opacity(0.75) }
+        }
+        .lineLimit(1).fixedSize()
+        .padding(.horizontal, 14).padding(.vertical, 9)
+        .foregroundStyle(selected ? .white : .primary)
+        .glassEffect(selected ? .regular.tint(Color.filament).interactive() : .regular.interactive(), in: .capsule)
     }
 }
 
@@ -114,7 +241,7 @@ struct PrinterChoice: View {
             Text(printer.model).font(.caption).foregroundStyle(.secondary)
             HStack(spacing: 3) {
                 ForEach(printer.spools.prefix(4)) { SpoolDot(spool: $0, size: 12) }
-                if printer.spools.isEmpty { Text("Offline").font(.caption2).foregroundStyle(.secondary) }
+                if printer.spools.isEmpty { Text(printer.ready ? "Filament not reported" : "Offline").font(.caption2).foregroundStyle(.secondary) }
             }
         }
         .frame(width: 136, alignment: .leading)

@@ -109,6 +109,7 @@ Each principle is taken from what Apple rewarded in 2026; sources are in [resear
 ### 5.1 Home
 
 Screenshot: `screens/phone-home.jpg`.
+Screenshot, empty state: `screens/phone-home-empty.jpg`.
 
 - **Title area.** A large "Counterpart" title, with the subtitle "*Mac name* connected · *N* printers ready". Top-trailing holds a Printers button with a badge for printer problems, and the account and settings button. Those are the only items at the top, and neither starts work.
 - **Now.** One card for each job that's running:
@@ -167,6 +168,7 @@ Screenshots:
 - `screens/phone-working.jpg`
 - `screens/phone-ask.jpg`
 - `screens/phone-inputs.jpg`
+- `screens/phone-failed.jpg`
 
 **Layout:**
 - **Hero.** A live RealityKit model on a dark stage that you can turn by dragging. Glass buttons float over it:
@@ -200,6 +202,7 @@ Screenshots:
 ### 5.5 Print
 
 Screenshot: `screens/phone-print.jpg`. The flow is modelled on Bambu Handy and MakerWorld's Prepare to Print.
+Screenshots of the variants: `screens/phone-print-one.jpg` (one colour), `screens/phone-print-noams.jpg` (no AMS), `screens/phone-print-loaded.jpg` (What's loaded?), `screens/phone-confirm.jpg` (the MCP's confirmation) and `screens/phone-confirm-mac.jpg` (Answer on your Mac).
 
 **Layout:**
 - **Printer.** A horizontal row of cards, one per printer, read from both MCPs. Each card shows the name, model, a ready dot and its spool colours.
@@ -253,6 +256,7 @@ Screenshot: `screens/phone-printing.jpg`.
 ### 5.8 Printers
 
 Screenshot: `screens/phone-printers.jpg`.
+Screenshots, printer detail: `screens/phone-printer.jpg` and `screens/phone-printer-update.jpg`.
 
 - **One row per printer** from the MCP configs on the Mac, showing state, spools, current job and camera.
 - **Tap a printer** for its live camera, job, filament and history of prints from Counterpart.
@@ -260,12 +264,16 @@ Screenshot: `screens/phone-printers.jpg`.
 
 ### 5.9 Settings and About
 
+Screenshots: `screens/phone-settings.jpg`, `screens/phone-settings-notifications.jpg` and `screens/phone-about.jpg`.
+
 - **Your Mac:** name, connected or last seen, address in use, Check Connection, Connect a Different Mac.
 - **Notifications:** an on/off switch for each event type, and the progress milestones (§9.1, §8.6).
 - **Help:** a guide at the docs site, how scanning works, **Print the caliper card**, and **Print the scan rig**. The rig link opens Kass 3D's MakerWorld page, credited by name (§15).
 - **About:** the app icon, "Counterpart", the version and build, the website, the licences, and open-source notices.
 
 ### 5.10 First run and pairing
+
+Screenshots: `screens/phone-welcome.jpg`, `screens/phone-pair.jpg` and `screens/phone-notify.jpg`.
 
 **Order:**
 1. Welcome: one screen with the two jobs.
@@ -279,6 +287,7 @@ Screenshot: `screens/phone-printers.jpg`.
 ## 6. iPad and iPhone Duo
 
 Screenshots: `screens/ipad-split.jpg` and `screens/duo-closed.jpg`.
+Screenshots, reflow: `screens/duo-home-empty.jpg` and `screens/ipad-welcome.jpg`.
 
 - **iPad, and Duo unfolded.** A `NavigationSplitView`:
   - a sidebar grouped as Now / Needs you / Ready / Printed / Printers;
@@ -307,6 +316,7 @@ Screenshots: `screens/ipad-split.jpg` and `screens/duo-closed.jpg`.
 ### 7.2 Main window
 
 Screenshot: `screens/mac-main.jpg`.
+Screenshots, inspector and New Project: `screens/mac-inspector-activity.jpg`, `screens/mac-inspector-print.jpg` and `screens/mac-new.jpg`.
 
 - **Sidebar:**
   - Now / Needs you / Ready / Printed, each row with a real thumbnail and its status line in the state colour;
@@ -341,6 +351,7 @@ Screenshot: `screens/mac-popover.jpg`.
 ### 7.5 Settings
 
 Screenshot: `screens/mac-devices.jpg`.
+Screenshots, the other tabs: `screens/mac-settings-general.jpg`, `screens/mac-settings-printers.jpg`, `screens/mac-settings-ai.jpg` and `screens/mac-settings-advanced.jpg`.
 
 - **General:** open at login, show in Dock, notifications.
 - **Phones and iPads:**
@@ -398,6 +409,7 @@ Who runs what:
   - When several profiles reach the same printer through the same MCP, the Mac app's own `printer-handoff.json` (the `current` destination) wins.
 - **Capabilities are detected, never assumed.** On the first connection, the companion reads the server name and version from MCP `initialize`, plus its tool list. Each feature lights up only when its tool exists (§8.4).
   - If a tool is missing, Printers says exactly which update unlocks it, with an **Update** button that runs the user's own package manager command for that MCP. Example: "Update mcp-3D-printer-server to see progress and camera."
+  - Screenshot: `screens/phone-printer-update.jpg`.
 
 ### 8.3 MCP sessions: one long-lived session per printer
 
@@ -728,6 +740,9 @@ Scan cleanup always uses Blender. Designing a part from scratch ("make something
 - The pass result records `engine: "fusion"|"blender"`. For Fusion it also keeps the project's `design.f3d` and `parameters.json`, so a later "Ask for changes" pass starts from the parametric design instead of the mesh.
 
 **Setup on the Mac.** Settings → AI has an optional **Design with Fusion** row:
+
+Screenshots: `screens/mac-settings-ai.jpg` and `screens/mac-settings-ai-nofusion.jpg`.
+
 - It shows "Fusion found" or "Fusion isn't installed".
 - **Set up** installs the add-in at the pinned commit and adds the four `FUSION_MCP_*` variables to the printer MCP's env file, next to `BLENDER_MCP_*`.
 - Fusion and its licence (including Autodesk's free personal-use licence) belong to the user. Counterpart never ships or requires Fusion.
@@ -745,6 +760,8 @@ Scan cleanup always uses Blender. Designing a part from scratch ("make something
 Neither app has any notifications today (audit P6, M5). Events come from §8.7 and travel by the routes in §8.8.
 
 ### 9.1 What the user gets
+
+Screenshot: `screens/phone-notifications.jpg` (an approximation: the system draws the Lock Screen).
 
 | Event | iPhone notification | Actions | Level | Mac |
 |---|---|---|---|---|
@@ -826,6 +843,8 @@ If the fetch runs past the extension's time limit, the notification is delivered
 
 ### 9.4 Live Activity
 
+Screenshots: `screens/phone-lock.jpg` and `screens/phone-island.jpg` (approximations: the system draws the Lock Screen and the Dynamic Island).
+
 `PrintAttributes {projectId, printId, title, printerName}`; content state `{state, progress, layer, totalLayers, endsAt, stage, problem?}`.
 
 | Presentation | Content |
@@ -839,6 +858,8 @@ If the fetch runs past the extension's time limit, the notification is delivered
 - Starting and updating it follow §8.8: through the relay when there's an APNs key, and from the phone itself otherwise.
 
 ### 9.5 Widgets and system surfaces
+
+Screenshots: `screens/phone-widgets.jpg` and `screens/phone-widgets-lock.jpg` (approximations: the system draws the Home Screen and the Lock Screen).
 
 - **Widgets:**
   - **Now printing:** small and medium sizes, plus Lock Screen circular and rectangular;
