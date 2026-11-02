@@ -256,6 +256,10 @@ struct ProjectView: View {
     @ViewBuilder private func stateCard(_ object: Project, _ words: ProjectWords) -> some View {
         switch words.phase {
         case .working, .sending: workingCard(object, words)
+        // A printer question needs you too (an older Mac sends no status); it's answered in its sheet, not with photos.
+        case .needsYou where object.printConfirmation != nil:
+            PrintStatusCard(store: store, project: object, working: $working, openPrinting: { openPrinting(object.id) },
+                            openConfirmation: { confirming = object.printConfirmation.map { IdentifiedProject(id: $0.id) } })
         case .needsYou: askCard(object)
         case .failed: failedCard(object, words)
         case .draft: draftCard(object, words)

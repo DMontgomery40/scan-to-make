@@ -120,6 +120,8 @@ public struct ProjectWords: Equatable, Sendable {
     public static func phase(_ project: Project, sending: Bool = false) -> ProjectPhase {
         // The Mac's own phase wins when it gives one (KAN-214 PR 3).
         if let phase = project.status?.phase, let known = ProjectPhase(rawValue: phase), !(project.state == .new && !sending) { return known }
+        // An older Mac sends no status: a printer question waiting for an answer needs you, as the Mac shows it.
+        if project.status == nil, project.printConfirmation != nil { return .needsYou }
         switch project.state {
         case .new:
             // Only while this phone is actually uploading; a send cut short is a draft to finish.
@@ -199,7 +201,7 @@ public struct ProjectWords: Equatable, Sendable {
             let finished = project.print?.monitor?.endState == "done"
             let endedAt = project.print?.monitor?.endedAt.flatMap(ISO.date) ?? project.updatedAt
             (status, busy, actions) = (finished ? "Printed" : "Print request accepted", false, made)
-            line = finished ? "Printed " + Format.when(endedAt, now: now).replacingOccurrences(of: "Now", with: "just now")
+            line = finished ? "Printed " + Format.whenInSentence(endedAt, now: now)
                 : "Sent to " + (project.print?.destination?.name ?? "your printer")
         case .sent:
             // The printer has it, but no "done" will come. It may be printing, so Print asks first (`print.uncertain`).

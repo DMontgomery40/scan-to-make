@@ -62,6 +62,42 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
         self.status = status; self.title = title; self.kind = kind; self.ask = ask; self.directory = directory
     }
 
+    private enum CodingKeys: String, CodingKey {
+        case id, createdAtMs, updatedAtMs, instructions, state, scan, photos, capture, captureDepth, progress, passes, current, question, plate
+        case failure, print, printerDestinationId, printConfirmation, status, title, kind, ask, directory
+    }
+
+    /// One odd object never drops out of the list: missing lists are empty, and an optional that doesn't
+    /// decode is left out. Only a missing id, time or state makes it unreadable.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        func optional<T: Decodable>(_ type: T.Type, _ key: CodingKeys) -> T? { (try? c.decodeIfPresent(T.self, forKey: key)) ?? nil }
+        // Identity, times and state are what every object has; without them it isn't one.
+        id = try c.decode(String.self, forKey: .id)
+        createdAtMs = try c.decode(Double.self, forKey: .createdAtMs)
+        updatedAtMs = try c.decode(Double.self, forKey: .updatedAtMs)
+        state = try c.decode(State.self, forKey: .state)
+        instructions = optional(String.self, .instructions)
+        scan = optional(String.self, .scan)
+        photos = optional([String].self, .photos) ?? []
+        capture = optional([String].self, .capture)
+        captureDepth = optional([String].self, .captureDepth)
+        progress = optional(String.self, .progress)
+        passes = optional([Pass].self, .passes) ?? []
+        current = optional(Result.self, .current)
+        question = optional(Question.self, .question)
+        plate = optional(Plate.self, .plate)
+        failure = optional(String.self, .failure)
+        print = optional(Print.self, .print)
+        printerDestinationId = optional(String.self, .printerDestinationId)
+        printConfirmation = optional(PrintConfirmation.self, .printConfirmation)
+        status = optional(Status.self, .status)
+        title = optional(String.self, .title)
+        kind = optional(String.self, .kind)
+        ask = optional(Ask.self, .ask)
+        directory = optional(String.self, .directory)
+    }
+
     public var createdAt: Date { Date(timeIntervalSince1970: createdAtMs / 1000) }
     public var updatedAt: Date { Date(timeIntervalSince1970: updatedAtMs / 1000) }
 
@@ -177,6 +213,17 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
         public var engine: String?
         public init(model: String, renders: [String], sizeMm: [Double]? = nil, summary: String? = nil, changes: [Change]? = nil) {
             self.model = model; self.renders = renders; self.sizeMm = sizeMm; self.summary = summary; self.changes = changes
+        }
+        private enum CodingKeys: String, CodingKey { case model, renders, sizeMm, summary, changes, engine }
+        /// A malformed optional (say, `changes`) is left out; the model and renders still show.
+        public init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            model = try c.decode(String.self, forKey: .model)
+            renders = (try? c.decodeIfPresent([String].self, forKey: .renders)) ?? []
+            sizeMm = (try? c.decodeIfPresent([Double].self, forKey: .sizeMm)) ?? nil
+            summary = (try? c.decodeIfPresent(String.self, forKey: .summary)) ?? nil
+            changes = (try? c.decodeIfPresent([Change].self, forKey: .changes)) ?? nil
+            engine = (try? c.decodeIfPresent(String.self, forKey: .engine)) ?? nil
         }
     }
 
@@ -340,11 +387,16 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
                 format = try c.decodeIfPresent(String.self, forKey: .format)
             }
 
-            /// The value this field starts with: its default when it has one of the right type, else off for a switch.
+            /// The value this field starts with. A switch always starts off, whatever the MCP's default says: a
+            /// person ticks every printer check themselves. Other fields start at a valid default.
             public var initialValue: JSONValue? {
+                if type == .boolean { return .bool(false) }
                 if let defaultValue, accepts(defaultValue) { return defaultValue }
-                return type == .boolean ? .bool(false) : nil
+                return nil
             }
+
+            /// The answer to use when the person gave none: never a default for a switch.
+            func fallback(_ given: JSONValue?) -> JSONValue? { given ?? (type == .boolean ? nil : defaultValue) }
 
             /// "Low (0.2 mm)" for an enum value, else the value itself.
             public func displayName(of value: String) -> String {
@@ -405,7 +457,7 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
         public func canAccept(_ content: [String: JSONValue], atMs: Double) -> Bool {
             guard isRenderable, expiresAtMs > atMs else { return false }
             return fields.allSatisfy { field in
-                guard let value = content[field.name] ?? field.defaultValue else { return !field.required }
+                guard let value = field.fallback(content[field.name]) else { return !field.required }
                 if field.type == .boolean && field.required { return value == .bool(true) }
                 return field.accepts(value)
             }
@@ -417,7 +469,7 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
             if action == .accept && !canAccept(content, atMs: atMs) { return nil }
             var answer: [String: JSONValue] = [:]
             for field in fields {
-                if let value = content[field.name] ?? field.defaultValue, field.accepts(value) { answer[field.name] = value }
+                if let value = field.fallback(content[field.name]), field.accepts(value) { answer[field.name] = value }
                 else if field.type == .boolean { answer[field.name] = .bool(false) }
             }
             return .init(confirmationId: id, answer: .init(action: action, content: action == .accept ? answer : nil))

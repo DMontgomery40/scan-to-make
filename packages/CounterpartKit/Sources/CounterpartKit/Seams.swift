@@ -20,6 +20,9 @@ public enum CloudKitRecords {
     public static let event = "CounterpartEvent"
     public static let project = "CounterpartProject"
     public static let command = "CounterpartCommand"
+    /// `CounterpartProject.state`: the shared phase spelling, exactly `ProjectPhase.rawValue`
+    /// (draft, sending, working, needs-you, ready, preparing, printing, printed, sent, failed, unknown).
+    public static func projectState(_ phase: ProjectPhase) -> String { phase.rawValue }
     public static let device = "CounterpartDevice"
 
     /// The phone's fixed subscription ids and their notification categories (PRD §9.2).
