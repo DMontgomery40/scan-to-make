@@ -35,7 +35,7 @@ public struct ControlStatus: Decodable, Sendable {
         public let events: Bool
         /// Pause, resume and cancel a running print.
         public let printControl: Bool
-        /// Quality, strength, colour and plate check on `objects.print`, and `objects.estimate`.
+        /// Quality, strength and colour on `objects.print`, and `objects.estimate`.
         public let printSettings: Bool
         /// Title, kind, Ask, what changed, pass stages and estimates, and the design engine.
         public let structuredPasses: Bool
@@ -129,11 +129,9 @@ public struct ControlJobsPage: Decodable, Sendable {
     public let nextCursor: String?
 }
 public struct ControlConfirmation: Decodable, Sendable, Identifiable {
-    public struct CameraSnapshot: Decodable, Sendable { public let format: String, base64: String }
     public let id: String, mode: String, message: String
     public let requestedSchema: JSONValue?
     public let url: String?, elicitationId: String?
-    public let cameraSnapshot: CameraSnapshot?
     public let createdAtMs: Double, expiresAtMs: Double
 }
 public enum ConfirmationAnswer: Sendable {

@@ -45,7 +45,7 @@ final class ObjectsClientTests: XCTestCase {
     }
     private func confirmation(_ overrides: [String: Any] = [:]) throws -> Project.PrintConfirmation {
         let fields: [String: Any] = ["id":"q1", "message":"Check the actual printer.\nKeep all checks.", "expiresAtMs":2000,
-            "supported":true, "fields":[["name":"bed_clear", "title":"The bed is clear", "description":"Look at the entire plate.", "required":true],
+            "supported":true, "fields":[["name":"spool_loaded", "title":"The spool is loaded", "description":"Check the AMS slot.", "required":true],
                                         ["name":"optional_check", "title":"Optional check", "required":false]]]
         return try JSONDecoder().decode(Project.PrintConfirmation.self, from:JSONSerialization.data(withJSONObject:fields.merging(overrides) { $1 }))
     }
@@ -56,13 +56,13 @@ final class ObjectsClientTests: XCTestCase {
             "printConfirmation": ["id":"q1", "message":question.message, "expiresAtMs":2000, "fields":[], "supported":false]
         ]) { $1 }))
         XCTAssertEqual(decoded.printConfirmation?.message, "Check the actual printer.\nKeep all checks.")
-        XCTAssertEqual(question.fields[0].description, "Look at the entire plate.")
+        XCTAssertEqual(question.fields[0].description, "Check the AMS slot.")
         var draft = PrintConfirmationDraft(question)
-        XCTAssertEqual(draft.values, ["bed_clear":.bool(false), "optional_check":.bool(false)], "every check starts unticked")
+        XCTAssertEqual(draft.values, ["spool_loaded":.bool(false), "optional_check":.bool(false)], "every check starts unticked")
         XCTAssertNil(draft.answer(question, at:1000))
-        draft.values["bed_clear"] = .bool(true)
+        draft.values["spool_loaded"] = .bool(true)
         draft.values["not_in_schema"] = .bool(true)
-        XCTAssertEqual(draft.answer(question, at:1000)?.content, ["bed_clear":.bool(true), "optional_check":.bool(false)])
+        XCTAssertEqual(draft.answer(question, at:1000)?.content, ["spool_loaded":.bool(true), "optional_check":.bool(false)])
         XCTAssertNil(draft.answer(question, at:2000), "Expired questions cannot be accepted")
         let next = try confirmation(["id":"q2"])
         XCTAssertNil(draft.answer(next, at:1000), "Answers cannot transfer to a replacement question")
@@ -72,19 +72,19 @@ final class ObjectsClientTests: XCTestCase {
 
     func testEveryElicitationFieldTypeIsShownAndChecked() throws {
         let question = try confirmation(["id":"q9", "fields":[
-            ["name":"ok", "title":"The bed is clear", "required":true],
-            ["name":"plate", "title":"Plate", "type":"string", "enum":["textured", "smooth"], "enumNames":["Textured PEI", "Smooth PEI"], "required":true],
+            ["name":"ok", "title":"The spool is loaded", "required":true],
+            ["name":"nozzle", "title":"Nozzle", "type":"string", "enum":["0.4", "0.6"], "enumNames":["0.4 mm", "0.6 mm"], "required":true],
             ["name":"note", "title":"Note", "type":"string", "maxLength":10],
             ["name":"temp", "title":"Bed temperature", "type":"integer", "minimum":40, "maximum":110, "default":60, "required":true],
             ["name":"flow", "title":"Flow", "type":"number", "minimum":0.5, "maximum":1.5],
             ["name":"mail", "title":"Email me", "type":"string", "format":"email"]]])
         XCTAssertTrue(question.isRenderable)
-        XCTAssertEqual(question.fields[1].displayName(of:"smooth"), "Smooth PEI")
+        XCTAssertEqual(question.fields[1].displayName(of:"0.6"), "0.6 mm")
         var draft = PrintConfirmationDraft(question)
         XCTAssertEqual(draft.text["temp"], "60", "the printer's own default fills a number")
         XCTAssertNil(draft.answer(question, at:1000), "a required check and a required choice are still empty")
         draft.values["ok"] = .bool(true)
-        draft.values["plate"] = .string("smooth")
+        draft.values["nozzle"] = .string("0.6")
         draft.text["temp"] = "60.5"
         XCTAssertEqual(draft.problem(question.fields[3]), "A whole number.")
         draft.text["temp"] = "120"
@@ -105,7 +105,7 @@ final class ObjectsClientTests: XCTestCase {
         XCTAssertEqual(draft.problem(question.fields[5]), "An email address.")
         draft.text["mail"] = "me@example.com"
         XCTAssertEqual(draft.answer(question, at:1000)?.content,
-                       ["ok":.bool(true), "plate":.string("smooth"), "temp":.number(65), "flow":.number(0.95), "mail":.string("me@example.com")],
+                       ["ok":.bool(true), "nozzle":.string("0.6"), "temp":.number(65), "flow":.number(0.95), "mail":.string("me@example.com")],
                        "typed as asked; an empty optional field is left out")
 
         let unknown = try confirmation(["fields":[["name":"f", "title":"F", "type":"array", "required":false]]])
@@ -115,7 +115,7 @@ final class ObjectsClientTests: XCTestCase {
 
     func testConfirmationTransportPreservesExactQuestionAndBooleanAnswers() async throws {
         for action in [PrintConfirmationResponse.Action.accept, .decline, .cancel] {
-            let answer = PrintConfirmationAnswer(action:action, content:action == .accept ? ["bed_clear":.bool(true), "temp":.number(60), "plate":.string("smooth")] : nil)
+            let answer = PrintConfirmationAnswer(action:action, content:action == .accept ? ["spool_loaded":.bool(true), "temp":.number(60), "nozzle":.string("0.6")] : nil)
             let server = try UnixFixture { request in
                 XCTAssertEqual(request["method"] as? String, "objects.answerPrintConfirmation")
                 let params = request["params"] as! [String: Any]
@@ -124,7 +124,7 @@ final class ObjectsClientTests: XCTestCase {
                 XCTAssertEqual(params["confirmationId"] as? String, "exact-pending-question")
                 let sent = params["answer"] as! [String: Any]
                 XCTAssertEqual(sent["action"] as? String, action.rawValue)
-                XCTAssertEqual(sent["content"] as? [String: AnyHashable], action == .accept ? ["bed_clear":true, "temp":60.0, "plate":"smooth"] : nil)
+                XCTAssertEqual(sent["content"] as? [String: AnyHashable], action == .accept ? ["spool_loaded":true, "temp":60.0, "nozzle":"0.6"] : nil)
                 XCTAssertEqual(sent.count, action == .accept ? 2 : 1)
                 return [try objectReply(request)]
             }

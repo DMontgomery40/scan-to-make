@@ -171,7 +171,7 @@ struct ProjectDetail: View {
         .confirmationDialog("Stop the print?", isPresented: $stopping, titleVisibility: .visible) {
             Button("Stop Printing", role: .destructive) { Task { await model.control(object.id, .cancel) } }
             Button("Keep Printing", role: .cancel) {}
-        } message: { Text("The printer stops now. What's on the plate stays there.") }
+        } message: { Text("The printer stops now.") }
     }
 
     private var failedCard: some View {

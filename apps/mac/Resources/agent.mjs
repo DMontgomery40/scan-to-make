@@ -70,7 +70,7 @@ function loginShellClaude(home, timeoutMs = 5000) {
   });
 }
 /**
- * Objects (touch-ups and the plate check) run the user's own Claude Code login, and the companion
+ * Objects (touch-ups) run the user's own Claude Code login, and the companion
  * turns them on only with an absolute SCAN_TO_MAKE_CLAUDE_PATH. An explicit absolute path from
  * companion.env wins; a relative one would stop the companion starting, so it is replaced. Otherwise:
  * the login shell's claude, then the usual install places. Nothing found leaves objects off.
