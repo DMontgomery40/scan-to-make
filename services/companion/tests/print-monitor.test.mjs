@@ -89,7 +89,7 @@ test('someone else\'s print running instead of ours is "replaced", never reporte
 test('lost contact: three failed reads say "still trying" once, reads slow to 30 s, and recovery carries on', async () => {
   const fail = new Error('EHOSTUNREACH');
   const h = harness({reports: [printing(10, 10), fail, fail, fail, fail, printing(12, 12)]});
-  const run = async () => { await h.monitor.step(h.signal); };
+  const run = async () => { await h.monitor.step(h.signal); h.clock.t += 1; };
   await run(); await run(); await run();
   assert.equal(h.types().includes('print.unreachable'), false);
   await run();
@@ -207,7 +207,7 @@ test('a job named after our file is adopted only while it runs; an earlier finis
   const queue = [leftover, leftover, fresh, {state: 'finished', job: {name: 'checked-NEW-clean_flat_sliced', progress: 100}}];
   const ends = [];
   const runner = new PrintMonitorRunner({projectId: 'p', printId: 'x', destinationId: 'd', printerName: 'P1S', fileBase: 'clean_flat_sliced', dispatchedAtMs: T0}, {
-    clock, read: async () => ({observedAt: new Date(clock.t).toISOString(), problems: [], source: 'counterpart', ...queue.shift()}),
+    clock, read: async () => ({observedAt: new Date(clock.t++).toISOString(), problems: [], source: 'counterpart', ...queue.shift()}),
     save: async () => {}, end: async end => { ends.push(end); }, emit: async () => {}, milestones: () => [50], adopted: async name => { adopted.push(name); }});
   const signal = new AbortController().signal;
   await runner.step(signal); await runner.step(signal);
@@ -224,7 +224,7 @@ test('a reused job name\'s leftover ending is not ours until this print has been
     {state: 'finished', job: {name: 'sliced.gcode', progress: 100}}];
   const ends = [], events = [];
   const runner = new PrintMonitorRunner({projectId: 'p', printId: 'x', destinationId: 'd', printerName: 'Voron', jobName: 'sliced.gcode', dispatchedAtMs: T0}, {
-    clock, read: async () => ({observedAt: new Date(clock.t).toISOString(), problems: [], source: 'counterpart', ...queue.shift()}),
+    clock, read: async () => ({observedAt: new Date(clock.t++).toISOString(), problems: [], source: 'counterpart', ...queue.shift()}),
     save: async () => {}, end: async end => { ends.push(end); }, emit: async draft => { events.push(draft.type); }, milestones: () => []});
   const signal = new AbortController().signal;
   await runner.step(signal);
@@ -338,4 +338,86 @@ test('a failure takes its words from its own report: preparing with no problems,
   assert.deepEqual(h.events.at(-1).data.problems.map(problem => problem.code), [HMS.code]);
   assert.equal(printEndFailure('failed', {title: 'Stove gap filler', printer: 'Bambu Lab P1S', problem: h.saves.at(-1).live.problems[0]}),
     'The printer stopped (0300_0D00_0002_0001).');
+});
+
+// Production: a dispatch-unique name arrived with FINISH/100% observed 2.3 s before
+// the app's dispatch receipt. It must not produce Done while the new print starts.
+test('a unique job cannot finish from a report observed before dispatch', async () => {
+  const h = harness({taskId: 'current-job', reports: [
+    {state: 'finished', observedAt: new Date(T0 - 2300).toISOString(), job: {name: JOB, progress: 100}},
+    printing(0, 0),
+    {state: 'finished', job: {name: JOB, progress: 100}},
+  ]});
+  await h.steps(1);
+  assert.equal(h.monitor.state.phase, 'starting');
+  assert.deepEqual(h.types(), []);
+  assert.deepEqual(h.ends, []);
+  await h.steps(1);
+  assert.equal(h.monitor.state.phase, 'watching');
+  assert.equal(h.saves.at(-1).live.state, 'preparing');
+  await h.steps(1);
+  assert.deepEqual(h.ends.map(x => x.end), ['done']);
+});
+
+test('out-of-order and untimeable reports cannot end or replace a newer running job', async () => {
+  const at = ms => new Date(T0 + ms).toISOString();
+  const h = harness({reports: [
+    printing(20, 20, {observedAt: at(20_000)}),
+    {state: 'finished', observedAt: at(10_000), job: {name: JOB, progress: 100}},
+    {state: 'failed', observedAt: 'invalid', job: {name: JOB}},
+    printing(5, 5, {observedAt: at(10_000), job: {name: 'older-other-job'}}),
+    {state: 'finished', observedAt: at(30_000), job: {name: JOB, progress: 100}},
+  ]});
+  h.clock.t = T0 + 20_000;
+  await h.steps(4);
+  assert.deepEqual(h.ends, []);
+  assert.equal(h.monitor.state.lastReportAt, at(20_000));
+  assert.equal(h.saves.at(-1).live.job.progress, 20);
+  await h.steps(1);
+  assert.deepEqual(h.ends.map(x => x.end), ['done']);
+});
+
+test('a restarted watch preserves the last observation boundary before accepting an ending', async () => {
+  const at = ms => new Date(T0 + ms).toISOString();
+  const state = {phase: 'watching', startedAt: at(0), lastReportAt: at(60_000), milestonesSent: [], firstLayerSent: true};
+  const h = harness({state, reports: [
+    {state: 'finished', observedAt: at(50_000), job: {name: JOB, progress: 100}},
+    {state: 'finished', observedAt: at(70_000), job: {name: JOB, progress: 100}},
+  ]});
+  h.clock.t = T0 + 70_000;
+  await h.steps(1);
+  assert.deepEqual(h.ends, []);
+  await h.steps(1);
+  assert.deepEqual(h.ends.map(x => x.end), ['done']);
+});
+
+test('a conflicting terminal at the same observation time cannot overwrite running, and an ending is emitted once', async () => {
+  const h = harness({reports: [printing(10, 10),
+    {state: 'finished', observedAt: new Date(T0).toISOString(), job: {name: JOB, progress: 100}},
+    {state: 'finished', job: {name: JOB, progress: 100}},
+  ]});
+  await h.steps(2);
+  assert.deepEqual(h.ends, []);
+  await h.steps(2);
+  assert.deepEqual(h.ends.map(x => x.end), ['done']);
+  assert.equal(h.types().filter(x => x === 'print.done').length, 1);
+});
+
+test('a fresh unique-job ending may still be accepted when first observed after restart', async () => {
+  const h = harness({taskId: 'unique-task', reports: [{state: 'finished', job: {name: JOB, progress: 100}}]});
+  h.clock.t = T0 + 60_000;
+  await h.steps(1);
+  assert.deepEqual(h.ends.map(x => x.end), ['done']);
+});
+
+test('repeated stale reports cannot claim not-started or keep a watch alive forever', async () => {
+  const stale = {state: 'finished', observedAt: new Date(T0 - 1).toISOString(), job: {name: JOB, progress: 100}};
+  const h = harness({taskId: 'unique-task', reports: [stale, stale, stale]});
+  await h.steps(1);
+  h.clock.t = T0 + MONITOR.startWindowMs;
+  await h.steps(1);
+  assert.deepEqual(h.ends, []);
+  h.clock.t = T0 + MONITOR.giveUpAfterMs;
+  await h.steps(1);
+  assert.deepEqual(h.ends.map(x => x.end), ['sent'], 'stale data establishes no print outcome');
 });

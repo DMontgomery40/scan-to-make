@@ -255,6 +255,7 @@ export class PrintMonitorRunner {
 
   /** One read and everything it implies. Exposed for tests. */
   async step(signal: AbortSignal): Promise<void> {
+    if (signal.aborted || this.#state.phase === 'ended') return;
     const now = this.#clock.now();
     let report: PrintReport;
     try { report = await this.#deps.read(signal); }
@@ -262,6 +263,17 @@ export class PrintMonitorRunner {
       if (signal.aborted) return;
       this.#failures++;
       if (this.#failures >= MONITOR.unreachableAfterFailures) await this.#unreachable(now, signal);
+      await this.#giveUp(now, signal);
+      return;
+    }
+    // Even a dispatch-unique name can be paired with cached state from before
+    // dispatch. Only advance this watch with a timestamp at/after dispatch and
+    // strictly newer than its last accepted report (also persisted on restart).
+    const observedAt = Date.parse(report.observedAt);
+    const lastObservedAt = this.#state.lastReportAt ? Date.parse(this.#state.lastReportAt) : undefined;
+    if (!Number.isFinite(observedAt) || observedAt < this.target.dispatchedAtMs
+        || (lastObservedAt !== undefined && observedAt <= lastObservedAt)) {
+      // Stale data proves neither completion nor failure to start.
       await this.#giveUp(now, signal);
       return;
     }
