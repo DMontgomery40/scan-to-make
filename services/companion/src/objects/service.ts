@@ -1440,7 +1440,10 @@ export class ObjectService {
     }
     const ask = result.status === 'needs_closeup' ? await this.#ask(id, result) : undefined;
     const state: StmObject['state'] = result.status === 'needs_closeup' ? 'needs-closeup'
-      : current && result.status !== 'failed' ? 'ready' : 'failed';
+      : current && (result.status === 'done' || result.status === 'unchanged') ? 'ready' : 'failed';
+    const failure = result.status === 'capped'
+      ? `Stopped at the ${result.reason?.includes('time') ? 'time' : 'step'} limit. ${current ? 'Try again or review the saved checkpoint.' : 'Try again.'}`
+      : result.reason ?? 'The touch-up stopped without a model.';
     const now = Date.now();
     // A changed model hasn't been shown to work yet: its first print asks "Did it fit?" again. A pass that
     // changed nothing leaves the outcome alone, and a Done project stays Done.
@@ -1452,11 +1455,11 @@ export class ObjectService {
       ...(o.kind ? {} : {kind}),
       ...(ask ? {ask} : {}),
       ...(state === 'needs-closeup' ? {question: {closeup: result.closeup ?? result.ask?.question ?? 'a part of the object'}} : {}),
-      ...(state === 'failed' ? {failure: result.reason ?? 'The touch-up stopped without a model.'} : {}),
+      ...(state === 'failed' ? {failure} : {}),
       passes: o.passes.map(({estimate: _estimate, ...p}) => p.startedAtMs !== startedAtMs ? {...p, ...(_estimate ? {estimate: _estimate} : {})} : {...p, endedAtMs: now, status: result.status,
         stages: p.stages?.map(item => item.endedAtMs === undefined ? {...item, endedAtMs: now} : item),
         ...(result.engine ? {engine: result.engine} : {}), ...(result.note ? {engineNote: this.#publicText(result.note)} : {}),
-        ...(state === 'failed' ? {activity: this.#activity(p.activity, [{atMs: Date.now(), kind: 'message', text: result.reason ?? 'The touch-up stopped without a model.'}])} : {}),
+        ...(state === 'failed' ? {activity: this.#activity(p.activity, [{atMs: Date.now(), kind: 'message', text: failure}])} : {}),
         ...(result.summary ? {summary: result.summary} : {}), seconds: result.stats.seconds,
         ...(result.stats.costUsd !== undefined ? {costUsd: result.stats.costUsd} : {}), dir: result.passDir})}));
     const saving = updated.passes.find(p => p.startedAtMs === startedAtMs)?.stages?.find(item => item.id === 'saving');

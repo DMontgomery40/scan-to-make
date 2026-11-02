@@ -204,12 +204,13 @@ test('more than 24 photos sends 24, evenly spread from first to last', async () 
   assert.equal(sent.at(-1), join(store.dir(object.id), 'photos', 'p30.jpg'));
 });
 
-test('a model the engine stopped early is kept and shown as ready with a note', async () => {
+test('a model the engine stopped early is kept without claiming completion', async () => {
   const {service, object} = await setup({status: 'capped', reason: 'stopped at the 900 s time limit', summary: undefined});
   await service.start(object.id);
   const settled = await service.settled(object.id);
-  assert.equal(settled.state, 'ready');
+  assert.equal(settled.state, 'failed');
   assert.match(settled.current.summary, /time limit/);
+  assert.equal(settled.failure, 'Stopped at the time limit. Try again or review the saved checkpoint.');
 });
 
 test('a close-up answer after a correction carries on from the corrected model and the correction', async () => {
