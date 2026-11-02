@@ -168,6 +168,23 @@ import CounterpartKit
         XCTAssertEqual(store.project(project.id), project)
     }
 
+    func testRemovingOlderPairingsNeverRevokesTheRequestingPhone() async throws {
+        let mac = SettingsMac()
+        let pairing = PairingClient(store: PairingStore(store: Fixtures.store()), transport: mac)
+        let store = ProjectsStore(mac: MacConnection(client: CompanionClient(pairing: pairing, transport: mac)), pairing: pairing)
+        let model = MacSettingsModel(store: store)
+        let current = try XCTUnwrap(model.deviceId)
+        let older = "bcb48dc1-50c8-4ca9-924b-eaf9639f7c32"
+        let bytes = try JSONSerialization.data(withJSONObject: [
+            ["deviceId": current, "current": true, "legacy": true],
+            ["deviceId": older, "legacy": true],
+        ])
+        model.devices = try JSONDecoder().decode([CompanionDevice].self, from: bytes)
+        await model.remove([current, older])
+        XCTAssertFalse(mac.requests.contains("DELETE /v1/devices/\(current)"), "a legacy current phone must remain paired")
+        XCTAssertTrue(mac.requests.contains("DELETE /v1/devices/\(older)"), "the other older pairing is still removed")
+    }
+
     /// Codex on #218: a refused AI choice keeps its reason and isn't tested; a read that works clears a failed read,
     /// but not a refusal.
     func testMacSettingsKeepARefusalAndDropAFailedReadOnceTheMacAnswers() async {
@@ -213,6 +230,7 @@ private final class SettingsMac: HTTPTransport, @unchecked Sendable {
         guard answers else { throw URLError(.cannotConnectToHost) }
         func json(_ value: Any, _ status: Int = 200) -> HTTPReply { HTTPReply(status: status, body: (try? JSONSerialization.data(withJSONObject: value)) ?? Data()) }
         let settings: [String: Any] = ["milestones": "50", "ai": ["revision": "r1", "choice": ["kind": "claude-code"], "check": ["state": "connected"]]]
+        if request.httpMethod == "DELETE", request.url?.path.hasPrefix("/v1/devices/") == true { return json(["removed": true]) }
         switch line {
         case "GET /v1/settings": return json(["settings": settings])
         case "PATCH /v1/settings":

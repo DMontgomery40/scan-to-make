@@ -462,7 +462,6 @@ test('HTTP token scopes, expiry, revocation and per-device credentials prevent c
   for (const route of [
     '/v1/generate',
     '/v1/revoke',
-    '/v1/devices',
     '/v1/print',
     '/v1/discovery',
     '/v1/journal',
@@ -473,6 +472,9 @@ test('HTTP token scopes, expiry, revocation and per-device credentials prevent c
       404
     );
   }
+  // Device management is a known route now, but never a POST or a generation-only capability.
+  assert.equal((await wire(server, '/v1/devices', {method: 'POST', headers: credentials(b)})).status, 403);
+  assert.equal((await wire(server, '/v1/devices', {method: 'POST', headers: credentials(projectsOnly)})).status, 405);
   advance(30 * 24 * 60 * 60 * 1000);
   assert.equal(
     (await wire(server, '/healthz', { headers: credentials(b) })).status,
@@ -975,4 +977,56 @@ test('an MCP update rechecks a phone revoked while its request body was arriving
   });
   assert.equal(reply.status, 401);
   assert.equal(updates, 0);
+});
+
+
+test('HTTP paired device list matches the phone schema without exposing credentials', async t => {
+  const {store, server} = await httpFixture(t);
+  const phone = await exchange(store, 'alice@example.test', ['projects:read', 'projects:write']);
+  const other = await exchange(store, 'bob@example.test', ['projects:read', 'projects:write']);
+  const response = await wire(server, '/v1/devices', {headers: credentials(phone)});
+  assert.equal(response.status, 200);
+  assert.equal(response.body.devices.length, 2);
+  const device = response.body.devices.find(d => d.deviceId === phone.deviceId);
+  assert.equal(device.deviceId, phone.deviceId);
+  assert.equal(device.current, true);
+  assert.equal(device.legacy, true);
+  assert.equal(device.pairedAt, '2027-01-15T08:00:00.000Z');
+  assert.equal(typeof device.expiresAt, 'string');
+  for (const key of ['token', 'tokenHash', 'installationKeyHash', 'login', 'scopes']) assert.equal(key in device, false);
+  assert.equal(response.body.devices.find(d => d.deviceId === other.deviceId).current, false);
+  assert.equal(device.pairedVia, 'tailscale');
+});
+
+test('HTTP paired device removal revokes its credential and tokens while preserving other phones', async t => {
+  const f = await fixture(t);
+  const {LiveActivityTokenStore} = await import('../dist/devices/live-activity-tokens.js');
+  const {DevicePresence} = await import('../dist/devices/presence.js');
+  const tokens = new LiveActivityTokenStore(join(f.directory, 'tokens.json'), {now:f.clock});
+  const presence = new DevicePresence(join(f.directory, 'presence.json'), {now:f.clock});
+  const server = await startCompanionServer({port:0, remoteAuth:f.store, liveActivityTokens:tokens, presence});
+  t.after(() => server.close());
+  const phone = await exchange(f.store, 'alice@example.test', ['projects:read', 'projects:write']);
+  const removed = await exchange(f.store, 'alice@example.test', ['projects:read', 'projects:write']);
+  await tokens.store(removed.deviceId, {pushToStart:'a'.repeat(64)});
+  await presence.seen(removed.deviceId, 'iPhone18,2');
+  const result = await wire(server, '/v1/devices/'+removed.deviceId, {method:'DELETE', headers:credentials(phone)});
+  assert.equal(result.status, 200);
+  assert.deepEqual(result.body, {removed:true});
+  await denied(() => f.store.authorize('alice@example.test', removed.deviceId, removed.token, 'projects:read'));
+  await f.store.authorize('alice@example.test', phone.deviceId, phone.token, 'projects:read');
+  assert.deepEqual(await tokens.list(), {pushToStart:[], activities:[]});
+  assert.deepEqual(await presence.get(removed.deviceId), {});
+});
+
+test('HTTP paired device management enforces authentication, write scope and valid device IDs', async t => {
+  const {store, server} = await httpFixture(t);
+  const reader = await exchange(store, 'alice@example.test', ['projects:read']);
+  const writer = await exchange(store, 'alice@example.test', ['projects:read','projects:write']);
+  const other = await exchange(store, 'bob@example.test', ['projects:read']);
+  assert.equal((await wire(server, '/v1/devices')).status, 401);
+  assert.equal((await wire(server, '/v1/devices/'+writer.deviceId, {method:'DELETE',headers:credentials(reader)})).status, 403);
+  assert.equal((await wire(server, '/v1/devices/'+randomUUID(), {method:'DELETE',headers:credentials(writer)})).status, 404);
+  assert.equal((await wire(server, '/v1/devices/not-a-uuid', {method:'DELETE',headers:credentials(writer)})).status, 400);
+  await store.authorize('bob@example.test',other.deviceId,other.token,'projects:read');
 });

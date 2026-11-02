@@ -284,6 +284,39 @@ export async function startCompanionServer(
       if(eventRoutes&&(request.url==='/v1/events'||request.url?.startsWith('/v1/events?'))){
         await eventRoutes.handle(request,response,authorize);return;
       }
+      const deviceRoute = /^\/v1\/devices\/([^/]+)$/.exec(request.url ?? '');
+      if (auth && (request.url === '/v1/devices' || (deviceRoute && deviceRoute[1] !== 'live-activity-tokens'))) {
+        const listing = request.url === '/v1/devices';
+        await authorize(listing ? 'projects:read' : 'projects:write');
+        if (request.method !== (listing ? 'GET' : 'DELETE')) throw new ServerFailure('method-not-allowed');
+        // The paired credential authorizes access; pairedVia records transport history, not ownership.
+        const devices = await auth.listDevices();
+        if (listing) {
+          const legacy = await auth.legacyDeviceIds();
+          const current = credential().deviceId;
+          response.end(JSON.stringify({devices: await Promise.all(devices.map(async device => {
+            const seen = await options.presence?.get(device.deviceId);
+            return {
+              deviceId: device.deviceId, deviceName: device.deviceName,
+              pairedAt: new Date(device.pairedAt).toISOString(),
+              lastRefreshedAt: new Date(device.lastRefreshedAt).toISOString(),
+              expiresAt: new Date(device.expiresAt).toISOString(), pairedVia: device.pairedVia.transport,
+              ...(seen?.model ? {model: seen.model} : {}),
+              ...(seen?.lastSeenAt !== undefined ? {lastSeenAt: new Date(seen.lastSeenAt).toISOString()} : {}),
+              legacy: legacy.has(device.deviceId), current: device.deviceId === current,
+            };
+          }))}));
+        } else {
+          const parsed = z.uuid().safeParse(deviceRoute![1]);
+          if (!parsed.success) throw new ServerFailure('invalid-request');
+          if (!devices.some(device => device.deviceId === parsed.data)) throw new ServerFailure('not-found');
+          await auth.revoke(parsed.data);
+          await options.liveActivityTokens?.removeDevice(parsed.data).catch(() => undefined);
+          await options.presence?.forget(parsed.data).catch(() => undefined);
+          response.end(JSON.stringify({removed: true}));
+        }
+        return;
+      }
       if(options.liveActivityTokens&&request.url==='/v1/devices/live-activity-tokens'){
         if(request.method!=='POST')throw new ServerFailure('method-not-allowed');
         await authorize('projects:write');
