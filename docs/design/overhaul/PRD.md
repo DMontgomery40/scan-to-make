@@ -204,8 +204,8 @@ Screenshots:
 
 **After printing: did it fit?** A `printed` project shows a card under the hero:
 - **Did it fit?**, with **It works** and **Needs changes**.
-- **It works** sets the state to `confirmed` (`PATCH /v1/objects/<id> {"outcome":"works"}`). The project moves to a **Done** section on Home and in the Mac sidebar, with a green **Works** capsule.
-- **Needs changes** opens Ask for changes with "After printing: " prefilled and the camera ready, so a photo of the part on the real object can go with it. That starts a new pass, keeps the print history, and sets `outcome: "needs-changes"`.
+- **It works** sets the state to `confirmed` (`PATCH /v1/objects/<id>/settings {"status":"works"}`, or `objects.settings.set` on the Mac; gated on `capabilities.projectSettings`). The project moves to a **Done** section on Home and in the Mac sidebar, with a green **Works** capsule.
+- **Needs changes** opens Ask for changes with "After printing: " prefilled and the camera ready, so a photo of the part on the real object can go with it. That starts a new pass, keeps the print history, and sets the status to `needs-changes`.
 - The same two answers are actions on the `print.done` notification (§9.1). Done projects can still be printed again or changed.
 - Projects nobody answers stay `printed` and are never nagged about again after the first card.
 
