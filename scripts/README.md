@@ -41,3 +41,14 @@ Every `macos`/`xcode-` job, whether started on the Mac or sent from a Linux box,
 python3 scripts/ci_local.py --ios-lock xcodebuild test ...
 /usr/bin/lockf -k ~/.stm-ios.lock xcodebuild test ...   # same lock
 ```
+
+## Before every merge: `branch_check.py`
+
+David, 2026-11-01: "make sure ... no one is writing on top of each other and in worktrees that have already been changed by a sibling session next door and all of sudden nothing agrees."
+
+```
+python3 scripts/branch_check.py                # every live branch: behind main, files it changes, conflicts
+python3 scripts/branch_check.py --merge KAN-x  # exit 0 only if KAN-x is current with main and conflicts with nothing active
+```
+
+It uses git's real three-way merge, so squash-merged work counts as merged. If it says NOT SAFE: rebase on main, or agree the merge order with the other branch's owner (the later one rebases), re-run the tests at the new head (`stm-ci` / `ci_local.py`), push, and check again. Delete a branch or worktree only after GitHub shows the PR as merged.
