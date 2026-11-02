@@ -149,10 +149,20 @@ public extension ControlClient {
         let reply: Reply = try await call("settings.set", patch)
         return reply.settings
     }
-    /// After the phone asked for Fusion's Set Up (`settings.changed` with `action: "fusion.setup"`), the result.
-    func fusionSetupDone(ok: Bool, message: String?) async throws {
+    /// Passive Mac observations only; neither call launches Fusion or reads a design.
+    func reportFusion(installed: Bool, configured: Bool, running: Bool) async throws {
         struct Reply: Decodable {}
-        var params: [String: JSONValue] = ["ok": .bool(ok)]
+        let _: Reply = try await call("fusion.report", ["installed": .bool(installed), "configured": .bool(configured), "running": .bool(running)])
+    }
+    /// Claim once, including after reconnect. Replayed settings events never repeat an install.
+    func claimFusionSetup(claimantId: String) async throws -> String? {
+        struct Reply: Decodable { let requestId: String? }
+        let reply: Reply = try await call("fusion.claimSetup", ["claimantId": .string(claimantId)])
+        return reply.requestId
+    }
+    func fusionSetupDone(requestId: String, ok: Bool, message: String?) async throws {
+        struct Reply: Decodable {}
+        var params: [String: JSONValue] = ["requestId": .string(requestId), "ok": .bool(ok)]
         if let message { params["message"] = .string(message) }
         let _: Reply = try await call("fusion.setupDone", params)
     }

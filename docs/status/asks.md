@@ -90,3 +90,12 @@ Defects Codex found in the code:
 - `ObjectMasker` clips beyond the nearest depth + 20 cm, so a nearer hand erases the object.
 - `ObjectMasker` subtracts the hands before choosing the object.
 - `reconstruct.ts` throws away the reconstruction's stderr, which hides the real error.
+
+### AI provider routing acceptance — 2026-11-02
+
+The new phone/Mac AI connection controls save and test ModelAccessService credentials.
+They do not select the current ObjectService worker: cleanup, design and corrections still
+use configured Claude Code. The UI now labels this diagnostic scope explicitly, and the
+project footer reports the actual Claude worker rather than the unused saved choice.
+Provider switching and globally disabling model AI remain unimplemented; no live provider
+change or alternate-provider model job is claimed by this settings bridge.

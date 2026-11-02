@@ -24,7 +24,7 @@ protocol ObjectsCompanion: Sendable {
     /// What the companion can do (capability flags) and the phones paired with it, for the footer and gating.
     func status() async throws -> ControlStatus
     func devices() async throws -> [ControlDevice]
-    /// The AI that does the work ("Claude Code"), nil when none is chosen or it can't be read.
+    /// The actual object worker, independent of the saved connection-test choice.
     func aiProvider() async -> String?
     func create(instructions: String?, kind: String?) async throws -> Project
     func addFile(_ id: String, kind: String, path: String) async throws -> Project
@@ -118,8 +118,10 @@ struct SocketObjects: ObjectsCompanion {
     func status() async throws -> ControlStatus { try await ControlClient(socketPath:path).status() }
     func devices() async throws -> [ControlDevice] { try await ControlClient(socketPath:path).devices() }
     func aiProvider() async -> String? {
-        guard let snapshot = try? await ControlClient(socketPath:path).modelAccess(), snapshot.choice != .none else { return nil }
-        return snapshot.choice.providerName
+        // ObjectService currently builds every model job with the configured Claude executable.
+        // The saved modelAccess choice only drives connection tests and must not label these jobs.
+        guard let status = try? await ControlClient(socketPath:path).status(), status.capabilities.objectsCreate else { return nil }
+        return "Claude"
     }
     func create(instructions: String?, kind: String?) async throws -> Project {
         try await ControlClient(socketPath:path).createObject(instructions:instructions, kind:kind)

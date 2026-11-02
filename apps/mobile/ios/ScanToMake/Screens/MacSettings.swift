@@ -192,8 +192,8 @@ struct MacSettingsSections: View {
 
     private func aiSection(_ ai: CompanionSettings.AI) -> some View {
         Section {
-            Picker("AI", selection: Binding(get: { ai.choice?.kind ?? "none" }, set: { kind in Task { await model.chooseAI(kind) } })) {
-                ForEach(SettingsSchema.aiKinds.filter { $0.fromPhone || $0.kind == ai.choice?.kind }, id: \.kind) { Text($0.label).tag($0.kind) }
+            Picker("Connection to test", selection: Binding(get: { ai.choice?.kind ?? "none" }, set: { kind in Task { await model.chooseAI(kind) } })) {
+                ForEach(SettingsSchema.aiKinds.filter { $0.fromPhone || $0.kind == ai.choice?.kind }, id: \.kind) { Text($0.kind == "none" ? "None" : $0.label).tag($0.kind) }
             }
             .pickerStyle(.menu)
             HStack {
@@ -207,8 +207,8 @@ struct MacSettingsSections: View {
                 Spacer()
                 Button("Test") { Task { await model.testAI() } }.disabled(model.working != nil || ai.revision == nil)
             }
-        } header: { Text("AI") } footer: {
-            Text("An API key or your own endpoint is chosen on \(model.macName), where its key is kept.")
+        } header: { Text("AI connection test") } footer: {
+            Text("Save and test an AI connection on \(model.macName). Current scan cleanup, designs and corrections use Claude Code independently of this choice. API keys and endpoints are set up on the Mac, where keys stay.")
         }
     }
 
@@ -217,7 +217,7 @@ struct MacSettingsSections: View {
         switch check.state {
         case "connected": return "Connected"
         case "checking": return "Testing…"
-        case "skipped": return "Off"
+        case "skipped": return "No connection selected"
         default: return check.message ?? "Not connected"
         }
     }
@@ -230,11 +230,19 @@ struct MacSettingsSections: View {
                 if fusion.state == "setting-up" { ProgressView().controlSize(.small) }
                 Text(fusion.message).font(.subheadline).fixedSize(horizontal: false, vertical: true)
                 Spacer()
-                if fusion.state == "not-set-up" {
-                    Button("Set Up") { Task { await model.setUpFusion() } }.disabled(model.working != nil)
+                if fusion.state == "not-set-up" || fusion.state == "not-running" || fusion.state == "connected" {
+                    Button(fusion.state == "not-set-up" ? "Set Up" : "Set Up Again") { Task { await model.setUpFusion() } }.disabled(model.working != nil)
                 }
             }
         } header: { Text("Design with Fusion") }
+        .task(id: fusion.state) {
+            guard fusion.state == "setting-up" else { return }
+            while !Task.isCancelled {
+                do { try await Task.sleep(for: .seconds(2)) } catch { return }
+                await model.load()
+                if model.settings?.fusion?.state != "setting-up" { return }
+            }
+        }
     }
 
     // MARK: Phones and iPads

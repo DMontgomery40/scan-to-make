@@ -11,7 +11,7 @@ import {CompanionSettingsPatchSchema, type ObjectStatus, type ProjectStatus} fro
 import {objectStatus, projectTitle} from '../events/words.js';
 import {ObjectNotFoundError, type ObjectPass, type StmObject} from './store.js';
 import {RECONSTRUCTION_FAILED} from './reconstruct.js';
-import {parameters} from '../local-control-protocol.js';
+import {ControlFailure, parameters} from '../local-control-protocol.js';
 
 const READ: RemoteScope = 'projects:read', WRITE: RemoteScope = 'captures:import', PRINT: RemoteScope = 'printer-handoff:use';
 const MAX_SCAN = 64 * 1024 * 1024, MAX_PHOTO = 25 * 1024 * 1024, MAX_JSON = 16 * 1024;
@@ -166,6 +166,17 @@ export function createObjectRoutes(service: ObjectService) {
           await authorize(PRINT);
           if (url.searchParams.get('stream') === '1') return await sendCameraStream(response, () => authorize(PRINT), signal => service.printerCameraStream(printerCamera[1]!, {size: url.searchParams.get('size') === 'full' ? 'full' : 'card', signal}));
           return sendFrame(response, await service.printerCamera(printerCamera[1]!, {size: url.searchParams.get('size') === 'full' ? 'full' : 'card'}), header('if-none-match'));
+        }
+        if (url.pathname === '/v1/settings/ai/test' || url.pathname === '/v1/settings/fusion/setup') {
+          if (request.method !== 'POST') throw new HttpFailure(405, 'method-not-allowed');
+          await authorize(SETTINGS);
+          const input = await json<unknown>(request);
+          const method = url.pathname.endsWith('/ai/test') ? 'modelAccess.check' : 'settings.get';
+          const parsed = parameters[method].safeParse(input);
+          if (!parsed.success) throw new HttpFailure(400, 'invalid-request');
+          if ('revision' in parsed.data) service.testAI(parsed.data.revision);
+          else await service.setupFusion();
+          return send(response, 200, {settings: await service.settings()});
         }
         if (url.pathname === '/v1/settings') {
           if (request.method === 'GET') { await authorize(READ); return send(response, 200, {settings: await service.settings()}); }
@@ -427,6 +438,7 @@ export function createObjectRoutes(service: ObjectService) {
         }
         return send(response, 200, {object: publicObject(object)});
       } catch (error) {
+        if (error instanceof ControlFailure) return send(response, error.code === 'conflict' ? 409 : error.code === 'invalid-request' ? 400 : 503, {error: {code: error.code, message: error.message}});
         if (error instanceof HttpFailure) return send(response, error.status, {error: {code: error.code, message: error.message}});
         if (error instanceof ObjectNotFoundError) return send(response, 404, {error: {code: 'not-found', message: 'Object not found'}});
         if (error instanceof InvalidAnswerError) return send(response, 400, {error: {code: 'invalid-request', message: error.message}});

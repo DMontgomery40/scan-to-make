@@ -12,6 +12,7 @@ import {CameraFrames, CameraUnavailableError, type CameraFrame, type CameraSize}
 import {PrinterUpdatingError, type PrintGate} from '../printing/print-gate.js';
 import {defaultRunPublished, publishedLink, type PublishedModel, type PublishedPassInput, type PublishedResult} from '../published/published.js';
 import {sliceOverrides, settingsUnsupported} from '../printing/print-settings.js';
+import type {RuntimeSettings} from '../runtime-settings.js';
 import type {CompanionSettingsStore} from '../settings.js';
 import type {CompanionSettingsPatch} from '@scan-to-make/contracts/counterpart';
 import {PRINT_LOG, printEndFailure, projectTitle, sizeText} from '../events/words.js';
@@ -125,6 +126,7 @@ export interface ObjectServiceDeps {
   };
   /** Companion settings: which milestones the print monitor announces. */
   settings?: CompanionSettingsStore;
+  runtimeSettings?: RuntimeSettings;
   /** Where print and pass events go (the event log, PRD §8.7). */
   events?: {emit(draft: EventDraft): Promise<void>};
   /** PRD §8.10: prints and MCP updates on a printer exclude each other. */
@@ -229,12 +231,19 @@ export class ObjectService {
 
   /** Print settings, controls and the monitor need the printers' sessions. */
   get printSettingsAvailable(): boolean { return !!this.#deps.printers; }
-  async settings() { return this.#deps.settings ? this.#deps.settings.load() : {milestones: '50' as const}; }
+  async settings() { return {...(this.#deps.settings ? await this.#deps.settings.load() : {milestones: '50' as const}), ...this.#deps.runtimeSettings?.snapshot()}; }
+  testAI(revision: string) { return this.runtimeSettings().testAI(revision); }
+  setupFusion() { return this.runtimeSettings().requestFusion(); }
+  private runtimeSettings() {
+    if (!this.#deps.runtimeSettings) throw new InvalidStateError('Open an updated Counterpart on your Mac.');
+    return this.#deps.runtimeSettings;
+  }
   async updateSettings(patch: CompanionSettingsPatch) {
     if (!this.#deps.settings) throw new InvalidStateError('Settings are unavailable on this Mac.');
-    const settings = await this.#deps.settings.update(patch);
+    if (patch.ai) await this.runtimeSettings().setAI(patch.ai);
+    else await this.#deps.settings.update(patch);
     await this.#emit({id: randomUUID(), type: 'settings.changed', data: {keys: Object.keys(patch)}});
-    return settings;
+    return this.settings();
   }
 
   /** Hide from Home (KAN-217): a flag of its own. The status underneath stays exactly as it was, `sent` included. */

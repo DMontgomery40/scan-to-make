@@ -195,7 +195,9 @@ print(json.dumps({'quit': quit_calls}))`;
       if (owned) setTimeout(() => server.close(), 20);
       return {content: [{type: 'text', text: legacy ? 'Code executed successfully: ' : stdout}]};
     };
-    const stopping = stopOwnedBlender(client, {port: server.address().port, timeoutMs: 250});
+    // Positive cases include starting Python; shared CI measured 640–799 ms before its reply.
+    // Keep the negative deadline assertion short without making process startup its subject.
+    const stopping = stopOwnedBlender(client, {port: server.address().port, timeoutMs: owned ? 2000 : 250});
     if (legacy && !owned) await assert.rejects(stopping, /did not close/);
     else await stopping;
     assert.equal(server.listening, !owned);

@@ -240,9 +240,10 @@ enum FusionSetup {
     // MARK: Set Up
 
     enum Failure: LocalizedError {
-        case download, verify, noEnvFile, write(String)
+        case download, verify, noEnvFile, busy, write(String)
         var errorDescription: String? {
             switch self {
+            case .busy: return "Fusion setup is already running on this Mac."
             case .download: return "The Fusion add-in couldn’t be downloaded. Check the internet connection and try again."
             case .verify: return "The downloaded add-in didn’t match the pinned version, so nothing was installed."
             case .noEnvFile: return "Counterpart couldn’t find your printer MCP’s .env file. Add the FUSION_MCP settings there by hand."
@@ -278,7 +279,13 @@ enum FusionSetup {
     /// Downloads the pinned add-in, checks every file, installs it set to run on startup, adds the settings to each
     /// printer MCP env file (keeping a copy of each file next to it first), installs the login item that sets
     /// `FUSION_MCP_PORT`, then asks the printer MCP for `fusion_mcp_status {launch: true}`.
-    @MainActor static func install(state: URL) async throws -> Report { try await install(state: state, steps: .live(state: state)) }
+    @MainActor private static var installing = false
+    @MainActor static func install(state: URL) async throws -> Report {
+        guard !installing else { throw Failure.busy }
+        installing = true
+        defer { installing = false }
+        return try await install(state: state, steps: .live(state: state))
+    }
 
     static func install(state: URL, steps: Steps) async throws -> Report {
         let envs = envFiles(state: state, home: steps.home)
@@ -401,6 +408,15 @@ enum FusionSetup {
         case unreachable(String)
 
         var ok: Bool { self == .connected }
+        /// No arbitrary MCP text, local paths or diagnostic detail crosses to a phone.
+        var phoneMessage: String? {
+            switch self {
+            case .connected: return nil
+            case .needsDesign, .reopenFusion, .notConfigured, .noBridge: return words
+            case .bridgeOutdated: return "Update your printer MCP on the Mac, then try Fusion setup again."
+            case .notConnected, .unreachable: return "Fusion did not connect. Check Counterpart on your Mac, then try again."
+            }
+        }
         var words: String {
             switch self {
             case .connected: return "Fusion is connected. New designs use it while it's running."
@@ -701,5 +717,50 @@ extension MCPCall {
         let children = String(decoding: out.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
             .split(separator: "\n").compactMap { pid_t($0.trimmingCharacters(in: .whitespaces)) }
         return children.flatMap { [$0] + descendants(of: $0) }
+    }
+}
+
+/// The socket atomically claims a request. Install runs independently of the event reader,
+/// so a slow download cannot block print notifications or settings refreshes.
+@MainActor final class PhoneFusionSetup {
+    private let report: () async throws -> Void
+    private let claim: (String) async throws -> String?
+    private let claimantId = UUID().uuidString
+    private let install: () async -> (Bool, String?)
+    private let complete: (String, Bool, String?) async throws -> Void
+    private var claiming = false
+    private var completing = false
+    private var completion: (id: String, ok: Bool, message: String?)?
+    private var task: Task<Void, Never>?
+    init(report: @escaping () async throws -> Void, claim: @escaping (String) async throws -> String?,
+         install: @escaping () async -> (Bool, String?), complete: @escaping (String, Bool, String?) async throws -> Void) {
+        self.report = report; self.claim = claim; self.install = install; self.complete = complete
+    }
+    func refresh() async {
+        try? await report()
+        guard task == nil, !claiming else { return }
+        if completion != nil { await sendCompletion(); return }
+        claiming = true
+        defer { claiming = false }
+        guard let id = try? await claim(claimantId) else { return }
+        task = Task { [self] in
+            let (ok, message) = await install()
+            completion = (id, ok, message)
+            task = nil
+            await sendCompletion()
+        }
+    }
+    private func sendCompletion() async {
+        guard let saved = completion, !completing else { return }
+        completing = true
+        defer { completing = false }
+        do {
+            try await complete(saved.id, saved.ok, saved.message)
+            completion = nil
+        } catch let failure as ControlRemoteError where failure.code == "conflict" {
+            completion = nil // Expired/restarted companion: never reinstall to recover a result.
+        } catch {
+            // Preserve the exact result across a transient socket failure. Next refresh retries it.
+        }
     }
 }

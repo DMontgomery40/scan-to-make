@@ -534,3 +534,21 @@ user model was edited, saved or closed. Installed printer transport/profile/env,
 packages are unchanged. Mac Set Up pins the reviewed document-binding fork and ten-file hash
 manifest, preventing a later setup downgrade. Row 26 remains unverified until the owned-document
 and production-pass acceptance in `codex-fusion-acceptance-20261102` completes.
+
+## Phone AI/Fusion settings bridge — 2026-11-02
+
+The existing phone AI/Fusion sections now have real backend projections and routes. AI
+is explicitly scoped to saving/testing connections; current model jobs remain on their
+configured Claude Code path. It uses the same ModelAccessService revision/check worker as the Mac; remote choices are
+limited to existing CLI/off modes, and Keychain references/credentials are omitted.
+Fusion stays in the signed Mac app: passive reports inspect only installation/running
+state, while an explicit phone setup request is claimed once and completed with its ID.
+Replayed events and stale completions cannot rerun/settle another setup. Last setup results
+are labeled historical; missing Mac reports and setup timeout are actionable. No live
+provider configuration or Fusion installation/document operation was used for validation.
+
+Validation: actual server/auth/socket regression suite 11 pass; native Mac Release suite
+136 tests, 1 existing opt-in Keychain skip, zero failures; shared client tests 32 pass.
+Unsigned phone Release build passes. Exact Node 22/24 workflow receipts are recorded outside the repository in
+`scan-to-make-work/phone-ai-fusion-*`. Installed acceptance remains for the next coordinated
+signed build. See `docs/protocols/settings.md` for the implemented boundaries.

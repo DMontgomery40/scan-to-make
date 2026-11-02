@@ -22,6 +22,9 @@ async function writeRecord(path:string,record:ModelAccessRecord,createOnly=false
  * Connection results are deliberately ephemeral and bound to the exact revision. */
 export class ModelAccessService {
   private check?:ModelAccessCheck;
+  private listeners = new Set<()=>void>();
+  onChange(listener:()=>void) {this.listeners.add(listener);return ()=>this.listeners.delete(listener);}
+  private changed() {for(const listener of this.listeners)listener();}
   private controller?:AbortController;
   private writes:Promise<unknown> = Promise.resolve();
   private constructor(private path:string,private record:ModelAccessRecord,private worker:ModelWorker) {}
@@ -56,7 +59,7 @@ export class ModelAccessService {
       const record:ModelAccessRecord = {version:1,revision:randomUUID(),choice};
       await writeRecord(this.path,record);
       this.controller?.abort(); this.controller = undefined; this.check = undefined;
-      this.record = record;
+      this.record = record; this.changed();
       return this.get();
     });
     this.writes = operation.catch(() => {});
@@ -67,8 +70,8 @@ export class ModelAccessService {
     if (this.check?.state === 'checking') return this.get();
     const check:ModelAccessCheck = {id:randomUUID(),revision:this.record.revision,state:this.record.choice.kind === 'none' ? 'skipped' : 'checking'};
     this.check = check;
-    if (check.state === 'skipped') { check.outcome = 'skipped'; return this.get(); }
-    const controller = new AbortController(); this.controller = controller;
+    if (check.state === 'skipped') { check.outcome = 'skipped'; this.changed(); return this.get(); }
+    const controller = new AbortController(); this.controller = controller; this.changed();
     void this.worker(structuredClone(this.record.choice),['check'],{signal:controller.signal,timeoutMs:150000}).then(result => {
       if (this.check !== check || controller.signal.aborted) return;
       const value:unknown = JSON.parse(result.stdout);
@@ -78,7 +81,8 @@ export class ModelAccessService {
         const outcomes = ['auth-failed','needs-gui-session','timed-out','cancelled','failed'] as const;
         check.outcome = outcomes.find(value => value === response?.outcome) ?? 'failed';
       }
-    }).catch(() => { if (this.check === check && !controller.signal.aborted) { check.state = 'failed'; check.outcome = 'failed'; } });
+      this.changed();
+    }).catch(() => { if (this.check === check && !controller.signal.aborted) { check.state = 'failed'; check.outcome = 'failed'; this.changed(); } });
     return this.get();
   }
   /** Cleanup job integration: one immutable selection per invocation. Secrets are
@@ -86,5 +90,5 @@ export class ModelAccessService {
   run(args:string[],options:ModelWorkerOptions = {}) {
     return this.worker(structuredClone(this.record.choice),['run',...args],options);
   }
-  close() { this.controller?.abort(); }
+  close() { this.controller?.abort(); this.listeners.clear(); }
 }
