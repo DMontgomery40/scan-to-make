@@ -9,6 +9,7 @@ on:
       - 'packages/CounterpartKit/**'
       - 'packages/contracts/fixtures/**'
       - '.github/workflows/mobile.yml'
+      - 'scripts/camera_safe_tests.py'
   push:
     branches: [main]
     paths:
@@ -16,6 +17,7 @@ on:
       - 'packages/CounterpartKit/**'
       - 'packages/contracts/fixtures/**'
       - '.github/workflows/mobile.yml'
+      - 'scripts/camera_safe_tests.py'
 permissions:
   contents: read
 jobs:
@@ -92,9 +94,14 @@ jobs:
           SIM=$(xcrun simctl create "mobile-ci-${GITHUB_RUN_ID:-local}-$$" "$SIM_TYPE" "$SIM_RUNTIME")
           trap 'xcrun simctl shutdown "$SIM" >/dev/null 2>&1 || true; xcrun simctl delete "$SIM" >/dev/null 2>&1 || true; rm -rf "${{ runner.temp }}/app-tests"' EXIT
           # Ad hoc signing gives the Simulator build its Keychain entitlement, as on a device.
-          xcodebuild test -project apps/mobile/ios/ScanToMake.xcodeproj -scheme ScanToMake \
+          xcodebuild build-for-testing -project apps/mobile/ios/ScanToMake.xcodeproj -scheme ScanToMake \
             -destination "platform=iOS Simulator,id=$SIM" -derivedDataPath "${{ runner.temp }}/app-tests" \
             -parallel-testing-enabled NO CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual
+          manifests=("${{ runner.temp }}/app-tests/Build/Products/"*.xctestrun)
+          test "${#manifests[@]}" = 1
+          python3 scripts/camera_safe_tests.py "${manifests[0]}"
+          xcodebuild test-without-building -xctestrun "${manifests[0]}" \
+            -destination "platform=iOS Simulator,id=$SIM" -parallel-testing-enabled NO -collect-test-diagnostics never
       - name: Unsigned iPhoneOS Release build has no React Native in it
         run: |
           set -euo pipefail
