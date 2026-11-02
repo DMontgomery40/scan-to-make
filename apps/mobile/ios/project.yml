@@ -1,0 +1,115 @@
+# The iPhone and iPad app: pure Swift and SwiftUI (PRD §3). Regenerate the committed project after
+# changing this file: `xcodegen generate --spec apps/mobile/ios/project.yml` (from the repository root).
+# The bundle id, team and Keychain items are the ones every earlier build used, so an installed app
+# upgrades in place and keeps its pairing.
+name: ScanToMake
+options:
+  bundleIdPrefix: com.scantomake
+  deploymentTarget:
+    iOS: "27.0"
+  createIntermediateGroups: true
+  developmentLanguage: en
+packages:
+  CounterpartKit:
+    path: ../../../packages/CounterpartKit
+settings:
+  base:
+    DEVELOPMENT_TEAM: X7F5F9LR24
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "2.0"
+    CURRENT_PROJECT_VERSION: "1"
+    IPHONEOS_DEPLOYMENT_TARGET: "27.0"
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+    DEAD_CODE_STRIPPING: YES
+targets:
+  ScanToMake:
+    type: application
+    platform: iOS
+    sources:
+      - path: ScanToMake
+        excludes:
+          - Info.plist
+      # The capture sample reads its guidance videos and strings from Bundle.main.
+      - path: ../modules/object-capture/GuidedCaptureSample/GuidedCaptureSample/Resources
+        buildPhase: resources
+      - path: ../modules/object-capture/GuidedCaptureSample/en.lproj
+        buildPhase: resources
+    postBuildScripts: []
+    dependencies:
+      - package: CounterpartKit
+      - target: GuidedObjectCapture
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.scantomake
+        PRODUCT_NAME: ScanToMake
+        INFOPLIST_FILE: ScanToMake/Info.plist
+        TARGETED_DEVICE_FAMILY: "1,2"
+        CODE_SIGN_STYLE: Automatic
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        SUPPORTS_MACCATALYST: NO
+        SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: NO
+  # The walk-around Object Capture module: Apple's sample, unchanged, plus its entry and exit, in its own
+  # module as it always was (the sample's own type names stay out of the app's namespace).
+  GuidedObjectCapture:
+    type: framework
+    platform: iOS
+    sources:
+      - path: ../modules/object-capture/ios
+      - path: ../modules/object-capture/GuidedCaptureSample/GuidedCaptureSample
+        excludes:
+          - GuidedCaptureSampleApp.swift
+          - Info.plist
+          - Assets.xcassets
+          - Preview Content
+          - PrivacyInfo.xcprivacy
+          - Resources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.scantomake.guidedobjectcapture
+        GENERATE_INFOPLIST_FILE: YES
+        SKIP_INSTALL: YES
+        DEFINES_MODULE: YES
+        SWIFT_VERSION: "5.0"
+        CODE_SIGN_STYLE: Automatic
+  ScanToMakeTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: ScanToMakeTests
+    dependencies:
+      - target: ScanToMake
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.scantomake.tests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/ScanToMake.app/ScanToMake"
+        BUNDLE_LOADER: "$(TEST_HOST)"
+  ScanToMakeUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: ScanToMakeUITests
+    dependencies:
+      - target: ScanToMake
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.scantomake.uitests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: ScanToMake
+schemes:
+  ScanToMake:
+    build:
+      targets:
+        ScanToMake: all
+        ScanToMakeTests: [test]
+        ScanToMakeUITests: [test]
+    test:
+      config: Debug
+      gatherCoverageData: false
+      targets:
+        - ScanToMakeTests
+        - ScanToMakeUITests
+    run:
+      config: Debug
+    archive:
+      config: Release

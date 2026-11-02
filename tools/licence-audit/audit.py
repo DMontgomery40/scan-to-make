@@ -18,6 +18,7 @@ if str(_THIS_DIR) not in sys.path:
 from inventory import (  # noqa: E402
     detect_app_gpl_tool_imports,
     inventory_cocoapods,
+    inventory_mobile_embedded_modules,
     inventory_mobile_npm,
     inventory_tools,
     inventory_workspace_npm,
@@ -166,6 +167,7 @@ def run_audit(
     exemptions, violations = _validate_policy(policy)
 
     mobile_npm = inventory_mobile_npm(repo_root)
+    mobile_embedded = inventory_mobile_embedded_modules(repo_root)
     cocoapods = inventory_cocoapods(repo_root, policy)
     workspace_npm = inventory_workspace_npm(repo_root)
     tool_folders, tool_python = inventory_tools(
@@ -225,6 +227,9 @@ def run_audit(
         )
 
     for item in mobile_npm:
+        _audit_standard_item(item)
+
+    for item in mobile_embedded:
         _audit_standard_item(item)
 
     for item in cocoapods:
@@ -391,7 +396,7 @@ def run_audit(
         )
     )
 
-    all_items = mobile_npm + cocoapods + workspace_npm + tool_folders + tool_python + mac_distribution
+    all_items = mobile_npm + mobile_embedded + cocoapods + workspace_npm + tool_folders + tool_python + mac_distribution
     status_counts: dict[str, int] = {}
     for rec in all_items:
         st = str(rec.get("status") or "unknown")
@@ -401,6 +406,7 @@ def run_audit(
         "appGplToolImports": app_gpl_imports,
         "inventory": {
             "cocoapods": cocoapods,
+            "mobileEmbedded": mobile_embedded,
             "mobileNpm": mobile_npm,
             "toolFolders": tool_folders,
             "toolPythonRequirements": tool_python,
@@ -413,6 +419,7 @@ def run_audit(
         "summary": {
             "appGplToolImportCount": len(app_gpl_imports),
             "cocoapodsCount": len(cocoapods),
+            "mobileEmbeddedCount": len(mobile_embedded),
             "mobileNpmCount": len(mobile_npm),
             "statusCounts": dict(sorted(status_counts.items())),
             "toolFoldersCount": len(tool_folders),

@@ -59,7 +59,6 @@ import UIKit
 import SwiftUI
 import RealityKit
 import ARKit
-import React
 
 @MainActor final class GuidedNativeCaptureEngine: NativeCaptureEngine {
     let model: AppDataModel
@@ -74,67 +73,67 @@ import React
     func stop() { model.stopEmbeddedCapture() }
 }
 
-@MainActor @objc(NativeCaptureCoordinator)
-final class NativeCaptureCoordinator: NSObject {
-    // A bridge reload destroys its module, never the active session owner.
+/// The walk-around Object Capture scan's entry and exit for the app: start a scan for a project, show it
+/// full screen, and return its saved draft when it closes. The capture module itself is Apple's sample,
+/// unchanged; drafts and their files are kept on this device until they're sent.
+@MainActor public final class NativeCaptureCoordinator {
     static let owner = NativeCaptureRunOwner(store: NativeCaptureDraftStore()) { GuidedNativeCaptureEngine(directory: $0) }
+    public static let shared = NativeCaptureCoordinator()
     private var host: UIViewController?
-    private var completion: RCTPromiseResolveBlock?
-    private var rejection: RCTPromiseRejectBlock?
+    private var completion: CheckedContinuation<[String: Any], Error>?
     private var presentedRunID: String?
-    @objc nonisolated static func requiresMainQueueSetup() -> Bool { true }
-    @objc nonisolated func methodQueue() -> DispatchQueue { .main }
-    @objc func status(_ resolve: RCTPromiseResolveBlock, reject: RCTPromiseRejectBlock) {
-        // Scene depth is only available with a LiDAR scanner; it lets the app say why scanning is off.
-        resolve(["supported": ObjectCaptureSession.isSupported && PhotogrammetrySession.isSupported,
-                 "lidar": ARWorldTrackingConfiguration.supportsFrameSemantics(.sceneDepth),
-                 "activeRunID": Self.owner.activeRunID as Any? ?? NSNull()])
+
+    /// Whether this device can scan: Object Capture and a LiDAR Scanner (scene depth).
+    public static func status() -> [String: Any] {
+        ["supported": ObjectCaptureSession.isSupported && PhotogrammetrySession.isSupported,
+         "lidar": ARWorldTrackingConfiguration.supportsFrameSemantics(.sceneDepth),
+         "activeRunID": owner.activeRunID as Any? ?? NSNull()]
     }
-    @objc func drafts(_ resolve: RCTPromiseResolveBlock, reject: RCTPromiseRejectBlock) {
-        do { resolve(try Self.owner.store.list(activeRunID: Self.owner.activeRunID).map { try $0.dictionary() }) }
-        catch { reject("storage-error", error.localizedDescription, error) }
+
+    public func drafts() throws -> [[String: Any]] {
+        try Self.owner.store.list(activeRunID: Self.owner.activeRunID).map { try $0.dictionary() }
     }
-    @objc func start(_ options: NSDictionary, resolve: @escaping RCTPromiseResolveBlock,
-                     reject: @escaping RCTPromiseRejectBlock) {
+
+    /// Starts a scan for `origin` and shows it. Returns the draft when the scan screen closes.
+    public func start(_ origin: NativeCaptureDestination) async throws -> [String: Any] {
         guard ObjectCaptureSession.isSupported && PhotogrammetrySession.isSupported else {
-            reject("unsupported", "Scanning is unavailable on this device. Choose a USDZ file instead.", nil); return
+            throw NSError(domain: "NativeCapture", code: 2, userInfo: [NSLocalizedDescriptionKey: "Scanning needs an iPhone or iPad with LiDAR."])
         }
-        guard host == nil, let presenter = RCTPresentedViewController(), presenter.presentedViewController == nil else {
-            reject("busy", "Close the current sheet first.", nil); return
+        guard host == nil, let presenter = Self.topViewController(), presenter.presentedViewController == nil else {
+            throw NSError(domain: "NativeCapture", code: 3, userInfo: [NSLocalizedDescriptionKey: "Close the current sheet first."])
         }
-        do {
-            let origin = try JSONDecoder().decode(NativeCaptureDestination.self,
-                from: JSONSerialization.data(withJSONObject: options))
-            let draft = try Self.owner.start(origin: origin)
-            guard let engine = Self.owner.engine as? GuidedNativeCaptureEngine else {
-                // Synchronous startup failure was retained by the owner.
-                resolve(try Self.owner.store.read(draft.runID).dictionary()); return
-            }
-            completion = resolve; rejection = reject; presentedRunID = draft.runID
+        let draft = try Self.owner.start(origin: origin)
+        guard let engine = Self.owner.engine as? GuidedNativeCaptureEngine else {
+            // Synchronous startup failure was retained by the owner.
+            return try Self.owner.store.read(draft.runID).dictionary()
+        }
+        return try await withCheckedThrowingContinuation { continuation in
+            completion = continuation; presentedRunID = draft.runID
             let controller = UIHostingController(rootView: NativeCaptureHostView(owner: Self.owner, model: engine.model) { [weak self] add in self?.close(add: add) })
             controller.modalPresentationStyle = .fullScreen; controller.isModalInPresentation = true
             host = controller; presenter.present(controller, animated: true)
-        } catch { reject("capture-error", error.localizedDescription, error) }
+        }
     }
+
     private func close(add: Bool) {
         guard let id = presentedRunID else { return }
         Self.owner.stop()
-        let resolve = completion; let reject = rejection
-        completion = nil; rejection = nil; presentedRunID = nil
+        let continuation = completion
+        completion = nil; presentedRunID = nil
         let controller = host; host = nil
         controller?.dismiss(animated: true) {
-            do { var result = try Self.owner.store.read(id).dictionary(); result["addRequested"] = add; resolve?(result) }
-            catch { reject?("storage-error", error.localizedDescription, error) }
+            do { var result = try Self.owner.store.read(id).dictionary(); result["addRequested"] = add; continuation?.resume(returning: result) }
+            catch { continuation?.resume(throwing: error) }
         }
     }
-    @objc func stop(_ resolve: RCTPromiseResolveBlock, reject: RCTPromiseRejectBlock) { Self.owner.stop(); resolve(nil) }
-    @objc nonisolated func invalidate() {
-        Task { @MainActor [self] in
-            // Invalidation is an interruption; no implicit restart when the bridge comes back.
-            if let id = presentedRunID, Self.owner.activeRunID == id { Self.owner.stop() }
-            completion = nil; rejection = nil; presentedRunID = nil
-            host?.dismiss(animated: false); host = nil
-        }
+
+    public func stop() { Self.owner.stop() }
+
+    private static func topViewController() -> UIViewController? {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        var top = scenes.flatMap(\.windows).first { $0.isKeyWindow }?.rootViewController
+        while let presented = top?.presentedViewController { top = presented }
+        return top
     }
 }
 #endif

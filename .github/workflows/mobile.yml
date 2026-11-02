@@ -1,37 +1,109 @@
 name: Mobile checks
+# The iPhone and iPad app is pure Swift and SwiftUI (no React Native, Metro or node_modules), with its
+# shared code in packages/CounterpartKit. Both are tested on macOS with Xcode.
 on:
   pull_request:
     branches: [main]
     paths:
       - 'apps/mobile/**'
-      - 'packages/contracts/**'
+      - 'packages/CounterpartKit/**'
+      - 'packages/contracts/fixtures/**'
       - '.github/workflows/mobile.yml'
   push:
     branches: [main]
     paths:
       - 'apps/mobile/**'
-      - 'packages/contracts/**'
+      - 'packages/CounterpartKit/**'
+      - 'packages/contracts/fixtures/**'
       - '.github/workflows/mobile.yml'
 permissions:
   contents: read
 jobs:
-  mobile:
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        node: [22, 24]
+  counterpartkit:
+    name: CounterpartKit tests
+    runs-on: macos-latest
+    timeout-minutes: 30
+    env:
+      DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: ${{ matrix.node }}
-          cache: npm
-          cache-dependency-path: |
-            packages/contracts/package-lock.json
-            apps/mobile/package-lock.json
-      - run: npm ci --prefix packages/contracts --ignore-scripts
-      - run: npm run build --prefix packages/contracts
-      - run: npm ci --prefix apps/mobile --ignore-scripts
-      - run: npm run typecheck --prefix apps/mobile
-      - run: npm run lint --prefix apps/mobile
-      - run: npm test --prefix apps/mobile -- --runInBand
+          persist-credentials: false
+      - name: Show Xcode and Swift versions
+        run: |
+          xcodebuild -version
+          swift --version
+      - name: Test CounterpartKit on macOS (model, words, formatters, pairing, client)
+        working-directory: packages/CounterpartKit
+        run: |
+          set -euo pipefail
+          trap 'rm -rf "${{ runner.temp }}/counterpartkit"' EXIT
+          xcodebuild test -scheme CounterpartKit -destination 'platform=macOS' -derivedDataPath "${{ runner.temp }}/counterpartkit"
+
+  app:
+    name: iPhone app build and tests
+    runs-on: macos-latest
+    timeout-minutes: 60
+    env:
+      DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: The committed Xcode project matches project.yml
+        working-directory: apps/mobile/ios
+        run: |
+          set -euo pipefail
+          if ! command -v xcodegen >/dev/null; then echo "xcodegen not installed; skipping the drift check"; exit 0; fi
+          cp -R ScanToMake.xcodeproj "${{ runner.temp }}/committed.xcodeproj"
+          trap 'rm -rf "${{ runner.temp }}/committed.xcodeproj"' EXIT
+          xcodegen generate --spec project.yml --quiet
+          diff -r "${{ runner.temp }}/committed.xcodeproj" ScanToMake.xcodeproj
+      - name: Find Xcode 27 and an iOS 27 simulator
+        run: |
+          set -euo pipefail
+          # The app targets iOS 27, so it needs Xcode 27's SDK. Use whichever installed Xcode has it.
+          for xcode in "$DEVELOPER_DIR" /Applications/Xcode*.app/Contents/Developer; do
+            if DEVELOPER_DIR="$xcode" xcodebuild -showsdks 2>/dev/null | grep -q 'iphoneos27'; then echo "DEVELOPER_DIR=$xcode" >> "$GITHUB_ENV"; found="$xcode"; break; fi
+          done
+          if [ -z "${found:-}" ]; then
+            echo "::error::The iPhone app needs Xcode 27 with the iOS 27 SDK. This runner has: $(xcodebuild -version | head -1). It is tested on the Mac by scripts/ci-local.sh."
+            exit 1
+          fi
+          DEVELOPER_DIR="$found" xcrun simctl list -j runtimes devicetypes > "${{ runner.temp }}/simctl.json"
+          python3 - "${{ runner.temp }}/simctl.json" >> "$GITHUB_ENV" <<'PY'
+          import json, sys
+          data = json.load(open(sys.argv[1]))
+          runtimes = [r for r in data["runtimes"] if r.get("isAvailable") and r["platform"] == "iOS" and r["version"].startswith("27.")]
+          if not runtimes: sys.exit("::error::No iOS 27 simulator runtime is installed.")
+          iphones = {t["identifier"]: t["name"] for t in data["devicetypes"] if t.get("productFamily") == "iPhone"}
+          def choice(runtime):
+              supported = [t["identifier"] for t in runtime.get("supportedDeviceTypes", []) if t["identifier"] in iphones]
+              pro = [t for t in supported if iphones[t] == "iPhone 18 Pro"]
+              return (bool(pro), [int(x) for x in runtime["version"].split(".")], (pro or supported or [None])[-1])
+          runtime = max(runtimes, key=choice)
+          kind = choice(runtime)[2]
+          if not kind: sys.exit("::error::No iPhone simulator type for " + runtime["name"])
+          preferred = [{"identifier": kind}]
+          print("SIM_RUNTIME=" + runtime["identifier"]); print("SIM_TYPE=" + preferred[-1]["identifier"])
+          PY
+      - name: Unit and UI tests on an iOS 27 simulator (iPhone 18 Pro when installed)
+        run: |
+          set -euo pipefail
+          SIM=$(xcrun simctl create "mobile-ci-${GITHUB_RUN_ID:-local}-$$" "$SIM_TYPE" "$SIM_RUNTIME")
+          trap 'xcrun simctl shutdown "$SIM" >/dev/null 2>&1 || true; xcrun simctl delete "$SIM" >/dev/null 2>&1 || true; rm -rf "${{ runner.temp }}/app-tests"' EXIT
+          # Ad hoc signing gives the Simulator build its Keychain entitlement, as on a device.
+          xcodebuild test -project apps/mobile/ios/ScanToMake.xcodeproj -scheme ScanToMake \
+            -destination "platform=iOS Simulator,id=$SIM" -derivedDataPath "${{ runner.temp }}/app-tests" \
+            -parallel-testing-enabled NO CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual
+      - name: Unsigned iPhoneOS Release build has no React Native in it
+        run: |
+          set -euo pipefail
+          trap 'rm -rf "${{ runner.temp }}/app-release"' EXIT
+          xcodebuild build -project apps/mobile/ios/ScanToMake.xcodeproj -scheme ScanToMake -configuration Release \
+            -destination 'generic/platform=iOS' -derivedDataPath "${{ runner.temp }}/app-release" CODE_SIGNING_ALLOWED=NO
+          APP="${{ runner.temp }}/app-release/Build/Products/Release-iphoneos/ScanToMake.app"
+          test -x "$APP/ScanToMake"
+          if find "$APP" \( -iname '*react*' -o -iname '*hermes*' -o -name '*.jsbundle' \) | grep .; then echo "React Native found in the bundle"; exit 1; fi
+          if nm "$APP/ScanToMake" | grep -E ' _?RCT|facebook::react'; then echo "React Native symbols found"; exit 1; fi
+          echo "No React Native: $(du -sh "$APP" | cut -f1) bundle"

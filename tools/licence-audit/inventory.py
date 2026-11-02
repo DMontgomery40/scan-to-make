@@ -436,6 +436,47 @@ def inventory_mobile_npm(repo_root: Path) -> list[dict[str, Any]]:
     return sorted(items, key=lambda x: (x["name"], x["version"], x["packagePath"]))
 
 
+def inventory_mobile_embedded_modules(repo_root: Path) -> list[dict[str, Any]]:
+    """Third-party source embedded in the iPhone app: `apps/mobile/modules/*` with LICENSE.txt and PROVENANCE.md.
+
+    The Swift app has no package manager closure for these, so they are found by their own licence and
+    provenance files. The module's package.json, when present, names and versions it.
+    """
+    modules_dir = repo_root / "apps" / "mobile" / "modules"
+    if not modules_dir.is_dir():
+        return []
+    items: list[dict[str, Any]] = []
+    for module_dir in sorted(p for p in modules_dir.iterdir() if p.is_dir()):
+        licence_path = module_dir / "LICENSE.txt"
+        if not licence_path.is_file() or not (module_dir / "PROVENANCE.md").is_file():
+            continue
+        meta: dict[str, Any] = {}
+        meta_path = module_dir / "package.json"
+        if meta_path.is_file():
+            try:
+                meta = json.loads(meta_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                meta = {}
+        licence_rel = _rel_posix(licence_path, repo_root)
+        items.append(
+            {
+                "ecosystem": "embedded",
+                "evidence": licence_rel,
+                "firstParty": False,
+                "licence": classify_licence_text(licence_path.read_text(encoding="utf-8", errors="replace")),
+                "licenceFile": licence_rel,
+                "lockfile": None,
+                "name": meta.get("name") if isinstance(meta.get("name"), str) else f"@scan-to-make/{module_dir.name}",
+                "packagePath": _rel_posix(module_dir, repo_root),
+                "production": True,
+                "resolvedUrl": None,
+                "scope": "app",
+                "version": str(meta.get("version") or "0.0.0"),
+            }
+        )
+    return items
+
+
 def _collect_mobile_linked_workspace_dirs(repo_root: Path) -> set[Path]:
     """Return resolved directories of workspace packages linked into apps/mobile's production closure."""
     linked_dirs: set[Path] = set()

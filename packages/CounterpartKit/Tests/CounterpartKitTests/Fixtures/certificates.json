@@ -1,0 +1,13 @@
+{
+ "//": "Throwaway self-signed certificates (openssl) and their SubjectPublicKeyInfo SHA-256 as OpenSSL computes it.",
+ "rsa": {
+  "certificate": "rsa-cert.der",
+  "certificateSha256": "cec9f1ce9a6d485271bb325f9e8b4bdb0a6dff4607e956fa7429e67406e01beb",
+  "publicKeySha256": "547708a385fe575b45a515f5b1a2e246ad0944701e124280c295b69d614fd9e4"
+ },
+ "ec": {
+  "certificate": "ec-cert.der",
+  "certificateSha256": "a69a4096ebb27f6a2c77ef3759dff492fabf8dafbd3ebc8b706fe57a6a450207",
+  "publicKeySha256": "c5da487da10b4f77248ab76a6882c754c6407d101fe10da5efafc084e4481784"
+ }
+}

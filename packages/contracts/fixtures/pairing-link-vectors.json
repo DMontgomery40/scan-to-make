@@ -1,0 +1,2052 @@
+{
+ "//": "Pairing link vectors: every case the TS parser (packages/contracts/src/pairing-link.ts) answers, generated from that parser. The companion contract test and the iPhone app (packages/CounterpartKit) both check them.",
+ "cases": [
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2Fmac.tail1234.ts.net&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000",
+   "parsed": {
+    "version": 1,
+    "baseUrl": "https://mac.tail1234.ts.net",
+    "code": "AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z",
+    "expiresAt": 1800000300000
+   }
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2Fmac.tail1234.ts.net&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000",
+   "now": 1800000000000,
+   "parsed": {
+    "version": 1,
+    "baseUrl": "https://mac.tail1234.ts.net",
+    "code": "AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z",
+    "expiresAt": 1800000300000
+   }
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2Fmac.tail1234.ts.net&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000",
+   "now": 1800000300000,
+   "error": "expired-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2Fmac.tail1234.ts.net&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000",
+   "now": 1800000299999,
+   "parsed": {
+    "version": 1,
+    "baseUrl": "https://mac.tail1234.ts.net",
+    "code": "AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z",
+    "expiresAt": 1800000300000
+   }
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2Fmac.tail1234.ts.net%2F&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000",
+   "parsed": {
+    "version": 1,
+    "baseUrl": "https://mac.tail1234.ts.net/",
+    "code": "AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z",
+    "expiresAt": 1800000300000
+   }
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2Fmac.tail1234.ts.net%2F&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000",
+   "now": 1800000000000,
+   "parsed": {
+    "version": 1,
+    "baseUrl": "https://mac.tail1234.ts.net/",
+    "code": "AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z",
+    "expiresAt": 1800000300000
+   }
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2Fmac.tail1234.ts.net%2F&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000",
+   "now": 1800000300000,
+   "error": "expired-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2Fmac.tail1234.ts.net%2F&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000",
+   "now": 1800000299999,
+   "parsed": {
+    "version": 1,
+    "baseUrl": "https://mac.tail1234.ts.net/",
+    "code": "AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z",
+    "expiresAt": 1800000300000
+   }
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2F192.168.1.20%3A9077&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&f=0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f",
+   "parsed": {
+    "version": 1,
+    "baseUrl": "https://192.168.1.20:9077",
+    "code": "AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z",
+    "expiresAt": 1800000300000,
+    "certificateSha256": "0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f"
+   }
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2F192.168.1.20%3A9077&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&f=0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f",
+   "now": 1800000000000,
+   "parsed": {
+    "version": 1,
+    "baseUrl": "https://192.168.1.20:9077",
+    "code": "AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z",
+    "expiresAt": 1800000300000,
+    "certificateSha256": "0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f"
+   }
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2F192.168.1.20%3A9077&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&f=0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f",
+   "now": 1800000300000,
+   "error": "expired-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2F192.168.1.20%3A9077&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&f=0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f",
+   "now": 1800000299999,
+   "parsed": {
+    "version": 1,
+    "baseUrl": "https://192.168.1.20:9077",
+    "code": "AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z",
+    "expiresAt": 1800000300000,
+    "certificateSha256": "0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f"
+   }
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2Fmac.local&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&f=0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f",
+   "parsed": {
+    "version": 1,
+    "baseUrl": "https://mac.local",
+    "code": "AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z",
+    "expiresAt": 1800000300000,
+    "certificateSha256": "0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f"
+   }
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2Fmac.local&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&f=0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f",
+   "now": 1800000000000,
+   "parsed": {
+    "version": 1,
+    "baseUrl": "https://mac.local",
+    "code": "AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z",
+    "expiresAt": 1800000300000,
+    "certificateSha256": "0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f"
+   }
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2Fmac.local&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&f=0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f",
+   "now": 1800000300000,
+   "error": "expired-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2Fmac.local&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&f=0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f",
+   "now": 1800000299999,
+   "parsed": {
+    "version": 1,
+    "baseUrl": "https://mac.local",
+    "code": "AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z",
+    "expiresAt": 1800000300000,
+    "certificateSha256": "0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f"
+   }
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2Fmac%3A9077&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&f=0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f",
+   "parsed": {
+    "version": 1,
+    "baseUrl": "https://mac:9077",
+    "code": "AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z",
+    "expiresAt": 1800000300000,
+    "certificateSha256": "0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f"
+   }
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2Fmac%3A9077&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&f=0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f",
+   "now": 1800000000000,
+   "parsed": {
+    "version": 1,
+    "baseUrl": "https://mac:9077",
+    "code": "AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z",
+    "expiresAt": 1800000300000,
+    "certificateSha256": "0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f"
+   }
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2Fmac%3A9077&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&f=0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f",
+   "now": 1800000300000,
+   "error": "expired-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2Fmac%3A9077&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&f=0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f",
+   "now": 1800000299999,
+   "parsed": {
+    "version": 1,
+    "baseUrl": "https://mac:9077",
+    "code": "AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z",
+    "expiresAt": 1800000300000,
+    "certificateSha256": "0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f"
+   }
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2F%5Bfd00%3A%3A1%5D%3A9077&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&f=0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f",
+   "parsed": {
+    "version": 1,
+    "baseUrl": "https://[fd00::1]:9077",
+    "code": "AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z",
+    "expiresAt": 1800000300000,
+    "certificateSha256": "0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f"
+   }
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2F%5Bfd00%3A%3A1%5D%3A9077&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&f=0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f",
+   "now": 1800000000000,
+   "parsed": {
+    "version": 1,
+    "baseUrl": "https://[fd00::1]:9077",
+    "code": "AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z",
+    "expiresAt": 1800000300000,
+    "certificateSha256": "0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f"
+   }
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2F%5Bfd00%3A%3A1%5D%3A9077&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&f=0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f",
+   "now": 1800000300000,
+   "error": "expired-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2F%5Bfd00%3A%3A1%5D%3A9077&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&f=0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f",
+   "now": 1800000299999,
+   "parsed": {
+    "version": 1,
+    "baseUrl": "https://[fd00::1]:9077",
+    "code": "AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z",
+    "expiresAt": 1800000300000,
+    "certificateSha256": "0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f"
+   }
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2Fstudio.office.local%3A9077&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&f=0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f",
+   "parsed": {
+    "version": 1,
+    "baseUrl": "https://studio.office.local:9077",
+    "code": "AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z",
+    "expiresAt": 1800000300000,
+    "certificateSha256": "0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f"
+   }
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2Fstudio.office.local%3A9077&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&f=0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f",
+   "now": 1800000000000,
+   "parsed": {
+    "version": 1,
+    "baseUrl": "https://studio.office.local:9077",
+    "code": "AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z",
+    "expiresAt": 1800000300000,
+    "certificateSha256": "0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f"
+   }
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2Fstudio.office.local%3A9077&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&f=0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f",
+   "now": 1800000300000,
+   "error": "expired-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2Fstudio.office.local%3A9077&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&f=0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f",
+   "now": 1800000299999,
+   "parsed": {
+    "version": 1,
+    "baseUrl": "https://studio.office.local:9077",
+    "code": "AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z",
+    "expiresAt": 1800000300000,
+    "certificateSha256": "0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f"
+   }
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2F192.168.1.20%3A9077&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000",
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2F192.168.1.20%3A9077&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000",
+   "now": 1800000000000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2F192.168.1.20%3A9077&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000",
+   "now": 1800000300000,
+   "error": "expired-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2F192.168.1.20%3A9077&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000",
+   "now": 1800000299999,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2Fmac.local&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000",
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2Fmac.local&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000",
+   "now": 1800000000000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2Fmac.local&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000",
+   "now": 1800000300000,
+   "error": "expired-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2Fmac.local&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000",
+   "now": 1800000299999,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2Fmac.example.com&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000",
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2Fmac.example.com&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000",
+   "now": 1800000000000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2Fmac.example.com&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000",
+   "now": 1800000300000,
+   "error": "expired-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2Fmac.example.com&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000",
+   "now": 1800000299999,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2Fmac.tail1234.ts.net%3A8443&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000",
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2Fmac.tail1234.ts.net%3A8443&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000",
+   "now": 1800000000000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2Fmac.tail1234.ts.net%3A8443&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000",
+   "now": 1800000300000,
+   "error": "expired-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2Fmac.tail1234.ts.net%3A8443&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000",
+   "now": 1800000299999,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2Fmac.example.com&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&f=0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f",
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2Fmac.example.com&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&f=0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f",
+   "now": 1800000000000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2Fmac.example.com&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&f=0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f",
+   "now": 1800000300000,
+   "error": "expired-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2Fmac.example.com&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&f=0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f",
+   "now": 1800000299999,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2F192.168.1.20%3A9077&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&f=0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F",
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2F192.168.1.20%3A9077&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&f=0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F",
+   "now": 1800000000000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2F192.168.1.20%3A9077&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&f=0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F",
+   "now": 1800000300000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2F192.168.1.20%3A9077&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&f=0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F",
+   "now": 1800000299999,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2F192.168.1.20%3A9077&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&f=f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f",
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2F192.168.1.20%3A9077&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&f=f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f",
+   "now": 1800000000000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2F192.168.1.20%3A9077&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&f=f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f",
+   "now": 1800000300000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2F192.168.1.20%3A9077&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&f=f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f",
+   "now": 1800000299999,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2F192.168.1.20%3A9077&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&f=0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0",
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2F192.168.1.20%3A9077&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&f=0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0",
+   "now": 1800000000000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2F192.168.1.20%3A9077&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&f=0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0",
+   "now": 1800000300000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2F192.168.1.20%3A9077&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&f=0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0",
+   "now": 1800000299999,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2Fuser%40mac.tail1234.ts.net&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000",
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2Fuser%40mac.tail1234.ts.net&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000",
+   "now": 1800000000000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2Fuser%40mac.tail1234.ts.net&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000",
+   "now": 1800000300000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2Fuser%40mac.tail1234.ts.net&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000",
+   "now": 1800000299999,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2Fmac.tail1234.ts.net%2Fextra&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000",
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2Fmac.tail1234.ts.net%2Fextra&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000",
+   "now": 1800000000000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2Fmac.tail1234.ts.net%2Fextra&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000",
+   "now": 1800000300000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2Fmac.tail1234.ts.net%2Fextra&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000",
+   "now": 1800000299999,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=1&u=http%3A%2F%2Fmac.tail1234.ts.net&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000",
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=1&u=http%3A%2F%2Fmac.tail1234.ts.net&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000",
+   "now": 1800000000000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=1&u=http%3A%2F%2Fmac.tail1234.ts.net&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000",
+   "now": 1800000300000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=1&u=http%3A%2F%2Fmac.tail1234.ts.net&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000",
+   "now": 1800000299999,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2Fmac.tail1234.ts.net&c=short&e=1800000300000",
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2Fmac.tail1234.ts.net&c=short&e=1800000300000",
+   "now": 1800000000000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2Fmac.tail1234.ts.net&c=short&e=1800000300000",
+   "now": 1800000300000,
+   "error": "expired-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2Fmac.tail1234.ts.net&c=short&e=1800000300000",
+   "now": 1800000299999,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "https://example.com/pair?c=x",
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "https://example.com/pair?c=x",
+   "now": 1800000000000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "https://example.com/pair?c=x",
+   "now": 1800000300000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "https://example.com/pair?c=x",
+   "now": 1800000299999,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "hello",
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "hello",
+   "now": 1800000000000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "hello",
+   "now": 1800000300000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "hello",
+   "now": 1800000299999,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "SCANTOMAKE://PAIR?v=1",
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "SCANTOMAKE://PAIR?v=1",
+   "now": 1800000000000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "SCANTOMAKE://PAIR?v=1",
+   "now": 1800000300000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "SCANTOMAKE://PAIR?v=1",
+   "now": 1800000299999,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077&n=David's%20Mac%20mini",
+   "parsed": {
+    "version": 2,
+    "addresses": [
+     "https://192.168.68.123:9077",
+     "https://davids-mac-mini.local:9077",
+     "https://100.101.102.103:9077"
+    ],
+    "code": "AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z",
+    "expiresAt": 1800000300000,
+    "publicKeySha256": "abababababababababababababababababababababababababababababababab",
+    "name": "David's Mac mini"
+   }
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077&n=David's%20Mac%20mini",
+   "now": 1800000000000,
+   "parsed": {
+    "version": 2,
+    "addresses": [
+     "https://192.168.68.123:9077",
+     "https://davids-mac-mini.local:9077",
+     "https://100.101.102.103:9077"
+    ],
+    "code": "AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z",
+    "expiresAt": 1800000300000,
+    "publicKeySha256": "abababababababababababababababababababababababababababababababab",
+    "name": "David's Mac mini"
+   }
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077&n=David's%20Mac%20mini",
+   "now": 1800000300000,
+   "error": "expired-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077&n=David's%20Mac%20mini",
+   "now": 1800000299999,
+   "parsed": {
+    "version": 2,
+    "addresses": [
+     "https://192.168.68.123:9077",
+     "https://davids-mac-mini.local:9077",
+     "https://100.101.102.103:9077"
+    ],
+    "code": "AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z",
+    "expiresAt": 1800000300000,
+    "publicKeySha256": "abababababababababababababababababababababababababababababababab",
+    "name": "David's Mac mini"
+   }
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077",
+   "parsed": {
+    "version": 2,
+    "addresses": [
+     "https://192.168.68.123:9077",
+     "https://davids-mac-mini.local:9077",
+     "https://100.101.102.103:9077"
+    ],
+    "code": "AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z",
+    "expiresAt": 1800000300000,
+    "publicKeySha256": "abababababababababababababababababababababababababababababababab"
+   }
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077",
+   "now": 1800000000000,
+   "parsed": {
+    "version": 2,
+    "addresses": [
+     "https://192.168.68.123:9077",
+     "https://davids-mac-mini.local:9077",
+     "https://100.101.102.103:9077"
+    ],
+    "code": "AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z",
+    "expiresAt": 1800000300000,
+    "publicKeySha256": "abababababababababababababababababababababababababababababababab"
+   }
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077",
+   "now": 1800000300000,
+   "error": "expired-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077",
+   "now": 1800000299999,
+   "parsed": {
+    "version": 2,
+    "addresses": [
+     "https://192.168.68.123:9077",
+     "https://davids-mac-mini.local:9077",
+     "https://100.101.102.103:9077"
+    ],
+    "code": "AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z",
+    "expiresAt": 1800000300000,
+    "publicKeySha256": "abababababababababababababababababababababababababababababababab"
+   }
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077&n=David's%20Mac%20(2)%20~%20*",
+   "parsed": {
+    "version": 2,
+    "addresses": [
+     "https://192.168.68.123:9077",
+     "https://davids-mac-mini.local:9077",
+     "https://100.101.102.103:9077"
+    ],
+    "code": "AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z",
+    "expiresAt": 1800000300000,
+    "publicKeySha256": "abababababababababababababababababababababababababababababababab",
+    "name": "David's Mac (2) ~ *"
+   }
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077&n=David's%20Mac%20(2)%20~%20*",
+   "now": 1800000000000,
+   "parsed": {
+    "version": 2,
+    "addresses": [
+     "https://192.168.68.123:9077",
+     "https://davids-mac-mini.local:9077",
+     "https://100.101.102.103:9077"
+    ],
+    "code": "AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z",
+    "expiresAt": 1800000300000,
+    "publicKeySha256": "abababababababababababababababababababababababababababababababab",
+    "name": "David's Mac (2) ~ *"
+   }
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077&n=David's%20Mac%20(2)%20~%20*",
+   "now": 1800000300000,
+   "error": "expired-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077&n=David's%20Mac%20(2)%20~%20*",
+   "now": 1800000299999,
+   "parsed": {
+    "version": 2,
+    "addresses": [
+     "https://192.168.68.123:9077",
+     "https://davids-mac-mini.local:9077",
+     "https://100.101.102.103:9077"
+    ],
+    "code": "AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z",
+    "expiresAt": 1800000300000,
+    "publicKeySha256": "abababababababababababababababababababababababababababababababab",
+    "name": "David's Mac (2) ~ *"
+   }
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077&n=Mac+mini",
+   "parsed": {
+    "version": 2,
+    "addresses": [
+     "https://192.168.68.123:9077",
+     "https://davids-mac-mini.local:9077",
+     "https://100.101.102.103:9077"
+    ],
+    "code": "AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z",
+    "expiresAt": 1800000300000,
+    "publicKeySha256": "abababababababababababababababababababababababababababababababab",
+    "name": "Mac mini"
+   }
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077&n=Mac+mini",
+   "now": 1800000000000,
+   "parsed": {
+    "version": 2,
+    "addresses": [
+     "https://192.168.68.123:9077",
+     "https://davids-mac-mini.local:9077",
+     "https://100.101.102.103:9077"
+    ],
+    "code": "AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z",
+    "expiresAt": 1800000300000,
+    "publicKeySha256": "abababababababababababababababababababababababababababababababab",
+    "name": "Mac mini"
+   }
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077&n=Mac+mini",
+   "now": 1800000300000,
+   "error": "expired-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077&n=Mac+mini",
+   "now": 1800000299999,
+   "parsed": {
+    "version": 2,
+    "addresses": [
+     "https://192.168.68.123:9077",
+     "https://davids-mac-mini.local:9077",
+     "https://100.101.102.103:9077"
+    ],
+    "code": "AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z",
+    "expiresAt": 1800000300000,
+    "publicKeySha256": "abababababababababababababababababababababababababababababababab",
+    "name": "Mac mini"
+   }
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077&n=Mac%20%F0%9F%96%A5%EF%B8%8F%20mini",
+   "parsed": {
+    "version": 2,
+    "addresses": [
+     "https://192.168.68.123:9077",
+     "https://davids-mac-mini.local:9077",
+     "https://100.101.102.103:9077"
+    ],
+    "code": "AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z",
+    "expiresAt": 1800000300000,
+    "publicKeySha256": "abababababababababababababababababababababababababababababababab",
+    "name": "Mac 🖥️ mini"
+   }
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077&n=Mac%20%F0%9F%96%A5%EF%B8%8F%20mini",
+   "now": 1800000000000,
+   "parsed": {
+    "version": 2,
+    "addresses": [
+     "https://192.168.68.123:9077",
+     "https://davids-mac-mini.local:9077",
+     "https://100.101.102.103:9077"
+    ],
+    "code": "AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z",
+    "expiresAt": 1800000300000,
+    "publicKeySha256": "abababababababababababababababababababababababababababababababab",
+    "name": "Mac 🖥️ mini"
+   }
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077&n=Mac%20%F0%9F%96%A5%EF%B8%8F%20mini",
+   "now": 1800000300000,
+   "error": "expired-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077&n=Mac%20%F0%9F%96%A5%EF%B8%8F%20mini",
+   "now": 1800000299999,
+   "parsed": {
+    "version": 2,
+    "addresses": [
+     "https://192.168.68.123:9077",
+     "https://davids-mac-mini.local:9077",
+     "https://100.101.102.103:9077"
+    ],
+    "code": "AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z",
+    "expiresAt": 1800000300000,
+    "publicKeySha256": "abababababababababababababababababababababababababababababababab",
+    "name": "Mac 🖥️ mini"
+   }
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F%5Bfd7a%3A115c%3Aa1e0%3A%3A1%5D%3A9077&a=https://mac&a=https://10.0.0.5",
+   "parsed": {
+    "version": 2,
+    "addresses": [
+     "https://[fd7a:115c:a1e0::1]:9077",
+     "https://mac",
+     "https://10.0.0.5"
+    ],
+    "code": "AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z",
+    "expiresAt": 1800000300000,
+    "publicKeySha256": "abababababababababababababababababababababababababababababababab"
+   }
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F%5Bfd7a%3A115c%3Aa1e0%3A%3A1%5D%3A9077&a=https://mac&a=https://10.0.0.5",
+   "now": 1800000000000,
+   "parsed": {
+    "version": 2,
+    "addresses": [
+     "https://[fd7a:115c:a1e0::1]:9077",
+     "https://mac",
+     "https://10.0.0.5"
+    ],
+    "code": "AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z",
+    "expiresAt": 1800000300000,
+    "publicKeySha256": "abababababababababababababababababababababababababababababababab"
+   }
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F%5Bfd7a%3A115c%3Aa1e0%3A%3A1%5D%3A9077&a=https://mac&a=https://10.0.0.5",
+   "now": 1800000300000,
+   "error": "expired-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F%5Bfd7a%3A115c%3Aa1e0%3A%3A1%5D%3A9077&a=https://mac&a=https://10.0.0.5",
+   "now": 1800000299999,
+   "parsed": {
+    "version": 2,
+    "addresses": [
+     "https://[fd7a:115c:a1e0::1]:9077",
+     "https://mac",
+     "https://10.0.0.5"
+    ],
+    "code": "AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z",
+    "expiresAt": 1800000300000,
+    "publicKeySha256": "abababababababababababababababababababababababababababababababab"
+   }
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2Fmac.tail1234.ts.net&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&name=Mac&x",
+   "parsed": {
+    "version": 1,
+    "baseUrl": "https://mac.tail1234.ts.net",
+    "code": "AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z",
+    "expiresAt": 1800000300000
+   }
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2Fmac.tail1234.ts.net&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&name=Mac&x",
+   "now": 1800000000000,
+   "parsed": {
+    "version": 1,
+    "baseUrl": "https://mac.tail1234.ts.net",
+    "code": "AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z",
+    "expiresAt": 1800000300000
+   }
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2Fmac.tail1234.ts.net&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&name=Mac&x",
+   "now": 1800000300000,
+   "error": "expired-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2Fmac.tail1234.ts.net&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&name=Mac&x",
+   "now": 1800000299999,
+   "parsed": {
+    "version": 1,
+    "baseUrl": "https://mac.tail1234.ts.net",
+    "code": "AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z",
+    "expiresAt": 1800000300000
+   }
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077&future=1&b=2",
+   "parsed": {
+    "version": 2,
+    "addresses": [
+     "https://192.168.68.123:9077",
+     "https://davids-mac-mini.local:9077",
+     "https://100.101.102.103:9077"
+    ],
+    "code": "AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z",
+    "expiresAt": 1800000300000,
+    "publicKeySha256": "abababababababababababababababababababababababababababababababab"
+   }
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077&future=1&b=2",
+   "now": 1800000000000,
+   "parsed": {
+    "version": 2,
+    "addresses": [
+     "https://192.168.68.123:9077",
+     "https://davids-mac-mini.local:9077",
+     "https://100.101.102.103:9077"
+    ],
+    "code": "AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z",
+    "expiresAt": 1800000300000,
+    "publicKeySha256": "abababababababababababababababababababababababababababababababab"
+   }
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077&future=1&b=2",
+   "now": 1800000300000,
+   "error": "expired-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077&future=1&b=2",
+   "now": 1800000299999,
+   "parsed": {
+    "version": 2,
+    "addresses": [
+     "https://192.168.68.123:9077",
+     "https://davids-mac-mini.local:9077",
+     "https://100.101.102.103:9077"
+    ],
+    "code": "AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z",
+    "expiresAt": 1800000300000,
+    "publicKeySha256": "abababababababababababababababababababababababababababababababab"
+   }
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2F192.168.1.20%3A9077&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&f=0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z",
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2F192.168.1.20%3A9077&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&f=0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z",
+   "now": 1800000000000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2F192.168.1.20%3A9077&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&f=0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z",
+   "now": 1800000300000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2F192.168.1.20%3A9077&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&f=0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z",
+   "now": 1800000299999,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2F192.168.1.20%3A9077&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&f=0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f&e=1800000300000",
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2F192.168.1.20%3A9077&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&f=0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f&e=1800000300000",
+   "now": 1800000000000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2F192.168.1.20%3A9077&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&f=0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f&e=1800000300000",
+   "now": 1800000300000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2F192.168.1.20%3A9077&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&f=0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f&e=1800000300000",
+   "now": 1800000299999,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2F192.168.1.20%3A9077&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&f=0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f&f=0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f",
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2F192.168.1.20%3A9077&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&f=0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f&f=0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f",
+   "now": 1800000000000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2F192.168.1.20%3A9077&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&f=0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f&f=0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f",
+   "now": 1800000300000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2F192.168.1.20%3A9077&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&f=0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f&f=0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f",
+   "now": 1800000299999,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2F192.168.1.20%3A9077&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&f=0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f&v=1",
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2F192.168.1.20%3A9077&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&f=0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f&v=1",
+   "now": 1800000000000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2F192.168.1.20%3A9077&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&f=0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f&v=1",
+   "now": 1800000300000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2F192.168.1.20%3A9077&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&f=0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f&v=1",
+   "now": 1800000299999,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2Fmac.tail1234.ts.net&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&u=https%3A%2F%2Fmac.tail1234.ts.net",
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2Fmac.tail1234.ts.net&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&u=https%3A%2F%2Fmac.tail1234.ts.net",
+   "now": 1800000000000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2Fmac.tail1234.ts.net&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&u=https%3A%2F%2Fmac.tail1234.ts.net",
+   "now": 1800000300000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2Fmac.tail1234.ts.net&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&u=https%3A%2F%2Fmac.tail1234.ts.net",
+   "now": 1800000299999,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077&k=abababababababababababababababababababababababababababababababab",
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077&k=abababababababababababababababababababababababababababababababab",
+   "now": 1800000000000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077&k=abababababababababababababababababababababababababababababababab",
+   "now": 1800000300000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077&k=abababababababababababababababababababababababababababababababab",
+   "now": 1800000299999,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z",
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z",
+   "now": 1800000000000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z",
+   "now": 1800000300000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z",
+   "now": 1800000299999,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077&e=1800000300000",
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077&e=1800000300000",
+   "now": 1800000000000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077&e=1800000300000",
+   "now": 1800000300000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077&e=1800000300000",
+   "now": 1800000299999,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077&v=2",
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077&v=2",
+   "now": 1800000000000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077&v=2",
+   "now": 1800000300000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077&v=2",
+   "now": 1800000299999,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077&n=A&n=B",
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077&n=A&n=B",
+   "now": 1800000000000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077&n=A&n=B",
+   "now": 1800000300000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077&n=A&n=B",
+   "now": 1800000299999,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.1.1%3A9077&a=https%3A%2F%2F192.168.1.2%3A9077&a=https%3A%2F%2F192.168.1.3%3A9077&a=https%3A%2F%2F192.168.1.4%3A9077&a=https%3A%2F%2F192.168.1.5%3A9077&a=https%3A%2F%2F192.168.1.6%3A9077&a=https%3A%2F%2F192.168.1.7%3A9077&a=https%3A%2F%2F192.168.1.8%3A9077",
+   "parsed": {
+    "version": 2,
+    "addresses": [
+     "https://192.168.1.1:9077",
+     "https://192.168.1.2:9077",
+     "https://192.168.1.3:9077",
+     "https://192.168.1.4:9077",
+     "https://192.168.1.5:9077",
+     "https://192.168.1.6:9077",
+     "https://192.168.1.7:9077",
+     "https://192.168.1.8:9077"
+    ],
+    "code": "AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z",
+    "expiresAt": 1800000300000,
+    "publicKeySha256": "abababababababababababababababababababababababababababababababab"
+   }
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.1.1%3A9077&a=https%3A%2F%2F192.168.1.2%3A9077&a=https%3A%2F%2F192.168.1.3%3A9077&a=https%3A%2F%2F192.168.1.4%3A9077&a=https%3A%2F%2F192.168.1.5%3A9077&a=https%3A%2F%2F192.168.1.6%3A9077&a=https%3A%2F%2F192.168.1.7%3A9077&a=https%3A%2F%2F192.168.1.8%3A9077",
+   "now": 1800000000000,
+   "parsed": {
+    "version": 2,
+    "addresses": [
+     "https://192.168.1.1:9077",
+     "https://192.168.1.2:9077",
+     "https://192.168.1.3:9077",
+     "https://192.168.1.4:9077",
+     "https://192.168.1.5:9077",
+     "https://192.168.1.6:9077",
+     "https://192.168.1.7:9077",
+     "https://192.168.1.8:9077"
+    ],
+    "code": "AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z",
+    "expiresAt": 1800000300000,
+    "publicKeySha256": "abababababababababababababababababababababababababababababababab"
+   }
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.1.1%3A9077&a=https%3A%2F%2F192.168.1.2%3A9077&a=https%3A%2F%2F192.168.1.3%3A9077&a=https%3A%2F%2F192.168.1.4%3A9077&a=https%3A%2F%2F192.168.1.5%3A9077&a=https%3A%2F%2F192.168.1.6%3A9077&a=https%3A%2F%2F192.168.1.7%3A9077&a=https%3A%2F%2F192.168.1.8%3A9077",
+   "now": 1800000300000,
+   "error": "expired-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.1.1%3A9077&a=https%3A%2F%2F192.168.1.2%3A9077&a=https%3A%2F%2F192.168.1.3%3A9077&a=https%3A%2F%2F192.168.1.4%3A9077&a=https%3A%2F%2F192.168.1.5%3A9077&a=https%3A%2F%2F192.168.1.6%3A9077&a=https%3A%2F%2F192.168.1.7%3A9077&a=https%3A%2F%2F192.168.1.8%3A9077",
+   "now": 1800000299999,
+   "parsed": {
+    "version": 2,
+    "addresses": [
+     "https://192.168.1.1:9077",
+     "https://192.168.1.2:9077",
+     "https://192.168.1.3:9077",
+     "https://192.168.1.4:9077",
+     "https://192.168.1.5:9077",
+     "https://192.168.1.6:9077",
+     "https://192.168.1.7:9077",
+     "https://192.168.1.8:9077"
+    ],
+    "code": "AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z",
+    "expiresAt": 1800000300000,
+    "publicKeySha256": "abababababababababababababababababababababababababababababababab"
+   }
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.1.1%3A9077&a=https%3A%2F%2F192.168.1.2%3A9077&a=https%3A%2F%2F192.168.1.3%3A9077&a=https%3A%2F%2F192.168.1.4%3A9077&a=https%3A%2F%2F192.168.1.5%3A9077&a=https%3A%2F%2F192.168.1.6%3A9077&a=https%3A%2F%2F192.168.1.7%3A9077&a=https%3A%2F%2F192.168.1.8%3A9077&a=https%3A%2F%2F192.168.1.9%3A9077",
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.1.1%3A9077&a=https%3A%2F%2F192.168.1.2%3A9077&a=https%3A%2F%2F192.168.1.3%3A9077&a=https%3A%2F%2F192.168.1.4%3A9077&a=https%3A%2F%2F192.168.1.5%3A9077&a=https%3A%2F%2F192.168.1.6%3A9077&a=https%3A%2F%2F192.168.1.7%3A9077&a=https%3A%2F%2F192.168.1.8%3A9077&a=https%3A%2F%2F192.168.1.9%3A9077",
+   "now": 1800000000000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.1.1%3A9077&a=https%3A%2F%2F192.168.1.2%3A9077&a=https%3A%2F%2F192.168.1.3%3A9077&a=https%3A%2F%2F192.168.1.4%3A9077&a=https%3A%2F%2F192.168.1.5%3A9077&a=https%3A%2F%2F192.168.1.6%3A9077&a=https%3A%2F%2F192.168.1.7%3A9077&a=https%3A%2F%2F192.168.1.8%3A9077&a=https%3A%2F%2F192.168.1.9%3A9077",
+   "now": 1800000300000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.1.1%3A9077&a=https%3A%2F%2F192.168.1.2%3A9077&a=https%3A%2F%2F192.168.1.3%3A9077&a=https%3A%2F%2F192.168.1.4%3A9077&a=https%3A%2F%2F192.168.1.5%3A9077&a=https%3A%2F%2F192.168.1.6%3A9077&a=https%3A%2F%2F192.168.1.7%3A9077&a=https%3A%2F%2F192.168.1.8%3A9077&a=https%3A%2F%2F192.168.1.9%3A9077",
+   "now": 1800000299999,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab",
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab",
+   "now": 1800000000000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab",
+   "now": 1800000300000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab",
+   "now": 1800000299999,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2Fmac.local%3A9077&a=https%3A%2F%2FMAC.local%3A9077",
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2Fmac.local%3A9077&a=https%3A%2F%2FMAC.local%3A9077",
+   "now": 1800000000000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2Fmac.local%3A9077&a=https%3A%2F%2FMAC.local%3A9077",
+   "now": 1800000300000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2Fmac.local%3A9077&a=https%3A%2F%2FMAC.local%3A9077",
+   "now": 1800000299999,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2Fmac.tail1234.ts.net",
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2Fmac.tail1234.ts.net",
+   "now": 1800000000000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2Fmac.tail1234.ts.net",
+   "now": 1800000300000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2Fmac.tail1234.ts.net",
+   "now": 1800000299999,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2Fmac.example.com",
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2Fmac.example.com",
+   "now": 1800000000000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2Fmac.example.com",
+   "now": 1800000300000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2Fmac.example.com",
+   "now": 1800000299999,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=http%3A%2F%2F192.168.1.2%3A9077",
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=http%3A%2F%2F192.168.1.2%3A9077",
+   "now": 1800000000000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=http%3A%2F%2F192.168.1.2%3A9077",
+   "now": 1800000300000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=http%3A%2F%2F192.168.1.2%3A9077",
+   "now": 1800000299999,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.1.2%3A9077%2F",
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.1.2%3A9077%2F",
+   "now": 1800000000000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.1.2%3A9077%2F",
+   "now": 1800000300000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.1.2%3A9077%2F",
+   "now": 1800000299999,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.1.2%2Fpath",
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.1.2%2Fpath",
+   "now": 1800000000000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.1.2%2Fpath",
+   "now": 1800000300000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.1.2%2Fpath",
+   "now": 1800000299999,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2Fuser%40192.168.1.2",
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2Fuser%40192.168.1.2",
+   "now": 1800000000000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2Fuser%40192.168.1.2",
+   "now": 1800000300000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2Fuser%40192.168.1.2",
+   "now": 1800000299999,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077&n=",
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077&n=",
+   "now": 1800000000000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077&n=",
+   "now": 1800000300000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077&n=",
+   "now": 1800000299999,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077&n=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "parsed": {
+    "version": 2,
+    "addresses": [
+     "https://192.168.68.123:9077",
+     "https://davids-mac-mini.local:9077",
+     "https://100.101.102.103:9077"
+    ],
+    "code": "AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z",
+    "expiresAt": 1800000300000,
+    "publicKeySha256": "abababababababababababababababababababababababababababababababab",
+    "name": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+   }
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077&n=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "now": 1800000000000,
+   "parsed": {
+    "version": 2,
+    "addresses": [
+     "https://192.168.68.123:9077",
+     "https://davids-mac-mini.local:9077",
+     "https://100.101.102.103:9077"
+    ],
+    "code": "AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z",
+    "expiresAt": 1800000300000,
+    "publicKeySha256": "abababababababababababababababababababababababababababababababab",
+    "name": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+   }
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077&n=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "now": 1800000300000,
+   "error": "expired-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077&n=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "now": 1800000299999,
+   "parsed": {
+    "version": 2,
+    "addresses": [
+     "https://192.168.68.123:9077",
+     "https://davids-mac-mini.local:9077",
+     "https://100.101.102.103:9077"
+    ],
+    "code": "AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z",
+    "expiresAt": 1800000300000,
+    "publicKeySha256": "abababababababababababababababababababababababababababababababab",
+    "name": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+   }
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077&n=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077&n=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "now": 1800000000000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077&n=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "now": 1800000300000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077&n=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "now": 1800000299999,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077&n=a%0Ab",
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077&n=a%0Ab",
+   "now": 1800000000000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077&n=a%0Ab",
+   "now": 1800000300000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077&n=a%0Ab",
+   "now": 1800000299999,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077&n=%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80",
+   "parsed": {
+    "version": 2,
+    "addresses": [
+     "https://192.168.68.123:9077",
+     "https://davids-mac-mini.local:9077",
+     "https://100.101.102.103:9077"
+    ],
+    "code": "AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z",
+    "expiresAt": 1800000300000,
+    "publicKeySha256": "abababababababababababababababababababababababababababababababab",
+    "name": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀"
+   }
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077&n=%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80",
+   "now": 1800000000000,
+   "parsed": {
+    "version": 2,
+    "addresses": [
+     "https://192.168.68.123:9077",
+     "https://davids-mac-mini.local:9077",
+     "https://100.101.102.103:9077"
+    ],
+    "code": "AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z",
+    "expiresAt": 1800000300000,
+    "publicKeySha256": "abababababababababababababababababababababababababababababababab",
+    "name": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀"
+   }
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077&n=%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80",
+   "now": 1800000300000,
+   "error": "expired-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077&n=%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80",
+   "now": 1800000299999,
+   "parsed": {
+    "version": 2,
+    "addresses": [
+     "https://192.168.68.123:9077",
+     "https://davids-mac-mini.local:9077",
+     "https://100.101.102.103:9077"
+    ],
+    "code": "AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z",
+    "expiresAt": 1800000300000,
+    "publicKeySha256": "abababababababababababababababababababababababababababababababab",
+    "name": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀"
+   }
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077&n=%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80",
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077&n=%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80",
+   "now": 1800000000000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077&n=%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80",
+   "now": 1800000300000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077&n=%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80%F0%9F%98%80",
+   "now": 1800000299999,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077",
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077",
+   "now": 1800000000000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077",
+   "now": 1800000300000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077",
+   "now": 1800000299999,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077",
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077",
+   "now": 1800000000000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077",
+   "now": 1800000300000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077",
+   "now": 1800000299999,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077",
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077",
+   "now": 1800000000000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077",
+   "now": 1800000300000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077",
+   "now": 1800000299999,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=3&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077",
+   "error": "unsupported-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=3&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077",
+   "now": 1800000000000,
+   "error": "unsupported-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=3&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077",
+   "now": 1800000300000,
+   "error": "unsupported-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=3&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077",
+   "now": 1800000299999,
+   "error": "unsupported-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=12&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077",
+   "error": "unsupported-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=12&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077",
+   "now": 1800000000000,
+   "error": "unsupported-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=12&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077",
+   "now": 1800000300000,
+   "error": "unsupported-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=12&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077",
+   "now": 1800000299999,
+   "error": "unsupported-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=0&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077",
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=0&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077",
+   "now": 1800000000000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=0&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077",
+   "now": 1800000300000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=0&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077",
+   "now": 1800000299999,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=x&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077",
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=x&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077",
+   "now": 1800000000000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=x&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077",
+   "now": 1800000300000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=x&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077",
+   "now": 1800000299999,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=-1&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077",
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=-1&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077",
+   "now": 1800000000000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=-1&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077",
+   "now": 1800000300000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=-1&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077",
+   "now": 1800000299999,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2.0&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077",
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2.0&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077",
+   "now": 1800000000000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2.0&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077",
+   "now": 1800000300000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2.0&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077",
+   "now": 1800000299999,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077",
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077",
+   "now": 1800000000000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077",
+   "now": 1800000300000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077",
+   "now": 1800000299999,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=1234567890&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077",
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=1234567890&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077",
+   "now": 1800000000000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=1234567890&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077",
+   "now": 1800000300000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=1234567890&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077",
+   "now": 1800000299999,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077",
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077",
+   "now": 1800000000000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077",
+   "now": 1800000300000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077",
+   "now": 1800000299999,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=soon&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077",
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=soon&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077",
+   "now": 1800000000000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=soon&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077",
+   "now": 1800000300000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=soon&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077",
+   "now": 1800000299999,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077",
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077",
+   "now": 1800000000000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077",
+   "now": 1800000300000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077",
+   "now": 1800000299999,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=%2B&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077",
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=%2B&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077",
+   "now": 1800000000000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=%2B&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077",
+   "now": 1800000300000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=%2B&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077",
+   "now": 1800000299999,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=-1&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077",
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=-1&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077",
+   "now": 1800000000000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=-1&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077",
+   "now": 1800000300000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=-1&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077",
+   "now": 1800000299999,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=0&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077",
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=0&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077",
+   "now": 1800000000000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=0&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077",
+   "now": 1800000300000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=0&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077",
+   "now": 1800000299999,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=0x10&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077",
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=0x10&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077",
+   "now": 1800000000000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=0x10&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077",
+   "now": 1800000300000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=0x10&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077",
+   "now": 1800000299999,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1e5&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077",
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1e5&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077",
+   "now": 1800000000000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1e5&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077",
+   "now": 1800000300000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1e5&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077",
+   "now": 1800000299999,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=%201&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077",
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=%201&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077",
+   "now": 1800000000000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=%201&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077",
+   "now": 1800000300000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=%201&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077",
+   "now": 1800000299999,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=9007199254740992&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077",
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=9007199254740992&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077",
+   "now": 1800000000000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=9007199254740992&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077",
+   "now": 1800000300000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=9007199254740992&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077",
+   "now": 1800000299999,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=9007199254740991&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077",
+   "parsed": {
+    "version": 2,
+    "addresses": [
+     "https://192.168.68.123:9077",
+     "https://davids-mac-mini.local:9077",
+     "https://100.101.102.103:9077"
+    ],
+    "code": "AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z",
+    "expiresAt": 9007199254740991,
+    "publicKeySha256": "abababababababababababababababababababababababababababababababab"
+   }
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=9007199254740991&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077",
+   "now": 1800000000000,
+   "parsed": {
+    "version": 2,
+    "addresses": [
+     "https://192.168.68.123:9077",
+     "https://davids-mac-mini.local:9077",
+     "https://100.101.102.103:9077"
+    ],
+    "code": "AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z",
+    "expiresAt": 9007199254740991,
+    "publicKeySha256": "abababababababababababababababababababababababababababababababab"
+   }
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=9007199254740991&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077",
+   "now": 1800000300000,
+   "parsed": {
+    "version": 2,
+    "addresses": [
+     "https://192.168.68.123:9077",
+     "https://davids-mac-mini.local:9077",
+     "https://100.101.102.103:9077"
+    ],
+    "code": "AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z",
+    "expiresAt": 9007199254740991,
+    "publicKeySha256": "abababababababababababababababababababababababababababababababab"
+   }
+  },
+  {
+   "link": "scantomake://pair?v=2&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=9007199254740991&k=abababababababababababababababababababababababababababababababab&a=https%3A%2F%2F192.168.68.123%3A9077&a=https%3A%2F%2Fdavids-mac-mini.local%3A9077&a=https%3A%2F%2F100.101.102.103%3A9077",
+   "now": 1800000299999,
+   "parsed": {
+    "version": 2,
+    "addresses": [
+     "https://192.168.68.123:9077",
+     "https://davids-mac-mini.local:9077",
+     "https://100.101.102.103:9077"
+    ],
+    "code": "AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z",
+    "expiresAt": 9007199254740991,
+    "publicKeySha256": "abababababababababababababababababababababababababababababababab"
+   }
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2Fmac.tail1234.ts.net&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=",
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2Fmac.tail1234.ts.net&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=",
+   "now": 1800000000000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2Fmac.tail1234.ts.net&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=",
+   "now": 1800000300000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2Fmac.tail1234.ts.net&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=",
+   "now": 1800000299999,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=%E0%A4%A",
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=%E0%A4%A",
+   "now": 1800000000000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=%E0%A4%A",
+   "now": 1800000300000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=2&c=%E0%A4%A",
+   "now": 1800000299999,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2Fmac.tail1234.ts.net&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&f",
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2Fmac.tail1234.ts.net&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&f",
+   "now": 1800000000000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2Fmac.tail1234.ts.net&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&f",
+   "now": 1800000300000,
+   "error": "invalid-invitation"
+  },
+  {
+   "link": "scantomake://pair?v=1&u=https%3A%2F%2Fmac.tail1234.ts.net&c=AAAAAAAAAAAAAAAAb_-b_-b_-b_-b_-z&e=1800000300000&f",
+   "now": 1800000299999,
+   "error": "invalid-invitation"
+  }
+ ]
+}
