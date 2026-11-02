@@ -19,6 +19,11 @@ and verified fixes for muted Live Activity alerts, hidden saved multiple-copy co
 and file-export symlink containment. Native settings interaction and physical delivery remain device
 acceptance work for the integration owner.
 
+After rebasing onto release `2f350a8c`, independent review corrections preserve successful Save/Duplicate
+completion when a newer display refresh wins, while connection resets still invalidate the reply.
+Original scan labels are format-neutral and exports serve retained STL, 3MF and USDZ with correct MIME
+types. Follow-up checks: 123 CounterpartKit, 44 ControlKit and 35 companion HTTP tests passed.
+
 [Apple's ActivityKit push documentation](https://developer.apple.com/documentation/ActivityKit/starting-and-updating-live-activities-with-activitykit-push-notifications)
 requires an alert for push-to-start. Muted project events therefore skip remote start, while existing
 activities still receive silent updates/end. This does not claim the currently undeployed relay works live.

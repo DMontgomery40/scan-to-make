@@ -254,7 +254,10 @@ export function createObjectRoutes(service: ObjectService) {
           if (!/^[A-Za-z0-9][A-Za-z0-9._ -]{0,127}$/.test(name) || name.includes('..')) throw new HttpFailure(404, 'not-found');
           const extension = name.split('.').at(-1)?.toLowerCase();
           const type = extension === 'jpg' || extension === 'jpeg' ? 'image/jpeg'
-            : extension === 'png' ? 'image/png' : extension === 'heic' ? 'image/heic' : kind === 'scan' && extension === 'usdz' ? 'model/vnd.usdz+zip' : undefined;
+            : extension === 'png' ? 'image/png' : extension === 'heic' ? 'image/heic'
+            : kind === 'scan' && extension === 'usdz' ? 'model/vnd.usdz+zip'
+            : kind === 'scan' && extension === 'stl' ? 'model/stl'
+            : kind === 'scan' && extension === '3mf' ? 'model/3mf' : undefined;
           const object = await service.get(id);
           if (!type || !(kind === 'scan' ? object.scan === name : object[kind]?.includes(name))) throw new HttpFailure(404, 'not-found');
           const bytes = await exportFile(service.dir(id), `${kind}/${name}`);

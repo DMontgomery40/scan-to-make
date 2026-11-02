@@ -960,12 +960,14 @@ private struct PhoneProjectSettings: View {
                 save: { patch in
                     let ticket = store.startRequest()
                     let saved = try await store.mac.client.setProjectSettings(id, patch)
-                    guard store.replace(saved, ticket: ticket) else { throw CancellationError() }
+                    guard store.requestIsCurrent(ticket) else { throw CancellationError() }
+                    store.replace(saved, ticket: ticket)
                     if patch["status"] == .string("works"), let pending = project.pendingFollowup { store.corrections.sent(pending, for: id) }
                 }, duplicate: {
                     let ticket = store.startRequest()
                     let copied = try await store.mac.client.duplicate(id)
-                    guard store.replace(copied, ticket: ticket) else { throw CancellationError() }
+                    guard store.requestIsCurrent(ticket) else { throw CancellationError() }
+                    store.replace(copied, ticket: ticket)
                     app.route = .project(copied.id)
                 }, delete: {
                     try await store.mac.delete(id)

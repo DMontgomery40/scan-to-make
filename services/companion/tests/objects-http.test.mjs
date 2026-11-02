@@ -143,6 +143,19 @@ test('start validates the bounded manifest and requires capture import scope', a
   assert.equal((await denied.call('POST', `/v1/objects/${other.id}/start`, {captureManifest: valid})).status, 403);
 });
 
+test('original scan export preserves every supported retained model format', async t => {
+  const {call, service} = await fixture(t);
+  for (const [extension, type] of [['stl', 'model/stl'], ['3mf', 'model/3mf'], ['usdz', 'model/vnd.usdz+zip']]) {
+    const project = await service.create();
+    await service.addScan(project.id, `scan.${extension}`, Buffer.from(`original ${extension}`));
+    const response = await call('GET', `/v1/objects/${project.id}/scan/scan.${extension}`);
+    assert.equal(response.status, 200);
+    assert.equal(response.type, type);
+    assert.equal(response.bytes.toString(), `original ${extension}`);
+    assert.equal((await call('GET', `/v1/objects/${project.id}/scan/unrecorded.${extension}`)).status, 404);
+  }
+});
+
 test('scan, photos, start, then the ready model and renders download', async t => {
   const {call, service} = await fixture(t);
   const id = (await call('POST', '/v1/objects', {})).json.object.id;

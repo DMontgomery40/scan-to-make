@@ -183,7 +183,7 @@ public extension Project {
     var settingsFiles: [ProjectSettingsForm.File] {
         var result: [ProjectSettingsForm.File] = []
         if current != nil { result.append(.init(id: "model.stl", name: "Current model (STL)")) }
-        if let scan { result.append(.init(id: "scan/" + scan, name: "Original scan (USDZ)")) }
+        if let scan { result.append(.init(id: "scan/" + scan, name: "Original scan")) }
         result += photos.map { .init(id: "photos/" + $0, name: $0) }
         result += (capture ?? []).map { .init(id: "capture/" + $0, name: $0) }
         if case .array(let originals)? = files?.object?["original"] {
