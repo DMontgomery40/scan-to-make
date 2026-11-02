@@ -142,6 +142,9 @@ typealias MacError = CompanionError
 
     /// Opens the walk-around scan. Returns a ready run only when Add to this project was chosen.
     func scan(_ id: String) async throws -> String? {
+        // A new capture choice replaces an earlier failed Send. Keep for later must not inherit that
+        // old automatic-resume request; the files remain available when Send is explicitly pressed.
+        try? FileManager.default.removeItem(at: Self.requestedFile(id))
         do {
             let draft = try await NativeCaptureCoordinator.shared.start(NativeCaptureDestination(projectId: id, revision: 0, snapshot: "{}", context: nil))
             guard draft["addRequested"] as? Bool == true, draft["status"] as? String == "ready" else { return nil }
