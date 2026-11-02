@@ -50,30 +50,26 @@ struct HomeView: View {
                 VStack(alignment: .leading, spacing: 26) {
                     if let error = store.error { ConnectionBanner(error: error, pair: store.onPair) }
                     if !running.isEmpty {
-                        SectionTitle("Now")
+                        HomeSection("Now") {
                         VStack(spacing: 12) {
                             ForEach(running) { project in
                                 // A print opens the Printing screen; anything else, its project page.
-                                Button { path.append(store.words(project).phase == .printing ? Page.printing(project.id) : project.id) } label: {
+                                Button { path.append(ProjectWords.watchable(project, phase: store.words(project).phase) ? Page.printing(project.id) : project.id) } label: {
                                     if [.printing, .preparing].contains(store.words(project).phase) { NowPrintingCard(store: store, project: project) }
                                     else { NowWorkingCard(store: store, project: project) }
                                 }
                                 .buttonStyle(.plain)
                             }
                         }
+                        }
                     }
                     if !needsYou.isEmpty {
-                        SectionTitle("Needs you")
-                        ForEach(needsYou) { project in NeedsYouCard(store: store, project: project) { path.append(project.id) } }
+                        HomeSection("Needs you") {
+                            ForEach(needsYou) { project in NeedsYouCard(store: store, project: project) { path.append(project.id) } }
+                        }
                     }
-                    if !grid.isEmpty {
-                        SectionTitle("All projects")
-                        projectGrid(grid)
-                    }
-                    if !done.isEmpty {
-                        SectionTitle("Done")
-                        projectGrid(done)
-                    }
+                    if !grid.isEmpty { HomeSection("All projects") { projectGrid(grid) } }
+                    if !done.isEmpty { HomeSection("Done") { projectGrid(done) } }
                     if !archived.isEmpty {
                         Button { withAnimation { showArchived.toggle() } } label: {
                             Label("Archived · \(archived.count)", systemImage: showArchived ? "chevron.down" : "chevron.right")
@@ -127,7 +123,8 @@ struct HomeView: View {
     }
 
     private func projectGrid(_ projects: [Project]) -> some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 150, maximum: 260), spacing: 12)], spacing: 12) {
+        // Two equal columns, 12 pt gutters both ways; the card's own shape sets its size, never its content.
+        LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
             ForEach(projects) { project in
                 Button { path.append(project.id) } label: { ProjectCard(store: store, project: project) }
                     .buttonStyle(.plain)
@@ -141,12 +138,16 @@ struct HomeView: View {
         let mac = store.macName ?? "Your Mac"
         let connection = store.reachable == false ? "\(mac) isn't answering" : store.reachable == true ? "\(mac) connected" : mac
         guard let catalog = store.catalog, !catalog.destinations.isEmpty else { return connection }
-        let known = catalog.destinations.filter { $0.isReady != nil }
-        if known.isEmpty {
-            let count = catalog.destinations.count
-            return "\(connection) · \(count) \(count == 1 ? "printer" : "printers")"
+        // What the printers are doing: printing first ("Bambu Lab P1S printing"), then how many are ready.
+        // Printing, not getting ready: a print the printer is still preparing isn't "printing" yet.
+        let printing = catalog.destinations.filter { destination in
+            destination.state == "printing" || (store.printing(on: destination.id).map { store.words($0).phase == .printing } ?? false)
         }
-        let ready = known.filter { $0.isReady == true }.count
+        if printing.count == 1 { return "\(connection) · \(printing[0].model ?? printing[0].name) printing" }
+        if printing.count > 1 { return "\(connection) · \(printing.count) printers printing" }
+        let count = catalog.destinations.count
+        let ready = catalog.destinations.filter { $0.isReady == true }.count
+        if ready == 0 { return "\(connection) · \(count) \(count == 1 ? "printer" : "printers")" }
         return "\(connection) · \(ready) \(ready == 1 ? "printer" : "printers") ready"
     }
 
@@ -206,12 +207,14 @@ struct NowPrintingCard: View {
                 HStack {
                     Text(words.title).font(.headline).lineLimit(1)
                     Spacer()
-                    if let percent = Format.percent(live?.job?.progress) {
+                    // A percent only once the Mac says it's printing: while the printer gets ready (layer 0) there's none.
+                    if words.phase == .printing, let percent = Format.percent(live?.job?.progress) {
                         Text(percent).font(.headline.monospacedDigit()).foregroundStyle(Color.okGreen)
                     }
                 }
-                Text(detail(live)).font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
-                if let progress = live?.job?.progress { ProgressView(value: progress, total: 100).tint(.okGreen) }
+                // The Mac's own words when it gives them ("Getting ready · …", "The printer stopped: …").
+                Text(project.status?.text.isEmpty == false ? words.line : detail(live)).font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
+                if words.phase == .printing, let progress = live?.job?.progress { ProgressView(value: progress, total: 100).tint(.okGreen) }
                 else { ProgressView().progressViewStyle(.linear).tint(words.phase.color) }
                 if let filament = live?.activeFilament, let material = filament.material {
                     HStack(spacing: 6) {
@@ -392,8 +395,10 @@ struct ProjectCard: View {
     var body: some View {
         let words = store.words(project)
         VStack(alignment: .leading, spacing: 0) {
-            ProjectImage(project: project, path: project.thumbnailPath, maxPixelSize: 500)
-                .frame(height: 150)
+            Color.clear
+                .aspectRatio(4/3, contentMode: .fit)
+                .overlay { ProjectImage(project: project, path: project.thumbnailPath, maxPixelSize: 500) }
+                .clipped()
                 .overlay(alignment: .topLeading) { StatusCapsule(phase: words.phase, text: capsuleText(words)).padding(8) }
             VStack(alignment: .leading, spacing: 2) {
                 Text(words.title).font(.headline).lineLimit(1)
@@ -413,8 +418,22 @@ struct ProjectCard: View {
         case .confirmed: ProjectWords.doneLine
         case .printed: "Printed"
         case .sent: "Sent"
-        case .printing: Format.percent(project.print?.live?.job?.progress).map { "Printing · \($0)" }
+        // The Mac's own words while it prints or gets ready, never a percent worked out here.
+        case .printing, .preparing: project.status?.text.isEmpty == false ? project.status?.text : nil
         default: nil
+        }
+    }
+}
+
+/// A Home section: its title tight above its cards.
+struct HomeSection<Content: View>: View {
+    let title: String
+    @ViewBuilder let content: Content
+    init(_ title: String, @ViewBuilder content: () -> Content) { self.title = title; self.content = content() }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            SectionTitle(title)
+            content
         }
     }
 }

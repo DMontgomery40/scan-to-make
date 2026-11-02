@@ -28,8 +28,10 @@ struct PrintStatusCard: View {
                         .buttonStyle(.glass)
                 }
                 .disabled(working)
-            } else if words.phase == .printing {
-                if let progress = project.print?.live?.job?.progress { ProgressView(value: progress, total: 100).tint(.okGreen) }
+            } else if ProjectWords.watchable(project, phase: words.phase) {
+                // Getting ready on the printer (layer 0): the camera and Stop are already there, without a percent.
+                if words.phase == .printing, let progress = project.print?.live?.job?.progress { ProgressView(value: progress, total: 100).tint(.okGreen) }
+                else { ProgressView().progressViewStyle(.linear).tint(words.phase.color) }
                 Button(action: openPrinting) { Label("Watch the Print", systemImage: "camera").frame(maxWidth: .infinity).frame(height: 36) }
                     .buttonStyle(.glass)
             } else {

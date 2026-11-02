@@ -56,9 +56,11 @@ struct StatusCapsule: View {
         Label(text ?? phase.label, systemImage: phase.symbol)
             .font(.caption.weight(.semibold))
             .labelStyle(.titleAndIcon)
-            .foregroundStyle(phase == .printed ? Color.secondary : phase.color)
+            .lineLimit(1).minimumScaleFactor(0.75)
+            .foregroundStyle(phase == .printed ? Color.white.opacity(0.75) : phase.color)
             .padding(.horizontal, 10).padding(.vertical, 5)
-            .glassEffect(.regular, in: .capsule)
+            // Dark glass: readable on a light render as on a dark one.
+            .glassEffect(.regular.tint(.black.opacity(0.55)), in: .capsule)
             .accessibilityElement(children: .combine)
     }
 }

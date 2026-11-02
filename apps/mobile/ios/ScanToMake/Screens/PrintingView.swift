@@ -107,13 +107,15 @@ struct PrintingView: View {
 
     private func summary(_ project: Project) -> some View {
         let job = live?.job
-        let fraction = (job?.progress ?? 0) / 100
+        // No progress while the printer gets ready; a finished print keeps its final progress.
+        let printing = store.words(project).phase != .preparing
+        let fraction = printing ? (job?.progress ?? 0) / 100 : 0
         return HStack(alignment: .center, spacing: 20) {
             ZStack {
                 Circle().stroke(.quaternary, lineWidth: 10)
                 Circle().trim(from: 0, to: fraction).stroke(Color.okGreen, style: .init(lineWidth: 10, lineCap: .round)).rotationEffect(.degrees(-90))
                 VStack(spacing: 0) {
-                    Text(Format.percent(job?.progress) ?? "–").font(.title.bold().monospacedDigit())
+                    Text(printing ? Format.percent(job?.progress) ?? "–" : "–").font(.title.bold().monospacedDigit())
                     Text(stateWord).font(.caption).foregroundStyle(.secondary)
                 }
             }

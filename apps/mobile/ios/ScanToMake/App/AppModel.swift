@@ -111,6 +111,7 @@ import CounterpartKit
         switch screen {
         case "ready": route = .project(ids.mic)
         case "printed": route = .project(ids.first)
+        case "preparing": Fixtures.preparing = true
         case "inputs": route = .project(ids.mic); debugSection = "inputs"
         case "working": route = .project(ids.potato)
         case "ask": route = .project(ids.plush)

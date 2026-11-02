@@ -253,10 +253,14 @@ public final class CompanionClient: @unchecked Sendable {
         (try? await send("GET", "/healthz", timeout: 6).checked(path: "/healthz")) != nil
     }
 
-    public func capabilities() async throws -> Set<String> {
-        struct Health: Decodable { var capabilities: [String: JSONValue]? }
+    public func capabilities() async throws -> Set<String> { try await health().capabilities }
+
+    /// `/healthz`: the capability flags that are on, and the Mac's own name when it gives one.
+    public func health() async throws -> (capabilities: Set<String>, name: String?) {
+        struct Health: Decodable { var capabilities: [String: JSONValue]?; var name: String?; var macName: String? }
         let health = try await request("GET", "/healthz", as: Health.self)
-        return Set((health.capabilities ?? [:]).compactMap { $0.value == .bool(true) ? $0.key : nil })
+        let name = (health.name ?? health.macName)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return (Set((health.capabilities ?? [:]).compactMap { $0.value == .bool(true) ? $0.key : nil }), name?.isEmpty == false ? name : nil)
     }
 
     public func printers() async throws -> PrinterCatalog { try await request("GET", "/v1/objects/printers", as: PrinterCatalog.self) }

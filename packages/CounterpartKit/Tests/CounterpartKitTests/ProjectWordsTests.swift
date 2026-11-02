@@ -261,6 +261,18 @@ final class ProjectWordsTests: XCTestCase {
         XCTAssertTrue(ready(["settings": ["status": "works", "archived": true]]).isArchived)
     }
 
+    /// KAN-214 #237: a print on the printer getting ready (dispatched, monitor starting or watching) belongs on the
+    /// Printing screen; slicing or sending (not yet dispatched) stays on the project page.
+    func testAPrintGettingReadyOnThePrinterIsWatchable() {
+        let preparing: [String: Any] = ["phase": "preparing", "text": "Getting ready · Heating", "symbol": "printer", "tint": "accent"]
+        let sent = ready(["state": "printing", "status": preparing,
+                          "print": ["bundleId": "b", "printId": "p", "dispatchedAt": "2026-11-02T08:00:00Z", "monitor": ["phase": "starting"]]])
+        XCTAssertTrue(ProjectWords.watchable(sent, phase: ProjectWords(sent).phase))
+        let tapped = ready(["state": "printing", "status": preparing, "print": ["bundleId": "b", "printId": "p"]])
+        XCTAssertFalse(ProjectWords.watchable(tapped, phase: ProjectWords(tapped).phase), "Print tapped, still slicing or sending")
+        XCTAssertEqual(ProjectWords(sent).line, "Getting ready · Heating", "the Mac's words, no percent")
+    }
+
     func testCardLines() {
         XCTAssertEqual(ProjectWords(ready()).line, "Ready to print · 62 × 75 × 49 mm")
         XCTAssertEqual(ProjectWords(ready(["state": "printed"])).line, "Sent to your printer", "no claim it printed without the monitor's word")

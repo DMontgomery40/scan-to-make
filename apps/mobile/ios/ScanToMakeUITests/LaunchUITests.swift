@@ -36,6 +36,8 @@ final class ProjectScreensUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Needs you"].exists)
         XCTAssertTrue(app.buttons["Camera"].exists && app.buttons["Best guess"].exists, "the ask card answers in place")
         XCTAssertTrue(app.buttons["new-project"].exists)
+        // The Mac's real name and what its printer is doing, never "0 printers ready" while one prints.
+        XCTAssertTrue(app.staticTexts["Mac mini connected · Bambu Lab P1S printing"].exists)
     }
 
     func testEmptyHomeOffersTheFirstProject() {
@@ -81,6 +83,17 @@ final class ProjectScreensUITests: XCTestCase {
         let done = app.staticTexts["Done"]
         XCTAssertTrue(reach(app, done), "Home has a Done section")
         XCTAssertTrue(reach(app, app.staticTexts["Potato, first try"]))
+    }
+
+    /// KAN-214 #237: a print getting ready on the printer (layer 0) shows the Mac's words, no percent, and opens the
+    /// Printing screen, where the camera and Stop are.
+    func testAPrintGettingReadyOpensPrinting() {
+        let app = launch("preparing")
+        let card = app.buttons.containing(NSPredicate(format: "label CONTAINS %@", "Getting ready · Heating")).firstMatch
+        XCTAssertTrue(card.waitForExistence(timeout: 20), "the Mac's own words on the Now card")
+        XCTAssertFalse(card.label.contains("%"), "no percent while it gets ready")
+        card.tap()
+        XCTAssertTrue(app.buttons["Stop"].waitForExistence(timeout: 10), "Printing, with Stop, not the project page")
     }
 
     /// David's mic mount is Ready, not Printed: the status capsule makes it Done in one tap from the page.
@@ -133,6 +146,8 @@ final class ProjectScreensUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Potato, first try"].exists)
         unarchive.tap()
         XCTAssertTrue(gone(app.buttons["show-archived"]), "nothing archived any more")
+        // Back in All projects, above where the Archived list was: scroll back to the top first.
+        for _ in 0..<4 { app.swipeDown() }
         XCTAssertTrue(reach(app, app.staticTexts["Potato, first try"]), "back in Projects")
     }
 
