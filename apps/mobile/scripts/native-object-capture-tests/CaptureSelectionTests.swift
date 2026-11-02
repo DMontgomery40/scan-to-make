@@ -5,6 +5,7 @@ struct NativeCaptureDestination {
     let projectId: String; let revision: Int; let snapshot: String; let context: String?
 }
 @MainActor final class NativeCaptureCoordinator {
+    static let stitchingWarning = "stitching warning"
     static let shared = NativeCaptureCoordinator()
     var retained: [[String: Any]] = []
     var result: [String: Any] = [:]
@@ -37,6 +38,12 @@ enum CaptureFixture {
         }
         coordinator.retained = [draft(stoppedRun, "stopped"), draft(otherRun, "ready", project: "project-other"), draft(readyRun, "ready")]
         check(await mac.finishedScan("project-one") == readyRun, "a later stopped attempt cannot hide a ready scan")
+        check(mac.localScanWarning("project-one") == nil, "legacy ready capture has no invented warning")
+        coordinator.retained[0]["stitchingIncomplete"] = true
+        coordinator.retained[1]["stitchingIncomplete"] = true
+        check(mac.localScanWarning("project-one") == nil, "a stopped or different project's warning cannot attach to Send")
+        coordinator.retained[2]["stitchingIncomplete"] = true
+        check(mac.localScanWarning("project-one") == NativeCaptureCoordinator.stitchingWarning, "Send uses the warning from the same ready capture")
         check(await mac.finishedScan("missing-project") == nil, "another project's scan cannot be adopted")
         let output = CaptureFixture.root.appendingPathComponent("NativeCaptures/\(readyRun)/Models/model-mobile.usdz")
         try FileManager.default.createDirectory(at: output.deletingLastPathComponent(), withIntermediateDirectories: true)

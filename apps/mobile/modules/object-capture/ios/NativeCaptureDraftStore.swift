@@ -24,6 +24,9 @@ struct NativeCaptureDraft: Codable, Equatable {
     var status: String
     var file: NativeCaptureFile?
     var message: String?
+    /// Apple's reconstruction warning; a saved model still needs all-side review.
+    var stitchingIncomplete: Bool?
+    static let stitchingWarning = "Some sides may be missing. The scan couldn't join every part of the object. Turn the model and check all sides before sending."
 
     func dictionary() throws -> [String: Any] {
         var value = try JSONSerialization.jsonObject(with: JSONEncoder().encode(self)) as! [String: Any]
@@ -125,7 +128,7 @@ final class NativeCaptureDraftStore {
     func update(_ id: String, status: String, message: String? = nil) throws {
         var draft = try read(id); draft.status = status; draft.message = message; try write(draft)
     }
-    func complete(_ id: String) throws -> NativeCaptureDraft {
+    func complete(_ id: String, stitchingIncomplete: Bool = false) throws -> NativeCaptureDraft {
         let parent = try runFD(id); defer { close(parent) }
         let models = openat(parent, "Models", O_RDONLY | O_DIRECTORY | O_NOFOLLOW)
         guard models >= 0 else { throw failure("The model folder could not be opened.") }; defer { close(models) }
@@ -149,6 +152,7 @@ final class NativeCaptureDraftStore {
         var draft = try read(id)
         draft.file = NativeCaptureFile(sha256: hash.finalize().map { String(format: "%02x", $0) }.joined(),
                                        byteLength: total, mediaType: "model/vnd.usdz+zip")
+        draft.stitchingIncomplete = stitchingIncomplete ? true : nil
         draft.status = "ready"; draft.message = nil; try write(draft)
         return draft
     }

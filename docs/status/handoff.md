@@ -1,5 +1,13 @@
 # Handoff: how to pick up Counterpart work
 
+## Capture warning and reconstruction diagnostics follow-up — 2026-11-02
+
+New walk-around captures retain Apple's `stitchingIncomplete` warning in the local draft. Capture review and the phone's Send journey say that some sides may be missing and ask for all-side inspection; the warning does not discard the model or claim scan acceptance. Existing drafts without the optional flag are unchanged. A new healthy reconstruction clears the flag.
+
+A failed Mac photo reconstruction retains its last 64 KiB of helper stderr, with a timestamp/exit header, in `scan/.reconstruction-diagnostics/last-failure.log` inside that project's private directory (0700 directory, 0600 file). Retries replace only this one file; successful runs do not create a failure log or replace a prior timestamped failure. These diagnostics are neither served as project files nor included in public error text. Storage failure leaves the existing saved-photos error intact.
+
+Host native lifecycle/draft/selection/retry fixtures and the companion's focused reconstruction tests cover warning persistence, healthy reset, legacy drafts, bounded private logs, retry replacement and symlink refusal. Device camera/scan-quality acceptance remains open; no saved capture or historical model was altered.
+
 ## Project Settings follow-up — 2026-11-02
 
 PR [#260](https://github.com/DMontgomery40/scan-to-make/pull/260), `feat/project-settings`, is separate from the merged release PR #259. Both clients use one native grouped Form from

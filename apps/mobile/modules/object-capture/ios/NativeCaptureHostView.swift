@@ -20,7 +20,11 @@ struct NativeCaptureHostView: View {
                                  ? "Stopping is taking longer than expected. Your files are kept, and a new scan stays unavailable until stopping finishes."
                                  : "Your files are kept. Please wait while scanning stops.")
                         } else if model.state == .viewing, owner.message == nil {
-                            Text("Scan ready").font(.title.bold())
+                            Text(model.stitchingIncomplete ? "Check every side" : "Scan ready").font(.title.bold())
+                            if model.stitchingIncomplete {
+                                Label(NativeCaptureDraft.stitchingWarning, systemImage: "exclamationmark.triangle")
+                                    .foregroundStyle(.orange)
+                            }
                             Text("Add this scan to your project to review its shape. Measurements and fit still need checking.")
                             Button("Add to this project") { close(true) }
                                 .buttonStyle(.borderedProminent)

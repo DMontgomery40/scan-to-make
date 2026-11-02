@@ -6,6 +6,7 @@ final class DelayedEngine: NativeCaptureEngine {
     var onFinish: ((NativeCaptureOutcome) -> Void)?
     var starts = 0
     var stops = 0
+    var stitchingIncomplete = false
     func start() { starts += 1 }
     func stop() { stops += 1 }
 }
@@ -38,6 +39,7 @@ final class DelayedEngine: NativeCaptureEngine {
         let output = try store.directory(second.runID).appendingPathComponent("Models/model-mobile.usdz")
         try FileManager.default.createDirectory(at: output.deletingLastPathComponent(), withIntermediateDirectories: true)
         try Data("abc".utf8).write(to: output)
+        engines[1].stitchingIncomplete = true
         engines[1].onFinish?(.completed)
         let ready = try store.read(second.runID)
         precondition(ready.status == "ready" && ready.origin == origin)
@@ -46,6 +48,18 @@ final class DelayedEngine: NativeCaptureEngine {
         let reopened = NativeCaptureDraftStore(root: root)
         let retained = try reopened.read(second.runID)
         precondition(retained == ready, "Draft survives a new store instance")
+        precondition(retained.stitchingIncomplete == true, "Reconstruction warning survives completion and reload")
+        let retainedDictionary = try retained.dictionary()
+        precondition(retainedDictionary["stitchingIncomplete"] as? Bool == true)
+        let legacyData = try JSONSerialization.data(withJSONObject: first.dictionary())
+        let legacy = try JSONDecoder().decode(NativeCaptureDraft.self, from: legacyData)
+        precondition(legacy.stitchingIncomplete == nil, "Legacy captures without a warning remain readable")
+        let healthy = try store.create(origin: origin)
+        let healthyOutput = try store.directory(healthy.runID).appendingPathComponent("Models/model-mobile.usdz")
+        try FileManager.default.createDirectory(at: healthyOutput.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("healthy".utf8).write(to: healthyOutput)
+        let healthyReady = try store.complete(healthy.runID)
+        precondition(healthyReady.stitchingIncomplete == nil, "Healthy capture completion does not invent a warning")
         let original = try Data(contentsOf: output)
         precondition(original == Data("abc".utf8), "Keep original bytes")
         let third = try owner.start(origin: origin)
@@ -131,6 +145,7 @@ struct FixtureMessages { mutating func removeAll() {} }
     var reconstructionProgress: Float = 0
     var reconstructionRemainingTime: TimeInterval?
     var reconstructionStage: String?
+    var stitchingIncomplete = false
     var reconstructionFailure: Swift.Error?
     var isStoppingReconstruction = false
     var reconstructionStopWaitExceeded = false
@@ -238,8 +253,16 @@ struct FixtureMessages { mutating func removeAll() {} }
         check(missing.state == .failed && missing.photogrammetrySession == nil, "missing completed model cannot become ready")
         let ready = AppDataModel(); let readySession = PhotogrammetrySession(); var readyOutput: URL?
         ready.onEmbeddedCompletion = { url,_ in readyOutput = url }
-        ready.beginFixtureReconstruction(readySession, output: output); await flush(); readySession.emit(.processingComplete); await flush()
+        ready.beginFixtureReconstruction(readySession, output: output); await flush()
+        readySession.emit(.stitchingIncomplete); await flush()
+        readySession.emit(.processingComplete); await flush()
+        check(ready.stitchingIncomplete, "Incomplete stitching stays visible after successful reconstruction")
         check(ready.state == .viewing && readyOutput == output && readySession.processCalls == 1, "completed model is handed off exactly once")
+        let fresh = AppDataModel(); let freshSession = PhotogrammetrySession()
+        fresh.stitchingIncomplete = true
+        fresh.beginFixtureReconstruction(freshSession, output: output); await flush()
+        freshSession.emit(.processingComplete); await flush()
+        check(!fresh.stitchingIncomplete && fresh.state == .viewing, "New healthy reconstruction clears any previous warning")
         let rejected = AppDataModel(); let rejectedSession = PhotogrammetrySession(); rejectedSession.throwsOnProcess = true
         rejected.beginFixtureReconstruction(rejectedSession, output: output); await flush()
         check(rejected.photogrammetrySession == nil && rejected.state == .failed, "synchronously rejected processing starts no active operation")

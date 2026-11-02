@@ -60,6 +60,7 @@ class AppDataModel: Identifiable {
     private(set) var reconstructionProgress: Float = 0
     private(set) var reconstructionRemainingTime: TimeInterval?
     private(set) var reconstructionStage: String?
+    private(set) var stitchingIncomplete = false
     private(set) var reconstructionFailure: Swift.Error?
     private(set) var isStoppingReconstruction = false
     private(set) var reconstructionStopWaitExceeded = false
@@ -481,6 +482,7 @@ extension AppDataModel {
         guard let session = photogrammetrySession, reconstructionTask == nil else { return }
         reconstructionProgress = 0
         reconstructionFailure = nil
+        stitchingIncomplete = false
         isStoppingReconstruction = false
         reconstructionStopWaitExceeded = false
         reconstructionTask = Task { [weak self, session] in
@@ -512,7 +514,10 @@ extension AppDataModel {
                     self.isStoppingReconstruction = true
                     self.finishReconstruction(session: session, outputFile: outputFile, failure: nil)
                     return
-                case .invalidSample, .skippedSample, .automaticDownsampling, .stitchingIncomplete:
+                case .stitchingIncomplete:
+                    self.stitchingIncomplete = true
+                    self.record("reconstruction-warning", detail: String(describing: output))
+                case .invalidSample, .skippedSample, .automaticDownsampling:
                     self.record("reconstruction-warning", detail: String(describing: output))
                 default: break
                 }
