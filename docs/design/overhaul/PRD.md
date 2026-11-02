@@ -221,7 +221,7 @@ Screenshots:
 | Setting | What it does |
 |---|---|
 | Name | Rename. |
-| Status | Not printed yet, Printed, **Works**, Needs changes, Archived. Set it by hand any time, for example to mark something done that was printed elsewhere. |
+| Status | Not printed yet → Printed → **Done** (it works); Needs changes is a side branch from Printed. Set it by hand any time, for example to mark something done that was printed elsewhere. **Archive** is a separate action ("Hide from Home"), not a status step: it keeps the project's status, Done stays Done, and Unarchive brings it back. |
 | Printer | The printer this project prints on by default. |
 | Colours | The default colour per part or filament (AMS slot or loaded spool), reused for every reprint. |
 | Quality and strength | The default Draft/Standard/Fine and Standard/Strong/Max. |
@@ -232,7 +232,7 @@ Screenshots:
 | Duplicate | A new project from this one's current model and settings. |
 | Archive / Delete | Archive hides it from Home and keeps everything. Delete removes it from the Mac, with a confirmation. |
 
-Home and the Mac sidebar group projects as Now, Needs you, Ready, **Done** (Works) and Printed, with Archived behind a filter. Marking a project **Works** moves it to Done.
+Home and the Mac sidebar group projects as Now, Needs you, Ready, **Done** (Works) and Printed, with Archived behind a filter. Marking a project **Works** moves it to Done. A Done project stays printable: **Print another** opens the print sheet with the last printer, settings and colours, plus Copies; it needs no extra confirmation, and it stays Done after the new print finishes.
 
 ### 5.5 Print
 
