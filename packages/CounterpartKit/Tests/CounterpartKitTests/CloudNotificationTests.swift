@@ -30,6 +30,13 @@ final class CloudNotificationTests: XCTestCase {
             XCTAssertTrue(info.shouldSendContentAvailable)
             XCTAssertTrue(info.desiredKeys?.contains("eventId") == true)
             XCTAssertTrue(info.desiredKeys?.contains("projectId") == true)
+            XCTAssertTrue(info.desiredKeys?.contains("type") == true)
+            XCTAssertLessThanOrEqual(info.desiredKeys?.count ?? 0, 3, "CloudKit rejects notification payloads requesting more than three fields")
+            XCTAssertEqual(info.titleLocalizationKey, "%1$@")
+            XCTAssertEqual(info.titleLocalizationArgs, ["title"])
+            XCTAssertEqual(info.alertLocalizationKey, "%1$@")
+            XCTAssertEqual(info.alertLocalizationArgs, ["body"])
+            XCTAssertNil(info.collapseIDKey, "separate prints must not share one constant collapse ID")
             XCTAssertNotNil(info.category)
         }
         XCTAssertNotNil(subscriptions.first { $0.subscriptionID == "proj-silent" })
