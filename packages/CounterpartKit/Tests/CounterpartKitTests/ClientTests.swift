@@ -505,6 +505,24 @@ final class CompanionClientTests: XCTestCase {
         XCTAssertEqual(p.settingsFiles.first?.name, "Current model (3MF)")
     }
 
+    func testChangingPublishedOriginalInvalidatesCurrentDownloadWithoutChangingPassTime() async throws {
+        func project(_ file: String) throws -> Project {
+            let data: [String: Any] = ["id": "0b6f0f43-7c35-4b8a-9a3c-8f0b4c4b2a11", "createdAtMs": 1, "updatedAtMs": 2, "state": "ready", "kind": "published", "photos": [], "passes": [], "current": ["model": file, "renders": []], "files": ["original": ["original/first.3mf", "original/second.3mf"]]]
+            return try JSONDecoder().decode(Project.self, from: JSONSerialization.data(withJSONObject: data))
+        }
+        let fake = FakeTransport { request, _ in HTTPReply(status: 200, body: Data((request.url!.path.hasSuffix("/original/0") ? "first" : "second").utf8)) }
+        let c = try client(fake), firstProject = try project("original/first.3mf"), secondProject = try project("original/second.3mf")
+        let first = try await c.download(firstProject, "model.stl")
+        let second = try await c.download(secondProject, "model.stl")
+        XCTAssertEqual(firstProject.mediaVersion, secondProject.mediaVersion)
+        XCTAssertEqual(try Data(contentsOf: first), Data("first".utf8), "The current endpoint may already serve the next selection")
+        XCTAssertNotEqual(first, second)
+        XCTAssertEqual(try Data(contentsOf: second), Data("second".utf8))
+        XCTAssertEqual(fake.calls.count, 2)
+        _ = try await c.download(secondProject, "model.stl")
+        XCTAssertEqual(fake.calls.count, 2)
+    }
+
     func testMessageUploadIntentSurvivesAnInitialPassFailingBeforeTheUpload() async throws {
         let id = "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a02"
         var uploads: [URL] = []

@@ -468,15 +468,23 @@ public final class CompanionClient: @unchecked Sendable {
         let version = String(Int64(project.mediaVersion))
         let folder = cache.appending(path: project.id, directoryHint: .isDirectory).appending(path: version, directoryHint: .isDirectory)
         var filename = name.replacingOccurrences(of: "/", with: "_")
+        var resource = name
         // The historical route serves the current model, including an original 3MF.
-        if name == "model.stl", project.preservesPublishedFilaments { filename = "model.3mf" }
+        if name == "model.stl", project.kind == "published", let model = project.current?.model {
+            let original = Hex.sha256(Data(model.utf8))
+            filename = "model-\(original).\(project.preservesPublishedFilaments ? "3mf" : "stl")"
+            // Bind this request to the selected original even if another choice
+            // reaches the Mac before this download is served.
+            if case .array(let originals)? = project.files?.object?["original"],
+               let index = originals.firstIndex(where: { $0.string == model }) { resource = "original/\(index)" }
+        }
         if name.hasPrefix("original/"), let index = Int(name.dropFirst(9)),
            case .array(let originals)? = project.files?.object?["original"], originals.indices.contains(index), let path = originals[index].string {
             filename += "_" + URL(fileURLWithPath: path).lastPathComponent
         }
         let target = folder.appending(path: filename)
         if FileManager.default.fileExists(atPath: target.path) { return target }
-        let encoded = name.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? name
+        let encoded = resource.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? resource
         // The Ask's picture is served by its id; the field gives `asks/<id>.<ext>`.
         let path = "/v1/objects/\(project.id)/\(encoded)"
         let reply = try await send("GET", path, limit: Self.scanLimit)

@@ -293,7 +293,11 @@ export class ObjectService {
       const duplicate = await this.#deps.store.create(source.instructions, passKind(source));
       try {
         const current = source.current;
-        const paths = [current.model, ...current.renders, ...(current.design ? [current.design.f3d, ...(current.design.parameters ? [current.design.parameters] : [])] : [])];
+        // Duplicate the chosen original, not every alternate file or an earlier plate.
+        const receipt = source.kind === 'published' ? source.files?.receipts?.find(file => file.path === current.model) : undefined;
+        const files = receipt ? {original: [receipt.path], current: receipt.path, receipts: [receipt]} : undefined;
+        const publishedSelection = source.publishedSelection ? {...source.publishedSelection, fileIndex: 0} : undefined;
+        const paths = [current.model, ...current.renders, ...(receipt?.plates.flatMap(plate => plate.thumbnail ? [plate.thumbnail] : []) ?? []), ...(current.design ? [current.design.f3d, ...(current.design.parameters ? [current.design.parameters] : [])] : [])];
         for (const path of new Set(paths)) {
           if (isAbsolute(path) || path.split('/').some(part => !part || part === '.' || part === '..')) throw new InvalidFileError('The model has an invalid file path.');
           const target = join(this.dir(duplicate.id), path);
@@ -303,7 +307,8 @@ export class ObjectService {
         const credit = (source as StmObject & {credit?: unknown}).credit;
         const result = await this.#deps.store.update(duplicate.id, o => ({...o, state: 'ready', current,
           title: `${projectTitle(source).slice(0, 114)} copy`, printerDestinationId: source.printerDestinationId,
-          preferences: {...source.preferences, printDefaults: this.#resolvedPrintDefaults(source)}, ...(credit ? {credit} : {})}));
+          preferences: {...source.preferences, printDefaults: this.#resolvedPrintDefaults(source)}, ...(credit ? {credit} : {}),
+          ...(files ? {files} : {}), ...(publishedSelection ? {publishedSelection} : {})}));
         await this.#emit({id: randomUUID(), type: 'project.updated', projectId: result.id, data: {keys: ['created']}});
         return this.#changed(result);
       } catch (error) { await this.#deps.store.remove(duplicate.id); throw error; }

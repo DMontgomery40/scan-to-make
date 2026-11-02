@@ -100,3 +100,18 @@ for (const extension of ['3mf','3MF']) test(`published ${extension} preserves mu
  assert.deepEqual(await readFile(bundles.stlPath(manifest)),bytes);
  assert.deepEqual((await service.get(object.id)).preferences.printDefaults.colour,{material:'ABS'},'stored preference is preserved');
 });
+
+test('duplicating a selected published plate preserves its original receipt and plate for the next handoff',async t=>{
+ const selections=[];
+ const f=await setup(t,undefined,{print:{services:{selection:{model:'p1s'},runner:{backend:'bambu-printer-mcp',estimate:async input=>{selections.push(input.selection);return{estimate:{seconds:100},settings:{}};}}}}});
+ const source=await f.service.create('Print this','published',LINK);
+ await f.service.addModelFile(source.id,'first.3mf',model('First'));
+ const bytes=model('Selected second file',2),asking=await f.service.addModelFile(source.id,'second.3mf',bytes);
+ const selected=await f.service.answerAsk(source.id,asking.ask.id,['1:1']);
+ const copy=await f.service.duplicate(source.id);
+ assert.deepEqual(copy.publishedSelection,{fileIndex:0,plateIndex:1,sliced:false});
+ assert.equal(copy.files.receipts.length,1);assert.deepEqual(copy.files.receipts[0],selected.files.receipts[1]);
+ assert.deepEqual(copy.files.original,[selected.current.model]);assert.equal(copy.files.current,copy.current.model);
+ assert.deepEqual(await readFile(join(f.service.dir(copy.id),copy.current.model)),bytes);assert.deepEqual(copy.credit,selected.credit);
+ await f.service.estimate(copy.id);assert.equal(selections.at(-1).plateIndex,1);
+});

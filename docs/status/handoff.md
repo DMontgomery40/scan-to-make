@@ -71,10 +71,24 @@ isolated temporary project as Ready, preserves exact original/bundle bytes, and 
 files are unchanged. These are user-provided files; no publisher download checksum was verified.
 No live project, browser session or printer was changed, and no physical print was attempted.
 
-Development checks before final integration: focused published/model tests 14 pass; shared Swift
-140 pass; companion upload/pass/print/HTTP/worker/auth regressions 114 pass; handoff suite 60 pass
-before the last added validation cases; unsigned iPhone and Mac builds pass. Complete current-head
-checks and live download/phone acceptance must be recorded before claiming row 24 accepted.
+Fresh publisher retrieval is now separately verified: root downloaded profile 218979 through signed-in
+Brave to `Vernier+Caliper+Ruler+220mm+COLOR-02.3mf` (1,687,930 bytes, SHA
+`e08c4d77bc6bafd708e3fee653c7880732384f955622c2d7fbd93ce1f88af7bf`). Its isolated import is Ready,
+with both OUTER and INNER caliper parts on plate 0, the original designer/licence/profile URL,
+and the selected plate thumbnail. Source, stored original and handoff bundle hashes match;
+source unchanged, temporary project removed. `publisher-download.{json,png}` and
+`publisher-import.json` in the same evidence folder record the browser retrieval and local checks.
+The earlier underscore-named caliper file is damaged; this fresh publisher file is valid.
+No physical print or installed-app acceptance is implied by the isolated import.
+
+Draft #273 review reproduced and fixed two further defects: duplicates now retain the chosen
+original's receipt and plate selection, and phone downloads include the selected original path
+in their cache identity. Focused published tests 11 pass; shared Swift 144 pass; full handoff
+94 pass/5 skips; unsigned iPhone and Mac builds pass before these last model/transport fixes.
+Node 22 full workflow passed; Node 24's unrelated printing-test teardown race is fixed in the
+separate fixture branch. Final exact-head checks and native UI acceptance remain outstanding.
+Generic draft #49 now also exposes file-only inspection, preserves the public print plate index,
+and fixes STL copies; full 607 tests and package installation checks pass. No npm publication.
 
 ## Device acceptance and Blender follow-up — 2026-11-02, 09:24 Mountain
 
