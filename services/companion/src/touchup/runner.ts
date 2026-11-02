@@ -1,6 +1,6 @@
 import {spawn as nodeSpawn} from 'node:child_process';
 import {createHash} from 'node:crypto';
-import {readdir, readFile} from 'node:fs/promises';
+import {readdir, readFile, stat} from 'node:fs/promises';
 import {join} from 'node:path';
 import {createInterface} from 'node:readline';
 import type {TouchupPass} from './inputs.js';
@@ -10,8 +10,16 @@ export const TOUCHUP_TIMEOUT_MS = 900_000;
 export const TOUCHUP_MAX_TOOL_CALLS = 120;
 const KILL_GRACE_MS = 5000;
 
+export interface TouchupChange {tag: 'added' | 'changed' | 'assumed' | 'estimated'; text: string; toleranceMm?: number}
+export interface TouchupAsk {question: string; photo?: string; region?: {x: number; y: number; width: number; height: number}}
 export interface TouchupResult {
   status: 'done' | 'unchanged' | 'needs_closeup' | 'capped' | 'failed';
+  /** The worker's short name for the thing (PR 4). */
+  title?: string;
+  changes?: TouchupChange[];
+  ask?: TouchupAsk;
+  /** Fusion passes: the parametric design and its parameters, from fusion_mcp_export. */
+  design?: {f3d: string; parameters?: string};
   reason?: string;
   closeup?: string;
   summary?: string;
@@ -47,7 +55,32 @@ interface ResultEvent {
   is_error?: boolean;
   result?: string;
   total_cost_usd?: number;
-  structured_output?: {status?: string; closeup?: string; summary?: string};
+  structured_output?: {status?: string; closeup?: string; summary?: string; title?: string; changes?: unknown; ask?: unknown};
+}
+
+/** The worker's title, what-changed list and Ask, checked and made safe to show. */
+function structured(answer: ResultEvent['structured_output'], publicText: (text: string) => string): Pick<TouchupResult, 'title' | 'changes' | 'ask'> {
+  const out: Pick<TouchupResult, 'title' | 'changes' | 'ask'> = {};
+  if (typeof answer?.title === 'string' && answer.title.trim()) out.title = publicText(answer.title).replace(/[.!]+$/, '').slice(0, 40);
+  if (Array.isArray(answer?.changes)) {
+    const changes = answer.changes.flatMap((item: unknown): TouchupChange[] => {
+      const change = item as Record<string, unknown> | null;
+      if (!change || !['added', 'changed', 'assumed', 'estimated'].includes(change.tag as string) || typeof change.text !== 'string' || !change.text.trim()) return [];
+      const tolerance = typeof change.toleranceMm === 'number' && Number.isFinite(change.toleranceMm) && change.toleranceMm >= 0 ? {toleranceMm: change.toleranceMm} : {};
+      return [{tag: change.tag as TouchupChange['tag'], text: publicText(change.text).slice(0, 300), ...tolerance}];
+    }).slice(0, 12);
+    if (changes.length) out.changes = changes;
+  }
+  const ask = answer?.ask as Record<string, unknown> | undefined;
+  if (ask && typeof ask.question === 'string' && ask.question.trim()) {
+    const region = ask.region as Record<string, unknown> | undefined;
+    const unit = (value: unknown) => typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1;
+    out.ask = {question: publicText(ask.question).slice(0, 300),
+      ...(typeof ask.photo === 'string' && /^[A-Za-z0-9._ -]{1,128}$/.test(ask.photo.split('/').at(-1) ?? '') ? {photo: ask.photo.split('/').at(-1)!} : {}),
+      ...(region && unit(region.x) && unit(region.y) && unit(region.width) && unit(region.height)
+        ? {region: {x: region.x as number, y: region.y as number, width: region.width as number, height: region.height as number}} : {})};
+  }
+  return out;
 }
 
 /** A printable STL: every triangle complete and every vertex coordinate finite. Cut-off or corrupt exports fail. */
@@ -164,7 +197,11 @@ export async function runTouchupWorker(inv: TouchupInvocation, pass: TouchupPass
   const base = {renders, checkpoints, ...(worker ? {worker} : {}), stats: {seconds: seconds(), toolCalls, ...(resultEvent?.total_cost_usd !== undefined ? {costUsd: resultEvent.total_cost_usd} : {})}};
   const withModel = model ? {model} : {};
   const answer = resultEvent?.structured_output;
-  const summary = answer?.summary ? {summary: answer.summary} : {};
+  const summary = {...(answer?.summary ? {summary: answer.summary} : {}), ...structured(answer, publicText)};
+  const f3d = join(pass.outDir, 'touched.f3d'), parameters = join(pass.outDir, 'touched.parameters.json');
+  const design = await stat(f3d).then(info => info.isFile(), () => false)
+    ? {design: {f3d, ...(await stat(parameters).then(info => info.isFile(), () => false) ? {parameters} : {})}} : {};
+  Object.assign(base, design);
 
   if (ended.error) {
     const reason = ended.error.code === 'ENOENT' ? `Claude Code wasn't found at ${inv.command}. Install it or sign in.` : `Claude Code couldn't start: ${ended.error.message}`;

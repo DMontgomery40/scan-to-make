@@ -30,6 +30,8 @@ import {createPrinterCheck} from './printer-check.js';
 import {ObjectStore} from './objects/store.js';
 import {ObjectService} from './objects/service.js';
 import {judgePlate} from './objects/bedcheck.js';
+import {generateTitle} from './objects/title.js';
+import {PassTimings} from './touchup/stages.js';
 import {printerStlSize} from './objects/stl-size.js';
 import {runTouchup} from './touchup/touchup.js';
 import {loadPrinterCatalog} from './objects/printers.js';
@@ -100,6 +102,7 @@ if(handoffConfig&&printHandoff&&captureDirectory&&claudePath){
     stlInfo:path=>printerStlSize(handoffConfig,path),
     print:{services:printHandoff,destinations,judgePlate:photo=>judgePlate(photo,claudePath)},
     settings:companionSettings,camera:new CameraFrames(),
+    passTimings:new PassTimings(join(dataRoot,'pass-timings.json')),titleFor:request=>generateTitle(request,claudePath),
     ...(eventLog?{events:{emit:async draft=>{await eventLog.append(draft);}}}:{})});
   await companionSettings.load();
   await objects.resume();

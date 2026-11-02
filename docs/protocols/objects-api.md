@@ -111,8 +111,8 @@ A non-standard `quality` or `strength` the destination's MCP can't apply (its `s
 | Field | Type | Status |
 |---|---|---|
 | `status` | `ObjectStatus` `{phase, text, symbol, tint}`: the PRD §4 state line, written by the companion. Show `text` as is. `phase` is `sending`, `working`, `needs-you`, `ready`, `preparing`, `printing`, `printed`, `failed` or `sent` (symbol `paperplane`, tint `secondary`). | PR 3 |
-| `title` | The short generated title ("Mic mount"). Absent until generated; show `status`/the request until then. | PR 4 |
-| `kind` | `fit` (make something that fits) or `copy` (copy an object) | PR 4 |
+| `title` | The short title ("Mic mount"). Always a string: generated at the first pass, and for a project from before titles the first time it is listed (once, in the background, then saved). Until then it is the request's first six words ("A mount for my mic stand…"), or "Your scan" / "Your project" without a request. | PR 4 |
+| `kind` | `fit` (make something that fits) or `copy` (copy an object). Set at creation (send it: the phone's New flow knows which job it is), else from the first pass: a project with a scan or a handheld capture is a `copy` even with a request ("Copy this. Close up the bottom."), and a request with photos alone is a `fit`. A copy is always cleaned up in Blender; a design uses Fusion when the printer MCP's `fusion_mcp_status` reports it connected and a new design opens, else Blender. | PR 4 |
 | `ask` | `Ask` `{id, question, photo?, region?, answers, status, askedAtMs}` while `state` is `needs-closeup` (and kept, `status: "answered"`, after). The old `question.closeup` is still set for older apps. | PR 4 |
 | `current.changes` | `[{tag: "added"\|"changed"\|"assumed"\|"estimated", text, toleranceMm?}]`: the what-changed list | PR 4 |
 | `current.engine` | `blender` or `fusion` | PR 4 |
@@ -121,6 +121,7 @@ A non-standard `quality` or `strength` the destination's MCP can't apply (its `s
 | `passes[].stages` | `[{id, words, startedAtMs, endedAtMs?, typicalSec}]` (`id`: `building`, `preparing`, `working`, `saving`) | PR 4 |
 | `passes[].estimate` | `{remainingSec, endsAtMs}` while the pass runs | PR 4 |
 | `passes[].engine` | `blender` or `fusion` | PR 4 |
+| `passes[].engineNote` | Why a design pass used Blender when Fusion was wanted ("Fusion couldn't open a new design: …") | PR 4 |
 | `print.printId` | A uuid per dispatched print | PR 2 |
 | `print.destinationId` | The destination it was sent to (same as `print.destination.id`) | PR 2 |
 | `print.fileBase` | Set when the dispatch returned no job identity: the name a job is adopted by | PR 2 |

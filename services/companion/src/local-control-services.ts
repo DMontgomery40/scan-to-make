@@ -148,7 +148,7 @@ export function createControlDispatcher(services: ControlServices) {
         case 'status.get': return {protocolVersion:1,companionVersion:services.companionVersion,transport:auth.transport,
           pairedDeviceCount:(await auth.listDevices()).length,capabilities:{capture:!!capture?.captures,cleanup:!!capture?.scanProcessing,printerHandoff:!!printHandoff,nearbyPairing:!!services.nearby,
             objectsCreate:!!services.objects,printSettings:!!services.objects?.printSettingsAvailable,printControl:!!services.objects?.printSettingsAvailable,
-            events:!!services.events&&!!services.liveActivityTokens}};
+            events:!!services.events&&!!services.liveActivityTokens,structuredPasses:!!services.objects}};
         case 'devices.list': {
           const devices = await auth.listDevices();
           return {devices: await Promise.all(devices.map(async device => {
@@ -232,7 +232,10 @@ export function createControlDispatcher(services: ControlServices) {
               return {activity: await objects.passActivity(id, index)};
             }
             if (method === 'objects.delete') { await objects.delete((parameters[method].parse(raw) as {id: string}).id); return {deleted: true}; }
-            if (method === 'objects.create') return {object: local(await objects.create(parameters[method].parse(raw).instructions))};
+            if (method === 'objects.create') {
+              const {instructions, kind} = parameters[method].parse(raw);
+              return {object: local(await objects.create(instructions, kind))};
+            }
             if (method === 'objects.estimate') {
               const {id, ...request} = parameters[method].parse(raw);
               return await objects.estimate(id, request);
@@ -268,7 +271,7 @@ export function createControlDispatcher(services: ControlServices) {
             const object = method === 'objects.get' ? await objects.get(params.id)
               : method === 'objects.selectPrinter' ? await objects.selectPrinter(params.id, params.destinationId!)
               : method === 'objects.start' ? await objects.start(params.id)
-              : method === 'objects.answerCloseup' ? await objects.answerCloseup(params.id, {bestGuess: params.bestGuess!})
+              : method === 'objects.answerCloseup' ? await objects.answerCloseup(params.id, {bestGuess: params.bestGuess!, ...((params as {text?: string}).text ? {text: (params as {text?: string}).text} : {})})
               : method === 'objects.print' ? await objects.print(params.id, (({id: _id, ...options}) => options)(params))
               : await objects.answerPlate(params.id, {clear: true});
             return {object: local(object)};
