@@ -100,7 +100,7 @@ import Observation
             try Task.checkCancellation()
             let page = try await database.recordZoneChanges(inZoneWith: CloudNotificationSubscriptions.zoneID, since: token,
                 desiredKeys: ["macId", "name", "addresses", "spkiSha256", "enrolmentToken", "tokenExpiresAt",
-                    "projectId", "printId", "title", "printerName", "printState", "progress", "remainingSec", "endsAt", "updatedAt"], resultsLimit: 200)
+                    "projectId", "printId", "title", "printerName", "printState", "projectState", "state", "printOutcome", "progress", "remainingSec", "endsAt", "updatedAt"], resultsLimit: 200)
             // Do not advance past a record-level failure; the next attempt must see it again.
             let changed = try page.modificationResultsByID.map { (id, result) in (id, try result.get().record) }
             for (id, record) in changed where ["CounterpartMac", CloudKitRecords.project].contains(record.recordType) { records[id] = record }
@@ -110,12 +110,7 @@ import Observation
     }
 
     private static func printSnapshot(_ record: CKRecord) -> PrintActivitySnapshot? {
-        guard let project = record["projectId"] as? String, let print = record["printId"] as? String,
-              let state = record["printState"] as? String else { return nil }
-        let updated = record["updatedAt"] as? Date ?? Date()
-        return .init(attributes: .init(projectId: project, printId: print, title: record["title"] as? String ?? "Your print", printerName: record["printerName"] as? String ?? "Your printer"),
-            content: .init(state: state, progress: (record["progress"] as? NSNumber)?.doubleValue ?? 0,
-                           endsAt: record["endsAt"] as? Date ?? updated.addingTimeInterval((record["remainingSec"] as? NSNumber)?.doubleValue ?? 0)), observedAt: updated)
+        PrintActivitySnapshot(cloudRecord: record)
     }
 
     private static func mac(_ record: CKRecord) -> CloudMac? {

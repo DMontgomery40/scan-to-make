@@ -1,4 +1,5 @@
 import XCTest
+import CloudKit
 @testable import CounterpartKit
 
 final class PrintActivityTests: XCTestCase {
@@ -15,6 +16,32 @@ final class PrintActivityTests: XCTestCase {
         let ended = try XCTUnwrap(PrintActivitySnapshot(project, now: now))
         XCTAssertTrue(ended.content.terminal)
         XCTAssertEqual(ended.content.progress, 100)
+    }
+
+    func testCloudMirrorAndPhoneEndDespiteAnOldPrinterReport() throws {
+        let updated = Date(timeIntervalSince1970: 1_800_000_000)
+        for (outcome, reported, projectState, expected) in [
+            ("replaced", "printing", Project.State.ready, "cancelled"),
+            ("failed", "idle", .failed, "failed"),
+            ("done", "printing", .printed, "finished"),
+            ("", "idle", .failed, "failed")
+        ] {
+            var project = Project(id: "p", createdAtMs: 0, updatedAtMs: updated.timeIntervalSince1970 * 1000, state: projectState)
+            project.print = .init(bundleId: "b", printId: "j", live: .init(state: reported, job: .init(name: "Old job", progress: 42)),
+                                  monitor: .init(phase: "ended", endState: outcome.isEmpty ? nil : outcome))
+            let record = CKRecord(recordType: "CounterpartProject")
+            record["projectId"] = project.id; record["updatedAt"] = updated
+            PrintActivitySnapshot.mirror(project, into: record)
+            XCTAssertEqual(record["printState"] as? String, expected)
+            let remote = try XCTUnwrap(PrintActivitySnapshot(cloudRecord: record))
+            XCTAssertEqual(remote.content.state, expected)
+            XCTAssertTrue(remote.content.terminal)
+            XCTAssertFalse(remote.shouldStart(foreground: true, dismissed: []))
+            XCTAssertEqual(remote.observedAt, updated)
+            // Outcome must also override a raw legacy report in a record read by the phone.
+            record["printState"] = reported
+            XCTAssertEqual(PrintActivitySnapshot(cloudRecord: record)?.content.state, expected)
+        }
     }
 
     func testRelayCodingAndLifecycle() throws {
