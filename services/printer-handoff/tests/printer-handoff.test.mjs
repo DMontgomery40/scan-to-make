@@ -77,6 +77,20 @@ test('a selected colour and profile reach slicing and its AMS slot reaches print
   assert.equal(print.arguments.auto_match_ams, false);
 });
 
+test('a chosen spool\'s profile replaces the configured filament alias instead of sending both', async t => {
+  const f = await setup(t);
+  const runner = new PrinterHandoffRunner({...f.config, slicer: {filamentProfile: 'Generic PLA @BBL P1S'}}, {relay: f.relay});
+  const store = new HandoffBundleStore(join(f.root, 'chosen-profile'));
+  const manifest = await store.create({stl, prompt:'', backend:'bambu-printer-mcp', selection:{...selection, useAms:true, amsSlots:[0], autoMatchAms:false}});
+  await runner.runBundle(store, manifest.id, {slicer:{loadFilaments:'/profiles/petg.json', filamentColours:'#000000'}});
+  const slice = (await f.calls()).find(call => call.tool === 'slice_stl');
+  assert.equal(slice.arguments.load_filaments, '/profiles/petg.json');
+  assert.equal(slice.arguments.filament_profile, undefined);
+  // Without a chosen profile the configured one is still sent.
+  await runner.run({stlPath: f.stlPath, print: false});
+  assert.equal((await f.calls()).filter(call => call.tool === 'slice_stl').at(-1).arguments.filament_profile, 'Generic PLA @BBL P1S');
+});
+
 test('a backend that cannot honour the chosen colour is refused before slicing or dispatch', async t => {
   const f = await setup(t, {noColour:true});
   await assert.rejects(f.runner.run({stlPath:f.stlPath, slicer:{loadFilaments:'/profiles/pla.json', filamentColours:'#FEC600'}}), /filament-selection-unsupported/);

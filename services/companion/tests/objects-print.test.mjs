@@ -131,7 +131,7 @@ test('a clear camera never answers the printer question; explicit checked values
   const waiting = await until(async () => (await service.get(object.id)).printConfirmation);
   assert.equal(waiting.message, 'Printer: P1S. Build plate is clear?');
   assert.equal(waiting.supported, true);
-  assert.deepEqual(waiting.fields, [{name: 'confirmed', title: 'I checked the printer and confirm this operation', required: true}]);
+  assert.deepEqual(waiting.fields, [{name: 'confirmed', title: 'I checked the printer and confirm this operation', required: true, default: false}]);
   assert.equal(answers.length, 0);
   assert.equal((await service.get(object.id)).state, 'printing');
   await assert.rejects(service.answerPlate(object.id, {clear: true}), InvalidStateError);
@@ -272,7 +272,7 @@ test('answers are bound to the current question and preserve explicit false valu
 });
 
 test('unknown schemas and modes preserve the original question but only permit cancellation', async () => {
-  for (const options of [{schema: {type: 'object', properties: {name: {type: 'string'}}}}, {mode: 'url'},
+  for (const options of [{schema: {type: 'object', properties: {name: {type: 'array'}}}}, {mode: 'url'},
     {schema: undefined, mode: 'url'}, {schema: {...CONFIRM, anyOf: [{required: ['confirmed']}]}}]) {
     const {service, object, answers} = await setup(options);
     await service.print(object.id);
@@ -351,4 +351,23 @@ test('Bambu live timeRemaining is shown for its running printer job', async () =
  const loaded=await service.get(object.id);
  assert.equal(loaded.print.printerStatus.percent,3);
  assert.equal(loaded.print.printerStatus.remainingMinutes,42);
+});
+
+test('the Mac answers any flat MCP question; a wrong answer comes back as invalid-request with its reason', async () => {
+  const schema = {type: 'object', required: ['confirmed', 'bambu_model'], properties: {
+    confirmed: {type: 'boolean', title: 'I checked the printer'}, bambu_model: {type: 'string', title: 'Printer Model', oneOf: [{const: 'p1s', title: 'P1S'}]}}};
+  const {service, object, answers} = await setup({schema, camera: false});
+  const dispatch = createControlDispatcher({auth: {}, companionVersion: 'test', objects: service});
+  const {capabilities} = await createControlDispatcher({auth: {transport: 'lan', listDevices: async () => []}, companionVersion: 'test', objects: service})('status.get', {});
+  assert.deepEqual([capabilities.genericConfirmations, capabilities.materialChoice], [true, true]);
+  await service.print(object.id);
+  const question = await until(async () => (await service.get(object.id)).printConfirmation);
+  assert.equal(question.supported, true);
+  assert.deepEqual(question.fields[1], {name: 'bambu_model', title: 'Printer Model', required: true, type: 'string', enum: ['p1s'], enumNames: ['P1S']});
+  await assert.rejects(dispatch('objects.answerPrintConfirmation', {id: object.id, confirmationId: question.id, answer: {action: 'accept', content: {confirmed: true, bambu_model: 'x1c'}}}),
+    error => error.code === 'invalid-request' && /"Printer Model" must be one of the choices/.test(error.message));
+  assert.equal(answers.length, 0);
+  await dispatch('objects.answerPrintConfirmation', {id: object.id, confirmationId: question.id, answer: {action: 'accept', content: {confirmed: true, bambu_model: 'p1s'}}});
+  await service.settled(object.id);
+  assert.deepEqual(answers[0].result.content, {confirmed: true, bambu_model: 'p1s'});
 });

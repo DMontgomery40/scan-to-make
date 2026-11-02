@@ -13,7 +13,7 @@ import {readBoundedCaptureFile} from './capture-import.js';
 import {RemoteAuthStore, RemoteAuthFailure} from './remote-auth.js';
 import type {ModelAccessService} from './model-access.js';
 import type {NearbyRequest} from '@scan-to-make/contracts/nearby-pairing';
-import {InvalidFileError, InvalidStateError, type ObjectService} from './objects/service.js';
+import {InvalidAnswerError, InvalidFileError, InvalidStateError, type ObjectService} from './objects/service.js';
 import {CameraUnavailableError} from './printing/camera.js';
 import {ObjectNotFoundError} from './objects/store.js';
 import {publicObject} from './objects/http.js';
@@ -148,12 +148,14 @@ export function createControlDispatcher(services: ControlServices) {
         case 'status.get': return {protocolVersion:1,companionVersion:services.companionVersion,transport:auth.transport,
           pairedDeviceCount:(await auth.listDevices()).length,capabilities:{capture:!!capture?.captures,cleanup:!!capture?.scanProcessing,printerHandoff:!!printHandoff,nearbyPairing:!!services.nearby,
             objectsCreate:!!services.objects,printSettings:!!services.objects?.printSettingsAvailable,printControl:!!services.objects?.printSettingsAvailable,
-            events:!!services.events&&!!services.liveActivityTokens,structuredPasses:!!services.objects}};
+            events:!!services.events&&!!services.liveActivityTokens,structuredPasses:!!services.objects,genericConfirmations:!!services.objects,materialChoice:!!services.objects}};
         case 'devices.list': {
           const devices = await auth.listDevices();
+          const legacy = await auth.legacyDeviceIds?.() ?? new Set<string>();
           return {devices: await Promise.all(devices.map(async device => {
             const seen = await services.presence?.get(device.deviceId) ?? {};
-            return {...device, ...(seen.model ? {model: seen.model} : {}), ...(seen.lastSeenAt !== undefined ? {lastSeenAt: seen.lastSeenAt} : {})};
+            return {...device, ...(seen.model ? {model: seen.model} : {}), ...(seen.lastSeenAt !== undefined ? {lastSeenAt: seen.lastSeenAt} : {}),
+              ...(legacy.has(device.deviceId) ? {legacy: true} : {})};
           }))};
         }
         case 'events.wait': {
@@ -225,7 +227,7 @@ export function createControlDispatcher(services: ControlServices) {
             // The Mac app is on this Mac: it gets each object's folder to read the renders and model from.
             const local = (o: Awaited<ReturnType<typeof objects.get>>) => ({...publicObject(o), directory: objects.dir(o.id)});
             if (method === 'objects.list') return {objects: (await objects.list()).map(local)};
-            if (method === 'objects.printers') return objects.printers();
+            if (method === 'objects.printers') return objects.printers({view: true});
             if (method === 'objects.filaments') return {filaments: await objects.filaments(parameters[method].parse(raw).id)};
             if (method === 'objects.passActivity') {
               const {id, index} = parameters[method].parse(raw);
@@ -268,7 +270,7 @@ export function createControlDispatcher(services: ControlServices) {
               return {object: local(await objects.answerPrintConfirmation(id, confirmationId, answer))};
             }
             const params = parameters[method].parse(raw) as {id: string; destinationId?: string; note?: string; bestGuess?: boolean} & import('./objects/service.js').PrintOptions;
-            const object = method === 'objects.get' ? await objects.get(params.id)
+            const object = method === 'objects.get' ? await objects.view(params.id)
               : method === 'objects.selectPrinter' ? await objects.selectPrinter(params.id, params.destinationId!)
               : method === 'objects.start' ? await objects.start(params.id)
               : method === 'objects.answerCloseup' ? await objects.answerCloseup(params.id, {bestGuess: params.bestGuess!, ...((params as {text?: string}).text ? {text: (params as {text?: string}).text} : {})})
@@ -278,6 +280,8 @@ export function createControlDispatcher(services: ControlServices) {
           } catch (error) {
             if (error instanceof ObjectNotFoundError) throw new ControlFailure('not-found');
             // Its sentence is written for the person ("There is no model to print yet.").
+            // A refused answer says which field and why.
+            if (error instanceof InvalidAnswerError) throw new ControlFailure('invalid-request', error.message);
             if (error instanceof InvalidStateError || error instanceof InvalidFileError) throw new ControlFailure('conflict', error.message);
             throw error;
           }

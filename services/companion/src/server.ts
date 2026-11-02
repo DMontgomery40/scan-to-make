@@ -230,11 +230,14 @@ export async function startCompanionServer(
         const { deviceId, token } = credential();
         await auth.authorize(login, deviceId, token, scope);
         if (deviceId) void options.presence?.seen(deviceId, singleHeader(request, 'x-scan-device-model')).catch(() => undefined);
+        const name = deviceId ? singleHeader(request, 'x-scan-device-name') : undefined;
+        if (deviceId && name) void auth.renameDevice(deviceId, name).catch(() => undefined);
       };
       if (request.url === '/healthz' && request.method === 'GET') {
         // Scope name kept from the first protocol so existing pairings still parse.
         await authorize('generation:health');
-        response.end(JSON.stringify({ status: 'ok', protocolVersion: '0.1.0' }));
+        // Additive: older phones read only status and protocolVersion.
+        response.end(JSON.stringify({ status: 'ok', protocolVersion: '0.1.0', capabilities: { genericConfirmations: !!options.objects, materialChoice: !!options.objects } }));
         return;
       }
       if(captureRoutes&&request.url?.startsWith('/v1/saved-projects/')){

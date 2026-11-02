@@ -16,6 +16,8 @@ export class DevicePresence {
   readonly #now: () => number;
   #state?: Record<string, {lastSeenAt: number; model?: string}>;
   #loading?: Promise<Record<string, {lastSeenAt: number; model?: string}>>;
+  /** When this companion first kept presence: the start of a legacy device's 14 days. */
+  #since?: number;
   readonly #flushedAt = new Map<string, number>();
   #writing: Promise<unknown> = Promise.resolve();
   constructor(path: string, options: {now?: () => number} = {}) { this.#path = path; this.#now = options.now ?? Date.now; }
@@ -28,12 +30,20 @@ export class DevicePresence {
   async #read() {
     if (this.#state) return this.#state;
     try {
-      const value = JSON.parse(await readFile(this.#path, 'utf8')) as Record<string, {lastSeenAt?: unknown; model?: unknown}>;
-      this.#state = Object.fromEntries(Object.entries(value).flatMap(([id, entry]) => typeof entry?.lastSeenAt === 'number'
+      const file = JSON.parse(await readFile(this.#path, 'utf8')) as Record<string, unknown>;
+      // Version 2 is {version, since, devices}; the first version was the devices map itself.
+      const devices = (file.version === 2 && file.devices && typeof file.devices === 'object' ? file.devices : file) as Record<string, {lastSeenAt?: unknown; model?: unknown}>;
+      this.#since = file.version === 2 && typeof file.since === 'number' ? file.since : undefined;
+      this.#state = Object.fromEntries(Object.entries(devices).flatMap(([id, entry]) => entry && typeof entry === 'object' && typeof entry.lastSeenAt === 'number'
         ? [[id, {lastSeenAt: entry.lastSeenAt, ...(typeof entry.model === 'string' && MODEL.test(entry.model) ? {model: entry.model} : {})}]] : []));
     } catch { this.#state = {}; }
+    // First run with presence (or with this version): a legacy device's 14 days start now. Recorded so a restart doesn't restart them.
+    if (this.#since === undefined) { this.#since = this.#now(); await this.#flush().catch(() => undefined); }
     return this.#state;
   }
+
+  /** The time presence started being kept on this Mac. */
+  async since(): Promise<number> { await this.#load(); return this.#since!; }
 
   /** Called after each successful authorization. */
   async seen(deviceId: string, model?: string): Promise<void> {
@@ -51,7 +61,7 @@ export class DevicePresence {
   async get(deviceId: string): Promise<{lastSeenAt?: number; model?: string}> { return {...(await this.#load())[deviceId]}; }
 
   async #flush() {
-    const snapshot = JSON.stringify(this.#state ?? {});
+    const snapshot = JSON.stringify({version: 2, since: this.#since ?? this.#now(), devices: this.#state ?? {}});
     await (this.#writing = this.#writing.catch(() => undefined).then(async () => {
       await mkdir(dirname(this.#path), {recursive: true, mode: 0o700});
       const temporary = `${this.#path}.${randomUUID()}.tmp`;
