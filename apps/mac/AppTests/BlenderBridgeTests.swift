@@ -60,7 +60,7 @@ final class BlenderBridgeTests: XCTestCase {
         let file = URL(fileURLWithPath: "/tmp/Mic mount/model.stl")
         let imported = await BlenderBridge.importSTL(file, port: addOn.port)
         addOn.finish()
-        XCTAssertTrue(imported, "an answer that arrives in pieces still counts")
+        XCTAssertEqual(imported, .imported, "an answer that arrives in pieces still counts")
         XCTAssertEqual(addOn.request?["type"] as? String, "execute_code")
         XCTAssertEqual((addOn.request?["params"] as? [String: Any])?["code"] as? String,
                        "import bpy; bpy.ops.wm.stl_import(filepath='/tmp/Mic mount/model.stl')")
@@ -70,7 +70,7 @@ final class BlenderBridgeTests: XCTestCase {
         let failing = try FakeAddOn(reply: #"{"status": "error", "message": "Operator failed"}"#)
         let erred = await BlenderBridge.importSTL(URL(fileURLWithPath: "/tmp/a.stl"), port: failing.port)
         failing.finish()
-        XCTAssertFalse(erred)
+        XCTAssertEqual(erred, .refused, "the add-on ran it and nothing was imported")
 
         // Nothing listening: refused at once, not a hang.
         let closed = try FakeAddOn(reply: nil)
@@ -78,8 +78,16 @@ final class BlenderBridgeTests: XCTestCase {
         closed.finish()
         let started = Date()
         let refused = await BlenderBridge.importSTL(URL(fileURLWithPath: "/tmp/a.stl"), port: port)
-        XCTAssertFalse(refused)
+        XCTAssertEqual(refused, .refused)
         XCTAssertLessThan(Date().timeIntervalSince(started), 3.5)
+    }
+
+    /// A busy Blender that doesn't answer in time may still import it: never sent a second way.
+    func testNoAnswerInTimeIsUncertain() async throws {
+        let slow = try FakeAddOn(reply: "", pieces: 1) // reads the request, answers nothing, then hangs up
+        let outcome = await BlenderBridge.importSTL(URL(fileURLWithPath: "/tmp/a.stl"), port: slow.port, answerWithin: 1)
+        slow.finish()
+        XCTAssertEqual(outcome, .uncertain)
     }
 
     func testThePathIsAQuotedLiteralNeverCode() {

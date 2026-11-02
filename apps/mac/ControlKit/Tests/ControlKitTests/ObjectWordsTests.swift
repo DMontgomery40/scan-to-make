@@ -168,6 +168,26 @@ final class PrintSettingsTests: XCTestCase {
         XCTAssertEqual(PrintSettings(colour: .external).params["colour"], .object(["external": .bool(true)]))
     }
 
+    /// Print Another (PRD §5.4) opens with what the last print was sent with.
+    func testPrintAnotherStartsFromTheLastPrintsSettings() throws {
+        let last = try JSONDecoder().decode(Project.Print.self, from: Data("""
+        {"bundleId":"b","destinationId":"x1c","settings":{"quality":"fine","strength":"max","colour":{"amsSlot":3}}}
+        """.utf8))
+        let settings = PrintSettings(last: last)
+        XCTAssertEqual(settings.quality, .fine)
+        XCTAssertEqual(settings.strength, .max)
+        XCTAssertEqual(settings.colour, .amsSlot(3))
+        XCTAssertEqual(PrintSettings(last: nil), PrintSettings(), "a first print starts at Standard")
+        let spools = [PrinterFilament(slot: 1, colour: "#fff", material: "PLA", name: "White", filamentId: "a", destinationId: "x1c", suggested: true),
+                      PrinterFilament(slot: 3, colour: "#000", material: "PETG", name: "Black", filamentId: "b", destinationId: "x1c"),
+                      PrinterFilament(slot: 254, colour: "#f00", material: "TPU", name: "Red", filamentId: "c", destinationId: "x1c")]
+        XCTAssertEqual(PrintSettings.lastSlot(.amsSlot(3), lastPrinter: "x1c", printer: "x1c", in: spools), 3)
+        XCTAssertEqual(PrintSettings.lastSlot(.external, lastPrinter: "x1c", printer: "x1c", in: spools), 254)
+        XCTAssertNil(PrintSettings.lastSlot(.amsSlot(3), lastPrinter: "x1c", printer: "a1", in: spools), "slots belong to their printer")
+        XCTAssertNil(PrintSettings.lastSlot(.amsSlot(4), lastPrinter: "x1c", printer: "x1c", in: spools), "that spool is gone")
+        XCTAssertNil(PrintSettings.lastSlot(.auto, lastPrinter: "x1c", printer: "x1c", in: spools), "the suggestion again")
+    }
+
     func testTheEstimateAndSuggestedTrayDecodeFromTheCompanion() throws {
         let estimate = try JSONDecoder().decode(PrintEstimate.self, from: Data("""
         {"destinationId":"current","quality":"standard","strength":"standard","seconds":4320,"grams":22.4,"layers":212,

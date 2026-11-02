@@ -64,16 +64,12 @@ public struct PublishedExtras: Decodable, Sendable, Equatable {
     public let status: String?
     /// Hidden from the sidebar's groups, everything kept; separate from the status, which Unarchive restores.
     public let archived: Bool
-    /// What the person said after a print: `works` or `needs-changes`.
-    public let outcome: String?
 
-    public init(credit: Credit? = nil, original: [String]? = nil, current: String? = nil, ask: Ask? = nil, status: String? = nil, archived: Bool = false,
-                outcome: String? = nil) {
+    public init(credit: Credit? = nil, original: [String]? = nil, current: String? = nil, ask: Ask? = nil, status: String? = nil, archived: Bool = false) {
         self.credit = credit; self.original = original; self.current = current; self.ask = ask; self.status = status; self.archived = archived
-        self.outcome = outcome
     }
 
-    private enum CodingKeys: String, CodingKey { case credit, files, ask, settings, outcome }
+    private enum CodingKeys: String, CodingKey { case credit, files, ask, settings }
     private struct Files: Decodable { let original: [String]?; let current: String? }
     private struct Settings: Decodable { let status: String?; let archived: Bool? }
     public init(from decoder: Decoder) throws {
@@ -85,7 +81,6 @@ public struct PublishedExtras: Decodable, Sendable, Equatable {
         let settings = try? c.decodeIfPresent(Settings.self, forKey: .settings)
         status = settings?.status
         archived = settings?.archived == true || settings?.status == "archived"
-        outcome = try? c.decodeIfPresent(String.self, forKey: .outcome)
     }
 
     /// The open `file` Ask, if the project is waiting for the designer's file.

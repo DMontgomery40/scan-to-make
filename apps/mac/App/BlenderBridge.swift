@@ -85,16 +85,25 @@ enum BlenderBridge {
         return "import bpy; bpy.ops.wm.stl_import(filepath='\(path)')"
     }
 
-    /// Whether the add-on imported it. False when nothing listens, it errs, or it doesn't answer within 3 s.
-    static func importSTL(_ file: URL, port: UInt16 = port) async -> Bool {
-        guard let body = try? JSONSerialization.data(withJSONObject: ["type": "execute_code", "params": ["code": importCode(file)]]) else { return false }
-        return await Task.detached { () -> Bool in
+    enum Outcome: Equatable, Sendable {
+        case imported
+        /// Nothing was imported: nothing listens, or the add-on answered with an error.
+        case refused
+        /// Sent, but no whole answer in time: it may still import, so it is never sent another way as well.
+        case uncertain
+    }
+
+    /// Imports through the add-on. A large scan can take a while, so the answer gets 8 s.
+    static func importSTL(_ file: URL, port: UInt16 = port, answerWithin seconds: Int = 8) async -> Outcome {
+        guard let body = try? JSONSerialization.data(withJSONObject: ["type": "execute_code", "params": ["code": importCode(file)]]) else { return .refused }
+        return await Task.detached { () -> Outcome in
             let socket = Darwin.socket(AF_INET, SOCK_STREAM, 0)
-            guard socket >= 0 else { return false }
+            guard socket >= 0 else { return .refused }
             defer { close(socket) }
             var timeout = timeval(tv_sec: 3, tv_usec: 0)
-            setsockopt(socket, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
             setsockopt(socket, SOL_SOCKET, SO_SNDTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
+            var answer = timeval(tv_sec: seconds, tv_usec: 0)
+            setsockopt(socket, SOL_SOCKET, SO_RCVTIMEO, &answer, socklen_t(MemoryLayout<timeval>.size))
             var address = sockaddr_in()
             address.sin_family = sa_family_t(AF_INET)
             address.sin_port = in_port_t(port).bigEndian
@@ -102,20 +111,22 @@ enum BlenderBridge {
             let connected = withUnsafePointer(to: &address) {
                 $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { connect(socket, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) }
             }
-            guard connected == 0 else { return false }
-            guard body.withUnsafeBytes({ send(socket, $0.baseAddress, body.count, 0) }) == body.count else { return false }
+            guard connected == 0 else { return .refused }
+            let sent = body.withUnsafeBytes { send(socket, $0.baseAddress, body.count, 0) }
+            guard sent > 0 else { return .refused }
+            guard sent == body.count else { return .uncertain }
             // The answer can arrive in pieces: read until it is whole JSON (or the 3 s timeout ends it).
             var reply = Data()
             var buffer = [UInt8](repeating: 0, count: 16_384)
             while reply.count < 1_048_576 {
                 let read = recv(socket, &buffer, buffer.count, 0)
-                guard read > 0 else { return false }
+                guard read > 0 else { return .uncertain }
                 reply.append(contentsOf: buffer[0..<read])
                 if let object = try? JSONSerialization.jsonObject(with: reply) as? [String: Any] {
-                    return (object["status"] as? String) == "success"
+                    return (object["status"] as? String) == "success" ? .imported : .refused
                 }
             }
-            return false
+            return .uncertain
         }.value
     }
 }

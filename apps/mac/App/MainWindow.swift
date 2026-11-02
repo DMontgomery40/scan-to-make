@@ -304,24 +304,37 @@ enum ModelEditor {
             return .failure(Problem(text: "Blender isn’t on this Mac. Install it, or choose a slicer."))
         }
         guard let copy = try? editorCopy(source) else { return .failure(Problem(text: "The model couldn’t be copied for Blender.")) }
-        let running = NSRunningApplication.runningApplications(withBundleIdentifier: blenderId).filter { !$0.isTerminated }
-        let ours = BlenderBridge.listeningPid().flatMap { pid in running.first { $0.processIdentifier == pid } }
-            ?? started.flatMap { app in app.isTerminated ? nil : app }
-        if !running.isEmpty, await BlenderBridge.importSTL(copy) {
-            (running.first { $0 != ours } ?? ours)?.activate()
-            return .success("Opened in Blender")
+        var running = NSRunningApplication.runningApplications(withBundleIdentifier: blenderId).filter { !$0.isTerminated }
+        if !running.isEmpty && !launching {
+            switch await BlenderBridge.importSTL(copy) {
+            case .imported:
+                (running.first { $0 != ownBlender() } ?? running.first)?.activate()
+                return .success("Opened in Blender")
+            case .uncertain:
+                running.first?.activate()
+                return .success("Sent to Blender")
+            case .refused: break
+            }
+            running = NSRunningApplication.runningApplications(withBundleIdentifier: blenderId).filter { !$0.isTerminated }
         }
+        // No await from here until `launching` is set, so a second click can't start a second Blender.
         do {
-            if let ours {
+            if let ours = ownBlender() {
                 try BlenderBridge.drop(copy)
                 ours.activate()
                 return .success("Opened in Blender")
+            }
+            if launching {
+                try BlenderBridge.drop(copy) // the Blender starting now imports it once it is up
+                return .success("Opening in Blender…")
             }
             BlenderBridge.clear()
             try BlenderBridge.drop(copy)
         } catch {
             return .failure(Problem(text: "The model couldn’t be copied for Blender."))
         }
+        launching = true
+        defer { launching = false }
         let configuration = NSWorkspace.OpenConfiguration()
         configuration.createsNewApplicationInstance = !running.isEmpty
         configuration.arguments = ["--python-expr", BlenderBridge.watcher, "--", BlenderBridge.inbox.path]
@@ -333,8 +346,15 @@ enum ModelEditor {
         }
     }
 
-    /// The Blender this Mac started, from its launch until its inbox heartbeat takes over.
+    /// The Blender this Mac started, while it runs: its inbox heartbeat, or the launch itself until that begins.
+    @MainActor private static func ownBlender() -> NSRunningApplication? {
+        if let pid = BlenderBridge.listeningPid(), let app = NSRunningApplication(processIdentifier: pid), !app.isTerminated,
+           app.bundleIdentifier == blenderId { return app }
+        return started.flatMap { $0.isTerminated ? nil : $0 }
+    }
     @MainActor private static var started: NSRunningApplication?
+    /// A launch in flight.
+    @MainActor private static var launching = false
 
     /// A copy of the model, so another app's edits never change the project.
     static func editorCopy(_ source: URL) throws -> URL {

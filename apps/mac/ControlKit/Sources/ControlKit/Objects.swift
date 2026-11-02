@@ -336,3 +336,30 @@ public struct PrinterCatalog: Decodable, Sendable, Equatable {
         self.destinations = destinations; self.defaultDestinationId = defaultDestinationId
     }
 }
+
+public extension PrintSettings {
+    /// Print Another (PRD §5.4): the settings the last print was sent with, so a reprint is the same print. Standard,
+    /// and the suggested colour, for what it didn't record.
+    init(last: Project.Print?) {
+        let saved = last?.settings
+        var colour: Colour?
+        if case .object(let value)? = saved?.colour {
+            if case .number(let slot)? = value["amsSlot"] { colour = .amsSlot(Int(slot)) }
+            else if value["external"] == .bool(true) { colour = .external }
+            else if case .string(let material)? = value["material"] { colour = .material(material) }
+            else if value["auto"] == .bool(true) { colour = .auto }
+        }
+        self.init(quality: saved?.quality.flatMap(Quality.init(rawValue:)) ?? .standard,
+                  strength: saved?.strength.flatMap(Strength.init(rawValue:)) ?? .standard, colour: colour)
+    }
+
+    /// The spool the last print used, when it is on the same printer and still loaded.
+    static func lastSlot(_ colour: Colour?, lastPrinter: String?, printer: String?, in filaments: [PrinterFilament]) -> Int? {
+        guard let colour, lastPrinter != nil, lastPrinter == printer else { return nil }
+        switch colour {
+        case .amsSlot(let slot): return filaments.first { $0.slot == slot && !$0.external }?.slot
+        case .external: return filaments.first(where: \.external)?.slot
+        case .auto, .material: return nil
+        }
+    }
+}

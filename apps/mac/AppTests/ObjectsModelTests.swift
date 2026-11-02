@@ -25,20 +25,13 @@ private actor FakeObjects: ObjectsCompanion {
         }
         return (list, extras)
     }
-    /// A companion from KAN-214 PR 8a: Archive is only a status, and any other status unarchives.
-    private var statusOnly = false
-    func takeStatusOnly() { statusOnly = true }
     func setProjectSettings(_ id: String, _ patch: [String: JSONValue]) async throws -> Project {
         settingsPatches[id, default: [:]].merge(patch) { $1 }
-        if statusOnly, patch["archived"] != nil { throw ControlRemoteError(code: "invalid-request", message: "Unrecognized key: \"archived\"") }
         let item = items.first { $0["id"] as? String == id }
         var settings = item?["settings"] as? [String: Any] ?? ["status": "printed", "archived": false]
         var fields: [String: Any] = [:]
         if case .string(let status)? = patch["status"] {
-            if status == "archived" { settings["archived"] = true } else {
-                settings["status"] = status
-                if statusOnly { settings["archived"] = false }
-            }
+            if status == "archived" { settings["archived"] = true } else { settings["status"] = status }
             if status == "works" { fields["state"] = "confirmed"; fields["status"] = ["phase": "confirmed", "text": "It works", "symbol": "checkmark.circle.fill", "tint": "green"] }
         }
         if case .bool(let archived)? = patch["archived"] { settings["archived"] = archived }
@@ -362,36 +355,12 @@ private func project(_ item: [String: Any]) throws -> Project {
         XCTAssertEqual(model.groups.map(\.group), [.done], "Unarchive brings Done back")
     }
 
-    /// A companion from before the separate flag (KAN-214 PR 8a) archives as a status; Unarchive sends Done back.
-    func testArchiveOnAStatusOnlyCompanionKeepsDone() async {
-        let companion = FakeObjects()
-        await companion.set([item("m", "confirmed", ["current": ["model": "current/model.stl", "renders": []],
-                                                      "status": ["phase": "confirmed", "text": "It works", "symbol": "checkmark.circle.fill", "tint": "green"],
-                                                      "settings": ["status": "works"]])])
-        await companion.setCapabilities(.init(objectsCreate: true, projectSettings: true))
-        await companion.takeStatusOnly()
-        let model = ObjectsModel(companion: companion)
-        await model.refresh()
-        XCTAssertEqual(model.groups.map(\.group), [.done])
-        let archived = await model.setArchived(true, for: "m")
-        XCTAssertTrue(archived)
-        XCTAssertEqual(model.groups.map(\.group), [.archived])
-        let archive = await companion.settingsPatches
-        XCTAssertEqual(archive["m"]?["status"], .string("archived"))
-        let unarchived = await model.setArchived(false, for: "m")
-        XCTAssertTrue(unarchived)
-        let unarchive = await companion.settingsPatches
-        XCTAssertEqual(unarchive["m"]?["status"], .string("works"), "the status underneath, Done")
-        XCTAssertEqual(model.groups.map(\.group), [.done])
-        XCTAssertNil(model.problem, "the older companion's refusal of the flag is never shown")
-    }
-
     /// "Did it fit?" is asked once per print: answering Needs Changes (or Not Now) ends it until the next print.
     func testDidItFitIsAskedOncePerPrint() throws {
         let defaults = try XCTUnwrap(UserDefaults(suiteName: "fit-\(UUID().uuidString)"))
         let first = try project(item("m", "printed", ["print": ["bundleId": "b1", "printId": "p1"]]))
         XCTAssertTrue(DidItFit.asks(first, nil, defaults: defaults))
-        let answered = try JSONDecoder().decode(PublishedExtras.self, from: Data(#"{"outcome":"needs-changes","settings":{"status":"needs-changes"}}"#.utf8))
+        let answered = try JSONDecoder().decode(PublishedExtras.self, from: Data(#"{"settings":{"status":"needs-changes","archived":false}}"#.utf8))
         XCTAssertFalse(DidItFit.asks(first, answered, defaults: defaults), "Needs Changes is an answer")
         DidItFit.dismiss(first, defaults: defaults)
         XCTAssertFalse(DidItFit.asks(first, nil, defaults: defaults), "Not Now sets this print aside")
@@ -399,16 +368,4 @@ private func project(_ item: [String: Any]) throws -> Project {
         XCTAssertTrue(DidItFit.asks(next, nil, defaults: defaults), "the next print asks again")
     }
 
-    /// Without the separate flag, Unarchive sends only a status that changes nothing else.
-    func testUnarchiveOnAStatusOnlyCompanionNeverChangesTheState() throws {
-        var draft = item("a", "new")
-        draft.removeValue(forKey: "current")
-        XCTAssertEqual(ObjectsModel.statusUnderneath(try project(item("a", "printed")), outcome: "needs-changes"), "needs-changes")
-        XCTAssertEqual(ObjectsModel.statusUnderneath(try project(item("a", "printed")), outcome: "works"), "works")
-        XCTAssertEqual(ObjectsModel.statusUnderneath(try project(item("a", "printed")), outcome: nil), "printed")
-        XCTAssertEqual(ObjectsModel.statusUnderneath(try project(item("a", "ready")), outcome: nil), "not-printed")
-        XCTAssertEqual(ObjectsModel.statusUnderneath(try project(draft), outcome: nil), "not-printed", "a draft stays a draft")
-        XCTAssertNil(ObjectsModel.statusUnderneath(try project(item("a", "sent")), outcome: nil), "printed would change sent")
-        XCTAssertNil(ObjectsModel.statusUnderneath(try project(item("a", "failed")), outcome: nil), "not-printed would make it ready")
-    }
 }

@@ -27,6 +27,18 @@ struct PrintSheet: View {
     @State private var estimateState = Loading.idle
     enum Loading: Equatable { case idle, loading, done, failed(String) }
 
+    /// The last print's colour, chosen again when its printer and spool are (Print Another, PRD §5.4).
+    private let lastColour: PrintSettings.Colour?
+
+    init(opened: Project, model: ObjectsModel) {
+        self.opened = opened
+        _model = ObservedObject(wrappedValue: model)
+        let last = PrintSettings(last: opened.print)
+        _quality = State(initialValue: last.quality)
+        _strength = State(initialValue: last.strength)
+        lastColour = last.colour
+    }
+
     private var object: Project { model.objects.first { $0.id == opened.id } ?? opened }
     private var printer: PrinterDestination? { model.printer(for: object) }
     private var settingsServed: Bool { model.capabilities?.printSettings == true }
@@ -222,8 +234,13 @@ struct PrintSheet: View {
             guard !Task.isCancelled else { return }
             filaments = list
             let suggested = list.first { $0.suggested == true }
-            slot = suggested?.slot ?? (list.count == 1 ? list[0].slot : nil)
-            keptSuggestion = suggested != nil
+            if let last = PrintSettings.lastSlot(lastColour, lastPrinter: opened.print?.destinationId, printer: printer?.id, in: list) {
+                slot = last
+                keptSuggestion = false
+            } else {
+                slot = suggested?.slot ?? (list.count == 1 ? list[0].slot : nil)
+                keptSuggestion = suggested != nil
+            }
             filamentState = .done
         } catch {
             guard !Task.isCancelled else { return }
