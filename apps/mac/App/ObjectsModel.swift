@@ -541,7 +541,8 @@ struct SocketObjects: ObjectsCompanion {
             case .printChecked: updated = try await companion.print(id, checked:true)
             case .correct:
                 let text = note.trimmingCharacters(in:.whitespacesAndNewlines)
-                if capabilities?.messagePhotos == true, let project = objects.first(where: { $0.id == id }) {
+                // A held-message retry lets the companion retain its recorded evidence. Pending photos may belong to a later message.
+                if capabilities?.messagePhotos == true, let project = objects.first(where: { $0.id == id }), project.pendingFollowup != text {
                     updated = try await companion.correct(id, note: text.isEmpty ? "See the photos I added." : text,
                         photos: photos.map(\.path), photoNames: corrections.availablePhotos(project) ?? [])
                 } else {
