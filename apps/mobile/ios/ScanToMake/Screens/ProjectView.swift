@@ -25,7 +25,8 @@ struct ProjectView: View {
     @State private var projectName = ""
     @State private var working = false
     @State private var problem: String?
-    @State private var fetchProblem: String?
+    @State private var fetchFailure: CompanionError?
+    @State private var loading = true
     @State private var resumed = false
     @State private var confirmDelete = false
     @State private var modelURL: URL?
@@ -44,7 +45,22 @@ struct ProjectView: View {
 
     var body: some View {
         Group {
-            if let object { page(object) } else { ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity).background(Color.black) }
+            if let object { page(object) }
+            else if loading { ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity).background(Color.black) }
+            else {
+                ContentUnavailableView {
+                    Label(fetchFailure == nil || fetchFailure?.code == "not-found" ? "Project unavailable" : "Couldn't load project", systemImage: "cube")
+                } description: {
+                    Text(fetchFailure?.code == "not-found" ? "This project is no longer available on your Mac."
+                         : fetchFailure?.message ?? "This project is no longer available on your Mac.")
+                } actions: {
+                    Button("Back to Projects", action: close)
+                    if let fetchFailure, fetchFailure.code != "not-found" {
+                        Button("Try Again") { Task { await reload() } }
+                    }
+                }
+                .background(Color.black)
+            }
         }
         .task(id: id) {
             await reload()
@@ -71,9 +87,10 @@ struct ProjectView: View {
     }
 
     private func reload() async {
-        do { let ticket = store.startRequest(); store.replace(try await store.mac.get(id), ticket: ticket); fetchProblem = nil }
-        catch let failure as CompanionError { if failure.code != "cancelled" { fetchProblem = failure.message } }
-        catch { fetchProblem = CompanionError.unreachable.message }
+        loading = true
+        defer { loading = false }
+        let failure = await store.reload(id)
+        if failure?.code != "cancelled" { fetchFailure = failure }
     }
 
     private func addDropped(_ items: [Data], to id: String, forMessage: Bool) async {
@@ -174,7 +191,7 @@ struct ProjectView: View {
                 if object.current == nil, let captureWarning {
                     Label(captureWarning, systemImage: "exclamationmark.triangle").font(.subheadline).foregroundStyle(.orange).padding(.horizontal, 20)
                 }
-                if let message = problem ?? fetchProblem ?? store.sendFailures[object.id] {
+                if let message = problem ?? fetchFailure?.message ?? store.sendFailures[object.id] {
                     Label(message, systemImage: "exclamationmark.triangle.fill").font(.subheadline).foregroundStyle(.orange).padding(.horizontal, 20)
                 }
                 if let notice, problem == nil {

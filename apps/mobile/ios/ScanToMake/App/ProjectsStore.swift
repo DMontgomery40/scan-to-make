@@ -84,9 +84,33 @@ import CounterpartKit
         loaded = true
     }
 
-    func reload(_ id: String) async {
+    @discardableResult func reload(_ id: String) async -> CompanionError? {
         let ticket = reads.start()
-        if let latest = try? await mac.get(id), reads.accept(id, ticket: ticket) { show(latest) }
+        do {
+            let latest = try await mac.get(id)
+            guard !Task.isCancelled, reads.isCurrent(ticket) else { return .cancelled }
+            if reads.accept(id, ticket: ticket) { show(latest) }
+            return nil
+        } catch {
+            guard !Task.isCancelled, reads.isCurrent(ticket) else { return .cancelled }
+            let failure = error as? CompanionError ?? .unreachable
+            if failure.code == "not-found" {
+                guard reads.accept(id, ticket: ticket) else { return .cancelled }
+                remove(id)
+            }
+            return failure
+        }
+    }
+
+    /// A deletion has no project left to fetch. Tombstone it so an older reply cannot restore it.
+    func receive(_ event: CounterpartEvent) async {
+        if let project = event.projectId {
+            if event.type == "project.deleted" { remove(project) }
+            else { await reload(project) }
+        } else if event.type.hasPrefix("mcp.update.") {
+            if let id = event.data?.mcpId { mcpUpdates[id] = MCPUpdateProgress(event) }
+            await loadPrinters()
+        } else if event.type == "settings.changed" { settingsChanges += 1 }
     }
 
     /// The Mac keeps Project Settings (PRD §5.4): status, Did it fit?, Done.
@@ -205,12 +229,7 @@ import CounterpartKit
                     switch update {
                     case .resync: await load(); await loadPrinters()
                     case .event(let event):
-                        if let project = event.projectId { await reload(project) }
-                        // Events about the Mac, not a project: a printer MCP updating, or a setting changed elsewhere.
-                        else if event.type.hasPrefix("mcp.update.") {
-                            if let id = event.data?.mcpId { mcpUpdates[id] = MCPUpdateProgress(event) }
-                            await loadPrinters()
-                        } else if event.type == "settings.changed" { settingsChanges += 1 }
+                        await receive(event)
                     }
                 }
             } catch let failure as CompanionError {

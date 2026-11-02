@@ -124,6 +124,50 @@ import CounterpartKit
                        "the draft response may itself prove Start succeeded even when its display ticket is old")
     }
 
+    func testRemoteDeletionEvictsProjectAndRejectsOlderReplies() async throws {
+        let mac = SettingsMac()
+        let pairing = PairingClient(store: PairingStore(store: Fixtures.store()), transport: mac)
+        let store = ProjectsStore(mac: MacConnection(client: CompanionClient(pairing: pairing, transport: mac)), pairing: pairing)
+        let project = Project(id: "d79d4c15-d786-461c-b76e-ec687c8e2dad", createdAtMs: 1, updatedAtMs: 2, state: .ready)
+        store.replace(project, ticket: store.startRequest())
+        let older = store.startRequest()
+        let event = try JSONDecoder().decode(CounterpartEvent.self, from: Data(#"{"v":1,"seq":1,"id":"event","at":"2026-11-02T19:52:31Z","type":"project.deleted","projectId":"d79d4c15-d786-461c-b76e-ec687c8e2dad","title":"Removed","body":"","notify":"none"}"#.utf8))
+        await store.receive(event)
+        XCTAssertNil(store.project("d79d4c15-d786-461c-b76e-ec687c8e2dad"))
+        XCTAssertTrue(mac.requests.isEmpty, "a deleted project cannot be fetched")
+        XCTAssertFalse(store.replace(project, ticket: older), "a request begun before deletion cannot resurrect the project")
+    }
+
+    func testMissingProjectRemovesCachedCopyButTransientFailureKeepsIt() async {
+        let mac = SettingsMac()
+        let pairing = PairingClient(store: PairingStore(store: Fixtures.store()), transport: mac)
+        let store = ProjectsStore(mac: MacConnection(client: CompanionClient(pairing: pairing, transport: mac)), pairing: pairing)
+        let project = Project(id: "d79d4c15-d786-461c-b76e-ec687c8e2dad", createdAtMs: 1, updatedAtMs: 2, state: .ready)
+        store.replace(project, ticket: store.startRequest())
+        mac.answers = false
+        let offline = await store.reload(project.id)
+        XCTAssertEqual(offline?.code, "unreachable")
+        XCTAssertNotNil(store.project(project.id), "an offline Mac is not evidence of deletion")
+        mac.answers = true
+        let missing = await store.reload(project.id)
+        XCTAssertEqual(missing?.code, "not-found")
+        XCTAssertNil(store.project(project.id), "confirmed absence must reach the unavailable UI")
+    }
+
+    func testOlderMissingReplyCannotReplaceANewerProjectOrItsErrorState() async throws {
+        let mac = DelayedMissingProjectMac()
+        let pairing = PairingClient(store: PairingStore(store: Fixtures.store()), transport: mac)
+        let store = ProjectsStore(mac: MacConnection(client: CompanionClient(pairing: pairing, transport: mac)), pairing: pairing)
+        let pending = Task { await store.reload("21fe17ec-1ee1-4a60-b24d-c0a8f74879b1") }
+        await mac.waitForRequest()
+        let project = Project(id: "21fe17ec-1ee1-4a60-b24d-c0a8f74879b1", createdAtMs: 1, updatedAtMs: 2, state: .ready)
+        store.replace(project, ticket: store.startRequest())
+        await mac.finish()
+        let failure = await pending.value
+        XCTAssertEqual(failure, .cancelled, "an obsolete absence must not appear as a current fetch failure")
+        XCTAssertEqual(store.project(project.id), project)
+    }
+
     /// Codex on #218: a refused AI choice keeps its reason and isn't tested; a read that works clears a failed read,
     /// but not a refusal.
     func testMacSettingsKeepARefusalAndDropAFailedReadOnceTheMacAnswers() async {
@@ -178,5 +222,25 @@ private final class SettingsMac: HTTPTransport, @unchecked Sendable {
         case "GET /v1/devices": return json(["devices": []])
         default: return json(["error": ["code": "not-found", "message": "Not found"]], 404)
         }
+    }
+}
+
+/// Holds the actual HTTP 404 until a newer project response has reached the store.
+private actor DelayedMissingProjectMac: HTTPTransport {
+    private var reply: CheckedContinuation<HTTPReply, Never>?
+    private var requested: CheckedContinuation<Void, Never>?
+    func waitForRequest() async {
+        if reply != nil { return }
+        await withCheckedContinuation { requested = $0 }
+    }
+    func send(_ request: URLRequest, trust: TrustPolicy, limit: Int, resourceTimeout: TimeInterval) async throws -> HTTPReply {
+        await withCheckedContinuation {
+            reply = $0
+            requested?.resume(); requested = nil
+        }
+    }
+    func finish() {
+        reply?.resume(returning: HTTPReply(status: 404, body: Data(#"{"error":{"code":"not-found","message":"Object not found"}}"#.utf8)))
+        reply = nil
     }
 }
