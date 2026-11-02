@@ -360,7 +360,7 @@ struct AskButtons: View {
 
     private func answer(camera: Bool) {
         act {
-            let sent = try await store.mac.addCloseups(project.id, camera: camera)
+            let sent = try await store.mac.addCloseups(project.id, camera: camera, forMessage: true)
             guard !sent.isEmpty else { return nil }
             return try await store.mac.closeup(project.id, bestGuess: false, photoNames: sent)
         }

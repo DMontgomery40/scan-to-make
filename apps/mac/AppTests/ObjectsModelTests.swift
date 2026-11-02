@@ -8,6 +8,7 @@ private actor FakeObjects: ObjectsCompanion {
     var actionError: Error?
     private(set) var calls: [String] = []
     private(set) var correctionPhotoNames: [[String]?] = []
+    private(set) var messageUploadFlags: [Bool] = []
     private(set) var confirmationAnswer: PrintConfirmationAnswer?
     func set(_ items: [[String: Any]]) { self.items = items }
     private(set) var settingsPatches: [String: [String: JSONValue]] = [:]
@@ -66,6 +67,12 @@ private actor FakeObjects: ObjectsCompanion {
         correctionPhotoNames.append(photoNames)
         return try change(id, "correct:\(note)", ["state": "touching-up"])
     }
+    func addPhotoFile(_ id: String, path: String, forMessage: Bool) async throws -> String {
+        messageUploadFlags.append(forMessage)
+        // The initial worker fails while this queued upload is in flight; another message's photo also arrives.
+        _ = try change(id, "upload", ["state": "failed", "current": NSNull(), "photos": ["other.jpg", "renamed-evidence.jpg"], "pendingPhotos": ["other.jpg", "renamed-evidence.jpg"]])
+        return "renamed-evidence.jpg"
+    }
     func answerCloseup(_ id: String, bestGuess: Bool) async throws -> Project { try change(id, "closeup:\(bestGuess)", ["state": "touching-up"]) }
     func print(_ id: String, checked: Bool) async throws -> Project { try change(id, "print:\(checked)", ["state": "printing"]) }
     func answerPrintConfirmation(_ id: String, confirmationId: String, answer: PrintConfirmationAnswer) async throws -> Project {
@@ -91,6 +98,21 @@ private func project(_ item: [String: Any]) throws -> Project {
 }
 
 @MainActor final class ObjectsModelTests: XCTestCase {
+    func testQueuedPhotoKeepsItsIntentAndExactReceiptWhenInitialPassFailsDuringUpload() async throws {
+        let companion = FakeObjects()
+        await companion.set([item("queued", "touching-up", ["current": NSNull(), "pendingPhotos": ["other.jpg"]])])
+        let model = ObjectsModel(companion: companion, defaults: UserDefaults(suiteName: UUID().uuidString)!)
+        await model.refresh()
+        let accepted = await model.requestChanges("queued", note: "Widen this", photos: [URL(fileURLWithPath: "/tmp/evidence.jpg")])
+        XCTAssertTrue(accepted)
+        let flags = await companion.messageUploadFlags
+        XCTAssertEqual(flags, [true])
+        await model.refresh()
+        XCTAssertEqual(model.objects.first?.state, .failed)
+        XCTAssertEqual(model.corrections.messages["queued"]?.first?.photos, ["renamed-evidence.jpg"], "never claim unrelated pending photos")
+        XCTAssertEqual(model.corrections.pending("queued"), "Widen this", "a failed initial pass cannot consume the queued correction")
+    }
+
     func testChangesWrittenDuringAPassAreSavedAndSentOnceWhenItEnds() async throws {
         let defaults = UserDefaults(suiteName: "counterpart-queue-\(UUID().uuidString)")!
         let companion = FakeObjects()

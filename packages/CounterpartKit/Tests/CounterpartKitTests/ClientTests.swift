@@ -411,6 +411,21 @@ final class CompanionClientTests: XCTestCase {
         do { _ = try await c.download(p, "../../etc/passwd"); XCTFail() } catch {}
     }
 
+    func testMessageUploadIntentSurvivesAnInitialPassFailingBeforeTheUpload() async throws {
+        let id = "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a02"
+        var uploads: [URL] = []
+        let fake = FakeTransport { request, _ in
+            if request.httpMethod != "GET" { uploads.append(request.url!) }
+            return json(200, ["object": ["id": id, "createdAtMs": 1, "updatedAtMs": 2, "state": "failed", "photos": [], "passes": []]])
+        }
+        let uploader = ProjectUploader(client: try client(fake))
+        let photo = UploadFile(kind: .photo, name: "evidence.jpg", source: .bytes(Data("jpeg".utf8)), type: "image/jpeg")
+        _ = try await uploader.send([photo], to: id, forMessage: true)
+        _ = try await uploader.send([photo], to: id)
+        XCTAssertEqual(uploads.map(\.query), ["name=evidence.jpg&forMessage=true", "name=evidence.jpg"],
+                       "message intent comes from the action; the same failed state also permits initial retry evidence")
+    }
+
     func testUploadsSkipWhatTheMacHas() async throws {
         let id = "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a02"
         var sent: [String] = []

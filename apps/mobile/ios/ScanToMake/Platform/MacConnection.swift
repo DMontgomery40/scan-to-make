@@ -114,22 +114,22 @@ typealias MacError = CompanionError
     }
 
     /// Sends chosen photos; they leave this phone's cache once the Mac has every one.
-    func sendChosen(_ id: String, _ photos: [ChosenPhoto]) async throws {
+    func sendChosen(_ id: String, _ photos: [ChosenPhoto], forMessage: Bool = false) async throws {
         guard !photos.isEmpty else { return }
         let files = photos.map { UploadFile.image($0.url, name: "photo-\($0.id)") }
-        try await uploader.send(files, to: id)
+        try await uploader.send(files, to: id, forMessage: forMessage)
         for photo in photos { try? FileManager.default.removeItem(at: photo.url) }
     }
 
     /// Close-ups for a project that asked for them, sent as soon as they're taken or picked.
-    func addCloseups(_ id: String, camera: Bool) async throws -> [String] {
+    func addCloseups(_ id: String, camera: Bool, forMessage: Bool = false) async throws -> [String] {
         let photos: [PickedPhoto]
         if camera { photos = try await PhotoSources.takePhoto().map { [$0] } ?? [] }
         else { photos = try await PhotoSources.pick(limit: 12) }
         guard !photos.isEmpty else { return [] }
         let files = photos.map { UploadFile(kind: .photo, name: PhotoSources.closeupName($0.ext), source: .bytes($0.data),
                                             type: $0.ext == "png" ? "image/png" : $0.ext == "heic" ? "image/heic" : "image/jpeg") }
-        _ = try await uploader.send(files, to: id)
+        _ = try await uploader.send(files, to: id, forMessage: forMessage)
         return files.map(\.name)
     }
 

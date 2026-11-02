@@ -573,3 +573,27 @@ test('local photo upload returns its exact renamed receipt without selecting oth
   assert.deepEqual(after.messages.at(-1).photos, ['answer-2.jpg']);
   assert.deepEqual(after.pendingPhotos, ['answer.jpg', 'queued.jpg', 'later.jpg']);
 });
+
+
+test('HTTP and local photo uploads preserve explicit message intent after an initial failure', async t => {
+  const {call, service, store} = await fixture(t);
+  const dispatch = createControlDispatcher({objects: service});
+  for (const local of [false, true]) {
+    const project = await service.create('A mount', 'fit');
+    await store.update(project.id, o => ({...o, state: 'failed', failure: 'Initial work failed'}));
+    if (local) {
+      const file = join(store.dir(project.id), 'queued.jpg');
+      await writeFile(file, Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0, 0, 0]));
+      const receipt = await dispatch('objects.addFile', {id: project.id, kind: 'photos', path: file, forMessage: true});
+      assert.equal(receipt.photoName, 'queued.jpg');
+      await dispatch('objects.addFile', {id: project.id, kind: 'photos', path: file});
+    } else {
+      assert.equal((await call('POST', `/v1/objects/${project.id}/photos?name=queued.jpg&forMessage=true`, Buffer.from('queue'), 'image/jpeg')).status, 200);
+      assert.equal((await call('POST', `/v1/objects/${project.id}/photos?name=retry.jpg`, Buffer.from('retry'), 'image/jpeg')).status, 200);
+      assert.equal((await call('POST', `/v1/objects/${project.id}/photos?name=invalid.jpg&forMessage=yes`, Buffer.from('bad'), 'image/jpeg')).status, 400);
+    }
+    const after = await store.get(project.id);
+    assert.deepEqual(after.pendingPhotos, ['queued.jpg']);
+    assert.deepEqual(after.requestPhotos, [local ? 'queued-2.jpg' : 'retry.jpg']);
+  }
+});

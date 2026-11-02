@@ -514,13 +514,15 @@ export class ObjectService {
   }
 
   /** Photos are welcome at any time; one added while a pass runs is used by the next pass ("late photos"). */
-  async addPhoto(id: string, name: string, bytes: Buffer): Promise<StmObject> {
+  async addPhoto(id: string, name: string, bytes: Buffer, forMessage = false): Promise<StmObject> {
     await this.get(id);
     await this.#deps.store.addFile(id, 'photos', name, bytes);
     return this.#changed(await this.#deps.store.update(id, o => {
       if (o.photos.includes(name)) return o;
-      const initial = o.state === 'new' && o.passes.length === 0;
-      return {...o, photos: [...o.photos, name], ...(initial
+      // With no model after an initial failure, added evidence is for Try Again.
+      // Preserve the sender's message ownership even if its upload arrives after failure.
+      const requestEvidence = !forMessage && ((o.state === 'new' && o.passes.length === 0) || (o.state === 'failed' && !o.current));
+      return {...o, photos: [...o.photos, name], ...(requestEvidence
         ? {requestPhotos: [...(o.requestPhotos ?? []), name]}
         : {pendingPhotos: [...(o.pendingPhotos ?? []), name]})};
     }));
@@ -530,15 +532,15 @@ export class ObjectService {
    * Copies a file on this Mac into the object (the Mac app's New Project and drop targets).
    * The control socket can't carry file bytes, so the companion reads the path itself.
    */
-  addFile(id: string, kind: 'photos' | 'scan', path: string): Promise<StmObject> {
+  addFile(id: string, kind: 'photos' | 'scan', path: string, forMessage = false): Promise<StmObject> {
     // One at a time per object, so two files with the same name can't take the same slot.
-    return this.addFileReceipt(id, kind, path).then(receipt => receipt.object);
+    return this.addFileReceipt(id, kind, path, forMessage).then(receipt => receipt.object);
   }
   /** The exact name assigned to this upload, independent of other pending evidence. */
-  addFileReceipt(id: string, kind: 'photos' | 'scan', path: string): Promise<{object: StmObject; photoName?: string}> {
-    return this.#gate(id, () => this.#addFileReceipt(id, kind, path));
+  addFileReceipt(id: string, kind: 'photos' | 'scan', path: string, forMessage = false): Promise<{object: StmObject; photoName?: string}> {
+    return this.#gate(id, () => this.#addFileReceipt(id, kind, path, forMessage));
   }
-  async #addFileReceipt(id: string, kind: 'photos' | 'scan', path: string): Promise<{object: StmObject; photoName?: string}> {
+  async #addFileReceipt(id: string, kind: 'photos' | 'scan', path: string, forMessage = false): Promise<{object: StmObject; photoName?: string}> {
     const rule = FILE_KINDS[kind];
     if (!isAbsolute(path) || path.includes('\0')) throw new InvalidFileError('Choose a file on this Mac.');
     const extension = extname(path).toLowerCase();
@@ -555,7 +557,7 @@ export class ObjectService {
     if (bytes.length > rule.limit || !looksLike(extension, bytes.subarray(0, 84))) throw new InvalidFileError(`That isn't ${rule.words}.`);
     if (kind === 'scan') return {object: await this.addScan(id, `scan${extension}`, bytes)};
     const name = photoName(path, (await this.get(id)).photos);
-    return {object: await this.addPhoto(id, name, bytes), photoName: name};
+    return {object: await this.addPhoto(id, name, bytes, forMessage), photoName: name};
   }
 
   /** The inputs are complete: start the touch-up. Starting again while it runs changes nothing. */
@@ -621,7 +623,7 @@ export class ObjectService {
     if (!object.current && object.state !== 'failed') throw new InvalidStateError('There is no model to correct yet.');
     const imported: string[] = [];
     for (const path of photos) {
-      const receipt = await this.#addFileReceipt(id, 'photos', path);
+      const receipt = await this.#addFileReceipt(id, 'photos', path, true);
       object = receipt.object;
       if (receipt.photoName) imported.push(receipt.photoName);
     }

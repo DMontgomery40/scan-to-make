@@ -86,9 +86,9 @@ Destination `capabilities.materialChoice` (PR 5) says the same per printer; what
 | `objects.settings.get` | `{id}` | `{settings: {status, archived}}` | PR 8a, 8b |
 | `objects.settings.set` | `{id, status?: "not-printed"\|"printed"\|"works"\|"needs-changes", archived?: boolean}`, at least one | `{settings, object}`; as `PATCH /v1/objects/<id>/settings` (objects-api.md). A refusal is `conflict` with its sentence. | PR 8a, 8b |
 | `objects.create` | `{instructions?: string ≤ 8000, kind?: "fit"\|"copy"}` | `{object}` (`kind` from PR 4) | PR 1 |
-| `objects.addFile` | `{id, kind: "photos"\|"scan", path}` | `{object}` | PR 1 |
+| `objects.addFile` | `{id, kind: "photos"\|"scan", path, forMessage?: boolean}` | `{object, photoName?}` | PR 1 |
 | `objects.start` | `{id}` | `{object}` | |
-| `objects.correct` | `{id, note: string 1–4000, photos?: [path] ≤ 24}` | `{object}`: a new pass (`photos` PR 1) | |
+| `objects.correct` | `{id, note: string 1–4000, photoNames?: string[] ≤ 100, photos?: [path] ≤ 24}` | `{object}`: a new pass (`photos` PR 1) | |
 | `objects.answerCloseup` | `{id, bestGuess: boolean, text?: string ≤ 2000, photoNames?: string[] ≤ 100}` (omitted names select none; an empty answer is refused) | `{object}`: a new pass (`text` PR 4) | |
 | `objects.delete` | `{id}` | `{deleted: true}` | |
 | `objects.passActivity` | `{id, index}` | `{activity}` | |
@@ -110,7 +110,12 @@ Destination `capabilities.materialChoice` (PR 5) says the same per printer; what
 
 **Deadlines.** Every connection still carries one request. Its deadline is 10 s, except `events.wait` (its `timeoutMs` plus 5 s) and `objects.estimate` (180 s, because it slices). A camera read gives up after 10 s.
 
-**`objects.addFile`.** `path` is an absolute path on this Mac: the companion reads the file itself because requests are capped at 64 KiB. It must be a regular file (a symlink is followed), its extension and first bytes must agree, and:
+**`objects.addFile`.** `path` is an absolute path on this Mac: the companion reads the file itself because requests are capped at 64 KiB. It must be a regular file (a symlink is followed), and its extension and first bytes must agree.
+
+For correction queues and Ask answers, send `forMessage: true` when importing photos. This preserves
+the attachment's purpose if the initial pass fails before the upload finishes. Other photos added
+after an initial failure with no current model are request evidence for Try Again. Use the returned
+`photoName` to select this upload; do not infer its name from the whole pending-photo list.
 
 | `kind` | Accepted | Limit | Stored as | When |
 |---|---|---|---|---|

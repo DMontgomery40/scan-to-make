@@ -258,11 +258,13 @@ export function createObjectRoutes(service: ObjectService) {
           }
           case 'photos':
           case 'capture': {
+            const messageIntent = url.searchParams.get('forMessage');
+            if (action === 'photos' && messageIntent !== null && !['true', 'false'].includes(messageIntent)) throw new HttpFailure(400, 'invalid-for-message');
             const name = url.searchParams.get('name') ?? '';
             if (!/^[A-Za-z0-9][A-Za-z0-9._ -]{0,127}$/.test(name) || name.includes('..')) throw new HttpFailure(400, 'invalid-name');
             object = await service.receive(id, async () => {
               const bytes = await body(request, MAX_PHOTO);
-              return action === 'capture' ? service.addCapturePhoto(id, name, bytes) : service.addPhoto(id, name, bytes);
+              return action === 'capture' ? service.addCapturePhoto(id, name, bytes) : service.addPhoto(id, name, bytes, messageIntent === 'true');
             });
             break;
           }

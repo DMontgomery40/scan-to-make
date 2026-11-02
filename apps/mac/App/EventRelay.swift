@@ -136,7 +136,7 @@ import ControlKit
             let client = try ControlClient(socketPath: socket, timeout: ControlClient.timeout(for: call.method))
             guard let prepared = try await command.preparedCall(photos: photos, acceptsText: capabilities?.structuredPasses ?? false,
                                                                printSettings: capabilities?.printSettings ?? false,
-                                                               addPhoto: { try await client.addPhotoFile(command.projectId, path: $0) }) else {
+                                                               addPhoto: { try await client.addPhotoFile(command.projectId, path: $0, forMessage: true) }) else {
                 return (false, command.refusal)
             }
             _ = try await client.run(prepared.method, prepared.params)

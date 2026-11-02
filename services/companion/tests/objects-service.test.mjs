@@ -11,12 +11,13 @@ import {projectTitle} from '../dist/events/words.js';
 
 const STL = 'solid m\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 1 0 0\nvertex 0 1 0\nendloop\nendfacet\nendsolid m\n';
 
-async function setup(outcome = {status: 'done', summary: 'Fixed the card.'}, {throws, delayMs = 0, outcomes, waitForAbort, printGate} = {}) {
+async function setup(outcome = {status: 'done', summary: 'Fixed the card.'}, {throws, delayMs = 0, outcomes, waitForAbort, printGate, beforeResult} = {}) {
   const root = await mkdtemp(join(tmpdir(), 'objects-svc-'));
   const store = new ObjectStore(join(root, 'objects'));
   const calls = [];
   const runTouchup = async input => {
     calls.push(input);
+    await beforeResult?.(calls.length);
     if (waitForAbort) await new Promise(r => input.signal.addEventListener('abort', r, {once: true}));
     await new Promise(r => setTimeout(r, delayMs));
     if (outcomes) outcome = outcomes[calls.length - 1] ?? outcome;
@@ -68,6 +69,40 @@ test('a failed pass becomes failed with its reason', async () => {
   const settled = await service.settled(object.id);
   assert.equal(settled.state, 'failed');
   assert.equal(settled.failure, 'Not logged in');
+});
+
+test('retrying an initial failure uses new evidence without taking photos queued during the failed pass', async () => {
+  let releaseFirst;
+  const firstPass = new Promise(resolve => { releaseFirst = resolve; });
+  const {service, object, calls} = await setup(undefined, {beforeResult: count => count === 1 ? firstPass : undefined, outcomes: [
+    {status: 'failed', reason: 'Need a clearer view'}, {status: 'done', summary: 'Made the model'},
+  ]});
+  await service.addPhoto(object.id, 'original.jpg', Buffer.from('original'));
+  await service.start(object.id);
+  await service.addPhoto(object.id, 'queued-change.jpg', Buffer.from('reserved for later'));
+  releaseFirst();
+  const failed = await service.settled(object.id);
+  assert.equal(failed.state, 'failed');
+  assert.equal(failed.current, undefined);
+  await service.addPhoto(object.id, 'retry-evidence.jpg', Buffer.from('clearer view'));
+  await service.start(object.id);
+  const retried = await service.settled(object.id);
+  assert.deepEqual(calls[1].photos.map(path => path.split('/').at(-1)).sort(), ['original.jpg', 'retry-evidence.jpg']);
+  assert.deepEqual(retried.pendingPhotos, ['queued-change.jpg']);
+  assert.deepEqual(retried.requestPhotos, ['original.jpg', 'retry-evidence.jpg']);
+});
+
+test('new photos after a failed correction remain pending when a current model exists', async () => {
+  const {service, object} = await setup(undefined, {outcomes: [
+    {status: 'done', summary: 'Made the model'}, {status: 'failed', reason: 'Could not change it'},
+  ]});
+  await service.start(object.id); await service.settled(object.id);
+  await service.correct(object.id, 'Make it thicker.', [], []);
+  const failed = await service.settled(object.id);
+  assert.equal(failed.state, 'failed');
+  assert.ok(failed.current);
+  await service.addPhoto(object.id, 'next-change.jpg', Buffer.from('next change'));
+  assert.deepEqual((await service.get(object.id)).pendingPhotos, ['next-change.jpg']);
 });
 
 test('an engine error becomes failed with its message', async () => {
@@ -410,4 +445,39 @@ test('a concurrent unrelated photo upload never enters a local-file correction r
   assert.deepEqual(after.messages.at(-1).photos, ['local.jpg']);
   assert.deepEqual(after.pendingPhotos, ['other-message.jpg']);
   assert.deepEqual(calls[1].photos.map(path => path.split('/').at(-1)), ['local.jpg']);
+});
+
+
+test('a queued message photo arriving after initial failure stays out of Try Again', async () => {
+  let releaseFirst;
+  const firstPass = new Promise(resolve => { releaseFirst = resolve; });
+  const {service, object, store, calls} = await setup(undefined, {beforeResult: count => count === 1 ? firstPass : undefined, outcomes: [
+    {status: 'failed', reason: 'Need a clearer view'}, {status: 'done', summary: 'Made the model'},
+  ]});
+  await service.addPhoto(object.id, 'original.jpg', Buffer.from('original'));
+  await service.start(object.id);
+  let releaseUpload;
+  const arrived = new Promise(resolve => { releaseUpload = resolve; });
+  let uploadStarted;
+  const started = new Promise(resolve => { uploadStarted = resolve; });
+  const addFile = store.addFile.bind(store);
+  store.addFile = async (id, kind, name, bytes) => {
+    if (name === 'queued-change.jpg') { uploadStarted(); await arrived; }
+    return addFile(id, kind, name, bytes);
+  };
+  const upload = service.addPhoto(object.id, 'queued-change.jpg', Buffer.from('reserved for later'), true);
+  await started;
+  releaseFirst();
+  assert.equal((await service.settled(object.id)).state, 'failed');
+  releaseUpload();
+  await upload;
+  await service.addPhoto(object.id, 'retry-evidence.jpg', Buffer.from('clearer view'));
+  await service.start(object.id);
+  const retried = await service.settled(object.id);
+  assert.deepEqual(calls[1].photos.map(path => path.split('/').at(-1)).sort(), ['original.jpg', 'retry-evidence.jpg']);
+  assert.deepEqual(retried.pendingPhotos, ['queued-change.jpg']);
+  await service.correct(object.id, 'Make the queued change.', [], ['queued-change.jpg']);
+  const corrected = await service.settled(object.id);
+  assert.deepEqual(corrected.messages.at(-1).photos, ['queued-change.jpg']);
+  assert.deepEqual(corrected.pendingPhotos, []);
 });

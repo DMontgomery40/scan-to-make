@@ -175,14 +175,18 @@ public extension ControlClient {
         let result: ObjectReply = try await call("objects.create", params); return result.object
     }
     /// Copies a file on this Mac into the project: `photos` (JPEG, HEIC, PNG) or `scan` (STL, 3MF, USDZ).
-    func addFile(_ id: String, kind: String, path: String) async throws -> Project {
-        let result: ObjectReply = try await call("objects.addFile", ["id": .string(id), "kind": .string(kind), "path": .string(path)])
+    func addFile(_ id: String, kind: String, path: String, forMessage: Bool = false) async throws -> Project {
+        var params: [String: JSONValue] = ["id": .string(id), "kind": .string(kind), "path": .string(path)]
+        if forMessage { params["forMessage"] = .bool(true) }
+        let result: ObjectReply = try await call("objects.addFile", params)
         return result.object
     }
     /// The companion may sanitize or disambiguate a local filename. Only its receipt identifies this upload.
-    func addPhotoFile(_ id: String, path: String) async throws -> String {
+    func addPhotoFile(_ id: String, path: String, forMessage: Bool = false) async throws -> String {
         struct Receipt: Decodable { let photoName: String? }
-        let receipt: Receipt = try await call("objects.addFile", ["id": .string(id), "kind": .string("photos"), "path": .string(path)])
+        var params: [String: JSONValue] = ["id": .string(id), "kind": .string("photos"), "path": .string(path)]
+        if forMessage { params["forMessage"] = .bool(true) }
+        let receipt: Receipt = try await call("objects.addFile", params)
         guard let name = receipt.photoName, !name.isEmpty else {
             throw ControlRemoteError(code: "not-supported", message: "Update Counterpart on your Mac to answer with these photos.")
         }

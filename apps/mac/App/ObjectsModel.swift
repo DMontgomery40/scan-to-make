@@ -28,6 +28,7 @@ protocol ObjectsCompanion: Sendable {
     func aiProvider() async -> String?
     func create(instructions: String?, kind: String?) async throws -> Project
     func addFile(_ id: String, kind: String, path: String) async throws -> Project
+    func addPhotoFile(_ id: String, path: String, forMessage: Bool) async throws -> String
     func correct(_ id: String, note: String, photos: [String]) async throws -> Project
     func print(_ id: String, checked: Bool, settings: PrintSettings) async throws -> Project
     func estimate(_ id: String, destinationId: String?, quality: PrintSettings.Quality, strength: PrintSettings.Strength) async throws -> PrintEstimate
@@ -54,6 +55,7 @@ extension ObjectsCompanion {
     func aiProvider() async -> String? { nil }
     func create(instructions: String?, kind: String?) async throws -> Project { throw ControlClientError.unavailable }
     func addFile(_ id: String, kind: String, path: String) async throws -> Project { throw ControlClientError.unavailable }
+    func addPhotoFile(_ id: String, path: String, forMessage: Bool) async throws -> String { throw ControlClientError.unavailable }
     func correct(_ id: String, note: String, photos: [String]) async throws -> Project {
         guard photos.isEmpty else { throw ControlClientError.unavailable }
         return try await correct(id, note: note)
@@ -112,6 +114,9 @@ struct SocketObjects: ObjectsCompanion {
     }
     func create(instructions: String?, kind: String?) async throws -> Project {
         try await ControlClient(socketPath:path).createObject(instructions:instructions, kind:kind)
+    }
+    func addPhotoFile(_ id: String, path file: String, forMessage: Bool) async throws -> String {
+        try await ControlClient(socketPath: path, timeout: 30).addPhotoFile(id, path: file, forMessage: forMessage)
     }
     func addFile(_ id: String, kind: String, path file: String) async throws -> Project {
         try await ControlClient(socketPath:path, timeout:30).addFile(id, kind:kind, path:file)
@@ -485,8 +490,9 @@ struct SocketObjects: ObjectsCompanion {
 
     private func queueChanges(_ id: String, note: String, photos: [URL]) async -> Bool {
         do {
-            for photo in photos { applyReply(try await companion.addFile(id, kind: "photos", path: photo.path)) }
-            let available = objects.first(where: { $0.id == id }).flatMap { corrections.availablePhotos($0) }
+            var uploaded: [String] = []
+            for photo in photos { uploaded.append(try await companion.addPhotoFile(id, path: photo.path, forMessage: true)) }
+            let available = photos.isEmpty ? objects.first(where: { $0.id == id }).flatMap { corrections.availablePhotos($0) } : uploaded
             corrections.add(note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "See the photos I added." : note, for: id, photos: available)
             if let project = objects.first(where: { $0.id == id }) { sendQueuedNote(project) }
             return true

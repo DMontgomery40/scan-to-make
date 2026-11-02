@@ -25,13 +25,23 @@ private func failure(_ request: [String: Any], _ code: String) throws -> Data {
 }
 
 final class ObjectsClientTests: XCTestCase {
+    func testInitialFileUploadDoesNotClaimMessageOwnership() async throws {
+        let server = try UnixFixture { request in
+            XCTAssertNil((request["params"] as? [String: Any])?["forMessage"])
+            return [try objectReply(request)]
+        }
+        _ = try await ControlClient(socketPath: server.path).addFile(id, kind: "photos", path: "/tmp/retry.jpg")
+        withExtendedLifetime(server) {}
+    }
+
     func testPhotoUploadUsesItsReceiptInsteadOfOtherPendingProjectPhotos() async throws {
         let server = try UnixFixture { request in
             XCTAssertEqual(request["method"] as? String, "objects.addFile")
             XCTAssertEqual((request["params"] as? [String: Any])?["path"] as? String, "/tmp/answer.jpg")
+            XCTAssertEqual((request["params"] as? [String: Any])?["forMessage"] as? Bool, true)
             return [try reply(request, result: ["object": ready.merging(["photos": ["queued.jpg", "answer-2.jpg", "later.jpg"]]) { $1 }, "photoName": "answer-2.jpg"])]
         }
-        let name = try await ControlClient(socketPath: server.path).addPhotoFile(id, path: "/tmp/answer.jpg")
+        let name = try await ControlClient(socketPath: server.path).addPhotoFile(id, path: "/tmp/answer.jpg", forMessage: true)
         XCTAssertEqual(name, "answer-2.jpg")
         let old = try UnixFixture { request in [try objectReply(request)] }
         do { _ = try await ControlClient(socketPath: old.path).addPhotoFile(id, path: "/tmp/answer.jpg"); XCTFail("No guessing from the project's photos") }

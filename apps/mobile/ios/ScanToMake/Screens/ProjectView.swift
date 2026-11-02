@@ -57,7 +57,8 @@ struct ProjectView: View {
         .dropDestination(for: Data.self) { items, _ in
             // One action at a time: a drop while something runs is refused, not quietly lost.
             guard let object, !working else { return false }
-            Task { await addDropped(items, to: object.id) }
+            let forMessage = object.current != nil || object.changesWait || object.openAsk != nil
+            Task { await addDropped(items, to: object.id, forMessage: forMessage) }
             return !items.isEmpty
         }
         .task(id: object.map { store.words($0).busy } ?? false) {
@@ -79,7 +80,7 @@ struct ProjectView: View {
         catch { fetchProblem = CompanionError.unreachable.message }
     }
 
-    private func addDropped(_ items: [Data], to id: String) async {
+    private func addDropped(_ items: [Data], to id: String, forMessage: Bool) async {
         let photos = items.prefix(NewObjectView.photoLimit).compactMap { data -> ChosenPhoto? in
             let png = data.starts(with: [0x89, 0x50, 0x4E, 0x47])
             guard let image = UIImage(data: data) else { return nil }
@@ -87,7 +88,7 @@ struct ProjectView: View {
         }
         guard !photos.isEmpty else { return }
         act {
-            try await store.mac.sendChosen(id, photos)
+            try await store.mac.sendChosen(id, photos, forMessage: forMessage)
             notice = photos.count == 1 ? "Added a photo. Your Mac uses it in the next change." : "Added \(photos.count) photos. Your Mac uses them in the next change."
             return try await store.mac.get(id)
         }
@@ -651,7 +652,7 @@ struct ProjectView: View {
                 ? (try await PhotoSources.takePhoto()).flatMap(MacConnection.keep).map { [$0] } ?? []
                 : try await store.mac.choosePhotos(limit: NewObjectView.photoLimit)
             guard !photos.isEmpty else { return object }
-            try await store.mac.sendChosen(object.id, photos)
+            try await store.mac.sendChosen(object.id, photos, forMessage: true)
             notice = photos.count == 1 ? "Added a photo. Your Mac uses it in the next change." : "Added \(photos.count) photos. Your Mac uses them in the next change."
             return try await store.mac.get(object.id)
         }
