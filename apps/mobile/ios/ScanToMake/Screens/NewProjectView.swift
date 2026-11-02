@@ -60,10 +60,14 @@ struct NewObjectView: View {
                         SourceTile(symbol: "cube.transparent", title: "Scan it", detail: store.canScan ? "Walk around it. LiDAR measures it." : "Needs an iPhone or iPad with LiDAR.",
                                    tint: .filament, enabled: store.canScan && working == nil) { Task { await scan(handheld: false) } }
                             .accessibilityIdentifier("scan-object")
-                        SourceTile(symbol: "hand.raised.fingers.spread", title: "Scan in hand",
-                                   detail: HandheldCapture.isAvailable ? "Hold it up and turn it." : "Needs an iPhone or iPad with LiDAR.",
-                                   tint: .blue, enabled: HandheldCapture.isAvailable && working == nil) { Task { await scan(handheld: true) } }
-                            .accessibilityIdentifier("capture-photos")
+                        // Scan in hand is off until it's rebuilt on Apple's still-photo capture: its LiDAR session
+                        // left the phone's camera black (KAN-217 P0, Davica3 2026-11-02 02:07).
+                        if HandheldCapture.offered {
+                            SourceTile(symbol: "hand.raised.fingers.spread", title: "Scan in hand",
+                                       detail: HandheldCapture.isAvailable ? "Hold it up and turn it." : "Needs an iPhone or iPad with LiDAR.",
+                                       tint: .blue, enabled: HandheldCapture.isAvailable && working == nil) { Task { await scan(handheld: true) } }
+                                .accessibilityIdentifier("capture-photos")
+                        }
                         SourceTile(symbol: "camera", title: "Take photos", detail: photos.count < Self.photoLimit ? "A few angles is plenty." : "24 photos is the most.", tint: .purple,
                                    enabled: working == nil && !photosLocked && photos.count < Self.photoLimit) { Task { await addPhotos(camera: true) } }
                         SourceTile(symbol: "photo.on.rectangle.angled", title: "From Photos", detail: photos.count < Self.photoLimit ? "Pick what you have." : "24 photos is the most.", tint: .green,
