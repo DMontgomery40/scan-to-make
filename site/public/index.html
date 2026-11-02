@@ -18,7 +18,7 @@
   <nav aria-label="On this page">
     <a href="#how">How it works</a>
     <a href="#need">What you need</a>
-    <a href="#help">Help</a>
+    <a href="help.html">Help</a>
   </nav>
 </header>
 
@@ -55,21 +55,22 @@
   </section>
 
   <section class="ways" aria-labelledby="ways-title">
-    <h2 id="ways-title">Three ways to start</h2>
+    <h2 id="ways-title">Four ways to start</h2>
     <dl class="ways-list">
       <div><dt>Scan it</dt><dd>Scan the real thing with an iPhone or iPad that has a LiDAR scanner. It captures the shape in millimetres.</dd></div>
       <div><dt>Photograph it</dt><dd>One or two photos and a sentence about what you want. A ruler or caliper in the picture helps with sizes.</dd></div>
       <div><dt>Describe it</dt><dd>“A hook for a 25 mm tube that holds a mug.” Sizes in your words are enough to start.</dd></div>
+      <div><dt>Paste a link</dt><dd>A published model on MakerWorld or Printables. It prints the designer's own file, credited to them.</dd></div>
     </dl>
   </section>
 
   <section id="how" aria-labelledby="how-title">
     <h2 id="how-title">How it works</h2>
     <ol class="steps">
-      <li><h3>Send it from your phone</h3><p>Your scan, photos and description go straight to your Mac over your Wi-Fi. Counterpart has no servers of its own.</p></li>
+      <li><h3>Send it from your phone</h3><p>Your scan, photos and description go straight to your Mac, over your Wi-Fi or your own private iCloud. Counterpart has no servers of its own.</p></li>
       <li><h3>Your Mac makes it</h3><p>Counterpart uses your own Claude Code login and Blender to make the model, so Claude sees what you sent. If it can't see a part well enough, it asks you for a close-up.</p></li>
       <li><h3>Check it on your phone</h3><p>See pictures and the size in millimetres. Ask for changes in plain words, like “make it 2 mm wider”.</p></li>
-      <li><h3>Print it</h3><p>Choose your printer and filament, then send the sliced model to the printer.</p></li>
+      <li><h3>Print it</h3><p>Choose your printer and filament, see the time and filament it needs, and confirm on the printer's own terms.</p></li>
     </ol>
   </section>
 
@@ -77,9 +78,9 @@
     <h2 id="need-title">What you need</h2>
     <ul class="needs">
       <li><strong>An iPhone or iPad with iOS 27.</strong> Scanning needs a model with LiDAR (Pro models). Photos and descriptions work on any.</li>
-      <li><strong>A Mac</strong> on the same Wi-Fi, with Counterpart running in the menu bar.</li>
+      <li><strong>A Mac</strong> with Counterpart running in the menu bar. On the same Apple Account, your iPhone finds it by itself.</li>
       <li><strong>Claude Code</strong>, signed in on that Mac. Counterpart uses your login to make models.</li>
-      <li><strong>Blender</strong> on that Mac. Counterpart edits models with it through your printer's MCP server.</li>
+      <li><strong>Blender</strong> on that Mac. Counterpart opens it only while it works on a project.</li>
       <li><strong>A 3D printer and its MCP server.</strong> Counterpart uses your existing setup as it is.</li>
     </ul>
     <div class="printers">
@@ -96,6 +97,7 @@
 
   <section id="help" aria-labelledby="help-title">
     <h2 id="help-title">Help</h2>
+    <p>Quick answers below. The full guide is on the <a href="help.html">Help page</a>.</p>
     <div class="faq">
       <details>
         <summary>My phone can't find my Mac</summary>
@@ -107,11 +109,11 @@
       </details>
       <details>
         <summary>Making it stopped with an error</summary>
-        <p>The message on the object says what went wrong. The usual causes are Blender not being open, or Claude Code not being signed in on your Mac. Fix that, then open the object and tap Try Again.</p>
+        <p>The message on the object says what went wrong. The usual cause is Claude Code not being signed in on your Mac. Fix that, then open the object and tap Try Again.</p>
       </details>
       <details>
         <summary>It asked me for a close-up</summary>
-        <p>Your Mac couldn't see one part clearly. Take a photo close to that part, or tap Make Your Best Guess to let it carry on without one.</p>
+        <p>Your Mac couldn't see one part clearly. Take a photo close to that part, or tap Best Guess to let it carry on without one.</p>
       </details>
       <details>
         <summary>The print has not started</summary>
