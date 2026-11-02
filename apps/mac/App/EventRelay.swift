@@ -81,7 +81,10 @@ import ControlKit
     /// Reads the projects (at most every 30 s unless forced). Returns whether this snapshot is current.
     @discardableResult private func refreshProjects(_ client: ControlClient, force: Bool) async -> Bool {
         if !force, let at = projectsReadAt, Date().timeIntervalSince(at) < 30 { return true }
+        // The window shows this read too, in order with its own: a `pass.*` event changes the badge at once.
+        let read = AppModels.objects.startRead()
         guard let (list, extras) = try? await client.objectsAndExtras() else { return false }
+        AppModels.objects.apply(read: read, list, extras)
         projects = Dictionary(uniqueKeysWithValues: list.map { ($0.id, $0) })
         // The ~/Downloads watch follows the projects' Asks while no window is open, too (PRD §8.11).
         DownloadsWatcher.shared.follow(extras, titles: Dictionary(uniqueKeysWithValues: list.map { ($0.id, $0.words.title) }))

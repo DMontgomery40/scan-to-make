@@ -231,7 +231,9 @@ struct ProjectDetail: View {
         GlassEffectContainer(spacing: 10) {
             HStack(spacing: 10) {
                 HStack(spacing: 8) {
+                    // Part of the field: a click on it is a click in the field.
                     Image(systemName: "text.bubble").foregroundStyle(.secondary)
+                        .contentShape(Rectangle()).onTapGesture { if canCorrect { noteFocused = true } }.accessibilityHidden(true)
                     ForEach(photos, id: \.self) { url in
                         FillImage(url: url, version: 0).frame(width: 26, height: 26).clipShape(.rect(cornerRadius: 6))
                             .overlay(alignment: .topTrailing) {

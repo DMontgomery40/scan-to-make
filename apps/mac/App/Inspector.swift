@@ -228,7 +228,8 @@ private struct StageRow: View {
         HStack(alignment: .top, spacing: 10) {
             Group {
                 if running { ProgressView().controlSize(.mini) }
-                else { Image(systemName: done ? "checkmark.circle.fill" : "circle").foregroundStyle(done ? Color.green : .secondary) }
+                // A step still to come is dashed: an empty circle reads as a checkbox to click.
+                else { Image(systemName: done ? "checkmark.circle.fill" : "circle.dashed").foregroundStyle(done ? Color.green : .secondary) }
             }
             .frame(width: 18)
             VStack(alignment: .leading, spacing: 2) {

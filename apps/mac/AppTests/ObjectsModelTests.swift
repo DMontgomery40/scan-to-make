@@ -368,4 +368,28 @@ private func project(_ item: [String: Any]) throws -> Project {
         XCTAssertTrue(DidItFit.asks(next, nil, defaults: defaults), "the next print asks again")
     }
 
+    /// P1: a follow-up pass showed "Ready to print" throughout. pass.ready, then pass.started 182 ms later: the read
+    /// for the first can answer after the read for the second, and must not put Ready back.
+    func testAnOlderReadNeverPutsBackAStateTheProjectLeft() throws {
+        let model = ObjectsModel(companion: FakeObjects())
+        let ready = try project(item("s", "ready")), touchingUp = try project(item("s", "touching-up"))
+        let afterReady = model.startRead(), afterStarted = model.startRead()
+        XCTAssertTrue(model.apply(read: afterStarted, [touchingUp], [:]))
+        XCTAssertFalse(model.apply(read: afterReady, [ready], [:]), "the older reply is dropped")
+        XCTAssertEqual(model.objects.first?.state.rawValue, "touching-up")
+        XCTAssertNotEqual(model.objects.first?.words.capsule, "Ready to print")
+    }
+
+    /// An action's reply is newer than a read that started before it.
+    func testAReadFromBeforeAnActionDoesNotUndoIt() async throws {
+        let companion = FakeObjects()
+        await companion.set([item("s", "ready")])
+        let model = ObjectsModel(companion: companion)
+        await model.refresh()
+        let stale = model.startRead()
+        let corrected = await model.perform(.correct, on: "s", note: "Wider lip")
+        XCTAssertTrue(corrected)
+        XCTAssertFalse(model.apply(read: stale, [try project(item("s", "ready"))], [:]))
+        XCTAssertEqual(model.objects.first?.state.rawValue, "touching-up")
+    }
 }
