@@ -70,5 +70,49 @@ final class ModelPosterTests: XCTestCase {
         let cached = await cache.load(key: "old") { XCTFail("Concurrent result must be reusable"); return nil }
         XCTAssertNotNil(cached)
     }
+
+    @MainActor func testCacheReleaseDropsPrototypeWithoutInvalidatingDisplayedClone() async {
+        let cache = ModelEntityCache(limit: 1)
+        weak var prototype: Entity?
+        let displayed = await cache.load(key: "model") {
+            let entity = Entity(); entity.name = "model"
+            prototype = entity
+            return entity
+        }
+        XCTAssertNotNil(prototype)
+        cache.removeAll()
+        XCTAssertNil(prototype, "Closing the window must release the cache's retained entity")
+        XCTAssertEqual(displayed?.name, "model", "Another active consumer owns its independent hierarchy")
+    }
+
+    @MainActor func testCacheReleaseSeparatesReopenedLoadFromOldPendingWork() async {
+        let cache = ModelEntityCache(limit: 1)
+        var finishOld: CheckedContinuation<Entity?, Never>?
+        let old = Task { @MainActor in await cache.load(key: "model") {
+            await withCheckedContinuation { finishOld = $0 }
+        } }
+        while finishOld == nil { await Task.yield() }
+        old.cancel()
+        cache.removeAll()
+        let started = expectation(description: "Reopened window starts its own load")
+        var newStarted = false
+        let reopened = Task { @MainActor in await cache.load(key: "model") {
+            newStarted = true; started.fulfill()
+            let entity = Entity(); entity.name = "reopened"
+            return entity
+        } }
+        await fulfillment(of: [started], timeout: 2)
+        // A broken implementation joins the old pending task; release it even
+        // after the failed expectation so the regression cannot hang the suite.
+        if newStarted { _ = await reopened.value }
+        let obsolete = Entity(); obsolete.name = "closed"
+        finishOld?.resume(returning: obsolete)
+        let oldResult = await old.value
+        let newResult = await reopened.value
+        XCTAssertNil(oldResult)
+        XCTAssertEqual(newResult?.name, "reopened")
+        let cached = await cache.load(key: "model") { XCTFail("Old completion evicted the new window's model"); return nil }
+        XCTAssertEqual(cached?.name, "reopened")
+    }
 }
 #endif
