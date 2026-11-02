@@ -151,12 +151,6 @@ struct ObjectWords: Equatable, Sendable {
         case .printing:
             if object.printConfirmation != nil {
                 (status, tone, busy, actions) = ("Your printer needs your confirmation.", .accent, true, [])
-            } else if object.plate?.noCamera == true {
-                (status, tone, busy, actions) = ("Check the plate is clear.", .accent, true, [.plateClear])
-            } else if let plate = object.plate {
-                let item = (plate.item ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-                (status, tone, busy, actions) = ("Looks like there's \(item.isEmpty ? "something" : item) on your plate. Can you take it off first?",
-                                                 .accent, true, [.plateClear])
             } else {
                 (status, tone, busy, actions) = (object.progress ?? "Preparing print…", .pending, true, [])
             }

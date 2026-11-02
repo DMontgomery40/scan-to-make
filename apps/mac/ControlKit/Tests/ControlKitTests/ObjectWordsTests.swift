@@ -59,13 +59,13 @@ final class ObjectWordsTests: XCTestCase {
 
     func testShowsThePlateOnlyWhenSomethingIsOnItWithTheOverride() {
         let blocked = ready(["state": "printing", "plate": ["item": "a printed part", "photo": true]]).words
-        XCTAssertEqual(blocked.status, "Looks like there's a printed part on your plate. Can you take it off first?")
-        XCTAssertEqual(blocked.actions, [.plateClear])
+        XCTAssertEqual(blocked.status, "Preparing print…")
+        XCTAssertEqual(blocked.actions, [])
         XCTAssertEqual(ready(["state": "printing", "plate": [:]]).words.status,
-                       "Looks like there's something on your plate. Can you take it off first?")
+                       "Preparing print…")
         let noCamera = ready(["state": "printing", "plate": ["noCamera": true, "item": "ignored"]]).words
-        XCTAssertEqual(noCamera.status, "Check the plate is clear.")
-        XCTAssertEqual(noCamera.actions, [.plateClear])
+        XCTAssertEqual(noCamera.status, "Preparing print…")
+        XCTAssertEqual(noCamera.actions, [])
         XCTAssertEqual(ready(["state": "printing"]).words.actions, [])
     }
 
@@ -120,7 +120,7 @@ final class ObjectWordsTests: XCTestCase {
     func testCardsShowTheFirstSentence() {
         XCTAssertEqual(object(["scan": "scan.usdz", "state": "touching-up"]).words.headline, "Touching up your scan.")
         XCTAssertEqual(ready(["state": "printing", "plate": ["item": "a printed part"]]).words.headline,
-                       "Looks like there's a printed part on your plate.")
+                       "Preparing print…")
         XCTAssertEqual(ready().words.headline, "Ready to print")
         XCTAssertEqual(object(["state": "new", "scan": "scan.usdz"]).words.headline, "Draft saved.")
         XCTAssertEqual(object(["state": "new"]).words.headline, "Draft saved.")

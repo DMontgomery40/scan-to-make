@@ -258,7 +258,7 @@ private struct PrintConfirmationForm: View {
                     Text("Waiting for Your Print Confirmation").font(.headline)
                     Text(verbatim:question.message).textSelection(.enabled).fixedSize(horizontal:false, vertical:true)
                     if let item = object.plate?.item, !item.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty {
-                        Label("The camera check saw \(item) on the plate. Check and clear it before confirming.", systemImage:"exclamationmark.triangle.fill")
+                        Label("The printer camera reported \(item) on the plate.", systemImage:"exclamationmark.triangle.fill")
                             .foregroundStyle(.orange).fixedSize(horizontal:false, vertical:true)
                     }
                     if let photo = object.platePhotoURL {
@@ -443,7 +443,7 @@ struct ObjectPage: View {
                         if let job = report.job { Text("Reported job: \(job)").foregroundStyle(.secondary) }
                         if let percent = report.percent { ProgressView(value:percent,total:100); Text("\(Int(percent))% of reported printer job").monospacedDigit() }
                         if let remaining = report.remainingMinutes { Text("\(Int(remaining)) min remaining").monospacedDigit() }
-                        if report.state == "FAILED" { Text("The previous printer job failed. Inspect the printer and clear the plate before confirming a new print.").foregroundStyle(.orange) }
+                        if report.state == "FAILED" { Text("The previous printer job failed. Check its status before starting another print.").foregroundStyle(.orange) }
                     }.textSelection(.enabled)
                 }
                 if object.modelURL != nil { editorActions }
