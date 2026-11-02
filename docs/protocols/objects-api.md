@@ -120,13 +120,23 @@ While the printer's MCP asks something (MCP elicitation, form mode), the object 
 
 A rejected answer leaves the question open, so the person can correct it and send again. `decline` and `cancel` take no content. Only a person's answer is sent: nothing is answered on the person's behalf.
 
-### Camera timing (PR 5)
+### Watched camera delivery
+
+Both `camera.jpg` routes accept `?stream=1&size=full` (or `size=card`, the default). They keep the usual PRINT authorization and return `Content-Type: application/x-ndjson` with `X-Camera-Protocol: 1`. Each newline-terminated frame is `{v: 1, seq, capturedAt, base64}`. `base64` is JPEG; a complete line is at most 65536 bytes. Blank lines every 15 seconds are keep-alives. Clients must bound their partial-line buffer, ignore blank lines, and cancel the connection when the camera view disappears or the app becomes inactive.
+
+An explicit `capabilities.cameraStream: false` or structured `camera_stream_start` status `not-supported` also selects snapshot compatibility. Tool names alone do not prove the optional native runtime is available. Authentication, discovery and connection failures remain errors. Capability refusal is cached only for the current MCP connection.
+
+The companion discovers all three MCP stream tools plus `camera_frame.max_bytes` before opening a watched feed. An older MCP returns ordinary JSON `404 not-supported` before streaming headers; the phone then uses the existing JPEG route. A stream sends only changed images, at most once every two seconds full-screen or ten seconds for a card. Full-screen requests cap JPEG at 42000 bytes (at most 56000 base64 bytes); cards cap at 20000. Widths are ceilings of 1200 and 300 respectively; the MCP may reduce dimensions to meet the byte cap. Several viewers share MCP reads and one native camera source. Closing one viewer releases only its lease; the last viewer cancels the outstanding MCP wait and releases the session, and the MCP closes its shared source after 30 seconds idle. Authorization is rechecked before frames and keep-alives. Slow readers stop the stream rather than growing an unbounded output queue.
+
+Without `stream=1`, replies remain JPEG. `size=full` selects the larger bounded stream frame when supported. `ETag` and `If-None-Match` permit `304` with no JPEG bytes; `X-Camera-Stream: 1` identifies the available MCP capability. Metadata, notifications and project reads never imply a camera viewer.
+
+### Snapshot fallback timing (PR 5)
 
 A P1S camera snapshot (bambu-printer-mcp `camera_snapshot`, bambu-tcp) takes 5 to 7 s on its own, measured on David's printer. So the companion:
 
 - answers a camera request from the last frame when it is under 3 s old, and otherwise from a frame up to 2 min old while one fetch for the next runs (several viewers share it). An event's frame (`print.done`, milestones) always waits for a new one, since it is saved with the event. `X-Captured-At` is always when that frame was taken: show "a few seconds ago" from it rather than assuming it is live;
 - waits only when there is no frame yet, or the last one is over 2 min old;
-- warms the camera when a view opens: `GET /v1/objects/<id>` of a printing project (or one with a printer question) and `GET /v1/objects/printers` connect that printer's session and fetch a frame ahead of the first camera request, at most once a minute per printer;
+- starts camera work only for an explicit camera request; project and printer metadata reads do not fetch frames;
 - keeps the session held for 30 s after each camera request, so a view refreshing every 3 s never meets a closed session.
 
 Live, P1S through bambu-printer-mcp 1.1.46: cold first frame 5.3 s; then 0 to 1 ms per 3 s refresh (each new frame arrives about every 6 s, as fast as the camera gives them); a view's first request 1 s after it opened waited 4.0 s instead of 5.3 s.

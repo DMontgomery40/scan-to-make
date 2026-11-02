@@ -269,7 +269,7 @@ export function createControlDispatcher(services: ControlServices) {
             const local = (o: Awaited<ReturnType<typeof objects.get>>) => ({...publicObject(o), directory: objects.dir(o.id),
               ...(o.state === 'new' && !o.progress && objects.receiving(o.id) ? {progress: RECEIVING} : {})});
             if (method === 'objects.list') return {objects: (await objects.list()).map(local)};
-            if (method === 'objects.printers') return objects.printers({view: true});
+            if (method === 'objects.printers') return objects.printers();
             if (method === 'objects.filaments') return {filaments: await objects.filaments(parameters[method].parse(raw).id)};
             if (method === 'objects.passActivity') {
               const {id, index} = parameters[method].parse(raw);

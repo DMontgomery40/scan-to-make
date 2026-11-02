@@ -96,6 +96,7 @@ enum PrinterWords {
 /// update its MCP needs for what's missing.
 struct PrinterDetailView: View {
     @Environment(AppModel.self) private var app
+    @Environment(\.scenePhase) private var scenePhase
     let store: ProjectsStore
     let id: String
     @State private var feed = CameraFeed()
@@ -158,9 +159,9 @@ struct PrinterDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .fullScreenCover(isPresented: $fullScreen) { CameraFullScreen(feed: feed, printer: printer?.name ?? "Printer") }
         // Keyed on whether the Mac says it has a camera, so the photos start once the printers have loaded.
-        .task(id: "\(id)#\(printer?.hasCamera == true)") {
-            guard printer?.hasCamera == true else { return }
-            await feed.run(app.companion, printer: id, every: 3)
+        .task(id: "\(id)#\(printer?.hasCamera == true)#\(scenePhase)#\(fullScreen)") {
+            guard scenePhase == .active, printer?.hasCamera == true else { return }
+            await feed.run(app.companion, printer: id, every: fullScreen ? 3 : 10)
         }
     }
 

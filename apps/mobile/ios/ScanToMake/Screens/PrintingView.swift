@@ -2,12 +2,13 @@ import SwiftUI
 import CounterpartKit
 
 /// A print in progress (PRD §5.7, screens/phone-printing.jpg): the printer camera as a still refreshed every
-/// 3 s with when it was taken, progress, time left, layer, filament and temperatures, and Pause / Stop when the
+/// 10 s (3 s full-screen) with when it was taken, progress, time left, layer, filament and temperatures, and Pause / Stop when the
 /// printer's MCP has them. Stop asks first. Never called video.
 ///
 /// Guards: one control at a time (`working`); the camera loop and polling are tied to the screen.
 struct PrintingView: View {
     @Environment(AppModel.self) private var app
+    @Environment(\.scenePhase) private var scenePhase
     let store: ProjectsStore
     let id: String
     @State private var feed = CameraFeed()
@@ -51,18 +52,14 @@ struct PrintingView: View {
         .fullScreenCover(isPresented: $fullScreen) { CameraFullScreen(feed: feed, printer: printerName) }
         // Pause, Resume and Stop can bring the printer's own question; it's answered here too.
         .modifier(PrinterQuestion(store: store, project: project, confirming: $confirming))
-        .task(id: id) {
-            // The Mac's still is shared and cached for 3 s; asking more often gets the same photo.
-            await feed.run(app.companion, project: id, every: 3)
+        .task(id: "\(id)#\(scenePhase)#\(fullScreen)") {
+            guard scenePhase == .active else { return }
+            // Snapshot fallback: cards refresh slowly; full-screen retains the shared 3 s cadence.
+            await feed.run(app.companion, project: id, every: fullScreen ? 3 : 10)
         }
         .task(id: id) {
-            // Pause, Resume and Stop follow the MCP's capabilities, read fresh.
+            // Project updates already come from ProjectsRoot's one event/fallback consumer.
             await store.loadPrinters()
-            guard store.events != true else { return }
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(5))
-                if UIApplication.shared.applicationState != .background { await store.reload(id) }
-            }
         }
     }
 

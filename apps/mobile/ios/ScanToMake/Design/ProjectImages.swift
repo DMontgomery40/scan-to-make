@@ -87,19 +87,39 @@ struct ProjectImage: View {
     var unsupported = false
 
     func run(_ client: CompanionClient, project: String? = nil, printer: String? = nil, every seconds: Double, maxPixelSize: Int = 1200) async {
+        guard project != nil || printer != nil else { return }
+        var previous: CompanionClient.CameraFrame?
+        let fullScreen = seconds < 10
+        var snapshots = false
+        unsupported = false
+        func display(_ frame: CompanionClient.CameraFrame) async {
+            let size = fullScreen ? maxPixelSize : 300
+            let decoded = await Task.detached { ImageMemory.thumbnail(data: frame.jpeg, maxPixelSize: size) }.value
+            guard !Task.isCancelled else { return }
+            if let decoded { image = decoded; capturedAt = frame.capturedAt ?? Date() }
+            problem = nil
+        }
         while !Task.isCancelled {
             do {
-                let frame = project != nil ? try await client.camera(project: project!) : try await client.camera(printer: printer!)
-                let size = maxPixelSize
-                let decoded = await Task.detached { ImageMemory.thumbnail(data: frame.jpeg, maxPixelSize: size) }.value
-                guard !Task.isCancelled else { return }
-                if let decoded { image = decoded; capturedAt = frame.capturedAt ?? Date(); problem = nil }
+                if snapshots {
+                    let frame = project != nil ? try await client.camera(project: project!, fullScreen: fullScreen, previous: previous)
+                        : try await client.camera(printer: printer!, fullScreen: fullScreen, previous: previous)
+                    if previous == nil || frame.etag == nil || frame.etag != previous?.etag { await display(frame) }
+                    previous = frame; problem = nil
+                } else {
+                    let frames = project != nil ? client.cameraFrames(project: project!, fullScreen: fullScreen)
+                        : client.cameraFrames(printer: printer!, fullScreen: fullScreen)
+                    for try await frame in frames { await display(frame) }
+                }
             } catch let error as CompanionError {
                 guard !Task.isCancelled else { return }
-                if error.isUnsupported || error.code == "no-camera" { unsupported = true; problem = error.message; return }
+                if error.isUnsupported, !snapshots { snapshots = true; continue }
+                if error.isUnsupported || error.code == "no-camera" || error.needsPairing {
+                    unsupported = error.isUnsupported || error.code == "no-camera"; problem = error.message; return
+                }
                 problem = error.message
             } catch { return }
-            try? await Task.sleep(for: .seconds(seconds))
+            try? await Task.sleep(for: .seconds(fullScreen && previous?.streaming == true ? 2 : seconds))
         }
     }
 }

@@ -11,7 +11,7 @@ import {createControlDispatcher} from '../dist/local-control-services.js';
 
 const STL = 'solid m\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 1 0 0\nvertex 0 1 0\nendloop\nendfacet\nendsolid m\n';
 
-async function fixture(t, {denied = [], reconstruct, reportsCompletion} = {}) {
+async function fixture(t, {denied = [], reconstruct, reportsCompletion, camera, printers, printerCatalog} = {}) {
   const root = await mkdtemp(join(tmpdir(), 'objects-http-'));
   const store = new ObjectStore(join(root, 'objects'));
   const runTouchup = async () => {
@@ -20,7 +20,7 @@ async function fixture(t, {denied = [], reconstruct, reportsCompletion} = {}) {
     return {status: 'done', summary: 'Fixed.', model: join(out, 'touched.stl'), renders: [join(out, 'front.png')], checkpoints: [], stats: {seconds: 1, toolCalls: 1}, passDir: join(root, 'pass')};
   };
   const events = [];
-  const service = new ObjectService({store, runTouchup, reportsCompletion, stlInfo: async () => [60.6, 45.2, 21.7], claudePath: '/c', handoff: {backend: 'bambu-printer-mcp', process: {command: '/usr/bin/true'}}, ...(reconstruct ? {reconstruct} : {}),
+  const service = new ObjectService({store, runTouchup, reportsCompletion, camera, printers, printerCatalog, stlInfo: async () => [60.6, 45.2, 21.7], claudePath: '/c', handoff: {backend: 'bambu-printer-mcp', process: {command: '/usr/bin/true'}}, ...(reconstruct ? {reconstruct} : {}),
     events: {emit: async draft => { events.push(draft); }}});
   const routes = createObjectRoutes(service);
   const scopes = [], devices = [];
@@ -596,4 +596,21 @@ test('HTTP and local photo uploads preserve explicit message intent after an ini
     assert.deepEqual(after.pendingPhotos, ['queued.jpg']);
     assert.deepEqual(after.requestPhotos, [local ? 'queued-2.jpg' : 'retry.jpg']);
   }
+});
+
+test('printer and printing-project metadata reads never start camera work without a viewer', async t => {
+  let snapshots = 0;
+  const frame = {bytes: Buffer.from([0xff, 0xd8, 0xff]), capturedAt: new Date().toISOString()};
+  const session = {config: {selection: {model: 'p1s'}}};
+  const camera = {warm: () => { snapshots++; }, frame: async () => { snapshots++; return frame; }, close: () => {}};
+  const printers = {list: () => ({destinations: [{id: 'current', capabilities: {camera: 'bambu-tcp'}}]}), session: () => session};
+  const printerCatalog = {canonical: id => id, destinations: [], defaultDestinationId: 'current'};
+  const {service, store, call} = await fixture(t, {camera, printers, printerCatalog});
+  const project = await service.create('A mount');
+  await store.update(project.id, o => ({...o, state: 'printing', print: {destinationId: 'current'}}));
+  assert.equal((await call('GET', '/v1/objects/printers')).status, 200);
+  assert.equal((await call('GET', `/v1/objects/${project.id}`)).status, 200);
+  assert.equal(snapshots, 0, 'status and event refreshes are not camera viewers');
+  assert.equal((await call('GET', '/v1/objects/printers/current/camera.jpg')).status, 200);
+  assert.equal(snapshots, 1, 'an explicit camera request still obtains a frame');
 });

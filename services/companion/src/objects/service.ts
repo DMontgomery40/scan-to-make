@@ -8,7 +8,7 @@ import {DispatchedPrintError, PrinterMcpError, readPrintReport, routeArgs, slice
   type PrintProgress, type PendingElicitation, type PrinterHandoffConfig, type PrinterSelection, type PrinterSlicer, type PrintReport, type PrinterSession} from '@scan-to-make/printer-handoff';
 import type {PrintEstimate, PrintSettings, ProjectStatus} from '@scan-to-make/contracts/counterpart';
 import {PrintMonitorRunner, matchJob, milestonesFor, type EventDraft, type MonitorClock, type MonitorEnd, type MonitorTarget} from '../printing/monitor.js';
-import {CameraFrames, CameraUnavailableError, type CameraFrame} from '../printing/camera.js';
+import {CameraFrames, CameraUnavailableError, type CameraFrame, type CameraSize} from '../printing/camera.js';
 import {PrinterUpdatingError, type PrintGate} from '../printing/print-gate.js';
 import {sliceOverrides, settingsUnsupported} from '../printing/print-settings.js';
 import type {CompanionSettingsStore} from '../settings.js';
@@ -367,14 +367,9 @@ export class ObjectService {
     return pass.activity ?? [];
   }
 
-  printers(options: {view?: boolean} = {}): {defaultDestinationId?: string; destinations: PublicDestination[]} {
-    if (this.#deps.printers) {
-      const listed = this.#deps.printers.list();
-      // A printer view opened: warm each camera that has one, so its first frame doesn't wait on a cold session.
-      if (options.view) for (const destination of listed.destinations)
-        if (destination.capabilities?.camera !== 'none') this.#warmCamera(destination.id);
-      return listed;
-    }
+  printers(): {defaultDestinationId?: string; destinations: PublicDestination[]} {
+    // Metadata reads also come from status/event refreshes with no camera on screen.
+    if (this.#deps.printers) return this.#deps.printers.list();
     const catalog = this.#deps.printerCatalog;
     return {defaultDestinationId: catalog?.defaultDestinationId, destinations: catalog?.destinations.map(({id, name, backend, model, address, source, origin}) =>
       ({id, name, backend, ...(model ? {model} : {}), ...(address ? {address} : {}), source, ...(origin ? {origin} : {})})) ?? []};
@@ -991,31 +986,31 @@ export class ObjectService {
     return false;
   }
 
-  /** A client opened this project: while it prints (or the printer asks something), warm its printer's camera. */
-  async view(id: string): Promise<StmObject> {
-    const object = await this.get(id);
-    if (object.state === 'printing' || object.printConfirmation) {
-      const destinationId = object.print?.destinationId ?? object.print?.destination?.id ?? this.#destinationId(object);
-      if (destinationId) this.#warmCamera(destinationId);
-    }
-    return object;
-  }
-  #warmCamera(destinationId: string): void {
-    const session = this.#deps.printers?.session(destinationId);
-    if (session) this.#deps.camera?.warm(this.#deps.printerCatalog?.canonical(destinationId) ?? destinationId, session, {model: session.config.selection?.model});
-  }
+  /** Reading a project does not imply that someone is watching its printer camera. */
+  async view(id: string): Promise<StmObject> { return this.get(id); }
 
   /** The camera of the project's printer (the one printing it, else its chosen one). */
-  async camera(id: string): Promise<CameraFrame> {
+  async camera(id: string, options: {size?: CameraSize} = {}): Promise<CameraFrame> {
     const object = await this.get(id);
     const destinationId = object.state === 'printing' ? object.print?.destinationId ?? object.print?.destination?.id ?? this.#destinationId(object) : this.#destinationId(object);
     if (!destinationId) throw new CameraUnavailableError('no-camera');
-    return this.printerCamera(destinationId);
+    return this.printerCamera(destinationId, options);
   }
-  async printerCamera(destinationId: string): Promise<CameraFrame> {
+  async cameraStream(id: string, options: {size?: CameraSize; signal: AbortSignal}): Promise<AsyncGenerator<CameraFrame>> {
+    const object = await this.get(id);
+    const destinationId = object.state === 'printing' ? object.print?.destinationId ?? object.print?.destination?.id ?? this.#destinationId(object) : this.#destinationId(object);
+    if (!destinationId) throw new CameraUnavailableError('no-camera');
+    return this.printerCameraStream(destinationId, options);
+  }
+  async printerCameraStream(destinationId: string, options: {size?: CameraSize; signal: AbortSignal}): Promise<AsyncGenerator<CameraFrame>> {
     const session = this.#deps.printers?.session(destinationId), camera = this.#deps.camera;
     if (!session || !camera) throw new CameraUnavailableError('no-camera');
-    return camera.frame(this.#deps.printerCatalog?.canonical(destinationId) ?? destinationId, session, {model: session.config.selection?.model, view: true});
+    return camera.watch(this.#deps.printerCatalog?.canonical(destinationId) ?? destinationId, session, {model: session.config.selection?.model, ...options});
+  }
+  async printerCamera(destinationId: string, options: {size?: CameraSize} = {}): Promise<CameraFrame> {
+    const session = this.#deps.printers?.session(destinationId), camera = this.#deps.camera;
+    if (!session || !camera) throw new CameraUnavailableError('no-camera');
+    return camera.frame(this.#deps.printerCatalog?.canonical(destinationId) ?? destinationId, session, {model: session.config.selection?.model, view: true, ...options});
   }
 
   /** Pause, resume or stop this project's print, through the destination's mutex (PRD §8.6). */
