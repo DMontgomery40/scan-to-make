@@ -146,7 +146,7 @@
         </div>
       </div>
       <div role="tabpanel" id="dp-mac" aria-labelledby="d-mac" hidden>
-        <p class="device-note">Counterpart lives in the menu bar, with a window for your projects. It needs Claude and Blender on the same Mac.</p>
+        <p class="device-note">Counterpart lives in the menu bar, with a window for your projects. Blender and Autodesk Fusion are optional tools for cleanup and design. Printing an existing model or reprinting needs neither.</p>
         <div class="rail macs">
           <figure><a class="shot mac" href="screens/mac-main.jpg"><img src="screens/mac-main.jpg" width="1320" height="872" loading="lazy" alt="The main window"></a><figcaption>Your projects and printers</figcaption></figure>
           <figure><a class="shot mac" href="screens/mac-new.jpg"><img src="screens/mac-new.jpg" width="1320" height="872" loading="lazy" alt="New project"></a><figcaption>New project: drop files in</figcaption></figure>
@@ -196,13 +196,14 @@
   <section id="need" aria-labelledby="need-title">
     <div class="wrap">
       <h2 id="need-title">What you need</h2>
-      <p class="intro">Tick what you have. Anything missing has a line in the <a href="help.html#setup">setup guide</a>.</p>
+      <p class="intro">Tick what you have. The <a href="help.html#setup">setup guide</a> explains each item. Optional design tools are only needed when you want to make or change a model.</p>
       <ul class="needs">
         <li><label><input type="checkbox"><div><b>An iPhone or iPad with iOS 27.</b> <span>Scanning needs a LiDAR model (Pro). Photos, descriptions and links work on any.</span></div></label></li>
         <li><label><input type="checkbox"><div><b>A Mac running Counterpart.</b> <span>It sits in the menu bar. Your iPhone pairs with it once.</span></div></label></li>
-        <li><label><input type="checkbox"><div><b>Claude Code, signed in on that Mac.</b> <span>Counterpart makes models with your own login.</span></div></label></li>
-        <li><label><input type="checkbox"><div><b>Blender on that Mac.</b> <span>Counterpart opens it only while it's working on a project.</span></div></label></li>
+        <li><label><input type="checkbox" data-optional><div><b>Claude Code · optional for printing existing models.</b> <span>Sign in on your Mac to design or edit models with your own login.</span></div></label></li>
+        <li><label><input type="checkbox" data-optional><div><b>Blender · optional.</b> <span>For scan cleanup, design and model changes. Existing-model printing and reprints work without it.</span></div></label></li>
         <li><label><input type="checkbox"><div><b>A 3D printer and its MCP server.</b> <span>bambu-printer-mcp or mcp-3D-printer-server, set up as you already have it.</span></div></label></li>
+        <li><label><input type="checkbox" data-optional><div><b>Autodesk Fusion · optional.</b> <span>For parametric designs and changes. Connect your own installation in Settings → AI → Design with Fusion.</span></div></label></li>
       </ul>
       <p class="needs-done" aria-live="polite"></p>
     </div>

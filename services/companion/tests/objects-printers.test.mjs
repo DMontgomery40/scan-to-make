@@ -295,6 +295,7 @@ test('Add printer: found MCP folders, SSDP and Bonjour printers; Check; Add (a f
   const catalog = await loadPrinterCatalog(current, {homeDirectory: home, sourcePaths: [], profilesPath});
   const busy = new Set(), clients = [];
   const jpeg = Buffer.from([0xff, 0xd8, 1, 2, 0xff, 0xd9]).toString('base64');
+  let cameraFormat = 'image/jpeg';
   const setup = new PrinterSetup({env, configs: () => catalog.entries(), catalog: () => catalog, reload: () => catalog.reload(), profilesPath,
     node: '/usr/local/bin/node', busy: async id => busy.has(id),
     folders: async () => [{dir: clone, package: 'mcp-3d-printer-server', version: '1.2.17', hasEnv: true}],
@@ -307,7 +308,7 @@ test('Add printer: found MCP folders, SSDP and Bonjour printers; Check; Add (a f
         callTool: async (name, args) => {
           calls.push(name);
           if (config.process.env?.PRINTER_HOST === '192.0.2.99') throw new Error('connect ECONNREFUSED 192.0.2.99 token=12345678');
-          return {content: [{type: 'text', text: JSON.stringify(name === 'camera_snapshot' ? {format: 'image/jpeg', base64: jpeg} : {connected: true, status: 'idle', model: 'Bambu Lab P1S', raw: {secret: 'x'}})}]};
+          return {content: [{type: 'text', text: JSON.stringify(name === 'camera_snapshot' ? {format: cameraFormat, base64: jpeg} : {connected: true, status: 'idle', model: 'Bambu Lab P1S', raw: {secret: 'x'}})}]};
         }, close: async () => undefined};
     }});
 
@@ -330,6 +331,8 @@ test('Add printer: found MCP folders, SSDP and Bonjour printers; Check; Add (a f
   assert.deepEqual(clients.at(-1).calls, ['get_printer_status', 'camera_snapshot']);
   assert.deepEqual(clients.at(-1).config.process.env, {MCP_TRANSPORT: 'stdio', PRINTER_HOST: '192.0.2.9', PRINTER_TYPE: 'bambu', BAMBU_SERIAL: '03900A000000001', BAMBU_MODEL: 'a1', BAMBU_TOKEN: '87654321'});
   assert.equal(clients.at(-1).config.process.cwd, join(env.appPrinters, 'profiles'), 'a folder with no .env of its own');
+  cameraFormat = 'jpeg';
+  assert.deepEqual(await setup.check(PrinterFormSchema.parse(a1)), checked, 'both MCP JPEG format names display the camera');
   // A printer with no camera tool is checked by status alone.
   await setup.check(PrinterFormSchema.parse(form));
   assert.deepEqual(clients.at(-1).calls, ['get_printer_status']);

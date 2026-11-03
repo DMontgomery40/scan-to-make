@@ -709,7 +709,9 @@ test('anything that shapes the slice slices again: quality, strength, copies, fi
   await slice({});
   await slice({});
   assert.equal(await slices(), 1, 'nothing changed: kept');
-  const changes = [{slicer: {layerHeightMm: 0.12}}, {slicer: {wallLoops: 4}}, {slicer: {repetitions: 2}}, {slicer: {filamentProfile: '/p/petg.json'}},
+  const preset = join(f.root, 'petg.json');
+  await writeFile(preset, JSON.stringify({filament_type: ['PETG']}));
+  const changes = [{slicer: {layerHeightMm: 0.12}}, {slicer: {wallLoops: 4}}, {slicer: {repetitions: 2}}, {slicer: {filamentProfile: preset}},
     {selection: {nozzleType: 'stainless_steel'}}, {selection: {bedType: 'cool_plate'}}];
   for (const [index, change] of changes.entries()) {
     await slice(change);
@@ -730,6 +732,38 @@ test('anything that shapes the slice slices again: quality, strength, copies, fi
   assert.equal(await slices(), ++count, 'another MCP');
 });
 
+test('an MCP inheriting the working directory invalidates its slice when that directory’s .env changes', async t => {
+  const f = await setup(t);
+  const {cwd: _cwd, ...inheritedProcess} = f.config.process;
+  const runner = new PrinterHandoffRunner({...f.config, process: inheritedProcess}, {relay: f.relay});
+  const input = {stlPath: f.stlPath, print: false, sliceCache: {directory: join(f.root, 'slices')}};
+  const previousCwd = process.cwd();
+  process.chdir(f.root);
+  try {
+    await writeFile(join(f.root, '.env'), 'BAMBU_NOZZLE_TYPE=hardened_steel\n');
+    await runner.run(input);
+    await runner.run(input);
+    assert.equal((await f.calls()).filter(call => call.tool === 'slice_stl').length, 1);
+    await writeFile(join(f.root, '.env'), 'BAMBU_NOZZLE_TYPE=stainless_steel\n');
+    await runner.run(input);
+    assert.equal((await f.calls()).filter(call => call.tool === 'slice_stl').length, 2);
+  } finally {
+    process.chdir(previousCwd);
+  }
+});
+
+test('a wrapped MCP launch bypasses the cache because its effective slicing environment is unknown', async t => {
+  const f = await setup(t);
+  const wrapper = join(f.root, 'launch.sh');
+  await writeFile(wrapper, 'exec "$@"\n');
+  const runner = new PrinterHandoffRunner({...f.config, process: {...f.config.process,
+    command: '/bin/sh', args: [wrapper, f.config.process.command, ...f.config.process.args]}}, {relay: f.relay});
+  const input = {stlPath: f.stlPath, print: false, sliceCache: {directory: join(f.root, 'slices')}};
+  await runner.run(input);
+  await runner.run(input);
+  assert.equal((await f.calls()).filter(call => call.tool === 'slice_stl').length, 2);
+});
+
 test("a kept slice with Bambu Studio's warning asks it again before printing", async t => {
   const words = (await studio('lay-flat-floating-cantilever')).sliced_plates[0].warning_message;
   const f = await setup(t, {slicerResult: 'lay-flat-floating-cantilever'});
@@ -748,4 +782,36 @@ test('Estimate, then Print of the same model and settings slices once', async t 
   await f.runner.estimate({stlPath: f.stlPath, sliceCache}).catch(() => undefined);
   await f.runner.run({stlPath: f.stlPath, sliceCache});
   assert.deepEqual((await f.calls()).filter(entry => entry.tool).map(entry => entry.tool), ['lay_flat', 'slice_stl', 'inspect_print_file', 'inspect_print_file', 'print_3mf']);
+});
+
+test('cached generic G-code still confirms temperatures and uploads G-code after Estimate and on Print Again', async t => {
+  const f = await setup(t, {mode: 'generic-gcode', backend: 'mcp-3d-printer-server'});
+  const input = {stlPath: f.stlPath, sliceCache: {directory: join(f.root, 'slices')}};
+  const estimate = await f.runner.run({...input, print: false});
+  const bytes = await readFile(estimate.slicedPath);
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const printed = await f.runner.run(input);
+    assert.ok(printed.slicedPath.endsWith('.gcode'));
+    assert.deepEqual(await readFile(printed.slicedPath), bytes);
+  }
+  assert.deepEqual((await f.calls()).filter(entry => entry.tool).map(entry => entry.tool),
+    ['lay_flat', 'slice_stl', 'confirm_temperatures', 'confirm_temperatures', 'upload_gcode', 'confirm_temperatures', 'upload_gcode']);
+});
+
+test('editing a selected filament preset at the same path invalidates its slice; unreadable presets are never reused', async t => {
+  const f = await setup(t);
+  const preset = join(f.root, 'custom-filament.json');
+  const input = {stlPath: f.stlPath, print: false, sliceCache: {directory: join(f.root, 'slices')}, slicer: {loadFilaments: 'custom-filament.json'}};
+  const slices = async () => (await f.calls()).filter(call => call.tool === 'slice_stl').length;
+  await writeFile(preset, JSON.stringify({nozzle_temperature: [220]}));
+  await f.runner.run(input);
+  await f.runner.run(input);
+  assert.equal(await slices(), 1, 'unchanged file can be reused');
+  await writeFile(preset, JSON.stringify({nozzle_temperature: [240]}));
+  await f.runner.run(input);
+  assert.equal(await slices(), 2, 'changed contents at the same relative path need a new slice');
+  await rm(preset);
+  await f.runner.run(input);
+  await f.runner.run(input);
+  assert.equal(await slices(), 4, 'an unreadable dependency cannot prove reuse is valid');
 });

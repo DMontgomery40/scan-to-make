@@ -174,6 +174,7 @@ struct AddPrinterSheet: View {
         }
         .frame(width:540, height:600)
         .task { await discover() }
+        .onChange(of:form) { _, _ in check = nil; problem = nil }
     }
 
     // MARK: Found printers
@@ -272,6 +273,9 @@ struct AddPrinterSheet: View {
                 }
             }
             TextField("Address", text:$form.host, prompt:Text("192.168.1.20 or printer.local"))
+            if form.printerType != "bambu" {
+                TextField("Port (optional)", text:Binding(get: { form.port ?? "" }, set: { form.port = $0.isEmpty ? nil : $0 }), prompt:Text("Default"))
+            }
             if type?.serial == true {
                 TextField("Serial number", text:Binding(get: { form.serial }, set: { value in
                     form.serial = value
@@ -353,8 +357,14 @@ struct AddPrinterSheet: View {
         let value = form
         Task {
             defer { checking = false }
-            do { check = try await PrinterSetupModel.client(for:"printers.check").checkPrinter(value) }
-            catch { problem = PrinterSetupModel.words(error, otherwise:"Counterpart couldn’t run the check. Try again.") }
+            do {
+                let result = try await PrinterSetupModel.client(for:"printers.check").checkPrinter(value)
+                guard form == value else { return }
+                check = result
+            } catch {
+                guard form == value else { return }
+                problem = PrinterSetupModel.words(error, otherwise:"Counterpart couldn’t run the check. Try again.")
+            }
         }
     }
 

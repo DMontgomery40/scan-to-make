@@ -628,7 +628,7 @@ struct AISettings: View {
                     Image(systemName:"cube.transparent.fill").font(.title2).foregroundStyle(fusion == .notInstalled ? .secondary : Color.filament)
                         .frame(width:40, height:40).glassEffect(.regular, in:.rect(cornerRadius:10))
                     VStack(alignment:.leading, spacing:2) {
-                        Text("Design with Fusion").font(.body.weight(.semibold))
+                        Text("Design with Fusion · Optional").font(.body.weight(.semibold))
                         switch fusion {
                         case .checking: Text("Looking for Fusion…").font(.caption).foregroundStyle(.secondary)
                         case .notInstalled:
@@ -649,8 +649,8 @@ struct AISettings: View {
                         .buttonStyle(.glassProminent).disabled(fusion != .found && fusion != .setUp)
                 }
                 Text(fusion == .notInstalled
-                     ? "New designs use Blender. Install Autodesk Fusion (its personal-use licence is free) and Set Up turns on."
-                     : "Set Up adds the Fusion360MCP add-in to Fusion, and five FUSION_MCP settings next to Blender's in your printer MCP's env file. New designs then use Fusion when it's running.")
+                     ? "Install Autodesk Fusion if you want to use it for new designs. You can also design with Blender."
+                     : "Set Up connects Fusion to Counterpart for new designs and later changes to them.")
                     .font(.caption).foregroundStyle(.secondary)
                 if let fusionProblem { Text(fusionProblem).font(.caption).foregroundStyle(.red) }
                 if let fusionStatus, fusion == .setUp {
@@ -660,9 +660,9 @@ struct AISettings: View {
                 LabeledContent("Make something that fits") {
                     Text(fusion == .notInstalled ? "Blender" : "Fusion, or Blender if Fusion can't start").foregroundStyle(.secondary)
                 }
-                LabeledContent("Copy something") { Text("Blender, always").foregroundStyle(.secondary) }
+                LabeledContent("Clean up a scan") { Text("Blender").foregroundStyle(.secondary) }
             } header: { Text("Design engine") } footer: {
-                Text("Fusion and its licence are yours. Counterpart never ships or requires it. The bridge is fusion360-mcp-server by Faust Machines (MIT).")
+                Text("Blender and Fusion are optional. Printing existing models and reprinting needs neither. Fusion and its licence are yours; its bridge is fusion360-mcp-server by Faust Machines (MIT).")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }

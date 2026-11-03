@@ -400,7 +400,7 @@ export class PrinterSetup {
         result.camera = 'failed';
         try {
           const frame = toolResultJson(await client.callTool('camera_snapshot', {timeout_ms: 8000}, {timeoutMs: 12_000}));
-          if (frame.format === 'image/jpeg' && typeof frame.base64 === 'string' && frame.base64.length <= 700_000 && /^[A-Za-z0-9+/]+={0,2}$/.test(frame.base64)) {
+          if (['image/jpeg', 'jpeg'].includes(frame.format as string) && typeof frame.base64 === 'string' && frame.base64.length <= 700_000 && /^[A-Za-z0-9+/]+={0,2}$/.test(frame.base64)) {
             const bytes = Buffer.from(frame.base64, 'base64');
             if (bytes.length >= 4 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes.at(-2) === 0xff && bytes.at(-1) === 0xd9) {
               result.camera = 'connected'; result.image = {mimeType: 'image/jpeg', base64: frame.base64};

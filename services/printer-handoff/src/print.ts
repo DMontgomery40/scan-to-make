@@ -10,7 +10,7 @@ import type {ElicitationContext, ElicitationRelay} from './elicitation.js';
 import {sliceEstimate, sliceSettings, slicePlateCount, type SliceEstimate, type SliceSettings} from './slice-estimate.js';
 import {inspectModelFile} from './model-file.js';
 import {slicerReport} from './slicer-report.js';
-import {keepSlice, readSlice, sliceCacheKey} from './slice-cache.js';
+import {keepSlice, readSlice, sliceCacheKey, presetDigests} from './slice-cache.js';
 import type {HandoffBundleStore} from './bundle.js';
 import {PrinterMcpError, toolResultJson, toolResultText, type PrinterToolCatalog} from './mcp-client.js';
 import {PrinterSession} from './session.js';
@@ -354,8 +354,12 @@ export class PrinterHandoffRunner {
     };
     // The same model sliced the same way before (Print Again, or Print after Estimate): print that file. Only lay_flat
     // and slice_stl are skipped; inspection, the printer checks, Studio's warning and the print call all run as always.
-    const cacheKey = input.sliceCache && !alreadySliced ? sliceCacheKey({model: await readFile(input.stlPath), backend: this.#config.backend,
-      server: catalog.server, config: this.#config.process, env: await readFile(join(this.#config.process.cwd ?? '/nonexistent', '.env'), 'utf8').catch(() => undefined),
+    // SSH, shells and other wrappers can change cwd or host before starting the MCP. Their
+    // actual defaults are not visible here, so only cache direct local Node/npm launches.
+    const localLaunch = /^(node|nodejs|npx)(\.exe|\.cmd)?$/i.test(basename(this.#config.process.command));
+    const presets = input.sliceCache && !alreadySliced && localLaunch ? await presetDigests(sliceArgs, this.#config.process.cwd ?? process.cwd()) : undefined;
+    const cacheKey = input.sliceCache && !alreadySliced && presets ? sliceCacheKey({model: await readFile(input.stlPath), backend: this.#config.backend, presets,
+      server: catalog.server, config: this.#config.process, env: await readFile(join(this.#config.process.cwd ?? process.cwd(), '.env'), 'utf8').catch(() => undefined),
       args: {...sliceArgs, lay_flat: !threeMf && session.hasTool('lay_flat')}}) : undefined;
     const reused = cacheKey ? await readSlice(input.sliceCache!.directory, cacheKey) : undefined;
     let orientedStlPath = input.stlPath;
@@ -382,7 +386,7 @@ export class PrinterHandoffRunner {
     let slicedPath = sliced ? absolutePath(sliced) : input.stlPath;
     if (reused) {
       // Named as a fresh slice of this input would be: the printer's job is named after the file.
-      slicedPath = join(dirname(input.stlPath), `${basename(input.stlPath, extname(input.stlPath))}_sliced.3mf`);
+      slicedPath = join(dirname(input.stlPath), `${basename(input.stlPath, extname(input.stlPath))}_sliced${reused.extension}`);
       await writeFile(slicedPath, reused.bytes, {mode: 0o600});
     }
     if (sliced) step('slice_stl');
@@ -393,7 +397,7 @@ export class PrinterHandoffRunner {
     const slicerWarning = reused ? reused.slicerWarning : report?.message;
     const slicedBytes = await readFile(slicedPath);
     const plateCount = slicePlateCount(slicedBytes) ?? report?.plateCount ?? reused?.plateCount;
-    if (cacheKey && !reused) await keepSlice(input.sliceCache!.directory, cacheKey, {bytes: slicedBytes, ...(slicerWarning ? {slicerWarning} : {}), ...(plateCount !== undefined ? {plateCount} : {})});
+    if (cacheKey && !reused) await keepSlice(input.sliceCache!.directory, cacheKey, {bytes: slicedBytes, extension: extname(slicedPath), ...(slicerWarning ? {slicerWarning} : {}), ...(plateCount !== undefined ? {plateCount} : {})});
     // Copies in this flow mean copies in one print. The MCP dispatches one selected plate,
     // so never present one plate's estimate or dispatch as fulfilling a multi-plate request.
     if ((slicer.repetitions ?? 1) > 1 && plateCount && plateCount > 1) {
