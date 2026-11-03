@@ -32,7 +32,7 @@ What to build: [`../design/overhaul/PRD.md`](../design/overhaul/PRD.md), journey
 | Mac app `/Applications/Counterpart.app` | **202611031529** | `feat/pause-at-layer` @ `539ef23` (contains all of #295) |
 | iPhone "Davica3" (`00008150-001A488C3642401C`) | **202611022325** | old: has none of #294/#295 or pause-at-layer |
 | bambu-printer-mcp (what Counterpart runs) | 1.1.46 install + dist from `feat/one-printer-control-route` @ `fdca5a1` (a built `native/bambu-native-print` from `exp/native-plugin-controls` sits beside it, unused for a P1S) | `~/Library/Application Support/Scan to Make/printers/bambu-1.1.46/lib/node_modules/bambu-printer-mcp/dist` |
-| mcp-3D-printer-server | `~/mcp-3D-printer-server` detached at `175944e` (`feat/bambu-complete`), built in place | runs from its own folder and `.env` |
+| mcp-3D-printer-server | `~/mcp-3D-printer-server` on `feat/bambu-complete` @ `45551f1`, built in place | runs from its own folder and `.env` |
 | bambu-printer-mcp config | `~/bambu-printer-mcp/.env` (the ssh forced command `cd`s there): `BAMBU_DEFAULT_CONNECTION_MODE=bambu_network`, `…_TYPE=lan` | Counterpart's own environment never crosses the ssh hop |
 | FULU runtime | Colima profile `bambu-fulu`, image `bpm-fulu-e2e:runtime`, plug-in **02.05.02.58** | launcher `~/Library/Application Support/Scan to Make/printers/fulu-authenticated-lan.sh` (in neither repo) |
 | P1S | `01P00C4B2500106`, 192.168.68.148, firmware 01.10.00.00, cloud-bound, not LAN-only/Developer mode | AMS A1 black PLA, A2 yellow PLA, A3 PETG |
@@ -80,9 +80,14 @@ Every deployment, companion restart and rollback is logged in
    Remaining leads, untested: (a) FULU's runtime uses Bambu's plug-in **02.05.02.58** while Bambu Studio on this Mac
    uses **02.08.02.61**, so a newer plug-in in the bridge; (b) LAN-only + Developer mode on the printer (David's call,
    disconnects Bambu Cloud/Handy). Bambu Studio itself pauses and resumes this printer fine.
-2a. **Resume is lost when the MCP restarts during a pause.** bambu-printer-mcp refuses Resume for a job "not inspected
-   and started by this server instance"; any companion restart (deploy, crash, Mac restart) during a magnet pause
-   strands the print on the printer's screen. Persist the resume binding (both MCPs). Today's test pick hit this.
+2a. **Resume is lost when the MCP restarts during a pause: fixed in code, staged, not yet accepted.** Both MCPs
+   kept "the job this server inspected and started" in memory, so any restart during a pause refused Resume for
+   the rest of the print (today's pick: three Resume presses from the phone at 16:14-16:15 refused). Now each
+   printer's record is a private file (`BAMBU_RESUME_STATE_DIR`, else `~/.config/bambu-printer-mcp/resume` and
+   `~/.config/mcp-3d-printer-server/resume`), reloaded on start; every resume check still runs. bambu-printer-mcp
+   `c0c988b` (full suite 1017/0) is copied into the live install but **not active until the next companion
+   restart** (held while the stranded pick is paused); mcp-3D-printer-server `45551f1` (648/0) is built in place.
+   Acceptance: a pick with a pause, restart the companion during the pause, Resume from the app.
 2. **Resume from the app after a pause: fixed in code, not yet re-tested.** Nov 3 15:18: the pick paused itself before
    layer 2 (`pause_at_layers` works); Resume in the app reached the MCP, which asked its unverifiable-resume question.
    The companion gave the control call 2 min while the question lives 10, so it timed out and the dead question hid
@@ -105,12 +110,12 @@ Every deployment, companion restart and rollback is logged in
      no 3MF tool). This is ask 41, the "Vivi" pick.
    - **#297** `docs/site-mcp-backend`: site says the MCPs are the backend and links their docs sites.
 4. **MCP branches, PRs not opened, releases held by David** (merging to main publishes to npm):
-   - bambu-printer-mcp `feat/one-printer-control-route` (`fdca5a1`, 20 commits over 1.1.51 main): route ownership,
+   - bambu-printer-mcp `feat/one-printer-control-route` (`c0c988b`, 21 commits over 1.1.51 main; + persistent resume records): route ownership,
      FULU cloud session, refusal reporting, prompt removal, `counterpart_print_route`, `pause_at_layers`, Resume fix,
      client headers. Before a PR: strip the `Co-Authored-By` trailers on `c03a9bb`, `f4433b6`, `84aa077`, `7146550`
      (that repo forbids AI attribution), CHANGELOG, code-review gate. Open PRs there: #95 camera stream, #96 Fusion
      document binding, **#97 Studio 2.9 bare-`M` temperature marker (not in the deployed build)**.
-   - mcp-3D-printer-server `feat/bambu-complete` (`175944e`): AMS, Pause/Resume/Stop, FULU route,
+   - mcp-3D-printer-server `feat/bambu-complete` (`45551f1`): AMS, Pause/Resume/Stop, FULU route,
      `counterpart_print_route`, bambu-printer-mcp's safety modules. **Missing here, must be ported:** `pause_at_layers`,
      the Resume pause-notice fix, refusal reporting. Open PRs: #49 camera stream, #50 Studio 2.9.
 5. **Phone parity.** The phone build is a day old. Needed: a new build with #294/#295; Printer MCP and Connection
