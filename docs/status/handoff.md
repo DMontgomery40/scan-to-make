@@ -20,6 +20,18 @@ real printer (firmware 01.10.00.00, cloud-bound, not LAN-only/Developer mode):
   Bambu Studio itself; not run (it puts a print on the bed outside Counterpart).
 - **Printing over the local network works** (01:46 Triangle pick, 6 copies, started from the app, finished).
 
+**Update ~13:00 Mountain — read `~/scan-to-make-work/claude-route-20261102/HANDOFF-PROMPT-4.md` first** (then -3).
+- The phone connects again; the 12:16 outage was the companion not completing the phone's TCP handshakes (SYN_RCVD
+  on 9077 only, other hosts fine); a restart cleared it. Not root-caused. Not #295's contract (the phone's own
+  CounterpartKit decodes the new payloads).
+- #295 head `b9d7fe6`: the same printer through another MCP keeps its nozzle and bed (fixed mcp-3D's nozzle refusal),
+  refused prints reach the phone as events (item 23), Print Again reuses its slice (not deployed yet).
+- 12:55: David chose bambu-printer-mcp + Bambu Cloud in the Mac app; Bambu Cloud refused task creation (-3120, 403
+  "internal blocking"), as last night. Local network (FULU LAN) is the route that has printed on this P1S.
+- Open: per-printer connection choice from every viable route (both MCPs), Printer MCP + Connection pickers on the
+  phone, plain words for a cloud refusal, FULU through mcp-3D (session folder), two "0%" menu-bar items with nothing
+  printing.
+
 **Update ~12:20 Mountain — read `~/scan-to-make-work/claude-route-20261102/HANDOFF-PROMPT-3.md` first.**
 - URGENT: David's iPhone (build 202611022325) no longer connects. The companion is up on 192.168.68.123:9077. The
   leading, unverified suspect is #295's contract changes (Mac runs 202611031300 from `feat/add-printer` `23c37bc`);
