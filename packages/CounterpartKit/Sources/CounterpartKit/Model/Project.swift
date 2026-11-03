@@ -22,9 +22,10 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
         return instructions?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false
     }
 
-    /// A published STL has no embedded filament assignments and uses the normal material controls.
+    /// A 3MF model carries its parts' filament assignments (a published file, or a design in several
+    /// colours), so the sheets don't offer one spool for the whole model. An STL uses the normal material controls.
     public var preservesPublishedFilaments: Bool {
-        kind == "published" && current?.model.lowercased().hasSuffix(".3mf") == true
+        current?.model.lowercased().hasSuffix(".3mf") == true
     }
 
     /// Saved defaults replace print history as a whole: an absent colour means use the printer profile.
