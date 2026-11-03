@@ -1,5 +1,41 @@
 # Handoff: how to pick up Counterpart work
 
+## Continuation — 2026-11-02, about 23:15 Mountain (Claude took over from Codex)
+
+**Architecture finding:** bambu-printer-mcp is Counterpart's printer backend; a bug there is a bug in the
+app, fixed once in the MCP. The MCP printed over `BAMBU_DEFAULT_CONNECTION_MODE` but `cancel_print`,
+`pause_print` and `resume_print` ignored it. A FULU print got plain-MQTT Stop/Pause, which protected
+firmware rejects (HMS 0500_0500_0001_0007, Bambu's own "update Studio or Handy" text). Counterpart had
+compensated with its own route copy: `selection.connectionMode` threaded into every print_3mf, a tool-schema
+guard, and #290's Stop threading.
+
+**Changed:**
+- bambu-printer-mcp `feat/one-printer-control-route` @ `c03a9bb` (on top of Codex's `4243272` and `b1ac31a`). One
+  `resolveConnection` for print_3mf and every control; Pause/Resume use the authenticated FULU LAN session like
+  Stop; adds and documents `BAMBU_DEFAULT_CONNECTION_TYPE`. Full suite 994 pass, 0 fail, 4 skip. Pushed, no PR, not
+  released. FULU's own host manifest lists `set_on_message_fn` as implemented (b1ac31a's callback).
+- Counterpart PR #291 `feat/mcp-owns-print-route`. Prints and controls carry no route; removes the
+  schema guard and #290's threading. Full companion workflow passed on Node 22 and 24 at `be3e20c7`.
+- The MCP's real config is `~/bambu-printer-mcp/.env`: the ssh forced command `cd`s there and dotenv loads it.
+  Environment set by Counterpart never crosses the ssh hop. Added `BAMBU_DEFAULT_CONNECTION_MODE=bambu_network` and
+  `BAMBU_DEFAULT_CONNECTION_TYPE=lan` there; other settings unchanged. Private backup in the evidence folder.
+
+**Installed at about 23:07 (disclosed deployment, printer idle):** Mac build `202611030005` from `be3e20c7`; MCP
+1.1.52 plus the `c03a9bb` dist/src files. Counterpart was quit and relaunched; the companion was restarted twice, once for
+the app and once after the `.env` change. FULU and Colima untouched. Preservation receipt unchanged (6 projects, 7
+pairings). Rollbacks: `~/scan-to-make-work/claude-route-20261102/` (`Counterpart-202611022325.app.rollback`,
+`bambu-rollback/`, `bambu-mcp.env.before`).
+
+**Not accepted:** Stop/Pause through the real app UI on a real print has not been run since this install.
+Whether the FULU `-4` was the route, the certificate readiness, or something else is unknown until then.
+
+**Still in the map, not yet changed:** `print.ts` auto-clears HMS 0007 (a workaround for the route bug), `PrintingView`
+hardcodes the same code, and `mcp-client.ts` resets timeouts on progress but drops it. `counterpart.ts` re-maps
+`get_printer_status`, and `print.ts` orchestrates lay flat/slice/inspect around print_3mf, which also slices. Print state
+lives in object.json, the event feed, CloudKit and Live Activity tokens. `selection.connectionMode` still exists for the HMS
+check and Bambu Connect detection; it should come from the MCP. Codex's unfinished terminal-event branch is preserved as
+`git stash` "codex WIP: print-state-delivery" and `codex-stop-continuation-20261102/codex-print-state-delivery-wip.patch`.
+
 ## CRITICAL continuation — 2026-11-02, about 22:17 Mountain
 
 This section supersedes optimistic acceptance statements below. David requested a handoff;

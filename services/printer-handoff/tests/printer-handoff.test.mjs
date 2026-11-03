@@ -490,21 +490,13 @@ test('declining error acknowledgment stops before the print command', async t =>
 });
 
 
-test('the chosen connection is the printer service’s own setting, never a per-print argument', async t => {
+test('print_3mf carries no route: the printer service prints over its own configured connection', async t => {
  const f=await setup(t,{route:{connectionMode:'bambu_network',connectionType:'lan'}});
  await f.runner.run({stlPath:f.stlPath});
- const calls=await f.calls();
- assert.deepEqual(calls.find(x=>x.route)?.route,{mode:'bambu_network',type:'lan'});
- const printed=calls.find(x=>x.tool==='print_3mf');
+ const printed=(await f.calls()).find(x=>x.tool==='print_3mf');
  assert.ok(printed,'printed');
  assert.equal(printed.arguments.connection_mode,undefined);
  assert.equal(printed.arguments.connection_type,undefined);
-});
-
-test('mcp-3D-printer-server is given no Bambu route setting', async t => {
- const f=await setup(t,{backend:'mcp-3d-printer-server',route:{connectionMode:'bambu_network',connectionType:'lan'}});
- await f.runner.discover();
- assert.equal((await f.calls()).find(x=>x.route),undefined);
 });
 
 test('quality and strength reach slice_stl as process overrides, and are refused by an MCP without them', async t => {

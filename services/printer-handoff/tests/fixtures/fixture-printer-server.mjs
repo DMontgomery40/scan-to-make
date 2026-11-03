@@ -16,8 +16,6 @@ if (ephemeral) {
 const [mode, log] = process.argv.slice(2);
 const record = entry => appendFileSync(log, JSON.stringify(entry) + '\n');
 if (process.env.HANDOFF_FIXTURE_PID === '1') record({started: process.pid});
-if (process.env.BAMBU_DEFAULT_CONNECTION_MODE || process.env.BAMBU_DEFAULT_CONNECTION_TYPE)
-  record({route: {mode: process.env.BAMBU_DEFAULT_CONNECTION_MODE, type: process.env.BAMBU_DEFAULT_CONNECTION_TYPE}});
 const string = {type: 'string'};
 const number = {type: 'number'};
 const integer = {type: 'integer'};
