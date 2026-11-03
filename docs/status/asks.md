@@ -1,24 +1,7 @@
 # David's asks: status
 
-**Critical update, Nov 2 about 22:17 Mountain:** actual app Stop fails; Pause is not accepted and the app logs “Pause sent” while printing continues. David reports the real Mic mount Lock Screen activity stuck at 0% / “Waiting for an update” while the app shows about 49%. The UI-started print depended on an out-of-app FULU runtime restart and is NOT self-sufficient acceptance. Stop/connection-flow fixes and phone error copy are pending, NOT installed. Full companion validation currently has 14 failures. Read the top of [handoff.md](handoff.md) before doing anything; it records the strict no-intervention acceptance boundary and the architecture/data-flow audit request.
-
-Every request David has made for Counterpart, updated 2026-11-02 at 14:10 Mountain.
-Relay update at 21:25 Mountain: the Sandbox APNs key is registered, secrets deployed, and
-Davica3 visibly received a labeled test start (10%), update (70%) and end (100%). The test
-card was dismissed. Update-token registration required restarting Counterpart despite a
-green connection check; foreground recovery is installed and verified without a restart. This is not real-print or
-Watch acceptance. The previous browser error was a tool/session mismatch, not disabled
-user settings or failed sign-in. See the latest handoff section.
-All 40 asks remain in scope. PRs #259–#285 are merged. Mac now has signed native build `202611022145` with the displayed-spool selection fix; its companion runtime remains reviewed `184a7d4d` (tree matching merged `4c7af6a5`).
-Phone now has signed build `202611022125` with the foreground token recovery fix.
-The Mac runtime was rebuilt from that same source. Local Bambu 1.1.52 remains `ed9aba3`,
-with Fusion CLI/add-in `86a3016`; no public MCP release. Six original projects/photos and
-seven pairings survived installation and the disposable acceptance import unchanged.
-David explicitly authorized the small test cube: do not re-ask or require a manual bed check.
-The FULU connection recovered after restarting its dedicated runtime. Installed Mac 2145
-now starts the mic mount from the actual app UI and shows live heatbed preparation. Completion
-and Stop remain unaccepted; see the handoff. Backend or direct MCP calls never count as app acceptance.
-How to pick up this work, and the diagnosis notes behind the P0 rows: [`handoff.md`](handoff.md).
+Every request David has made for Counterpart. Rows 1, 2 and 42 were rechecked on 2026-11-03 at 14:30 Mountain;
+the other rows are as of Nov 2. What is installed, what is open and how to work: [`handoff.md`](handoff.md), the only handoff.
 
 **Done means David can do it on his own device.** "Merged" isn't done. Status values:
 - **on device**: installed on his device and checked there;
@@ -31,8 +14,8 @@ The owner is whoever the lead assigns. Repeats count how often the ask came up a
 
 | # | Ask | Repeats | Status | Done when |
 |---|---|---|---|---|
-| 1 | Printing works from the app (stove strips) | many | **partially verified**: reviewed local Bambu MCP 1.1.52 at `ed9aba3` and app #268/#277 are installed. Small STL/two-copy slicing produces two objects on one plate. The real stove/two-copy sheet now explains that two separate plates are required and disables Print; changing to one copy restores Fine / 4 h 48 min / 104 g and enables Print. Installed Mac 2145 dispatched the mic mount through its actual Print UI and MCP at 21:52; the app shows live printer preparation. Completed-part acceptance remains open; original toolhead-cover failure remains historical evidence. Public MCP release is held | He presses Print in the app and the part prints |
-| 2 | Stop/cancel from the app actually stops the printer | 3 | **failing in the app, fix installed, untested**: at 22:30 on Nov 2, Mac Stop returned `FULU authenticated stop was rejected (-4)` and the print continued. Root cause: bambu-printer-mcp printed over its configured FULU route but sent Stop and Pause over plain MQTT. Fixed in the MCP (`c03a9bb`, one route for print and every control); the route now lives in the MCP's own `.env`. Installed at 23:07, not yet exercised through the app UI | Stop in the app stops the printer
+| 1 | Printing works from the app (stove strips) | many | **on Mac, picks print**: Triangle guitar picks printed start to finish from the Mac app's Print button on Nov 3 (13:24, 13:50, 14:11) through bambu-printer-mcp over the local network (FULU). Bambu Cloud printing is refused by Bambu (-3120, HTTP 403). The phone (old build) and mcp-3D-printer-server are not yet accepted; the stove/mic mount not reprinted | He presses Print in the app and the part prints |
+| 2 | Stop/cancel from the app actually stops the printer | 4 | **failing: the printer refuses it**: Stop and Pause from both apps reach the P1S and get `err_code 84033546` (0x0502400A), over LAN and Bambu Cloud; the app now shows and keeps that refusal. Resume was blocked inside the MCP by the pause notice (fixed in `fdca5a1`, deployed, not re-tested). Leads in handoff.md open item 1 | Stop in the app stops the printer |
 | 3 | Done / Works status | 7 | **on device, both** (#240; Mac at `91734f0`, phone at `c2eb1e0`) | Marks the mic mount Done on both |
 | 4 | Rename projects | 2 | **installed #259; acceptance partial**: Mac rename saved and restored on the real stove project; phone rename saved from its native dialog and was read back from the Mac on a disposable duplicate; generated titles cannot overwrite a rename | Taps the name and renames, on both |
 | 5 | Project settings (printer, colours, quality, copies, engine, notifications, files, duplicate, archive/delete) | 2 | **installed; Mac acceptance partial, [PR #260](https://github.com/DMontgomery40/scan-to-make/pull/260)**: unified native Project Settings on both; saved printer/colour/quality/strength/copies, next-pass engine, print alerts, original-file export and independent Duplicate implemented and tested. The installed Mac independently duplicates the model, renames the copy, saves Fine/two-copy defaults and carries them into Print. The two-copy defect is now handled as described in row 1. The temporary acceptance copy was removed after verification; six original projects and seven pairing identities remain unchanged. Phone native Project Settings now saves Fine/two-copy defaults on a disposable duplicate and produces a real 1 h 49 m / 37 g / 452-layer estimate in its Print sheet. Sheet canceled and only the duplicate removed; originals/pairings preserved. Remaining settings still need acceptance | Each setting works on both |
@@ -72,6 +55,7 @@ The owner is whoever the lead assigns. Repeats count how often the ask came up a
 | 39 | Real-world testing of the user experience | 1 | ongoing | Each fix tested on his devices |
 | 40 | Second opinions (advisor, Codex) | 2 | **ongoing**: competing Claude executors stopped; tool-disabled Claude advice, independent integration review and GitHub reviews used | — |
 | 41 | A request's text and colours reach the print (guitar pick saying "vivi" in the named colours) | 1 | **open**: Nov 2, the guitar pick printed with no name. Print offers only one colour, and the preview shows geometry only, with no text | The requested name and colours are in the model, the preview and the print sheet |
+| 42 | Pause at a chosen layer to drop in magnets, as Bambu Studio and OrcaSlicer do | 1 | **on Mac, observed**: print sheet → Pause → "Before layer N of T"; bambu-printer-mcp `pause_at_layers` has the slicer write the printer's own pause. On Nov 3 at 14:18 the P1S paused itself before layer 3. Resume from the printer's screen; from the app, see row 2. Not on the phone or in mcp-3D-printer-server yet; PR not opened | He sets a pause layer in the app and the printer stops there |
 
 ## Current evidence and outstanding device checks
 
