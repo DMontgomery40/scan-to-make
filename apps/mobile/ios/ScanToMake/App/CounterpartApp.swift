@@ -23,7 +23,12 @@ struct CounterpartApp: App {
                     await app.activities.reconcile(app.projects.projects.compactMap { PrintActivitySnapshot($0) }, mayStart: true)
                 }
                 .onChange(of: scenePhase) { _, phase in
-                    if phase == .active { Task { await app.keepFresh(); await app.refreshCloud(); await app.activities.publish() } }
+                    if phase == .active {
+                        // Discover push-started activities immediately, before an iCloud or LAN
+                        // refresh can suspend. Existing observers alone may miss a suspended start.
+                        app.activities.attach(app)
+                        Task { await app.keepFresh(); await app.refreshCloud(); await app.activities.publish() }
+                    }
                 }
                 .onChange(of: app.projects.projects) { _, projects in
                     Task { await app.activities.reconcile(projects.compactMap { PrintActivitySnapshot($0) }, mayStart: true) }

@@ -1,5 +1,67 @@
 # Handoff: how to pick up Counterpart work
 
+## Sandbox Live Activity acceptance — 2026-11-02, 21:25 Mountain
+
+The fresh session read Apple Developer signed in, inspected an empty Keys list, registered
+`Counterpart Live Activities Development` with **Sandbox / one topic `com.scantomake`**,
+and downloaded the private key. The private file is outside Git under
+`~/.config/counterpart/apns/sandbox/` (directory 0700, file 0600). All three encrypted secrets
+are present on `counterpart-relay-sandbox`; every secret/deploy command used `--env sandbox`.
+Deployed version: `84657bc4-9aa1-48c8-8b42-dd3071143ca6`. The random-token probe returned
+`410 token_inactive / BadDeviceToken`, verifying the authenticated APNs path, not delivery.
+
+**Actual phone delivery:** a clearly labeled `Counterpart delivery test`, with no physical
+printer command or live project mutation, appeared on Davica3. David confirmed it. Device
+Hub subsequently showed the Lock Screen at 10%, then 70% after a relay update, then 100% /
+Print finished after a relay end. Each relay call returned 200 with an APNs ID. David dismissed
+the completed test card. This verifies start/update/end delivery for the test, not a real print,
+Watch receipt, or unattended background token registration.
+
+**Foreground recovery repaired and accepted on Davica3:** the initial activity update token did not
+reach the companion or Mac CloudKit cache, even after David opened Counterpart and its Check
+Connection stayed green. Restarting only the phone app immediately registered that existing
+activity's token; only then were update/end possible. The phone patch reconciles the
+system's activities and current tokens whenever the app becomes active, before network waits.
+Signed build `202611022125` passed all 14 native AppTests and is installed. A new foreground
+test registered its token in 1.5 seconds and visibly reached 70%. A second test started while
+the phone was locked: no update token appeared until Counterpart returned to the foreground,
+then it registered without restarting (PID 2966 before and after). The six original projects,
+seven pairings, TLS and connection configuration match the pre-install preservation receipt.
+It does not change Keychain accessibility. Cold locked-phone registration remains a separate
+acceptance case; do not label that fixed by foreground recovery.
+
+Mac Advanced settings now persist the verified base URL:
+`https://counterpart-relay-sandbox.betkalshi-dtmont.workers.dev/relay/v1`.
+The relay toggle was already on. The address field requires Return to save; its initial
+Tab-away edit did not persist, and the subsequent Return/save was verified via UserDefaults.
+Mac remains build `202611021355`; phone is now `202611022125`. Both devices are actually
+on 27.2. Davica3 is connected by USB. iPhone Mirroring stayed off; Device Hub screen viewing
+was used only for notification checks and must be stopped before camera acceptance.
+
+**Browser correction:** enabled browser access and signed-in Apple Developer were real in the
+prior session. Its “disabled in Work settings” error was an integration mismatch. This session
+initially worked, then hit `browser.user is unavailable` during Save and even read-only calls.
+One tool-kernel reset recovered the same prepared page; registration/download then succeeded.
+Do not send David through the old settings/sign-in loop or ask again for provisioning approval.
+
+Evidence: `~/scan-to-make-work/codex-live-delivery-20261102` contains nonsecret relay response
+receipts, key-registration and phone Lock Screen screenshots, Mac settings evidence, and a
+six-original-project/seven-pairing preservation receipt. Private token/key values never enter
+Git, screenshots, PRs or response receipts. All 40 asks remain in scope; physical print/Stop,
+fresh camera/Face ID/scan quality, Watch delivery and the memory target are still open.
+
+**Print authorization and current result:** David explicitly authorized the small cube print and
+said not to ask for approval or a manual bed check again. That supersedes older “no print
+approval” notes. A 10 mm private Fusion cube was sliced for black PLA / P1S / 0.4 mm hardened
+steel. The first stock-nozzle slice was rejected before dispatch; matching the reported nozzle
+resolved that mismatch. The configured FULU bridge then failed its LAN connection before
+sending a print. A direct LAN attempt was explicitly rejected with HMS
+`0500-0500-0001-0007` / MQTT command verification failed; nothing printed. Do not retry that
+unauthenticated route or change printer security settings. Investigate the authenticated bridge.
+These direct MCP diagnostics do not count as Counterpart's app-driven print acceptance.
+Only the temporary local MCP process used the documented `BAMBU_REQUIRE_CONFIRMATION=0`;
+the configured SSH restrictions and persistent environment were not changed.
+
 ## Relay provisioning update — 2026-11-02, 20:29 Mountain
 
 David explicitly authorized registering the prepared Sandbox APNs key, storing it as an
@@ -13,13 +75,13 @@ It has separate Durable Object storage and no production route. Its random-token
 returns `503 not_configured`, as expected with no secrets. This is deployment evidence,
 not APNs authentication or phone delivery. Mac relay settings have not been switched.
 
-Apple expired the saved sign-in when Register was clicked; no successful registration or
-download was observed. The login page then stalled. Browser access subsequently became
-disabled in Work settings, preventing further inspection. David has been asked to restore
-browser access and finish Apple sign-in. Before retrying registration, inspect the Keys list
-to avoid duplicates. The prepared name was `Counterpart Live Activities Development`, Sandbox,
-topic-specific `com.scantomake`. Keep its downloaded private key outside Git and use
-`wrangler secret put --env sandbox` for every secret. See the relay README's Sandbox section.
+Apple expired the saved sign-in when Register was clicked in the previous session; that
+session observed no successful registration or download. David then showed browser access
+enabled and Apple Developer signed in in Codex. The old tool nevertheless reported
+“Local browser use is disabled in Work settings”; this was an unresolved tool/session mismatch,
+not evidence that David had disabled browser access or failed to sign in. The fresh session
+read the signed-in Apple account and empty Keys list successfully. See the newer delivery
+update above for completed registration. Do not ask for the existing provisioning approval again.
 
 Local relay validation: 96 tests pass, production and Sandbox bundles validate, and loopback
 start/JWT/headers/rate-limit/check smoke tests pass. Mirroring is not running. Camera, Face ID,
