@@ -107,6 +107,10 @@ test('every event type has words within the limits, and the state line matches t
   assert.equal(eventWords('print.milestone', {progress: 25, remainingSec: 3900}, context).body, '1 h 5 min left · Bambu Lab P1S');
   assert.equal(eventWords('print.paused', {problems: [{code: 'x', message: 'AMS slot 1 ran out of filament'}]}, context).body, 'AMS slot 1 ran out of filament');
   assert.equal(eventWords('print.not-started', undefined, context).title, "Bambu Lab P1S didn't start Mic mount");
+  assert.equal(eventWords('print.not-started', undefined, {...context, reason: undefined}).body, 'Nothing was sent twice. Check the printer, then press Print again.');
+  // Refused by the printer service before anything reached the printer (review item 23): its reason, clipped to the schema.
+  assert.equal(eventWords('print.not-started', undefined, {...context, reason: 'Printer nozzle 0 type is unknown or does not match the job.'}).body, 'Printer nozzle 0 type is unknown or does not match the job.');
+  assert.equal(eventWords('print.not-started', undefined, {...context, reason: 'x'.repeat(900)}).body.length, 500);
   assert.deepEqual(objectStatus({state: 'new', photos: []}), {phase: 'draft', text: 'Add photos or a scan', symbol: 'square.and.pencil', tint: 'secondary'});
   assert.equal(objectStatus({state: 'new', capture: ['0001.heic']}).text, 'Draft saved · finish sending to begin');
   assert.equal(objectStatus({state: 'ready', current: {sizeMm: [60.2, 45.1, 21.7]}}).text, 'Ready to print · 60 × 45 × 22 mm');

@@ -4,7 +4,7 @@ import {mkdtemp, mkdir, readFile, rm, writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {createServer} from 'node:http';
-import {HandoffBundleStore, InMemoryElicitationRelay, PrinterSession} from '@scan-to-make/printer-handoff';
+import {HandoffBundleStore, InMemoryElicitationRelay, PrinterMcpError, PrinterSession} from '@scan-to-make/printer-handoff';
 import {ObjectStore} from '../dist/objects/store.js';
 import {ObjectService, InvalidStateError} from '../dist/objects/service.js';
 import {PrinterDirectory} from '../dist/printing/directory.js';
@@ -581,4 +581,26 @@ test('a one-copy-only destination can override an old saved count for Print and 
   assert.equal(run.options.slicer.repetitions, 1);
   assert.equal((await f.service.get(f.object.id)).preferences.printDefaults.copies, 3, 'the default remains available for a capable printer');
   await f.approve(); await f.service.settled(f.object.id);
+});
+
+test('a print the printer service refuses reaches the phone as an event (review item 23): "didn\'t start" with the reason, or a project update when it may have reached the printer', async t => {
+  const f = await setup(t);
+  const refusal = 'Error: Printer nozzle 0 type is unknown or does not match the job. Suggestion: A safety check stopped this before anything reached the printer.';
+  // Refused before the print call: nothing can have reached the printer.
+  f.deps.print.services.runner.runBundle = async () => { throw new PrinterMcpError('tool-failed', undefined, refusal); };
+  await f.service.print(f.object.id);
+  const refused = await f.service.settled(f.object.id);
+  assert.deepEqual([refused.state, refused.failure], ['failed', refusal]);
+  const event = f.events.find(item => item.type === 'print.not-started');
+  assert.deepEqual([event?.projectId, event?.printId, event?.destinationId, event?.detail?.reason], [f.object.id, refused.print.printId, 'current', refusal]);
+  // The print call was made and its answer is unclear: the phone is told the project changed, never that it didn't start.
+  await reset(f);
+  f.events.length = 0;
+  f.deps.print.services.runner.runBundle = async (store, id) => { await store.setStatus(id, 'uncertain', 'dispatch-uncertain'); throw new PrinterMcpError('tool-failed', undefined, refusal); };
+  await f.service.print(f.object.id);
+  const unclear = await f.service.settled(f.object.id);
+  assert.equal(unclear.state, 'failed');
+  assert.equal(unclear.print.uncertain, true);
+  assert.equal(f.events.some(item => item.type === 'print.not-started'), false);
+  assert.deepEqual(f.events.filter(item => item.type === 'project.updated').map(item => [item.projectId, item.data]), [[f.object.id, {keys: ['print']}]]);
 });

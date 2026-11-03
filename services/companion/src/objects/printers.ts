@@ -221,6 +221,9 @@ async function readDocument(path: string): Promise<RecordValue | undefined> {
  * mcp-3D-printer-server. Within one MCP, the Mac app's own config wins, then
  * the first source found.
  */
+/** The printer's own hardware in the Mac app's selection, the same whichever MCP reaches it. */
+const HARDWARE = ['nozzleType', 'nozzleDiameterMm', 'bedType'] as const;
+
 function winners(candidates: Candidate[], choices: Record<string, PrinterBackend> = {}): {chosen: Map<Candidate, Candidate>; groups: Candidate[][]} {
   const parent = candidates.map((_, index) => index);
   const find = (index: number): number => parent[index] === index ? index : (parent[index] = find(parent[index]!));
@@ -374,6 +377,14 @@ async function buildCatalog(current: PrinterHandoffConfig, options: PrinterCatal
   const choiceKeys = new Map<string, string>();
   const alternatives = new Map<string, {backend: PrinterBackend; destinationId: string}[]>();
   for (const group of groups) {
+    // The nozzle and bed belong to the printer, not to an MCP: the same printer through another MCP slices for the
+    // nozzle the Mac app's config names, or that MCP's preset default fails its own nozzle check. A profile's own value stays.
+    const own = group.find(candidate => candidate.source === 'current')?.config.selection;
+    if (own) for (const candidate of group) {
+      if (candidate.source === 'current') continue;
+      const hardware = Object.fromEntries(HARDWARE.flatMap(key => own[key] !== undefined && candidate.config.selection?.[key] === undefined ? [[key, own[key]]] : []));
+      if (Object.keys(hardware).length) candidate.config.selection = {...candidate.config.selection, ...hardware};
+    }
     const keys = group.flatMap(candidate => candidate.keys);
     const key = keys.find(item => item.startsWith('serial:')) ?? keys[0];
     if (key) for (const candidate of group) choiceKeys.set(candidate.id, key);

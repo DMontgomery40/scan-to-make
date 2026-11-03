@@ -601,3 +601,30 @@ test('an mcp-3D-printer-server Bambu printer with no route gets the authenticate
   assert.deepEqual(restarted, [added.id]);
   assert.equal(catalog.destinations.find(item => item.id === added.id).incomplete, undefined);
 });
+
+test('the same printer through another MCP keeps its nozzle and bed: a profile that does not set them takes the Mac app\'s own (the P1S refused through mcp-3D-printer-server, 2026-11-03)', async t => {
+  const f = await fixture(t);
+  const current = {...f.current, selection: {model: 'p1s', nozzleType: 'hardened_steel', nozzleDiameterMm: 0.4, bedType: 'textured_plate'}};
+  const folder = join(f.home, 'mcp-3D-printer-server');
+  await f.put('mcp-3D-printer-server/.env', 'PRINTER_HOST=192.0.2.1\nPRINTER_TYPE=bambu\nBAMBU_SERIAL=PRIVATE-SERIAL-ONE\nBAMBU_MODEL=p1s\n');
+  const profilesPath = await f.put('printers/profiles.json', {version: 1, profiles: [{id: 'counterpart-0b6f0f43-7c35-4b8a-9a3c-8f0b4c4b2a11', name: 'P1S via mcp-3D', backend: 'mcp-3d-printer-server',
+    process: {command: '/usr/local/bin/node', args: [join(folder, 'dist/index.js')], cwd: folder}, owned: false, model: 'p1s'}],
+    choices: {'serial:PRIVATE-SERIAL-ONE': 'mcp-3d-printer-server'}});
+  const generic = '/usr/local/bin/mcp-3d-printer-server';
+  const claude = await f.put('.claude.json', {mcpServers: {
+    // The same P1S in a client config, and a different printer: only the P1S's profiles take the P1S's hardware.
+    'P1S via generic': {command: generic, env: {PRINTER_HOST: '192.0.2.1', PRINTER_TYPE: 'bambu', BAMBU_SERIAL: 'private-serial-one'}},
+    'A1 via generic': {command: generic, env: {PRINTER_HOST: '192.0.2.50', PRINTER_TYPE: 'bambu', BAMBU_SERIAL: 'serial-50', BAMBU_MODEL: 'a1'}},
+  }});
+  const catalog = await loadPrinterCatalog(current, {...f.options([claude]), profilesPath});
+  // The person chose mcp-3D for the P1S: that profile is the destination prints go to.
+  assert.equal(catalog.defaultDestinationId, 'counterpart-0b6f0f43-7c35-4b8a-9a3c-8f0b4c4b2a11');
+  assert.deepEqual(catalog.resolve('counterpart-0b6f0f43-7c35-4b8a-9a3c-8f0b4c4b2a11').selection, {model: 'p1s', printerType: 'bambu', nozzleType: 'hardened_steel', nozzleDiameterMm: 0.4, bedType: 'textured_plate'});
+  const entry = name => catalog.entries().find(item => item.config.process.command === generic && item.config.process.env?.BAMBU_SERIAL === name);
+  assert.equal(catalog.resolve(entry('private-serial-one').id).selection.nozzleType, 'hardened_steel');
+  const a1 = catalog.resolve(entry('serial-50').id).selection;
+  assert.equal(a1.nozzleType, undefined);
+  assert.equal(a1.bedType, undefined);
+  // The Mac app's own config is unchanged, and a profile's own value is never replaced.
+  assert.deepEqual(catalog.resolve('current').selection, current.selection);
+});
