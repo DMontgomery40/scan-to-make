@@ -302,18 +302,19 @@ test('a print handed to Bambu Connect is "sent" at once: the person finishes it 
   assert.equal(sent.print.sentVia, 'bambu-connect');
 });
 
-test('Stop receives the connection selected for the print, even after settings change', async t => {
+test('Stop, Pause and Resume carry no route: the printer service controls over the connection it printed with', async t => {
   const f = await setup(t, {controlsRoute: true, reports: [status('RUNNING', 10)]});
   f.deps.print.services.selection = {...f.deps.print.services.selection, connectionMode: 'bambu_network', connectionType: 'lan'};
   await f.service.print(f.object.id);
   await f.approve();
   await f.service.settled(f.object.id);
   await until(() => f.events.some(e => e.type === 'print.started'));
-  f.deps.print.services.selection = {...f.deps.print.services.selection, connectionMode: 'lan_mqtt_ftps'};
   const stopping = f.service.control(f.object.id, 'cancel');
   await f.approve();
   await stopping;
-  assert.deepEqual(f.calls.find(c => c.name === 'cancel_print').args, {connection_mode: 'bambu_network', connection_type: 'lan'});
+  const args = f.calls.find(c => c.name === 'cancel_print').args;
+  assert.equal(args.connection_mode, undefined);
+  assert.equal(args.connection_type, undefined);
 });
 
 test('a control is sent only while the printer is still printing this project\'s job', async t => {

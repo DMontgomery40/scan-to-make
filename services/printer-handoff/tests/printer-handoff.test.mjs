@@ -26,7 +26,7 @@ const selection = {
   bedType: 'textured_plate', material: 'PLA', plateIndex: 0,
 };
 
-async function setup(t, {mode = 'bambu', backend = 'bambu-printer-mcp', answer = 'accept', relayTimeoutMs = 5000, dispatch, ephemeral = false, noColour = false, crypto = false, noConnectionType = false, settings = false, remote = false, slicer, slicerResult, laidFlat, slicedBytes} = {}) {
+async function setup(t, {route, mode = 'bambu', backend = 'bambu-printer-mcp', answer = 'accept', relayTimeoutMs = 5000, dispatch, ephemeral = false, noColour = false, crypto = false, noConnectionType = false, settings = false, remote = false, slicer, slicerResult, laidFlat, slicedBytes} = {}) {
   const root = await mkdtemp(join(tmpdir(), 'printer-handoff-'));
   t.after(() => rm(root, {recursive: true, force: true}));
   const log = join(root, 'calls.jsonl');
@@ -38,7 +38,7 @@ async function setup(t, {mode = 'bambu', backend = 'bambu-printer-mcp', answer =
     backend,
     process: {command: process.execPath, args: [fixture, mode, log], cwd: root,
       env: {...(slicedBytes ? {HANDOFF_FIXTURE_SLICED_FILE: join(root, 'fixture-output.3mf')} : {}), ...(laidFlat !== undefined ? {HANDOFF_FIXTURE_LAID_FLAT: String(laidFlat)} : {}), ...(slicerResult ? {HANDOFF_FIXTURE_SLICER_RESULT: join(slicerResults, `${slicerResult}.json`)} : {}), ...(settings ? {HANDOFF_FIXTURE_SLICE_SETTINGS:'1'} : {}), ...(remote ? {HANDOFF_FIXTURE_REMOTE:'1'} : {}), ...(noConnectionType ? {HANDOFF_FIXTURE_NO_CONNECTION_TYPE:'1'} : {}), ...(crypto ? {HANDOFF_FIXTURE_CRYPTO:'1'} : {}), ...(dispatch ? {HANDOFF_FIXTURE_DISPATCH: dispatch} : {}), ...(ephemeral ? {HANDOFF_FIXTURE_EPHEMERAL: '1'} : {}), ...(noColour ? {HANDOFF_FIXTURE_NO_COLOUR:'1'} : {})}},
-    selection,
+    selection: route ? {...selection, ...route} : selection,
     ...(slicer ? {slicer} : {}),
     timeouts: {connectMs: 5000, toolMs: 5000, elicitationMs: relayTimeoutMs},
   };
@@ -475,15 +475,6 @@ test('failure recording accepted progress never makes an accepted print replayab
 });
 
 
-test('an explicitly selected authenticated transport reaches the MCP print tool', async t => {
-  const f=await setup(t);
-  await f.runner.run({stlPath:f.stlPath,selection:{...selection,connectionMode:'bambu_network',connectionType:'lan'}});
-  const printed=(await f.calls()).find(x=>x.tool==='print_3mf');
-  assert.equal(printed.arguments.connection_mode,'bambu_network');
-  assert.equal(printed.arguments.connection_type,'lan');
-});
-
-
 test('authenticated LAN recovery relays the printer error acknowledgment before print clearance', async t => {
  const f=await setup(t,{crypto:true});
  await f.runner.run({stlPath:f.stlPath,selection:{...selection,connectionMode:'bambu_network',connectionType:'lan'}});
@@ -499,10 +490,21 @@ test('declining error acknowledgment stops before the print command', async t =>
 });
 
 
-test('an explicit LAN route cannot silently become cloud when a backend omits connection_type', async t => {
- const f=await setup(t,{noConnectionType:true});
- await assert.rejects(f.runner.run({stlPath:f.stlPath,selection:{...selection,connectionMode:'bambu_network',connectionType:'lan'}}),{code:'print-transport-unsupported'});
- assert.deepEqual(await f.calls(),[]);
+test('the chosen connection is the printer service’s own setting, never a per-print argument', async t => {
+ const f=await setup(t,{route:{connectionMode:'bambu_network',connectionType:'lan'}});
+ await f.runner.run({stlPath:f.stlPath});
+ const calls=await f.calls();
+ assert.deepEqual(calls.find(x=>x.route)?.route,{mode:'bambu_network',type:'lan'});
+ const printed=calls.find(x=>x.tool==='print_3mf');
+ assert.ok(printed,'printed');
+ assert.equal(printed.arguments.connection_mode,undefined);
+ assert.equal(printed.arguments.connection_type,undefined);
+});
+
+test('mcp-3D-printer-server is given no Bambu route setting', async t => {
+ const f=await setup(t,{backend:'mcp-3d-printer-server',route:{connectionMode:'bambu_network',connectionType:'lan'}});
+ await f.runner.discover();
+ assert.equal((await f.calls()).find(x=>x.route),undefined);
 });
 
 test('quality and strength reach slice_stl as process overrides, and are refused by an MCP without them', async t => {

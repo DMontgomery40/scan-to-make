@@ -36,6 +36,21 @@ function failureDetail(result: CallToolResult, config: PrinterHandoffConfig): st
   return text ? text.slice(0, 1000) : undefined;
 }
 
+/**
+ * The printer connection the person chose is bambu-printer-mcp's own setting:
+ * the server decides the route for printing and for every control from it, so
+ * Counterpart never passes or re-derives a route per call. An explicit value in
+ * the server's env wins.
+ */
+function serverRoute(config: PrinterHandoffConfig): Record<string, string> {
+  if (config.backend !== 'bambu-printer-mcp') return {};
+  const {connectionMode, connectionType} = config.selection ?? {};
+  return {
+    ...(connectionMode ? {BAMBU_DEFAULT_CONNECTION_MODE: connectionMode} : {}),
+    ...(connectionType ? {BAMBU_DEFAULT_CONNECTION_TYPE: connectionType} : {}),
+  };
+}
+
 export interface PrinterToolCatalog {
   server: {name: string; version: string};
   tools: Tool[];
@@ -123,7 +138,7 @@ export class PrinterMcpClient {
       command: processConfig.command,
       args: [...(processConfig.args ?? [])],
       cwd: processConfig.cwd,
-      env: {...processConfig.env},
+      env: {...serverRoute(this.#config), ...processConfig.env},
       stderr: 'pipe',
     });
     this.#transport = transport;
