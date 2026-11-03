@@ -153,7 +153,14 @@ const printerSetup=mcpUpdates?new PrinterSetup({env:printerEnv,configs:()=>print
   latestVersion:(pkg,options)=>mcpUpdates!.latestVersion(pkg,options),folders:()=>findMcpFolders(homedir()),
   node:process.execPath,profilesPath:printerProfiles,catalog:()=>printerCatalog,reload:reloadPrinters,
   // Complete Settings changed its .env: the MCP reads it again on a fresh start (with any Update's override).
-  restart:async id=>{const config=printerCatalog?.resolve(id);if(config)await printerDestinations?.get(id)?.runner.session?.restart(mcpUpdates!.effective(id,config));},
+  // Its services are rebuilt with the catalog's new config (the recorded model, passed as bambu_model), keeping the
+  // pooled session and its confirmation relay.
+  restart:async id=>{
+    const config=printerCatalog?.resolve(id), old=printerDestinations?.get(id);
+    if(!config||!old)return;
+    await old.runner.session?.restart(mcpUpdates!.effective(id,config));
+    if(id!=='current')printerDestinations!.set(id,createPrintHandoffServices(config,handoffDirectory!,{pool:printerPool,destinationId:id,onConnect:onConnect(id),relay:old.relay as import('@scan-to-make/printer-handoff').InMemoryElicitationRelay}));
+  },
   busy:async id=>printerBusy?await printerBusy(id):false}):undefined;
 if(handoffConfig&&printHandoff&&captureDirectory&&claudePath){
   const objectStore=new ObjectStore(join(captureDirectory,'objects'));

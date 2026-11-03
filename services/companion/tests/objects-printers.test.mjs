@@ -497,3 +497,18 @@ test('a found install missing the model its MCP needs: Counterpart fills only BA
   assert.equal((await readFile(join(clone, '.env'), 'utf8')).match(/BAMBU_MODEL/g).length, 1);
   await assert.rejects(setup.completeSettings('current'), /Only printers added in Counterpart/);
 });
+
+test('a printer\'s services rebuilt after Complete Settings keep its pooled session and confirmation relay, and carry the new model', async t => {
+  const {createPrintHandoffServices} = await import('../dist/print-handoff-http.js');
+  const {PrinterSessionPool} = await import('@scan-to-make/printer-handoff');
+  const dir = await mkdtemp(join(tmpdir(), 'printer-services-'));
+  const pool = new PrinterSessionPool();
+  t.after(async () => { await pool.close(); await rm(dir, {recursive: true, force: true}); });
+  const config = {backend: 'mcp-3d-printer-server', process: {command: '/usr/local/bin/node', args: ['/x/dist/index.js'], cwd: '/x'}, selection: {printerType: 'bambu'}};
+  const before = createPrintHandoffServices(config, dir, {pool, destinationId: 'counterpart-1'});
+  const after = createPrintHandoffServices({...config, selection: {printerType: 'bambu', model: 'p1s'}}, dir, {pool, destinationId: 'counterpart-1', relay: before.relay});
+  assert.equal(after.relay, before.relay, 'confirmations from the session still reach these services');
+  assert.equal(after.runner.session, before.runner.session, 'the same long-lived MCP session');
+  assert.equal(after.selection.model, 'p1s');
+  assert.equal(before.selection.model, undefined);
+});

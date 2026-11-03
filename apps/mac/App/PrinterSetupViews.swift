@@ -224,7 +224,8 @@ struct AddPrinterSheet: View {
                 }
                 // Configured already: it runs where it is, with its own settings (plus only what its MCP lacks).
                 Button(saving == candidate.id ? "Adding…" : "Add") {
-                    var value = PrinterForm(folder:folder); value.model = folderModels[candidate.id]
+                    // Exactly what the row says it will add: the chosen model, else the one Counterpart found.
+                    var value = PrinterForm(folder:folder); value.model = folderModels[candidate.id] ?? candidate.fill?["BAMBU_MODEL"]
                     save(value, id:candidate.id)
                 }
                 .buttonStyle(.glassProminent).disabled(saving != nil || (candidate.needsModel && folderModels[candidate.id] == nil))
