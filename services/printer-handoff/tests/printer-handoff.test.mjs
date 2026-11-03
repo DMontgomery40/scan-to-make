@@ -37,8 +37,8 @@ async function setup(t, {route, mode = 'bambu', backend = 'bambu-printer-mcp', a
   const config = {
     backend,
     process: {command: process.execPath, args: [fixture, mode, log], cwd: root,
-      env: {...(slicedBytes ? {HANDOFF_FIXTURE_SLICED_FILE: join(root, 'fixture-output.3mf')} : {}), ...(laidFlat !== undefined ? {HANDOFF_FIXTURE_LAID_FLAT: String(laidFlat)} : {}), ...(slicerResult ? {HANDOFF_FIXTURE_SLICER_RESULT: join(slicerResults, `${slicerResult}.json`)} : {}), ...(settings ? {HANDOFF_FIXTURE_SLICE_SETTINGS:'1'} : {}), ...(remote ? {HANDOFF_FIXTURE_REMOTE:'1'} : {}), ...(noConnectionType ? {HANDOFF_FIXTURE_NO_CONNECTION_TYPE:'1'} : {}), ...(crypto ? {HANDOFF_FIXTURE_CRYPTO:'1'} : {}), ...(dispatch ? {HANDOFF_FIXTURE_DISPATCH: dispatch} : {}), ...(ephemeral ? {HANDOFF_FIXTURE_EPHEMERAL: '1'} : {}), ...(noColour ? {HANDOFF_FIXTURE_NO_COLOUR:'1'} : {})}},
-    selection: route ? {...selection, ...route} : selection,
+      env: {...(slicedBytes ? {HANDOFF_FIXTURE_SLICED_FILE: join(root, 'fixture-output.3mf')} : {}), ...(laidFlat !== undefined ? {HANDOFF_FIXTURE_LAID_FLAT: String(laidFlat)} : {}), ...(slicerResult ? {HANDOFF_FIXTURE_SLICER_RESULT: join(slicerResults, `${slicerResult}.json`)} : {}), ...(settings ? {HANDOFF_FIXTURE_SLICE_SETTINGS:'1'} : {}), ...(remote ? {HANDOFF_FIXTURE_REMOTE:'1'} : {}), ...(noConnectionType ? {HANDOFF_FIXTURE_NO_CONNECTION_TYPE:'1'} : {}), ...(crypto ? {HANDOFF_FIXTURE_CRYPTO:'1'} : {}), ...(route ? {HANDOFF_FIXTURE_ROUTE: JSON.stringify(route)} : {}), ...(dispatch ? {HANDOFF_FIXTURE_DISPATCH: dispatch} : {}), ...(ephemeral ? {HANDOFF_FIXTURE_EPHEMERAL: '1'} : {}), ...(noColour ? {HANDOFF_FIXTURE_NO_COLOUR:'1'} : {})}},
+    selection,
     ...(slicer ? {slicer} : {}),
     timeouts: {connectMs: 5000, toolMs: 5000, elicitationMs: relayTimeoutMs},
   };
@@ -476,22 +476,40 @@ test('failure recording accepted progress never makes an accepted print replayab
 
 
 test('authenticated LAN recovery relays the printer error acknowledgment before print clearance', async t => {
- const f=await setup(t,{crypto:true});
- await f.runner.run({stlPath:f.stlPath,selection:{...selection,connectionMode:'bambu_network',connectionType:'lan'}});
+ const f=await setup(t,{crypto:true,route:{mode:'bambu_network',type:'lan'}});
+ await f.runner.run({stlPath:f.stlPath});
  const tools=(await f.calls()).filter(x=>x.tool).map(x=>x.tool);
  assert.ok(tools.indexOf('clear_hms_errors')<tools.indexOf('print_3mf'));
  assert.equal(f.seen.length,2);
 });
 
 test('declining error acknowledgment stops before the print command', async t => {
- const f=await setup(t,{crypto:true,answer:'decline'});
- await assert.rejects(f.runner.run({stlPath:f.stlPath,selection:{...selection,connectionMode:'bambu_network',connectionType:'lan'}}));
+ const f=await setup(t,{crypto:true,answer:'decline',route:{mode:'bambu_network',type:'lan'}});
+ await assert.rejects(f.runner.run({stlPath:f.stlPath}));
  assert.equal((await f.calls()).filter(x=>x.tool==='print_3mf').length,0);
 });
 
 
+test('the printer error is cleared only when the MCP itself says it prints through FULU, not from a copy in printer-handoff.json', async t => {
+ for (const [route, selectionRoute] of [[{mode:'lan_mqtt_ftps',type:'cloud'}, {connectionMode:'bambu_network',connectionType:'lan'}], [undefined, {connectionMode:'bambu_network',connectionType:'lan'}]]) {
+  const f=await setup(t,{crypto:true,route});
+  await f.runner.run({stlPath:f.stlPath,selection:{...selection,...selectionRoute}});
+  const tools=(await f.calls()).filter(x=>x.tool).map(x=>x.tool);
+  assert.equal(tools.includes('clear_hms_errors'),false,JSON.stringify(route));
+  assert.ok(tools.includes('print_3mf'));
+ }
+});
+
+test('a route read that fails skips only the optional printer-error recovery, never the print', async t => {
+ const f=await setup(t,{crypto:true,route:'error'});
+ await f.runner.run({stlPath:f.stlPath});
+ const tools=(await f.calls()).filter(x=>x.tool).map(x=>x.tool);
+ assert.equal(tools.includes('clear_hms_errors'),false);
+ assert.ok(tools.includes('print_3mf'));
+});
+
 test('print_3mf carries no route: the printer service prints over its own configured connection', async t => {
- const f=await setup(t,{route:{connectionMode:'bambu_network',connectionType:'lan'}});
+ const f=await setup(t,{route:{mode:'bambu_network',type:'lan'}});
  await f.runner.run({stlPath:f.stlPath});
  const printed=(await f.calls()).find(x=>x.tool==='print_3mf');
  assert.ok(printed,'printed');

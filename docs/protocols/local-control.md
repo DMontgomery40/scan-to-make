@@ -103,6 +103,7 @@ Destination `capabilities.materialChoice` (PR 5) says the same per printer; what
 | `objects.pausePrint`, `objects.resumePrint`, `objects.cancelPrint` | `{id}` | `{object}` | PR 2 |
 | `objects.camera` | `{id}` | `{format: "jpeg", base64, capturedAt}` from the project's printer | PR 2 |
 | `printers.camera` | `{destinationId}` | `{format: "jpeg", base64, capturedAt}` | PR 2 |
+| `printers.route` | `{destinationId, route?: "lan"\|"cloud"}` | `{route: {route, mode, type, choices, savedTo} \| null}`: how the destination's MCP reaches the printer, read from (or, with `route`, changed in) the MCP itself through bambu-printer-mcp's `counterpart_print_route`. The MCP saves the change in its own config (`savedTo`); Counterpart keeps no copy. `null` for an MCP without a route choice (mcp-3D-printer-server). Unknown destination: `not-found`. Deadline 25 s (it may start the MCP's session). | Nov 3 |
 | `printers.updateMcp` | `{mcpId, fresh?: boolean}` | `{update: {mcpId, state: "started"\|"waiting"\|"current"\|"unresolved", fromVersion?, toVersion?, found?}}`. Unknown `mcpId`: `not-found`; npm unreachable: `unavailable` with the sentence. It answers within about 7 s: when npm is slower, `unavailable` "npm is slow to answer…" (try again; the lookup keeps going and is cached). What runs and when: objects-api.md, "Updating the printer MCPs". | PR 6 |
 | `settings.get` | `{}` | `{settings: {milestones}}` | PR 2 |
 | `settings.set` | `{milestones: "off"\|"50"\|"25-50-75"\|"every-10"}` | `{settings}` | PR 2 |
