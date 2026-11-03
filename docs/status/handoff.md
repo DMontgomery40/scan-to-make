@@ -1,5 +1,134 @@
 # Handoff: how to pick up Counterpart work
 
+## CRITICAL continuation — 2026-11-02, about 22:17 Mountain
+
+This section supersedes optimistic acceptance statements below. David requested a handoff;
+implementation and deployment stopped. **No Stop fix or new phone error UI is installed.**
+
+### Non-negotiable testing boundary
+
+David repeatedly required actual UI testing: phone taps or Mac computer use → Counterpart →
+its existing MCP → printer. The agent violated the intent by first trying standalone MCP
+printing and later restarting the dedicated FULU runtime outside Counterpart to recover
+connectivity. The subsequent UI print therefore depended on manual intervention and **does
+not establish a self-sufficient product**. Do not repeat this or call it accepted.
+
+No direct control helper/MCP/SSH/Studio printer dispatch or stop as an app test. No hidden
+runtime restart, process kill, configuration repair, state injection or simulated completion
+while testing. Read-only logs and source diagnosis are allowed; unit tests are supporting
+engineering checks, never app acceptance. Software fixes still need an explicit, recorded
+build/deployment boundary; do not disguise a runtime repair as deploying a fix. Do not ask
+again for already-granted print permission or a manual bed check. David explicitly wants
+**this print stopped by hitting Stop in Counterpart after fixing the app**. He withdrew his
+idea of stopping it manually. Do not stop it by another route.
+
+### Actual failures at handoff
+
+- Mic mount print `88ebb9f5-1811-448f-aacd-c989ee7c5c9c` was still running. Actual Mac UI read
+  approximately 49%, 22 minutes remaining. Recheck: it may finish before continuation.
+  Project `7f157a66-90a1-4c16-97ef-b97e06cb3c77`; printer job
+  `checked-cd44095c-b6f7-4a00-adfb-054a94658c22-clean_flat_sliced`.
+- David's Stop attempt failed. Phone and persisted printer reports showed HMS
+  `0500_0500_0001_0007`, MQTT command verification failed. Print used authenticated FULU;
+  the installed P1S Stop route used ordinary MQTT. Stop remains broken.
+- The Mac also showed repeated “Pause sent.” entries at 22:12–22:13 while still printing.
+  The agent did not initiate those Pause actions. Do not invent their actor or call them
+  successful. The pending patch covers Stop only; Pause/Resume remain unaudited/unfixed.
+- David reports the real Lock Screen activity still says **Mic mount, 0%, “Waiting for an
+  update”**, while app/printer progress advances. Real-print Live Activity state synchronization
+  FAILS. Prior labeled start/update/end test success does not establish real-print delivery.
+  Cause of this current discrepancy is not diagnosed; do not assume it is the prior token bug.
+- Failed FULU attempts left the phone on “Getting the print ready” until reopening the project.
+  The event log has preparation/confirmation entries but no terminal failure event for those
+  attempts. The companion saves failed state without emitting that transition. Not fixed yet.
+- Firmware text told the user to update Studio/Handy despite using Counterpart/FULU. A pending
+  phone UI change puts the raw vendor text in Printer details, but **copy is not the primary
+  problem** and must not replace fixing control/result/state flow.
+
+### Architecture request — do not narrow this to copy or another guard
+
+David explicitly challenged the overall iOS/Mac → companion → MCP architecture. MCP servers
+already wrap the machinery; Counterpart should be UI and connective tissue, passing existing
+MCP requests, elicitation, stdout/structured results and progress. Do not add policy layers,
+parallel printer backends, fallback paths or duplicated printer logic to cover lost information.
+Audit actual ownership and data flow. Do not assert “three backends” as a finding without
+inspection. Concrete audit leads: `services/printer-handoff/src/print.ts` contains a Bambu HMS
+special-case/clear sequence; `mcp-client.ts` callTool enables resetTimeoutOnProgress without
+forwarding an onprogress callback; Stop dropped the already-saved connection selection;
+pre-dispatch failure state is not emitted to the phone's event feed. These are leads, not a
+completed architecture audit. Keep the Stop fix and state-management failures active.
+
+### Source state; preserve uncommitted work
+
+Counterpart primary checkout: `/Users/davidmontgomery/.codex/worktrees/counterpart-integration/scan-to-make`.
+Branch `feat/counterpart-print-control-flow`, HEAD `d713e6409e874efc5aa0d892b5c9959176f65c4c`.
+PR #289 merged there (Mac displayed-spool fix). Three pending implementation files are dirty:
+- `services/companion/src/objects/service.ts`: Stop reads saved handoff bundle selection and
+  forwards `connection_mode` / `connection_type` to the MCP; refuses to silently drop the FULU
+  choice if an old MCP cannot receive it. Existing app/MCP command path remains.
+- `services/companion/tests/objects-printing.test.mjs`: regression proves Stop retains the print's
+  original connection after later settings changes.
+- `apps/mobile/ios/ScanToMake/Screens/PrintingView.swift`: rejected-control card explains that the
+  print is still running; original HMS text moves under Printer details.
+This handoff/status update is also uncommitted. No new Counterpart PR yet.
+
+Bambu checkout `/Users/davidmontgomery/stm-wt/bambu-fusion-document-binding`, now branch
+`feat/counterpart-authenticated-stop`, clean at local-only commit
+`42432727c39c21613d5e62b55e68242c6b78efb9`, based on installed `ed9aba3`.
+Adds Stop's explicit connection fields, authenticated LAN stop through existing FULU session,
+and tests preserving direct/default/native routes. Bridge failure is an error; no unsigned
+fallback or automatic Stop replay. Cloud FULU Stop is explicitly unsupported. Public releases
+are held; this commit is not pushed, not installed and has no PR. Earlier candidate `1330914`
+incorrectly equated “bridge configured” with “selected route”; independent reviews caught it.
+Do NOT revive that approach. Both read-only reviewers found no further substantive issues in
+4243272 plus the companion interface patch. This is source review, not acceptance.
+
+### Validation and installed versions
+
+- MCP final full suite: **987 pass, 0 fail, 4 skip** (991 tests). Source/compiled dist synchronized.
+- Companion focused objects-printing suite: **22 pass**. The new regression failed before fix
+  because Stop received `{}` instead of the saved FULU/LAN choice.
+- Full companion suite: **718 pass, 14 fail, 10 skip** (742 tests). NOT GREEN. Logs show old
+  Xcode Python rejecting `-P`, missing `pxr`, Blender repair assertions and a worker-environment
+  assertion involving `__CF_USER_TEXT_ENCODING`. Do not label all failures pre-existing or
+  environmental without reproducing under the documented workflow environment.
+- Xcode MCP BuildProject successfully built the changed phone project for Davica3 in Debug.
+  **Not installed.** Build log saved with the evidence below.
+- Installed Mac is still `202611022145`, with older reviewed 1355 companion runtime.
+  Installed phone is still `202611022125`. Installed Bambu is still 1.1.52 / `ed9aba3`.
+- PR #289 exact-head Codex/Cursor review clear, real review wait elapsed, branch guard SAFE,
+  manually merged. Postmerge verification after >3 minutes: runs 41582299174/41582299260 have
+  zero executed steps and billing/spending annotations. Hosted CI did not pass.
+
+### Tools and live state
+
+Use the available Build iOS Apps plugin and Xcode MCP tools where they support the task;
+inspect capabilities instead of defaulting to shell-only development. Build iOS Apps defaults
+were empty; its currently exposed workflows are simulator-oriented. Xcode's run destination
+list DOES show Davica3 active/eligible, and BuildProject succeeded. Both standalone and
+workspace DeviceInteractionStart calls nevertheless returned only simulators as eligible.
+That is a tool capability mismatch, not proof the phone is absent. Do not boot a simulator as
+physical acceptance or send David into a settings loop. Actual phone UI is reachable through
+Xcode Device Hub using computer use; actual Mac UI through `/Applications/Counterpart.app`.
+No device interaction session was successfully created. Xcode GetConsoleOutput had no active
+launch session. Use fresh inventory/handles and screenshots; David operates devices concurrently.
+
+Build lock was released; test/build commands finished. No deployment, repair, hardware command
+or new implementation was started for the handoff. Review agents finished, read-only. Existing
+user/system processes remain untouched. Reinstalled development node_modules remain in the
+relevant Counterpart packages and Bambu checkout; clean owned bloat only after use.
+
+Evidence and source snapshots: `/Users/davidmontgomery/scan-to-make-work/codex-stop-handoff-20261102`.
+Includes final logs, both source diffs, live-print receipt, Xcode build log and the pasteable prompt.
+Earlier evidence remains in `codex-app-print-20261102`, `codex-live-delivery-20261102`, and
+`codex-deploy-20261102`. Preserve original projects, photos, pairings, TLS, Fusion documents,
+private APNs key, and app rollback copies. All 40 asks remain in scope. Read the older sections
+for APNs provisioning, prior acceptance, identifiers and preservation details, but this section
+supersedes their current acceptance claims.
+
+---
+
+
 ## Sandbox Live Activity acceptance — 2026-11-02, 21:25 Mountain
 
 The fresh session read Apple Developer signed in, inspected an empty Keys list, registered
