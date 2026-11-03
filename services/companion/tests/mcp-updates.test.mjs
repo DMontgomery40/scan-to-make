@@ -681,7 +681,9 @@ test('Settings → Printers lists both MCPs; any copy this Mac has (a printer\'s
   const {PrinterSetup} = await import('../dist/printing/setup.js');
   const node = '/Applications/Scan to Make.app/Contents/Resources/Payload/node/bin/node';
   const legacy = `${APP}/printers/bambu-1.1.46`;
-  const env = mac({[`${legacy}/lib/node_modules/bambu-printer-mcp/package.json`]: pkgJson('1.1.46')});
+  // A copy counts when Counterpart can start it: its dist/index.js is there (an npx profile has none until npx runs).
+  const env = mac({[`${legacy}/lib/node_modules/bambu-printer-mcp/package.json`]: pkgJson('1.1.46'),
+    [`${legacy}/lib/node_modules/bambu-printer-mcp/dist/index.js`]: '', [`${HOME}/mcp-3D-printer-server/dist/index.js`]: ''});
   const downloads = [];
   const setup = (configs, folders = []) => new PrinterSetup({env, configs: () => configs, folders: async () => folders,
     list: path => path === `${APP}/printers` ? ['bambu-1.1.46', 'profiles'] : [], latestVersion: pkg => pkg === 'bambu-printer-mcp' ? '1.1.50' : '1.2.17',
@@ -696,13 +698,14 @@ test('Settings → Printers lists both MCPs; any copy this Mac has (a printer\'s
   assert.deepEqual(await setup([]).installMcp('mcp-3d-printer-server'), {update: {mcpId: 'mcp-0000000000000000', state: 'started', toVersion: '1.2.17'}});
   assert.deepEqual(await setup([]).installMcp('bambu-printer-mcp'), {installed: true, package: 'bambu-printer-mcp'});
   assert.deepEqual(downloads, ['mcp-3d-printer-server']);
-  // A clone in the home folder, or a printer's npx profile, is a copy too.
+  // A clone in the home folder is a copy too; a printer's npx profile is listed.
   const folder = await setup([], [{dir: `${HOME}/mcp-3D-printer-server`, package: 'mcp-3d-printer-server', version: '1.2.17', hasEnv: true}]).mcps();
   assert.deepEqual(folder.packages[1].installs, [{kind: 'folder', path: `${HOME}/mcp-3D-printer-server`, version: '1.2.17'}]);
   assert.equal(folder.packages[1].installed, true);
   const npx = await setup([{id: 'x', config: {backend: 'mcp-3d-printer-server', process: {command: '/opt/homebrew/bin/npx', args: ['-y', 'mcp-3d-printer-server@1.2.10']}}}]).mcps();
   assert.deepEqual(npx.packages[1].installs, [{kind: 'npx', path: 'mcp-3d-printer-server@1.2.10', version: '1.2.10'}]);
   assert.equal(npx.packages[1].version, '1.2.10');
+  assert.equal(npx.packages[1].installed, false, 'listed, but Download is offered: Check and Add need a copy Counterpart can start');
   void node;
 });
 
