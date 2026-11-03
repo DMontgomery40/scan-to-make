@@ -279,6 +279,33 @@ public extension ControlClient {
     }
 }
 
+/// `printers.route`: how a destination's printer MCP reaches the printer. The MCP keeps this setting
+/// (bambu-printer-mcp `counterpart_print_route`); Counterpart only shows and changes it.
+public struct PrintRoute: Decodable, Sendable, Equatable {
+    /// `lan` (the local network) or `cloud` (Bambu Cloud).
+    public let route: String
+    /// The MCP's connection mode and type, for example `bambu_network` / `lan`.
+    public let mode: String
+    public let type: String
+    public let choices: [String]
+    /// The config file the MCP saved it to; nil when it has none to update.
+    public let savedTo: String?
+    public init(route: String, mode: String, type: String, choices: [String], savedTo: String? = nil) {
+        self.route = route; self.mode = mode; self.type = type; self.choices = choices; self.savedTo = savedTo
+    }
+}
+
+public extension ControlClient {
+    /// Reads, or with `route` changes, the destination MCP's print route. Nil when that MCP has no route choice.
+    func printRoute(_ destinationId: String, route: String? = nil) async throws -> PrintRoute? {
+        struct Reply: Decodable { let route: PrintRoute? }
+        var params: [String: JSONValue] = ["destinationId": .string(destinationId)]
+        if let route { params["route"] = .string(route) }
+        let reply: Reply = try await call("printers.route", params)
+        return reply.route
+    }
+}
+
 public enum PrintControl: String, Sendable { case pause, resume, cancel
     public var method: String { "objects.\(rawValue)Print" }
 }

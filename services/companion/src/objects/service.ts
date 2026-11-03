@@ -4,7 +4,7 @@ import {tmpdir} from 'node:os';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {basename, dirname, extname, isAbsolute, join} from 'node:path';
-import {DispatchedPrintError, PrinterMcpError, inspectModelFile, modelPlatePreview, readModelFile, type ModelFileInfo, readPrintReport, routeArgs, sliceEstimate,
+import {DispatchedPrintError, PrinterMcpError, inspectModelFile, modelPlatePreview, readModelFile, type ModelFileInfo, readPrintReport, readPrintRoute, routeArgs, setPrintRoute, sliceEstimate, type PrintRoute,
   type PrintProgress, type PendingElicitation, type PrinterHandoffConfig, type PrinterSelection, type PrinterSlicer, type PrintReport, type PrinterSession} from '@scan-to-make/printer-handoff';
 import type {PrintEstimate, PrintSettings, ProjectStatus, ProjectSettingsPatch} from '@scan-to-make/contracts/counterpart';
 import {PrintMonitorRunner, matchJob, milestonesFor, type EventDraft, type MonitorClock, type MonitorEnd, type MonitorTarget} from '../printing/monitor.js';
@@ -891,11 +891,11 @@ export class ObjectService {
     };
     const work = runner.runBundle(bundles, manifest.id, {print: true, signal: controller.signal, onProgress,
       ...(Object.keys(sliced).length ? {slicer: sliced} : {})})
-      .then(outcome => this.#dispatched(id, manifest.id, printDestination?.id ?? destinationId, (outcome as {result?: {dispatch?: {jobName?: string; taskId?: string; fileBase?: string}}} | undefined)?.result?.dispatch, selected?.connectionMode),
+      .then(outcome => this.#dispatched(id, manifest.id, printDestination?.id ?? destinationId, (outcome as {result?: {dispatch?: {jobName?: string; taskId?: string; fileBase?: string}}} | undefined)?.result?.dispatch),
         async error => {
           const status = (await bundles.read(manifest.id).catch(() => undefined))?.status;
           // Once the printer has the job it is printing, whatever went wrong afterwards (as the phone's print route does).
-          if (error instanceof DispatchedPrintError || status === 'printed') return this.#dispatched(id, manifest.id, printDestination?.id ?? destinationId, undefined, selected?.connectionMode);
+          if (error instanceof DispatchedPrintError || status === 'printed') return this.#dispatched(id, manifest.id, printDestination?.id ?? destinationId, undefined);
           // It may have reached the printer: never send it again by itself.
           if (status === 'uncertain') return this.#deps.store.update(id, o => ({...o, state: 'failed', printConfirmation: undefined, progress: undefined, failure: error instanceof PrinterMcpError && error.detail ? `Printer service: ${error.detail} Counterpart could not confirm a print start. Check the printer before trying again.` : UNCERTAIN, print: {...o.print!, uncertain: true}}));
           if (this.#cancelledPrints.has(id)) return this.#deps.store.update(id, o => ({...o, state: 'ready', progress: undefined, printConfirmation: undefined, failure: undefined}));
@@ -971,13 +971,14 @@ export class ObjectService {
    * the monitor sets `printed` when the job finishes. A destination that can't
    * report jobs (an older mcp-3D-printer-server) ends here, as before.
    */
-  async #dispatched(id: string, bundleId: string, destinationId: string | undefined, dispatch: {jobName?: string; taskId?: string; fileBase?: string} | undefined,
-    route?: PrinterSelection['connectionMode']): Promise<StmObject> {
+  async #dispatched(id: string, bundleId: string, destinationId: string | undefined, dispatch: {jobName?: string; taskId?: string; fileBase?: string} | undefined): Promise<StmObject> {
     const session = destinationId ? this.#deps.printers?.session(destinationId) : undefined;
+    // The route is the MCP's own setting; it says whether this print went to Bambu Connect.
+    const route = session ? await readPrintRoute(session).catch(() => undefined) : undefined;
     const reports = !!session && (session.hasTool('counterpart_print_progress') || (session.backend === 'bambu-printer-mcp' && session.hasTool('get_printer_status')));
     const identified = !!(dispatch?.jobName || dispatch?.taskId);
     // Bambu Connect only opens the job on the Mac: the person presses Print there.
-    const bambuConnect = route === 'bambu_connect';
+    const bambuConnect = route?.mode === 'bambu_connect';
     // Some routes (Bambu's pre-sliced .gcode.3mf, X2D native, BambuNetwork) return no identity: a job
     // named after our file within the start window is adopted; otherwise the print ends "sent".
     const watchable = !!session && reports && !bambuConnect && (identified || !!dispatch?.fileBase);
@@ -1136,6 +1137,19 @@ export class ObjectService {
     if (!session || !camera) throw new CameraUnavailableError('no-camera');
     return camera.watch(this.#deps.printerCatalog?.canonical(destinationId) ?? destinationId, session, {model: session.config.selection?.model, ...options});
   }
+  /**
+   * Settings -> Printers: how the destination's MCP reaches the printer (local network or Bambu
+   * Cloud), and changing it. The MCP keeps the setting; Counterpart holds no copy. Undefined when
+   * the destination has no such choice (mcp-3D-printer-server, older bambu-printer-mcp).
+   */
+  async printRoute(destinationId: string, route?: PrintRoute['route']): Promise<PrintRoute | undefined> {
+    const session = this.#deps.printers?.session(destinationId);
+    if (!session) throw new ObjectNotFoundError();
+    await session.connect();
+    if (!session.hasTool('counterpart_print_route')) return undefined;
+    return route ? await setPrintRoute(session, route) : await readPrintRoute(session);
+  }
+
   async printerCamera(destinationId: string, options: {size?: CameraSize} = {}): Promise<CameraFrame> {
     const session = this.#deps.printers?.session(destinationId), camera = this.#deps.camera;
     if (!session || !camera) throw new CameraUnavailableError('no-camera');

@@ -13,6 +13,7 @@ import {slicerReport} from './slicer-report.js';
 import type {HandoffBundleStore} from './bundle.js';
 import {PrinterMcpError, toolResultJson, toolResultText, type PrinterToolCatalog} from './mcp-client.js';
 import {PrinterSession} from './session.js';
+import {readPrintRoute} from './counterpart.js';
 
 export type PrintStep = 'discover' | 'lay_flat' | 'slice_stl' | 'inspect' | 'print';
 export type PrintPhase = 'connecting' | 'orienting' | 'slicing' | 'inspecting' | 'slice-ready' | 'checking-printer' | 'resolving-printer-error' | 'requesting-print' | 'accepted';
@@ -400,10 +401,11 @@ export class PrinterHandoffRunner {
     // PRD §5.6: no bed check. Bambu's own bed levelling finds a full plate; the MCP's own confirmation is relayed as it asks.
     const printContext: ElicitationContext = tag;
 
-    // A rejected unsigned command leaves a software HMS error. The authenticated
-    // LAN route can recover it only through the server's own human confirmation.
-    if (this.#config.backend === 'bambu-printer-mcp' && selection.connectionMode === 'bambu_network'
-        && session.hasTool('get_printer_status') && session.hasTool('clear_hms_errors')) {
+    // A rejected unsigned command leaves a software HMS error. FULU's authenticated
+    // route can recover it only through the server's own human confirmation. The route
+    // is the MCP's own setting, so ask it rather than keeping a copy here.
+    if (this.#config.backend === 'bambu-printer-mcp' && session.hasTool('get_printer_status') && session.hasTool('clear_hms_errors')
+        && (await readPrintRoute(session, {signal}))?.mode === 'bambu_network') {
       const status = resultValue(await call(session, 'get_printer_status', {}, read)) as {raw?: {hms?: {attr?: number; code?: number}[]}};
       const errors = status?.raw?.hms;
       if (Array.isArray(errors) && errors.length === 1 && errors[0]?.attr === 0x05000500 && errors[0]?.code === 0x00010007) {
