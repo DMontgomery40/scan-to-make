@@ -1,5 +1,48 @@
 # Handoff: how to pick up Counterpart work
 
+## Continuation — 2026-11-03, about 02:10 Mountain (Claude, second session of the night)
+
+**Result: the P1S refuses controls from FULU's plug-in over both routes.** Through the real Mac app on the
+real printer (firmware 01.10.00.00, cloud-bound, not LAN-only/Developer mode):
+- Pause over **Bambu Cloud** (01:59 Mountain, 08:59Z): cloud session up, printer connected, first send -2
+  (CONNECT_FAILED, certificate still installing), retry after `device_cert_installed` accepted (code 0), then the
+  printer's signed reply `{"command":"pause",...,"err_code":84033546}` (0x0502400A) — the same refusal it gives
+  over the local network. The app showed "The printer didn't pause: … refused Pause over Bambu Cloud" and the
+  printer kept printing. So the earlier theory "cloud is how Studio controls this printer, so cloud will work"
+  is false for this client.
+- **Cloud printing is refused too:** three Print presses on the cloud route failed with -3120
+  (`BAMBU_NETWORK_ERR_PRINT_SP_POST_TASK_FAILED`): both uploads reached 100%, then Bambu Cloud answered the
+  create-task request with HTTP 403 "internal blocking". status.bambulab.com showed no incident. Sending the
+  `ams_mapping_info` Bambu Studio sends did not change it.
+- Common factor: FULU's runtime (and FULU's current source) loads Bambu's network plug-in **02.05.02.58**;
+  Bambu Studio on this Mac is **02.08.02.61**. Leading explanation: Bambu's printer/cloud reject that client.
+  Not proven. The one test that would separate "this client" from "this account/printer" is a cloud print from
+  Bambu Studio itself; not run (it puts a print on the bed outside Counterpart).
+- **Printing over the local network works** (01:46 Triangle pick, 6 copies, started from the app, finished).
+
+**Changed in bambu-printer-mcp** (`feat/one-printer-control-route`, Linux clone `agents-136:~/bambu-printer-mcp`):
+- `57c980a` (pushed): FULU PrintParams carry Bambu Studio's `ams_mapping_info` (one entry per project filament,
+  from project_settings.config + the live tray colour). Also stubs the new cloud session in
+  tests/safety-dispatch, where e7d442a had broken 10 bridge tests. Full `npm test` 1001 pass / 0 fail / 10 skip.
+- `c10e78d` on branch `fix/cloud-control-certificate-retry` (worktree `/tmp/bpm-cloudctl`, not pushed yet):
+  a cloud control retries on -2/-4 after reinstalling the certificate, like the LAN control. Fake-host tests added.
+- In progress (delegate): remove the ordinary print/heating/verified-resume confirmation prompt and
+  `BAMBU_REQUIRE_CONFIRMATION` from the MCP (David, Nov 3, repeatedly: "useless friction, Bambu does those checks
+  on its own"). Hardware-error clears and unverified resumes still ask.
+
+**Installed on the test Mac** (rollbacks in `~/scan-to-make-work/claude-route-20261102/`):
+- MCP dist: `index.js`, `ams-mapping.js`, `safety/print-file.js` from 57c980a and `bambu-network-bridge.js` from
+  c10e78d (rollback `bambu-rollback-e7d442a/`).
+- `~/bambu-printer-mcp/.env`: `BAMBU_REQUIRE_CONFIRMATION=0` added (backup `bambu-mcp.env.before-noconfirm`);
+  `BAMBU_DEFAULT_CONNECTION_TYPE` back on **lan** (cloud prints are refused). The popup is gone (verified 01:36).
+- Stopped an orphaned FULU container (bd9bff281b33) that predated the running MCP.
+- Companion restarted six times (#5–#10 in `deployment-boundary.txt`), each with the printer idle or a running
+  print not being dispatched.
+
+**Open for David:** whether to put the printer in LAN-only + Developer mode (then the MCP's plain LAN route
+prints and controls with no FULU plug-in), or to try Bambu Studio's cloud print as the comparison test. Review
+items 22–26 added to `app-review-2026-11-02.md`.
+
 ## Continuation — 2026-11-02, about 23:15 Mountain (Claude took over from Codex)
 
 **Architecture finding:** bambu-printer-mcp is Counterpart's printer backend; a bug there is a bug in the
