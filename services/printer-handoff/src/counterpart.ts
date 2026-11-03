@@ -248,6 +248,8 @@ export interface PrinterCapabilities {
   pause: boolean; resume: boolean; cancel: boolean;
   quality: boolean; strength: boolean; multiColour: boolean;
   copies: boolean;
+  /** slice_stl takes pause_at_layers. */
+  layerPauses: boolean;
   materialChoice: boolean;
   missing: CapabilityFeature[];
   /** `latestVersion` (PRD §8.10) is added by the companion from `npm view`. */
@@ -300,6 +302,7 @@ export function detectCapabilities(config: PrinterHandoffConfig, catalog: Printe
   const slicerType = (config.slicer?.type ?? '').toLowerCase();
   const bambuRoute = bambu || config.selection?.printerType === 'bambu' || ['bambustudio', 'orcaslicer-bambulab', 'fulu-orca', 'orca-studio'].includes(slicerType);
   const copies = hasArgs(catalog, 'slice_stl', ['repetitions']) && bambuRoute;
+  const layerPauses = hasArgs(catalog, 'slice_stl', ['pause_at_layers']);
   // Missing means this version lacks the tool, not that the printer lacks the hardware.
   const missing: CapabilityFeature[] = [];
   if (!progressTool && !progress) missing.push('progress');
@@ -323,7 +326,7 @@ export function detectCapabilities(config: PrinterHandoffConfig, catalog: Printe
     server: {name: catalog.server.name.slice(0, 128), version: catalog.server.version.slice(0, 64)},
     ...(info ? {contract: 'counterpart/1' as const} : {}),
     progress, layers: progress && (info?.capabilities.layers ?? bambu),
-    camera, filaments, pause, resume, cancel, quality, strength, multiColour, copies,
+    camera, filaments, pause, resume, cancel, quality, strength, multiColour, copies, layerPauses,
     // Every printer can be told what's loaded: the companion slices it with the profile of a spool the printer
     // reports for it (mcp-3D-printer-server: the profile its filament report gives), or refuses with what to do.
     materialChoice: true,
