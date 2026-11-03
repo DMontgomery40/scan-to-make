@@ -295,7 +295,7 @@ export class PrinterSetup {
   #nameFor(printerType: string, model?: string, host?: string, backend?: PrinterBackend): string {
     const type = PRINTER_TYPES.find(item => item.printerType === printerType);
     const base = printerType === 'bambu' ? `Bambu Lab ${model ? MODEL_LABELS[model] ?? model.toUpperCase() : 'printer'}` : `${type?.label ?? 'Printer'}${host ? ` at ${host}` : ''}`;
-    return backend === 'mcp-3d-printer-server' && printerType === 'bambu' ? `${base} via mcp-3D-printer-server` : base;
+    return (backend === 'mcp-3d-printer-server' && printerType === 'bambu' ? `${base} via mcp-3D-printer-server` : base).slice(0, 120);
   }
 
   /** `printers.discover`: configured MCP folders on this Mac, Bambu printers (SSDP) and other printers (Bonjour). About 4 s. */
@@ -319,12 +319,12 @@ export class PrinterSetup {
         ...(read.model ? {model: read.model} : {}), folder: folder.dir, added: false});
     }
     for (const printer of bambu.printers) {
-      found.push({id: `ssdp:${printer.serial}`, source: 'ssdp', name: printer.name, backend: 'bambu-printer-mcp', printerType: 'bambu', host: printer.host,
+      found.push({id: `ssdp:${printer.serial}`, source: 'ssdp', name: printer.name.slice(0, 120), backend: 'bambu-printer-mcp', printerType: 'bambu', host: printer.host,
         serial: printer.serial, ...(printer.model ? {model: printer.model} : {}), added: known.has(`serial:${printer.serial.toUpperCase()}`)});
     }
     for (const service of bonjour) {
       const printerType = BONJOUR_TYPES[service.type] ?? 'octoprint';
-      found.push({id: `bonjour:${service.host}:${service.port}`, source: 'bonjour', name: service.name || this.#nameFor(printerType, undefined, service.host),
+      found.push({id: `bonjour:${service.host}:${service.port}`, source: 'bonjour', name: (service.name || this.#nameFor(printerType, undefined, service.host)).slice(0, 120),
         backend: 'mcp-3d-printer-server', printerType, host: service.host, port: service.port, added: known.has(`host:${service.host.toLowerCase()}:${service.port}`)});
     }
     return {found, network: bambu.state, options: setupOptions()};

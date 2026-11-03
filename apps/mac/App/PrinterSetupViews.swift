@@ -334,7 +334,9 @@ struct AddPrinterSheet: View {
             do {
                 let result = try await PrinterSetupModel.client(for:"printers.add").addPrinter(value)
                 added()
-                done = result.sameAs != nil
+                done = result.destinationId == nil
+                    ? "Saved. It shows in Printers once printing is set up on this Mac."
+                    : result.sameAs != nil
                     ? "Added. It’s the same printer as one you have, so Counterpart can use either MCP: choose in Settings → Printers → Printer MCP."
                     : value.folder == nil && check?.reached != true ? "Added. Counterpart couldn’t reach the printer yet; it shows as Offline until it can." : "Added."
             } catch { problem = PrinterSetupModel.words(error, otherwise:"Counterpart couldn’t add the printer. Try again.") }
