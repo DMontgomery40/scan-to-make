@@ -211,14 +211,20 @@ export async function readPrinterInfo(session: PrinterSession, options: SessionC
 
 /**
  * How the printer MCP reaches the printer for prints and Stop/Pause/Resume: the MCP's own
- * setting (bambu-printer-mcp `counterpart_print_route`). `lan` is the local network, `cloud`
- * Bambu Cloud; `mode` is the MCP's connection mode (for example `bambu_connect`).
+ * setting (`counterpart_print_route`, both MCPs). Today `lan` (the local network through FULU), `cloud`
+ * (Bambu Cloud) and `developer` (straight to a printer in LAN Only + Developer Mode); `options` carries the
+ * MCP's own label, availability and what controls do on each, so a new route needs no Counterpart change.
  */
+const routeId = z.string().regex(/^[a-z][a-z0-9_-]{0,31}$/);
 export const printRouteSchema = z.object({
-  route: z.enum(['lan', 'cloud']),
+  route: routeId,
   mode: z.string(),
   type: z.string(),
-  choices: z.array(z.enum(['lan', 'cloud'])),
+  choices: z.array(routeId),
+  options: z.array(z.object({
+    id: routeId, label: z.string().min(1).max(80), available: z.boolean(),
+    reason: z.string().max(300).optional(), controls: z.string().max(400).optional(),
+  })).optional(),
   savedTo: z.string().nullable(),
 });
 export type PrintRoute = z.infer<typeof printRouteSchema>;

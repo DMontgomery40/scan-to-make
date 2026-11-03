@@ -82,7 +82,7 @@ export const parameters = {
   'objects.cancelPrint': z.strictObject({id: z.uuid()}),
   'objects.camera': z.strictObject({id: z.uuid()}),
   'printers.camera': z.strictObject({destinationId: z.string().min(1).max(256)}),
-  'printers.route': z.strictObject({destinationId: z.string().min(1).max(256), route: z.enum(['lan', 'cloud']).optional()}),
+  'printers.route': z.strictObject({destinationId: z.string().min(1).max(256), route: z.string().regex(/^[a-z][a-z0-9_-]{0,31}$/).optional()}),
   'printers.mcps': empty,
   'printers.installMcp': z.strictObject({package: z.enum(['bambu-printer-mcp', 'mcp-3d-printer-server'])}),
   'printers.discover': empty,

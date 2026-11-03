@@ -194,6 +194,16 @@ export function hasFiles(object: Pick<StmObject, 'scan' | 'photos' | 'capture' |
   return !!object.scan || object.photos.length > 0 || (object.capture?.length ?? 0) > 0 || (object.captureDepth?.length ?? 0) > 0;
 }
 
+const RESUMED_ELSEWHERE = 'Resumed outside Counterpart (on the printer or another app).';
+/** Counterpart sent the Resume that ended the latest pause ("Resume sent." after the last "The printer paused it."). */
+function resumedHere(events: readonly {message: string}[]): boolean {
+  for (let index = events.length - 1; index >= 0; index--) {
+    if (events[index]!.message === 'Resume sent.') return true;
+    if (events[index]!.message === PRINT_LOG['print.paused']) return false;
+  }
+  return false;
+}
+
 export class ObjectService {
   readonly #deps: ObjectServiceDeps;
   readonly #running = new Map<string, Promise<StmObject>>();
@@ -1064,8 +1074,14 @@ export class ObjectService {
       save: async (monitor, live) => { this.#changed(await this.#deps.store.update(id, o => ours(o) ? {...o, print: {...o.print!, monitor, ...(live ? {live} : {})}} : o)); },
       end: async (end, report) => { this.#changed(await this.#deps.store.update(id, o => ours(o) ? this.#ended(o, end, report) : o)); },
       emit: async draft => {
-        const line = draft.type === 'print.milestone' && draft.data?.progress !== 50 ? `${draft.data?.progress}% done.` : PRINT_LOG[draft.type];
-        if (line) this.#changed(await this.#deps.store.update(id, o => ours(o) ? {...o, print: {...o.print!, events: [...(o.print!.events ?? []), {atMs: Date.now(), message: line}].slice(-20)}} : o));
+        const fixed = draft.type === 'print.milestone' && draft.data?.progress !== 50 ? `${draft.data?.progress}% done.` : PRINT_LOG[draft.type];
+        if (fixed) this.#changed(await this.#deps.store.update(id, o => {
+          if (!ours(o)) return o;
+          const events = o.print!.events ?? [];
+          // Nov 3: Bambu Handy resumed a pick Counterpart couldn't; "Printing again." read as if Counterpart had.
+          const line = draft.type === 'print.resumed' && !resumedHere(events) ? RESUMED_ELSEWHERE : fixed;
+          return {...o, print: {...o.print!, events: [...events, {atMs: Date.now(), message: line}].slice(-20)}};
+        }));
         await this.#emit(draft);
       },
     }, print.monitor);
