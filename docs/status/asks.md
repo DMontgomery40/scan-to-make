@@ -1,5 +1,7 @@
 # David's asks: status
 
+**Critical update, Nov 2 about 22:17 Mountain:** actual app Stop fails; Pause is not accepted and the app logs “Pause sent” while printing continues. David reports the real Mic mount Lock Screen activity stuck at 0% / “Waiting for an update” while the app shows about 49%. The UI-started print depended on an out-of-app FULU runtime restart and is NOT self-sufficient acceptance. Stop/connection-flow fixes and phone error copy are pending, NOT installed. Full companion validation currently has 14 failures. Read the top of [handoff.md](handoff.md) before doing anything; it records the strict no-intervention acceptance boundary and the architecture/data-flow audit request.
+
 Every request David has made for Counterpart, updated 2026-11-02 at 14:10 Mountain.
 Relay update at 21:25 Mountain: the Sandbox APNs key is registered, secrets deployed, and
 Davica3 visibly received a labeled test start (10%), update (70%) and end (100%). The test

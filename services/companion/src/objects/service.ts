@@ -1170,7 +1170,13 @@ export class ObjectService {
     let notOurs = false;
     try {
       const properties = (session.getTool(tool).inputSchema as {properties?: Record<string, unknown>}).properties;
-      const args = Object.fromEntries(Object.entries(routeArgs(session.config)).filter(([key, value]) => value !== undefined && (!properties || Object.hasOwn(properties, key))));
+      // The bundle already records the connection chosen for this print. Carry it through Stop.
+      const selection = (await services.store.read(print.bundleId)).selection ?? session.config.selection;
+      const transport = action === 'cancel' && session.backend === 'bambu-printer-mcp'
+        ? {connection_mode: selection?.connectionMode, connection_type: selection?.connectionType} : {};
+      if (transport.connection_mode === 'bambu_network' && properties && !Object.hasOwn(properties, 'connection_mode'))
+        throw new PrinterMcpError('tool-failed', undefined, 'Update Counterpart’s printer service to stop this FULU print. This service cannot receive the selected connection.');
+      const args = Object.fromEntries(Object.entries({...routeArgs(session.config, selection), ...transport}).filter(([key, value]) => value !== undefined && (!properties || Object.hasOwn(properties, key))));
       await session.exclusive(async () => {
         // The printer's controls act on whatever it is printing now: make sure that is still this project.
         const report = await readPrintReport(session, {failFast: true});

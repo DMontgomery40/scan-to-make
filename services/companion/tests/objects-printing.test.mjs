@@ -25,7 +25,7 @@ const until = async check => { for (let i = 0; i < 300; i++) { const value = awa
  * A P1S behind a fake MCP session, a fake print runner, and a monitor clock the
  * test steps by hand: every printer report and every wait is scripted.
  */
-async function setup(t, {tools = ['get_printer_status', 'camera_snapshot', 'pause_print', 'resume_print', 'cancel_print', 'slice_stl'], sliceArgs = false, copies = false, reports = []} = {}) {
+async function setup(t, {tools = ['get_printer_status', 'camera_snapshot', 'pause_print', 'resume_print', 'cancel_print', 'slice_stl'], sliceArgs = false, copies = false, controlsRoute = false, reports = []} = {}) {
   const root = await mkdtemp(join(tmpdir(), 'objects-printing-'));
   let service;
   t.after(async () => { await service?.close(); await rm(root, {recursive: true, force: true, maxRetries: 10, retryDelay: 20}); });
@@ -33,7 +33,7 @@ async function setup(t, {tools = ['get_printer_status', 'camera_snapshot', 'paus
   const queue = [...reports];
   const relay = new InMemoryElicitationRelay({timeoutMs: 5000});
   const catalogTools = tools.map(name => name === 'slice_stl' && (sliceArgs || copies)
-    ? tool(name, {...(sliceArgs ? {layer_height: {}, wall_loops: {}, sparse_infill_density: {}} : {}), ...(copies ? {repetitions: {}} : {})}) : tool(name));
+    ? tool(name, {...(sliceArgs ? {layer_height: {}, wall_loops: {}, sparse_infill_density: {}} : {}), ...(copies ? {repetitions: {}} : {})}) : tool(name, controlsRoute && ['cancel_print', 'pause_print', 'resume_print'].includes(name) ? {connection_mode: {}, connection_type: {}} : {}));
   const factory = () => ({
     catalog: undefined,
     async connect() { this.catalog = {server: {name: 'bambu-printer-mcp', version: '1.1.46'}, tools: catalogTools}; return this.catalog; },
@@ -300,6 +300,20 @@ test('a print handed to Bambu Connect is "sent" at once: the person finishes it 
   const sent = await f.service.settled(f.object.id);
   assert.equal(sent.state, 'sent');
   assert.equal(sent.print.sentVia, 'bambu-connect');
+});
+
+test('Stop receives the connection selected for the print, even after settings change', async t => {
+  const f = await setup(t, {controlsRoute: true, reports: [status('RUNNING', 10)]});
+  f.deps.print.services.selection = {...f.deps.print.services.selection, connectionMode: 'bambu_network', connectionType: 'lan'};
+  await f.service.print(f.object.id);
+  await f.approve();
+  await f.service.settled(f.object.id);
+  await until(() => f.events.some(e => e.type === 'print.started'));
+  f.deps.print.services.selection = {...f.deps.print.services.selection, connectionMode: 'lan_mqtt_ftps'};
+  const stopping = f.service.control(f.object.id, 'cancel');
+  await f.approve();
+  await stopping;
+  assert.deepEqual(f.calls.find(c => c.name === 'cancel_print').args, {connection_mode: 'bambu_network', connection_type: 'lan'});
 });
 
 test('a control is sent only while the printer is still printing this project\'s job', async t => {
