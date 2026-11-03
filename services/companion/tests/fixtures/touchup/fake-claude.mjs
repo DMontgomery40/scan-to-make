@@ -17,6 +17,12 @@ switch (scenario) {
     writeFileSync('out/checkpoints/01.stl', stl); writeFileSync('out/touched.stl', stl); writeFileSync('out/front.png', 'png');
     result({status: 'done', summary: 'Restored the texture on the underside.'});
     break;
+  case 'multicolour':
+    toolUse('mcp__printer__counterpart_make_3mf'); say('Made the pick black with yellow lettering.');
+    writeFileSync('out/checkpoints/01.stl', stl); writeFileSync('out/touched.stl', stl); writeFileSync('out/touched.3mf', Buffer.from('PK\x03\x04 two parts'));
+    writeFileSync('out/front.png', 'png');
+    result({status: 'done', summary: 'Made the pick black with yellow lettering.'});
+    break;
   case 'needs_closeup':
     toolUse('Read');
     result({status: 'needs_closeup', closeup: 'the underside', summary: 'The underside is not visible in any photo.'});

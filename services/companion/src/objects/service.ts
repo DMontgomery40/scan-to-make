@@ -166,6 +166,11 @@ export function spreadPick<T>(items: T[], count: number): T[] {
 }
 
 /** The object lifecycle: inputs arrive, the touch-up runs by itself, and the result is ready to print. */
+/** A 3MF model owns its parts and their filaments: a published file, or a design in several colours. */
+function isMultipart(object: Pick<StmObject, 'current'>): boolean {
+  return object.current?.model.toLowerCase().endsWith('.3mf') === true;
+}
+
 /**
  * PRD §8.9: a copy is cleaned up in Blender; a new design may use Fusion. Set at creation; otherwise a project
  * with a scan (LiDAR or a handheld capture) is a copy, even with a request ("Copy this. Close up the bottom."),
@@ -820,7 +825,7 @@ export class ObjectService {
     // A 3MF owns its filament assignments; the sheets do not offer a single-spool override.
     // Keep the saved preference for other models, but do not silently apply it here.
     const defaults = {...object.preferences?.printDefaults};
-    if (object.kind === 'published' && object.current?.model.toLowerCase().endsWith('.3mf')) delete defaults.colour;
+    if (isMultipart(object)) delete defaults.colour;
     options = {...defaults, ...options, ...(options.filament ? {colour: undefined} : {})};
     if (!object.current) throw new InvalidStateError('There is no model to print yet.');
     if (object.ask?.status === 'open' && object.ask.type === 'choice') throw new InvalidStateError('Choose the model’s file and plate before printing.');
@@ -846,7 +851,7 @@ export class ObjectService {
     const {selection: colourSelection, slicer} = await this.#colour(id, options, services.selection, runner.backend);
     const selected = object.publishedSelection ? {...colourSelection, plateIndex: object.publishedSelection.plateIndex} : colourSelection;
     const overrides = object.publishedSelection?.sliced ? {repetitions: 1} : sliceOverrides(options, selected?.nozzleDiameterMm);
-    if (object.kind === 'published' && object.current.model.toLowerCase().endsWith('.3mf')) {
+    if (isMultipart(object)) {
       if (!options.quality || options.quality === 'standard') delete overrides.layerHeightMm;
       if (!options.strength || options.strength === 'standard') { delete overrides.wallLoops; delete overrides.sparseInfillDensity; }
     }
@@ -858,7 +863,7 @@ export class ObjectService {
       ...(options.colour ? {colour: options.colour} : {}), ...(options.copies !== undefined ? {copies: options.copies} : {})};
     const sliced = {...slicer, ...overrides};
     const stl = await this.#modelBytes(object);
-    const manifest = await bundles.create({...(object.kind === 'published' ? {model: {bytes: stl, format: object.current.model.toLowerCase().endsWith('.3mf') ? '3mf' as const : 'stl' as const}} : {stl}), prompt: '', backend: runner.backend, ...(selected ? {selection:selected} : {})});
+    const manifest = await bundles.create({...(object.kind === 'published' || isMultipart(object) ? {model: {bytes: stl, format: isMultipart(object) ? '3mf' as const : 'stl' as const}} : {stl}), prompt: '', backend: runner.backend, ...(selected ? {selection:selected} : {})});
     const printId = randomUUID();
     const print = {bundleId: manifest.id, printId, ...(printDestination ? {destination: printDestination, destinationId: printDestination.id} : {}),
       ...(Object.keys(settings).length ? {settings} : {})};
@@ -1224,7 +1229,7 @@ export class ObjectService {
     const copies = request.copies && request.copies > 1 ? request.copies : undefined;
     // Exactly as Print: named copies (1 included) override the printer config's own repetitions.
     const overrides = object.publishedSelection?.sliced ? {repetitions: 1} : sliceOverrides({quality, strength, ...(request.copies !== undefined ? {copies: request.copies} : {})}, services.selection?.nozzleDiameterMm);
-    if (object.kind === 'published' && object.current.model.toLowerCase().endsWith('.3mf')) {
+    if (isMultipart(object)) {
       if (quality === 'standard') delete overrides.layerHeightMm;
       if (strength === 'standard') { delete overrides.wallLoops; delete overrides.sparseInfillDensity; }
     }
@@ -1412,7 +1417,9 @@ export class ObjectService {
     const work = (async () => {
       let scanName = object.scan;
       if (build) scanName = await this.#build(object.id, dir, controller.signal);
-      const scan = fromCurrent ? [join(dir, object.current!.model)] : scanName ? [join(dir, 'scan', scanName)] : [];
+      // A multi-colour design is revised from its merged mesh; Fusion passes also get the parametric design.
+      const currentMesh = object.current && isMultipart(object) && object.kind !== 'published' ? join('current', 'model.stl') : object.current?.model;
+      const scan = fromCurrent ? [join(dir, currentMesh!)] : scanName ? [join(dir, 'scan', scanName)] : [];
       const input: TouchupInput = {root: join(dir, 'passes'), objectId: 'pass', scan, photos, currentModel: fromCurrent, handoff: this.#handoff(), claudePath: this.#deps.claudePath,
         kind, ...(object.preferences?.designEngine && object.preferences.designEngine !== 'auto' ? {preferredEngine: object.preferences.designEngine} : {}), onStage: (id, chosen) => stage(id, chosen),
         ...(fromCurrent && object.current?.engine === 'fusion' && object.current.design
@@ -1654,7 +1661,9 @@ export class ObjectService {
         if (result.design.parameters) await copyFile(result.design.parameters, join(currentDir, 'parameters.json')).catch(() => undefined);
         design = {f3d: join('current', 'design.f3d'), ...(result.design.parameters ? {parameters: join('current', 'parameters.json')} : {})};
       }
-      current = {model: join('current', 'model.stl'), renders, ...(sizeMm ? {sizeMm} : {}), ...(summary ? {summary} : {}),
+      if (result.parts) await copyFile(result.parts, join(currentDir, 'model.3mf'));
+      else await rm(join(currentDir, 'model.3mf'), {force: true});
+      current = {model: join('current', result.parts ? 'model.3mf' : 'model.stl'), renders, ...(sizeMm ? {sizeMm} : {}), ...(summary ? {summary} : {}),
         ...(result.changes?.length ? {changes: result.changes} : {}), engine, ...(design ? {design} : {})};
     }
     const ask = result.status === 'needs_closeup' ? await this.#ask(id, result) : undefined;

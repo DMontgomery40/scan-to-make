@@ -32,6 +32,19 @@ test('done', async () => {
   assert.ok(progress.some(p => p.lastText === 'Restored the texture on the underside.'));
 });
 
+test('a request in several colours keeps the printer MCP\'s multi-part 3MF beside the merged mesh', async () => {
+  const {pass, inv} = await setup('multicolour');
+  const result = await runTouchupWorker(inv, pass);
+  assert.equal(result.status, 'done');
+  assert.equal(result.model, join(pass.outDir, 'touched.stl'));
+  assert.equal(result.parts, join(pass.outDir, 'touched.3mf'));
+});
+
+test('a single-colour pass has no parts file', async () => {
+  const {pass, inv} = await setup('done');
+  assert.equal((await runTouchupWorker(inv, pass)).parts, undefined);
+});
+
 test('needs_closeup', async () => {
   const {pass, inv} = await setup('needs_closeup');
   const result = await runTouchupWorker(inv, pass);
