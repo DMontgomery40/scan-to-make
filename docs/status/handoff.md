@@ -20,6 +20,26 @@ real printer (firmware 01.10.00.00, cloud-bound, not LAN-only/Developer mode):
   Bambu Studio itself; not run (it puts a print on the bed outside Counterpart).
 - **Printing over the local network works** (01:46 Triangle pick, 6 copies, started from the app, finished).
 
+**Update ~11:15 Mountain.** #294 merged (`6109c1c`). PR #295 `feat/add-printer` (head `ac5e38b`, local CI 13/13):
+both MCPs listed and downloadable, **Add Printer…** (found MCP folders run in place, SSDP, Bonjour; dropdown form; Check;
+`printers/profiles.json` + per-printer `.env`), per-printer **Printer MCP** choice, **Complete Settings** smart fill.
+Accepted in the real app (build 202611031100): found `~/mcp-3D-printer-server`, switched the P1S to it, filled
+`BAMBU_MODEL='p1s'` into its `.env`, estimate 8 min · 1 g through it. Not yet printed through it.
+- mcp-3D-printer-server (Mac checkout `~/mcp-3D-printer-server`, now **detached at `1602be2`** = branch
+  `integrate/counterpart`, pushed): `5e6f70e` Bambu printers default to Bambu Studio (David chose this: FULU
+  OrcaSlicer-bambulab v1.0.0's CLI segfaults on every slice, FULU #56/#57 unreleased), `a23a286` relative TEMP_DIR
+  resolved, `1602be2` ordinary prompt + bed check removed (also on `fix/no-ordinary-confirmation-v2` `cf373d7`).
+  Its local `main` was 38 commits behind origin (1.2.17 vs 1.2.25): fast-forwarded. `.env` is back to David's
+  original plus `BAMBU_MODEL='p1s'` (added by Complete Settings).
+- In progress (delegate, David chose "Make it complete"): `feat/bambu-complete` in worktree
+  `~/mcp-3D-wt-bambu`: Bambu AMS inventory + tray choice, Pause/Resume/Stop, FULU authenticated route and
+  `counterpart_print_route`, ported from bambu-printer-mcp. Needed before a print through mcp-3D on this P1S
+  (plain MQTT prints are refused without Developer mode; it prints from the external spool without AMS).
+- Installed FULU OrcaSlicer-bambulab v1.0.0 (official universal DMG, sha256 71947959…) at /Applications/OrcaSlicer.app.
+- bambu-printer-mcp PR: origin/main is still 1.1.51 (#94); the branch carries 1.1.52 (already on npm) and the
+  WIP commit `7146550`. A PR needs a clean rebase, CHANGELOG, the code-review gate and attribution stripped
+  (4 commits have Co-Authored-By); merging publishes to npm (held). Not opened.
+
 **Changed in bambu-printer-mcp** (`feat/one-printer-control-route`, pushed at `94d995a`; built and tested in the
 worktree `agents-136:/tmp/bpm-cloudctl`, branch `integrate/control-route`). Full `npm test` 1004 pass / 0 fail / 10 skip:
 - `57c980a`: FULU PrintParams carry Bambu Studio's `ams_mapping_info`; safety-dispatch stubs the cloud session
