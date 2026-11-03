@@ -1,6 +1,9 @@
 # David's asks: status
 
 Every request David has made for Counterpart, updated 2026-11-02 at 14:10 Mountain.
+Relay update at 20:29 Mountain: the Sandbox Worker is deployed and returns `503 not_configured`.
+Key registration/upload is authorized but blocked by expired Apple sign-in and disabled browser
+access; no APNs authentication or phone delivery is claimed. See the latest handoff section.
 All 40 asks remain in scope. PRs #259–#285 are merged. Both Mac and phone have signed build
 `202611021355` from reviewed `184a7d4d`, whose entire source tree matches merged `4c7af6a5`.
 The Mac runtime was rebuilt from that same source. Local Bambu 1.1.52 remains `ed9aba3`,
@@ -39,7 +42,7 @@ The owner is whoever the lead assigns. Repeats count how often the ask came up a
 | 18 | Conversation as message bubbles, photos with their message | 1 | **installed #259; acceptance partial**: chronological native bubbles; new photos belong to their actual message. Historical unknown ownership is not invented | Bubbles on both |
 | 19 | "DONE / it works" message doesn't start a design pass | 1 | **installed #259; acceptance partial**: success reports, including photos, mark Done without a design pass; uncertain classification saves the message; Undo supported | Message marks Done instead |
 | 20 | Notifications (ready, question, halfway with camera frame, done, failed) | 3 | **installed #259/#283; delivery unverified**: missing settings persistence and accidental deletion of account-wide CloudKit subscriptions are fixed. Phone 1355 reports that iCloud alerts include every event type; OS permission is allowed. A genuine temporary import emitted Ready and the Mac recorded its CloudKit save. This is not a phone/Watch delivery receipt. Separate phone/type filters remain unsupported and disabled | Halfway notification with frame on his phone and Watch |
-| 21 | Lock Screen / Live Activity print progress | 1 | **installed #259; acceptance partial**: local Lock Screen/Dynamic Island extension and token registration now exist and sign. Relay implementation and loopback tests exist; the deployed APNs relay is absent. Key registration and provisioning remain pending. Signed phone 1355 uses development APNs, requiring sandbox configuration; foreground activity and actual Lock Screen delivery remain unverified | Live Activity on his Lock Screen |
+| 21 | Lock Screen / Live Activity print progress | 1 | **installed #259; acceptance partial**: local Lock Screen/Dynamic Island extension and token registration now exist and sign. Sandbox relay is deployed with separate storage and passes the expected missing-credentials probe. Key registration/upload is authorized but blocked by Apple sign-in/browser access. Signed phone 1355 uses development APNs; actual APNs authentication, foreground activity and Lock Screen delivery remain unverified | Live Activity on his Lock Screen |
 | 22 | Printer camera efficient (Scrypted-like) | 1 | **installed #262; sustained acceptance pending**: sample taken on reviewed local Bambu MCP 1.1.52 at `d6c1d953` (now `ed9aba3`). Twelve installed-control reads over about 23 seconds had zero errors, at most 8,409 bytes, first read 3.486 s and later reads at most 0.005 s; one shared camera connection closed after idle. Static-camera content was unchanged. This is a bounded sample, not phone or sustained-budget acceptance | Budgets met on his P1S |
 | 23 | Getting ready vs printing; printer's own failure text + Print Again | 1 | **on Mac, observed**: original printer failure text and Print Again sheet checked in the real installed app | Shows "Getting ready · …" then real failure text |
 | 24 | Print a published model (link → designer's file, credit) | 2 | **installed #273; Mac import/estimate verified**: fresh MakerWorld caliper original imports as Ready through the native app, shows designer/licence/link and plate preview, preserves the exact SHA-256, and produces a real P1S estimate of 1 h 39 m / 40 g. Sheet canceled without dispatch; temporary acceptance project removed. Phone 1355 displays the imported original with designer/licence/plate preview. Automatic browser retrieval, import initiated from the phone, and physical print remain unaccepted | Paste a MakerWorld link and it prints that file |
@@ -72,7 +75,7 @@ Hosted Actions cannot start because of the account billing restriction; no requi
 No new physical print, stop test, camera/Face ID acceptance, phone/Watch push receipt or fresh
 same-account enrollment has been claimed. Build 1355 installed without reset; actual phone UI is verified: connected Home, model,
 Project Settings, saved rename/defaults, and a real one-copy 44 min / 18 g / 272-layer print estimate.
-No print was dispatched. OS notification authorization is enabled; this is not a delivery receipt. The APNs relay requires credentials and deployment. These do not prevent
+No print was dispatched. OS notification authorization is enabled; this is not a delivery receipt. The Sandbox APNs relay is deployed but still requires credentials and delivery verification. These do not prevent
 continued implementation and Mac acceptance work.
 
 The latest exact-source checks passed: Node 22/24 companion workflows each 740 tests plus one

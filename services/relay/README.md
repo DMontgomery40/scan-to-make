@@ -143,6 +143,39 @@ Create the APNs key, give it to the Worker, and deploy. Everything else is alrea
 
 ## Development
 
+### Sandbox deployment for locally signed Counterpart
+
+The `sandbox` Wrangler environment deploys `counterpart-relay-sandbox` on its own
+`workers.dev` hostname. It explicitly uses `api.sandbox.push.apple.com`, its own
+Durable Object storage and its own secrets. It does not claim the production docs-site
+route. [Wrangler environments](https://developers.cloudflare.com/workers/wrangler/environments/)
+require bindings and variables to be declared for each environment.
+
+For a Sandbox APNs key, use `--env sandbox` on **every** secret and deployment command:
+
+```sh
+cd services/relay
+npm ci --ignore-scripts
+npx wrangler deploy --env sandbox --dry-run --outdir .wrangler/dry-run-sandbox
+npx wrangler secret put APNS_KEY_P8 --env sandbox < /private/path/AuthKey_KEYID.p8
+npx wrangler secret put APNS_KEY_ID --env sandbox
+npx wrangler secret put TEAM_ID --env sandbox
+npx wrangler deploy --env sandbox
+```
+
+Use the actual HTTPS hostname printed by deployment, followed by
+`/relay/v1/live-activity`, as the URL argument to `npm run check -- <URL>`.
+Only after provisioning succeeds, enable Live Activity relay in Counterpart for Mac's
+Advanced settings and set Relay address to that hostname followed by `/relay/v1`.
+The signed `aps-environment` entitlement determines the environment; installed build
+`202611021355` uses `development`. Backend identifiers remain `com.scantomake` so existing
+pairing, CloudKit and push topics continue to agree.
+
+A missing key must return `503 not_configured`; deployment alone does not establish
+APNs authentication or phone delivery. A key/environment mismatch requires a key compatible
+with the selected APNs host, not necessarily a Production key. Keep private key files outside
+the repository and use Wrangler's encrypted secrets, never plaintext configuration variables.
+
 ```sh
 npm ci --ignore-scripts
 npm test          # typecheck + vitest in the Workers runtime (@cloudflare/vitest-plugin)

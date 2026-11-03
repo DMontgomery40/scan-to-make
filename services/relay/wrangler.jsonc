@@ -24,6 +24,22 @@
     // Pushes accepted per UTC day across all callers. Sized so the free plan's 100,000 Durable Object
     // rows written per day can't run out: a worst-case push costs 7 writes (README, "Free plan").
     "GLOBAL_DAILY_CAP": 14000
+  },
+  // Locally signed iPhone builds have development APNs tokens. Keep their credentials,
+  // rate limits and token deny list separate from the production deployment.
+  "env": {
+    "sandbox": {
+      "name": "counterpart-relay-sandbox",
+      "workers_dev": true,
+      "routes": [],
+      "durable_objects": {
+        "bindings": [{ "name": "LIMITER", "class_name": "RelayLimiter" }]
+      },
+      "vars": {
+        "GLOBAL_DAILY_CAP": 14000,
+        "APNS_ORIGIN": "https://api.sandbox.push.apple.com"
+      }
+    }
   }
   // Secrets (wrangler secret put): APNS_KEY_P8, APNS_KEY_ID, TEAM_ID.
 }

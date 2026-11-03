@@ -1,5 +1,30 @@
 # Handoff: how to pick up Counterpart work
 
+## Relay provisioning update — 2026-11-02, 20:29 Mountain
+
+David explicitly authorized registering the prepared Sandbox APNs key, storing it as an
+encrypted Cloudflare secret and deploying the relay. Do not ask for that approval again.
+The product name is **Counterpart**; existing `com.scantomake` backend identifiers stay intact.
+
+Sandbox Worker `counterpart-relay-sandbox` is deployed at
+`https://counterpart-relay-sandbox.betkalshi-dtmont.workers.dev/relay/v1` with APNs origin
+`https://api.sandbox.push.apple.com`. Version: `c7225f78-10dc-4097-8684-ca0a7cd861f0`.
+It has separate Durable Object storage and no production route. Its random-token probe
+returns `503 not_configured`, as expected with no secrets. This is deployment evidence,
+not APNs authentication or phone delivery. Mac relay settings have not been switched.
+
+Apple expired the saved sign-in when Register was clicked; no successful registration or
+download was observed. The login page then stalled. Browser access subsequently became
+disabled in Work settings, preventing further inspection. David has been asked to restore
+browser access and finish Apple sign-in. Before retrying registration, inspect the Keys list
+to avoid duplicates. The prepared name was `Counterpart Live Activities Development`, Sandbox,
+topic-specific `com.scantomake`. Keep its downloaded private key outside Git and use
+`wrangler secret put --env sandbox` for every secret. See the relay README's Sandbox section.
+
+Local relay validation: 96 tests pass, production and Sandbox bundles validate, and loopback
+start/JWT/headers/rate-limit/check smoke tests pass. Mirroring is not running. Camera, Face ID,
+physical printing and actual phone/Watch push acceptance remain open; all 40 asks remain in scope.
+
 ## Latest acceptance update — 2026-11-02, 14:10 Mountain
 
 Both apps now have signed build `202611021355`. Main is `4c7af6a5` (#285), with the entire

@@ -29,4 +29,6 @@ jobs:
       - run: npm ci --prefix services/relay --ignore-scripts
       - run: npm test --prefix services/relay
       - run: npm run build --prefix services/relay
+      - run: npx wrangler deploy --env sandbox --dry-run --outdir .wrangler/dry-run-sandbox
+        working-directory: services/relay
       - run: npm run smoke --prefix services/relay
