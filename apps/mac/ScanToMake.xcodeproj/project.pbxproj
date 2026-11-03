@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		007B0087635810646A5380B8 /* FusionSetup.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9FE7B5E2AF7AE14627DA9569 /* FusionSetup.swift */; };
 		02C51868139E34338B1B6200 /* SettingsViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A63BE8D6BD19AFFDA3F5D4E /* SettingsViews.swift */; };
+		692B89C0007CA76C08D9851D /* PrinterSetupViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72682441B6240267DE248E3B /* PrinterSetupViews.swift */; };
 		03D161D806169A282A36F1EC /* MacStatusModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 81F869DA19C2B26065AAF581 /* MacStatusModel.swift */; };
 		05551324D77D3BD8D2A0C7C3 /* PrinterCheck.swift in Sources */ = {isa = PBXBuildFile; fileRef = 112D6ADABF2AF7AAEB888655 /* PrinterCheck.swift */; };
 		0EFA54A02DBEEF87FFF4215E /* ModelAccessModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC5F2C1001F7210EDDAC44F0 /* ModelAccessModelTests.swift */; };
@@ -177,6 +178,7 @@
 		597C236AD2F8BEAB989B447D /* ModelAccessViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelAccessViews.swift; sourceTree = "<group>"; };
 		59A8B37FDCCE714A49CB678C /* FileImagesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileImagesTests.swift; sourceTree = "<group>"; };
 		5A63BE8D6BD19AFFDA3F5D4E /* SettingsViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsViews.swift; sourceTree = "<group>"; };
+		72682441B6240267DE248E3B /* PrinterSetupViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrinterSetupViews.swift; sourceTree = "<group>"; };
 		6085C88754126EAB39C66248 /* Objects.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Objects.swift; sourceTree = "<group>"; };
 		65E3A0D63F7083BD2ECAB4E5 /* CompanionSettingsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompanionSettingsTests.swift; sourceTree = "<group>"; };
 		666DD15803F0A0C9F25C5AB3 /* PairingSessionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingSessionTests.swift; sourceTree = "<group>"; };
@@ -357,6 +359,7 @@
 				E755D06CBF436291D928B062 /* PublishedModel.swift */,
 				A1DA7ED6F82EDD9901D021D2 /* Runtime.swift */,
 				5A63BE8D6BD19AFFDA3F5D4E /* SettingsViews.swift */,
+				72682441B6240267DE248E3B /* PrinterSetupViews.swift */,
 				887E68D99AD15299EF044892 /* Style.swift */,
 			);
 			path = App;
@@ -588,6 +591,7 @@
 				1AD68916037597DF36587C57 /* PublishedModel.swift in Sources */,
 				16062DFD6EE91A1948D2FD7F /* Runtime.swift in Sources */,
 				02C51868139E34338B1B6200 /* SettingsViews.swift in Sources */,
+				692B89C0007CA76C08D9851D /* PrinterSetupViews.swift in Sources */,
 				CD2C9A9B185AB263C69CF1F9 /* Style.swift in Sources */,
 				41E6E16B1111A02496D50670 /* UnixTransport.swift in Sources */,
 			);

@@ -318,6 +318,8 @@ public extension ControlClient {
         case "objects.estimate": return 190 // it slices: 180 s on the companion
         case "objects.pausePrint", "objects.resumePrint", "objects.cancelPrint": return 140 // 130 s on the companion
         case "printers.route": return 35 // 25 s on the companion: it may start the MCP's session first
+        case "printers.mcps": return 15 // it looks for copies in the home folder
+        case "printers.installMcp": return 25 // 15 s on the companion (the npm lookup is bounded to 7 s)
         default: return 30
         }
     }
@@ -453,5 +455,57 @@ public extension ControlClient {
         struct Reply: Decodable { let blender: BlenderAddonStatus }
         let reply: Reply = try await call("blender." + action.rawValue)
         return reply.blender
+    }
+}
+
+/// `printers.mcps`: one of the two printer MCPs, and whether this Mac has a copy of it (a printer's, the app's own,
+/// or a folder of its own). One it hasn't is offered as Download.
+public struct PrinterMcpPackage: Decodable, Sendable, Equatable, Identifiable {
+    public struct Install: Decodable, Sendable, Equatable {
+        /// `npx`, `global`, `app`, `checkout` or `folder`.
+        public let kind: String
+        public let path: String?
+        public let version: String?
+        public init(kind: String, path: String? = nil, version: String? = nil) { self.kind = kind; self.path = path; self.version = version }
+    }
+    /// The npm package: `bambu-printer-mcp` or `mcp-3d-printer-server`.
+    public let package: String
+    /// As people know it: `mcp-3D-printer-server`.
+    public let label: String
+    public let description: String
+    public let installed: Bool
+    public let version: String?
+    public let latestVersion: String?
+    /// The id Download's `mcp.update.*` events carry.
+    public let appMcpId: String
+    public let installs: [Install]
+    public var id: String { package }
+    public init(package: String, label: String, description: String, installed: Bool, version: String? = nil, latestVersion: String? = nil,
+                appMcpId: String, installs: [Install] = []) {
+        self.package = package; self.label = label; self.description = description; self.installed = installed; self.version = version
+        self.latestVersion = latestVersion; self.appMcpId = appMcpId; self.installs = installs
+    }
+}
+
+/// Download's answer: already on this Mac, or the install it started (its progress comes as `mcp.update.*` events).
+public enum McpInstallReply: Sendable {
+    case installed
+    case started(McpUpdate)
+}
+
+public extension ControlClient {
+    /// Settings → Printers, Printer MCPs: both packages, always.
+    func printerMcps() async throws -> [PrinterMcpPackage] {
+        struct Reply: Decodable { let packages: [PrinterMcpPackage] }
+        let reply: Reply = try await call("printers.mcps")
+        return reply.packages
+    }
+
+    /// Download: installs only `package`, into the app's own copy, when this Mac has no copy of it.
+    func installPrinterMcp(_ package: String) async throws -> McpInstallReply {
+        struct Reply: Decodable { let installed: Bool?; let update: McpUpdate? }
+        let reply: Reply = try await call("printers.installMcp", ["package": .string(package)])
+        if let update = reply.update { return .started(update) }
+        return .installed
     }
 }

@@ -132,6 +132,15 @@ import ControlKit
 extension DesignFixtures {
     /// The mockup's paired phones (mac-devices.jpg): an iPhone connected now and an iPad seen yesterday.
     static func macStatus() -> FixtureMac? { assets == nil ? nil : FixtureMac() }
+    /// Settings → Printers, Printer MCPs: one installed, one offered as Download.
+    static func printerMcps() -> [PrinterMcpPackage]? {
+        guard assets != nil else { return nil }
+        return [PrinterMcpPackage(package:"bambu-printer-mcp", label:"bambu-printer-mcp", description:"Bambu Lab printers", installed:true,
+                                  version:"1.1.50", latestVersion:"1.1.50", appMcpId:"mcp-00000000000000b1", installs:[.init(kind:"app", version:"1.1.50")]),
+                PrinterMcpPackage(package:"mcp-3d-printer-server", label:"mcp-3D-printer-server",
+                                  description:"Prusa, Klipper, OctoPrint, Duet, Repetier, Creality — and Bambu", installed:false,
+                                  latestVersion:"1.2.17", appMcpId:"mcp-00000000000000c2")]
+    }
 }
 
 struct FixtureMac: MacStatusSource {

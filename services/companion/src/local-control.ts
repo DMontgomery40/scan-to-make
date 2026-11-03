@@ -36,7 +36,7 @@ export function methodDeadlineMs(method: ControlMethod, params: unknown): number
   if (method === 'objects.correct') return 25_000; // a completion classification is bounded to 20 s
   if (method === 'objects.estimate') return 180_000;
   // npm lookup is bounded to 7 s, then admission waits at most 250 ms; longer printer checks continue under the update reservation.
-  if (method === 'printers.updateMcp') return 15_000;
+  if (method === 'printers.updateMcp' || method === 'printers.installMcp') return 15_000;
   // Starting the printer MCP's session can take a few seconds before its route is read.
   if (method === 'printers.route') return 25_000;
   // The printer MCP may ask its own confirmation; the call waits up to 120 s for it.

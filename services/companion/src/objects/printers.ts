@@ -31,6 +31,8 @@ export interface PrinterCatalog {
    * destination that won over it for the same printer. Undefined for an unknown id.
    */
   canonical(id: string): string | undefined;
+  /** Every profile found, listed or merged into another for the same printer (installs, Settings). */
+  entries(): {id: string; backend: PrinterBackend; config: PrinterHandoffConfig}[];
 }
 
 export interface PrinterCatalogOptions {
@@ -303,5 +305,6 @@ export async function loadPrinterCatalog(current: PrinterHandoffConfig, options:
     .map(({id, name, backend, model, address, source, origin}) => ({id, name, backend, ...(model ? {model} : {}), ...(address ? {address} : {}), source, origin}));
   return {defaultDestinationId, destinations,
     resolve(id) { const config = configs.get(id); return config ? structuredClone(config) : undefined; },
-    canonical(id) { return canonical.get(id); }};
+    canonical(id) { return canonical.get(id); },
+    entries() { return candidates.map(candidate => ({id: candidate.id, backend: candidate.backend, config: structuredClone(candidate.config)})); }};
 }

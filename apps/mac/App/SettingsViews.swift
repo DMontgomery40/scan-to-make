@@ -352,7 +352,7 @@ private struct DeviceRow: View {
 struct PrintersSettings: View {
     @ObservedObject var objects: ObjectsModel
     @ObservedObject private var updates = PrinterUpdates.shared
-    /// Only for a companion without `printers.updateMcp`: the package manager's own command, run here.
+    @ObservedObject private var setup = PrinterSetupModel.shared
 
     private var printers: [PrinterDestination] { objects.printerCatalog?.destinations ?? [] }
 
@@ -383,19 +383,40 @@ struct PrintersSettings: View {
                 Text("Counterpart reads these from your MCP configs. Add or edit printers there. The connection is the printer MCP’s own setting: changing it here changes it in that MCP.")
                     .font(.caption).foregroundStyle(.secondary)
             }
-            Section("Printer MCPs") {
+            Section {
                 ForEach(PrinterMCP.list(printers)) { mcp in
                     MCPRow(mcp:mcp, companionUpdates:objects.capabilities?.mcpUpdates == true,
                            status:mcp.mcpId.flatMap { updates.status[$0] },
                            update:{ update(mcp, fresh:false) }, installFresh:{ update(mcp, fresh:true) })
                 }
-                if PrinterMCP.list(printers).isEmpty { Text("None found yet.").foregroundStyle(.secondary) }
+                // Both MCPs, always: one no printer uses yet shows where it is, or Download.
+                ForEach(unusedPackages) { package in
+                    McpPackageRow(package:package, status:updates.status[package.appMcpId], download:{ setup.download(package) })
+                }
+                if PrinterMCP.list(printers).isEmpty && unusedPackages.isEmpty { Text("None found yet.").foregroundStyle(.secondary) }
+            } header: { Text("Printer MCPs") } footer: {
+                if setup.available {
+                    Text("Download installs that MCP for Counterpart only. You need just the one your printer uses.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
             }
         }
         .formStyle(.grouped)
         .focusEffectDisabled()
         .frame(height:590)
-        .task { await objects.refresh() }
+        .task { await objects.refresh(); await setup.refresh() }
+        .onChange(of:updates.status) { _, status in
+            // A download that finished: read the packages (and printers) again.
+            if setup.packages.contains(where: { if case .updated = status[$0.appMcpId] { return true }; return false }) {
+                Task { await setup.refresh(); await objects.refresh() }
+            }
+        }
+    }
+
+    /// The packages with no printer row above: neither MCP is ever missing from the list.
+    private var unusedPackages: [PrinterMcpPackage] {
+        let used = Set(PrinterMCP.list(printers).map { $0.name.lowercased() })
+        return setup.packages.filter { !used.contains($0.package) }
     }
 
     static func readiness(_ state: String?) -> String {

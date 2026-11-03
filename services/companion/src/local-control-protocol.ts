@@ -82,6 +82,8 @@ export const parameters = {
   'objects.camera': z.strictObject({id: z.uuid()}),
   'printers.camera': z.strictObject({destinationId: z.string().min(1).max(256)}),
   'printers.route': z.strictObject({destinationId: z.string().min(1).max(256), route: z.enum(['lan', 'cloud']).optional()}),
+  'printers.mcps': empty,
+  'printers.installMcp': z.strictObject({package: z.enum(['bambu-printer-mcp', 'mcp-3d-printer-server'])}),
   'printers.updateMcp': z.strictObject({mcpId: z.string().regex(/^mcp-[0-9a-f]{16}$/), fresh: z.boolean().optional()}),
   'fusion.report': z.strictObject({installed:z.boolean(), configured:z.boolean(), running:z.boolean()}),
   'fusion.claimSetup': z.strictObject({claimantId:z.uuid()}),

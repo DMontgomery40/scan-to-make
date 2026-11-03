@@ -5,7 +5,7 @@ import {dirname, join} from 'node:path';
 import type {PrinterHandoffConfig, PrinterSession} from '@scan-to-make/printer-handoff';
 import {newerVersion} from './directory.js';
 import type {PrintGate} from './print-gate.js';
-import {findNpm, installedVersion, mcpIdFor, resolveMcpInstall, type InstallEnvironment, type McpInstall, type ResolvedMcpInstall} from './mcp-install.js';
+import {appInstall, findNpm, installedVersion, mcpIdFor, resolveMcpInstall, type InstallEnvironment, type McpInstall, type ResolvedMcpInstall} from './mcp-install.js';
 
 export const MCP_UPDATE_TIMEOUT_MS = 10 * 60_000;
 /** PRD §8.10: the latest version is checked once a day, and when Settings opens (a list read after an hour). */
@@ -421,8 +421,71 @@ export class McpUpdater {
   }
 
   #freshInstall(config: PrinterHandoffConfig): McpInstall & {type: 'app'} {
-    const pkg = config.backend, prefix = join(this.#deps.env.appPrinters, pkg === 'bambu-printer-mcp' ? 'bambu' : 'generic');
-    return {type: 'app', pkg, prefix, node: this.#deps.node, entry: join(prefix, 'lib', 'node_modules', pkg, 'dist', 'index.js')};
+    return appInstall(config.backend, this.#deps.env, this.#deps.node) as McpInstall & {type: 'app'};
+  }
+
+  /**
+   * Download (`printers.installMcp`): installs the latest `pkg` into the app's own copy when no printer uses it yet,
+   * with the same staged npm install and swap as Update, and the same mcp.update.* events (keyed by the app copy's id).
+   * The caller checks the package isn't installed anywhere first; this never touches another install.
+   */
+  download(pkg: PrinterHandoffConfig['backend']): Promise<McpUpdate> {
+    const install = this.#freshInstall({backend: pkg, process: {command: this.#deps.node}} as PrinterHandoffConfig);
+    const mcpId = mcpIdFor(install, {backend: pkg, process: {command: this.#deps.node}} as PrinterHandoffConfig);
+    const running = this.#active.get(mcpId);
+    if (running) return Promise.resolve({...running});
+    const starting = this.#starting.get(mcpId);
+    if (starting) return starting.then(update => ({...update}));
+    const work = (async (): Promise<McpUpdate> => {
+      const cached = this.#latest.get(pkg);
+      const looking = cached?.version && this.#now() - cached.atMs < LATEST_ON_VIEW_MS ? Promise.resolve(cached.version) : this.checkLatest(pkg).catch(() => undefined);
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const latest = await Promise.race([looking, new Promise<'slow'>(resolve => { timer = setTimeout(() => resolve('slow'), this.#deps.lookupTimeoutMs ?? LOOKUP_TIMEOUT_MS); })])
+        .finally(() => clearTimeout(timer));
+      if (latest === 'slow') throw new McpUpdateError('unavailable', `npm is slow to answer for ${pkg}. Try Download again in a moment.`);
+      if (!latest) throw new McpUpdateError('unavailable', `Counterpart couldn't ask npm for the latest ${pkg}. Check this Mac's internet connection.`);
+      // A fresh copy or update of the same files is running: this waits for the next tap.
+      if (this.#changing.has(mcpId)) throw new McpUpdateError('unavailable', `${pkg} is being installed already. Try again when it finishes.`);
+      const update: McpUpdate = {mcpId, state: 'started', toVersion: latest};
+      this.#active.set(mcpId, update);
+      this.#changing.set(mcpId, mcpId);
+      void this.#performDownload(install, update, latest);
+      return update;
+    })().finally(() => this.#starting.delete(mcpId));
+    this.#starting.set(mcpId, work);
+    return work.then(update => ({...update}));
+  }
+
+  async #performDownload(install: McpInstall & {type: 'app'}, update: McpUpdate, latest: string): Promise<void> {
+    const pkg = install.pkg as PrinterHandoffConfig['backend'];
+    let log = '';
+    const staging = join(install.prefix, `.counterpart-update-${randomUUID()}`);
+    const live = join(install.prefix, 'lib', 'node_modules', pkg), staged = join(staging, 'lib', 'node_modules', pkg), kept = join(staging, 'previous');
+    try {
+      await this.#emit('mcp.update.started', pkg, update);
+      const plan = this.#plan(install, latest);
+      if ('fail' in plan) throw Object.assign(new Error(plan.fail), {sentence: plan.fail});
+      if (plan.kind !== 'npm') throw new Error('not an npm install');
+      await this.#fs.mkdir(install.prefix);
+      const result = await this.#run(plan.command, [...plan.args, 'install', '--global', '--prefix', staging, `${pkg}@${latest}`], {env: plan.env, timeoutMs: MCP_UPDATE_TIMEOUT_MS});
+      log += `$ ${[plan.command, ...plan.args, 'install', '--global', '--prefix', staging, `${pkg}@${latest}`].join(' ')}\n${result.output}\n`;
+      if (result.code !== 0) throw new Error('npm install failed');
+      if (!this.#deps.env.exists(join(staged, 'package.json'))) throw new Error('npm install left no package');
+      await this.#fs.mkdir(dirname(live));
+      // A copy without its package.json (an interrupted install) isn't an install: it is set aside, then removed.
+      if (this.#deps.env.exists(live)) await this.#fs.rename(live, kept);
+      await this.#fs.rename(staged, live);
+      await this.#fs.rm(staging).catch(() => undefined);
+      this.#active.delete(update.mcpId);
+      await this.#emit('mcp.update.done', pkg, {...update, toVersion: installedVersion(install, this.#deps.env) ?? latest});
+    } catch (error) {
+      await this.#fs.rm(staging).catch(() => undefined);
+      this.#active.delete(update.mcpId);
+      const sentence = (error as {sentence?: string}).sentence;
+      await this.#emit('mcp.update.failed', pkg, update, tail(sentence ? `${log}${sentence}\n` : log || String((error as Error).message)));
+    } finally {
+      this.#changing.delete(update.mcpId);
+    }
   }
 
   #env(npm: string, node?: string): NodeJS.ProcessEnv {
