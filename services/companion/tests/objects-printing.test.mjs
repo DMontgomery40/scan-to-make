@@ -109,6 +109,35 @@ const status = (state, progress, extra = {}) => ({connected: true, print: {filen
   raw: {gcode_state: state, subtask_name: JOB, task_id: '0', ...extra}});
 const reset = f => f.store.update(f.object.id, o => ({...o, state: 'ready', print: undefined}));
 
+test('a rejected print preparation publishes its saved failure to the connected phone', async t => {
+  const f = await setup(t);
+  f.deps.print.services.runner.runBundle = async (store, id, options) => {
+    await options.onProgress({phase: 'requesting-print'});
+    await store.setStatus(id, 'failed', 'tool-failed');
+    throw new Error('The authenticated printer connection failed.');
+  };
+  const started = await f.service.print(f.object.id);
+  await f.service.settled(f.object.id);
+  const terminal = f.events.find(e => e.type === 'print.not-started');
+  assert.ok(terminal, 'the phone must receive a terminal event without reopening the project');
+  assert.equal(terminal.printId, started.print.printId);
+  assert.equal(terminal.detail.reason, 'The authenticated printer connection failed.');
+  assert.equal((await f.service.get(terminal.projectId)).state, 'failed');
+});
+
+test('an uncertain print dispatch publishes the saved state without claiming the printer stopped', async t => {
+  const f = await setup(t);
+  f.deps.print.services.runner.runBundle = async (store, id) => {
+    await store.setStatus(id, 'uncertain', 'dispatch-uncertain');
+    throw new Error('Connection lost during dispatch');
+  };
+  await f.service.print(f.object.id);
+  await f.service.settled(f.object.id);
+  assert.ok(f.events.some(e => e.type === 'project.updated'));
+  assert.equal(f.events.some(e => ['print.failed', 'print.not-started', 'print.cancelled'].includes(e.type)), false);
+  assert.equal((await f.service.get(f.object.id)).print.uncertain, true);
+});
+
 test('"printed" means printed: Print leaves the project printing until the printer reports this job done', async t => {
   const f = await setup(t, {reports: [status('FINISH', 100, {subtask_name: 'old job'}), status('PREPARE', 0), status('RUNNING', 3), status('RUNNING', 51), status('FINISH', 100)]});
   const started = await f.service.print(f.object.id);

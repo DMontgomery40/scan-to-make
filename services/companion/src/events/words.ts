@@ -160,7 +160,7 @@ export function eventWords(type: CounterpartEventType, data: CounterpartEvent['d
     case 'print.done': title = `${t} is done`; body = 'Take it off the plate.'; break;
     case 'print.failed': title = `${printer} stopped ${t}`; body = printerStopped(data?.problems?.[0]); break;
     case 'print.cancelled': title = `${t} was cancelled`; body = 'Nothing more will print.'; break;
-    case 'print.not-started': title = `${printer} didn't start ${t}`; body = 'Nothing was sent twice. Check the printer, then press Print again.'; break;
+    case 'print.not-started': title = `${printer} didn't start ${t}`; body = context.reason ?? 'Nothing was sent twice. Check the printer, then press Print again.'; break;
     case 'print.unreachable': title = `Lost contact with ${printer}`; body = 'Still trying.'; break;
     case 'settings.changed': title = 'Counterpart settings'; body = 'Settings updated'; break;
     case 'project.updated': title = t; body = 'Project updated'; break;

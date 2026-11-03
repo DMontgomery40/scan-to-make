@@ -1,5 +1,35 @@
 # Handoff: how to pick up Counterpart work
 
+## Active continuation — 2026-11-02, about 22:36 Mountain
+
+This supersedes the installation state below. Counterpart PR #290 merged as `d9819488` after
+the full review window, exact-head Codex/Cursor reviews without findings, and SAFE branch guard.
+Node 22/24 companion workflow checks each passed 741 tests with one skip using the documented
+Python 3.12/USD/Blender environment. Postmerge hosted jobs executed zero steps and remain billing-blocked.
+
+Signed Mac and Davica3 builds `202611022325` from reviewed `59f35e98` are installed, with
+Bambu 1.1.52 plus local patch `4243272`. Deployment explicitly quit/relaunched Counterpart and
+restarted its companion once to load code. FULU/Colima were untouched. Six projects' current
+models/photos, seven pairings, TLS and configuration match before/after preservation receipts.
+
+**Actual app Stop FAILED again:** at about 22:30, Mac Counterpart Stop → Stop Printing returned
+`FULU authenticated stop was rejected (-4)`; the same print continued from 82% to 94%.
+No Stop success is claimed. `-4` is the upstream generic SEND_MSG_FAILED, not proof of a particular
+certificate failure. The existing FULU session omits the `on_message` callback and ignores the
+`device_cert_installed` readiness message that FULU v1.0.0 consumes. A new Bambu source correction
+waits for that scoped callback before one Stop submission; regression checks pass, full checks/review
+are running. This next patch is NOT installed yet. No automatic Stop replay or alternative control path.
+
+Real-print Live Activity failure reproduced: foreground app showed 72%, Lock Screen still 0% /
+Waiting for an update. Companion/Mac consumed current progress events but registered activity tokens
+were empty. Read-only phone preferences include current print `88ebb9f5-1811-448f-aacd-c989ee7c5c9c`
+in dismissed activities; the cause remains under investigation. No preferences/tokens were reset.
+
+Evidence and rollback: `~/scan-to-make-work/codex-stop-continuation-20261102`. Original print still
+running at 94% / 2 min at the last UI read. Recheck before another test; natural completion is not Stop.
+All 40 asks remain in scope. Primary checkout is now `feat/counterpart-print-state-delivery` on
+`d9819488`; Bambu remains `feat/counterpart-authenticated-stop` with the callback patch pending.
+
 ## CRITICAL continuation — 2026-11-02, about 22:17 Mountain
 
 This section supersedes optimistic acceptance statements below. David requested a handoff;

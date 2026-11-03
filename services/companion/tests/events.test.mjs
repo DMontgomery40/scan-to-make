@@ -96,6 +96,12 @@ test('project.deleted keeps the title the project had, though the project can no
   CounterpartEventSchema.parse(event);
 });
 
+test('a rejected preparation keeps the printer service reason in the event', () => {
+  const words = eventWords('print.not-started', undefined, {title: 'Mic mount', printer: 'P1S', reason: 'The authenticated printer connection failed.'});
+  assert.equal(words.body, 'The authenticated printer connection failed.');
+  assert.equal(words.title, "P1S didn't start Mic mount");
+});
+
 test('every event type has words within the limits, and the state line matches the PRD table', () => {
   const context = {title: 'Mic mount', printer: 'Bambu Lab P1S', size: '60 × 45 × 22 mm', item: 'a spool', question: 'Can you take a close-up of the clip?', reason: 'Blender stopped responding.'};
   for (const type of Object.keys(NOTIFY)) {

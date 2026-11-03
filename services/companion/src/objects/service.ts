@@ -905,7 +905,15 @@ export class ObjectService {
             return this.#deps.store.update(id, o => ({...o, state: 'ready', progress: undefined, printConfirmation: undefined, failure: settingsUnsupported(runner.backend, options)}));
           return this.#deps.store.update(id, o => ({...o, state: 'failed', progress: undefined, printConfirmation: undefined, failure: error instanceof PrinterMcpError && error.detail ? error.detail : error instanceof Error ? error.message : String(error)}));
         })
-      .then(o => this.#changed(o))
+      .then(async o => {
+        if (o.print?.bundleId === manifest.id && !o.print.dispatchedAt && (o.state === 'failed' || o.state === 'ready')) {
+          // The connected phone reloads on events, not #changed. Publish only
+          // after saving the outcome so its reload sees this failure immediately.
+          const type = o.print.uncertain ? 'project.updated' : this.#cancelledPrints.has(id) ? 'print.cancelled' : 'print.not-started';
+          await this.#emit({id: randomUUID(), type, ...eventBase, ...(o.failure ? {detail: {reason: o.failure}} : {})});
+        }
+        return this.#changed(o);
+      })
       .finally(() => {
         release();
         unsubscribe(); this.#running.delete(id); this.#controllers.delete(id);
