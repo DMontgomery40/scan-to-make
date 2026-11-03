@@ -8,7 +8,7 @@ import {appInstall, appMcpId, installedVersion, resolveMcpInstall, type InstallE
 import type {McpUpdate} from './mcp-updates.js';
 import type {PrinterCatalog} from '../objects/printers.js';
 import {discoverBambu, discoverBonjour, modelFromSerial, BAMBU_SERIAL_MODELS, BONJOUR_TYPES, type BambuAdvert, type BonjourService} from './discovery.js';
-import {changeProfiles, newProfileId, readProfiles, settingsGap, type SavedProfile} from './profiles.js';
+import {changeProfiles, findBambuRoute, newProfileId, readProfiles, readsRouteSettings, settingsGap, type RouteSource, type SavedProfile} from './profiles.js';
 
 /**
  * Settings → Printers: both printer MCPs, whether this Mac has each, and Download for one it hasn't. The MCPs are
@@ -333,11 +333,13 @@ export class PrinterSetup {
       if (!read?.host) continue;
       // A model its .env lacks: the printer's own announcement (DevModel) first, else its serial number.
       const announced = bambu.printers.find(printer => read.serial && printer.serial.toUpperCase() === read.serial)?.model;
-      const gap = settingsGap(folder.package, read.env, {...(announced ? {model: announced} : {}), modelFromSerial});
+      const route = await this.#route(folder.package, read.env, join(folder.dir, 'dist', 'index.js'), folder.dir);
+      const gap = settingsGap(folder.package, read.env, {...(announced ? {model: announced} : {}), modelFromSerial, ...(route ? {route} : {})});
       const model = read.model ?? gap.fill.BAMBU_MODEL;
       found.push({id: `folder:${folder.dir}`, source: 'folder', name: this.#nameFor(read.printerType, model, read.host, folder.package),
         backend: folder.package, printerType: read.printerType, host: read.host, ...(read.serial ? {serial: read.serial} : {}),
-        ...(model ? {model} : {}), folder: folder.dir, added: false, ...(gap.missing.length ? {missing: gap.missing, fill: gap.fill} : {})});
+        ...(model ? {model} : {}), folder: folder.dir, added: false,
+        ...(gap.missing.length || Object.keys(gap.fill).length ? {missing: gap.missing, fill: gap.fill} : {})});
     }
     for (const printer of bambu.printers) {
       const model = printer.model ?? modelFromSerial(printer.serial);
@@ -426,7 +428,7 @@ export class PrinterSetup {
         || (await readProfiles(this.#profilesPath)).profiles.some(item => item.process.cwd === read.found.dir))
         throw new PrinterSetupError('conflict', 'That printer MCP is one of your printers already.');
       // Its .env gains only what its MCP needs and lacks, and only the model; nothing there is changed.
-      const model = await this.#completeEnv(read.found.dir, read.found.package, input.model);
+      const model = await this.#completeEnv(read.found.dir, read.found.package, input.model, join(read.found.dir, 'dist', 'index.js'));
       profile = {id, name: this.#nameFor(read.printerType, model ?? read.model, read.host, read.found.package), backend: read.found.package,
         process: {command: this.#node, args: [join(read.found.dir, 'dist', 'index.js')], cwd: read.found.dir}, owned: false,
         ...((model ?? read.model) && /^[a-z0-9]{1,16}$/.test(model ?? read.model!) ? {model: model ?? read.model!} : {})};
@@ -452,23 +454,52 @@ export class PrinterSetup {
     return {id, destinationId, ...(destinationId !== id ? {sameAs: destinationId} : {})};
   }
 
+  /** Every `.env` another MCP config on this Mac runs with: the catalog's profiles (their working directory, or the one
+   * an ssh-wrapped command `cd`s into), folders found on the Mac, and Counterpart's own profiles. */
+  async #envPaths(): Promise<string[]> {
+    const paths: string[] = [];
+    for (const {id, config} of this.deps.configs()) for (const profile of [config, this.deps.effective?.(id, config) ?? config]) {
+      if (profile.process.cwd) paths.push(join(profile.process.cwd, '.env'));
+      const via = resolveMcpInstall(profile, this.deps.env).via?.cwd;
+      if (via && isAbsolute(via)) paths.push(join(via, '.env'));
+    }
+    for (const folder of await (this.deps.folders?.() ?? Promise.resolve([])).catch(() => [])) if (folder.hasEnv) paths.push(join(folder.dir, '.env'));
+    for (const profile of (await readProfiles(this.#profilesPath)).profiles) paths.push(join(profile.process.cwd, '.env'));
+    return [...new Set(paths)];
+  }
+
   /**
-   * Appends the model to an MCP's `.env` when it needs one and has none: `model` (the person's choice), else the
-   * serial number's. Other lines, values, order and the file's mode stay as they are; secrets are never written here.
+   * The authenticated route to offer an mcp-3D-printer-server Bambu printer whose `.env` sets none: the one another
+   * MCP config uses for the same serial (`bambu_network` with a bridge command), and only when this copy reads it.
+   */
+  async #route(backend: PrinterBackend, env: Record<string, string | undefined>, entry: string | undefined, dir: string): Promise<RouteSource | undefined> {
+    if (backend !== 'mcp-3d-printer-server' || env.PRINTER_TYPE?.trim().toLowerCase() !== 'bambu' || env.BAMBU_DEFAULT_CONNECTION_MODE?.trim()) return undefined;
+    if (!(await readsRouteSettings(entry))) return undefined;
+    const own = join(dir, '.env');
+    return findBambuRoute(env.BAMBU_SERIAL ?? env.BAMBU_PRINTER_SERIAL, (await this.#envPaths()).filter(path => path !== own));
+  }
+
+  /**
+   * Appends what an MCP's `.env` needs and lacks: the model (`model`, the person's choice, else the serial number's)
+   * and, for an mcp-3D-printer-server Bambu printer, the authenticated route another MCP uses for it (its lines
+   * verbatim). Other lines, values, order and the file's mode stay as they are; nothing already there is rewritten.
    * Returns the model the printer has now (written or already there). A model nobody can tell is refused.
    */
-  async #completeEnv(dir: string, backend: PrinterBackend, model?: string): Promise<string | undefined> {
+  async #completeEnv(dir: string, backend: PrinterBackend, model: string | undefined, entry: string | undefined): Promise<string | undefined> {
     const path = join(dir, '.env');
     const text = await readFile(path, 'utf8');
     const env = parseEnv(text);
-    const gap = settingsGap(backend, env, {...(model ? {model} : {}), modelFromSerial});
+    const route = await this.#route(backend, env, entry, dir);
+    const gap = settingsGap(backend, env, {...(model ? {model} : {}), modelFromSerial, ...(route ? {route} : {})});
     const existing = (env.BAMBU_MODEL ?? env.BAMBU_PRINTER_MODEL)?.trim().toLowerCase();
-    if (!gap.missing.includes('BAMBU_MODEL')) return existing;
-    const value = gap.fill.BAMBU_MODEL;
-    if (!value) throw new PrinterSetupError('invalid', 'Choose the printer’s model: its MCP needs it, and Counterpart couldn’t tell it from the printer.');
-    if (!MODELS[backend].includes(value)) throw new PrinterSetupError('invalid', `${this.#label(backend)} doesn’t know that model.`);
-    await appendFile(path, `${text.length && !text.endsWith('\n') ? '\n' : ''}BAMBU_MODEL='${value}'\n`);
-    return value;
+    if (gap.missing.includes('BAMBU_MODEL')) {
+      const value = gap.fill.BAMBU_MODEL;
+      if (!value) throw new PrinterSetupError('invalid', 'Choose the printer’s model: its MCP needs it, and Counterpart couldn’t tell it from the printer.');
+      if (!MODELS[backend].includes(value)) throw new PrinterSetupError('invalid', `${this.#label(backend)} doesn’t know that model.`);
+    }
+    const lines = Object.values(gap.lines);
+    if (lines.length) await appendFile(path, `${text.length && !text.endsWith('\n') ? '\n' : ''}${lines.join('\n')}\n`);
+    return gap.fill.BAMBU_MODEL ?? existing;
   }
 
   /**
@@ -482,7 +513,7 @@ export class PrinterSetup {
     if (!profile) throw new PrinterSetupError('not-found', 'Only printers added in Counterpart can be completed here.');
     const listed = this.deps.catalog?.()?.canonical(profile.id) ?? profile.id;
     if (await this.deps.busy?.(listed)) throw new PrinterSetupError('conflict', 'This printer is printing. Complete its settings when the print finishes.');
-    const now = await this.#completeEnv(profile.process.cwd, profile.backend, model);
+    const now = await this.#completeEnv(profile.process.cwd, profile.backend, model, profile.process.args.find(arg => isAbsolute(arg) && arg.endsWith('.js')));
     if (now && /^[a-z0-9]{1,16}$/.test(now) && profile.model !== now)
       await changeProfiles(this.#profilesPath, state => { const item = state.profiles.find(entry => entry.id === profile.id); if (item) item.model = now; });
     await this.deps.reload?.();

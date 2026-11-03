@@ -418,7 +418,11 @@ struct SettingsGapNote: View {
         VStack(alignment:.leading, spacing:2) {
             if !fill.isEmpty {
                 Text("Counterpart will add " + fill.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator:", ") + " to its settings.")
-                    .font(.caption).foregroundStyle(Color.filament)
+                    .font(.caption).foregroundStyle(Color.filament).textSelection(.enabled)
+            }
+            if fill["BAMBU_DEFAULT_CONNECTION_MODE"] != nil {
+                Text("The connection settings are the authenticated route bambu-printer-mcp uses for this printer.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
             if unfilled.contains("BAMBU_MODEL") { Text("Choose its model: its MCP needs one.").font(.caption).foregroundStyle(.secondary) }
             if !others.isEmpty {
@@ -440,12 +444,13 @@ struct AddedPrinterActions: View {
     @State private var completing = false
 
     private var needsModel: Bool { printer.incomplete?.missing.contains("BAMBU_MODEL") == true && printer.incomplete?.fill["BAMBU_MODEL"] == nil }
-    private var canComplete: Bool { printer.incomplete?.missing.contains("BAMBU_MODEL") == true }
+    /// Anything to add: a model (filled or chosen here), or settings Counterpart found for this printer.
+    private var canComplete: Bool { printer.incomplete.map { $0.missing.contains("BAMBU_MODEL") || !$0.fill.isEmpty } ?? false }
 
     var body: some View {
         VStack(alignment:.leading, spacing:6) {
             if let incomplete = printer.incomplete {
-                SettingsGapNote(missing:incomplete.missing, fill:model.isEmpty ? incomplete.fill : ["BAMBU_MODEL": model])
+                SettingsGapNote(missing:incomplete.missing, fill:model.isEmpty ? incomplete.fill : incomplete.fill.merging(["BAMBU_MODEL": model]) { $1 })
                 if canComplete {
                     HStack(spacing:8) {
                         if needsModel {

@@ -6,7 +6,8 @@ import {basename, delimiter, dirname, isAbsolute, join, resolve} from 'node:path
 import {parseEnv} from 'node:util';
 import {printerHandoffConfigSchema, printerSelectionSchema, type PrinterBackend, type PrinterHandoffConfig, type PrinterMcpProcess} from '@scan-to-make/printer-handoff';
 import {parseToml} from './toml.js';
-import {readProfiles, settingsGap} from '../printing/profiles.js';
+import {findBambuRoute, readProfiles, readsRouteSettings, settingsGap, type RouteSource} from '../printing/profiles.js';
+import {hostEnvironment, resolveMcpInstall} from '../printing/mcp-install.js';
 import {modelFromSerial} from '../printing/discovery.js';
 
 /** Configured destinations, not claims about live printer connectivity. */
@@ -203,6 +204,8 @@ interface Candidate {
   config: PrinterHandoffConfig;
   folder?: string;
   incomplete?: {missing: string[]; fill: Record<string, string>};
+  /** A Counterpart profile's recorded model. */
+  profileModel?: string;
 }
 
 async function readDocument(path: string): Promise<RecordValue | undefined> {
@@ -287,11 +290,10 @@ async function buildCatalog(current: PrinterHandoffConfig, options: PrinterCatal
     // The model Counterpart recorded, else the MCP's own: tool calls need it (bambu_model) before the MCP's defaults apply.
     const model = profile.model ?? meta.model;
     if (model || meta.printerType) config.selection = {...(model ? {model} : {}), ...(meta.printerType ? {printerType: meta.printerType} : {})};
-    const gap = settingsGap(profile.backend, await environment(join(profile.process.cwd, '.env')), {...(profile.model ? {model: profile.model} : {}), modelFromSerial});
     seenProfiles.add(JSON.stringify([profile.backend, profile.process]));
     candidates.push({id: profile.id, name: profile.name, backend: profile.backend, address: meta.address, ...(model ? {model} : {}),
       source: 'mcp-profile', origin: 'counterpart', keys: meta.keys, bambuKind: meta.bambuKind, ...(meta.serial ? {serial: meta.serial} : {}),
-      config, folder: profile.process.cwd, ...(gap.missing.length ? {incomplete: gap} : {})});
+      config, folder: profile.process.cwd, ...(profile.model ? {profileModel: profile.model} : {})});
   }
   const queue = (options.sourcePaths ?? defaultSources(home)).map(path => ({path: expand(path, home, home), origin: undefined as PrinterOrigin | undefined}));
   const visited = new Set<string>();
@@ -346,6 +348,25 @@ async function buildCatalog(current: PrinterHandoffConfig, options: PrinterCatal
         ...(meta.model ? {model: meta.model} : {}), source: 'mcp-profile', origin, keys: meta.keys, bambuKind: meta.bambuKind,
         ...(meta.serial ? {serial: meta.serial} : {}), config});
     }
+  }
+  // What a Counterpart printer's .env lacks, with the authenticated route another config here uses for the same serial.
+  const installEnv = {...hostEnvironment(''), home};
+  const envPaths = (config: PrinterHandoffConfig) => {
+    const via = resolveMcpInstall(config, installEnv).via?.cwd;
+    return [...(config.process.cwd ? [join(config.process.cwd, '.env')] : []), ...(via && isAbsolute(via) ? [join(via, '.env')] : [])];
+  };
+  for (const candidate of candidates) {
+    if (candidate.origin !== 'counterpart' || !candidate.folder) continue;
+    const env = await environment(join(candidate.folder, '.env'));
+    let route: RouteSource | undefined;
+    if (candidate.backend === 'mcp-3d-printer-server' && env.PRINTER_TYPE?.trim().toLowerCase() === 'bambu' && !env.BAMBU_DEFAULT_CONNECTION_MODE?.trim()
+      && await readsRouteSettings(candidate.config.process.args?.find(arg => isAbsolute(arg) && arg.endsWith('.js')))) {
+      const own = join(candidate.folder, '.env');
+      route = await findBambuRoute(env.BAMBU_SERIAL ?? env.BAMBU_PRINTER_SERIAL,
+        candidates.flatMap(other => other === candidate ? [] : envPaths(other.config)).filter(path => path !== own));
+    }
+    const gap = settingsGap(candidate.backend, env, {...(candidate.profileModel ? {model: candidate.profileModel} : {}), modelFromSerial, ...(route ? {route} : {})});
+    if (gap.missing.length || Object.keys(gap.fill).length) candidate.incomplete = {missing: gap.missing, fill: gap.fill};
   }
   const {chosen, groups} = winners(candidates, saved?.choices);
   const configs = new Map(candidates.map(candidate => [candidate.id, candidate.config] as const));

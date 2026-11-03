@@ -531,3 +531,73 @@ test('review fix (#295): an MCP known only through an npx profile is not "instal
   assert.deepEqual(downloads, ['mcp-3d-printer-server']);
   await assert.rejects(setup.check({backend: 'mcp-3d-printer-server', printerType: 'octoprint', host: 'octopi.local', port: '80', secret: 'k'}), /Download mcp-3D-printer-server first/);
 });
+
+test('an mcp-3D-printer-server Bambu printer with no route gets the authenticated route another MCP uses for the same serial: its three lines, verbatim, only when that MCP reads them', async t => {
+  const {PrinterSetup} = await import('../dist/printing/setup.js');
+  const {hostEnvironment} = await import('../dist/printing/mcp-install.js');
+  const {stat, chmod} = await import('node:fs/promises');
+  const home = await mkdtemp(join(tmpdir(), 'printer-route-'));
+  t.after(() => rm(home, {recursive: true, force: true}));
+  const put = async (file, text) => { await mkdir(join(home, file, '..'), {recursive: true}); await writeFile(join(home, file), text); };
+  // The Mac's own bambu-printer-mcp, run over ssh into ~/bambu-printer-mcp (resolveMcpInstall's via.cwd), printing through FULU.
+  const bambuDir = join(home, 'bambu-printer-mcp');
+  const routeLines = ['BAMBU_DEFAULT_CONNECTION_MODE=bambu_network', 'BAMBU_DEFAULT_CONNECTION_TYPE="lan"',
+    "BAMBU_NETWORK_BRIDGE_COMMAND='ssh -i ~/.ssh/fulu fulu-vm /opt/bridge --printer 01P00A123456789'"];
+  const bambuEnv = (serial, lines = routeLines) => ['PRINTER_HOST=192.0.2.1', `BAMBU_SERIAL=${serial}`, 'BAMBU_TOKEN=55550000', 'BAMBU_MODEL=p1s',
+    'BAMBU_DEV_ID=dev-secret-1', ...lines, 'CLOUD_TOKEN=cloud-secret-2', ''].join('\n');
+  await put('bambu-printer-mcp/.env', bambuEnv('01P00A123456789'));
+  // The clone of mcp-3D-printer-server for the same P1S: no route of its own.
+  const clone = join(home, 'mcp-3D-printer-server');
+  const original = 'PRINTER_TYPE=bambu\nPRINTER_HOST=192.0.2.1\nBAMBU_SERIAL=01P00A123456789\nBAMBU_TOKEN=55550000\nBAMBU_MODEL=p1s\n';
+  await put('mcp-3D-printer-server/.env', original);
+  await chmod(join(clone, '.env'), 0o640);
+  const reads = 'const mode = process.env.BAMBU_DEFAULT_CONNECTION_MODE;\n';
+  await put('mcp-3D-printer-server/dist/index.js', reads);
+  await put('mcp-3D-printer-server/package.json', JSON.stringify({name: 'mcp-3d-printer-server', version: '1.3.0'}));
+  const env = {...hostEnvironment(join(home, 'Library/Application Support/Scan to Make')), home};
+  const profilesPath = join(env.appPrinters, 'profiles.json');
+  const current = {backend: 'bambu-printer-mcp', process: {command: '/usr/bin/ssh', args: ['127.0.0.1', `cd '${bambuDir}' && exec node dist/index.js`]}};
+  const catalog = await loadPrinterCatalog(current, {homeDirectory: home, sourcePaths: [], profilesPath});
+  const restarted = [];
+  const setup = new PrinterSetup({env, configs: () => catalog.entries(), catalog: () => catalog, reload: () => catalog.reload(), profilesPath,
+    node: '/usr/local/bin/node', busy: async () => false, restart: async id => { restarted.push(id); }, bonjour: async () => [],
+    ssdp: async () => ({state: 'complete', printers: []}), folders: async () => [{dir: clone, package: 'mcp-3d-printer-server', version: '1.3.0', hasEnv: true}]});
+  const offered = async () => (await setup.discover()).found.find(item => item.folder === clone);
+  const values = {BAMBU_DEFAULT_CONNECTION_MODE: 'bambu_network', BAMBU_DEFAULT_CONNECTION_TYPE: 'lan',
+    BAMBU_NETWORK_BRIDGE_COMMAND: 'ssh -i ~/.ssh/fulu fulu-vm /opt/bridge --printer 01P00A123456789'};
+
+  // Nothing is offered for another printer's route, a route without a bridge, or an MCP copy that doesn't read it.
+  await put('bambu-printer-mcp/.env', bambuEnv('03900A000000001'));
+  assert.equal((await offered()).fill, undefined, 'a different serial');
+  await put('bambu-printer-mcp/.env', bambuEnv('01P00A123456789', [routeLines[0], routeLines[1]]));
+  assert.equal((await offered()).fill, undefined, 'no bridge command');
+  await put('bambu-printer-mcp/.env', bambuEnv('01P00A123456789'));
+  await put('mcp-3D-printer-server/dist/index.js', 'console.log("an older release");\n');
+  assert.equal((await offered()).fill, undefined, 'its dist doesn\'t read BAMBU_DEFAULT_CONNECTION_MODE');
+  await put('mcp-3D-printer-server/dist/index.js', reads);
+
+  // The same serial: exactly the three keys, nothing else from that file.
+  const candidate = await offered();
+  assert.deepEqual([candidate.missing, candidate.fill], [[], values]);
+  assert.ok(!JSON.stringify(candidate).match(/dev-secret-1|cloud-secret-2|55550000/), 'no other key, and never a token');
+
+  // Add appends those lines as they are written there (quoting included); every other line and the mode stay.
+  const added = await setup.add({folder: clone});
+  const routed = `${original}${routeLines.join('\n')}\n`;
+  assert.equal(await readFile(join(clone, '.env'), 'utf8'), routed);
+  assert.equal((await stat(join(clone, '.env'))).mode & 0o777, 0o640);
+  assert.equal(catalog.destinations.find(item => item.id === added.id).incomplete, undefined);
+  // A route of its own is never replaced.
+  assert.equal((await setup.completeSettings(added.id)).destinationId, added.id);
+  assert.equal(await readFile(join(clone, '.env'), 'utf8'), routed);
+
+  // A printer added before this: Settings offers it with nothing strictly missing, and Complete Settings appends it.
+  await writeFile(join(clone, '.env'), original);
+  restarted.length = 0;
+  await catalog.reload();
+  assert.deepEqual(catalog.destinations.find(item => item.id === added.id).incomplete, {missing: [], fill: values});
+  await setup.completeSettings(added.id);
+  assert.equal(await readFile(join(clone, '.env'), 'utf8'), routed);
+  assert.deepEqual(restarted, [added.id]);
+  assert.equal(catalog.destinations.find(item => item.id === added.id).incomplete, undefined);
+});
