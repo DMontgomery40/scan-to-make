@@ -214,6 +214,13 @@ export class McpUpdater {
     }
   }
 
+  /** A destination listed after start (Add, a Printer MCP choice): its saved override, applied as at start. */
+  async applyOverride(destinationId: string): Promise<void> {
+    const entry = this.#deps.destinations().find(item => item.id === destinationId);
+    const found = entry ? this.install(entry.id) : undefined;
+    if (entry && found && this.#deps.overrides.peek(entry.id, entry.config)) await this.#deps.session(entry.id)?.restart(found.effective).catch(() => undefined);
+  }
+
   /** `printers.updateMcp` / `POST /v1/printers/mcp/<mcpId>/update`. */
   update(mcpId: string, options: {fresh?: boolean} = {}): Promise<McpUpdate> {
     const running = this.#active.get(mcpId);

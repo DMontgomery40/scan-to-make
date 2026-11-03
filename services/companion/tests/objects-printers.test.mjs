@@ -512,3 +512,22 @@ test('a printer\'s services rebuilt after Complete Settings keep its pooled sess
   assert.equal(after.selection.model, 'p1s');
   assert.equal(before.selection.model, undefined);
 });
+
+test('review fix (#295): an MCP known only through an npx profile is not "installed": Download gets a copy Check and Add can run', async t => {
+  const {PrinterSetup} = await import('../dist/printing/setup.js');
+  const {hostEnvironment} = await import('../dist/printing/mcp-install.js');
+  const home = await mkdtemp(join(tmpdir(), 'printer-setup-npx-'));
+  t.after(() => rm(home, {recursive: true, force: true}));
+  const env = {...hostEnvironment(join(home, 'Library/Application Support/Scan to Make')), home};
+  const npx = {backend: 'mcp-3d-printer-server', process: {command: '/opt/homebrew/bin/npx', args: ['-y', 'mcp-3d-printer-server']}};
+  const downloads = [];
+  const setup = new PrinterSetup({env, configs: () => [{id: 'claude-desktop:printer', config: npx}], profilesPath: join(home, 'profiles.json'),
+    node: '/usr/local/bin/node', folders: async () => [],
+    download: async pkg => { downloads.push(pkg); return {mcpId: 'mcp-0000000000000000', state: 'started'}; }});
+  const view = (await setup.mcps()).packages.find(item => item.package === 'mcp-3d-printer-server');
+  assert.equal(view.installed, false, 'npx fetches it only when that client starts it');
+  assert.ok(view.installs.some(install => install.kind === 'npx'), 'the npx profile is still listed');
+  assert.deepEqual(await setup.installMcp('mcp-3d-printer-server'), {update: {mcpId: 'mcp-0000000000000000', state: 'started'}});
+  assert.deepEqual(downloads, ['mcp-3d-printer-server']);
+  await assert.rejects(setup.check({backend: 'mcp-3d-printer-server', printerType: 'octoprint', host: 'octopi.local', port: '80', secret: 'k'}), /Download mcp-3D-printer-server first/);
+});

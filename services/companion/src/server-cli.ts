@@ -143,8 +143,12 @@ const reloadPrinters=async()=>{
   if(!catalog||!services||!printHandoff)return;
   const before=new Set(catalog.entries().map(entry=>entry.id));
   await catalog.reload();
-  for(const destination of catalog.destinations)if(!services.has(destination.id))
-    services.set(destination.id,createPrintHandoffServices(catalog.resolve(destination.id)!,handoffDirectory!,{pool:printerPool,destinationId:destination.id,onConnect:onConnect(destination.id)}));
+  for(const destination of catalog.destinations)if(!services.has(destination.id)){
+    // `current` keeps the phone handoff route's services: its pooled session answers through that relay, so a second
+    // relay would never see the MCP's questions. Any destination starts with its saved Update override, as at start.
+    services.set(destination.id,destination.id==='current'?printHandoff:createPrintHandoffServices(catalog.resolve(destination.id)!,handoffDirectory!,{pool:printerPool,destinationId:destination.id,onConnect:onConnect(destination.id)}));
+    await mcpUpdates?.applyOverride(destination.id);
+  }
   const now=new Set(catalog.entries().map(entry=>entry.id));
   for(const id of before)if(!now.has(id)&&id!=='current'){await services.get(id)?.runner.session?.close().catch(()=>undefined);services.delete(id);}
 };

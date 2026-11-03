@@ -207,6 +207,17 @@ export class PrinterSetupError extends Error {
 
 const newest = (versions: string[]) => versions.sort((a, b) => b.localeCompare(a, undefined, {numeric: true}))[0];
 
+/**
+ * The entry point of a copy Counterpart can start itself. An npx profile has none (npx fetches it when that client
+ * starts it), so a package known only through npx is not "installed" here: Download gets a copy Check and Add can run.
+ */
+function localEntry(pkg: PrinterBackend, install: {kind: string; path?: string}, env: InstallEnvironment): string | undefined {
+  if (!install.path) return undefined;
+  const entry = install.kind === 'global' || install.kind === 'app' ? join(install.path, 'lib', 'node_modules', pkg, 'dist', 'index.js')
+    : install.kind === 'checkout' || install.kind === 'folder' ? join(install.path, 'dist', 'index.js') : undefined;
+  return entry && env.exists(entry) ? entry : undefined;
+}
+
 export class PrinterSetup {
   readonly deps: PrinterSetupDeps;
   constructor(deps: PrinterSetupDeps) { this.deps = deps; }
@@ -248,7 +259,7 @@ export class PrinterSetup {
       const found = [...installs.get(item.package)!.values()];
       const version = newest(found.map(install => install.version).filter((value): value is string => !!value));
       const latestVersion = this.deps.latestVersion?.(item.package, {view: true});
-      return {...item, installed: found.length > 0, ...(version ? {version} : {}), ...(latestVersion ? {latestVersion} : {}),
+      return {...item, installed: found.some(install => !!localEntry(item.package, install, env)), ...(version ? {version} : {}), ...(latestVersion ? {latestVersion} : {}),
         appMcpId: appMcpId(item.package, env), installs: found};
     }), options: setupOptions()};
   }
@@ -347,10 +358,8 @@ export class PrinterSetup {
     if (this.deps.env.exists(own)) return own;
     const view = (await this.mcps()).packages.find(item => item.package === pkg)!;
     for (const install of view.installs) {
-      if (!install.path) continue;
-      const entry = install.kind === 'global' || install.kind === 'app' ? join(install.path, 'lib', 'node_modules', pkg, 'dist', 'index.js')
-        : install.kind === 'checkout' || install.kind === 'folder' ? join(install.path, 'dist', 'index.js') : undefined;
-      if (entry && this.deps.env.exists(entry)) return entry;
+      const entry = localEntry(pkg, install, this.deps.env);
+      if (entry) return entry;
     }
     throw new PrinterSetupError('unavailable', `Download ${this.#label(pkg)} first, then add the printer.`);
   }

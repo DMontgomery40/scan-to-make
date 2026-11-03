@@ -729,3 +729,15 @@ test('findMcpFolders finds a built copy of either MCP two levels into the home f
     {dir: join(home, 'mcp-3D-printer-server'), package: 'mcp-3d-printer-server', version: '1.2.17', hasEnv: true},
   ]);
 });
+
+test('review fix (#295): a printer listed after start (Add, a Printer MCP choice) starts on its saved override, as at start', async t => {
+  const fresh = `${APP}/printers/bambu/lib/node_modules/bambu-printer-mcp/dist/index.js`;
+  const profiles = [];
+  const f = await updater(t, {profiles});
+  profiles.push({id: 'later', config: bambu('/opt/tools/wrapper.sh')});
+  await f.overrides.set('later', {command: '/node', args: [fresh]}, profiles[0].config);
+  await f.updates.applyOverride('later');
+  assert.deepEqual(f.restarts.map(entry => [entry.id, entry.process.args]), [['later', [fresh]]]);
+  await f.updates.applyOverride('unknown');
+  assert.equal(f.restarts.length, 1, 'an unknown or override-free destination is left alone');
+});
