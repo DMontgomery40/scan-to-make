@@ -1223,7 +1223,12 @@ export class ObjectService {
       });
     } catch (error) {
       const detail = error instanceof PrinterMcpError ? error.detail : undefined;
-      throw new InvalidStateError(detail ? `The printer didn't ${action === 'cancel' ? 'stop' : action}: ${detail}` : `The printer didn't ${action === 'cancel' ? 'stop' : action}. Check it, then try again.`);
+      const message = detail ? `The printer didn't ${action === 'cancel' ? 'stop' : action}: ${detail}` : `The printer didn't ${action === 'cancel' ? 'stop' : action}. Check it, then try again.`;
+      // Kept, not only shown: the project's activity and companion.log say what was refused and why.
+      console.error(`print control ${action} refused for ${id}: ${message}${detail ? '' : ` (${error instanceof Error ? error.message : String(error)})`}`);
+      await this.#deps.store.update(id, o => o.print ? {...o, print: {...o.print, events: [...(o.print.events ?? []), {atMs: Date.now(), message: message.slice(0, 400)}].slice(-20)}} : o)
+        .then(updated => this.#changed(updated)).catch(() => undefined);
+      throw new InvalidStateError(message);
     } finally {
       unsubscribe();
       clearTimeout(this.#confirmations.get(id)?.timer); this.#confirmations.delete(id);
