@@ -58,7 +58,14 @@ why. Ordered by how much it hurts someone who just wants a thing printed.
     main canvas render shows yellow "Vivi". Neither tells the person what will actually print.
 19. **Print sheet Cancel doesn't respond to an accessibility press** (VoiceOver / Switch Control users);
     Escape closes it.
-19a. **The sidebar printer row ("Bambu Lab P1S, Ready") doesn't respond to an accessibility press** either.
+19a. **The sidebar printer row ("Bambu Lab P1S, Ready") opens a separate Settings → Printers window** instead of
+    showing the printer in the main window. A person clicking "the printer" lands in preferences.
+19b. **The title pill in the toolbar is a rename button disguised as a title.** The project name appears twice: once
+    as the window title with its status line, and again as a large capsule on the right ("Triangle guitar pick").
+    Clicking the capsule renames the project. A rename belongs on the title itself (click-to-edit, or Rename in the
+    project's menu), not in a second copy of the name styled as a button. David: "this needs to go".
+19c. **Text set through accessibility doesn't reach New Project.** VoiceOver/dictation-style value changes show in the
+    field but leave Create Project disabled; only real keystrokes enable it.
 20. **A stray "Your project" draft** sits in Drafts ("Draft from your iPhone · nothing sent yet").
 
 ## Earlier tonight (from the Stop failure)

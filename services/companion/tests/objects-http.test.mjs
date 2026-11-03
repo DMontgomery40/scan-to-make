@@ -658,6 +658,8 @@ test('project preferences persist across both transports without starting work',
 test('duplicate copies the current model and defaults, never the source outcome or active work', async t => {
   const {call, service, store} = await fixture(t);
   const project = await service.create('A mount', 'copy');
+  // A copy has something it copies (here, its scan); a request alone would be a new design.
+  await store.update(project.id, o => ({...o, scan: 'scan.usdz'}));
   await service.start(project.id); await service.settled(project.id);
   await service.setProjectSettings(project.id, {title: 'Original mount', status: 'works', archived: true,
     printDefaults: {quality: 'fine', copies: 2}, notifications: 'problems', designEngine: 'blender'});
@@ -740,13 +742,17 @@ test('exports refuse recorded final and intermediate symlinks that leave the pro
 
 
 test('saved project engine reaches the next worker and copies reject Fusion', async t => {
-  const {service, inputs} = await fixture(t);
+  const {service, inputs, store} = await fixture(t);
   const fit = await service.create('A clip', 'fit');
   await service.setProjectSettings(fit.id, {designEngine: 'blender'});
   await service.start(fit.id); await service.settled(fit.id);
   assert.equal(inputs[0].preferredEngine, 'blender');
   const copy = await service.create('Copy the clip', 'copy');
+  await store.update(copy.id, o => ({...o, scan: 'scan.usdz'}));
   await assert.rejects(service.setProjectSettings(copy.id, {designEngine: 'fusion'}), /cleaned up in Blender/);
+  // Nothing scanned: the request is a new design, which may use Fusion.
+  const unscanned = await service.create('A guitar pick that says Vivi', 'copy');
+  await service.setProjectSettings(unscanned.id, {designEngine: 'fusion'});
 });
 
 
