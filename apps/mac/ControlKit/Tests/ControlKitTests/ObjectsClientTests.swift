@@ -299,4 +299,21 @@ final class ObjectsClientTests: XCTestCase {
         }
         XCTAssertEqual(ControlClient.timeout(for: "objects.print"), 30)
     }
+
+    /// Both MCPs word each connection since Nov 3 (lan, cloud, developer); an older MCP sends only choices.
+    func testPrintRouteDecodesTheMCPsOwnOptionsAndOlderReplies() throws {
+        let current: [String: Any] = ["route": "developer", "mode": "lan_mqtt_ftps", "type": "lan", "choices": ["lan", "cloud", "developer"], "savedTo": NSNull(),
+            "options": [["id": "lan", "label": "Local network", "available": true, "controls": "Refused on firmware with authorization control."],
+                        ["id": "cloud", "label": "Bambu Cloud", "available": false, "reason": "Needs FULU's BambuNetwork bridge."],
+                        ["id": "developer", "label": "Local network, Developer Mode", "available": true, "controls": "Pause, Resume and Stop go straight to the printer."]]]
+        let route = try JSONDecoder().decode(PrintRoute.self, from: JSONSerialization.data(withJSONObject: current))
+        XCTAssertEqual(route.route, "developer")
+        XCTAssertEqual(route.options?.map(\.label), ["Local network", "Bambu Cloud", "Local network, Developer Mode"])
+        XCTAssertEqual(route.options?[1].reason, "Needs FULU's BambuNetwork bridge.")
+        XCTAssertEqual(route.options?[2].controls, "Pause, Resume and Stop go straight to the printer.")
+        let older = try JSONDecoder().decode(PrintRoute.self, from: JSONSerialization.data(withJSONObject:
+            ["route": "lan", "mode": "bambu_network", "type": "lan", "choices": ["lan", "cloud"], "savedTo": "/Users/x/.env"]))
+        XCTAssertNil(older.options)
+        XCTAssertEqual(older.choices, ["lan", "cloud"])
+    }
 }

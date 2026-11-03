@@ -51,8 +51,15 @@ async function setup(t, {tools = ['get_printer_status', 'camera_snapshot', 'paus
       if (name === 'counterpart_printer_info' && info) return {content: [{type: 'text', text: JSON.stringify(info)}], structuredContent: info};
       if (name === 'get_printer_filaments' && slots) return {content: [{type: 'text', text: JSON.stringify({slots})}]};
       if (name === 'counterpart_print_route') {
-        if (args?.route) route = args.route === 'cloud' ? {mode: 'bambu_network', type: 'cloud'} : {...route, type: route.mode === 'bambu_network' ? 'lan' : route.type};
-        return {content: [{type: 'text', text: JSON.stringify({route: route.mode === 'bambu_network' && route.type === 'cloud' ? 'cloud' : 'lan', ...route, choices: ['lan', 'cloud'], savedTo: '/Users/x/bambu-printer-mcp/.env'})}]};
+        // As both MCPs answer since Nov 3: lan and cloud through FULU, developer straight to a Developer Mode printer.
+        if (args?.route) route = args.route === 'cloud' ? {mode: 'bambu_network', type: 'cloud'} : args.route === 'developer' ? {mode: 'lan_mqtt_ftps', type: 'lan'} : {mode: 'bambu_network', type: 'lan'};
+        const id = route.mode === 'lan_mqtt_ftps' ? 'developer' : route.mode === 'bambu_network' && route.type === 'cloud' ? 'cloud' : 'lan';
+        const options = route.legacy ? undefined : [
+          {id: 'lan', label: 'Local network', available: true, controls: 'Printers with authorization control refuse Pause, Resume and Stop sent this way.'},
+          {id: 'cloud', label: 'Bambu Cloud', available: true, controls: 'Printers with authorization control refuse Pause, Resume and Stop sent this way.'},
+          {id: 'developer', label: 'Local network, Developer Mode', available: true, controls: 'Pause, Resume and Stop go straight to the printer.'}];
+        return {content: [{type: 'text', text: JSON.stringify({route: id, mode: route.mode, type: route.type,
+          choices: route.legacy ? ['lan', 'cloud'] : ['lan', 'cloud', 'developer'], ...(options ? {options} : {}), savedTo: '/Users/x/bambu-printer-mcp/.env'})}]};
       }
       if (['pause_print', 'resume_print', 'cancel_print'].includes(name)) {
         if (controlEnds) {
@@ -361,13 +368,47 @@ test('a Bambu Connect choice copied into printer-handoff.json no longer decides 
 
 test('Settings -> Printers reads and changes the MCP\'s own route, and has none to show for an MCP without one', async t => {
   const f = await setup(t, {route: {mode: 'bambu_network', type: 'lan'}});
-  assert.equal((await f.service.printRoute('current')).route, 'lan');
+  const read = await f.service.printRoute('current');
+  assert.equal(read.route, 'lan');
+  assert.deepEqual(read.options.map(option => option.label), ['Local network', 'Bambu Cloud', 'Local network, Developer Mode'], 'the MCP words each connection');
   const cloud = await f.service.printRoute('current', 'cloud');
   assert.deepEqual([cloud.route, cloud.mode, cloud.type], ['cloud', 'bambu_network', 'cloud']);
-  assert.deepEqual(f.calls.filter(c => c.name === 'counterpart_print_route').map(c => c.args?.route), [undefined, 'cloud']);
+  // Developer Mode is a route Counterpart never had to know about: the MCP names and words it.
+  const developer = await f.service.printRoute('current', 'developer');
+  assert.deepEqual([developer.route, developer.mode], ['developer', 'lan_mqtt_ftps']);
+  assert.match(developer.options.find(option => option.id === 'developer').controls, /straight to the printer/);
+  assert.deepEqual(f.calls.filter(c => c.name === 'counterpart_print_route').map(c => c.args?.route), [undefined, 'cloud', 'developer']);
   await assert.rejects(f.service.printRoute('elsewhere'));
   const none = await setup(t, {});
   assert.equal(await none.service.printRoute('current'), undefined);
+  // An MCP from before options still shows its two choices.
+  const older = await setup(t, {route: {mode: 'bambu_network', type: 'lan', legacy: true}});
+  const legacy = await older.service.printRoute('current');
+  assert.deepEqual([legacy.route, legacy.choices, legacy.options], ['lan', ['lan', 'cloud'], undefined]);
+});
+
+// Nov 3: Bambu Handy resumed a pick after Counterpart's Resume was refused, and the activity said "Printing again."
+test('a resume Counterpart did not send is logged as outside Counterpart; its own Resume keeps "Printing again."', async t => {
+  const f = await setup(t, {reports: [status('RUNNING', 10)]});
+  await f.service.print(f.object.id);
+  await f.approve();
+  await f.service.settled(f.object.id);
+  await until(() => f.events.some(e => e.type === 'print.started'));
+  const lines = async () => (await f.service.get(f.object.id)).print.events.map(e => e.message);
+  const step = async (report, line) => {
+    f.queue.length = 0; f.queue.push(report);
+    await until(async () => { await f.tick(); return (await lines()).includes(line) ? true : undefined; });
+  };
+  await step(status('PAUSE', 20), 'The printer paused it.');
+  await step(status('RUNNING', 30), 'Resumed outside Counterpart (on the printer or another app).');
+  assert.equal((await lines()).includes('Printing again.'), false);
+
+  await step(status('PAUSE', 40), 'The printer paused it.');
+  const resuming = f.service.control(f.object.id, 'resume');
+  const question = await until(async () => (await f.service.get(f.object.id)).printConfirmation);
+  await f.service.answerPrintConfirmation(f.object.id, question.id, {action: 'accept', content: {confirmed: true}});
+  await resuming;
+  await step(status('RUNNING', 50), 'Printing again.');
 });
 
 test('an MCP that reports AMS trays in the counterpart/1 slots shape (mcp-3D-printer-server) gets filament choices like bambu-printer-mcp', async t => {
