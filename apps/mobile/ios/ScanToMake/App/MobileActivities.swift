@@ -35,9 +35,12 @@ import CounterpartKit
             }
         }
         boundDevice = device; UserDefaults.standard.set(device, forKey: "CounterpartActivityDevice")
+        // A push can start an activity while this process is suspended. Reconcile the system's
+        // current activities on every foreground attachment, even when observers already exist.
+        for activity in Activity<PrintAttributes>.activities { watch(activity) }
+        if let token = Activity<PrintAttributes>.pushToStartToken { startToken = Self.hex(token) }
         guard !started else { Task { await publish() }; return }
         started = true
-        for activity in Activity<PrintAttributes>.activities { watch(activity) }
         Task { [weak self] in
             for await activity in Activity<PrintAttributes>.activityUpdates { self?.watch(activity) }
         }
@@ -47,6 +50,7 @@ import CounterpartKit
                 await self?.publish()
             }
         }
+        Task { await publish() }
     }
 
     func reconcile(_ snapshots: [PrintActivitySnapshot], mayStart: Bool) async {
@@ -69,7 +73,20 @@ import CounterpartKit
 
     private func watch(_ activity: Activity<PrintAttributes>) {
         let print = activity.attributes.printId
-        guard !ignored.contains(activity.id), !watched.contains(activity.id) else { return }
+        guard !ignored.contains(activity.id) else { return }
+        // Recover a token missed during suspension without creating duplicate stream observers.
+        if !dismissed.contains(print), activityForPrint[print].map({ $0 == activity.id }) ?? true,
+           activity.activityState == .active || activity.activityState == .stale,
+           let token = activity.pushToken {
+            let recovered = Self.hex(token)
+            let changed = tokens[print] != recovered
+            tokens[print] = recovered
+            removed.remove(print)
+            // The token may already exist when activityUpdates yields the activity; do not
+            // wait for another pushTokenUpdates element to upload this first value.
+            if changed { Task { await publish() } }
+        }
+        guard !watched.contains(activity.id) else { return }
         // A remote start can race the foreground start for the same print. Keep one surface and one
         // update token, and respect a prior dismissal even if its remote start arrived late.
         if dismissed.contains(print) || activityForPrint[print].map({ $0 != activity.id }) == true {
@@ -79,7 +96,6 @@ import CounterpartKit
         }
         watched.insert(activity.id); activityForPrint[print] = activity.id
         let owner = boundDevice
-        if let token = activity.pushToken { tokens[print] = Self.hex(token) }
         Task { [weak self] in
             for await token in activity.pushTokenUpdates {
                 guard self?.boundDevice == owner else { break }

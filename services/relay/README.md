@@ -92,8 +92,8 @@ Create the APNs key, give it to the Worker, and deploy. Everything else is alrea
      - Environment: match the target signed app. Distribution builds use **Production**;
        locally signed build `202611021121` uses **Sandbox** and needs the sandbox relay origin below.
      - Key restriction: select the scope needed for Counterpart. An all-topics key is not a
-       prerequisite. The pending topic-specific `com.scantomake` key still needs real APNs
-       validation for the `com.scantomake.push-type.liveactivity` topic; registration is pending.
+       prerequisite. The Sandbox topic-specific `com.scantomake` key was validated on 2026-11-02
+       with real start/update/end delivery for `com.scantomake.push-type.liveactivity`.
    - **Save → Continue → Register.**
    - Download `AuthKey_<KEY_ID>.p8`. Apple lets you download it only once.
    - Note the 10-character **Key ID**.
@@ -133,7 +133,7 @@ Create the APNs key, give it to the Worker, and deploy. Everything else is alrea
   has `aps-environment=development`.
 - `development` requires the sandbox APNs host, a compatible key, and
   `APNS_ORIGIN = "https://api.sandbox.push.apple.com"` in a separate sandbox deployment.
-  The pending sandbox key registration is not a completed provisioning step.
+  Key registration alone does not establish delivery.
 - `production` uses `api.push.apple.com` (the default when `APNS_ORIGIN` is unset) and a
   compatible production key. TestFlight/App Store distribution uses this environment.
 - Do not send a development token to the production deployment. APNs can answer
@@ -170,6 +170,13 @@ Advanced settings and set Relay address to that hostname followed by `/relay/v1`
 The signed `aps-environment` entitlement determines the environment; installed build
 `202611021355` uses `development`. Backend identifiers remain `com.scantomake` so existing
 pairing, CloudKit and push topics continue to agree.
+
+The development Sandbox was provisioned on 2026-11-02. Its random-token probe reached
+APNs, and a labeled test activity visibly started, updated and ended on Davica3. The
+phone initially needed an app restart to upload its activity update token; that client
+recovery issue is tracked in [the acceptance handoff](../../docs/status/handoff.md).
+The Mac's saved development relay address now uses the Sandbox base URL. This does not
+establish real-print or Watch acceptance, and production credentials remain separate.
 
 A missing key must return `503 not_configured`; deployment alone does not establish
 APNs authentication or phone delivery. A key/environment mismatch requires a key compatible
