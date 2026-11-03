@@ -25,11 +25,12 @@ const until = async check => { for (let i = 0; i < 300; i++) { const value = awa
  * A P1S behind a fake MCP session, a fake print runner, and a monitor clock the
  * test steps by hand: every printer report and every wait is scripted.
  */
-async function setup(t, {tools = ['get_printer_status', 'camera_snapshot', 'pause_print', 'resume_print', 'cancel_print', 'slice_stl'], sliceArgs = false, copies = false, controlsRoute = false, reports = [], route, backend = 'bambu-printer-mcp', info, slots} = {}) {
+async function setup(t, {tools = ['get_printer_status', 'camera_snapshot', 'pause_print', 'resume_print', 'cancel_print', 'slice_stl'], sliceArgs = false, copies = false, controlsRoute = false, reports = [], route, backend = 'bambu-printer-mcp', info, slots, controlEnds = false} = {}) {
   const root = await mkdtemp(join(tmpdir(), 'objects-printing-'));
   let service;
   t.after(async () => { await service?.close(); await rm(root, {recursive: true, force: true, maxRetries: 10, retryDelay: 20}); });
   const calls = [], events = [], runs = [];
+  let endControl;
   const queue = [...reports];
   const relay = new InMemoryElicitationRelay({timeoutMs: 5000});
   const catalogTools = [...tools, ...(route ? ['counterpart_print_route'] : [])].map(name => name === 'slice_stl' && (sliceArgs || copies)
@@ -40,7 +41,7 @@ async function setup(t, {tools = ['get_printer_status', 'camera_snapshot', 'paus
     hasTool(name) { return catalogTools.some(item => item.name === name); },
     getTool(name) { return catalogTools.find(item => item.name === name); },
     async callTool(name, args, options = {}) {
-      calls.push({name, args, context: options.elicitationContext});
+      calls.push({name, args, context: options.elicitationContext, timeoutMs: options.timeoutMs});
       if (name === 'get_printer_status') {
         const next = queue.length > 1 ? queue.shift() : queue[0];
         if (!next) throw Object.assign(new Error('down'), {code: 'tool-failed'});
@@ -54,6 +55,12 @@ async function setup(t, {tools = ['get_printer_status', 'camera_snapshot', 'paus
         return {content: [{type: 'text', text: JSON.stringify({route: route.mode === 'bambu_network' && route.type === 'cloud' ? 'cloud' : 'lan', ...route, choices: ['lan', 'cloud'], savedTo: '/Users/x/bambu-printer-mcp/.env'})}]};
       }
       if (['pause_print', 'resume_print', 'cancel_print'].includes(name)) {
+        if (controlEnds) {
+          // The call ends (a client timeout) while its question is still open.
+          relay.request({method: 'elicitation/create', params: {mode: 'form', message: `Confirm ${name}`, requestedSchema: CONFIRM}}, options.elicitationContext).catch(() => undefined);
+          await new Promise(resolve => { endControl = resolve; });
+          throw Object.assign(new Error('MCP error -32001: Request timed out'), {code: 'tool-failed'});
+        }
         const answer = await relay.request({method: 'elicitation/create', params: {mode: 'form', message: `Confirm ${name}`, requestedSchema: CONFIRM}}, options.elicitationContext);
         if (answer.action !== 'accept') return {isError: true, content: [{type: 'text', text: 'Not confirmed. Nothing was sent.'}]};
         return {content: [{type: 'text', text: '{"status":"success"}'}]};
@@ -109,7 +116,7 @@ async function setup(t, {tools = ['get_printer_status', 'camera_snapshot', 'paus
     const question = await until(async () => (await service.get(object.id)).printConfirmation);
     return service.answerPrintConfirmation(object.id, question.id, {action: 'accept', content: {confirmed: true}});
   };
-  return {service, store, object, calls, events, runs, relay, session, directory, queue, tick, clock, approve, deps, settings, root, slots};
+  return {service, store, object, calls, events, runs, relay, session, directory, queue, tick, clock, approve, deps, settings, root, slots, endControl: () => endControl?.()};
 }
 const status = (state, progress, extra = {}) => ({connected: true, print: {filename: JOB, progress, timeRemaining: Math.max(0, 40 - progress), currentLayer: progress, totalLayers: 100},
   raw: {gcode_state: state, subtask_name: JOB, task_id: '0', ...extra}});
@@ -239,6 +246,28 @@ test('pause, resume and stop go through the printer\'s mutex and relay its own c
   await f.service.answerPrintConfirmation(f.object.id, second.id, {action: 'decline'});
   assert.match((await resuming).message, /didn't resume: Not confirmed/);
   await assert.rejects(f.service.control((await f.store.create()).id, 'cancel'), /Nothing of this project is printing/);
+});
+
+// Nov 3: a Resume's question outlived its 2-minute call; the dead question then hid Resume until the print ended.
+test('a control waits as long as its question can, and a question whose call ended never stays on the project', async t => {
+  const f = await setup(t, {reports: [status('RUNNING', 10)], controlEnds: true});
+  await f.service.print(f.object.id);
+  await f.approve();
+  await f.service.settled(f.object.id);
+  await until(() => f.events.some(e => e.type === 'print.started'));
+  const resuming = f.service.control(f.object.id, 'resume').then(() => assert.fail('resumed'), error => error);
+  const question = await until(async () => (await f.service.get(f.object.id)).printConfirmation);
+  assert.ok(f.calls.find(c => c.name === 'resume_print').timeoutMs > 600000, 'the call outlasts the 10-minute question');
+  f.endControl();
+  assert.match((await resuming).message, /didn't resume/);
+  assert.equal((await f.service.get(f.object.id)).printConfirmation, undefined);
+  // A question an older companion left behind: answering it takes it off the project.
+  await f.store.update(f.object.id, o => ({...o, printConfirmation: question}));
+  await assert.rejects(f.service.answerPrintConfirmation(f.object.id, question.id, {action: 'accept', content: {confirmed: true}}), /no longer waiting/);
+  assert.equal((await f.service.get(f.object.id)).printConfirmation, undefined);  // An expired one can't be answered at all; a restart takes it away.
+  await f.store.update(f.object.id, o => ({...o, printConfirmation: {...question, expiresAtMs: Date.now() - 1}}));
+  await f.service.resume();
+  assert.equal((await f.service.get(f.object.id)).printConfirmation, undefined);
 });
 
 test('the camera route serves one frame per 3 s to every viewer, and 404s a printer without a camera', async t => {
