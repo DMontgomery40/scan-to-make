@@ -418,6 +418,8 @@ private struct PrintRoutePicker: View {
     @State private var route: PrintRoute?
     @State private var problem: String?
     @State private var saving = false
+    /// Until the first answer: a view with no content never runs `.task`, so something must be shown.
+    @State private var loaded = false
 
     private static func label(_ choice: String) -> String {
         switch choice { case "lan": return "Local network"; case "cloud": return "Bambu Cloud"; default: return choice }
@@ -436,6 +438,8 @@ private struct PrintRoutePicker: View {
                     Text(problem ?? "Prints, Stop, Pause and Resume go this way.")
                         .font(.caption).foregroundStyle(problem == nil ? AnyShapeStyle(.secondary) : AnyShapeStyle(.red))
                 }
+            } else if !loaded {
+                ProgressView().controlSize(.small)
             }
         }
         .task { await load() }
@@ -444,6 +448,7 @@ private struct PrintRoutePicker: View {
     private func load() async {
         do { route = try await client().printRoute(destinationId); problem = nil }
         catch { route = nil }
+        loaded = true
     }
 
     private func choose(_ choice: String) {
