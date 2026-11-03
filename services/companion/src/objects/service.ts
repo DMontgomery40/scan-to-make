@@ -172,6 +172,8 @@ export function spreadPick<T>(items: T[], count: number): T[] {
  * since the phone sends only the request; a request with photos alone is a new design.
  */
 export function passKind(object: Pick<StmObject, 'kind' | 'scan' | 'capture' | 'instructions'>): PassKind {
+  // A copy needs something to copy: one that never received a scan or capture is its request, a new design.
+  if (object.kind === 'copy' && !object.scan && !object.capture?.length && object.instructions?.trim()) return 'fit';
   if (object.kind) return object.kind;
   // PRD §8.11: a link to a published model's page prints the designer's file; it is never designed.
   if (publishedLink(object.instructions)) return 'published';

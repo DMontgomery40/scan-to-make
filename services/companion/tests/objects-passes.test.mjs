@@ -151,6 +151,12 @@ test('without a kind, a scan is a copy even with a request; a request with photo
   assert.equal(passKind({instructions: 'A hook for a 25 mm rail'}), 'fit');
   assert.equal(passKind({}), 'copy');
   assert.equal(passKind({kind: 'fit', scan: 'scan.usdz', instructions: 'A mount that fits this'}), 'fit', 'a kind chosen at creation wins');
+  // A project started as a copy that never received a scan or capture has nothing to copy:
+  // its request is a new design (the Nov 2 guitar pick ran four Blender "scan fixes" on no scan).
+  assert.equal(passKind({kind: 'copy', instructions: 'A guitar pick that says Vivi, black and yellow'}), 'fit');
+  assert.equal(passKind({kind: 'copy', scan: 'scan.usdz', instructions: 'Close up the bottom.'}), 'copy');
+  assert.equal(passKind({kind: 'copy', capture: ['0001.heic']}), 'copy');
+  assert.equal(passKind({kind: 'copy'}), 'copy', 'no request and no scan: nothing to design');
 });
 
 test('an Ask pointing at a PNG render is still served at asks/<id>.jpg, as the protocol says', async t => {
