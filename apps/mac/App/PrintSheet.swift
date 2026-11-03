@@ -18,7 +18,6 @@ struct PrintSheet: View {
     @State private var filaments: [PrinterFilament] = []
     @State private var filamentState = Loading.loading
     @State private var slot: Int?
-    @State private var keptSuggestion = true
     @State private var quality = PrintSettings.Quality.standard
     @State private var strength = PrintSettings.Strength.standard
     @State private var copies = 1
@@ -180,7 +179,7 @@ struct PrintSheet: View {
                     Image(systemName: "arrow.right").foregroundStyle(.secondary)
                     Menu {
                         ForEach(filaments) { filament in
-                            Button { slot = filament.slot; keptSuggestion = filament.suggested == true } label: {
+                            Button { slot = filament.slot } label: {
                                 Text(Self.name(filament))
                             }
                         }
@@ -257,7 +256,6 @@ struct PrintSheet: View {
             if case .material? = lastColour, (opened.printerDestinationId ?? model.printerCatalog?.defaultDestinationId) == printer?.id { return lastColour }
             return nil
         }
-        if keptSuggestion && chosen.suggested == true { return .auto }
         return chosen.external ? .external : .amsSlot(chosen.slot)
     }
 
@@ -277,10 +275,8 @@ struct PrintSheet: View {
             let suggested = list.first { $0.suggested == true }
             if let last = PrintSettings.lastSlot(lastColour, lastPrinter: opened.settings?.printDefaults != nil ? (opened.printerDestinationId ?? model.printerCatalog?.defaultDestinationId) : (opened.print?.destinationId ?? opened.print?.destination?.id), printer: printer?.id, in: list) {
                 slot = last
-                keptSuggestion = false
             } else {
                 slot = suggested?.slot ?? (list.count == 1 ? list[0].slot : nil)
-                keptSuggestion = suggested != nil
             }
             filamentState = .done
         } catch {

@@ -34,7 +34,7 @@ Mac Advanced settings now persist the verified base URL:
 `https://counterpart-relay-sandbox.betkalshi-dtmont.workers.dev/relay/v1`.
 The relay toggle was already on. The address field requires Return to save; its initial
 Tab-away edit did not persist, and the subsequent Return/save was verified via UserDefaults.
-Mac remains build `202611021355`; phone is now `202611022125`. Both devices are actually
+At this relay check Mac was build `202611021355`; phone was `202611022125` (see the later Mac 2145 installation below). Both devices are actually
 on 27.2. Davica3 is connected by USB. iPhone Mirroring stayed off; Device Hub screen viewing
 was used only for notification checks and must be stopped before camera acceptance.
 
@@ -58,7 +58,35 @@ resolved that mismatch. The configured FULU bridge then failed its LAN connectio
 sending a print. A direct LAN attempt was explicitly rejected with HMS
 `0500-0500-0001-0007` / MQTT command verification failed; nothing printed. Do not retry that
 unauthenticated route or change printer security settings. Investigate the authenticated bridge.
-These direct MCP diagnostics do not count as Counterpart's app-driven print acceptance.
+These direct MCP diagnostics do not count as Counterpart's app-driven print acceptance. David explicitly
+corrected this mistake: ALL further print initiation must use Counterpart’s actual UI → MCP
+flow. No direct-control scripts, standalone MCP dispatch, Studio fallback or substitute path.
+The Mac app’s actual Print Another → black A1 flow then failed with `color_mismatch`, asking
+for preset green `#00AE42`. The sheet converted the displayed suggested tray to `{auto:true}`
+instead of the selected AMS slot; that Mac UI bug is fixed in installed signed Mac build `202611022145`.
+David then retried from the actual phone app at 21:41:53 Mountain. Its bundle
+`ec190bb2-f7f4-4458-b454-be575ced51e2` correctly selects black PLA / AMS slot 0 and reaches
+the FULU connection failure at 21:42:11, before any print command. The phone stayed on
+“Getting the print ready” until Back → reopen showed the failure. This is a separate stale
+phone-state defect. The persisted event feed contains preparation/confirmation events for both failed attempts but no terminal event; the failure path saves the object without emitting an event, while the connected phone relies on that feed. Read current logs/UI before acting; David may be testing concurrently.
+A bounded transport diagnostic found Mac TCP to the printer’s MQTT port succeeds while
+the configured FULU container’s connection was refused. Both Colima and Counterpart already
+had Local Network permission enabled. Restarting only the dedicated `bambu-fulu` runtime
+restored its connection; Docker’s default context and printer security settings were preserved.
+No alternate print route is allowed.
+
+**Actual UI retry at 21:51–21:53 Mountain:** installed Mac 2145 → Mic mount → Print Again →
+black A1 → Print → existing slicer/MCP confirmations. The app now shows “The printer started
+it”, Busy, Pause/Stop, and “Waiting for heatbed to reach target temperature”. Print ID
+`88ebb9f5-1811-448f-aacd-c989ee7c5c9c`; its saved colour is `{amsSlot:0}`. This establishes
+app-driven dispatch and live preparation, not a finished part or Stop acceptance. Do not
+restart the companion or FULU while that job is active. Phone is also build 2125; the Mac’s
+companion runtime is the unchanged, previously reviewed installed 1355 runtime because this
+change only alters the native Mac sheet. Signed build and 142 native tests pass (one existing
+Keychain skip). Original model/photo, seven-pairing and connection receipts match after install.
+Evidence: `~/scan-to-make-work/codex-app-print-20261102`; immediate Mac 1355 rollback is there.
+The earlier 1227 rollback remains retained. PR #288 merged as `a544feec`; postmerge hosted
+checks again have zero steps and billing annotations. PR #289 contains the Mac spool fix.
 Only the temporary local MCP process used the documented `BAMBU_REQUIRE_CONFIRMATION=0`;
 the configured SSH restrictions and persistent environment were not changed.
 

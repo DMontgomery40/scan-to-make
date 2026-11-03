@@ -7,14 +7,15 @@ card was dismissed. Update-token registration required restarting Counterpart de
 green connection check; foreground recovery is installed and verified without a restart. This is not real-print or
 Watch acceptance. The previous browser error was a tool/session mismatch, not disabled
 user settings or failed sign-in. See the latest handoff section.
-All 40 asks remain in scope. PRs #259–#285 are merged. Mac has signed build
-`202611021355` from reviewed `184a7d4d`, whose entire source tree matches merged `4c7af6a5`.
+All 40 asks remain in scope. PRs #259–#285 are merged. Mac now has signed native build `202611022145` with the displayed-spool selection fix; its companion runtime remains reviewed `184a7d4d` (tree matching merged `4c7af6a5`).
 Phone now has signed build `202611022125` with the foreground token recovery fix.
 The Mac runtime was rebuilt from that same source. Local Bambu 1.1.52 remains `ed9aba3`,
 with Fusion CLI/add-in `86a3016`; no public MCP release. Six original projects/photos and
 seven pairings survived installation and the disposable acceptance import unchanged.
 David explicitly authorized the small test cube: do not re-ask or require a manual bed check.
-The attempted print remains blocked by the MCP transport failures recorded in the handoff.
+The FULU connection recovered after restarting its dedicated runtime. Installed Mac 2145
+now starts the mic mount from the actual app UI and shows live heatbed preparation. Completion
+and Stop remain unaccepted; see the handoff. Backend or direct MCP calls never count as app acceptance.
 How to pick up this work, and the diagnosis notes behind the P0 rows: [`handoff.md`](handoff.md).
 
 **Done means David can do it on his own device.** "Merged" isn't done. Status values:
@@ -28,7 +29,7 @@ The owner is whoever the lead assigns. Repeats count how often the ask came up a
 
 | # | Ask | Repeats | Status | Done when |
 |---|---|---|---|---|
-| 1 | Printing works from the app (stove strips) | many | **partially verified**: reviewed local Bambu MCP 1.1.52 at `ed9aba3` and app #268/#277 are installed. Small STL/two-copy slicing produces two objects on one plate. The real stove/two-copy sheet now explains that two separate plates are required and disables Print; changing to one copy restores Fine / 4 h 48 min / 104 g and enables Print. No new physical print dispatched; original toolhead-cover failure remains historical evidence. Public MCP release is held | He presses Print in the app and the part prints |
+| 1 | Printing works from the app (stove strips) | many | **partially verified**: reviewed local Bambu MCP 1.1.52 at `ed9aba3` and app #268/#277 are installed. Small STL/two-copy slicing produces two objects on one plate. The real stove/two-copy sheet now explains that two separate plates are required and disables Print; changing to one copy restores Fine / 4 h 48 min / 104 g and enables Print. Installed Mac 2145 dispatched the mic mount through its actual Print UI and MCP at 21:52; the app shows live printer preparation. Completed-part acceptance remains open; original toolhead-cover failure remains historical evidence. Public MCP release is held | He presses Print in the app and the part prints |
 | 2 | Stop/cancel from the app actually stops the printer | 1 | **installed, unverified stop**: cancel capability and QoS 1 implementation were confirmed in the 1.1.51 audit; reviewed local 1.1.52 is now installed. No running print was stopped during this audit | Stop in the app stops the printer |
 | 3 | Done / Works status | 7 | **on device, both** (#240; Mac at `91734f0`, phone at `c2eb1e0`) | Marks the mic mount Done on both |
 | 4 | Rename projects | 2 | **installed #259; acceptance partial**: Mac rename saved and restored on the real stove project; phone rename saved from its native dialog and was read back from the Mac on a disposable duplicate; generated titles cannot overwrite a rename | Taps the name and renames, on both |
@@ -78,8 +79,7 @@ Later review fixes pass 119 shared tests, 10 simulator AppTests, 25 Mac ObjectsM
 full native capture suite. Signed integration builds pass and are installed. Both Node 22/24 companion workflows also pass the final updater deadline fix at `3b8ea525`.
 Hosted Actions cannot start because of the account billing restriction; no required checks are configured.
 
-No new physical print, stop test, camera/Face ID acceptance, phone/Watch push receipt or fresh
-same-account enrollment has been claimed. Build 1355 installed without reset; actual phone UI is verified: connected Home, model,
+A new mic mount print was dispatched through the actual Mac UI and reached live preparation. Completed-part, Stop, camera/Face ID, Watch delivery and fresh same-account enrollment acceptance remain open; labeled phone Live Activity delivery is recorded above. Build 1355 installed without reset; actual phone UI is verified: connected Home, model,
 Project Settings, saved rename/defaults, and a real one-copy 44 min / 18 g / 272-layer print estimate.
 No print was dispatched. OS notification authorization is enabled; this is not a delivery receipt. The Sandbox APNs relay is provisioned and test start/update/end delivery is observed; update-token recovery and real-print/Watch acceptance remain open. These do not prevent
 continued implementation and Mac acceptance work.
