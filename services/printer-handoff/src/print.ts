@@ -306,11 +306,6 @@ export class PrinterHandoffRunner {
     await progress('connecting');
     const catalog = await session.connect(signal ? {signal} : {});
     step('discover');
-    if (selection.connectionMode || selection.connectionType) {
-      const properties = session.getTool('print_3mf').inputSchema.properties ?? {};
-      if ((selection.connectionMode && !Object.hasOwn(properties, 'connection_mode'))
-          || (selection.connectionType && !Object.hasOwn(properties, 'connection_type'))) fail('print-transport-unsupported');
-    }
     if (slicer.filamentColours) {
       const sliceProperties = session.getTool('slice_stl').inputSchema.properties ?? {};
       if (!Object.hasOwn(sliceProperties, 'filament_colours') || !Object.hasOwn(sliceProperties, 'load_filaments'))
@@ -422,8 +417,6 @@ export class PrinterHandoffRunner {
       if (!slicedPath.toLowerCase().endsWith('.3mf')) fail('expected-sliced-3mf');
       const result = await call(session, 'print_3mf', {
         three_mf_path: slicedPath,
-        connection_mode: selection.connectionMode,
-        connection_type: selection.connectionType,
         bambu_model: selection.model,
         bed_type: selection.bedType,
         nozzle_type: selection.nozzleType,
