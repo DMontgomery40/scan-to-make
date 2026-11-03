@@ -370,3 +370,15 @@ test('a project notification preference suppresses the alert without losing its 
   assert.equal(event.notify, 'none');
   assert.equal(log.page(0).events.length, 1);
 });
+
+test('a print refused before it reached the printer is written to the log the phone reads (review item 23): its reason clipped, and the unclear case as a project update', async t => {
+  const {log, path} = await openLog(t);
+  const reason = 'Printer service: Error: Printer nozzle 0 type is unknown or does not match the job. ' + 'x'.repeat(900);
+  const refused = await log.append(draft('print.not-started', {detail: {reason}}));
+  assert.equal(refused.title, "Bambu Lab P1S didn't start Mic mount");
+  assert.equal(refused.body, reason.slice(0, 500));
+  const unclear = await log.append({id: randomUUID(), type: 'project.updated', projectId: PROJECT, data: {keys: ['print']}});
+  assert.deepEqual(unclear.data, {keys: ['print']});
+  const lines = (await readFile(path, 'utf8')).trim().split('\n').map(line => CounterpartEventSchema.parse(JSON.parse(line)));
+  assert.deepEqual(lines.map(event => event.type), ['print.not-started', 'project.updated']);
+});
