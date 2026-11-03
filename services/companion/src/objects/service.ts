@@ -506,10 +506,23 @@ export class ObjectService {
     const object = await this.get(id), configured = this.#deps.print;
     const destinationId = this.#destinationId(object);
     const services = destinationId ? configured?.destinations?.get(destinationId) : configured?.services;
-    if (!services || services.runner.backend !== 'bambu-printer-mcp' || !services.runner.filaments) throw new InvalidStateError('Filament choices are unavailable for this printer. Open the model in your slicer to choose a material.');
+    // Trays come from any MCP that reports them (counterpart_printer_info `filaments: "ams"`), not from one package.
+    const ams = services?.runner.backend === 'bambu-printer-mcp' || (!!destinationId && this.#deps.printers?.capabilities(destinationId)?.filaments === 'ams');
+    if (!services || !ams || !services.runner.filaments) throw new InvalidStateError('Filament choices are unavailable for this printer. Open the model in your slicer to choose a material.');
     let inventory: unknown;
     try { inventory = await services.runner.filaments(); }
     catch { throw new InvalidStateError('Couldn’t read the printer’s filament. Check its connection and try again.'); }
+    // The counterpart/1 filament contract (mcp-3D-printer-server): {slots: [{id, material, color, name, profile}]}.
+    if (record(inventory) && Array.isArray(inventory.slots)) return inventory.slots.flatMap((slot: unknown): LiveFilament[] => {
+      if (!record(slot) || typeof slot.id !== 'string' || !/^(\d{1,3}|ext)$/.test(slot.id) || typeof slot.material !== 'string' || !slot.material || slot.material.length > 128
+          || typeof slot.color !== 'string' || !/^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/.test(slot.color)
+          || typeof slot.profile !== 'string' || !slot.profile.startsWith('/')) return [];
+      const number = slot.id === 'ext' ? 254 : Number(slot.id);
+      if (number > 254) return [];
+      return [{slot:number, colour:slot.color.slice(0,7).toUpperCase(), material:slot.material,
+        filamentId:typeof slot.filamentId === 'string' ? slot.filamentId.slice(0,128) : '', destinationId:destinationId ?? 'default',
+        name:typeof slot.name === 'string' ? slot.name.slice(0,256) : slot.material, profile:slot.profile}];
+    });
     if (!record(inventory) || !Array.isArray(inventory.trays)) throw new InvalidStateError('The printer did not return a filament inventory.');
     return inventory.trays.flatMap((tray: unknown): LiveFilament[] => {
       if (!record(tray) || tray.loaded !== true || !Number.isSafeInteger(tray.slot) || (tray.slot as number) < 0
