@@ -38,8 +38,10 @@ public struct PrintSettings: Sendable, Equatable {
     /// How many on the plate (`capabilities.printCopies`), only when the person picked a number: nil sends nothing,
     /// so the printer profile's own count applies (one named overrides a profile set to three, KAN-214 #230).
     public var copies: Int?
-    public init(quality: Quality = .standard, strength: Strength = .standard, colour: Colour? = nil, copies: Int? = nil) {
-        self.quality = quality; self.strength = strength; self.colour = colour; self.copies = copies
+    /// Pause before these 1-based layers, as the slicer preview numbers them: the printer stops there by itself.
+    public var pauseBeforeLayers: [Int]
+    public init(quality: Quality = .standard, strength: Strength = .standard, colour: Colour? = nil, copies: Int? = nil, pauseBeforeLayers: [Int] = []) {
+        self.quality = quality; self.strength = strength; self.colour = colour; self.copies = copies; self.pauseBeforeLayers = pauseBeforeLayers
     }
     /// The `objects.print` fields: standard values are left out.
     public var params: [String: JSONValue] {
@@ -54,6 +56,8 @@ public struct PrintSettings: Sendable, Equatable {
         case nil: break
         }
         if let copies { params["copies"] = .number(Double(copies)) }
+        let pauses = Array(Set(pauseBeforeLayers.filter { $0 >= 2 })).sorted()
+        if !pauses.isEmpty { params["pauseBeforeLayers"] = .array(pauses.map { .number(Double($0)) }) }
         return params
     }
 }
@@ -420,6 +424,8 @@ public struct PrinterCapabilities: Decodable, Sendable, Equatable {
     public let multiColour: Bool?
     /// This printer's MCP can put several on the plate (`slice_stl` `repetitions`, KAN-214 PR 8b).
     public let copies: Bool?
+    /// slice_stl takes pause_at_layers: the print sheet offers Pause before a layer.
+    public var layerPauses: Bool? = nil
     public let materialChoice: Bool?
     public let missing: [String]?
     public let update: Update?

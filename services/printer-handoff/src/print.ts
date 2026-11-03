@@ -292,6 +292,8 @@ export class PrinterHandoffRunner {
         if (input.slicer?.[key] === undefined) delete slicer[key];
       }
     }
+    if (alreadySliced && slicer.pauseAtLayers?.length)
+      throw new PrinterMcpError('published-sliced-settings', undefined, 'This file is already sliced, so its layer pauses are the ones it was sliced with. Share the designer’s editable 3MF to add a pause.');
     if (alreadySliced && ((slicer.repetitions ?? 1) !== 1 || ['layerHeightMm', 'wallLoops', 'sparseInfillDensity', 'loadFilaments', 'filamentProfile', 'filamentColours', 'templateName'].some(key => Object.hasOwn(input.slicer ?? {}, key))))
       throw new PrinterMcpError('published-sliced-settings', undefined, 'This file is already sliced. Share the designer’s editable 3MF to change its slicing settings or copies.');
     // A chosen spool's profile (load_filaments) replaces the configured filament alias: MCPs refuse the two when they differ.
@@ -326,6 +328,7 @@ export class PrinterHandoffRunner {
       if ((slicer.layerHeightMm !== undefined && !Object.hasOwn(sliceProperties, 'layer_height'))
           || (slicer.wallLoops !== undefined && !Object.hasOwn(sliceProperties, 'wall_loops'))
           || (slicer.sparseInfillDensity !== undefined && !Object.hasOwn(sliceProperties, 'sparse_infill_density'))
+          || (slicer.pauseAtLayers?.length && !Object.hasOwn(sliceProperties, 'pause_at_layers'))
           // mcp-3D-printer-server forwards repetitions only on its Bambu-compatible route; elsewhere it would slice one.
           || (slicer.repetitions !== undefined && slicer.repetitions > 1 && (!Object.hasOwn(sliceProperties, 'repetitions') || !isBambuSlicing(this.#config, selection, slicer)))) fail('print-settings-unsupported');
     }
@@ -345,6 +348,7 @@ export class PrinterHandoffRunner {
       layer_height: slicer.layerHeightMm,
       wall_loops: slicer.wallLoops,
       sparse_infill_density: slicer.sparseInfillDensity,
+      pause_at_layers: slicer.pauseAtLayers?.length ? slicer.pauseAtLayers : undefined,
       // Sent whenever it is set and the tool takes it, 1 included: a request for one copy overrides a configured 3.
       repetitions: slicer.repetitions !== undefined && (slicer.repetitions > 1 || Object.hasOwn(session.getTool('slice_stl').inputSchema.properties ?? {}, 'repetitions'))
         ? slicer.repetitions : undefined,

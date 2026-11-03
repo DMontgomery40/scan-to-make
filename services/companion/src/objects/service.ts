@@ -858,17 +858,21 @@ export class ObjectService {
     const {store: bundles, relay, runner} = printing.services;
     const {selection: colourSelection, slicer} = await this.#colour(id, options, services.selection, runner.backend);
     const selected = object.publishedSelection ? {...colourSelection, plateIndex: object.publishedSelection.plateIndex} : colourSelection;
-    const overrides = object.publishedSelection?.sliced ? {repetitions: 1} : sliceOverrides(options, selected?.nozzleDiameterMm);
+    const overrides = object.publishedSelection?.sliced
+      ? {repetitions: 1, ...(options.pauseBeforeLayers?.length ? {pauseAtLayers: options.pauseBeforeLayers} : {})}
+      : sliceOverrides(options, selected?.nozzleDiameterMm);
     if (object.kind === 'published' && object.current.model.toLowerCase().endsWith('.3mf')) {
       if (!options.quality || options.quality === 'standard') delete overrides.layerHeightMm;
       if (!options.strength || options.strength === 'standard') { delete overrides.wallLoops; delete overrides.sparseInfillDensity; }
     }
     const capabilities = destinationId ? this.#deps.printers?.capabilities(destinationId) : undefined;
     if (capabilities && ((overrides.layerHeightMm !== undefined && !capabilities.quality) || (overrides.wallLoops !== undefined && !capabilities.strength)
-        || (overrides.repetitions !== undefined && overrides.repetitions > 1 && !capabilities.copies)))
+        || (overrides.repetitions !== undefined && overrides.repetitions > 1 && !capabilities.copies)
+        || (overrides.pauseAtLayers?.length && !capabilities.layerPauses)))
       throw new InvalidStateError(settingsUnsupported(runner.backend, options));
     const settings: PrintSettings = {...(options.quality ? {quality: options.quality} : {}), ...(options.strength ? {strength: options.strength} : {}),
-      ...(options.colour ? {colour: options.colour} : {}), ...(options.copies !== undefined ? {copies: options.copies} : {})};
+      ...(options.colour ? {colour: options.colour} : {}), ...(options.copies !== undefined ? {copies: options.copies} : {}),
+      ...(options.pauseBeforeLayers?.length ? {pauseBeforeLayers: options.pauseBeforeLayers} : {})};
     const sliced = {...slicer, ...overrides};
     const stl = await this.#modelBytes(object);
     const manifest = await bundles.create({...(object.kind === 'published' ? {model: {bytes: stl, format: object.current.model.toLowerCase().endsWith('.3mf') ? '3mf' as const : 'stl' as const}} : {stl}), prompt: '', backend: runner.backend, ...(selected ? {selection:selected} : {})});

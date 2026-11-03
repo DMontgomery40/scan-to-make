@@ -24,6 +24,8 @@ struct PrintSheet: View {
     /// The person changed Copies; until then the printer profile's own count applies.
     @State private var copiesPicked = false
     @State private var checked = false
+    /// "Pause before layer" rows (the slicer's Add pause), e.g. to drop in magnets. Empty: no pause.
+    @State private var pauses: [Int] = []
     @State private var estimate: PrintEstimate?
     @State private var estimateState = Loading.idle
     /// `refused`: Bambu Studio refused this slice (its words); Print is held for it.
@@ -97,6 +99,7 @@ struct PrintSheet: View {
                     }
                     if !offersCopies, object.settings?.printDefaults?.copies != nil { Text("This printer uses one copy.").font(.caption).foregroundStyle(.secondary) }
                     }
+                    if offersPauses { pauseRows }
                     estimateLine
                 }
             }
@@ -199,6 +202,38 @@ struct PrintSheet: View {
         return "\(place) · \(filament.material) \(filament.name)"
     }
 
+    // MARK: Pauses
+
+    /// The slicer's "Add pause" through the printer's MCP (`pause_at_layers`): the printer stops by itself before the layer.
+    private var offersPauses: Bool { !slicedOriginal && printer?.capabilities?.layerPauses == true }
+    /// The slice's layer count once the estimate has it.
+    private var layerCount: Int? { estimate?.layers.flatMap { $0 > 1 ? $0 : nil } }
+
+    @ViewBuilder private var pauseRows: some View {
+        Text("Pause").font(.headline)
+        ForEach(pauses.indices, id: \.self) { index in
+            HStack {
+                Stepper(value: Binding(get: { pauses[index] }, set: { pauses[index] = $0 }), in: 2...(layerCount ?? 100_000)) {
+                    Text(layerCount.map { "Before layer \(pauses[index]) of \($0)" } ?? "Before layer \(pauses[index])").monospacedDigit()
+                }
+                Button { pauses.remove(at: index) } label: { Image(systemName: "minus.circle.fill") }
+                    .buttonStyle(.borderless).foregroundStyle(.secondary).accessibilityLabel("Remove this pause")
+            }
+        }
+        Button(pauses.isEmpty ? "Add a Pause…" : "Add Another Pause") {
+            let next = (pauses.max() ?? 1) + 1
+            pauses.append(min(next, layerCount ?? next))
+        }
+        .accessibilityIdentifier("add-pause")
+        if !pauses.isEmpty {
+            Text("The printer stops before each of these layers and waits, so you can drop in magnets or nuts. Press Resume on the printer when they’re in. Layers count as in Bambu Studio’s and OrcaSlicer’s preview.")
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        }
+        if let count = layerCount, pauses.contains(where: { $0 > count }) {
+            Text("This print has \(count) layers.").font(.caption).foregroundStyle(.red)
+        }
+    }
+
     // MARK: Estimate
 
     private var offersQuality: Bool { !slicedOriginal && settingsServed && (printer?.capabilities?.quality ?? true) }
@@ -248,6 +283,7 @@ struct PrintSheet: View {
         printer != nil && !model.working.contains(object.id) && (!uncertain || checked) && !refused
             && (words.actions.contains(.print) || words.actions.contains(.printChecked))
             && (settingsServed || chosen != nil || (filamentState == .done && filaments.isEmpty))
+            && !(layerCount.map { count in pauses.contains { $0 > count } } ?? false)
     }
 
     private var colour: PrintSettings.Colour? {
@@ -261,7 +297,8 @@ struct PrintSheet: View {
 
     private func send() {
         let settings = PrintSettings(quality: offersQuality ? quality : .standard, strength: offersStrength ? strength : .standard, colour: colour,
-                                     copies: slicedOriginal ? 1 : offersCopies && copiesPicked ? copies : (object.settings?.printDefaults?.copies != nil ? 1 : nil))
+                                     copies: slicedOriginal ? 1 : offersCopies && copiesPicked ? copies : (object.settings?.printDefaults?.copies != nil ? 1 : nil),
+                                     pauseBeforeLayers: offersPauses ? pauses : [])
         let filament = published ? nil : chosen
         Task { if await model.print(object.id, checked: uncertain && checked, settings: settings, filament: filament) { dismiss() } }
     }
