@@ -604,3 +604,14 @@ test('a print the printer service refuses reaches the phone as an event (review 
   assert.equal(f.events.some(item => item.type === 'print.not-started'), false);
   assert.deepEqual(f.events.filter(item => item.type === 'project.updated').map(item => [item.projectId, item.data]), [[f.object.id, {keys: ['print']}]]);
 });
+
+test('Print and Estimate keep their slices in the project\'s own folder, so Print Again prints the one already made', async t => {
+  const f = await setup(t, {reports: [status('IDLE', 0)]});
+  const slices = join(f.store.dir(f.object.id), 'slices');
+  await f.service.estimate(f.object.id).catch(() => undefined);
+  assert.deepEqual(f.runs.find(run => run.estimate)?.estimate.sliceCache, {directory: slices});
+  await f.service.print(f.object.id);
+  await f.approve();
+  await f.service.settled(f.object.id);
+  assert.deepEqual(f.runs.find(run => run.options)?.options.sliceCache, {directory: slices});
+});

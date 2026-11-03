@@ -684,3 +684,68 @@ test('slicer reports fail closed and keep Studio\'s words', async () => {
   assert.deepEqual(slicerReport({slicer_result: {return_code: 0, sliced_plates: [{warning_message: 'A.\r\nB.\u0007'}, {warning_message: 'A.\r\nB.\u0007'}]}}),
     {failed: false, message: 'A.\nB.'}, 'line breaks kept, other control characters dropped, one copy per message');
 });
+
+test('Print Again prints the slice it made: no lay_flat or slice_stl, but the same inspection, printer checks and print_3mf', async t => {
+  const f = await setup(t);
+  const sliceCache = {directory: join(f.root, 'slices')};
+  const first = await f.runner.run({stlPath: f.stlPath, sliceCache});
+  const firstBytes = await readFile(first.slicedPath);
+  const again = await f.runner.run({stlPath: f.stlPath, sliceCache});
+  assert.deepEqual(again.steps, ['discover', 'inspect', 'print']);
+  const calls = (await f.calls()).filter(entry => entry.tool).map(entry => entry.tool);
+  assert.deepEqual(calls, ['lay_flat', 'slice_stl', 'inspect_print_file', 'print_3mf', 'inspect_print_file', 'print_3mf']);
+  const printed = (await f.calls()).filter(entry => entry.tool === 'print_3mf').at(-1).arguments;
+  assert.equal(printed.three_mf_path, again.slicedPath);
+  assert.ok(again.slicedPath.endsWith('clean_sliced.3mf'));
+  assert.deepEqual(await readFile(again.slicedPath), firstBytes);
+  assert.equal(again.print.dispatch, 'started');
+});
+
+test('anything that shapes the slice slices again: quality, strength, copies, filament, nozzle, bed, model, the MCP and its .env', async t => {
+  const f = await setup(t, {settings: true, remote: true});
+  const sliceCache = {directory: join(f.root, 'slices')};
+  const slices = async () => (await f.calls()).filter(call => call.tool === 'slice_stl').length;
+  const slice = input => f.runner.run({stlPath: f.stlPath, print: false, sliceCache, ...input});
+  await slice({});
+  await slice({});
+  assert.equal(await slices(), 1, 'nothing changed: kept');
+  const changes = [{slicer: {layerHeightMm: 0.12}}, {slicer: {wallLoops: 4}}, {slicer: {repetitions: 2}}, {slicer: {filamentProfile: '/p/petg.json'}},
+    {selection: {nozzleType: 'stainless_steel'}}, {selection: {bedType: 'cool_plate'}}];
+  for (const [index, change] of changes.entries()) {
+    await slice(change);
+    assert.equal(await slices(), 2 + index, JSON.stringify(change));
+    await slice(change);
+    assert.equal(await slices(), 2 + index, `${JSON.stringify(change)} again: kept`);
+  }
+  let count = await slices();
+  await writeFile(f.stlPath, Buffer.concat([stl, Buffer.from('\n')]));
+  await slice({});
+  assert.equal(await slices(), ++count, 'new model bytes');
+  await writeFile(join(f.root, '.env'), 'BAMBU_NOZZLE_TYPE=stainless_steel\n');
+  await slice({});
+  assert.equal(await slices(), ++count, "the MCP's .env changed");
+  // Another MCP (its own process) never prints this one's slice.
+  const other = new PrinterHandoffRunner({...f.config, process: {...f.config.process, args: [...f.config.process.args, 'other']}}, {relay: f.relay});
+  await other.run({stlPath: f.stlPath, print: false, sliceCache}).catch(() => undefined);
+  assert.equal(await slices(), ++count, 'another MCP');
+});
+
+test("a kept slice with Bambu Studio's warning asks it again before printing", async t => {
+  const words = (await studio('lay-flat-floating-cantilever')).sliced_plates[0].warning_message;
+  const f = await setup(t, {slicerResult: 'lay-flat-floating-cantilever'});
+  const sliceCache = {directory: join(f.root, 'slices')};
+  await f.runner.run({stlPath: f.stlPath, sliceCache});
+  const asked = f.seen.length;
+  const again = await f.runner.run({stlPath: f.stlPath, sliceCache});
+  assert.equal(again.slicerWarning, words);
+  assert.equal(f.seen[asked].message, words, "Studio's question again, in its own words");
+  assert.equal((await f.calls()).filter(call => call.tool === 'slice_stl').length, 1);
+});
+
+test('Estimate, then Print of the same model and settings slices once', async t => {
+  const f = await setup(t);
+  const sliceCache = {directory: join(f.root, 'slices')};
+  await f.runner.estimate({stlPath: f.stlPath, sliceCache}).catch(() => undefined);
+  await f.runner.run({stlPath: f.stlPath, sliceCache});
+  assert.deepEqual((await f.calls()).filter(entry => entry.tool).map(entry => entry.tool), ['lay_flat', 'slice_stl', 'inspect_print_file', 'inspect_print_file', 'print_3mf']);
+});

@@ -902,7 +902,8 @@ export class ObjectService {
       })));
       if (update.phase !== 'accepted') await this.#emit({id: randomUUID(), type: 'print.preparing', ...eventBase, data: {stage: message.replace(/…$/, '')}});
     };
-    const work = runner.runBundle(bundles, manifest.id, {print: true, signal: controller.signal, onProgress,
+    // Print Again prints the slice it made last time when nothing that shapes it changed (slice-cache.ts).
+    const work = runner.runBundle(bundles, manifest.id, {print: true, signal: controller.signal, onProgress, sliceCache: {directory: join(this.#deps.store.dir(id), 'slices')},
       ...(Object.keys(sliced).length ? {slicer: sliced} : {})})
       .then(outcome => this.#dispatched(id, manifest.id, printDestination?.id ?? destinationId, (outcome as {result?: {dispatch?: {jobName?: string; taskId?: string; fileBase?: string}}} | undefined)?.result?.dispatch),
         async error => {
@@ -1280,7 +1281,7 @@ export class ObjectService {
           const stlPath = join(work, object.current!.model.toLowerCase().endsWith('.3mf') ? 'model.3mf' : 'model.stl');
           await writeFile(stlPath, model);
           const {estimate, settings, slicerWarning} = await runner.estimate!({stlPath, ...((services.selection || object.publishedSelection) ? {selection: {...services.selection, ...(object.publishedSelection ? {plateIndex: object.publishedSelection.plateIndex} : {})}} : {}), ...(Object.keys(overrides).length ? {slicer: overrides} : {}),
-            signal: AbortSignal.timeout(150_000)});
+            signal: AbortSignal.timeout(150_000), sliceCache: {directory: join(this.#deps.store.dir(id), 'slices')}});
           return {destinationId: destinationId ?? 'current', quality, strength, ...(copies ? {copies} : {}),
             ...(estimate?.seconds !== undefined ? {seconds: estimate.seconds} : {}), ...(estimate?.grams !== undefined ? {grams: estimate.grams} : {}),
             ...(settings.layers !== undefined ? {layers: settings.layers} : {}), ...(settings.layerHeightMm !== undefined ? {layerHeightMm: settings.layerHeightMm} : {}),
