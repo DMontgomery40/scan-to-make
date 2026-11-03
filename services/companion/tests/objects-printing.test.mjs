@@ -1,3 +1,4 @@
+import {createRequire} from 'node:module';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {mkdtemp, mkdir, readFile, rm, writeFile} from 'node:fs/promises';
@@ -128,6 +129,21 @@ async function setup(t, {tools = ['get_printer_status', 'camera_snapshot', 'paus
 const status = (state, progress, extra = {}) => ({connected: true, print: {filename: JOB, progress, timeRemaining: Math.max(0, 40 - progress), currentLayer: progress, totalLayers: 100},
   raw: {gcode_state: state, subtask_name: JOB, task_id: '0', ...extra}});
 const reset = f => f.store.update(f.object.id, o => ({...o, state: 'ready', print: undefined}));
+
+test('a design in several colours prints its multi-part 3MF, not a one-spool STL', async t => {
+  const f = await setup(t, {reports: [status('RUNNING', 10)]});
+  const {zipSync, strToU8} = createRequire(new URL('../../printer-handoff/package.json', import.meta.url))('fflate');
+  const parts = Buffer.from(zipSync({'[Content_Types].xml': strToU8('<Types/>'),
+    '3D/3dmodel.model': strToU8('<model><resources><object id="1"><mesh/></object><object id="2"><mesh/></object></resources><build><item objectid="1"/><item objectid="2"/></build></model>')}));
+  await writeFile(join(f.store.dir(f.object.id), 'current', 'model.3mf'), parts);
+  await f.store.update(f.object.id, o => ({...o, kind: 'fit', current: {model: 'current/model.3mf', renders: []}}));
+  await f.service.print(f.object.id);
+  await f.approve();
+  await f.service.settled(f.object.id);
+  const manifest = await f.deps.print.services.store.read(f.runs[0].id);
+  assert.equal(manifest.sourceModel?.format, '3mf', 'the parts and their filaments reach the printer service');
+  assert.equal(manifest.cleanStl, undefined);
+});
 
 test('"printed" means printed: Print leaves the project printing until the printer reports this job done', async t => {
   const f = await setup(t, {reports: [status('FINISH', 100, {subtask_name: 'old job'}), status('PREPARE', 0), status('RUNNING', 3), status('RUNNING', 51), status('FINISH', 100)]});

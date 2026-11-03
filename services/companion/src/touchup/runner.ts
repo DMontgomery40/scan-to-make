@@ -24,6 +24,8 @@ export interface TouchupResult {
   closeup?: string;
   summary?: string;
   model?: string;
+  /** A request in several colours: the printer MCP's multi-part 3MF (counterpart_make_3mf), each part on its filament. */
+  parts?: string;
   renders: string[];
   checkpoints: string[];
   stats: {seconds: number; toolCalls: number; costUsd?: number};
@@ -210,7 +212,9 @@ export async function runTouchupWorker(inv: TouchupInvocation, pass: TouchupPass
   if (await isValidStl(touched)) model = touched;
   else model = validCheckpoints.at(-1);
 
-  const base = {renders, checkpoints, ...(worker ? {worker} : {}), stats: {seconds: seconds(), toolCalls, ...(resultEvent?.total_cost_usd !== undefined ? {costUsd: resultEvent.total_cost_usd} : {})}};
+  const partsPath = join(pass.outDir, 'touched.3mf');
+  const parts = await readFile(partsPath).then(bytes => bytes.length > 4 && bytes[0] === 0x50 && bytes[1] === 0x4b ? partsPath : undefined, () => undefined);
+  const base = {renders, checkpoints, ...(parts ? {parts} : {}), ...(worker ? {worker} : {}), stats: {seconds: seconds(), toolCalls, ...(resultEvent?.total_cost_usd !== undefined ? {costUsd: resultEvent.total_cost_usd} : {})}};
   const withModel = model ? {model} : {};
   const answer = resultEvent?.structured_output;
   const summary = {...(answer?.summary ? {summary: publicText(answer.summary)} : {}), ...structured(answer, publicText)};
