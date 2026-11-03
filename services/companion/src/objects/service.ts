@@ -4,7 +4,7 @@ import {tmpdir} from 'node:os';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {basename, dirname, extname, isAbsolute, join} from 'node:path';
-import {DispatchedPrintError, PrinterMcpError, inspectModelFile, modelPlatePreview, readModelFile, type ModelFileInfo, readPrintReport, readPrintRoute, routeArgs, setPrintRoute, sliceEstimate, type PrintRoute,
+import {DispatchedPrintError, PrinterMcpError, inspectModelFile, modelPlatePreview, readModelFile, type ModelFileInfo, readPrintReport, readPrintRoute, routeArgs, setPrintRoute, sliceEstimate, timeoutsFor, type PrintRoute,
   type PrintProgress, type PendingElicitation, type PrinterHandoffConfig, type PrinterSelection, type PrinterSlicer, type PrintReport, type PrinterSession} from '@scan-to-make/printer-handoff';
 import type {PrintEstimate, PrintSettings, ProjectStatus, ProjectSettingsPatch} from '@scan-to-make/contracts/counterpart';
 import {PrintMonitorRunner, matchJob, milestonesFor, type EventDraft, type MonitorClock, type MonitorEnd, type MonitorTarget} from '../printing/monitor.js';
@@ -1099,7 +1099,9 @@ export class ObjectService {
 
   /** After a restart: resume watching dispatched prints; a print still being prepared was interrupted. */
   async resume(): Promise<void> {
-    for (const object of await this.#deps.store.list()) {
+    for (let object of await this.#deps.store.list()) {
+      // A printer's question lives only as long as the process that asked it: none survives a restart.
+      if (object.printConfirmation) object = this.#changed(await this.#deps.store.update(object.id, o => ({...o, printConfirmation: undefined})));
       if (object.state !== 'printing' || !object.print) continue;
       const monitor = object.print.monitor;
       const destinationId = object.print.destinationId ?? object.print.destination?.id;
@@ -1218,7 +1220,9 @@ export class ObjectService {
         // The printer's controls act on whatever it is printing now: make sure that is still this project.
         const report = await readPrintReport(session, {failFast: true});
         if (matchJob(target, report) !== 'ours' || !['preparing', 'printing', 'paused'].includes(report.state)) { notOurs = true; return; }
-        const result = await session.call(tool, args, {held: true, elicitationContext: {bundleId: print.bundleId}, timeoutMs: 120_000});
+        // The MCP may ask a person first (a Resume it can't verify does): wait as long as that question stays open.
+        const result = await session.call(tool, args, {held: true, elicitationContext: {bundleId: print.bundleId},
+          timeoutMs: timeoutsFor(session.config).elicitationMs + 120_000});
         if (result.isError) throw new PrinterMcpError('tool-failed', undefined, (result.content ?? []).flatMap(item => item.type === 'text' ? [item.text] : []).join(' ').trim().slice(0, 300) || undefined);
       });
     } catch (error) {
@@ -1226,7 +1230,8 @@ export class ObjectService {
       const message = detail ? `The printer didn't ${action === 'cancel' ? 'stop' : action}: ${detail}` : `The printer didn't ${action === 'cancel' ? 'stop' : action}. Check it, then try again.`;
       // Kept, not only shown: the project's activity and companion.log say what was refused and why.
       console.error(`print control ${action} refused for ${id}: ${message}${detail ? '' : ` (${error instanceof Error ? error.message : String(error)})`}`);
-      await this.#deps.store.update(id, o => o.print ? {...o, print: {...o.print, events: [...(o.print.events ?? []), {atMs: Date.now(), message: message.slice(0, 400)}].slice(-20)}} : o)
+      // A question this control asked ends with it: never leave it on the project, where it hides the controls.
+      await this.#deps.store.update(id, o => o.print ? {...o, printConfirmation: undefined, print: {...o.print, events: [...(o.print.events ?? []), {atMs: Date.now(), message: message.slice(0, 400)}].slice(-20)}} : o)
         .then(updated => this.#changed(updated)).catch(() => undefined);
       throw new InvalidStateError(message);
     } finally {
@@ -1318,8 +1323,11 @@ export class ObjectService {
   answerPrintConfirmation(id: string, confirmationId: string, answer: unknown): Promise<StmObject> {
     return this.#gate(id, async () => {
       const confirmation = this.#confirmations.get(id);
-      if (!confirmation || confirmation.pending.id !== confirmationId || !this.#pending(id, confirmationId))
+      if (!confirmation || confirmation.pending.id !== confirmationId || !this.#pending(id, confirmationId)) {
+        // Nothing waits for this answer any more: take the question off the project so its controls come back.
+        this.#changed(await this.#deps.store.update(id, o => o.printConfirmation?.id === confirmationId ? {...o, printConfirmation: undefined} : o));
         throw new InvalidStateError('That printer confirmation is no longer waiting. Refresh the project.');
+      }
       const question = printQuestion(confirmation.pending);
       if (!record(answer) || Object.keys(answer).some(key => !['action', 'content'].includes(key)))
         throw new InvalidStateError('Invalid printer confirmation answer.');
@@ -1335,6 +1343,7 @@ export class ObjectService {
       if (checked.action !== 'accept' && this.#running.has(id)) this.#cancelledPrints.add(id);
       if (!confirmation.printing.services.relay.respond(confirmationId, checked)) {
         this.#cancelledPrints.delete(id);
+        this.#changed(await this.#deps.store.update(id, o => o.printConfirmation?.id === confirmationId ? {...o, printConfirmation: undefined} : o));
         throw new InvalidStateError('That printer confirmation is no longer waiting. Refresh the project.');
       }
       clearTimeout(confirmation.timer);
