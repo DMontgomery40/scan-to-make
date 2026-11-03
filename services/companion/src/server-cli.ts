@@ -135,15 +135,30 @@ if(remoteAuth)mcpUpdates=new McpUpdater({
   runningVersion:id=>printerDirectory?.capabilities(id)?.server.version,node:process.execPath,gate:printGate,
   ...(eventLog&&projectlessEvents?{emit:async event=>{await eventLog.append({id:randomUUID(),type:event.type,data:event.data,detail:{package:mcpLabels[event.package]??event.package,...(event.reason?{reason:event.reason}:{})}});}}:{}),
 });
+const printerProfiles=join(dataRoot,'printers','profiles.json');
+/** After Add, Remove or a Printer MCP choice: the catalog reads every source again (in place), new printers get
+ * their services, and a removed one's MCP session closes. */
+const reloadPrinters=async()=>{
+  const catalog=printerCatalog, services=printerDestinations;
+  if(!catalog||!services||!printHandoff)return;
+  const before=new Set(catalog.entries().map(entry=>entry.id));
+  await catalog.reload();
+  for(const destination of catalog.destinations)if(!services.has(destination.id))
+    services.set(destination.id,createPrintHandoffServices(catalog.resolve(destination.id)!,handoffDirectory!,{pool:printerPool,destinationId:destination.id,onConnect:onConnect(destination.id)}));
+  const now=new Set(catalog.entries().map(entry=>entry.id));
+  for(const id of before)if(!now.has(id)&&id!=='current'){await services.get(id)?.runner.session?.close().catch(()=>undefined);services.delete(id);}
+};
 const printerSetup=mcpUpdates?new PrinterSetup({env:printerEnv,configs:()=>printerCatalog?.entries()??[],
   effective:(id,config)=>mcpUpdates!.effective(id,config),download:pkg=>mcpUpdates!.download(pkg),
-  latestVersion:(pkg,options)=>mcpUpdates!.latestVersion(pkg,options),folders:()=>findMcpFolders(homedir())}):undefined;
+  latestVersion:(pkg,options)=>mcpUpdates!.latestVersion(pkg,options),folders:()=>findMcpFolders(homedir()),
+  node:process.execPath,profilesPath:printerProfiles,catalog:()=>printerCatalog,reload:reloadPrinters,
+  busy:async id=>printerBusy?await printerBusy(id):false}):undefined;
 if(handoffConfig&&printHandoff&&captureDirectory&&claudePath){
   const objectStore=new ObjectStore(join(captureDirectory,'objects'));
   objectStoreForEvents=objectStore;
   // Dispatched prints keep printing: ObjectService.resume() picks their monitors back up.
   await objectStore.recoverInterrupted({keepPrinting:true});
-  printerCatalog=await loadPrinterCatalog(handoffConfig);
+  printerCatalog=await loadPrinterCatalog(handoffConfig,{profilesPath:printerProfiles});
   const catalog=printerCatalog;
   // `current` is the Mac app's own config and keeps the phone handoff route's services.
   const destinations=new Map(catalog.destinations.map(destination=>{

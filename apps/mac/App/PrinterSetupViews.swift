@@ -106,3 +106,300 @@ struct McpPackageRow: View {
         }
     }
 }
+
+extension PrinterSetupModel {
+    /// The package for an MCP name, when the companion listed it.
+    func package(_ backend: String) -> PrinterMcpPackage? { packages.first { $0.package == backend } }
+    static func label(_ backend: String) -> String { backend == "bambu-printer-mcp" ? "bambu-printer-mcp" : "mcp-3D-printer-server" }
+    static func words(_ error: Error, otherwise: String) -> String {
+        if let error = error as? ControlRemoteError, !error.message.isEmpty { return error.message }
+        return otherwise
+    }
+}
+
+/// Add printer… (journey M3, MAC-6): printers found on this Mac and the network first, one tap each; then
+/// Other Brand… / Enter Address…, all dropdowns except the access code or API key. Check asks the printer before saving.
+struct AddPrinterSheet: View {
+    @ObservedObject var setup: PrinterSetupModel
+    let added: () -> Void
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject private var updates = PrinterUpdates.shared
+    @State private var discovery: PrinterDiscovery?
+    @State private var looking = true
+    @State private var editing = false
+    @State private var form = PrinterForm()
+    @State private var check: PrinterCheckResult?
+    @State private var checking = false
+    @State private var saving: String?
+    @State private var problem: String?
+    @State private var done: String?
+
+    private var options: PrinterSetupOptions? { discovery?.options }
+    private var type: PrinterSetupOptions.PrinterType? { options?.types.first { $0.printerType == form.printerType } }
+    private var models: [PrinterSetupOptions.Model] { options?.models[form.backend] ?? [] }
+    private var missingMcp: PrinterMcpPackage? { setup.package(form.backend).flatMap { $0.installed ? nil : $0 } }
+    private var formReady: Bool {
+        guard !form.host.trimmingCharacters(in: .whitespaces).isEmpty, missingMcp == nil else { return false }
+        if type?.serial == true && (form.serial.isEmpty || form.model == nil) { return false }
+        return type?.secret?.required != true || !form.secret.isEmpty
+    }
+
+    var body: some View {
+        VStack(spacing:0) {
+            Form {
+                if let done { finished(done) } else if editing { formSections } else { foundSections }
+            }
+            .formStyle(.grouped)
+            Divider()
+            HStack {
+                if editing && done == nil { Button("Back") { editing = false; check = nil; problem = nil } }
+                Spacer()
+                if done != nil { Button("Done") { dismiss() }.keyboardShortcut(.defaultAction).buttonStyle(.glassProminent) }
+                else {
+                    Button("Cancel", role:.cancel) { dismiss() }.keyboardShortcut(.cancelAction)
+                    if editing {
+                        Button(checking ? "Checking…" : "Check") { runCheck() }.disabled(!formReady || checking || saving != nil)
+                        Button("Add Printer") { save(form) }.keyboardShortcut(.defaultAction).buttonStyle(.glassProminent)
+                            .disabled(!formReady || checking || saving != nil)
+                    }
+                }
+            }
+            .padding(16)
+        }
+        .frame(width:540, height:600)
+        .task { await discover() }
+    }
+
+    // MARK: Found printers
+
+    @ViewBuilder private var foundSections: some View {
+        Section {
+            if looking {
+                HStack(spacing:8) { ProgressView().controlSize(.small); Text("Looking for printers…").foregroundStyle(.secondary) }
+            } else if discovery?.found.isEmpty != false {
+                Text("No printers found on this Mac or your network.").foregroundStyle(.secondary)
+            }
+            ForEach(discovery?.found ?? []) { candidate in candidateRow(candidate) }
+        } header: { Text("Found") } footer: {
+            if discovery?.network == "unavailable" {
+                Text("Counterpart couldn’t listen for Bambu printers on this network (another app, such as Bambu Studio, may be using it). Enter the address instead.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        if let problem { Section { Text(problem).font(.caption).foregroundStyle(.red) } }
+        Section {
+            Button("Enter Address…") { start(PrinterForm()) }.disabled(options == nil)
+            Button("Other Brand…") { var other = PrinterForm(); other.printerType = "octoprint"; other.backend = "mcp-3d-printer-server"; start(other) }
+                .disabled(options == nil)
+        } footer: {
+            Text("Bambu Lab printers use bambu-printer-mcp; other brands use mcp-3D-printer-server. Settings for anything else live in each printer’s .env.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    private func candidateRow(_ candidate: PrinterCandidate) -> some View {
+        HStack(spacing:12) {
+            Image(systemName:candidate.folder != nil ? "folder" : candidate.printerType == "bambu" ? "printer.fill" : "printer").font(.title3).frame(width:26)
+            VStack(alignment:.leading, spacing:2) {
+                Text(candidate.name).font(.body.weight(.medium))
+                Text([PrinterSetupModel.label(candidate.backend), candidate.host, candidate.folder.map { ($0 as NSString).abbreviatingWithTildeInPath }]
+                    .compactMap { $0 }.joined(separator:" · ")).font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+            if candidate.added { Text("Added").font(.caption).foregroundStyle(.secondary) }
+            else if let folder = candidate.folder {
+                // Configured already: it runs where it is, with its own settings.
+                Button(saving == candidate.id ? "Adding…" : "Add") { save(PrinterForm(folder:folder), id:candidate.id) }
+                    .buttonStyle(.glassProminent).disabled(saving != nil)
+            } else {
+                Button("Set Up…") { start(prefilled(candidate)) }.disabled(saving != nil)
+            }
+        }
+    }
+
+    private func prefilled(_ candidate: PrinterCandidate) -> PrinterForm {
+        var form = PrinterForm()
+        form.printerType = candidate.printerType
+        form.backend = candidate.backend
+        form.host = candidate.host ?? ""
+        form.port = candidate.port
+        form.serial = candidate.serial ?? ""
+        form.model = candidate.model
+        form.name = candidate.source == "ssdp" ? candidate.name : nil
+        return form
+    }
+
+    // MARK: The form
+
+    @ViewBuilder private var formSections: some View {
+        Section("Printer") {
+            Picker("Brand", selection:Binding(get: { form.printerType }, set: { value in
+                form.printerType = value
+                form.backend = options?.types.first { $0.printerType == value }?.backends.first ?? form.backend
+                form.model = nil; check = nil
+            })) {
+                ForEach(options?.types ?? []) { Text($0.label).tag($0.printerType) }
+            }
+            if type?.serial == true {
+                Picker("Model", selection:Binding(get: { form.model ?? "" }, set: { form.model = $0.isEmpty ? nil : $0; check = nil })) {
+                    if form.model == nil { Text("Choose…").tag("") }
+                    ForEach(models) { Text($0.label).tag($0.value) }
+                }
+            }
+            TextField("Address", text:$form.host, prompt:Text("192.168.1.20 or printer.local"))
+            if type?.serial == true { TextField("Serial number", text:$form.serial, prompt:Text("On the printer: Settings → Device")) }
+            if let secret = type?.secret {
+                VStack(alignment:.leading, spacing:4) {
+                    SecureField(secret.label + (secret.required ? "" : " (optional)"), text:$form.secret)
+                    Text(secret.hint).font(.caption).foregroundStyle(.secondary)
+                }
+            }
+        }
+        if let backends = type?.backends, backends.count > 1 {
+            Section {
+                Picker("Printer MCP", selection:Binding(get: { form.backend }, set: { form.backend = $0; form.model = nil; check = nil })) {
+                    ForEach(backends, id:\.self) { Text(PrinterSetupModel.label($0)).tag($0) }
+                }
+            } footer: { Text("Counterpart sends this printer’s prints through this MCP.").font(.caption).foregroundStyle(.secondary) }
+        }
+        if let missing = missingMcp {
+            Section {
+                McpPackageRow(package:missing, status:updates.status[missing.appMcpId], download:{ setup.download(missing) })
+            } footer: { Text("\(missing.label) isn’t on this Mac yet. Download it to add this printer.").font(.caption).foregroundStyle(.secondary) }
+        }
+        Section { checkResult }
+    }
+
+    @ViewBuilder private var checkResult: some View {
+        if checking {
+            HStack(spacing:8) { ProgressView().controlSize(.small); Text("Asking the printer…").foregroundStyle(.secondary) }
+        } else if let check, check.reached {
+            VStack(alignment:.leading, spacing:8) {
+                if let data = check.image.flatMap({ Data(base64Encoded:$0.base64) }), let image = NSImage(data:data) {
+                    Text("Here’s what your printer sees").font(.body.weight(.medium))
+                    Image(nsImage:image).resizable().scaledToFit().frame(maxHeight:220).clipShape(.rect(cornerRadius:10))
+                } else {
+                    Label(check.camera == "failed" ? "Connected. The camera didn’t send a picture." : "Connected. This printer has no camera to show.",
+                          systemImage:"checkmark.circle.fill").foregroundStyle(Color.okGreen)
+                }
+            }
+        } else if check != nil {
+            Label("Counterpart couldn’t reach the printer. Check the address\(type?.secret == nil ? "" : " and \(type!.secret!.label.lowercased())").",
+                  systemImage:"exclamationmark.triangle.fill").foregroundStyle(.orange)
+        } else {
+            Text("Check asks the printer for its status\(form.printerType == "bambu" ? " and a camera picture" : ""). It never starts a print.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+        if check?.reached != true && !checking && formReady {
+            Text(check == nil ? "Not checked yet: Add Printer saves it without reaching the printer." : "Add Printer saves it anyway; Counterpart couldn’t reach it.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+        if let problem { Text(problem).font(.caption).foregroundStyle(.red) }
+    }
+
+    @ViewBuilder private func finished(_ words: String) -> some View {
+        Section { Label(words, systemImage:"checkmark.circle.fill").foregroundStyle(Color.okGreen) }
+    }
+
+    // MARK: Actions
+
+    private func start(_ value: PrinterForm) {
+        form = value
+        if form.printerType == "bambu", form.model == nil, models.count == 1 { form.model = models.first?.value }
+        check = nil; problem = nil; editing = true
+    }
+
+    private func discover() async {
+        looking = true
+        await setup.refresh()
+        do { discovery = try await PrinterSetupModel.client(for:"printers.discover").discoverPrinters(); problem = nil }
+        catch { problem = PrinterSetupModel.words(error, otherwise:"Counterpart couldn’t look for printers. You can still enter an address.") }
+        looking = false
+    }
+
+    private func runCheck() {
+        checking = true; problem = nil
+        let value = form
+        Task {
+            defer { checking = false }
+            do { check = try await PrinterSetupModel.client(for:"printers.check").checkPrinter(value) }
+            catch { problem = PrinterSetupModel.words(error, otherwise:"Counterpart couldn’t run the check. Try again.") }
+        }
+    }
+
+    private func save(_ value: PrinterForm, id: String = "form") {
+        saving = id; problem = nil
+        Task {
+            defer { saving = nil }
+            do {
+                let result = try await PrinterSetupModel.client(for:"printers.add").addPrinter(value)
+                added()
+                done = result.sameAs != nil
+                    ? "Added. It’s the same printer as one you have, so Counterpart can use either MCP: choose in Settings → Printers → Printer MCP."
+                    : value.folder == nil && check?.reached != true ? "Added. Counterpart couldn’t reach the printer yet; it shows as Offline until it can." : "Added."
+            } catch { problem = PrinterSetupModel.words(error, otherwise:"Counterpart couldn’t add the printer. Try again.") }
+        }
+    }
+}
+
+/// Which MCP a printer reachable through both uses (`printers.chooseMcp`). Counterpart's own preference.
+struct PrinterMcpPicker: View {
+    let printer: PrinterDestination
+    let changed: () -> Void
+    @State private var saving = false
+    @State private var problem: String?
+
+    var body: some View {
+        if let choices = printer.mcps, choices.count > 1 {
+            VStack(alignment:.leading, spacing:6) {
+                Picker("Printer MCP", selection:Binding(get: { printer.backend }, set: { choose($0) })) {
+                    ForEach(choices.map(\.backend), id:\.self) { Text(PrinterSetupModel.label($0)).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .disabled(saving)
+                Text(problem ?? "This printer is set up in both MCPs. Prints go through this one.")
+                    .font(.caption).foregroundStyle(problem == nil ? AnyShapeStyle(.secondary) : AnyShapeStyle(.red))
+            }
+        }
+    }
+
+    private func choose(_ backend: String) {
+        guard backend != printer.backend, !saving else { return }
+        saving = true
+        Task {
+            defer { saving = false }
+            do { _ = try await PrinterSetupModel.client(for:"printers.chooseMcp").choosePrinterMcp(printer.id, backend:backend); problem = nil; changed() }
+            catch { problem = PrinterSetupModel.words(error, otherwise:"Counterpart couldn’t change the MCP. Try again.") }
+        }
+    }
+}
+
+/// A printer added in Counterpart: its settings file, and Remove.
+struct AddedPrinterActions: View {
+    let printer: PrinterDestination
+    let removed: () -> Void
+    @State private var confirming = false
+    @State private var problem: String?
+
+    var body: some View {
+        HStack(spacing:12) {
+            if let folder = printer.folder {
+                let env = URL(fileURLWithPath:folder).appendingPathComponent(".env")
+                Button("Show Settings in Finder") { NSWorkspace.shared.activateFileViewerSelecting([env]) }
+                    .buttonStyle(.link).font(.caption).help(env.path)
+            }
+            Button("Remove…", role:.destructive) { confirming = true }.buttonStyle(.link).font(.caption)
+            if let problem { Text(problem).font(.caption).foregroundStyle(.red) }
+        }
+        .confirmationDialog("Remove \(printer.name)?", isPresented:$confirming) {
+            Button("Remove", role:.destructive) { remove() }
+        } message: { Text("Counterpart stops using this printer. A printer MCP folder you set up yourself stays where it is.") }
+    }
+
+    private func remove() {
+        Task {
+            do { try await PrinterSetupModel.client(for:"printers.remove").removePrinter(printer.id); problem = nil; removed() }
+            catch { problem = PrinterSetupModel.words(error, otherwise:"Counterpart couldn’t remove it. Try again.") }
+        }
+    }
+}

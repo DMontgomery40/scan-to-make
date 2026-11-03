@@ -319,7 +319,9 @@ public extension ControlClient {
         case "objects.pausePrint", "objects.resumePrint", "objects.cancelPrint": return 140 // 130 s on the companion
         case "printers.route": return 35 // 25 s on the companion: it may start the MCP's session first
         case "printers.mcps": return 15 // it looks for copies in the home folder
-        case "printers.installMcp": return 25 // 15 s on the companion (the npm lookup is bounded to 7 s)
+        case "printers.installMcp", "printers.discover": return 25 // 15 s on the companion (npm lookup 7 s; discovery about 4 s)
+        case "printers.check": return 70 // 60 s on the companion: it starts the MCP, then reads status and the camera
+        case "printers.add", "printers.remove", "printers.chooseMcp": return 40 // 30 s on the companion
         default: return 30
         }
     }
@@ -340,6 +342,15 @@ public struct PrinterDestination: Decodable, Sendable, Identifiable, Equatable {
     public let capabilities: PrinterCapabilities?
     /// The MCP install this printer uses, shared by its printers (`printers.updateMcp`, PRD §8.10).
     public let mcpId: String?
+    /// The same printer reached through both MCPs: the profile for each, the one in use first (`printers.chooseMcp`).
+    public let mcps: [McpChoice]?
+    /// A printer added in Counterpart: the folder its MCP runs in (its `.env` holds the settings).
+    public let folder: String?
+    public struct McpChoice: Decodable, Sendable, Equatable {
+        public let backend: String
+        public let destinationId: String
+        public init(backend: String, destinationId: String) { self.backend = backend; self.destinationId = destinationId }
+    }
     /// The MCP that reaches this printer, as people know it.
     public var mcpName: String {
         switch backend {
@@ -347,11 +358,12 @@ public struct PrinterDestination: Decodable, Sendable, Identifiable, Equatable {
         default: return "mcp-3D-printer-server"
         }
     }
-    private enum CodingKeys: String, CodingKey { case id, name, backend, model, address, source, state, origin, capabilities, mcpId }
+    private enum CodingKeys: String, CodingKey { case id, name, backend, model, address, source, state, origin, capabilities, mcpId, mcps, folder }
     public init(id: String, name: String, backend: String, model: String? = nil, address: String? = nil, source: String = "mcp-profile",
-                state: String? = nil, origin: String? = nil, capabilities: PrinterCapabilities? = nil, mcpId: String? = nil) {
+                state: String? = nil, origin: String? = nil, capabilities: PrinterCapabilities? = nil, mcpId: String? = nil,
+                mcps: [McpChoice]? = nil, folder: String? = nil) {
         self.id = id; self.name = name; self.backend = backend; self.model = model; self.address = address; self.source = source
-        self.state = state; self.origin = origin; self.capabilities = capabilities; self.mcpId = mcpId
+        self.state = state; self.origin = origin; self.capabilities = capabilities; self.mcpId = mcpId; self.mcps = mcps; self.folder = folder
     }
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
@@ -365,6 +377,8 @@ public struct PrinterDestination: Decodable, Sendable, Identifiable, Equatable {
         origin = try? values.decodeIfPresent(String.self, forKey: .origin)
         capabilities = try? values.decodeIfPresent(PrinterCapabilities.self, forKey: .capabilities)
         mcpId = try? values.decodeIfPresent(String.self, forKey: .mcpId)
+        mcps = try? values.decodeIfPresent([McpChoice].self, forKey: .mcps)
+        folder = try? values.decodeIfPresent(String.self, forKey: .folder)
     }
 }
 
@@ -507,5 +521,120 @@ public extension ControlClient {
         let reply: Reply = try await call("printers.installMcp", ["package": .string(package)])
         if let update = reply.update { return .started(update) }
         return .installed
+    }
+}
+
+/// Add printer…: what the sheet offers, from the printer MCPs (`printers.discover` `options`).
+public struct PrinterSetupOptions: Decodable, Sendable, Equatable {
+    public struct Secret: Decodable, Sendable, Equatable {
+        public let label: String
+        public let hint: String
+        public let required: Bool
+    }
+    /// A brand or host software: mcp-3D-printer-server's `PRINTER_TYPE`, and the MCPs that can reach it (the default first).
+    public struct PrinterType: Decodable, Sendable, Equatable, Identifiable {
+        public let printerType: String
+        public let label: String
+        public let backends: [String]
+        /// It needs a serial number and a model (Bambu Lab).
+        public let serial: Bool
+        public let secret: Secret?
+        public var id: String { printerType }
+    }
+    public struct Model: Decodable, Sendable, Equatable, Identifiable {
+        public let value: String
+        public let label: String
+        public var id: String { value }
+    }
+    public let types: [PrinterType]
+    /// Each MCP's own model names, by package.
+    public let models: [String: [Model]]
+}
+
+/// A printer Add printer… found: a configured MCP folder on this Mac, or a printer on the network. Never a secret.
+public struct PrinterCandidate: Decodable, Sendable, Equatable, Identifiable {
+    public let id: String
+    /// `folder`, `ssdp` or `bonjour`.
+    public let source: String
+    public let name: String
+    public let backend: String
+    public let printerType: String
+    public let model: String?
+    public let host: String?
+    public let port: String?
+    public let serial: String?
+    /// A configured MCP folder: Add runs it where it is, in one click.
+    public let folder: String?
+    /// Already one of the printers.
+    public let added: Bool
+}
+
+public struct PrinterDiscovery: Decodable, Sendable, Equatable {
+    public let found: [PrinterCandidate]
+    /// `unavailable` when this Mac couldn't listen for Bambu printers (another app may hold the port).
+    public let network: String
+    public let options: PrinterSetupOptions
+}
+
+/// What Check and Add send: a found folder, or the form's fields. `secret` is the access code or API key.
+public struct PrinterForm: Sendable, Equatable {
+    public var folder: String?
+    public var backend = "bambu-printer-mcp"
+    public var printerType = "bambu"
+    public var host = ""
+    public var port: String?
+    public var serial = ""
+    public var model: String?
+    public var secret = ""
+    public var name: String?
+    public init(folder: String? = nil) { self.folder = folder }
+    public var json: JSONValue {
+        if let folder { return .object(["folder": .string(folder)]) }
+        var value: [String: JSONValue] = ["backend": .string(backend), "printerType": .string(printerType), "host": .string(host.trimmingCharacters(in: .whitespaces))]
+        if let port, !port.isEmpty { value["port"] = .string(port) }
+        if printerType == "bambu" {
+            value["serial"] = .string(serial.trimmingCharacters(in: .whitespaces))
+            if let model { value["model"] = .string(model) }
+        }
+        if !secret.isEmpty { value["secret"] = .string(secret) }
+        if let name, !name.isEmpty { value["name"] = .string(name) }
+        return .object(value)
+    }
+}
+
+/// Check: what get_printer_status (and, for a Bambu printer, camera_snapshot) said. Never the MCP's own words.
+public struct PrinterCheckResult: Decodable, Sendable, Equatable {
+    public struct Image: Decodable, Sendable, Equatable { public let mimeType: String; public let base64: String }
+    public let reached: Bool
+    /// `connected`, `failed` or `not-supported`.
+    public let camera: String
+    public let image: Image?
+    public let model: String?
+}
+
+public struct PrinterAdded: Decodable, Sendable, Equatable {
+    public let id: String
+    /// The printer it is listed as; another one when it is the same printer through another MCP.
+    public let destinationId: String?
+    public let sameAs: String?
+}
+
+public extension ControlClient {
+    func discoverPrinters() async throws -> PrinterDiscovery { try await call("printers.discover") }
+    func checkPrinter(_ form: PrinterForm) async throws -> PrinterCheckResult {
+        struct Reply: Decodable { let check: PrinterCheckResult }
+        let reply: Reply = try await call("printers.check", ["printer": form.json])
+        return reply.check
+    }
+    func addPrinter(_ form: PrinterForm) async throws -> PrinterAdded { try await call("printers.add", ["printer": form.json]) }
+    func removePrinter(_ destinationId: String) async throws {
+        struct Reply: Decodable { let removed: Bool }
+        let _: Reply = try await call("printers.remove", ["destinationId": .string(destinationId)])
+    }
+    /// Which MCP a printer reachable through both uses. Returns the printer's id now.
+    func choosePrinterMcp(_ destinationId: String, backend: String) async throws -> String {
+        struct Reply: Decodable { let destinationId: String }
+        let reply: Reply = try await call("printers.chooseMcp", ["destinationId": .string(destinationId), "backend": .string(backend)])
+        return reply.destinationId
     }
 }

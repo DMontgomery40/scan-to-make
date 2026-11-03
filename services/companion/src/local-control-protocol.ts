@@ -1,5 +1,6 @@
 import {z} from 'zod';
 import {ModelAccessChoiceSchema} from './model-access-protocol.js';
+import {PrinterFormSchema} from './printing/setup.js';
 import {CompanionSettingsPatchSchema, ProjectSettingsPatchSchema, PrintColourSchema, PrintQualitySchema, PrintStrengthSchema} from '@scan-to-make/contracts/counterpart';
 
 export const MAX_REQUEST_BYTES = 64 * 1024;
@@ -84,6 +85,11 @@ export const parameters = {
   'printers.route': z.strictObject({destinationId: z.string().min(1).max(256), route: z.enum(['lan', 'cloud']).optional()}),
   'printers.mcps': empty,
   'printers.installMcp': z.strictObject({package: z.enum(['bambu-printer-mcp', 'mcp-3d-printer-server'])}),
+  'printers.discover': empty,
+  'printers.check': z.strictObject({printer: PrinterFormSchema}),
+  'printers.add': z.strictObject({printer: PrinterFormSchema}),
+  'printers.remove': z.strictObject({destinationId: z.string().min(1).max(256)}),
+  'printers.chooseMcp': z.strictObject({destinationId: z.string().min(1).max(256), backend: z.enum(['bambu-printer-mcp', 'mcp-3d-printer-server'])}),
   'printers.updateMcp': z.strictObject({mcpId: z.string().regex(/^mcp-[0-9a-f]{16}$/), fresh: z.boolean().optional()}),
   'fusion.report': z.strictObject({installed:z.boolean(), configured:z.boolean(), running:z.boolean()}),
   'fusion.claimSetup': z.strictObject({claimantId:z.uuid()}),

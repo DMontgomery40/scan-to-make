@@ -137,6 +137,7 @@ struct PrinterMCP: Identifiable, Equatable {
     var source: String {
         switch origin {
         case "printer-handoff": return "Counterpart · printer-handoff.json"
+        case "counterpart": return "Counterpart · added in Settings"
         case "claude-code": return "Claude Code · ~/.claude.json"
         case "claude-desktop": return "Claude Desktop · claude_desktop_config.json"
         case "cursor": return "Cursor · ~/.cursor/mcp.json"

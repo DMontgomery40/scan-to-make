@@ -353,6 +353,7 @@ struct PrintersSettings: View {
     @ObservedObject var objects: ObjectsModel
     @ObservedObject private var updates = PrinterUpdates.shared
     @ObservedObject private var setup = PrinterSetupModel.shared
+    @State private var adding = false
 
     private var printers: [PrinterDestination] { objects.printerCatalog?.destinations ?? [] }
 
@@ -377,10 +378,15 @@ struct PrintersSettings: View {
                         }
                         // Only bambu-printer-mcp has a choice of connection (mcp-3D-printer-server has no Bambu Cloud route).
                         if printer.mcpName == "bambu-printer-mcp" { PrintRoutePicker(destinationId:printer.id).padding(.leading, 38) }
+                        PrinterMcpPicker(printer:printer) { Task { await objects.refresh() } }.padding(.leading, 38)
+                        if printer.origin == "counterpart" { AddedPrinterActions(printer:printer) { Task { await objects.refresh() } }.padding(.leading, 38) }
                     }
                 }
+                if setup.available {
+                    Button("Add Printer…") { adding = true }
+                }
             } header: { Text("Printers") } footer: {
-                Text("Counterpart reads these from your MCP configs. Add or edit printers there. The connection is the printer MCP’s own setting: changing it here changes it in that MCP.")
+                Text("Counterpart finds printers in your MCP configs, and the ones you add here. The connection is the printer MCP’s own setting: changing it here changes it in that MCP.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section {
@@ -405,6 +411,9 @@ struct PrintersSettings: View {
         .focusEffectDisabled()
         .frame(height:590)
         .task { await objects.refresh(); await setup.refresh() }
+        .sheet(isPresented:$adding) {
+            AddPrinterSheet(setup:setup) { Task { await objects.refresh(); await setup.refresh() } }
+        }
         .onChange(of:updates.status) { _, status in
             // A download that finished: read the packages (and printers) again.
             if setup.packages.contains(where: { if case .updated = status[$0.appMcpId] { return true }; return false }) {
