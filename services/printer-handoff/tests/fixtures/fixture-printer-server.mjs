@@ -132,6 +132,7 @@ server.setRequestHandler(CallToolRequestSchema, async request => {
   }
   if (name === 'confirm_temperatures') return text({compatible: true, peakNozzleTempC: 220});
   if (name === 'counterpart_print_route') {
+    if (process.env.HANDOFF_FIXTURE_ROUTE === '"error"') return {isError: true, content: [{type: 'text', text: 'route unavailable'}]};
     const {mode, type} = JSON.parse(process.env.HANDOFF_FIXTURE_ROUTE);
     return text({route: mode === 'bambu_network' && type === 'cloud' ? 'cloud' : 'lan', mode, type, choices: ['lan', 'cloud'], savedTo: null});
   }

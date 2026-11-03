@@ -405,7 +405,8 @@ export class PrinterHandoffRunner {
     // route can recover it only through the server's own human confirmation. The route
     // is the MCP's own setting, so ask it rather than keeping a copy here.
     if (this.#config.backend === 'bambu-printer-mcp' && session.hasTool('get_printer_status') && session.hasTool('clear_hms_errors')
-        && (await readPrintRoute(session, {signal}))?.mode === 'bambu_network') {
+        // The route only decides this optional recovery: a failed read skips it, never the print.
+        && (await readPrintRoute(session, {signal}).catch(error => { if (signal?.aborted) throw error; return undefined; }))?.mode === 'bambu_network') {
       const status = resultValue(await call(session, 'get_printer_status', {}, read)) as {raw?: {hms?: {attr?: number; code?: number}[]}};
       const errors = status?.raw?.hms;
       if (Array.isArray(errors) && errors.length === 1 && errors[0]?.attr === 0x05000500 && errors[0]?.code === 0x00010007) {

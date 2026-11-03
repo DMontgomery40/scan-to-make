@@ -424,7 +424,9 @@ private struct PrintRoutePicker: View {
     private static func label(_ choice: String) -> String {
         switch choice { case "lan": return "Local network"; case "cloud": return "Bambu Cloud"; default: return choice }
     }
-    private func client() throws -> ControlClient { try ControlClient(socketPath:ModelAccessModel.socketPath(for:Installation(bundle:.main))) }
+    private func client() throws -> ControlClient {
+        try ControlClient(socketPath:ModelAccessModel.socketPath(for:Installation(bundle:.main)), timeout:ControlClient.timeout(for:"printers.route"))
+    }
 
     var body: some View {
         Group {

@@ -317,6 +317,7 @@ public extension ControlClient {
         switch method {
         case "objects.estimate": return 190 // it slices: 180 s on the companion
         case "objects.pausePrint", "objects.resumePrint", "objects.cancelPrint": return 140 // 130 s on the companion
+        case "printers.route": return 35 // 25 s on the companion: it may start the MCP's session first
         default: return 30
         }
     }

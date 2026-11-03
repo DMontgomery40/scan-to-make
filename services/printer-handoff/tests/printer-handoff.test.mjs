@@ -500,6 +500,14 @@ test('the printer error is cleared only when the MCP itself says it prints throu
  }
 });
 
+test('a route read that fails skips only the optional printer-error recovery, never the print', async t => {
+ const f=await setup(t,{crypto:true,route:'error'});
+ await f.runner.run({stlPath:f.stlPath});
+ const tools=(await f.calls()).filter(x=>x.tool).map(x=>x.tool);
+ assert.equal(tools.includes('clear_hms_errors'),false);
+ assert.ok(tools.includes('print_3mf'));
+});
+
 test('print_3mf carries no route: the printer service prints over its own configured connection', async t => {
  const f=await setup(t,{route:{mode:'bambu_network',type:'lan'}});
  await f.runner.run({stlPath:f.stlPath});
