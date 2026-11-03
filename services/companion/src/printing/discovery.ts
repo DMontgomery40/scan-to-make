@@ -16,6 +16,18 @@ export const BAMBU_MODEL_IDS: Record<string, string> = {
   O1D: 'h2d', O1E: 'h2dpro', O1S: 'h2s', O1C: 'h2c', O1C2: 'h2c',
 };
 
+/**
+ * The model a Bambu serial number's first three characters name, as bambu-printer-mcp reads them
+ * (its src/safety/printer-state.ts SERIAL_MODELS), in its model names. X1 (00W) has no model name there, so it stays unset.
+ */
+export const BAMBU_SERIAL_MODELS: Record<string, string> = {
+  '093': 'h2s', '094': 'h2d', '31B': 'h2c', '239': 'h2dpro', '20P': 'x2d',
+  '00M': 'x1c', '03W': 'x1e', '01S': 'p1p', '01P': 'p1s', '22E': 'p2s', '039': 'a1', '030': 'a1mini',
+};
+export function modelFromSerial(serial?: string): string | undefined {
+  return serial ? BAMBU_SERIAL_MODELS[serial.trim().slice(0, 3).toUpperCase()] : undefined;
+}
+
 export interface BambuAdvert {host: string; serial: string; model?: string; name: string; firmware?: string}
 
 export function privateIPv4(value: string): boolean {

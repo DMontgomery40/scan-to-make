@@ -40,7 +40,7 @@ export function methodDeadlineMs(method: ControlMethod, params: unknown): number
   // Check starts the MCP (up to 25 s), then status (20 s) and the camera (12 s).
   if (method === 'printers.check') return 60_000;
   // Add, Remove and a Printer MCP choice read every printer config again and restart the printers' services.
-  if (method === 'printers.add' || method === 'printers.remove' || method === 'printers.chooseMcp') return 30_000;
+  if (method === 'printers.add' || method === 'printers.remove' || method === 'printers.chooseMcp' || method === 'printers.completeSettings') return 30_000;
   // Starting the printer MCP's session can take a few seconds before its route is read.
   if (method === 'printers.route') return 25_000;
   // The printer MCP may ask its own confirmation; the call waits up to 120 s for it.

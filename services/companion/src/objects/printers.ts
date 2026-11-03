@@ -6,7 +6,8 @@ import {basename, delimiter, dirname, isAbsolute, join, resolve} from 'node:path
 import {parseEnv} from 'node:util';
 import {printerHandoffConfigSchema, printerSelectionSchema, type PrinterBackend, type PrinterHandoffConfig, type PrinterMcpProcess} from '@scan-to-make/printer-handoff';
 import {parseToml} from './toml.js';
-import {readProfiles} from '../printing/profiles.js';
+import {readProfiles, settingsGap} from '../printing/profiles.js';
+import {modelFromSerial} from '../printing/discovery.js';
 
 /** Configured destinations, not claims about live printer connectivity. */
 export interface PrinterDestination {
@@ -22,6 +23,8 @@ export interface PrinterDestination {
   mcps?: {backend: PrinterBackend; destinationId: string}[];
   /** A printer added in Counterpart: the folder its MCP runs in, whose `.env` holds its settings. */
   folder?: string;
+  /** A printer added in Counterpart whose `.env` lacks settings its MCP needs (names only), and what Complete Settings would add. */
+  incomplete?: {missing: string[]; fill: Record<string, string>};
 }
 
 export type PrinterOrigin = 'printer-handoff' | 'counterpart' | 'claude-code' | 'claude-desktop' | 'cursor' | 'codemode' | 'codex';
@@ -199,6 +202,7 @@ interface Candidate {
   serial?: string;
   config: PrinterHandoffConfig;
   folder?: string;
+  incomplete?: {missing: string[]; fill: Record<string, string>};
 }
 
 async function readDocument(path: string): Promise<RecordValue | undefined> {
@@ -280,11 +284,14 @@ async function buildCatalog(current: PrinterHandoffConfig, options: PrinterCatal
     const config = parsed.data;
     const meta = await metadata(config);
     if (!meta.address) continue;
-    if (meta.model || meta.printerType) config.selection = {...(meta.model ? {model: meta.model} : {}), ...(meta.printerType ? {printerType: meta.printerType} : {})};
+    // The model Counterpart recorded, else the MCP's own: tool calls need it (bambu_model) before the MCP's defaults apply.
+    const model = profile.model ?? meta.model;
+    if (model || meta.printerType) config.selection = {...(model ? {model} : {}), ...(meta.printerType ? {printerType: meta.printerType} : {})};
+    const gap = settingsGap(profile.backend, await environment(join(profile.process.cwd, '.env')), {...(profile.model ? {model: profile.model} : {}), modelFromSerial});
     seenProfiles.add(JSON.stringify([profile.backend, profile.process]));
-    candidates.push({id: profile.id, name: profile.name, backend: profile.backend, address: meta.address, ...(meta.model ? {model: meta.model} : {}),
+    candidates.push({id: profile.id, name: profile.name, backend: profile.backend, address: meta.address, ...(model ? {model} : {}),
       source: 'mcp-profile', origin: 'counterpart', keys: meta.keys, bambuKind: meta.bambuKind, ...(meta.serial ? {serial: meta.serial} : {}),
-      config, folder: profile.process.cwd});
+      config, folder: profile.process.cwd, ...(gap.missing.length ? {incomplete: gap} : {})});
   }
   const queue = (options.sourcePaths ?? defaultSources(home)).map(path => ({path: expand(path, home, home), origin: undefined as PrinterOrigin | undefined}));
   const visited = new Set<string>();
@@ -360,7 +367,7 @@ async function buildCatalog(current: PrinterHandoffConfig, options: PrinterCatal
   const listed = candidates.filter(candidate => chosen.get(candidate) === candidate);
   const defaultDestinationId = canonical.get('current')!;
   const destinations: PrinterDestination[] = [...listed.filter(item => item.id === defaultDestinationId), ...listed.filter(item => item.id !== defaultDestinationId)]
-    .map(({id, name, backend, model, address, source, origin, folder}) => ({id, name, backend, ...(model ? {model} : {}), ...(address ? {address} : {}), source, origin,
-      ...(alternatives.has(id) ? {mcps: alternatives.get(id)!} : {}), ...(origin === 'counterpart' && folder ? {folder} : {})}));
+    .map(({id, name, backend, model, address, source, origin, folder, incomplete}) => ({id, name, backend, ...(model ? {model} : {}), ...(address ? {address} : {}), source, origin,
+      ...(alternatives.has(id) ? {mcps: alternatives.get(id)!} : {}), ...(origin === 'counterpart' && folder ? {folder} : {}), ...(incomplete ? {incomplete} : {})}));
   return {defaultDestinationId, destinations, configs, canonical, candidates, choiceKeys};
 }

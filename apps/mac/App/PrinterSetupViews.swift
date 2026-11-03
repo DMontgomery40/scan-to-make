@@ -14,6 +14,9 @@ import ControlKit
     /// The companion has `printers.mcps` and the setup methods (`capabilities.printerSetup`).
     @Published private(set) var available = false
     @Published private(set) var packages: [PrinterMcpPackage] = []
+    /// The MCPs' own choices (models by package), for Complete Settings.
+    @Published private(set) var options: PrinterSetupOptions?
+    func models(_ backend: String) -> [PrinterSetupOptions.Model] { options?.models[backend] ?? [] }
 
     static var socket: String { ModelAccessModel.socketPath(for:Installation(bundle:.main)) }
     /// A client that waits as long as the companion may take for this method (local-control.md "Deadlines").
@@ -27,8 +30,9 @@ import ControlKit
         #endif
         guard let status = try? await Self.client(for:"status.get").status() else { return }
         available = status.capabilities.printerSetup
-        guard available, let packages = try? await Self.client(for:"printers.mcps").printerMcps() else { return }
-        if self.packages != packages { self.packages = packages }
+        guard available, let state = try? await Self.client(for:"printers.mcps").printerSetupState() else { return }
+        if packages != state.packages { packages = state.packages }
+        if options != state.options { options = state.options }
     }
 
     /// Download: the companion installs only that package; `mcp.update.*` events carry the progress.
@@ -133,6 +137,8 @@ struct AddPrinterSheet: View {
     @State private var saving: String?
     @State private var problem: String?
     @State private var done: String?
+    /// A found folder's model, chosen when Counterpart couldn't tell it.
+    @State private var folderModels: [String: String] = [:]
 
     private var options: PrinterSetupOptions? { discovery?.options }
     private var type: PrinterSetupOptions.PrinterType? { options?.types.first { $0.printerType == form.printerType } }
@@ -204,17 +210,35 @@ struct AddPrinterSheet: View {
                 Text(candidate.name).font(.body.weight(.medium))
                 Text([PrinterSetupModel.label(candidate.backend), candidate.host, candidate.folder.map { ($0 as NSString).abbreviatingWithTildeInPath }]
                     .compactMap { $0 }.joined(separator:" · ")).font(.caption).foregroundStyle(.secondary)
+                if candidate.folder != nil { SettingsGapNote(missing:candidate.missing ?? [], fill:fill(for:candidate)) }
             }
             Spacer()
             if candidate.added { Text("Added").font(.caption).foregroundStyle(.secondary) }
             else if let folder = candidate.folder {
-                // Configured already: it runs where it is, with its own settings.
-                Button(saving == candidate.id ? "Adding…" : "Add") { save(PrinterForm(folder:folder), id:candidate.id) }
-                    .buttonStyle(.glassProminent).disabled(saving != nil)
+                if candidate.needsModel {
+                    Picker("Model", selection:Binding(get: { folderModels[candidate.id] ?? "" }, set: { folderModels[candidate.id] = $0.isEmpty ? nil : $0 })) {
+                        Text("Model…").tag("")
+                        ForEach(options?.models[candidate.backend] ?? []) { Text($0.label).tag($0.value) }
+                    }
+                    .labelsHidden().fixedSize()
+                }
+                // Configured already: it runs where it is, with its own settings (plus only what its MCP lacks).
+                Button(saving == candidate.id ? "Adding…" : "Add") {
+                    var value = PrinterForm(folder:folder); value.model = folderModels[candidate.id]
+                    save(value, id:candidate.id)
+                }
+                .buttonStyle(.glassProminent).disabled(saving != nil || (candidate.needsModel && folderModels[candidate.id] == nil))
             } else {
                 Button("Set Up…") { start(prefilled(candidate)) }.disabled(saving != nil)
             }
         }
+    }
+
+    /// What Add writes to a found folder's settings: what it would fill, or the model chosen here.
+    private func fill(for candidate: PrinterCandidate) -> [String: String] {
+        var fill = candidate.fill ?? [:]
+        if let chosen = folderModels[candidate.id] { fill["BAMBU_MODEL"] = chosen }
+        return fill
     }
 
     private func prefilled(_ candidate: PrinterCandidate) -> PrinterForm {
@@ -247,7 +271,13 @@ struct AddPrinterSheet: View {
                 }
             }
             TextField("Address", text:$form.host, prompt:Text("192.168.1.20 or printer.local"))
-            if type?.serial == true { TextField("Serial number", text:$form.serial, prompt:Text("On the printer: Settings → Device")) }
+            if type?.serial == true {
+                TextField("Serial number", text:Binding(get: { form.serial }, set: { value in
+                    form.serial = value
+                    // The serial names the model (bambu-printer-mcp's table): filled unless one was chosen.
+                    if form.model == nil, let model = options?.model(forSerial:value), models.contains(where: { $0.value == model }) { form.model = model }
+                }), prompt:Text("On the printer: Settings → Device"))
+            }
             if let secret = type?.secret {
                 VStack(alignment:.leading, spacing:4) {
                     SecureField(secret.label + (secret.required ? "" : " (optional)"), text:$form.secret)
@@ -376,14 +406,72 @@ struct PrinterMcpPicker: View {
     }
 }
 
-/// A printer added in Counterpart: its settings file, and Remove.
+/// What a found or added printer's `.env` lacks, and what Counterpart adds to it (only the model; never a secret).
+struct SettingsGapNote: View {
+    let missing: [String]
+    let fill: [String: String]
+
+    var body: some View {
+        let unfilled = missing.filter { fill[$0] == nil }
+        let others = unfilled.filter { $0 != "BAMBU_MODEL" }
+        VStack(alignment:.leading, spacing:2) {
+            if !fill.isEmpty {
+                Text("Counterpart will add " + fill.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator:", ") + " to its settings.")
+                    .font(.caption).foregroundStyle(Color.filament)
+            }
+            if unfilled.contains("BAMBU_MODEL") { Text("Choose its model: its MCP needs one.").font(.caption).foregroundStyle(.secondary) }
+            if !others.isEmpty {
+                Text("Its settings have no " + others.joined(separator:", ") + ". Add \(others.count == 1 ? "it" : "them") in its .env.")
+                    .font(.caption).foregroundStyle(.orange)
+            }
+        }
+    }
+}
+
+/// A printer added in Counterpart: its settings file, Complete Settings when its `.env` lacks the model, and Remove.
 struct AddedPrinterActions: View {
     let printer: PrinterDestination
+    let models: [PrinterSetupOptions.Model]
     let removed: () -> Void
     @State private var confirming = false
     @State private var problem: String?
+    @State private var model = ""
+    @State private var completing = false
+
+    private var needsModel: Bool { printer.incomplete?.missing.contains("BAMBU_MODEL") == true && printer.incomplete?.fill["BAMBU_MODEL"] == nil }
+    private var canComplete: Bool { printer.incomplete?.missing.contains("BAMBU_MODEL") == true }
 
     var body: some View {
+        VStack(alignment:.leading, spacing:6) {
+            if let incomplete = printer.incomplete {
+                SettingsGapNote(missing:incomplete.missing, fill:model.isEmpty ? incomplete.fill : ["BAMBU_MODEL": model])
+                if canComplete {
+                    HStack(spacing:8) {
+                        if needsModel {
+                            Picker("Model", selection:$model) { Text("Model…").tag(""); ForEach(models) { Text($0.label).tag($0.value) } }
+                                .labelsHidden().fixedSize()
+                        }
+                        Button(completing ? "Completing…" : "Complete Settings") { complete() }
+                            .buttonStyle(.glassProminent).controlSize(.small).disabled(completing || (needsModel && model.isEmpty))
+                    }
+                }
+            }
+            actions
+        }
+    }
+
+    private func complete() {
+        completing = true
+        Task {
+            defer { completing = false }
+            do {
+                try await PrinterSetupModel.client(for:"printers.completeSettings").completePrinterSettings(printer.id, model:model.isEmpty ? nil : model)
+                problem = nil; removed()
+            } catch { problem = PrinterSetupModel.words(error, otherwise:"Counterpart couldn’t complete its settings. Try again.") }
+        }
+    }
+
+    private var actions: some View {
         HStack(spacing:12) {
             if let folder = printer.folder {
                 let env = URL(fileURLWithPath:folder).appendingPathComponent(".env")

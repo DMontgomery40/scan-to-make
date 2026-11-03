@@ -177,7 +177,7 @@ export function createControlDispatcher(services: ControlServices) {
             throw error;
           }
         }
-        case 'printers.mcps': case 'printers.installMcp': case 'printers.discover': case 'printers.check': case 'printers.add': case 'printers.remove': case 'printers.chooseMcp': {
+        case 'printers.mcps': case 'printers.installMcp': case 'printers.discover': case 'printers.check': case 'printers.add': case 'printers.remove': case 'printers.chooseMcp': case 'printers.completeSettings': {
           const setup = services.printerSetup;
           if (!setup) throw new ControlFailure('unavailable');
           const {PrinterSetupError} = await import('./printing/setup.js');
@@ -188,6 +188,7 @@ export function createControlDispatcher(services: ControlServices) {
             if (method === 'printers.check') return {check: await setup.check(parameters[method].parse(raw).printer)};
             if (method === 'printers.add') return await setup.add(parameters[method].parse(raw).printer);
             if (method === 'printers.remove') return await setup.remove(parameters[method].parse(raw).destinationId);
+            if (method === 'printers.completeSettings') { const {destinationId, model} = parameters[method].parse(raw); return await setup.completeSettings(destinationId, model); }
             if (method === 'printers.chooseMcp') { const {destinationId, backend} = parameters[method].parse(raw); return await setup.chooseMcp(destinationId, backend); }
             return await setup.installMcp(parameters[method].parse(raw).package);
           } catch (error) {

@@ -421,3 +421,79 @@ test('discovery: a Bambu SSDP announcement from the printer itself, and dns-sd S
   assert.deepEqual(spawned.map(args => args[2]), ['_octoprint._tcp', '_moonraker._tcp', '_prusalink._tcp']);
   assert.deepEqual(await discoverBonjour(40, {spawn, platform: 'linux'}), []);
 });
+
+test('a found install missing the model its MCP needs: Counterpart fills only BAMBU_MODEL (SSDP, else the serial), appends it, records it, and Complete Settings fixes one already added', async t => {
+  const {PrinterSetup} = await import('../dist/printing/setup.js');
+  const {hostEnvironment} = await import('../dist/printing/mcp-install.js');
+  const {stat, chmod} = await import('node:fs/promises');
+  const home = await mkdtemp(join(tmpdir(), 'printer-fill-'));
+  t.after(() => rm(home, {recursive: true, force: true}));
+  const put = async (file, text) => { await mkdir(join(home, file, '..'), {recursive: true}); await writeFile(join(home, file), text); };
+  await put('.env', 'PRINTER_HOST=192.0.2.50\nPRINTER_TYPE=octoprint\n');
+  // David's ~/mcp-3D-printer-server: everything for his P1S but the model (comments and order must survive).
+  const clone = join(home, 'mcp-3D-printer-server');
+  const original = '# my printer\nPRINTER_TYPE=bambu\nPRINTER_HOST=192.0.2.1\nBAMBU_SERIAL=01P00A123456789\nBAMBU_TOKEN=55550000\nSLICER_TYPE=orcaslicer-bambulab # FULU';
+  await put('mcp-3D-printer-server/.env', original);
+  await chmod(join(clone, '.env'), 0o640);
+  await put('mcp-3D-printer-server/dist/index.js', '');
+  await put('mcp-3D-printer-server/package.json', JSON.stringify({name: 'mcp-3d-printer-server', version: '1.2.17'}));
+  // Another clone for a printer whose serial names no model, and with no access code either.
+  const other = join(home, 'src/mcp-3d-printer-server');
+  await put('src/mcp-3d-printer-server/.env', 'PRINTER_TYPE=bambu\nPRINTER_HOST=192.0.2.2\nBAMBU_SERIAL=ZZZ00A000000001\n');
+  await put('src/mcp-3d-printer-server/dist/index.js', '');
+  await put('src/mcp-3d-printer-server/package.json', JSON.stringify({name: 'mcp-3d-printer-server', version: '1.2.17'}));
+  const data = join(home, 'Library/Application Support/Scan to Make');
+  const env = {...hostEnvironment(data), home};
+  const profilesPath = join(env.appPrinters, 'profiles.json');
+  const current = {backend: 'mcp-3d-printer-server', process: {command: '/usr/bin/ssh', args: ['printer-tunnel'], cwd: home}};
+  const catalog = await loadPrinterCatalog(current, {homeDirectory: home, sourcePaths: [], profilesPath});
+  let announced = [];
+  const restarted = [];
+  const setup = new PrinterSetup({env, configs: () => catalog.entries(), catalog: () => catalog, reload: () => catalog.reload(), profilesPath,
+    node: '/usr/local/bin/node', busy: async () => false, restart: async id => { restarted.push(id); }, bonjour: async () => [],
+    ssdp: async () => ({state: 'complete', printers: announced}),
+    folders: async () => [{dir: clone, package: 'mcp-3d-printer-server', version: '1.2.17', hasEnv: true}, {dir: other, package: 'mcp-3d-printer-server', version: '1.2.17', hasEnv: true}]});
+
+  // Offered with what Counterpart will add: the model from the serial (01P → P1S), and nothing else.
+  let found = (await setup.discover()).found;
+  const p1s = found.find(item => item.folder === clone);
+  assert.deepEqual([p1s.name, p1s.model, p1s.missing, p1s.fill], ['Bambu Lab P1S via mcp-3D-printer-server', 'p1s', ['BAMBU_MODEL'], {BAMBU_MODEL: 'p1s'}]);
+  const unknown = found.find(item => item.folder === other);
+  assert.deepEqual([unknown.missing, unknown.fill, unknown.model], [['BAMBU_TOKEN', 'BAMBU_MODEL'], {}, undefined], 'a secret is never filled; an unknown serial needs the dropdown');
+  // The printer's own announcement (DevModel) outranks the serial.
+  announced = [{host: '192.0.2.1', serial: '01P00A123456789', model: 'p1p', name: 'Workshop'}];
+  assert.deepEqual((await setup.discover()).found.find(item => item.folder === clone).fill, {BAMBU_MODEL: 'p1p'});
+  announced = [];
+  assert.deepEqual((await setup.discover()).found.find(item => item.source === 'ssdp'), undefined);
+  const {options} = await setup.discover();
+  assert.equal(options.serialModels['01P'], 'p1s', 'the sheet fills a typed serial\'s model from the same table');
+
+  // Add appends exactly that one variable: every other line, its order and the file's mode stay.
+  const added = await setup.add({folder: clone});
+  assert.equal(await readFile(join(clone, '.env'), 'utf8'), `${original}\nBAMBU_MODEL='p1s'\n`);
+  assert.equal((await stat(join(clone, '.env'))).mode & 0o777, 0o640);
+  const saved = JSON.parse(await readFile(profilesPath, 'utf8')).profiles.find(item => item.id === added.id);
+  assert.equal(saved.model, 'p1s');
+  assert.equal(catalog.resolve(added.id).selection.model, 'p1s', 'Counterpart passes bambu_model to that MCP');
+  assert.equal(catalog.destinations.find(item => item.id === added.id).incomplete, undefined);
+  // A model Counterpart can't tell must be chosen; the choice is checked against that MCP's own list.
+  await assert.rejects(setup.add({folder: other}), /Choose the printer’s model/);
+  await assert.rejects(setup.add({folder: other, model: 'x2d'}), /doesn’t know that model/);
+  assert.equal(await readFile(join(other, '.env'), 'utf8'), 'PRINTER_TYPE=bambu\nPRINTER_HOST=192.0.2.2\nBAMBU_SERIAL=ZZZ00A000000001\n', 'nothing written when refused');
+
+  // A printer added before this fix (no model in its .env or its profile): Settings says so, and Complete Settings fills it.
+  await writeFile(join(clone, '.env'), original);
+  await writeFile(profilesPath, JSON.stringify({version: 1, choices: {}, profiles: [{...saved, model: undefined}]}));
+  await catalog.reload();
+  assert.deepEqual(catalog.destinations.find(item => item.id === added.id).incomplete, {missing: ['BAMBU_MODEL'], fill: {BAMBU_MODEL: 'p1s'}});
+  assert.equal(catalog.resolve(added.id).selection?.model, undefined);
+  assert.deepEqual(await setup.completeSettings(added.id), {destinationId: added.id, model: 'p1s'});
+  assert.equal(await readFile(join(clone, '.env'), 'utf8'), `${original}\nBAMBU_MODEL='p1s'\n`);
+  assert.deepEqual(restarted, [added.id], 'its MCP restarts to read the file again');
+  assert.equal(catalog.resolve(added.id).selection.model, 'p1s');
+  assert.equal(catalog.destinations.find(item => item.id === added.id).incomplete, undefined);
+  // Nothing left to fill: the file isn't touched again.
+  await setup.completeSettings(added.id);
+  assert.equal((await readFile(join(clone, '.env'), 'utf8')).match(/BAMBU_MODEL/g).length, 1);
+  await assert.rejects(setup.completeSettings('current'), /Only printers added in Counterpart/);
+});

@@ -152,6 +152,8 @@ const printerSetup=mcpUpdates?new PrinterSetup({env:printerEnv,configs:()=>print
   effective:(id,config)=>mcpUpdates!.effective(id,config),download:pkg=>mcpUpdates!.download(pkg),
   latestVersion:(pkg,options)=>mcpUpdates!.latestVersion(pkg,options),folders:()=>findMcpFolders(homedir()),
   node:process.execPath,profilesPath:printerProfiles,catalog:()=>printerCatalog,reload:reloadPrinters,
+  // Complete Settings changed its .env: the MCP reads it again on a fresh start (with any Update's override).
+  restart:async id=>{const config=printerCatalog?.resolve(id);if(config)await printerDestinations?.get(id)?.runner.session?.restart(mcpUpdates!.effective(id,config));},
   busy:async id=>printerBusy?await printerBusy(id):false}):undefined;
 if(handoffConfig&&printHandoff&&captureDirectory&&claudePath){
   const objectStore=new ObjectStore(join(captureDirectory,'objects'));

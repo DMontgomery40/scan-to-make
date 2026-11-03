@@ -32,4 +32,23 @@ final class PrinterSetupTests: XCTestCase {
         XCTAssertEqual(printer.folder, "/x")
         XCTAssertEqual(ControlClient.timeout(for: "printers.check"), 70, "Check runs for up to 60 s on the companion")
     }
+
+    func testMissingModelIsFilledFromTheSerialOrAsked() throws {
+        let options = try JSONDecoder().decode(PrinterSetupOptions.self, from: Data("""
+        {"types":[],"models":{"mcp-3d-printer-server":[{"value":"p1s","label":"P1S"}]},"serialModels":{"01P":"p1s","039":"a1"}}
+        """.utf8))
+        XCTAssertEqual(options.model(forSerial: " 01p00a123456789"), "p1s")
+        XCTAssertNil(options.model(forSerial: "ZZZ"))
+        let candidate = try JSONDecoder().decode(PrinterCandidate.self, from: Data("""
+        {"id":"folder:/x","source":"folder","name":"P","backend":"mcp-3d-printer-server","printerType":"bambu","folder":"/x","added":false,"missing":["BAMBU_TOKEN","BAMBU_MODEL"],"fill":{}}
+        """.utf8))
+        XCTAssertTrue(candidate.needsModel)
+        var form = PrinterForm(folder: "/x"); form.model = "p1s"
+        XCTAssertEqual(form.json, .object(["folder": .string("/x"), "model": .string("p1s")]))
+        let printer = try JSONDecoder().decode(PrinterDestination.self, from: Data("""
+        {"id":"counterpart-1","name":"P1S","backend":"mcp-3d-printer-server","source":"mcp-profile","origin":"counterpart","incomplete":{"missing":["BAMBU_MODEL"],"fill":{"BAMBU_MODEL":"p1s"}}}
+        """.utf8))
+        XCTAssertEqual(printer.incomplete, .init(missing: ["BAMBU_MODEL"], fill: ["BAMBU_MODEL": "p1s"]))
+        XCTAssertEqual(ControlClient.timeout(for: "printers.completeSettings"), 40)
+    }
 }

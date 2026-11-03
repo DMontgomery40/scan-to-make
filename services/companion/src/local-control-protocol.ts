@@ -89,6 +89,7 @@ export const parameters = {
   'printers.check': z.strictObject({printer: PrinterFormSchema}),
   'printers.add': z.strictObject({printer: PrinterFormSchema}),
   'printers.remove': z.strictObject({destinationId: z.string().min(1).max(256)}),
+  'printers.completeSettings': z.strictObject({destinationId: z.string().min(1).max(256), model: z.string().regex(/^[a-z0-9]{1,16}$/).optional()}),
   'printers.chooseMcp': z.strictObject({destinationId: z.string().min(1).max(256), backend: z.enum(['bambu-printer-mcp', 'mcp-3d-printer-server'])}),
   'printers.updateMcp': z.strictObject({mcpId: z.string().regex(/^mcp-[0-9a-f]{16}$/), fresh: z.boolean().optional()}),
   'fusion.report': z.strictObject({installed:z.boolean(), configured:z.boolean(), running:z.boolean()}),

@@ -379,7 +379,9 @@ struct PrintersSettings: View {
                         // Only bambu-printer-mcp has a choice of connection (mcp-3D-printer-server has no Bambu Cloud route).
                         if printer.mcpName == "bambu-printer-mcp" { PrintRoutePicker(destinationId:printer.id).padding(.leading, 38) }
                         PrinterMcpPicker(printer:printer) { Task { await objects.refresh() } }.padding(.leading, 38)
-                        if printer.origin == "counterpart" { AddedPrinterActions(printer:printer) { Task { await objects.refresh() } }.padding(.leading, 38) }
+                        if printer.origin == "counterpart" {
+                            AddedPrinterActions(printer:printer, models:setup.models(printer.backend)) { Task { await objects.refresh() } }.padding(.leading, 38)
+                        }
                     }
                 }
                 if setup.available {
