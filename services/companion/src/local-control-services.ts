@@ -272,7 +272,7 @@ export function createControlDispatcher(services: ControlServices) {
         }
         case 'objects.answerAsk': case 'objects.duplicate': case 'objects.list': case 'objects.printers': case 'objects.filaments': case 'objects.selectPrinter': case 'objects.get': case 'objects.passActivity': case 'objects.start': case 'objects.delete': case 'objects.correct': case 'objects.answerCloseup': case 'objects.print': case 'objects.answerPrintConfirmation':
         case 'objects.create': case 'objects.addFile':
-        case 'objects.estimate': case 'objects.pausePrint': case 'objects.resumePrint': case 'objects.cancelPrint': case 'objects.camera': case 'printers.camera': case 'settings.get': case 'settings.set': {
+        case 'objects.estimate': case 'objects.pausePrint': case 'objects.resumePrint': case 'objects.cancelPrint': case 'objects.camera': case 'printers.camera': case 'printers.route': case 'settings.get': case 'settings.set': {
           const objects = services.objects;
           if (!objects) throw new ControlFailure('unavailable');
           try {
@@ -310,6 +310,10 @@ export function createControlDispatcher(services: ControlServices) {
                 if (error instanceof CameraUnavailableError) throw new ControlFailure(error.reason === 'no-camera' ? 'not-found' : 'unavailable', error.message);
                 throw error;
               }
+            }
+            if (method === 'printers.route') {
+              const {destinationId, route} = parameters[method].parse(raw);
+              return {route: await objects.printRoute(destinationId, route) ?? null};
             }
             if (method === 'settings.get') return {settings: await objects.settings()};
             if (method === 'settings.set') return {settings: await objects.updateSettings(parameters[method].parse(raw))};

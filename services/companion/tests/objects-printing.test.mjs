@@ -25,14 +25,14 @@ const until = async check => { for (let i = 0; i < 300; i++) { const value = awa
  * A P1S behind a fake MCP session, a fake print runner, and a monitor clock the
  * test steps by hand: every printer report and every wait is scripted.
  */
-async function setup(t, {tools = ['get_printer_status', 'camera_snapshot', 'pause_print', 'resume_print', 'cancel_print', 'slice_stl'], sliceArgs = false, copies = false, controlsRoute = false, reports = []} = {}) {
+async function setup(t, {tools = ['get_printer_status', 'camera_snapshot', 'pause_print', 'resume_print', 'cancel_print', 'slice_stl'], sliceArgs = false, copies = false, controlsRoute = false, reports = [], route} = {}) {
   const root = await mkdtemp(join(tmpdir(), 'objects-printing-'));
   let service;
   t.after(async () => { await service?.close(); await rm(root, {recursive: true, force: true, maxRetries: 10, retryDelay: 20}); });
   const calls = [], events = [], runs = [];
   const queue = [...reports];
   const relay = new InMemoryElicitationRelay({timeoutMs: 5000});
-  const catalogTools = tools.map(name => name === 'slice_stl' && (sliceArgs || copies)
+  const catalogTools = [...tools, ...(route ? ['counterpart_print_route'] : [])].map(name => name === 'slice_stl' && (sliceArgs || copies)
     ? tool(name, {...(sliceArgs ? {layer_height: {}, wall_loops: {}, sparse_infill_density: {}} : {}), ...(copies ? {repetitions: {}} : {})}) : tool(name, controlsRoute && ['cancel_print', 'pause_print', 'resume_print'].includes(name) ? {connection_mode: {}, connection_type: {}} : {}));
   const factory = () => ({
     catalog: undefined,
@@ -47,6 +47,10 @@ async function setup(t, {tools = ['get_printer_status', 'camera_snapshot', 'paus
         return {content: [{type: 'text', text: JSON.stringify(next)}]};
       }
       if (name === 'camera_snapshot') return {content: [{type: 'text', text: JSON.stringify({format: 'jpeg', base64: JPEG.toString('base64')})}]};
+      if (name === 'counterpart_print_route') {
+        if (args?.route) route = args.route === 'cloud' ? {mode: 'bambu_network', type: 'cloud'} : {...route, type: route.mode === 'bambu_network' ? 'lan' : route.type};
+        return {content: [{type: 'text', text: JSON.stringify({route: route.mode === 'bambu_network' && route.type === 'cloud' ? 'cloud' : 'lan', ...route, choices: ['lan', 'cloud'], savedTo: '/Users/x/bambu-printer-mcp/.env'})}]};
+      }
       if (['pause_print', 'resume_print', 'cancel_print'].includes(name)) {
         const answer = await relay.request({method: 'elicitation/create', params: {mode: 'form', message: `Confirm ${name}`, requestedSchema: CONFIRM}}, options.elicitationContext);
         if (answer.action !== 'accept') return {isError: true, content: [{type: 'text', text: 'Not confirmed. Nothing was sent.'}]};
@@ -293,8 +297,7 @@ test('a print whose job the printer can\'t identify is "sent", never "printed"; 
 });
 
 test('a print handed to Bambu Connect is "sent" at once: the person finishes it on the Mac', async t => {
-  const f = await setup(t, {reports: [status('RUNNING', 1)]});
-  f.deps.print.services.selection = {...f.deps.print.services.selection, connectionMode: 'bambu_connect'};
+  const f = await setup(t, {reports: [status('RUNNING', 1)], route: {mode: 'bambu_connect', type: 'cloud'}});
   f.deps.print.services.runner.runBundle = async (store, id) => { await store.setStatus(id, 'printed'); return {manifest: await store.read(id), result: {dispatch: {jobName: 'x', fileBase: 'x'}}}; };
   await f.service.print(f.object.id);
   const sent = await f.service.settled(f.object.id);
@@ -303,8 +306,7 @@ test('a print handed to Bambu Connect is "sent" at once: the person finishes it 
 });
 
 test('Stop, Pause and Resume carry no route: the printer service controls over the connection it printed with', async t => {
-  const f = await setup(t, {controlsRoute: true, reports: [status('RUNNING', 10)]});
-  f.deps.print.services.selection = {...f.deps.print.services.selection, connectionMode: 'bambu_network', connectionType: 'lan'};
+  const f = await setup(t, {controlsRoute: true, reports: [status('RUNNING', 10)], route: {mode: 'bambu_network', type: 'lan'}});
   await f.service.print(f.object.id);
   await f.approve();
   await f.service.settled(f.object.id);
@@ -315,6 +317,26 @@ test('Stop, Pause and Resume carry no route: the printer service controls over t
   const args = f.calls.find(c => c.name === 'cancel_print').args;
   assert.equal(args.connection_mode, undefined);
   assert.equal(args.connection_type, undefined);
+});
+
+test('a Bambu Connect choice copied into printer-handoff.json no longer decides anything: the MCP\'s route does', async t => {
+  const f = await setup(t, {reports: [status('RUNNING', 1)], route: {mode: 'bambu_network', type: 'lan'}});
+  f.deps.print.services.selection = {...f.deps.print.services.selection, connectionMode: 'bambu_connect'};
+  f.deps.print.services.runner.runBundle = async (store, id) => { await store.setStatus(id, 'printed'); return {manifest: await store.read(id), result: {dispatch: {jobName: 'x', fileBase: 'x'}}}; };
+  await f.service.print(f.object.id);
+  const settled = await f.service.settled(f.object.id);
+  assert.notEqual(settled.print.sentVia, 'bambu-connect');
+});
+
+test('Settings -> Printers reads and changes the MCP\'s own route, and has none to show for an MCP without one', async t => {
+  const f = await setup(t, {route: {mode: 'bambu_network', type: 'lan'}});
+  assert.equal((await f.service.printRoute('current')).route, 'lan');
+  const cloud = await f.service.printRoute('current', 'cloud');
+  assert.deepEqual([cloud.route, cloud.mode, cloud.type], ['cloud', 'bambu_network', 'cloud']);
+  assert.deepEqual(f.calls.filter(c => c.name === 'counterpart_print_route').map(c => c.args?.route), [undefined, 'cloud']);
+  await assert.rejects(f.service.printRoute('elsewhere'));
+  const none = await setup(t, {});
+  assert.equal(await none.service.printRoute('current'), undefined);
 });
 
 test('a control is sent only while the printer is still printing this project\'s job', async t => {

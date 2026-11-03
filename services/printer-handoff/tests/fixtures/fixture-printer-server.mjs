@@ -45,6 +45,8 @@ const tools = [
   {name: 'lay_flat', inputSchema: {type: 'object', additionalProperties: false, required: ['stl_path'], properties: {stl_path: string}}},
   {name: 'slice_stl', inputSchema: {type: 'object', additionalProperties: false, required: ['stl_path'], properties: sliceProps}},
   ...(mode === 'bambu' ? [
+    // HANDOFF_FIXTURE_ROUTE: the MCP's own route, as counterpart_print_route reports it.
+    ...(process.env.HANDOFF_FIXTURE_ROUTE ? [{name:'counterpart_print_route',inputSchema:{type:'object',properties:{route:string}}}] : []),
     ...(process.env.HANDOFF_FIXTURE_CRYPTO ? [
       {name:'get_printer_status',inputSchema:{type:'object',properties:{}}},
       {name:'clear_hms_errors',inputSchema:{type:'object',properties:{bambu_model:string}}},
@@ -129,6 +131,10 @@ server.setRequestHandler(CallToolRequestSchema, async request => {
     return text({dispatchAuthorized: false, inspection: {model: args.bambu_model, plate: args.plate_index ?? 0}});
   }
   if (name === 'confirm_temperatures') return text({compatible: true, peakNozzleTempC: 220});
+  if (name === 'counterpart_print_route') {
+    const {mode, type} = JSON.parse(process.env.HANDOFF_FIXTURE_ROUTE);
+    return text({route: mode === 'bambu_network' && type === 'cloud' ? 'cloud' : 'lan', mode, type, choices: ['lan', 'cloud'], savedTo: null});
+  }
   if (name === 'get_printer_status') return text({raw:{hms:[{attr:0x05000500,code:0x00010007}]}});
   if (name === 'clear_hms_errors') {await confirmPrint();return text({status:'success'});}
   if (name === 'camera_snapshot') return text({format: 'jpeg', base64: 'ZmFrZQ==', savedTo: join(directory, 'snapshot.jpg')});
