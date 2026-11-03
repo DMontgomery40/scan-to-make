@@ -3,7 +3,7 @@
 The one handoff. Update this file in place when you stop; never add a numbered or dated copy, a prompt file,
 or a "continuation" section on top. Git history has every older version.
 
-Last verified: **2026-11-03, 14:30 Mountain**, against GitHub, the Mac, the installed apps and the printer.
+Last verified: **2026-11-03, 16:00 Mountain**, against GitHub, the Mac, the installed apps and the printer.
 Status of each of David's asks: [`asks.md`](asks.md). Hands-on review list: [`app-review-2026-11-02.md`](app-review-2026-11-02.md).
 What to build: [`../design/overhaul/PRD.md`](../design/overhaul/PRD.md), journey in [`../design/journey.md`](../design/journey.md).
 
@@ -29,9 +29,9 @@ What to build: [`../design/overhaul/PRD.md`](../design/overhaul/PRD.md), journey
 
 | What | Version | From |
 |---|---|---|
-| Mac app `/Applications/Counterpart.app` | **202611031427** | `feat/pause-at-layer` @ `acce6e1` (contains all of #295) |
+| Mac app `/Applications/Counterpart.app` | **202611031529** | `feat/pause-at-layer` @ `539ef23` (contains all of #295) |
 | iPhone "Davica3" (`00008150-001A488C3642401C`) | **202611022325** | old: has none of #294/#295 or pause-at-layer |
-| bambu-printer-mcp (what Counterpart runs) | 1.1.46 install + dist from `feat/one-printer-control-route` @ `fdca5a1` | `~/Library/Application Support/Scan to Make/printers/bambu-1.1.46/lib/node_modules/bambu-printer-mcp/dist` |
+| bambu-printer-mcp (what Counterpart runs) | 1.1.46 install + dist from `feat/one-printer-control-route` @ `fdca5a1` (a built `native/bambu-native-print` from `exp/native-plugin-controls` sits beside it, unused for a P1S) | `~/Library/Application Support/Scan to Make/printers/bambu-1.1.46/lib/node_modules/bambu-printer-mcp/dist` |
 | mcp-3D-printer-server | `~/mcp-3D-printer-server` detached at `175944e` (`feat/bambu-complete`), built in place | runs from its own folder and `.env` |
 | bambu-printer-mcp config | `~/bambu-printer-mcp/.env` (the ssh forced command `cd`s there): `BAMBU_DEFAULT_CONNECTION_MODE=bambu_network`, `…_TYPE=lan` | Counterpart's own environment never crosses the ssh hop |
 | FULU runtime | Colima profile `bambu-fulu`, image `bpm-fulu-e2e:runtime`, plug-in **02.05.02.58** | launcher `~/Library/Application Support/Scan to Make/printers/fulu-authenticated-lan.sh` (in neither repo) |
@@ -57,13 +57,38 @@ Every deployment, companion restart and rollback is logged in
 
 ## Open, in order
 
-1. **Remote Pause/Resume/Stop are refused by the printer.** Every Pause and Stop sent today reached the P1S and got
+0. **Right now (16:00):** Claude's test Triangle pick is **paused before layer 2 on the P1S** and can only be resumed
+   or stopped on the printer's screen (see 2a). **The iPhone app loads nothing**: since 14:38 no request from the
+   phone has reached the Mac (60 s watch on :9077 while David refreshed: zero connections; agents-136 reaches
+   `192.168.68.123:9077` in 37 ms; Mac firewall off; pairing and pinned certificate unchanged; `devicectl` and Xcode
+   list Davica3 as unavailable). David is on his LAN and says it isn't his connection. Asked him to toggle Airplane
+   Mode, rejoin Wi-Fi and reopen: if it still can't reach, reproduce with the installed phone commit (`d981948`,
+   202611022325) in the Simulator against this Mac's companion. The "two app instances" he sees are one process at two
+   moments: `SettingsView.swift:34` shows **"Connected now" while `reachable` is still unknown** (fresh launch from the
+   Live Activity), and "Can't reach it" after a failed request (`MobileCloud.swift:17` vs `:78` explain the two
+   Notifications texts). Fix the label: unknown is not connected, and a request with no answer must end in "Can't
+   reach it" instead of a spinner.
+1. **Remote Pause/Resume/Stop are refused by the printer.** Nov 3 afternoon: tried lead (a) through the existing
+   native helper with Bambu Studio's 02.08.02.61 plug-in (`exp/native-plugin-controls`, `be88434`, pushed, rolled back
+   from the live MCP). The helper reaches the printer and gets replies (`ledctrl` answered `success`, unsigned), but the
+   plug-in never reports `device_cert_installed` (private or Studio config folder, `lan_only` 0 or 1), so every
+   protected control returns -4 unsent. Likely missing: a plug-in cloud session (`connect_server`), which Studio and
+   FULU have. Next lead there, or (b) below. FULU's own `ledctrl` is also accepted unsigned, so the light can't
+   discriminate signing; only pause/stop/resume do. Every Pause and Stop sent today reached the P1S and got
    the signed reply `err_code 84033546` (0x0502400A), over LAN and over Bambu Cloud. Tried and ruled out: flag 1,
    32-bit sequence ids, the cloud route, FULU's client identity headers (`X-BBL-Client-*`, now sent; changed nothing).
    Remaining leads, untested: (a) FULU's runtime uses Bambu's plug-in **02.05.02.58** while Bambu Studio on this Mac
    uses **02.08.02.61**, so a newer plug-in in the bridge; (b) LAN-only + Developer mode on the printer (David's call,
    disconnects Bambu Cloud/Handy). Bambu Studio itself pauses and resumes this printer fine.
-2. **Resume from the app after a pause: fixed in code, not yet re-tested.** Until `fdca5a1`, bambu-printer-mcp's
+2a. **Resume is lost when the MCP restarts during a pause.** bambu-printer-mcp refuses Resume for a job "not inspected
+   and started by this server instance"; any companion restart (deploy, crash, Mac restart) during a magnet pause
+   strands the print on the printer's screen. Persist the resume binding (both MCPs). Today's test pick hit this.
+2. **Resume from the app after a pause: fixed in code, not yet re-tested.** Nov 3 15:18: the pick paused itself before
+   layer 2 (`pause_at_layers` works); Resume in the app reached the MCP, which asked its unverifiable-resume question.
+   The companion gave the control call 2 min while the question lives 10, so it timed out and the dead question hid
+   Pause/Resume/Stop until the print ended. Fixed and installed in `539ef23` (control waits `elicitationMs` + 2 min; a
+   failed control, a stale answer and a companion restart all clear the question). The Mac card's yes button reads
+   "Print" for a Resume question: wording bug. Until `fdca5a1`, bambu-printer-mcp's
    pre-resume check refused any non-zero `print_error`, and a paused P1S reports `0x03008013` ("paused by the user"),
    so Resume never reached the printer (David pressed it on both apps at 14:19). Now excused only while the printer
    reports `PAUSE`. Next: a pick with a pause, Resume in the app. It may then hit item 1's refusal; the reason will show
@@ -72,7 +97,7 @@ Every deployment, companion restart and rollback is logged in
    - **#295** `feat/add-printer` (head `fef3ef1`): installed and in use. Includes print failures as events
      (review item 23), Print Again reuses its slice, the review fixes (cached G-code format, preset contents and
      `.env` in the slice cache key, JPEG camera replies, manual port, stale Check result).
-   - **`feat/pause-at-layer`** (stacked on #295, head `acce6e1`, pushed, **no PR yet**): pause rows in the Mac print
+   - **`feat/pause-at-layer`** (stacked on #295, head `539ef23`, pushed, **no PR yet**; `stm-ci` started on `539ef23`): pause rows in the Mac print
      sheet, `pauseBeforeLayers` → `pause_at_layers`, `capabilities.layerPauses`, refused controls kept.
    - **#292** `feat/new-design-without-scan`: a copy request with nothing scanned runs as a new design (Fusion).
    - **#293** `feat/keep-multicolour-model`: keeps a pass's 3MF. **Don't install alone:** a designed 3MF would print
@@ -105,7 +130,10 @@ Every deployment, companion restart and rollback is logged in
    source MCP's session folder (`BAMBU_NETWORK_CONFIG_DIR`, or ask `bambu_network_bridge_status` for `configDir`).
    Then check two bridge containers sharing one login don't log each other out. Unexplained: at 12:52 `printers.route`
    for the mcp-3D printer returned `cloud` while its `.env` says `lan`.
-9. **Live Activities.** The two orange "0%" items in the Mac menu bar are the iPhone's print Live Activities, mirrored
+9. **Duplicate phone alerts and Live Activities.** Every event reaches the phone twice: a CloudKit subscription
+   alert (thumbnail added by the Notification Service extension, `CloudNotificationSubscriptions.swift:34`,
+   `NotificationService.swift:36`) and the relay's own alert (`EventRelay.swift:123`). Pick one owner per event type
+   from the PRD/asks before changing it. **Live Activities.** The two orange "0%" items in the Mac menu bar are the iPhone's print Live Activities, mirrored
    by macOS. The relay ends an activity only on `print.done`/`failed`/`cancelled` (`EventRelayPolicy.swift:208`), not on
    `print.not-started`; retrying a project may also orphan its earlier activity (not verified). Separately, on Nov 2 a
    real print's Lock Screen activity stayed at 0% "Waiting for an update" while the app advanced. Not diagnosed.
