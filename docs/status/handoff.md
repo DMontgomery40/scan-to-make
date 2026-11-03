@@ -97,7 +97,7 @@ Every deployment, companion restart and rollback is logged in
    - **#295** `feat/add-printer` (head `fef3ef1`): installed and in use. Includes print failures as events
      (review item 23), Print Again reuses its slice, the review fixes (cached G-code format, preset contents and
      `.env` in the slice cache key, JPEG camera replies, manual port, stale Check result).
-   - **`feat/pause-at-layer`** (stacked on #295, head `539ef23`, pushed, **no PR yet**; `stm-ci` started on `539ef23`): pause rows in the Mac print
+   - **`feat/pause-at-layer`** (stacked on #295, head `539ef23`, pushed, **no PR yet**; `stm-ci` ALL PASS on `539ef23`): pause rows in the Mac print
      sheet, `pauseBeforeLayers` → `pause_at_layers`, `capabilities.layerPauses`, refused controls kept.
    - **#292** `feat/new-design-without-scan`: a copy request with nothing scanned runs as a new design (Fusion).
    - **#293** `feat/keep-multicolour-model`: keeps a pass's 3MF. **Don't install alone:** a designed 3MF would print
