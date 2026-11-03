@@ -20,6 +20,15 @@ real printer (firmware 01.10.00.00, cloud-bound, not LAN-only/Developer mode):
   Bambu Studio itself; not run (it puts a print on the bed outside Counterpart).
 - **Printing over the local network works** (01:46 Triangle pick, 6 copies, started from the app, finished).
 
+**Update ~12:20 Mountain — read `~/scan-to-make-work/claude-route-20261102/HANDOFF-PROMPT-3.md` first.**
+- URGENT: David's iPhone (build 202611022325) no longer connects. The companion is up on 192.168.68.123:9077. The
+  leading, unverified suspect is #295's contract changes (Mac runs 202611031300 from `feat/add-printer` `23c37bc`);
+  test by swapping in `/Applications/Counterpart.app.0245`.
+- The P1S is currently served by mcp-3D-printer-server (Settings → Printer MCP), running `~/mcp-3D-printer-server`
+  detached at `175944e` (`feat/bambu-complete`: AMS, controls, FULU route, bambu-printer-mcp's safety modules). A
+  print through it has not succeeded yet; the last failure, a nozzle-type check, is fixed in `175944e` but not re-tested.
+- David: anything that applies to both MCPs goes into both; mcp-3D's Bambu code had fallen behind.
+
 **Update ~11:15 Mountain.** #294 merged (`6109c1c`). PR #295 `feat/add-printer` (head `ac5e38b`, local CI 13/13):
 both MCPs listed and downloadable, **Add Printer…** (found MCP folders run in place, SSDP, Bonjour; dropdown form; Check;
 `printers/profiles.json` + per-printer `.env`), per-printer **Printer MCP** choice, **Complete Settings** smart fill.
