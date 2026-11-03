@@ -4,131 +4,236 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Counterpart: make the part that fits</title>
-<meta name="description" content="Scan something with your iPhone, send a photo, or describe it. Counterpart makes the part that fits it on your Mac and prints it on your own printer.">
+<meta name="description" content="Describe it, photograph it, scan it, or paste a link. Counterpart makes the part on your Mac and prints it on your own 3D printer.">
+<meta property="og:title" content="Counterpart: make the part that fits">
+<meta property="og:description" content="Describe it, photograph it, scan it, or paste a link. Counterpart makes the part on your Mac and prints it on your own 3D printer.">
+<meta property="og:image" content="https://counterpart.dtmont.com/screens/mac-main.jpg">
+<meta name="theme-color" content="#f2622a">
 <link rel="icon" href="favicon.png" type="image/png">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600&family=Barlow:ital,wght@0,400;0,500;0,600;1,400&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="styles.css">
+<script src="site.js" defer></script>
 </head>
 <body>
+<a class="skip" href="#main">Skip to content</a>
 <header class="masthead">
-  <a class="brand" href="./"><img src="icon-256.png" alt="" width="36" height="36"><span>Counterpart</span></a>
-  <nav aria-label="On this page">
-    <a href="#how">How it works</a>
-    <a href="#need">What you need</a>
-    <a href="help.html">Help</a>
-  </nav>
+  <div class="wrap">
+    <a class="brand" href="./"><img src="icon-256.png" alt="" width="36" height="36"><span>Counterpart</span></a>
+    <nav aria-label="Site">
+      <a href="#how">How it works</a>
+      <a href="#devices">iPhone, Mac, iPad</a>
+      <a href="#printers">Printers</a>
+      <a href="help.html">Help</a>
+    </nav>
+  </div>
 </header>
 
-<main>
-  <section class="hero">
-    <div class="hero-text">
-      <h1>Make the part that fits.</h1>
-      <p class="lede">Scan something with your iPhone, send a photo of it, or just describe it. Counterpart makes the part that fits it on your Mac, then prints it on your own printer.</p>
-      <p class="status">Counterpart is in early testing and isn't available to download yet.</p>
+<main id="main">
+  <section class="hero" aria-labelledby="hero-title">
+    <div class="wrap">
+      <div>
+        <h1 id="hero-title">Make the part that fits.</h1>
+        <p class="lede">Describe it, photograph it, scan it, or paste a link. Counterpart makes the part on your Mac, shows it to you on your iPhone, and prints it on your own printer.</p>
+        <div class="cta">
+          <a class="button" href="#how">See how it works</a>
+          <a class="button quiet" href="help.html">Read the guide</a>
+        </div>
+        <p class="status">In early testing. It isn't available to download yet.</p>
+      </div>
+      <figure class="bed">
+        <a class="shot mac" href="screens/mac-main.jpg"><img src="screens/mac-main.jpg" width="1320" height="872" alt="Counterpart on the Mac: a mic mount ready to print, with the request, photos and what changed beside it"></a>
+        <a class="shot phone" href="screens/phone-home.jpg"><img src="screens/phone-home.jpg" width="644" height="1400" alt="Counterpart on iPhone: a print at 42%, a model being made, and a question waiting for an answer"></a>
+        <svg class="callouts" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+          <path d="M25 72 L33 82 H46"/>
+          <path d="M74.5 71 L80 82 H99"/>
+        </svg>
+        <figcaption class="callout c1" style="top: 79%; left: 34%"><strong>It asks, it doesn't guess</strong>When your Mac can't see a part, your phone asks for a close-up.</figcaption>
+        <figcaption class="callout c2" style="top: 79%; right: 0"><strong>Print when it looks right</strong>Your printer, your filament, time and grams up front.</figcaption>
+      </figure>
     </div>
-    <figure class="drawing" aria-label="A drawing of a 25 mm tube with a printed hook clipped around it">
-      <svg viewBox="0 0 400 400" role="img" aria-hidden="true">
-        <defs>
-          <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-            <path d="M0 1 L9 5 L0 9 z" class="ink-fill"/>
-          </marker>
-        </defs>
-        <!-- what you have: the tube, in section -->
-        <circle cx="200" cy="140" r="50" class="tube"/>
-        <circle cx="200" cy="140" r="41" class="tube-bore"/>
-        <path d="M193 140 h14 M200 133 v14" class="centre"/>
-        <line x1="153" y1="140" x2="247" y2="140" class="dim" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
-        <text x="200" y="128" class="dim-label">25 mm</text>
-        <!-- what Counterpart makes: a clip that snaps on, and a hook -->
-        <path d="M229.5 88.9 A59 59 0 1 1 170.5 88.9" class="part part-clip"/>
-        <path d="M200 199 V300 A42 42 0 0 0 284 300 V284" class="part part-hook"/>
-        <!-- leaders -->
-        <path d="M157 112 L96 64 H40" class="leader"/>
-        <text x="40" y="56" class="note">What you have</text>
-        <path d="M274 328 L298 352 H400" class="leader"/>
-        <text x="400" y="344" class="note note-end">What it makes</text>
-      </svg>
-    </figure>
   </section>
 
-  <section class="ways" aria-labelledby="ways-title">
-    <h2 id="ways-title">Four ways to start</h2>
-    <dl class="ways-list">
-      <div><dt>Scan it</dt><dd>Scan the real thing with an iPhone or iPad that has a LiDAR scanner. It captures the shape in millimetres.</dd></div>
-      <div><dt>Photograph it</dt><dd>One or two photos and a sentence about what you want. A ruler or caliper in the picture helps with sizes.</dd></div>
-      <div><dt>Describe it</dt><dd>“A hook for a 25 mm tube that holds a mug.” Sizes in your words are enough to start.</dd></div>
-      <div><dt>Paste a link</dt><dd>A published model on MakerWorld or Printables. It prints the designer's own file, credited to them.</dd></div>
-    </dl>
+  <section aria-labelledby="ways-title">
+    <div class="wrap">
+      <h2 id="ways-title">Start however you like</h2>
+      <p class="intro">Use one way or mix them. The more it knows about what the part has to fit, the closer the first try is.</p>
+      <ul class="ways">
+        <li><h3>Describe it</h3><p>“A cup holder that clamps on this stroller handle, 90 mm cup.” Name a product and it looks up its published sizes.</p></li>
+        <li><h3>Photograph it</h3><p>One or two photos and a sentence. A ruler or caliper in the picture pins the sizes down.</p></li>
+        <li><h3>Scan it</h3><p>Walk around it with a LiDAR iPhone or iPad, or turn it on a scan rig. The scan is in millimetres.</p></li>
+        <li><h3>Paste a link</h3><p>A model on MakerWorld or Printables. It prints the designer's own file, credited to them, and changes only what you ask.</p></li>
+      </ul>
+      <div class="ways-shots">
+        <figure><a class="shot" href="screens/phone-home-empty.jpg"><img src="screens/phone-home-empty.jpg" width="644" height="1400" loading="lazy" alt="Home with no projects yet: Make something that fits, or Copy something"></a><figcaption>Make something that fits, or copy something you have.</figcaption></figure>
+        <figure><a class="shot" href="screens/phone-new.jpg"><img src="screens/phone-new.jpg" width="644" height="1400" loading="lazy" alt="New project: what you need, and how to show it"></a><figcaption>Say what you need, then show it.</figcaption></figure>
+        <figure><a class="shot" href="screens/phone-rig.jpg"><img src="screens/phone-rig.jpg" width="644" height="1400" loading="lazy" alt="Scanning a crochet potato on a scan rig, ring 1 of 3"></a><figcaption>On a scan rig, it guides each ring.</figcaption></figure>
+      </div>
+    </div>
   </section>
 
   <section id="how" aria-labelledby="how-title">
-    <h2 id="how-title">How it works</h2>
-    <ol class="steps">
-      <li><h3>Send it from your phone</h3><p>Your scan, photos and description go straight to your Mac, over your Wi-Fi or your own private iCloud. Counterpart has no servers of its own.</p></li>
-      <li><h3>Your Mac makes it</h3><p>Counterpart uses your own Claude Code login and Blender to make the model, so Claude sees what you sent. If it can't see a part well enough, it asks you for a close-up.</p></li>
-      <li><h3>Check it on your phone</h3><p>See pictures and the size in millimetres. Ask for changes in plain words, like “make it 2 mm wider”.</p></li>
-      <li><h3>Print it</h3><p>Choose your printer and filament, see the time and filament it needs, and confirm on the printer's own terms.</p></li>
-    </ol>
-  </section>
-
-  <section id="need" aria-labelledby="need-title">
-    <h2 id="need-title">What you need</h2>
-    <ul class="needs">
-      <li><strong>An iPhone or iPad with iOS 27.</strong> Scanning needs a model with LiDAR (Pro models). Photos and descriptions work on any.</li>
-      <li><strong>A Mac</strong> with Counterpart running in the menu bar. On the same Apple Account, your iPhone finds it by itself.</li>
-      <li><strong>Claude Code</strong>, signed in on that Mac. Counterpart uses your login to make models.</li>
-      <li><strong>Blender</strong> on that Mac. Counterpart opens it only while it works on a project.</li>
-      <li><strong>A 3D printer and its MCP server.</strong> Counterpart uses your existing setup as it is.</li>
-    </ul>
-    <div class="printers">
-      <a class="printer" href="https://dmontgomery40.github.io/bambu-printer-mcp/">
-        <span class="printer-name">bambu-printer-mcp</span>
-        <span class="printer-what">For Bambu Lab printers: slicing, AMS colours and printing.</span>
-      </a>
-      <a class="printer" href="https://dmontgomery40.github.io/mcp-3D-printer-server/">
-        <span class="printer-name">mcp-3D-printer-server</span>
-        <span class="printer-what">For OctoPrint, Klipper, Duet, Repetier, PrusaLink and Creality printers.</span>
-      </a>
+    <div class="wrap">
+      <h2 id="how-title">How it works</h2>
+      <p class="intro">From the request to the print, step by step. Pick a step to see it on the iPhone and the Mac.</p>
+      <div class="tour">
+        <div>
+          <ol class="tour-steps" role="tablist" aria-label="Steps" aria-orientation="vertical">
+            <li><button role="tab" id="t1" aria-controls="p1" aria-selected="true"><span class="t">Send it from your phone</span><span class="d">Your words, photos and scan go straight to your Mac, over your Wi-Fi or your own private iCloud.</span></button></li>
+            <li><button role="tab" id="t2" aria-controls="p2" aria-selected="false" tabindex="-1"><span class="t">Your Mac makes it</span><span class="d">It uses your own Claude login and Blender on your Mac, and shows each step with the time left. You can put your phone down.</span></button></li>
+            <li><button role="tab" id="t3" aria-controls="p3" aria-selected="false" tabindex="-1"><span class="t">It asks when it can't see</span><span class="d">If a part isn't clear enough, it asks for a close-up. Take one, pick one from Photos, or let it make its best guess.</span></button></li>
+            <li><button role="tab" id="t4" aria-controls="p4" aria-selected="false" tabindex="-1"><span class="t">Check it, change it</span><span class="d">See it in 3D or AR with its size in millimetres and a list of what changed. Ask for changes in plain words: “make the clamp a bit tighter”.</span></button></li>
+            <li><button role="tab" id="t5" aria-controls="p5" aria-selected="false" tabindex="-1"><span class="t">Print it</span><span class="d">Choose the printer, the colours from what's loaded, quality and strength. It slices first and shows the time and grams before anything starts.</span></button></li>
+            <li><button role="tab" id="t6" aria-controls="p6" aria-selected="false" tabindex="-1"><span class="t">Follow the print</span><span class="d">Progress, layers, time left and the printer's camera, with Pause and Stop. It tells you at halfway and when it's done, then asks: did it fit?</span></button></li>
+          </ol>
+          <div class="tour-nav"><button type="button" data-tour="back">Back</button><button type="button" data-tour="next">Next step</button></div>
+        </div>
+        <div class="tour-stage">
+          <div class="tour-panel" role="tabpanel" id="p1" aria-labelledby="t1">
+            <figure><a class="shot" href="screens/phone-new.jpg"><img src="screens/phone-new.jpg" width="644" height="1400" alt="New project on iPhone" loading="lazy"></a><figcaption>iPhone: New project.</figcaption></figure>
+            <figure class="mac"><a class="shot mac" href="screens/mac-new.jpg"><img src="screens/mac-new.jpg" width="1320" height="872" alt="New project on the Mac, with photos dropped in" loading="lazy"></a><figcaption>Mac: drop photos, STL, 3MF or USDZ files straight in.</figcaption></figure>
+          </div>
+          <div class="tour-panel" role="tabpanel" id="p2" aria-labelledby="t2" hidden>
+            <figure><a class="shot" href="screens/phone-working.jpg"><img src="screens/phone-working.jpg" width="644" height="1400" alt="Your Mac is working on the crochet potato, about 4 minutes left" loading="lazy"></a><figcaption>iPhone: what it's doing, and about how long.</figcaption></figure>
+            <figure class="mac"><a class="shot mac" href="screens/mac-inspector-activity.jpg"><img src="screens/mac-inspector-activity.jpg" width="1320" height="872" alt="The Mac's Activity list for a project" loading="lazy"></a><figcaption>Mac: every step it took, in Activity.</figcaption></figure>
+          </div>
+          <div class="tour-panel" role="tabpanel" id="p3" aria-labelledby="t3" hidden>
+            <figure><a class="shot" href="screens/phone-ask.jpg"><img src="screens/phone-ask.jpg" width="644" height="1400" alt="Your Mac has a question: can you send a close-up of the underside?" loading="lazy"></a><figcaption>iPhone: Camera, Photos, or Best guess.</figcaption></figure>
+            <figure class="mac"><a class="shot mac" href="screens/mac-popover.jpg"><img src="screens/mac-popover.jpg" width="360" height="318" alt="The Mac's menu bar: a print, a model being made, and a close-up request" loading="lazy" style="max-width: 22rem"></a><figcaption>Mac menu bar: the same question, and what's printing.</figcaption></figure>
+          </div>
+          <div class="tour-panel" role="tabpanel" id="p4" aria-labelledby="t4" hidden>
+            <figure><a class="shot" href="screens/phone-ready.jpg"><img src="screens/phone-ready.jpg" width="644" height="1400" alt="Mic mount ready to print, 48 by 50 by 54 mm" loading="lazy"></a><figcaption>iPhone: ready to print, with its size.</figcaption></figure>
+            <figure class="mac"><a class="shot mac" href="screens/mac-main.jpg"><img src="screens/mac-main.jpg" width="1320" height="872" alt="The mic mount on the Mac with what changed" loading="lazy"></a><figcaption>Mac: what changed, and which sizes were estimated.</figcaption></figure>
+          </div>
+          <div class="tour-panel" role="tabpanel" id="p5" aria-labelledby="t5" hidden>
+            <figure><a class="shot" href="screens/phone-print.jpg"><img src="screens/phone-print.jpg" width="644" height="1400" alt="Print sheet: printer, colours from the AMS, quality" loading="lazy"></a><figcaption>iPhone: colours go to the AMS slots that hold them.</figcaption></figure>
+            <figure class="mac"><a class="shot mac" href="screens/mac-print.jpg"><img src="screens/mac-print.jpg" width="1320" height="872" alt="The Print sheet on the Mac" loading="lazy"></a><figcaption>Mac: the same Print sheet.</figcaption></figure>
+          </div>
+          <div class="tour-panel" role="tabpanel" id="p6" aria-labelledby="t6" hidden>
+            <figure><a class="shot" href="screens/phone-printing.jpg"><img src="screens/phone-printing.jpg" width="644" height="1400" alt="Printing the cable clip: 42%, layer 84 of 212, the printer's camera" loading="lazy"></a><figcaption>iPhone: the printer's camera, Pause and Stop.</figcaption></figure>
+            <figure class="mac"><a class="shot mac" href="screens/mac-inspector-print.jpg"><img src="screens/mac-inspector-print.jpg" width="1320" height="872" alt="The Mac's Print tab for a project" loading="lazy"></a><figcaption>Mac: the print and its history.</figcaption></figure>
+          </div>
+        </div>
+      </div>
     </div>
   </section>
 
-  <section id="help" aria-labelledby="help-title">
-    <h2 id="help-title">Help</h2>
-    <p>Quick answers below. The full guide is on the <a href="help.html">Help page</a>.</p>
-    <div class="faq">
-      <details>
-        <summary>My phone can't find my Mac</summary>
-        <p>Check that both are on the same Wi-Fi and that Counterpart is running on your Mac (its icon is in the menu bar). On your phone, open Settings, then Counterpart, and turn on Local Network.</p>
-      </details>
-      <details>
-        <summary>The pairing code says it expired</summary>
-        <p>Codes only last a few minutes. Click the Counterpart icon in your Mac's menu bar to show a fresh code, then scan it with your phone.</p>
-      </details>
-      <details>
-        <summary>Making it stopped with an error</summary>
-        <p>The message on the object says what went wrong. The usual cause is Claude Code not being signed in on your Mac. Fix that, then open the object and tap Try Again.</p>
-      </details>
-      <details>
-        <summary>It asked me for a close-up</summary>
-        <p>Your Mac couldn't see one part clearly. Take a photo close to that part, or tap Best Guess to let it carry on without one.</p>
-      </details>
-      <details>
-        <summary>The print has not started</summary>
-        <p>Open the project to see the latest printer status and any message from your printer service.</p>
-      </details>
-      <details>
-        <summary>The size is a little off</summary>
-        <p>Phone scans are good to a few millimetres. For a part that has to fit exactly, measure the important size with a caliper or ruler and tell it in plain words, or put the caliper in a photo.</p>
-      </details>
+  <section id="devices" class="devices" aria-labelledby="devices-title">
+    <div class="wrap">
+      <h2 id="devices-title">On your iPhone, Mac and iPad</h2>
+      <p class="intro">Your Mac does the work. Your iPhone and iPad send, check and print, at home or away.</p>
+      <div class="switch" role="tablist" aria-label="Device">
+        <button role="tab" id="d-phone" aria-controls="dp-phone" aria-selected="true">iPhone</button>
+        <button role="tab" id="d-mac" aria-controls="dp-mac" aria-selected="false" tabindex="-1">Mac</button>
+        <button role="tab" id="d-ipad" aria-controls="dp-ipad" aria-selected="false" tabindex="-1">iPad</button>
+        <button role="tab" id="d-duo" aria-controls="dp-duo" aria-selected="false" tabindex="-1">iPhone Duo</button>
+      </div>
+      <div role="tabpanel" id="dp-phone" aria-labelledby="d-phone">
+        <p class="device-note">Scanning needs a Pro model with LiDAR. Everything else works on any iPhone with iOS 27.</p>
+        <div class="rail phones">
+          <figure><a class="shot" href="screens/phone-welcome.jpg"><img src="screens/phone-welcome.jpg" width="644" height="1400" loading="lazy" alt="Welcome screen"></a><figcaption>Welcome</figcaption></figure>
+          <figure><a class="shot" href="screens/phone-pair.jpg"><img src="screens/phone-pair.jpg" width="644" height="1400" loading="lazy" alt="Find your Mac: scan the code it shows"></a><figcaption>Find your Mac</figcaption></figure>
+          <figure><a class="shot" href="screens/phone-home.jpg"><img src="screens/phone-home.jpg" width="644" height="1400" loading="lazy" alt="Home: now, needs you, projects"></a><figcaption>Home</figcaption></figure>
+          <figure><a class="shot" href="screens/phone-inputs.jpg"><img src="screens/phone-inputs.jpg" width="644" height="1400" loading="lazy" alt="What you sent: your request, photos and scans"></a><figcaption>What you sent</figcaption></figure>
+          <figure><a class="shot" href="screens/phone-failed.jpg"><img src="screens/phone-failed.jpg" width="644" height="1400" loading="lazy" alt="Your Mac couldn't finish, with Try Again"></a><figcaption>When it can't finish, it says why</figcaption></figure>
+          <figure><a class="shot" href="screens/phone-print-loaded.jpg"><img src="screens/phone-print-loaded.jpg" width="644" height="1400" loading="lazy" alt="What's loaded? Pick the material in a printer that can't report it"></a><figcaption>What's loaded?</figcaption></figure>
+          <figure><a class="shot" href="screens/phone-printers.jpg"><img src="screens/phone-printers.jpg" width="644" height="1400" loading="lazy" alt="Printers: ready, loaded filament, offline"></a><figcaption>Printers</figcaption></figure>
+          <figure><a class="shot" href="screens/phone-printer.jpg"><img src="screens/phone-printer.jpg" width="644" height="1400" loading="lazy" alt="A printer's camera, current print and filament"></a><figcaption>A printer</figcaption></figure>
+          <figure><a class="shot" href="screens/phone-settings.jpg"><img src="screens/phone-settings.jpg" width="644" height="1400" loading="lazy" alt="Settings: your Mac, notifications, help"></a><figcaption>Settings</figcaption></figure>
+          <figure><a class="shot" href="screens/phone-settings-notifications.jpg"><img src="screens/phone-settings-notifications.jpg" width="644" height="1400" loading="lazy" alt="Notification choices"></a><figcaption>Notifications</figcaption></figure>
+        </div>
+      </div>
+      <div role="tabpanel" id="dp-mac" aria-labelledby="d-mac" hidden>
+        <p class="device-note">Counterpart lives in the menu bar, with a window for your projects. It needs Claude and Blender on the same Mac.</p>
+        <div class="rail macs">
+          <figure><a class="shot mac" href="screens/mac-main.jpg"><img src="screens/mac-main.jpg" width="1320" height="872" loading="lazy" alt="The main window"></a><figcaption>Your projects and printers</figcaption></figure>
+          <figure><a class="shot mac" href="screens/mac-new.jpg"><img src="screens/mac-new.jpg" width="1320" height="872" loading="lazy" alt="New project"></a><figcaption>New project: drop files in</figcaption></figure>
+          <figure><a class="shot mac" href="screens/mac-print.jpg"><img src="screens/mac-print.jpg" width="1320" height="872" loading="lazy" alt="Print sheet"></a><figcaption>Print</figcaption></figure>
+          <figure><a class="shot mac" href="screens/mac-settings-printers.jpg"><img src="screens/mac-settings-printers.jpg" width="620" height="678" loading="lazy" alt="Settings: Printers and their MCP servers"></a><figcaption>Settings: Printers</figcaption></figure>
+          <figure><a class="shot mac" href="screens/mac-devices.jpg"><img src="screens/mac-devices.jpg" width="620" height="388" loading="lazy" alt="Settings: phones and iPads"></a><figcaption>Settings: Phones and iPads</figcaption></figure>
+          <figure><a class="shot mac" href="screens/mac-settings-ai.jpg"><img src="screens/mac-settings-ai.jpg" width="620" height="588" loading="lazy" alt="Settings: AI and design engine"></a><figcaption>Settings: AI</figcaption></figure>
+          <figure><a class="shot mac" href="screens/mac-settings-general.jpg"><img src="screens/mac-settings-general.jpg" width="620" height="708" loading="lazy" alt="Settings: General and notifications on the Mac"></a><figcaption>Settings: General</figcaption></figure>
+        </div>
+      </div>
+      <div role="tabpanel" id="dp-ipad" aria-labelledby="d-ipad" hidden>
+        <p class="device-note">On iPad, projects sit beside the one you're looking at. An iPad Pro with LiDAR can scan.</p>
+        <div class="rail tablets">
+          <figure><a class="shot tablet" href="screens/ipad-split.jpg"><img src="screens/ipad-split.jpg" width="1050" height="1400" loading="lazy" alt="iPad: projects beside the mic mount"></a><figcaption>Projects beside the one you're on</figcaption></figure>
+          <figure><a class="shot tablet" href="screens/ipad-welcome.jpg"><img src="screens/ipad-welcome.jpg" width="1050" height="1400" loading="lazy" alt="iPad welcome screen"></a><figcaption>Welcome</figcaption></figure>
+        </div>
+      </div>
+      <div role="tabpanel" id="dp-duo" aria-labelledby="d-duo" hidden>
+        <p class="device-note">iPhone Duo has its own layout folded and unfolded. It has no LiDAR, so it can't scan, but it can open a scan from another device, add close-ups and print.</p>
+        <div class="rail tablets">
+          <figure><a class="shot tablet" href="screens/duo-closed.jpg"><img src="screens/duo-closed.jpg" width="962" height="1400" loading="lazy" alt="iPhone Duo folded: home"></a><figcaption>Folded</figcaption></figure>
+          <figure><a class="shot tablet" href="screens/duo-home-empty.jpg"><img src="screens/duo-home-empty.jpg" width="962" height="1400" loading="lazy" alt="iPhone Duo folded: first project"></a><figcaption>Folded, first project</figcaption></figure>
+          <figure><a class="shot tablet" href="screens/ipad-split.jpg"><img src="screens/ipad-split.jpg" width="1050" height="1400" loading="lazy" alt="iPhone Duo unfolded, like iPad"></a><figcaption>Unfolded, like iPad</figcaption></figure>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="printers" aria-labelledby="printers-title">
+    <div class="wrap printers-grid">
+      <div>
+        <h2 id="printers-title">Prints on the printer you already have</h2>
+        <p>Counterpart prints through the MCP server you already use for your printer, as you've set it up. It never copies your printer's settings.</p>
+        <p>On the Mac, Settings › Printers lists each printer, the MCP server that reaches it and its version, with Update when a newer one is out. For a Bambu printer you can choose how bambu-printer-mcp reaches it: your local network, or Bambu Cloud.</p>
+        <div class="mcps">
+          <a class="mcp" href="https://dmontgomery40.github.io/bambu-printer-mcp/"><b>bambu-printer-mcp</b><span>Bambu Lab printers: slicing, AMS colours, printing and the printer's camera.</span></a>
+          <a class="mcp" href="https://dmontgomery40.github.io/mcp-3D-printer-server/"><b>mcp-3D-printer-server</b><span>OctoPrint, Klipper, Duet, Repetier, PrusaLink and Creality printers, and Bambu Lab too.</span></a>
+        </div>
+      </div>
+      <div class="pair">
+        <figure><a class="shot" href="screens/phone-printers.jpg"><img src="screens/phone-printers.jpg" width="644" height="1400" loading="lazy" alt="Printers on iPhone"></a><figcaption>iPhone: each printer and what's loaded.</figcaption></figure>
+        <figure><a class="shot mac" href="screens/mac-settings-printers.jpg"><img src="screens/mac-settings-printers.jpg" width="620" height="678" loading="lazy" alt="Settings › Printers on the Mac"></a><figcaption>Mac: the printers and the MCP servers behind them.</figcaption></figure>
+      </div>
+    </div>
+  </section>
+
+  <section id="need" aria-labelledby="need-title">
+    <div class="wrap">
+      <h2 id="need-title">What you need</h2>
+      <p class="intro">Tick what you have. Anything missing has a line in the <a href="help.html#setup">setup guide</a>.</p>
+      <ul class="needs">
+        <li><label><input type="checkbox"><div><b>An iPhone or iPad with iOS 27.</b> <span>Scanning needs a LiDAR model (Pro). Photos, descriptions and links work on any.</span></div></label></li>
+        <li><label><input type="checkbox"><div><b>A Mac running Counterpart.</b> <span>It sits in the menu bar. Your iPhone pairs with it once.</span></div></label></li>
+        <li><label><input type="checkbox"><div><b>Claude Code, signed in on that Mac.</b> <span>Counterpart makes models with your own login.</span></div></label></li>
+        <li><label><input type="checkbox"><div><b>Blender on that Mac.</b> <span>Counterpart opens it only while it's working on a project.</span></div></label></li>
+        <li><label><input type="checkbox"><div><b>A 3D printer and its MCP server.</b> <span>bambu-printer-mcp or mcp-3D-printer-server, set up as you already have it.</span></div></label></li>
+      </ul>
+      <p class="needs-done" aria-live="polite"></p>
+    </div>
+  </section>
+
+  <section id="faq" aria-labelledby="faq-title">
+    <div class="wrap">
+      <h2 id="faq-title">Quick answers</h2>
+      <p class="intro">The full guide, with search, is on the <a href="help.html">Help page</a>.</p>
+      <div class="faq">
+        <details><summary>My phone can't find my Mac</summary><p>Check that Counterpart is running on your Mac: its icon is in the menu bar. On the same Wi-Fi, check iPhone Settings › Counterpart › Local Network is on. Otherwise click the menu bar icon and scan the code it shows.</p></details>
+        <details><summary>Making it stopped with an error</summary><p>The project says what went wrong. The usual cause is Claude Code not being signed in on your Mac. Fix that, then open the project and tap Try Again.</p></details>
+        <details><summary>It asked me for a close-up</summary><p>Your Mac couldn't see one part clearly. Take a photo close to that part, pick one from Photos, or tap Best guess to carry on without one.</p></details>
+        <details><summary>The print didn't start</summary><p>Open the project: it shows what the printer or its MCP server said. If the printer shows an error on its own screen, clear it there, then print again.</p></details>
+        <details><summary>The size is a little off</summary><p>Phone scans are good to a few millimetres. Measure the size that matters with a caliper and say it in Ask for changes, like “the tube is 25.4 mm across”.</p></details>
+        <details><summary>Where do my scans and photos go?</summary><p>To your Mac only. Your iPhone reaches it on your Wi-Fi, or through your own private iCloud when you're away. Counterpart has no accounts. <a href="help.html#privacy">Privacy</a> has the details.</p></details>
+      </div>
     </div>
   </section>
 </main>
 
 <footer class="foot">
-  <p>Counterpart runs on your own Mac and printer, with your own Claude Code account.</p>
+  <div class="wrap">
+    <p>Counterpart runs on your own Mac and printer, with your own Claude Code account.</p>
+    <p class="foot-links"><a href="help.html">Help</a> <a href="help.html#privacy">Privacy</a> <a href="help.html#credits">Credits</a></p>
+  </div>
 </footer>
+
+<dialog class="zoom" id="zoom" aria-label="Screen, larger">
+  <form method="dialog"><button class="close">Close</button></form>
+  <figure><img src="" alt=""><figcaption></figcaption></figure>
+</dialog>
 </body>
 </html>

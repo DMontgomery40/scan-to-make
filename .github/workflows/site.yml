@@ -1,0 +1,18 @@
+name: Docs site
+on:
+  pull_request:
+    branches: [main]
+    paths: ['site/**', '.github/workflows/site.yml']
+  push:
+    branches: [main]
+    paths: ['site/**', '.github/workflows/site.yml']
+permissions:
+  contents: read
+jobs:
+  site:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Static checks (links, anchors the app opens, alt text, contrast)
+        run: node site/check.mjs
