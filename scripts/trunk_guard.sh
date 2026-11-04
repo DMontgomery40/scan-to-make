@@ -39,13 +39,15 @@ git -C "$repo" rev-parse --git-dir >/dev/null 2>&1 || refuse "$repo is not a git
 head=$(git -C "$repo" rev-parse HEAD)
 branch=$(git -C "$repo" rev-parse --abbrev-ref HEAD)
 
-dirty=$(git -C "$repo" status --porcelain --untracked-files=normal | head -5)
-[ -z "$dirty" ] || refuse "the tree has uncommitted or untracked files: $(echo "$dirty" | tr '\n' ' ')"
+status=$(git -C "$repo" status --porcelain --untracked-files=normal)
+[ -z "$status" ] || refuse "the tree has uncommitted or untracked files: $(printf '%s\n' "$status" | sed -n 1,5p | tr '\n' ' ')"
 
 # A stale origin/main only makes this stricter: main is never rewritten, so anything already on
 # an older main is still on the current one.
 if [ "$main" = origin/main ] && [ -z "${STM_TRUNK_NO_FETCH:-}" ]; then
-  git -C "$repo" fetch -q origin main 2>/dev/null || echo "trunk_guard: could not fetch origin/main; checking against the local copy" >&2
+  # Never prompt for credentials or hang inside an Xcode phase or Gradle task.
+  GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND="ssh -o BatchMode=yes -o ConnectTimeout=10" \
+    git -C "$repo" -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=20 fetch -q origin main 2>/dev/null || echo "trunk_guard: could not fetch origin/main; checking against the local copy" >&2
 fi
 git -C "$repo" rev-parse -q --verify "$main^{commit}" >/dev/null || refuse "$main does not exist here"
 git -C "$repo" merge-base --is-ancestor "$head" "$main" ||

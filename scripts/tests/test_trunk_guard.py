@@ -15,6 +15,7 @@ ENTRY_POINTS = [
     'apps/mac/scripts/embed.sh',
     'apps/mobile/scripts/prepare-testflight.sh',
     'apps/mobile/scripts/install-iphone.sh',
+    'apps/mobile/scripts/release-trunk-guard.sh',
     'apps/linux/scripts/bundle.sh',
     'tools/linux-host/prepare-payload.sh',
     'tools/linux-reconstruct/packaging/build-linux-payload.sh',
@@ -34,6 +35,7 @@ class TrunkGuardTests(unittest.TestCase):
         for path in [GUARD, *ENTRY_POINTS]:
             (self.work / path).parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(REPO / path, self.work / path)
+        (self.work / 'apps/mobile/ios').mkdir(parents=True)  # the iPhone project's SRCROOT (empty: git ignores it)
         self.commit('base'); self.git('push', '-q', 'origin', 'HEAD:main')
 
     def tearDown(self):
@@ -100,11 +102,26 @@ class TrunkGuardTests(unittest.TestCase):
                 done = self.run_script(path, '/tmp/unused-out', BUILD_NUMBER='1', RELEASE_DIR='/tmp/unused-release',
                                        DEVELOPER_ID_APPLICATION='x', NOTARY_PROFILE='x', SPARKLE_PUBLIC_KEY='x',
                                        SPARKLE_FEED_URL='https://x', SPARKLE_BIN='x', RELEASE_DOWNLOAD_URL='https://x',
-                                       MAC_PROVISIONING_PROFILE='x', SRCROOT=str(self.work / 'apps/mac'),
+                                       MAC_PROVISIONING_PROFILE='x', SRCROOT=str(self.work / self.srcroot(path)),
                                        CONFIGURATION='Release', TARGET_BUILD_DIR='/tmp/unused', CONTENTS_FOLDER_PATH='x',
                                        STM_IPHONE_DEVICE='x')
                 self.assertNotEqual(done.returncode, 0, done.stdout + done.stderr)
                 self.assertIn('trunk_guard: refusing', done.stderr)
+
+    @staticmethod
+    def srcroot(path):
+        return 'apps/mobile/ios' if path.startswith('apps/mobile/') else 'apps/mac'
+
+    def test_xcode_phases_skip_debug_and_unsigned_builds_without_reading_git(self):
+        # ci_local runs Xcode jobs from a git archive: no .git, and the guard must not be reached.
+        shutil.rmtree(self.work / '.git')
+        mac = self.run_script('apps/mac/scripts/embed.sh', CONFIGURATION='Debug', SRCROOT=str(self.work / 'apps/mac'),
+                              TARGET_BUILD_DIR=str(self.work / 'out'), CONTENTS_FOLDER_PATH='x')
+        self.assertNotIn('trunk_guard', mac.stderr)
+        for env in ({'CONFIGURATION': 'Debug'}, {'CONFIGURATION': 'Release', 'CODE_SIGNING_ALLOWED': 'NO'}):
+            with self.subTest(env):
+                done = self.run_script('apps/mobile/scripts/release-trunk-guard.sh', SRCROOT=str(self.work / 'apps/mobile/ios'), **env)
+                self.assertEqual(done.returncode, 0, done.stderr)
 
 
 if __name__ == '__main__':

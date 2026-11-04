@@ -51,7 +51,9 @@ refuses when the tree is dirty (untracked files included) or HEAD is not on `ori
 
 - Mac: `apps/mac/scripts/prepare-payload.sh`, `release.sh`, and the app's `embed.sh` build phase for every
   Release build (which also refuses a Payload prepared from another commit);
-- iPhone: `apps/mobile/scripts/install-iphone.sh` (USB install) and `prepare-testflight.sh`;
+- iPhone: `apps/mobile/scripts/install-iphone.sh` (USB install), `prepare-testflight.sh`, and the app's
+  `TrunkGuard` aggregate target for every signed Release build (`release-trunk-guard.sh`), so a raw
+  `xcodebuild -configuration Release` refuses too;
 - Linux: `apps/linux/scripts/bundle.sh`, `tools/linux-host/prepare-payload.sh`,
   `tools/linux-reconstruct/packaging/build-linux-payload.sh`;
 - Android: Gradle's `assemble*`, `bundle*` and `install*` tasks (unit tests and lint are not guarded).
