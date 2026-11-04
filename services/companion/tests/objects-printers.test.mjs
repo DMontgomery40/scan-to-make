@@ -22,6 +22,46 @@ async function fixture(t) {
   return {home, current, put, options: sourcePaths => ({homeDirectory: home, sourcePaths})};
 }
 
+test('a host-generated empty installation remains downloadable without appearing as a printer', async t => {
+  const f = await fixture(t);
+  const entry = join(f.home, 'printers/bambu/lib/node_modules/bambu-printer-mcp/dist/index.js');
+  const current = {backend: 'bambu-printer-mcp', process: {command: process.execPath, args: [entry]}};
+  const catalog = await loadPrinterCatalog(current, {...f.options([]), placeholderEntryPoint: entry});
+  assert.deepEqual(catalog.destinations, []);
+  assert.deepEqual(catalog.entries(), [{id: 'current', backend: current.backend, config: current}]);
+  assert.deepEqual(catalog.resolve('current'), current);
+});
+
+test('the first configured printer becomes default instead of the empty host installation', async t => {
+  const f = await fixture(t);
+  const entry = join(f.home, 'printers/bambu/lib/node_modules/bambu-printer-mcp/dist/index.js');
+  const current = {backend: 'bambu-printer-mcp', process: {command: process.execPath, args: [entry]}};
+  const source = await f.put('mcp.json', {mcpServers: {'Workshop': {
+    command: process.execPath, args: ['/opt/bambu-printer-mcp/dist/index.js'], env: {PRINTER_HOST: '192.0.2.22'},
+  }}});
+  const catalog = await loadPrinterCatalog(current, {...f.options([source]), placeholderEntryPoint: entry});
+  assert.equal(catalog.destinations.length, 1);
+  assert.equal(catalog.destinations[0].name, 'Workshop');
+  assert.equal(catalog.defaultDestinationId, catalog.destinations[0].id);
+});
+
+test('placeholder detection preserves customized local configurations and remote SSH printers', async t => {
+  const f = await fixture(t);
+  const entry = join(f.home, 'printers/bambu/lib/node_modules/bambu-printer-mcp/dist/index.js');
+  const empty = {backend: 'bambu-printer-mcp', process: {command: process.execPath, args: [entry]}};
+  const variants = [
+    {...empty, process: {...empty.process, env: {PRINTER_HOST: '192.0.2.22'}}},
+    {...empty, process: {...empty.process, cwd: f.home}},
+    {...empty, selection: {host: '192.0.2.22'}},
+    {backend: 'bambu-printer-mcp', process: {command: '/usr/bin/ssh', args: ['printer-tunnel']}},
+  ];
+  for (const current of variants) {
+    const catalog = await loadPrinterCatalog(current, {...f.options([]), placeholderEntryPoint: entry});
+    assert.equal(catalog.destinations[0]?.id, 'current');
+  }
+  assert.equal((await loadPrinterCatalog(empty, f.options([]))).destinations[0]?.id, 'current');
+});
+
 test('current destination inherits metadata without rewriting its working SSH configuration', async t => {
   const f = await fixture(t);
   const catalog = await loadPrinterCatalog(f.current, f.options([]));

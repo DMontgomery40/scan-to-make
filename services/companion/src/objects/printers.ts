@@ -56,6 +56,8 @@ export interface PrinterCatalogOptions {
   currentEnvPath?: string;
   /** Counterpart's own list (`<appPrinters>/profiles.json`): printers added in the app, and per-printer MCP choices. */
   profilesPath?: string;
+  /** The host's empty installation target. Keep it for Download, but do not present it as a printer. */
+  placeholderEntryPoint?: string;
 }
 
 type RecordValue = Record<string, unknown>;
@@ -277,6 +279,15 @@ async function buildCatalog(current: PrinterHandoffConfig, options: PrinterCatal
   const home = options.homeDirectory ?? homedir();
   const currentConfig = printerHandoffConfigSchema.parse(structuredClone(current));
   const currentMetadata = await metadata(currentConfig, options.currentEnvPath);
+  // Only the host's unchanged local bootstrap config is a placeholder. In particular,
+  // an SSH route can be fully configured on its remote host without any local metadata.
+  const placeholder = options.placeholderEntryPoint !== undefined
+    && currentConfig.backend === 'bambu-printer-mcp'
+    && ['node', 'nodejs'].includes(basename(currentConfig.process.command))
+    && currentConfig.process.args?.length === 1
+    && currentConfig.process.args[0] === options.placeholderEntryPoint
+    && !currentConfig.process.cwd && !currentConfig.process.env && !currentConfig.selection
+    && currentMetadata.keys.length === 0 && !currentMetadata.model;
   const candidates: Candidate[] = [{id: 'current', name: defaultName(currentConfig.backend, currentMetadata.model), backend: currentConfig.backend,
     ...(currentMetadata.model ? {model: currentMetadata.model} : {}), ...(currentMetadata.address ? {address: currentMetadata.address} : {}),
     source: 'current', origin: 'printer-handoff', keys: currentMetadata.keys, bambuKind: currentMetadata.bambuKind,
@@ -397,8 +408,8 @@ async function buildCatalog(current: PrinterHandoffConfig, options: PrinterCatal
     alternatives.set(winner.id, [winner.backend, ...backends.filter(backend => backend !== winner.backend)]
       .map(backend => ({backend, destinationId: backend === winner.backend ? winner.id : pick(backend)})));
   }
-  const listed = candidates.filter(candidate => chosen.get(candidate) === candidate);
-  const defaultDestinationId = canonical.get('current')!;
+  const listed = candidates.filter(candidate => chosen.get(candidate) === candidate && !(placeholder && candidate.id === 'current'));
+  const defaultDestinationId = (placeholder ? listed[0]?.id : undefined) ?? canonical.get('current')!;
   const destinations: PrinterDestination[] = [...listed.filter(item => item.id === defaultDestinationId), ...listed.filter(item => item.id !== defaultDestinationId)]
     .map(({id, name, backend, model, address, source, origin, folder, incomplete}) => ({id, name, backend, ...(model ? {model} : {}), ...(address ? {address} : {}), source, origin,
       ...(alternatives.has(id) ? {mcps: alternatives.get(id)!} : {}), ...(origin === 'counterpart' && folder ? {folder} : {}), ...(incomplete ? {incomplete} : {})}));

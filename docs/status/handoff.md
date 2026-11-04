@@ -262,31 +262,32 @@ remote native probes and the SSH tunnel were removed after verification.
      and official OpenMVS 2.4.0 Ubuntu binaries, verified against release SHA-256
      `7104ae1ddd6ca38fbca9e0e4a70b20af59e21e0b497eb7181c864fbf38ca8d00`.
      No Linux reconstruction source integration or geometry/scale acceptance yet.
-     Linux host delegate hit Claude's rate limit, with a clean `linux-host-runtime` branch at `d640c07`
-     (`5d38205` helper, `76e17b2` companion portability, `d640c07` payload script), worktree
-     `~/.t3/worktrees/scan-to-make/t3-6dc7974b`. David used his banked Claude reset; the same Opus delegate
-     resumed implementation. Muse Wonder Full 1.0 is separately researching reconstruction and metric-scale design.
-     Its agents-173 payload build compiled the Rust release helper but failed npm extraction with errno -122
-     in `/tmp` (tmpfs/quota). The UI delegate's independent agents-136 build succeeded: 210 MB, BUILD-ID
-     `gd640c07bd9a3-node24.22.2-x64`, at `~/scan-to-make-work/linux-desktop/app/src-tauri/resources`.
-     Log: `~/scan-to-make-work/linux-desktop/receipts/payload-build.log`; Tauri release linked, packaging and
-     visible setup/starter checks continue. This is not host acceptance. Further builds use an owned `TMPDIR`
-     under `/home`. Failed-build source/log: `~/scan-to-make-work/linux-host/{repo,prepare.log}` on agents-173.
-     The first .deb and AppImage built, and the UI owner installed the .deb and clicked Set up this computer.
-     Setup failed with "Counterpart could not list this computer's network addresses". Parent reproduced the
-     underlying read-only import failure: installed Node cannot find `@scan-to-make/contracts`; all three
-     companion workspace links exist in prepared resources but `node_modules/@scan-to-make` is absent from
-     the installed package. UI owner reports this fixed in BOTH rebuilt .deb and AppImage by materializing npm
-     directory links and providing relocatable npm/npx launchers; extracted packages pass 60 export imports and
-     five internal dependency checks. After reinstall, the actual setup button passed address discovery and created
-     the service. The next blocker was host-generated `printer-handoff.json` with relative `process.command='node'`,
-     rejected by the absolute-path schema (`config.js:80`, retained `companion-error.log`). Sent to the host owner
-     to fix source and coordinate a rebuilt helper/UI retry. UI owner now reports installed helper/payload
-     `ga41b298a488d-node24.22.2-x64` passes the actual native **Repair setup** button: connected Projects,
-     companion active, all three starters visible, caliper card started through **Start this project**.
-     This accepts that setup/starter slice only; model creation, device pairing and printing remain unaccepted.
-     The delegate created disposable account `stm-hosttest` (UID 1001) with lingering enabled for pending
-     runtime checks; remove only after its owned checks and service cleanup. Final host commit/check receipts pending.
+     **Linux integration:** host `linux-host-runtime` @ `b304ec1` and desktop `linux-tauri-desktop`
+     @ `25f5e17` are merged into this branch (`6d8864d`, `fd73fae`). Host state is deliberately
+     `~/.local/share/counterpart` so the isolated model worker and service agree; the socket is private under
+     `/run/user/<uid>/counterpart`. AppImage resources are retained by BUILD-ID so the service survives closing it.
+     The installed .deb and AppImage used payload `ga41b298a488d-node24.22.2-x64`: actual Repair setup,
+     connected Home, all three starters, caliper creation, native original-file import, plate selection,
+     STL orbit/zoom and published generic MCP Download were exercised. No print, provider or phone pairing
+     acceptance. Evidence is `apps/linux/receipts/{implementation.md,verification.txt}`; artifacts are on
+     agents-136 at `~/scan-to-make-work/linux-desktop/artifacts/`. Software-rendered XFCE :93 is not physical
+     desktop/GPU acceptance. Packaging materializes all npm directory links and supplies relocatable npm/npx.
+     The initial missing-module and relative-Node setup errors are fixed in that installed build.
+     Parent is fixing the remaining first-run phantom Bambu destination: retain the generated config for
+     Download/Update, hide it from printer choices only while unchanged and empty. No custom SSH route is hidden.
+     Rebuild from the integrated head, including the final Avahi decoding fix, before the next UI acceptance.
+     Host engineering evidence: 33 real-process checks; official CI passed at `2f6b7df` (not the final integrated
+     head), focused Avahi checks passed at `b304ec1`. Desktop checks: 8 frontend, 12 Rust, 2 packaging checks;
+     both extracted formats passed 60 export imports and five dependency checks. These are not app acceptance.
+     Host-owned disposable account `stm-hosttest`, test packages and build cache were removed. Remaining owned
+     scratch on agents-173 was retained when the cleanup guard rejected recursive deletion; do not bypass it.
+     Linux capture conversion still needs Python/Pillow/usd-core distribution. Pairing defaults match the Mac;
+     nearby discovery, Tailscale pairing, provider/modeling and actual printer controls remain open.
+     **Reconstruction:** Muse pushed `linux-muse-reconstruction` @ `c814db7`, only `tools/linux-reconstruct`.
+     It is not integrated. Synthetic COLMAP/OpenMVS runs exercised camera scale, measurement resume and cancellation,
+     but the anchor crop retained a support disc in the measured width/depth. Object-region qualification and real
+     captures remain unresolved. Parent still must wire camera metadata, needs-scale/measurement Ask and packaging
+     with OpenMVS licence/source information. No automatic print-ready claim from those synthetic dimensions.
 5. **Phone parity implemented on the release branch:** Settings → Printers exposes MCP and
    route selection through authorized routes and per-physical-printer reservations; phone print
    sheet has layer pauses and Resume-specific confirmation. Finished print removes live controls,

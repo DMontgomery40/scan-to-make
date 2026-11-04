@@ -436,6 +436,8 @@ pub fn serve_environment(context: &Context, inherited: BTreeMap<String, String>,
         ("SCAN_TO_MAKE_CAPTURE_DIR", state.join("capture").display().to_string()),
         // Printer MCPs run under the bundled Node, whatever node a profile names.
         ("SCAN_TO_MAKE_PRINTER_NODE", installation.node().display().to_string()),
+        // Preserve the install/update target without advertising an unconfigured printer.
+        ("SCAN_TO_MAKE_DEFAULT_PRINTER_ENTRY", default_printer_config(state, &installation.node())["process"]["args"][0].as_str().unwrap().to_owned()),
         ("SCAN_TO_MAKE_CAPTURE_PYTHON", python),
         // This helper alone resolves keys; the companion never sees one.
         ("SCAN_TO_MAKE_MODEL_WORKER", installation.exe.display().to_string()),

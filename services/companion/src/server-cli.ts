@@ -171,7 +171,8 @@ if(handoffConfig&&printHandoff&&captureDirectory){
   objectStoreForEvents=objectStore;
   // Dispatched prints keep printing: ObjectService.resume() picks their monitors back up.
   await objectStore.recoverInterrupted({keepPrinting:true});
-  printerCatalog=await loadPrinterCatalog(handoffConfig,{profilesPath:printerProfiles});
+  printerCatalog=await loadPrinterCatalog(handoffConfig,{profilesPath:printerProfiles,
+    placeholderEntryPoint:process.env.SCAN_TO_MAKE_DEFAULT_PRINTER_ENTRY});
   const catalog=printerCatalog;
   // `current` is the Mac app's own config and keeps the phone handoff route's services.
   const destinations=new Map(catalog.destinations.map(destination=>{
