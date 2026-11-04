@@ -5,6 +5,7 @@
 #   OUT_DIR/host/counterpart-host    setup, user service and credential-resolving model worker
 #   OUT_DIR/Payload/node/            official Node 24 (npm kept: Download/Update installs printer MCPs)
 #   OUT_DIR/Payload/source/          compiled companion, shared contracts and starters
+#   OUT_DIR/SYMLINKS                 relative links a package must preserve (checked by the helper)
 #
 # The source whitelist is apps/mac/distribution.json's sourcePaths (minus the Apple-only
 # mac-reconstruct), so GPL cleanup workers can never enter. Printer MCPs are not bundled:
@@ -26,7 +27,9 @@ case "$(uname -m)" in
   *) echo "Unsupported architecture: $(uname -m)" >&2; exit 1 ;;
 esac
 
-work=$(mktemp -d "${TMPDIR:-/tmp}/counterpart-payload.XXXXXX")
+# Scratch space beside OUT_DIR (same filesystem, owned by the caller), never a shared /tmp quota.
+mkdir -p "$(dirname "$out")"
+work=$(mktemp -d "$(dirname "$out")/.counterpart-payload.XXXXXX")
 trap 'rm -rf "$work"' EXIT
 stage="$work/out"
 payload="$stage/Payload"
@@ -74,6 +77,8 @@ done
 
 printf 'g%s-node%s-%s\n' "${commit:0:12}" "$node_version" "$node_arch" > "$stage/BUILD-ID"
 chmod -R go-w "$stage"
-mkdir -p "$out"
-cp -a "$stage/." "$out/"
+# These links must survive packaging: the workspace packages and npm (Settings → Printers → Download/Update).
+find "$stage" -type l -not -path '*/node_modules/.bin/*' -printf '%P -> %l\n' | sort > "$stage/SYMLINKS"
+rmdir "$out" 2>/dev/null || true
+mv "$stage" "$out"
 echo "Prepared $(cat "$out/BUILD-ID") in $out ($(du -sh "$out" | cut -f1))"

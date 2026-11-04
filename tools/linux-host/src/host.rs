@@ -52,13 +52,39 @@ pub fn parse_env_file(context: &Context, path: &Path) -> io::Result<BTreeMap<Str
     if !path.exists() { return Ok(BTreeMap::new()); }
     let script = "import {parseEnv} from 'node:util';import {readFileSync} from 'node:fs';process.stdout.write(JSON.stringify(parseEnv(readFileSync(process.argv[1],'utf8'))))";
     let path = path.to_str().ok_or_else(|| io::Error::other("Invalid companion.env path"))?;
-    let out = process::run(&context.installation.node(), &["--input-type=module", "-e", script, path], &node_env(context), None, None, Duration::from_secs(20))?;
-    if out.status != 0 { return Err(io::Error::other("companion.env could not be read")); }
-    let value: BTreeMap<String, Value> = serde_json::from_slice(&out.stdout).map_err(|_| io::Error::other("companion.env could not be read"))?;
+    // Its stderr is not kept: a parse error could quote a value from the file.
+    let out = process::run(&context.installation.node(), &["--input-type=module", "-e", script, path], &node_env(context), None, None, Duration::from_secs(20))
+        .map_err(|e| io::Error::other(format!("Counterpart's bundled Node could not run to read {path} ({e}). Reinstall Counterpart.")))?;
+    if out.status != 0 { return Err(io::Error::other(format!("{path} could not be read (Node exit {}). Check that it is a readable KEY=value file.", out.status))); }
+    let value: BTreeMap<String, Value> = serde_json::from_slice(&out.stdout).map_err(|_| io::Error::other(format!("{path} could not be read")))?;
     Ok(value.into_iter().filter_map(|(k, v)| v.as_str().map(|v| (k, v.to_owned()))).collect())
 }
 
 fn connectable(socket: &Path) -> bool { UnixStream::connect(socket).is_ok() }
+
+/// `<state>/logs/setup.log` (0600): the failing step, its exit status and its bounded stderr,
+/// for steps whose output never carries a secret. Returns the log path for the user message.
+fn diagnose(context: &Context, step: &str, status: Option<i32>, stderr: &[u8]) -> String {
+    let logs = context.state.join("logs");
+    let path = logs.join("setup.log");
+    let written = paths::private_dir(&logs, context.account.uid).and_then(|_| {
+        let mut file = OpenOptions::new().create(true).append(true).mode(0o600).open(&path)?;
+        let when = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+        let text = String::from_utf8_lossy(&stderr[..stderr.len().min(8192)]).replace('\0', "");
+        let status = status.map_or("did not finish".to_owned(), |code| format!("exit {code}"));
+        writeln!(file, "[{when}] {step}: {status}\n{}\n", text.trim_end())
+    });
+    match written { Ok(()) => path.display().to_string(), Err(_) => "(the setup log could not be written)".to_owned() }
+}
+
+/// A runtime step that failed to run at all (missing module, broken install) is not a user's network problem.
+fn runtime_failure(context: &Context, step: &str, result: &io::Result<process::Output>) -> io::Error {
+    let log = match result {
+        Ok(out) => diagnose(context, step, Some(out.status), &out.stderr),
+        Err(error) => diagnose(context, step, None, error.to_string().as_bytes()),
+    };
+    io::Error::other(format!("Counterpart's runtime failed while it {step}, so its installation is incomplete or damaged. Reinstall Counterpart; details: {log}"))
+}
 
 fn systemctl_env(context: &Context) -> BTreeMap<String, String> {
     let mut env = inherited();
@@ -74,7 +100,11 @@ fn systemctl_env(context: &Context) -> BTreeMap<String, String> {
 fn systemctl(context: &Context, args: &[&str]) -> io::Result<i32> {
     let mut full = vec!["--user"];
     full.extend_from_slice(args);
-    Ok(process::run(Path::new("/usr/bin/systemctl"), &full, &systemctl_env(context), None, None, Duration::from_secs(60))?.status)
+    let out = process::run(Path::new("/usr/bin/systemctl"), &full, &systemctl_env(context), None, None, Duration::from_secs(60))?;
+    if out.status != 0 && args.first() != Some(&"is-active") && context.state.is_dir() {
+        diagnose(context, &format!("ran systemctl --user {}", args.join(" ")), Some(out.status), &out.stderr);
+    }
+    Ok(out.status)
 }
 
 fn active(context: &Context) -> bool { systemctl(context, &["is-active", "--quiet", UNIT]).map(|s| s == 0).unwrap_or(false) }
@@ -200,8 +230,13 @@ fn lan_address(context: &Context) -> io::Result<String> {
     let module = context.installation.companion("lan-addresses.js");
     let url = format!("file://{}", module.display());
     let script = format!("const {{discoverAddresses}}=await import({});process.stdout.write(JSON.stringify(discoverAddresses()))", serde_json::to_string(&url).unwrap());
-    let out = process::run(&context.installation.node(), &["--input-type=module", "-e", &script], &node_env(context), Some(&context.installation.source()), None, Duration::from_secs(20))?;
-    let value: Value = serde_json::from_slice(&out.stdout).map_err(|_| io::Error::other("Counterpart could not list this computer's network addresses"))?;
+    let step = "listed this computer's network addresses";
+    let result = process::run(&context.installation.node(), &["--input-type=module", "-e", &script], &node_env(context), Some(&context.installation.source()), None, Duration::from_secs(20));
+    let value: Option<Value> = match &result {
+        Ok(out) if out.status == 0 => serde_json::from_slice(&out.stdout).ok(),
+        _ => None,
+    };
+    let Some(value) = value.filter(|v| v["lan"].is_array()) else { return Err(runtime_failure(context, step, &result)) };
     value["lan"].as_array().and_then(|list| list.first()).and_then(Value::as_str).map(str::to_owned).ok_or_else(|| io::Error::other(
         "No private network address was found on a wired or Wi-Fi connection. Connect this computer to your home or office network, then run setup again."))
 }
@@ -270,18 +305,21 @@ fn initialize_state(context: &Context) -> io::Result<()> {
     let tls_env = BTreeMap::from([("PATH".into(), "/usr/bin:/bin".into()), ("HOME".into(), context.account.home.display().to_string()), ("LANG".into(), "C.UTF-8".into())]);
     let tls = context.state.join("tls");
     let script = context.installation.source().join("deploy/companion/generate-lan-tls.py");
-    let out = process::run(&python, &["-B", script.to_str().unwrap(), tls.to_str().unwrap(), &address], &tls_env, None, None, Duration::from_secs(60))?;
-    if out.status != 0 {
-        return Err(io::Error::other("Counterpart could not create its network certificate. Make sure openssl is installed, then run setup again."));
+    let result = process::run(&python, &["-B", script.to_str().unwrap(), tls.to_str().unwrap(), &address], &tls_env, None, None, Duration::from_secs(60));
+    if !matches!(&result, Ok(out) if out.status == 0) {
+        let log = match &result { Ok(out) => diagnose(context, "created the network certificate", Some(out.status), &out.stderr), Err(e) => diagnose(context, "created the network certificate", None, e.to_string().as_bytes()) };
+        return Err(io::Error::other(format!("Counterpart could not create its network certificate. Make sure openssl is installed, then run setup again; details: {log}")));
     }
     let cli = context.installation.companion("remote-auth-cli.js");
     let origin = if port == "443" { format!("https://{address}") } else { format!("https://{address}:{port}") };
     let auth = context.auth();
     let cert = tls.join("cert.pem");
-    let out = process::run(&context.installation.node(), &[cli.to_str().unwrap(), "init-lan", auth.to_str().unwrap(), &origin, cert.to_str().unwrap()],
-        &node_env(context), Some(&context.installation.source()), None, Duration::from_secs(60))?;
-    if out.status != 0 {
-        return Err(io::Error::other("Counterpart could not set up pairing. If this computer's network address changed since a previous setup, remove the incomplete tls folder in Counterpart's data folder and run setup again."));
+    // init-lan prints nothing secret on stderr (its stdout, never kept, is the store summary).
+    let result = process::run(&context.installation.node(), &[cli.to_str().unwrap(), "init-lan", auth.to_str().unwrap(), &origin, cert.to_str().unwrap()],
+        &node_env(context), Some(&context.installation.source()), None, Duration::from_secs(60));
+    if !matches!(&result, Ok(out) if out.status == 0) {
+        let log = match &result { Ok(out) => diagnose(context, "set up pairing", Some(out.status), &out.stderr), Err(e) => diagnose(context, "set up pairing", None, e.to_string().as_bytes()) };
+        return Err(io::Error::other(format!("Counterpart could not set up pairing. If this computer's network address changed since a previous setup, remove the incomplete tls folder in {} and run setup again; details: {log}", context.state.display())));
     }
     Ok(())
 }
@@ -295,7 +333,8 @@ pub fn setup(context: &Context) -> io::Result<Value> {
     let unit_file = context.unit_file();
     let unit_changed = fs::read_to_string(&unit_file).ok().as_deref() != Some(unit.as_str());
     if unit_changed { write_atomic(&unit_file, unit.as_bytes(), 0o644)?; }
-    let failed = |what: &str| io::Error::other(format!("systemd could not {what} Counterpart's user service. Check `systemctl --user status {UNIT}`."));
+    let log = context.state.join("logs/setup.log");
+    let failed = |what: &str| io::Error::other(format!("systemd could not {what} Counterpart's user service. Check `systemctl --user status {UNIT}` and {}.", log.display()));
     if systemctl(context, &["daemon-reload"])? != 0 { return Err(failed("reload")); }
     if systemctl(context, &["enable", UNIT])? != 0 { return Err(failed("enable")); }
     // A running service keeps its jobs; it restarts only to apply a changed runtime or unit.

@@ -61,10 +61,27 @@ impl Installation {
         let path = self.payload().join("python/bin/python3");
         executable(&path).then_some(path)
     }
+    /// The files the companion cannot start without, including the workspace package links
+    /// and npm (Download/Update). A packager that drops symlinks breaks exactly these.
     pub fn require_payload(&self) -> io::Result<()> {
-        if executable(&self.node()) && self.companion("server-cli.js").is_file() { Ok(()) } else {
-            Err(io::Error::other(format!("The Counterpart runtime is incomplete at {}; reinstall Counterpart", self.root.display())))
-        }
+        let source = self.source();
+        let required = [
+            self.node(),
+            self.companion("server-cli.js"),
+            self.companion("ai-tweak-cli.js"),
+            source.join("services/companion/node_modules/@scan-to-make/contracts/package.json"),
+            source.join("services/companion/node_modules/@scan-to-make/printer-handoff/package.json"),
+            source.join("services/companion/node_modules/@scan-to-make/project/package.json"),
+            source.join("services/project/node_modules/@scan-to-make/contracts/package.json"),
+            self.payload().join("node/bin/npm"),
+        ];
+        // metadata() follows links: a dropped or dangling link is reported by its path.
+        let missing: Vec<String> = required.iter().filter(|path| fs::metadata(path).is_err())
+            .map(|path| path.strip_prefix(&self.root).unwrap_or(path).display().to_string()).collect();
+        if missing.is_empty() && executable(&self.node()) { return Ok(()); }
+        Err(io::Error::other(format!(
+            "The Counterpart runtime at {} is incomplete (missing {}). Its package must keep the payload's symbolic links; reinstall Counterpart.",
+            self.root.display(), if missing.is_empty() { "an executable Node".to_owned() } else { missing.join(", ") })))
     }
 }
 
