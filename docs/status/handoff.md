@@ -80,7 +80,7 @@ remote native probes and the SSH tunnel were removed after verification.
    **https://testflight.apple.com/join/S4tExVzp**, Open to Anyone. Apple says testers cannot join
    until an approved build is in the group. No public announcement sent. App record currently
    lists iOS and macOS drafts; do not remove the Mac platform without understanding that choice.
-   Release branch `feat/testflight-readiness` is pushed through `db8e87b` (no PR yet).
+   Release branch `feat/testflight-readiness` is pushed through `121e8e3` (no PR yet).
    `docs/distribution.md` contains the release procedure and remaining production prerequisites.
    - **Starter projects and multi-plate printing implemented on the release branch:** welcome/Home and
      the empty Mac workspace offer the scan platform, Counterpart caliper card and long vernier
@@ -107,21 +107,27 @@ remote native probes and the SSH tunnel were removed after verification.
      unreachable, successful poll recovery reloads; bounded JSON metadata requests preserve long
      downloads. David explicitly says his phone is connected. A developer-tool tunnel being
      unavailable is not evidence of app failure. No fresh phone build installed this session.
-   - **Production services remain:** CloudKit Console is signed in; the complete schema was deployed and verified in Production at 23:23. Added missing
-     `CounterpartCommand` and `CounterpartProject.openAsk`; `CounterpartEvent.type` is Queryable.
-     Source schema: `docs/protocols/cloudkit-schema.ckdb`. No user records were changed. The production relay
-     probe returned HTTP 405, not a valid relay/APNs receipt. Do not point the installed development
-     phone/Mac at production yet. Developer ID Application certificate is now issued/imported; matching profile and notarization
-     remain in progress. No notarized Mac companion/download exists yet; independent
-     worker installer is implemented and qualified but fresh-install activation remains unaccepted.
-   - **Latest implementation evidence:** `testflight-ci-c438efa` passed Node 22/24,
-     each 790 companion and 55 contract tests. Final cleanup-path changes pass two
-     compiled-helper tests, two tool-resolution tests and the full licence workflow.
-     `testflight-ci-db8e87b` passed Node 22 (792); Node 24 exposed a printer-test race:
-     its second pause matched the first pause's old message. `78e6750` waits for a
-     new event; all 29 printing tests then pass. Full final rerun remains in progress.
-     Mac 147 + one skip, shared 168 and two new simulator UI tests pass. The packaged
-     companion was rebuilt and audited; Docker starter/context smoke passes.
+   - **Production services provisioned:** complete CloudKit schema deployed and verified at 23:23,
+     including `CounterpartCommand`, `CounterpartProject.openAsk` and Queryable `CounterpartEvent.type`.
+     No records changed. Production `counterpart-relay` now serves `/relay/*`; its APNs probe returned
+     `410 token_inactive / BadDeviceToken`, proving authentication, not phone delivery. Production key
+     is topic-scoped to `com.scantomake`. Sandbox and installed development relay settings are unchanged.
+   - **Mac distribution in progress:** Developer ID certificate and matching Production CloudKit/APNs
+     profile are installed. Sparkle update key is in Keychain; notarization credential profile is
+     `Counterpart-Production`. Build **0.1.0 (202611032345)** passed deep signature/entitlement checks
+     and embedded Node/Python execution. `121e8e3` fixes Xcode's injected debug entitlement in distribution
+     builds. The first notarization rejected Sparkle’s nested helper signatures. The release script now
+     uses Xcode archive/export; all four helpers have Developer ID signatures and timestamps.
+     Retry **8569fc14-6619-42b0-aefb-ae0469545a65** is processing; artifacts:
+     `~/scan-to-make-work/mac-beta-export-202611032345/`. No downloadable notarized Mac release yet.
+     Independent worker installer is qualified; fresh installation remains unaccepted.
+   - **Final implementation evidence:** official Linux workflow `testflight-ci-6124fb3` passes
+     Node 22 and 24, each **792 companion + 55 contracts**, zero failures and one Mac-only skip.
+     `78e6750` fixes the test race where a second pause matched the first pause's old event.
+     Mac 147 + one skip, shared Swift 168 and two new simulator UI tests pass. Final cleanup
+     paths pass two compiled-helper tests, two tool-resolution tests and the full licence workflow.
+     Packaged companion rebuilt/audited; Docker starter/context smoke passes. Eight distribution
+     validation tests pass on Linux. These checks do not establish physical-device acceptance.
    - **Earlier evidence:** `~/scan-to-make-work/testflight-2.0-1/` holds archive/IPA; official Linux CI at
      `~/scan-to-make-work/testflight-ci-b734344/` passes Node 22/24 (each 55 contracts + 767 companion,
      one macOS-only skip). Shared 164; iOS app 16; print UI 15 across corrected reruns; Mac 147 +

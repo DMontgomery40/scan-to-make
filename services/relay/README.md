@@ -141,6 +141,16 @@ Create the APNs key, give it to the Worker, and deploy. Everything else is alrea
 - Before deployment, verify the signed app, key environment, relay host and Live Activity
   topic agree, following [Apple’s token-based APNs setup](https://developer.apple.com/documentation/usernotifications/establishing-a-token-based-connection-to-apns). Registering a key or passing the loopback smoke test does not prove delivery.
 
+## Production deployment receipt
+
+On 2026-11-03, `counterpart-relay` was deployed to the production `/relay/*` route
+with a separate Production APNs key scoped to `com.scantomake`. The deployed probe
+returned `410 token_inactive` / `BadDeviceToken`; the docs site's home page still
+loaded. This verifies APNs authentication and connectivity, not delivery to a real
+TestFlight phone. Sandbox deployment and David's development app settings were
+left unchanged. The redacted local receipt is in
+`~/scan-to-make-work/production-services/relay-deployment.json`.
+
 ## Development
 
 ### Sandbox deployment for locally signed Counterpart

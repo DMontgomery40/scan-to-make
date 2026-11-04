@@ -50,14 +50,14 @@
 
   <main class="help-body" id="help-body">
     <h1>Counterpart Help</h1>
-    <p class="lede">Counterpart makes a part that fits something you have, or a copy of it, or prints a model someone published. Your iPhone sends and asks. Your Mac does the work with your own Claude Code and prints on your own printer.</p>
+    <p class="lede">Counterpart makes a part that fits something you have, or a copy of it, or prints a model someone published. Your iPhone sends and asks. Your Mac does the work with the AI provider you choose and prints on your own printer.</p>
     <p class="nomatch" hidden>Nothing in the guide mentions <q></q>. Try a shorter word, or press Escape to see everything.</p>
 
     <section id="setup" aria-labelledby="setup-h">
       <h2 id="setup-h">Set up</h2>
       <ol>
         <li><strong>On your Mac,</strong> open Counterpart. It lives in the menu bar, with a main window for your projects.</li>
-        <li><strong>Optional for design and editing:</strong> sign in to Claude Code on that Mac. Printing an existing model or a reprint does not need it.</li>
+        <li><strong>Optional for design and editing:</strong> choose Claude Code, Codex, or an OpenAI-compatible API in <span class="path">Settings › AI</span>. OpenRouter and local model endpoints work through the API option. Printing an existing model or a reprint does not need an AI connection.</li>
         <li><strong>Blender is optional.</strong> Install it for scan cleanup, design or model changes. Printing existing models and reprints works without it.</li>
         <li><strong>Autodesk Fusion is optional too.</strong> Use your own installation for parametric designs and changes, connected through <span class="path">Settings › AI › Design with Fusion</span>. Printing existing models and reprints needs neither Blender nor Fusion.</li>
         <li>Have your printer's <strong>MCP server</strong>: bambu-printer-mcp for Bambu Lab printers, mcp-3D-printer-server for OctoPrint, Klipper, Duet, Repetier, PrusaLink and Creality.</li>
@@ -189,7 +189,7 @@
       <h2 id="trouble-h">Troubleshooting</h2>
       <div class="faq">
         <details><summary>My iPhone can't find my Mac</summary><p>Check that Counterpart is running on your Mac (its icon is in the menu bar). On the same Wi-Fi, check iPhone Settings › Counterpart › Local Network is on. In Counterpart on your iPhone, Settings › Your Mac › Check Connection tries again. If it still can't, quit and reopen Counterpart on the Mac, or pair again with the code from its menu bar.</p></details>
-        <details><summary>Making it stopped with an error</summary><p>The project says what went wrong. The usual cause is Claude Code not being signed in on your Mac. Fix that, then open the project and tap Try Again.</p></details>
+        <details><summary>Making it stopped with an error</summary><p>The project says what went wrong. Check the selected provider in Settings → AI and its connection test. Fix the reported issue, then open the project and tap Try Again.</p></details>
         <details><summary>The print didn't start</summary><p>Open the project: it shows what the printer or its MCP server said. If the printer shows an error on its own screen, clear it there, then print again. If the message says Bambu Cloud refused it (code -3120 or 403), switch the printer's Connection to Local network in Settings › Printers on the Mac.</p></details>
         <details><summary>The size is a little off</summary><p>Measure the size that matters with a caliper and say it in Ask for changes, like “the tube is 25.4 mm across”. It redoes that part only.</p></details>
         <details><summary>My iPhone camera went black after scanning</summary><p>An earlier test version could leave the camera unusable after Scan in hand. Restart your iPhone to fix it. Current versions don't do this.</p></details>
@@ -202,7 +202,7 @@
 
     <section id="privacy" aria-labelledby="privacy-h">
       <h2 id="privacy-h">Privacy</h2>
-      <p>Counterpart has no accounts. Your Mac stores your scans, photos and projects. Your iPhone reaches it on your Wi-Fi, or reads project summaries, thumbnails and updates in your own private iCloud when you're away. Counterpart's Live Activity relay receives the project's name, the printer's name, print progress and the phone's activity push token to deliver updates through Apple. Model creation, edits and AI-assisted cleanup currently run through your own Claude Code login on your Mac; information supplied for that work, including rendered scan views and close-ups, goes to Anthropic under your own account. The connection tests in Settings › AI do not change that worker.</p>
+      <p>Counterpart has no accounts. Your Mac stores your scans, photos and projects. Your iPhone reaches it on your Wi-Fi, or reads project summaries, thumbnails and updates in your own private iCloud when you're away. Counterpart's Live Activity relay receives the project's name, the printer's name, print progress and the phone's activity push token to deliver updates through Apple. Model creation, edits and AI-assisted cleanup use the provider selected in Settings › AI when the job starts. Information supplied for that work, including rendered model views and close-ups, goes to that provider under your own account or API configuration. Choosing a local model endpoint routes those requests to that endpoint. Changing the selection affects subsequent jobs; selecting Off disables AI jobs. Independent cleanup tools run on your computer.</p>
     </section>
 
     <section id="credits" aria-labelledby="credits-h">
@@ -219,7 +219,7 @@
 
 <footer class="foot">
   <div class="wrap">
-    <p>Counterpart runs on your own Mac and printer, with your own Claude Code account.</p>
+    <p>Counterpart runs on your own Mac and printer, with your chosen AI provider.</p>
     <p class="foot-links"><a href="./">Home</a> <a href="#privacy">Privacy</a> <a href="#credits">Credits</a></p>
   </div>
 </footer>

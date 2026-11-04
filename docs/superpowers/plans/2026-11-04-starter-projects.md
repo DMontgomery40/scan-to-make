@@ -20,14 +20,14 @@
 - [x] Add failing companion tests in `services/companion/tests/published.test.mjs` for six-plate selection after the initial Ask, switching after completion, restart persistence, failed/cancelled prints, invalid indices and busy/uncertain locks.
 - [x] Add `objects/plates.ts`, `ObjectService.selectPlate`, HTTP/socket operations, frozen print plate identity and bounded progress retention.
 - [x] Add shared plate wire model/picker and client methods. Connect phone `ProjectView` and Mac `ProjectDetail` to selection and normal Print sheets.
-- [ ] Run companion tests on Linux; shared/native compilation under the Apple build lock. Commit and push.
+- [x] Run companion tests on Linux; shared/native compilation under the Apple build lock. Commit and push.
 
 ## 2. Starter catalog
 
 - [x] Inspect available original model metadata and licences; finish Counterpart card branding and QR from generator source.
 - [x] Create curated manifests, previews and import action; surface on welcome, phone Home and Mac empty workspace.
 - [ ] Verify fresh project has no inherited messages, passes, personal photos/settings or print activity; verify external import and all six platform plates.
-- [ ] Commit and push; update handoff and prepare the next TestFlight build with integrated provider work.
+- [x] Commit and push; update handoff and prepare the next TestFlight build with integrated provider work.
 
 ## Verification and remaining acceptance
 
@@ -35,4 +35,4 @@
 - Shared Swift: 168 passed; native Mac and iOS builds passed. New first-launch starter detail and six-plate selection/print-sheet UI tests: 2 passed.
 - Caliper geometry, QR and shipped assets: 13 checks passed.
 - Six-plate behavior uses a synthetic fixture. Actual Kass 3D six-plate original import and physical prints remain unaccepted. The original is not bundled; both MakerWorld starters request their designer’s files, as PRD §15 requires.
-- Full configured companion suite and provider integration are in progress before the next release build.
+- Provider integration is in build 2.0 (2), now waiting for external Beta App Review. Final Linux Node 22/24 workflows each pass 792 companion tests, one skip and 55 contracts. Clean-project isolation is tested; actual original scan-rig import remains open.

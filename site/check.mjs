@@ -23,7 +23,7 @@ for (const page of pages) {
   if (/Scan to Make/.test(html)) fail(`${page}: still says Scan to Make`);
   for (const [, href] of html.matchAll(/href="([^"]+)"/g)) {
     if (/^(https?:|mailto:)/.test(href)) {
-      if (!/^https:\/\/(fonts\.(googleapis|gstatic)\.com|dmontgomery40\.github\.io\/(bambu-printer-mcp|mcp-3D-printer-server)\/|makerworld\.com\/en\/models\/1531561)/.test(href)) fail(`${page}: outside link not on the public list: ${href}`);
+      if (!/^https:\/\/(testflight\.apple\.com\/join\/S4tExVzp$|github\.com\/DMontgomery40\/scan-to-make\/(blob\/121e8e3\/deploy\/companion\/README\.md|releases\/download\/v2\.0-beta\.2\/ScanToMake-202611032345\.zip)|fonts\.(googleapis|gstatic)\.com|dmontgomery40\.github\.io\/(bambu-printer-mcp|mcp-3D-printer-server)\/|makerworld\.com\/en\/models\/1531561)/.test(href)) fail(`${page}: outside link not on the public list: ${href}`);
       continue;
     }
     const [file, hash] = href.replace(/^\//, '').split('#');

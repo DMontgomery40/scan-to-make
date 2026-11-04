@@ -22,8 +22,18 @@ The internal prerequisite group `Counterpart Team` exists. Beta description and
 David's supplied review/feedback contacts are saved in App Store Connect.
 
 Xcode used cloud-managed Apple Distribution signing for the iPhone. A Developer ID
-Application certificate was issued and imported at 23:32; the matching Mac profile,
-notarization credentials and downloadable Mac release remain in progress.
+Application certificate and matching Production profile are installed. Build
+**0.1.0 (202611032345)** passes distribution signature/entitlement checks and embedded
+Node/Python execution. Apple notarization submission
+`8569fc14-6619-42b0-aefb-ae0469545a65` is processing. Artifacts are in
+`~/scan-to-make-work/mac-beta-export-202611032345/`; log is
+`/tmp/counterpart-mac-archive-release-fixed.log`. The initial direct-build submission
+was rejected because Sparkle’s four nested helpers lacked distribution signatures.
+The release script now archives and exports through Xcode; all four exported helpers
+have verified Developer ID signatures and secure timestamps. The licence check now
+handles archive-directory depth as well as ordinary builds. The Keychain notary profile is
+`Counterpart-Production`; the private Sparkle update key is also in Keychain.
+`121e8e3` disables Xcode debug-entitlement injection for distribution builds.
 `ab455a6` fixes the release helper to use Apple's matching rsync peer and requests
 sufficient codesign verbosity to inspect the signing certificate.
 
@@ -63,9 +73,12 @@ were changed. Container:
 Queryable. Deployment copies schema, not development records. Both clients must
 use Production for same-account discovery, events and commands to meet.
 
-The production Live Activity relay must authenticate to `api.push.apple.com` using
-a production-compatible APNs key and topic `com.scantomake.push-type.liveactivity`.
-Sandbox acceptance does not establish production readiness; see
+The production Live Activity relay is deployed at `https://counterpart.dtmont.com/relay/v1`.
+Its Production key is scoped to `com.scantomake`. The deployed random-token probe
+returned `410 token_inactive` with `BadDeviceToken`, verifying APNs authentication
+and connectivity for `com.scantomake.push-type.liveactivity`. The docs site remains
+healthy; Sandbox deployment and installed development settings are unchanged.
+Actual delivery to a TestFlight phone is still unverified; see
 [relay setup](../services/relay/README.md).
 
 **Check the Mac's saved relay settings after upgrading the phone.** David's current
@@ -119,7 +132,8 @@ Prepare `apps/mac/Payload` from the exact release source using its existing
 bash apps/mac/scripts/release.sh
 ```
 
-The script applies `App+CloudKitProduction.entitlements`, pins production push and
+The script archives and exports with Xcode, disables base debug-entitlement injection, applies
+`App+CloudKitProduction.entitlements`, pins production push and
 CloudKit, validates the signed app, notarizes/staples it, checks Gatekeeper and
 creates the ZIP/appcast. It does not upload them. The profile setting applies only
 to the app target, not AgentKit. Verify a downloaded copy on a clean Mac, including
@@ -199,3 +213,9 @@ node site/check.mjs
 - [Developer ID capabilities](https://developer.apple.com/help/account/certificates/create-developer-id-certificates/)
 - [Notarization requirements](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution)
 - [Review access and app completeness](https://developer.apple.com/app-store/review/guidelines/#app-completeness)
+
+Release update configuration: public key `Q4iK0moZS/pqxA5lrVvBbESdU218oW49rKlNGTd0z8A=`,
+feed `https://counterpart.dtmont.com/appcast.xml`. No feed has been published yet.
+
+Apple’s [common notarization issues](https://developer.apple.com/documentation/security/resolving-common-notarization-issues)
+documents `CODE_SIGN_INJECT_BASE_ENTITLEMENTS=NO` for a custom distribution build.

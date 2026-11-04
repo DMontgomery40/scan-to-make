@@ -10,7 +10,13 @@ if [ -d "$SRCROOT/Payload" ]; then
   ditto "$SRCROOT/Payload" "$contents/Resources/Payload"
 fi
 cp "$SRCROOT/Resources/agent.mjs" "$SRCROOT/Resources/pairing-active.mjs" "$contents/Resources/"
-cmp "$SRCROOT/Licenses/Sparkle.txt" "$BUILD_DIR/../../SourcePackages/checkouts/Sparkle/LICENSE"
+# Archive products are nested deeper than ordinary build products. Find the
+# enclosing DerivedData checkout instead of assuming Build/Products depth.
+packages="$BUILD_DIR"
+while [ "$packages" != / ] && [ ! -f "$packages/SourcePackages/checkouts/Sparkle/LICENSE" ]; do
+  packages=$(dirname "$packages")
+done
+cmp "$SRCROOT/Licenses/Sparkle.txt" "$packages/SourcePackages/checkouts/Sparkle/LICENSE"
 cp "$SRCROOT/THIRD_PARTY_NOTICES.md" "$SRCROOT/distribution.json" "$contents/Resources/"
 ditto "$SRCROOT/Licenses" "$contents/Resources/Licenses"
 /usr/bin/python3 - "$contents" "${STM_VARIANT:-}" "$EXECUTABLE_NAME" <<'PY'

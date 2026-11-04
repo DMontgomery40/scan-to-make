@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Counterpart beta setup</title>
+<meta name="description" content="Install the Counterpart Mac companion, connect your iPhone beta, and try the starter projects.">
+<link rel="icon" href="favicon.png" type="image/png">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to setup</a>
+<header class="masthead"><div class="wrap"><a class="brand" href="./"><img src="icon-256.png" alt="" width="36" height="36"><span>Counterpart</span></a><nav aria-label="Site"><a href="help.html">Help</a></nav></div></header>
+<main class="wrap help-body" id="main">
+<h1>Try Counterpart</h1>
+<p class="lede">Your iPhone and your computer work together. Install both apps, connect your printer tools, and start with something useful.</p>
+<section id="install">
+<h2>Install the beta</h2>
+<p>Requires an Apple silicon Mac with macOS 27 and an iPhone with iOS 27. LiDAR capture needs a LiDAR-equipped iPhone. Linux desktop support and OpenCode integration are coming soon.</p>
+<p id="mac-release">The signed Mac companion is completing Apple notarization. Its download will appear here when ready.</p>
+<p><a class="button" href="https://testflight.apple.com/join/S4tExVzp">Open the iPhone TestFlight beta</a></p>
+<p>iPhone build 2.0 (2) is waiting for Apple’s external beta review. TestFlight will accept testers through this public link after approval; no email invitation is needed.</p>
+<ol>
+<li>Move Counterpart to Applications and open it. Allow Local Network access so it can reach your phone and printer.</li>
+<li>Keep Counterpart running on the Mac. On your iPhone, open the TestFlight app and connect to the Mac. You can also use Add a Phone in Counterpart’s Mac menu to show a pairing code.</li>
+<li>In Settings → Printers, connect your existing bambu-printer-mcp or mcp-3D-printer-server. Install and configure the slicer and any networking bridge required by that backend.</li>
+<li>For design and editing, select Claude Code, Codex, or an OpenAI-compatible API in Settings → AI. The API option includes OpenRouter and local model endpoints. Run the connection test.</li>
+</ol>
+</section>
+<section id="cleanup">
+<h2>Set up scan cleanup</h2>
+<p>Cleanup workers are installed separately from the signed app. You need Python 3.12 and Blender 5.0.1. Open Counterpart once, then follow the <a href="https://github.com/DMontgomery40/scan-to-make/blob/121e8e3/deploy/companion/README.md#independent-workers-for-the-signed-counterpart-mac-app">independent worker installation instructions</a> using source revision <code>121e8e3</code>. The installer checks the workers before saving their paths. Restart Counterpart when idle afterward.</p>
+<p>Printing existing models does not require the AI connection or cleanup workers. API-based cleanup retains the documented CLI requirements; custom endpoints need the Responses API.</p>
+</section>
+<section id="starters">
+<h2>Start with a useful print</h2>
+<ul>
+<li><strong>Counterpart caliper card:</strong> model files and preview are included. Add it to create a fresh project, then choose your printer and print settings.</li>
+<li><strong>Kass 3D scan platform:</strong> open the credited designer page from its starter and import the original six-plate file. All plates remain in one project; select a plate to print or reprint it.</li>
+<li><strong>Long vernier caliper with depth gauge:</strong> open its designer page and import the original model files together into the starter project.</li>
+</ul>
+<p>Starter projects contain instructions and designer credits, without another user’s conversation or print history. Plate completion is tracked separately; sending a plate does not mark it finished.</p>
+</section>
+<section id="test">
+<h2>What to test</h2>
+<p>Try pairing, the starter card, plate selection, printing, and one design or cleanup job with your chosen provider. For LiDAR capture, inspect every side of the result and check the camera and Face ID afterward. Send feedback through TestFlight with your phone model, Mac build, printer model and MCP version.</p>
+<p>This beta still needs fresh-install and physical-device acceptance for capture quality, phone printer controls, real-print alerts and Watch delivery. The newer printer MCP fixes are not yet published to npm; the app’s Download MCP action installs the published version. The local development printer results do not establish the behavior of those published packages.</p>
+<p>For TestFlight Live Activities, enable the relay in Mac Settings → Advanced with <code>https://counterpart.dtmont.com/relay/v1</code>. Production APNs authentication is verified; delivery to a TestFlight phone is still being tested.</p>
+</section>
+<p><a href="help.html">Read the full guide</a> · <a href="help.html#privacy">Privacy and your AI provider</a></p>
+</main>
+</body>
+</html>
