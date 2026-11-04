@@ -76,6 +76,7 @@ public final class CompanionClient: @unchecked Sendable {
             if is_("/v1/events") || is_("/v1/settings") || is_("/v1/devices") { return "projects:read" }
             if is_(one + "/(model\\.stl|renders/[^/]+|photos/[^/]+|capture/[^/]+|scan/[^/]+|original/[0-9]+|asks/[^/]+|prints/[^/]+/frames/[^/]+)") { return "projects:read" }
             if is_(one + "/(filaments|camera\\.jpg)") || is_("/v1/objects/printers/[^/]+/camera\\.jpg") { return "printer-handoff:use" }
+            if is_("/v1/objects/printers/[A-Za-z0-9_-]+/route") { return "printer-handoff:use" }
         case "PATCH":
             if is_(one) { return "captures:import" }
             if is_(one + "/settings") { return "captures:import" }
@@ -85,6 +86,8 @@ public final class CompanionClient: @unchecked Sendable {
             if is_("/v1/devices/[^/]+") { return "projects:write" }
         case "PUT":
             if is_(one + "/scan") { return "captures:import" }
+            // The Mac also checks printing (`printer-handoff:use`); every phone pairing has both.
+            if is_("/v1/objects/printers/[A-Za-z0-9_-]+/(route|mcp)") { return "projects:write" }
         case "POST":
             if is_("/v1/blender/(check|update)") { return "projects:write" }
             if is_("/v1/objects") || is_(one + "/(start|duplicate|corrections|closeup|model|ask|photos|capture|capture-depth)") { return "captures:import" }
@@ -174,7 +177,7 @@ public final class CompanionClient: @unchecked Sendable {
         let message = error?["message"]?.string, code = error?["code"]?.string
         let newer = path.hasPrefix("/v1/events") || path.hasPrefix("/v1/settings") || path.hasSuffix("/camera.jpg") || path.contains("/print/")
             || path.hasSuffix("/estimate") || path.contains("/asks/") || path.hasPrefix("/v1/devices") || path.hasSuffix("/settings")
-            || path.hasPrefix("/v1/printers/")
+            || path.hasPrefix("/v1/printers/") || (path.hasPrefix("/v1/objects/printers/") && (path.hasSuffix("/route") || path.hasSuffix("/mcp")))
         switch reply.status {
         case 401, 403: return CompanionError(code: "pairing", message: "Connect to your Mac again.")
         case 404 where path == "/v1/objects": return CompanionError(code: "not-set-up", message: "Your Mac isn't ready to make things yet. Open Counterpart on your Mac.")
@@ -299,6 +302,26 @@ public final class CompanionClient: @unchecked Sendable {
     }
 
     public func printers() async throws -> PrinterCatalog { try await request("GET", "/v1/objects/printers", as: PrinterCatalog.self) }
+    private struct RouteReply: Decodable { var route: PrinterConnection? }
+    static func printerPath(_ destinationId: String, _ leaf: String) throws -> String {
+        guard Pattern("[A-Za-z0-9_-]{1,256}").matches(destinationId) else { throw CompanionError.transport("invalid-request") }
+        return "/v1/objects/printers/\(destinationId)/\(leaf)"
+    }
+    /// How the printer's MCP reaches it, in the MCP's words; nil when that MCP has no choice (needs `printerChoices`).
+    public func printerConnection(_ destinationId: String) async throws -> PrinterConnection? {
+        try await request("GET", Self.printerPath(destinationId, "route"), as: RouteReply.self, timeout: 40).route
+    }
+    /// Changes the connection in the MCP's own settings. Refused (409) while the printer prints.
+    public func setPrinterConnection(_ destinationId: String, route: String) async throws -> PrinterConnection {
+        guard let saved = try await request("PUT", Self.printerPath(destinationId, "route"), json: ["route": route], as: RouteReply.self, timeout: 40).route
+        else { throw CompanionError(code: "invalid-response", message: "Your Mac sent something this app doesn't understand. Update both apps.") }
+        return saved
+    }
+    private struct McpReply: Decodable { var destinationId: String }
+    /// Which MCP a printer reached through both uses. Returns the printer's id now, which may change.
+    public func choosePrinterMcp(_ destinationId: String, backend: String) async throws -> String {
+        try await request("PUT", Self.printerPath(destinationId, "mcp"), json: ["backend": backend], as: McpReply.self, timeout: 40).destinationId
+    }
     public func filaments(_ id: String) async throws -> [PrinterFilament] {
         try await request("GET", "/v1/objects/\(id)/filaments", as: Filaments.self).filaments
     }

@@ -19,6 +19,16 @@ struct PrintSheet: View {
     @State private var strength = PrintStrength.standard
     /// How many on the plate, where `offersCopies`; nil until you choose (the printer profile's count).
     @State private var copies: Int?
+    /// "Before layer N" pauses (the slicer's Add pause, for magnets or nuts), where `offersPauses`. Empty: none.
+    @State private var pauseRows: [PauseRow] = []
+    /// The layers, in order. Setting them keeps each remaining row's identity, so SwiftUI animates the right one.
+    private var pauses: [Int] {
+        get { pauseRows.map(\.layer) }
+        nonmutating set { pauseRows = newValue.enumerated().map { PauseRow(id: $0.offset < pauseRows.count ? pauseRows[$0.offset].id : UUID(), layer: $0.element) } }
+    }
+    /// The pause whose layer is being typed, and what's typed.
+    @State private var editingPause: Int?
+    @State private var typedLayer = ""
     @State private var slice = EstimateState()
     @State private var shownPrinter: String?
     @Environment(\.horizontalSizeClass) private var widthClass
@@ -60,6 +70,7 @@ struct PrintSheet: View {
                             .glassEffect(.regular, in: .rect(cornerRadius: 24))
                         }
                         if slicedOriginal { Text("Uses the quality, strength and copies already saved in this sliced file. Share an editable 3MF to change them.").font(.footnote).foregroundStyle(.secondary) } else { settingsSection.id("settings") }
+                        if offersPauses { pauseSection.id("pauses") }
                         if !offersCopies, project?.settings?.printDefaults?.copies != nil {
                             Text("This printer uses one copy.").font(.caption).foregroundStyle(.secondary)
                         }
@@ -75,7 +86,12 @@ struct PrintSheet: View {
                 }
                 // The bar belongs to this scroll view: its content insets above it and fades under it.
                 .scrollEdgeEffectStyle(.soft, for: .bottom)
+                // The last card keeps the same gap above the Print button as the cards keep between them.
+                .contentMargins(.bottom, 16, for: .scrollContent)
                 .safeAreaBar(edge: .bottom) { printButton }
+                #if DEBUG
+                .onChange(of: pauses.count) { old, new in if old == 0 && new > 1 { withAnimation { scroll.scrollTo("pauses", anchor: .bottom) } } }
+                #endif
                 .navigationTitle("Print \(title)")
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
@@ -89,7 +105,12 @@ struct PrintSheet: View {
 
         }
         .presentationDetents([.large])
-        .task { await start() }
+        .task {
+            await start()
+            #if DEBUG
+            if !Fixtures.pauses.isEmpty { pauses = Fixtures.pauses; Fixtures.pauses = [] }
+            #endif
+        }
         .task(id: estimateKey) { await refreshEstimate() }
     }
 
@@ -241,6 +262,101 @@ struct PrintSheet: View {
         .disabled(busy == "print")
     }
 
+    // MARK: Pauses
+
+    /// The slicer's "Add pause" through the printer's MCP (`pause_at_layers`): the printer stops by itself before
+    /// each layer, as on the Mac. Only for an MCP that takes it, and not for a file that's already sliced.
+    private var offersPauses: Bool { !slicedOriginal && printer?.offersLayerPauses == true }
+    /// The slice's layer count, once the estimate has it.
+    private var layerCount: Int? { estimate?.layers.flatMap { $0 > 1 ? $0 : nil } }
+    private var pauseTooLate: Bool { layerCount.map { count in pauses.contains { $0 > count } } ?? false }
+
+    /// The layers a row may take: above the pause before it and below the one after, so the list stays in order.
+    private func pauseRange(_ index: Int) -> ClosedRange<Int> {
+        let low = index > 0 ? pauses[index - 1] + 1 : 2
+        let high = index + 1 < pauses.count ? pauses[index + 1] - 1 : (layerCount ?? 100_000)
+        return low...max(low, high)
+    }
+    /// Room for another pause after the last one.
+    private var canAddPause: Bool { pauses.count < PrintChoice.maxPauses && (pauses.max() ?? 1) < (layerCount ?? 100_000) }
+
+    private var pauseSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Pause").font(.headline)
+            ForEach(Array(pauseRows.enumerated()), id: \.element.id) { index, row in
+                HStack(spacing: 4) {
+                    Button { withAnimation { pauseRows.removeAll { $0.id == row.id } } } label: {
+                        Image(systemName: "xmark.circle.fill").font(.title3).foregroundStyle(.secondary)
+                            .frame(width: 44, height: 44).contentShape(.rect)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.leading, -10)
+                    .accessibilityLabel("Remove the pause before layer \(row.layer)")
+                    Button { typedLayer = String(row.layer); editingPause = index } label: {
+                        HStack(spacing: 0) {
+                            Text("Before layer ")
+                            // A tinted capsule: the number is the thing to tap to type one.
+                            Text("\(row.layer)").fontWeight(.semibold).foregroundStyle(Color.filament)
+                                .padding(.horizontal, 7).padding(.vertical, 2)
+                                .background(Color.filament.opacity(0.16), in: .capsule)
+                            if let count = layerCount { Text(" of \(count)").foregroundStyle(.secondary) }
+                        }
+                        .monospacedDigit().lineLimit(1).minimumScaleFactor(0.8)
+                        .frame(minHeight: 44).contentShape(.rect)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityHint("Type the layer")
+                    Spacer(minLength: 8)
+                    Stepper("Before layer \(row.layer)", value: Binding(get: { row.layer }, set: { value in
+                        if let at = pauseRows.firstIndex(where: { $0.id == row.id }) { pauseRows[at].layer = value } }), in: pauseRange(index))
+                        .labelsHidden()
+                        .accessibilityIdentifier("pause-\(index)")
+                }
+                .foregroundStyle(layerCount.map { row.layer > $0 } == true ? .red : .primary)
+            }
+            if canAddPause {
+                Button {
+                    let next = (pauses.max() ?? 1) + 1
+                    withAnimation { pauseRows.append(PauseRow(layer: min(next, layerCount ?? next))) }
+                } label: {
+                    Label(pauses.isEmpty ? "Add a Pause" : "Add Another Pause", systemImage: "plus.circle.fill")
+                }
+                .frame(minHeight: 44)
+                .accessibilityIdentifier("add-pause")
+            }
+            Text(pauses.isEmpty
+                 ? "Stop before a layer to drop in magnets or nuts."
+                 : "The printer stops before each of these layers and waits, so you can drop in magnets or nuts. Press Resume on the printer when they’re in. Layers count as in Bambu Studio’s and OrcaSlicer’s preview.")
+                .font(.footnote).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            if pauseTooLate, let count = layerCount {
+                Label("This print has \(count) layers.", systemImage: "exclamationmark.triangle.fill").font(.footnote).foregroundStyle(.red)
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .glassEffect(.regular, in: .rect(cornerRadius: 24))
+        .disabled(busy == "print")
+        .alert("Pause before layer", isPresented: Binding(get: { editingPause != nil }, set: { if !$0 { editingPause = nil } })) {
+            TextField("Layer", text: $typedLayer).keyboardType(.numberPad)
+            Button("Cancel", role: .cancel) { editingPause = nil }
+            Button("Done") { setTypedLayer() }
+        } message: {
+            Text(layerCount.map { "A layer from 2 to \($0)." } ?? "A layer from 2 up.")
+        }
+    }
+
+    /// A typed layer: kept within the print, and the list sorted with no layer twice.
+    private func setTypedLayer() {
+        defer { editingPause = nil }
+        guard let index = editingPause, pauses.indices.contains(index), let typed = Int(typedLayer.trimmingCharacters(in: .whitespaces)) else { return }
+        var next = pauseRows
+        next[index].layer = min(max(2, typed), layerCount ?? 100_000)
+        // In order, and no layer twice (the row just typed wins).
+        let edited = next[index].id
+        next.sort { $0.layer < $1.layer }
+        withAnimation { pauseRows = next.filter { row in !next.contains { $0.layer == row.layer && $0.id == edited && row.id != edited } } }
+    }
+
     /// Why Draft, Fine and Strength aren't offered: the update that unlocks them, in the Mac's words when it gives them.
     private var presetOnlyWords: String {
         if printer?.capabilities == nil { return "Your Mac hasn't read this printer's MCP yet, so the printer's preset is used." }
@@ -302,6 +418,8 @@ struct PrintSheet: View {
         if uncertain && !checked { return false }
         // An AMS printer prints the spool you can see chosen here, never whatever the Mac last had set.
         if !published && filamentKind == "ams" && chosen == nil { return false }
+        // A pause after the last layer would never happen: the Mac refuses it the same way.
+        if offersPauses && pauseTooLate { return false }
         return true
     }
 
@@ -311,13 +429,17 @@ struct PrintSheet: View {
         // Fresh capabilities: a Mac that just started reads its printers in the background (Copies depends on them).
         await store.loadPrinters()
         await store.loadCapabilities()
-        destinationId = project?.printerDestinationId ?? store.catalog?.defaultDestinationId ?? ""
+        let saved = project?.printerDestinationId ?? store.catalog?.defaultDestinationId ?? ""
+        // A printer whose MCP was changed since has another id; the project's choice follows it.
+        destinationId = store.catalog?.listed(saved) ?? saved
         // Print another: the last print's quality and strength again (its printer is the project's).
         if let last = project?.resolvedPrintDefaults(destinationId: destinationId) {
             quality = last.quality.flatMap(PrintQuality.init(rawValue:)) ?? quality
             strength = last.strength.flatMap(PrintStrength.init(rawValue:)) ?? strength
             copies = last.copies
         }
+        // Print Another keeps the last print's pauses (the magnets go in at the same layers), as on the Mac.
+        pauses = project?.print?.settings?.pauseBeforeLayers ?? []
         await loadFilaments()
         await store.loadPrinters()
         if let project, project.current != nil, !published { modelURL = try? await store.mac.download(project, "model.stl") }
@@ -406,7 +528,8 @@ struct PrintSheet: View {
         let choice = PrintChoice(colour: published ? nil : colour,
                                  quality: !slicedOriginal && printer?.offersQuality == true ? quality : .standard,
                                  strength: !slicedOriginal && printer?.offersStrength == true ? strength : .standard,
-                                 checked: uncertain && checked, copies: slicedOriginal ? 1 : offersCopies ? copies : (project?.settings?.printDefaults?.copies != nil ? 1 : nil))
+                                 checked: uncertain && checked, copies: slicedOriginal ? 1 : offersCopies ? copies : (project?.settings?.printDefaults?.copies != nil ? 1 : nil),
+                                 pauseBeforeLayers: offersPauses ? pauses : [])
         do {
             let ticket = store.startRequest()
             store.replace(try await store.mac.client.print(projectId, choice: choice, overrideDefaults: true), ticket: ticket)
@@ -417,6 +540,12 @@ struct PrintSheet: View {
             problem = failure.message
         } catch { problem = CompanionError.unreachable.message }
     }
+}
+
+/// One "Pause before layer" row, with an identity of its own so removing or reordering animates the right row.
+struct PauseRow: Identifiable, Equatable {
+    var id = UUID()
+    var layer: Int
 }
 
 /// One printer in the sheet's row: name, model, whether it's ready, and its spools when it reported them.

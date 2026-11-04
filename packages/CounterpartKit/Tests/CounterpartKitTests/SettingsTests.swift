@@ -67,6 +67,10 @@ final class SettingsTests: XCTestCase {
         XCTAssertEqual(CompanionClient.scope("POST", "/v1/settings/ai/test"), "projects:write")
         XCTAssertEqual(CompanionClient.scope("POST", "/v1/settings/fusion/setup"), "projects:write")
         XCTAssertEqual(CompanionClient.scope("POST", "/v1/printers/mcp/m1/update"), "printer-handoff:use")
+        XCTAssertEqual(CompanionClient.scope("GET", "/v1/objects/printers/current/route"), "printer-handoff:use")
+        XCTAssertEqual(CompanionClient.scope("PUT", "/v1/objects/printers/current/route"), "projects:write")
+        XCTAssertEqual(CompanionClient.scope("PUT", "/v1/objects/printers/mcp-1a2b/mcp"), "projects:write")
+        XCTAssertNil(CompanionClient.scope("GET", "/v1/objects/printers/current/mcp"))
     }
 
     func testTheDeviceNameIsEncodedAsEncodeURIComponentDoes() {
