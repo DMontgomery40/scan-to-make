@@ -211,6 +211,19 @@ remote native probes and the SSH tunnel were removed after verification.
      follow-ups, phone picker/pause deployment, and `/v1/mcp`. This release thread retains Android/Linux,
      TestFlight/reconstruction and its release/status/distribution files. Leave their branches and live deployments
      alone; record and coordinate any proposed Mac deployment or companion restart here first.
+     **Final-main integration checklist (merge owner, Nov 4):** wait for their final main SHA/caveats, then
+     reconcile hunks rather than choosing whole files. Earlier #295/#299 heads on this release branch do not
+     contain all fixes in main's squashes `7b112af`/`2a8155f`:
+     - #295 final head `f17b72f`: preserve MCP updater `#perform` handling when all printers are removed
+       (`#held`, `NO_PRINTERS`, caught fire-and-forget) and both regressions; preserve setup `#runs()` settings-folder
+       ownership and its regression in objects-printers.
+     - #299 final head `6d95d38`: retain PrintSheet `maxPauses` 16, unique/sorted `pauseBeforeLayers`, exclude
+       pauses from saved defaults (`48f22a5`), and final control refusals/deadlines (`c4c904f`, `3c0a192`).
+     - Known conflicts: PrintSheet, local-control protocol/services, objects/printers, and add/add printing/discovery.
+       Also reconcile profiles/setup/server-cli, print/slice-cache, updater/printer checks and help/index.html.
+     - Preserve release-only reconstruction handlers/review state and contracts, Linux Avahi/bootstrap-printer
+       behavior, provider routing and starter/multi-plate work. #293 overlaps service/http/store/local-control;
+       #292/#302/#301 overlap service, #292/#301 http, and #301 local-control-services. Inspect each final diff.
      Nov 4: David explicitly requested fixing live connection settings and sending the failed AirPods/Stove
      prompts. Owner yielded Mac UI and held deployments/Update. Parent found Developer Mode already selected,
      fresh saved-config MCP handshake works but live Blender Check Again fails; restarting Counterpart through
