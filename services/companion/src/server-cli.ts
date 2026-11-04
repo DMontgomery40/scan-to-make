@@ -15,7 +15,7 @@ import { startCompanionServer } from './server.js';
 import { instanceName } from './bonjour.js';
 import { computerName, discoverAddresses, localHostName, macDisplayName } from './lan-addresses.js';
 import { RemoteAuthStore } from './remote-auth.js';
-import { createPrintHandoffServices } from './print-handoff-http.js';
+import { createPrintHandoffServices, type PrintHandoffServices } from './print-handoff-http.js';
 import { PrinterMcpClient, PrinterSessionPool, readPrinterHandoffConfig } from '@scan-to-make/printer-handoff';
 import { PrinterDirectory } from './printing/directory.js';
 import { CameraFrames } from './printing/camera.js';
@@ -87,6 +87,9 @@ const printHandoff=handoffConfig===undefined?undefined:createPrintHandoffService
 // PRD §8.10: a print and an update of its printer's MCP never overlap (the phone's handoff route prints on `current`).
 const printGate=new PrintGate();
 if(printHandoff)printHandoff.admit=()=>printGate.hold('current');
+// docs/design/remote-mcp.md: `/v1/mcp` reaches every configured destination through its own shared session and relay.
+// It reads the live destination map below (Add, Remove and Complete Settings change it in place).
+if(printHandoff)printHandoff.remoteRelays=()=>[...(printerDestinations?.values()??[])].map(services=>services.relay);
 // Objects: the touch-up runs through the user's own printer MCP and their own Claude login. Needs both.
 const claudePath=process.env.SCAN_TO_MAKE_CLAUDE_PATH||undefined;
 if(claudePath!==undefined&&!isAbsolute(claudePath))throw new Error('SCAN_TO_MAKE_CLAUDE_PATH must be absolute');
@@ -166,19 +169,25 @@ const printerSetup=mcpUpdates?new PrinterSetup({env:printerEnv,configs:()=>print
     if(id!=='current')printerDestinations!.set(id,createPrintHandoffServices(config,handoffDirectory!,{pool:printerPool,destinationId:id,onConnect:onConnect(id),relay:old.relay as import('@scan-to-make/printer-handoff').InMemoryElicitationRelay}));
   },
   busy:async id=>printerBusy?await printerBusy(id):false}):undefined;
+// docs/design/remote-mcp.md: every configured printer and its services whenever printer handoff is configured, with
+// or without objects, so `/v1/mcp/<id>` reaches each one; the objects setup reuses them. Reload and Complete Settings
+// replace entries in this map in place, and `/v1/mcp` reads it live.
+if(handoffConfig&&printHandoff){
+  const services=printHandoff;
+  printerCatalog=await loadPrinterCatalog(handoffConfig,{profilesPath:printerProfiles});
+  const catalog=printerCatalog;
+  // `current` is the Mac app's own config and keeps the phone handoff route's services.
+  printerDestinations=new Map(catalog.destinations.map(destination=>{
+    const config=catalog.resolve(destination.id)!;
+    return [destination.id,destination.id==='current'?services:createPrintHandoffServices(config,handoffDirectory!,{pool:printerPool,destinationId:destination.id,onConnect:onConnect(destination.id)})] as const;
+  }));
+}
 if(handoffConfig&&printHandoff&&captureDirectory&&claudePath){
   const objectStore=new ObjectStore(join(captureDirectory,'objects'));
   objectStoreForEvents=objectStore;
   // Dispatched prints keep printing: ObjectService.resume() picks their monitors back up.
   await objectStore.recoverInterrupted({keepPrinting:true});
-  printerCatalog=await loadPrinterCatalog(handoffConfig,{profilesPath:printerProfiles});
-  const catalog=printerCatalog;
-  // `current` is the Mac app's own config and keeps the phone handoff route's services.
-  const destinations=new Map(catalog.destinations.map(destination=>{
-    const config=catalog.resolve(destination.id)!;
-    return [destination.id,destination.id==='current'?printHandoff:createPrintHandoffServices(config,handoffDirectory!,{pool:printerPool,destinationId:destination.id,onConnect:onConnect(destination.id)})] as const;
-  }));
-  printerDestinations=destinations;
+  const catalog=printerCatalog!, destinations=printerDestinations!;
   printerDirectory=new PrinterDirectory(catalog,id=>destinations.get(id)?.runner.session);
   objects=new ObjectService({store:objectStore,runTouchup:input=>runTouchup(input),claudePath,handoff:handoffConfig,runningHandoff:()=>runningHandoff()!,printerCatalog:catalog,printers:printerDirectory,
     stlInfo:path=>printerStlSize(runningHandoff()!,path),
@@ -234,6 +243,12 @@ const server = await startCompanionServer({
   ...(nearbyPairing === '1' ? { nearby: { name: macName ?? 'Scan to Make' } } : {}),
   capture,
   printHandoff,
+  ...(printHandoff ? {remoteMcp: {
+    bundleRoot: handoffDirectory!,
+    admit: (id: string) => printGate.hold(id),
+    destinations: () => new Map([...(printerDestinations ?? new Map([['current', printHandoff]]))].flatMap(([id, services]) => services.runner.session
+      ? [[id, {session: services.runner.session, relay: services.relay}] as const] : [])),
+  }} : {}),
   ...(objects ? {objects} : {}),
   ...(eventLog ? {events: eventLog} : {}),
   ...(liveActivityTokens ? {liveActivityTokens} : {}),

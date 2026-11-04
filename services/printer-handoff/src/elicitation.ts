@@ -16,12 +16,19 @@ export interface PendingElicitation {
   elicitationId?: string;
   /** The handoff bundle whose print asked, so each answer reaches its own print. */
   bundleId?: string;
+  /** The paired remote device (`/v1/mcp`) whose call asked; that device may never answer it. */
+  remoteDeviceId?: string;
+  /** That device's name as paired, so the owner can see who is asking. */
+  remoteDeviceName?: string;
   createdAtMs: number;
   expiresAtMs: number;
 }
 
 export interface ElicitationContext {
   bundleId?: string;
+  /** Set by `/v1/mcp` for a remote device's call. */
+  remoteDeviceId?: string;
+  remoteDeviceName?: string;
 }
 
 export interface ElicitationRelay {
@@ -75,6 +82,8 @@ export class InMemoryElicitationRelay implements ElicitationRelay {
       ...(params.url === undefined ? {} : {url: params.url}),
       ...(params.elicitationId === undefined ? {} : {elicitationId: params.elicitationId}),
       ...(context.bundleId === undefined ? {} : {bundleId: context.bundleId}),
+      ...(context.remoteDeviceId === undefined ? {} : {remoteDeviceId: context.remoteDeviceId}),
+      ...(context.remoteDeviceName === undefined ? {} : {remoteDeviceName: context.remoteDeviceName}),
       createdAtMs: now,
       expiresAtMs: now + this.#timeoutMs,
     };

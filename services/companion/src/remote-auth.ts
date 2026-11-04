@@ -9,6 +9,7 @@ import { link, lstat, mkdir, open, rename, rm } from 'node:fs/promises';
 import { isAbsolute, join } from 'node:path';
 import { z } from 'zod';
 import {
+  REMOTE_SCOPES,
   DEVICE_AUTH_PROTOCOL_VERSION,
   DEVICE_CREDENTIAL_LIFETIME_MS,
   DeviceCredentialSchema,
@@ -29,7 +30,7 @@ const MAX_STORE_BYTES = 128 * 1024;
 const scopesSchema = z
   .array(RemoteScopeSchema)
   .min(1)
-  .max(10)
+  .max(REMOTE_SCOPES.length)
   .refine((x) => new Set(x).size === x.length);
 const loginSchema = z
   .string()
@@ -585,6 +586,17 @@ export class RemoteAuthStore {
       const device = this.valid(state, login, deviceId, token);
       if (!device.scopes.includes(scope))
         throw new RemoteAuthFailure('forbidden');
+    } catch (error) {
+      if (error instanceof RemoteAuthFailure) throw error;
+      throw new RemoteAuthFailure('auth-unavailable');
+    }
+  }
+  /** The paired device a credential belongs to (name and scopes), for routes that act per device (`/v1/mcp`). */
+  async device(login: string, deviceId: string | undefined, token: string | undefined) {
+    try {
+      const { state } = await this.read();
+      const { deviceName, scopes } = this.valid(state, login, deviceId, token);
+      return { deviceId: deviceId!, deviceName, scopes: [...scopes] };
     } catch (error) {
       if (error instanceof RemoteAuthFailure) throw error;
       throw new RemoteAuthFailure('auth-unavailable');
