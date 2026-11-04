@@ -32,11 +32,11 @@ object Notifications {
     fun createChannels(context: Context) {
         val manager = context.getSystemService(NotificationManager::class.java)
         manager.createNotificationChannels(listOf(
-            NotificationChannel(READY, "Ready to print", NotificationManager.IMPORTANCE_DEFAULT).apply { description = "Your Mac finished a design or a scan" },
+            NotificationChannel(READY, "Ready to print", NotificationManager.IMPORTANCE_DEFAULT).apply { description = "Your computer finished a design or a scan" },
             NotificationChannel(NEEDS_YOU, "Needs you", NotificationManager.IMPORTANCE_HIGH).apply { description = "It needs a photo or a yes from you" },
             NotificationChannel(PRINT, "Print progress", NotificationManager.IMPORTANCE_DEFAULT).apply { description = "The print is halfway, done, or cancelled" },
             NotificationChannel(PROBLEMS, "Print problems", NotificationManager.IMPORTANCE_HIGH).apply { description = "The printer paused, stopped or needs a yes" },
-            NotificationChannel(WATCHING, "Following your Mac", NotificationManager.IMPORTANCE_LOW).apply { description = "Shown while Counterpart follows a print or a design" },
+            NotificationChannel(WATCHING, "Following your computer", NotificationManager.IMPORTANCE_LOW).apply { description = "Shown while Counterpart follows a print or a design" },
         ))
     }
 

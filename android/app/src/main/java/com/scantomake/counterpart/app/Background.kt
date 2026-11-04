@@ -86,7 +86,7 @@ class WatchService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == STOP) { stopSelf(); return START_NOT_STICKY }
         val type = if (Build.VERSION.SDK_INT >= 29) ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC else 0
-        try { ServiceCompat.startForeground(this, 7, ongoing("Following your Mac"), type) } catch (_: Exception) { stopSelf(); return START_NOT_STICKY }
+        try { ServiceCompat.startForeground(this, 7, ongoing("Following your computer"), type) } catch (_: Exception) { stopSelf(); return START_NOT_STICKY }
         if (job == null) job = scope.launch { watch() }
         return START_NOT_STICKY
     }

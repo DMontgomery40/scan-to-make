@@ -64,8 +64,8 @@ fun PrintersScreen(back: () -> Unit) {
         }
         Column(Modifier.verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             val list = catalog?.destinations
-            if (list == null) Text("Reading the printers on your Mac…", color = Palette.secondary)
-            else if (list.isEmpty()) Text("No printers are set up on your Mac yet. Add one in Counterpart on your Mac (bambu-printer-mcp or mcp-3D-printer-server).", color = Palette.secondary)
+            if (list == null) Text("Reading the printers on your computer…", color = Palette.secondary)
+            else if (list.isEmpty()) Text("No printers are set up on your computer yet. Add one in Counterpart on your computer (bambu-printer-mcp or mcp-3D-printer-server).", color = Palette.secondary)
             list?.forEach { d ->
                 GlassCard(Modifier.fillMaxWidth()) { Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -79,8 +79,9 @@ fun PrintersScreen(back: () -> Unit) {
                     d.capabilities?.let { c ->
                         Text(listOfNotNull(if (c.progress) "Progress" else null, if (c.camera != "none") "Camera" else null, if (c.pause) "Pause" else null,
                             if (c.filaments != "none") "Filaments" else null).joinToString(" · "), color = Palette.secondary, fontSize = 12.sp)
-                        c.update?.message?.takeIf { it.isNotBlank() }?.let { Text(it + " Update it from Counterpart on your Mac.", color = Palette.needsYou, fontSize = 12.sp) }
+                        c.update?.message?.takeIf { it.isNotBlank() }?.let { Text(it, color = Palette.needsYou, fontSize = 12.sp) }
                     }
+                    PrinterSettingsControls(d, state)
                 } }
             }
         }
@@ -109,20 +110,20 @@ fun SettingsScreen(back: () -> Unit, pairAgain: () -> Unit) {
             Text("Settings", fontWeight = FontWeight.SemiBold, fontSize = 17.sp)
         }
         Column(Modifier.verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            SectionTitle("Your Mac")
+            SectionTitle("Your computer")
             GlassCard(Modifier.fillMaxWidth()) { Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text(macName ?: "Your Mac", fontWeight = FontWeight.SemiBold)
+                Text(macName ?: "Your computer", fontWeight = FontWeight.SemiBold)
                 Text("Address in use: ${status?.host ?: "–"}", color = Palette.secondary, fontSize = 13.sp)
                 status?.expiresAtMs?.let { Text("Pairing renews by itself; next renewal before ${java.text.DateFormat.getDateInstance().format(java.util.Date(it.toLong()))}", color = Palette.secondary, fontSize = 12.sp) }
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    SecondaryButton("Connect a Different Mac", Modifier.weight(1f), onClick = pairAgain)
+                    SecondaryButton("Connect a Different Computer", Modifier.weight(1f), onClick = pairAgain)
                 }
-                SecondaryButton("Forget This Mac", Modifier.fillMaxWidth(), color = Palette.failed) { forget = true }
+                SecondaryButton("Forget This Computer", Modifier.fillMaxWidth(), color = Palette.failed) { forget = true }
             } }
             SectionTitle("This phone")
-            OutlinedTextField(name, { name = it }, Modifier.fillMaxWidth(), label = { Text("Name your Mac shows") }, singleLine = true)
+            OutlinedTextField(name, { name = it }, Modifier.fillMaxWidth(), label = { Text("Name your computer shows") }, singleLine = true)
             SecondaryButton("Save Name", Modifier.fillMaxWidth(), enabled = isPlainText(name, 80)) { app.prefs.edit().putString(Counterpart.DEVICE_NAME_KEY, name.trim()).apply() }
-            Text("Your Mac shows the new name after you reopen Counterpart here.", color = Palette.secondary, fontSize = 12.sp)
+            Text("Your computer shows the new name after you reopen Counterpart here.", color = Palette.secondary, fontSize = 12.sp)
 
             SectionTitle("Notifications")
             if (!notifications) SecondaryButton("Turn On Notifications", Modifier.fillMaxWidth()) {
@@ -137,14 +138,14 @@ fun SettingsScreen(back: () -> Unit, pairAgain: () -> Unit) {
                     scope.launch { try { milestones = app.companion.changeSettings(jsonOf("milestones" to value))["milestones"].str } catch (_: Exception) {} }
                 }.padding(14.dp)) { Text(label, Modifier.weight(1f)); if (milestones == value) Icon(CIcons.Tick, null, tint = Palette.filament) }
             }
-            Text("Notifications come from your Mac over your Wi-Fi (or Tailscale). Away from both, they arrive when the phone can reach your Mac again.",
+            Text("Notifications come from your computer over your Wi-Fi (or Tailscale). Away from both, they arrive when the phone can reach your computer again.",
                 color = Palette.secondary, fontSize = 12.sp)
             SectionTitle("About")
             Text("Counterpart for Android 0.1.0 · open source · github.com/DMontgomery40/scan-to-make", color = Palette.secondary, fontSize = 13.sp)
         }
     }
-    if (forget) AlertDialog(onDismissRequest = { forget = false }, title = { Text("Forget This Mac?") },
-        text = { Text("This phone stops connecting to it. Your projects stay on your Mac; pair again to see them.") },
-        confirmButton = { TextButton({ forget = false; state.forgetMac() }) { Text("Forget This Mac", color = Palette.failed) } },
+    if (forget) AlertDialog(onDismissRequest = { forget = false }, title = { Text("Forget This Computer?") },
+        text = { Text("This phone stops connecting to it. Your projects stay on your computer; pair again to see them.") },
+        confirmButton = { TextButton({ forget = false; state.forgetMac() }) { Text("Forget This Computer", color = Palette.failed) } },
         dismissButton = { TextButton({ forget = false }) { Text("Cancel") } })
 }

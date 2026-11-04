@@ -106,7 +106,7 @@ fun NewProjectScreen(job: String?, close: () -> Unit, started: (String) -> Unit,
         }
         val created = if (link != null) {
             state.loadCapabilities()
-            if ("publishedModels" !in state.capabilities.value) throw CompanionException("published-models-unavailable", "Update Counterpart on your Mac to get the designer’s file.")
+            if ("publishedModels" !in state.capabilities.value) throw CompanionException("published-models-unavailable", "Update Counterpart on your computer to get the designer’s file.")
             app.companion.create(text, "published", link)
         } else app.companion.create(text, kind())
         draftId = created.id
@@ -133,12 +133,12 @@ fun NewProjectScreen(job: String?, close: () -> Unit, started: (String) -> Unit,
             Text("What do you need?", fontWeight = FontWeight.SemiBold, fontSize = 17.sp)
             OutlinedTextField(text, { text = it }, Modifier.fillMaxWidth(), minLines = 3, maxLines = 6,
                 placeholder = { Text(if (job == "copy") "Copy this. Close up the bottom." else "A hook for my stroller handle…") })
-            Text("Describe it, scan it, or both. Your Mac can look up published sizes, like a phone or a mic. Paste a MakerWorld or Printables link to print a published model.",
+            Text("Describe it, scan it, or both. Your computer can look up published sizes, like a phone or a mic. Paste a MakerWorld or Printables link to print a published model.",
                 color = Palette.secondary, fontSize = 13.sp)
             if (link != null) GlassCard(Modifier.fillMaxWidth()) {
                 Column {
                     Row(verticalAlignment = Alignment.CenterVertically) { Icon(CIcons.Link, null, tint = Palette.filament); Text("  " + (Uri.parse(link).host ?: "Published model"), fontWeight = FontWeight.SemiBold) }
-                    Text("Your Mac will get the designer’s file and keep its credit.", color = Palette.secondary, fontSize = 13.sp)
+                    Text("Your computer will get the designer’s file and keep its credit.", color = Palette.secondary, fontSize = 13.sp)
                 }
             }
             Text("Show it", fontWeight = FontWeight.SemiBold, fontSize = 17.sp)
@@ -175,7 +175,7 @@ fun NewProjectScreen(job: String?, close: () -> Unit, started: (String) -> Unit,
             problem?.let { Text(it, color = Palette.failed) }
         }
         val canSend = text.isNotBlank() || scanned
-        PrimaryButton(if (working == "make") "Sending…" else "Send to ${macName ?: "your Mac"}", Modifier.fillMaxWidth().padding(20.dp, 8.dp),
+        PrimaryButton(if (working == "make") "Sending…" else "Send to ${macName ?: "your computer"}", Modifier.fillMaxWidth().padding(20.dp, 8.dp),
             enabled = working == null, icon = CIcons.Upload) {
             if (!canSend) { problem = "Describe what to make, or add a scan."; return@PrimaryButton }
             run("make") {

@@ -46,13 +46,13 @@ fun WelcomeScreen(next: () -> Unit) {
             Spacer(Modifier.height(24.dp))
             AppIcon(88.dp)
             Text("Counterpart", fontSize = 34.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 18.dp))
-            Text("Make things that fit your life, with your phone, your Mac and your 3D printer.", color = Palette.secondary,
+            Text("Make things that fit your life, with your phone, your computer and your 3D printer.", color = Palette.secondary,
                 textAlign = TextAlign.Center, modifier = Modifier.padding(top = 8.dp, start = 8.dp, end = 8.dp))
             Spacer(Modifier.height(30.dp))
-            JobCard(CIcons.Ruler, "Make something that fits", "Describe it and show what it fits. Your Mac designs the part.",
+            JobCard(CIcons.Ruler, "Make something that fits", "Describe it and show what it fits. Your computer designs the part.",
                 listOf(CIcons.Bubble to "Describe", CIcons.Camera to "Show"))
             Spacer(Modifier.height(14.dp))
-            JobCard(CIcons.Cube, "Copy something", "Scan it. Your Mac fixes what the scanner missed and makes it printable.",
+            JobCard(CIcons.Cube, "Copy something", "Scan it. Your computer fixes what the scanner missed and makes it printable.",
                 listOf(CIcons.Cube to "Scan", CIcons.Wand to "Fix"))
             Text("Either way, you'll get a notification when it's ready, and another when the print is done.", color = Palette.secondary,
                 fontSize = 13.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 22.dp, start = 16.dp, end = 16.dp))
@@ -99,7 +99,7 @@ fun NotifyPermissionScreen(done: () -> Unit) {
         Text("Know when it's ready", fontSize = 28.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 18.dp))
         Text("So you know when it's ready and when the print is done.", color = Palette.secondary, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 8.dp))
         Column(Modifier.padding(top = 26.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Benefit(CIcons.Seal, Palette.filament, "Your Mac finished a design or a scan")
+            Benefit(CIcons.Seal, Palette.filament, "Your computer finished a design or a scan")
             Benefit(CIcons.Hand, Palette.needsYou, "It needs a photo or a yes from you")
             Benefit(CIcons.Printer, Palette.okGreen, "The print is halfway, done, or stopped")
         }

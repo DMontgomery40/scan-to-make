@@ -83,7 +83,7 @@ fun HomeScreen(open: (String, Boolean) -> Unit, newProject: (String?) -> Unit, p
     val needsYou = visible.filter { phase(it) == ProjectPhase.NeedsYou }
     val grid = visible.filter { phase(it) != ProjectPhase.Confirmed }.sortedWith(compareByDescending<Project> { phase(it) == ProjectPhase.Ready }.thenByDescending { it.updatedAtMs })
 
-    val mac = macName ?: "Your Mac"
+    val mac = macName ?: "Your computer"
     val subtitle = when (reachable) { false -> "$mac isn't answering"; true -> "$mac connected"; else -> mac } +
         (catalog?.destinations?.size?.takeIf { it > 0 }?.let { " · $it printer" + if (it == 1) "" else "s" } ?: "")
 
@@ -152,7 +152,7 @@ fun ConnectionBanner(message: String, pair: Boolean) {
     GlassCard(Modifier.fillMaxWidth()) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(CIcons.Warning, null, tint = Palette.needsYou); Spacer(Modifier.width(10.dp))
-            Text(if (pair) "$message Open Settings → Connect a Different Mac." else message, fontSize = 14.sp)
+            Text(if (pair) "$message Open Settings → Connect a Different Computer." else message, fontSize = 14.sp)
         }
     }
 }
@@ -162,11 +162,11 @@ private fun EmptyHome(start: (String?) -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
         Spacer(Modifier.height(20.dp))
         Text("What do you want to make?", fontSize = 26.sp, fontWeight = FontWeight.Bold)
-        JobCard(CIcons.Ruler, "Make something that fits", "Describe it and show what it fits. Your Mac designs the part.",
+        JobCard(CIcons.Ruler, "Make something that fits", "Describe it and show what it fits. Your computer designs the part.",
             listOf(CIcons.Bubble to "Describe", CIcons.Camera to "Show")) { start("fit") }
-        JobCard(CIcons.Cube, "Copy something", "Scan it. Your Mac fixes what the scanner missed and makes it printable.",
+        JobCard(CIcons.Cube, "Copy something", "Scan it. Your computer fixes what the scanner missed and makes it printable.",
             listOf(CIcons.Cube to "Scan", CIcons.Wand to "Fix")) { start("copy") }
-        JobCard(CIcons.Link, "Print a published model", "Paste a MakerWorld or Printables link. Your Mac gets the designer's file.",
+        JobCard(CIcons.Link, "Print a published model", "Paste a MakerWorld or Printables link. Your computer gets the designer's file.",
             listOf(CIcons.Link to "Paste a link")) { start(null) }
         Text("You'll get a notification when it's ready.", color = Palette.secondary, fontSize = 13.sp)
     }

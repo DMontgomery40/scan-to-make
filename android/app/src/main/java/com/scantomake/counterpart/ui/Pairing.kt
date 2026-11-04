@@ -94,7 +94,7 @@ fun FindYourMacScreen(replace: Boolean = false, onPaired: () -> Unit, cancel: ((
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { camera = it }
 
     fun finish(name: String?) {
-        connected = name ?: state.macName.value ?: "your Mac"
+        connected = name ?: state.macName.value ?: "your computer"
         state.readStatus()
         scope.launch { state.loadCapabilities(); delay(1200); onPaired() }
     }
@@ -103,7 +103,7 @@ fun FindYourMacScreen(replace: Boolean = false, onPaired: () -> Unit, cancel: ((
         if (working != null) return
         problem = null
         val invitation = try { PairingInvitation.parse(text) } catch (e: Exception) { problem = PairingWords.failure(e); return }
-        working = "Pairing with ${invitation.name ?: "your Mac"}…"
+        working = "Pairing with ${invitation.name ?: "your computer"}…"
         job = scope.launch {
             try {
                 app.pairing.pair(invitation, app.pairingStore.deviceName())
@@ -129,9 +129,9 @@ fun FindYourMacScreen(replace: Boolean = false, onPaired: () -> Unit, cancel: ((
             Text("Connected to $it", fontSize = 24.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
             return@Column
         }
-        Text("Find your Mac", fontSize = 30.sp, fontWeight = FontWeight.Bold)
-        Text(if (replace) "This phone is paired with a Mac. Pairing with another one replaces it."
-            else "On your Mac, open Counterpart. Point your camera at the code it shows.", color = Palette.secondary, textAlign = TextAlign.Center)
+        Text("Find your computer", fontSize = 30.sp, fontWeight = FontWeight.Bold)
+        Text(if (replace) "This phone is paired with a computer. Pairing with another one replaces it."
+            else "On your computer, open Counterpart. Point your camera at the code it shows.", color = Palette.secondary, textAlign = TextAlign.Center)
 
         Box(Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(28.dp)).background(Palette.card).border(2.dp, Palette.filament.copy(alpha = 0.6f), RoundedCornerShape(28.dp)),
             contentAlignment = Alignment.Center) {
@@ -142,13 +142,13 @@ fun FindYourMacScreen(replace: Boolean = false, onPaired: () -> Unit, cancel: ((
                 code != null -> Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(20.dp)) {
                     Text("Code", color = Palette.secondary)
                     Text(NearbyCrypto.display(code!!.code), fontSize = 44.sp, fontWeight = FontWeight.Bold, color = Palette.filament)
-                    Text("Make sure your Mac shows the same number, then click Allow on your Mac.", textAlign = TextAlign.Center, color = Palette.secondary)
-                    Spacer(Modifier.height(10.dp)); Text("Waiting for your Mac…")
+                    Text("Make sure your computer shows the same number, then click Allow on your computer.", textAlign = TextAlign.Center, color = Palette.secondary)
+                    Spacer(Modifier.height(10.dp)); Text("Waiting for your computer…")
                 }
                 camera -> QrScanner(Modifier.fillMaxSize()) { text -> if (PairingLink.isPairingLink(text) || text.trim().startsWith("{")) pair(text) }
                 else -> Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(20.dp)) {
                     Icon(CIcons.Qr, null, tint = Palette.secondary, modifier = Modifier.size(56.dp))
-                    Text("Counterpart needs the camera to read your Mac's code.", textAlign = TextAlign.Center, color = Palette.secondary)
+                    Text("Counterpart needs the camera to read your computer's code.", textAlign = TextAlign.Center, color = Palette.secondary)
                     Spacer(Modifier.height(10.dp))
                     SecondaryButton("Allow Camera") { permission.launch(Manifest.permission.CAMERA) }
                 }
@@ -164,8 +164,8 @@ fun FindYourMacScreen(replace: Boolean = false, onPaired: () -> Unit, cancel: ((
                     Text("On this Wi-Fi · Counterpart is open", fontWeight = FontWeight.SemiBold)
                 }
                 when {
-                    looking -> Text("Looking for your Mac on this Wi-Fi…", color = Palette.secondary)
-                    nearby?.isEmpty() == true -> Text("No Mac found on this Wi-Fi. Are they on the same Wi-Fi, or is your VPN on?", color = Palette.secondary)
+                    looking -> Text("Looking for your computer on this Wi-Fi…", color = Palette.secondary)
+                    nearby?.isEmpty() == true -> Text("No computer found on this Wi-Fi. Are they on the same Wi-Fi, or is your VPN on?", color = Palette.secondary)
                     else -> {}
                 }
                 nearby?.forEach { mac ->
@@ -194,7 +194,7 @@ fun FindYourMacScreen(replace: Boolean = false, onPaired: () -> Unit, cancel: ((
         // The link from the Mac, pasted (for example sent from the Mac by Messages or e-mail).
         GlassCard(Modifier.fillMaxWidth()) {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("Or paste the link from your Mac", fontWeight = FontWeight.SemiBold)
+                Text("Or paste the link from your computer", fontWeight = FontWeight.SemiBold)
                 OutlinedTextField(pasted, { pasted = it }, Modifier.fillMaxWidth(), placeholder = { Text("scantomake://pair?…") }, singleLine = true)
                 SecondaryButton("Pair", Modifier.fillMaxWidth(), enabled = pasted.isNotBlank() && working == null) { pair(pasted.trim()) }
             }

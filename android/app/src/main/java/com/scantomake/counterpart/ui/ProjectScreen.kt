@@ -198,7 +198,7 @@ fun ProjectScreen(id: String, back: () -> Unit, print: () -> Unit, printing: () 
             // The Mac's question.
             project.openAsk?.let { ask ->
                 GlassCard(Modifier.fillMaxWidth()) { Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) { Icon(CIcons.Hand, null, tint = Palette.needsYou); Spacer(Modifier.width(8.dp)); Text("Your Mac asks", fontWeight = FontWeight.SemiBold) }
+                    Row(verticalAlignment = Alignment.CenterVertically) { Icon(CIcons.Hand, null, tint = Palette.needsYou); Spacer(Modifier.width(8.dp)); Text("Your computer asks", fontWeight = FontWeight.SemiBold) }
                     Text(ask.question)
                     ask.photo?.let { ProjectImage(project, "asks/" + it.substringAfterLast('/'), Modifier.fillMaxWidth().aspectRatio(1.3f).clip(RoundedCornerShape(18.dp)), ContentScale.Fit) }
                     when (ask.type) {
@@ -290,7 +290,7 @@ fun ProjectScreen(id: String, back: () -> Unit, print: () -> Unit, printing: () 
         }
     }
     if (confirmDelete) AlertDialog(onDismissRequest = { confirmDelete = false },
-        title = { Text("Delete this project?") }, text = { Text("Its model and files are deleted from your Mac too.") },
+        title = { Text("Delete this project?") }, text = { Text("Its model and files are deleted from your computer too.") },
         confirmButton = { TextButton({ confirmDelete = false; run("delete") { app.companion.delete(id); state.remove(id); back() } }) { Text("Delete", color = Palette.failed) } },
         dismissButton = { TextButton({ confirmDelete = false }) { Text("Cancel") } })
 }
@@ -305,7 +305,7 @@ fun PrintConfirmationCard(project: Project, confirmation: PrintConfirmation, ans
     GlassCard(Modifier.fillMaxWidth()) { Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) { Icon(CIcons.Printer, null, tint = Palette.needsYou); Spacer(Modifier.width(8.dp)); Text("Your printer asks", fontWeight = FontWeight.SemiBold) }
         Text(confirmation.message)
-        if (!confirmation.isRenderable) Text("Answer this on your Mac, or don't print.", color = Palette.secondary)
+        if (!confirmation.isRenderable) Text("Answer this on your computer, or don't print.", color = Palette.secondary)
         else confirmation.fields.forEach { f ->
             when (f.kind) {
                 "boolean" -> Row(verticalAlignment = Alignment.CenterVertically) {

@@ -10,6 +10,9 @@ import com.scantomake.counterpart.api.PrintColour
 import com.scantomake.counterpart.api.PrintLive
 import com.scantomake.counterpart.api.PrintQuality
 import com.scantomake.counterpart.api.PrintStrength
+import com.scantomake.counterpart.api.printerPrintRoute
+import com.scantomake.counterpart.api.choosePrinterMcp
+import com.scantomake.counterpart.api.updatePrinterMcp
 import com.scantomake.counterpart.api.PrinterDestination
 import com.scantomake.counterpart.api.PrinterFilament
 import com.scantomake.counterpart.api.Project
@@ -211,6 +214,44 @@ class CompanionClientTests {
         assertEquals(setOf("checked"), PrintChoice(null).body.keys)
         assertEquals("Bambu PLA Basic", filament.displayName)
         assertEquals("Ext", PrinterFilament(254, "#FFFFFF", "PETG", "Generic PETG #FFFFFF", "", "x").slotLabel)
+    }
+
+    @Test fun printerSettingsUseTheCompanionsAuthorizedScopes() {
+        assertEquals("printer-handoff:use", CompanionClient.scope("GET", "/v1/objects/printers/current/route"))
+        assertEquals("printer-handoff:use", CompanionClient.scope("POST", "/v1/objects/printers/current/route"))
+        assertEquals("projects:write", CompanionClient.scope("POST", "/v1/objects/printers/current/mcp"))
+        assertEquals("projects:write", CompanionClient.scope("POST", "/v1/printers/mcp/mcp-0123456789abcdef/update"))
+        assertNull(CompanionClient.scope("POST", "/v1/printers/mcp/bad-id/update"))
+        assertNull(CompanionClient.scope("POST", "/v1/objects/printers/current/route/extra"))
+    }
+
+    @Test fun printerSettingsSendExactChoicesAndKeepTheReportedResult() = runBlocking {
+        val fixture = parseObject(contractFixture("printer-settings-http.json").readText())!!
+        val fake = FakeTransport { request, _ ->
+            val reply = when {
+                request.url.endsWith("/route") -> JsonObject(mapOf("route" to fixture["route"]!!))
+                request.url.endsWith("/mcp") -> fixture["selection"]!!
+                else -> JsonObject(mapOf("update" to fixture["update"]!!))
+            }
+            HttpReply(200, reply.toString().toByteArray())
+        }
+        val c = client(fake)
+        val route = c.printerPrintRoute("current", "cloud")!!
+        assertEquals("cloud", route.route)
+        assertFalse(route.available("lan"))
+        assertEquals("No local address", route.options!![0].reason)
+        assertEquals("{\"route\":\"cloud\"}", String(fake.calls[0].request.body!!))
+        assertEquals("generic", c.choosePrinterMcp("current", "mcp-3d-printer-server").catalog.defaultDestinationId)
+        assertEquals("{\"backend\":\"mcp-3d-printer-server\"}", String(fake.calls[1].request.body!!))
+        assertEquals("waiting", c.updatePrinterMcp("mcp-0123456789abcdef").state)
+        assertEquals("{}", String(fake.calls[2].request.body!!))
+        c.updatePrinterMcp("mcp-0123456789abcdef", fresh = true)
+        assertEquals("{\"fresh\":true}", String(fake.calls[3].request.body!!))
+        for (attempt in listOf<suspend () -> Unit>({ c.printerPrintRoute("../bad") },
+            { c.printerPrintRoute("current", "../cloud") }, { c.choosePrinterMcp("current", "bad") }, { c.updatePrinterMcp("bad") })) {
+            try { attempt(); fail("Invalid setting escaped validation") } catch (e: CompanionException) { assertEquals("invalid-request", e.code) }
+        }
+        assertEquals(4, fake.calls.size)
     }
 
     @Test fun uploadsSkipWhatTheMacHasAndUseTheCaptureRoute() = runBlocking {

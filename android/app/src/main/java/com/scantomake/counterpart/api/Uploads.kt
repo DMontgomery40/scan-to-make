@@ -61,8 +61,8 @@ class ProjectUploader(private val client: CompanionClient) {
                 val reply = client.send(method, path, bytes, f.type)
                 if (reply.status == 409) throw CompanionException("conflict", "This is already being touched up.")
                 if (reply.status !in 200..299) {
-                    throw if (reply.status == 404) CompanionException("not-found", "This is no longer on your Mac.")
-                    else CompanionException("upload-failed", "Your Mac didn't accept a file from this scan. Try again.")
+                    throw if (reply.status == 404) CompanionException("not-found", "This is no longer on your computer.")
+                    else CompanionException("upload-failed", "Your computer didn't accept a file from this scan. Try again.")
                 }
                 if (f.kind != UploadFile.Kind.Scan) sent += 1
             }

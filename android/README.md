@@ -1,7 +1,7 @@
 # Counterpart for Android
 
-A native Android companion for Counterpart (Kotlin, Jetpack Compose, minSdk 26 / Android 8.0, target 35). It does what
-the iPhone app does, against the **same, unchanged Mac app**: it pairs with the Mac by its QR code (or nearby on the
+A native Android client for Counterpart (Kotlin, Jetpack Compose, minSdk 26 / Android 8.0, target 35). It uses
+the iPhone app's companion protocol: it pairs by QR code (or nearby on the
 same Wi-Fi), sends it what you want made (a description, photos, a MakerWorld/Printables link, a scan), follows the
 work and the print, pauses and stops prints, and shows notifications ("Ready to print", "Did it fit?").
 
@@ -13,6 +13,12 @@ with fresh projects created by the companion. Imported projects retain all plate
 choose a plate to print or reprint it, and import multiple original files into one project. Active and uncertain
 prints lock plate selection. A print sheet retains its original plate identity so a change on another client
 cannot silently print a different plate. These additions have build/lint coverage; visible app acceptance is pending.
+
+The print sheet includes capability-gated copies and pauses before selected layers, and preserves the settings
+in sliced originals. Printers includes the MCP-reported connection choices, selection between configured MCPs,
+and updates through the companion's existing updater. Update events show completion or failure; an uncertain
+update request is never automatically resent. Pairing, status and error wording also supports a Linux computer;
+Linux desktop integration and all Android × Mac/Linux acceptance remain open.
 
 ## Build
 
@@ -105,7 +111,7 @@ but needs a Mac-side change and an FCM project; not done.
 Verified here (a Linux machine, no phone, no Mac):
 
 - `./gradlew assembleDebug` builds; `lintDebug` reports no errors (warnings are newer-library-version notices).
-- 28 unit tests pass, including **all 324 pairing-link vectors** from `packages/contracts/fixtures`, the nearby-pairing
+- Client/contract checks pass, including **all 324 pairing-link vectors** from `packages/contracts/fixtures`, the nearby-pairing
   v1 vector, the certificate/public-key pins of the CounterpartKit fixtures (checked against Java's own certificate
   parser too), pairing/check/refresh flows, scopes, refusals, uploads, the print body, and every sample in
   `counterpart-v1.json` and `objects.json`.
@@ -122,7 +128,7 @@ Not verified (needs a real phone and the Mac):
 
 - No 3D model viewer: the project shows the Mac's renders (PNG), not a turnable model.
 - No live camera stream: Printing shows a camera snapshot every 3 s (the snapshot route every companion has).
-- Printer MCP updates, Blender/Fusion setup, AI model settings and the device list are Mac-only here.
+- Blender/Fusion setup, AI model settings and the device list still need Android settings UI.
 - No widgets or Live-Activity equivalent beyond the ongoing "Following your Mac" notification.
 - No iCloud pairing (Android can't read the owner's iCloud); QR, link and nearby pairing only.
 - Queued changes while the Mac is working (iOS `CorrectionQueue`) aren't kept; send the change after the pass ends.

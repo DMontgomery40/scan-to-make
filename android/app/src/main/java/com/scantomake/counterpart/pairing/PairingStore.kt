@@ -107,29 +107,29 @@ class PairingStore(private val store: SecureStore, private val chosenName: () ->
 
 /** Pairing failures in plain words: what happened, and the one thing to do about it. Port of `PairingWords`. */
 object PairingWords {
-    const val expired = "That code expired. Show a new one on your Mac: click the Counterpart icon in the menu bar → Add a phone."
-    const val unreachable = "Your phone can’t reach your Mac. Are they on the same Wi-Fi, or is your VPN on?"
+    const val expired = "That code expired. Open Counterpart on your computer and choose Add a phone to show a new code."
+    const val unreachable = "Your phone can’t reach your computer. Are they on the same Wi-Fi, or is your VPN on?"
 
     fun message(code: PairingException.Code): String = when (code) {
-        PairingException.Code.InvalidInvitation -> "That isn’t a Counterpart code. Point at the code in Counterpart on your Mac."
+        PairingException.Code.InvalidInvitation -> "That isn’t a Counterpart code. Point at the code in Counterpart on your computer."
         PairingException.Code.ExpiredInvitation -> expired
         PairingException.Code.UnsupportedInvitation -> "That code is from a newer Counterpart. Update the app on this phone, then scan it again."
-        PairingException.Code.Unauthorized -> "Your Mac turned this phone down, or the code was already used. Show a new code on your Mac and scan it."
-        PairingException.Code.Forbidden -> "Your Mac turned this phone down. Show a new code and scan it."
-        PairingException.Code.RateLimited -> "Too many tries. Wait a minute, then scan a new code from your Mac."
-        PairingException.Code.CertificateChanged -> "This Mac looks different from last time. Pair again to be safe."
-        PairingException.Code.Certificate -> "Your phone couldn’t check that this is your Mac. Show a new code on your Mac and scan it."
-        PairingException.Code.WrongHost -> "That code sent your phone somewhere else, so nothing was shared. Scan the code on your Mac again."
+        PairingException.Code.Unauthorized -> "Your computer turned this phone down, or the code was already used. Show a new code on your computer and scan it."
+        PairingException.Code.Forbidden -> "Your computer turned this phone down. Show a new code and scan it."
+        PairingException.Code.RateLimited -> "Too many tries. Wait a minute, then scan a new code from your computer."
+        PairingException.Code.CertificateChanged -> "This computer looks different from last time. Pair again to be safe."
+        PairingException.Code.Certificate -> "Your phone couldn’t check that this is your computer. Show a new code on your computer and scan it."
+        PairingException.Code.WrongHost -> "That code sent your phone somewhere else, so nothing was shared. Scan the code on your computer again."
         PairingException.Code.Network, PairingException.Code.Timeout -> unreachable
-        PairingException.Code.Unavailable -> "Your Mac is busy right now. Try again in a moment."
+        PairingException.Code.Unavailable -> "Your computer is busy right now. Try again in a moment."
         PairingException.Code.SecureStorage -> "This phone couldn’t store the pairing. Unlock it and try again."
-        PairingException.Code.PairingRequired -> "Pair this phone with your Mac again."
-        PairingException.Code.PairingChanged -> "Your Mac changed while this was running. Try again."
-        PairingException.Code.InvalidResponse -> "Your Mac answered in a way this app doesn’t understand. Update Counterpart on both, then pair again."
+        PairingException.Code.PairingRequired -> "Pair this phone with your computer again."
+        PairingException.Code.PairingChanged -> "Your computer changed while this was running. Try again."
+        PairingException.Code.InvalidResponse -> "Your computer answered in a way this app doesn’t understand. Update Counterpart on both, then pair again."
         PairingException.Code.InvalidDeviceName -> "Give this phone a name between 1 and 80 characters."
-        PairingException.Code.NearbyDenied -> "Your Mac said no to this phone. If that was a mistake, try again and click Allow on your Mac."
-        PairingException.Code.NearbyExpired -> "That took too long, so nothing was paired. Try again, then click Allow on your Mac."
-        PairingException.Code.LocalNetwork -> "Counterpart can’t look on your Wi-Fi. Check that Wi-Fi is on and this phone is on the same network as your Mac."
+        PairingException.Code.NearbyDenied -> "Your computer said no to this phone. If that was a mistake, try again and click Allow on your computer."
+        PairingException.Code.NearbyExpired -> "That took too long, so nothing was paired. Try again, then click Allow on your computer."
+        PairingException.Code.LocalNetwork -> "Counterpart can’t look on your Wi-Fi. Check that Wi-Fi is on and this phone is on the same network as your computer."
         PairingException.Code.Cancelled -> "Cancelled. Nothing changed."
         PairingException.Code.Busy -> "Still working on the last request. Try again in a moment."
     }
@@ -138,7 +138,7 @@ object PairingWords {
         val code = when (error) {
             is PairingException -> error.code
             is PairingLinkException -> PairingException.of(error.error).code
-            else -> return "Pairing didn’t finish. Show a new code on your Mac and scan it."
+            else -> return "Pairing didn’t finish. Show a new code on your computer and scan it."
         }
         if (code == PairingException.Code.Network || code == PairingException.Code.Timeout) {
             return "$unreachable If you use a VPN or Private DNS, turn it off and try again."

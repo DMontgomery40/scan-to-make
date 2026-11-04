@@ -67,8 +67,8 @@ object Format {
 /** The PRD §4 project states, as the screens show them. Port of CounterpartKit `ProjectPhase`. */
 enum class ProjectPhase(val wire: String, val label: String, val tone: Tone) {
     Draft("draft", "Not sent yet", Tone.Secondary),
-    Sending("sending", "Sending to your Mac", Tone.Working),
-    Working("working", "Your Mac is working", Tone.Working),
+    Sending("sending", "Sending to your computer", Tone.Working),
+    Working("working", "Your computer is working", Tone.Working),
     NeedsYou("needs-you", "Needs you", Tone.NeedsYou),
     Ready("ready", "Ready to print", Tone.Accent),
     Preparing("preparing", "Getting the print ready", Tone.Accent),
@@ -99,7 +99,7 @@ class ProjectWords(project: Project, sending: Boolean = false, printerName: Stri
     val actions: List<ProjectAction>
 
     companion object {
-        const val WAIT = "You can leave this project and return to it while your Mac works."
+        const val WAIT = "You can leave this project and return to it while your computer works."
         const val PUT_DOWN = "You can put your phone down. We'll let you know when it's ready."
         const val DONE_LINE = "Done · it works"
 
@@ -191,7 +191,7 @@ class ProjectWords(project: Project, sending: Boolean = false, printerName: Stri
             s = "It works."; b = false; a = again; l = DONE_LINE
         } else when (project.state) {
             Project.State.New -> {
-                if (sending) { s = "Sending to your Mac. Keep the app open until it finishes."; b = true; a = emptyList() }
+                if (sending) { s = "Sending to your computer. Keep the app open until it finishes."; b = true; a = emptyList() }
                 else if (project.hasScan || project.photos.isNotEmpty()) { s = "Draft saved. Finish sending to begin."; b = false; a = listOf(ProjectAction.FinishSending) }
                 else {
                     val described = (project.instructions ?: "").isNotBlank()
@@ -236,7 +236,7 @@ class ProjectWords(project: Project, sending: Boolean = false, printerName: Stri
             Project.State.Sent -> {
                 val printer = printerName ?: project.print?.destination?.name ?: "your printer"
                 if (project.print?.sentVia == "bambu-connect") {
-                    s = "Finish on your Mac: press Print in Bambu Connect."; l = "Finish on your Mac: press Print in Bambu Connect"
+                    s = "Finish on your computer: press Print in Bambu Connect."; l = "Finish on your computer: press Print in Bambu Connect"
                 } else { s = "Sent to $printer. Counterpart can't follow this print."; l = "Sent to $printer · Counterpart can't follow this print" }
                 b = false; a = made
             }
@@ -244,7 +244,7 @@ class ProjectWords(project: Project, sending: Boolean = false, printerName: Stri
                 val failure = (project.failure ?: "").trim()
                 val recovery = if (made.isEmpty()) listOf(ProjectAction.Retry, ProjectAction.Correct)
                     else if (project.canRetryCleanup == true) listOf(ProjectAction.Retry) + made else made
-                s = failure.ifEmpty { "Something went wrong on your Mac." }; b = false; a = recovery
+                s = failure.ifEmpty { "Something went wrong on your computer." }; b = false; a = recovery
                 l = if (failure.isEmpty()) "Didn't finish · try again" else failure.split(". ").first()
             }
             Project.State.Unknown -> { s = "Update Counterpart to see this one."; b = false; a = emptyList(); l = "Update Counterpart to see this one" }

@@ -1,0 +1,14 @@
+{
+  "route": {
+    "route": "cloud",
+    "mode": "bambu_network",
+    "type": "cloud",
+    "choices": ["lan", "cloud"],
+    "options": [
+      {"id": "lan", "label": "Local network", "available": false, "reason": "No local address"},
+      {"id": "cloud", "label": "Bambu Cloud", "available": true}
+    ]
+  },
+  "selection": {"destinationId": "generic", "destinations": [], "defaultDestinationId": "generic"},
+  "update": {"mcpId": "mcp-0123456789abcdef", "state": "waiting", "toVersion": "1.1.52"}
+}

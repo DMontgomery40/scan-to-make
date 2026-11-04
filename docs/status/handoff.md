@@ -237,7 +237,11 @@ remote native probes and the SSH tunnel were removed after verification.
      systemd user service. This was not a unanimous council decision. Implementation and ownership are in
      `docs/superpowers/plans/2026-11-04-android-linux.md`; separate delegates own `apps/linux` and `tools/linux-host`.
      Android now also implements copies and layer pauses, gates choices by printer capabilities, preserves sliced
-     originals, and retains slice/selection refusals in the print sheet. Visible UI acceptance remains pending.
+     originals, and retains slice/selection refusals in the print sheet (`4ad579e`, pushed).
+     Printer settings now call the existing HTTPS connection/MCP selection/update routes and show the MCP's
+     own choices, refusal reasons and update events. The client updater scope was corrected to `projects:write`.
+     User-facing host wording supports either desktop. Provider/device settings, installation, queued corrections,
+     3D viewing and long-print background delivery still need work. Visible UI acceptance remains pending.
      T3 on agents-173 discovers `Counterpart_API35_Test`, but `device_open` exits code 1 before it comes online.
      Read-only diagnosis found that running T3 and Device Hub processes lack the newly granted `kvm` group (991).
      Do not bypass the Device panel or restart this environment while the Linux host delegate is using it.
@@ -246,6 +250,14 @@ remote native probes and the SSH tunnel were removed after verification.
      and official OpenMVS 2.4.0 Ubuntu binaries, verified against release SHA-256
      `7104ae1ddd6ca38fbca9e0e4a70b20af59e21e0b497eb7181c864fbf38ca8d00`.
      No Linux reconstruction source integration or geometry/scale acceptance yet.
+     Linux host delegate hit Claude's rate limit, with a clean `linux-host-runtime` branch at `d640c07`
+     (`5d38205` helper, `76e17b2` companion portability, `d640c07` payload script), worktree
+     `~/.t3/worktrees/scan-to-make/t3-6dc7974b`. Provider-switch choice is pending; do not silently replace Opus.
+     Its agents-173 payload build compiled the Rust release helper but failed npm extraction with errno -122
+     in `/tmp` (tmpfs/quota). No completed payload exists. Rerun with an owned `TMPDIR` under `/home` when
+     finishing integration. Scratch source/log: `~/scan-to-make-work/linux-host/{repo,prepare.log}` on agents-173.
+     The delegate created disposable account `stm-hosttest` (UID 1001) with lingering enabled for pending
+     runtime checks; remove only after its owned checks and service cleanup. No real host acceptance yet.
 5. **Phone parity implemented on the release branch:** Settings → Printers exposes MCP and
    route selection through authorized routes and per-physical-printer reservations; phone print
    sheet has layer pauses and Resume-specific confirmation. Finished print removes live controls,

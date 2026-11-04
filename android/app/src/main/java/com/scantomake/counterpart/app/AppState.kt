@@ -2,6 +2,7 @@ package com.scantomake.counterpart.app
 
 import android.content.Context
 import com.scantomake.counterpart.api.CompanionException
+import com.scantomake.counterpart.api.CounterpartEvent
 import com.scantomake.counterpart.api.EventUpdate
 import com.scantomake.counterpart.api.PrinterCatalog
 import com.scantomake.counterpart.api.Project
@@ -39,6 +40,7 @@ class AppState(private val app: Counterpart) {
     val sendFailures = MutableStateFlow<Map<String, String>>(emptyMap())
     val macName = MutableStateFlow(app.prefs.getString(MAC_NAME_KEY, null))
     val eventsSupported = MutableStateFlow<Boolean?>(null)
+    val mcpUpdateEvents = MutableStateFlow<Map<String, CounterpartEvent>>(emptyMap())
     /** A project to open, from a notification tap. */
     val route = MutableStateFlow<String?>(null)
     /** A `scantomake://pair` link waiting for the pairing screen. */
@@ -101,6 +103,7 @@ class AppState(private val app: Counterpart) {
         following?.cancel(); following = null
         projects.value = emptyList(); loaded.value = false; error.value = null; catalog.value = null; reachable.value = null
         capabilities.value = emptySet(); eventsSupported.value = null; sendFailures.value = emptyMap()
+        mcpUpdateEvents.value = emptyMap()
     }
 
     /** Starts following the Mac while the app is visible: one consumer for every screen. */
@@ -122,7 +125,10 @@ class AppState(private val app: Counterpart) {
                                 Notifications.markSeen(app, e.id, e.seq)
                                 val pid = e.projectId
                                 if (pid != null) { if (e.type == "project.deleted") remove(pid) else reload(pid) }
-                                else if (e.type.startsWith("mcp.update.")) loadPrinters()
+                                else if (e.type.startsWith("mcp.update.")) {
+                                    e.data?.mcpId?.let { mcpUpdateEvents.value = mcpUpdateEvents.value + (it to e) }
+                                    loadPrinters()
+                                }
                             }
                         }
                     }

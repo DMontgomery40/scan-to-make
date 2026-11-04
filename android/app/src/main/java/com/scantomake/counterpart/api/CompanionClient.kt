@@ -32,18 +32,18 @@ class CompanionException(val code: String, override val message: String) : Excep
     val isUnsupported: Boolean get() = code == "not-supported"
 
     companion object {
-        val unreachable get() = CompanionException("unreachable", "Your Mac isn't answering. Check it's on and awake, then try again.")
+        val unreachable get() = CompanionException("unreachable", "Your computer isn't answering. Check it's on and awake, then try again.")
         val cancelled get() = CompanionException("cancelled", "Cancelled.")
-        val unsupported get() = CompanionException("not-supported", "Update Counterpart on your Mac to use this here.")
+        val unsupported get() = CompanionException("not-supported", "Update Counterpart on your computer to use this here.")
 
         fun transport(code: String): CompanionException = when (code) {
-            "pairing-required", "scope-denied", "pairing-changed" -> CompanionException(code, "Connect to your Mac again.")
-            "certificate-changed" -> CompanionException(code, "Your Mac presented a different certificate. Scan a new QR code from it.")
+            "pairing-required", "scope-denied", "pairing-changed" -> CompanionException(code, "Connect to your computer again.")
+            "certificate-changed" -> CompanionException(code, "Your computer presented a different certificate. Scan a new QR code from it.")
             "too-large", "payload-too-large" -> CompanionException("payload-too-large", "That file is too large to send.")
             "invalid-request" -> CompanionException(code, "That request isn't allowed.")
             "cancelled" -> cancelled
             "network", "timeout", "certificate", "unreachable" -> unreachable
-            else -> CompanionException(code, "Something went wrong talking to your Mac. Try again.")
+            else -> CompanionException(code, "Something went wrong talking to your computer. Try again.")
         }
     }
 }
@@ -83,6 +83,7 @@ class CompanionClient(
                     if (m("/v1/events") || m("/v1/settings") || m("/v1/devices")) return "projects:read"
                     if (m("$one/(model\\.stl|renders/[^/]+|photos/[^/]+|capture/[^/]+|scan/[^/]+|original/[0-9]+|asks/[^/]+|prints/[^/]+/frames/[^/]+)")) return "projects:read"
                     if (m("$one/(filaments|camera\\.jpg)") || m("/v1/objects/printers/[^/]+/camera\\.jpg")) return "printer-handoff:use"
+                    if (m("/v1/objects/printers/[A-Za-z0-9_-]{1,256}/route")) return "printer-handoff:use"
                 }
                 "PATCH" -> {
                     if (m(one)) return "captures:import"
@@ -100,7 +101,9 @@ class CompanionClient(
                     if (m("$one/(print|printer|print-confirmation|estimate|print/pause|print/resume|print/cancel)")) return "printer-handoff:use"
                     if (m("/v1/devices/live-activity-tokens")) return "projects:write"
                     if (m("/v1/settings/(ai/test|fusion/setup)")) return "projects:write"
-                    if (m("/v1/printers/mcp/[^/]+/update")) return "printer-handoff:use"
+                    if (m("/v1/printers/mcp/mcp-[0-9a-f]{16}/update")) return "projects:write"
+                    if (m("/v1/objects/printers/[A-Za-z0-9_-]{1,256}/route")) return "printer-handoff:use"
+                    if (m("/v1/objects/printers/[A-Za-z0-9_-]{1,256}/mcp")) return "projects:write"
                 }
             }
             return null
@@ -113,21 +116,21 @@ class CompanionClient(
             val code = error?.get("code").str
             val newer = path.startsWith("/v1/events") || path.startsWith("/v1/settings") || path.endsWith("/camera.jpg") || path.contains("/print/") ||
                 path.endsWith("/estimate") || path.contains("/asks/") || path.startsWith("/v1/devices") || path.endsWith("/settings") ||
-                path.startsWith("/v1/printers/")
+                path.startsWith("/v1/printers/") || path.startsWith("/v1/objects/printers/")
             return when {
-                reply.status == 401 || reply.status == 403 -> CompanionException("pairing", "Connect to your Mac again.")
-                reply.status == 404 && path == "/v1/objects" -> CompanionException("not-set-up", "Your Mac isn't ready to make things yet. Open Counterpart on your Mac.")
-                reply.status == 404 && path.endsWith("/filaments") -> CompanionException("not-set-up", "Update Counterpart on your Mac to choose a filament here.")
+                reply.status == 401 || reply.status == 403 -> CompanionException("pairing", "Connect to your computer again.")
+                reply.status == 404 && path == "/v1/objects" -> CompanionException("not-set-up", "Your computer isn't ready to make things yet. Open Counterpart on your computer.")
+                reply.status == 404 && path.endsWith("/filaments") -> CompanionException("not-set-up", "Update Counterpart on your computer to choose a filament here.")
                 reply.status == 404 && path.endsWith("/camera.jpg") && code == "not-found" && message?.contains("camera") == true ->
                     CompanionException("no-camera", "This printer has no camera Counterpart can use.")
                 reply.status == 404 && (newer || code == "method-not-allowed") -> CompanionException.unsupported
                 reply.status == 405 -> CompanionException.unsupported
-                reply.status == 404 -> CompanionException("not-found", "This is no longer on your Mac.")
+                reply.status == 404 -> CompanionException("not-found", "This is no longer on your computer.")
                 reply.status == 409 -> CompanionException("conflict", message ?: "Wait until the current step finishes.")
                 reply.status == 503 -> CompanionException("unavailable", if (path.endsWith("/camera.jpg")) "The printer's camera isn't answering right now."
                     else "The printer isn't answering right now. Try again in a moment.")
-                reply.status == 400 && code == "invalid-request" -> CompanionException("invalid-request", "Your Mac didn't accept that. Update Counterpart on your Mac, then try again.")
-                else -> CompanionException("failed", "Something went wrong on your Mac. Try again.")
+                reply.status == 400 && code == "invalid-request" -> CompanionException("invalid-request", "Your computer didn't accept that. Update Counterpart on your computer, then try again.")
+                else -> CompanionException("failed", "Something went wrong on your computer. Try again.")
             }
         }
     }
@@ -190,12 +193,12 @@ class CompanionClient(
 
     private fun decode(reply: HttpReply, path: String): JsonObject {
         if (reply.status in 200..299) {
-            return parseObject(reply.body) ?: throw CompanionException("invalid-response", "Your Mac sent something this app doesn't understand. Update both apps.")
+            return parseObject(reply.body) ?: throw CompanionException("invalid-response", "Your computer sent something this app doesn't understand. Update both apps.")
         }
         throw refusal(reply, path)
     }
 
-    private fun invalid() = CompanionException("invalid-response", "Your Mac sent something this app doesn't understand. Update both apps.")
+    private fun invalid() = CompanionException("invalid-response", "Your computer sent something this app doesn't understand. Update both apps.")
     private fun one(o: JsonObject): Project = o["object"].obj?.let(Project::decode) ?: throw invalid()
     private fun HttpReply.checked(path: String): HttpReply { if (status !in 200..299) throw refusal(this, path); return this }
 
@@ -345,7 +348,7 @@ class CompanionClient(
         val path = "/v1/objects/${project.id}/${encodePath(resource)}"
         val reply = send("GET", path, limit = SCAN_LIMIT)
         if (reply.status != 200 || reply.body.isEmpty()) {
-            throw if (reply.status == 404) CompanionException("not-found", "This is no longer on your Mac.")
+            throw if (reply.status == 404) CompanionException("not-found", "This is no longer on your computer.")
             else CompanionException("download-failed", "That file couldn't be saved on this phone.")
         }
         // Older versions of this project are no longer shown.

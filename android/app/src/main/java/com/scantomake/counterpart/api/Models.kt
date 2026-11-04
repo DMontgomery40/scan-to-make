@@ -255,15 +255,19 @@ enum class ProjectStatus(val wire: String, val label: String) {
 data class PrinterDestination(
     val id: String, val name: String, val backend: String = "", val model: String? = null, val address: String? = null,
     val source: String = "", val origin: String? = null, val state: String? = null, val stateCheckedAt: String? = null,
-    val capabilities: Capabilities? = null, val mcpId: String? = null,
+    val capabilities: Capabilities? = null, val mcpId: String? = null, val mcps: List<McpChoice>? = null,
 ) {
+    @Serializable data class McpChoice(val backend: String, val destinationId: String)
     @Serializable
     data class Capabilities(
         val progress: Boolean = false, val layers: Boolean = false, val camera: String = "none", val filaments: String = "none",
         val pause: Boolean = false, val resume: Boolean = false, val cancel: Boolean = false, val quality: Boolean = false,
         val strength: Boolean = false, val copies: Boolean? = null, val materialChoice: Boolean? = null, val update: Update? = null,
-        val layerPauses: Boolean? = null,
-    ) { @Serializable data class Update(val message: String = "", val latestVersion: String? = null) }
+        val layerPauses: Boolean? = null, val server: Server? = null,
+    ) {
+        @Serializable data class Update(val message: String = "", val latestVersion: String? = null)
+        @Serializable data class Server(val name: String, val version: String)
+    }
 
     val isBambu: Boolean get() = backend == "bambu-printer-mcp"
     val via: String get() = if (isBambu) "bambu-printer-mcp" else "mcp-3D-printer-server"

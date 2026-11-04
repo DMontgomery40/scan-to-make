@@ -61,7 +61,8 @@ State uses XDG data directories; socket uses a private `counterpart` directory u
 - [x] Reuse shared starter catalog/assets and wire fresh project creation (`40cc1d9`).
 - [x] Add plate selection/completion/reprint, multiple original import and expectedPlate guard (`40cc1d9`). Build/lint and existing contract checks pass; UI acceptance remains open.
 - [x] Implement Android copies and layer pauses through existing HTTPS print/estimate routes, with capability gating and sliced-original preservation. Build verification only; visible UI acceptance is still pending.
-- [ ] Add remaining current phone features: settings/provider/MCP management, queued corrections, host-neutral wording and 3D viewing. Work against existing authorized HTTPS routes.
+- [x] Implement Android connection/MCP selection and updates against existing authorized HTTPS routes, plus host-neutral app wording. Update results follow companion events. Visible app acceptance remains pending.
+- [ ] Add remaining current phone features: provider/general/device settings, MCP installation, queued corrections and 3D viewing. Work against existing authorized HTTPS routes.
 - [ ] Qualify foreground/background event delivery and recovery for long prints; do not rely indefinitely on dataSync foreground-service runtime.
 - [ ] Build signed installable beta, inspect real UI, pair with Mac then Linux. Capture needs physical Android evidence.
 
