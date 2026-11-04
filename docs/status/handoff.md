@@ -506,8 +506,20 @@ remote native probes and the SSH tunnel were removed after verification.
      Parent `eb767494` pins gcc-16-base to retain its shared notices, rejects missing package copyright files
      and any dangling distro link, and removes only the unused qt-default selector. Rebuilt runtime
      `reconstruction-1.2.0-geb7674946d04-linux-x64` passed all 66 .deb hashes, strict closure and relocated check.
-     Linux .deb/AppImage build is in progress in agents-136
-     `~/scan-to-make-work/reconstruction-release-6151553/`. Nothing installed or restarted.
+     **Both Linux packages built and extracted-runtime verification passed:** app/host source `eb767494`,
+     host BUILD-ID `geb7674946d04-node24.22.2-x64-r4c6014f501e9`. AppImage initially failed because
+     linuxdeploy could not locate the wheel-private TBB dependency; packaging-only `28db39e8` supplies
+     bundled library paths to its scanner. Final artifact bytes, not the pre-bundle tree, passed 64 exports,
+     5 internal dependencies, npm/npx 11.19.1, reconstruction identity and samples readiness (USD modules,
+     COLMAP and all three OpenMVS tools) under env -i. Validator is committed in `3bda30f2`.
+     Artifacts: agents-136 `~/scan-to-make-work/reconstruction-release-6151553/artifacts/`:
+     - `Counterpart_0.1.0_amd64.deb`, SHA-256 `f80433771942eaf2e634501e63865b61385c70405826b86387720130fa33c36b`.
+     - `Counterpart_0.1.0_amd64.AppImage`, SHA-256 `40a16ad1da3a18feea4be139c6a05eda9970231feb6d3349109fb321cb810ac7`.
+     Full receipt `verify-final-packages.log` and build logs remain beside artifacts; generated Rust/frontend
+     caches, duplicate resources and extracted verification trees were removed. New reconstruction runtime
+     retained for reuse; Muse's agents-171 artifact untouched. Mac generated payload removed after its receipt.
+     Nothing installed or restarted. Genuine phone-capture region/scale UI, Android/device pairing and
+     physical desktop acceptance remain open; package checks are engineering evidence only.
      #293 remains with the merge owner. No further Muse implementation requested; retained artifacts stay.
      Synthetic geometry retained a support disc until explicit region choice; one OpenMVS run crashed then
      succeeded on retry. Neither result establishes real capture quality or automatic print readiness.
