@@ -8,18 +8,21 @@ set -euo pipefail
 : "${SPARKLE_BIN:?Set Sparkle distribution bin directory}"
 : "${RELEASE_DOWNLOAD_URL:?Set the HTTPS release asset directory}"
 : "${BUILD_NUMBER:?Set an increasing bundle version}"
+: "${MAC_PROVISIONING_PROFILE:?Set the Developer ID CloudKit provisioning profile name or UUID}"
 mac=$(cd "$(dirname "$0")/.." && pwd)
 [ -x "$mac/Payload/node/bin/node" ] || { echo 'Run prepare-payload.sh first.' >&2; exit 1; }
 case "$SPARKLE_FEED_URL" in https://*) ;; *) exit 1 ;; esac
 out="$mac/build/release-$BUILD_NUMBER"
 mkdir -p "$out"
-xcodebuild -project "$mac/ScanToMake.xcodeproj" -scheme ScanToMake -configuration Release -derivedDataPath "$out/derived" CODE_SIGN_STYLE=Manual OTHER_CODE_SIGN_FLAGS=--timestamp CODE_SIGN_IDENTITY="$DEVELOPER_ID_APPLICATION" CURRENT_PROJECT_VERSION="$BUILD_NUMBER" SPARKLE_FEED_URL="$SPARKLE_FEED_URL" SPARKLE_PUBLIC_KEY="$SPARKLE_PUBLIC_KEY" build
+xcodebuild -project "$mac/ScanToMake.xcodeproj" -scheme ScanToMake -configuration Release -derivedDataPath "$out/derived" CODE_SIGN_STYLE=Manual OTHER_CODE_SIGN_FLAGS=--timestamp CODE_SIGN_IDENTITY="$DEVELOPER_ID_APPLICATION" STM_MAC_PROVISIONING_PROFILE="$MAC_PROVISIONING_PROFILE" STM_ENTITLEMENTS_SUFFIX=+CloudKitProduction STM_APS_ENVIRONMENT=production CURRENT_PROJECT_VERSION="$BUILD_NUMBER" SPARKLE_FEED_URL="$SPARKLE_FEED_URL" SPARKLE_PUBLIC_KEY="$SPARKLE_PUBLIC_KEY" build
 app="$out/derived/Build/Products/Release/Counterpart.app"
 codesign --verify --deep --strict "$app"
+python3 "$mac/../../scripts/verify_apple_distribution.py" "$app" --platform mac --build "$BUILD_NUMBER"
 ditto -c -k --keepParent "$app" "$out/notarization.zip"
 xcrun notarytool submit "$out/notarization.zip" --keychain-profile "$NOTARY_PROFILE" --wait
 xcrun stapler staple "$app"
 xcrun stapler validate "$app"
+spctl --assess --type execute --verbose=2 "$app"
 mkdir -p "$out/feed"
 ditto -c -k --keepParent "$app" "$out/feed/ScanToMake-$BUILD_NUMBER.zip"
 "$SPARKLE_BIN/generate_appcast" --download-url-prefix "$RELEASE_DOWNLOAD_URL" "$out/feed"

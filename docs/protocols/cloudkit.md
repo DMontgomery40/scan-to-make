@@ -128,8 +128,8 @@ How the Mac handles a command:
 
 ## Before the first production deploy
 
-1. In CloudKit Console, open `iCloud.com.scantomake.counterpart` → Development and check that `CounterpartEvent`, `CounterpartProject` and `CounterpartCommand` exist with the fields above (save one of each from a development build if any is missing).
+1. In CloudKit Console, open `iCloud.com.scantomake.counterpart` → Development and check that all five types (`CounterpartEvent`, `CounterpartProject`, `CounterpartCommand`, `CounterpartMac`, and `CounterpartDevice`) exist with the fields above (save one of each from a development build if any is missing).
 2. Add a **Queryable** index on `CounterpartEvent.type`.
 3. **Deploy Schema Changes** to Production. Developer ID and App Store builds use production (PRD §8.8).
-4. Sign the Mac app with its iCloud entitlement (`STM_ENTITLEMENTS_SUFFIX=+CloudKit`) and `STM_APS_ENVIRONMENT=production`, so command pushes reach it.
+4. Use the Mac production release script, which selects `STM_ENTITLEMENTS_SUFFIX=+CloudKitProduction` and a matching Developer ID CloudKit profile, so CloudKit and command pushes both use Production. The phone's App Store Connect export must also select CloudKit Production. See [distribution](../distribution.md) for signed-artifact checks and the production Live Activity relay address.
 5. On a Mac and a phone signed in to the same iCloud account: a print event appears as a `CounterpartEvent`, the project as a `CounterpartProject`, and a `pause` command written from the phone comes back `done`.
