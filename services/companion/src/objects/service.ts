@@ -914,7 +914,6 @@ export class ObjectService {
     const messages: Record<PrintProgress['phase'], string> = {
       connecting:'Connecting to your printer service…', orienting:'Orienting the model for printing…', slicing:'Slicing the model…',
       inspecting:'Checking the sliced print file…', 'slice-ready':'Sliced file saved.', 'checking-printer':'Checking the printer…',
-      'resolving-printer-error':'The printer needs your acknowledgment of its rejected command.',
       'requesting-print':'Requesting print. Waiting for the printer service…', accepted:'Print request accepted.',
     };
     const eventBase = {projectId: id, printId, ...(printDestination ? {destinationId: printDestination.id, printerName: printDestination.name} : {})};

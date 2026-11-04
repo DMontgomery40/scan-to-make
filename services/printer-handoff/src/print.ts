@@ -12,13 +12,13 @@ import {inspectModelFile} from './model-file.js';
 import {slicerReport} from './slicer-report.js';
 import {keepSlice, readSlice, sliceCacheKey, presetDigests} from './slice-cache.js';
 import type {HandoffBundleStore} from './bundle.js';
-import {PrinterMcpError, toolResultJson, toolResultText, type PrinterToolCatalog} from './mcp-client.js';
+import {PrinterMcpError, toolResultJson, toolResultText, type McpProgress, type PrinterToolCatalog} from './mcp-client.js';
 import {PrinterSession} from './session.js';
-import {readPrintRoute} from './counterpart.js';
 
 export type PrintStep = 'discover' | 'lay_flat' | 'slice_stl' | 'inspect' | 'print';
-export type PrintPhase = 'connecting' | 'orienting' | 'slicing' | 'inspecting' | 'slice-ready' | 'checking-printer' | 'resolving-printer-error' | 'requesting-print' | 'accepted';
-export interface PrintProgress {phase: PrintPhase; estimate?: SliceEstimate}
+export type PrintPhase = 'connecting' | 'orienting' | 'slicing' | 'inspecting' | 'slice-ready' | 'checking-printer' | 'requesting-print' | 'accepted';
+/** `mcp`: the printer MCP's own progress during that phase (slicing, requesting the print), when it sends any. */
+export interface PrintProgress {phase: PrintPhase; estimate?: SliceEstimate; mcp?: McpProgress}
 export interface PrintRunInput {
   onProgress?: (update: PrintProgress) => Promise<void>;
   /** Persist a non-replayable intent before sending the print tool call. */
@@ -91,7 +91,7 @@ function filtered(session: PrinterSession, name: string, args: Record<string, un
   return Object.fromEntries(Object.entries(clean).filter(([key]) => allowed.has(key)));
 }
 const DISPATCH_TOOLS = ['print_3mf', 'upload_gcode', 'process_and_print_stl'];
-interface CallOptions {signal?: AbortSignal; beforeDispatch?: () => Promise<void>; elicitationContext?: ElicitationContext; failFast?: boolean}
+interface CallOptions {signal?: AbortSignal; beforeDispatch?: () => Promise<void>; elicitationContext?: ElicitationContext; failFast?: boolean; onProgress?: (progress: McpProgress) => void}
 async function call(session: PrinterSession, name: string, args: Record<string, unknown>, options: CallOptions = {}) {
   return session.call(name, filtered(session, name, args), {
     ...(options.signal ? {signal: options.signal} : {}),
@@ -99,6 +99,7 @@ async function call(session: PrinterSession, name: string, args: Record<string, 
     ...(options.beforeDispatch ? {beforeDispatch: options.beforeDispatch} : {}),
     ...(options.elicitationContext ? {elicitationContext: options.elicitationContext} : {}),
     ...(options.failFast ? {failFast: true} : {}),
+    ...(options.onProgress ? {onProgress: options.onProgress} : {}),
   });
 }
 function absolutePath(result: Parameters<typeof toolResultText>[0]): string {
@@ -307,8 +308,8 @@ export class PrinterHandoffRunner {
     // without a known model may ask for it, so it holds the mutex then.
     const signal = input.signal;
     const local: CallOptions = {signal, ...(shared ? (selection.model ? {} : {elicitationContext: tag}) : {elicitationContext: tag})};
-    const read: CallOptions = {signal, ...(shared ? {} : {elicitationContext: tag})};
     const progress = async (phase: PrintPhase, estimate?: SliceEstimate) => { await input.onProgress?.({phase, ...(estimate ? {estimate} : {})}); };
+    const mcpProgress = (phase: PrintPhase) => (mcp: McpProgress) => { void input.onProgress?.({phase, mcp})?.catch(() => undefined); };
     await progress('connecting');
     const catalog = await session.connect(signal ? {signal} : {});
     step('discover');
@@ -389,7 +390,7 @@ export class PrinterHandoffRunner {
       ...sliceArgs,
       // lay_flat already chose the flat face; otherwise let the slicer orient.
       orient: !threeMf && !laidFlat,
-    }, local);
+    }, {...local, onProgress: mcpProgress('slicing')});
     let slicedPath = sliced ? absolutePath(sliced) : input.stlPath;
     if (reused) {
       // Named as a fresh slice of this input would be: the printer's job is named after the file.
@@ -431,19 +432,7 @@ export class PrinterHandoffRunner {
     // PRD §5.6: no bed check. Bambu's own bed levelling finds a full plate; the MCP's own confirmation is relayed as it asks.
     const printContext: ElicitationContext = tag;
 
-    // A rejected unsigned command leaves a software HMS error. FULU's authenticated
-    // route can recover it only through the server's own human confirmation. The route
-    // is the MCP's own setting, so ask it rather than keeping a copy here.
-    if (this.#config.backend === 'bambu-printer-mcp' && session.hasTool('get_printer_status') && session.hasTool('clear_hms_errors')
-        // The route only decides this optional recovery: a failed read skips it, never the print.
-        && (await readPrintRoute(session, {signal}).catch(error => { if (signal?.aborted) throw error; return undefined; }))?.mode === 'bambu_network') {
-      const status = resultValue(await call(session, 'get_printer_status', {}, read)) as {raw?: {hms?: {attr?: number; code?: number}[]}};
-      const errors = status?.raw?.hms;
-      if (Array.isArray(errors) && errors.length === 1 && errors[0]?.attr === 0x05000500 && errors[0]?.code === 0x00010007) {
-        await progress('resolving-printer-error');
-        await call(session, 'clear_hms_errors', {bambu_model:selection.model}, {signal, elicitationContext: tag});
-      }
-    }
+    // The printer MCP owns its route and the printer's errors: Print never clears one itself.
     await progress('requesting-print');
     let printed: unknown;
     if (this.#config.backend === 'bambu-printer-mcp' || slicedPath.toLowerCase().endsWith('.3mf') || selection.printerType === 'bambu') {
@@ -465,7 +454,7 @@ export class PrinterHandoffRunner {
         vibration_calibration: printOptions.vibrationCalibration,
         layer_inspect: printOptions.layerInspect,
         timelapse: printOptions.timelapse,
-      }, {signal, beforeDispatch: input.beforePrint, elicitationContext: printContext});
+      }, {signal, beforeDispatch: input.beforePrint, elicitationContext: printContext, onProgress: mcpProgress('requesting-print')});
       printed = resultValue(result);
     } else {
       const result = await call(session, 'upload_gcode', {
@@ -476,7 +465,7 @@ export class PrinterHandoffRunner {
         type: selection.printerType,
         host: selection.host,
         port: selection.port,
-      }, {signal, beforeDispatch: input.beforePrint, elicitationContext: printContext});
+      }, {signal, beforeDispatch: input.beforePrint, elicitationContext: printContext, onProgress: mcpProgress('requesting-print')});
       printed = resultValue(result);
     }
     step('print');

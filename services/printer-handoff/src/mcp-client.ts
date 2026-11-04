@@ -77,6 +77,9 @@ export interface PrinterMcpClientOptions {
   onClose?: () => void;
 }
 
+/** One `notifications/progress` from the printer MCP during a tool call. */
+export interface McpProgress {progress: number; total?: number; message?: string}
+
 export interface PrinterToolCallOptions {
   /** Transparent MCP adapters preserve tool errors and media under the SDK's
    * transport frame limit, without applying printer-domain result semantics. */
@@ -91,6 +94,8 @@ export interface PrinterToolCallOptions {
    * server's elicitation requests carry no reference to the call that caused them.
    */
   elicitationContext?: ElicitationContext;
+  /** The MCP's progress notifications for this call. Given, the call asks for them, and each restarts its timeout (within its total). */
+  onProgress?: (progress: McpProgress) => void;
 }
 
 /** One stdio MCP session against the operator-configured printer server. */
@@ -246,6 +251,12 @@ export class PrinterMcpClient {
     try {
       result = await this.#client.callTool({name, arguments: args}, undefined, {
         signal: options.signal, timeout, maxTotalTimeout: timeout, resetTimeoutOnProgress: true,
+        // The SDK asks the MCP for progress (and resets the timeout on it) only with a handler: given only when the
+        // caller wants it, so other calls (the Fusion worker's pass-through) send exactly what they always did.
+        ...(options.onProgress ? {onprogress: ({progress, total, message}: {progress: number; total?: number; message?: string}) => {
+          try { options.onProgress?.({progress, ...(total !== undefined ? {total} : {}), ...(message !== undefined ? {message} : {})}); }
+          catch { /* A caller's progress display never fails the call. */ }
+        }} : {}),
       }) as CallToolResult;
     } catch (error) {
       const failure = new PrinterMcpError(options.dispatchSensitive && this.#declinedElicitations === declinedBefore
