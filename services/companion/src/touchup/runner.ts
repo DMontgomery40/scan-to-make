@@ -58,13 +58,13 @@ interface ResultEvent {
   is_error?: boolean;
   result?: string;
   total_cost_usd?: number;
-  structured_output?: {status?: string; closeup?: string; summary?: string; title?: string; changes?: unknown; ask?: unknown; supports?: unknown};
+  structured_output?: {status?: string; closeup?: string; summary?: string; title?: string; changes?: unknown; ask?: unknown};
 }
 
 /** The worker's title, what-changed list and Ask, checked and made safe to show. */
 function structured(answer: ResultEvent['structured_output'], publicText: (text: string) => string): Pick<TouchupResult, 'title' | 'changes' | 'ask' | 'supports'> {
   const out: Pick<TouchupResult, 'title' | 'changes' | 'ask' | 'supports'> = {};
-  const supports = answer?.supports as Record<string, unknown> | undefined;
+  const supports = (answer as {supports?: unknown} | undefined)?.supports as Record<string, unknown> | undefined;
   if (supports && typeof supports.enabled === 'boolean')
     out.supports = {enabled: supports.enabled, ...(supports.enabled && (supports.type === 'tree(auto)' || supports.type === 'normal(auto)') ? {type: supports.type} : {})};
   if (typeof answer?.title === 'string' && answer.title.trim()) out.title = publicText(answer.title).replace(/[.!]+$/, '').slice(0, 40);

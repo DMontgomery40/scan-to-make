@@ -826,6 +826,21 @@ test('Estimate, then Print of the same model and settings slices once', async t 
   assert.deepEqual((await f.calls()).filter(entry => entry.tool).map(entry => entry.tool), ['slice_stl', 'inspect_print_file', 'inspect_print_file', 'print_3mf']);
 });
 
+// The supports choice shapes the slice: a kept slice is reused only for the same choice, never across a change.
+test('a kept slice is reused only for the same supports choice', async t => {
+  const f = await setup(t, {supports: true});
+  const sliceCache = {directory: join(f.root, 'slices')};
+  const slices = async () => (await f.calls()).filter(entry => entry.tool === 'slice_stl').map(entry => entry.arguments.enable_support);
+  await f.runner.run({stlPath: f.stlPath, sliceCache, print: false});
+  await f.runner.run({stlPath: f.stlPath, sliceCache, print: false, slicer: {enableSupport: false}});
+  await f.runner.run({stlPath: f.stlPath, sliceCache, print: false, slicer: {enableSupport: true, supportType: 'tree(auto)'}});
+  await f.runner.run({stlPath: f.stlPath, sliceCache, print: false, slicer: {enableSupport: true, supportType: 'normal(auto)'}});
+  assert.deepEqual(await slices(), [undefined, false, true, true], 'profile default, off, tree and normal each slice');
+  // The same choice again prints the kept slice.
+  await f.runner.run({stlPath: f.stlPath, sliceCache, slicer: {enableSupport: true, supportType: 'tree(auto)'}});
+  assert.equal((await slices()).length, 4);
+});
+
 test('cached generic G-code still confirms temperatures and uploads G-code after Estimate and on Print Again', async t => {
   const f = await setup(t, {mode: 'generic-gcode', backend: 'mcp-3d-printer-server'});
   const input = {stlPath: f.stlPath, sliceCache: {directory: join(f.root, 'slices')}};
