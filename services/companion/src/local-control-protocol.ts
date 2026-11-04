@@ -58,6 +58,7 @@ export const parameters = {
   'objects.list': empty,
   'objects.printers': empty,
   'objects.filaments': z.strictObject({id: z.uuid()}),
+  'objects.colourMapping': z.strictObject({id: z.uuid()}),
   'objects.selectPrinter': z.strictObject({id: z.uuid(), destinationId: z.string().min(1).max(256)}),
   'objects.get': z.strictObject({id: z.uuid()}),
   'objects.settings.get': z.strictObject({id: z.uuid()}),
@@ -77,10 +78,16 @@ export const parameters = {
   'objects.print': z.strictObject({id: z.uuid(), expectedPlate: z.string().regex(/^[0-9a-f]{64}:[0-9]+$/).optional(), checked: z.boolean().optional(), filament: z.strictObject({
     slot:z.number().int().min(0).max(255), colour:z.string().regex(/^#[0-9A-F]{6}$/), material:z.string().min(1).max(128),
     name:z.string().max(256), filamentId:z.string().max(128), destinationId:z.string().min(1).max(256), suggested:z.boolean().optional(),
-  }).optional(), quality: PrintQualitySchema.optional(), strength: PrintStrengthSchema.optional(), colour: PrintColourSchema.optional(),
+  }).optional(), filaments: z.array(z.strictObject({
+    slot:z.number().int().min(0).max(4095), colour:z.string().regex(/^#[0-9A-F]{6}$/), material:z.string().min(1).max(128),
+    name:z.string().max(256), filamentId:z.string().max(128), destinationId:z.string().min(1).max(256), suggested:z.boolean().optional(),
+  })).min(1).max(64).optional(), filamentsModelVersion: z.string().min(1).max(128).optional(), quality: PrintQualitySchema.optional(), strength: PrintStrengthSchema.optional(), colour: PrintColourSchema.optional(),
     copies: z.number().int().min(1).max(64).optional(), pauseBeforeLayers: PrintSettingsSchema.shape.pauseBeforeLayers}),
   'objects.estimate': z.strictObject({id: z.uuid(), destinationId: z.string().min(1).max(256).optional(), quality: PrintQualitySchema.optional(), strength: PrintStrengthSchema.optional(),
-    copies: z.number().int().min(1).max(64).optional()}),
+    copies: z.number().int().min(1).max(64).optional(), filaments: z.array(z.strictObject({
+      slot:z.number().int().min(0).max(4095), colour:z.string().regex(/^#[0-9A-F]{6}$/), material:z.string().min(1).max(128),
+      name:z.string().max(256), filamentId:z.string().max(128), destinationId:z.string().min(1).max(256), suggested:z.boolean().optional(),
+    })).min(1).max(64).optional(), filamentsModelVersion: z.string().min(1).max(128).optional()}),
   'objects.pausePrint': z.strictObject({id: z.uuid()}),
   'objects.resumePrint': z.strictObject({id: z.uuid()}),
   'objects.cancelPrint': z.strictObject({id: z.uuid()}),

@@ -231,7 +231,7 @@ remote native probes and the SSH tunnel were removed after verification.
      `choosePrinterMcpWithCatalog` to avoid conflicting with main's id-returning method.
      Checks: companion build, 86 affected Node checks, 172 shared Swift checks and unsigned iOS Release build
      pass. Logs in `~/scan-to-make-work/phone-301-integration/`. No phone installation/UI acceptance.
-     Remaining main queue: #293 (Muse after quota reset).
+     Main queue is complete at `127721fa` (#293, Nov 4). The release integration retains the final AMS/3MF behavior alongside reconstruction, starters, provider workers and multi-plate selection. The new mapped-colour Mac print request also sends `expectedPlate`. Companion build, 109 focused companion checks and 19 ControlKit request checks pass; the combined committed-source gate is next. No deployment or physical-print acceptance claimed.
      Engineering checks: companion build and 125 focused remote/auth/updater/session/printer checks pass.
      Broader handoff/HTTP/control/provider run: 212 pass, 5 skip, one unchanged Mac worker-environment
      assertion fails because the child receives `__CF_USER_TEXT_ENCODING` (secret-leak assertion passes).
@@ -363,7 +363,7 @@ remote native probes and the SSH tunnel were removed after verification.
      carries the complete global install-script policy/verification and Node native-addon entitlement.
      Owner reports package/e2e/licence/Mac build passed at `e179aef`; Node 22/24 companion passed at
      `b0926e2`, whose only additional edits were updater source/tests. branch_check SAFE; Codex no major
-     issues. Release `31353f57` already matches the runtime behavior; final main integration waits for #293.
+     issues. Release `31353f57` already matches the runtime behavior; final main `127721fa` is integrated with #293, with the combined gate pending.
      `verify_apple_distribution.py` is absent on main, so its signed-Node check remains release-only until
      distribution tooling is integrated. No live deployment is needed for the backport.
      Review follow-up (#304 `b0926e2`): both global installs now also force `--loglevel=notice`, so a

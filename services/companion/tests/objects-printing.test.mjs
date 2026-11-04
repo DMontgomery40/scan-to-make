@@ -1,3 +1,4 @@
+import {createRequire} from 'node:module';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {mkdtemp, mkdir, readFile, rm, writeFile} from 'node:fs/promises';
@@ -94,6 +95,7 @@ async function setup(t, {tools = ['get_printer_status', 'camera_snapshot', 'paus
     runBundle: async (store, id, options = {}) => {
       runs.push({id, options, selection: (await store.read(id)).selection});
       for (const phase of ['slicing', 'checking-printer']) await options.onProgress?.({phase});
+      await options.beforePrint?.();
       const answer = await relay.request({method: 'elicitation/create', params: {mode: 'form', message: 'Printer: P1S. Plate clear?', requestedSchema: CONFIRM}},
         {bundleId: id});
       if (answer.action !== 'accept') throw new Error('declined');
@@ -128,6 +130,276 @@ async function setup(t, {tools = ['get_printer_status', 'camera_snapshot', 'paus
 const status = (state, progress, extra = {}) => ({connected: true, print: {filename: JOB, progress, timeRemaining: Math.max(0, 40 - progress), currentLayer: progress, totalLayers: 100},
   raw: {gcode_state: state, subtask_name: JOB, task_id: '0', ...extra}});
 const reset = f => f.store.update(f.object.id, o => ({...o, state: 'ready', print: undefined}));
+
+test('a design in several colours prints its multi-part 3MF, not a one-spool STL', async t => {
+  const f = await setup(t, {reports: [status('RUNNING', 10)]});
+  const {zipSync, strToU8} = createRequire(new URL('../../printer-handoff/package.json', import.meta.url))('fflate');
+  const parts = Buffer.from(zipSync({'[Content_Types].xml': strToU8('<Types/>'),
+    '3D/3dmodel.model': strToU8('<model><resources><object id="1"><mesh/></object><object id="2"><mesh/></object></resources><build><item objectid="1"/><item objectid="2"/></build></model>')}));
+  await writeFile(join(f.store.dir(f.object.id), 'current', 'model.3mf'), parts);
+  await f.store.update(f.object.id, o => ({...o, kind: 'fit', current: {model: 'current/model.3mf', renders: []}}));
+  await f.service.print(f.object.id);
+  await f.approve();
+  await f.service.settled(f.object.id);
+  const manifest = await f.deps.print.services.store.read(f.runs[0].id);
+  assert.equal(manifest.sourceModel?.format, '3mf', 'the parts and their filaments reach the printer service');
+  assert.equal(manifest.cleanStl, undefined);
+});
+
+const fflate = () => createRequire(new URL('../../printer-handoff/package.json', import.meta.url))('fflate');
+const twoPart3mf = (projectSettings) => {
+  const {zipSync, strToU8} = fflate();
+  return Buffer.from(zipSync({'[Content_Types].xml': strToU8('<Types/>'),
+    '3D/3dmodel.model': strToU8('<model><resources><object id="1"><mesh/></object></resources><build><item objectid="1"/></build></model>'),
+    'Metadata/model_settings.config': strToU8('<config><object id="3"><metadata key="name" value="Pick"/><metadata key="extruder" value="1"/>'
+      + '<part id="1" subtype="normal_part"><metadata key="name" value="body"/><metadata key="extruder" value="1"/></part>'
+      + '<part id="2" subtype="normal_part"><metadata key="name" value="letters"/><metadata key="extruder" value="2"/></part></object></config>'),
+    ...(projectSettings ? {'Metadata/project_settings.config': strToU8(JSON.stringify(projectSettings))} : {})}));
+};
+async function multipart(f, {bytes, filaments, kind = 'fit', publishedSelection} = {}) {
+  await writeFile(join(f.store.dir(f.object.id), 'current', 'model.3mf'), bytes);
+  await f.store.update(f.object.id, o => ({...o, kind, ...(publishedSelection ? {publishedSelection} : {}),
+    current: {model: 'current/model.3mf', renders: [], ...(filaments ? {filaments} : {})}}));
+}
+
+test('a multi-colour design prints each part from the nearest loaded spool', async t => {
+  const f = await setup(t, {reports: [status('RUNNING', 10)]});
+  await multipart(f, {bytes: twoPart3mf(), filaments: [{name: 'body', colour: '#111111'}, {name: 'letters', colour: '#FFD200'}]});
+  const mapping = await f.service.colourMapping(f.object.id);
+  assert.deepEqual(mapping.filaments.map(x => [x.index, x.name, x.colour, x.slot]), [[1, 'body', '#111111', 0], [2, 'letters', '#FFD200', 1]]);
+  assert.equal(mapping.trays.length, 3);
+  assert.ok(mapping.trays.every(tray => !('profile' in tray)), 'trays reach the sheet without slicer paths');
+  await f.service.print(f.object.id);
+  await f.approve();
+  await f.service.settled(f.object.id);
+  assert.deepEqual(f.runs[0].selection.amsMapping, [0, 1], 'black body on the black spool, yellow letters on the yellow one');
+  assert.equal(f.runs[0].selection.useAms, true);
+  assert.equal(f.runs[0].selection.autoMatchAms, false);
+  assert.equal(f.runs[0].selection.amsSlots, undefined);
+  assert.equal(f.runs[0].options.slicer.loadFilaments, '/p/petg.json;/p/pla.json');
+  assert.equal(f.runs[0].options.slicer.filamentColours, '#000000;#FEC600');
+});
+
+test('the sheet’s spools override the suggestion, and a spool that changed since is refused', async t => {
+  const f = await setup(t, {reports: [status('RUNNING', 10)]});
+  await multipart(f, {bytes: twoPart3mf(), filaments: [{colour: '#111111'}, {colour: '#FFD200'}]});
+  const {modelVersion} = await f.service.colourMapping(f.object.id);
+  const choices = await f.service.filaments(f.object.id);
+  const bySlot = slot => choices.find(choice => choice.slot === slot);
+  await assert.rejects(f.service.print(f.object.id, {filaments: [{...bySlot(1), colour: '#123456'}, bySlot(0)], filamentsModelVersion: modelVersion}), /changed/);
+  await assert.rejects(f.service.print(f.object.id, {filaments: [bySlot(1)], filamentsModelVersion: modelVersion}), /every colour/);
+  await assert.rejects(f.service.print(f.object.id, {filaments: [bySlot(1), bySlot(254)], filamentsModelVersion: modelVersion}), /One print feeds from one source/);
+  await f.service.print(f.object.id, {filaments: [bySlot(1), bySlot(0)], filamentsModelVersion: modelVersion});
+  await f.approve();
+  await f.service.settled(f.object.id);
+  assert.deepEqual(f.runs.at(-1).selection.amsMapping, [1, 0]);
+  assert.equal(f.runs.at(-1).options.slicer.loadFilaments, '/p/pla.json;/p/petg.json');
+});
+
+test('a published multi-colour 3MF maps its designer colours to loaded spools; a sliced one keeps its slicing and its material', async t => {
+  const bytes = twoPart3mf({filament_colour: ['#000000', '#FFFFFF'], filament_type: ['PLA', 'PLA']});
+  const f = await setup(t, {reports: [status('RUNNING', 10)]});
+  await multipart(f, {bytes, kind: 'published'});
+  await f.service.print(f.object.id);
+  await f.approve();
+  await f.service.settled(f.object.id);
+  // One feed source per print: white follows the nearest AMS spool automatically, not the external one.
+  assert.deepEqual(f.runs[0].selection.amsMapping, [0, 1], 'black to the black spool (PETG, re-sliced with it), white to the nearest AMS spool');
+  assert.equal(f.runs[0].options.slicer.loadFilaments, '/p/petg.json;/p/pla.json');
+
+  const g = await setup(t, {reports: [status('RUNNING', 10)]});
+  await multipart(g, {bytes, kind: 'published', publishedSelection: {fileIndex: 0, plateIndex: 0, sliced: true}});
+  await g.service.print(g.object.id);
+  await g.approve();
+  await g.service.settled(g.object.id);
+  // Sliced for PLA: the black PETG spool is not eligible at all (the MCP would refuse it at dispatch).
+  assert.deepEqual(g.runs[0].selection.amsMapping, [1, 1]);
+  assert.equal(g.runs[0].options.slicer?.loadFilaments, undefined, 'an already-sliced file is never re-sliced with new profiles');
+});
+
+test('profiles and mapping cover every declared slot, and choices for an older model are refused', async t => {
+  const f = await setup(t, {reports: [status('RUNNING', 10)]});
+  const bytes = twoPart3mf({filament_colour: ['#000000', '#FEC600', '#FFFFFF', '#0000FF'], filament_type: ['PLA', 'PLA', 'PLA', 'PLA']});
+  await multipart(f, {bytes, kind: 'published'});
+  const mapping = await f.service.colourMapping(f.object.id);
+  assert.ok(mapping.modelVersion);
+  await assert.rejects(f.service.print(f.object.id, {filaments: [mapping.trays[0], mapping.trays[1]], filamentsModelVersion: 'stale'}), /model changed/);
+  await f.service.print(f.object.id);
+  await f.approve();
+  await f.service.settled(f.object.id);
+  assert.equal(f.runs.at(-1).selection.amsMapping.length, 4, 'one mapping entry per declared slot');
+  assert.equal(f.runs.at(-1).options.slicer.loadFilaments.split(';').length, 4, 'one profile per declared slot (the MCP refuses fewer)');
+  assert.equal(f.runs.at(-1).options.slicer.filamentColours.split(';').length, 4);
+});
+
+test('a sliced plate is not blocked by a declared material it never uses, but a painted one with no plate list still refuses', async t => {
+  const {zipSync, strToU8} = fflate();
+  const build = plate => Buffer.from(zipSync({'[Content_Types].xml': strToU8('<Types/>'),
+    '3D/3dmodel.model': strToU8('<model><resources><object id="1"><mesh/></object></resources><build><item objectid="1"/></build></model>'),
+    'Metadata/model_settings.config': strToU8('<config><object id="3"><metadata key="name" value="Pick"/><metadata key="extruder" value="1"/>'
+      + '<part id="1" subtype="normal_part"><metadata key="name" value="body"/><metadata key="extruder" value="1"/></part></object></config>'),
+    'Metadata/project_settings.config': strToU8(JSON.stringify({filament_colour: ['#FEC600', '#000000'], filament_type: ['PLA', 'ABS']})),
+    ...(plate ? {'Metadata/plate_1.json': strToU8(JSON.stringify({filament_ids: [0]}))} : {})}));
+  const selection = {fileIndex: 0, plateIndex: 0, sliced: true};
+  // Plate 1 uses only filament 1 (PLA, loaded): the unused ABS slot must not block it.
+  const f = await setup(t, {reports: [status('RUNNING', 10)]});
+  await multipart(f, {bytes: build(true), kind: 'published', publishedSelection: selection});
+  await f.service.print(f.object.id);
+  await f.approve();
+  await f.service.settled(f.object.id);
+  assert.equal(f.runs[0].selection.amsMapping.length, 2, 'the mapping still covers every declared slot');
+  assert.equal(f.runs[0].selection.amsMapping[0], 1, 'the PLA part prints from the loaded PLA spool');
+  // No plate list: slot 2 may be painted, and no ABS spool is loaded — refuse, don't guess.
+  const g = await setup(t, {reports: [status('RUNNING', 10)]});
+  await multipart(g, {bytes: build(false), kind: 'published', publishedSelection: selection});
+  await assert.rejects(g.service.print(g.object.id), /painted part of this file was sliced for ABS/);
+});
+
+test('a painted unsliced model shows its painted filament as a colour row; without painting it stays an unused preset', async t => {
+  const {zipSync, strToU8} = fflate();
+  const build = painted => Buffer.from(zipSync({'[Content_Types].xml': strToU8('<Types/>'),
+    '3D/3dmodel.model': strToU8(`<model><resources><object id="1"><mesh><triangles><triangle v1="0" v2="1" v3="2"${painted ? ' paint_color="8"' : ''}/></triangles></mesh></object></resources><build><item objectid="1"/></build></model>`),
+    'Metadata/model_settings.config': strToU8('<config><object id="3"><metadata key="name" value="Pick"/><metadata key="extruder" value="1"/>'
+      + '<part id="1" subtype="normal_part"><metadata key="name" value="body"/><metadata key="extruder" value="1"/></part></object></config>'),
+    'Metadata/project_settings.config': strToU8(JSON.stringify({filament_colour: ['#FEC600', '#000000'], filament_type: ['PLA', 'PLA']}))}));
+  const f = await setup(t, {reports: [status('RUNNING', 10)]});
+  await multipart(f, {bytes: build(true), kind: 'published'});
+  const mapping = await f.service.colourMapping(f.object.id);
+  assert.deepEqual(mapping.filaments.map(x => x.index), [1, 2], 'the painted filament is a row the person can change');
+  await f.service.print(f.object.id);
+  await f.approve();
+  await f.service.settled(f.object.id);
+  assert.deepEqual(f.runs[0].selection.amsMapping, [1, 0], 'body on the yellow PLA spool, painted black on the black spool');
+  const g = await setup(t, {reports: [status('RUNNING', 10)]});
+  await multipart(g, {bytes: build(false), kind: 'published'});
+  assert.deepEqual((await g.service.colourMapping(g.object.id)).filaments.map(x => x.index), [1], 'no painting: the second declared slot is just an unused preset');
+  // Studio layout: painting only in a component file under 3D/Objects/ still earns its row.
+  const componentPainted = Buffer.from(zipSync({'[Content_Types].xml': strToU8('<Types/>'),
+    '3D/3dmodel.model': strToU8('<model><resources><object id="1"><components><component p:path="/3D/Objects/object_1.model" objectid="1"/></components></object></resources><build><item objectid="1"/></build></model>'),
+    '3D/Objects/object_1.model': strToU8('<model><resources><object id="1"><mesh><triangles><triangle v1="0" v2="1" v3="2" paint_color="8"/></triangles></mesh></object></resources></model>'),
+    'Metadata/model_settings.config': strToU8('<config><object id="3"><metadata key="name" value="Pick"/><metadata key="extruder" value="1"/>'
+      + '<part id="1" subtype="normal_part"><metadata key="name" value="body"/><metadata key="extruder" value="1"/></part></object></config>'),
+    'Metadata/project_settings.config': strToU8(JSON.stringify({filament_colour: ['#FEC600', '#000000'], filament_type: ['PLA', 'PLA']}))}));
+  const h = await setup(t, {reports: [status('RUNNING', 10)]});
+  await multipart(h, {bytes: componentPainted, kind: 'published'});
+  assert.deepEqual((await h.service.colourMapping(h.object.id)).filaments.map(x => x.index), [1, 2], 'component-file painting earns its row too');
+});
+
+test('spool choices for a 3MF whose filaments cannot be read are refused, never dropped', async t => {
+  const {zipSync, strToU8} = fflate();
+  const bare = Buffer.from(zipSync({'[Content_Types].xml': strToU8('<Types/>'),
+    '3D/3dmodel.model': strToU8('<model><resources><object id="1"><mesh/></object></resources><build><item objectid="1"/></build></model>')}));
+  const f = await setup(t, {reports: [status('RUNNING', 10)]});
+  await multipart(f, {bytes: bare});
+  const tray = {slot: 1, colour: '#FEC600', material: 'PLA', filamentId: 'GFA00', destinationId: 'current', name: 'PLA'};
+  await assert.rejects(f.service.print(f.object.id, {filaments: [tray], filamentsModelVersion: 'from-the-old-model'}), /model changed since you chose its spools/);
+  await assert.rejects(f.service.estimate(f.object.id, {filaments: [tray], filamentsModelVersion: 'from-the-old-model'}), /model changed since you chose its spools/);
+});
+
+test('when the inventory cannot be read, a multi-part print falls back to the MCP defaults as before', async t => {
+  const f = await setup(t, {reports: [status('RUNNING', 10)]});
+  await multipart(f, {bytes: twoPart3mf({filament_colour: ['#000000', '#FFFFFF'], filament_type: ['PLA', 'PLA']}), kind: 'published'});
+  f.deps.print.services.runner.filaments = async () => { throw new Error('offline'); };
+  await f.service.print(f.object.id);
+  await f.approve();
+  await f.service.settled(f.object.id);
+  assert.equal(f.runs[0].selection.amsMapping, undefined);
+});
+
+test('a spool swapped while slicing stops the dispatch before anything is sent', async t => {
+  const f = await setup(t, {reports: [status('RUNNING', 10)]});
+  await multipart(f, {bytes: twoPart3mf(), filaments: [{colour: '#111111'}, {colour: '#FFD200'}]});
+  const real = f.deps.print.services.runner.filaments;
+  let reads = 0;
+  f.deps.print.services.runner.filaments = async () => {
+    const inventory = await real();
+    reads++;
+    if (reads < 2) return inventory;
+    return {trays: inventory.trays.map(tray => tray.slot === 1 ? {...tray, tray_color: 'FF0000FF'} : tray)};
+  };
+  await f.service.print(f.object.id);
+  const failed = await f.service.settled(f.object.id);
+  assert.equal(failed.state, 'failed');
+  assert.match(failed.failure ?? '', /changed before printing started/);
+});
+
+test('a spool swapped while the printer’s question waits is caught before the acceptance is forwarded', async t => {
+  const f = await setup(t, {reports: [status('RUNNING', 10)]});
+  await multipart(f, {bytes: twoPart3mf(), filaments: [{colour: '#111111'}, {colour: '#FFD200'}]});
+  const real = f.deps.print.services.runner.filaments;
+  let swapped = false;
+  f.deps.print.services.runner.filaments = async () => {
+    const inventory = await real();
+    return swapped ? {trays: inventory.trays.map(tray => tray.slot === 1 ? {...tray, tray_color: 'FF0000FF'} : tray)} : inventory;
+  };
+  await f.service.print(f.object.id);
+  const question = await until(async () => (await f.service.get(f.object.id)).printConfirmation);
+  swapped = true;
+  await assert.rejects(f.service.answerPrintConfirmation(f.object.id, question.id, {action: 'accept', content: {confirmed: true}}), /changed before printing started/);
+  const settled = await f.service.settled(f.object.id);
+  // A safety-check refusal, like the dispatch one: failed, the reason kept, and the phone
+  // hears print.not-started so its Live Activity ends instead of cancelling quietly.
+  assert.equal(settled.state, 'failed', 'the declined print settles as not started, nothing sent');
+  assert.match(settled.failure, /changed before printing started/);
+  assert.ok(f.events.some(event => event.type === 'print.not-started'), 'the refusal is announced, not quiet');
+});
+
+test('the estimate for a multi-colour model slices with the mapped spools’ profiles', async t => {
+  const f = await setup(t, {reports: [status('RUNNING', 10)]});
+  await multipart(f, {bytes: twoPart3mf(), filaments: [{colour: '#111111'}, {colour: '#FFD200'}]});
+  const estimate = await f.service.estimate(f.object.id);
+  assert.equal(estimate.seconds, 3420);
+  assert.equal(f.runs[0].estimate.slicer.loadFilaments, '/p/petg.json;/p/pla.json');
+  assert.equal(f.runs[0].estimate.slicer.filamentColours, '#000000;#FEC600');
+  // The sheet's edited spools slice the estimate too, not the suggestions.
+  const {modelVersion} = await f.service.colourMapping(f.object.id);
+  const choices = await f.service.filaments(f.object.id);
+  const bySlot = slot => choices.find(choice => choice.slot === slot);
+  await f.service.estimate(f.object.id, {filaments: [bySlot(254), bySlot(254)], filamentsModelVersion: modelVersion});
+  assert.equal(f.runs.at(-1).estimate.slicer.loadFilaments, '/p/ext.json;/p/ext.json');
+});
+
+test('an estimate for another printer reads that printer’s spools, not the saved printer’s', async t => {
+  const f = await setup(t, {reports: [status('RUNNING', 10)]});
+  await multipart(f, {bytes: twoPart3mf(), filaments: [{colour: '#111111'}, {colour: '#FFD200'}]});
+  const base = f.deps.print.services;
+  const otherRunner = {...base.runner,
+    filaments: async () => ({trays: [{slot: 0, loaded: true, tray_color: 'FFFFFFFF', tray_type: 'PLA', tray_info_idx: 'OTHER', resolved_profile_path: '/p/other.json'}]}),
+    estimate: async input => { f.runs.push({estimate: input, other: true}); return {estimate: {seconds: 60, grams: 1}, settings: {layers: 10}}; }};
+  f.deps.print.destinations.set('other', {...base, runner: otherRunner});
+  f.deps.printerCatalog.canonical = id => ['current', 'other'].includes(id) ? id : undefined;
+  const {modelVersion} = await f.service.colourMapping(f.object.id);
+  // Automatic matching uses the requested printer's inventory.
+  await f.service.estimate(f.object.id, {destinationId: 'other'});
+  assert.equal(f.runs.at(-1).other, true);
+  assert.equal(f.runs.at(-1).estimate.slicer.loadFilaments, '/p/other.json;/p/other.json');
+  assert.equal(f.runs.at(-1).estimate.slicer.filamentColours, '#FFFFFF;#FFFFFF');
+  // Explicit choices from that printer validate against its trays, not the saved printer's.
+  const tray = {slot: 0, colour: '#FFFFFF', material: 'PLA', filamentId: 'OTHER', destinationId: 'other', name: 'PLA'};
+  await f.service.estimate(f.object.id, {destinationId: 'other', filaments: [tray, tray], filamentsModelVersion: modelVersion});
+  assert.equal(f.runs.at(-1).estimate.slicer.loadFilaments, '/p/other.json;/p/other.json');
+});
+
+test('the mapping and per-colour spools cross both transports (Mac socket and phone HTTP)', async t => {
+  const f = await setup(t, {reports: [status('RUNNING', 10)]});
+  await multipart(f, {bytes: twoPart3mf(), filaments: [{name: 'body', colour: '#111111'}, {name: 'letters', colour: '#FFD200'}]});
+  const dispatch = createControlDispatcher({auth: {}, companionVersion: 'test', objects: f.service});
+  const viaSocket = await dispatch('objects.colourMapping', {id: f.object.id});
+  assert.deepEqual(viaSocket.filaments.map(x => x.slot), [0, 1]);
+  const routes = createObjectRoutes(f.service);
+  const server = createServer((request, response) => void routes.handle(request, response, async () => {}, () => undefined));
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  const base = `http://127.0.0.1:${server.address().port}/v1`;
+  const viaHttp = await (await fetch(`${base}/objects/${f.object.id}/colour-mapping`)).json();
+  assert.deepEqual(viaHttp, viaSocket);
+  const printed = await (await fetch(`${base}/objects/${f.object.id}/print`, {method: 'POST', headers: {'content-type': 'application/json'},
+    body: JSON.stringify({filaments: [viaSocket.trays.find(x => x.slot === 1), viaSocket.trays.find(x => x.slot === 0)], filamentsModelVersion: viaSocket.modelVersion})})).json();
+  assert.equal(printed.object.state, 'printing');
+  await f.approve();
+  await f.service.settled(f.object.id);
+  assert.deepEqual(f.runs.at(-1).selection.amsMapping, [1, 0]);
+});
 
 test('"printed" means printed: Print leaves the project printing until the printer reports this job done', async t => {
   const f = await setup(t, {reports: [status('FINISH', 100, {subtask_name: 'old job'}), status('PREPARE', 0), status('RUNNING', 3), status('RUNNING', 51), status('FINISH', 100)]});

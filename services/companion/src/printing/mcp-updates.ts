@@ -329,6 +329,7 @@ export class McpUpdater {
 
   /** npm can succeed while skipping install scripts. Its foreground lifecycle banner plus
    * a successful exit proves the declared postinstall ran before the staged copy goes live.
+   * The install passes --loglevel=notice: a user's loglevel=silent (.npmrc or environment) hides the banner.
    * The MCP owns its setup/patch implementation; Counterpart does not reproduce it. */
   #verifyPostinstall(staged: string, output: string): void {
     const manifest = JSON.parse(this.#deps.env.readFile(join(staged, 'package.json')) ?? 'null');

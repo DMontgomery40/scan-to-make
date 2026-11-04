@@ -95,6 +95,33 @@ final class ObjectsClientTests: XCTestCase {
         _ = try await ControlClient(socketPath:print.path).printObject(id, checked:true, filament:filament)
         withExtendedLifetime((inventory, print)) {}
     }
+
+    func testColourMappingDecodesAndChosenSpoolsReachThePrintRequestInOrder() async throws {
+        let black: [String: Any] = ["slot":0, "colour":"#000000", "material":"PETG", "name":"Black PETG", "filamentId":"GFG00", "destinationId":"p1s"]
+        let yellow: [String: Any] = ["slot":1, "colour":"#FEC600", "material":"PLA", "name":"Yellow PLA", "filamentId":"GFA00", "destinationId":"p1s"]
+        let server = try UnixFixture { request in
+            XCTAssertEqual(request["method"] as? String, "objects.colourMapping")
+            return [try reply(request, result:[
+                "filaments":[["index":1, "name":"body", "colour":"#111111", "slot":0, "distance":0.04],
+                             ["index":2, "name":"letters", "colour":"#FFD200", "material":"PLA", "slot":1, "distance":0.02]],
+                "trays":[black, yellow]])]
+        }
+        let mapping = try await ControlClient(socketPath:server.path).colourMapping(id)
+        XCTAssertEqual(mapping.filaments.map(\.slot), [0, 1])
+        XCTAssertEqual(mapping.filaments[1].material, "PLA")
+        XCTAssertEqual(mapping.trays.map(\.slot), [0, 1])
+        let print = try UnixFixture { request in
+            XCTAssertEqual(request["method"] as? String, "objects.print")
+            let params = request["params"] as! [String: Any]
+            XCTAssertEqual(params["expectedPlate"] as? String, "0:2")
+            let spools = params["filaments"] as! [[String: Any]]
+            XCTAssertEqual(spools.map { $0["slot"] as! Int }, [1, 0], "the person's order, not the suggestion's")
+            XCTAssertEqual(spools[0].mapValues { $0 as! AnyHashable }, yellow.mapValues { $0 as! AnyHashable })
+            return [try objectReply(request)]
+        }
+        _ = try await ControlClient(socketPath:print.path).printObject(id, checked:false, settings:PrintSettings(), filaments:[mapping.trays[1], mapping.trays[0]], expectedPlate:"0:2")
+        withExtendedLifetime((server, print)) {}
+    }
     private func confirmation(_ overrides: [String: Any] = [:]) throws -> Project.PrintConfirmation {
         let fields: [String: Any] = ["id":"q1", "message":"Check the actual printer.\nKeep all checks.", "expiresAtMs":2000,
             "supported":true, "fields":[["name":"spool_loaded", "title":"The spool is loaded", "description":"Check the AMS slot.", "required":true],
@@ -234,6 +261,27 @@ final class ObjectsClientTests: XCTestCase {
         XCTAssertEqual(objects[1].directory, folder)
         XCTAssertEqual(objects[2].state, .unknown)
         withExtendedLifetime(server) {}
+    }
+
+    func testBlenderOpensTheMergedMeshOfAMultiColour3MF() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("controlkit-blender-\(UUID().uuidString)", isDirectory: true)
+        let current = root.appendingPathComponent("current", isDirectory: true)
+        try FileManager.default.createDirectory(at: current, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try Data("3mf".utf8).write(to: current.appendingPathComponent("model.3mf"))
+        func project(model: String) throws -> Project {
+            var object = ready
+            object["directory"] = root.path
+            object["current"] = ["model": model, "renders": []]
+            return try JSONDecoder().decode(Project.self, from: JSONSerialization.data(withJSONObject: object))
+        }
+        let designed = try project(model: "current/model.3mf")
+        XCTAssertEqual(designed.modelURL?.path, current.appendingPathComponent("model.3mf").path, "printing keeps the 3MF")
+        XCTAssertNil(designed.blenderModelURL, "no merged mesh saved yet: nothing honest to send Blender")
+        try Data("stl".utf8).write(to: current.appendingPathComponent("model.stl"))
+        XCTAssertEqual(designed.blenderModelURL?.path, current.appendingPathComponent("model.stl").path, "Blender gets the merged STL beside the 3MF")
+        let plain = try project(model: "current/model.stl")
+        XCTAssertEqual(plain.blenderModelURL?.path, current.appendingPathComponent("model.stl").path, "an STL model opens itself")
     }
 
     func testFilesResolveInsideTheObjectFolderOnly() throws {

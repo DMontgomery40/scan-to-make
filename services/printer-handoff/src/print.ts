@@ -474,7 +474,7 @@ export class PrinterHandoffRunner {
    * Runs a stored handoff bundle and records the sliced output back into it.
    * The bundle backend must match this runner's configured backend.
    */
-  async runBundle(store: HandoffBundleStore, id: string, options: {print?: boolean; signal?: AbortSignal; slicer?: PrinterSlicer; onProgress?: PrintRunInput['onProgress']; sliceCache?: PrintRunInput['sliceCache']} = {}) {
+  async runBundle(store: HandoffBundleStore, id: string, options: {print?: boolean; signal?: AbortSignal; slicer?: PrinterSlicer; onProgress?: PrintRunInput['onProgress']; sliceCache?: PrintRunInput['sliceCache']; beforePrint?: PrintRunInput['beforePrint']} = {}) {
     const manifest = await store.read(id);
     if (manifest.backend !== this.#config.backend) fail('backend-mismatch');
     if (manifest.status === 'uncertain') fail('dispatch-uncertain');
@@ -499,7 +499,8 @@ export class PrinterHandoffRunner {
           return {slicedPath: join(store.directory(id), saved.artifacts.sliced!.file),
             orientedStlPath: saved.artifacts.oriented ? join(store.directory(id), saved.artifacts.oriented.file) : store.stlPath(saved)};
         },
-        beforePrint: async () => { await store.setStatus(id, 'uncertain', 'dispatch-uncertain'); },
+        // The caller's last check runs first: if it refuses, nothing was dispatched and the bundle is not uncertain.
+        beforePrint: async () => { await options.beforePrint?.(); await store.setStatus(id, 'uncertain', 'dispatch-uncertain'); },
       });
       dispatched = options.print !== false;
       // A later artifact write must not erase a successful print dispatch

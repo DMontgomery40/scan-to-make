@@ -505,8 +505,9 @@ public final class CompanionClient: @unchecked Sendable {
         let folder = cache.appending(path: project.id, directoryHint: .isDirectory).appending(path: version, directoryHint: .isDirectory)
         var filename = name.replacingOccurrences(of: "/", with: "_")
         var resource = name
-        // The historical route serves the current model, including an original 3MF.
-        if name == "model.stl", project.kind == "published", let model = project.current?.model {
+        // The historical route serves the current model, including a 3MF (published or designed multi-colour).
+        if name == "model.stl", let model = project.current?.model,
+           project.kind == "published" || model.lowercased().hasSuffix(".3mf") {
             let original = Hex.sha256(Data(model.utf8))
             filename = "model-\(original).\(project.preservesPublishedFilaments ? "3mf" : "stl")"
             // Bind this request to the selected original even if another choice

@@ -819,3 +819,27 @@ test('review fix (#295): removing the printers while an admitted Update checks t
   assert.equal(gate.updating('p1s'), false);
   assert.equal(gate.updating('a1'), false);
 });
+
+test('npm script policy: Update and Download authorize only the selected MCP and refuse a skipped postinstall', async t => {
+  for (const pkg of ['bambu-printer-mcp', 'mcp-3d-printer-server']) {
+    for (const download of [false, true]) {
+      const prefix = `${APP}/printers/${pkg}`;
+      const profile = {backend: pkg, process: {command: '/usr/bin/node', args: [`${prefix}/lib/node_modules/${pkg}/dist/index.js`]}};
+      const files = {[`${prefix}/lib/node_modules/${pkg}/package.json`]: pkgJson('1.1.46', pkg)};
+      for (const ran of [false, true]) {
+        const f = await updater(t, {profile, files, postinstall: 'node setup.mjs',
+          installOutput: ran ? `> ${pkg}@1.1.50 postinstall\n> node setup.mjs\n` : 'install-scripts: setup was skipped'});
+        if (download) await f.updates.download(pkg); else await f.updates.update(f.mcpId);
+        await f.done();
+        const install = f.commands.find(command => command.includes(' install '));
+        assert.ok(install.includes(`--allow-scripts=${pkg} --ignore-scripts=false --foreground-scripts --loglevel=notice`), 'a user\'s loglevel=silent would hide the postinstall banner');
+        assert.ok(!install.includes('dangerously-allow-all'));
+        assert.equal(f.events.at(-1).type, ran ? 'mcp.update.done' : 'mcp.update.failed');
+        if (!ran) {
+          assert.equal(f.moves.filter(move => move[0] === 'rename').length, 0, 'skipped setup never swaps the working copy');
+          assert.match(f.events.at(-1).data.log, /required setup/);
+        }
+      }
+    }
+  }
+});

@@ -8,8 +8,9 @@ final class PublishedModelTests: XCTestCase {
         XCTAssertNil(PublishedModelLink.find(in: "https://makerworld.com.evil.example/model/1"))
         XCTAssertNil(PublishedModelLink.find(in: "https://example.com/phone-dimensions"))
     }
-    func testOnlyPublished3MFHidesSingleMaterialControls() throws {
-        for (kind, file, expected) in [("published", "original/model.3mf", true), ("published", "original/model.3MF", true), ("published", "original/model.stl", false), ("fit", "current/model.3mf", false)] {
+    func testA3MFModelHidesSingleMaterialControls() throws {
+        // A design in several colours keeps its parts' filaments exactly like a published 3MF (Nov 2 Vivi pick).
+        for (kind, file, expected) in [("published", "original/model.3mf", true), ("published", "original/model.3MF", true), ("published", "original/model.stl", false), ("fit", "current/model.3mf", true), ("fit", "current/model.stl", false)] {
             let json: [String: Any] = ["id": "p", "createdAtMs": 1, "updatedAtMs": 2, "state": "ready", "kind": kind, "photos": [], "passes": [], "current": ["model": file, "renders": []]]
             let project = try JSONDecoder().decode(Project.self, from: JSONSerialization.data(withJSONObject: json))
             XCTAssertEqual(project.preservesPublishedFilaments, expected, file)
