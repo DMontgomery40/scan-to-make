@@ -53,7 +53,7 @@ Build **202611040900** (source `3b24efcf`) is installed and checked through the 
 | What | Version | From |
 |---|---|---|
 | Mac app `/Applications/Counterpart.app` | **202611040900** | release @ `3b24efcf`: final main queue including #293, provider routing, reconstruction qualification, multi-plate/starter support and both updater fixes. Signed entitlements match the previous development app exactly; installed idle and checked through actual UI Nov 4 16:08Z. |
-| iPhone "Davica3" (`00008150-001A488C3642401C`) | **2.0 (202611040322), DEBUG** | Phone/deploy owner verified Nov 4: `feat/phone-pause-and-printer-pickers` around `f03580e`; installed by its child around 03:24 MST. Includes #271 virtual RealityView camera and handheld teardown. Fixture screen launches are not connected-app acceptance. |
+| iPhone "Davica3" (`00008150-001A488C3642401C`) | **2.0 (202611041045), Release configuration / development signing** | Source `a26be565`, installed Nov 4 through USB without uninstall or fixture launch arguments; version verified on device. Sandbox APNs/CloudKit preserved. Signed app and receipts: `~/scan-to-make-work/phone-release-202611041045/`. Supersedes DEBUG build 0322. |
 | bambu-printer-mcp (what Counterpart runs) | **Published npm 1.1.54**, installed through actual Settings → Printers → Update Nov 4 13:37Z; replaces hand-copied `587461b`. UI says Updated to 1.1.54, P1S Ready. | `~/Library/Application Support/Scan to Make/printers/bambu-1.1.46/lib/node_modules/bambu-printer-mcp/dist` |
 | mcp-3D-printer-server | live dist from `56d8fb9`; source `feat/bambu-complete` now `afcf378` (new layer-pause parity not deployed) | runs from its own folder and `.env` |
 | bambu-printer-mcp config | `~/bambu-printer-mcp/.env` (the ssh forced command `cd`s there): `BAMBU_DEFAULT_CONNECTION_MODE=bambu_network`, `…_TYPE=lan` | Counterpart's own environment never crosses the ssh hop |
@@ -595,6 +595,22 @@ remote native probes and the SSH tunnel were removed after verification.
     in-hand is off), camera/Face ID after scanning, real-print notifications and Watch delivery, same-account
     enrollment, AI provider app-level acceptance (saved choice is now routed), Mac memory (348 MB open vs the 150 MB
     menu-bar target), "Vivi" multi-colour (ask 41).
+    **Nov 4 camera recurrence, origin identified:** current phone build 202611041045 initially showed a
+    live Object Capture preview at 10:45:43 Mountain (17:45:43Z), then went black. At 10:46:02.432,
+    the Mac's **Xcode Device Hub** PID 60487 started CoreDeviceScreenSharing session
+    `284E2BCE-BBAA-488A-AF2E-26849445EC71`; the phone's matching session was followed at
+    10:46:02.804 by cameracaptured explicitly reporting “The continuity display is connected. Will
+    start blackening frames” for the rear camera, LiDAR and ultra-wide streams. Executable verified:
+    `/Applications/Xcode.app/Contents/Applications/DeviceHub.app/Contents/MacOS/DeviceHub`.
+    This is not T3's Device panel or the iPhone Mirroring app. Native Mac UI showed Davica3 selected.
+    Release owner quit that viewer through **Quit and Keep Simulators Running**, verified its exit,
+    and read-only display info now lists only the phone LCD (no Wireless display). David then confirmed
+    **both Apple Camera lenses work**. No camera source fix is claimed: capture files are unchanged
+    from `f03580e` to `a26be565`. User-operated 30-second preview → Close → Apple Camera check is pending.
+    Keep physical-phone viewers/screen sharing/recording off during capture acceptance; use USB syslog
+    only. Other agents remain off Davica3. Private logs and retained archives (not committed):
+    `~/scan-to-make-work/camera-recurrence-20261104/`, especially `mac-coredevice-trigger.log`,
+    `blackout-trigger-all.log`, `current-repro-retained.logarchive`, and `displays-after-devicehub-quit.json`.
 14. **Caliper card** (`KAN-209-caliper`, unmerged; evidence `~/scan-to-make-work/caliper/`): rename to Counterpart,
     docs QR → `https://counterpart.dtmont.com/`, put each vernier digit under its own line, then print the two-colour
     3MF. `tools/caliper/LICENSE` had an uncommitted GPL-3 → Apache-2.0 switch. The no-AMS variant can now use
