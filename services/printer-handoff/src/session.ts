@@ -1,7 +1,7 @@
 import type {CallToolResult, Tool} from '@modelcontextprotocol/sdk/types.js';
 import type {PrinterHandoffConfig} from './config.js';
 import type {ElicitationContext, ElicitationRelay} from './elicitation.js';
-import {PrinterMcpClient, PrinterMcpError, type PrinterToolCatalog} from './mcp-client.js';
+import {PrinterMcpClient, PrinterMcpError, type PrinterToolCallOptions, type PrinterToolCatalog} from './mcp-client.js';
 
 /** Time, injectable so the pool's lifetime and backoff are testable without real waits. */
 export interface SessionClock {
@@ -79,6 +79,8 @@ export interface SessionCallOptions {
   elicitationContext?: ElicitationContext;
   /** Overrides MUTATING_TOOLS for this call. */
   exclusive?: boolean;
+  /** The MCP's progress notifications for this call. */
+  onProgress?: PrinterToolCallOptions['onProgress'];
   /** During a reconnect backoff, fail at once with `printer-unreachable` instead of waiting it out. */
   failFast?: boolean;
   /** The caller already holds the mutex through exclusive(): don't take it again, but tag questions as its holder. */
@@ -188,6 +190,7 @@ export class PrinterSession {
         ...(options.dispatchSensitive ? {dispatchSensitive: true} : {}),
         ...(options.beforeDispatch ? {beforeDispatch: options.beforeDispatch} : {}),
         ...(options.forwardResult ? {forwardResult: true} : {}),
+        ...(options.onProgress ? {onProgress: options.onProgress} : {}),
         // Only the mutex holder tags questions; any other question goes untagged.
         ...(exclusive ? {elicitationContext: options.elicitationContext ?? {}} : {}),
       });

@@ -370,7 +370,8 @@ source_f3d sparse_infill_density speed support_enabled task_name temperature tem
 tool_names try_emmc_print uptodate use_ams use_printer_filaments user_prompt version vibration_calibration wall_loops with_agent
 confirm mode fan light object_ids action auto_match_ams operations parts extension_inches extruder_temp bed_temp scale_factor
 translate_x translate_y translate_z section transformation_type value_x value_y value_z custom_min_x custom_min_y custom_min_z
-custom_max_x custom_max_y custom_max_z width height platform run_bridge_probe probe_timeout_ms`.split(/\s+/));
+custom_max_x custom_max_y custom_max_z width height platform run_bridge_probe probe_timeout_ms
+enable_support support_type support_threshold_angle`.split(/\s+/));
 test('every upstream argument key is classed', t => {
   const home = process.env.HOME ?? '';
   const sources = ['bambu-printer-mcp', 'mcp-3D-printer-server'].map(repo => join(home, repo)).filter(dir => existsSync(join(dir, 'src/index.ts')));

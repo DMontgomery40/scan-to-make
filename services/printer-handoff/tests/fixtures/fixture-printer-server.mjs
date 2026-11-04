@@ -102,8 +102,16 @@ async function elicitModel(args) {
   return {...args, bambu_model: 'p1s'};
 }
 
-server.setRequestHandler(CallToolRequestSchema, async request => {
+server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
   const name = request.params.name;
+  // HANDOFF_FIXTURE_PROGRESS: slice_stl reports its progress, as a slicer MCP may.
+  const progressToken = request.params._meta?.progressToken;
+  if (process.env.HANDOFF_FIXTURE_PROGRESS === '1' && name === 'slice_stl' && progressToken !== undefined)
+    for (const [progress, message] of [[1, 'Slicing plate 1'], [2, 'Writing the 3MF']]) {
+      await extra.sendNotification({method: 'notifications/progress', params: {progressToken, progress, total: 2, message}});
+      // As a slicer that is still working: the progress arrives before the result.
+      await new Promise(resolve => setTimeout(resolve, 25));
+    }
   let args = request.params.arguments ?? {};
   if ((name === 'slice_stl' || name === 'print_3mf') && !args.bambu_model) args = await elicitModel(args);
   record({tool: name, arguments: args});

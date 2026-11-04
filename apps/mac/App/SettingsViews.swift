@@ -376,8 +376,8 @@ struct PrintersSettings: View {
                             ReadyDot(state:printer.state)
                             Text(Self.readiness(printer.state)).font(.caption).foregroundStyle(.secondary)
                         }
-                        // Only bambu-printer-mcp has a choice of connection (mcp-3D-printer-server has no Bambu Cloud route).
-                        if printer.mcpName == "bambu-printer-mcp" { PrintRoutePicker(destinationId:printer.id).padding(.leading, 38) }
+                        // Any MCP with counterpart_print_route; the picker shows nothing for one without it.
+                        PrintRoutePicker(destinationId:printer.id).padding(.leading, 38)
                         PrinterMcpPicker(printer:printer) { Task { await objects.refresh() } }.padding(.leading, 38)
                         if printer.origin == "counterpart" {
                             AddedPrinterActions(printer:printer, models:setup.models(printer.backend)) { Task { await objects.refresh() } }.padding(.leading, 38)
@@ -443,8 +443,8 @@ struct PrintersSettings: View {
 }
 
 /// How the printer MCP reaches the printer, for prints and for Stop, Pause and Resume. The MCP keeps the setting
-/// (`printers.route` → bambu-printer-mcp `counterpart_print_route`); this only shows and changes it. Hidden for an
-/// MCP without the choice.
+/// (`printers.route` → `counterpart_print_route`, both MCPs) and words each connection; this only shows and
+/// changes it. Hidden for an MCP without the choice.
 private struct PrintRoutePicker: View {
     let destinationId: String
     @State private var route: PrintRoute?
@@ -453,8 +453,9 @@ private struct PrintRoutePicker: View {
     /// Until the first answer: a view with no content never runs `.task`, so something must be shown.
     @State private var loaded = false
 
-    private static func label(_ choice: String) -> String {
-        switch choice { case "lan": return "Local network"; case "cloud": return "Bambu Cloud"; default: return choice }
+    private static func label(_ choice: String, in route: PrintRoute) -> String {
+        if let option = route.options?.first(where: { $0.id == choice }) { return option.label }
+        switch choice { case "lan": return "Local network"; case "cloud": return "Bambu Cloud"; case "developer": return "Local network, Developer Mode"; default: return choice }
     }
     private func client() throws -> ControlClient {
         try ControlClient(socketPath:ModelAccessModel.socketPath(for:Installation(bundle:.main)), timeout:ControlClient.timeout(for:"printers.route"))
@@ -465,12 +466,14 @@ private struct PrintRoutePicker: View {
             if let route {
                 VStack(alignment:.leading, spacing:6) {
                     Picker("Connection", selection:Binding(get: { route.route }, set: { choose($0) })) {
-                        ForEach(route.choices, id:\.self) { Text(Self.label($0)).tag($0) }
+                        ForEach(route.choices, id:\.self) { Text(Self.label($0, in:route)).tag($0) }
                     }
                     .pickerStyle(.segmented)
                     .disabled(saving)
-                    Text(problem ?? "Prints, Stop, Pause and Resume go this way.")
+                    // What Stop, Pause and Resume do on this connection, in the MCP's own words.
+                    Text(problem ?? route.options?.first(where: { $0.id == route.route })?.controls ?? "Prints, Stop, Pause and Resume go this way.")
                         .font(.caption).foregroundStyle(problem == nil ? AnyShapeStyle(.secondary) : AnyShapeStyle(.red))
+                        .fixedSize(horizontal:false, vertical:true)
                 }
             } else if !loaded {
                 ProgressView().controlSize(.small)

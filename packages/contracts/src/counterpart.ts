@@ -184,6 +184,8 @@ export const PrintSettingsSchema = z.strictObject({
   colour: PrintColourSchema.optional(),
   /** How many on the plate (slice_stl `repetitions`); 1 sends nothing. */
   copies: z.number().int().min(1).max(64).optional(),
+  /** Pause before each of these 1-based layers, as the slicer preview numbers them (slice_stl `pause_at_layers`), e.g. to drop in magnets. */
+  pauseBeforeLayers: z.array(z.number().int().min(2).max(100000)).min(1).max(16).optional(),
 });
 export type PrintSettings = z.infer<typeof PrintSettingsSchema>;
 
@@ -225,6 +227,8 @@ export const PrinterCapabilitiesSchema = z.strictObject({
   multiColour: z.boolean(),
   /** slice_stl takes `repetitions`: Print and Estimate take `copies`. */
   copies: z.boolean().optional(),
+  /** slice_stl takes `pause_at_layers`: Print takes `pauseBeforeLayers`. */
+  layerPauses: z.boolean().optional(),
   /** The print sheet may ask "What's loaded?": `colour: {material}` is accepted (shown as chips when there is no spool list). */
   materialChoice: z.boolean().optional(),
   /** The features this install lacks, each with the update that unlocks it. */

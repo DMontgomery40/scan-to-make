@@ -4,7 +4,7 @@ import {tmpdir} from 'node:os';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {basename, dirname, extname, isAbsolute, join} from 'node:path';
-import {DispatchedPrintError, PrinterMcpError, inspectModelFile, modelPlatePreview, readModelFile, type ModelFileInfo, readPrintReport, readPrintRoute, routeArgs, setPrintRoute, sliceEstimate, type PrintRoute,
+import {DispatchedPrintError, PrinterMcpError, inspectModelFile, modelPlatePreview, readModelFile, type ModelFileInfo, readPrintReport, readPrintRoute, routeArgs, setPrintRoute, sliceEstimate, timeoutsFor, type PrintRoute,
   type PrintProgress, type PendingElicitation, type PrinterHandoffConfig, type PrinterSelection, type PrinterSlicer, type PrintReport, type PrinterSession} from '@scan-to-make/printer-handoff';
 import type {PrintEstimate, PrintSettings, ProjectStatus, ProjectSettingsPatch} from '@scan-to-make/contracts/counterpart';
 import {PrintMonitorRunner, matchJob, milestonesFor, type EventDraft, type MonitorClock, type MonitorEnd, type MonitorTarget} from '../printing/monitor.js';
@@ -171,7 +171,10 @@ export function spreadPick<T>(items: T[], count: number): T[] {
  * with a scan (LiDAR or a handheld capture) is a copy, even with a request ("Copy this. Close up the bottom."),
  * since the phone sends only the request; a request with photos alone is a new design.
  */
-export function passKind(object: Pick<StmObject, 'kind' | 'scan' | 'capture' | 'instructions'>): PassKind {
+export function passKind(object: Pick<StmObject, 'kind' | 'scan' | 'capture' | 'instructions' | 'current'>): PassKind {
+  // A copy needs something to copy: one that never received a scan or capture is its request, a new design.
+  // Its model, if any, came from passes run on the request alone (the Nov 2 guitar pick); a duplicate keeps its source's scan.
+  if (object.kind === 'copy' && !object.scan && !object.capture?.length && object.instructions?.trim()) return 'fit';
   if (object.kind) return object.kind;
   // PRD §8.11: a link to a published model's page prints the designer's file; it is never designed.
   if (publishedLink(object.instructions)) return 'published';
@@ -194,9 +197,20 @@ export function hasFiles(object: Pick<StmObject, 'scan' | 'photos' | 'capture' |
   return !!object.scan || object.photos.length > 0 || (object.capture?.length ?? 0) > 0 || (object.captureDepth?.length ?? 0) > 0;
 }
 
+const RESUMED_ELSEWHERE = 'Resumed outside Counterpart (on the printer or another app).';
+/** Counterpart sent the Resume that ended the latest pause ("Resume sent." after the last "The printer paused it."). */
+function resumedHere(events: readonly {message: string}[]): boolean {
+  for (let index = events.length - 1; index >= 0; index--) {
+    if (events[index]!.message === 'Resume sent.') return true;
+    if (events[index]!.message === PRINT_LOG['print.paused']) return false;
+  }
+  return false;
+}
+
 export class ObjectService {
   readonly #deps: ObjectServiceDeps;
   readonly #running = new Map<string, Promise<StmObject>>();
+  readonly #controlling = new Set<string>();
   readonly #controllers = new Map<string, AbortController>();
   readonly #confirmations = new Map<string, {pending: PendingElicitation; printing: NonNullable<ObjectServiceDeps['print']>; timer: ReturnType<typeof setTimeout>}>();
   readonly #cancelledPrints = new Set<string>();
@@ -302,14 +316,17 @@ export class ObjectService {
       const source = await this.get(id);
       if (!source.current) throw new InvalidStateError('There is no model to duplicate yet.');
       if (source.state === 'touching-up') throw new InvalidStateError('Wait until the current step finishes.');
-      const duplicate = await this.#deps.store.create(source.instructions, passKind(source));
+      const kind = passKind(source);
+      const duplicate = await this.#deps.store.create(source.instructions, kind);
       try {
         const current = source.current;
+        // A copy keeps the scan it copies, or with nothing scanned its request would read as a new design.
+        const scan = kind === 'copy' ? source.scan : undefined;
         // Duplicate the chosen original, not every alternate file or an earlier plate.
         const receipt = source.kind === 'published' ? source.files?.receipts?.find(file => file.path === current.model) : undefined;
         const files = receipt ? {original: [receipt.path], current: receipt.path, receipts: [receipt]} : undefined;
         const publishedSelection = source.publishedSelection ? {...source.publishedSelection, fileIndex: 0} : undefined;
-        const paths = [current.model, ...current.renders, ...(receipt?.plates.flatMap(plate => plate.thumbnail ? [plate.thumbnail] : []) ?? []), ...(current.design ? [current.design.f3d, ...(current.design.parameters ? [current.design.parameters] : [])] : [])];
+        const paths = [current.model, ...current.renders, ...(scan ? [`scan/${scan}`] : []), ...(receipt?.plates.flatMap(plate => plate.thumbnail ? [plate.thumbnail] : []) ?? []), ...(current.design ? [current.design.f3d, ...(current.design.parameters ? [current.design.parameters] : [])] : [])];
         for (const path of new Set(paths)) {
           if (isAbsolute(path) || path.split('/').some(part => !part || part === '.' || part === '..')) throw new InvalidFileError('The model has an invalid file path.');
           const target = join(this.dir(duplicate.id), path);
@@ -320,7 +337,7 @@ export class ObjectService {
         const result = await this.#deps.store.update(duplicate.id, o => ({...o, state: 'ready', current,
           title: `${projectTitle(source).slice(0, 114)} copy`, printerDestinationId: source.printerDestinationId,
           preferences: {...source.preferences, printDefaults: this.#resolvedPrintDefaults(source)}, ...(credit ? {credit} : {}),
-          ...(files ? {files} : {}), ...(publishedSelection ? {publishedSelection} : {})}));
+          ...(files ? {files} : {}), ...(publishedSelection ? {publishedSelection} : {}), ...(scan ? {scan} : {})}));
         await this.#emit({id: randomUUID(), type: 'project.updated', projectId: result.id, data: {keys: ['created']}});
         return this.#changed(result);
       } catch (error) { await this.#deps.store.remove(duplicate.id); throw error; }
@@ -481,8 +498,10 @@ export class ObjectService {
     if (!previous) return undefined;
     const recorded = object.print?.destinationId ?? object.print?.destination?.id;
     const previousPrinter = recorded === undefined ? undefined : this.#deps.printerCatalog?.canonical(recorded) ?? recorded;
-    if (previousPrinter !== undefined && previousPrinter === this.#destinationId(object)) return previous;
-    const {colour: _colour, ...defaults} = previous;
+    // Layer pauses belong to that print of that model, never to defaults.
+    const {pauseBeforeLayers: _pauses, ...settings} = previous;
+    if (previousPrinter !== undefined && previousPrinter === this.#destinationId(object)) return settings;
+    const {colour: _colour, ...defaults} = settings;
     return defaults;
   }
 
@@ -832,7 +851,8 @@ export class ObjectService {
     const object = await this.get(id);
     // A 3MF owns its filament assignments; the sheets do not offer a single-spool override.
     // Keep the saved preference for other models, but do not silently apply it here.
-    const defaults = {...object.preferences?.printDefaults};
+    // Layer pauses come only from this request (the sheet shows them): a saved default never adds a hidden stop.
+    const {pauseBeforeLayers: _savedPauses, ...defaults} = {...object.preferences?.printDefaults};
     if (object.kind === 'published' && object.current?.model.toLowerCase().endsWith('.3mf')) delete defaults.colour;
     options = {...defaults, ...options, ...(options.filament ? {colour: undefined} : {})};
     if (!object.current) throw new InvalidStateError('There is no model to print yet.');
@@ -858,17 +878,21 @@ export class ObjectService {
     const {store: bundles, relay, runner} = printing.services;
     const {selection: colourSelection, slicer} = await this.#colour(id, options, services.selection, runner.backend);
     const selected = object.publishedSelection ? {...colourSelection, plateIndex: object.publishedSelection.plateIndex} : colourSelection;
-    const overrides = object.publishedSelection?.sliced ? {repetitions: 1} : sliceOverrides(options, selected?.nozzleDiameterMm);
+    const overrides = object.publishedSelection?.sliced
+      ? {repetitions: 1, ...(options.pauseBeforeLayers?.length ? {pauseAtLayers: options.pauseBeforeLayers} : {})}
+      : sliceOverrides(options, selected?.nozzleDiameterMm);
     if (object.kind === 'published' && object.current.model.toLowerCase().endsWith('.3mf')) {
       if (!options.quality || options.quality === 'standard') delete overrides.layerHeightMm;
       if (!options.strength || options.strength === 'standard') { delete overrides.wallLoops; delete overrides.sparseInfillDensity; }
     }
     const capabilities = destinationId ? this.#deps.printers?.capabilities(destinationId) : undefined;
     if (capabilities && ((overrides.layerHeightMm !== undefined && !capabilities.quality) || (overrides.wallLoops !== undefined && !capabilities.strength)
-        || (overrides.repetitions !== undefined && overrides.repetitions > 1 && !capabilities.copies)))
+        || (overrides.repetitions !== undefined && overrides.repetitions > 1 && !capabilities.copies)
+        || (overrides.pauseAtLayers?.length && !capabilities.layerPauses)))
       throw new InvalidStateError(settingsUnsupported(runner.backend, options));
     const settings: PrintSettings = {...(options.quality ? {quality: options.quality} : {}), ...(options.strength ? {strength: options.strength} : {}),
-      ...(options.colour ? {colour: options.colour} : {}), ...(options.copies !== undefined ? {copies: options.copies} : {})};
+      ...(options.colour ? {colour: options.colour} : {}), ...(options.copies !== undefined ? {copies: options.copies} : {}),
+      ...(options.pauseBeforeLayers?.length ? {pauseBeforeLayers: options.pauseBeforeLayers} : {})};
     const sliced = {...slicer, ...overrides};
     const stl = await this.#modelBytes(object);
     const manifest = await bundles.create({...(object.kind === 'published' ? {model: {bytes: stl, format: object.current.model.toLowerCase().endsWith('.3mf') ? '3mf' as const : 'stl' as const}} : {stl}), prompt: '', backend: runner.backend, ...(selected ? {selection:selected} : {})});
@@ -890,7 +914,6 @@ export class ObjectService {
     const messages: Record<PrintProgress['phase'], string> = {
       connecting:'Connecting to your printer service…', orienting:'Orienting the model for printing…', slicing:'Slicing the model…',
       inspecting:'Checking the sliced print file…', 'slice-ready':'Sliced file saved.', 'checking-printer':'Checking the printer…',
-      'resolving-printer-error':'The printer needs your acknowledgment of its rejected command.',
       'requesting-print':'Requesting print. Waiting for the printer service…', accepted:'Print request accepted.',
     };
     const eventBase = {projectId: id, printId, ...(printDestination ? {destinationId: printDestination.id, printerName: printDestination.name} : {})};
@@ -1060,8 +1083,14 @@ export class ObjectService {
       save: async (monitor, live) => { this.#changed(await this.#deps.store.update(id, o => ours(o) ? {...o, print: {...o.print!, monitor, ...(live ? {live} : {})}} : o)); },
       end: async (end, report) => { this.#changed(await this.#deps.store.update(id, o => ours(o) ? this.#ended(o, end, report) : o)); },
       emit: async draft => {
-        const line = draft.type === 'print.milestone' && draft.data?.progress !== 50 ? `${draft.data?.progress}% done.` : PRINT_LOG[draft.type];
-        if (line) this.#changed(await this.#deps.store.update(id, o => ours(o) ? {...o, print: {...o.print!, events: [...(o.print!.events ?? []), {atMs: Date.now(), message: line}].slice(-20)}} : o));
+        const fixed = draft.type === 'print.milestone' && draft.data?.progress !== 50 ? `${draft.data?.progress}% done.` : PRINT_LOG[draft.type];
+        if (fixed) this.#changed(await this.#deps.store.update(id, o => {
+          if (!ours(o)) return o;
+          const events = o.print!.events ?? [];
+          // Nov 3: Bambu Handy resumed a pick Counterpart couldn't; "Printing again." read as if Counterpart had.
+          const line = draft.type === 'print.resumed' && !resumedHere(events) ? RESUMED_ELSEWHERE : fixed;
+          return {...o, print: {...o.print!, events: [...events, {atMs: Date.now(), message: line}].slice(-20)}};
+        }));
         await this.#emit(draft);
       },
     }, print.monitor);
@@ -1095,7 +1124,9 @@ export class ObjectService {
 
   /** After a restart: resume watching dispatched prints; a print still being prepared was interrupted. */
   async resume(): Promise<void> {
-    for (const object of await this.#deps.store.list()) {
+    for (let object of await this.#deps.store.list()) {
+      // A printer's question lives only as long as the process that asked it: none survives a restart.
+      if (object.printConfirmation) object = this.#changed(await this.#deps.store.update(object.id, o => ({...o, printConfirmation: undefined})));
       if (object.state !== 'printing' || !object.print) continue;
       const monitor = object.print.monitor;
       const destinationId = object.print.destinationId ?? object.print.destination?.id;
@@ -1183,11 +1214,17 @@ export class ObjectService {
   /** Pause, resume or stop this project's print, through the destination's mutex (PRD §8.6). */
   /**
    * Not under the object's gate: the printer MCP may ask its own confirmation
-   * during the call, and answering it goes through that gate. Two taps are still
-   * one at a time, behind the destination's mutex.
+   * during the call, and answering it goes through that gate. A second control while
+   * one still waits is refused, never queued behind its question (the app's request
+   * would end long before a queued control could run).
    */
   async control(id: string, action: 'pause' | 'resume' | 'cancel'): Promise<StmObject> {
     if (this.#closed) throw new InvalidStateError('Counterpart is shutting down on this Mac.');
+    if (this.#controlling.has(id)) throw new InvalidStateError('The printer is still answering the last Pause, Resume or Stop. Answer its question or wait, then try again.');
+    this.#controlling.add(id);
+    try { return await this.#control(id, action); } finally { this.#controlling.delete(id); }
+  }
+  async #control(id: string, action: 'pause' | 'resume' | 'cancel'): Promise<StmObject> {
     const object = await this.get(id);
     const print = object.print;
     if (object.state !== 'printing' || !print?.dispatchedAt || !print.monitor || print.monitor.phase === 'ended')
@@ -1214,12 +1251,20 @@ export class ObjectService {
         // The printer's controls act on whatever it is printing now: make sure that is still this project.
         const report = await readPrintReport(session, {failFast: true});
         if (matchJob(target, report) !== 'ours' || !['preparing', 'printing', 'paused'].includes(report.state)) { notOurs = true; return; }
-        const result = await session.call(tool, args, {held: true, elicitationContext: {bundleId: print.bundleId}, timeoutMs: 120_000});
+        // The MCP may ask a person first (a Resume it can't verify does): wait as long as that question stays open.
+        const result = await session.call(tool, args, {held: true, elicitationContext: {bundleId: print.bundleId},
+          timeoutMs: timeoutsFor(session.config).elicitationMs + 120_000});
         if (result.isError) throw new PrinterMcpError('tool-failed', undefined, (result.content ?? []).flatMap(item => item.type === 'text' ? [item.text] : []).join(' ').trim().slice(0, 300) || undefined);
       });
     } catch (error) {
       const detail = error instanceof PrinterMcpError ? error.detail : undefined;
-      throw new InvalidStateError(detail ? `The printer didn't ${action === 'cancel' ? 'stop' : action}: ${detail}` : `The printer didn't ${action === 'cancel' ? 'stop' : action}. Check it, then try again.`);
+      const message = detail ? `The printer didn't ${action === 'cancel' ? 'stop' : action}: ${detail}` : `The printer didn't ${action === 'cancel' ? 'stop' : action}. Check it, then try again.`;
+      // Kept, not only shown: the project's activity and companion.log say what was refused and why.
+      console.error(`print control ${action} refused for ${id}: ${message}${detail ? '' : ` (${error instanceof Error ? error.message : String(error)})`}`);
+      // A question this control asked ends with it: never leave it on the project, where it hides the controls.
+      await this.#deps.store.update(id, o => o.print ? {...o, printConfirmation: undefined, print: {...o.print, events: [...(o.print.events ?? []), {atMs: Date.now(), message: message.slice(0, 400)}].slice(-20)}} : o)
+        .then(updated => this.#changed(updated)).catch(() => undefined);
+      throw new InvalidStateError(message);
     } finally {
       unsubscribe();
       clearTimeout(this.#confirmations.get(id)?.timer); this.#confirmations.delete(id);
@@ -1309,8 +1354,11 @@ export class ObjectService {
   answerPrintConfirmation(id: string, confirmationId: string, answer: unknown): Promise<StmObject> {
     return this.#gate(id, async () => {
       const confirmation = this.#confirmations.get(id);
-      if (!confirmation || confirmation.pending.id !== confirmationId || !this.#pending(id, confirmationId))
+      if (!confirmation || confirmation.pending.id !== confirmationId || !this.#pending(id, confirmationId)) {
+        // Nothing waits for this answer any more: take the question off the project so its controls come back.
+        this.#changed(await this.#deps.store.update(id, o => o.printConfirmation?.id === confirmationId ? {...o, printConfirmation: undefined} : o));
         throw new InvalidStateError('That printer confirmation is no longer waiting. Refresh the project.');
+      }
       const question = printQuestion(confirmation.pending);
       if (!record(answer) || Object.keys(answer).some(key => !['action', 'content'].includes(key)))
         throw new InvalidStateError('Invalid printer confirmation answer.');
@@ -1326,6 +1374,7 @@ export class ObjectService {
       if (checked.action !== 'accept' && this.#running.has(id)) this.#cancelledPrints.add(id);
       if (!confirmation.printing.services.relay.respond(confirmationId, checked)) {
         this.#cancelledPrints.delete(id);
+        this.#changed(await this.#deps.store.update(id, o => o.printConfirmation?.id === confirmationId ? {...o, printConfirmation: undefined} : o));
         throw new InvalidStateError('That printer confirmation is no longer waiting. Refresh the project.');
       }
       clearTimeout(confirmation.timer);
@@ -1382,6 +1431,8 @@ export class ObjectService {
     const store = this.#deps.store, dir = store.dir(object.id);
     const fromCurrent = opts.note !== undefined && object.current !== undefined;
     const kind: PassKind = passKind(object);
+    // Keep the decision: once this pass makes a model, a copy with nothing scanned would otherwise read as a copy again.
+    if (object.kind !== kind) object = await store.update(object.id, o => ({...o, kind}));
     // A handheld scan is rebuilt into scan/scan.usdz first, once; its photos also show the touch-up the object.
     const build = kind !== 'published' && !fromCurrent && !object.scan && (object.capture?.length ?? 0) > 0;
     const capturePhotos = (object.capture ?? []).map(name => join(dir, 'capture', name));

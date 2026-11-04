@@ -170,13 +170,33 @@ figcaption { margin-top: .6rem; color: var(--ink-soft); font-size: .95rem; line-
 .devices [role="tabpanel"][hidden] { display: none; }
 .device-note { margin: -.4rem 0 1.4rem; color: var(--ink-soft); }
 
-/* Printers */
-.printers-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); gap: 3rem; align-items: start; }
-.mcps { display: grid; gap: 1rem; margin-top: 1.5rem; }
-.mcp { display: block; padding: 1.1rem 1.25rem; background: var(--sheet); border: 1px solid var(--rule); border-left: 4px solid var(--orange); border-radius: 4px 10px 10px 4px; color: var(--ink); text-decoration: none; }
-.mcp:hover { color: var(--ink); border-color: var(--ink); border-left-color: var(--orange); }
-.mcp b { display: block; font: 600 1.35rem/1.2 var(--display); color: var(--orange-ink); }
-.mcp span { display: block; margin-top: .25rem; color: var(--ink-soft); font-size: 1rem; }
+/* The printing backend: the MCP servers */
+.flow { list-style: none; margin: 0 0 2.75rem; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 2.6rem; counter-reset: hop; }
+.flow li { position: relative; padding: 1rem 1.15rem; border: 1px solid var(--rule); border-radius: 12px; background: var(--sheet); }
+.flow li:nth-child(2) { border: 2px solid var(--orange); }
+.flow b { display: block; font: 600 1.45rem/1.1 var(--display); margin-bottom: .3rem; }
+.flow li:nth-child(2) b { color: var(--orange-ink); }
+.flow span { display: block; color: var(--ink-soft); font-size: .98rem; line-height: 1.45; }
+.flow li + li::before { content: ""; position: absolute; left: -2.15rem; top: 50%; width: 1.7rem; border-top: 2px solid var(--line); }
+.flow li + li::after { content: ""; position: absolute; left: -.62rem; top: calc(50% - .36rem); border: .4rem solid transparent; border-left-color: var(--line); border-right: 0; }
+.backend { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 3rem; align-items: start; }
+.tools { width: 100%; border-collapse: collapse; font-size: 1rem; }
+.tools caption { text-align: left; font-weight: 600; padding-bottom: .6rem; }
+.tools th, .tools td { text-align: left; vertical-align: top; padding: .65rem .75rem .65rem 0; border-bottom: 1px solid var(--rule); }
+.tools thead th { color: var(--ink-soft); font-weight: 500; font-size: .92rem; }
+.tools tbody th { font-weight: 500; width: 46%; }
+.tools code { font: 500 .88rem/1.4 ui-monospace, "SF Mono", Menlo, monospace; color: var(--orange-ink); white-space: nowrap; }
+.servers { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2.25rem; margin-top: 3.25rem; }
+.server .card { display: block; }
+.server .card img { border-radius: 14px; box-shadow: var(--shadow); }
+.server .card:hover img { outline: 2px solid var(--orange); outline-offset: 3px; }
+.server h3 { margin: 1.1rem 0 .3rem; font: 600 1.7rem/1.1 var(--display); }
+.server h3 a { color: var(--ink); text-decoration: none; }
+.server h3 a:hover { color: var(--orange-ink); }
+.server p { margin: 0 0 .9rem; color: var(--ink-soft); }
+.doclinks { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: .5rem; }
+.doclinks a { display: inline-block; padding: .3rem .75rem; border: 1px solid var(--rule); border-radius: 999px; font-size: .95rem; font-weight: 500; text-decoration: none; color: var(--ink); }
+.doclinks a:hover { border-color: var(--orange); color: var(--orange-ink); }
 .pair { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.6fr); gap: 1.25rem; align-items: end; }
 .pair figure, .ways-shots figure { margin: 0; }
 
@@ -236,7 +256,10 @@ mark { background: var(--orange-wash); color: inherit; border-radius: 2px; paddi
 .foot-links { display: flex; gap: 1.25rem; }
 
 @media (max-width: 980px) {
-  .hero .wrap, .printers-grid, .tour { grid-template-columns: 1fr; }
+  .hero .wrap, .backend, .tour { grid-template-columns: 1fr; }
+  .flow { grid-template-columns: 1fr; gap: 1.6rem; }
+  .flow li + li::before { left: 1.4rem; top: -1.5rem; width: 0; height: 1.3rem; border-top: 0; border-left: 2px solid var(--line); }
+  .flow li + li::after { left: 1.03rem; top: -.45rem; border: .4rem solid transparent; border-top-color: var(--line); border-bottom: 0; }
   .ways { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .tour-stage { min-height: 0; }
   .help { grid-template-columns: 1fr; gap: 1.5rem; }
@@ -257,7 +280,15 @@ mark { background: var(--orange-wash); color: inherit; border-radius: 2px; paddi
   .tour-stage { grid-template-columns: minmax(0, 1fr); }
   .tour-stage .mac { display: none; }
   .tour-stage figure:first-child { max-width: 16rem; }
+  html { scroll-padding-top: 8rem; }
   .pair { grid-template-columns: 1fr; }
+  .pair figure:first-child { max-width: 15rem; }
+  .servers { grid-template-columns: 1fr; }
+  .tools thead { display: none; }
+  .tools tr { display: block; padding: .7rem 0; border-bottom: 1px solid var(--rule); }
+  .tools th, .tools td { display: block; border: 0; padding: 0; }
+  .tools tbody th { width: auto; margin-bottom: .2rem; }
+  .tools code { white-space: normal; }
   .toc { columns: 1; }
 }
 @media print { .masthead, .help-side, .zoom { display: none; } }

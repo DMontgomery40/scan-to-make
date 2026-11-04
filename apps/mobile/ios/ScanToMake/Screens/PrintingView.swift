@@ -163,17 +163,11 @@ struct PrintingView: View {
 
     private func problemsCard(_ problems: [PrintLive.Problem]) -> some View {
         VStack(alignment: .leading, spacing: 8) {
+            // Each problem in the printer MCP's own words; no code is special-cased here (handoff item 10).
             ForEach(problems, id: \.code) { problem in
-                let rejectedControl = problem.code.replacingOccurrences(of: "_", with: "").replacingOccurrences(of: "-", with: "") == "0500050000010007"
-                Label(rejectedControl ? "The printer rejected a control command." : problem.message, systemImage: problem.severity == "fatal" || problem.severity == "serious" ? "exclamationmark.octagon.fill" : "exclamationmark.triangle.fill")
+                Label(problem.message, systemImage: problem.severity == "fatal" || problem.severity == "serious" ? "exclamationmark.octagon.fill" : "exclamationmark.triangle.fill")
                     .foregroundStyle(problem.severity == "fatal" || problem.severity == "serious" ? .red : .orange)
                     .fixedSize(horizontal: false, vertical: true)
-                if rejectedControl {
-                    if live?.state == "printing" || live?.state == "preparing" { Text("Your print is still running.") }
-                    DisclosureGroup("Printer details") {
-                        Text("\(problem.code)\n\(problem.message)").font(.caption).textSelection(.enabled)
-                    }
-                }
             }
         }
         .font(.subheadline)

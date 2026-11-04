@@ -14,13 +14,8 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
         }
     }
 
-    /// An explicit fit can use a scan as reference; only legacy records infer their job from capture evidence.
-    public var usesCopyWorkflow: Bool {
-        if kind == "fit" { return false }
-        if kind == "copy" { return true }
-        if scan != nil || !(capture ?? []).isEmpty { return true }
-        return instructions?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false
-    }
+    /// The companion decides the job (`passKind`) and sends it as `kind`; the apps don't re-derive it.
+    public var usesCopyWorkflow: Bool { kind == "copy" }
 
     /// A published STL has no embedded filament assignments and uses the normal material controls.
     public var preservesPublishedFilaments: Bool {
@@ -666,12 +661,15 @@ public struct PrintSettings: Codable, Equatable, Sendable {
     /// `{auto: true}`, `{amsSlot: n}`, `{external: true}` or `{material: "PETG"}`.
     public var colour: JSONValue?
     public var copies: Int?
+    /// The last print's "Pause before layer" numbers (`print.settings`), so Print Another keeps the magnet pauses.
+    /// Read only: Print sends its own (`pauseBeforeLayers`), and saved defaults never carry them.
+    public var pauseBeforeLayers: [Int]?
 
-    public init(quality: String? = nil, strength: String? = nil, colour: JSONValue? = nil, copies: Int? = nil) {
-        self.quality = quality; self.strength = strength; self.colour = colour; self.copies = copies
+    public init(quality: String? = nil, strength: String? = nil, colour: JSONValue? = nil, copies: Int? = nil, pauseBeforeLayers: [Int]? = nil) {
+        self.quality = quality; self.strength = strength; self.colour = colour; self.copies = copies; self.pauseBeforeLayers = pauseBeforeLayers
     }
 
-    private enum CodingKeys: String, CodingKey { case quality, strength, colour, copies }
+    private enum CodingKeys: String, CodingKey { case quality, strength, colour, copies, pauseBeforeLayers }
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encodeIfPresent(quality, forKey: .quality)
