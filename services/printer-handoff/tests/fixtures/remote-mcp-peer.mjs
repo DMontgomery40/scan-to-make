@@ -13,7 +13,7 @@ const open = {type: 'object', properties: {
   stl_path: {type: 'string'}, output_path: {type: 'string'}, save_path: {type: 'string'}, three_mf_path: {type: 'string'},
   slicer_profile: {type: 'string'}, note: {type: 'string'}, host: {type: 'string'}, bridge_command: {type: 'string'},
   ms: {type: 'number'}, ask: {type: 'boolean'}, nested: {type: 'object'},
-  bambu_model: {type: 'string'}, nozzle_diameter: {type: 'string'}, launch: {type: 'boolean'}, type: {type: 'string'}, port: {type: 'string'},
+  bambu_model: {type: 'string'}, nozzle_diameter: {type: 'string'}, launch: {type: 'boolean'}, type: {type: 'string'}, port: {type: 'string'}, source_f3d: {type: 'string'},
 }};
 const required = {...open, required: ['stl_path', 'bambu_model']};
 const tools = [

@@ -176,7 +176,11 @@ test('arguments: selectors, relative paths, .., list escapes, embedded paths, sy
   assert.deepEqual(await f.calls(), [], 'nothing refused reached the MCP');
   assert.equal(text(await client.callTool({name: 'peek', arguments: {stl_path: join(f.bundles, 'bundle.3mf'), save_path: join(own, 'shot.jpg')}})), 'peek ok');
   assert.equal(text(await client.callTool({name: 'shape', arguments: {stl_path: join(own, 'part.stl'), output_path: join(own, 'out.stl'), note: 'make it 2 mm taller'}})), 'shape ok');
-  assert.equal((await f.calls()).length, 2);
+  // A Fusion archive to reopen is a path: confined like the others, accepted inside the device folder.
+  await writeFile(join(own, 'saved.f3d'), 'f3d');
+  assert.equal(text(await client.callTool({name: 'shape', arguments: {source_f3d: join(own, 'saved.f3d')}})), 'shape ok');
+  await refused('shape', {source_f3d: join(f.bundles, 'bundle.3mf')}, /outside/);
+  assert.equal((await f.calls()).length, 3);
 });
 
 test('prompts and listed resources pass through unchanged; templates and unlisted URIs do not', async t => {
@@ -366,7 +370,7 @@ external_change_assist filament filament_colours filename flag flow_calibration 
 layer_inspect load_filament_ids material message_json method min_save name nozzle_mapping nozzle_temperature nozzle_type
 nozzle_volume_type nozzles_info object_names orient pause_at_layers payload plate_index preset_name print project_name qos
 repetitions rotate rotate_x rotate_y rotate_z scale scale_x scale_y scale_z skip_modified_gcodes skip_objects slice_plate slot_id
-source_f3d sparse_infill_density speed support_enabled task_name temperature template_name timelapse timeout_ms tolerance tool_name
+sparse_infill_density speed support_enabled task_name temperature template_name timelapse timeout_ms tolerance tool_name
 tool_names try_emmc_print uptodate use_ams use_printer_filaments user_prompt version vibration_calibration wall_loops with_agent
 confirm mode fan light object_ids action auto_match_ams operations parts extension_inches extruder_temp bed_temp scale_factor
 translate_x translate_y translate_z section transformation_type value_x value_y value_z custom_min_x custom_min_y custom_min_z
@@ -383,7 +387,7 @@ test('every upstream argument key is classed', t => {
     for (const match of text.matchAll(/^\s+([a-z_][a-z0-9_]*):\s*\{\s*(?:\/\/[^\n]*\s*)?(?:type|description|enum|anyOf|oneOf|items|properties)\b/gm)) keys.add(match[1]);
   }
   const refused = /^(host|port|dev_ip|dev_id|bambu_serial|bambu_token|api_key|password|username|user_info|country_code|connection_type|connection_mode|route|bambu_model|nozzle_diameter|nozzle_diameters|bridge_command|slicer_path|ffmpeg_path|plugin_dir|runtime_dir|template_dir|config_filename|bambu_network_method|use_ssl_for_mqtt|use_ssl_for_ftp|slicer_type|extra_options|allow_mutating_method|type)$|config_dir$/;
-  const path = /(?:path|dir|directory|_file)$|^(?:filament_profile|slicer_profile|load_filaments)$/;
+  const path = /(?:path|dir|directory|_file)$|^(?:filament_profile|slicer_profile|load_filaments|source_f3d)$/;
   const unclassed = [...keys].filter(key => !refused.test(key) && !path.test(key) && !KNOWN_PLAIN.has(key));
   assert.deepEqual(unclassed, [], 'new upstream argument keys need a class in remote-mcp.ts');
 });

@@ -110,7 +110,7 @@ export function remoteTool(tool: Tool): Tool {
   }
   return copy;
 }
-const PROFILE_KEYS = new Set(['filament_profile', 'slicer_profile', 'load_filaments']);
+const PROFILE_KEYS = new Set(['filament_profile', 'slicer_profile', 'load_filaments', 'source_f3d']);
 const isPathKey = (key: string) => /(?:path|dir|directory|_file)$/.test(key) || PROFILE_KEYS.has(key);
 const isOutputKey = (key: string) => /^output_|^out_path$|^save_path$/.test(key);
 const pathLike = (value: string) => /[\\/]/.test(value) || value.startsWith('~') || value.includes('..') || value.includes('\0');
