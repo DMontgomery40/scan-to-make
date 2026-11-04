@@ -14,7 +14,7 @@ mac=$(cd "$(dirname "$0")/.." && pwd)
 case "$SPARKLE_FEED_URL" in https://*) ;; *) exit 1 ;; esac
 out="$mac/build/release-$BUILD_NUMBER"
 mkdir -p "$out"
-xcodebuild -project "$mac/ScanToMake.xcodeproj" -scheme ScanToMake -configuration Release -derivedDataPath "$out/derived" CODE_SIGN_STYLE=Manual OTHER_CODE_SIGN_FLAGS=--timestamp CODE_SIGN_IDENTITY="$DEVELOPER_ID_APPLICATION" STM_MAC_PROVISIONING_PROFILE="$MAC_PROVISIONING_PROFILE" STM_ENTITLEMENTS_SUFFIX=+CloudKitProduction STM_APS_ENVIRONMENT=production CURRENT_PROJECT_VERSION="$BUILD_NUMBER" SPARKLE_FEED_URL="$SPARKLE_FEED_URL" SPARKLE_PUBLIC_KEY="$SPARKLE_PUBLIC_KEY" build
+xcodebuild -project "$mac/ScanToMake.xcodeproj" -scheme ScanToMake -configuration Release -derivedDataPath "$out/derived" CODE_SIGN_STYLE=Manual CODE_SIGN_INJECT_BASE_ENTITLEMENTS=NO OTHER_CODE_SIGN_FLAGS=--timestamp CODE_SIGN_IDENTITY="$DEVELOPER_ID_APPLICATION" STM_MAC_PROVISIONING_PROFILE="$MAC_PROVISIONING_PROFILE" STM_ENTITLEMENTS_SUFFIX=+CloudKitProduction STM_APS_ENVIRONMENT=production CURRENT_PROJECT_VERSION="$BUILD_NUMBER" SPARKLE_FEED_URL="$SPARKLE_FEED_URL" SPARKLE_PUBLIC_KEY="$SPARKLE_PUBLIC_KEY" build
 app="$out/derived/Build/Products/Release/Counterpart.app"
 codesign --verify --deep --strict "$app"
 python3 "$mac/../../scripts/verify_apple_distribution.py" "$app" --platform mac --build "$BUILD_NUMBER"
