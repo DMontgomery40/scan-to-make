@@ -53,7 +53,7 @@ Build **202611040900** (source `3b24efcf`) is installed and checked through the 
 | What | Version | From |
 |---|---|---|
 | Mac app `/Applications/Counterpart.app` | **202611040900** | release @ `3b24efcf`: final main queue including #293, provider routing, reconstruction qualification, multi-plate/starter support and both updater fixes. Signed entitlements match the previous development app exactly; installed idle and checked through actual UI Nov 4 16:08Z. |
-| iPhone "Davica3" (`00008150-001A488C3642401C`) | **2.0 (202611041045), Release configuration / development signing** | Source `a26be565`, installed Nov 4 through USB without uninstall or fixture launch arguments; version verified on device. Sandbox APNs/CloudKit preserved. Signed app and receipts: `~/scan-to-make-work/phone-release-202611041045/`. Supersedes DEBUG build 0322. |
+| iPhone "Davica3" (`00008150-001A488C3642401C`) | **2.0 (202611041132), Release configuration / development signing** | Source `38003639`, includes iPhone per-part AMS controls from `5864c561`. Installed Nov 4 through USB without uninstall or fixture launch arguments; exact build verified on device. Signed entitlements equal previous 1045; Sandbox APNs/CloudKit preserved. Signed app and receipts: `~/scan-to-make-work/phone-ams-202611041132/`. |
 | bambu-printer-mcp (what Counterpart runs) | **Published npm 1.1.54**, installed through actual Settings → Printers → Update Nov 4 13:37Z; replaces hand-copied `587461b`. UI says Updated to 1.1.54, P1S Ready. | `~/Library/Application Support/Scan to Make/printers/bambu-1.1.46/lib/node_modules/bambu-printer-mcp/dist` |
 | mcp-3D-printer-server | live dist from `56d8fb9`; source `feat/bambu-complete` now `afcf378` (new layer-pause parity not deployed) | runs from its own folder and `.env` |
 | bambu-printer-mcp config | `~/bambu-printer-mcp/.env` (the ssh forced command `cd`s there): `BAMBU_DEFAULT_CONNECTION_MODE=bambu_network`, `…_TYPE=lan` | Counterpart's own environment never crosses the ssh hop |
@@ -625,12 +625,18 @@ remote native probes and the SSH tunnel were removed after verification.
     the pass assumed a flat unphotographed underside and straight lower sidewalls, retaining scan scale.
     No print was initiated. Codex's initial invalid-result failure remains unresolved.
     No printer action, companion restart or provider-setting change was performed by the release owner.
-    **iPhone AMS parity gap (Nov 4):** installed build is current, but #293 added the per-colour controls
-    only to Mac. Mobile PrintSheet explicitly directs users to Mac for changing a colour's spool. Muse
-    implementation child `428fc779-7752-4874-8a67-8dedf20b7615` owns mobile/shared-client parity in
-    an isolated worktree; existing mapping API/model-version/estimate guards must be reused. Parent
-    retains integration/install ownership; this child's task is source/build only. Coordinate any physical
-    acceptance with the parent; this task boundary is not a general device-tools ban.
+    **iPhone AMS parity installed (Nov 4):** #293 originally added per-colour controls only to Mac.
+    Muse child `428fc779-7752-4874-8a67-8dedf20b7615` implemented iOS/shared-client parity at
+    `5864c561`, merged into release as `38003639`. Signed Release **202611041132** built under
+    the Apple lock, installed over 1045, and verified with read-only device app info. No uninstall,
+    fixture launch, screen viewer or print. Body/letters rows use the existing mapping API and send
+    exact spools/model version in estimate and Print; plate/pause/copies and #306 question UI preserved.
+    Engineering: child CounterpartKit 174, ControlKit 52, Mac and phone compiles passed; parent signed
+    Release build passed with exact prior entitlements. User-visible acceptance is pending: David has
+    been asked to open Guitar pick → Print and verify body black A1 / letters yellow A2, without pressing
+    final Print. Fresh pick now has current/model.3mf and separate body/letters filament records.
+    Source branch and clean worktree removed after integration; owned parent DerivedData removed,
+    signed app/logs/receipts retained in `~/scan-to-make-work/phone-ams-202611041132/`.
     David reports a physical print completed with WRONG AMS colours and the plate is now clear.
     Merge owner `5bc59bdb` has been asked to coordinate the existing AMS/MCP owners on that print's
     backend receipts (last observed project Guitar pick `a2bfa85a-9700-495d-a86c-d4c6d521502e`).
