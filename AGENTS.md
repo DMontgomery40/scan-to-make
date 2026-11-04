@@ -10,7 +10,7 @@ The app covers capture (LiDAR Object Capture plus close-up stills) and cleanup (
 
 Android app: see [`android/AGENTS.md`](android/AGENTS.md) and [`android/README.md`](android/README.md).
 
-New session? Read [`docs/status/handoff.md`](docs/status/handoff.md) for how to pick up the work, and [`docs/status/asks.md`](docs/status/asks.md) for what's open. Handoffs go in `docs/status/handoff.md`, not in temp folders or agent memory.
+New session? Read the working PRD, [`docs/design/overhaul/PRD.md`](docs/design/overhaul/PRD.md): what is built and accepted, from the code (§0 is the status table). Then [`docs/status/handoff.md`](docs/status/handoff.md) (one screen: owner, installed builds, open list) and [`docs/operations.md`](docs/operations.md) (how to gate, build, install and drive the apps). Handoffs go in `docs/status/handoff.md`, not in temp folders or agent memory.
 
 ## One trunk
 

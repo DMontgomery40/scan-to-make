@@ -1,7 +1,12 @@
 # Counterpart 2: product requirements for iPhone, iPad and Mac
 
-**Platforms:** iOS 27.2 and iPadOS 27.2 (minimum 27.0), including iPhone Duo; macOS 27.
-**Status:** draft for the owner's review, 2026-11-01.
+**Platforms:** iOS 27.2 and iPadOS 27.2 (minimum 27.0), including iPhone Duo; macOS 27. Also a native Android app (Android 8+, `android/`, §16) and a Linux desktop (Ubuntu 26.04 x86_64, `apps/linux`, §17).
+**Status:** working PRD. It describes the code on `main` (checked at `4baf0cd8`, 2026-11-04), not a plan. Fix it in place in the same PR that changes the behaviour. Each section has a status line using these words:
+- **Built**: on main, with engineering checks only (tests, scripts, simulators);
+- **Accepted on device (date)**: David pressed the buttons in the installed app, and the printer's own reports agreed;
+- **Not accepted**: what is still missing or open.
+
+Section 0 lists them all. Who is working on what, and which builds are installed: [`../../status/handoff.md`](../../status/handoff.md).
 **Replaces:** the screen specs in [`../journey.md`](../journey.md) §5–§9. journey.md's decisions on pairing (§3.4), the companion and its payload (§3.2–3.3) and model sign-in (§3.6) still stand unless this document changes them.
 
 **Read with:**
@@ -12,7 +17,65 @@
 
 ---
 
+## 0. Status at a glance
+
+Checked against `main` at `4baf0cd8` on 2026-11-04. This replaces `docs/status/asks.md` and `docs/status/app-review-2026-11-02.md`; git history keeps both.
+
+| Area | Status | Still open |
+|---|---|---|
+| One native iPhone/iPad app, no React Native (§3) | Built; installed 2.0 (202611041132) | — |
+| Mac app (§7) | Built; installed 202611041137 | full mockup parity; background memory budget fails (348 MB idle, §9.6) |
+| Pairing: QR, nearby code (§5.10) | Built; in daily use on Davica3 | — |
+| Automatic iCloud pairing (§5.10) | Built | Not accepted: fresh same-account enrolment |
+| Home, search, title, grid, no fake controls (§5.1) | Built; checked on device Nov 2–3 | stays connected for an hour (never "Mac isn't answering") |
+| Starter projects (§5.11) | Built on iPhone, Mac, Android, Linux | Not accepted; rig original import and physical prints |
+| Scanning: walk-around, in hand, rig (§5.3, §11) | Built; a physical iPhone scan → Mac cleanup → model observed Nov 4 (Leatherman Wave+) | Not accepted: geometry, dimensions, print fitness; in-hand recorder defects (§11) |
+| Project page, rename, Project Settings, Done/Works (§5.4) | Built; Done/Works checked on both Nov 2–3 | rename and settings acceptance partial; Compare versions not built (§18) |
+| Conversation bubbles; "DONE" marks Done without a pass (§5.4.1) | Built | Not accepted |
+| Change request reliability | Built | **open bug**: `objects/completion-intent.ts` turns errors and timeouts into `unknown` with nothing logged, so a change request can stall silently |
+| Print sheet: printer, estimate, quality, strength (§5.5) | Built; prints from the Mac app's Print button Nov 3 | — |
+| Per-part AMS colours for a multi-colour 3MF (§5.5, §8.5) | Built on Mac (#293) and iPhone (`5864c56`) | **Accepted on device Nov 4** (iPhone + P1S, David: "Yes, both colours are correct") |
+| A colour design from before colour parts asks before printing in one colour (§5.5) | Built (#306) | Not accepted |
+| Copies, pause before a layer (§5.5) | Built; P1S paused itself before layer 3 on Nov 3 (Mac, pre-release MCP build) | Not accepted on the published MCPs; mcp-3D-printer-server parity not on npm |
+| Plates of an imported 3MF; per-plate print and completion (§5.5) | Built | Not accepted |
+| Pause, Resume, Stop (§5.7) | Built; worked from the Mac UI over local FULU Nov 3 (hand-copied MCP code) | Not accepted on the published MCP; phone Stop |
+| Bambu Cloud print route (§8.2) | Bambu refused cloud printing (-3120, HTTP 403) Nov 3 | MCP fixes bambu-printer-mcp #102 and mcp-3D-printer-server #56 open |
+| FULU through mcp-3D-printer-server | — | **open bug**: crashes on its config-dir mount |
+| Print a published model (§8.11) | Built; MakerWorld caliper import + real P1S estimate observed | Not accepted: print, browser download path |
+| Notifications (§9.1) | Built; OS permission on | Not accepted: delivery of each event type |
+| Live Activity (§9.4) | Built; Sandbox relay test start/update/end seen on the Lock Screen | Not accepted: real print, Watch, production push |
+| Printer camera (§8.6.1) | Built; 12 reads in 23 s, ≤ 8.4 KB, 0 errors | sustained acceptance |
+| Settings on both, the same (§5.9) | Built; keep-awake toggled from the phone changed the Mac | **open bug**: phone shows "Connected now" while reachability is unknown (`SettingsView.swift`) |
+| Update both MCPs from either app (§8.10) | Built; bambu-printer-mcp 1.1.54 installed through Settings → Update Nov 4 | from the phone; mcp-3D-printer-server is still a hand-built dist |
+| AI provider routing (§7.5) | Built: Claude Code, Codex CLI, Anthropic/OpenAI API, OpenAI-compatible endpoint, Off | real Claude cleanup observed Nov 4; OpenCode not supported yet |
+| Design passes plan how the object prints (FDM prompt pack, `docs/design/fdm-prompt-pack`) | Published in bambu-printer-mcp 1.1.52 / mcp-3D-printer-server 1.2.26 (#99, #52) | Not accepted |
+| One app named Counterpart, one icon (§10) | Built; `/Applications/Counterpart.app` is the only registration for `com.scantomake.mac` | — |
+| Fusion design engine (§8.9) | Built; a private real-worker pass made a parametric cube | Not accepted |
+| Help, docs site, credits (§5.9, §15) | Built; Help opens counterpart.dtmont.com/help.html on both | — |
+| No plate checks anywhere (§5.6) | Built in the app and both MCPs | — |
+| Remote MCP `/v1/mcp` (§8.12) | Built | Not accepted |
+| Android app (§16) | Built (debug APK) | Not accepted: never run on a device or emulator |
+| Linux desktop (§17) | Built (.deb, AppImage) | Not accepted: only exercised on software-rendered XFCE; no pairing, print, provider or reconstruction-review acceptance |
+| TestFlight and Mac beta (§14) | 2.0 (3) uploaded; Mac v2.0-beta.4 notarized and published | external review approval; production push delivery |
+| Widgets (§9.5) | Built | Control Center, App Intents/Siri, Spotlight, Share extension and Watch are not built |
+
+**Known issues from the Nov 2–3 hands-on review that nobody has re-checked since.** The review's two-colour items (one-colour print, the AI telling the person to slice, a preview that isn't the model) are fixed by per-part colours. Failures now reach the phone (#295), and the MCP's "needs a yes before printing" prompt is gone. Still to re-check on device:
+- thickness rounded up ("27 × 31 × 1 mm" for a 0.6 mm pick); "0 g" for a 0.49 g estimate;
+- stage names for the wrong job ("Fixing the scan" with no scan); milestones out of order on short prints;
+- a project's start date taken from an old phone draft; a stray "Your project" draft;
+- spool names as developer strings ("A1 · PLA PLA Basic PLA #000000");
+- "Copies: as the printer profile says" next to a stepper showing 1; "Your printer MCP's preset" as the profile name;
+- phone presence flipping between "seen 15 minutes ago" and "connected";
+- a finished print still offering Pause and Stop, "You'll get a notification when it's done" and a stale camera (Android and the companion now hide these; the iPhone needs checking); Speed shows "–";
+- the Mac print sheet's Cancel ignores an accessibility press; text set through accessibility leaves Create Project disabled;
+- the sidebar printer row opens Settings → Printers instead of the printer;
+- a title capsule in the toolbar that is really a rename button (David: "this needs to go");
+- "I checked the printer: it isn't already printing this" blocking Print with no visible reason;
+- "Getting the print ready" for ~6 minutes after the printer started; "Busy" after a finished print.
+
 ## 1. The product
+
+**Status:** Built. A physical scan became a cleaned model on the Mac (Nov 4), and a two-colour design printed in both AMS colours from the iPhone (Nov 4, accepted). The fit and copy jobs have no end-to-end acceptance yet.
 
 Counterpart makes physical things that fit your life, using your iPhone, your Mac and your 3D printer. It has three jobs:
 
@@ -48,9 +111,15 @@ Each principle is taken from what Apple rewarded in 2026; sources are in [resear
    - Get Dynamic Type, VoiceOver, Increase Contrast, Reduce Motion and Differentiate Without Color for free, then go further: 3D views get spoken descriptions, and status always pairs a symbol with words.
    - Moonlitt won Interaction for "best-in-class Liquid Glass integration" and easy onboarding. Guitar Wiz won Inclusivity for spoken guidance and full accessibility support.
 
-## 3. Platform decision: native Swift, no React Native, no Electron
+## 3. Platform decision: native on every platform, no React Native, no Electron
 
-**Decision.** Both apps become pure Swift and SwiftUI and share one Swift package, `CounterpartKit`. React Native is removed from the phone, and the Mac stays native.
+**Decision.**
+- **Apple:** the iPhone/iPad and Mac apps are pure Swift and SwiftUI and share one Swift package, `CounterpartKit`. React Native is gone from the phone; CI fails if a Release build contains it.
+- **Android:** a native Kotlin and Jetpack Compose app (`android/`, §16). It speaks the iPhone's companion protocol and reuses the shared starter catalog and contract fixtures.
+- **Linux:** a Tauri 2 desktop with a React/TypeScript and Three.js frontend (`apps/linux`, §17). It drives the same Node companion, bundled with its host helper (`tools/linux-host`) and the Linux reconstruction runtime (`tools/linux-reconstruct`). The Apple reasoning below doesn't apply to Linux: there's no Liquid Glass or RealityKit to lose, and the companion was already a Node service.
+- **Windows:** nothing yet.
+
+**Status:** Built. The Apple apps are installed and in daily use. Android and Linux are built but not accepted (§16, §17).
 
 ### Why not Electron or a web stack
 
@@ -63,7 +132,7 @@ Each principle is taken from what Apple rewarded in 2026; sources are in [resear
   - **Native bridges.** Local Network permission attribution, `SMAppService`, the Keychain, `MenuBarExtra`, Quick Look and notifications would each need one.
 
   journey.md §3.2 already covers these reasons.
-- **When a cross-platform shell makes sense:** if a Windows or Linux companion is ever wanted. The companion is already a Node service with a documented protocol, so a Tauri shell for Windows could wrap it later without touching the Apple apps.
+- **Where a cross-platform shell made sense:** Linux, where it now exists (§17). The same Tauri shell could later serve Windows without touching the Apple apps.
 
 ### Why remove React Native from the phone
 
@@ -80,6 +149,8 @@ Each principle is taken from what Apple rewarded in 2026; sources are in [resear
 - the formatters for size, time and grams.
 
 ## 4. Domain model
+
+**Status:** Built. A project can also hold several plates from an imported 3MF, each with its own completion; a Print carries the per-part colour map and its model version.
 
 | Entity | What it is | Key fields |
 |---|---|---|
@@ -110,6 +181,8 @@ Each principle is taken from what Apple rewarded in 2026; sources are in [resear
 
 ### 5.1 Home
 
+**Status:** Built; title, two-column grid, search over notes and every field, and no fake controls were checked on Davica3 Nov 2–3. Not accepted: staying connected on Home for an hour. The empty state offers the starters (§5.11).
+
 **No screen is titled "Counterpart".** David, 2026-11-02: "it looks like it's printing a part called counterpart, i mean, there is not difference in the fonts. and since 3d printing involves printing parts, having it as it is makes it looks like not the name of the app". Like Apple's own apps (Photos says "Library", Music says "Home"), a large title names the screen, never the app; the app icon carries the brand. The app name appears only on Welcome, About and the Mac's menu bar and window chrome. The mockup screenshots below still show the old "Counterpart" title.
 
 Screenshot: `screens/phone-home.jpg`.
@@ -132,6 +205,8 @@ Screenshot, empty state: `screens/phone-home-empty.jpg`.
 
 ### 5.2 New
 
+**Status:** Built. Not accepted.
+
 Screenshot: `screens/phone-new.jpg`.
 
 **Layout.** A large sheet:
@@ -153,6 +228,8 @@ Screenshot: `screens/phone-new.jpg`.
 
 ### 5.3 Capture
 
+**Status:** Built: walk-around (Apple Object Capture), in hand and on a rig. A physical scan reached the Mac and became a cleaned model on Nov 4. Not accepted: geometry and dimensions. A connected Continuity display blacks out the camera ([camera incident](../../status/camera-incident-2026-11-02.md)).
+
 - **Walk-around (unchanged).** The existing Object Capture module (`apps/mobile/modules/object-capture/`) works and isn't touched. Changes are limited to its entry and exit: it's launched from New and returns its scan to New.
   - Close-ups come from the scan's own images, with no extra step. The Mac picks frames from the capture (§7.4).
 - **Scan in hand (new; spec in §11).** Screenshot: `screens/phone-hand.jpg`.
@@ -166,6 +243,8 @@ Screenshot: `screens/phone-new.jpg`.
   - The mode switch reads Walk / In hand / Rig.
 
 ### 5.4 Project
+
+**Status:** Built. Done/Works checked on both devices Nov 2–3; Claude names projects. Not accepted: rename and Project Settings (partial), Ask for changes from both. **Compare versions** in the menu is not built (archived, §18).
 
 Screenshots:
 - `screens/phone-ready.jpg`
@@ -238,6 +317,8 @@ Home and the Mac sidebar group projects as Now, Needs you, Ready, **Done** (Work
 
 ### 5.4.1 The conversation (phone "What you sent", Mac inspector "Request")
 
+**Status:** Built. Not accepted.
+
 David, 2026-11-02: "'you're request' like the dialogue words, and the model/llm words, should be like ios message bubbles… at a glance, and user can see, more eaily, how the whole thing really just a quick texting exchange. DO NOT GO OVER THE TOP and put everything in actions or logs… BUTTTT just the user messages, with just the main actions message, yes… and also they should be in order kinda… my photos of the thing being finished, should not be clusted together with my first pictures."
 
 - **Only two kinds of bubble.** Each of the user's messages (the request, each follow-up, each close-up answer) is a right-aligned bubble in the accent colour. Each pass's reply (its `summary`) is a left-aligned grey bubble. Nothing else becomes a bubble: Activity, stages, tool lines, print events and Ask cards stay where and as they are.
@@ -251,6 +332,8 @@ David, 2026-11-02: "'you're request' like the dialogue words, and the model/llm 
 
 ### 5.5 Print
 
+**Status:** Built on iPhone, Mac, Android and Linux. Per-part AMS colours **accepted on device Nov 4** (iPhone, P1S). Copies, pause before a layer, plates and the legacy-colour choice are built, not accepted on the published MCPs.
+
 Screenshot: `screens/phone-print.jpg`. The flow is modelled on Bambu Handy and MakerWorld's Prepare to Print.
 Screenshots of the variants: `screens/phone-print-one.jpg` (one colour), `screens/phone-print-noams.jpg` (no AMS), `screens/phone-print-loaded.jpg` (What's loaded?), `screens/phone-confirm.jpg` (the MCP's confirmation) and `screens/phone-confirm-mac.jpg` (Answer on your Mac).
 
@@ -261,11 +344,15 @@ Screenshots of the variants: `screens/phone-print-one.jpg` (one colour), `screen
 - **Plate preview.** The model on a plate, with time, grams and layer count as glass capsules. These come from slicing with the printer MCP (`slice_stl` and its estimate) as soon as a printer is chosen.
 - **Colours.**
   - **v1: one colour.** Pick an AMS slot or the loaded spool. It's preselected by matching the MCP's live filaments to the profile's material. Grams are shown.
-  - **Multi-colour (M3b), when the result has separate parts.** Each part maps to a slot, and grams are shown per part. The pipeline is in §8.5.
+  - **Multi-colour (M3b), when the model has separate parts.** One row per part (`GET /v1/objects/<id>/colour-mapping`), each starting on the nearest loaded spool. "Closest colour loaded" is said out loud when the match is loose. Print stays off until every part has a spool, and AMS trays and the external spool can't be mixed. The chosen order travels with Estimate and Print, bound to the model version (`filamentsModelVersion`) so a redesign can't inherit old choices. The same rows are on the Mac (#293) and the iPhone (`5864c56`); the phone never says "Open Counterpart on your Mac". The pipeline is in §8.5.
+  - **A colour design from before colour parts existed** (#306) keeps only one merged STL. Print asks first: **Make it again in colour** (a new pass) or **Print in one colour**. It never quietly adopts old pass outputs.
   - The mockup shows the multi-colour version.
   - A printer without an AMS shows "Uses the loaded filament: *material colour*", with a reminder to change it if needed.
 - **Quality:** Draft, Standard or Fine (layer height).
 - **Strength:** Standard, Strong or Max (walls and infill).
+- **Copies:** how many on the plate, only when the person picks a number (`capabilities.printCopies`). Otherwise the printer profile's own count applies.
+- **Pause before layers:** "Before layer *N* of *T*", for dropping in magnets or nuts (`pauseBeforeLayers`, at most `PrintChoice.maxPauses`). The MCP has the slicer write the printer's own pause (`pause_at_layers`), and pauses already saved in a Studio/Orca 3MF are kept. Gated on `capabilities.layerPauses`.
+- **Plate:** an imported 3MF keeps all its plates in one project. You choose a plate to print or reprint, and each plate remembers that it was printed. The sheet sends the plate's identity (`expectedPlate`), so a change on another device can't print a different plate. Active or uncertain prints lock the selection.
 - **Profile line:** the actual profile name. The trailing toolbar button opens all of the slicer's settings, or "Open in *slicer* on Mac".
 - **Print on *printer***: a prominent bottom button with "Done around *time*".
 
@@ -275,9 +362,13 @@ Screenshots of the variants: `screens/phone-print-one.jpg` (one colour), `screen
 
 ### 5.6 No plate check
 
+**Status:** Built, in the app and in both MCPs.
+
 There is no plate check of any kind: no camera judging, no "is the plate clear?" prompt, no checkbox and no notification. The printer detects an occupied bed itself during bed leveling and stops; that's the only check. When bambu-printer-mcp or another printer MCP asks its own confirmation, the app shows exactly the checks that MCP asks for, and never adds a plate line.
 
 ### 5.7 Printing
+
+**Status:** Built. Pause, Resume and Stop worked from the Mac UI over local FULU on Nov 3 with hand-copied MCP code; not accepted on the published MCP or from the phone. Live Activity: test start, update and end were seen on the Lock Screen through the Sandbox relay; not accepted for a real print or on the Watch.
 
 Screenshot: `screens/phone-printing.jpg`.
 
@@ -295,6 +386,8 @@ Screenshot: `screens/phone-printing.jpg`.
 
 ### 5.8 Printers
 
+**Status:** Built. Settings → Printers also offers each printer's **Connection** (the MCP's own route, e.g. Local network or Bambu Cloud, written to that MCP's `.env`), which MCP a printer uses, Add Printer…, and Download for both MCPs.
+
 Screenshot: `screens/phone-printers.jpg`.
 Screenshots, printer detail: `screens/phone-printer.jpg` and `screens/phone-printer-update.jpg`.
 
@@ -303,6 +396,8 @@ Screenshots, printer detail: `screens/phone-printer.jpg` and `screens/phone-prin
 - **The footer says plainly** that printers are configured in the MCPs on the Mac and Counterpart picks them up. Settings are never duplicated in the app.
 
 ### 5.9 Settings and About
+
+**Status:** Built. General values come from the real Mac; keep-awake changed from the phone changed the Mac (Nov 3). Help opens the live help page on both. **Open bug:** the phone shows "Connected now" while reachability is unknown (`SettingsView.swift`).
 
 Screenshots: `screens/phone-settings.jpg`, `screens/phone-settings-notifications.jpg` and `screens/phone-about.jpg`.
 
@@ -328,6 +423,8 @@ Screenshots: `screens/phone-settings.jpg`, `screens/phone-settings-notifications
 - **About:** the app icon, "Counterpart", the version and build, the website, the licences, and open-source notices.
 
 ### 5.10 First run and pairing
+
+**Status:** QR and nearby pairing built and in use. Automatic iCloud pairing (`POST /v1/pair/icloud`) is built; fresh same-account enrolment is not accepted.
 
 Screenshots: `screens/phone-welcome.jpg`, `screens/phone-pair.jpg` and `screens/phone-notify.jpg`.
 
@@ -359,7 +456,20 @@ Screenshots: `screens/phone-welcome.jpg`, `screens/phone-pair.jpg` and `screens/
 
 - **Permissions.** Local Network is asked when first used, with a reason. The camera is only needed for the QR fallback.
 
+### 5.11 Starter projects
+
+The empty Home, the welcome flow and the empty Mac workspace offer three starters from one shared catalog (`packages/CounterpartKit/Sources/CounterpartKit/Resources/Starters/catalog.json`, also used by Android and Linux):
+- the **scan platform**;
+- the **Counterpart caliper card**, which ships freshly generated model files, branding, QR and preview;
+- the **long vernier caliper with depth gauge**.
+
+MakerWorld starters carry credits and instructions and import the designer's original files; Counterpart never redistributes their geometry (§15). Several original files can be imported into one project. `POST /v1/objects {"starterId": …}` creates the project on the companion. No personal project history is copied.
+
+**Status:** Built. Not accepted: importing the rig original, and printing a starter.
+
 ## 6. iPad and iPhone Duo
+
+**Status:** Built (`NavigationSplitView` at regular width). Not accepted on an iPad or a Duo.
 
 Screenshots: `screens/ipad-split.jpg` and `screens/duo-closed.jpg`.
 Screenshots, reflow: `screens/duo-home-empty.jpg` and `screens/ipad-welcome.jpg`.
@@ -376,7 +486,11 @@ Screenshots, reflow: `screens/duo-home-empty.jpg` and `screens/ipad-welcome.jpg`
 
 ## 7. Mac
 
+**Status:** Built; installed build 202611041137 (source `c5762972`).
+
 ### 7.1 App shape
+
+**Status:** Built: SwiftUI scenes, a `MenuBarExtra`, and the companion as an `SMAppService` agent.
 
 - **A normal Mac app with a menu bar extra.** It has a Dock icon by default, with a Settings switch to hide it, plus a `MenuBarExtra`.
 - **SwiftUI scenes only:**
@@ -389,6 +503,8 @@ Screenshots, reflow: `screens/duo-home-empty.jpg` and `screens/ipad-welcome.jpg`
 - **The companion** stays the bundled Node service, registered as an `SMAppService` agent as today.
 
 ### 7.2 Main window
+
+**Status:** Built; the real model shows on a transparent stage and enters 3D. Not accepted: full parity with the mockups. Open review items are in §0.
 
 Screenshot: `screens/mac-main.jpg`.
 Screenshots, inspector and New Project: `screens/mac-inspector-activity.jpg`, `screens/mac-inspector-print.jpg` and `screens/mac-new.jpg`.
@@ -411,9 +527,13 @@ Screenshots, inspector and New Project: `screens/mac-inspector-activity.jpg`, `s
 
 ### 7.3 Print sheet
 
+**Status:** Built, including per-part colours, copies, layer pauses and plates (§5.5).
+
 Screenshot: `screens/mac-print.jpg`. The same content as the phone's (§5.5), laid out as a sheet: printer cards, the plate preview, the colour map, quality and strength, and **Print on *printer***.
 
 ### 7.4 Menu bar popover
+
+**Status:** Built. Not accepted.
 
 Screenshot: `screens/mac-popover.jpg`.
 
@@ -425,6 +545,8 @@ Screenshot: `screens/mac-popover.jpg`.
 
 ### 7.5 Settings
 
+**Status:** Built.
+
 Screenshot: `screens/mac-devices.jpg`.
 Screenshots, the other tabs: `screens/mac-settings-general.jpg`, `screens/mac-settings-printers.jpg`, `screens/mac-settings-ai.jpg` and `screens/mac-settings-advanced.jpg`.
 
@@ -434,23 +556,23 @@ Screenshots, the other tabs: `screens/mac-settings-general.jpg`, `screens/mac-se
   - each row shows connected now or last seen, and its paired date;
   - Remove…, and Add a Phone….
 - **Printers:** read-only, listing each printer and which MCP provides it, with a link to the MCP's own config.
-- **AI** (journey.md §3.6, unchanged): provider, connected state, and a test.
+- **AI:** which model runs the jobs, with its connected state and a **Test**. The choices are Claude Code, Codex CLI, an Anthropic or OpenAI API key (kept in the Keychain), an OpenAI-compatible endpoint (OpenRouter or a local server), or **Off**. Every job snapshots the choice when it starts: design, change, cleanup, published model, title and completion. Off is enforced, and nothing falls back to Claude. OpenCode isn't offered yet. The contract is in [`docs/protocols/settings.md`](../../protocols/settings.md). A real Claude cleanup of David's scan ran Nov 4; an earlier Codex pass failed.
 - **Advanced:** addresses in use, logs, diagnostics export.
 
 ### 7.6 What the Mac does without being asked
+
+**Status:** Built. Keep-awake while working is a setting on both devices.
 
 - **Close-ups from the scan.** On arrival, the Mac selects the sharpest, most informative frames from the capture as reference photos. If the scan can't show a region, the Mac raises an **Ask** with that region highlighted.
 - **Prevents idle sleep** while a pass or a print is running (journey.md §3.3).
 
 ## 8. Back end: printers, progress and events
 
-This section specifies every connection from the user's printer to their phone's Lock Screen.
-- **Baseline:** the `feat/counterpart-project-workspace` branch at `dca404d`, which Codex is still committing to.
-- **Existing** marks what that branch already does. Keep it, and don't rebuild it.
-- **New** and **Fix** mark the work this PRD adds.
-- Re-read the branch head before starting a milestone, because it moves.
+This section specifies every connection from the user's printer to their phone's Lock Screen. The **Existing**, **New** and **Fix** marks are historical: they record what the Nov 1 plan added to the code of that time. All of it is now on main; each status line says what is accepted.
 
 ### 8.1 Topology
+
+**Status:** Built as drawn. Android and Linux reach the companion the same way as the iPhone (§16, §17).
 
 ```
 iPhone ──HTTPS, LAN/VPN, pinned key──▶ companion (Node, on the Mac) ──MCP over stdio──▶ bambu-printer-mcp ──MQTT 8883 · FTPS 990 · camera TCP 6000 / RTSP 322──▶ Bambu printer
@@ -466,6 +588,8 @@ Who runs what:
 - **The phone** never talks to a printer or an MCP directly.
 
 ### 8.2 Finding printers and choosing the MCP
+
+**Status:** Built, including the Codex `config.toml` source and one destination per printer. Bambu Cloud printing was refused by Bambu (-3120, HTTP 403) on Nov 3; the fix is in bambu-printer-mcp #102 and mcp-3D-printer-server #56, both open.
 
 - **Existing.** `services/companion/src/objects/printers.ts` (`loadPrinterCatalog`) builds the list of printers from the MCP configs the user already has:
   - Claude Code (`~/.claude.json`, user and project scopes);
@@ -487,6 +611,8 @@ Who runs what:
 
 ### 8.3 MCP sessions: one long-lived session per printer
 
+**Status:** Built (`PrinterSessionPool`).
+
 - **Fix.** Today `PrintRunner.status()`, `filaments()` and the print run each spawn a new MCP process and close it afterwards (`printer-handoff/src/print.ts`). The project `GET` calls `status()` every 15 s while a print is open (`objects/service.ts`).
   - Each spawn of bambu-printer-mcp opens its own MQTT connection to the printer.
   - During a print, that means a churn of processes and several MQTT clients at once.
@@ -502,6 +628,8 @@ Who runs what:
   - **Why this matters for Bambu.** bambu-printer-mcp caches the printer's MQTT reports (`reportSnapshots`). On a held session, a progress read is served from that cache without any extra printer traffic.
 
 ### 8.4 The Counterpart tool contract (`counterpart/1`), added to both MCPs
+
+**Status:** Built in both MCPs (on mcp-3D-printer-server's main). The installed mcp-3D-printer-server is a hand-built dist from `feat/bambu-complete@56d8fb9`, not npm; its `pause_at_layers`, Resume notice and refusal reporting aren't published.
 
 Both MCPs gain the same small set of tools with the same arguments and results. Each tool declares an `outputSchema` and returns `structuredContent`, plus the same JSON as text for older clients. The companion validates results with zod.
 - **Bambu tools** take the existing optional `host`, `bambu_serial` and `bambu_token` overrides.
@@ -587,6 +715,8 @@ Each change follows the MCP repo's own AGENTS.md and release process.
 
 ### 8.5 Printing a project (dispatch)
 
+**Status:** Built, including per-part colours (M3b: `parts`, `counterpart_make_3mf`, `ams_mapping`) and the orientation/support pass-through (#303): no `lay_flat`. Bambu Studio orients an STL itself, a 3MF keeps its placement, other slicers get the model as it is, and the designer's support choice goes straight to `slice_stl`. A two-colour pick printed correctly from the iPhone on Nov 4.
+
 - **Existing.** `PrintRunner.runBundle` runs `lay_flat` → `slice_stl` → `inspect_print_file` → `camera_snapshot` → `print_3mf` (Bambu). For other printers it runs `slice_stl` → `upload_gcode`/`start_print`.
   - It reports preparation phases: connecting, slicing, slice-ready (with the estimate from `sliceEstimate`), checking the printer, and requesting the print.
   - It relays the MCP's own print confirmation (elicitation) to the phone and the Mac. `DispatchedPrintError` and the "uncertain" result are handled.
@@ -610,6 +740,8 @@ Each change follows the MCP repo's own AGENTS.md and release process.
 - **Fix: "printed" now means printed.** On `print_3mf`/`start_print` success, the object goes to `printing` with `print.printId` (a new uuid), `destinationId`, `dispatchedAt`, `jobName`, `taskId?` and the slice `estimate`. Today it goes straight to `printed`. The monitor (§8.6) sets `printed` when the matching job finishes.
 
 ### 8.6 The print monitor (new: `services/companion/src/printing/monitor.ts`)
+
+**Status:** Built. A print that never started ends its Live Activity (#302).
 
 One monitor runs per active print. It holds the destination's session (§8.3) until the print ends.
 
@@ -670,6 +802,8 @@ If a different job is running, the monitor marks ours `replaced` and stops; it n
 
 ### 8.6.1 The printer camera, done cheaply
 
+**Status:** Built; an installed sample had 0 errors over 12 reads. Not accepted: a sustained run.
+
 David, 2026-11-02: "are we doing that in an effecient and clever say like how scrypted nvr sends over webrtc peer to peer nad it takes like zero memory or compute and it's basically fucking instant… but somehow, i highly doubt we're doing this in an effecient and clever way". He was right. As of `37ecbb6`, every frame opened a new TLS connection to the printer's camera (P1S, port 6000: handshake, auth, one JPEG, close), RTSP printers started a new ffmpeg per frame, phones re-downloaded on a timer whether or not the picture changed, and a dropped event stream fell back to polling the whole project list every 3 s.
 
 The design, Scrypted's shape at a 3D printer's pace:
@@ -686,6 +820,8 @@ The design, Scrypted's shape at a 3D printer's pace:
 - measured on the real P1S.
 
 ### 8.7 The event log (new: `services/companion/src/events/`)
+
+**Status:** Built.
 
 Every user-visible change becomes one event.
 - Events are appended to `~/Library/Application Support/Scan to Make/events.ndjson`, with a monotonic `seq`, and kept for 7 days.
@@ -717,6 +853,8 @@ type CounterpartEvent = {
 - **Mac app:** the new control method `events.wait {after: number, timeoutMs ≤ 25000}` returns the same payload. Frames are read straight from disk, at the path the event gives.
 
 ### 8.8 Delivery: Mac, CloudKit, and the Live Activity relay
+
+**Status:** Built. The relay is provisioned for Sandbox and Production. CloudKit owns the discrete alerts, with their camera frames. A Live Activity push carries an alert only on push-to-start, so a pause or completion never shows two banners. Not accepted: production push delivery.
 
 **Mac app `EventRelay` (new, Swift).** It loops on `events.wait` and persists its cursor. After a restart it doesn't notify for events older than 10 minutes; it only syncs them.
 
@@ -768,6 +906,8 @@ For every event with `notify ≠ none`:
   - In both modes the activity renders with `Text(timerInterval:)` and `ProgressView(timerInterval:countsDown:)` up to `endsAt`, so it keeps counting between updates. `staleDate = endsAt + 10 min` shows "Checking…" if nothing has arrived.
 
 ### 8.9 Design engine: Blender, or Fusion when the user has it
+
+**Status:** Built. Blender runs only while a pass needs it and closes afterwards. A Fusion pass made and exported a parametric cube without touching David's open documents. Not accepted.
 
 **Both Blender and Autodesk Fusion are optional dependencies of Counterpart.** Printing existing models that need no changes and reprinting projects must work without either. Their installation and readiness only gate the cleanup, design or editing operation that actually uses them, never pairing, printer setup or printing an existing model.
 
@@ -850,6 +990,8 @@ Screenshots: `screens/mac-settings-ai.jpg` and `screens/mac-settings-ai-nofusion
 
 ### 8.10 Updating the printer MCPs from either app
 
+**Status:** Built. bambu-printer-mcp 1.1.54 was installed through the Mac's Settings → Printers → Update on Nov 4. Not accepted: from the phone, and for mcp-3D-printer-server.
+
 **Update** is one tap in Settings → Printers, on the phone or the Mac. It actually updates; it never shows a config file. The phone sends the request through the paired connection (`POST /v1/printers/mcp/<mcpId>/update`, or the `printers.updateMcp` control method on the Mac). The companion does the work and reports progress as events (`mcp.update.started`, `mcp.update.done`, `mcp.update.failed`), so both apps show the same progress bar and result.
 
 **How the companion updates.** It works out how each MCP is installed from the process it runs (§8.2), then runs the matching update in that installation's own directory:
@@ -869,6 +1011,8 @@ Screenshots: `screens/mac-settings-ai.jpg` and `screens/mac-settings-ai-nofusion
 - **The same flow** updates the Fusion MCP pin (§8.9) once a new pin has passed its acceptance check.
 
 ### 8.11 Print a published model
+
+**Status:** Built. A MakerWorld caliper imported as Ready with credit, licence, link, the exact file hash and a real P1S estimate. Not accepted: printing it, and the browser download path.
 
 **When this job applies.** The request contains a link to a model page, or a 3MF or STL was shared or dropped together with a link or a model name. The companion sets `kind: "published"`. This job never goes to the Blender or Fusion design pass.
 
@@ -910,11 +1054,41 @@ Screenshots: `screens/mac-settings-ai.jpg` and `screens/mac-settings-ai-nofusion
 
 **What the user sees.** The New sheet (§5.2) accepts a pasted link. Typing or pasting a URL turns the field into a link card with the page's title and thumbnail, and the action becomes **Get this model**. The Share sheet from Safari or the MakerWorld app does the same.
 
+### 8.12 Remote MCP: `/v1/mcp`
+
+A paired device or remote MCP client reaches every configured printer MCP through the companion's existing front door (`services/companion/src/remote-mcp-http.ts`, `services/printer-handoff/src/remote-mcp.ts`). `/v1/mcp` serves all destinations and `/v1/mcp/<destinationId>` serves one, as stateless Streamable HTTP. It uses the same pairing, tokens and revocation as the phone. A remote client always gets read and never the phone's scopes. Design: [`docs/design/remote-mcp.md`](../remote-mcp.md).
+
+**Status:** Built. Not accepted.
+
+### 8.13 The companion's HTTP surface
+
+These are the routes the phone, Android, Linux and remote clients use, from `services/companion/src`:
+
+| Route | What |
+|---|---|
+| `/healthz` | liveness |
+| `/v1/pair`, `/v1/pair/icloud`, `/v1/pair/nearby{,/reveal,/result}`, `/v1/auth/refresh` | pairing and credentials |
+| `/v1/devices`, `/v1/devices/<id>`, `/v1/devices/live-activity-tokens` | paired devices, Live Activity tokens |
+| `/v1/settings`, `/v1/settings/ai/test`, `/v1/settings/fusion/setup` | shared settings (§5.9) |
+| `/v1/objects` (`GET`, `POST` incl. `starterId`), `/v1/objects/<id>` (`PATCH`, `DELETE`) | projects |
+| `/v1/objects/<id>/…`: `scan`, `model`, `model.stl`, `ask`, `asks/<id>.jpg`, `plate-selection`, `settings`, `duplicate`, `photos`, `capture`, `capture-depth`, `capture-camera`, `reconstruction`, `reconstruction-preview.stl`, `start`, `corrections`, `closeup`, `estimate`, `filaments`, `colour-mapping`, `printer`, `print`, `print/pause`, `print/resume`, `print/cancel`, `print-confirmation`, `camera.jpg`, `prints/<id>/frames/<id>.jpg`, `original/<n>`, `passes/<id>/activity`, `renders/…` | everything on a project page and print sheet |
+| `/v1/objects/printers`, `/v1/objects/printers/<id>/{route,mcp}`, `/v1/objects/printers/<id>/camera.jpg` | printers, connection route, which MCP |
+| `/v1/printers/mcp/<id>/update` | MCP update (§8.10) |
+| `/v1/events` | long-poll event log (§8.7) |
+| `/v1/saved-projects/<id>/captures/…` | captures, detail stills, scan processing, model assets, size, maker size |
+| `/v1/printer-handoff/bundles…`, `/v1/printer-handoff/elicitations…` | print bundles and the MCP's own questions |
+| `/v1/blender{,/check,/update}` | Blender add-on status and repair |
+| `/v1/mcp`, `/v1/mcp/<destinationId>` | remote MCP (§8.12) |
+
 ## 9. Notifications and Live Activities
 
-Neither app has any notifications today (audit P6, M5). Events come from §8.7 and travel by the routes in §8.8.
+Both apps notify. Events come from §8.7 and travel by the routes in §8.8. Android posts its own notifications from the same event log (§16).
+
+**Status:** Built. Duplicate alerts are suppressed, and the Live Activity recovers when its update token changes. Not accepted: delivery of each event type on a real print.
 
 ### 9.1 What the user gets
+
+**Status:** Built. Not accepted: delivery of each event on a real print.
 
 Screenshot: `screens/phone-notifications.jpg` (an approximation: the system draws the Lock Screen).
 
@@ -934,6 +1108,8 @@ Screenshot: `screens/phone-notifications.jpg` (an approximation: the system draw
 Each row has its own switch in Settings → Notifications, on both devices. The milestone choice is in the same place (§8.6).
 
 ### 9.2 iPhone: subscriptions, extension and actions
+
+**Status:** Built. Not accepted.
 
 **Subscriptions.** The phone creates these once, with fixed IDs so it's idempotent: `CKQuerySubscription`s on `CounterpartEvent`, in the private database, `firesOnRecordCreation`. There is one per category, because a subscription carries one category:
 
@@ -984,6 +1160,8 @@ If the fetch runs past the extension's time limit, the notification is delivered
 
 ### 9.3 Commands from anywhere (CloudKit)
 
+**Status:** Built. Not accepted away from home.
+
 - **How a command travels.** When the phone can't reach the Mac directly, it writes a `CounterpartCommand` record into the same private zone:
   - `{commandId, type, projectId, payload, photos[CKAsset], createdAt}`, where `type` is one of `print | correct | answerAsk | confirm | pause | resume | cancel`.
 - **How the Mac receives it.** The Mac app subscribes to that record type (content-available) and also fetches on launch and on wake.
@@ -995,6 +1173,8 @@ If the fetch runs past the extension's time limit, the notification is delivered
   2. the user's answer goes back as a `confirm` command.
 
 ### 9.4 Live Activity
+
+**Status:** Built. Test start, update and end were seen on the Lock Screen through the Sandbox relay. Not accepted: a real print, the Watch, production push.
 
 Screenshots: `screens/phone-lock.jpg` and `screens/phone-island.jpg` (approximations: the system draws the Lock Screen and the Dynamic Island).
 
@@ -1011,6 +1191,8 @@ Screenshots: `screens/phone-lock.jpg` and `screens/phone-island.jpg` (approximat
 - Starting and updating it follow §8.8: through the relay when there's an APNs key, and from the phone itself otherwise.
 
 ### 9.5 Widgets and system surfaces
+
+**Status:** Widgets are built. Control Center controls, App Intents and Siri, Spotlight, the Share extension and the Watch are not built.
 
 Screenshots: `screens/phone-widgets.jpg` and `screens/phone-widgets-lock.jpg` (approximations: the system draws the Home Screen and the Lock Screen).
 
@@ -1030,6 +1212,8 @@ Screenshots: `screens/phone-widgets.jpg` and `screens/phone-widgets-lock.jpg` (a
 - **Share extension:** photos or a product web page shared from Photos or Safari open New with them attached.
 
 ### 9.6 Performance budgets
+
+**Status:** Not accepted: the installed Mac app measured 348 MB with its window open and 349 MB closed, peaking at 591 MB (build 1355, Nov 3). That is over budget.
 
 Counterpart runs all day in the menu bar and on the phone, so it has to be cheap when nothing is happening.
 
@@ -1062,6 +1246,8 @@ Counterpart runs all day in the menu bar and on the phone, so it has to be cheap
 
 ## 11. Scan in hand
 
+**Status:** Built (`HandheldCapture.swift`, `HandheldDepthRecorder.swift`, `tools/mac-reconstruct samples`). Not accepted. A Codex review found defects that remain open: 24 frames at 10 fps covers only ~2.4 s of nearly identical views; `ObjectMasker` erases the object when a hand is nearer than it; and `reconstruct.ts` discards the reconstruction's stderr. Its advice: try Apple's own masking (`--no-masks`) first, then move to sharp still photos with depth and turn-pause-capture guidance.
+
 The full research is in [research/inhand-capture.md](research/inhand-capture.md).
 
 - **Placement.** A separate mode, "Scan in hand", for small objects. It is also offered after a walk-around as **Get the underside**. The walk-around module is not changed.
@@ -1088,6 +1274,8 @@ The full research is in [research/inhand-capture.md](research/inhand-capture.md)
   - two scans agree within 1%.
 
 ### 11.1 On a scan rig
+
+**Status:** Built (the rig mode and its Kass 3D credit). Not accepted: the §11.1 pass criteria on a real rig.
 
 - **What the rig is.** The rig is "Fully 3D-printed 360° photography turntable" by **Kass 3D**, published on MakerWorld:
   - <https://makerworld.com/en/models/1531561>
@@ -1121,6 +1309,8 @@ The full research is in [research/inhand-capture.md](research/inhand-capture.md)
 
 ## 12. Sync and data
 
+**Status:** Built (CloudKit project mirror and events).
+
 - **The Mac is the source of truth.** Projects, inputs, passes and results live in the companion's store, as today.
 - **On the home network or a VPN,** the phone talks to the companion over the existing pairing (pinned key, addresses in order; journey.md §3.4).
 - **Away from home,** the Mac mirrors a project summary to the user's private CloudKit database: title, state, render thumbnail, the open Ask, and print progress.
@@ -1132,6 +1322,8 @@ The full research is in [research/inhand-capture.md](research/inhand-capture.md)
 ## 13. Build plan
 
 Each milestone ends in an on-device check with screenshots compared against `screens/`, and a VoiceOver pass on the new screens.
+
+Status per milestone, checked on 2026-11-04: M0 Accepted (React Native gone; pairing in daily use). M1, M1F, M2, M4 and M5 Built, with acceptance partial as §0 lists. M3 Built; real-print Live Activity not accepted. **M3b accepted on device Nov 4:** a two-part guitar pick printed in black and yellow AMS colours on the P1S, from the iPhone. M6: widgets only.
 
 | # | Milestone | Done when |
 |---|---|---|
@@ -1151,8 +1343,8 @@ Each milestone ends in an on-device check with screenshots compared against `scr
 
 ## 14. Open questions and the one manual step
 
-1. **Distribution.** TestFlight first for the iPhone app, and Developer ID with Sparkle for the Mac (journey.md §3.2)? Or App Store for both from the start? Either way CloudKit and push work (§8.8), so this choice doesn't block anything in M1–M3.
-2. **Manual step (not a decision): the APNs key.** The owner creates an APNs auth key in the Apple developer portal and puts it in the Worker's secrets. The Live Activity relay (§8.8) needs it. Everything else in M1 works without it, including notifications with frames.
+1. **Distribution: decided.** TestFlight for the iPhone app (App Store name *Counterpart 3D*, public beta group *Counterpart Public Beta*), and Developer ID with Sparkle for the Mac (v2.0-beta.4 notarized and published at counterpart.dtmont.com/beta.html). The procedure is in [`docs/distribution.md`](../../distribution.md). Still open: Apple's approval of the external build, and production push delivery.
+2. **The APNs key: done.** The relay is provisioned for Sandbox and Production.
 
 ## 15. Credits
 
@@ -1163,3 +1355,28 @@ Each milestone ends in an on-device check with screenshots compared against `scr
 - **Fusion MCP:** [fusion360-mcp-server](https://github.com/faust-machines/fusion360-mcp-server) by Faust Machines and its contributors (MIT), used through the printer MCPs' Fusion bridge at a pinned commit.
 - **Print flow reference:** Bambu Handy and MakerWorld's Prepare to Print.
 
+## 16. Android
+
+A native Kotlin/Jetpack Compose client (`android/`, minSdk 26, target 35, application id `com.scantomake`). Screens: Welcome, Pairing (QR or nearby), Home, Starter projects, New project, Scan (ARCore capture), Project with plates and reconstruction review, Printing, Printer settings, Settings. It pairs, sends descriptions, photos, links and scans, and follows the work and the print. Its print sheet has capability-gated copies and layer pauses. It pauses and stops prints, and posts notifications ("Ready to print", "Did it fit?"). Once a print finishes it stops refreshing the camera and hides Pause, Resume, Stop and time left. Build: `./gradlew assembleDebug`. Details: [`android/README.md`](../../../android/README.md).
+
+**Status:** Built (debug APK; unit tests and lint pass). **Not accepted: it has never run on a device or an emulator**; the T3 emulator failed to start. No signed release.
+
+## 17. Linux desktop
+
+A Tauri 2 app (`apps/linux`) for Ubuntu 26.04 x86_64, shipped as a `.deb` and an AppImage. Its frontend is React/TypeScript with Three.js, which loads only for Explore in 3D. It talks to the bundled companion through the private control socket and never serves an admin API or talks to printers directly. `tools/linux-host` provides setup, the user service and the credential-resolving model worker. `tools/linux-reconstruct` provides COLMAP/OpenMVS reconstruction with its own Python. Tailscale reaches it from the phone ([`docs/tailscale-setup.md`](../../tailscale-setup.md)). Build: `apps/linux/scripts/bundle.sh`.
+
+**Status:** Built. Repair, retained projects, starters, the plate/STL viewer and phantom-printer removal were observed on software-rendered XFCE (agents-136, Xvfb :93). **Not accepted:** pairing a phone, printing, the AI provider and reconstruction review.
+
+## 18. Backlog: work that never landed
+
+Every unmerged branch and dirty worktree was preserved on 2026-11-04 as a pushed tag; `git ls-remote --tags origin 'archive/2026-11-04/*'` lists all 83. Don't delete them. The notable ones:
+
+| Tag | What | Why it matters |
+|---|---|---|
+| `archive/2026-11-04/agents-173/dirty/t3-98ed2eba` | KAN-200 scan-repair colour sampler and fixed-rim fill, uncommitted, 259 lines | core cleanup work (§5.3) |
+| `archive/2026-11-04/agents-173/branch/KAN-159-dependency-manager` | dependency manager, 3,178-line WIP | install/update of tools |
+| `archive/2026-11-04/Mac-mini/dirty/KAN-217-accept` | `DeviceCameraAcceptanceUITests.swift` | camera acceptance on a device |
+| `archive/2026-11-04/github/KAN-184-compare-versions` | Compare versions (§5.4 menu) | listed in the PRD, not built |
+| `archive/2026-11-04/github/KAN-201-newest-codex` | "Update Codex" | provider maintenance (§7.5) |
+| `archive/2026-11-04/github/KAN-198-mac-judge-tool` | Mac judge tool | |
+| `archive/2026-11-04/github/KAN-209-caliper` | caliper work | starters (§5.11) |

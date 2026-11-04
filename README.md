@@ -37,8 +37,8 @@ Make`) keep the old name.
 - **Protocols:** the phone's API ([`objects-api.md`](docs/protocols/objects-api.md)), events and notifications
   ([`events.md`](docs/protocols/events.md)), the Mac app's control socket ([`local-control.md`](docs/protocols/local-control.md)),
   settings ([`settings.md`](docs/protocols/settings.md)) and CloudKit ([`cloudkit.md`](docs/protocols/cloudkit.md)).
-- **Status:** start with [`docs/status/handoff.md`](docs/status/handoff.md); open questions are in
-  [`docs/status/asks.md`](docs/status/asks.md).
+- **Status:** start with the working PRD, [`docs/design/overhaul/PRD.md`](docs/design/overhaul/PRD.md) (§0), then
+  [`docs/status/handoff.md`](docs/status/handoff.md).
 - **Brand:** [`docs/brand/`](docs/brand/): the app icon and the mark.
 
 ## Checks

@@ -68,18 +68,18 @@ independently of David's existing setup:
   Accept print controls using visible Counterpart controls with the published packages users receive.
 - The installed development Mac build **202611040900** includes #298 guidance, the orientation/support
   bridge and updater fixes. Final main **127721fa**, including #293 multi-colour 3MF/AMS mapping,
-  is integrated into the release branch at **167b5770**, alongside Android/Linux and reconstruction.
+  was integrated at **167b5770**, alongside Android/Linux and reconstruction; all of it is on main since #307.
   Public Mac beta 4 now carries this integration; physical-print acceptance remains open.
 - The hand-copied version-label obstacle is resolved by the newer npm release. The updater now authorizes
   the selected package's postinstall and verifies it before swapping; bundled Node permits third-party
   native modules under Hardened Runtime. `--loglevel=notice` also preserves the verification banner
   when the user's npm configuration is silent. Public Mac beta 4 carries all these fixes.
 - The legacy macOS installer and Docker image pin older MCP versions. They do not
-  reproduce the currently accepted feature-branch installation.
+  reproduce the current installation.
 
 Physical capture, post-capture camera/Face ID, phone printer controls, real-print
 notifications and Watch delivery still need the acceptance recorded in
-[asks](status/asks.md). A successful archive does not close those checks.
+[working PRD](design/overhaul/PRD.md) (§0). A successful archive does not close those checks.
 
 ## Production services
 
