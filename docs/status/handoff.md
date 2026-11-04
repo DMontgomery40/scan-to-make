@@ -41,7 +41,7 @@ What to build: [`../design/overhaul/PRD.md`](../design/overhaul/PRD.md), journey
   designer's structured support on/off/type directly to `slice_stl`. Include support args in slice-cache
   identity; use the existing unsupported-settings refusal. No stored rotation, hash-bound plan, receipt
   checks, missing-plan Ask or walls/infill minimum Asks. Counterpart is a bridge to the slicer.
-  No fix or UI acceptance is claimed yet.
+  The source fix is installed in build 202611040628; design/print acceptance remains open.
   Mac UI, companion restarts, installs and MCP Update remain held until the release owner hands control back.
 - No user memories (AGENTS.md). Push after every feature. Clean up worktrees, branches, venvs and build bloat you made.
 - iOS/macOS 27.x, Liquid Glass; read current Apple docs. Use Apple's frameworks; don't hand-roll what Apple ships.
@@ -50,9 +50,9 @@ What to build: [`../design/overhaul/PRD.md`](../design/overhaul/PRD.md), journey
 
 | What | Version | From |
 |---|---|---|
-| Mac app `/Applications/Counterpart.app` | **202611040557** | release @ `4d6838f0`: includes #295/#299/#302/#303, provider routing and updater script-permission fix. Signed development CloudKit/APNs; installed while idle Nov 4. #300 is later source, not in this app. |
+| Mac app `/Applications/Counterpart.app` | **202611040628** | release @ `86467621`: includes #295/#299/#302/#303/#300/#301, provider routing, updater script permissions and bundled Node native-addon entitlement. Signed development CloudKit/APNs; installed idle and verified through actual UI Nov 4 13:35Z. |
 | iPhone "Davica3" (`00008150-001A488C3642401C`) | **2.0 (202611040322), DEBUG** | Phone/deploy owner verified Nov 4: `feat/phone-pause-and-printer-pickers` around `f03580e`; installed by its child around 03:24 MST. Includes #271 virtual RealityView camera and handheld teardown. Fixture screen launches are not connected-app acceptance. |
-| bambu-printer-mcp (what Counterpart runs) | 1.1.46 install + dist from `feat/one-printer-control-route` @ `587461b` (active since 20:17) (a built `native/bambu-native-print` from `exp/native-plugin-controls` sits beside it, unused for a P1S) | `~/Library/Application Support/Scan to Make/printers/bambu-1.1.46/lib/node_modules/bambu-printer-mcp/dist` |
+| bambu-printer-mcp (what Counterpart runs) | **Published npm 1.1.54**, installed through actual Settings → Printers → Update Nov 4 13:37Z; replaces hand-copied `587461b`. UI says Updated to 1.1.54, P1S Ready. | `~/Library/Application Support/Scan to Make/printers/bambu-1.1.46/lib/node_modules/bambu-printer-mcp/dist` |
 | mcp-3D-printer-server | live dist from `56d8fb9`; source `feat/bambu-complete` now `afcf378` (new layer-pause parity not deployed) | runs from its own folder and `.env` |
 | bambu-printer-mcp config | `~/bambu-printer-mcp/.env` (the ssh forced command `cd`s there): `BAMBU_DEFAULT_CONNECTION_MODE=bambu_network`, `…_TYPE=lan` | Counterpart's own environment never crosses the ssh hop |
 | FULU runtime | Colima profile `bambu-fulu`, image `bpm-fulu-e2e:runtime`, plug-in **02.05.02.58** | launcher `~/Library/Application Support/Scan to Make/printers/fulu-authenticated-lan.sh` (in neither repo) |
@@ -277,7 +277,7 @@ remote native probes and the SSH tunnel were removed after verification.
      **Deployment completed after fresh idle verification:** parent observed AirPods **Couldn't finish /
      The printer stopped**, no pending confirmation, no Working/Printing projects, and P1S **Ready** in Settings.
      Installed the already-signed `202611040557` (`4d6838f0`, includes #303 and updater fix, predates #300), retaining
-     immediate rollback at `~/scan-to-make-work/combined-mac-202611040557/Counterpart.previous`.
+     a rollback at the time; superseded by the corrected deployment below.
      Quit through the app, replaced `/Applications/Counterpart.app`, restarted only its companion (PID 83387),
      and verified retained projects and printer state through UI. All nine project IDs, settings, printer config,
      companion environment and credentials are retained; only the instance-lock owner receipt changed.
@@ -287,13 +287,32 @@ remote native probes and the SSH tunnel were removed after verification.
      **Update attempt 13:18:53Z failed and rolled back:** owner used visible Update. The new npm flags worked:
      postinstall ran and applied the compatibility patch. Fresh MCP startup then failed loading sharp because
      bundled hardened Node has only allow-jit, and sharp's native addon has a different/no Team ID. Version
-     1.1.52 remains live; no staging leftovers or print. UI returned to parent. Packaging correction in progress;
+     1.1.52 remains live; no staging leftovers or print. UI returned to parent. Packaging corrected in `86467621`;
      retained isolated repro at `~/scan-to-make-work/sharp-library-validation-repro/`. No retry until rebuilt.
      Node-only packaging fix adds `com.apple.security.cs.disable-library-validation` alongside allow-jit;
      the distribution verifier now checks the signed Node's actual entitlements. Parent reproduced failure
      under the installed Node, then re-signed an isolated copy with the new entitlements: all four sharp
      loads passed and fresh npm 1.1.54 initialized. No printer commands. Receipts in
-     `~/scan-to-make-work/node-native-signing/`. Rebuild/notarization verification and real UI Update remain.
+     `~/scan-to-make-work/node-native-signing/`. Rebuild/runtime notarization and real UI Update passed below.
+     **Corrected build installed and UI verified:** signed development Mac `202611040628`, source `86467621` (also #300/#301),
+     finished exit 0 and passed deep/strict signature verification. Its actual embedded Node passes all four
+     sharp loads and fresh npm 1.1.54 initialize. Corrected standalone Developer ID Node notarization
+     `89b595ea-1d8f-47f5-9641-a062fa6f1f6a` was Accepted; this is not a notarization claim for the development app.
+     Parent freshly observed no active projects/pending confirmations and P1S Ready, quit through the app,
+     installed the prepared bundle and restarted the companion. Actual UI again showed all nine retained
+     projects and P1S Ready with Developer Mode selected. Auth, settings, companion environment and printer
+     config hashes are unchanged; only the instance-lock owner changed. Receipts and immediate 557 rollback:
+     `~/scan-to-make-work/native-node-mac-202611040628/`. Explicit SETTLED sent directly to MCP owner at
+     13:36Z for the visible Update retry; other agents retain UI/deploy holds. No printer operations.
+     **Published MCP Update accepted in actual app:** MCP owner freshly checked idle and pressed Update at
+     13:37:01Z. Events: `mcp.update.started` 13:37:01.935Z → `mcp.update.done` 13:37:05.843Z,
+     “Your printers use it now.” Version **1.1.54** is now live, matching npm latest (#101 / `e1fbc69`).
+     UI shows “Updated to 1.1.54” and P1S Ready. New MCP PID 30636 replaced 89891; no staging leftovers.
+     This closes both updater blockers through the installed app. Mac UI returned to release owner.
+     Unused mcp-3D checkout remains 1.2.26, not updated; latest published is 1.2.28. No prints.
+     MCP owner cleans its repro kit; parent keeps logs, new signed artifact and immediate 557 rollback,
+     and removed superseded app/rollback and owned build caches. Orientation/FDM/physical print acceptance
+     remains open for David's app-driven use; no automatic reprint.
      **Earlier hold, Nov 4 13:05Z:** visible Mac UI showed AirPods **Getting the print ready**, with a floating-
      cantilever warning, unchecked **Print anyway**, **Cancel Print**, and disabled **Print**. P1S shows Ready,
      but the pending print question means deployment is not idle. Parent left the decision untouched and
@@ -301,9 +320,9 @@ remote native probes and the SSH tunnel were removed after verification.
      verified again. Combined source `4d6838f0`, signed development build `202611040557`, finished with exit 0;
      deep/strict codesign verification passed and CloudKit/APNs development entitlements match the installed
      app. Packaged runtime includes the updater script permission/lifecycle check, no-printer safeguard, FDM
-     guidance and auto-orient/support forwarding. Build output/log/exit and payload-check receipts are in
-     `~/scan-to-make-work/combined-mac-202611040557/`; app is under
-     `build/Build/Products/Release/Counterpart.app`. No installation or real-app acceptance is claimed.
+     guidance and auto-orient/support forwarding. Build log/exit and payload-check receipts are in
+     `~/scan-to-make-work/combined-mac-202611040557/`; superseded artifact and old rollback cleaned after
+     corrected build verification. The immediate 557 rollback is retained in the newer namespace.
      Completed Linux integration snapshot (205 MB) was removed; its log is retained as
      `~/scan-to-make-work/main-integration-mac/linux-check.log` alongside the Mac check log.
      **Earlier settled handoff:** both passes were done/Ready; a fresh saved-object scan showed no touching-up or
@@ -314,7 +333,8 @@ remote native probes and the SSH tunnel were removed after verification.
      release owner packages/installs the combined Mac build with the updater fix first; then explicitly
      hands UI to MCP owner for Update. Other agents' UI/restarts remain held. No autonomous print/reprint.
      The recovery itself made no app replacement, config-file edit or printer start.
-     Installed app still predates #298; sending the FDM request does not prove new MCP prompt consumption.
+     At that earlier recovery the installed app predated #298; sending the FDM request did not prove new MCP
+     prompt consumption. Current 628 includes the guidance; a new app-driven design remains to be accepted.
      Their incoming "releases held" note predates the authorized publications below; the publication receipts and
      revoked hold were sent back directly. The orchestrator must coordinate installed MCP Update with the FDM/MCP
      owner above, so two threads never replace the same live backend.
