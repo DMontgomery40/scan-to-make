@@ -59,9 +59,12 @@ NDJSON on stdout, one object per line: `{"stage": ..., "progress": 0..1}` for
 `inventory, features, matching, mapping, undistorting, interfacing,
 densifying, meshing, exporting`; then exactly one of `{"done": "<output>"}`,
 `{"needsObjectRegion": {"receipt": path, "previewMeshSha256": ...,
-"previewMesh": path, "scaleKnown": bool, "suggestion": {...}}}`,
+"previewMesh": path, "previewStl": path, "boundsMin": [...], "boundsMax": [...],
+"components": [...], "scaleKnown": bool, "scaleMPerUnit": number|null,
+"suggestion": {...}}}`,
 `{"needsScale": {"receipt": path, "meshSha256": ..., "extents": {...},
-"previewMesh": path}}`, or `{"error": ..., "code": ...}`. Exit codes: 0
+"boundsMin": [...], "boundsMax": [...], "previewMesh": path, "previewStl": path}}`,
+or `{"error": ..., "code": ...}`. Exit codes: 0
 success, 5 needs-object-region, 4 needs-scale, 2 actionable error.
 SIGINT/SIGTERM kills only this tool's own process group and never reports
 success. Tool logs are bounded files under `<work-dir>/logs/`, never stdout.
@@ -108,7 +111,9 @@ support disc's, not the object's). So **no selection is ever applied
 automatically** — not with an anchor, not with a proven camera fit, and a
 measurement alone never counts as confirmation. Instead the run stops
 with exit 5 and a `needs-object-region` receipt containing the full
-preview mesh (private, reconstruction units), per-component stats
+preview mesh (PLY plus a binary STL of the same vertices for app
+rendering; STL has no units and its header says "arbitrary units, NOT
+metres"), per-component stats
 (index, share, bounds, extents), the tool's suggestion (anchor region
 when fit+anchor exist, else largest component — labelled with why it may
 be wrong, never with a confidence number), and whether scale is already

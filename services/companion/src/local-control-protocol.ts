@@ -2,6 +2,7 @@ import {z} from 'zod';
 import {ModelAccessChoiceSchema} from './model-access-protocol.js';
 import {PrinterFormSchema} from './printing/setup.js';
 import {CompanionSettingsPatchSchema, ProjectSettingsPatchSchema, PrintColourSchema, PrintQualitySchema, PrintStrengthSchema, PrintSettingsSchema} from '@scan-to-make/contracts/counterpart';
+import {ReconstructionAnswerSchema} from '@scan-to-make/contracts/reconstruction';
 
 export const MAX_REQUEST_BYTES = 64 * 1024;
 export const MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
@@ -72,6 +73,7 @@ export const parameters = {
   'objects.answerAsk': z.strictObject({id: z.uuid(), askId: z.uuid(), choices: z.array(z.string().min(1).max(64)).min(1).max(32)}),
   'objects.addFile': z.strictObject({id: z.uuid(), kind: z.enum(['photos', 'scan', 'model']), path: z.string().min(2).max(4096), forMessage: z.boolean().optional()}),
   'objects.answerCloseup': z.strictObject({id: z.uuid(), bestGuess: z.boolean(), photoNames: z.array(z.string().min(1).max(128)).max(100).optional(), text: z.string().trim().min(1).max(2000).optional()}),
+  'objects.answerReconstruction': z.strictObject({id: z.uuid(), reviewId: z.uuid(), answer: ReconstructionAnswerSchema}),
   'objects.print': z.strictObject({id: z.uuid(), expectedPlate: z.string().regex(/^[0-9a-f]{64}:[0-9]+$/).optional(), checked: z.boolean().optional(), filament: z.strictObject({
     slot:z.number().int().min(0).max(255), colour:z.string().regex(/^#[0-9A-F]{6}$/), material:z.string().min(1).max(128),
     name:z.string().max(256), filamentId:z.string().max(128), destinationId:z.string().min(1).max(256), suggested:z.boolean().optional(),

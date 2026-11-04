@@ -1,0 +1,37 @@
+{
+  "captureCamera": {
+    "version": 1,
+    "kind": "capture-camera",
+    "frames": [
+      {"image": "IMG_0001.jpg", "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "width": 4032, "height": 3024, "fx": 2900.0, "fy": 2900.0, "cx": 2016.0, "cy": 1512.0, "timestampMs": 1730000000000, "tracking": "tracking", "center": [0.12, 1.05, -0.3]}
+    ],
+    "objectAnchor": {"center": [0.0, 0.9, 0.0], "radiusM": 0.15, "confidence": 0.9, "source": "user-tap"}
+  },
+  "regionReview": {
+    "id": "11111111-2222-4333-8444-555555555555",
+    "kind": "region",
+    "preview": "reconstruction-preview.stl?reviewId=11111111-2222-4333-8444-555555555555",
+    "previewMeshSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "boundsMin": [-3.2, -0.4, -3.0],
+    "boundsMax": [3.2, 1.8, 3.0],
+    "extents": {"x": 6.4, "y": 2.2, "z": 6.0},
+    "scaleKnown": true,
+    "scaleMPerUnit": 0.1613,
+    "suggestion": {"type": "anchor-region", "reason": "anchor region includes any support surface inside the recorded radius; confirm or crop tighter", "extents": {"x": 1.58, "y": 1.49, "z": 1.72}, "extentsM": {"x": 0.255, "y": 0.153, "z": 0.253}},
+    "components": [{"index": 0, "vertices": 140000, "faces": 280000, "share": 1.0, "boundsMin": [-3.2, -0.4, -3.0], "boundsMax": [3.2, 1.8, 3.0], "extents": {"x": 6.4, "y": 2.2, "z": 6.0}}]
+  },
+  "scaleReview": {
+    "id": "11111111-2222-4333-8444-555555555555",
+    "kind": "scale",
+    "preview": "reconstruction-preview.stl?reviewId=11111111-2222-4333-8444-555555555555",
+    "meshSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "boundsMin": [-0.8, 0.6, -0.2],
+    "boundsMax": [0.7, 2.3, 1.6],
+    "extents": {"x": 1.5, "y": 1.7, "z": 1.8},
+    "scaleKnown": false
+  },
+  "regionAnswer": {"type": "region", "previewMeshSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "selection": {"type": "crop", "min": [-0.9, 0.6, -0.2], "max": [0.7, 2.3, 1.6]}},
+  "scaleAnswer": {"type": "scale", "meshSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "axis": "x", "extentMm": 142.5},
+  "objectRegion": {"version": 1, "kind": "capture-object-region", "previewMeshSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "selection": {"type": "suggested"}},
+  "measurement": {"version": 1, "kind": "capture-measurement", "meshSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "axis": "y", "extentMm": 150.0}
+}

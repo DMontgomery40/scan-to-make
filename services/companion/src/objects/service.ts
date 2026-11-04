@@ -21,12 +21,15 @@ import {PRINT_LOG, printEndFailure, projectTitle, sizeText} from '../events/word
 import {PassTimings, STAGE_DEFAULT_SEC, passEstimate, stageWords, type PassKind, type PassStage, type StageId} from '../touchup/stages.js';
 import type {DesignEngine} from '../touchup/invocation.js';
 import type {PrintHandoffServices} from '../print-handoff-http.js';
-import {printQuestion, validateAnswer, type ConfirmationValue} from './confirmation.js';
+import {InvalidAnswerError, printQuestion, validateAnswer, type ConfirmationValue} from './confirmation.js';
 import {InvalidStateError, SlicerRefusedError} from './errors.js';
 import type {TouchupInput} from '../touchup/touchup.js';
 import {publicTouchupText, type TouchupActivity, type TouchupResult} from '../touchup/runner.js';
 import {ObjectNotFoundError, ObjectStore, type ObjectPrintConfirmation, type StmObject} from './store.js';
-import {macReconstructRunner, type Reconstruct} from './reconstruct.js';
+import {defaultReconstructRunner, ReconstructionReviewNeeded, type Reconstruct} from './reconstruct.js';
+import {captureCameraDigest, validateCaptureCamera} from './capture-camera.js';
+import {clearReconstructionInputs, publicReview, reconstructionInputs, reconstructionPaths, saveReviewPreview, writeCaptureCamera, writeMeasurement, writeObjectRegion} from './reconstruction.js';
+import {ReconstructionAnswerSchema, type ReconstructionAnswer} from '@scan-to-make/contracts/reconstruction';
 import type {PrinterCatalog} from './printers.js';
 import type {PrinterDirectory, PublicDestination} from '../printing/directory.js';
 
@@ -55,7 +58,13 @@ export class InvalidCaptureManifestError extends Error {
   constructor() { super('Invalid capture manifest'); this.name = 'InvalidCaptureManifestError'; }
 }
 
-export interface CaptureManifest {version: 1; images: string[]; depthRequired: boolean}
+export interface CaptureManifest {version: 1; images: string[]; depthRequired: boolean; cameraMetadataRequired?: boolean}
+
+export {InvalidCaptureCameraError} from './capture-camera.js';
+
+/** While a reconstruction review is open, only the preview answer counts; older clients get this. */
+export const RECONSTRUCTION_REVIEW_UPDATE = 'This question is about the rebuilt model itself. Update Counterpart, then open this project to review the model and answer it.';
+const CAPTURE_CAMERA_PENDING = 'The capture is still missing its camera information. Resume sending it from the phone that recorded it.';
 
 /** A file on this Mac that `objects.addFile` refuses: the sentence says why. */
 export class InvalidFileError extends Error {
@@ -95,14 +104,21 @@ function parseCaptureManifest(value: unknown): CaptureManifest {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new InvalidCaptureManifestError();
   const manifest = value as Record<string, unknown>;
   if (manifest.version !== 1 || typeof manifest.depthRequired !== 'boolean' || !Array.isArray(manifest.images)
+      || (manifest.cameraMetadataRequired !== undefined && typeof manifest.cameraMetadataRequired !== 'boolean')
       || manifest.images.length < 1 || manifest.images.length > 10000
-      || manifest.images.some(name => typeof name !== 'string' || !/^[0-9]{4}\.heic$/.test(name))
+      || manifest.images.some(name => typeof name !== 'string' || !/^[0-9]{4}\.(heic|jpe?g|png)$/.test(name))
+      // Depth companions belong to the iPhone HEIC protocol only.
+      || (manifest.depthRequired && manifest.images.some(name => typeof name !== 'string' || !name.endsWith('.heic')))
       || new Set(manifest.images).size !== manifest.images.length) throw new InvalidCaptureManifestError();
-  return {version: 1, images: [...manifest.images].sort(), depthRequired: manifest.depthRequired};
+  return {version: 1, images: [...manifest.images].sort(), depthRequired: manifest.depthRequired,
+    ...(manifest.cameraMetadataRequired !== undefined ? {cameraMetadataRequired: manifest.cameraMetadataRequired} : {})};
 }
 
-function captureDigest(object: StmObject, depthRequired: boolean): string {
+function captureDigest(object: StmObject, depthRequired: boolean, cameraMetadataRequired = false): string {
   return createHash('sha256').update(JSON.stringify({version: 1, depthRequired,
+    // Only present fields bind, so digests of older image-only captures are unchanged.
+    ...(cameraMetadataRequired ? {cameraMetadataRequired: true} : {}),
+    ...(object.captureCamera ? {camera: object.captureCamera.sha256} : {}),
     images: [...(object.capture ?? [])].sort(), depth: [...(object.captureDepth ?? [])].sort()})).digest('hex');
 }
 
@@ -650,12 +666,36 @@ export class ObjectService {
     return this.#gate(id, async () => {
       const object = await this.get(id);
       if (object.state !== 'new' || object.scan) throw new InvalidStateError('The scan can only be added before the touch-up starts.');
+      // Replacing capture photos invalidates camera metadata bound to the old bytes.
+      if (object.captureCamera) {
+        await clearReconstructionInputs(this.dir(id));
+        await this.#deps.store.update(id, o => ({...o, captureCamera: undefined, reconstructionReview: undefined}));
+      }
       if (object.captureCompletion) await this.#deps.store.update(id, o => ({...o, captureCompletion: undefined}));
       await this.#deps.store.addFile(id, 'capture', name, bytes);
       return this.#changed(await this.#deps.store.update(id, o => {
         const capture = o.capture ?? [];
         return {...o, capture: capture.includes(name) ? capture : [...capture, name], captureCompletion: undefined};
       }));
+    });
+  }
+
+  /**
+   * capture-camera v1 for the saved capture photos (Android ARCore centres and
+   * intrinsics). Only before start; every frame is bound to the exact saved
+   * bytes, and the frame set must be exactly the captured set.
+   */
+  addCaptureCamera(id: string, value: unknown): Promise<StmObject> {
+    return this.#gate(id, async () => {
+      const object = await this.get(id);
+      if (object.state !== 'new' || object.scan) throw new InvalidStateError('Camera information can only be added before the touch-up starts.');
+      const camera = await validateCaptureCamera(value, join(this.dir(id), 'capture'), object.capture ?? []);
+      // Store exactly what was validated; the digest binds those bytes to the completion.
+      const stored = Buffer.from(JSON.stringify(camera, null, 2) + '\n', 'utf8');
+      await writeCaptureCamera(this.dir(id), camera);
+      return this.#changed(await this.#deps.store.update(id, o => ({...o,
+        captureCamera: {sha256: captureCameraDigest(stored), frameCount: camera.frames.length},
+        captureCompletion: undefined})));
     });
   }
 
@@ -733,14 +773,19 @@ export class ObjectService {
       const expectedDepth = manifest.depthRequired ? manifest.images.map(name => name.replace('.heic', '.depth.plist')) : [];
       if (JSON.stringify(images) !== JSON.stringify(manifest.images) || JSON.stringify(depths) !== JSON.stringify(expectedDepth))
         throw new InvalidStateError(CAPTURE_PENDING);
+      if (manifest.cameraMetadataRequired && !object.captureCamera)
+        throw new InvalidStateError(CAPTURE_CAMERA_PENDING);
       await this.#captureFilesPresent(object);
-      const sha256 = captureDigest(object, manifest.depthRequired);
-      const same = object.captureCompletion?.sha256 === sha256 && object.captureCompletion.depthRequired === manifest.depthRequired;
+      const sha256 = captureDigest(object, manifest.depthRequired, manifest.cameraMetadataRequired);
+      const same = object.captureCompletion?.sha256 === sha256 && object.captureCompletion.depthRequired === manifest.depthRequired
+        && !!object.captureCompletion.cameraMetadataRequired === !!manifest.cameraMetadataRequired;
       if (same && ['touching-up', 'needs-closeup', 'ready', 'printing', 'printed'].includes(object.state)) return object;
       if (!same) {
         if (object.state !== 'new' && object.state !== 'failed') throw new InvalidStateError('Wait until the current step finishes.');
         object = await this.#deps.store.update(id, o => ({...o, captureCompletion: {
-          version: 1, depthRequired: manifest.depthRequired, frameCount: manifest.images.length, sha256, completedAtMs: Date.now(),
+          version: 1, depthRequired: manifest.depthRequired,
+          ...(manifest.cameraMetadataRequired ? {cameraMetadataRequired: true} : {}),
+          frameCount: manifest.images.length, sha256, completedAtMs: Date.now(),
         }}));
       }
     }
@@ -762,7 +807,7 @@ export class ObjectService {
     const names = [...(object.capture ?? []), ...(object.captureDepth ?? [])];
     for (let offset = 0; offset < names.length; offset += 32) {
       const present = await Promise.all(names.slice(offset, offset + 32).map(async name => {
-        if (!/^[0-9]{4}\.(heic|depth\.plist)$/.test(name)) return false;
+        if (!/^[0-9]{4}\.(heic|jpe?g|png|depth\.plist)$/.test(name)) return false;
         const info = await stat(join(this.dir(object.id), 'capture', name)).catch(() => undefined);
         return info?.isFile() && info.size > 0;
       }));
@@ -775,7 +820,8 @@ export class ObjectService {
     if (!object.captureDepth?.length && !complete) return; // Previously recorded image-only captures.
     if (!complete || complete.version !== 1 || complete.frameCount !== object.capture?.length
         || (object.captureDepth?.length && !complete.depthRequired)
-        || complete.sha256 !== captureDigest(object, complete.depthRequired)) throw new InvalidStateError(CAPTURE_PENDING);
+        || (complete.cameraMetadataRequired && !object.captureCamera)
+        || complete.sha256 !== captureDigest(object, complete.depthRequired, complete.cameraMetadataRequired)) throw new InvalidStateError(CAPTURE_PENDING);
     await this.#captureFilesPresent(object);
   }
 
@@ -843,6 +889,8 @@ export class ObjectService {
   async #reservedAnswerCloseup(id: string, answer: {bestGuess?: boolean; text?: string; photoNames?: string[]}): Promise<StmObject> {
     const object = await this.get(id);
     if (object.state !== 'needs-closeup') throw new InvalidStateError('No close-up was asked for.');
+    // A reconstruction review is not a close-up: Best Guess, words or photos must not approve it.
+    if (object.reconstructionReview) throw new InvalidStateError(RECONSTRUCTION_REVIEW_UPDATE);
     // Carry on with what the asking pass was doing: a correction keeps its note and its model.
     // Only this answer's explicit attachments belong to it. Other pending photos may already
     // be reserved by a correction queued on either client; Best Guess and text claim none.
@@ -1563,7 +1611,10 @@ export class ObjectService {
       try { return await this.#deps.runTouchup({...input, signal: controller.signal, onProgress}); }
       finally { stage('saving'); await writing; }
     })()
-      .then(result => this.#finish(object.id, startedAtMs, result, kind), error => this.#fail(object.id, startedAtMs, error))
+      .then(result => this.#finish(object.id, startedAtMs, result, kind),
+        error => error instanceof ReconstructionReviewNeeded
+          ? this.#finishReconstructionReview(object.id, startedAtMs, error)
+          : this.#fail(object.id, startedAtMs, error))
       .finally(() => { release(); this.#running.delete(object.id); this.#controllers.delete(object.id); });
     this.#running.set(object.id, work);
     return running;
@@ -1672,6 +1723,8 @@ export class ObjectService {
   answerAsk(id: string, askId: string, choices: string[]): Promise<StmObject> {
     return this.#gate(id, async () => {
       const object = await this.get(id);
+      // A normal choice must not approve a reconstruction review either.
+      if (object.reconstructionReview) throw new InvalidStateError(RECONSTRUCTION_REVIEW_UPDATE);
       const ask = object.ask;
       if (!ask || ask.id !== askId || ask.status !== 'open' || ask.type !== 'choice') throw new InvalidStateError('That question has been answered or replaced. Look again.');
       const known = new Set((ask.options ?? []).map(option => option.id));
@@ -1689,6 +1742,61 @@ export class ObjectService {
       const answered = await this.#deps.store.update(id, o => ({...o, ask: {...o.ask!, status: 'answered' as const, choices}}));
       this.#changed(answered);
       return this.#pass(answered, {note: `${ask.question} The person chose: ${labels.join(', ')}.`, trigger: 'ask-answer'});
+    });
+  }
+
+  /** The current review's preview STL, as a project-relative path for the bounded file export. */
+  async reconstructionPreview(id: string, reviewId: string): Promise<string> {
+    const object = await this.get(id);
+    if (!object.reconstructionReview || object.reconstructionReview.id !== reviewId) throw new ObjectNotFoundError();
+    return reconstructionPaths(this.dir(id)).previewStlRelative(reviewId);
+  }
+
+  /**
+   * The explicit reconstruction answer: which part is the object, or how big
+   * it is. Bound to the open review's id and hashes; the answer is stored
+   * privately and the cached rebuild resumes. Original photos are retained.
+   */
+  answerReconstruction(id: string, reviewId: unknown, answerValue: unknown): Promise<StmObject> {
+    return this.#gate(id, async () => {
+      if (typeof reviewId !== 'string' || !/^[0-9a-f-]{36}$/i.test(reviewId)) throw new InvalidAnswerError('That question has been answered or replaced. Look again.');
+      const parsed = ReconstructionAnswerSchema.safeParse(answerValue);
+      if (!parsed.success) throw new InvalidAnswerError('That answer is not complete. Review the model and answer again.');
+      const answer: ReconstructionAnswer = parsed.data;
+      const object = await this.get(id);
+      const review = object.reconstructionReview;
+      if (!review || review.id !== reviewId || object.state !== 'needs-closeup')
+        throw new InvalidAnswerError('That question has been answered or replaced. Look again.');
+      if (answer.type !== review.kind)
+        throw new InvalidAnswerError(review.kind === 'region'
+          ? 'First choose which part of the model is the object.'
+          : 'First say how big the object is.');
+      const dir = this.dir(id);
+      if (answer.type === 'region') {
+        if (answer.previewMeshSha256 !== review.previewMeshSha256)
+          throw new InvalidAnswerError('That answer was for an older preview. Look again and answer the current one.');
+        const selection = answer.selection;
+        if (selection.type === 'component' && review.components && selection.index >= review.components.length)
+          throw new InvalidAnswerError('That piece is not in the current preview. Look again.');
+        if (selection.type === 'crop') {
+          const {min, max} = selection;
+          const inverted = min.some((v, i) => !(v < max[i]!));
+          const misses = min.some((v, i) => max[i]! < review.boundsMin[i]! || v > review.boundsMax[i]!);
+          if (inverted || misses) throw new InvalidAnswerError('That selection does not cover any of the model. Try again.');
+        }
+        await writeObjectRegion(dir, {version: 1, kind: 'capture-object-region',
+          previewMeshSha256: answer.previewMeshSha256, selection});
+      } else {
+        if (answer.meshSha256 !== review.meshSha256)
+          throw new InvalidAnswerError('That measurement was for an older model. Look again and measure the current one.');
+        await writeMeasurement(dir, {version: 1, kind: 'capture-measurement',
+          meshSha256: answer.meshSha256, axis: answer.axis, extentMm: answer.extentMm});
+      }
+      await rm(reconstructionPaths(dir).previewStl(review.id), {force: true});
+      const answered = await this.#deps.store.update(id, o => ({...o, reconstructionReview: undefined,
+        ...(o.ask ? {ask: {...o.ask, status: 'answered' as const}} : {}), question: undefined}));
+      this.#changed(answered);
+      return this.#pass(answered, {trigger: 'ask-answer'});
     });
   }
 
@@ -1714,7 +1822,7 @@ export class ObjectService {
 
   /** Rebuilds a handheld scan on this Mac, showing progress in words, and records it as the object's scan. */
   async #build(id: string, dir: string, signal: AbortSignal): Promise<string> {
-    const reconstruct = this.#deps.reconstruct ?? macReconstructRunner();
+    const reconstruct = this.#deps.reconstruct ?? defaultReconstructRunner();
     const store = this.#deps.store;
     let shownAt = 0, pending: string | undefined, writing = Promise.resolve();
     const show = (words: string) => {
@@ -1724,10 +1832,37 @@ export class ObjectService {
       writing = writing.then(async () => { this.#changed(await store.update(id, o => ({...o, progress: pending}))); }).catch(() => undefined);
     };
     await mkdir(join(dir, 'scan'), {recursive: true});
-    await reconstruct({photosDir: join(dir, 'capture'), output: join(dir, 'scan', 'scan.usdz'), masksDir: join(dir, 'capture-masks'), signal, onProgress: show});
+    const outcome = await reconstruct({photosDir: join(dir, 'capture'), output: join(dir, 'scan', 'scan.usdz'),
+      masksDir: join(dir, 'capture-masks'), ...await reconstructionInputs(dir), signal, onProgress: show});
     await writing;
-    this.#changed(await store.update(id, o => ({...o, scan: 'scan.usdz', progress: undefined})));
+    if (outcome?.status === 'needs-review') {
+      // Not a failure and not a scan: the pass ends as an Ask (see #finishReconstructionReview).
+      const reviewId = randomUUID();
+      await saveReviewPreview(dir, reviewId, outcome.review.previewStl);
+      throw new ReconstructionReviewNeeded(outcome.review, reviewId);
+    }
+    this.#changed(await store.update(id, o => ({...o, scan: 'scan.usdz', progress: undefined, reconstructionReview: undefined})));
     return 'scan.usdz';
+  }
+
+  /** A rebuild stopped for the person: needs-closeup with an Ask and the public review, never failed. */
+  async #finishReconstructionReview(id: string, startedAtMs: number, needed: ReconstructionReviewNeeded): Promise<StmObject> {
+    const store = this.#deps.store, now = Date.now();
+    const review = publicReview(needed.reviewId, needed.review);
+    const question = needed.review.kind === 'region'
+      ? 'Which part of this model is the object you scanned? Check the preview, then confirm it or choose the right part.'
+      : 'How big is the object? Measure one side of it and enter the size in millimetres.';
+    const ask: NonNullable<StmObject['ask']> = {id: randomUUID(), question, type: 'choice',
+      answers: ['choice'], status: 'open', askedAtMs: now};
+    const updated = await store.update(id, o => ({...o, state: 'needs-closeup', progress: undefined,
+      failure: undefined, ask, reconstructionReview: review,
+      question: {closeup: needed.review.kind === 'region' ? 'which part is the object' : 'how big the object is'},
+      passes: o.passes.map(({estimate: _estimate, ...p}) => p.startedAtMs !== startedAtMs ? {...p, ...(_estimate ? {estimate: _estimate} : {})}
+        : {...p, endedAtMs: now, status: 'needs_closeup',
+          stages: p.stages?.map(item => item.endedAtMs === undefined ? {...item, endedAtMs: now} : item),
+          activity: this.#activity(p.activity, [{atMs: now, kind: 'message', text: question}])})}));
+    await this.#emit({id: randomUUID(), type: 'pass.ask', projectId: id, data: {askId: ask.id}, detail: {question}});
+    return this.#changed(updated);
   }
 
   /** A running pass's time left, recomputed at every read so it counts down (and never shows an expired estimate). */

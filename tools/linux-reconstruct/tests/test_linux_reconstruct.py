@@ -239,6 +239,16 @@ class MeshHandling(unittest.TestCase):
             self.assertEqual(ext, {"x": 2.0, "y": 1.0, "z": 3.0})
             self.assertGreater(back.signed_volume(), 0)
 
+    def test_stl_roundtrip_shape(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "box.stl"
+            mesh_mod.write_stl(p, box_mesh())
+            data = p.read_bytes()
+            self.assertIn(b"NOT metres", data[:80])
+            (count,) = struct.unpack_from("<I", data, 80)
+            self.assertEqual(count, 12)
+            self.assertEqual(len(data), 84 + 50 * 12)
+
     def test_components_split(self):
         a, b = box_mesh(), box_mesh(offset=(10.0, 0.0, 0.0))
         merged = mesh_mod.Mesh(a.vertices + b.vertices,

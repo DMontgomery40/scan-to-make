@@ -575,6 +575,8 @@ def main(argv=None):
         preview_path = work / "preview.ply"
         mesh_mod.write_ply(preview_path, raw_mesh)
         preview_sha = schemas.sha256_file(preview_path)
+        preview_stl = work / "preview.stl"
+        mesh_mod.write_stl(preview_stl, raw_mesh)
         components = mesh_mod.connected_components(raw_mesh)
         plo, phi, _pext = raw_mesh.extents()
         region_source = args.object_region
@@ -601,6 +603,7 @@ def main(argv=None):
                 "version": RECEIPT_VERSION, "kind": "needs-object-region",
                 "toolVersion": TOOL_VERSION, "captureKey": key,
                 "previewMesh": str(preview_path),
+                "previewStl": str(preview_stl),
                 "previewMeshSha256": preview_sha,
                 "units": "reconstruction units; multiply by scaleMPerUnit when "
                          "scaleKnown (axes are the reconstruction axes)",
@@ -630,9 +633,13 @@ def main(argv=None):
             emit({"needsObjectRegion": {"receipt": str(needs_path),
                                         "previewMeshSha256": preview_sha,
                                         "previewMesh": str(preview_path),
+                                        "previewStl": str(preview_stl),
+                                        "boundsMin": region_receipt["boundsMin"],
+                                        "boundsMax": region_receipt["boundsMax"],
+                                        "components": region_receipt["components"],
                                         "scaleKnown": region_receipt["scaleKnown"],
-                                        "suggestion": {"type": sugg["type"],
-                                                       "extents": sugg["extents"]}}})
+                                        "scaleMPerUnit": region_receipt["scaleMPerUnit"],
+                                        "suggestion": sugg}})
             return 5
         try:
             region = schemas.load_object_region(
@@ -652,6 +659,8 @@ def main(argv=None):
         selected_path = work / "selected-unscaled.ply"
         mesh_mod.write_ply(selected_path, selected)
         mesh_sha = schemas.sha256_file(selected_path)
+        selected_stl = work / "selected-unscaled.stl"
+        mesh_mod.write_stl(selected_stl, selected)
         lo, hi, extents = selected.extents()
 
         scale_report = None
@@ -679,6 +688,7 @@ def main(argv=None):
                 "toolVersion": TOOL_VERSION, "captureKey": key,
                 "meshSha256": mesh_sha,
                 "previewMesh": str(selected_path),
+                "previewStl": str(selected_stl),
                 "units": "arbitrary reconstruction units (NOT metres)",
                 "extents": {a: round(extents[a], 6) for a in ("x", "y", "z")},
                 "boundsMin": [round(v, 6) for v in lo],
@@ -698,7 +708,10 @@ def main(argv=None):
             write_json_atomic(work / "receipt.json", receipt)
             emit({"needsScale": {"receipt": str(needs_path), "meshSha256": mesh_sha,
                                  "extents": preview["extents"],
-                                 "previewMesh": str(selected_path)}})
+                                 "boundsMin": preview["boundsMin"],
+                                 "boundsMax": preview["boundsMax"],
+                                 "previewMesh": str(selected_path),
+                                 "previewStl": str(selected_stl)}})
             return 4
 
         stage("exporting", 0.95)
