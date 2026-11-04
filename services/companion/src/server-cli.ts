@@ -65,7 +65,7 @@ const scanBlender=process.env.SCAN_TO_MAKE_SCAN_BLENDER;
 if(scanTool!==undefined||scanBlender!==undefined){
  if(!capture||!captureDirectory||!scanTool||!scanBlender)throw new Error('Scan processing requires authenticated capture storage, tool and Blender paths');
  Object.assign(capture,{scanProcessing:new ScanProcessingStore(capture.storage,capture.captures!,join(captureDirectory,'captures'),createScanCleanupRunner({toolPath:scanTool,blender:scanBlender,python:process.env.SCAN_TO_MAKE_CAPTURE_PYTHON??'python3',correctTool:process.env.SCAN_TO_MAKE_SCAN_CORRECT_TOOL??join(dirname(scanTool),'../scan-correct/correct.py'),adapter:process.env.SCAN_TO_MAKE_CORRECTION_ADAPTER as 'scripted'|'anthropic'|'openai'|undefined,model:process.env.SCAN_TO_MAKE_CORRECTION_MODEL,baseUrl:process.env.SCAN_TO_MAKE_CORRECTION_BASE_URL,keyEnv:process.env.SCAN_TO_MAKE_CORRECTION_KEY_ENV,printable:{},
-  // KAN-184: with SCAN_TO_MAKE_AI_ACCESS set, the correct stage is David's one-sentence AI step and its visual pick.
+  // The saved selection, including phone changes, is snapshotted when cleanup is admitted.
   selectAI:()=>modelAccess?.cleanupSnapshot()??{access:{kind:'none'}},
   ai:{access:{kind:'none'},cli:fileURLToPath(new URL('./ai-tweak-cli.js',import.meta.url)),judgeTool:process.env.SCAN_TO_MAKE_AI_JUDGE_TOOL??join(dirname(scanTool),'../ai-tweak-judge')}}))});
 }
@@ -87,7 +87,7 @@ const printHandoff=handoffConfig===undefined?undefined:createPrintHandoffService
 // PRD §8.10: a print and an update of its printer's MCP never overlap (the phone's handoff route prints on `current`).
 const printGate=new PrintGate();
 if(printHandoff)printHandoff.admit=()=>printGate.hold('current');
-// Objects: the touch-up runs through the user's own printer MCP and their own Claude login. Needs both.
+// Objects keep the user's printer MCP; each model pass snapshots the saved AI selection.
 const claudePath=process.env.SCAN_TO_MAKE_CLAUDE_PATH||undefined;
 if(claudePath!==undefined&&!isAbsolute(claudePath))throw new Error('SCAN_TO_MAKE_CLAUDE_PATH must be absolute');
 let objects:ObjectService|undefined;

@@ -300,7 +300,7 @@ export class ScanProcessingStore {
     const waitingJob=existing.find(job=>job.jobId===waiting.jobId);
     // Only a waiting job from the same pipeline/adapter configuration can
     // absorb this follow-up; otherwise the requested correction never runs.
-    if(waitingJob&&this.pipelineMatches(waitingJob,selectedRunner)){this.adoptAuthorize(waiting,authorize);return {job:structuredClone(waitingJob)};}
+    if(waitingJob&&waiting.runner.selectionRevision===selectedRunner.selectionRevision&&this.pipelineMatches(waitingJob,selectedRunner)){this.adoptAuthorize(waiting,authorize);return {job:structuredClone(waitingJob)};}
    }
    const newest=existing.find(job=>job.status!=='failed');
    if(newest?.reference&&params.reference===undefined)params={...params,reference:newest.reference};
@@ -313,7 +313,7 @@ export class ScanProcessingStore {
     // Same pipeline/adapter identity as the succeeded pass: a live job from
     // another runner configuration is not this request's job.
     if(!this.pipelineMatches(job,selectedRunner))continue;
-    const entry=entryFor(job.jobId);if(!entry)continue;
+    const entry=entryFor(job.jobId);if(!entry||entry.runner.selectionRevision!==selectedRunner.selectionRevision)continue;
     // A running cleanup job already snapshotted its close-ups; only a
     // waiting job can absorb a follow-up for photos that arrived later.
     if(selectedRunner.cleanup&&queue.running===entry){

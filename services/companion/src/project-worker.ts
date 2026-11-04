@@ -54,7 +54,7 @@ export async function runProjectModel(request:Request,options:AiTweakOptions,sig
    const home=join(work,'home'),codex=join(work,'codex'),tmp=join(work,'tmp');
    await Promise.all([home,codex,tmp].map(path=>mkdir(path,{mode:0o700})));
    const plan=aiTweakInternals.plan(access,options,join(work,'bin'),tmp,codex,home);
-   const mcpConfig={mcpServers:Object.fromEntries(await Promise.all(Object.entries(request.mcpConfig.mcpServers).map(async([name,entry])=>[name,await isolatedMcp(entry,work,options.env)])))};
+   const mcpConfig:TouchupInvocation['mcpConfig']={mcpServers:Object.fromEntries(await Promise.all(Object.entries(request.mcpConfig.mcpServers).map(async([name,entry])=>[name,await isolatedMcp(entry,work,options.env)] as const)))};
    const mcpPath=join(work,'mcp.json');await writeFile(mcpPath,JSON.stringify(mcpConfig),{mode:0o600});
    if(access.kind==='claude-code'){
     const args=[...request.args];args[args.indexOf('--mcp-config')+1]=mcpPath;

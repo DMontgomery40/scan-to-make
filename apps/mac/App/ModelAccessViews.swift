@@ -4,7 +4,7 @@ import AgentKit
 import ControlKit
 #endif
 
-// Saved AI connection tests: the user's own Claude Code
+// Saved AI provider selection: the user's own Claude Code
 // or Codex login, and a small "Other options" door for an API key or a custom endpoint.
 // Choices go to the companion over the control socket; keys go straight into ModelKeychain.
 

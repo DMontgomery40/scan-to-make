@@ -113,7 +113,7 @@ export class ModelAccessService {
     const access:import('./ai-tweak.js').ModelAccess = choice.kind === 'api'
       ? {kind:choice.kind,provider:choice.provider,model:choice.model,keyEnv:'SCAN_TO_MAKE_MODEL_KEY'}
       : choice.kind === 'endpoint' ? {kind:choice.kind,url:choice.url,model:choice.model,...(choice.keychainRef?{keyEnv:'SCAN_TO_MAKE_MODEL_KEY'}:{})} : choice;
-    return {access,worker:(args:string[],options:ModelWorkerOptions = {})=>this.worker(choice,['run',...args],options)};
+    return {access,revision:this.record.revision,worker:(args:string[],options:ModelWorkerOptions = {})=>this.worker(choice,['run',...args],options)};
   }
   /** Cleanup job integration: one immutable selection per invocation. Secrets are
    * resolved by the app at spawn, never copied into the companion environment. */

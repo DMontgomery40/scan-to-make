@@ -106,6 +106,7 @@ func launchModelWorker(_ installation: Installation) -> Never {
             let blender = "/Applications/Blender.app/Contents/MacOS/Blender"
             if FileManager.default.isExecutableFile(atPath: blender) { environment["SCAN_TO_MAKE_SCAN_BLENDER"] = blender }
         }
+        environment["SCAN_TO_MAKE_AI_JUDGE_TOOL"] = installation.resources.appendingPathComponent("Payload/source/tools/ai-tweak-judge").path
         let arguments = [installation.node.path, installation.resources.appendingPathComponent("Payload/source/services/companion/dist/ai-tweak-cli.js").path] + args
         let null = open("/dev/null", O_RDWR)
         guard null >= 0, dup2(null, STDIN_FILENO) >= 0, dup2(null, STDERR_FILENO) >= 0 else { exit(2) }
