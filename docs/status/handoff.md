@@ -650,7 +650,8 @@ remote native probes and the SSH tunnel were removed after verification.
     Engineering: child CounterpartKit 174, ControlKit 52, Mac and phone compiles passed; parent signed
     Release build passed with exact prior entitlements. **iPhone controls accepted by David:** he
     confirmed the body/letters selections work and started the print himself. Saved dispatch has
-    AMS mapping `[0, 1]`; final physical colour result still pending. Fresh pick has current/model.3mf
+    AMS mapping `[0, 1]`; David confirmed the finished black body and yellow “Vivi” letters.
+    **Colour-print acceptance passed**, then David reported the plate clear. Fresh pick has current/model.3mf
     and separate body/letters filament records.
     Source branch and clean worktree removed after integration; owned parent DerivedData removed,
     signed app/logs/receipts retained in `~/scan-to-make-work/phone-ams-202611041132/`.
@@ -673,7 +674,8 @@ remote native probes and the SSH tunnel were removed after verification.
     18:34:41Z, uses current/model.3mf and AMS mapping `[0, 1]`; actual Mac UI at 18:40Z shows
     Printing and P1S Busy. It finished before the 18:48Z deployment: actual UI Printed/P1S Ready.
     Parent initiated neither design nor print. iPhone menu/selection acceptance is confirmed by David;
-    physical colour result remains open. No reprint. David also reports another Device Hub use;
+    physical colour result is also confirmed correct by David. Plate clear; this is not permission for an
+    autonomous reprint. David also reports another Device Hub use;
     read-only check at 11:15 MST found no Xcode DeviceHub process or events in its previous 8 minutes.
     David clarified this was an iOS lock-screen/Settings notice saying the device was viewed through
     Device Hub, not an observed agent tool call or reopened Mac window. USB read-only display info
