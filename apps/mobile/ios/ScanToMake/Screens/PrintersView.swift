@@ -386,6 +386,16 @@ struct PrinterConnectionCard: View {
                             chosen: option.id == connection.route, available: option.available)
                     }) { key in await choose(String(key.dropFirst(6))) }
                 }
+            } else if let problem, problem.kind == "route" {
+                // The Mac didn't answer: say so, and offer to ask again (an MCP without the choice shows nothing).
+                PanelTitle("Connection")
+                VStack(alignment: .leading, spacing: 12) {
+                    Label(problem.text, systemImage: "exclamationmark.triangle.fill").font(.subheadline).foregroundStyle(.red)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Button("Try Again") { Task { loaded = false; self.problem = nil; await load() } }.buttonStyle(.glass)
+                }
+                .padding(16).frame(maxWidth: .infinity, alignment: .leading)
+                .glassEffect(.regular, in: .rect(cornerRadius: 24)).padding(.horizontal, 16)
             } else if !loaded {
                 PanelTitle("Connection")
                 HStack(spacing: 10) { ProgressView(); Text("Reading \(printer.via)’s connection…").font(.subheadline).foregroundStyle(.secondary) }
@@ -438,7 +448,7 @@ struct PrinterConnectionCard: View {
     private func label(_ row: Row) -> some View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 3) {
-                Text(row.title).font(.body).foregroundStyle(row.available ? (printing ? .secondary : .primary) : .tertiary)
+                Text(row.title).font(.body).foregroundStyle(row.available && !printing ? .primary : .secondary)
                 if let reason = row.reason { Text(reason).font(.footnote).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
             }
             Spacer(minLength: 8)
