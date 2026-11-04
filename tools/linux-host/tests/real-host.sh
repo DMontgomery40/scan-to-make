@@ -61,6 +61,8 @@ check "printer config names the runtime's absolute node" test "$command" = "$sta
 check "handoff paths appended to the seeded companion.env" as grep -q SCAN_TO_MAKE_PRINTER_HANDOFF_CONFIG "$state/companion.env"
 check "seeded port kept" as grep -q "SCAN_TO_MAKE_GENERATION_PORT=$port" "$state/companion.env"
 check "state is private" test "$(sudo -n stat -c %a "$state")" = 700
+build=$(as cat "$installed/BUILD-ID")
+check "status reports the intended build as applied" test "$(as "$helper" status | json 'v["buildId"], v["appliedBuildId"]')" = "$build $build"
 pid=$(session systemctl --user show -p MainPID --value counterpart-companion.service)
 identity() { sudo -n python3 -c "import json,sys; c=json.load(open(sys.argv[1]))[\"configuration\"]; print(c[\"host\"], c[\"certificateSha256\"])" "$state/auth/auth.json"; }
 auth_identity=$(identity)
@@ -87,6 +89,26 @@ echo "== setup again is idempotent"
 out=$(as "$helper" setup) || fail "second setup: $out"
 check "service not restarted" test "$(session systemctl --user show -p MainPID --value counterpart-companion.service)" = "$pid"
 check "pairing identity (address and certificate pin) kept" test "$(identity)" = "$auth_identity"
+
+echo "== a new build at the same install path is applied, then restored"
+# Same files, a different BUILD-ID: exactly what a replaced package at a stable
+# path looks like to setup. It must restart the service, keep the identity, and
+# record the new build as applied only once the new process is answering.
+newbuild="z${build:1}"
+printf '%s\n' "$newbuild" | as tee "$installed/BUILD-ID" >/dev/null
+out=$(as "$helper" setup) || fail "upgrade setup: $out"
+check "upgrade setup configured and running" test "$(echo "$out" | json 'v["configured"], v["running"]')" = "True True"
+newpid=$(session systemctl --user show -p MainPID --value counterpart-companion.service)
+check "service restarted for the new build" bash -c "[ -n '$newpid' ] && [ '$newpid' != '$pid' ]"
+check "new build recorded as applied" test "$(echo "$out" | json 'v["buildId"], v["appliedBuildId"]')" = "$newbuild $newbuild"
+check "pairing identity kept across the upgrade" test "$(identity)" = "$auth_identity"
+out=$(as "$helper" setup) || fail "same-new-build setup: $out"
+check "same new build setup does not restart again" test "$(session systemctl --user show -p MainPID --value counterpart-companion.service)" = "$newpid"
+printf '%s\n' "$build" | as tee "$installed/BUILD-ID" >/dev/null
+out=$(as "$helper" setup) || fail "restore setup: $out"
+pid=$(session systemctl --user show -p MainPID --value counterpart-companion.service)
+check "original build applied again" test "$(echo "$out" | json 'v["buildId"], v["appliedBuildId"]')" = "$build $build"
+check "service restarted to restore the original build" bash -c "[ -n '$pid' ] && [ '$pid' != '$newpid' ]"
 
 echo "== service stop/start"
 check "stop" test "$(as "$helper" service stop | json 'v["running"]')" = False

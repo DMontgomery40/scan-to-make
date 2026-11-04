@@ -5,8 +5,8 @@ use crate::process::{self, inherited};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::fs::{self, OpenOptions};
-use std::io::{self, Write};
-use std::os::unix::fs::OpenOptionsExt;
+use std::io::{self, Read, Write};
+use std::os::unix::fs::{FileTypeExt, MetadataExt, OpenOptionsExt};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -33,6 +33,7 @@ impl Context {
     fn env_file(&self) -> PathBuf { self.state.join("companion.env") }
     fn unit_file(&self) -> PathBuf { paths::unit_dir(&self.account).join(UNIT) }
     fn runtime(&self) -> PathBuf { self.state.join("runtime") }
+    fn applied_build_file(&self) -> PathBuf { self.state.join("applied-build-id") }
     pub fn socket(&self) -> PathBuf { paths::control_socket(&self.account) }
     fn configured(&self) -> bool {
         self.auth().join("auth.json").is_file() && self.env_file().is_file() && self.unit_file().is_file()
@@ -109,11 +110,28 @@ fn systemctl(context: &Context, args: &[&str]) -> io::Result<i32> {
 
 fn active(context: &Context) -> bool { systemctl(context, &["is-active", "--quiet", UNIT]).map(|s| s == 0).unwrap_or(false) }
 
+/// The user service's main PID, so a restart can prove the old process is gone.
+fn main_pid(context: &Context) -> Option<u32> {
+    let out = process::run(
+        Path::new("/usr/bin/systemctl"),
+        &["--user", "show", "-p", "MainPID", "--value", UNIT],
+        &systemctl_env(context),
+        None,
+        None,
+        Duration::from_secs(20),
+    )
+    .ok()?;
+    if out.status != 0 { return None; }
+    String::from_utf8_lossy(&out.stdout).trim().parse::<u32>().ok().filter(|pid| *pid > 0)
+}
+
 pub fn status(context: &Context) -> Value {
     let socket = context.socket();
     json!({
         "configured": context.configured(),
         "running": context.unit_file().is_file() && active(context) && connectable(&socket),
+        "buildId": intended_build_id(context).ok(),
+        "appliedBuildId": read_applied_build_id(&context.applied_build_file()),
         "stateDir": context.state.display().to_string(),
         "controlSocket": socket.display().to_string(),
     })
@@ -167,8 +185,7 @@ fn stable_root(context: &Context) -> bool {
     root.starts_with("/usr/") || root.starts_with("/opt/") || root.starts_with(context.runtime())
 }
 
-fn build_id(installation: &Installation) -> io::Result<String> {
-    let text = fs::read_to_string(installation.root.join("BUILD-ID")).map_err(|_| io::Error::other("This Counterpart runtime has no BUILD-ID; rebuild it with tools/linux-host/prepare-payload.sh"))?;
+pub fn parse_build_id(text: &str) -> io::Result<String> {
     let id = text.trim().to_owned();
     if id.is_empty() || id.len() > 64 || !id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'.') {
         return Err(io::Error::other("Invalid BUILD-ID"));
@@ -176,21 +193,71 @@ fn build_id(installation: &Installation) -> io::Result<String> {
     Ok(id)
 }
 
+fn build_id_at(root: &Path) -> io::Result<String> {
+    let text = fs::read_to_string(root.join("BUILD-ID")).map_err(|_| io::Error::other("This Counterpart runtime has no BUILD-ID; rebuild it with tools/linux-host/prepare-payload.sh"))?;
+    parse_build_id(&text)
+}
+
+fn build_id(installation: &Installation) -> io::Result<String> { build_id_at(&installation.root) }
+
+/// The build this setup should leave running. A helper already inside the copied
+/// runtime names the `current` copy, never an older sibling it happened to start from.
+fn intended_build_id(context: &Context) -> io::Result<String> {
+    let runtime = context.runtime();
+    if context.installation.root.starts_with(&runtime) {
+        let current = runtime.join("current");
+        if current.join("BUILD-ID").is_file() { return build_id_at(&current); }
+    }
+    build_id(&context.installation)
+}
+
+/// The build the service last proved it is running (recorded only once it answers
+/// on its control socket). A missing or unreadable record means "not applied yet":
+/// the next setup must still (re)start the service to apply the intended build.
+pub fn read_applied_build_id(path: &Path) -> Option<String> {
+    fs::read_to_string(path).ok().and_then(|text| parse_build_id(&text).ok())
+}
+
+pub fn record_applied_build_id(path: &Path, id: &str) -> io::Result<()> {
+    let id = parse_build_id(id)?;
+    write_atomic(path, format!("{id}\n").as_bytes(), 0o600)
+}
+
+/// Whether applying `intended` still needs a (re)start. `linked` is only for a
+/// copied runtime: true when its `current` link already names `intended`.
+/// A failed earlier restart leaves the link right but the applied build old,
+/// so the link alone must never count as applied.
+pub fn runtime_change_pending(intended: &str, applied: Option<&str>, linked: Option<bool>) -> bool {
+    applied != Some(intended) || linked == Some(false)
+}
+
+fn pending_runtime_change(context: &Context, intended: &str) -> bool {
+    let applied = read_applied_build_id(&context.applied_build_file());
+    let linked = if stable_root(context) {
+        None
+    } else {
+        Some(fs::read_link(context.runtime().join("current")).ok().as_deref() == Some(Path::new(intended)))
+    };
+    runtime_change_pending(intended, applied.as_deref(), linked)
+}
+
 /// The helper the user unit runs, installing a stable runtime copy when needed.
-/// Returns whether the selected runtime changed.
-fn install_runtime(context: &Context) -> io::Result<(PathBuf, bool)> {
+/// Returns whether the applied runtime must change: for a system package at a
+/// stable path (/usr, /opt) the path does not change across upgrades, so the
+/// BUILD-ID decides; a same-build setup keeps the live service untouched.
+fn install_runtime(context: &Context, intended: &str) -> io::Result<(PathBuf, bool)> {
     if stable_root(context) && !context.installation.root.starts_with(context.runtime()) {
         let exe = context.installation.root.join("host/counterpart-host");
-        return Ok((exe, false));
+        return Ok((exe, pending_runtime_change(context, intended)));
     }
     let runtime = context.runtime();
     paths::private_dir(&runtime, context.account.uid)?;
     let current = runtime.join("current");
     if context.installation.root.starts_with(&runtime) {
-        // Already running from the installed copy.
-        return Ok((current.join("host/counterpart-host"), false));
+        // Already running from the installed copy; only an unapplied build is a change.
+        return Ok((current.join("host/counterpart-host"), pending_runtime_change(context, intended)));
     }
-    let id = build_id(&context.installation)?;
+    let id = intended.to_owned();
     let target = runtime.join(&id);
     if !target.join("host/counterpart-host").is_file() {
         let staging = runtime.join(format!(".staging-{}", uuid::Uuid::new_v4()));
@@ -204,8 +271,11 @@ fn install_runtime(context: &Context) -> io::Result<(PathBuf, bool)> {
         fs::rename(&staging, &target)?;
     }
     let previous = fs::read_link(&current).ok();
-    let changed = previous.as_deref() != Some(Path::new(&id));
-    if changed {
+    let link_changed = previous.as_deref() != Some(Path::new(&id));
+    // A link already naming this build does not prove the service runs it:
+    // an earlier restart may have failed after the link flipped.
+    let changed = link_changed || read_applied_build_id(&context.applied_build_file()).as_deref() != Some(id.as_str());
+    if link_changed {
         let link = runtime.join(format!(".current-{}", uuid::Uuid::new_v4()));
         std::os::unix::fs::symlink(&id, &link)?;
         fs::rename(&link, &current)?;
@@ -346,11 +416,85 @@ fn initialize_state(context: &Context, node: &Path) -> io::Result<()> {
     Ok(())
 }
 
+/// One bounded, read-only request on the companion's private control socket,
+/// in its own framing ({v,id,method,params} per line). Never a mutation.
+fn control_request(context: &Context, method: &str, params: Value) -> io::Result<Value> {
+    let socket = context.socket();
+    let meta = fs::symlink_metadata(&socket)?;
+    let parent = socket.parent().ok_or_else(|| io::Error::other("Invalid control socket"))?;
+    if !meta.file_type().is_socket() || meta.uid() != context.account.uid || meta.mode() & 0o077 != 0 || !paths::is_private_dir(parent, context.account.uid) {
+        return Err(io::Error::other("The companion socket is not private to your account"));
+    }
+    let mut stream = UnixStream::connect(&socket)?;
+    stream.set_read_timeout(Some(Duration::from_secs(12)))?;
+    stream.set_write_timeout(Some(Duration::from_secs(5)))?;
+    let id = uuid::Uuid::new_v4().to_string();
+    let mut bytes = serde_json::to_vec(&json!({"v": 1, "id": id, "method": method, "params": params}))
+        .map_err(|_| io::Error::other("Invalid control request"))?;
+    bytes.push(b'\n');
+    stream.write_all(&bytes)?;
+    let mut reply = Vec::new();
+    let mut buffer = [0u8; 8192];
+    loop {
+        if let Some(end) = reply.iter().position(|b| *b == b'\n') { reply.truncate(end); break; }
+        if reply.len() > 8 * 1024 * 1024 { return Err(io::Error::other("The companion reply exceeded the size limit")); }
+        let read = stream.read(&mut buffer)?;
+        if read == 0 { return Err(io::Error::other("The companion closed the request")); }
+        reply.extend_from_slice(&buffer[..read]);
+    }
+    let envelope: Value = serde_json::from_slice(&reply).map_err(|_| io::Error::other("The companion returned an invalid reply"))?;
+    if envelope["v"] != 1 || envelope["id"] != id.as_str() || envelope.get("result").is_some() == envelope.get("error").is_some() {
+        return Err(io::Error::other("The companion reply did not match this request"));
+    }
+    if envelope.get("error").is_some() { return Err(io::Error::other("The companion refused this request")); }
+    Ok(envelope["result"].clone())
+}
+
+/// A project being modeled right now (`touching-up`). A print already
+/// dispatched keeps going on the printer across a restart, so it is not busy.
+pub fn objects_busy(result: &Value) -> Option<bool> {
+    let objects = result.get("objects")?.as_array()?;
+    Some(objects.iter().any(|object| object.get("state").and_then(Value::as_str) == Some("touching-up")))
+}
+
+/// A scan-cleanup job waiting or running. Print handoffs are not modeling.
+pub fn cleanup_jobs_busy(result: &Value) -> Option<bool> {
+    let items = result.get("items")?.as_array()?;
+    let mut busy = false;
+    for item in items {
+        if item.get("kind").and_then(Value::as_str) != Some("cleanup") { continue; }
+        let status = item.get("job")?.get("status")?.as_str()?;
+        busy |= status == "queued" || status == "running";
+    }
+    Some(busy)
+}
+
+/// Whether the running companion is modeling. Restarting it aborts that work
+/// (the next start records the pass interrupted), so setup asks first and
+/// refuses to restart rather than silently discarding it.
+fn companion_busy(context: &Context) -> io::Result<bool> {
+    let invalid = || io::Error::other("The companion returned an unexpected work list");
+    if objects_busy(&control_request(context, "objects.list", json!({}))?).ok_or_else(invalid)? { return Ok(true); }
+    let mut cursor: Option<String> = None;
+    for _ in 0..50 {
+        let mut params = json!({"limit": 100});
+        if let Some(cursor) = &cursor { params["cursor"] = json!(cursor); }
+        let page = control_request(context, "jobs.list", params)?;
+        if cleanup_jobs_busy(&page).ok_or_else(invalid)? { return Ok(true); }
+        match page.get("nextCursor").and_then(Value::as_str) {
+            Some(next) => cursor = Some(next.to_owned()),
+            None => return Ok(false),
+        }
+    }
+    Err(io::Error::other("The companion's work list is too long to check"))
+}
+
 pub fn setup(context: &Context) -> io::Result<Value> {
     unsafe { libc::umask(0o077) };
     context.installation.require_payload()?;
     paths::private_dir(&context.state, context.account.uid)?;
-    let (executable, runtime_changed) = install_runtime(context)?;
+    let intended = intended_build_id(context)?;
+    let (executable, runtime_changed) = install_runtime(context, &intended)?;
     // The Node of the runtime the service runs (a stable `current` link for a copied runtime).
     let node = executable.parent().and_then(Path::parent).ok_or_else(|| io::Error::other("Invalid helper location"))?.join("Payload/node/bin/node");
     initialize_state(context, &node)?;
@@ -364,9 +508,34 @@ pub fn setup(context: &Context) -> io::Result<Value> {
     if systemctl(context, &["enable", UNIT])? != 0 { return Err(failed("enable")); }
     // A running service keeps its jobs; it restarts only to apply a changed runtime or unit.
     let action = if active(context) { if unit_changed || runtime_changed { "restart" } else { "" } } else { "start" };
+    if action == "restart" {
+        // Checked as late as possible, so work started during this setup is seen.
+        // The running companion resolved its files through the old runtime copy at
+        // startup, so the link/unit written above do not disturb it; refusing here
+        // keeps it and its jobs, and the unrecorded build makes a later setup retry.
+        match companion_busy(context) {
+            Ok(true) => return Err(io::Error::other(
+                "Counterpart is working on a project, so setup didn't restart it to apply the new version. Wait for that work to finish, then run Repair setup again. Your projects and settings are unchanged.")),
+            Ok(false) => {}
+            Err(error) => {
+                diagnose(context, "checked whether project work is running before restarting", None, error.to_string().as_bytes());
+                return Err(io::Error::other(
+                    "Counterpart couldn't check whether project work is running, so setup didn't restart it to apply the new version. Run Repair setup again. If it stays stuck, stop the companion first; stopping interrupts active work."));
+            }
+        }
+    }
+    let before_pid = if action == "restart" { main_pid(context) } else { None };
+    // A failed restart returns here: the intended build is not recorded as applied,
+    // and the old runtime copy is not pruned, so a later setup retries the upgrade.
     if !action.is_empty() && systemctl(context, &[action, UNIT])? != 0 { return Err(failed(action)); }
-    wait_ready(context, Duration::from_secs(45));
-    if runtime_changed && active(context) { prune_runtimes(context); }
+    let ready = wait_ready(context, Duration::from_secs(45));
+    // Applied is proved, not assumed: the service answers, is active, and after a
+    // restart is a different process than the one setup found running.
+    let applied = ready && active(context) && (action != "restart" || before_pid.is_none() || main_pid(context) != before_pid);
+    if applied && record_applied_build_id(&context.applied_build_file(), &intended).is_err() {
+        diagnose(context, "recorded the applied build", None, b"the applied-build record could not be written");
+    }
+    if runtime_changed && applied { prune_runtimes(context); }
     Ok(status(context))
 }
 
@@ -477,10 +646,22 @@ pub fn serve(context: &Context) -> io::Result<i32> {
     let mut child = Command::new(context.installation.node()).arg(context.installation.companion("server-cli.js"))
         .current_dir(context.installation.source()).env_clear().envs(&env)
         .stdin(Stdio::null()).stdout(out).stderr(err).spawn()?;
+    // This process records the build it actually serves, once the companion
+    // answers, so a package replaced at the same path while this process keeps
+    // running is still applied by the next setup (the id is read now, not later).
+    let serving_build = build_id(&context.installation).ok();
+    let mut recorded = serving_build.is_none();
+    let mut ticks = 0u32;
     let mut forwarded = false;
     loop {
         if let Some(status) = child.try_wait()? {
             return Ok(status.code().unwrap_or(1));
+        }
+        ticks = ticks.wrapping_add(1);
+        if !recorded && ticks % 10 == 1 && connectable(&context.socket()) {
+            if let Some(id) = &serving_build {
+                recorded = record_applied_build_id(&context.applied_build_file(), id).is_ok();
+            }
         }
         let signal = PENDING.load(Ordering::SeqCst);
         if signal != 0 && !forwarded {
