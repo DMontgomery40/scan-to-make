@@ -254,7 +254,19 @@ remote native probes and the SSH tunnel were removed after verification.
      clicked it, closed Blender's untouched startup scene normally, and Check Again reported Blender set up.
      AirPods 25 mm + FDM request and Stove FDM request were resent through the actual Send buttons at
      1793790273706 / 1793790324011; both showed Working, AirPods had real Blender tool activity.
-     **Current handoff:** both passes are now done/Ready; a fresh saved-object scan showed no touching-up or
+     **Current hold, Nov 4 13:05Z:** visible Mac UI shows AirPods **Getting the print ready**, with a floating-
+     cantilever warning, unchecked **Print anyway**, **Cancel Print**, and disabled **Print**. P1S shows Ready,
+     but the pending print question means deployment is not idle. Parent left the decision untouched and
+     notified both owners directly: no install, restart or MCP Update until David resolves it and idle is
+     verified again. Combined source `4d6838f0`, signed development build `202611040557`, finished with exit 0;
+     deep/strict codesign verification passed and CloudKit/APNs development entitlements match the installed
+     app. Packaged runtime includes the updater script permission/lifecycle check, no-printer safeguard, FDM
+     guidance and auto-orient/support forwarding. Build output/log/exit and payload-check receipts are in
+     `~/scan-to-make-work/combined-mac-202611040557/`; app is under
+     `build/Build/Products/Release/Counterpart.app`. No installation or real-app acceptance is claimed.
+     Completed Linux integration snapshot (205 MB) was removed; its log is retained as
+     `~/scan-to-make-work/main-integration-mac/linux-check.log` alongside the Mac check log.
+     **Earlier settled handoff:** both passes were done/Ready; a fresh saved-object scan showed no touching-up or
      printing projects. AirPods monitor records ended/cancelled at 2026-11-04T11:34:23.486Z. Parent sent literal
      "settled" directly to MCP owner and merge owner. MCP owner checked the actual app idle at 12:14Z
      (P1S Ready; no Working/Printing), clicked nothing, and returned Mac UI to this release owner because
