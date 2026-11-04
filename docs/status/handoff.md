@@ -248,6 +248,9 @@ remote native probes and the SSH tunnel were removed after verification.
   rules. David, Nov 4: "it 1000000% must be in the mcps but very little has to be in the app". It applies to copy passes
   too ("when this applies more, it should be known and done"). Developer notes and evaluation cases:
   `docs/design/fdm-prompt-pack/`.
+  **Order:** #298 (Counterpart) does nothing but drop the no-prep rule until the running MCP serves `fdm_design`. The
+  installed bambu MCP is `feat/one-printer-control-route`, not main, so release #98/#51 and deploy a build that carries
+  them before merging #298.
 
 ## Done or superseded (verified; don't redo)
 
