@@ -192,7 +192,9 @@ struct SocketObjects: ObjectsCompanion {
     @Published private(set) var aiProvider: String?
     @Published private(set) var availability = Availability.loading
     @Published var selection: String?
-    @Published private(set) var working: Set<String> = []
+    @Published private var operations: Set<String> = []
+    @Published private(set) var answeringPrintConfirmations: Set<String> = []
+    var working: Set<String> { operations.union(answeringPrintConfirmations) }
     @Published private(set) var problem: Problem?
     @Published private(set) var corrections: CorrectionQueue {
         didSet { defaults.set(corrections.saved, forKey: "CounterpartQueuedNotes") }
@@ -245,8 +247,8 @@ struct SocketObjects: ObjectsCompanion {
 
     @discardableResult func print(_ id: String, checked: Bool, filament: PrinterFilament) async -> Bool {
         guard !working.contains(id) else { return false }
-        working.insert(id)
-        defer { working.remove(id) }
+        operations.insert(id)
+        defer { operations.remove(id) }
         problem = nil
         do {
             let updated = try await companion.print(id, checked:checked, filament:filament)
@@ -264,8 +266,8 @@ struct SocketObjects: ObjectsCompanion {
     /// Prints with the sheet's settings when the companion takes them, else with the chosen filament as before.
     @discardableResult func print(_ id: String, checked: Bool, settings: PrintSettings, filament: PrinterFilament?) async -> Bool {
         guard !working.contains(id) else { return false }
-        working.insert(id)
-        defer { working.remove(id) }
+        operations.insert(id)
+        defer { operations.remove(id) }
         problem = nil
         do {
             let updated: Project
@@ -290,8 +292,8 @@ struct SocketObjects: ObjectsCompanion {
     /// Pause, resume or stop a print (`capabilities.printControl`). The printer MCP may ask its own confirmation first.
     @discardableResult func control(_ id: String, _ action: PrintControl) async -> Bool {
         guard !working.contains(id) else { return false }
-        working.insert(id)
-        defer { working.remove(id) }
+        operations.insert(id)
+        defer { operations.remove(id) }
         if problem?.id == id { problem = nil }
         do {
             let updated = try await companion.control(id, action)
@@ -313,8 +315,8 @@ struct SocketObjects: ObjectsCompanion {
     }
     func selectPrinter(_ id: String, destinationId: String) async {
         guard !working.contains(id) else { return }
-        working.insert(id)
-        defer { working.remove(id) }
+        operations.insert(id)
+        defer { operations.remove(id) }
         do {
             let updated = try await companion.selectPrinter(id, destinationId:destinationId)
             applyReply(updated)
@@ -492,8 +494,8 @@ struct SocketObjects: ObjectsCompanion {
 
     func duplicate(_ id: String) async throws {
         guard capabilities?.projectPreferences == true, !working.contains(id) else { throw ControlClientError.unavailable }
-        working.insert(id)
-        defer { working.remove(id) }
+        operations.insert(id)
+        defer { operations.remove(id) }
         let copied = try await companion.duplicate(id)
         readApplied = startRead()
         objects.removeAll { $0.id == copied.id }
@@ -536,8 +538,8 @@ struct SocketObjects: ObjectsCompanion {
     /// One change to one project, shown as working while it runs; a refusal reads the project again.
     private func change(_ id: String, _ body: @escaping () async throws -> Project) async -> Bool {
         guard !working.contains(id) else { return false }
-        working.insert(id)
-        defer { working.remove(id) }
+        operations.insert(id)
+        defer { operations.remove(id) }
         if problem?.id == id { problem = nil }
         do {
             let updated = try await body()
@@ -555,9 +557,9 @@ struct SocketObjects: ObjectsCompanion {
     @discardableResult func requestChanges(_ id: String, note: String, photos: [URL] = []) async -> Bool {
         guard let project = objects.first(where: { $0.id == id }), project.canAskForChanges, !working.contains(id) else { return false }
         if !project.changesWait { return await perform(.correct, on: id, note: note, photos: photos) }
-        working.insert(id)
+        operations.insert(id)
         defer {
-            working.remove(id)
+            operations.remove(id)
             if let current = objects.first(where: { $0.id == id }) { sendQueuedNote(current) }
         }
         return await queueChanges(id, note: note, photos: photos)
@@ -612,8 +614,8 @@ struct SocketObjects: ObjectsCompanion {
 
     @discardableResult func perform(_ action: ObjectAction, on id: String, note: String = "", photos: [URL] = []) async -> Bool {
         guard !working.contains(id) else { return false }
-        working.insert(id)
-        defer { working.remove(id) }
+        operations.insert(id)
+        defer { operations.remove(id) }
         if problem?.id == id { problem = nil }
         do {
             let updated: Project
@@ -648,7 +650,7 @@ struct SocketObjects: ObjectsCompanion {
     }
 
     @discardableResult func answerPrintConfirmation(_ id: String, confirmationId: String, answer: PrintConfirmationAnswer) async -> Bool {
-        guard !working.contains(id) else { return false }
+        guard !answeringPrintConfirmations.contains(id) else { return false }
         guard let question = objects.first(where:{ $0.id == id })?.printConfirmation, question.id == confirmationId else {
             problem = Problem(id:id, text:"That print confirmation has changed. Review the current request.")
             return false
@@ -659,8 +661,8 @@ struct SocketObjects: ObjectsCompanion {
             problem = Problem(id:id, text:"Complete the required checks before confirming this print. The request may have expired.")
             return false
         }
-        working.insert(id)
-        defer { working.remove(id) }
+        answeringPrintConfirmations.insert(id)
+        defer { answeringPrintConfirmations.remove(id) }
         if problem?.id == id { problem = nil }
         do {
             let updated = try await companion.answerPrintConfirmation(id, confirmationId:confirmationId, answer:answer)
@@ -678,8 +680,8 @@ struct SocketObjects: ObjectsCompanion {
     /// Returns whether it went through; if not, the object stays and its page says why.
     @discardableResult func delete(_ id: String) async -> Bool {
         guard !working.contains(id) else { return false }
-        working.insert(id)
-        defer { working.remove(id) }
+        operations.insert(id)
+        defer { operations.remove(id) }
         if problem?.id == id { problem = nil }
         do {
             try await companion.delete(id)

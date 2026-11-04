@@ -20,6 +20,13 @@ New session? Read [`docs/status/handoff.md`](docs/status/handoff.md) for how to 
 - it's a companion app, however, that doesn't mean the app is an afterthought, it should be designed as something that apple would feature in it's devday best examples.  Literally see and understand the latest ios apps that apple dev team has endorsed or showcased 
 - with the lidar and cameras and scanning, use what exists and don't handroll something apple has built in house for their own hardware, HOWEVER, if we are constrained by something, sometimes you literally have to reinvent pieces of the wheel; use the /be-ambitous skill when needed
 
+## Agent skills (tstack)
+
+tstack (github.com/t3dotgg/tstack) is installed in ~/.claude/skills and ~/.codex/skills on the Mac and the Linux boxes: council, full-send, full-stop, sol-loop, file-pr, babysit-pr, takeover, modernize, leaving-pr-comments. In T3 Code they use delegate_task and watch_pull_request.
+- Council members: Claude Opus 5.5 (claude-opus-5-5), Muse Wonder (muse-wonder-1.0), Codex GPT-6.1 Sol (gpt-6.1-sol), each at high reasoning effort. For UI work, council scores screenshots of the real app out of 10, compared with the best apps Apple features, and iterates until every member gives 9 or more.
+- In this repo, full-send's merge gate also includes this repo's own gate: `scripts/ci_local.py` and `scripts/branch_check.py --merge` printing SAFE (hosted Actions have no runner).
+- In bambu-printer-mcp and mcp-3D-printer-server, use full-stop, never full-send: merging there publishes to npm, and releases are held until David says otherwise.
+
 ## Local PR checks
 
 For now during development, make sure code is pushed after every feature so we don't use it and push to pain unless there is some weird major exception that would require a new branch

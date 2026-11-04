@@ -23,6 +23,13 @@ private actor FakeObjects: ObjectsCompanion {
         return []
     }
 
+    private var controlWaiter: CheckedContinuation<Void, Never>?
+    func control(_ id: String, _ action: PrintControl) async throws -> Project {
+        calls.append("control-waiting")
+        await withCheckedContinuation { controlWaiter = $0 }
+        return try change(id, "control-finished", [:])
+    }
+    func finishControl() { controlWaiter?.resume(); controlWaiter = nil }
     private(set) var confirmationAnswer: PrintConfirmationAnswer?
     func set(_ items: [[String: Any]]) { self.items = items }
     private(set) var settingsPatches: [String: [String: JSONValue]] = [:]
@@ -255,6 +262,28 @@ private func project(_ item: [String: Any]) throws -> Project {
         let older = ObjectsModel(companion: companion)
         let refused = await older.rename("rename", title: "Should wait for capability")
         XCTAssertFalse(refused)
+    }
+
+    func testResumeConfirmationCanBeAnsweredWhileControlWaits() async {
+        let companion = FakeObjects()
+        let question: [String: Any] = ["id":"q1", "message":"Resume this job?", "expiresAtMs":Date().timeIntervalSince1970 * 1000 + 60_000,
+            "supported":true, "fields":[["name":"confirmed", "title":"Confirm", "required":true]]]
+        await companion.set([item("a", "printing", ["printConfirmation":question])])
+        let model = ObjectsModel(companion:companion)
+        await model.refresh()
+        let control = Task { await model.control("a", .resume) }
+        for _ in 0..<100 {
+            if await companion.calls.contains("control-waiting") { break }
+            try? await Task.sleep(nanoseconds: 1_000_000)
+        }
+        XCTAssertTrue(model.working.contains("a"))
+        let accepted = await model.answerPrintConfirmation("a", confirmationId:"q1", answer:.init(action:.accept, content:["confirmed":.bool(true)]))
+        XCTAssertTrue(accepted, "the confirmation must not deadlock behind the control awaiting it")
+        XCTAssertTrue(model.working.contains("a"), "answering must not release the original control's busy state")
+        await companion.finishControl()
+        let resumed = await control.value
+        XCTAssertTrue(resumed)
+        XCTAssertFalse(model.working.contains("a"))
     }
 
     func testConfirmationRejectsStaleAndIncompleteAnswers() async {

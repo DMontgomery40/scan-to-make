@@ -347,7 +347,7 @@ private struct DeviceRow: View {
     }
 }
 
-// MARK: Printers (read-only: they come from the user's MCP configs)
+// MARK: Printers (they come from the user's MCP configs; the connection is the MCP's own setting)
 
 struct PrintersSettings: View {
     @ObservedObject var objects: ObjectsModel
@@ -364,19 +364,23 @@ struct PrintersSettings: View {
                         .foregroundStyle(.secondary)
                 }
                 ForEach(printers) { printer in
-                    HStack(spacing:12) {
-                        Image(systemName:printer.mcpName == "bambu-printer-mcp" ? "printer.fill" : "printer").font(.title3).frame(width:26)
-                        VStack(alignment:.leading, spacing:2) {
-                            Text([printer.name, printer.model].compactMap { $0 }.joined(separator:" · ")).font(.body.weight(.medium))
-                            Text([printer.mcpName, printer.address].compactMap { $0 }.joined(separator:" · ")).font(.caption).foregroundStyle(.secondary)
+                    VStack(alignment:.leading, spacing:10) {
+                        HStack(spacing:12) {
+                            Image(systemName:printer.mcpName == "bambu-printer-mcp" ? "printer.fill" : "printer").font(.title3).frame(width:26)
+                            VStack(alignment:.leading, spacing:2) {
+                                Text([printer.name, printer.model].compactMap { $0 }.joined(separator:" · ")).font(.body.weight(.medium))
+                                Text([printer.mcpName, printer.address].compactMap { $0 }.joined(separator:" · ")).font(.caption).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            ReadyDot(state:printer.state)
+                            Text(Self.readiness(printer.state)).font(.caption).foregroundStyle(.secondary)
                         }
-                        Spacer()
-                        ReadyDot(state:printer.state)
-                        Text(Self.readiness(printer.state)).font(.caption).foregroundStyle(.secondary)
+                        // Only bambu-printer-mcp has a choice of connection (mcp-3D-printer-server has no Bambu Cloud route).
+                        if printer.mcpName == "bambu-printer-mcp" { PrintRoutePicker(destinationId:printer.id).padding(.leading, 38) }
                     }
                 }
             } header: { Text("Printers") } footer: {
-                Text("Counterpart reads these from your MCP configs and never changes them. Add or edit printers there.")
+                Text("Counterpart reads these from your MCP configs. Add or edit printers there. The connection is the printer MCP’s own setting: changing it here changes it in that MCP.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section("Printer MCPs") {
@@ -403,6 +407,66 @@ struct PrintersSettings: View {
     private func update(_ mcp: PrinterMCP, fresh: Bool) {
         guard objects.capabilities?.mcpUpdates == true, let mcpId = mcp.mcpId else { return }
         Task { await updates.update(mcpId, fresh:fresh, socket:ModelAccessModel.socketPath(for:Installation(bundle:.main))) }
+    }
+}
+
+/// How the printer MCP reaches the printer, for prints and for Stop, Pause and Resume. The MCP keeps the setting
+/// (`printers.route` → bambu-printer-mcp `counterpart_print_route`); this only shows and changes it. Hidden for an
+/// MCP without the choice.
+private struct PrintRoutePicker: View {
+    let destinationId: String
+    @State private var route: PrintRoute?
+    @State private var problem: String?
+    @State private var saving = false
+    /// Until the first answer: a view with no content never runs `.task`, so something must be shown.
+    @State private var loaded = false
+
+    private static func label(_ choice: String) -> String {
+        switch choice { case "lan": return "Local network"; case "cloud": return "Bambu Cloud"; default: return choice }
+    }
+    private func client() throws -> ControlClient {
+        try ControlClient(socketPath:ModelAccessModel.socketPath(for:Installation(bundle:.main)), timeout:ControlClient.timeout(for:"printers.route"))
+    }
+
+    var body: some View {
+        Group {
+            if let route {
+                VStack(alignment:.leading, spacing:6) {
+                    Picker("Connection", selection:Binding(get: { route.route }, set: { choose($0) })) {
+                        ForEach(route.choices, id:\.self) { Text(Self.label($0)).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
+                    .disabled(saving)
+                    Text(problem ?? "Prints, Stop, Pause and Resume go this way.")
+                        .font(.caption).foregroundStyle(problem == nil ? AnyShapeStyle(.secondary) : AnyShapeStyle(.red))
+                }
+            } else if !loaded {
+                ProgressView().controlSize(.small)
+            }
+        }
+        .task { await load() }
+    }
+
+    private func load() async {
+        do { route = try await client().printRoute(destinationId); problem = nil }
+        catch { route = nil }
+        loaded = true
+    }
+
+    private func choose(_ choice: String) {
+        guard choice != route?.route, !saving else { return }
+        saving = true
+        Task {
+            defer { saving = false }
+            do {
+                route = try await client().printRoute(destinationId, route:choice)
+                problem = nil
+            } catch let error as ControlRemoteError where !error.message.isEmpty {
+                problem = error.message
+            } catch {
+                problem = "Counterpart couldn’t change the connection. Try again."
+            }
+        }
     }
 }
 

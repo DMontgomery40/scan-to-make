@@ -209,6 +209,35 @@ export async function readPrinterInfo(session: PrinterSession, options: SessionC
   return parsed.success ? parsed.data : undefined;
 }
 
+/**
+ * How the printer MCP reaches the printer for prints and Stop/Pause/Resume: the MCP's own
+ * setting (bambu-printer-mcp `counterpart_print_route`). `lan` is the local network, `cloud`
+ * Bambu Cloud; `mode` is the MCP's connection mode (for example `bambu_connect`).
+ */
+export const printRouteSchema = z.object({
+  route: z.enum(['lan', 'cloud']),
+  mode: z.string(),
+  type: z.string(),
+  choices: z.array(z.enum(['lan', 'cloud'])),
+  savedTo: z.string().nullable(),
+});
+export type PrintRoute = z.infer<typeof printRouteSchema>;
+
+/** Read the MCP's print route; undefined when the install has no route tool or answers something else. */
+export async function readPrintRoute(session: PrinterSession, options: SessionCallOptions = {}): Promise<PrintRoute | undefined> {
+  if (!session.hasTool('counterpart_print_route')) return undefined;
+  const parsed = printRouteSchema.safeParse(toolResultJson(await session.call('counterpart_print_route', {}, {timeoutMs: 15000, ...options})));
+  return parsed.success ? parsed.data : undefined;
+}
+
+/** Change the MCP's print route. The MCP applies it to the next print and control and saves it in its own config. */
+export async function setPrintRoute(session: PrinterSession, route: PrintRoute['route'], options: SessionCallOptions = {}): Promise<PrintRoute> {
+  if (!session.hasTool('counterpart_print_route')) throw new PrinterMcpError('route-unavailable');
+  const parsed = printRouteSchema.safeParse(toolResultJson(await session.call('counterpart_print_route', {route}, {timeoutMs: 15000, ...options})));
+  if (!parsed.success) throw new PrinterMcpError('invalid-route');
+  return parsed.data;
+}
+
 export type CapabilityFeature = 'progress' | 'camera' | 'filaments' | 'pause' | 'resume' | 'quality' | 'strength' | 'multi-colour';
 export interface PrinterCapabilities {
   server: {name: string; version: string};

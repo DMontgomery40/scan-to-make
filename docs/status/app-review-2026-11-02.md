@@ -73,3 +73,25 @@ why. Ordered by how much it hurts someone who just wants a thing printed.
 21. Stop failed with `FULU authenticated stop was rejected (-4)` and the phone stacked two contradictory
     errors (left-over HMS 0500_0500_0001_0007 with Bambu's "update Studio or Handy" text, plus the new one).
     Root cause and fix: see `handoff.md` (MCP route ownership). Pending real-app acceptance.
+
+## Nov 3, early morning (Mac app, Triangle guitar pick)
+
+22. **The Print sheet's "I checked the printer: it isn't already printing this." toggle** appears after an
+    unconfirmed attempt and keeps "Print on Bambu Lab P1S" disabled with no visible reason until it is
+    ticked. David hit it.
+23. **Print failures never reach `events.ndjson`.** Three -3120 cloud failures (01:2x, 01:34, 01:37) left
+    the project "Couldn't finish" on the Mac, but no event was written after `print.confirm`, so the phone
+    is never told a print failed.
+24. **"Getting the print ready" for ~6 minutes after the printer started** (01:46:23 "The printer started
+    it." → 01:52:21 "Printing"), then it showed 43% straight away.
+25. **The sidebar shows "Bambu Lab P1S, Busy"** after the print finished and the plate was cleared, also
+    after a companion restart.
+26. **The MCP's "needs a yes before printing" popup** after the app's own Print sheet. David: useless
+    friction, Bambu checks the printer itself. Turned off (`BAMBU_REQUIRE_CONFIRMATION=0` in
+    `~/bambu-printer-mcp/.env`) and being removed from bambu-printer-mcp itself.
+27. **A refused Stop shows nothing.** David pressed Stop twice at 02:11 (Mac app or phone); the MCP got
+    the printer's refusal (`err_code 84033546`) both times, but the Mac app kept showing the older Pause
+    error and no event was written, so neither app said Stop failed.
+28. **Unexplained printer states after the refused Stops.** 02:11:25 the printer reported PAUSE, 02:11:35
+    RUNNING again (Counterpart sent no Resume), 02:12:14 FAILED ("The printer stopped."). Counterpart sent
+    nothing after 02:11:25. Unknown whether David stopped it at the printer or in Handy.
