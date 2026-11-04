@@ -217,7 +217,17 @@ remote native probes and the SSH tunnel were removed after verification.
      Combined checks: contracts 58, handoff 116 (5 skipped), companion 824 (1 skipped), site 4 pages, Swift
      suites and unsigned Mac build passed. Removed an auto-merged duplicate PrinterSetupViews Xcode entry.
      This is source/build evidence; installed Mac remains unchanged until the recorded deployment boundary.
-     Remaining main queue (#293, #300, #301) integrates later. Reconciliation details:
+     **Remote MCP integration:** main `290d71fb` (#300, final head `ee3d008`) is also reconciled on release.
+     Catalog/session setup now serves `/v1/mcp` with or without objects, while keeping release's provider-worker
+     routing, no Claude-only requirement, Linux placeholder handling and print-gate reservations. Retained
+     `source_f3d` confinement and plain support arguments. The signed `202611040557` artifact predates #300;
+     this source integration does not change it or the installed app. Remaining main queue: #293 and #301.
+     Engineering checks: companion build and 125 focused remote/auth/updater/session/printer checks pass.
+     Broader handoff/HTTP/control/provider run: 212 pass, 5 skip, one unchanged Mac worker-environment
+     assertion fails because the child receives `__CF_USER_TEXT_ENCODING` (secret-leak assertion passes).
+     The same model-access suite passes 17/17 on Linux Node 24.22.2. Logs retained under
+     `~/scan-to-make-work/main-integration-mac/remote-mcp-*.log`; no remote-client/UI acceptance is claimed.
+     Reconciliation details:
      - #295 final head `f17b72f`: preserve MCP updater `#perform` handling when all printers are removed
        (`#held`, `NO_PRINTERS`, caught fire-and-forget) and both regressions; preserve setup `#runs()` settings-folder
        ownership and its regression in objects-printers.
@@ -470,6 +480,18 @@ remote native probes and the SSH tunnel were removed after verification.
 16. **The whole MCP toolset, remotely, through the companion: `/v1/mcp`** (from David's Claude Duet chat, Nov 3).
     The goal is that a remote Claude session (or any MCP client) can use *everything* both MCPs do, through the
     companion's existing front door, not a second one.
+    - **Built, not deployed (Nov 4, branch `feat/remote-mcp`):** design in
+      [`../design/remote-mcp.md`](../design/remote-mcp.md); pairing and connecting in
+      [`../tailscale-setup.md`](../tailscale-setup.md#remote-mcp-clients-v1mcp). It covers:
+      - `/v1/mcp` (`current`) and `/v1/mcp/<destinationId>` on each destination's shared session;
+      - scopes `mcp:read|design|control|print|raw`, with `pair-mcp` to grant them;
+      - path confinement to `<bundle store>/remote/<deviceId>/`;
+      - remote questions tagged with the device, cancelled at once until a screen shows them.
+
+      Loopback tests: `services/companion/tests/remote-mcp.test.mjs`.
+    - **Blocks real use:** on Nov 4 the Mac had **no Tailscale** and the companion was LAN-only (its certificate names
+      only `192.168.68.123`). A cloud session has no path in until David picks one: Serve mode, a subnet route, or a
+      certificate that names the tailnet address. Open questions are listed at the end of the design doc.
     - **What exists, read it first:** the companion already sits behind **Tailscale Serve** with per-phone pairing
       and revocation (`docs/tailscale-setup.md`); NET-001 (team vote, Oct 14) ruled out **Funnel**. So "Funnel in
       front of each MCP's HTTP mode" is the wrong answer here, and so is a separate WireGuard/wstunnel path for the

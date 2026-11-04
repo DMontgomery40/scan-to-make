@@ -53,11 +53,90 @@ phone app
 4. **Tailnet policy is the outer gate.** Grants should allow only the account's intended phone/user to reach the companion host's Serve port. Do not ship or require a permissive tailnet-wide rule.
 5. **Serve identity is required.** Serve strips spoofed identity headers and supplies `Tailscale-User-Login` for tailnet traffic. Remote mode must require that header and allowlist the expected login explicitly. Tagged or shared nodes without a user identity need an explicit policy decision, not a silent pass.
 6. **Pair every phone.** The companion CLI emits a single-use pairing code and invitation JSON valid for at most five minutes. A QR payload is data, not a delivered camera-scanning interface. The invitation contains its version, Serve URL, code and expiry, never a Tailscale credential or auth key. The phone exchanges it for a per-device token stored in the phone keychain; the companion stores only a token hash, device label, scopes, expiry, and paired-device state.
-7. **Scope narrowly.** Remote scopes cover health, saved projects and captures (including detail stills and scan processing). The companion has no printer routes. Any future route needs its own scope.
+7. **Scope narrowly.** Remote scopes cover health, saved projects and captures (including detail stills and scan processing), printer handoff, and the `mcp:*` scopes for `/v1/mcp` (granted only by `pair-mcp`). Each route has its own scope.
 8. **Fail closed.** Missing identity header, wrong login, wrong Host, unknown/revoked/expired pairing token, or a Funnel/public route rejects. Pairing attempts are rate-limited and errors do not reveal which secret part failed.
 9. **Make revocation obvious.** The companion must list paired devices and revoke one without rotating everyone else. Removing a phone from the tailnet and revoking its pairing token are separate levers; do both for a lost phone.
 
 Why user-installed Tailscale + Serve first, not embedded `tsnet`: the companion is currently a Node service, most target users can reuse an existing tailnet, and the OS client keeps login, updates, device approval, and revocation visible. Embedding Tailscale would add a Go sidecar or service rewrite plus node-state and auth-key management. Revisit only if distribution evidence shows the separate install is the real drop-off point.
+
+## Remote MCP clients (`/v1/mcp`)
+
+Status: implemented and covered by loopback tests (`services/companion/tests/remote-mcp.test.mjs`). A real cloud session reaching a real companion over a tailnet has not been verified.
+
+A remote MCP client, such as a cloud Claude session, can use the printer MCPs through the companion's `/v1/mcp` endpoint. It uses the same front door and the same kind of paired device token as the phone. There is no new listener, and Funnel is never used. The design, with its scopes and argument rules, is in [`design/remote-mcp.md`](design/remote-mcp.md).
+
+### 1. Pair the client on the Mac
+
+```sh
+node services/companion/dist/remote-auth-cli.js pair-mcp <auth-directory> [login] [design] [control] [print] [raw]
+```
+
+- **`read` is always granted.** Add only the classes the client needs. With `print`, the client can start prints, and nothing asks on your phone unless the printer MCP itself asks. Grant `raw` rarely.
+- **The output is a five-minute, single-use invitation:** a JSON object holding `baseUrl`, `code` and `expiresAt`. In Tailscale mode, `login` is the Tailscale login that the client's node will carry.
+
+### 2. Put the client on the tailnet (cloud session)
+
+1. **Allow Tailscale's hosts.** The environment's network allowlist must allow Tailscale's control servers (`controlplane.tailscale.com`, `login.tailscale.com`) and its DERP relays (`derp*.tailscale.com`). Without them, `tailscaled` cannot join.
+2. **Create an auth key.** In the admin console, create an **ephemeral, untagged** auth key and store it as a secret in the cloud environment's settings, never in chat, a repo or this doc.
+   - **Why ephemeral:** the node disappears when the session ends.
+   - **Why untagged:** an untagged key authenticates the node as the user who created the key, so Serve sends that user's `Tailscale-User-Login`. Serve sends no identity headers for tagged nodes, so the companion refuses them.
+3. **Start `tailscaled` in userspace,** because the sandbox has no TUN device. It exposes a local proxy for outbound traffic:
+
+   ```sh
+   tailscaled --tun=userspace-networking --state=mem: --socks5-server=localhost:1055 --outbound-http-proxy-listen=localhost:1055 &
+   tailscale up --auth-key="$TS_AUTHKEY" --hostname=claude-cloud
+   export HTTPS_PROXY=http://localhost:1055 ALL_PROXY=socks5://localhost:1055
+   ```
+
+   - `TS_AUTHKEY` is the variable the environment injects from its secret.
+   - Check that the MCP client and `curl` honor the proxy variables. Not every client does.
+
+### 3. Exchange the invitation
+
+```sh
+curl -sS --fail -X POST "$BASE_URL/v1/pair" -H 'content-type: application/json' \
+  -d '{"code":"<code>","deviceName":"Claude cloud session"}'
+```
+
+- **The reply is the credential:** `deviceId`, `token`, `expiresAt` and `scopes`. Keep `token` in the environment's secret store.
+- **The token lasts 30 days** from pairing or from its last refresh (`POST /v1/auth/refresh`).
+
+### 4. Add the MCP server
+
+Add it to the client as a Streamable HTTP server, with two static headers:
+
+```sh
+claude mcp add --transport http counterpart "$BASE_URL/v1/mcp" \
+  --header "Authorization: Bearer $COUNTERPART_TOKEN" --header "X-Scan-Device: $COUNTERPART_DEVICE_ID"
+```
+
+- **Pick the printer by path.** `/v1/mcp` is the Mac's own printer, and `/v1/mcp/<destinationId>` is another configured printer.
+- **Clients must not send a browser `Origin` header.** The companion refuses any request that carries one.
+
+### Which front door: Serve or LAN mode
+
+The endpoint follows the transport the companion was initialized with:
+
+- **Tailscale mode:** `$BASE_URL` is the Serve URL, `https://<host>.<tailnet>.ts.net`.
+- **LAN mode** (`init-lan`; this is how the installed Mac runs today):
+  - its certificate is self-signed, so give the client the pinned certificate (`NODE_EXTRA_CA_CERTS=<cert.pem>` for Node clients);
+  - the client must reach an address the certificate names;
+  - leave login out of `pair-mcp`.
+
+On Nov 4 the installed Mac had no Tailscale at all, and its certificate named only its LAN IP. A cloud session cannot reach it until David picks a path; see open question 1 in [`design/remote-mcp.md`](design/remote-mcp.md). The paths are:
+- Tailscale with Serve mode;
+- Tailscale with a subnet route to the LAN IP;
+- a certificate that names the tailnet address, with `SCAN_TO_MAKE_LAN_ALL_ADDRESSES=1`.
+
+### Revoke
+
+```sh
+node services/companion/dist/remote-auth-cli.js devices <auth-directory>
+node services/companion/dist/remote-auth-cli.js revoke <auth-directory> <device-id>
+```
+
+- **Revocation is immediate.** It also stops a call that is still waiting for the printer.
+- **Remove the node from the tailnet separately.** For an ephemeral node, ending the session removes it.
 
 ## Recovery and revocation
 
