@@ -694,6 +694,10 @@ final class DecodingTests: XCTestCase {
         let decoded = try JSONDecoder().decode(PrintSettings.self, from: Data(#"{"quality":"draft","plateCheck":true}"#.utf8))
         XCTAssertEqual(decoded, PrintSettings(quality: "draft"))
         XCTAssertEqual(Set(try json(decoded).keys), ["quality"])
+        // A print's saved layer pauses are read back (Print Another), never sent as a setting.
+        let paused = try JSONDecoder().decode(PrintSettings.self, from: Data(#"{"quality":"fine","pauseBeforeLayers":[3,12]}"#.utf8))
+        XCTAssertEqual(paused.pauseBeforeLayers, [3, 12])
+        XCTAssertEqual(Set(try json(paused).keys), ["quality"])
     }
 
     func testConfirmationFieldsCanBeMadeInTests() {

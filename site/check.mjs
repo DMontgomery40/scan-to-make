@@ -5,6 +5,9 @@ import {fileURLToPath} from 'node:url';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), 'public');
 const failures = [];
+// Outside links and images: fonts, the printer MCP servers' docs sites (Counterpart's printing backend), their npm and
+// GitHub pages, and the scan rig.
+const PUBLIC = /^https:\/\/(fonts\.(googleapis|gstatic)\.com(\/|$)|dmontgomery40\.github\.io\/(bambu-printer-mcp|mcp-3D-printer-server)\/|www\.npmjs\.com\/package\/(bambu-printer-mcp|mcp-3d-printer-server)$|github\.com\/DMontgomery40\/(bambu-printer-mcp|mcp-3D-printer-server)$|makerworld\.com\/en\/models\/1531561$)/;
 const fail = message => failures.push(message);
 const pages = readdirSync(root).filter(name => name.endsWith('.html'));
 const ids = Object.fromEntries(pages.map(page => [page, new Set([...readFileSync(join(root, page), 'utf8').matchAll(/\sid="([^"]+)"/g)].map(m => m[1]))]));
@@ -23,7 +26,7 @@ for (const page of pages) {
   if (/Scan to Make/.test(html)) fail(`${page}: still says Scan to Make`);
   for (const [, href] of html.matchAll(/href="([^"]+)"/g)) {
     if (/^(https?:|mailto:)/.test(href)) {
-      if (!/^https:\/\/(testflight\.apple\.com\/join\/S4tExVzp$|github\.com\/DMontgomery40\/scan-to-make\/(blob\/e7d5f6d\/deploy\/companion\/README\.md|releases\/download\/v2\.0-beta\.3\/ScanToMake-202611040120\.zip)|fonts\.(googleapis|gstatic)\.com|dmontgomery40\.github\.io\/(bambu-printer-mcp|mcp-3D-printer-server)\/|makerworld\.com\/en\/models\/1531561)/.test(href)) fail(`${page}: outside link not on the public list: ${href}`);
+      if (!/^https:\/\/(testflight\.apple\.com\/join\/S4tExVzp$|github\.com\/DMontgomery40\/scan-to-make\/(blob\/e7d5f6d\/deploy\/companion\/README\.md|releases\/download\/v2\.0-beta\.3\/ScanToMake-202611040120\.zip)|fonts\.(googleapis|gstatic)\.com|dmontgomery40\.github\.io\/(bambu-printer-mcp|mcp-3D-printer-server)\/|makerworld\.com\/en\/models\/1531561)/.test(href) && !PUBLIC.test(href)) fail(`${page}: outside link not on the public list: ${href}`);
       continue;
     }
     const [file, hash] = href.replace(/^\//, '').split('#');
@@ -33,7 +36,8 @@ for (const page of pages) {
   }
   for (const [tag] of html.matchAll(/<img\b[^>]*>/g)) {
     const src = tag.match(/src="([^"]*)"/)?.[1];
-    if (src && !existsSync(join(root, src.replace(/^\//, '')))) fail(`${page}: missing image ${src}`);
+    if (src && /^https:/.test(src)) { if (!PUBLIC.test(src)) fail(`${page}: outside image not on the public list: ${src}`); }
+    else if (src && !existsSync(join(root, src.replace(/^\//, '')))) fail(`${page}: missing image ${src}`);
     if (!/\salt="/.test(tag)) fail(`${page}: image without alt: ${src}`);
     if (src && !/width="\d+" height="\d+"/.test(tag)) fail(`${page}: image without width and height: ${src}`);
   }

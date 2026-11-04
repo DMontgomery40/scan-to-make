@@ -205,7 +205,8 @@ struct LiveActivityPush: Encodable, Equatable {
         case "print.started": kind = .start; priority = 10
         case "print.status", "print.resumed": kind = .update
         case "print.paused": kind = .update; priority = 10
-        case "print.done", "print.failed", "print.not-started", "print.cancelled": kind = .end; priority = 10
+        // A print the printer never started ends its activity too, or it stays at 0% "Waiting for an update".
+        case "print.done", "print.failed", "print.cancelled", "print.not-started": kind = .end; priority = 10
         default: return nil
         }
         // Push-to-start requires an alert. Muted projects can still update an activity started on the phone.

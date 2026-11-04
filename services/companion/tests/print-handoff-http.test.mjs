@@ -178,7 +178,7 @@ test('print runs through the fixture MCP server with phone-answered elicitation'
   assert.equal(json(again).error.code, 'already-printed');
   assert.ok(final.bundle.artifacts.sliced);
   const tools = (await f.calls()).filter(entry => entry.tool).map(entry => entry.tool);
-  assert.deepEqual(tools, ['lay_flat', 'slice_stl', 'inspect_print_file', 'print_3mf']);
+  assert.deepEqual(tools, ['slice_stl', 'inspect_print_file', 'print_3mf']);
 });
 
 test('elicitation respond rejects unknown ids and malformed answers', async t => {
@@ -537,7 +537,7 @@ for (const dispatch of ['crash', 'timeout']) {
     assert.equal(final.bundle.status, 'uncertain');
     assert.equal(final.bundle.failure, 'dispatch-uncertain');
     assert.deepEqual((await f.calls()).filter(item => item.tool).map(item => item.tool),
-      ['lay_flat', 'slice_stl', 'inspect_print_file', 'print_3mf']);
+      ['slice_stl', 'inspect_print_file', 'print_3mf']);
     assert.deepEqual((await f.calls()).filter(item => item.elicitation).map(item => item.elicitation),
       [{action: 'accept', content: {confirmed: true}}]);
     for (const restart of [false, true]) {
@@ -576,7 +576,8 @@ test('HTTP successful retry of a declined print clears its persisted failure', {
   assert.equal(retried.bundle.status, 'printed');
   assert.equal(Object.hasOwn(retried.bundle, 'failure'), false);
   assert.ok(retried.bundle.artifacts.sliced);
-  assert.ok(retried.bundle.artifacts.oriented);
+  // The slicer orients the model itself: no re-oriented copy is recorded.
+  assert.equal(retried.bundle.artifacts.oriented, undefined);
   const listed = json(await wire(f, '/v1/printer-handoff/bundles')).bundles.find(item => item.id === bundle.id);
   assert.equal(listed.status, 'printed');
   assert.equal(Object.hasOwn(listed, 'failure'), false);

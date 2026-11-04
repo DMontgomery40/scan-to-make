@@ -30,11 +30,15 @@ export function sliceCacheKey(parts: {model: Buffer; backend: string; server?: {
     env: parts.env === undefined ? undefined : createHash('sha256').update(parts.env).digest('hex'), presets: parts.presets, args})).digest('hex');
 }
 
+/** Preset files both printer MCPs read from their environment when slice_stl doesn't name one. */
+export const ENV_PRESETS = ['SLICER_PROFILE', 'BAMBU_SLICER_PROFILE', 'FILAMENT_PROFILE', 'SLICER_FILAMENT_PROFILE'];
+
 /** Explicit preset files can be edited without changing their path. If the MCP alone can read/resolve
  * an input (a remote path or named template), let it slice rather than reuse an unverified input. */
-export async function presetDigests(args: Record<string, unknown>, cwd: string): Promise<Record<string, string> | undefined> {
+export async function presetDigests(args: Record<string, unknown>, cwd: string, env: Record<string, string | undefined> = {}): Promise<Record<string, string> | undefined> {
   if (args.template_name) return undefined;
-  const paths = [args.slicer_profile, args.filament_profile, args.load_filaments]
+  // The MCP falls back to presets named in its environment or `.env` when an argument is unset; hash those too.
+  const paths = [args.slicer_profile, args.filament_profile, args.load_filaments, ...ENV_PRESETS.map(name => env[name])]
     .flatMap(value => typeof value === 'string' ? value.split(';').map(file => file.trim()).filter(Boolean) : []);
   try {
     return Object.fromEntries(await Promise.all(paths.map(async file =>

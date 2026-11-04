@@ -211,9 +211,13 @@ remote native probes and the SSH tunnel were removed after verification.
      follow-ups, phone picker/pause deployment, and `/v1/mcp`. This release thread retains Android/Linux,
      TestFlight/reconstruction and its release/status/distribution files. Leave their branches and live deployments
      alone; record and coordinate any proposed Mac deployment or companion restart here first.
-     **Final-main integration checklist (merge owner, Nov 4):** wait for their final main SHA/caveats, then
-     reconcile hunks rather than choosing whole files. Earlier #295/#299 heads on this release branch do not
-     contain all fixes in main's squashes `7b112af`/`2a8155f`:
+     **Combined integration through main `a72b6d4`:** reconciled #295/#299 final changes, #292/#297,
+     #302 and #303 with provider routing, Linux discovery, reconstruction, plate selection and notification
+     deduplication. One FDM guidance block remains. `--allow-scripts` and main's no-printer safeguards both remain.
+     Combined checks: contracts 58, handoff 116 (5 skipped), companion 824 (1 skipped), site 4 pages, Swift
+     suites and unsigned Mac build passed. Removed an auto-merged duplicate PrinterSetupViews Xcode entry.
+     This is source/build evidence; installed Mac remains unchanged until the recorded deployment boundary.
+     Remaining main queue (#293, #300, #301) integrates later. Reconciliation details:
      - #295 final head `f17b72f`: preserve MCP updater `#perform` handling when all printers are removed
        (`#held`, `NO_PRINTERS`, caught fire-and-forget) and both regressions; preserve setup `#runs()` settings-folder
        ownership and its regression in objects-printers.
@@ -406,8 +410,9 @@ remote native probes and the SSH tunnel were removed after verification.
      readiness probes import only `pxr` rather than the USD modules used by qualification, don't pass their
      supplied environment to spawn, and leave stderr unread. Cache identity is launcher mtime rather than
      the packaged build identity. Do not claim dependency independence/readiness from these checks yet.
-     T3 requires an explicit provider choice before replacing rate-limited Muse; choice requested, no switch
-     or restart performed. Source and retained runtime remain intact for continuation.
+     David chose **resume Muse after reset**. Continuation is scheduled for Nov 4 at 14:13Z (07:13 Mountain),
+     after its 14:12:05Z quota reset. No provider switch. Source and retained runtime remain intact;
+     parent continues the separate main integration/Mac build work. #293 remains with the merge owner.
      Synthetic geometry retained a support disc until explicit region choice; one OpenMVS run crashed then
      succeeded on retry. Neither result establishes real capture quality or automatic print readiness.
 
@@ -450,6 +455,28 @@ remote native probes and the SSH tunnel were removed after verification.
     3MF. `tools/caliper/LICENSE` had an uncommitted GPL-3 → Apache-2.0 switch. The no-AMS variant can now use
     `pause_at_layers`.
 15. **Starting a file already on the printer's SD card** without reslicing: offered to David, not built.
+16. **The whole MCP toolset, remotely, through the companion: `/v1/mcp`** (from David's Claude Duet chat, Nov 3).
+    The goal is that a remote Claude session (or any MCP client) can use *everything* both MCPs do, through the
+    companion's existing front door, not a second one.
+    - **What exists, read it first:** the companion already sits behind **Tailscale Serve** with per-phone pairing
+      and revocation (`docs/tailscale-setup.md`); NET-001 (team vote, Oct 14) ruled out **Funnel**. So "Funnel in
+      front of each MCP's HTTP mode" is the wrong answer here, and so is a separate WireGuard/wstunnel path for the
+      app itself. `remote-auth-cli.ts pair-printer-handoff` mints a token scoped to printing and health.
+    - **The gap:** `/v1` reaches about a dozen MCP tools out of 54 in bambu-printer-mcp and 42 in
+      mcp-3D-printer-server. Pause, resume, stop, temperatures, fans, lights, speed, AMS and drying, files, skip
+      objects, clearing HMS errors, and the MCPs' own prompts and resources are not reachable remotely.
+    - **Design:** one Streamable HTTP endpoint, `/v1/mcp`, behind the same Serve, allowed login and pairing, passing
+      both MCPs through as they are. Reuse `PrinterSessionPool`, `remote-auth`, the MCP SDK and mcp-proxy's pattern.
+      New parts only: per-device **scopes** (read, control, print, design; raw RPC off by default), file paths confined
+      to the bundle store, and print confirmations still routed to David's phone, so a remote session can't approve
+      its own print.
+    - **Step 1, in both MCPs:** scopes key off each tool's `readOnlyHint` / `destructiveHint` annotations, and both
+      MCPs annotate only a few tools today. Annotate every tool in both.
+    - **For a cloud Claude session (Duet) to reach it:** that environment's network allowlist refused Tailscale's
+      control and relay hosts. With those hosts allowed and an **ephemeral** auth key in the environment settings
+      (never in chat), the session runs `tailscaled` in userspace, joins the tailnet like a device, pairs with a scoped
+      token, and uses `/v1/mcp`. Other users without Tailscale would need a connector route later (OAuth pairing code,
+      optional hosted relay); not started.
 
 ## Stale work to decide on or clean up
 

@@ -2,7 +2,12 @@ import {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import {StdioClientTransport} from '@modelcontextprotocol/sdk/client/stdio.js';
 import {ElicitRequestSchema, type CallToolResult, type Tool} from '@modelcontextprotocol/sdk/types.js';
 import {Ajv, type ValidateFunction} from 'ajv';
+import {createHash} from 'node:crypto';
+import {readFile} from 'node:fs/promises';
+import {join} from 'node:path';
+import {parseEnv} from 'node:util';
 import {appOwnedPrinterProcess} from './node-runtime.js';
+import {ENV_PRESETS} from './slice-cache.js';
 import {timeoutsFor, type PrinterHandoffConfig} from './config.js';
 import type {ElicitationContext, ElicitationRelay} from './elicitation.js';
 import {slicerReport} from './slicer-report.js';
@@ -39,6 +44,9 @@ function failureDetail(result: CallToolResult, config: PrinterHandoffConfig): st
 export interface PrinterToolCatalog {
   server: {name: string; version: string};
   tools: Tool[];
+  /** The working directory's `.env` as this process started with it (the MCP reads it once, at start):
+   * its digest and the preset paths it names, for the slice cache. Never its other values. */
+  startedWith?: {envSha256?: string; presets: Record<string, string | undefined>};
 }
 
 const MAX_PAGES = 20;
@@ -69,6 +77,9 @@ export interface PrinterMcpClientOptions {
   onClose?: () => void;
 }
 
+/** One `notifications/progress` from the printer MCP during a tool call. */
+export interface McpProgress {progress: number; total?: number; message?: string}
+
 export interface PrinterToolCallOptions {
   /** Transparent MCP adapters preserve tool errors and media under the SDK's
    * transport frame limit, without applying printer-domain result semantics. */
@@ -83,6 +94,8 @@ export interface PrinterToolCallOptions {
    * server's elicitation requests carry no reference to the call that caused them.
    */
   elicitationContext?: ElicitationContext;
+  /** The MCP's progress notifications for this call. Given, the call asks for them, and each restarts its timeout (within its total). */
+  onProgress?: (progress: McpProgress) => void;
 }
 
 /** One stdio MCP session against the operator-configured printer server. */
@@ -119,6 +132,9 @@ export class PrinterMcpClient {
     if (signal?.aborted) fail('cancelled');
     const timeouts = timeoutsFor(this.#config);
     const processConfig = await appOwnedPrinterProcess(this.#config.process);
+    const dotEnv = await readFile(join(this.#config.process.cwd ?? process.cwd(), '.env'), 'utf8').catch(() => undefined);
+    const started = {...(dotEnv === undefined ? {} : {envSha256: createHash('sha256').update(dotEnv).digest('hex')}),
+      presets: Object.fromEntries(Object.entries(dotEnv ? parseEnv(dotEnv) : {}).filter(([name]) => ENV_PRESETS.includes(name)))};
     const transport = new StdioClientTransport({
       command: processConfig.command,
       args: [...(processConfig.args ?? [])],
@@ -173,7 +189,7 @@ export class PrinterMcpClient {
         if (!cursor) break;
         if (page === MAX_PAGES - 1) fail('catalog-limit');
       }
-      this.#catalog = freeze({server: {name: server.name, version: server.version}, tools});
+      this.#catalog = freeze({server: {name: server.name, version: server.version}, tools, startedWith: started});
       // A process that exits later ends this session; the owner reconnects on its next call.
       client.onclose = () => {
         if (this.#closing || this.#client !== client) return;
@@ -253,6 +269,12 @@ export class PrinterMcpClient {
     try {
       result = await this.#client.callTool({name, arguments: args}, undefined, {
         signal: options.signal, timeout, maxTotalTimeout: timeout, resetTimeoutOnProgress: true,
+        // The SDK asks the MCP for progress (and resets the timeout on it) only with a handler: given only when the
+        // caller wants it, so other calls (the Fusion worker's pass-through) send exactly what they always did.
+        ...(options.onProgress ? {onprogress: ({progress, total, message}: {progress: number; total?: number; message?: string}) => {
+          try { options.onProgress?.({progress, ...(total !== undefined ? {total} : {}), ...(message !== undefined ? {message} : {})}); }
+          catch { /* A caller's progress display never fails the call. */ }
+        }} : {}),
       }) as CallToolResult;
     } catch (error) {
       const failure = new PrinterMcpError(options.dispatchSensitive && this.#declinedElicitations === declinedBefore

@@ -279,15 +279,21 @@ export class PrinterSetup {
   get #node(): string { return this.deps.node ?? process.execPath; }
   #label(pkg: PrinterBackend): string { return MCP_PACKAGES.find(item => item.package === pkg)!.label; }
 
-  /** Folders the catalog already runs (an install's folder, a profile's working directory). */
+  /**
+   * Folders whose printer settings the catalog already uses: a profile's working directory (where its MCP reads
+   * `.env`), or its ssh command's. Running a found checkout's code with settings of its own (another folder, or
+   * inline) isn't that checkout's printer, so it stays offered. Only a profile with neither falls back to its
+   * installation's folders.
+   */
   #runs(): string[] {
     const paths: string[] = [];
     for (const {id, config} of this.deps.configs()) for (const profile of [config, this.deps.effective?.(id, config) ?? config]) {
       const install = resolveMcpInstall(profile, this.deps.env);
+      const settings = install.via?.cwd ?? profile.process.cwd;
+      if (settings) { paths.push(settings); continue; }
+      if (profile.process.env?.PRINTER_HOST || install.via?.env?.PRINTER_HOST) continue;
       if (install.type === 'checkout') paths.push(install.dir);
       if (install.type === 'global' || install.type === 'app') paths.push(install.prefix);
-      if (install.via?.cwd) paths.push(install.via.cwd);
-      if (profile.process.cwd) paths.push(profile.process.cwd);
       const entry = profile.process.args?.find(arg => arg.endsWith('.js') && isAbsolute(arg));
       if (entry) paths.push(dirname(dirname(entry)));
     }

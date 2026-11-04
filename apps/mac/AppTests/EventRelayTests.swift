@@ -281,6 +281,12 @@ final class EventRelayTests: XCTestCase {
         XCTAssertNil(done.staleDate, "an ended activity is never marked stale")
         XCTAssertEqual(done.contentState.state, "finished")
         XCTAssertEqual(done.contentState.progress, 100)
+        // Handoff item 9: a print the printer never started left its Live Activity at 0% (two orange "0%" items in the menu bar).
+        let notStarted = try XCTUnwrap(LiveActivityPush.make(for: event("print.not-started", printId: "print-1"), token: "aa", title: "Mic mount", now: now))
+        XCTAssertEqual(notStarted.kind, .end, "a print that never started ends its activity")
+        XCTAssertEqual(notStarted.contentState.state, "failed")
+        XCTAssertNil(notStarted.staleDate)
+        XCTAssertNil(notStarted.alert, "its own alert already says it didn't start; the activity ends silently")
         XCTAssertNil(LiveActivityPush.make(for: event("pass.ready"), token: "aa", title: "x", now: now))
         XCTAssertNil(LiveActivityPush.make(for: event("print.started"), token: "aa", title: "x", now: now), "a start needs its print")
         let long = LiveActivityPush.alert(title: String(repeating: "t", count: 150), body: String(repeating: "b\n", count: 100))

@@ -14,9 +14,19 @@ export const printerMcpProcessSchema = z.strictObject({
 });
 export type PrinterMcpProcess = z.infer<typeof printerMcpProcessSchema>;
 
-export const printerSelectionSchema = z.strictObject({
+export const printerTypeSchema = z.enum(['octoprint', 'klipper', 'duet', 'repetier', 'bambu', 'prusa', 'creality']);
+
+/** Dropped before validation so older printer-handoff.json files and bundles still load: the printer MCP
+ * owns its route (counterpart_print_route, Settings -> Printers), and nothing reads a copy here. */
+function withoutLegacyRoute(value: unknown): unknown {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || !Object.hasOwn(value, 'connectionMode')) return value;
+  const {connectionMode: _connectionMode, ...rest} = value as Record<string, unknown>;
+  return rest;
+}
+
+export const printerSelectionSchema = z.preprocess(withoutLegacyRoute, z.strictObject({
   model: z.string().trim().min(1).max(128).optional(),
-  printerType: z.enum(['octoprint', 'klipper', 'duet', 'repetier', 'bambu', 'prusa', 'creality']).optional(),
+  printerType: printerTypeSchema.optional(),
   host: z.string().trim().min(1).max(255).optional(),
   port: z.string().trim().min(1).max(16).optional(),
   nozzleDiameterMm: z.literal([0.2, 0.4, 0.6, 0.8]).optional(),
@@ -30,11 +40,8 @@ export const printerSelectionSchema = z.strictObject({
   // in bambu-printer-mcp and a material-to-slot object in mcp-3D-printer-server.
   amsMapping: z.union([z.array(z.number().int()).max(64), z.record(z.string(), z.number().int())]).optional(),
   autoMatchAms: z.boolean().optional(),
-  // Ignored, kept so older printer-handoff.json files still load: the printer MCP owns
-  // its route (bambu-printer-mcp counterpart_print_route, Settings -> Printers).
-  connectionMode: z.enum(['lan_mqtt_ftps','bambu_network','bambu_native','bambu_connect']).optional(),
   connectionType: z.enum(['lan','cloud']).optional(),
-});
+}));
 export type PrinterSelection = z.infer<typeof printerSelectionSchema>;
 
 export const printerSlicerSchema = z.strictObject({
@@ -50,6 +57,9 @@ export const printerSlicerSchema = z.strictObject({
   sparseInfillDensity: z.string().regex(/^(100|[1-9]?[0-9])%$/).optional(),
   /** Copies on the plate: slice_stl `repetitions`. */
   repetitions: z.number().int().min(1).max(64).optional(),
+  /** The designer's supports choice, sent as slice_stl `enable_support` and `support_type` (false included). */
+  enableSupport: z.boolean().optional(),
+  supportType: z.enum(['normal(auto)', 'tree(auto)']).optional(),
   /** Pause before these 1-based layers: slice_stl `pause_at_layers`. */
   pauseAtLayers: z.array(z.number().int().min(2).max(100000)).min(1).max(16).optional(),
 });

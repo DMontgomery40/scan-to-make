@@ -108,6 +108,8 @@ export interface StmObject {
 
     /** What changed, each tagged (PRD §4 Result). */
     changes?: TouchupChange[];
+    /** The designer's supports choice for this model, sent to the slicer as it is. */
+    supports?: import('../touchup/runner.js').TouchupSupports;
     engine?: DesignEngine;
     /** A Fusion pass keeps its parametric design for the next "Ask for changes" (PRD §8.9). */
     design?: {f3d: string; parameters?: string}};

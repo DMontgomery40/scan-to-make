@@ -242,6 +242,8 @@ test('pause, resume and stop go through the printer\'s mutex and relay its own c
   const pausing = f.service.control(f.object.id, 'pause');
   const question = await until(async () => (await f.service.get(f.object.id)).printConfirmation);
   assert.equal(question.message, 'Confirm pause_print');
+  // A second control while the first one's question is open is refused, never queued behind it.
+  await assert.rejects(f.service.control(f.object.id, 'cancel'), /still answering the last Pause, Resume or Stop/);
   await f.service.answerPrintConfirmation(f.object.id, question.id, {action: 'accept', content: {confirmed: true}});
   const paused = await pausing;
   assert.equal(paused.printConfirmation, undefined);

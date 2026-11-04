@@ -20,9 +20,11 @@ export function sliceOverrides(settings: Pick<PrintSettings, 'quality' | 'streng
 
 const PACKAGE_NAMES = {'bambu-printer-mcp': 'bambu-printer-mcp', 'mcp-3d-printer-server': 'mcp-3D-printer-server'} as const;
 /** The sentence for a quality or strength the installed MCP can't apply. */
-export function settingsUnsupported(backend: keyof typeof PACKAGE_NAMES, settings: Pick<PrintSettings, 'quality' | 'strength' | 'copies' | 'pauseBeforeLayers'>): string {
+export function settingsUnsupported(backend: keyof typeof PACKAGE_NAMES, settings: Pick<PrintSettings, 'quality' | 'strength' | 'copies' | 'pauseBeforeLayers'> & {supports?: boolean}): string {
   const what = [settings.quality && settings.quality !== 'standard' ? 'quality' : undefined, settings.strength && settings.strength !== 'standard' ? 'strength' : undefined,
-    settings.copies && settings.copies > 1 ? 'copies' : undefined, settings.pauseBeforeLayers?.length ? 'layer pauses' : undefined]
+    settings.copies && settings.copies > 1 ? 'copies' : undefined, settings.pauseBeforeLayers?.length ? 'layer pauses' : undefined,
+    settings.supports ? 'this design’s supports' : undefined]
     .filter(Boolean).join(' and ') || 'print settings';
+  if (what === 'this design’s supports') return `Update ${PACKAGE_NAMES[backend]} in Settings → Printers so Counterpart can send this design’s supports to the slicer. Nothing was sent to the printer.`;
   return `Update ${PACKAGE_NAMES[backend]} to choose ${what} from Counterpart. Standard prints with your printer's own preset.`;
 }

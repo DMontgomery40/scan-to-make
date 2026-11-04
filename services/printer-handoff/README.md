@@ -34,12 +34,16 @@ This package does not reimplement slicing or printer control.
 - `InMemoryElicitationRelay` — turns each server elicitation into a pending
   confirmation with an id. `respond(id, answer)` answers it; a timeout
   resolves as `cancel`. Nothing is ever answered automatically.
-- `PrinterHandoffRunner` — the print sequence:
-  - bambu-printer-mcp: `lay_flat` → `slice_stl` → `inspect_print_file` →
+- `PrinterHandoffRunner` — the print sequence. Counterpart is a bridge: the
+  model goes to the slicer as it is. An STL is sliced with `orient: true`, so
+  the slicer's own auto-orient places it; a 3MF keeps its placement. The
+  designer's supports choice, when there is one, is sent as `enable_support`
+  and `support_type` (off included); otherwise the printer profile decides.
+  - bambu-printer-mcp: `slice_stl` → `inspect_print_file` →
     `camera_snapshot` → `print_3mf`.
-  - mcp-3D-printer-server, G-code printers: `lay_flat` → `slice_stl` →
+  - mcp-3D-printer-server, G-code printers: `slice_stl` →
     `confirm_temperatures` → `upload_gcode` with `print: true`.
-  - mcp-3D-printer-server, Bambu: `lay_flat` → `slice_stl` → `print_3mf`.
+  - mcp-3D-printer-server, Bambu: `slice_stl` → `print_3mf`.
   - `processAndPrint` runs the generic server's one-call
     `process_and_print_stl` extend-and-print pipeline.
 - Bambu Studio's own verdict on the slice. When `slice_stl` returns the
@@ -109,7 +113,7 @@ PRINTER_HANDOFF_BAMBU_ENTRY=/path/to/bambu-printer-mcp/dist/index.js \
 node --test services/printer-handoff/tests/real-bambu.test.mjs
 ```
 
-**mcp-3D-printer-server** — full `lay_flat` → `slice_stl` →
+**mcp-3D-printer-server** — full `slice_stl` →
 `confirm_temperatures` → `upload_gcode` flow against a loopback OctoPrint or
 Moonraker stub and the real server process (slicing is stubbed in-process so
 no slicer install is required):
