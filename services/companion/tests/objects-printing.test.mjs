@@ -452,7 +452,7 @@ test('the phone reads and changes a printer\'s connection and MCP, never while i
   assert.equal((await call('PUT', '/current/route', {route: 'lan'})).status, 409);
   assert.equal(f.calls.filter(c => c.name === 'counterpart_print_route').length, outside);
   f.queue.splice(0, f.queue.length, status('IDLE', 0));
-  assert.equal((await call('PUT', '/current/route', {route: 'lan'})).status, 200, 'and allowed once it is idle again');
+  assert.equal((await call('PUT', '/current/route', {route: 'cloud'})).status, 200, 'and allowed once it is idle again');
 
   // Printer MCP: the companion's own chooseMcp, its refusals as HTTP statuses.
   const mcp = await call('PUT', '/current/mcp', {backend: 'mcp-3d-printer-server'});
