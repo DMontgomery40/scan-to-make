@@ -174,3 +174,34 @@ fn unit_quotes_systemd_specifiers() {
     assert!(text.contains("ExecStart=\"/home/a b/%%x$$y/host/counterpart-host\" serve\n"));
     assert!(text.contains("WantedBy=default.target"));
 }
+
+#[test]
+fn the_default_printer_config_names_an_absolute_node_and_repairs_only_our_old_default() {
+    use crate::host::write_default_printer_config;
+    use std::path::Path;
+    let dir = std::env::temp_dir().join(format!("counterpart-host-test-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let state = Path::new("/home/fixture/.local/share/counterpart");
+    let node = Path::new("/home/fixture/.local/share/counterpart/runtime/current/Payload/node/bin/node");
+    let entry = "/home/fixture/.local/share/counterpart/printers/bambu/lib/node_modules/bambu-printer-mcp/dist/index.js";
+    let read = |path: &Path| -> Value { serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap() };
+    // Fresh: created with an absolute command (printerHandoffConfigSchema's absolutePath).
+    let fresh = dir.join("fresh.json");
+    write_default_printer_config(&fresh, state, node).unwrap();
+    let config = read(&fresh);
+    assert_eq!(config, json!({"backend": "bambu-printer-mcp", "process": {"command": node.to_str().unwrap(), "args": [entry]}}));
+    assert!(Path::new(config["process"]["command"].as_str().unwrap()).is_absolute());
+    // The relative default an earlier build wrote is replaced.
+    let old = dir.join("old.json");
+    std::fs::write(&old, serde_json::to_vec(&json!({"backend": "bambu-printer-mcp", "process": {"command": "node", "args": [entry]}})).unwrap()).unwrap();
+    write_default_printer_config(&old, state, node).unwrap();
+    assert_eq!(read(&old), config);
+    // Anything the user or Counterpart has changed is never touched.
+    let mine = dir.join("mine.json");
+    let custom = json!({"backend": "mcp-3d-printer-server", "process": {"command": "node", "args": ["/home/fixture/mcp-3D-printer-server/dist/index.js"]}});
+    std::fs::write(&mine, serde_json::to_vec(&custom).unwrap()).unwrap();
+    write_default_printer_config(&mine, state, node).unwrap();
+    assert_eq!(read(&mine), custom);
+    assert!(write_default_printer_config(&dir.join("x.json"), state, Path::new("node")).is_err());
+    std::fs::remove_dir_all(&dir).unwrap();
+}

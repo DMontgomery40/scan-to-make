@@ -246,9 +246,37 @@ fn single_quoted(value: &str) -> io::Result<String> {
     Ok(format!("'{value}'"))
 }
 
+pub fn default_printer_config(state: &Path, node: &Path) -> Value {
+    let entry = state.join("printers/bambu/lib/node_modules/bambu-printer-mcp/dist/index.js");
+    json!({"backend": "bambu-printer-mcp", "process": {"command": node.display().to_string(), "args": [entry.display().to_string()]}})
+}
+
+/// Creates the default printer configuration, naming the service runtime's absolute Node
+/// (the companion's schema requires an absolute command; SCAN_TO_MAKE_PRINTER_NODE pins it at
+/// run time). An existing file is left alone, except the exact relative-`node` default an
+/// earlier helper build generated, which the companion refuses to load.
+pub fn write_default_printer_config(path: &Path, state: &Path, node: &Path) -> io::Result<()> {
+    if !node.is_absolute() { return Err(io::Error::other("Invalid runtime Node path")); }
+    let config = default_printer_config(state, node);
+    let text = format!("{}\n", serde_json::to_string_pretty(&config).unwrap());
+    match fs::read(path) {
+        Ok(bytes) => {
+            let earlier = json!({"backend": "bambu-printer-mcp", "process": {"command": "node", "args": [config["process"]["args"][0].clone()]}});
+            if serde_json::from_slice::<Value>(&bytes).ok().as_ref() == Some(&earlier) { write_atomic(path, text.as_bytes(), 0o600)?; }
+            Ok(())
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => match OpenOptions::new().write(true).create_new(true).mode(0o600).open(path) {
+            Ok(mut file) => file.write_all(text.as_bytes()),
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => Ok(()),
+            Err(error) => Err(error),
+        },
+        Err(error) => Err(error),
+    }
+}
+
 /// LAN TLS, pairing auth, companion.env and an empty printer configuration.
 /// Each piece is created only when missing; existing state is never replaced.
-fn initialize_state(context: &Context) -> io::Result<()> {
+fn initialize_state(context: &Context, node: &Path) -> io::Result<()> {
     let uid = context.account.uid;
     paths::private_dir(&context.state, uid)?;
     let env_file = context.env_file();
@@ -281,14 +309,8 @@ fn initialize_state(context: &Context) -> io::Result<()> {
     // The printer MCP is the backend: the default points at the app's own copy of
     // bambu-printer-mcp, which Settings → Printers → Download installs from npm.
     // Nothing is vendored here; until Download, the printer list stays empty.
-    if !handoff.exists() && env.get("SCAN_TO_MAKE_PRINTER_HANDOFF_CONFIG").map(PathBuf::from).as_deref() == Some(handoff.as_path()) {
-        let entry = context.state.join("printers/bambu/lib/node_modules/bambu-printer-mcp/dist/index.js");
-        let config = json!({"backend": "bambu-printer-mcp", "process": {"command": "node", "args": [entry.display().to_string()]}});
-        match OpenOptions::new().write(true).create_new(true).mode(0o600).open(&handoff) {
-            Ok(mut file) => file.write_all(format!("{}\n", serde_json::to_string_pretty(&config).unwrap()).as_bytes())?,
-            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
-            Err(error) => return Err(error),
-        }
+    if env.get("SCAN_TO_MAKE_PRINTER_HANDOFF_CONFIG").map(PathBuf::from).as_deref() == Some(handoff.as_path()) {
+        write_default_printer_config(&handoff, &context.state, node)?;
     }
     if env.get("SCAN_TO_MAKE_PRINTER_HANDOFF_DIR").map(PathBuf::from).as_deref() == Some(handoff_dir.as_path()) {
         paths::private_dir(&handoff_dir, uid)?;
@@ -327,8 +349,11 @@ fn initialize_state(context: &Context) -> io::Result<()> {
 pub fn setup(context: &Context) -> io::Result<Value> {
     unsafe { libc::umask(0o077) };
     context.installation.require_payload()?;
-    initialize_state(context)?;
+    paths::private_dir(&context.state, context.account.uid)?;
     let (executable, runtime_changed) = install_runtime(context)?;
+    // The Node of the runtime the service runs (a stable `current` link for a copied runtime).
+    let node = executable.parent().and_then(Path::parent).ok_or_else(|| io::Error::other("Invalid helper location"))?.join("Payload/node/bin/node");
+    initialize_state(context, &node)?;
     let unit = unit_text(&executable);
     let unit_file = context.unit_file();
     let unit_changed = fs::read_to_string(&unit_file).ok().as_deref() != Some(unit.as_str());
