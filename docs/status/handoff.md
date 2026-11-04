@@ -630,7 +630,12 @@ remote native probes and the SSH tunnel were removed after verification.
     backend receipts (last observed project Guitar pick `a2bfa85a-9700-495d-a86c-d4c6d521502e`).
     Do not mark colour acceptance passed or reprint. David also reports another Device Hub use;
     read-only check at 11:15 MST found no Xcode DeviceHub process or events in its previous 8 minutes.
-    Other owners are auditing activity; no claim about the unverified actor. All physical viewers stay off.
+    David clarified this was an iOS lock-screen/Settings notice saying the device was viewed through
+    Device Hub, not an observed agent tool call or reopened Mac window. USB read-only display info
+    after that notice still lists LCD only. Retained phone logs spanning 11:01:55–11:16:51 MST contain
+    no dtremotedisplayd/CoreDeviceScreenSharing/blackening event in that interval. A delayed earlier-session
+    notice is plausible, not proven; no new viewer or responsible agent established. Evidence retained in
+    `camera-recurrence-20261104/ios-notice-*` and `displays-after-ios-notice.json`. All physical viewers stay off.
     Keep physical-phone viewers/screen sharing/recording off during capture acceptance; use USB syslog
     only. Other agents remain off Davica3. Private logs and retained archives (not committed):
     `~/scan-to-make-work/camera-recurrence-20261104/`, especially `mac-coredevice-trigger.log`,
