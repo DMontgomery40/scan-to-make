@@ -1,6 +1,6 @@
-import {copyFile, mkdtemp, readFile, rm} from 'node:fs/promises';
+import {copyFile, mkdtemp, readFile, rm, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
-import {basename, extname, isAbsolute, join} from 'node:path';
+import {basename, dirname, extname, isAbsolute, join} from 'node:path';
 import type {ElicitResult, Tool} from '@modelcontextprotocol/sdk/types.js';
 import {
   printerHandoffConfigSchema,
@@ -10,6 +10,7 @@ import type {ElicitationContext, ElicitationRelay} from './elicitation.js';
 import {sliceEstimate, sliceSettings, slicePlateCount, type SliceEstimate, type SliceSettings} from './slice-estimate.js';
 import {inspectModelFile} from './model-file.js';
 import {slicerReport} from './slicer-report.js';
+import {keepSlice, readSlice, sliceCacheKey, presetDigests} from './slice-cache.js';
 import type {HandoffBundleStore} from './bundle.js';
 import {PrinterMcpError, toolResultJson, toolResultText, type PrinterToolCatalog} from './mcp-client.js';
 import {PrinterSession} from './session.js';
@@ -33,6 +34,8 @@ export interface PrintRunInput {
   signal?: AbortSignal;
   /** Tags the printer's questions with the bundle being printed. */
   bundleId?: string;
+  /** Keep each slice here and print a kept one again when nothing that shapes it changed (slice-cache.ts). */
+  sliceCache?: {directory: string};
 }
 /** How the printer will report this print, so its job can be recognised (PRD §8.6). */
 export interface DispatchIdentity {
@@ -176,11 +179,11 @@ export class PrinterHandoffRunner {
    * Lays the model flat and slices it exactly as a print would, then reads the
    * time, grams and settings from the sliced file. Never prints.
    */
-  async estimate(input: {stlPath: string; selection?: PrinterSelection; slicer?: PrinterSlicer; signal?: AbortSignal}): Promise<{estimate?: SliceEstimate; settings: SliceSettings; slicerWarning?: string}> {
+  async estimate(input: {stlPath: string; selection?: PrinterSelection; slicer?: PrinterSlicer; signal?: AbortSignal; sliceCache?: PrintRunInput['sliceCache']}): Promise<{estimate?: SliceEstimate; settings: SliceSettings; slicerWarning?: string}> {
     let sliced: Buffer | undefined;
     const plate = {...this.#config.selection, ...input.selection}.plateIndex ?? 0;
     const {slicerWarning} = await this.run({stlPath: input.stlPath, print: false, ...(input.selection ? {selection: input.selection} : {}), ...(input.slicer ? {slicer: input.slicer} : {}),
-      ...(input.signal ? {signal: input.signal} : {}),
+      ...(input.signal ? {signal: input.signal} : {}), ...(input.sliceCache ? {sliceCache: input.sliceCache} : {}),
       // Read the output while the MCP is alive: a one-shot backend may delete it when it closes.
       persistOutput: async output => { sliced = await readFile(output.slicedPath); return output; }});
     if (!sliced) fail('invalid-output-path');
@@ -289,6 +292,8 @@ export class PrinterHandoffRunner {
         if (input.slicer?.[key] === undefined) delete slicer[key];
       }
     }
+    if (alreadySliced && slicer.pauseAtLayers?.length)
+      throw new PrinterMcpError('published-sliced-settings', undefined, 'This file is already sliced, so its layer pauses are the ones it was sliced with. Share the designer’s editable 3MF to add a pause.');
     if (alreadySliced && ((slicer.repetitions ?? 1) !== 1 || ['layerHeightMm', 'wallLoops', 'sparseInfillDensity', 'loadFilaments', 'filamentProfile', 'filamentColours', 'templateName'].some(key => Object.hasOwn(input.slicer ?? {}, key))))
       throw new PrinterMcpError('published-sliced-settings', undefined, 'This file is already sliced. Share the designer’s editable 3MF to change its slicing settings or copies.');
     // A chosen spool's profile (load_filaments) replaces the configured filament alias: MCPs refuse the two when they differ.
@@ -323,26 +328,12 @@ export class PrinterHandoffRunner {
       if ((slicer.layerHeightMm !== undefined && !Object.hasOwn(sliceProperties, 'layer_height'))
           || (slicer.wallLoops !== undefined && !Object.hasOwn(sliceProperties, 'wall_loops'))
           || (slicer.sparseInfillDensity !== undefined && !Object.hasOwn(sliceProperties, 'sparse_infill_density'))
+          || (slicer.pauseAtLayers?.length && !Object.hasOwn(sliceProperties, 'pause_at_layers'))
           // mcp-3D-printer-server forwards repetitions only on its Bambu-compatible route; elsewhere it would slice one.
           || (slicer.repetitions !== undefined && slicer.repetitions > 1 && (!Object.hasOwn(sliceProperties, 'repetitions') || !isBambuSlicing(this.#config, selection, slicer)))) fail('print-settings-unsupported');
     }
-    let orientedStlPath = input.stlPath;
-    let laidFlat = false;
-    if (!threeMf && session.hasTool('lay_flat')) {
-      await progress('orienting');
-      const orientation = await call(session, 'lay_flat', {stl_path: input.stlPath}, local);
-      orientedStlPath = absolutePath(orientation);
-      // Newer MCPs explicitly return the unchanged model when no face can rest
-      // on the bed. Let the slicer orient it; older path-only results retain
-      // their established behavior.
-      laidFlat = orientation.structuredContent?.laid_flat !== false;
-      step('lay_flat');
-    }
-    if (threeMf && !alreadySliced && !Object.hasOwn(session.getTool('slice_stl').inputSchema.properties ?? {}, 'slice_plate'))
-      throw new PrinterMcpError('plate-selection-unsupported', undefined, 'Update your printer service to slice the selected 3MF plate.');
-    if (!alreadySliced) await progress('slicing');
-    const sliced = alreadySliced ? undefined : await call(session, 'slice_stl', {
-      stl_path: orientedStlPath,
+    // Every slice_stl argument but the model's path and whether lay_flat already chose its face.
+    const sliceArgs = {
       slice_plate: threeMf ? (selection.plateIndex ?? 0) + 1 : undefined,
       bambu_model: isBambuSlicing(this.#config, selection, slicer) ? selection.model : undefined,
       nozzle_diameter: selection.nozzleDiameterMm === undefined ? undefined : String(selection.nozzleDiameterMm),
@@ -357,24 +348,60 @@ export class PrinterHandoffRunner {
       layer_height: slicer.layerHeightMm,
       wall_loops: slicer.wallLoops,
       sparse_infill_density: slicer.sparseInfillDensity,
+      pause_at_layers: slicer.pauseAtLayers?.length ? slicer.pauseAtLayers : undefined,
       // Sent whenever it is set and the tool takes it, 1 included: a request for one copy overrides a configured 3.
       repetitions: slicer.repetitions !== undefined && (slicer.repetitions > 1 || Object.hasOwn(session.getTool('slice_stl').inputSchema.properties ?? {}, 'repetitions'))
         ? slicer.repetitions : undefined,
       use_printer_filaments: false,
-      // lay_flat already chose the flat face; otherwise let the slicer orient.
-      orient: !threeMf && !laidFlat,
       arrange: !threeMf || (slicer.repetitions ?? 1) > 1,
       ensure_on_bed: !threeMf,
+    };
+    // The same model sliced the same way before (Print Again, or Print after Estimate): print that file. Only lay_flat
+    // and slice_stl are skipped; inspection, the printer checks, Studio's warning and the print call all run as always.
+    // SSH, shells and other wrappers can change cwd or host before starting the MCP. Their
+    // actual defaults are not visible here, so only cache direct local Node/npm launches.
+    const localLaunch = /^(node|nodejs|npx)(\.exe|\.cmd)?$/i.test(basename(this.#config.process.command));
+    const presets = input.sliceCache && !alreadySliced && localLaunch ? await presetDigests(sliceArgs, this.#config.process.cwd ?? process.cwd()) : undefined;
+    const cacheKey = input.sliceCache && !alreadySliced && presets ? sliceCacheKey({model: await readFile(input.stlPath), backend: this.#config.backend, presets,
+      server: catalog.server, config: this.#config.process, env: await readFile(join(this.#config.process.cwd ?? process.cwd(), '.env'), 'utf8').catch(() => undefined),
+      args: {...sliceArgs, lay_flat: !threeMf && session.hasTool('lay_flat')}}) : undefined;
+    const reused = cacheKey ? await readSlice(input.sliceCache!.directory, cacheKey) : undefined;
+    let orientedStlPath = input.stlPath;
+    let laidFlat = false;
+    if (!reused && !threeMf && session.hasTool('lay_flat')) {
+      await progress('orienting');
+      const orientation = await call(session, 'lay_flat', {stl_path: input.stlPath}, local);
+      orientedStlPath = absolutePath(orientation);
+      // Newer MCPs explicitly return the unchanged model when no face can rest
+      // on the bed. Let the slicer orient it; older path-only results retain
+      // their established behavior.
+      laidFlat = orientation.structuredContent?.laid_flat !== false;
+      step('lay_flat');
+    }
+    if (threeMf && !alreadySliced && !Object.hasOwn(session.getTool('slice_stl').inputSchema.properties ?? {}, 'slice_plate'))
+      throw new PrinterMcpError('plate-selection-unsupported', undefined, 'Update your printer service to slice the selected 3MF plate.');
+    if (!alreadySliced && !reused) await progress('slicing');
+    const sliced = alreadySliced || reused ? undefined : await call(session, 'slice_stl', {
+      stl_path: orientedStlPath,
+      ...sliceArgs,
+      // lay_flat already chose the flat face; otherwise let the slicer orient.
+      orient: !threeMf && !laidFlat,
     }, local);
     let slicedPath = sliced ? absolutePath(sliced) : input.stlPath;
+    if (reused) {
+      // Named as a fresh slice of this input would be: the printer's job is named after the file.
+      slicedPath = join(dirname(input.stlPath), `${basename(input.stlPath, extname(input.stlPath))}_sliced${reused.extension}`);
+      await writeFile(slicedPath, reused.bytes, {mode: 0o600});
+    }
     if (sliced) step('slice_stl');
     // Studio's own verdict on this slice (absent from an MCP that returns only the path): an error is
     // never printed, and a warning is printed only on the user's explicit go, as in Studio.
-    const report = slicerReport(sliced?.structuredContent);
+    const report = reused ? undefined : slicerReport(sliced?.structuredContent);
     if (report?.failed) throw new PrinterMcpError('slicer-error', undefined, report.message);
-    const slicerWarning = report?.message;
+    const slicerWarning = reused ? reused.slicerWarning : report?.message;
     const slicedBytes = await readFile(slicedPath);
-    const plateCount = slicePlateCount(slicedBytes) ?? report?.plateCount;
+    const plateCount = slicePlateCount(slicedBytes) ?? report?.plateCount ?? reused?.plateCount;
+    if (cacheKey && !reused) await keepSlice(input.sliceCache!.directory, cacheKey, {bytes: slicedBytes, extension: extname(slicedPath), ...(slicerWarning ? {slicerWarning} : {}), ...(plateCount !== undefined ? {plateCount} : {})});
     // Copies in this flow mean copies in one print. The MCP dispatches one selected plate,
     // so never present one plate's estimate or dispatch as fulfilling a multi-plate request.
     if ((slicer.repetitions ?? 1) > 1 && plateCount && plateCount > 1) {
@@ -458,7 +485,7 @@ export class PrinterHandoffRunner {
    * Runs a stored handoff bundle and records the sliced output back into it.
    * The bundle backend must match this runner's configured backend.
    */
-  async runBundle(store: HandoffBundleStore, id: string, options: {print?: boolean; signal?: AbortSignal; slicer?: PrinterSlicer; onProgress?: PrintRunInput['onProgress']} = {}) {
+  async runBundle(store: HandoffBundleStore, id: string, options: {print?: boolean; signal?: AbortSignal; slicer?: PrinterSlicer; onProgress?: PrintRunInput['onProgress']; sliceCache?: PrintRunInput['sliceCache']} = {}) {
     const manifest = await store.read(id);
     if (manifest.backend !== this.#config.backend) fail('backend-mismatch');
     if (manifest.status === 'uncertain') fail('dispatch-uncertain');
@@ -472,6 +499,7 @@ export class PrinterHandoffRunner {
       const inputStl = join(workDirectory, basename(store.stlPath(manifest)));
       await copyFile(store.stlPath(manifest), inputStl);
       const result = await this.run({stlPath: inputStl, selection: manifest.selection, slicer: options.slicer, print: options.print, signal: options.signal, bundleId: id, onProgress: options.onProgress,
+        ...(options.sliceCache ? {sliceCache: options.sliceCache} : {}),
         persistOutput: async output => {
           // MCP backends may delete scratch files on close. Save both artifacts
           // before dispatch, and give the printer the durable bundle path.

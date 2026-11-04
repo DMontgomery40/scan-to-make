@@ -52,15 +52,18 @@ public struct ControlStatus: Decodable, Sendable {
         public let messagePhotos: Bool
         /// `copies` on `objects.print` and `objects.estimate`.
         public let printCopies: Bool
-        private enum CodingKeys: String, CodingKey { case capture, cleanup, printerHandoff, nearbyPairing, objectsCreate, events, printControl, printSettings, structuredPasses, genericConfirmations, mcpUpdates, publishedModels, projectPreferences, projectSettings, projectRename, messagePhotos, printCopies }
+        /// Settings → Printers: `printers.mcps`, Download (`printers.installMcp`), and finding and adding printers.
+        public let printerSetup: Bool
+        private enum CodingKeys: String, CodingKey { case capture, cleanup, printerHandoff, nearbyPairing, objectsCreate, events, printControl, printSettings, structuredPasses, genericConfirmations, mcpUpdates, publishedModels, projectPreferences, projectSettings, projectRename, messagePhotos, printCopies, printerSetup }
         public init(capture: Bool = true, cleanup: Bool = true, printerHandoff: Bool = true, nearbyPairing: Bool = false,
                     objectsCreate: Bool = false, events: Bool = false, printControl: Bool = false, printSettings: Bool = false,
                     structuredPasses: Bool = false, genericConfirmations: Bool = false, mcpUpdates: Bool = false, publishedModels: Bool = false,
-                    projectPreferences: Bool = false, projectSettings: Bool = false, projectRename: Bool = false, messagePhotos: Bool = false, printCopies: Bool = false) {
+                    projectPreferences: Bool = false, projectSettings: Bool = false, projectRename: Bool = false, messagePhotos: Bool = false, printCopies: Bool = false, printerSetup: Bool = false) {
             self.capture = capture; self.cleanup = cleanup; self.printerHandoff = printerHandoff; self.nearbyPairing = nearbyPairing
             self.objectsCreate = objectsCreate; self.events = events; self.printControl = printControl; self.printSettings = printSettings
             self.structuredPasses = structuredPasses; self.genericConfirmations = genericConfirmations; self.mcpUpdates = mcpUpdates
             self.publishedModels = publishedModels; self.projectPreferences = projectPreferences; self.projectSettings = projectSettings; self.projectRename = projectRename; self.messagePhotos = messagePhotos; self.printCopies = printCopies
+            self.printerSetup = printerSetup
         }
         public init(from decoder: Decoder) throws {
             let values = try decoder.container(keyedBy: CodingKeys.self)
@@ -80,6 +83,7 @@ public struct ControlStatus: Decodable, Sendable {
             projectSettings = try values.decodeIfPresent(Bool.self, forKey: .projectSettings) ?? false
             projectRename = try values.decodeIfPresent(Bool.self, forKey: .projectRename) ?? false
             messagePhotos = try values.decodeIfPresent(Bool.self, forKey: .messagePhotos) ?? false
+            printerSetup = try values.decodeIfPresent(Bool.self, forKey: .printerSetup) ?? false
             printCopies = try values.decodeIfPresent(Bool.self, forKey: .printCopies) ?? false
         }
     }

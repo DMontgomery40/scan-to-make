@@ -97,9 +97,11 @@ export interface PrintHandoffServices {
  * MCP session (PRD §8.3); without one, each run opens and closes its own.
  */
 export function createPrintHandoffServices(configInput: PrinterHandoffConfig, bundlesDirectory: string,
-  shared?: {pool: PrinterSessionPool; destinationId: string; onConnect?: (catalog: PrinterToolCatalog) => void}): PrintHandoffServices {
+  shared?: {pool: PrinterSessionPool; destinationId: string; onConnect?: (catalog: PrinterToolCatalog) => void;
+    /** The relay the destination's pooled session was made with, when its services are rebuilt with a new config. */
+    relay?: InMemoryElicitationRelay}): PrintHandoffServices {
   const config = printerHandoffConfigSchema.parse(structuredClone(configInput));
-  const relay = new InMemoryElicitationRelay({timeoutMs: timeoutsFor(config).elicitationMs});
+  const relay = shared?.relay ?? new InMemoryElicitationRelay({timeoutMs: timeoutsFor(config).elicitationMs});
   const session = shared?.pool.session(shared.destinationId, config, {relay, ...(shared.onConnect ? {onConnect: shared.onConnect} : {})});
   return {
     store: new HandoffBundleStore(bundlesDirectory),

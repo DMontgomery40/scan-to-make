@@ -184,6 +184,8 @@ export const PrintSettingsSchema = z.strictObject({
   colour: PrintColourSchema.optional(),
   /** How many on the plate (slice_stl `repetitions`); 1 sends nothing. */
   copies: z.number().int().min(1).max(64).optional(),
+  /** Pause before each of these 1-based layers, as the slicer preview numbers them (slice_stl `pause_at_layers`), e.g. to drop in magnets. */
+  pauseBeforeLayers: z.array(z.number().int().min(2).max(100000)).min(1).max(16).optional(),
 });
 export type PrintSettings = z.infer<typeof PrintSettingsSchema>;
 
@@ -225,6 +227,8 @@ export const PrinterCapabilitiesSchema = z.strictObject({
   multiColour: z.boolean(),
   /** slice_stl takes `repetitions`: Print and Estimate take `copies`. */
   copies: z.boolean().optional(),
+  /** slice_stl takes `pause_at_layers`: Print takes `pauseBeforeLayers`. */
+  layerPauses: z.boolean().optional(),
   /** The print sheet may ask "What's loaded?": `colour: {material}` is accepted (shown as chips when there is no spool list). */
   materialChoice: z.boolean().optional(),
   /** The features this install lacks, each with the update that unlocks it. */
@@ -261,6 +265,12 @@ export const PrinterDestinationSchema = z.strictObject({
   capabilities: PrinterCapabilitiesSchema.optional(),
   /** PRD §8.10 (PR 6): the MCP install this printer runs; every printer on the same install shares it. */
   mcpId: z.string().regex(/^mcp-[0-9a-f]{16}$/).optional(),
+  /** The same printer reached through both MCPs: each MCP's profile, the one in use first (`printers.chooseMcp`). */
+  mcps: z.array(z.strictObject({backend: z.enum(['bambu-printer-mcp', 'mcp-3d-printer-server']), destinationId: text(256)})).max(2).optional(),
+  /** A printer added in Counterpart (`origin: "counterpart"`): the folder its MCP runs in, whose `.env` holds its settings. */
+  folder: text(4096).optional(),
+  /** Its `.env` lacks settings its MCP needs (names only); `fill` is what `printers.completeSettings` adds (only the model). */
+  incomplete: z.strictObject({missing: z.array(text(64)).max(16), fill: z.record(text(64), text(4096))}).optional(),
 });
 export type PrinterDestination = z.infer<typeof PrinterDestinationSchema>;
 

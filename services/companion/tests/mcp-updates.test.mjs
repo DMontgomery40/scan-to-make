@@ -649,3 +649,98 @@ test('a delayed busy answer queues an already admitted update until printing fin
   assert.equal(f.events.at(-1).type, 'mcp.update.done');
   assert.equal(gate.updating('p1s'), false);
 });
+
+test('Download installs only that package into the app\'s own copy (staged, then swapped in) and reports it by the app copy\'s id', async t => {
+  const {appMcpId} = await import('../dist/printing/mcp-install.js');
+  const f = await updater(t, {profiles: []});
+  const started = await f.updates.download('mcp-3d-printer-server');
+  const id = appMcpId('mcp-3d-printer-server', {appPrinters: `${APP}/printers`});
+  assert.deepEqual(started, {mcpId: id, state: 'started', toVersion: '1.1.50'});
+  // A second tap while it runs gets the same download.
+  assert.deepEqual(await f.updates.download('mcp-3d-printer-server'), started);
+  await f.done();
+  const prefix = `${APP}/printers/generic`;
+  const staging = f.commands[1].match(/--prefix (.+\/\.counterpart-update-[0-9a-f-]+) /)[1];
+  assert.ok(staging.startsWith(`${prefix}/`));
+  assert.match(f.commands[1], / install --global --prefix .+ mcp-3d-printer-server@1\.1\.50$/);
+  assert.equal(f.commands.filter(line => line.includes(' install ')).length, 1, 'one install, of that package only');
+  assert.ok(!f.commands.some(line => line.includes('bambu-printer-mcp')), 'never the other MCP');
+  assert.deepEqual(f.moves.filter(move => move[0] === 'rename'), [['rename', `${staging}/lib/node_modules/mcp-3d-printer-server`, `${prefix}/lib/node_modules/mcp-3d-printer-server`]]);
+  assert.deepEqual(f.events.map(event => [event.type, event.package, event.data.mcpId]), [['mcp.update.started', 'mcp-3d-printer-server', id], ['mcp.update.done', 'mcp-3d-printer-server', id]]);
+  // A failed npm install leaves nothing behind and says so.
+  const broken = await updater(t, {profiles: [], fail: 'install'});
+  await broken.updates.download('bambu-printer-mcp');
+  await broken.done();
+  assert.equal(broken.events.at(-1).type, 'mcp.update.failed');
+  assert.match(broken.events.at(-1).data.log, /npm ERR! network/);
+  assert.ok(!broken.moves.some(move => move[0] === 'rename'), 'nothing swapped in');
+  assert.ok(broken.moves.some(move => move[0] === 'rm' && /\.counterpart-update-/.test(move[1])), 'the staging folder is removed');
+});
+
+test('Settings → Printers lists both MCPs; any copy this Mac has (a printer\'s, the app\'s, an earlier app copy, a folder) counts as installed', async t => {
+  const {PrinterSetup} = await import('../dist/printing/setup.js');
+  const node = '/Applications/Scan to Make.app/Contents/Resources/Payload/node/bin/node';
+  const legacy = `${APP}/printers/bambu-1.1.46`;
+  // A copy counts when Counterpart can start it: its dist/index.js is there (an npx profile has none until npx runs).
+  const env = mac({[`${legacy}/lib/node_modules/bambu-printer-mcp/package.json`]: pkgJson('1.1.46'),
+    [`${legacy}/lib/node_modules/bambu-printer-mcp/dist/index.js`]: '', [`${HOME}/mcp-3D-printer-server/dist/index.js`]: ''});
+  const downloads = [];
+  const setup = (configs, folders = []) => new PrinterSetup({env, configs: () => configs, folders: async () => folders,
+    list: path => path === `${APP}/printers` ? ['bambu-1.1.46', 'profiles'] : [], latestVersion: pkg => pkg === 'bambu-printer-mcp' ? '1.1.50' : '1.2.17',
+    download: async pkg => { downloads.push(pkg); return {mcpId: 'mcp-0000000000000000', state: 'started', toVersion: '1.2.17'}; }});
+  const nothing = await setup([]).mcps();
+  assert.deepEqual(nothing.packages.map(item => [item.package, item.label, item.installed]), [['bambu-printer-mcp', 'bambu-printer-mcp', true], ['mcp-3d-printer-server', 'mcp-3D-printer-server', false]]);
+  assert.equal(nothing.packages[0].description, 'Bambu Lab printers');
+  assert.match(nothing.packages[1].description, /Prusa, Klipper, OctoPrint, Duet, Repetier, Creality/);
+  assert.deepEqual(nothing.packages[0].installs, [{kind: 'app', path: legacy, version: '1.1.46'}]);
+  assert.equal(nothing.packages[0].latestVersion, '1.1.50');
+  // Download installs only the missing one; one already here is never installed again.
+  assert.deepEqual(await setup([]).installMcp('mcp-3d-printer-server'), {update: {mcpId: 'mcp-0000000000000000', state: 'started', toVersion: '1.2.17'}});
+  assert.deepEqual(await setup([]).installMcp('bambu-printer-mcp'), {installed: true, package: 'bambu-printer-mcp'});
+  assert.deepEqual(downloads, ['mcp-3d-printer-server']);
+  // A clone in the home folder is a copy too; a printer's npx profile is listed.
+  const folder = await setup([], [{dir: `${HOME}/mcp-3D-printer-server`, package: 'mcp-3d-printer-server', version: '1.2.17', hasEnv: true}]).mcps();
+  assert.deepEqual(folder.packages[1].installs, [{kind: 'folder', path: `${HOME}/mcp-3D-printer-server`, version: '1.2.17'}]);
+  assert.equal(folder.packages[1].installed, true);
+  const npx = await setup([{id: 'x', config: {backend: 'mcp-3d-printer-server', process: {command: '/opt/homebrew/bin/npx', args: ['-y', 'mcp-3d-printer-server@1.2.10']}}}]).mcps();
+  assert.deepEqual(npx.packages[1].installs, [{kind: 'npx', path: 'mcp-3d-printer-server@1.2.10', version: '1.2.10'}]);
+  assert.equal(npx.packages[1].version, '1.2.10');
+  assert.equal(npx.packages[1].installed, false, 'listed, but Download is offered: Check and Add need a copy Counterpart can start');
+  void node;
+});
+
+test('findMcpFolders finds a built copy of either MCP two levels into the home folder, and skips protected and hidden folders', async t => {
+  const {findMcpFolders} = await import('../dist/printing/setup.js');
+  const {mkdir, writeFile} = await import('node:fs/promises');
+  const home = await mkdtemp(join(tmpdir(), 'mcp-home-'));
+  t.after(() => rm(home, {recursive: true, force: true}));
+  const copy = async (dir, name, env = true) => {
+    await mkdir(join(home, dir, 'dist'), {recursive: true});
+    await writeFile(join(home, dir, 'package.json'), JSON.stringify({name, version: '1.2.17'}));
+    await writeFile(join(home, dir, 'dist', 'index.js'), '');
+    if (env) await writeFile(join(home, dir, '.env'), 'PRINTER_TYPE=bambu\n');
+  };
+  await copy('mcp-3D-printer-server', 'mcp-3d-printer-server');
+  await copy('fleet/bambu-printer-mcp', 'bambu-printer-mcp', false);
+  await copy('Documents/bambu-printer-mcp', 'bambu-printer-mcp');
+  await copy('.hidden/bambu-printer-mcp', 'bambu-printer-mcp');
+  await copy('a/b/bambu-printer-mcp', 'bambu-printer-mcp');
+  await copy('other', 'left-pad');
+  const found = (await findMcpFolders(home)).sort((a, b) => a.dir.localeCompare(b.dir));
+  assert.deepEqual(found, [
+    {dir: join(home, 'fleet/bambu-printer-mcp'), package: 'bambu-printer-mcp', version: '1.2.17', hasEnv: false},
+    {dir: join(home, 'mcp-3D-printer-server'), package: 'mcp-3d-printer-server', version: '1.2.17', hasEnv: true},
+  ]);
+});
+
+test('review fix (#295): a printer listed after start (Add, a Printer MCP choice) starts on its saved override, as at start', async t => {
+  const fresh = `${APP}/printers/bambu/lib/node_modules/bambu-printer-mcp/dist/index.js`;
+  const profiles = [];
+  const f = await updater(t, {profiles});
+  profiles.push({id: 'later', config: bambu('/opt/tools/wrapper.sh')});
+  await f.overrides.set('later', {command: '/node', args: [fresh]}, profiles[0].config);
+  await f.updates.applyOverride('later');
+  assert.deepEqual(f.restarts.map(entry => [entry.id, entry.process.args]), [['later', [fresh]]]);
+  await f.updates.applyOverride('unknown');
+  assert.equal(f.restarts.length, 1, 'an unknown or override-free destination is left alone');
+});

@@ -769,6 +769,8 @@ For every event with `notify ≠ none`:
 
 ### 8.9 Design engine: Blender, or Fusion when the user has it
 
+**Both Blender and Autodesk Fusion are optional dependencies of Counterpart.** Printing existing models that need no changes and reprinting projects must work without either. Their installation and readiness only gate the cleanup, design or editing operation that actually uses them, never pairing, printer setup or printing an existing model.
+
 Scan cleanup always uses Blender. Designing a part from scratch ("make something that fits") uses Autodesk Fusion when the user has Fusion installed and set up; otherwise it uses Blender, as it does today. Both are reached the same way: through a bridge inside the user's printer MCP. The design pass only ever talks to the printer MCP, so nothing changes in the app's UI.
 
 **The Fusion MCP: [faust-machines/fusion360-mcp-server](https://github.com/faust-machines/fusion360-mcp-server)** (MIT). Chosen 2026-11-01 as the most-used and most-maintained community server:
