@@ -171,7 +171,10 @@ export function spreadPick<T>(items: T[], count: number): T[] {
  * with a scan (LiDAR or a handheld capture) is a copy, even with a request ("Copy this. Close up the bottom."),
  * since the phone sends only the request; a request with photos alone is a new design.
  */
-export function passKind(object: Pick<StmObject, 'kind' | 'scan' | 'capture' | 'instructions'>): PassKind {
+export function passKind(object: Pick<StmObject, 'kind' | 'scan' | 'capture' | 'instructions' | 'current'>): PassKind {
+  // A copy needs something to copy: one that never received a scan or capture is its request, a new design.
+  // Its model, if any, came from passes run on the request alone (the Nov 2 guitar pick); a duplicate keeps its source's scan.
+  if (object.kind === 'copy' && !object.scan && !object.capture?.length && object.instructions?.trim()) return 'fit';
   if (object.kind) return object.kind;
   // PRD §8.11: a link to a published model's page prints the designer's file; it is never designed.
   if (publishedLink(object.instructions)) return 'published';
@@ -313,14 +316,17 @@ export class ObjectService {
       const source = await this.get(id);
       if (!source.current) throw new InvalidStateError('There is no model to duplicate yet.');
       if (source.state === 'touching-up') throw new InvalidStateError('Wait until the current step finishes.');
-      const duplicate = await this.#deps.store.create(source.instructions, passKind(source));
+      const kind = passKind(source);
+      const duplicate = await this.#deps.store.create(source.instructions, kind);
       try {
         const current = source.current;
+        // A copy keeps the scan it copies, or with nothing scanned its request would read as a new design.
+        const scan = kind === 'copy' ? source.scan : undefined;
         // Duplicate the chosen original, not every alternate file or an earlier plate.
         const receipt = source.kind === 'published' ? source.files?.receipts?.find(file => file.path === current.model) : undefined;
         const files = receipt ? {original: [receipt.path], current: receipt.path, receipts: [receipt]} : undefined;
         const publishedSelection = source.publishedSelection ? {...source.publishedSelection, fileIndex: 0} : undefined;
-        const paths = [current.model, ...current.renders, ...(receipt?.plates.flatMap(plate => plate.thumbnail ? [plate.thumbnail] : []) ?? []), ...(current.design ? [current.design.f3d, ...(current.design.parameters ? [current.design.parameters] : [])] : [])];
+        const paths = [current.model, ...current.renders, ...(scan ? [`scan/${scan}`] : []), ...(receipt?.plates.flatMap(plate => plate.thumbnail ? [plate.thumbnail] : []) ?? []), ...(current.design ? [current.design.f3d, ...(current.design.parameters ? [current.design.parameters] : [])] : [])];
         for (const path of new Set(paths)) {
           if (isAbsolute(path) || path.split('/').some(part => !part || part === '.' || part === '..')) throw new InvalidFileError('The model has an invalid file path.');
           const target = join(this.dir(duplicate.id), path);
@@ -331,7 +337,7 @@ export class ObjectService {
         const result = await this.#deps.store.update(duplicate.id, o => ({...o, state: 'ready', current,
           title: `${projectTitle(source).slice(0, 114)} copy`, printerDestinationId: source.printerDestinationId,
           preferences: {...source.preferences, printDefaults: this.#resolvedPrintDefaults(source)}, ...(credit ? {credit} : {}),
-          ...(files ? {files} : {}), ...(publishedSelection ? {publishedSelection} : {})}));
+          ...(files ? {files} : {}), ...(publishedSelection ? {publishedSelection} : {}), ...(scan ? {scan} : {})}));
         await this.#emit({id: randomUUID(), type: 'project.updated', projectId: result.id, data: {keys: ['created']}});
         return this.#changed(result);
       } catch (error) { await this.#deps.store.remove(duplicate.id); throw error; }
@@ -1426,6 +1432,8 @@ export class ObjectService {
     const store = this.#deps.store, dir = store.dir(object.id);
     const fromCurrent = opts.note !== undefined && object.current !== undefined;
     const kind: PassKind = passKind(object);
+    // Keep the decision: once this pass makes a model, a copy with nothing scanned would otherwise read as a copy again.
+    if (object.kind !== kind) object = await store.update(object.id, o => ({...o, kind}));
     // A handheld scan is rebuilt into scan/scan.usdz first, once; its photos also show the touch-up the object.
     const build = kind !== 'published' && !fromCurrent && !object.scan && (object.capture?.length ?? 0) > 0;
     const capturePhotos = (object.capture ?? []).map(name => join(dir, 'capture', name));
