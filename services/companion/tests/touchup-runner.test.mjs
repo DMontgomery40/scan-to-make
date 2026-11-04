@@ -32,6 +32,46 @@ test('done', async () => {
   assert.ok(progress.some(p => p.lastText === 'Restored the texture on the underside.'));
 });
 
+test('a request in several colours keeps the printer MCP\'s multi-part 3MF beside the merged mesh', async () => {
+  const {pass, inv} = await setup('multicolour');
+  const result = await runTouchupWorker(inv, pass);
+  assert.equal(result.status, 'done');
+  assert.equal(result.model, join(pass.outDir, 'touched.stl'));
+  assert.equal(result.parts, join(pass.outDir, 'touched.3mf'));
+  assert.deepEqual(result.partColours, [
+    {name: 'body', colour: '#111111', material: 'PLA'},
+    {name: 'letters', colour: '#FFD200'},
+  ]);
+});
+
+test('a touched.3mf that is not a printable 3MF never becomes the model', async () => {
+  const {pass, inv} = await setup('multicolourbroken');
+  const result = await runTouchupWorker(inv, pass);
+  assert.equal(result.parts, undefined);
+  assert.equal(result.partColours, undefined);
+  assert.equal(result.model, join(pass.outDir, 'touched.stl'));
+});
+
+test('part colours the worker garbles lose the garbled field but keep their filament’s place', async () => {
+  const {pass, inv} = await setup('multicolourjunk');
+  const result = await runTouchupWorker(inv, pass);
+  assert.equal(result.parts, join(pass.outDir, 'touched.3mf'));
+  // Positions are filaments: dropping an entry would put every later colour on the wrong part.
+  assert.deepEqual(result.partColours, [
+    {name: 'body'}, {colour: '#FFD200'}, {}, {name: 'x'.repeat(256)},
+  ]);
+});
+
+test('part colours without the 3MF they describe do not survive', async () => {
+  const {pass, inv} = await setup('done');
+  assert.equal((await runTouchupWorker(inv, pass)).partColours, undefined);
+});
+
+test('a single-colour pass has no parts file', async () => {
+  const {pass, inv} = await setup('done');
+  assert.equal((await runTouchupWorker(inv, pass)).parts, undefined);
+});
+
 test('needs_closeup', async () => {
   const {pass, inv} = await setup('needs_closeup');
   const result = await runTouchupWorker(inv, pass);
@@ -92,6 +132,7 @@ test('a broken final STL falls back to the last valid checkpoint', async () => {
   const {pass, inv} = await setup('brokenstl');
   const result = await runTouchupWorker(inv, pass);
   assert.equal(result.model, join(pass.checkpointsDir, '01.stl'));
+  assert.equal(result.parts, undefined, 'the final export’s 3MF never pairs with a checkpoint mesh');
 });
 
 test('junk is never a model', async () => {

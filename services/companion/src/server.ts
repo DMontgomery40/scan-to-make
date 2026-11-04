@@ -264,7 +264,7 @@ export async function startCompanionServer(
         // Scope name kept from the first protocol so existing pairings still parse.
         await authorize('generation:health');
         // Additive: older phones read only status and protocolVersion.
-        response.end(JSON.stringify({ status: 'ok', protocolVersion: '0.1.0', ...(options.name ? { name: options.name } : {}), capabilities: { genericConfirmations: !!options.objects, materialChoice: !!options.objects, projectSettings: !!options.objects, projectPreferences: !!options.objects, projectRename: !!options.objects, messagePhotos: !!options.objects, publishedModels: !!options.objects, mcpUpdates: !!options.mcpUpdates, blenderAddon: !!options.blenderAddon, printCopies: !!options.objects?.printCopiesAvailable, printerChoices: !!options.objects && !!options.printerSetup } }));
+        response.end(JSON.stringify({ status: 'ok', protocolVersion: '0.1.0', ...(options.name ? { name: options.name } : {}), capabilities: { genericConfirmations: !!options.objects, materialChoice: !!options.objects, colourMapping: !!options.objects, projectSettings: !!options.objects, projectPreferences: !!options.objects, projectRename: !!options.objects, messagePhotos: !!options.objects, publishedModels: !!options.objects, mcpUpdates: !!options.mcpUpdates, blenderAddon: !!options.blenderAddon, printCopies: !!options.objects?.printCopiesAvailable, printerChoices: !!options.objects && !!options.printerSetup } }));
         return;
       }
       if(captureRoutes&&request.url?.startsWith('/v1/saved-projects/')){

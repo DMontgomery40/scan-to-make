@@ -77,6 +77,7 @@ The Mac app shows the same projects as the phone and drives them through these m
 | `printerSetup` | Settings → Printers setup: `printers.mcps`, `printers.installMcp` (Download), and the printer setup methods below. Present without a printer configured. | Nov 3 |
 | `printerChoices` | The phone's Settings → Printers pickers: `GET`/`PUT /v1/objects/printers/<id>/route` and `PUT /v1/objects/printers/<id>/mcp`, the same work as `printers.route` and `printers.chooseMcp` ([objects-api.md](objects-api.md)). Also in `GET /healthz` `capabilities`. | Nov 4 |
 | `materialChoice` | `objects.print` `colour: {material}` is accepted on every printer ("What's loaded?"): sliced with a profile the printer reports for that material, or refused with a sentence saying what to do. Also in `GET /healthz` `capabilities`. | PR 5 |
+| `colourMapping` | `objects.colourMapping` (a multi-part model's filaments, loaded spools, nearest spool per colour) and `objects.print` `filaments: […]` (the chosen spool per colour). Also in `GET /healthz` `capabilities`. | #293 |
 
 Destination `capabilities.materialChoice` (PR 5) says the same per printer; what each MCP is sent, and when it is refused, is in [objects-api.md](objects-api.md#print-settings-pr-2). `objects.get` of a printing project and `objects.printers` warm the printers' cameras as the phone's routes do, so `objects.camera` and `printers.camera` answer from a recent frame (objects-api.md, "Camera timing").
 
@@ -99,8 +100,9 @@ Destination `capabilities.materialChoice` (PR 5) says the same per printer; what
 | `objects.printers` | `{}` | `{defaultDestinationId, destinations: [PrinterDestination]}`; `origin`, `state`, `stateCheckedAt`, `capabilities` from PR 1 | |
 | `objects.selectPrinter` | `{id, destinationId}` | `{object}` | |
 | `objects.filaments` | `{id}` | `{filaments}`; `suggested` from PR 2 | |
-| `objects.estimate` | `{id, destinationId?, quality?: "draft"\|"standard"\|"fine", strength?: "standard"\|"strong"\|"max"}` | `PrintEstimate` `{destinationId, quality, strength, seconds?, grams?, layers?, layerHeightMm?, infillPercent?, wallLoops?, slicedAt}` | PR 2 `copies` from PR 8b. |
-| `objects.print` | `{id, checked?, filament?, quality?, strength?, colour?: {auto: true}\|{amsSlot}\|{external: true}\|{material}}` | `{object}` (settings PR 2; `material` on every printer PR 5) | `copies` (1–64) from PR 8b; a Done project prints without `checked`. |
+| `objects.colourMapping` | `{id}` | `{filaments, trays, modelVersion}`: a multi-part model's filaments with the suggested spool for each colour; `modelVersion` binds the sheet's choices to these model bytes, plate and declared colours (#293) | |
+| `objects.estimate` | `{id, destinationId?, quality?: "draft"\|"standard"\|"fine", strength?: "standard"\|"strong"\|"max", filaments?: [tray…], filamentsModelVersion?}` | `PrintEstimate` `{destinationId, quality, strength, seconds?, grams?, layers?, layerHeightMm?, infillPercent?, wallLoops?, slicedAt}` | PR 2 `copies` from PR 8b. |
+| `objects.print` | `{id, checked?, filament?, filaments?: [tray…], filamentsModelVersion?, quality?, strength?, colour?: {auto: true}\|{amsSlot}\|{external: true}\|{material}}` | `{object}` (settings PR 2; `material` on every printer PR 5; `filaments` the spool per colour of a multi-part model with its required `filamentsModelVersion`, #293) | `copies` (1–64) from PR 8b; a Done project prints without `checked`. |
 | `objects.answerPrintConfirmation` | `{id, confirmationId, answer: {action: "accept", content: {<field>: boolean\|string ≤ 4096\|number}}\|{action: "decline"\|"cancel"}}` | `{object}`. An answer that doesn't fit the question is `invalid-request` with the field and reason as `message`. | strings and numbers PR 5 |
 | `objects.pausePrint`, `objects.resumePrint`, `objects.cancelPrint` | `{id}` | `{object}` | PR 2 |
 | `objects.camera` | `{id}` | `{format: "jpeg", base64, capturedAt}` from the project's printer | PR 2 |

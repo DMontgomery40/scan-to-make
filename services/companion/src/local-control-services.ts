@@ -159,7 +159,7 @@ export function createControlDispatcher(services: ControlServices) {
         case 'status.get': return {protocolVersion:1,companionVersion:services.companionVersion,...(services.name?{name:services.name}:{}),transport:auth.transport,
           pairedDeviceCount:(await auth.listDevices()).length,capabilities:{capture:!!capture?.captures,cleanup:!!capture?.scanProcessing,printerHandoff:!!printHandoff,nearbyPairing:!!services.nearby,
             objectsCreate:!!services.objects,printSettings:!!services.objects?.printSettingsAvailable,printControl:!!services.objects?.printSettingsAvailable,
-            events:!!services.events&&!!services.liveActivityTokens,structuredPasses:!!services.objects,genericConfirmations:!!services.objects,materialChoice:!!services.objects,projectSettings:!!services.objects,projectPreferences:!!services.objects,projectRename:!!services.objects,messagePhotos:!!services.objects,publishedModels:!!services.objects,mcpUpdates:!!services.mcpUpdates,printerSetup:!!services.printerSetup,blenderAddon:!!services.blenderAddon,printCopies:!!services.objects?.printCopiesAvailable,printerChoices:!!services.objects&&!!services.printerSetup}};
+            events:!!services.events&&!!services.liveActivityTokens,structuredPasses:!!services.objects,genericConfirmations:!!services.objects,materialChoice:!!services.objects,colourMapping:!!services.objects,projectSettings:!!services.objects,projectPreferences:!!services.objects,projectRename:!!services.objects,messagePhotos:!!services.objects,publishedModels:!!services.objects,mcpUpdates:!!services.mcpUpdates,printerSetup:!!services.printerSetup,blenderAddon:!!services.blenderAddon,printCopies:!!services.objects?.printCopiesAvailable,printerChoices:!!services.objects&&!!services.printerSetup}};
         case 'blender.status':
         case 'blender.check':
         case 'blender.update': {
@@ -292,7 +292,7 @@ export function createControlDispatcher(services: ControlServices) {
             throw error;
           }
         }
-        case 'objects.answerAsk': case 'objects.duplicate': case 'objects.list': case 'objects.printers': case 'objects.filaments': case 'objects.selectPrinter': case 'objects.get': case 'objects.passActivity': case 'objects.start': case 'objects.delete': case 'objects.correct': case 'objects.answerCloseup': case 'objects.print': case 'objects.answerPrintConfirmation':
+        case 'objects.answerAsk': case 'objects.duplicate': case 'objects.list': case 'objects.printers': case 'objects.filaments': case 'objects.colourMapping': case 'objects.selectPrinter': case 'objects.get': case 'objects.passActivity': case 'objects.start': case 'objects.delete': case 'objects.correct': case 'objects.answerCloseup': case 'objects.print': case 'objects.answerPrintConfirmation':
         case 'objects.create': case 'objects.addFile':
         case 'objects.estimate': case 'objects.pausePrint': case 'objects.resumePrint': case 'objects.cancelPrint': case 'objects.camera': case 'printers.camera': case 'printers.route': case 'settings.get': case 'settings.set': {
           const objects = services.objects;
@@ -307,6 +307,7 @@ export function createControlDispatcher(services: ControlServices) {
             if (method === 'objects.list') return {objects: (await objects.list()).map(local)};
             if (method === 'objects.printers') return objects.printers();
             if (method === 'objects.filaments') return {filaments: await objects.filaments(parameters[method].parse(raw).id)};
+            if (method === 'objects.colourMapping') return objects.colourMapping(parameters[method].parse(raw).id);
             if (method === 'objects.passActivity') {
               const {id, index} = parameters[method].parse(raw);
               return {activity: await objects.passActivity(id, index)};

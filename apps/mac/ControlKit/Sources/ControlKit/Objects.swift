@@ -27,6 +27,40 @@ public struct PrinterFilament: Codable, Sendable, Identifiable, Equatable {
     private enum SuggestedKey: String, CodingKey { case suggested }
 }
 
+/// One filament of a multi-part model, with the spool the companion suggests for it (`objects.colourMapping`).
+public struct ModelColourFilament: Codable, Sendable, Identifiable, Equatable {
+    /// 1-based project filament, as the 3MF numbers them.
+    public let index: Int
+    public let name: String?
+    /// The colour this part belongs in, `#RRGGBB`, when the model or its design pass says one.
+    public let colour: String?
+    public let material: String?
+    /// The suggested spool's absolute slot; nil when nothing is loaded.
+    public let slot: Int?
+    /// How far the suggested spool's colour is from `colour` (0 exact); nil when the colour is unknown.
+    public let distance: Double?
+    public let materialMismatch: Bool?
+    /// No colour was known: the suggestion is only a starting point.
+    public let guessed: Bool?
+    public var id: Int { index }
+    public init(index: Int, name: String? = nil, colour: String? = nil, material: String? = nil, slot: Int? = nil,
+                distance: Double? = nil, materialMismatch: Bool? = nil, guessed: Bool? = nil) {
+        self.index = index; self.name = name; self.colour = colour; self.material = material
+        self.slot = slot; self.distance = distance; self.materialMismatch = materialMismatch; self.guessed = guessed
+    }
+}
+
+/// A multi-part model's filaments and the printer's loaded spools: which spool each colour prints from.
+public struct ColourMapping: Codable, Sendable, Equatable {
+    public let filaments: [ModelColourFilament]
+    public let trays: [PrinterFilament]
+    /// The model version these rows describe; sent back with Print so a redesign can't inherit old choices.
+    public let modelVersion: String?
+    public init(filaments: [ModelColourFilament], trays: [PrinterFilament], modelVersion: String? = nil) {
+        self.filaments = filaments; self.trays = trays; self.modelVersion = modelVersion
+    }
+}
+
 /// What the print sheet asks for (PRD §5.5, §8.5). Standard quality and strength send nothing, so the MCP's preset decides.
 public struct PrintSettings: Sendable, Equatable {
     public enum Quality: String, Sendable, CaseIterable { case draft, standard, fine }
@@ -110,8 +144,16 @@ public extension Project {
     }
     /// The project's folder on this Mac.
     var folderURL: URL? { directory.flatMap { $0.hasPrefix("/") ? URL(fileURLWithPath: $0, isDirectory: true) : nil } }
-    /// The current model's STL: exactly what will print.
+    /// The current model: exactly what will print (an STL, or a multi-part model's 3MF).
     var modelURL: URL? { current.flatMap { file($0.model) } }
+    /// What Open in Blender sends. Blender imports STL, so a design whose model is a
+    /// multi-colour 3MF opens its merged mesh, saved beside the 3MF — never the 3MF itself.
+    /// Nil when there is no STL to open (a published 3MF), so the action can say so honestly.
+    var blenderModelURL: URL? {
+        guard let url = modelURL else { return nil }
+        if url.pathExtension.lowercased() == "stl" { return url }
+        return file("current/model.stl").flatMap { FileManager.default.fileExists(atPath: $0.path) ? $0 : nil }
+    }
     var renderURLs: [URL] { current?.renders.compactMap(file) ?? [] }
     var photoURLs: [URL] { photos.compactMap { file("photos/\($0)") } }
     var captureURLs: [URL] { (capture ?? []).compactMap { file("capture/\($0)") } }
@@ -141,6 +183,10 @@ public extension ControlClient {
         struct Result: Decodable { let filaments: [PrinterFilament] }
         let result: Result = try await call("objects.filaments", ["id":.string(id)])
         return result.filaments
+    }
+    /// A multi-part model's filaments, the loaded spools, and the suggested spool for each colour.
+    func colourMapping(_ id: String) async throws -> ColourMapping {
+        try await call("objects.colourMapping", ["id":.string(id)])
     }
     func selectPrinter(_ id: String, destinationId: String) async throws -> Project {
         let result: ObjectReply = try await call("objects.selectPrinter", ["id": .string(id), "destinationId": .string(destinationId)])
@@ -208,10 +254,24 @@ public extension ControlClient {
         let result: ObjectReply = try await call("objects.print", params); return result.object
     }
     func printObject(_ id: String, checked: Bool, filament: PrinterFilament) async throws -> Project {
-        let value: [String: JSONValue] = ["slot":.number(Double(filament.slot)), "colour":.string(filament.colour),
-            "material":.string(filament.material), "name":.string(filament.name), "filamentId":.string(filament.filamentId), "destinationId":.string(filament.destinationId)]
-        let result: ObjectReply = try await call("objects.print", ["id":.string(id), "checked":.bool(checked), "filament":.object(value)])
+        let result: ObjectReply = try await call("objects.print", ["id":.string(id), "checked":.bool(checked), "filament": Self.value(filament)])
         return result.object
+    }
+    /// Prints a multi-part model with the spool chosen for each of its filaments, in filament order.
+    func printObject(_ id: String, checked: Bool, settings: PrintSettings, filaments: [PrinterFilament], modelVersion: String? = nil) async throws -> Project {
+        var params = settings.params
+        // As the settings send does: Standard is a choice too, never the saved default in disguise.
+        params["quality"] = .string(settings.quality.rawValue); params["strength"] = .string(settings.strength.rawValue)
+        params["id"] = .string(id)
+        if checked { params["checked"] = .bool(true) }
+        params["filaments"] = .array(filaments.map(Self.value))
+        if let modelVersion { params["filamentsModelVersion"] = .string(modelVersion) }
+        let result: ObjectReply = try await call("objects.print", params)
+        return result.object
+    }
+    private static func value(_ filament: PrinterFilament) -> JSONValue {
+        .object(["slot":.number(Double(filament.slot)), "colour":.string(filament.colour),
+            "material":.string(filament.material), "name":.string(filament.name), "filamentId":.string(filament.filamentId), "destinationId":.string(filament.destinationId)])
     }
     /// Prints with the sheet's settings (`capabilities.printSettings`). A deadline after sending has an unknown outcome.
     func printObject(_ id: String, checked: Bool, settings: PrintSettings, overrideDefaults: Bool = false) async throws -> Project {
@@ -223,10 +283,13 @@ public extension ControlClient {
         return result.object
     }
     /// Slices the current model as a Print with these settings would, without printing. Up to 180 s.
-    func estimate(_ id: String, destinationId: String?, quality: PrintSettings.Quality, strength: PrintSettings.Strength, copies: Int? = nil) async throws -> PrintEstimate {
+    func estimate(_ id: String, destinationId: String?, quality: PrintSettings.Quality, strength: PrintSettings.Strength, copies: Int? = nil,
+                  filaments: [PrinterFilament] = [], modelVersion: String? = nil) async throws -> PrintEstimate {
         var params: [String: JSONValue] = ["id": .string(id), "quality": .string(quality.rawValue), "strength": .string(strength.rawValue)]
         if let destinationId { params["destinationId"] = .string(destinationId) }
         if let copies { params["copies"] = .number(Double(copies)) }
+        if !filaments.isEmpty { params["filaments"] = .array(filaments.map(Self.value)) }
+        if let modelVersion { params["filamentsModelVersion"] = .string(modelVersion) }
         return try await call("objects.estimate", params)
     }
     /// Pause, resume or cancel this project's print (`capabilities.printControl`).

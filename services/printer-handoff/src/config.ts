@@ -36,8 +36,8 @@ export const printerSelectionSchema = z.preprocess(withoutLegacyRoute, z.strictO
   plateIndex: z.number().int().min(0).max(1000).optional(),
   useAms: z.boolean().optional(),
   amsSlots: z.array(z.number().int()).max(64).optional(),
-  // The two servers use different ams_mapping shapes: an absolute tray array
-  // in bambu-printer-mcp and a material-to-slot object in mcp-3D-printer-server.
+  // Both servers accept a project-level absolute tray array; mcp-3D-printer-server
+  // also accepts trays keyed by project filament index (anyOf in its schema).
   amsMapping: z.union([z.array(z.number().int()).max(64), z.record(z.string(), z.number().int())]).optional(),
   autoMatchAms: z.boolean().optional(),
   connectionType: z.enum(['lan','cloud']).optional(),
@@ -49,7 +49,8 @@ export const printerSlicerSchema = z.strictObject({
   profile: z.string().trim().min(1).max(4096).optional(),
   filamentProfile: z.string().trim().min(1).max(4096).optional(),
   loadFilaments: z.string().trim().min(1).max(4096).optional(),
-  filamentColours: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
+  /** One `#RRGGBB` per filament in order, `;`-separated — `slice_stl`'s `filament_colours` shape. */
+  filamentColours: z.string().regex(/^#[0-9a-fA-F]{6}(;#[0-9a-fA-F]{6}){0,63}$/).optional(),
   templateName: z.string().trim().min(1).max(256).optional(),
   /** Print-sheet quality and strength (PRD §8.5), as process overrides through slice_stl. */
   layerHeightMm: z.number().min(0.04).max(1.2).optional(),

@@ -18,6 +18,10 @@ struct PrintSheet: View {
     @State private var filaments: [PrinterFilament] = []
     @State private var filamentState = Loading.loading
     @State private var slot: Int?
+    /// A multi-part model: its filaments, the loaded spools, and the spool chosen for each (filament index → slot).
+    @State private var mapping: ColourMapping?
+    @State private var mappingSlots: [Int: Int] = [:]
+    @State private var mappingState = Loading.idle
     @State private var quality = PrintSettings.Quality.standard
     @State private var strength = PrintSettings.Strength.standard
     @State private var copies = 1
@@ -75,10 +79,8 @@ struct PrintSheet: View {
                         .frame(width: 300, height: 220).clipShape(.rect(cornerRadius: 16))
                 }
                 VStack(alignment: .leading, spacing: 12) {
-                    if published { Text("Keeps the model’s filament assignments. The printer service confirms the loaded spools.").font(.callout) } else {
                     Text("Colors").font(.headline)
-                    colours
-                    }
+                    if published { multiColours } else { colours }
                     if slicedOriginal { Text("Uses the quality, strength and copies saved in this sliced file. Share an editable 3MF to change them.").font(.callout) } else {
                     Text("Quality").font(.headline)
                     Picker("Quality", selection: $quality) {
@@ -130,10 +132,10 @@ struct PrintSheet: View {
         .padding(24)
         .frame(width: 720)
         .tint(.filament)
-        .task(id: printer?.id) { await loadFilaments() }
+        .task(id: "\(printer?.id ?? "")|\(object.current?.model ?? "")|\(modelVersion)") { await loadFilaments() }
         // The model's version too: a correction rewrites the same current/model.stl, and a refusal of the old one
-        // must not hold Print for the new one.
-        .task(id: "\(printer?.id ?? "")|\(quality)|\(strength)|\(copiesPicked ? copies : 0)|\(object.current?.model ?? "")|\(modelVersion)") { await loadEstimate() }
+        // must not hold Print for the new one. The chosen spools too: they change what the estimate slices.
+        .task(id: "\(printer?.id ?? "")|\(quality)|\(strength)|\(copiesPicked ? copies : 0)|\(object.current?.model ?? "")|\(modelVersion)|\(mappingSignature)") { await loadEstimate() }
     }
 
     // MARK: Printers
@@ -200,7 +202,11 @@ struct PrintSheet: View {
     }
 
     static func name(_ filament: PrinterFilament) -> String {
-        let place = filament.external ? "External" : "A\(filament.slot + 1)"
+        // AMS units are lettered A–D, four trays each (slot 4 is B1); AMS-HT units report from 128.
+        let place = filament.slot == 255 ? "External 2"
+            : filament.external ? "External"
+            : filament.slot >= 128 ? "AMS-HT \(String(UnicodeScalar(65 + min(filament.slot - 128, 25))!))"
+            : "\(String(UnicodeScalar(65 + min(filament.slot / 4, 25))!))\(filament.slot % 4 + 1)"
         return "\(place) · \(filament.material) \(filament.name)"
     }
 
@@ -239,6 +245,102 @@ struct PrintSheet: View {
         if let count = layerCount, pauses.contains(where: { $0 > count }) {
             Text("This print has \(count) layers.").font(.caption).foregroundStyle(.red)
         }
+    }
+
+    // MARK: Colours (multi-part: one spool per part colour)
+
+    /// The spool currently chosen for one of the model's filaments.
+    private func chosenTray(_ filament: ModelColourFilament) -> PrinterFilament? {
+        mapping?.trays.first { $0.slot == mappingSlots[filament.index] }
+    }
+
+    /// The mapping choices as a task key, so editing a spool re-slices the estimate with it.
+    private var mappingSignature: String { mappingSlots.keys.sorted().map { "\($0):\(mappingSlots[$0] ?? -1)" }.joined(separator: ",") }
+
+    /// AMS trays and the external spool can't feed one print together (the companion refuses the mix).
+    private var mixedFeedSources: Bool {
+        let external = mappingSlots.values.map { $0 >= 254 }
+        return external.contains(true) && external.contains(false)
+    }
+
+    /// The chosen spools in filament order, when every colour has one: what Print sends.
+    private var chosenSpoolPerColour: [PrinterFilament]? {
+        guard let mapping, !mapping.filaments.isEmpty else { return nil }
+        let choices = mapping.filaments.compactMap { filament in mapping.trays.first { $0.slot == mappingSlots[filament.index] } }
+        return choices.count == mapping.filaments.count ? choices : nil
+    }
+
+    @ViewBuilder private var multiColours: some View {
+        switch mappingState {
+        case .loading:
+            HStack(spacing: 8) { ProgressView().controlSize(.small); Text("Reading the printer’s filament…").foregroundStyle(.secondary) }
+        case .failed(let text):
+            HStack(spacing: 8) {
+                Text(text).foregroundStyle(.secondary)
+                Button("Try Again") { Task { await loadFilaments() } }
+            }
+        default:
+            if let mapping, !mapping.filaments.isEmpty {
+                ScrollView {
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(mapping.filaments) { filament in
+                        VStack(alignment: .leading, spacing: 2) {
+                            HStack(spacing: 10) {
+                                SpoolDot(hex: filament.colour ?? "#808080", size: 18)
+                                Text(filament.name ?? "Part \(filament.index)").frame(minWidth: 60, alignment: .leading).lineLimit(1)
+                                Image(systemName: "arrow.right").foregroundStyle(.secondary)
+                                if let tray = chosenTray(filament) { SpoolDot(hex: tray.colour, size: 18) }
+                                Menu {
+                                    ForEach(mapping.trays) { tray in
+                                        Button { mappingSlots[filament.index] = tray.slot } label: {
+                                            Text(mappingSlots[filament.index] == tray.slot ? "✓ \(Self.name(tray))" : Self.name(tray))
+                                        }
+                                        // Mixed AMS/external choices stay selectable (else no row could be the
+                                        // first to switch source); the note below and Print say what's wrong.
+                                        .disabled(slicedOriginal && filament.material != nil && tray.material.caseInsensitiveCompare(filament.material!) != .orderedSame)
+                                    }
+                                } label: {
+                                    Text(chosenTray(filament).map(Self.name) ?? "Choose a spool")
+                                }
+                                .menuStyle(.borderlessButton).fixedSize()
+                                .disabled(mapping.trays.isEmpty)
+                            }
+                            if let note = mappingNote(filament) {
+                                Text(note).font(.caption).foregroundStyle(.secondary).padding(.leading, 28)
+                            }
+                        }
+                    }
+                    if mapping.trays.isEmpty {
+                        Text("No filament is loaded. Load a spool, then reopen this sheet.").foregroundStyle(.secondary)
+                    }
+                    if mixedFeedSources {
+                        Text("One print feeds from one source: put every colour on AMS spools, or every colour on the external spool.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                }
+                .frame(maxHeight: 176)
+            } else {
+                Text("Keeps the model’s filament assignments. The printer service confirms the loaded spools.").font(.callout)
+            }
+        }
+    }
+
+    /// What the person should know about this row's match, in their words.
+    private func mappingNote(_ filament: ModelColourFilament) -> String? {
+        if filament.colour == nil { return "The model doesn’t say this part’s colour — pick its spool." }
+        guard let tray = chosenTray(filament) else { return nil }
+        if let other = mapping?.filaments.first(where: { $0.index != filament.index && mappingSlots[$0.index] == tray.slot
+                && $0.colour != nil && $0.colour?.caseInsensitiveCompare(filament.colour ?? "") != .orderedSame }) {
+            return "Shares this spool with \(other.name ?? "Part \(other.index)") — both parts print this colour."
+        }
+        if let material = filament.material, tray.material.caseInsensitiveCompare(material) != .orderedSame {
+            return "Closest colour loaded; prints in \(tray.material), not \(material)."
+        }
+        if mappingSlots[filament.index] == filament.slot, let distance = filament.distance, distance > 0.08 {
+            return "Closest colour loaded."
+        }
+        return nil
     }
 
     // MARK: Estimate
@@ -286,8 +388,17 @@ struct PrintSheet: View {
     /// Bambu Studio refused this slice: printing it would fail the same way.
     private var refused: Bool { if case .refused = estimateState { return true } else { return false } }
 
+    /// A multi-part model whose colours are known prints only once every colour has a spool.
+    /// While the mapping loads Print waits; when it can't be read, the companion's own matching applies.
+    private var mappingReady: Bool {
+        guard published else { return true }
+        if mappingState == .loading { return false }
+        guard let mapping, !mapping.filaments.isEmpty else { return true }
+        return chosenSpoolPerColour != nil && !mixedFeedSources
+    }
+
     private var canPrint: Bool {
-        printer != nil && !model.working.contains(object.id) && (!uncertain || checked) && !refused
+        printer != nil && !model.working.contains(object.id) && (!uncertain || checked) && !refused && mappingReady
             && (words.actions.contains(.print) || words.actions.contains(.printChecked))
             && (settingsServed || chosen != nil || (filamentState == .done && filaments.isEmpty))
             && !(offersPauses && (layerCount.map { count in pauses.contains { $0 > count } } ?? false))
@@ -306,12 +417,17 @@ struct PrintSheet: View {
         let settings = PrintSettings(quality: offersQuality ? quality : .standard, strength: offersStrength ? strength : .standard, colour: colour,
                                      copies: slicedOriginal ? 1 : offersCopies && copiesPicked ? copies : (object.settings?.printDefaults?.copies != nil ? 1 : nil),
                                      pauseBeforeLayers: offersPauses ? Array(Set(pauses)).sorted() : [])
+        if published, let spools = chosenSpoolPerColour {
+            Task { if await model.print(object.id, checked: uncertain && checked, settings: settings, filaments: spools, modelVersion: mapping?.modelVersion) { dismiss() } }
+            return
+        }
         let filament = published ? nil : chosen
         Task { if await model.print(object.id, checked: uncertain && checked, settings: settings, filament: filament) { dismiss() } }
     }
 
     private func loadFilaments() async {
         filamentState = .loading; slot = nil
+        if published { mappingState = .loading; mapping = nil; mappingSlots = [:] }
         do {
             let list = try await model.filaments(object.id)
             guard !Task.isCancelled else { return }
@@ -323,10 +439,28 @@ struct PrintSheet: View {
                 slot = suggested?.slot ?? (list.count == 1 ? list[0].slot : nil)
             }
             filamentState = .done
+            if published { await loadMapping() }
         } catch {
             guard !Task.isCancelled else { return }
             filaments = []
             filamentState = .failed((error as? ControlRemoteError)?.message.nilIfEmpty ?? "Couldn’t read the printer’s filament.")
+            if published { mappingState = filamentState }
+        }
+    }
+
+    /// The spool per colour for a multi-part model; the suggestions arrive chosen.
+    private func loadMapping() async {
+        do {
+            let loaded = try await model.colourMapping(object.id)
+            guard !Task.isCancelled else { return }
+            mapping = loaded
+            if !loaded.trays.isEmpty { filaments = loaded.trays }
+            mappingSlots = Dictionary(uniqueKeysWithValues: loaded.filaments.compactMap { filament in filament.slot.map { (filament.index, $0) } })
+            mappingState = .done
+        } catch {
+            guard !Task.isCancelled else { return }
+            mapping = nil
+            mappingState = .failed((error as? ControlRemoteError)?.message.nilIfEmpty ?? "Couldn’t match this model’s colours to the loaded spools.")
         }
     }
 
@@ -335,7 +469,8 @@ struct PrintSheet: View {
         estimateState = .loading
         do {
             let result = try await model.estimate(object.id, destinationId: printer?.id, quality: offersQuality ? quality : .standard,
-                                                  strength: offersStrength ? strength : .standard, copies: slicedOriginal ? 1 : offersCopies && copiesPicked ? copies : (object.settings?.printDefaults?.copies != nil ? 1 : nil))
+                                                  strength: offersStrength ? strength : .standard, copies: slicedOriginal ? 1 : offersCopies && copiesPicked ? copies : (object.settings?.printDefaults?.copies != nil ? 1 : nil),
+                                                  filaments: published ? chosenSpoolPerColour ?? [] : [], modelVersion: mapping?.modelVersion)
             guard !Task.isCancelled else { return }
             estimate = result
             estimateState = .done

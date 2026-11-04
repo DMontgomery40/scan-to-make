@@ -97,6 +97,9 @@ export interface StmObject {
   progress?: string;
   passes: ObjectPass[];
   current?: {model: string; renders: string[]; sizeMm?: [number, number, number]; summary?: string;
+    /** A design in several colours: the colour (and material, when named) each of the 3MF's filaments
+     * belongs in, in filament order, as the pass declared them. The 3MF itself carries none. */
+    filaments?: {name?: string; colour?: string; material?: string}[];
 
     /** What changed, each tagged (PRD §4 Result). */
     changes?: TouchupChange[];

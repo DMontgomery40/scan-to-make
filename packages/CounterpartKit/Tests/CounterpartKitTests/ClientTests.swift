@@ -583,6 +583,16 @@ final class CompanionClientTests: XCTestCase {
         do { _ = try await c.download(p, "../../etc/passwd"); XCTFail() } catch {}
     }
 
+    func testDesignedMultiColour3MFExportDoesNotMasqueradeAsSTL() async throws {
+        let p = try JSONDecoder().decode(Project.self, from: Data(#"{"id":"0b6f0f43-7c35-4b8a-9a3c-8f0b4c4b2a11","createdAtMs":1,"updatedAtMs":2,"state":"ready","kind":"fit","photos":[],"passes":[],"current":{"model":"current/model.3mf","renders":[]}}"#.utf8))
+        let bytes = Data("designed 3MF bytes".utf8)
+        let fake = FakeTransport { _, _ in HTTPReply(status: 200, body: bytes) }
+        let url = try await client(fake).download(p, "model.stl")
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()) }
+        XCTAssertEqual(url.pathExtension, "3mf")
+        XCTAssertEqual(try Data(contentsOf: url), bytes)
+    }
+
     func testPublishedCurrent3MFExportDoesNotMasqueradeAsSTL() async throws {
         let p = try JSONDecoder().decode(Project.self, from: Data(#"{"id":"0b6f0f43-7c35-4b8a-9a3c-8f0b4c4b2a11","createdAtMs":1,"updatedAtMs":2,"state":"ready","kind":"published","photos":[],"passes":[],"current":{"model":"original/Designer.3MF","renders":["renders/plate.png"]}}"#.utf8))
         let bytes = Data("original 3MF bytes".utf8)

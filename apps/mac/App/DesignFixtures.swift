@@ -104,6 +104,10 @@ import ControlKit
              "instructions": "Something that holds this mic on my monitor arm.", "state": "printed", "photos": [], "passes": [], "print": printedOnP1S,
              "current": ["model": "current/model.stl", "renders": ["current/renders/front.png"]],
              "directory": folder("c6", ["current/model.stl": "mic.stl", "current/renders/front.png": "thumb-mic.png"])],
+            ["id": "0b6f0f43-7c35-4b8a-9a3c-000000000007", "createdAtMs": now - 7_000, "updatedAtMs": now - 60_000, "title": "Vivi pick",
+             "instructions": "A guitar pick that says Vivi, black with yellow letters.", "state": "ready", "photos": [], "passes": [],
+             "current": ["model": "current/model.3mf", "renders": ["current/renders/front.png"], "sizeMm": [26, 31, 1]],
+             "directory": folder("c7", ["current/model.3mf": "mic.stl", "current/renders/front.png": "thumb-mic.png"])],
         ]
         return FixtureObjects(items: items, catalog: PrinterCatalog(destinations: [
             PrinterDestination(id: "p1s", name: "P1S", backend: "bambu-printer-mcp", model: "Bambu Lab P1S", address: "LAN", state: "ready",
@@ -194,6 +198,13 @@ actor FixtureObjects: ObjectsCompanion {
          PrinterFilament(slot: 2, colour: "#BFEADB", material: "PETG", name: "Translucent", filamentId: "GFG00", destinationId: "p1s"),
          PrinterFilament(slot: 3, colour: "#6B7385", material: "PLA", name: "Blue Grey", filamentId: "GFA02", destinationId: "p1s")]
     }
+    func colourMapping(_ id: String) async throws -> ColourMapping {
+        ColourMapping(filaments: [
+            ModelColourFilament(index: 1, name: "body", colour: "#111111", material: "PLA", slot: 0, distance: 0.01),
+            ModelColourFilament(index: 2, name: "letters", colour: "#FFD200", material: "PLA", slot: 1, distance: 0.03),
+        ], trays: try await filaments(id))
+    }
+    func print(_ id: String, checked: Bool, settings: PrintSettings, filaments: [PrinterFilament], modelVersion: String?) async throws -> Project { try change(id, ["state": "printing"]) }
     func status() async throws -> ControlStatus {
         ControlStatus(companionVersion: "fixture", pairedDeviceCount: 1,
                       capabilities: .init(nearbyPairing: true, objectsCreate: true, events: true, printControl: true, printSettings: true,

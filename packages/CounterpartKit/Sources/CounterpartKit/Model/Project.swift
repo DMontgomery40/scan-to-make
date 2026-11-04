@@ -17,9 +17,10 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
     /// The companion decides the job (`passKind`) and sends it as `kind`; the apps don't re-derive it.
     public var usesCopyWorkflow: Bool { kind == "copy" }
 
-    /// A published STL has no embedded filament assignments and uses the normal material controls.
+    /// A 3MF model carries its parts' filament assignments (a published file, or a design in several
+    /// colours), so the sheets don't offer one spool for the whole model. An STL uses the normal material controls.
     public var preservesPublishedFilaments: Bool {
-        kind == "published" && current?.model.lowercased().hasSuffix(".3mf") == true
+        current?.model.lowercased().hasSuffix(".3mf") == true
     }
 
     /// Saved defaults replace print history as a whole: an absent colour means use the printer profile.
