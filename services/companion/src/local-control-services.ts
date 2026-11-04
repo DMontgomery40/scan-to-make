@@ -49,6 +49,8 @@ export interface ControlServices {
   presence?: import('./devices/presence.js').DevicePresence;
   blenderAddon?: import('./touchup/addon-repair.js').BlenderAddonRepair;
   mcpUpdates?: import('./printing/mcp-updates.js').McpUpdater;
+  /** Settings → Printers: both MCPs (Download), finding and adding printers. Present without a printer. */
+  printerSetup?: import('./printing/setup.js').PrinterSetup;
   /** Nearby pairing requests waiting for Allow (MAC-5), when the server has nearby pairing on. */
   nearby?: {pending(): NearbyRequest[]; answer(id: string, allow: boolean): Promise<boolean>};
 }
@@ -157,7 +159,7 @@ export function createControlDispatcher(services: ControlServices) {
         case 'status.get': return {protocolVersion:1,companionVersion:services.companionVersion,...(services.name?{name:services.name}:{}),transport:auth.transport,
           pairedDeviceCount:(await auth.listDevices()).length,capabilities:{capture:!!capture?.captures,cleanup:!!capture?.scanProcessing,printerHandoff:!!printHandoff,nearbyPairing:!!services.nearby,
             objectsCreate:!!services.objects,printSettings:!!services.objects?.printSettingsAvailable,printControl:!!services.objects?.printSettingsAvailable,
-            events:!!services.events&&!!services.liveActivityTokens,structuredPasses:!!services.objects,genericConfirmations:!!services.objects,materialChoice:!!services.objects,projectSettings:!!services.objects,projectPreferences:!!services.objects,projectRename:!!services.objects,messagePhotos:!!services.objects,publishedModels:!!services.objects,mcpUpdates:!!services.mcpUpdates,blenderAddon:!!services.blenderAddon,printCopies:!!services.objects?.printCopiesAvailable}};
+            events:!!services.events&&!!services.liveActivityTokens,structuredPasses:!!services.objects,genericConfirmations:!!services.objects,materialChoice:!!services.objects,projectSettings:!!services.objects,projectPreferences:!!services.objects,projectRename:!!services.objects,messagePhotos:!!services.objects,publishedModels:!!services.objects,mcpUpdates:!!services.mcpUpdates,printerSetup:!!services.printerSetup,blenderAddon:!!services.blenderAddon,printCopies:!!services.objects?.printCopiesAvailable}};
         case 'blender.status':
         case 'blender.check':
         case 'blender.update': {
@@ -171,6 +173,26 @@ export function createControlDispatcher(services: ControlServices) {
           try { return {update: await services.mcpUpdates.update(mcpId, fresh !== undefined ? {fresh} : {})}; }
           catch (error) {
             const {McpUpdateError} = await import('./printing/mcp-updates.js');
+            if (error instanceof McpUpdateError) throw new ControlFailure(error.code === 'not-found' ? 'not-found' : 'unavailable', error.message);
+            throw error;
+          }
+        }
+        case 'printers.mcps': case 'printers.installMcp': case 'printers.discover': case 'printers.check': case 'printers.add': case 'printers.remove': case 'printers.chooseMcp': case 'printers.completeSettings': {
+          const setup = services.printerSetup;
+          if (!setup) throw new ControlFailure('unavailable');
+          const {PrinterSetupError} = await import('./printing/setup.js');
+          const {McpUpdateError} = await import('./printing/mcp-updates.js');
+          try {
+            if (method === 'printers.mcps') return await setup.mcps();
+            if (method === 'printers.discover') return await setup.discover();
+            if (method === 'printers.check') return {check: await setup.check(parameters[method].parse(raw).printer)};
+            if (method === 'printers.add') return await setup.add(parameters[method].parse(raw).printer);
+            if (method === 'printers.remove') return await setup.remove(parameters[method].parse(raw).destinationId);
+            if (method === 'printers.completeSettings') { const {destinationId, model} = parameters[method].parse(raw); return await setup.completeSettings(destinationId, model); }
+            if (method === 'printers.chooseMcp') { const {destinationId, backend} = parameters[method].parse(raw); return await setup.chooseMcp(destinationId, backend); }
+            return await setup.installMcp(parameters[method].parse(raw).package);
+          } catch (error) {
+            if (error instanceof PrinterSetupError) throw new ControlFailure(error.code === 'invalid' ? 'invalid-request' : error.code, error.message);
             if (error instanceof McpUpdateError) throw new ControlFailure(error.code === 'not-found' ? 'not-found' : 'unavailable', error.message);
             throw error;
           }

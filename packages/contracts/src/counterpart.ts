@@ -261,6 +261,12 @@ export const PrinterDestinationSchema = z.strictObject({
   capabilities: PrinterCapabilitiesSchema.optional(),
   /** PRD §8.10 (PR 6): the MCP install this printer runs; every printer on the same install shares it. */
   mcpId: z.string().regex(/^mcp-[0-9a-f]{16}$/).optional(),
+  /** The same printer reached through both MCPs: each MCP's profile, the one in use first (`printers.chooseMcp`). */
+  mcps: z.array(z.strictObject({backend: z.enum(['bambu-printer-mcp', 'mcp-3d-printer-server']), destinationId: text(256)})).max(2).optional(),
+  /** A printer added in Counterpart (`origin: "counterpart"`): the folder its MCP runs in, whose `.env` holds its settings. */
+  folder: text(4096).optional(),
+  /** Its `.env` lacks settings its MCP needs (names only); `fill` is what `printers.completeSettings` adds (only the model). */
+  incomplete: z.strictObject({missing: z.array(text(64)).max(16), fill: z.record(text(64), text(4096))}).optional(),
 });
 export type PrinterDestination = z.infer<typeof PrinterDestinationSchema>;
 

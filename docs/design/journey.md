@@ -35,7 +35,7 @@ There are two apps. **Scan to Make** on the iPhone or iPad does the scanning, sh
 
 | # | Where | The user does | The product does |
 |---|---|---|---|
-| 1 | Mac + iPhone | Downloads Scan to Make for Mac and opens it. The window is a QR code and nothing else. Scans it with the iPhone Camera; the iPhone app opens. | Pairs, and starts fetching Blender and the printer tools in the background. If the phone is on the same Wi-Fi, it can also just find the Mac and ask "Pair with David's Mac mini?". |
+| 1 | Mac + iPhone | Downloads Scan to Make for Mac and opens it. The window is a QR code and nothing else. Scans it with the iPhone Camera; the iPhone app opens. | Pairs and prepares printer support. Blender and Fusion setup is offered only when a cleanup or design workflow needs it. If the phone is on the same Wi-Fi, it can also just find the Mac and ask "Pair with David's Mac mini?". |
 | 2 | Mac | Once the phone is connected, the same window asks two questions. First: picks their printer from a list and types the access code shown on the printer's screen. | Finds Bambu printers on the network, checks the connection, shows a live camera photo ("Here's what your printer sees"). |
 | 3 | Mac | Second: chooses how AI cleanup signs in (or skips it). | Stores the choice in the Keychain. Cleanup still works without AI. |
 | 4 | iPhone | Taps **Scan something** and walks around the object. | Object Capture with our guidance; the scan uploads to the Mac by itself as soon as it ends. |
@@ -89,7 +89,8 @@ Tauri is the fallback if the team insists on TypeScript UI. Electron is not.
 | Companion (`services/companion`) | Bundled Node 24 and a standalone Python (python-build-standalone) for `capture-mesh-convert` and `scan-correct`. Run as an SMAppService agent. | Removes the Homebrew/Node-exactly-24 requirement that breaks `install-macos.sh` for normal people. |
 | bambu-printer-mcp | Pinned npm version (the companion already pins `1.1.42`), installed into `~/Library/Application Support/Scan to Make/` on first run, integrity-checked, spawned over stdio by `services/printer-handoff`. | It stays GPL-2.0 in a separate process, as PRD §10.2 L03 says. It updates with its own releases. We call it; we don't copy it. |
 | mcp-3D-printer-server | Same, installed only when the user adds a non-Bambu printer. | Other brands, from the start (scope decision). |
-| Blender | Use `/Applications/Blender.app` when its version is supported; otherwise download the pinned build into Application Support with the existing SHA-256 check (`deploy/companion/download-blender.sh`). About 300 MB for the pinned 5.0.1, with progress shown in the first-run window. | Downloading from blender.org avoids redistributing GPL Blender. Today's installer hard-fails on any Blender that isn't 5.0.1; accept a tested range instead. |
+| Blender (optional) | Needed for scan cleanup or Blender editing, not printing existing models or reprints. Use a supported installed version, or offer the pinned download when that workflow needs it. | Downloading from blender.org avoids redistributing GPL Blender. |
+| Autodesk Fusion (optional) | Use the user's installation for parametric designs and changes; offer Set Up in Settings → AI. | Fusion and its licence belong to the user. Printing existing models or reprints needs neither Fusion nor Blender. |
 | Slicer | Detect Bambu Studio (preferred; its CLI is verified on P1S) or upstream OrcaSlicer. Set `SLICER_TYPE` and `SLICER_PATH` explicitly. If neither is installed, show **Get Bambu Studio**, which opens Bambu's download page. Never the FULU CLI. | FULU v1.0.0's CLI segfaults on every run (FULU.md). mcp-3D-printer-server defaults to FULU when unset, so leaving it unset is a trap. |
 | ffmpeg | Downloaded on demand only for printers whose camera is RTSP (X1, P2S, H2 family, X2D). | bambu-printer-mcp needs it for those cameras; P1S and A1 don't. |
 | Model access | §3.6. Secrets in the Keychain; the companion gets a reference, never a raw key in an env file. | — |
@@ -111,7 +112,7 @@ There's no Terminal step, no git clone, no admin password and no Full Disk Acces
 **Updates.** Sparkle checks daily. An update never restarts the companion while a cleanup or a print is running; it waits. The MCP version bumps ship inside app updates with a one-line note.
 
 **Readiness.** First run never ends on a half-working Mac. The first-run rail keeps a **Getting ready** list:
-- Blender;
+- Blender or Fusion only for a selected cleanup, design or editing workflow; both are optional and their absence never blocks printing an existing model or a reprint;
 - the slicer (with its printer profiles);
 - printer support (bambu-printer-mcp, plus mcp-3D-printer-server when needed);
 - ffmpeg, when the printer needs it.
@@ -652,7 +653,7 @@ The copy here is the real copy. ⓘ marks the mockup file.
    - When a phone connects, the window turns into the two questions below. If the user closes it, the app stays in the menu bar and **Add a phone…** reopens it.
 2. **Printer** (after a phone is connected). A 720 × 520 window.
    - The left rail lists "Your iPhone ✓ · Printer · AI cleanup".
-   - A "Getting ready" list at the bottom of the rail shows each dependency: "Blender 5.0 · 212 of 304 MB", "Bambu Studio · Ready", "Printer support · Ready".
+   - A "Getting ready" list at the bottom of the rail shows each dependency: "Bambu Studio · Ready", "Printer support · Ready"; optional Blender or Fusion appears only for a workflow that uses it.
    - "Choose your printer", then the printers found on the network (SSDP), e.g. "Workshop · P1S · 192.168.1.71". Plus **Other brand…** and **Enter address…**.
    - Selecting one asks for "Access code". Hint: "On the printer: Settings → WLAN → Access Code", with the photo from bambu-printer-mcp `docs/images/p1s-network-settings.jpeg`.
    - The check runs `get_printer_status` and `camera_snapshot`, never a print: "Here's what your printer sees", with the photo.

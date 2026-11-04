@@ -22,8 +22,8 @@ public struct BlenderAddonSettingsSection: View {
                     Button("Update Add-on") { action = .update; revision += 1 }.disabled(working)
                 }
             }
-        } header: { Text("Blender") } footer: {
-            Text("Counterpart uses your printer MCP’s Blender add-on. Updating preserves its module and backs up the existing file. Save your work before restarting Blender yourself.")
+        } header: { Text("Blender · Optional") } footer: {
+            Text("Blender is used for scan cleanup and model changes. Printing an existing model or reprinting needs neither Blender nor Fusion. Updating the add-on backs up its existing file; save your work before restarting Blender.")
         }
         .task(id: revision) { await run() }
     }

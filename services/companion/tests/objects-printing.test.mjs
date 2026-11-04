@@ -4,7 +4,7 @@ import {mkdtemp, mkdir, readFile, rm, writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {createServer} from 'node:http';
-import {HandoffBundleStore, InMemoryElicitationRelay, PrinterSession} from '@scan-to-make/printer-handoff';
+import {HandoffBundleStore, InMemoryElicitationRelay, PrinterMcpError, PrinterSession} from '@scan-to-make/printer-handoff';
 import {ObjectStore} from '../dist/objects/store.js';
 import {ObjectService, InvalidStateError} from '../dist/objects/service.js';
 import {PrinterDirectory} from '../dist/printing/directory.js';
@@ -25,7 +25,7 @@ const until = async check => { for (let i = 0; i < 300; i++) { const value = awa
  * A P1S behind a fake MCP session, a fake print runner, and a monitor clock the
  * test steps by hand: every printer report and every wait is scripted.
  */
-async function setup(t, {tools = ['get_printer_status', 'camera_snapshot', 'pause_print', 'resume_print', 'cancel_print', 'slice_stl'], sliceArgs = false, copies = false, controlsRoute = false, reports = [], route} = {}) {
+async function setup(t, {tools = ['get_printer_status', 'camera_snapshot', 'pause_print', 'resume_print', 'cancel_print', 'slice_stl'], sliceArgs = false, copies = false, controlsRoute = false, reports = [], route, backend = 'bambu-printer-mcp', info, slots} = {}) {
   const root = await mkdtemp(join(tmpdir(), 'objects-printing-'));
   let service;
   t.after(async () => { await service?.close(); await rm(root, {recursive: true, force: true, maxRetries: 10, retryDelay: 20}); });
@@ -47,6 +47,8 @@ async function setup(t, {tools = ['get_printer_status', 'camera_snapshot', 'paus
         return {content: [{type: 'text', text: JSON.stringify(next)}]};
       }
       if (name === 'camera_snapshot') return {content: [{type: 'text', text: JSON.stringify({format: 'jpeg', base64: JPEG.toString('base64')})}]};
+      if (name === 'counterpart_printer_info' && info) return {content: [{type: 'text', text: JSON.stringify(info)}], structuredContent: info};
+      if (name === 'get_printer_filaments' && slots) return {content: [{type: 'text', text: JSON.stringify({slots})}]};
       if (name === 'counterpart_print_route') {
         if (args?.route) route = args.route === 'cloud' ? {mode: 'bambu_network', type: 'cloud'} : {...route, type: route.mode === 'bambu_network' ? 'lan' : route.type};
         return {content: [{type: 'text', text: JSON.stringify({route: route.mode === 'bambu_network' && route.type === 'cloud' ? 'cloud' : 'lan', ...route, choices: ['lan', 'cloud'], savedTo: '/Users/x/bambu-printer-mcp/.env'})}]};
@@ -60,7 +62,7 @@ async function setup(t, {tools = ['get_printer_status', 'camera_snapshot', 'paus
     },
     async close() {},
   });
-  const config = {backend: 'bambu-printer-mcp', process: {command: '/usr/bin/true'}, selection: {model: 'p1s', material: 'PLA'}};
+  const config = {backend, process: {command: '/usr/bin/true'}, selection: {model: 'p1s', material: 'PLA'}};
   let directory;
   const session = new PrinterSession('current', config, {clientFactory: factory, relay, onConnect: catalog => directory?.connected('current', catalog)});
   const catalog = {defaultDestinationId: 'current', destinations: [{id: 'current', name: 'Bambu Lab P1S', backend: 'bambu-printer-mcp', source: 'current', origin: 'printer-handoff'}],
@@ -107,7 +109,7 @@ async function setup(t, {tools = ['get_printer_status', 'camera_snapshot', 'paus
     const question = await until(async () => (await service.get(object.id)).printConfirmation);
     return service.answerPrintConfirmation(object.id, question.id, {action: 'accept', content: {confirmed: true}});
   };
-  return {service, store, object, calls, events, runs, relay, session, directory, queue, tick, clock, approve, deps, settings, root};
+  return {service, store, object, calls, events, runs, relay, session, directory, queue, tick, clock, approve, deps, settings, root, slots};
 }
 const status = (state, progress, extra = {}) => ({connected: true, print: {filename: JOB, progress, timeRemaining: Math.max(0, 40 - progress), currentLayer: progress, totalLayers: 100},
   raw: {gcode_state: state, subtask_name: JOB, task_id: '0', ...extra}});
@@ -339,6 +341,24 @@ test('Settings -> Printers reads and changes the MCP\'s own route, and has none 
   assert.equal(await none.service.printRoute('current'), undefined);
 });
 
+test('an MCP that reports AMS trays in the counterpart/1 slots shape (mcp-3D-printer-server) gets filament choices like bambu-printer-mcp', async t => {
+  const info = {contract: 'counterpart/1', server: {name: 'mcp-3d-printer-server', version: '1.2.26'}, printer: {kind: 'bambu', host: '192.0.2.1', model: 'P1S'},
+    capabilities: {progress: true, layers: true, camera: 'none', filaments: 'ams', pause: true, resume: true, cancel: true, print3mf: true, gcode: true}};
+  const profile = '/Applications/BambuStudio.app/Contents/Resources/profiles/BBL/filament/Bambu PLA Basic @BBL P1S 0.4 nozzle.json';
+  const f = await setup(t, {backend: 'mcp-3d-printer-server', info, tools: ['get_printer_status', 'get_printer_filaments', 'counterpart_printer_info', 'slice_stl'], slots: [
+    {id: '0', material: 'PLA', color: '#000000', name: 'PLA Basic PLA #000000', source: 'printer', profile},
+    {id: '1', material: 'PLA', color: '#FEC600', name: 'PLA Basic PLA #fec600', source: 'printer', profile},
+    {id: '9', material: 'PLA', color: 'yellow', source: 'printer', profile},
+    {id: 'ext', material: 'PETG', color: '#FFFFFF', source: 'unknown', profile: 'relative.json'}]});
+  // The runner reads get_printer_filaments through the MCP; here it answers in the contract's slots shape.
+  const runner = f.deps.print.services.runner;
+  runner.backend = 'mcp-3d-printer-server';
+  runner.filaments = async () => ({slots: f.slots});
+  const choices = await f.service.filaments(f.object.id);
+  assert.deepEqual(choices.map(choice => [choice.slot, choice.colour, choice.material, !!choice.suggested]), [[0, '#000000', 'PLA', true], [1, '#FEC600', 'PLA', false]],
+    'well-formed trays only: a colour name or a relative profile is dropped');
+});
+
 test('a control is sent only while the printer is still printing this project\'s job', async t => {
   const f = await setup(t, {reports: [status('RUNNING', 10)]});
   await f.service.print(f.object.id);
@@ -561,4 +581,37 @@ test('a one-copy-only destination can override an old saved count for Print and 
   assert.equal(run.options.slicer.repetitions, 1);
   assert.equal((await f.service.get(f.object.id)).preferences.printDefaults.copies, 3, 'the default remains available for a capable printer');
   await f.approve(); await f.service.settled(f.object.id);
+});
+
+test('a print the printer service refuses reaches the phone as an event (review item 23): "didn\'t start" with the reason, or a project update when it may have reached the printer', async t => {
+  const f = await setup(t);
+  const refusal = 'Error: Printer nozzle 0 type is unknown or does not match the job. Suggestion: A safety check stopped this before anything reached the printer.';
+  // Refused before the print call: nothing can have reached the printer.
+  f.deps.print.services.runner.runBundle = async () => { throw new PrinterMcpError('tool-failed', undefined, refusal); };
+  await f.service.print(f.object.id);
+  const refused = await f.service.settled(f.object.id);
+  assert.deepEqual([refused.state, refused.failure], ['failed', refusal]);
+  const event = f.events.find(item => item.type === 'print.not-started');
+  assert.deepEqual([event?.projectId, event?.printId, event?.destinationId, event?.detail?.reason], [f.object.id, refused.print.printId, 'current', refusal]);
+  // The print call was made and its answer is unclear: the phone is told the project changed, never that it didn't start.
+  await reset(f);
+  f.events.length = 0;
+  f.deps.print.services.runner.runBundle = async (store, id) => { await store.setStatus(id, 'uncertain', 'dispatch-uncertain'); throw new PrinterMcpError('tool-failed', undefined, refusal); };
+  await f.service.print(f.object.id);
+  const unclear = await f.service.settled(f.object.id);
+  assert.equal(unclear.state, 'failed');
+  assert.equal(unclear.print.uncertain, true);
+  assert.equal(f.events.some(item => item.type === 'print.not-started'), false);
+  assert.deepEqual(f.events.filter(item => item.type === 'project.updated').map(item => [item.projectId, item.data]), [[f.object.id, {keys: ['print']}]]);
+});
+
+test('Print and Estimate keep their slices in the project\'s own folder, so Print Again prints the one already made', async t => {
+  const f = await setup(t, {reports: [status('IDLE', 0)]});
+  const slices = join(f.store.dir(f.object.id), 'slices');
+  await f.service.estimate(f.object.id).catch(() => undefined);
+  assert.deepEqual(f.runs.find(run => run.estimate)?.estimate.sliceCache, {directory: slices});
+  await f.service.print(f.object.id);
+  await f.approve();
+  await f.service.settled(f.object.id);
+  assert.deepEqual(f.runs.find(run => run.options)?.options.sliceCache, {directory: slices});
 });
