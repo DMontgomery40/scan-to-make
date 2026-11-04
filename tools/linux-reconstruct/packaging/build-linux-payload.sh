@@ -125,7 +125,7 @@ for deb in "$work/debs"/*.deb; do dpkg -x "$deb" "$stage/colmap-root"; done
 libdir="$stage/colmap-root/usr/lib/x86_64-linux-gnu"
 for soname in libblas.so.3 liblapack.so.3; do
   if [ ! -e "$libdir/$soname" ]; then
-    target=$(find "$libdir" -name "$soname" -type f | head -1)
+    target=$(find "$libdir" -name "$soname.*" -type f | sort | tail -1)
     [ -n "$target" ] && ln -s "$(realpath --relative-to="$libdir" "$target")" "$libdir/$soname"
   fi
 done
