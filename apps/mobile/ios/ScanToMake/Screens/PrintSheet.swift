@@ -423,6 +423,8 @@ struct PrintSheet: View {
             strength = last.strength.flatMap(PrintStrength.init(rawValue:)) ?? strength
             copies = last.copies
         }
+        // Print Another keeps the last print's pauses (the magnets go in at the same layers), as on the Mac.
+        pauses = project?.print?.settings?.pauseBeforeLayers ?? []
         await loadFilaments()
         await store.loadPrinters()
         if let project, project.current != nil, !published { modelURL = try? await store.mac.download(project, "model.stl") }
