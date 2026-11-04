@@ -351,6 +351,12 @@ struct FixtureTransport: HTTPTransport {
                 return json(["object": copied], 201)
             }
             if parts[3] == "filaments" { return json(["filaments": Fixtures.filaments(for: id == Fixtures.ids.mic ? Fixtures.printer : "current")]) }
+            if parts[3] == "colour-mapping" {
+                // A two-colour pick: body matches the black tray closely, letters the yellow one loosely.
+                return json(["filaments": [["index": 1, "name": "body", "colour": "#111111", "material": "PLA", "slot": 0, "distance": 0.04],
+                                           ["index": 2, "name": "letters", "colour": "#FFD200", "material": "PLA", "slot": 1, "distance": 0.12]],
+                             "trays": Fixtures.filaments, "modelVersion": "fixture-3mf-v1"])
+            }
             if parts[3] == "printer", method == "POST",
                let body = request.httpBody.flatMap({ try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }), let destination = body["destinationId"] as? String {
                 if id == Fixtures.ids.mic { Fixtures.printer = destination }

@@ -39,6 +39,11 @@ struct PrintSheet: View {
     @State private var modelURL: URL?
     /// What each printer last reported, so its card keeps its spools after you move on.
     @State private var spools: [String: [PrinterFilament]] = [:]
+    /// A multi-part model: its filaments, the loaded spools, and the spool chosen for each (filament index → slot).
+    @State private var mapping: ColourMapping?
+    @State private var mappingSlots: [Int: Int] = [:]
+    @State private var mappingState: MappingState = .loading
+    private enum MappingState: Equatable { case loading, done, failed(String) }
 
     private var project: Project? { store.project(projectId) }
     private var published: Bool { project?.preservesPublishedFilaments == true }
@@ -67,11 +72,10 @@ struct PrintSheet: View {
                             Label(message, systemImage: "exclamationmark.triangle.fill").font(.footnote).foregroundStyle(.orange)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
-                        if published { Text("Each colour is matched to a loaded spool when the printer reports its spools. Open Counterpart on your Mac to choose a different spool for a colour.").font(.footnote).foregroundStyle(.secondary) } else { colourSection
+                        Group { if published { multiColours } else { colourSection } }
                             .padding(16)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .glassEffect(.regular, in: .rect(cornerRadius: 24))
-                        }
                         if slicedOriginal { Text("Uses the quality, strength and copies already saved in this sliced file. Share an editable 3MF to change them.").font(.footnote).foregroundStyle(.secondary) } else { settingsSection.id("settings") }
                         if offersPauses { pauseSection.id("pauses") }
                         if !offersCopies, project?.settings?.printDefaults?.copies != nil {
@@ -115,6 +119,9 @@ struct PrintSheet: View {
             #endif
         }
         .task(id: estimateKey) { await refreshEstimate() }
+        // The spool rows belong to this printer, plate and model version; any of them changing reloads them,
+        // so a mapping made for another printer, plate or model is never reused.
+        .task(id: mappingLoadKey) { await loadMapping() }
     }
 
     // MARK: Sections
@@ -229,6 +236,113 @@ struct PrintSheet: View {
                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
         }
+    }
+
+    // MARK: Colours (multi-part: one spool per part colour, as on the Mac)
+
+    /// The spool currently chosen for one of the model's filaments.
+    private func chosenTray(_ filament: ModelColourFilament) -> PrinterFilament? {
+        mapping?.trays.first { $0.slot == mappingSlots[filament.index] }
+    }
+
+    /// The mapping choices as a task key, so editing a spool re-slices the estimate with it.
+    private var mappingSignature: String { mappingSlots.keys.sorted().map { "\($0):\(mappingSlots[$0] ?? -1)" }.joined(separator: ",") }
+
+    /// AMS trays and the external spool can't feed one print together (the companion refuses the mix).
+    private var mixedFeedSources: Bool {
+        let external = mappingSlots.values.map { $0 >= 254 }
+        return external.contains(true) && external.contains(false)
+    }
+
+    /// The chosen spools in filament order, when every colour has one: what Print sends.
+    private var chosenSpoolPerColour: [PrinterFilament]? { mapping?.spools(slots: mappingSlots) }
+
+    @ViewBuilder private var multiColours: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack { Text("Colors").font(.headline); Spacer(); if let mapping, !mapping.trays.isEmpty { Text("AMS · \(mapping.trays.filter { !$0.isExternal }.count) slots").font(.caption).foregroundStyle(.secondary) } }
+            switch mappingState {
+            case .loading:
+                HStack(spacing: 8) { ProgressView().controlSize(.small); Text("Reading the printer’s filament…").foregroundStyle(.secondary) }
+            case .failed(let text):
+                Text(text).font(.subheadline).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                Button("Try Again") { Task { await loadMapping() } }.buttonStyle(.glass)
+            case .done:
+                if let mapping, !mapping.filaments.isEmpty {
+                    VStack(alignment: .leading, spacing: 14) {
+                        ForEach(mapping.filaments) { filament in
+                            VStack(alignment: .leading, spacing: 2) {
+                                HStack(spacing: 10) {
+                                    SpoolDot(color: hexColor(filament.colour) ?? Color(white: 0.5), size: 26)
+                                    VStack(alignment: .leading, spacing: 1) {
+                                        Text(filament.name ?? "Part \(filament.index)").font(.body.weight(.medium)).lineLimit(1)
+                                        let wanted = [filament.colour, filament.material].compactMap { $0 }.joined(separator: " · ")
+                                        if !wanted.isEmpty { Text(wanted).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
+                                    }
+                                    Spacer(minLength: 4)
+                                    Image(systemName: "arrow.right").foregroundStyle(.secondary)
+                                    if let tray = chosenTray(filament) { SpoolDot(color: tray.color, size: 26) }
+                                    Menu {
+                                        ForEach(mapping.trays) { tray in
+                                            Button { mappingSlots[filament.index] = tray.slot } label: {
+                                                Text(mappingSlots[filament.index] == tray.slot ? "✓ \(Self.spoolName(tray))" : Self.spoolName(tray))
+                                            }
+                                            // Mixed AMS/external choices stay selectable (else no row could be the
+                                            // first to switch source); the note below and Print say what's wrong.
+                                            .disabled(slicedOriginal && filament.material != nil && tray.material.caseInsensitiveCompare(filament.material!) != .orderedSame)
+                                        }
+                                    } label: {
+                                        Text(chosenTray(filament).map(Self.spoolName) ?? "Choose a spool").lineLimit(1)
+                                    }
+                                    .disabled(mapping.trays.isEmpty || busy != nil)
+                                    .accessibilityLabel("Spool for \(filament.name ?? "Part \(filament.index)")")
+                                    .accessibilityValue(chosenTray(filament).map(Self.spoolName) ?? "None chosen")
+                                }
+                                if let note = mappingNote(filament) {
+                                    Text(note).font(.caption).foregroundStyle(.secondary).padding(.leading, 36)
+                                }
+                            }
+                        }
+                        if mapping.trays.isEmpty {
+                            Text("No filament is loaded. Load a spool, then reopen this sheet.").font(.subheadline).foregroundStyle(.secondary)
+                        }
+                        if mixedFeedSources {
+                            Text("One print feeds from one source: put every colour on AMS spools, or every colour on the external spool.")
+                                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                } else {
+                    Text("Keeps the model’s filament assignments. The printer service confirms the loaded spools.").font(.subheadline).foregroundStyle(.secondary)
+                }
+            }
+        }
+        .disabled(busy == "print")
+    }
+
+    /// What the person should know about this row's match, in their words (the Mac's notes).
+    private func mappingNote(_ filament: ModelColourFilament) -> String? {
+        if filament.colour == nil { return "The model doesn’t say this part’s colour — pick its spool." }
+        guard let tray = chosenTray(filament) else { return nil }
+        if let other = mapping?.filaments.first(where: { $0.index != filament.index && mappingSlots[$0.index] == tray.slot
+                && $0.colour != nil && $0.colour?.caseInsensitiveCompare(filament.colour ?? "") != .orderedSame }) {
+            return "Shares this spool with \(other.name ?? "Part \(other.index)") — both parts print this colour."
+        }
+        if let material = filament.material, tray.material.caseInsensitiveCompare(material) != .orderedSame {
+            return "Closest colour loaded; prints in \(tray.material), not \(material)."
+        }
+        if mappingSlots[filament.index] == filament.slot, let distance = filament.distance, distance > 0.08 {
+            return "Closest colour loaded."
+        }
+        return nil
+    }
+
+    /// "A1 · PLA Bambu PLA Basic": AMS units are lettered A–D, four trays each (slot 4 is B1); AMS-HT units
+    /// report from 128 (the Mac's spool names).
+    private static func spoolName(_ filament: PrinterFilament) -> String {
+        let place = filament.slot == 255 ? "External 2"
+            : filament.isExternal ? "External"
+            : filament.slot >= 128 ? "AMS-HT \(String(UnicodeScalar(65 + min(filament.slot - 128, 25))!))"
+            : "\(String(UnicodeScalar(65 + min(filament.slot / 4, 25))!))\(filament.slot % 4 + 1)"
+        return "\(place) · \(filament.material) \(filament.displayName)"
     }
 
     @ViewBuilder private var settingsSection: some View {
@@ -416,9 +530,19 @@ struct PrintSheet: View {
         return Date().addingTimeInterval(seconds).formatted(date: .omitted, time: .shortened)
     }
 
+    /// A multi-part model whose colours are known prints only once every colour has a spool.
+    /// While the mapping loads Print waits; when it can't be read, the companion's own matching applies.
+    private var mappingReady: Bool {
+        guard published else { return true }
+        if mappingState == .loading { return false }
+        guard let mapping, !mapping.filaments.isEmpty else { return true }
+        return chosenSpoolPerColour != nil && !mixedFeedSources
+    }
+
     private var canPrint: Bool {
         guard busy == nil, printer != nil, printer?.isOffline != true else { return false }
         if uncertain && !checked { return false }
+        if !mappingReady { return false }
         // An AMS printer prints the spool you can see chosen here, never whatever the Mac last had set.
         if !published && filamentKind == "ams" && chosen == nil { return false }
         // A pause after the last layer would never happen: the Mac refuses it the same way.
@@ -456,6 +580,8 @@ struct PrintSheet: View {
             let ticket = store.startRequest()
             store.replace(try await store.mac.selectPrinter(projectId, destinationId: id), ticket: ticket)
             destinationId = id
+            // Another printer's spools are not this one's: the old mapping must not outlive the change.
+            mapping = nil; mappingSlots = [:]; mappingState = .loading
             slice.forget()
         } catch let failure as CompanionError { problem = failure.message; return }
         catch { problem = CompanionError.unreachable.message; return }
@@ -494,8 +620,35 @@ struct PrintSheet: View {
         } catch { problem = CompanionError.unreachable.message }
     }
 
+    /// What the spool rows are for: this printer, plate and model. The mapping reloads when any of them changes.
+    private var mappingLoadKey: String { "\(published)#\(project?.selectedPlate?.id ?? "")#\(project?.mediaVersion ?? 0)#\(destinationId)" }
+
+    /// The spool per colour for a multi-part model; the suggestions arrive chosen. A reply for another
+    /// printer, plate or model version (a change while it ran) is dropped, never shown or sent.
+    private func loadMapping() async {
+        guard published, !destinationId.isEmpty else { return }
+        let key = mappingLoadKey
+        mappingState = .loading; mapping = nil; mappingSlots = [:]
+        do {
+            let loaded = try await store.mac.colourMapping(projectId)
+            guard !Task.isCancelled, key == mappingLoadKey else { return }
+            mapping = loaded
+            mappingSlots = loaded.suggestedSlots
+            mappingState = .done
+        } catch let failure as CompanionError {
+            guard !Task.isCancelled, key == mappingLoadKey, failure.code != "cancelled" else { return }
+            mapping = nil; mappingSlots = [:]
+            mappingState = .failed(failure.message)
+        } catch {
+            guard !Task.isCancelled, key == mappingLoadKey else { return }
+            mapping = nil; mappingSlots = [:]
+            mappingState = .failed("Couldn’t match this model’s colours to the loaded spools.")
+        }
+    }
+
     /// The model, printer and settings an estimate is for. Only an estimate for exactly these is shown.
-    private var estimateKey: String { "\(project?.selectedPlate?.id ?? "")#\(project?.mediaVersion ?? 0)#\(destinationId)#\(quality)#\(strength)#\(offersCopies ? copies.map(String.init) ?? "profile" : "profile")" }
+    /// The chosen spools are part of it, so changing one drops the old estimate and slices again.
+    private var estimateKey: String { "\(project?.selectedPlate?.id ?? "")#\(project?.mediaVersion ?? 0)#\(destinationId)#\(quality)#\(strength)#\(offersCopies ? copies.map(String.init) ?? "profile" : "profile")#\(published ? mappingSignature : "")#\(published ? mapping?.modelVersion ?? "" : "")" }
     /// The slice estimate on screen: always for these settings, or pending.
     private var estimate: SliceEstimate? { slice.estimate(for: estimateKey) }
 
@@ -508,7 +661,9 @@ struct PrintSheet: View {
             let next = try await store.mac.client.estimate(projectId, destinationId: destinationId,
                                                            quality: !slicedOriginal && printer?.offersQuality == true ? quality : .standard,
                                                            strength: !slicedOriginal && printer?.offersStrength == true ? strength : .standard,
-                                                           copies: slicedOriginal ? 1 : offersCopies ? copies : (project?.settings?.printDefaults?.copies != nil ? 1 : nil), overrideDefaults: true)
+                                                           copies: slicedOriginal ? 1 : offersCopies ? copies : (project?.settings?.printDefaults?.copies != nil ? 1 : nil), overrideDefaults: true,
+                                                           filaments: published ? chosenSpoolPerColour ?? [] : [],
+                                                           filamentsModelVersion: published ? mapping?.modelVersion : nil)
             guard !Task.isCancelled else { return }
             slice.finish(key, next)
         } catch let failure as CompanionError {
@@ -528,11 +683,16 @@ struct PrintSheet: View {
         // A printer that doesn't report its filament prints with its own profile's material.
         default: (project?.settings?.printDefaults?.colour?.object?["material"]?.string).map(PrintColour.material)
         }
+        // A multi-part model prints from the spool chosen for each colour, bound to the model version
+        // those choices were made against; with no complete mapping the companion's own matching applies.
+        let perColour = published ? chosenSpoolPerColour : nil
         let choice = PrintChoice(colour: published ? nil : colour,
                                  quality: !slicedOriginal && printer?.offersQuality == true ? quality : .standard,
                                  strength: !slicedOriginal && printer?.offersStrength == true ? strength : .standard,
                                  checked: uncertain && checked, copies: slicedOriginal ? 1 : offersCopies ? copies : (project?.settings?.printDefaults?.copies != nil ? 1 : nil),
-                                 pauseBeforeLayers: offersPauses ? pauses : [])
+                                 pauseBeforeLayers: offersPauses ? pauses : [],
+                                 filaments: perColour ?? [],
+                                 filamentsModelVersion: perColour != nil ? mapping?.modelVersion : nil)
         do {
             let ticket = store.startRequest()
             store.replace(try await store.mac.client.print(projectId, choice: choice, overrideDefaults: true, expectedPlate: project?.selectedPlate?.id), ticket: ticket)

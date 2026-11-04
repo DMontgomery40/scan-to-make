@@ -534,6 +534,61 @@ final class CompanionClientTests: XCTestCase {
         XCTAssertEqual((PrintChoice(colour: nil, pauseBeforeLayers: Array(2...40)).body["pauseBeforeLayers"] as? [Int])?.count, PrintChoice.maxPauses)
     }
 
+    func testColourMappingDecodesAndChosenSpoolsReachEstimateAndPrintInOrder() async throws {
+        let id = "0b6f0f43-7c35-4b8a-9a3c-8f0b4c4b2a11"
+        let black: [String: Any] = ["slot": 0, "colour": "#000000", "material": "PETG", "name": "Black PETG", "filamentId": "GFG00", "destinationId": "p1s"]
+        let yellow: [String: Any] = ["slot": 1, "colour": "#FEC600", "material": "PLA", "name": "Yellow PLA", "filamentId": "GFA00", "destinationId": "p1s"]
+        let object: [String: Any] = ["id": id, "createdAtMs": 1, "updatedAtMs": 2, "state": "ready", "kind": "published", "photos": [], "passes": [],
+                                     "current": ["model": "original/pick.3mf", "renders": []]]
+        let fake = FakeTransport { request, _ in
+            switch request.url?.path {
+            case "/v1/objects/\(id)/colour-mapping":
+                return json(200, ["filaments": [["index": 1, "name": "body", "colour": "#111111", "slot": 0, "distance": 0.04],
+                                                ["index": 2, "name": "letters", "colour": "#FFD200", "material": "PLA", "slot": 1, "distance": 0.12]],
+                                  "trays": [black, yellow], "modelVersion": "pick-3mf-v7"])
+            case "/v1/objects/\(id)/estimate":
+                return json(200, ["destinationId": "p1s", "quality": "standard", "strength": "standard", "seconds": 600, "grams": 4, "layers": 40])
+            default:
+                return json(200, ["object": object])
+            }
+        }
+        let mac = try client(fake)
+        let mapping = try await mac.colourMapping(id)
+        XCTAssertEqual(mapping.filaments.map(\.name), ["body", "letters"])
+        XCTAssertEqual(mapping.filaments.map(\.slot), [0, 1], "the Mac's nearest-colour suggestions arrive chosen")
+        XCTAssertEqual(mapping.suggestedSlots, [1: 0, 2: 1])
+        XCTAssertEqual(mapping.modelVersion, "pick-3mf-v7")
+        XCTAssertNil(mapping.spools(slots: [1: 0]), "every colour needs a spool before anything is sent")
+        // The person swaps both spools: the estimate and the print carry exactly that order, bound to the version.
+        let chosen = try XCTUnwrap(mapping.spools(slots: [1: 1, 2: 0]))
+        XCTAssertEqual(chosen.map(\.slot), [1, 0])
+        _ = try await mac.estimate(id, destinationId: "p1s", quality: .standard, strength: .standard, overrideDefaults: true,
+                                   filaments: chosen, filamentsModelVersion: mapping.modelVersion)
+        let choice = PrintChoice(colour: .tray(mapping.trays[0]), checked: true, copies: 2, pauseBeforeLayers: [3],
+                                 filaments: chosen, filamentsModelVersion: mapping.modelVersion)
+        _ = try await mac.print(id, choice: choice, overrideDefaults: true, expectedPlate: "\(String(repeating: "ab", count: 32)):2")
+        XCTAssertEqual(fake.calls.map { $0.request.url?.path }, ["/v1/objects/\(id)/colour-mapping", "/v1/objects/\(id)/estimate", "/v1/objects/\(id)/print"])
+        XCTAssertEqual(fake.calls.map { $0.request.httpMethod }, ["GET", "POST", "POST"])
+        for call in fake.calls.dropFirst() {
+            let body = try XCTUnwrap(JSONSerialization.jsonObject(with: call.request.httpBody!) as? [String: Any])
+            let spools = try XCTUnwrap(body["filaments"] as? [[String: Any]])
+            XCTAssertEqual(spools.map { $0["slot"] as? Int }, [1, 0], "the person's order, not the suggestion's")
+            XCTAssertEqual(spools[0].mapValues { $0 as! AnyHashable }, yellow.mapValues { $0 as! AnyHashable })
+            XCTAssertEqual(body["filamentsModelVersion"] as? String, "pick-3mf-v7")
+            XCTAssertNil(body["filament"], "per-colour spools replace the one-spool choice, never both")
+            XCTAssertNil(body["colour"])
+        }
+        let printed = try XCTUnwrap(JSONSerialization.jsonObject(with: fake.calls[2].request.httpBody!) as? [String: Any])
+        XCTAssertEqual(printed["expectedPlate"] as? String, "\(String(repeating: "ab", count: 32)):2", "the selected plate still guards the print")
+        XCTAssertEqual(printed["copies"] as? Int, 2)
+        XCTAssertEqual(printed["pauseBeforeLayers"] as? [Int], [3], "pauses ride along with the per-colour spools")
+        XCTAssertEqual(printed["checked"] as? Bool, true)
+        // An older Mac without the route says so in words the sheet can show, and sends nothing else.
+        let older = try client(FakeTransport { _, _ in json(404, ["error": ["code": "not-found", "message": "Not found"]]) })
+        do { _ = try await older.colourMapping(id); XCTFail() }
+        catch let error as CompanionError { XCTAssertEqual(error.message, "Update Counterpart on your Mac to choose a spool for each colour here.") }
+    }
+
     func testPrinterDestinationsDecodeBothMCPsAndLayerPausesAndOlderMacsStillDecode() throws {
         let current = #"{"id":"current","name":"P1S","backend":"bambu-printer-mcp","source":"current","mcps":[{"backend":"bambu-printer-mcp","destinationId":"current"},{"backend":"mcp-3d-printer-server","destinationId":"mcp-1a2b"}],"capabilities":{"progress":true,"layers":true,"camera":"bambu-tcp","filaments":"ams","pause":true,"resume":true,"cancel":true,"quality":true,"strength":true,"layerPauses":true,"newerField":1}}"#
         let printer = try JSONDecoder().decode(PrinterDestination.self, from: Data(current.utf8))

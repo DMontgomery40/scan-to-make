@@ -75,7 +75,7 @@ public final class CompanionClient: @unchecked Sendable {
             if is_("/healthz") { return "generation:health" }
             if is_("/v1/events") || is_("/v1/settings") || is_("/v1/devices") { return "projects:read" }
             if is_(one + "/(model\\.stl|renders/[^/]+|photos/[^/]+|capture/[^/]+|scan/[^/]+|original/[0-9]+|asks/[^/]+|prints/[^/]+/frames/[^/]+)") { return "projects:read" }
-            if is_(one + "/(filaments|camera\\.jpg)") || is_("/v1/objects/printers/[^/]+/camera\\.jpg") { return "printer-handoff:use" }
+            if is_(one + "/(filaments|colour-mapping|camera\\.jpg)") || is_("/v1/objects/printers/[^/]+/camera\\.jpg") { return "printer-handoff:use" }
             if is_("/v1/objects/printers/[A-Za-z0-9_-]{1,256}/route") { return "printer-handoff:use" }
         case "PATCH":
             if is_(one) { return "captures:import" }
@@ -188,6 +188,7 @@ public final class CompanionClient: @unchecked Sendable {
         case 401, 403: return CompanionError(code: "pairing", message: "Connect to your Mac again.")
         case 404 where path == "/v1/objects": return CompanionError(code: "not-set-up", message: "Your Mac isn't ready to make things yet. Open Counterpart on your Mac.")
         case 404 where path.hasSuffix("/filaments"): return CompanionError(code: "not-set-up", message: "Update Counterpart on your Mac to choose a filament here.")
+        case 404 where path.hasSuffix("/colour-mapping"): return CompanionError(code: "not-set-up", message: "Update Counterpart on your Mac to choose a spool for each colour here.")
         case 404 where path.hasSuffix("/camera.jpg") && code == "not-found" && message?.contains("camera") == true:
             return CompanionError(code: "no-camera", message: "This printer has no camera Counterpart can use.")
         case 404 where newer || code == "method-not-allowed": return .unsupported
@@ -337,16 +338,23 @@ public final class CompanionClient: @unchecked Sendable {
     public func filaments(_ id: String) async throws -> [PrinterFilament] {
         try await request("GET", "/v1/objects/\(id)/filaments", as: Filaments.self).filaments
     }
+    /// A multi-part model's filaments, the loaded spools, and the suggested spool for each colour.
+    public func colourMapping(_ id: String) async throws -> ColourMapping {
+        try await request("GET", "/v1/objects/\(id)/colour-mapping", as: ColourMapping.self)
+    }
     public func selectPrinter(_ id: String, destinationId: String) async throws -> Project {
         try await request("POST", "/v1/objects/\(id)/printer", json: ["destinationId": destinationId], as: One.self).object
     }
     /// The slice estimate for these settings (PR 2): time, grams and layers. Can take up to 150 s.
-    public func estimate(_ id: String, destinationId: String?, quality: PrintQuality, strength: PrintStrength, copies: Int? = nil, overrideDefaults: Bool = false) async throws -> SliceEstimate {
+    public func estimate(_ id: String, destinationId: String?, quality: PrintQuality, strength: PrintStrength, copies: Int? = nil, overrideDefaults: Bool = false,
+                         filaments: [PrinterFilament] = [], filamentsModelVersion: String? = nil) async throws -> SliceEstimate {
         var json: [String: Any] = [:]
         if let destinationId { json["destinationId"] = destinationId }
         if overrideDefaults || quality != .standard { json["quality"] = quality.rawValue }
         if overrideDefaults || strength != .standard { json["strength"] = strength.rawValue }
         if let copies { json["copies"] = max(1, copies) }
+        if !filaments.isEmpty { json["filaments"] = filaments.map(\.jsonObject) }
+        if let filamentsModelVersion { json["filamentsModelVersion"] = filamentsModelVersion }
         return try await request("POST", "/v1/objects/\(id)/estimate", json: json, as: SliceEstimate.self, timeout: 170)
     }
     /// Starts preparing the print. The printer MCP still asks its own confirmation.
