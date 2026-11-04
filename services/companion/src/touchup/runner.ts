@@ -12,12 +12,15 @@ const KILL_GRACE_MS = 5000;
 
 export interface TouchupChange {tag: 'added' | 'changed' | 'assumed' | 'estimated'; text: string; toleranceMm?: number}
 export interface TouchupAsk {question: string; photo?: string; region?: {x: number; y: number; width: number; height: number}}
+/** The designer's supports choice, passed to the slicer as it is (slice_stl `enable_support` / `support_type`). */
+export interface TouchupSupports {enabled: boolean; type?: 'tree(auto)' | 'normal(auto)'}
 export interface TouchupResult {
   status: 'done' | 'unchanged' | 'needs_closeup' | 'capped' | 'failed';
   /** The worker's short name for the thing (PR 4). */
   title?: string;
   changes?: TouchupChange[];
   ask?: TouchupAsk;
+  supports?: TouchupSupports;
   /** Fusion passes: the parametric design and its parameters, from fusion_mcp_export. */
   design?: {f3d: string; parameters?: string};
   reason?: string;
@@ -59,8 +62,11 @@ interface ResultEvent {
 }
 
 /** The worker's title, what-changed list and Ask, checked and made safe to show. */
-function structured(answer: ResultEvent['structured_output'], publicText: (text: string) => string): Pick<TouchupResult, 'title' | 'changes' | 'ask'> {
-  const out: Pick<TouchupResult, 'title' | 'changes' | 'ask'> = {};
+function structured(answer: ResultEvent['structured_output'], publicText: (text: string) => string): Pick<TouchupResult, 'title' | 'changes' | 'ask' | 'supports'> {
+  const out: Pick<TouchupResult, 'title' | 'changes' | 'ask' | 'supports'> = {};
+  const supports = (answer as {supports?: unknown} | undefined)?.supports as Record<string, unknown> | undefined;
+  if (supports && typeof supports.enabled === 'boolean')
+    out.supports = {enabled: supports.enabled, ...(supports.enabled && (supports.type === 'tree(auto)' || supports.type === 'normal(auto)') ? {type: supports.type} : {})};
   if (typeof answer?.title === 'string' && answer.title.trim()) out.title = publicText(answer.title).replace(/[.!]+$/, '').slice(0, 40);
   if (Array.isArray(answer?.changes)) {
     const changes = answer.changes.flatMap((item: unknown): TouchupChange[] => {

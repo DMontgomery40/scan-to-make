@@ -66,6 +66,12 @@ const FILE_KINDS = {
   model: {extensions: ['.stl', '.3mf'], limit: 64 * 1024 * 1024, words: 'a 3MF or STL model'},
 } as const;
 /** The first bytes must agree with the extension. */
+/** The designer's supports choice for the current model, as slice_stl takes it; nothing when the design made none. */
+function designedSupports(object: StmObject): Pick<PrinterSlicer, 'enableSupport' | 'supportType'> {
+  const supports = object.kind === 'published' ? undefined : object.current?.supports;
+  return supports ? {enableSupport: supports.enabled, ...(supports.enabled && supports.type ? {supportType: supports.type} : {})} : {};
+}
+
 function looksLike(extension: string, head: Buffer): boolean {
   switch (extension) {
     case '.jpg': case '.jpeg': return head[0] === 0xff && head[1] === 0xd8 && head[2] === 0xff;
@@ -893,7 +899,7 @@ export class ObjectService {
     const settings: PrintSettings = {...(options.quality ? {quality: options.quality} : {}), ...(options.strength ? {strength: options.strength} : {}),
       ...(options.colour ? {colour: options.colour} : {}), ...(options.copies !== undefined ? {copies: options.copies} : {}),
       ...(options.pauseBeforeLayers?.length ? {pauseBeforeLayers: options.pauseBeforeLayers} : {})};
-    const sliced = {...slicer, ...overrides};
+    const sliced = {...slicer, ...overrides, ...designedSupports(object)};
     const stl = await this.#modelBytes(object);
     const manifest = await bundles.create({...(object.kind === 'published' ? {model: {bytes: stl, format: object.current.model.toLowerCase().endsWith('.3mf') ? '3mf' as const : 'stl' as const}} : {stl}), prompt: '', backend: runner.backend, ...(selected ? {selection:selected} : {})});
     const printId = randomUUID();
@@ -949,7 +955,7 @@ export class ObjectService {
           };
           if (this.#expiredConfirmations.has(id) || (this.#confirmations.get(id)?.pending.expiresAtMs ?? Infinity) <= Date.now())
             return refused('failed', 'Printer confirmation timed out; no print was sent. Press Print to try again.');
-          if (error instanceof PrinterMcpError && error.code === 'print-settings-unsupported') return refused('ready', settingsUnsupported(runner.backend, options));
+          if (error instanceof PrinterMcpError && error.code === 'print-settings-unsupported') return refused('ready', settingsUnsupported(runner.backend, {...options, supports: !!object.current?.supports}));
           return refused('failed', error instanceof PrinterMcpError && error.detail ? error.detail : error instanceof Error ? error.message : String(error));
         })
       .then(o => this.#changed(o))
@@ -1316,7 +1322,8 @@ export class ObjectService {
         || (copies && !capabilities.copies)))
       throw new InvalidStateError(settingsUnsupported(services.runner.backend, {quality, strength, ...(copies ? {copies} : {})}));
     const model = await this.#modelBytes(object);
-    const key = JSON.stringify([createHash('sha256').update(model).digest('hex'), destinationId ?? 'default', quality, strength, request.copies ?? 'configured', object.publishedSelection?.plateIndex ?? services.selection?.plateIndex ?? 0]);
+    const supports = designedSupports(object);
+    const key = JSON.stringify([createHash('sha256').update(model).digest('hex'), destinationId ?? 'default', quality, strength, request.copies ?? 'configured', object.publishedSelection?.plateIndex ?? services.selection?.plateIndex ?? 0, supports]);
     let running = this.#estimates2.get(key);
     if (!running) {
       const runner = services.runner;
@@ -1325,7 +1332,7 @@ export class ObjectService {
         try {
           const stlPath = join(work, object.current!.model.toLowerCase().endsWith('.3mf') ? 'model.3mf' : 'model.stl');
           await writeFile(stlPath, model);
-          const {estimate, settings, slicerWarning} = await runner.estimate!({stlPath, ...((services.selection || object.publishedSelection) ? {selection: {...services.selection, ...(object.publishedSelection ? {plateIndex: object.publishedSelection.plateIndex} : {})}} : {}), ...(Object.keys(overrides).length ? {slicer: overrides} : {}),
+          const {estimate, settings, slicerWarning} = await runner.estimate!({stlPath, ...((services.selection || object.publishedSelection) ? {selection: {...services.selection, ...(object.publishedSelection ? {plateIndex: object.publishedSelection.plateIndex} : {})}} : {}), ...(Object.keys({...overrides, ...supports}).length ? {slicer: {...overrides, ...supports}} : {}),
             signal: AbortSignal.timeout(150_000), sliceCache: {directory: join(this.#deps.store.dir(id), 'slices')}});
           return {destinationId: destinationId ?? 'current', quality, strength, ...(copies ? {copies} : {}),
             ...(estimate?.seconds !== undefined ? {seconds: estimate.seconds} : {}), ...(estimate?.grams !== undefined ? {grams: estimate.grams} : {}),
@@ -1343,7 +1350,7 @@ export class ObjectService {
     }
     try { return structuredClone(await running); }
     catch (error) {
-      if (error instanceof PrinterMcpError && error.code === 'print-settings-unsupported') throw new InvalidStateError(settingsUnsupported(services.runner.backend, {quality, strength}));
+      if (error instanceof PrinterMcpError && error.code === 'print-settings-unsupported') throw new InvalidStateError(settingsUnsupported(services.runner.backend, {quality, strength, supports: supports.enableSupport !== undefined}));
       // Bambu Studio refused the slice: its own words, exactly what a Print of the same model fails with.
       if (error instanceof PrinterMcpError && ['slicer-error', 'copies-multiple-plates'].includes(error.code) && error.detail) throw new SlicerRefusedError(error.detail);
       throw new InvalidStateError(error instanceof PrinterMcpError && error.detail ? `Couldn't slice it for an estimate: ${error.detail}` : "Couldn't slice it for an estimate. Check the printer service, then try again.");
@@ -1744,7 +1751,7 @@ export class ObjectService {
         design = {f3d: join('current', 'design.f3d'), ...(result.design.parameters ? {parameters: join('current', 'parameters.json')} : {})};
       }
       current = {model: join('current', 'model.stl'), renders, ...(sizeMm ? {sizeMm} : {}), ...(summary ? {summary} : {}),
-        ...(result.changes?.length ? {changes: result.changes} : {}), engine, ...(design ? {design} : {})};
+        ...(result.changes?.length ? {changes: result.changes} : {}), ...(result.supports ? {supports: result.supports} : {}), engine, ...(design ? {design} : {})};
     }
     const ask = result.status === 'needs_closeup' ? await this.#ask(id, result) : undefined;
     const state: StmObject['state'] = result.status === 'needs_closeup' ? 'needs-closeup'

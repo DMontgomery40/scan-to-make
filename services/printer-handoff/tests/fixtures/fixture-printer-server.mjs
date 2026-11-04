@@ -2,7 +2,7 @@
 // It never loads a real printer implementation.
 import {Server} from '@modelcontextprotocol/sdk/server/index.js';
 import {StdioServerTransport} from '@modelcontextprotocol/sdk/server/stdio.js';
-import {CallToolRequestSchema, ListToolsRequestSchema} from '@modelcontextprotocol/sdk/types.js';
+import {CallToolRequestSchema, GetPromptRequestSchema, ListToolsRequestSchema} from '@modelcontextprotocol/sdk/types.js';
 import {appendFileSync, readFileSync, writeFileSync, mkdtempSync, rmSync} from 'node:fs';
 import {basename, dirname, join} from 'node:path';
 import {tmpdir} from 'node:os';
@@ -28,6 +28,8 @@ const sliceProps = {
 };
 if (process.env.HANDOFF_FIXTURE_NO_COLOUR === '1') delete sliceProps.filament_colours;
 if (process.env.HANDOFF_FIXTURE_SLICE_SETTINGS === '1') Object.assign(sliceProps, {layer_height: number, wall_loops: integer, sparse_infill_density: string, repetitions: integer});
+// The slice_stl support arguments a newer MCP takes (enable_support, support_type).
+if (process.env.HANDOFF_FIXTURE_SUPPORTS === '1') Object.assign(sliceProps, {enable_support: bool, support_type: {type: 'string', enum: ['normal(auto)', 'tree(auto)', 'normal(manual)', 'tree(manual)']}});
 const bambuPrintProps = {
   connection_mode:string, connection_type:string, three_mf_path: string, bambu_model: string, bed_type: string, nozzle_type: string,
   nozzle_diameter: string, nozzle_diameters: {type: 'array', items: number}, plate_index: integer,
@@ -66,8 +68,14 @@ const tools = [
   ]),
 ];
 const text = value => ({content: [{type: 'text', text: typeof value === 'string' ? value : JSON.stringify(value)}]});
-const server = new Server({name: `fixture-${mode}`, version: '0.0.0'}, {capabilities: {tools: {}}});
+// HANDOFF_FIXTURE_PROMPTS=1 serves the MCPs' fdm_design prompt, as bambu-printer-mcp and mcp-3D-printer-server do.
+const prompts = process.env.HANDOFF_FIXTURE_PROMPTS === '1';
+const server = new Server({name: `fixture-${mode}`, version: '0.0.0'}, {capabilities: {tools: {}, ...(prompts ? {prompts: {}} : {})}});
 server.setRequestHandler(ListToolsRequestSchema, async () => ({tools}));
+if (prompts) server.setRequestHandler(GetPromptRequestSchema, async request => {
+  if (request.params.name !== 'fdm_design') throw new Error(`Unknown prompt: ${request.params.name}`);
+  return {messages: [{role: 'user', content: {type: 'text', text: 'Design the finished object the user wants, with the manufacturing plan as part of the design.'}}]};
+});
 
 async function confirmPrint() {
   const response = await server.elicitInput({

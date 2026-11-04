@@ -57,6 +57,9 @@ export const printerSlicerSchema = z.strictObject({
   sparseInfillDensity: z.string().regex(/^(100|[1-9]?[0-9])%$/).optional(),
   /** Copies on the plate: slice_stl `repetitions`. */
   repetitions: z.number().int().min(1).max(64).optional(),
+  /** The designer's supports choice, sent as slice_stl `enable_support` and `support_type` (false included). */
+  enableSupport: z.boolean().optional(),
+  supportType: z.enum(['normal(auto)', 'tree(auto)']).optional(),
   /** Pause before these 1-based layers: slice_stl `pause_at_layers`. */
   pauseAtLayers: z.array(z.number().int().min(2).max(100000)).min(1).max(16).optional(),
 });
