@@ -225,6 +225,13 @@ remote native probes and the SSH tunnel were removed after verification.
      - #302 removes `selection.connectionMode` from the handoff schema (legacy configs load with that key
        dropped) and removes HMS 0007 auto-clear. Keep both removals when reconciling release code; its current
        print.ts still has the auto-clear workaround. Do not restore it from this branch during conflict resolution.
+     - #303 orientation/supports initial head `bebaa791`: replace #298's invocation sentence about lay_flat
+       and discarded orientation with slicer auto-orientation/direct support forwarding (including off).
+       Its `supports` schema block follows `ask`. Preserve release's provider `worker` hook when reconciling
+       touchup/mcp-client/bound-fusion. Integrate after #293/#302 from the merge owner's final main.
+       Known limitation reported by orientation owner: Studio `orient:true` refused the stove gap filler
+       with "empty layer" (KAN-223). Surface Studio's refusal; do not silently restore lay_flat or keep-pose.
+       David's selected auto-orient behavior remains unchanged unless he chooses otherwise.
      - Known conflicts: PrintSheet, local-control protocol/services, objects/printers, and add/add printing/discovery.
        Also reconcile profiles/setup/server-cli, print/slice-cache, updater/printer checks and help/index.html.
      - Preserve release-only reconstruction handlers/review state and contracts, Linux Avahi/bootstrap-printer
