@@ -219,6 +219,12 @@ remote native probes and the SSH tunnel were removed after verification.
        ownership and its regression in objects-printers.
      - #299 final head `6d95d38`: retain PrintSheet `maxPauses` 16, unique/sorted `pauseBeforeLayers`, exclude
        pauses from saved defaults (`48f22a5`), and final control refusals/deadlines (`c4c904f`, `3c0a192`).
+     - Queue receipt: main `f610034` includes #292 (`0c6125b`, head `7fbd3f2`, gate 7/7) and #297
+       (`f610034`, head `f9466b4`). Preserve main's optional Claude Code/Blender/Fusion setup items alongside
+       the MCP documentation links. Remaining order: #302 → #293 → #303 orientation → #300 → #301.
+     - #302 removes `selection.connectionMode` from the handoff schema (legacy configs load with that key
+       dropped) and removes HMS 0007 auto-clear. Keep both removals when reconciling release code; its current
+       print.ts still has the auto-clear workaround. Do not restore it from this branch during conflict resolution.
      - Known conflicts: PrintSheet, local-control protocol/services, objects/printers, and add/add printing/discovery.
        Also reconcile profiles/setup/server-cli, print/slice-cache, updater/printer checks and help/index.html.
      - Preserve release-only reconstruction handlers/review state and contracts, Linux Avahi/bootstrap-printer
