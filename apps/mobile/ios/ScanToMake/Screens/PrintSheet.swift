@@ -326,7 +326,7 @@ struct PrintSheet: View {
             }
             Text(pauses.isEmpty
                  ? "Stop before a layer to drop in magnets or nuts."
-                 : "The printer stops before each of these layers and waits for magnets or nuts. Press Resume on the printer when they’re in. Layers count as in Bambu Studio’s and OrcaSlicer’s preview.")
+                 : "The printer stops before each of these layers and waits, so you can drop in magnets or nuts. Press Resume on the printer when they’re in. Layers count as in Bambu Studio’s and OrcaSlicer’s preview.")
                 .font(.footnote).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             if pauseTooLate, let count = layerCount {
                 Label("This print has \(count) layers.", systemImage: "exclamationmark.triangle.fill").font(.footnote).foregroundStyle(.red)

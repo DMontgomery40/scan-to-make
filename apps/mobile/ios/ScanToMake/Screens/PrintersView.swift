@@ -462,7 +462,7 @@ struct PrinterConnectionCard: View {
     private func load() async {
         do { connection = try await store.mac.client.printerConnection(printer.id); problem = nil }
         catch let failure as CompanionError { connection = nil; if !failure.isUnsupported { problem = ("route", failure.message) } }
-        catch { connection = nil }
+        catch { connection = nil; problem = ("route", CompanionError.unreachable.message) }
         loaded = true
     }
 
