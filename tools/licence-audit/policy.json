@@ -151,6 +151,14 @@
     {
       "ecosystem": "tool",
       "licence": "UNKNOWN",
+      "name": "tools/linux-reconstruct",
+      "reason": "First-party reconstruction wrapper, pending the repository licence decision (KAN-105), like capture-pipeline. This exemption covers only its source folder, not the packaged COLMAP/OpenMVS/Python/USD dependencies; their exact licences and OpenMVS corresponding source remain required in the reconstruction payload.",
+      "scope": "server",
+      "version": "workspace"
+    },
+    {
+      "ecosystem": "tool",
+      "licence": "UNKNOWN",
       "name": "tools/tailscale",
       "reason": "Pending the repository licence decision (KAN-105). This folder contains no GPL code and will carry or inherit the chosen root licence once it is added.",
       "scope": "server",
