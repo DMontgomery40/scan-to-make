@@ -25,7 +25,8 @@ xcodebuild archive -project "$repo/apps/mobile/ios/ScanToMake.xcodeproj" \
   -scheme ScanToMake -configuration Release -destination 'generic/platform=iOS' \
   -archivePath "$RELEASE_DIR/Counterpart.xcarchive" -derivedDataPath "$RELEASE_DIR/DerivedData" \
   DEVELOPMENT_TEAM=X7F5F9LR24 CURRENT_PROJECT_VERSION="$BUILD_NUMBER" -allowProvisioningUpdates
-xcodebuild -exportArchive -archivePath "$RELEASE_DIR/Counterpart.xcarchive" \
+# Apple's rsync must find its matching peer, not Homebrew's incompatible rsync.
+PATH=/usr/bin:/bin:/usr/sbin:/sbin /usr/bin/xcodebuild -exportArchive -archivePath "$RELEASE_DIR/Counterpart.xcarchive" \
   -exportOptionsPlist "$RELEASE_DIR/ExportOptions.plist" -exportPath "$RELEASE_DIR/export" \
   -allowProvisioningUpdates
 shopt -s nullglob

@@ -42,7 +42,8 @@ def inspect_bundle(bundle, platform):
     subprocess.run(['/usr/bin/codesign', '--verify', '--deep', '--strict', str(bundle)], check=True)
     signed = subprocess.run(['/usr/bin/codesign', '-d', '--entitlements', ':-', str(bundle)],
                             check=True, capture_output=True)
-    identity = subprocess.run(['/usr/bin/codesign', '-dv', str(bundle)], check=True, capture_output=True)
+    # Certificate authorities are printed only at verbosity 2 or higher.
+    identity = subprocess.run(['/usr/bin/codesign', '-dvv', str(bundle)], check=True, capture_output=True)
     authorities = identity.stderr.decode()
     allowed = ('Developer ID Application:',) if platform == 'mac' else ('Apple Distribution:', 'iPhone Distribution:')
     if not any('Authority=' + prefix in authorities for prefix in allowed):
