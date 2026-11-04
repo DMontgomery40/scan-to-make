@@ -21,6 +21,11 @@ export function surface(repo) {
         if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) text = node.text;
         else if ((ts.isPropertyAssignment(node) || ts.isShorthandPropertyAssignment(node) || ts.isPropertySignature(node)) && node.name && ts.isIdentifier(node.name)) text = node.name.text;
         if (text && SNAKE.test(text)) names.set(text, (names.get(text) ?? new Set()).add(relative(repo, file)));
+        // An object literal with any snake_case key is an MCP argument or result shape: its one-word keys count too.
+        if (ts.isObjectLiteralExpression(node)) {
+          const keys = node.properties.flatMap(property => property.name && (ts.isIdentifier(property.name) || ts.isStringLiteral(property.name)) ? [property.name.text] : []);
+          if (keys.some(key => SNAKE.test(key))) for (const key of keys) names.set(key, (names.get(key) ?? new Set()).add(relative(repo, file)));
+        }
         ts.forEachChild(node, visit);
       };
       visit(source);

@@ -361,7 +361,7 @@ struct PrintSheet: View {
                 HStack { Text("Quality").font(.headline); Spacer(); Text("Standard").foregroundStyle(.secondary) }
                 Text(presetOnlyWords).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
-            Text(profileLine).font(.caption).foregroundStyle(.secondary)
+            if !profileLine.isEmpty { Text(profileLine).font(.caption).foregroundStyle(.secondary) }
             if offersCopies {
                 Stepper {
                     HStack {
@@ -480,12 +480,13 @@ struct PrintSheet: View {
         return "Draft, Fine and Strength need a newer \(printer?.via ?? "printer MCP") on your Mac. Until then the printer's preset is used."
     }
 
-    /// "0.20 mm layers · 2 walls · 15% infill · Bambu PLA Basic profile", from the slice when it's back.
+    /// "0.20 mm layers · 2 walls · 15% infill · Bambu PLA Basic profile": the slice's own settings, as the printer MCP
+    /// reported them, once it's back. The app never guesses slicer numbers (PRD §8.0).
     private var profileLine: String {
-        let layer = estimate?.layerHeightMm ?? quality.layerHeightMm
-        var parts = [String(format: "%.2f mm layers", layer)]
-        if let walls = estimate?.wallLoops ?? (printer?.offersStrength == true ? strength.walls : nil) { parts.append("\(walls) walls") }
-        if let infill = estimate?.infillPercent ?? (printer?.offersStrength == true ? Double(strength.infillPercent) : nil) { parts.append("\(Int(infill))% infill") }
+        var parts: [String] = []
+        if let layer = estimate?.layerHeightMm { parts.append(String(format: "%.2f mm layers", layer)) }
+        if let walls = estimate?.wallLoops { parts.append("\(walls) walls") }
+        if let infill = estimate?.infillPercent { parts.append("\(Int(infill))% infill") }
         if let chosen { parts.append("\(chosen.displayName) profile") }
         return parts.joined(separator: " · ")
     }

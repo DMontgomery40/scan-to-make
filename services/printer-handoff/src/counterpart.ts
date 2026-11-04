@@ -301,8 +301,9 @@ export function detectCapabilities(config: PrinterHandoffConfig, catalog: Printe
   const pause = has('pause_print') && (info?.capabilities.pause ?? true);
   const resume = has('resume_print') && (info?.capabilities.resume ?? true);
   const cancel = has('cancel_print') && (info?.capabilities.cancel ?? true);
-  const quality = hasArgs(catalog, 'slice_stl', ['layer_height']);
-  const strength = hasArgs(catalog, 'slice_stl', ['wall_loops', 'sparse_infill_density']);
+  // The MCP turns quality and strength into its slicer's numbers (PRD §8.0); older versions say Update.
+  const quality = hasArgs(catalog, 'slice_stl', ['quality']);
+  const strength = hasArgs(catalog, 'slice_stl', ['strength']);
   const multiColour = has('counterpart_make_3mf');
   // Copies only where the slice really makes them: mcp-3D-printer-server forwards repetitions on its Bambu-compatible route only.
   const slicerType = (config.slicer?.type ?? '').toLowerCase();

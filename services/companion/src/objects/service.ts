@@ -1204,13 +1204,9 @@ export class ObjectService {
     const selected = object.publishedSelection ? {...colourSelection, plateIndex: object.publishedSelection.plateIndex} : colourSelection;
     const overrides = object.publishedSelection?.sliced
       ? {repetitions: 1, ...(options.pauseBeforeLayers?.length ? {pauseAtLayers: options.pauseBeforeLayers} : {})}
-      : sliceOverrides(options, selected?.nozzleDiameterMm);
-    if (isMultipart(object)) {
-      if (!options.quality || options.quality === 'standard') delete overrides.layerHeightMm;
-      if (!options.strength || options.strength === 'standard') { delete overrides.wallLoops; delete overrides.sparseInfillDensity; }
-    }
+      : sliceOverrides(options);
     const capabilities = destinationId ? this.#deps.printers?.capabilities(destinationId) : undefined;
-    if (capabilities && ((overrides.layerHeightMm !== undefined && !capabilities.quality) || (overrides.wallLoops !== undefined && !capabilities.strength)
+    if (capabilities && (('quality' in overrides && !capabilities.quality) || ('strength' in overrides && !capabilities.strength)
         || (overrides.repetitions !== undefined && overrides.repetitions > 1 && !capabilities.copies)
         || (overrides.pauseAtLayers?.length && !capabilities.layerPauses)))
       throw new InvalidStateError(settingsUnsupported(runner.backend, options));
@@ -1702,13 +1698,9 @@ export class ObjectService {
     const quality = request.quality ?? 'standard', strength = request.strength ?? 'standard';
     const copies = request.copies && request.copies > 1 ? request.copies : undefined;
     // Exactly as Print: named copies (1 included) override the printer config's own repetitions.
-    const overrides = object.publishedSelection?.sliced ? {repetitions: 1} : sliceOverrides({quality, strength, ...(request.copies !== undefined ? {copies: request.copies} : {})}, services.selection?.nozzleDiameterMm);
-    if (isMultipart(object)) {
-      if (quality === 'standard') delete overrides.layerHeightMm;
-      if (strength === 'standard') { delete overrides.wallLoops; delete overrides.sparseInfillDensity; }
-    }
+    const overrides = object.publishedSelection?.sliced ? {repetitions: 1} : sliceOverrides({quality, strength, ...(request.copies !== undefined ? {copies: request.copies} : {})});
     const capabilities = destinationId ? this.#deps.printers?.capabilities(destinationId) : undefined;
-    if (capabilities && ((overrides.layerHeightMm !== undefined && !capabilities.quality) || (overrides.wallLoops !== undefined && !capabilities.strength)
+    if (capabilities && (('quality' in overrides && !capabilities.quality) || ('strength' in overrides && !capabilities.strength)
         || (copies && !capabilities.copies)))
       throw new InvalidStateError(settingsUnsupported(services.runner.backend, {quality, strength, ...(copies ? {copies} : {})}));
     // A multi-colour model slices with its mapped spools' profiles, exactly as Print would:

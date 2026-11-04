@@ -520,7 +520,6 @@ final class CompanionClientTests: XCTestCase {
         XCTAssertEqual(PrintChoice(colour: .material("PETG")).body["colour"] as? [String: String], ["material": "PETG"])
         XCTAssertNil(PrintChoice(colour: .material("PETG")).body["filament"], "filament or colour, never both")
         XCTAssertEqual(Set(PrintChoice(colour: nil).body.keys), ["checked"])
-        XCTAssertEqual(PrintChoice(filament: filament).settingsLine, "0.20 mm layers · 2 walls · 15% infill")
         XCTAssertEqual(filament.displayName, "Bambu PLA Basic")
         XCTAssertEqual(PrinterFilament(slot: 254, colour: "#FFFFFF", material: "PETG", name: "Generic PETG #FFFFFF", filamentId: "", destinationId: "x").slotLabel, "Ext")
     }

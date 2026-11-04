@@ -35,7 +35,7 @@ async function setup(t, {tools = ['get_printer_status', 'camera_snapshot', 'paus
   const queue = [...reports];
   const relay = new InMemoryElicitationRelay({timeoutMs: 5000});
   const catalogTools = [...tools, ...(route ? ['counterpart_print_route'] : [])].map(name => name === 'slice_stl' && (sliceArgs || copies)
-    ? tool(name, {...(sliceArgs ? {layer_height: {}, wall_loops: {}, sparse_infill_density: {}} : {}), ...(copies ? {repetitions: {}} : {})}) : tool(name, controlsRoute && ['cancel_print', 'pause_print', 'resume_print'].includes(name) ? {connection_mode: {}, connection_type: {}} : {}));
+    ? tool(name, {...(sliceArgs ? {quality: {}, strength: {}, layer_height: {}, wall_loops: {}, sparse_infill_density: {}} : {}), ...(copies ? {repetitions: {}} : {})}) : tool(name, controlsRoute && ['cancel_print', 'pause_print', 'resume_print'].includes(name) ? {connection_mode: {}, connection_type: {}} : {}));
   const factory = () => ({
     catalog: undefined,
     async connect() { this.catalog = {server: {name: 'bambu-printer-mcp', version: '1.1.46'}, tools: catalogTools}; return this.catalog; },
@@ -91,7 +91,7 @@ async function setup(t, {tools = ['get_printer_status', 'camera_snapshot', 'paus
       {slot: 0, loaded: true, tray_color: '000000FF', tray_type: 'PETG', tray_info_idx: 'GFG00', resolved_profile_path: '/p/petg.json'},
       {slot: 1, loaded: true, tray_color: 'FEC600FF', tray_type: 'PLA', tray_info_idx: 'GFA00', resolved_profile_path: '/p/pla.json'},
       {slot: 254, loaded: true, tray_color: 'FFFFFFFF', tray_type: 'PLA', tray_info_idx: 'GFA00', resolved_profile_path: '/p/ext.json'}]}),
-    estimate: async input => { runs.push({estimate: input}); return {estimate: {seconds: 3420, grams: 19.2}, settings: {layers: 183, layerHeightMm: input.slicer?.layerHeightMm ?? 0.2, infillPercent: 15, wallLoops: 2}}; },
+    estimate: async input => { runs.push({estimate: input}); return {estimate: {seconds: 3420, grams: 19.2}, settings: {layers: 183, layerHeightMm: input.slicer?.quality === 'fine' ? 0.12 : 0.2, infillPercent: 15, wallLoops: 2}}; }, // as the MCP's slice reports it
     runBundle: async (store, id, options = {}) => {
       runs.push({id, options, selection: (await store.read(id)).selection});
       for (const phase of ['slicing', 'checking-printer']) await options.onProgress?.({phase});
@@ -461,7 +461,8 @@ test('print settings reach the slicer and printer; an MCP without them is refuse
   const f = await setup(t, {sliceArgs: true, reports: [status('IDLE', 0)]});
   await f.service.print(f.object.id, {quality: 'fine', strength: 'strong', colour: {amsSlot: 1}});
   const run = await until(() => f.runs.at(-1));
-  assert.deepEqual(run.options.slicer, {loadFilaments: '/p/pla.json', filamentColours: '#FEC600', layerHeightMm: 0.12, wallLoops: 4, sparseInfillDensity: '25%'});
+  // The person's choice goes to the MCP as chosen; the MCP picks its slicer's numbers (PRD §8.0).
+  assert.deepEqual(run.options.slicer, {loadFilaments: '/p/pla.json', filamentColours: '#FEC600', quality: 'fine', strength: 'strong'});
   assert.deepEqual(run.selection, {model: 'p1s', material: 'PLA', useAms: true, amsSlots: [1], autoMatchAms: false});
   assert.deepEqual((await f.service.get(f.object.id)).print.settings, {quality: 'fine', strength: 'strong', colour: {amsSlot: 1}});
   await f.approve(); await f.service.settled(f.object.id); await f.service.close();
@@ -495,7 +496,7 @@ test('an estimate slices exactly as Print would, is shared by identical requests
   assert.equal(a.layerHeightMm, 0.12);
   assert.equal(a.quality, 'fine');
   assert.equal(a.strength, 'standard');
-  assert.deepEqual(f.runs.find(run => run.estimate).estimate.slicer, {layerHeightMm: 0.12});
+  assert.deepEqual(f.runs.find(run => run.estimate).estimate.slicer, {quality: 'fine'});
   await f.service.estimate(f.object.id, {quality: 'fine'});
   assert.equal(f.runs.filter(run => run.estimate).length, 1);
   await writeFile(join(f.service.dir(f.object.id), 'current', 'model.stl'), Buffer.concat([STL, Buffer.from(' ')]));
@@ -987,8 +988,9 @@ test('saved project defaults reach Print, and explicit Standard overrides a save
   assert.equal(f.runs.length, 0, 'saving defaults never starts a print');
   await f.service.print(f.object.id);
   const run = await until(() => f.runs.at(-1));
-  assert.equal(run.options.slicer.layerHeightMm, 0.12);
-  assert.equal(run.options.slicer.wallLoops, 4);
+  assert.equal(run.options.slicer.quality, 'fine');
+  assert.equal(run.options.slicer.strength, 'strong');
+  assert.equal(run.options.slicer.layerHeightMm, undefined, 'no slicer numbers from the app');
   assert.equal(run.options.slicer.repetitions, 3);
   assert.deepEqual(run.selection.amsSlots, [1]);
   await f.approve(); await f.service.settled(f.object.id);
@@ -996,8 +998,8 @@ test('saved project defaults reach Print, and explicit Standard overrides a save
   await g.service.setProjectSettings(g.object.id, {printDefaults: defaults});
   await g.service.print(g.object.id, {quality: 'standard', strength: 'standard', copies: 1, colour: {auto: true}});
   const overridden = await until(() => g.runs.at(-1));
-  assert.equal(overridden.options.slicer.layerHeightMm, undefined);
-  assert.equal(overridden.options.slicer.wallLoops, undefined);
+  assert.equal(overridden.options.slicer.quality, undefined, 'Standard sends nothing');
+  assert.equal(overridden.options.slicer.strength, undefined);
   assert.equal(overridden.options.slicer.repetitions, 1);
   assert.equal(overridden.selection.autoMatchAms, true);
   await g.approve(); await g.service.settled(g.object.id);

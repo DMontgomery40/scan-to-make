@@ -165,7 +165,12 @@ fun PrintSheetScreen(id: String, close: () -> Unit, printing: () -> Unit) {
                 SectionTitle("Strength")
                 Segmented(PrintStrength.entries.map { it.title }, PrintStrength.entries.indexOf(strength), enabled = !working) { strength = PrintStrength.entries[it] }
             }
-            if (offersQuality || offersStrength) Text(String.format(java.util.Locale.US, "%.2f mm layers · %d walls · %d%% infill", selectedQuality.layerHeightMm, selectedStrength.walls, selectedStrength.infill), color = Palette.secondary, fontSize = 12.sp)
+            if (offersQuality || offersStrength) estimate?.let { e ->
+                // The slice's own settings, as the printer MCP reported them.
+                val parts = listOfNotNull(e.layerHeightMm?.let { String.format(java.util.Locale.US, "%.2f mm layers", it) },
+                    e.wallLoops?.let { "$it walls" }, e.infillPercent?.let { String.format(java.util.Locale.US, "%.0f%% infill", it) })
+                if (parts.isNotEmpty()) Text(parts.joinToString(" · "), color = Palette.secondary, fontSize = 12.sp)
+            }
             if (offersCopies) {
                 SectionTitle("Copies")
                 Row(verticalAlignment = Alignment.CenterVertically) {

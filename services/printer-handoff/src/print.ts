@@ -323,13 +323,13 @@ export class PrinterHandoffRunner {
     const alreadySliced = plate?.sliced === true;
     // A 3MF already owns its per-part filaments and profile. Global STL defaults must not collapse them.
     if (threeMf) {
-      for (const key of ['loadFilaments', 'filamentProfile', 'filamentColours', 'templateName', 'layerHeightMm', 'wallLoops', 'sparseInfillDensity', 'enableSupport', 'supportType'] as const) {
+      for (const key of ['loadFilaments', 'filamentProfile', 'filamentColours', 'templateName', 'quality', 'strength', 'layerHeightMm', 'wallLoops', 'sparseInfillDensity', 'enableSupport', 'supportType'] as const) {
         if (input.slicer?.[key] === undefined) delete slicer[key];
       }
     }
     if (alreadySliced && slicer.pauseAtLayers?.length)
       throw new PrinterMcpError('published-sliced-settings', undefined, 'This file is already sliced, so its layer pauses are the ones it was sliced with. Share the designer’s editable 3MF to add a pause.');
-    if (alreadySliced && ((slicer.repetitions ?? 1) !== 1 || ['layerHeightMm', 'wallLoops', 'sparseInfillDensity', 'enableSupport', 'supportType', 'loadFilaments', 'filamentProfile', 'filamentColours', 'templateName'].some(key => Object.hasOwn(input.slicer ?? {}, key))))
+    if (alreadySliced && ((slicer.repetitions ?? 1) !== 1 || ['quality', 'strength', 'layerHeightMm', 'wallLoops', 'sparseInfillDensity', 'enableSupport', 'supportType', 'loadFilaments', 'filamentProfile', 'filamentColours', 'templateName'].some(key => Object.hasOwn(input.slicer ?? {}, key))))
       throw new PrinterMcpError('published-sliced-settings', undefined, 'This file is already sliced. Share the designer’s editable 3MF to change its slicing settings or copies.');
     // A chosen spool's profile (load_filaments) replaces the configured filament alias: MCPs refuse the two when they differ.
     if (input.slicer?.loadFilaments && input.slicer.filamentProfile === undefined) delete slicer.filamentProfile;
@@ -362,7 +362,9 @@ export class PrinterHandoffRunner {
     // A chosen quality or strength the MCP can't apply is refused, never silently printed at preset values.
     {
       const sliceProperties = session.getTool('slice_stl').inputSchema.properties ?? {};
-      if ((slicer.layerHeightMm !== undefined && !Object.hasOwn(sliceProperties, 'layer_height'))
+      if ((slicer.quality !== undefined && slicer.quality !== 'standard' && !Object.hasOwn(sliceProperties, 'quality'))
+          || (slicer.strength !== undefined && slicer.strength !== 'standard' && !Object.hasOwn(sliceProperties, 'strength'))
+          || (slicer.layerHeightMm !== undefined && !Object.hasOwn(sliceProperties, 'layer_height'))
           || (slicer.wallLoops !== undefined && !Object.hasOwn(sliceProperties, 'wall_loops'))
           || (slicer.sparseInfillDensity !== undefined && !Object.hasOwn(sliceProperties, 'sparse_infill_density'))
           || (slicer.pauseAtLayers?.length && !Object.hasOwn(sliceProperties, 'pause_at_layers'))
@@ -386,6 +388,9 @@ export class PrinterHandoffRunner {
       load_filaments: slicer.loadFilaments,
       filament_colours: slicer.filamentColours,
       template_name: slicer.templateName,
+      // Standard sends nothing: the preset decides, on MCPs with or without quality and strength.
+      quality: slicer.quality === 'standard' ? undefined : slicer.quality,
+      strength: slicer.strength === 'standard' ? undefined : slicer.strength,
       layer_height: slicer.layerHeightMm,
       wall_loops: slicer.wallLoops,
       sparse_infill_density: slicer.sparseInfillDensity,

@@ -52,7 +52,10 @@ export const printerSlicerSchema = z.strictObject({
   /** One `#RRGGBB` per filament in order, `;`-separated — `slice_stl`'s `filament_colours` shape. */
   filamentColours: z.string().regex(/^#[0-9a-fA-F]{6}(;#[0-9a-fA-F]{6}){0,63}$/).optional(),
   templateName: z.string().trim().min(1).max(256).optional(),
-  /** Print-sheet quality and strength (PRD §8.5), as process overrides through slice_stl. */
+  /** The print sheet's quality and strength (PRD §8.5), passed to slice_stl as chosen: the MCP owns the numbers (PRD §8.0). */
+  quality: z.enum(['draft', 'standard', 'fine']).optional(),
+  strength: z.enum(['standard', 'strong', 'max']).optional(),
+  /** A printer config's own explicit process values, passed through unchanged. */
   layerHeightMm: z.number().min(0.04).max(1.2).optional(),
   wallLoops: z.number().int().min(1).max(20).optional(),
   sparseInfillDensity: z.string().regex(/^(100|[1-9]?[0-9])%$/).optional(),

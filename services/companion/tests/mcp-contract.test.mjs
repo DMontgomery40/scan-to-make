@@ -27,7 +27,7 @@ test('every counterpart/1 result field the app validates is in the contract doc,
   assert.deepEqual([...listed].filter(name => !fields.has(name)).sort(), [], `${doc} lists result fields counterpart.ts no longer reads.`);
 });
 
-test('no name is listed twice', () => {
-  const all = [...sections.values()].flatMap(set => [...set]);
+test('no tool, argument or metadata name is listed twice (result fields may share names with arguments)', () => {
+  const all = [...sections].filter(([title]) => title !== FIELDS).flatMap(([, set]) => [...set]);
   assert.deepEqual(all.filter((name, i) => all.indexOf(name) !== i), []);
 });

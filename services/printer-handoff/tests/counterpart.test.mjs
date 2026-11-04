@@ -67,7 +67,7 @@ test('capabilities light up from the tool list, and say exactly which update unl
     capabilities: {progress: true, layers: false, camera: 'none', filaments: 'single', pause: true, resume: true, cancel: true, print3mf: false, gcode: true}};
   const updated = detectCapabilities(generic, catalog(tool('counterpart_printer_info'), tool('counterpart_print_progress'), tool('camera_snapshot'),
     tool('get_printer_filaments'), tool('pause_print'), tool('resume_print'), tool('cancel_print'),
-    tool('slice_stl', {layer_height: {}, wall_loops: {}, sparse_infill_density: {}})), info, at);
+    tool('slice_stl', {quality: {}, strength: {}})), info, at);
   assert.equal(updated.contract, 'counterpart/1');
   assert.equal(updated.camera, 'none', 'the firmware has no camera: not something an update unlocks');
   assert.deepEqual(updated.missing, []);

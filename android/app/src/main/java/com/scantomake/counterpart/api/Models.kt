@@ -312,14 +312,17 @@ data class PrinterFilament(val slot: Int, val colour: String = "#888888", val ma
 /** `POST /v1/objects/<id>/estimate`. */
 @Serializable
 data class SliceEstimate(val destinationId: String = "", val quality: String = "standard", val strength: String = "standard",
-                         val seconds: Double? = null, val grams: Double? = null, val layers: Int? = null, val slicerWarning: String? = null)
+                         val seconds: Double? = null, val grams: Double? = null, val layers: Int? = null, val slicerWarning: String? = null,
+                         // What the printer MCP actually sliced with: the app never guesses slicer numbers (PRD §8.0).
+                         val layerHeightMm: Double? = null, val wallLoops: Int? = null, val infillPercent: Double? = null)
 
-enum class PrintQuality(val wire: String, val title: String, val layerHeightMm: Double) {
-    Draft("draft", "Draft", 0.28), Standard("standard", "Standard", 0.20), Fine("fine", "Fine", 0.12)
+/** The print sheet's choices, sent as chosen; the printer MCP turns them into its slicer's settings. */
+enum class PrintQuality(val wire: String, val title: String) {
+    Draft("draft", "Draft"), Standard("standard", "Standard"), Fine("fine", "Fine")
 }
 
-enum class PrintStrength(val wire: String, val title: String, val walls: Int, val infill: Int) {
-    Standard("standard", "Standard", 2, 15), Strong("strong", "Strong", 4, 25), Max("max", "Max", 6, 40)
+enum class PrintStrength(val wire: String, val title: String) {
+    Standard("standard", "Standard"), Strong("strong", "Strong"), Max("max", "Max")
 }
 
 /** Which filament a print uses (`colour` / `filament` in `POST …/print`). */

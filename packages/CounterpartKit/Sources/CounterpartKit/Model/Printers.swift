@@ -244,18 +244,16 @@ public struct ColourMapping: Codable, Equatable, Sendable {
     }
 }
 
-/// The print sheet's choices (PRD §5.5). Quality and strength map to the slicer through the MCP (§8.5).
+/// The print sheet's choices (PRD §5.5), sent as chosen: the printer MCP turns them into its slicer's settings
+/// (PRD §8.0). The sheet shows the numbers only from the slice the MCP reports.
 public enum PrintQuality: String, CaseIterable, Codable, Sendable {
     case draft, standard, fine
     public var title: String { rawValue.capitalized }
-    public var layerHeightMm: Double { switch self { case .draft: 0.28; case .standard: 0.20; case .fine: 0.12 } }
 }
 
 public enum PrintStrength: String, CaseIterable, Codable, Sendable {
     case standard, strong, max
     public var title: String { rawValue.capitalized }
-    public var walls: Int { switch self { case .standard: 2; case .strong: 4; case .max: 6 } }
-    public var infillPercent: Int { switch self { case .standard: 15; case .strong: 25; case .max: 40 } }
 }
 
 /// Which filament a print uses (`colour` in `POST …/print`, PRD §5.5).
@@ -324,11 +322,6 @@ public struct PrintChoice: Equatable, Sendable {
         let pauses = Array(Array(Set(pauseBeforeLayers.filter { $0 >= 2 })).sorted().prefix(Self.maxPauses))
         if !pauses.isEmpty { json["pauseBeforeLayers"] = pauses }
         return json
-    }
-
-    /// "0.20 mm layers · 2 walls · 15% infill"
-    public var settingsLine: String {
-        String(format: "%.2f mm layers · %d walls · %d%% infill", quality.layerHeightMm, strength.walls, strength.infillPercent)
     }
 }
 
