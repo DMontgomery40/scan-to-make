@@ -347,20 +347,21 @@ remote native probes and the SSH tunnel were removed after verification.
      npm **1.2.26** published at 08:04:34Z (Publish Package run `41796478364`); registry latest independently
      verified. Release/tag v1.2.26 published; #49–#51 closed as released.
    - Both published packages advertise all four FDM prompts. That startup check is engineering evidence only;
-     installed app Update/visible-control acceptance remains with the MCP owner.
+     Bambu Update succeeded through the installed app at 13:37Z; physical-control acceptance remains open.
    - This TestFlight thread owns handoff/distribution/site/appcast, app packaging and Counterpart
      [#298](https://github.com/DMontgomery40/scan-to-make/pull/298), merged as `e7d5f6d` and shipped
      in Mac build 202611040120. MCP-only releases need no new iPhone build.
      Its status-doc edits were removed by the MCP owner and reconciled here. Do not replace the installed app
      during that thread's MCP update/acceptance; coordinate the later Mac upgrade explicitly.
-   - **Installed updater obstacle:** the hand-copied Bambu build reports 1.1.52. Newer releases exposed Update,
+   - **Resolved updater obstacles:** the previous hand-copied Bambu build reported 1.1.52. Newer releases exposed Update,
      but the earlier update failed at 11:34:59Z: Homebrew npm 11.20.0 skipped Bambu's required postinstall
      under allowScripts, and Counterpart retained the old copy. Latest published versions reported by MCP
      owner are Bambu **1.1.54** (`e1fbc69`) and generic **1.2.28** (`381ff87`), including support arguments.
      Parent's companion fix authorizes only the selected package with `--allow-scripts=<pkg>` on global
      Download/Update, enables foreground scripts and verifies any declared postinstall banner before swap.
      Checkout `npm ci` is unchanged. Focused Linux companion build and updater checks pass (30/30);
-     the installed app still lacks this fix, so UI Update acceptance remains blocked until packaging.
+     build 202611040628 now includes this and the Node native-addon signing fix. Actual UI Update to
+     published Bambu 1.1.54 succeeded at 13:37Z; see the deployment receipt above.
      Earlier integrated source `07241c503` passed official agents-136 CI: contracts 58, printer-handoff
      108 (5 skipped), companion 811 (1 skipped), and all six Python suites; this is engineering evidence.
      MCP owner checked Settings: Developer Mode was already selected; saved credentials returned a fresh
