@@ -2,6 +2,7 @@
 # Derived from the COLMAP binary's ldd closure plus libposelib (under-declared by the colmap package).
 # Regenerate only with a version bump review: apt-cache show <pkg> -> Version/SHA256.
 colmap 3.12.6-4 b9760d323ef697959f0279c5422062c07484d853dfd3c552cc09e0c3564d100e
+gcc-16-base 16-20260322-1ubuntu1 281b3188840a7abdca85a02eb2609b0efad852e8994b3804a0e4227ec4ec3f90
 libamd3 1:7.12.2+dfsg-1ubuntu1 13dbd6bd4bbd19745b1196993eaa4d3fba5efa2e8f262ed01aec222a20cd8904
 libatomic1 16-20260322-1ubuntu1 82fa61135e7154d7958feaa91ec1808a688eb1e0e06822ab35e99e2480feb148
 libboost-program-options1.90.0 1.90.0-6ubuntu1 552699d9211d5e9bc6c2ff97c412a901b431ba61eb7d93c8c139c3d20f45104e

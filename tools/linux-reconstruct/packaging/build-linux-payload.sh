@@ -120,6 +120,9 @@ if bad:
 print(f"verified {len(by_name)} pinned .debs")
 PYEOF
 for deb in "$work/debs"/*.deb; do dpkg -x "$deb" "$stage/colmap-root"; done
+# Qt's development-tool selector is unused by the offscreen COLMAP runtime.
+# Its default.conf links to qtchooser, which is intentionally not shipped.
+rm -rf "$stage/colmap-root/usr/lib/x86_64-linux-gnu/qt-default"
 # Debian alternatives (blas/lapack) are postinst symlinks dpkg -x does not
 # create; link the shipped reference implementations into the library dir.
 libdir="$stage/colmap-root/usr/lib/x86_64-linux-gnu"
@@ -139,9 +142,12 @@ mkdir -p "$stage/licenses/debian"
 while read -r pkg _version _sha _rest; do
   case "$pkg" in ''|'#'*) continue ;; esac
   src="$stage/colmap-root/usr/share/doc/$pkg/copyright"
-  [ -f "$src" ] && cp "$src" "$stage/licenses/debian/$pkg.copyright"
+  [ -f "$src" ] || { echo "Missing shipped copyright for $pkg: $src" >&2; exit 1; }
+  cp "$src" "$stage/licenses/debian/$pkg.copyright"
 done < "$PACKAGES_FILE"
 cp "$PACKAGES_FILE" "$stage/licenses/debian/colmap-packages.txt"
+broken_links=$(find "$stage/colmap-root" -xtype l -print)
+[ -z "$broken_links" ] || { echo "Broken distro payload links: $broken_links" >&2; exit 1; }
 # Closure proof, strict: with the payload's own library paths, every needed
 # library of every shipped binary must resolve INSIDE the payload - except
 # the documented Ubuntu 26.04 glibc baseline. A resolution into the build
