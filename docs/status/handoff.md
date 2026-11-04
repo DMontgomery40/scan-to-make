@@ -50,7 +50,7 @@ What to build: [`../design/overhaul/PRD.md`](../design/overhaul/PRD.md), journey
 
 | What | Version | From |
 |---|---|---|
-| Mac app `/Applications/Counterpart.app` | **202611032022** | main @ `2f7f43e` (Resume confirmation deadlock fix; source audit found #295/pause-at-layer absent from this main build, contrary to the older handoff) |
+| Mac app `/Applications/Counterpart.app` | **202611040557** | release @ `4d6838f0`: includes #295/#299/#302/#303, provider routing and updater script-permission fix. Signed development CloudKit/APNs; installed while idle Nov 4. #300 is later source, not in this app. |
 | iPhone "Davica3" (`00008150-001A488C3642401C`) | **2.0 (202611040322), DEBUG** | Phone/deploy owner verified Nov 4: `feat/phone-pause-and-printer-pickers` around `f03580e`; installed by its child around 03:24 MST. Includes #271 virtual RealityView camera and handheld teardown. Fixture screen launches are not connected-app acceptance. |
 | bambu-printer-mcp (what Counterpart runs) | 1.1.46 install + dist from `feat/one-printer-control-route` @ `587461b` (active since 20:17) (a built `native/bambu-native-print` from `exp/native-plugin-controls` sits beside it, unused for a P1S) | `~/Library/Application Support/Scan to Make/printers/bambu-1.1.46/lib/node_modules/bambu-printer-mcp/dist` |
 | mcp-3D-printer-server | live dist from `56d8fb9`; source `feat/bambu-complete` now `afcf378` (new layer-pause parity not deployed) | runs from its own folder and `.env` |
@@ -264,7 +264,17 @@ remote native probes and the SSH tunnel were removed after verification.
      clicked it, closed Blender's untouched startup scene normally, and Check Again reported Blender set up.
      AirPods 25 mm + FDM request and Stove FDM request were resent through the actual Send buttons at
      1793790273706 / 1793790324011; both showed Working, AirPods had real Blender tool activity.
-     **Current hold, Nov 4 13:05Z:** visible Mac UI shows AirPods **Getting the print ready**, with a floating-
+     **Deployment completed after fresh idle verification:** parent observed AirPods **Couldn't finish /
+     The printer stopped**, no pending confirmation, no Working/Printing projects, and P1S **Ready** in Settings.
+     Installed the already-signed `202611040557` (`4d6838f0`, includes #303 and updater fix, predates #300), retaining
+     immediate rollback at `~/scan-to-make-work/combined-mac-202611040557/Counterpart.previous`.
+     Quit through the app, replaced `/Applications/Counterpart.app`, restarted only its companion (PID 83387),
+     and verified retained projects and printer state through UI. All nine project IDs, settings, printer config,
+     companion environment and credentials are retained; only the instance-lock owner receipt changed.
+     Settings shows P1S Ready, Local network / Developer Mode selected, and Update 1.1.52 → 1.1.54.
+     Explicit **SETTLED** UI handoff sent directly to MCP owner for Update; parent did not click it.
+     Phone, printer operations and public appcast stayed untouched. Deployment receipts are beside the build.
+     **Earlier hold, Nov 4 13:05Z:** visible Mac UI showed AirPods **Getting the print ready**, with a floating-
      cantilever warning, unchecked **Print anyway**, **Cancel Print**, and disabled **Print**. P1S shows Ready,
      but the pending print question means deployment is not idle. Parent left the decision untouched and
      notified both owners directly: no install, restart or MCP Update until David resolves it and idle is
