@@ -46,7 +46,22 @@ linux-reconstruct samples <photosDir> <output.usdz> full --save-masks <masksDir>
     [--object-region <capture-object-region.json>] \
     [--measurement <capture-measurement.json>] \
     [--work-dir <path>]
+
+linux-reconstruct qualify <input.usdz> <output.usdz> \
+    [--object-region <capture-object-region.json>] \
+    [--measurement <capture-measurement.json>] \
+    [--work-dir <path>]
 ```
+
+`samples` rebuilds from photos (COLMAP + OpenMVS, Linux hosts). `qualify`
+takes a mesh somebody else rebuilt — on a Mac host, Apple's
+PhotogrammetrySession output for an Android capture — and runs the same
+object-region and scale gates on it. Its units are untrusted: Apple gives
+that host no camera centres to fit ARCore poses against, so `qualify`
+accepts no camera metadata and scale there can only come from an explicit
+measurement. The work directory binds to the input file's hash
+(`qualify-<sha256>`) exactly as `samples` binds to the capture key, and the
+receipt records `"mode": "qualify"` plus the source hash.
 
 Two independent questions can stop a run, in this order: **which part is
 the object** (exit 5) and **how big is it** (exit 4, only when the camera
@@ -231,6 +246,13 @@ measurement by itself never satisfies the object-region gate.
 
 `axis` is one of `x|y|z` — the axes/extents named in the needs-scale
 receipt. `extentMm` ∈ [1, 10000]. A receipt for a different mesh is refused.
+
+## Packaging
+
+Concrete versions, licences, layout and install/verify steps live in
+[`packaging-manifest.json`](packaging-manifest.json), with rationale in
+[`PACKAGING.md`](PACKAGING.md). Nothing is bundled yet; do not claim
+otherwise.
 
 ## Dependencies and licences
 

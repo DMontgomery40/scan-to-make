@@ -51,6 +51,47 @@ def export_usdz(mesh, usdc_path, usdz_path):
                   expect_faces=len(mesh.faces))
 
 
+def read_usdz_mesh(usdz_path):
+    """All mesh prims of a USD/USDZ merged into one mesh in world (stage)
+    coordinates: points composed through each prim's local-to-world
+    transform exactly once, faces triangulated as fans. Units are whatever
+    the source stage used; callers must not assume metres. Raises on
+    non-finite or missing geometry. Returns (vertices, faces).
+    """
+    Gf, Usd, UsdGeom, _uu, _vt = _load_pxr()
+    stage = Usd.Stage.Open(str(usdz_path))
+    if stage is None:
+        raise RuntimeError("input USDZ does not open")
+    cache = UsdGeom.XformCache()
+    vertices, faces = [], []
+    for prim in stage.Traverse():
+        if not prim.IsA(UsdGeom.Mesh):
+            continue
+        mesh = UsdGeom.Mesh(prim)
+        points = mesh.GetPointsAttr().Get()
+        counts = mesh.GetFaceVertexCountsAttr().Get()
+        indices = mesh.GetFaceVertexIndicesAttr().Get()
+        if points is None or counts is None or indices is None:
+            raise RuntimeError("input USDZ mesh is missing geometry attributes")
+        matrix = cache.GetLocalToWorldTransform(prim)
+        base = len(vertices)
+        for p in points:
+            w = matrix.Transform(Gf.Vec3d(float(p[0]), float(p[1]), float(p[2])))
+            v = (float(w[0]), float(w[1]), float(w[2]))
+            if not all(math.isfinite(c) for c in v):
+                raise RuntimeError("input USDZ contains non-finite points")
+            vertices.append(v)
+        offset = 0
+        for count in counts:
+            face = [base + int(i) for i in indices[offset:offset + count]]
+            offset += count
+            for k in range(1, count - 1):
+                faces.append((face[0], face[k], face[k + 1]))
+    if not faces:
+        raise RuntimeError("input USDZ contains no mesh faces")
+    return vertices, faces
+
+
 def validate_usdz(usdz_path, expect_vertices=None, expect_faces=None):
     Gf, Usd, UsdGeom, UsdUtils, Vt = _load_pxr()
     stage = Usd.Stage.Open(str(usdz_path))

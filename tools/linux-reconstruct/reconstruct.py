@@ -39,7 +39,7 @@ import scale as scale_mod
 import schemas
 import usd_export
 
-TOOL_VERSION = "1.1.0"
+TOOL_VERSION = "1.2.0"
 RECEIPT_VERSION = 1
 PHOTO_SUFFIXES = {".jpg", ".jpeg", ".png"}
 MIN_PHOTOS, MAX_PHOTOS = 8, 300
@@ -468,9 +468,281 @@ def write_json_atomic(path, obj):
     os.replace(tmp, path)
 
 
+def finish_from_mesh(raw_mesh, fit, anchor, options, work, output, receipt, timings, started, key):
+    """Object-region gate, scale gate and metric export for one raw mesh.
+    Shared by the COLMAP/OpenMVS pipeline (samples) and qualification of an
+    externally rebuilt mesh (qualify, e.g. Apple PhotogrammetrySession
+    output on a Mac host). Returns an exit code; raises RunError/Cancelled.
+    """
+    to_metric = None
+    if fit and fit["ok"]:
+        s, r, t = fit["scaleMPerUnit"], fit["rotation"], tuple(fit["translation"])
+        to_metric = lambda p: scale_mod.apply_similarity(s, r, t, p)
+
+    # Object-identity gate. Nothing the tool computes proves which part
+    # of the reconstruction is the intended object: the largest piece may
+    # be the table and an anchor sphere includes its support surface.
+    # Export therefore requires the person's explicit confirmation,
+    # bound by hash to the exact preview mesh. This gate is independent
+    # of scale: a proven camera fit does not bypass it, and a
+    # measurement alone does not satisfy it.
+    preview_path = work / "preview.ply"
+    mesh_mod.write_ply(preview_path, raw_mesh)
+    preview_sha = schemas.sha256_file(preview_path)
+    preview_stl = work / "preview.stl"
+    mesh_mod.write_stl(preview_stl, raw_mesh)
+    components = mesh_mod.connected_components(raw_mesh)
+    plo, phi, _pext = raw_mesh.extents()
+    region_source = options.object_region
+    applied_path = work / "object-region.json"
+    if region_source is None and applied_path.exists():
+        region_source = str(applied_path)   # confirmed in an earlier run
+    if region_source is None:
+        sugg_kind, payload, sugg = suggested_selection(
+            raw_mesh, components, anchor, to_metric)
+        if sugg_kind == "anchor-region":
+            sugg_mesh = mesh_mod.submesh(payload[0], payload[1])
+        elif components:
+            sugg_mesh = mesh_mod.submesh(raw_mesh, components[0][1])
+        else:
+            sugg_mesh = raw_mesh
+        _slo, _shi, sugg_ext = sugg_mesh.extents()
+        sugg["extents"] = {a: round(sugg_ext[a], 6) for a in ("x", "y", "z")}
+        if to_metric is not None:
+            metric_pts = [to_metric(v) for v in sugg_mesh.vertices]
+            sugg["extentsM"] = {
+                a: round(max(p[i] for p in metric_pts) - min(p[i] for p in metric_pts), 6)
+                for i, a in enumerate(("x", "y", "z"))}
+        region_receipt = {
+            "version": RECEIPT_VERSION, "kind": "needs-object-region",
+            "toolVersion": TOOL_VERSION, "captureKey": key,
+            "previewMesh": str(preview_path),
+            "previewStl": str(preview_stl),
+            "previewMeshSha256": preview_sha,
+            "units": "reconstruction units; multiply by scaleMPerUnit when "
+                     "scaleKnown (axes are the reconstruction axes)",
+            "boundsMin": [round(v, 6) for v in plo],
+            "boundsMax": [round(v, 6) for v in phi],
+            "vertices": len(raw_mesh.vertices), "faces": len(raw_mesh.faces),
+            "components": component_stats(raw_mesh, components),
+            "suggestion": sugg,
+            "scaleKnown": bool(fit and fit["ok"]),
+            "scaleMPerUnit": fit["scaleMPerUnit"] if fit and fit["ok"] else None,
+            "cameraScaleFit": receipt.get("cameraScaleFit"),
+            "confirm": "answer with capture-object-region v1: "
+                       "{version:1, kind:'capture-object-region', previewMeshSha256, "
+                       "selection:{type:'suggested'} | {type:'component', index:<int>} "
+                       "| {type:'crop', min:[x,y,z], max:[x,y,z]}} in preview coordinates; "
+                       "then rerun with --object-region <file> (it is remembered in the "
+                       "work directory, so a later --measurement resume does not repeat it)",
+        }
+        receipt.update({"status": "needs-object-region", "scale": None,
+                        "objectSelection": {"method": "unconfirmed",
+                                            "suggestion": sugg},
+                        "timingsSeconds": timings,
+                        "elapsedSeconds": round(time.monotonic() - started, 2)})
+        needs_path = work / "needs-object-region.json"
+        write_json_atomic(needs_path, region_receipt)
+        write_json_atomic(work / "receipt.json", receipt)
+        emit({"needsObjectRegion": {"receipt": str(needs_path),
+                                    "previewMeshSha256": preview_sha,
+                                    "previewMesh": str(preview_path),
+                                    "previewStl": str(preview_stl),
+                                    "boundsMin": region_receipt["boundsMin"],
+                                    "boundsMax": region_receipt["boundsMax"],
+                                    "components": region_receipt["components"],
+                                    "scaleKnown": region_receipt["scaleKnown"],
+                                    "scaleMPerUnit": region_receipt["scaleMPerUnit"],
+                                    "suggestion": sugg}})
+        return 5
+    try:
+        region = schemas.load_object_region(
+            region_source, preview_sha, len(components), plo, phi)
+    except schemas.SchemaError as e:
+        raise RunError("object-region-invalid", str(e)) from e
+    if options.object_region:   # remember the confirmation for resumes
+        tmp_copy = applied_path.with_suffix(".json.tmp")
+        tmp_copy.write_bytes(Path(options.object_region).read_bytes())
+        os.replace(tmp_copy, applied_path)
+    selected, selection = apply_selection(
+        raw_mesh, components, region, anchor, to_metric)
+    selected.validate()
+    receipt["objectSelection"] = selection
+
+    # Cache the selected unscaled mesh; measurement binds to its hash.
+    selected_path = work / "selected-unscaled.ply"
+    mesh_mod.write_ply(selected_path, selected)
+    mesh_sha = schemas.sha256_file(selected_path)
+    selected_stl = work / "selected-unscaled.stl"
+    mesh_mod.write_stl(selected_stl, selected)
+    lo, hi, extents = selected.extents()
+
+    scale_report = None
+    transform = None     # point -> metres
+    up_provenance = "unverified: reconstruction frame kept; app must confirm orientation"
+    if fit and fit["ok"]:
+        s = fit["scaleMPerUnit"]
+        transform = to_metric
+        up_provenance = "arcore-world: similarity rotation maps to the capture's Y-up frame"
+        scale_report = {"method": "camera-centre-similarity", "scaleMPerUnit": s}
+    elif options.measurement:
+        try:
+            axis, extent_mm, s = schemas.load_measurement(
+                options.measurement, mesh_sha, extents)
+        except schemas.SchemaError as e:
+            raise RunError("measurement-invalid", str(e)) from e
+        transform = lambda p: (s * p[0], s * p[1], s * p[2])
+        # A measurement states a size only. Object identity comes from
+        # the capture-object-region confirmation above, never from here.
+        scale_report = {"method": "user-measurement", "scaleMPerUnit": s,
+                        "axis": axis, "extentMm": extent_mm}
+    if transform is None:
+        preview = {
+            "version": RECEIPT_VERSION, "kind": "needs-scale",
+            "toolVersion": TOOL_VERSION, "captureKey": key,
+            "meshSha256": mesh_sha,
+            "previewMesh": str(selected_path),
+            "previewStl": str(selected_stl),
+            "units": "arbitrary reconstruction units (NOT metres)",
+            "extents": {a: round(extents[a], 6) for a in ("x", "y", "z")},
+            "boundsMin": [round(v, 6) for v in lo],
+            "boundsMax": [round(v, 6) for v in hi],
+            "vertices": len(selected.vertices), "faces": len(selected.faces),
+            "objectSelection": selection,
+            "cameraScaleFit": receipt.get("cameraScaleFit"),
+            "measure": "answer with capture-measurement v1: "
+                       "{version:1, kind:'capture-measurement', meshSha256, "
+                       "axis:'x'|'y'|'z', extentMm:<number>} for one extent above",
+        }
+        receipt.update({"status": "needs-scale", "scale": None,
+                        "timingsSeconds": timings,
+                        "elapsedSeconds": round(time.monotonic() - started, 2)})
+        needs_path = work / "needs-scale.json"
+        write_json_atomic(needs_path, preview)
+        write_json_atomic(work / "receipt.json", receipt)
+        emit({"needsScale": {"receipt": str(needs_path), "meshSha256": mesh_sha,
+                             "extents": preview["extents"],
+                             "boundsMin": preview["boundsMin"],
+                             "boundsMax": preview["boundsMax"],
+                             "previewMesh": str(selected_path),
+                             "previewStl": str(selected_stl)}})
+        return 4
+
+    stage("exporting", 0.95)
+    metres = mesh_mod.Mesh([transform(v) for v in selected.vertices],
+                           list(selected.faces))
+    # Recentre: footprint centre at origin, lowest point at y=0. Scale
+    # and orientation are untouched; only translation changes.
+    mlo, mhi, mext = metres.extents()
+    cx, cz = (mlo[0] + mhi[0]) / 2, (mlo[2] + mhi[2]) / 2
+    metres.vertices = [(x - cx, y - mlo[1], z - cz) for x, y, z in metres.vertices]
+    if metres.signed_volume() < 0:   # outward winding for right-handed USD
+        metres.faces = [(a, c, b) for a, b, c in metres.faces]
+    metres.validate()
+    _lo, _hi, extents_m = metres.extents()
+    if max(extents_m.values()) > 10.0 or min(extents_m.values()) <= 0:
+        raise RunError("scale-implausible",
+                       "the scaled object would be over 10 m or degenerate; "
+                       "check the measurement and try again")
+    output.parent.mkdir(parents=True, exist_ok=True)
+    tmp_usdz = output.with_suffix(".tmp.usdz")
+    tmp_usdc = work / "export.usdc"
+    try:
+        usd_export.export_usdz(metres, tmp_usdc, tmp_usdz)
+        os.replace(tmp_usdz, output)   # atomic publish; done only after this
+    finally:
+        tmp_usdz.unlink(missing_ok=True)
+    scale_report["extentsM"] = {a: round(extents_m[a], 6) for a in ("x", "y", "z")}
+    scale_report["upAxisProvenance"] = up_provenance
+    receipt.update({"status": "done", "scale": scale_report,
+                    "outputSha256": schemas.sha256_file(output),
+                    "outputMeshSha256": mesh_sha,
+                    "timingsSeconds": timings,
+                    "elapsedSeconds": round(time.monotonic() - started, 2)})
+    write_json_atomic(work / "receipt.json", receipt)
+    write_json_atomic(output.with_suffix(".receipt.json"), receipt)
+    emit({"done": str(output)})
+    return 0
+
+
+def qualify_main(args):
+    """Qualify an externally rebuilt USDZ (e.g. Apple PhotogrammetrySession
+    output for an Android capture on a Mac host).
+
+    The source mesh's units are NOT trusted: Apple gives this host no camera
+    centres to fit ARCore poses against, so camera metadata is not accepted
+    here and scale can only come from an explicit measurement. Object
+    identity and scale go through the same gates as the photo pipeline.
+    """
+    signal.signal(signal.SIGINT, _on_signal)
+    signal.signal(signal.SIGTERM, _on_signal)
+    started = time.monotonic()
+    timings = {}
+    receipt = {"version": RECEIPT_VERSION, "tool": "linux-reconstruct",
+               "toolVersion": TOOL_VERSION, "status": "failed", "mode": "qualify"}
+    work = None
+    try:
+        source = Path(args.input).resolve()
+        output = Path(args.output).resolve()
+        if output.suffix.lower() != ".usdz":
+            raise RunError("bad-arguments", "output must be a .usdz path")
+        if not source.is_file():
+            raise RunError("input-missing", f"input model does not exist: {source}")
+        if source.stat().st_size > MAX_CAPTURE_BYTES:
+            raise RunError("input-too-large", "the input model exceeds the size bound")
+        stage("inventory", 0.01)
+        key = "qualify-" + schemas.sha256_file(source)[:24]
+        work = Path(args.work_dir).resolve() if args.work_dir else \
+            output.parent / ".linux-reconstruct-work" / key
+        work.mkdir(parents=True, exist_ok=True)
+        os.chmod(work, 0o700)
+        key_file = work / "capture-key.json"
+        if key_file.exists():
+            try:
+                stored = json.loads(key_file.read_text(encoding="utf-8")).get("captureKey")
+            except (OSError, json.JSONDecodeError, AttributeError):
+                stored = None
+            if stored != key:
+                raise RunError("work-dir-mismatch",
+                               "this work directory belongs to a different model; "
+                               "use a new work directory")
+        else:
+            write_json_atomic(key_file, {"captureKey": key})
+        receipt.update({"captureKey": key, "sourceSha256": schemas.sha256_file(source),
+                        "source": "external-usdz (units untrusted)"})
+        vertices, faces = usd_export.read_usdz_mesh(source)
+        raw_mesh = mesh_mod.Mesh(vertices, faces)
+        raw_mesh.validate()
+        return finish_from_mesh(raw_mesh, None, None, args, work, output,
+                                receipt, timings, started, key)
+    except Cancelled:
+        emit({"error": "cancelled", "code": "cancelled"})
+        return 2
+    except RunError as e:
+        receipt.update({"status": "failed", "error": str(e), "code": e.code,
+                        "timingsSeconds": timings,
+                        "elapsedSeconds": round(time.monotonic() - started, 2)})
+        if work is not None:
+            try:
+                write_json_atomic(work / "receipt.json", receipt)
+            except OSError:
+                pass
+        emit({"error": str(e), "code": e.code})
+        return 2
+    except (mesh_mod.MeshError, RuntimeError, OSError) as e:
+        emit({"error": str(e)[:500], "code": "failed"})
+        return 2
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(prog="linux-reconstruct")
     sub = parser.add_subparsers(dest="command", required=True)
+    qualify = sub.add_parser("qualify")
+    qualify.add_argument("input")
+    qualify.add_argument("output")
+    qualify.add_argument("--object-region")
+    qualify.add_argument("--measurement")
+    qualify.add_argument("--work-dir")
     samples = sub.add_parser("samples")
     samples.add_argument("photos_dir")
     samples.add_argument("output")
@@ -481,6 +753,8 @@ def main(argv=None):
     samples.add_argument("--measurement")
     samples.add_argument("--work-dir")
     args = parser.parse_args(argv)
+    if args.command == "qualify":
+        return qualify_main(args)
 
     signal.signal(signal.SIGINT, _on_signal)
     signal.signal(signal.SIGTERM, _on_signal)
@@ -559,196 +833,8 @@ def main(argv=None):
                                          if k not in ("rotation", "translation")}
 
         raw_mesh = mesh_mod.read_ply(mesh_ply)
-        to_metric = None
-        if fit and fit["ok"]:
-            s, r, t = fit["scaleMPerUnit"], fit["rotation"], tuple(fit["translation"])
-            to_metric = lambda p: scale_mod.apply_similarity(s, r, t, p)
         anchor = camera.anchor if camera else None
-
-        # Object-identity gate. Nothing the tool computes proves which part
-        # of the reconstruction is the intended object: the largest piece may
-        # be the table and an anchor sphere includes its support surface.
-        # Export therefore requires the person's explicit confirmation,
-        # bound by hash to the exact preview mesh. This gate is independent
-        # of scale: a proven camera fit does not bypass it, and a
-        # measurement alone does not satisfy it.
-        preview_path = work / "preview.ply"
-        mesh_mod.write_ply(preview_path, raw_mesh)
-        preview_sha = schemas.sha256_file(preview_path)
-        preview_stl = work / "preview.stl"
-        mesh_mod.write_stl(preview_stl, raw_mesh)
-        components = mesh_mod.connected_components(raw_mesh)
-        plo, phi, _pext = raw_mesh.extents()
-        region_source = args.object_region
-        applied_path = work / "object-region.json"
-        if region_source is None and applied_path.exists():
-            region_source = str(applied_path)   # confirmed in an earlier run
-        if region_source is None:
-            sugg_kind, payload, sugg = suggested_selection(
-                raw_mesh, components, anchor, to_metric)
-            if sugg_kind == "anchor-region":
-                sugg_mesh = mesh_mod.submesh(payload[0], payload[1])
-            elif components:
-                sugg_mesh = mesh_mod.submesh(raw_mesh, components[0][1])
-            else:
-                sugg_mesh = raw_mesh
-            _slo, _shi, sugg_ext = sugg_mesh.extents()
-            sugg["extents"] = {a: round(sugg_ext[a], 6) for a in ("x", "y", "z")}
-            if to_metric is not None:
-                metric_pts = [to_metric(v) for v in sugg_mesh.vertices]
-                sugg["extentsM"] = {
-                    a: round(max(p[i] for p in metric_pts) - min(p[i] for p in metric_pts), 6)
-                    for i, a in enumerate(("x", "y", "z"))}
-            region_receipt = {
-                "version": RECEIPT_VERSION, "kind": "needs-object-region",
-                "toolVersion": TOOL_VERSION, "captureKey": key,
-                "previewMesh": str(preview_path),
-                "previewStl": str(preview_stl),
-                "previewMeshSha256": preview_sha,
-                "units": "reconstruction units; multiply by scaleMPerUnit when "
-                         "scaleKnown (axes are the reconstruction axes)",
-                "boundsMin": [round(v, 6) for v in plo],
-                "boundsMax": [round(v, 6) for v in phi],
-                "vertices": len(raw_mesh.vertices), "faces": len(raw_mesh.faces),
-                "components": component_stats(raw_mesh, components),
-                "suggestion": sugg,
-                "scaleKnown": bool(fit and fit["ok"]),
-                "scaleMPerUnit": fit["scaleMPerUnit"] if fit and fit["ok"] else None,
-                "cameraScaleFit": receipt.get("cameraScaleFit"),
-                "confirm": "answer with capture-object-region v1: "
-                           "{version:1, kind:'capture-object-region', previewMeshSha256, "
-                           "selection:{type:'suggested'} | {type:'component', index:<int>} "
-                           "| {type:'crop', min:[x,y,z], max:[x,y,z]}} in preview coordinates; "
-                           "then rerun with --object-region <file> (it is remembered in the "
-                           "work directory, so a later --measurement resume does not repeat it)",
-            }
-            receipt.update({"status": "needs-object-region", "scale": None,
-                            "objectSelection": {"method": "unconfirmed",
-                                                "suggestion": sugg},
-                            "timingsSeconds": timings,
-                            "elapsedSeconds": round(time.monotonic() - started, 2)})
-            needs_path = work / "needs-object-region.json"
-            write_json_atomic(needs_path, region_receipt)
-            write_json_atomic(work / "receipt.json", receipt)
-            emit({"needsObjectRegion": {"receipt": str(needs_path),
-                                        "previewMeshSha256": preview_sha,
-                                        "previewMesh": str(preview_path),
-                                        "previewStl": str(preview_stl),
-                                        "boundsMin": region_receipt["boundsMin"],
-                                        "boundsMax": region_receipt["boundsMax"],
-                                        "components": region_receipt["components"],
-                                        "scaleKnown": region_receipt["scaleKnown"],
-                                        "scaleMPerUnit": region_receipt["scaleMPerUnit"],
-                                        "suggestion": sugg}})
-            return 5
-        try:
-            region = schemas.load_object_region(
-                region_source, preview_sha, len(components), plo, phi)
-        except schemas.SchemaError as e:
-            raise RunError("object-region-invalid", str(e)) from e
-        if args.object_region:   # remember the confirmation for resumes
-            tmp_copy = applied_path.with_suffix(".json.tmp")
-            tmp_copy.write_bytes(Path(args.object_region).read_bytes())
-            os.replace(tmp_copy, applied_path)
-        selected, selection = apply_selection(
-            raw_mesh, components, region, anchor, to_metric)
-        selected.validate()
-        receipt["objectSelection"] = selection
-
-        # Cache the selected unscaled mesh; measurement binds to its hash.
-        selected_path = work / "selected-unscaled.ply"
-        mesh_mod.write_ply(selected_path, selected)
-        mesh_sha = schemas.sha256_file(selected_path)
-        selected_stl = work / "selected-unscaled.stl"
-        mesh_mod.write_stl(selected_stl, selected)
-        lo, hi, extents = selected.extents()
-
-        scale_report = None
-        transform = None     # point -> metres
-        up_provenance = "unverified: reconstruction frame kept; app must confirm orientation"
-        if fit and fit["ok"]:
-            s = fit["scaleMPerUnit"]
-            transform = to_metric
-            up_provenance = "arcore-world: similarity rotation maps to the capture's Y-up frame"
-            scale_report = {"method": "camera-centre-similarity", "scaleMPerUnit": s}
-        elif args.measurement:
-            try:
-                axis, extent_mm, s = schemas.load_measurement(
-                    args.measurement, mesh_sha, extents)
-            except schemas.SchemaError as e:
-                raise RunError("measurement-invalid", str(e)) from e
-            transform = lambda p: (s * p[0], s * p[1], s * p[2])
-            # A measurement states a size only. Object identity comes from
-            # the capture-object-region confirmation above, never from here.
-            scale_report = {"method": "user-measurement", "scaleMPerUnit": s,
-                            "axis": axis, "extentMm": extent_mm}
-        if transform is None:
-            preview = {
-                "version": RECEIPT_VERSION, "kind": "needs-scale",
-                "toolVersion": TOOL_VERSION, "captureKey": key,
-                "meshSha256": mesh_sha,
-                "previewMesh": str(selected_path),
-                "previewStl": str(selected_stl),
-                "units": "arbitrary reconstruction units (NOT metres)",
-                "extents": {a: round(extents[a], 6) for a in ("x", "y", "z")},
-                "boundsMin": [round(v, 6) for v in lo],
-                "boundsMax": [round(v, 6) for v in hi],
-                "vertices": len(selected.vertices), "faces": len(selected.faces),
-                "objectSelection": selection,
-                "cameraScaleFit": receipt.get("cameraScaleFit"),
-                "measure": "answer with capture-measurement v1: "
-                           "{version:1, kind:'capture-measurement', meshSha256, "
-                           "axis:'x'|'y'|'z', extentMm:<number>} for one extent above",
-            }
-            receipt.update({"status": "needs-scale", "scale": None,
-                            "timingsSeconds": timings,
-                            "elapsedSeconds": round(time.monotonic() - started, 2)})
-            needs_path = work / "needs-scale.json"
-            write_json_atomic(needs_path, preview)
-            write_json_atomic(work / "receipt.json", receipt)
-            emit({"needsScale": {"receipt": str(needs_path), "meshSha256": mesh_sha,
-                                 "extents": preview["extents"],
-                                 "boundsMin": preview["boundsMin"],
-                                 "boundsMax": preview["boundsMax"],
-                                 "previewMesh": str(selected_path),
-                                 "previewStl": str(selected_stl)}})
-            return 4
-
-        stage("exporting", 0.95)
-        metres = mesh_mod.Mesh([transform(v) for v in selected.vertices],
-                               list(selected.faces))
-        # Recentre: footprint centre at origin, lowest point at y=0. Scale
-        # and orientation are untouched; only translation changes.
-        mlo, mhi, mext = metres.extents()
-        cx, cz = (mlo[0] + mhi[0]) / 2, (mlo[2] + mhi[2]) / 2
-        metres.vertices = [(x - cx, y - mlo[1], z - cz) for x, y, z in metres.vertices]
-        if metres.signed_volume() < 0:   # outward winding for right-handed USD
-            metres.faces = [(a, c, b) for a, b, c in metres.faces]
-        metres.validate()
-        _lo, _hi, extents_m = metres.extents()
-        if max(extents_m.values()) > 10.0 or min(extents_m.values()) <= 0:
-            raise RunError("scale-implausible",
-                           "the scaled object would be over 10 m or degenerate; "
-                           "check the measurement and try again")
-        output.parent.mkdir(parents=True, exist_ok=True)
-        tmp_usdz = output.with_suffix(".tmp.usdz")
-        tmp_usdc = work / "export.usdc"
-        try:
-            usd_export.export_usdz(metres, tmp_usdc, tmp_usdz)
-            os.replace(tmp_usdz, output)   # atomic publish; done only after this
-        finally:
-            tmp_usdz.unlink(missing_ok=True)
-        scale_report["extentsM"] = {a: round(extents_m[a], 6) for a in ("x", "y", "z")}
-        scale_report["upAxisProvenance"] = up_provenance
-        receipt.update({"status": "done", "scale": scale_report,
-                        "outputSha256": schemas.sha256_file(output),
-                        "outputMeshSha256": mesh_sha,
-                        "timingsSeconds": timings,
-                        "elapsedSeconds": round(time.monotonic() - started, 2)})
-        write_json_atomic(work / "receipt.json", receipt)
-        write_json_atomic(output.with_suffix(".receipt.json"), receipt)
-        emit({"done": str(output)})
-        return 0
+        return finish_from_mesh(raw_mesh, fit, anchor, args, work, output, receipt, timings, started, key)
     except Cancelled:
         emit({"error": "cancelled", "code": "cancelled"})
         return 2
