@@ -492,8 +492,10 @@ export class ObjectService {
     if (!previous) return undefined;
     const recorded = object.print?.destinationId ?? object.print?.destination?.id;
     const previousPrinter = recorded === undefined ? undefined : this.#deps.printerCatalog?.canonical(recorded) ?? recorded;
-    if (previousPrinter !== undefined && previousPrinter === this.#destinationId(object)) return previous;
-    const {colour: _colour, ...defaults} = previous;
+    // Layer pauses belong to that print of that model, never to defaults.
+    const {pauseBeforeLayers: _pauses, ...settings} = previous;
+    if (previousPrinter !== undefined && previousPrinter === this.#destinationId(object)) return settings;
+    const {colour: _colour, ...defaults} = settings;
     return defaults;
   }
 
@@ -843,7 +845,8 @@ export class ObjectService {
     const object = await this.get(id);
     // A 3MF owns its filament assignments; the sheets do not offer a single-spool override.
     // Keep the saved preference for other models, but do not silently apply it here.
-    const defaults = {...object.preferences?.printDefaults};
+    // Layer pauses come only from this request (the sheet shows them): a saved default never adds a hidden stop.
+    const {pauseBeforeLayers: _savedPauses, ...defaults} = {...object.preferences?.printDefaults};
     if (object.kind === 'published' && object.current?.model.toLowerCase().endsWith('.3mf')) delete defaults.colour;
     options = {...defaults, ...options, ...(options.filament ? {colour: undefined} : {})};
     if (!object.current) throw new InvalidStateError('There is no model to print yet.');
