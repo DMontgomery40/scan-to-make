@@ -35,7 +35,7 @@ What to build: [`../design/overhaul/PRD.md`](../design/overhaul/PRD.md), journey
   uses the actual installed app's visible controls. Leave the current AirPods hanger print running as he instructed.
 - **Orientation/support incident (Nov 4):** the AirPods hanger was reported printing upright with supports off
   although its design planned side-down printing. The orientation/support-plan fix is owned by thread
-  `56a66f4e-49b6-49ee-b167-550b55157819`, targeting main after #293 to preserve 3MF placement and AMS mapping.
+  `56a66f4e-49b6-49ee-b167-550b55157819`, targeting main as #303 after #302; #293's AMS work follows it.
   Release owner integrates it with #298/provider guidance. David's updated scope supersedes the earlier plan:
   drop `lay_flat`, pass every STL to the slicer with `orient: true`, preserve 3MF placement, and pass the
   designer's structured support on/off/type directly to `slice_stl`. Include support args in slice-cache
@@ -221,14 +221,19 @@ remote native probes and the SSH tunnel were removed after verification.
        pauses from saved defaults (`48f22a5`), and final control refusals/deadlines (`c4c904f`, `3c0a192`).
      - Queue receipt: main `f610034` includes #292 (`0c6125b`, head `7fbd3f2`, gate 7/7) and #297
        (`f610034`, head `f9466b4`). Preserve main's optional Claude Code/Blender/Fusion setup items alongside
-       the MCP documentation links. Remaining order: #302 → #293 → #303 orientation → #300 → #301.
+       the MCP documentation links. #302 is now merged: main `d9cd9eef783e607f56b3afde366741de70067197`,
+       head `697775f`, gate 11/11 and Codex clean. Remaining order: #303 orientation → #293 → #300 → #301.
+       #293 Muse stopped mid-edit on quota at 12:41Z; merge owner plans to resume after 14:12Z unless David
+       explicitly chooses another provider. No provider switch authorized by this release thread.
      - #302 removes `selection.connectionMode` from the handoff schema (legacy configs load with that key
        dropped) and removes HMS 0007 auto-clear. Keep both removals when reconciling release code; its current
        print.ts still has the auto-clear workaround. Do not restore it from this branch during conflict resolution.
      - #303 orientation/supports initial head `bebaa791`: replace #298's invocation sentence about lay_flat
        and discarded orientation with slicer auto-orientation/direct support forwarding (including off).
        Its `supports` schema block follows `ask`. Preserve release's provider `worker` hook when reconciling
-       touchup/mcp-client/bound-fusion. Integrate after #293/#302 from the merge owner's final main.
+       touchup/mcp-client/bound-fusion. Integrate from the merge owner's final main after #302. The
+       "multi-colour 3MF lies the way it prints" rule belongs in #293, not #303, because main does not yet
+       support that multi-colour path. This order supersedes earlier #293-before-orientation notes.
        Known limitation reported by orientation owner: Studio `orient:true` refused the stove gap filler
        with "empty layer" (KAN-223). Surface Studio's refusal; do not silently restore lay_flat or keep-pose.
        David's selected auto-orient behavior remains unchanged unless he chooses otherwise.
