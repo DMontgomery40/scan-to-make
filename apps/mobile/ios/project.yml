@@ -140,6 +140,8 @@ aggregateTargets:
   TrunkGuard:
     settings:
       ENABLE_USER_SCRIPT_SANDBOXING: NO
+      # Aggregates default to NO; YES here lets the phase see a signed build. CI's command-line NO still wins.
+      CODE_SIGNING_ALLOWED: YES
     buildScripts:
       - name: Refuse non-main source for signed Release
         script: 'bash "$SRCROOT/../scripts/release-trunk-guard.sh"'

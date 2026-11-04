@@ -1037,6 +1037,7 @@
 		19AAC6B5BBCAEB88DFC0C23A /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CODE_SIGNING_ALLOWED = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 			};
 			name = Release;
@@ -1162,6 +1163,7 @@
 		9027C50FF6390EC8C6288347 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CODE_SIGNING_ALLOWED = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 			};
 			name = Debug;
