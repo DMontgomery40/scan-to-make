@@ -15,10 +15,20 @@ const STL = Buffer.from('solid m\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\n
 // The advertised Bambu hardware-confirmation schema (including its unchecked default).
 const CONFIRM = {type: 'object', properties: {confirmed: {type: 'boolean', title: 'I checked the printer and confirm this operation', default: false}}, required: ['confirmed']};
 
-async function setup({runnerFails, afterDispatch, uncertain, objects = 1, slowMs = 0, schema = CONFIRM, mode = 'form', timeoutMs = 5000, inventory, progressUpdates, printerReport} = {}) {
+async function setup({runnerFails, afterDispatch, uncertain, objects = 1, slowMs = 0, schema = CONFIRM, mode = 'form', timeoutMs = 5000, inventory, progressUpdates, printerReport, relayExpiresEarlyMs} = {}) {
   const root = await mkdtemp(join(tmpdir(), 'objects-print-'));
   const store = new ObjectStore(join(root, 'objects'));
   const relay = new InMemoryElicitationRelay({timeoutMs});
+  if (relayExpiresEarlyMs) {
+    // The relay's own expiry firing before Date.now() reaches expiresAtMs, as a Node timer can.
+    const request = relay.request.bind(relay);
+    relay.request = (...args) => {
+      const answer = request(...args);
+      const asked = relay.pending().at(-1);
+      setTimeout(() => relay.respond(asked.id, {action: 'cancel'}), Math.max(0, asked.expiresAtMs - Date.now() - relayExpiresEarlyMs));
+      return answer;
+    };
+  }
   const bundles = new HandoffBundleStore(join(root, 'bundles'));
   const answers = [];
   const runs = [];
@@ -259,6 +269,16 @@ test('a timed-out question cannot be answered or restored', async () => {
   await assert.rejects(service.answerPrintConfirmation(object.id, question.id, {action: 'accept', content: {confirmed: true}}), InvalidStateError);
 });
 
+test('a question the relay expires just before its deadline still reads as timed out', async () => {
+  // Gate failure on Node 24, Nov 4: the relay's timer won the race and the reason became the runner's "declined".
+  const {service, object, answers} = await setup({timeoutMs: 600, relayExpiresEarlyMs: 200});
+  await service.print(object.id);
+  await until(async () => (await service.get(object.id)).printConfirmation);
+  const timedOut = await service.settled(object.id);
+  assert.equal(answers[0].result.action, 'cancel');
+  assert.equal(timedOut.state, 'failed');
+  assert.match(timedOut.failure, /confirmation timed out; no print was sent/i);
+});
 
 test('print phases and estimates are visible before confirmation and survive a failure', async () => {
   const {service, object} = await setup({progressUpdates:[{phase:'slicing'},{phase:'slice-ready',estimate:{seconds:2575,grams:16.74}}], uncertain:true});

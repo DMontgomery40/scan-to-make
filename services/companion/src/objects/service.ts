@@ -34,6 +34,9 @@ import {ReconstructionAnswerSchema, type ReconstructionAnswer} from '@scan-to-ma
 import type {PrinterCatalog} from './printers.js';
 import type {PrinterDirectory, PublicDestination} from '../printing/directory.js';
 
+/** How early before its deadline the relay's own expiry may report an unanswered question as cancelled. */
+const CONFIRMATION_EXPIRY_SLACK_MS = 1000;
+
 const STAGE_DEFAULTS = (kind: PassKind) => ({...STAGE_DEFAULT_SEC[kind]});
 
 /** Copies an Ask's picture as JPEG: PNG through macOS's sips; where there is no sips, the bytes as they are. */
@@ -1275,7 +1278,9 @@ export class ObjectService {
           // dispatch one, so it ends the Live Activity instead of cancelling quietly.
           const recheckFailure = this.#recheckFailures.get(id);
           if (recheckFailure) return refused('failed', recheckFailure);
-          if (this.#expiredConfirmations.has(id) || (this.#confirmations.get(id)?.pending.expiresAtMs ?? Infinity) <= Date.now())
+          // The relay's own expiry and ours share expiresAtMs, and a Node timer can fire a millisecond before
+          // Date.now() reaches it: an unanswered question (still in #confirmations) at its deadline timed out.
+          if (this.#expiredConfirmations.has(id) || (this.#confirmations.get(id)?.pending.expiresAtMs ?? Infinity) <= Date.now() + CONFIRMATION_EXPIRY_SLACK_MS)
             return refused('failed', 'Printer confirmation timed out; no print was sent. Press Print to try again.');
           // The person answered Print's own question: nothing was sliced or sent. "Make it again" starts that pass once this print ends.
           if (error instanceof PrinterMcpError && error.code === 'print-choice') {
