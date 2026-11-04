@@ -315,12 +315,19 @@ remote native probes and the SSH tunnel were removed after verification.
      scratch on agents-173 was retained when the cleanup guard rejected recursive deletion; do not bypass it.
      Linux capture conversion still needs Python/Pillow/usd-core distribution. Pairing defaults match the Mac;
      nearby discovery, Tailscale pairing, provider/modeling and actual printer controls remain open.
-     **Reconstruction:** `linux-muse-reconstruction` @ `081ba638` is integrated at `d610924`, only
-     `tools/linux-reconstruct`. It requires explicit region confirmation before scale/export; companion/client
-     wiring remains in progress. Synthetic COLMAP/OpenMVS runs exercised camera scale, measurement resume and cancellation,
-     but the anchor crop retained a support disc in the measured width/depth. Object-region qualification and real
-     captures remain unresolved. Parent still must wire camera metadata, needs-scale/measurement Ask and packaging
-     with OpenMVS licence/source information. No automatic print-ready claim from those synthetic dimensions.
+     **Reconstruction:** tool + companion integration `a641b7e` merged at `31f950b`. The exact camera v1
+     upload verifies photo hashes/dimensions; a private cached reconstruction stops for region confirmation and,
+     when needed, a measurement. HTTP/local-control answers bind the current review/hash; generic Ask/Best Guess
+     cannot approve it. Preview routes expose only the current review. No real capture/UI acceptance yet.
+     Follow-up ownership: Muse reconstruction owner extends Mac-hosted Android/photo capture qualification
+     (the current Mac runner ignores ARCore metadata); a new Android owner wires capture-camera v1, uploads,
+     manifest and native review UI; a Linux UI owner adds the native review surface/preview bridge. Shared
+     `scaleQualificationRequired` manifest flag and `/healthz` capability `reconstructionReviewV1` are the agreed
+     next transport additions, not implemented yet. Old clients/hosts must not silently bypass qualification.
+     Packaging still needs Python/Pillow/usd-core and COLMAP/OpenMVS with licence/source information.
+     Synthetic geometry retained a support disc until explicit region choice; one OpenMVS run crashed then
+     succeeded on retry. Neither result establishes real capture quality or automatic print readiness.
+
 5. **Phone parity implemented on the release branch:** Settings → Printers exposes MCP and
    route selection through authorized routes and per-physical-printer reservations; phone print
    sheet has layer pauses and Resume-specific confirmation. Finished print removes live controls,
