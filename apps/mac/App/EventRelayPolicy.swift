@@ -205,7 +205,8 @@ struct LiveActivityPush: Encodable, Equatable {
         case "print.started": kind = .start; priority = 10
         case "print.status", "print.resumed": kind = .update
         case "print.paused": kind = .update; priority = 10
-        case "print.done", "print.failed", "print.cancelled": kind = .end; priority = 10
+        // A print the printer never started ends its activity too, or it stays at 0% "Waiting for an update".
+        case "print.done", "print.failed", "print.cancelled", "print.not-started": kind = .end; priority = 10
         default: return nil
         }
         // Push-to-start requires an alert. Muted projects can still update an activity started on the phone.
@@ -214,7 +215,7 @@ struct LiveActivityPush: Encodable, Equatable {
         let fallbackState: String
         switch event.type {
         case "print.done": fallbackState = "finished"
-        case "print.failed": fallbackState = "failed"
+        case "print.failed", "print.not-started": fallbackState = "failed"
         case "print.cancelled": fallbackState = "cancelled"
         case "print.paused": fallbackState = "paused"
         case "print.started": fallbackState = "preparing"
@@ -236,7 +237,8 @@ struct LiveActivityPush: Encodable, Equatable {
             push.alert = alert(title: "\(shortTitle) is printing", body: "On \(name)")
         } else if kind == .start {
             return nil
-        } else if event.notify != "none" && (event.type == "print.paused" || kind == .end) {
+        } else if event.notify != "none" && (event.type == "print.paused" || (kind == .end && event.type != "print.not-started")) {
+            // "Didn't start" already alerts on its own (handoff item 9: one owner per alert); its activity just ends.
             push.alert = alert(title: event.title, body: event.body, sound: kind == .end ? "default" : nil)
         }
         return push

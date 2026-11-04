@@ -256,7 +256,7 @@ test('a spool swapped while slicing stops the dispatch before anything is sent',
   await f.service.print(f.object.id);
   const failed = await f.service.settled(f.object.id);
   assert.equal(failed.state, 'failed');
-  assert.match(failed.failure ?? '', /changed while slicing/);
+  assert.match(failed.failure ?? '', /changed before printing started/);
 });
 
 test('a spool swapped while the printer’s question waits is caught before the acceptance is forwarded', async t => {
@@ -271,7 +271,7 @@ test('a spool swapped while the printer’s question waits is caught before the 
   await f.service.print(f.object.id);
   const question = await until(async () => (await f.service.get(f.object.id)).printConfirmation);
   swapped = true;
-  await assert.rejects(f.service.answerPrintConfirmation(f.object.id, question.id, {action: 'accept', content: {confirmed: true}}), /changed while slicing/);
+  await assert.rejects(f.service.answerPrintConfirmation(f.object.id, question.id, {action: 'accept', content: {confirmed: true}}), /changed before printing started/);
   const settled = await f.service.settled(f.object.id);
   assert.equal(settled.state, 'ready', 'the declined print leaves the project ready, nothing sent');
 });

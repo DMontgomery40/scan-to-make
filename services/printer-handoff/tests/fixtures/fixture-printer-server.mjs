@@ -39,7 +39,8 @@ const bambuPrintProps = {
 if (process.env.HANDOFF_FIXTURE_NO_CONNECTION_TYPE) delete bambuPrintProps.connection_type;
 const genericPrintProps = {
   connection_mode:string, connection_type:string, three_mf_path: string, bambu_model: string, bed_type: string, nozzle_type: string,
-  nozzle_diameter: string, use_ams: bool, ams_mapping: {type: 'object'},
+  // The real generic server accepts ams_mapping as an array or an object (anyOf); this fixture takes the array Counterpart sends.
+  nozzle_diameter: string, use_ams: bool, ams_mapping: {type: 'array', items: integer}, ams_slots: {type: 'array', items: integer},
 };
 const tools = [
   {name: 'lay_flat', inputSchema: {type: 'object', additionalProperties: false, required: ['stl_path'], properties: {stl_path: string}}},

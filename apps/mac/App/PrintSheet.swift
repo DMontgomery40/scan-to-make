@@ -205,7 +205,7 @@ struct PrintSheet: View {
         // AMS units are lettered A–D, four trays each (slot 4 is B1); AMS-HT units report from 128.
         let place = filament.slot == 255 ? "External 2"
             : filament.external ? "External"
-            : filament.slot >= 128 ? "AMS-HT \(filament.slot - 127)"
+            : filament.slot >= 128 ? "AMS-HT \(String(UnicodeScalar(65 + min(filament.slot - 128, 25))!))"
             : "\(String(UnicodeScalar(65 + min(filament.slot / 4, 25))!))\(filament.slot % 4 + 1)"
         return "\(place) · \(filament.material) \(filament.name)"
     }
@@ -289,7 +289,8 @@ struct PrintSheet: View {
                                         Button { mappingSlots[filament.index] = tray.slot } label: {
                                             Text(mappingSlots[filament.index] == tray.slot ? "✓ \(Self.name(tray))" : Self.name(tray))
                                         }
-                                        .disabled(slicedOriginal && filament.material != nil && tray.material.caseInsensitiveCompare(filament.material!) != .orderedSame)
+                                        .disabled((slicedOriginal && filament.material != nil && tray.material.caseInsensitiveCompare(filament.material!) != .orderedSame)
+                                            || mappingSlots.contains { $0.key != filament.index && ($0.value >= 254) != (tray.slot >= 254) })
                                     }
                                 } label: {
                                     Text(chosenTray(filament).map(Self.name) ?? "Choose a spool")

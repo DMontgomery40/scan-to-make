@@ -230,6 +230,8 @@ export class ObjectService {
   readonly #cancelledPrints = new Set<string>();
   /** Per-print spool rechecks, run again when the printer's confirmation is accepted (it can wait minutes). */
   readonly #dispatchRechecks = new Map<string, () => Promise<void>>();
+  /** Why a recheck declined a print, kept so the settled project still explains itself. */
+  readonly #recheckFailures = new Map<string, string>();
   readonly #monitors = new Map<string, {runner: PrintMonitorRunner; controller: AbortController; done: Promise<void>}>();
   readonly #expiredConfirmations = new Set<string>();
   /** One action at a time per object, so a double tap can't start the same work twice. */
@@ -339,7 +341,8 @@ export class ObjectService {
         const receipt = source.kind === 'published' ? source.files?.receipts?.find(file => file.path === current.model) : undefined;
         const files = receipt ? {original: [receipt.path], current: receipt.path, receipts: [receipt]} : undefined;
         const publishedSelection = source.publishedSelection ? {...source.publishedSelection, fileIndex: 0} : undefined;
-        const paths = [current.model, ...current.renders, ...(receipt?.plates.flatMap(plate => plate.thumbnail ? [plate.thumbnail] : []) ?? []), ...(current.design ? [current.design.f3d, ...(current.design.parameters ? [current.design.parameters] : [])] : [])];
+        // A designed multi-colour model prints its 3MF but is corrected from the merged mesh beside it: both copy.
+        const paths = [current.model, ...(isMultipart(source) && source.kind !== 'published' ? ['current/model.stl'] : []), ...current.renders, ...(receipt?.plates.flatMap(plate => plate.thumbnail ? [plate.thumbnail] : []) ?? []), ...(current.design ? [current.design.f3d, ...(current.design.parameters ? [current.design.parameters] : [])] : [])];
         for (const path of new Set(paths)) {
           if (isAbsolute(path) || path.split('/').some(part => !part || part === '.' || part === '..')) throw new InvalidFileError('The model has an invalid file path.');
           const target = join(this.dir(duplicate.id), path);
@@ -651,7 +654,9 @@ export class ObjectService {
     const {filaments: model, slots, version, declaredSlots} = await this.#modelData(object);
     if (!model.length) return undefined;
     if (options.filaments && options.filamentsModelVersion !== version)
-      throw new InvalidStateError('The model changed since you chose its spools. Reopen the print sheet and check the colours.');
+      throw new InvalidStateError(options.filamentsModelVersion
+        ? 'The model changed since you chose its spools. Reopen the print sheet and check the colours.'
+        : 'These spool choices carry no model version. Reopen the print sheet and choose the spools again.');
     let live: LiveFilament[];
     try { live = await this.liveFilaments(object.id); }
     catch (error) { if (options.filaments) throw error; return undefined; }
@@ -668,7 +673,7 @@ export class ObjectService {
         if (sliced && wanted.material && tray.material.toUpperCase() !== wanted.material.toUpperCase())
           throw new InvalidStateError(`“${wanted.name ?? `Part ${wanted.index}`}” was sliced for ${wanted.material}, so it can only print from a ${wanted.material} spool. Choose one, or share the designer’s editable 3MF to change material.`);
         if (!sliced && !tray.profile)
-          throw new InvalidStateError(`The ${tray.material} spool in slot ${tray.slot + 1} has no slicing profile on this Mac. Choose another spool.`);
+          throw new InvalidStateError(`The ${tray.material} spool you chose has no slicing profile on this Mac. Choose another spool.`);
         return tray;
       });
       if (chosen.some(tray => tray.slot >= 254) && chosen.some(tray => tray.slot < 254))
@@ -679,9 +684,12 @@ export class ObjectService {
       const matches = matchColours(model, pool, {requireMaterial: sliced});
       if (matches.some(match => !match)) {
         const missing = model[matches.findIndex(match => !match)]!;
-        throw new InvalidStateError(sliced && missing.material
-          ? `No ${missing.material} spool is loaded for “${missing.name ?? `Part ${missing.index}`}”, and this file was sliced for ${missing.material}. Load one, then try again.`
-          : 'No filament is loaded. Load a spool in the AMS, then try again.');
+        const elsewhere = sliced && missing.material && live.some(tray => tray.material.toUpperCase() === missing.material!.toUpperCase());
+        throw new InvalidStateError(elsewhere
+          ? `“${missing.name ?? `Part ${missing.index}`}” needs ${missing.material}, but one print feeds from one source and no single source holds every colour’s material. Load the spools on one source, then try again.`
+          : sliced && missing.material
+            ? `No ${missing.material} spool is loaded for “${missing.name ?? `Part ${missing.index}`}”, and this file was sliced for ${missing.material}. Load one, then try again.`
+            : 'No filament is loaded. Load a spool in the AMS, then try again.');
       }
       chosen = matches.map(match => live.find(item => item.slot === match!.slot)!);
     }
@@ -691,21 +699,28 @@ export class ObjectService {
     // matched by its own declared colour from the same feed source as the chosen
     // spools; with no declared colour it follows the first colour's spool rather
     // than failing the print for a missing mapping.
+    const chosenSlots = new Set(chosen.map(tray => tray.slot));
     const externalChosen = chosen.every(tray => tray.slot >= 254);
-    const fillerPool = (sliced ? live : live.filter(tray => tray.profile)).filter(tray => externalChosen ? tray.slot >= 254 : tray.slot < 254);
+    // The same feed source, exactly: an external print's painted slots stay on the chosen external spool(s).
+    const fillerPool = (sliced ? live : live.filter(tray => tray.profile))
+      .filter(tray => externalChosen ? chosenSlots.has(tray.slot) : tray.slot < 254);
     for (const declared of declaredSlots) {
       if (byIndex.has(declared.index) || declared.index > slots) continue;
       const [match] = matchColours([declared], fillerPool, {requireMaterial: sliced});
       const tray = match ? live.find(item => item.slot === match.slot) : undefined;
       if (tray && (sliced || tray.profile)) byIndex.set(declared.index, tray);
+      else if (sliced && declared.material)
+        throw new InvalidStateError(`A painted part of this file was sliced for ${declared.material}, and no ${declared.material} spool on the chosen feed source can print it. Load one, then try again.`);
     }
     const at = (index: number) => byIndex.get(index) ?? chosen[0]!;
     const amsMapping = Array.from({length: slots}, (_, i) => at(i + 1).slot);
+    // Every spool in the final mapping is rechecked at dispatch, painted slots included.
+    const allTrays = [...new Map([...byIndex.values()].map(tray => [tray.slot, tray])).values()];
     const mapped: PrinterSelection = {...selection,
       useAms: chosen.some(tray => tray.slot !== 254 && tray.slot !== 255),
       amsMapping, amsSlots: undefined, autoMatchAms: false};
-    if (sliced) return {selection: mapped, chosenTrays: chosen};
-    return {selection: mapped, chosenTrays: chosen, slicer: {
+    if (sliced) return {selection: mapped, chosenTrays: allTrays};
+    return {selection: mapped, chosenTrays: allTrays, slicer: {
       loadFilaments: Array.from({length: slots}, (_, i) => at(i + 1).profile!).join(';'),
       filamentColours: Array.from({length: slots}, (_, i) => at(i + 1).colour).join(';'),
     }};
@@ -1031,7 +1046,7 @@ export class ObjectService {
       const live = await this.liveFilaments(id);
       for (const tray of chosenTrays) if (!live.some(item => item.slot === tray.slot && item.colour === tray.colour
         && item.material === tray.material && item.filamentId === tray.filamentId && item.destinationId === tray.destinationId))
-        throw new InvalidStateError('A chosen spool changed while slicing. Nothing was sent — open the print sheet and check the colours.');
+        throw new InvalidStateError('A chosen spool changed before printing started. Nothing was sent — open the print sheet and check the colours.');
     } : undefined;
     const selected = object.publishedSelection ? {...colourSelection, plateIndex: object.publishedSelection.plateIndex} : colourSelection;
     const overrides = object.publishedSelection?.sliced
@@ -1098,7 +1113,7 @@ export class ObjectService {
             await this.#emit({id: randomUUID(), type: 'project.updated', projectId: id, data: {keys: ['print']}});
             return unclear;
           }
-          if (this.#cancelledPrints.has(id)) return this.#deps.store.update(id, o => ({...o, state: 'ready', progress: undefined, printConfirmation: undefined, failure: undefined}));
+          if (this.#cancelledPrints.has(id)) return this.#deps.store.update(id, o => ({...o, state: 'ready', progress: undefined, printConfirmation: undefined, failure: this.#recheckFailures.get(id)}));
           // Refused before anything reached the printer (review item 23): the phone hears it, with the reason.
           const refused = async (state: 'failed' | 'ready', failure: string) => {
             const updated = await this.#deps.store.update(id, o => ({...o, state, progress: undefined, printConfirmation: undefined, failure}));
@@ -1116,6 +1131,7 @@ export class ObjectService {
         unsubscribe(); this.#running.delete(id); this.#controllers.delete(id);
         clearTimeout(this.#confirmations.get(id)?.timer); this.#confirmations.delete(id);
         this.#dispatchRechecks.delete(id);
+        this.#recheckFailures.delete(id);
         this.#cancelledPrints.delete(id);
         this.#expiredConfirmations.delete(id);
       });
@@ -1127,6 +1143,9 @@ export class ObjectService {
   async #colour(id: string, options: PrintOptions, selection: PrinterSelection | undefined, backend: PrinterHandoffConfig['backend'])
     : Promise<{selection?: PrinterSelection; slicer?: PrinterSlicer; chosenTrays?: LiveFilament[]}> {
     const object = await this.get(id);
+    // Per-colour choices for a model that is no longer a multi-part 3MF are stale, never ignored.
+    if (options.filaments?.length && !isMultipart(object))
+      throw new InvalidStateError('The model changed since you chose its spools. Reopen the print sheet and check the colours.');
     if (isMultipart(object)) {
       // A 3MF owns its per-part filaments: map each to a spool, never one spool for the whole model.
       const multipart = await this.#multipartColour(object, options, selection, backend);
@@ -1486,6 +1505,8 @@ export class ObjectService {
     // the sheet's chosen spools when it sends them (validated, errors visible), else the
     // suggestions. Best effort for suggestions: an unreadable inventory leaves the
     // estimate to the MCP's own defaults.
+    if (request.filaments?.length && !isMultipart(object))
+      throw new InvalidStateError('The model changed since you chose its spools. Reopen the print sheet and check the colours.');
     const multipart = !isMultipart(object) ? undefined
       : request.filaments
         ? await this.#multipartColour(object, {filaments: request.filaments, ...(request.filamentsModelVersion ? {filamentsModelVersion: request.filamentsModelVersion} : {})}, services.selection, services.runner.backend)
@@ -1551,12 +1572,12 @@ export class ObjectService {
         if (recheck) {
           try { await recheck(); }
           catch (error) {
-            if (confirmation.printing.services.relay.respond(confirmationId, {action: 'decline'})) {
-              this.#cancelledPrints.add(id);
-              clearTimeout(confirmation.timer);
-              this.#confirmations.delete(id);
-              await this.#deps.store.update(id, o => o.printConfirmation?.id === confirmationId ? {...o, printConfirmation: undefined} : o);
-            }
+            this.#recheckFailures.set(id, error instanceof Error ? error.message : 'A chosen spool changed before printing started.');
+            this.#cancelledPrints.add(id);
+            confirmation.printing.services.relay.respond(confirmationId, {action: 'decline'});
+            clearTimeout(confirmation.timer);
+            this.#confirmations.delete(id);
+            await this.#deps.store.update(id, o => o.printConfirmation?.id === confirmationId ? {...o, printConfirmation: undefined} : o);
             throw error;
           }
         }

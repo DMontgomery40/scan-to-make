@@ -26,8 +26,8 @@ export const printerSelectionSchema = z.strictObject({
   plateIndex: z.number().int().min(0).max(1000).optional(),
   useAms: z.boolean().optional(),
   amsSlots: z.array(z.number().int()).max(64).optional(),
-  // The two servers use different ams_mapping shapes: an absolute tray array
-  // in bambu-printer-mcp and a material-to-slot object in mcp-3D-printer-server.
+  // Both servers accept a project-level absolute tray array; mcp-3D-printer-server
+  // also accepts trays keyed by project filament index (anyOf in its schema).
   amsMapping: z.union([z.array(z.number().int()).max(64), z.record(z.string(), z.number().int())]).optional(),
   autoMatchAms: z.boolean().optional(),
   // Ignored, kept so older printer-handoff.json files still load: the printer MCP owns
