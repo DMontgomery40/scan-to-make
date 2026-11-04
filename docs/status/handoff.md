@@ -648,9 +648,10 @@ remote native probes and the SSH tunnel were removed after verification.
     fixture launch, screen viewer or print. Body/letters rows use the existing mapping API and send
     exact spools/model version in estimate and Print; plate/pause/copies and #306 question UI preserved.
     Engineering: child CounterpartKit 174, ControlKit 52, Mac and phone compiles passed; parent signed
-    Release build passed with exact prior entitlements. User-visible acceptance is pending: David has
-    been asked to open Guitar pick → Print and verify body black A1 / letters yellow A2, without pressing
-    final Print. Fresh pick now has current/model.3mf and separate body/letters filament records.
+    Release build passed with exact prior entitlements. **iPhone controls accepted by David:** he
+    confirmed the body/letters selections work and started the print himself. Saved dispatch has
+    AMS mapping `[0, 1]`; final physical colour result still pending. Fresh pick has current/model.3mf
+    and separate body/letters filament records.
     Source branch and clean worktree removed after integration; owned parent DerivedData removed,
     signed app/logs/receipts retained in `~/scan-to-make-work/phone-ams-202611041132/`.
     David reports a physical print completed with WRONG AMS colours and the plate is now clear.
@@ -670,7 +671,7 @@ remote native probes and the SSH tunnel were removed after verification.
     **User-started colour print active:** bundle `e592f12e-e5a0-4821-9f56-2cdacb8d6f5e`, dispatched
     18:34:41Z, uses current/model.3mf and AMS mapping `[0, 1]`; actual Mac UI at 18:40Z shows
     Printing and P1S Busy. Parent initiated neither the design nor print. Keep installs/restarts held
-    until it settles. Physical colour result and iPhone menu acceptance remain open; no reprint. David also reports another Device Hub use;
+    until it settles. iPhone menu/selection acceptance is confirmed by David; physical colour result remains open. No reprint. David also reports another Device Hub use;
     read-only check at 11:15 MST found no Xcode DeviceHub process or events in its previous 8 minutes.
     David clarified this was an iOS lock-screen/Settings notice saying the device was viewed through
     Device Hub, not an observed agent tool call or reopened Mac window. USB read-only display info
