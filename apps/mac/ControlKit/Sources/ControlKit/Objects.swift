@@ -38,8 +38,10 @@ public struct PrintSettings: Sendable, Equatable {
     /// How many on the plate (`capabilities.printCopies`), only when the person picked a number: nil sends nothing,
     /// so the printer profile's own count applies (one named overrides a profile set to three, KAN-214 #230).
     public var copies: Int?
-    public init(quality: Quality = .standard, strength: Strength = .standard, colour: Colour? = nil, copies: Int? = nil) {
-        self.quality = quality; self.strength = strength; self.colour = colour; self.copies = copies
+    /// Pause before these 1-based layers, as the slicer preview numbers them: the printer stops there by itself.
+    public var pauseBeforeLayers: [Int]
+    public init(quality: Quality = .standard, strength: Strength = .standard, colour: Colour? = nil, copies: Int? = nil, pauseBeforeLayers: [Int] = []) {
+        self.quality = quality; self.strength = strength; self.colour = colour; self.copies = copies; self.pauseBeforeLayers = pauseBeforeLayers
     }
     /// The `objects.print` fields: standard values are left out.
     public var params: [String: JSONValue] {
@@ -54,6 +56,8 @@ public struct PrintSettings: Sendable, Equatable {
         case nil: break
         }
         if let copies { params["copies"] = .number(Double(copies)) }
+        let pauses = Array(Set(pauseBeforeLayers.filter { $0 >= 2 })).sorted()
+        if !pauses.isEmpty { params["pauseBeforeLayers"] = .array(pauses.map { .number(Double($0)) }) }
         return params
     }
 }
@@ -282,16 +286,29 @@ public extension ControlClient {
 /// `printers.route`: how a destination's printer MCP reaches the printer. The MCP keeps this setting
 /// (bambu-printer-mcp `counterpart_print_route`); Counterpart only shows and changes it.
 public struct PrintRoute: Decodable, Sendable, Equatable {
-    /// `lan` (the local network) or `cloud` (Bambu Cloud).
+    /// One connection as the MCP describes it: its own label, whether it can be chosen and what controls do on it.
+    public struct Option: Decodable, Sendable, Equatable {
+        public let id: String
+        public let label: String
+        public let available: Bool
+        public let reason: String?
+        public let controls: String?
+        public init(id: String, label: String, available: Bool, reason: String? = nil, controls: String? = nil) {
+            self.id = id; self.label = label; self.available = available; self.reason = reason; self.controls = controls
+        }
+    }
+    /// `lan` (the local network), `cloud` (Bambu Cloud), `developer` (LAN Only + Developer Mode), or a newer id.
     public let route: String
     /// The MCP's connection mode and type, for example `bambu_network` / `lan`.
     public let mode: String
     public let type: String
     public let choices: [String]
+    /// Every connection with the MCP's own words; nil from an MCP that only reports `choices`.
+    public let options: [Option]?
     /// The config file the MCP saved it to; nil when it has none to update.
     public let savedTo: String?
-    public init(route: String, mode: String, type: String, choices: [String], savedTo: String? = nil) {
-        self.route = route; self.mode = mode; self.type = type; self.choices = choices; self.savedTo = savedTo
+    public init(route: String, mode: String, type: String, choices: [String], options: [Option]? = nil, savedTo: String? = nil) {
+        self.route = route; self.mode = mode; self.type = type; self.choices = choices; self.options = options; self.savedTo = savedTo
     }
 }
 
@@ -316,7 +333,7 @@ public extension ControlClient {
     static func timeout(for method: String) -> TimeInterval {
         switch method {
         case "objects.estimate": return 190 // it slices: 180 s on the companion
-        case "objects.pausePrint", "objects.resumePrint", "objects.cancelPrint": return 140 // 130 s on the companion
+        case "objects.pausePrint", "objects.resumePrint", "objects.cancelPrint": return 740 // 730 s on the companion: the printer's question may stay open 10 min
         case "printers.route": return 35 // 25 s on the companion: it may start the MCP's session first
         case "printers.mcps": return 15 // it looks for copies in the home folder
         case "printers.installMcp", "printers.discover": return 25 // 15 s on the companion (npm lookup 7 s; discovery about 4 s)
@@ -420,6 +437,8 @@ public struct PrinterCapabilities: Decodable, Sendable, Equatable {
     public let multiColour: Bool?
     /// This printer's MCP can put several on the plate (`slice_stl` `repetitions`, KAN-214 PR 8b).
     public let copies: Bool?
+    /// slice_stl takes pause_at_layers: the print sheet offers Pause before a layer.
+    public var layerPauses: Bool? = nil
     public let materialChoice: Bool?
     public let missing: [String]?
     public let update: Update?

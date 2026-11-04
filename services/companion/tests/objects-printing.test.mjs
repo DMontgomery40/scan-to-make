@@ -25,11 +25,12 @@ const until = async check => { for (let i = 0; i < 300; i++) { const value = awa
  * A P1S behind a fake MCP session, a fake print runner, and a monitor clock the
  * test steps by hand: every printer report and every wait is scripted.
  */
-async function setup(t, {tools = ['get_printer_status', 'camera_snapshot', 'pause_print', 'resume_print', 'cancel_print', 'slice_stl'], sliceArgs = false, copies = false, controlsRoute = false, reports = [], route, backend = 'bambu-printer-mcp', info, slots} = {}) {
+async function setup(t, {tools = ['get_printer_status', 'camera_snapshot', 'pause_print', 'resume_print', 'cancel_print', 'slice_stl'], sliceArgs = false, copies = false, controlsRoute = false, reports = [], route, backend = 'bambu-printer-mcp', info, slots, controlEnds = false} = {}) {
   const root = await mkdtemp(join(tmpdir(), 'objects-printing-'));
   let service;
   t.after(async () => { await service?.close(); await rm(root, {recursive: true, force: true, maxRetries: 10, retryDelay: 20}); });
   const calls = [], events = [], runs = [];
+  let endControl;
   const queue = [...reports];
   const relay = new InMemoryElicitationRelay({timeoutMs: 5000});
   const catalogTools = [...tools, ...(route ? ['counterpart_print_route'] : [])].map(name => name === 'slice_stl' && (sliceArgs || copies)
@@ -40,7 +41,7 @@ async function setup(t, {tools = ['get_printer_status', 'camera_snapshot', 'paus
     hasTool(name) { return catalogTools.some(item => item.name === name); },
     getTool(name) { return catalogTools.find(item => item.name === name); },
     async callTool(name, args, options = {}) {
-      calls.push({name, args, context: options.elicitationContext});
+      calls.push({name, args, context: options.elicitationContext, timeoutMs: options.timeoutMs});
       if (name === 'get_printer_status') {
         const next = queue.length > 1 ? queue.shift() : queue[0];
         if (!next) throw Object.assign(new Error('down'), {code: 'tool-failed'});
@@ -50,10 +51,23 @@ async function setup(t, {tools = ['get_printer_status', 'camera_snapshot', 'paus
       if (name === 'counterpart_printer_info' && info) return {content: [{type: 'text', text: JSON.stringify(info)}], structuredContent: info};
       if (name === 'get_printer_filaments' && slots) return {content: [{type: 'text', text: JSON.stringify({slots})}]};
       if (name === 'counterpart_print_route') {
-        if (args?.route) route = args.route === 'cloud' ? {mode: 'bambu_network', type: 'cloud'} : {...route, type: route.mode === 'bambu_network' ? 'lan' : route.type};
-        return {content: [{type: 'text', text: JSON.stringify({route: route.mode === 'bambu_network' && route.type === 'cloud' ? 'cloud' : 'lan', ...route, choices: ['lan', 'cloud'], savedTo: '/Users/x/bambu-printer-mcp/.env'})}]};
+        // As both MCPs answer since Nov 3: lan and cloud through FULU, developer straight to a Developer Mode printer.
+        if (args?.route) route = args.route === 'cloud' ? {mode: 'bambu_network', type: 'cloud'} : args.route === 'developer' ? {mode: 'lan_mqtt_ftps', type: 'lan'} : {mode: 'bambu_network', type: 'lan'};
+        const id = route.mode === 'lan_mqtt_ftps' ? 'developer' : route.mode === 'bambu_network' && route.type === 'cloud' ? 'cloud' : 'lan';
+        const options = route.legacy ? undefined : [
+          {id: 'lan', label: 'Local network', available: true, controls: 'Printers with authorization control refuse Pause, Resume and Stop sent this way.'},
+          {id: 'cloud', label: 'Bambu Cloud', available: true, controls: 'Printers with authorization control refuse Pause, Resume and Stop sent this way.'},
+          {id: 'developer', label: 'Local network, Developer Mode', available: true, controls: 'Pause, Resume and Stop go straight to the printer.'}];
+        return {content: [{type: 'text', text: JSON.stringify({route: id, mode: route.mode, type: route.type,
+          choices: route.legacy ? ['lan', 'cloud'] : ['lan', 'cloud', 'developer'], ...(options ? {options} : {}), savedTo: '/Users/x/bambu-printer-mcp/.env'})}]};
       }
       if (['pause_print', 'resume_print', 'cancel_print'].includes(name)) {
+        if (controlEnds) {
+          // The call ends (a client timeout) while its question is still open.
+          relay.request({method: 'elicitation/create', params: {mode: 'form', message: `Confirm ${name}`, requestedSchema: CONFIRM}}, options.elicitationContext).catch(() => undefined);
+          await new Promise(resolve => { endControl = resolve; });
+          throw Object.assign(new Error('MCP error -32001: Request timed out'), {code: 'tool-failed'});
+        }
         const answer = await relay.request({method: 'elicitation/create', params: {mode: 'form', message: `Confirm ${name}`, requestedSchema: CONFIRM}}, options.elicitationContext);
         if (answer.action !== 'accept') return {isError: true, content: [{type: 'text', text: 'Not confirmed. Nothing was sent.'}]};
         return {content: [{type: 'text', text: '{"status":"success"}'}]};
@@ -109,7 +123,7 @@ async function setup(t, {tools = ['get_printer_status', 'camera_snapshot', 'paus
     const question = await until(async () => (await service.get(object.id)).printConfirmation);
     return service.answerPrintConfirmation(object.id, question.id, {action: 'accept', content: {confirmed: true}});
   };
-  return {service, store, object, calls, events, runs, relay, session, directory, queue, tick, clock, approve, deps, settings, root, slots};
+  return {service, store, object, calls, events, runs, relay, session, directory, queue, tick, clock, approve, deps, settings, root, slots, endControl: () => endControl?.()};
 }
 const status = (state, progress, extra = {}) => ({connected: true, print: {filename: JOB, progress, timeRemaining: Math.max(0, 40 - progress), currentLayer: progress, totalLayers: 100},
   raw: {gcode_state: state, subtask_name: JOB, task_id: '0', ...extra}});
@@ -228,6 +242,8 @@ test('pause, resume and stop go through the printer\'s mutex and relay its own c
   const pausing = f.service.control(f.object.id, 'pause');
   const question = await until(async () => (await f.service.get(f.object.id)).printConfirmation);
   assert.equal(question.message, 'Confirm pause_print');
+  // A second control while the first one's question is open is refused, never queued behind it.
+  await assert.rejects(f.service.control(f.object.id, 'cancel'), /still answering the last Pause, Resume or Stop/);
   await f.service.answerPrintConfirmation(f.object.id, question.id, {action: 'accept', content: {confirmed: true}});
   const paused = await pausing;
   assert.equal(paused.printConfirmation, undefined);
@@ -239,6 +255,28 @@ test('pause, resume and stop go through the printer\'s mutex and relay its own c
   await f.service.answerPrintConfirmation(f.object.id, second.id, {action: 'decline'});
   assert.match((await resuming).message, /didn't resume: Not confirmed/);
   await assert.rejects(f.service.control((await f.store.create()).id, 'cancel'), /Nothing of this project is printing/);
+});
+
+// Nov 3: a Resume's question outlived its 2-minute call; the dead question then hid Resume until the print ended.
+test('a control waits as long as its question can, and a question whose call ended never stays on the project', async t => {
+  const f = await setup(t, {reports: [status('RUNNING', 10)], controlEnds: true});
+  await f.service.print(f.object.id);
+  await f.approve();
+  await f.service.settled(f.object.id);
+  await until(() => f.events.some(e => e.type === 'print.started'));
+  const resuming = f.service.control(f.object.id, 'resume').then(() => assert.fail('resumed'), error => error);
+  const question = await until(async () => (await f.service.get(f.object.id)).printConfirmation);
+  assert.ok(f.calls.find(c => c.name === 'resume_print').timeoutMs > 600000, 'the call outlasts the 10-minute question');
+  f.endControl();
+  assert.match((await resuming).message, /didn't resume/);
+  assert.equal((await f.service.get(f.object.id)).printConfirmation, undefined);
+  // A question an older companion left behind: answering it takes it off the project.
+  await f.store.update(f.object.id, o => ({...o, printConfirmation: question}));
+  await assert.rejects(f.service.answerPrintConfirmation(f.object.id, question.id, {action: 'accept', content: {confirmed: true}}), /no longer waiting/);
+  assert.equal((await f.service.get(f.object.id)).printConfirmation, undefined);  // An expired one can't be answered at all; a restart takes it away.
+  await f.store.update(f.object.id, o => ({...o, printConfirmation: {...question, expiresAtMs: Date.now() - 1}}));
+  await f.service.resume();
+  assert.equal((await f.service.get(f.object.id)).printConfirmation, undefined);
 });
 
 test('the camera route serves one frame per 3 s to every viewer, and 404s a printer without a camera', async t => {
@@ -332,13 +370,47 @@ test('a Bambu Connect choice copied into printer-handoff.json no longer decides 
 
 test('Settings -> Printers reads and changes the MCP\'s own route, and has none to show for an MCP without one', async t => {
   const f = await setup(t, {route: {mode: 'bambu_network', type: 'lan'}});
-  assert.equal((await f.service.printRoute('current')).route, 'lan');
+  const read = await f.service.printRoute('current');
+  assert.equal(read.route, 'lan');
+  assert.deepEqual(read.options.map(option => option.label), ['Local network', 'Bambu Cloud', 'Local network, Developer Mode'], 'the MCP words each connection');
   const cloud = await f.service.printRoute('current', 'cloud');
   assert.deepEqual([cloud.route, cloud.mode, cloud.type], ['cloud', 'bambu_network', 'cloud']);
-  assert.deepEqual(f.calls.filter(c => c.name === 'counterpart_print_route').map(c => c.args?.route), [undefined, 'cloud']);
+  // Developer Mode is a route Counterpart never had to know about: the MCP names and words it.
+  const developer = await f.service.printRoute('current', 'developer');
+  assert.deepEqual([developer.route, developer.mode], ['developer', 'lan_mqtt_ftps']);
+  assert.match(developer.options.find(option => option.id === 'developer').controls, /straight to the printer/);
+  assert.deepEqual(f.calls.filter(c => c.name === 'counterpart_print_route').map(c => c.args?.route), [undefined, 'cloud', 'developer']);
   await assert.rejects(f.service.printRoute('elsewhere'));
   const none = await setup(t, {});
   assert.equal(await none.service.printRoute('current'), undefined);
+  // An MCP from before options still shows its two choices.
+  const older = await setup(t, {route: {mode: 'bambu_network', type: 'lan', legacy: true}});
+  const legacy = await older.service.printRoute('current');
+  assert.deepEqual([legacy.route, legacy.choices, legacy.options], ['lan', ['lan', 'cloud'], undefined]);
+});
+
+// Nov 3: Bambu Handy resumed a pick after Counterpart's Resume was refused, and the activity said "Printing again."
+test('a resume Counterpart did not send is logged as outside Counterpart; its own Resume keeps "Printing again."', async t => {
+  const f = await setup(t, {reports: [status('RUNNING', 10)]});
+  await f.service.print(f.object.id);
+  await f.approve();
+  await f.service.settled(f.object.id);
+  await until(() => f.events.some(e => e.type === 'print.started'));
+  const lines = async () => (await f.service.get(f.object.id)).print.events.map(e => e.message);
+  const step = async (report, line) => {
+    f.queue.length = 0; f.queue.push(report);
+    await until(async () => { await f.tick(); return (await lines()).includes(line) ? true : undefined; });
+  };
+  await step(status('PAUSE', 20), 'The printer paused it.');
+  await step(status('RUNNING', 30), 'Resumed outside Counterpart (on the printer or another app).');
+  assert.equal((await lines()).includes('Printing again.'), false);
+
+  await step(status('PAUSE', 40), 'The printer paused it.');
+  const resuming = f.service.control(f.object.id, 'resume');
+  const question = await until(async () => (await f.service.get(f.object.id)).printConfirmation);
+  await f.service.answerPrintConfirmation(f.object.id, question.id, {action: 'accept', content: {confirmed: true}});
+  await resuming;
+  await step(status('RUNNING', 50), 'Printing again.');
 });
 
 test('an MCP that reports AMS trays in the counterpart/1 slots shape (mcp-3D-printer-server) gets filament choices like bambu-printer-mcp', async t => {
