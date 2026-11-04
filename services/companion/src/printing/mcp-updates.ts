@@ -378,7 +378,7 @@ export class McpUpdater {
         const live = join(plan.prefix, 'lib', 'node_modules', install.pkg), staged = join(staging, 'lib', 'node_modules', install.pkg), kept = join(staging, 'previous');
         finish = () => this.#fs.rm(staging);
         undo = finish;
-        const output = await run('npm install', plan.command, [...plan.args, 'install', '--global', '--prefix', staging, `--allow-scripts=${install.pkg}`, '--ignore-scripts=false', '--foreground-scripts', `${install.pkg}@${latest}`], undefined, plan.env);
+        const output = await run('npm install', plan.command, [...plan.args, 'install', '--global', '--prefix', staging, `--allow-scripts=${install.pkg}`, '--ignore-scripts=false', '--foreground-scripts', '--loglevel=notice', `${install.pkg}@${latest}`], undefined, plan.env);
         if (!this.#deps.env.exists(join(staged, 'package.json'))) throw new Error('npm install left no package');
         this.#verifyPostinstall(staged, output);
         await this.#fs.mkdir(dirname(live));
@@ -503,8 +503,8 @@ export class McpUpdater {
       if ('fail' in plan) throw Object.assign(new Error(plan.fail), {sentence: plan.fail});
       if (plan.kind !== 'npm') throw new Error('not an npm install');
       await this.#fs.mkdir(install.prefix);
-      const result = await this.#run(plan.command, [...plan.args, 'install', '--global', '--prefix', staging, `--allow-scripts=${pkg}`, '--ignore-scripts=false', '--foreground-scripts', `${pkg}@${latest}`], {env: plan.env, timeoutMs: MCP_UPDATE_TIMEOUT_MS});
-      log += `$ ${[plan.command, ...plan.args, 'install', '--global', '--prefix', staging, `--allow-scripts=${pkg}`, '--ignore-scripts=false', '--foreground-scripts', `${pkg}@${latest}`].join(' ')}\n${result.output}\n`;
+      const result = await this.#run(plan.command, [...plan.args, 'install', '--global', '--prefix', staging, `--allow-scripts=${pkg}`, '--ignore-scripts=false', '--foreground-scripts', '--loglevel=notice', `${pkg}@${latest}`], {env: plan.env, timeoutMs: MCP_UPDATE_TIMEOUT_MS});
+      log += `$ ${[plan.command, ...plan.args, 'install', '--global', '--prefix', staging, `--allow-scripts=${pkg}`, '--ignore-scripts=false', '--foreground-scripts', '--loglevel=notice', `${pkg}@${latest}`].join(' ')}\n${result.output}\n`;
       if (result.code !== 0) throw new Error('npm install failed');
       if (!this.#deps.env.exists(join(staged, 'package.json'))) throw new Error('npm install left no package');
       this.#verifyPostinstall(staged, result.output);

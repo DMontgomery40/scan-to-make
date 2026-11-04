@@ -135,7 +135,7 @@ test('Update runs the matching update in that installation, restarts every sessi
   assert.equal(f.commands[0], '/opt/homebrew/bin/npm view bambu-printer-mcp version');
   // Installed beside the live copy, then swapped in: a failed install never touches what runs.
   const staging = f.commands[1].match(/--prefix (.+\/\.counterpart-update-[0-9a-f-]+) /)[1];
-  assert.equal(f.commands[1], `${node} /opt/homebrew/lib/node_modules/npm/bin/npm-cli.js install --global --prefix ${staging} --allow-scripts=bambu-printer-mcp --ignore-scripts=false --foreground-scripts bambu-printer-mcp@1.1.50`);
+  assert.equal(f.commands[1], `${node} /opt/homebrew/lib/node_modules/npm/bin/npm-cli.js install --global --prefix ${staging} --allow-scripts=bambu-printer-mcp --ignore-scripts=false --foreground-scripts --loglevel=notice bambu-printer-mcp@1.1.50`);
   assert.ok(staging.startsWith(`${prefix}/`));
   const live = `${prefix}/lib/node_modules/bambu-printer-mcp`;
   assert.deepEqual(f.moves, [['rename', live, `${staging}/previous`], ['rename', `${staging}/lib/node_modules/bambu-printer-mcp`, live], ['rm', staging]]);
@@ -763,7 +763,7 @@ test('npm script policy: Update and Download authorize only the selected MCP and
         if (download) await f.updates.download(pkg); else await f.updates.update(f.mcpId);
         await f.done();
         const install = f.commands.find(command => command.includes(' install '));
-        assert.ok(install.includes(`--allow-scripts=${pkg} --ignore-scripts=false --foreground-scripts`));
+        assert.ok(install.includes(`--allow-scripts=${pkg} --ignore-scripts=false --foreground-scripts --loglevel=notice`));
         assert.ok(!install.includes('dangerously-allow-all'));
         assert.equal(f.events.at(-1).type, ran ? 'mcp.update.done' : 'mcp.update.failed');
         if (!ran) {

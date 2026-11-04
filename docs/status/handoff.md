@@ -359,6 +359,12 @@ remote native probes and the SSH tunnel were removed after verification.
      owner are Bambu **1.1.54** (`e1fbc69`) and generic **1.2.28** (`381ff87`), including support arguments.
      Parent's companion fix authorizes only the selected package with `--allow-scripts=<pkg>` on global
      Download/Update, enables foreground scripts and verifies any declared postinstall banner before swap.
+     Review follow-up (#304 `b0926e2`): both global installs now also force `--loglevel=notice`, so a
+     user's silent npm setting cannot suppress the lifecycle banner and falsely reject completed setup.
+     Release build and all 32 updater checks pass; real Homebrew npm with `npm_config_loglevel=silent`
+     hides the banner without the flag and shows it with the flag (setup runs in both cases). Engineering
+     receipts: `~/scan-to-make-work/main-integration-mac/npm-notice-*`. This follow-up is source-only;
+     installed 628 lacks it, but its actual Update succeeded with David's existing npm settings.
      Checkout `npm ci` is unchanged. Focused Linux companion build and updater checks pass (30/30);
      build 202611040628 now includes this and the Node native-addon signing fix. Actual UI Update to
      published Bambu 1.1.54 succeeded at 13:37Z; see the deployment receipt above.
