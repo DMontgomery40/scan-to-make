@@ -606,7 +606,12 @@ remote native probes and the SSH tunnel were removed after verification.
     Release owner quit that viewer through **Quit and Keep Simulators Running**, verified its exit,
     and read-only display info now lists only the phone LCD (no Wireless display). David then confirmed
     **both Apple Camera lenses work**. No camera source fix is claimed: capture files are unchanged
-    from `f03580e` to `a26be565`. User-operated 30-second preview → Close → Apple Camera check is pending.
+    from `f03580e` to `a26be565`. **Camera lifecycle acceptance PASSED on build 202611041045:**
+    David operated Counterpart → New Project → Scan it, left the preview open for 30 seconds, tapped
+    Close, then checked Apple Camera front and rear. His result: “Preview stays live; both cameras work
+    afterward.” USB-only `viewer-off-live.log` / `viewer-off-camera-excerpt.log` recorded camera processing
+    with zero continuity-display blackening events. Owned logger is stopped. This accepts preview/cancel
+    and camera recovery with the viewer off; a complete real-object capture/reconstruction remains open.
     Keep physical-phone viewers/screen sharing/recording off during capture acceptance; use USB syslog
     only. Other agents remain off Davica3. Private logs and retained archives (not committed):
     `~/scan-to-make-work/camera-recurrence-20261104/`, especially `mac-coredevice-trigger.log`,
