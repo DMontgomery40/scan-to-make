@@ -359,6 +359,13 @@ remote native probes and the SSH tunnel were removed after verification.
      owner are Bambu **1.1.54** (`e1fbc69`) and generic **1.2.28** (`381ff87`), including support arguments.
      Parent's companion fix authorizes only the selected package with `--allow-scripts=<pkg>` on global
      Download/Update, enables foreground scripts and verifies any declared postinstall banner before swap.
+     **Main backport merged:** #304 squash `f9ecff62537e1f0d0cd2813b302ee4b9c31a3398`, head `b0926e2`,
+     carries the complete global install-script policy/verification and Node native-addon entitlement.
+     Owner reports package/e2e/licence/Mac build passed at `e179aef`; Node 22/24 companion passed at
+     `b0926e2`, whose only additional edits were updater source/tests. branch_check SAFE; Codex no major
+     issues. Release `31353f57` already matches the runtime behavior; final main integration waits for #293.
+     `verify_apple_distribution.py` is absent on main, so its signed-Node check remains release-only until
+     distribution tooling is integrated. No live deployment is needed for the backport.
      Review follow-up (#304 `b0926e2`): both global installs now also force `--loglevel=notice`, so a
      user's silent npm setting cannot suppress the lifecycle banner and falsely reject completed setup.
      Release build and all 32 updater checks pass; real Homebrew npm with `npm_config_loglevel=silent`
