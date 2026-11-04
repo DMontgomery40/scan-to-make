@@ -4,7 +4,7 @@
   "toolVersion": "1.2.0",
   "status": "built and verified on Ubuntu 26.04 x86_64 (packaging/build-linux-payload.sh); not yet shipped inside a Counterpart .deb/AppImage - apps/linux owns that wiring via RECONSTRUCTION_PAYLOAD",
   "buildIdFormat": "reconstruction-<toolVersion>-g<commit12>-linux-x64 (file BUILD-ID at payload root)",
-  "target": "Ubuntu 26.04 LTS x86_64; the host provides glibc/ld-linux only (the .deb closure carries its exact baseline). Linux x64 only - no arm64 claim.",
+  "target": "Ubuntu 26.04 LTS x86_64. Explicit system baseline the payload may resolve from the host: ld-linux-x86-64.so.2, libc.so.6, libm.so.6, libdl.so.2, libpthread.so.0, librt.so.1, libutil.so.1, libresolv.so.2 (glibc 2.43 core). Every other library of every shipped binary must resolve inside the payload; the build fails otherwise (a build-host /usr/lib resolution is a failure, not a pass).",
   "layout": {
     "payloadRoot": "Payload/reconstruction/ inside the app payload",
     "bin/linux-reconstruct": "relocatable launcher: bundled python/bin/python3 + tool/reconstruct.py, defaults SCAN_TO_MAKE_OPENMVS_DIR and SCAN_TO_MAKE_COLMAP to the payload",
@@ -22,16 +22,26 @@
       "version": "3.12.6-4 (Ubuntu 26.04 archive at build time; exact .deb versions recorded in the payload's licenses/debian/)",
       "role": "CPU sparse reconstruction",
       "licence": "COLMAP BSD-3-Clause; each closure library under its Debian copyright file shipped in licenses/debian/",
-      "acquire": "apt-get download of the package list pinned in build-linux-payload.sh, dpkg -x into colmap-root (no system install)",
-      "verify": "bin/colmap help | head -1 -> COLMAP 3.12.6"
+      "acquire": "Exact pins (name, version, .deb SHA-256) in packaging/colmap-packages.txt; apt-get download of name=version, each .deb hash-verified by package metadata, dpkg -x into colmap-root (downloaded, never installed). Includes libposelib, which the colmap package links but does not declare.",
+      "verify": "bin/colmap help -> COLMAP 3.12.6, plus the strict closure proof in build-linux-payload.sh"
     },
     {
       "name": "OpenMVS official Ubuntu binaries",
       "version": "2.4.0",
       "role": "Dense point cloud + mesh, invoked as separate processes",
       "licence": "AGPL-3.0 (licenses/openmvs-LICENSE from the source tree)",
-      "binaryArchive": {"file": "OpenMVS_Ubuntu_x64.zip", "url": "https://github.com/cdcseacave/openMVS/releases/download/v2.4.0/OpenMVS_Ubuntu_x64.zip", "sha256": "7104ae1ddd6ca38fbca9e0e4a70b20af59e21e0b497eb7181c864fbf38ca8d00", "note": "This hash is the official prebuilt BINARY zip (an earlier draft wrongly called it a source archive)."},
-      "correspondingSource": {"file": "openmvs-v2.4.0-corresponding-source.tar.gz", "url": "https://github.com/cdcseacave/openMVS/archive/refs/tags/v2.4.0.tar.gz", "sha256": "1668a991fa1fdd3540ee47fdba282a7579ed876af713e8fa907625be1cf8dfc8", "shippedAt": "licenses/openmvs-v2.4.0-corresponding-source.tar.gz"},
+      "binaryArchive": {
+        "file": "OpenMVS_Ubuntu_x64.zip",
+        "url": "https://github.com/cdcseacave/openMVS/releases/download/v2.4.0/OpenMVS_Ubuntu_x64.zip",
+        "sha256": "7104ae1ddd6ca38fbca9e0e4a70b20af59e21e0b497eb7181c864fbf38ca8d00",
+        "note": "This hash is the official prebuilt BINARY zip (an earlier draft wrongly called it a source archive)."
+      },
+      "correspondingSource": {
+        "file": "openmvs-v2.4.0-corresponding-source.tar.gz",
+        "url": "https://github.com/cdcseacave/openMVS/archive/refs/tags/v2.4.0.tar.gz",
+        "sha256": "1668a991fa1fdd3540ee47fdba282a7579ed876af713e8fa907625be1cf8dfc8",
+        "shippedAt": "licenses/openmvs-v2.4.0-corresponding-source.tar.gz"
+      },
       "runtimeLibraries": "libgomp/libstdc++/libgcc_s from the .deb closure (lib/), glibc from the supported host",
       "verify": "openmvs/InterfaceCOLMAP --help -> OpenMVS x64 v2.4.0"
     },
@@ -60,7 +70,7 @@
   ],
   "readiness": {
     "check": "bin/linux-reconstruct check --mode samples|qualify prints one JSON line {ok, toolVersion, versions} and exits 0 only when the closure runs (30s bound in the companion)",
-    "capability": "companion capabilities.reconstructionReviewV1 requires this check to pass; results are cached per binary (path+mtime), failures re-probed after 30s and never cached as success",
+    "capability": "companion capabilities.reconstructionReviewV1 requires this check to pass; results are cached per packaged BUILD-ID (mtime fallback for unpackaged checkouts), failures re-probed after 30s and never cached as success; the probe runs with the companion-supplied environment and drains stderr; check imports the exact USD modules qualification loads (Gf, Usd, UsdGeom, UsdUtils, Vt)",
     "mac": "No separate Mac closure: qualify reuses the audited Mac payload Python (CPython 3.12 + usd-core 26.8 + Pillow 13 in apps/mac/distribution.json) via the relocatable in-repo launcher; check --mode qualify is the Mac readiness probe"
   },
   "verification": [

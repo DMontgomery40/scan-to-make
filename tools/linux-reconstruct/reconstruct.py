@@ -681,9 +681,11 @@ def check_main(args):
     report = {"ok": False, "tool": "linux-reconstruct", "toolVersion": TOOL_VERSION,
               "mode": args.mode, "versions": {}}
     try:
-        import pxr  # noqa: F401
+        # The exact USD modules qualification/export load (usd_export._load_pxr),
+        # not merely the pxr package shell.
+        from pxr import Gf, Usd, UsdGeom, UsdUtils, Vt  # noqa: F401
         report["versions"]["python"] = ".".join(str(v) for v in sys.version_info[:3])
-        report["versions"]["usd"] = "importable"
+        report["versions"]["usd"] = "Gf,Usd,UsdGeom,UsdUtils,Vt importable"
     except ImportError as e:
         report["error"] = f"USD runtime unavailable: {e}"
         emit(report)

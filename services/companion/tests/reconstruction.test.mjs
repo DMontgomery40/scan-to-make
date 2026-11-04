@@ -297,6 +297,42 @@ test('reconstructionReviewSupported reflects the tools actually present', async 
   assert.equal(reconstructionReviewSupported('win32', {SCAN_TO_MAKE_LINUX_RECONSTRUCT: tool}), false);
 });
 
+test('readiness passes the supplied environment to the probe and drains stderr', async () => {
+  resetReconstructionReadiness();
+  const root = await mkdtemp(join(tmpdir(), 'readiness-env-'));
+  const tool = join(root, 'tool');
+  await writeFile(tool, `#!/bin/sh\ni=0; while [ $i -lt 200 ]; do echo "noisy-stderr-line-$i" >&2; i=$((i+1)); done\nif [ "$STM_PROBE" = "yes" ]; then echo '{"ok":true,"versions":{"python":"3.12"}}'; else echo '{"ok":false,"error":"no env"}'; exit 2; fi\n`);
+  await chmod(tool, 0o755);
+  const env = {SCAN_TO_MAKE_LINUX_RECONSTRUCT: tool, STM_PROBE: 'yes', PATH: process.env.PATH};
+  assert.equal((await reconstructionReadiness('linux', env)).ok, true);
+  resetReconstructionReadiness();
+});
+
+test('readiness cache is keyed by packaged BUILD-ID, not launcher mtime', async () => {
+  resetReconstructionReadiness();
+  const root = await mkdtemp(join(tmpdir(), 'readiness-buildid-'));
+  await mkdir(join(root, 'bin'));
+  const tool = join(root, 'bin', 'linux-reconstruct');
+  const counter = join(root, 'count');
+  await writeFile(tool, `#!/bin/sh\necho x >> ${counter}\necho '{"ok":true,"versions":{"python":"3.12"}}'\n`);
+  await chmod(tool, 0o755);
+  await writeFile(join(root, 'BUILD-ID'), 'reconstruction-9.9-g111111111111-linux-x64\n');
+  const env = {SCAN_TO_MAKE_LINUX_RECONSTRUCT: tool};
+  const {packagedBuildId} = await import('../dist/objects/reconstruct.js');
+  assert.equal(packagedBuildId(tool), 'reconstruction-9.9-g111111111111-linux-x64');
+  assert.equal((await reconstructionReadiness('linux', env)).ok, true);
+  // Same BUILD-ID, launcher rewritten: still cached.
+  await writeFile(tool, `#!/bin/sh\necho x >> ${counter}\necho '{"ok":true,"versions":{"python":"3.12"}}'\n`);
+  await chmod(tool, 0o755);
+  assert.equal((await reconstructionReadiness('linux', env)).ok, true);
+  assert.equal((await readFile(counter, 'utf8')).trim().split('\n').length, 1);
+  // New BUILD-ID: re-probed.
+  await writeFile(join(root, 'BUILD-ID'), 'reconstruction-9.9-g222222222222-linux-x64\n');
+  assert.equal((await reconstructionReadiness('linux', env)).ok, true);
+  assert.equal((await readFile(counter, 'utf8')).trim().split('\n').length, 2);
+  resetReconstructionReadiness();
+});
+
 test('readiness runs the tool check once, caches it, and never caches failure as success', async () => {
   resetReconstructionReadiness();
   const root = await mkdtemp(join(tmpdir(), 'readiness-'));

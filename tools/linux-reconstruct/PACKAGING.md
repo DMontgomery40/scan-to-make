@@ -22,13 +22,18 @@ The build id for siblings to pin is the payload's `BUILD-ID` file
 
 ## Closure choices
 
-- **COLMAP** comes from the Ubuntu 26.04 archive: the pinned package list
-  (COLMAP plus every package owning a library in its `ldd` closure) is
-  downloaded and extracted with `dpkg -x` — downloaded, never installed —
-  and run through a wrapper setting `LD_LIBRARY_PATH` and
-  `QT_QPA_PLATFORM=offscreen`. Debian copyright files for the closure ship
-  in `licenses/debian/`. Supported target is stated honestly: Ubuntu
-  26.04 x86_64, host provides glibc/ld-linux only.
+- **COLMAP** comes from the Ubuntu 26.04 archive at exact pins
+  (`packaging/colmap-packages.txt`: name, version, .deb SHA-256 — COLMAP
+  plus every package owning a library in its `ldd` closure, plus
+  `libposelib`, which the package links but does not declare). Each .deb
+  is hash-verified, extracted with `dpkg -x` — downloaded, never
+  installed — and run through a wrapper setting `LD_LIBRARY_PATH` and
+  `QT_QPA_PLATFORM=offscreen`. The build then proves closure strictly:
+  with only the payload's library paths, every needed library of every
+  shipped binary must resolve inside the payload, except the documented
+  Ubuntu 26.04 glibc baseline (ld-linux, libc/libm/libdl/libpthread/
+  librt/libutil/libresolv). A resolution into the build host's `/usr/lib`
+  fails the build. Debian copyright files ship in `licenses/debian/`.
 - **OpenMVS** official binaries are nearly static (libgomp/libstdc++/
   libgcc_s + glibc); the GCC runtimes ship in `lib/` from the same .deb
   closure.
@@ -46,11 +51,14 @@ The build id for siblings to pin is the payload's `BUILD-ID` file
 ## Readiness, not presence
 
 `linux-reconstruct check --mode samples|qualify` is the bounded evidence
-probe (imports USD; samples also launches COLMAP/OpenMVS `--help`). The
-companion's `reconstructionReviewV1` capability is its cached result —
-per binary path+mtime, failures re-probed after 30 s and never cached as
-success — so health requests do not spawn probes, and a broken closure
-reports false with an actionable error instead of advertising support.
+probe (imports the exact USD modules qualification loads — Gf, Usd,
+UsdGeom, UsdUtils, Vt; samples also launches COLMAP/OpenMVS `--help`).
+The companion's `reconstructionReviewV1` capability is its cached
+result — per packaged BUILD-ID (mtime fallback for unpackaged
+checkouts), failures re-probed after 30 s and never cached as success,
+probed with the companion-supplied environment and drained stderr — so
+health requests do not spawn probes, and a broken closure reports false
+with an actionable error instead of advertising support.
 
 ## Updating
 

@@ -38,9 +38,12 @@ USD_WHEEL_SHA=204fb1ef1fc977b827c491f4e9fa39b57518504ed0cacfe12e026e95123cacf1
 PIL_WHEEL=pillow-13.0.0-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl
 PIL_WHEEL_URL=https://files.pythonhosted.org/packages/e6/99/fdf65cc539e266ab93546c261bdf98411fe165c6e4e13f9dbf597097192b/$PIL_WHEEL
 PIL_WHEEL_SHA=42d63be3af4f9b951b199b0a9d23365d37ab14687e6d77b74940432c8515c4ca
-# distro packages providing COLMAP and every shared library its binary needs
-# (ldd closure, minus glibc/ld-linux which the supported target provides).
-COLMAP_PACKAGES="colmap libamd3 libatomic1 libboost-program-options1.90.0 libbrotli1 libbz2-1.0 libcamd3 libccolamd3 libceres4t64 libcholmod5 libcolamd3 libdeflate0 libdouble-conversion3 libfreeimage3 libfreetype6 libgcc-s1 libgflags2.2 libgfortran5 libgl1 libglew2.2 libglib2.0-0t64 libglvnd0 libglx0 libgomp1 libgoogle-glog0v6t64 libgraphite2-3 libharfbuzz0b libicu78 libimath-3-1-29t64 libjbig0 libjpeg-turbo8 libjxr0t64 liblcms2-2 liblerc4 liblzma5 libmd4c0 libmetis5 libopenexr-3-1-30 libopengl0 libopenjp2-7 libpcre2-16-0 libpcre2-8-0 libpng16-16t64 libposelib libqt5core5t64 libqt5gui5t64 libqt5widgets5t64 libraw23t64 libsharpyuv0 libspqr4 libsqlite3-0 libstdc++6 libsuitesparseconfig7 libtiff6 libunwind8 libwebp7 libwebpmux3 libx11-6 libxau6 libxcb1 libxdmcp6 libzstd1 zlib1g"
+# Pinned distro packages (name, exact version, .deb SHA-256) providing
+# COLMAP and every shared library its binary needs. Anything resolved from
+# outside the payload at verify time must be on the documented baseline:
+# Ubuntu 26.04 glibc core (ld-linux, libc/libm/libdl/libpthread/librt).
+PACKAGES_FILE="$tool_dir/packaging/colmap-packages.txt"
+BASELINE_LIBS="ld-linux-x86-64.so.2 libc.so.6 libm.so.6 libdl.so.2 libpthread.so.0 librt.so.1 libutil.so.1 libresolv.so.2"
 
 mkdir -p "$(dirname "$out")"
 work=$(mktemp -d "$(dirname "$out")/.reconstruction-payload.XXXXXX")
@@ -85,14 +88,38 @@ mkdir -p "$work/openmvs-src" && tar -xzf "$dl/openmvs-v2.4.0.tar.gz" -C "$work/o
 cp "$work/openmvs-src/LICENSE" "$stage/licenses/openmvs-LICENSE" 2>/dev/null || \
   find "$work/openmvs-src" -maxdepth 1 -iname 'LICENSE*' -exec cp {} "$stage/licenses/openmvs-LICENSE" \;
 
-# --- COLMAP closure from distro .debs (download + extract, never install) -----
+# --- COLMAP closure from pinned distro .debs (download + verify + extract) ---
 mkdir -p "$work/debs" "$stage/colmap-root"
-(cd "$work/debs" && apt-get download $COLMAP_PACKAGES >/dev/null)
+apt_specs=()
+while read -r name version _sha _rest; do
+  case "$name" in ''|'#'*) continue ;; esac
+  apt_specs+=("$name=$version")
+done < "$PACKAGES_FILE"
+[ "${#apt_specs[@]}" -gt 0 ] || { echo "No pinned packages in $PACKAGES_FILE" >&2; exit 1; }
+(cd "$work/debs" && apt-get download "${apt_specs[@]}" >/dev/null)
+# apt may percent-encode epochs in file names; verify by package, not by guess.
+"$python" - "$work/debs" "$PACKAGES_FILE" <<'PYEOF'
+import hashlib, subprocess, sys
+from pathlib import Path
+debs = Path(sys.argv[1])
+by_name = {}
+for deb in debs.glob("*.deb"):
+    name = subprocess.run(["dpkg-deb", "-f", str(deb), "Package"], capture_output=True, text=True).stdout.strip()
+    version = subprocess.run(["dpkg-deb", "-f", str(deb), "Version"], capture_output=True, text=True).stdout.strip()
+    by_name[name] = (version, hashlib.sha256(deb.read_bytes()).hexdigest(), deb.name)
+bad = []
+for line in Path(sys.argv[2]).read_text().splitlines():
+    if not line.strip() or line.startswith("#"):
+        continue
+    name, version, sha = line.split()[:3]
+    got = by_name.get(name)
+    if got != (version, sha, got[2] if got else None) or got is None:
+        bad.append(f"{name}: want {version} sha256 {sha}, got {got}")
+if bad:
+    raise SystemExit("Pinned .deb verification failed:\n" + "\n".join(bad))
+print(f"verified {len(by_name)} pinned .debs")
+PYEOF
 for deb in "$work/debs"/*.deb; do dpkg -x "$deb" "$stage/colmap-root"; done
-# Closure proof: every library the extracted COLMAP binary needs must
-# resolve inside the payload (the distro package under-declares libposelib).
-missing=$(LD_LIBRARY_PATH="$stage/colmap-root/usr/lib/x86_64-linux-gnu:$stage/lib" ldd "$stage/colmap-root/usr/bin/colmap" | grep 'not found' || true)
-if [ -n "$missing" ]; then echo "COLMAP closure is incomplete:" >&2; echo "$missing" >&2; exit 1; fi
 # GCC runtime libraries for the OpenMVS binaries, from the same extracted debs.
 for lib in libgomp.so.1 libstdc++.so.6 libgcc_s.so.1; do
   cp -L "$stage/colmap-root/usr/lib/x86_64-linux-gnu/$lib" "$stage/lib/" 2>/dev/null || \
@@ -100,10 +127,47 @@ for lib in libgomp.so.1 libstdc++.so.6 libgcc_s.so.1; do
 done
 # Distro copyright files for the closure (COLMAP itself and the libraries).
 mkdir -p "$stage/licenses/debian"
-for pkg in $COLMAP_PACKAGES; do
+while read -r pkg _version _sha _rest; do
+  case "$pkg" in ''|'#'*) continue ;; esac
   src="$stage/colmap-root/usr/share/doc/$pkg/copyright"
   [ -f "$src" ] && cp "$src" "$stage/licenses/debian/$pkg.copyright"
-done
+done < "$PACKAGES_FILE"
+cp "$PACKAGES_FILE" "$stage/licenses/debian/colmap-packages.txt"
+# Closure proof, strict: with the payload's own library paths, every needed
+# library of every shipped binary must resolve INSIDE the payload - except
+# the documented Ubuntu 26.04 glibc baseline. A resolution into the build
+# host's /usr/lib is a failure, not a pass (the libposelib lesson).
+"$python" - "$stage" "$BASELINE_LIBS" <<'PYEOF'
+import os, re, subprocess, sys
+from pathlib import Path
+stage = Path(sys.argv[1]).resolve()
+baseline = set(sys.argv[2].split())
+env = dict(os.environ)
+env["LD_LIBRARY_PATH"] = f"{stage}/colmap-root/usr/lib/x86_64-linux-gnu:{stage}/lib"
+binaries = [stage / "colmap-root/usr/bin/colmap", stage / "python/bin/python3"] + \
+           sorted((stage / "openmvs").glob("*"))
+bad = []
+for binary in binaries:
+    if not binary.is_file():
+        continue
+    out = subprocess.run(["ldd", str(binary)], capture_output=True, text=True, env=env).stdout
+    for line in out.splitlines():
+        m = re.search(r"(\S+)\s+=>\s+(\S+|not found)", line)
+        if m:
+            lib, path = m.group(1), m.group(2)
+            if path == "not":
+                bad.append(f"{binary.name}: {lib} not found")
+            elif not str(Path(path).resolve()).startswith(str(stage)) and lib not in baseline \
+                    and Path(path).name not in baseline:
+                bad.append(f"{binary.name}: {lib} resolved from build host: {path}")
+        elif "=>" not in line and line.strip().startswith("/"):
+            path = line.strip().split()[0]
+            if Path(path).name not in baseline and not str(Path(path).resolve()).startswith(str(stage)):
+                bad.append(f"{binary.name}: interpreter from build host: {path}")
+if bad:
+    raise SystemExit("Closure verification failed:\n" + "\n".join(sorted(set(bad))))
+print("closure proof ok: only payload paths + documented glibc baseline")
+PYEOF
 # Qt platform plugin colmap's Qt linkage loads at startup (offscreen only).
 mkdir -p "$stage/colmap-root/usr/lib/x86_64-linux-gnu/qt5/plugins/platforms"
 [ -f "$stage/colmap-root/usr/lib/x86_64-linux-gnu/qt5/plugins/platforms/libqoffscreen.so" ] || \

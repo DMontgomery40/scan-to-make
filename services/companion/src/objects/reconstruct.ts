@@ -1,5 +1,5 @@
 import {spawn} from 'node:child_process';
-import {existsSync, statSync} from 'node:fs';
+import {existsSync, readFileSync, statSync} from 'node:fs';
 import {lstat, mkdir, rename, rm, writeFile} from 'node:fs/promises';
 import {randomUUID} from 'node:crypto';
 import {dirname, join} from 'node:path';
@@ -354,37 +354,62 @@ async function probeReadiness(platform: string, env: NodeJS.ProcessEnv): Promise
     return {ok: false, error: QUALIFY_NOT_INSTALLED};
   const mode = platform === 'linux' ? 'samples' : 'qualify';
   return new Promise(resolve => {
-    const child = spawn(binary, ['check', '--mode', mode], {stdio: ['ignore', 'pipe', 'pipe']});
-    let out = '';
+    // The supplied environment decides discovery AND the probe itself (the
+    // packaged launcher reads SCAN_TO_MAKE_* from it); stderr is drained so
+    // a verbose failing tool can never wedge on a full pipe.
+    const child = spawn(binary, ['check', '--mode', mode], {stdio: ['ignore', 'pipe', 'pipe'], env});
+    let out = '', err = '';
     const timer = setTimeout(() => child.kill('SIGKILL'), 30000);
     child.stdout.setEncoding('utf8');
+    child.stderr.setEncoding('utf8');
     child.stdout.on('data', (chunk: string) => { out = (out + chunk).slice(-16384); });
+    child.stderr.on('data', (chunk: string) => { err = (err + chunk).slice(-4096); });
     child.on('error', () => { clearTimeout(timer); resolve({ok: false, error: QUALIFY_NOT_INSTALLED}); });
     child.on('close', code => {
       clearTimeout(timer);
+      const tail = err.trim().split('\n').at(-1)?.slice(0, 200);
       try {
         const line = out.trim().split('\n').at(-1);
         const report = JSON.parse(line ?? '') as {ok?: unknown; error?: unknown; versions?: Record<string, string>};
         resolve(code === 0 && report.ok === true
           ? {ok: true, versions: report.versions}
-          : {ok: false, error: typeof report.error === 'string' ? report.error : QUALIFY_NOT_INSTALLED});
-      } catch { resolve({ok: false, error: QUALIFY_NOT_INSTALLED}); }
+          : {ok: false, error: typeof report.error === 'string' ? report.error : (tail || QUALIFY_NOT_INSTALLED)});
+      } catch { resolve({ok: false, error: tail || QUALIFY_NOT_INSTALLED}); }
     });
   });
 }
 
 /**
+ * The packaged BUILD-ID beside a launcher, when the launcher lives in a
+ * payload: <payload>/bin/linux-reconstruct (Linux) or
+ * Payload/source/tools/linux-reconstruct/linux-reconstruct (Mac).
+ * Readiness evidence is bound to this identity, not a file timestamp.
+ */
+export function packagedBuildId(binary: string | undefined): string | undefined {
+  if (!binary) return undefined;
+  for (const candidate of [join(dirname(binary), '..', 'BUILD-ID'), join(dirname(binary), '..', '..', '..', 'BUILD-ID')]) {
+    try {
+      const text = readFileSync(candidate, 'utf8').trim().split('\n')[0]?.trim();
+      if (text && text.length <= 256) return text;
+    } catch { /* not packaged there */ }
+  }
+  return undefined;
+}
+
+/**
  * Verified-runnable evidence for capabilities.reconstructionReviewV1: the
- * tool's own bounded `check`, cached per binary (path + mtime) so health
- * requests never spawn probes repeatedly. A changed/replaced binary
- * invalidates; a failure is retried after 30 s, never cached as success.
+ * tool's own bounded `check`, cached per packaged BUILD-ID (falling back
+ * to launcher mtime for unpackaged checkouts) so health requests never
+ * spawn probes repeatedly. A new payload build invalidates; a failure is
+ * retried after 30 s, never cached as success.
  */
 export function reconstructionReadiness(platform: string = process.platform, env: NodeJS.ProcessEnv = process.env): Promise<ReconstructionReadiness> {
   if (platform !== 'linux' && platform !== 'darwin') return Promise.resolve({ok: false, error: QUALIFY_NOT_INSTALLED});
   const binary = findLinuxReconstruct(env);
+  const buildId = packagedBuildId(binary);
   let stamp = '';
-  try { stamp = binary ? String(statSync(binary).mtimeMs) : ''; } catch { stamp = ''; }
-  const key = `${platform}|${binary ?? ''}|${stamp}|${platform === 'darwin' ? findMacReconstruct(env) ?? '' : ''}`;
+  if (!buildId) { try { stamp = binary ? String(statSync(binary).mtimeMs) : ''; } catch { stamp = ''; } }
+  const key = `${platform}|${binary ?? ''}|build:${buildId ?? ''}|mtime:${stamp}|${platform === 'darwin' ? findMacReconstruct(env) ?? '' : ''}`;
   const now = Date.now();
   if (readinessCache?.key === key && now - readinessCache.at < 30000) return readinessCache.promise;
   if (readinessCache?.key === key) {
