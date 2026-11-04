@@ -396,8 +396,10 @@ test('a resume Counterpart did not send is logged as outside Counterpart; its ow
   await until(() => f.events.some(e => e.type === 'print.started'));
   const lines = async () => (await f.service.get(f.object.id)).print.events.map(e => e.message);
   const step = async (report, line) => {
+    const before = (await lines()).length;
     f.queue.length = 0; f.queue.push(report);
-    await until(async () => { await f.tick(); return (await lines()).includes(line) ? true : undefined; });
+    // The second pause must be observed before Resume; the first pause's identical text is not a receipt.
+    await until(async () => { await f.tick(); return (await lines()).slice(before).includes(line) ? true : undefined; });
   };
   await step(status('PAUSE', 20), 'The printer paused it.');
   await step(status('RUNNING', 30), 'Resumed outside Counterpart (on the printer or another app).');
