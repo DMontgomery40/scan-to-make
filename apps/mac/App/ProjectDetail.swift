@@ -362,7 +362,8 @@ struct PrintConfirmationForm: View {
         TimelineView(.periodic(from: .now, by: 1)) { context in
             let answer = draft.answer(question, at: context.date.timeIntervalSince1970 * 1000)
             let expired = question.expiresAtMs <= context.date.timeIntervalSince1970 * 1000
-            let working = model.working.contains(object.id)
+            // The original Resume call waits for this answer; it must not disable its own form.
+            let working = model.answeringPrintConfirmations.contains(object.id)
             VStack(alignment: .leading, spacing: 10) {
                 Label(object.words.question ?? "Your printer needs a yes before printing", systemImage: "hand.raised.fill")
                     .font(.subheadline.weight(.semibold)).foregroundStyle(.orange)
@@ -375,12 +376,12 @@ struct PrintConfirmationForm: View {
                 HStack(spacing: 10) {
                     Spacer()
                     if working { ProgressView().controlSize(.small) }
-                    Button("Cancel Print", role: .destructive) {
+                    Button(object.print?.live?.state == "paused" ? "Cancel Resume" : "Cancel Print", role: .destructive) {
                         Task { await model.answerPrintConfirmation(object.id, confirmationId: question.id, answer: .init(action: .cancel)) }
                     }
                     .buttonStyle(.glass).disabled(working || expired)
                     if question.isRenderable {
-                        Button("Print") {
+                        Button(object.print?.live?.state == "paused" ? "Resume" : "Print") {
                             guard let answer = draft.answer(question, at: Date().timeIntervalSince1970 * 1000) else { return }
                             Task { await model.answerPrintConfirmation(object.id, confirmationId: question.id, answer: answer) }
                         }
