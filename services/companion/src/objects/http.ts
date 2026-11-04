@@ -1,3 +1,4 @@
+import {projectPlates, type ProjectPlate} from './plates.js';
 import {once} from 'node:events';
 import {createHash} from 'node:crypto';
 import type {IncomingMessage, ServerResponse} from 'node:http';
@@ -17,7 +18,7 @@ import {PrinterSetupError, type PrinterSetup} from '../printing/setup.js';
 const READ: RemoteScope = 'projects:read', WRITE: RemoteScope = 'captures:import', PRINT: RemoteScope = 'printer-handoff:use';
 const MAX_SCAN = 64 * 1024 * 1024, MAX_PHOTO = 25 * 1024 * 1024, MAX_JSON = 16 * 1024;
 const MAX_DEPTH = 8 * 1024 * 1024;
-const PATH = /^\/v1\/objects(?:\/([0-9a-f-]{36})(?:\/(scan|model|ask|settings|duplicate|photos|capture|capture-depth|start|corrections|closeup|print|print\/pause|print\/resume|print\/cancel|estimate|camera\.jpg|prints\/[0-9a-f-]{36}\/frames\/[0-9a-f-]{36}\.jpg|asks\/[0-9a-f-]{36}\.jpg|filaments|print-confirmation|printer|model\.stl|original\/[0-9]+|passes\/[^/]+\/activity|(?:renders|photos|capture|scan)\/[^/]+))?)?$/;
+const PATH = /^\/v1\/objects(?:\/([0-9a-f-]{36})(?:\/(scan|model|ask|plate-selection|settings|duplicate|photos|capture|capture-depth|start|corrections|closeup|print|print\/pause|print\/resume|print\/cancel|estimate|camera\.jpg|prints\/[0-9a-f-]{36}\/frames\/[0-9a-f-]{36}\.jpg|asks\/[0-9a-f-]{36}\.jpg|filaments|print-confirmation|printer|model\.stl|original\/[0-9]+|passes\/[^/]+\/activity|(?:renders|photos|capture|scan)\/[^/]+))?)?$/;
 const PRINTER_CAMERA = /^\/v1\/objects\/printers\/([A-Za-z0-9_-]{1,256})\/camera\.jpg$/;
 const PRINTER_SETTINGS = /^\/v1\/objects\/printers\/([A-Za-z0-9_-]{1,256})\/(route|mcp)$/;
 const SETTINGS: RemoteScope = 'projects:write';
@@ -58,7 +59,7 @@ async function json<T>(request: IncomingMessage, limit = MAX_JSON): Promise<T> {
   try { return JSON.parse(bytes.toString('utf8')) as T; } catch { throw new HttpFailure(400, 'invalid-request'); }
 }
 
-export type PublicObject = Omit<StmObject, 'passes' | 'title'> & {title: string; canRetryCleanup: boolean; status: ObjectStatus; settings: ReturnType<typeof projectSettingsView>; passes: (Omit<ObjectPass, 'dir' | 'activity'> & {activityCount: number})[]};
+export type PublicObject = Omit<StmObject, 'passes' | 'title'> & {plates?: ProjectPlate[]; title: string; canRetryCleanup: boolean; status: ObjectStatus; settings: ReturnType<typeof projectSettingsView>; passes: (Omit<ObjectPass, 'dir' | 'activity'> & {activityCount: number})[]};
 
 // Earlier generic failures asserted a capture mistake without evidence. Correct the displayed
 // advice for those retained attempts too, leaving their original stored records intact.
@@ -82,7 +83,7 @@ export function publicObject(object: StmObject): PublicObject {
     && !!object.failure && lastPass.activity?.at(-1)?.text === object.failure;
   // Never null: until a title is generated (or backfilled for an older project), the request's first words.
   // The companion's decision (copy, new design or published), so neither app re-derives it.
-  return {...object, kind: passKind(object), title: projectTitle(object), failure, canRetryCleanup, status: objectStatus({...object, ...(failure !== undefined ? {failure} : {})}, object.updatedAtMs),
+  return {...object, ...(object.kind === 'published' ? {plates: projectPlates(object)} : {}), kind: passKind(object), title: projectTitle(object), failure, canRetryCleanup, status: objectStatus({...object, ...(failure !== undefined ? {failure} : {})}, object.updatedAtMs),
     settings: projectSettingsView(object),
     passes: object.passes.map(({dir: _dir, activity, ...pass}) => ({...pass,
       summary: currentFailureText(pass.summary), activityCount: activity?.length ?? 0}))};
@@ -229,7 +230,12 @@ export function createObjectRoutes(service: ObjectService, printerSetup?: Pick<P
           if (method === 'GET') { await authorize(READ); return send(response, 200, {objects: (await service.list()).map(publicObject)}); }
           if (method === 'POST') {
             await authorize(WRITE);
-            const {instructions, kind, url: link} = await json<{instructions?: unknown; kind?: unknown; url?: unknown}>(request);
+            const input = await json<{instructions?: unknown; kind?: unknown; url?: unknown; starterId?: unknown}>(request);
+            const {instructions, kind, url: link, starterId} = input;
+            if (starterId !== undefined) {
+              if (typeof starterId !== 'string' || Object.keys(input).length !== 1) throw new HttpFailure(400, 'invalid-request');
+              return send(response, 201, {object: publicObject(await service.addStarter(starterId))});
+            }
             if (instructions !== undefined && (typeof instructions !== 'string' || instructions.length > 8000)) throw new HttpFailure(400, 'invalid-request');
             if (kind !== undefined && kind !== 'fit' && kind !== 'copy' && kind !== 'published') throw new HttpFailure(400, 'invalid-request');
             if (link !== undefined && (typeof link !== 'string' || link.length > 2048)) throw new HttpFailure(400, 'invalid-request');
@@ -253,6 +259,14 @@ export function createObjectRoutes(service: ObjectService, printerSetup?: Pick<P
           if (method !== 'GET') throw new HttpFailure(405, 'method-not-allowed');
           await authorize(READ);
           return send(response, 200, {object: publicObject(await service.view(id))});
+        }
+        if (action === 'plate-selection') {
+          if (method !== 'POST') throw new HttpFailure(405, 'method-not-allowed');
+          await authorize(WRITE);
+          const input = await json<Record<string, unknown>>(request);
+          const parsed = parameters['objects.selectPlate'].safeParse({...input, id});
+          if (!parsed.success || 'id' in input) throw new HttpFailure(400, 'invalid-request');
+          return send(response, 200, {object: publicObject(await service.selectPlate(id, parsed.data.fileIndex, parsed.data.plateIndex))});
         }
         if (action === 'filaments') {
           if (method !== 'GET') throw new HttpFailure(405, 'method-not-allowed');

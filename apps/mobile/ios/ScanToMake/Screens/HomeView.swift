@@ -41,7 +41,10 @@ struct HomeView: View {
     var body: some View {
         ScrollView {
             if store.loaded && store.projects.isEmpty && store.error == nil {
-                EmptyHome(start: newProject).padding(.horizontal, 16).padding(.bottom, 24)
+                VStack(alignment: .leading, spacing: 28) {
+                    starters
+                    EmptyHome(start: newProject)
+                }.padding(.horizontal, 16).padding(.bottom, 96)
             } else {
                 VStack(alignment: .leading, spacing: 26) {
                     if let error = store.error { ConnectionBanner(error: error, pair: store.onPair) }
@@ -76,6 +79,7 @@ struct HomeView: View {
                             VStack(spacing: 8) { ForEach(archived) { ArchivedRow(store: store, project: $0) { path.append($0.id) } } }
                         }
                     }
+                    if query.isEmpty { starters }
                     if !store.loaded && store.error == nil {
                         ProgressView().frame(maxWidth: .infinity).padding(.top, 40)
                     } else if searched.isEmpty && !query.isEmpty {
@@ -115,6 +119,15 @@ struct HomeView: View {
                 .accessibilityIdentifier("new-project")
                 .keyboardShortcut("n", modifiers: .command)
             }
+        }
+    }
+
+    private var starters: some View {
+        StarterProjectsView { starter in
+            let ticket = store.startRequest()
+            let project = try await store.mac.client.addStarter(starter)
+            store.replace(project, ticket: ticket)
+            path.append(project.id)
         }
     }
 

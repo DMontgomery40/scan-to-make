@@ -29,6 +29,9 @@ struct WelcomeView: View {
                             .font(.body).foregroundStyle(.secondary).multilineTextAlignment(.center)
                             .padding(.top, 8).padding(.horizontal, 28)
 
+                        StarterProjectsView(actionTitle: "Connect to Print") { _ in next() }
+                            .padding(.horizontal, 20).padding(.top, 24)
+
                         VStack(spacing: 14) {
                             WelcomeJobCard(model: ("example-fit", "stl"), image: nil, title: "Make something that fits",
                                            detail: "Describe it and show what it fits. Your Mac designs the part.",

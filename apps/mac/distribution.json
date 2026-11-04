@@ -181,6 +181,7 @@
   ],
   "sourcePaths": [
     "packages/contracts",
+    "packages/CounterpartKit/Sources/CounterpartKit/Resources/Starters",
     "services/project",
     "services/printer-handoff",
     "services/companion",

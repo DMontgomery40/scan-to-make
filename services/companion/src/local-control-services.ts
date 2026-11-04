@@ -292,8 +292,8 @@ export function createControlDispatcher(services: ControlServices) {
             throw error;
           }
         }
-        case 'objects.answerAsk': case 'objects.duplicate': case 'objects.list': case 'objects.printers': case 'objects.filaments': case 'objects.selectPrinter': case 'objects.get': case 'objects.passActivity': case 'objects.start': case 'objects.delete': case 'objects.correct': case 'objects.answerCloseup': case 'objects.print': case 'objects.answerPrintConfirmation':
-        case 'objects.create': case 'objects.addFile':
+        case 'objects.selectPlate': case 'objects.answerAsk': case 'objects.duplicate': case 'objects.list': case 'objects.printers': case 'objects.filaments': case 'objects.selectPrinter': case 'objects.get': case 'objects.passActivity': case 'objects.start': case 'objects.delete': case 'objects.correct': case 'objects.answerCloseup': case 'objects.print': case 'objects.answerPrintConfirmation':
+        case 'objects.addStarter': case 'objects.create': case 'objects.addFile':
         case 'objects.estimate': case 'objects.pausePrint': case 'objects.resumePrint': case 'objects.cancelPrint': case 'objects.camera': case 'printers.camera': case 'printers.route': case 'settings.get': case 'settings.set': {
           const objects = services.objects;
           if (!objects) throw new ControlFailure('unavailable');
@@ -303,6 +303,7 @@ export function createControlDispatcher(services: ControlServices) {
             // sending; one with no files and nothing arriving is a draft still on the phone.
             const local = (o: Awaited<ReturnType<typeof objects.get>>) => ({...publicObject(o), directory: objects.dir(o.id),
               ...(o.state === 'new' && !o.progress && objects.receiving(o.id) ? {progress: RECEIVING} : {})});
+            if (method === 'objects.addStarter') return {object: local(await objects.addStarter(parameters[method].parse(raw).starterId))};
             if (method === 'objects.duplicate') return {object: local(await objects.duplicate(parameters[method].parse(raw).id))};
             if (method === 'objects.list') return {objects: (await objects.list()).map(local)};
             if (method === 'objects.printers') return objects.printers();
@@ -347,6 +348,10 @@ export function createControlDispatcher(services: ControlServices) {
             if (method === 'objects.correct') {
               const {id, note, photos, photoNames} = parameters[method].parse(raw);
               return {object: local(await objects.correct(id, note, photos, photoNames))};
+            }
+            if (method === 'objects.selectPlate') {
+              const {id, fileIndex, plateIndex} = parameters[method].parse(raw);
+              return {object: local(await objects.selectPlate(id, fileIndex, plateIndex))};
             }
             if (method === 'objects.answerAsk') {
               const {id, askId, choices} = parameters[method].parse(raw);

@@ -9,7 +9,7 @@ let package = Package(
     platforms: [.iOS(.v17), .macOS(.v14)],
     products: [.library(name: "CounterpartKit", targets: ["CounterpartKit"])],
     targets: [
-        .target(name: "CounterpartKit", swiftSettings: [.swiftLanguageMode(.v5)]),
+        .target(name: "CounterpartKit", resources: [.copy("Resources/Starters")], swiftSettings: [.swiftLanguageMode(.v5)]),
         .testTarget(
             name: "CounterpartKitTests",
             dependencies: ["CounterpartKit"],

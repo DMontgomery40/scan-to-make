@@ -51,6 +51,31 @@ final class ProjectScreensUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts["Cable clip"].exists)
     }
 
+    func testEmptyHomeShowsCleanStarterDetails() {
+        let app = launch(set: "empty")
+        let card = app.buttons["starter-caliper-card"]
+        XCTAssertTrue(card.waitForExistence(timeout: 20))
+        XCTAssertTrue(app.buttons["starter-scan-platform"].exists)
+        card.tap()
+        XCTAssertTrue(app.buttons["starter-add"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["A measurement tool for your scans"].exists)
+        XCTAssertFalse(app.staticTexts["What changed"].exists)
+    }
+
+    func testSelectingAnotherPlateKeepsCompletionAndPrintsThatSelection() {
+        let app = launch("ready", set: "plates")
+        XCTAssertTrue(app.staticTexts["1 of 6 printed"].waitForExistence(timeout: 20))
+        let second = app.buttons["select-plate-0-1"]
+        XCTAssertTrue(second.exists)
+        second.tap()
+        let selected = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS %@", "selected"), object: second)
+        XCTAssertEqual(XCTWaiter().wait(for: [selected], timeout: 5), .completed)
+        XCTAssertTrue(app.staticTexts["1 of 6 printed"].exists)
+        app.buttons["print"].tap()
+        XCTAssertTrue(app.staticTexts["Plate 2"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["print-now"].exists)
+    }
+
     func testAReadyProjectOffersPrintAndChanges() {
         let app = launch("ready")
         XCTAssertTrue(app.buttons["project-title"].waitForExistence(timeout: 20))

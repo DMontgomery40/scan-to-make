@@ -1,0 +1,50 @@
+[
+  {
+    "id": "scan-platform",
+    "title": "3D scan platform",
+    "subtitle": "A steady orbit around your object",
+    "summary": "Build Kass 3D’s camera rig, clamp your phone to the arm, and move it around the object for a steady scan.",
+    "instructions": "Download the original full kit print profile from Kass 3D’s model page. Keep all six plates together in this project. Print each plate, then follow the designer’s assembly instructions. Choose the A1 mini version if you need the smaller parts. Keep the object still and move the phone slowly around it.",
+    "designer": "Kass 3D",
+    "site": "MakerWorld",
+    "url": "https://makerworld.com/en/models/1531561",
+    "licence": "MakerWorld Standard Digital File License",
+    "symbol": "camera.metering.center.weighted",
+    "imageURL": "https://shop.wat3d.co.uk/wp-content/uploads/2026/06/2025-06-19_b222c56471356-600x450.png",
+    "imageCredit": "Kass 3D · model preview via WAT3D",
+    "detail": "6 plates · assembly required",
+    "source": "makerworld"
+  },
+  {
+    "id": "caliper-card",
+    "title": "Counterpart caliper card",
+    "subtitle": "A measurement tool for your scans",
+    "summary": "A compact 0–100 mm caliper with inside and outside jaws, a 0.2 mm vernier, and reference markers for close-up photos.",
+    "instructions": "Print the card and slider in their supplied positions. The slider prints face down; slide it into the card from the jaw end. Use contrasting colours for readable marks. Both jaws use the same scale: read the whole millimetres just before the vernier zero, then add 0.2 mm for each division to the line that aligns with a main-scale tick. Resolution is not a guarantee of accuracy: check the printed scale against a known ruler before using measurements.",
+    "designer": "Counterpart",
+    "site": "Counterpart",
+    "url": "https://counterpart.dtmont.com/",
+    "licence": "GPL-3.0-only · font outlines: SIL OFL 1.1",
+    "symbol": "ruler",
+    "image": "caliper/preview.png",
+    "detail": "1 plate · 0–100 mm",
+    "source": "bundled",
+    "model": "caliper/caliper-2colour.3mf"
+  },
+  {
+    "id": "long-vernier-caliper",
+    "title": "Long vernier caliper",
+    "subtitle": "Measure larger parts and depths",
+    "summary": "The long two-colour vernier caliper by 3D Print Masters Hub, together with its optional depth gauge.",
+    "instructions": "Choose the 220 mm LONG colour profile and the matching optional DEPTH GAUGE profile on the designer’s page. Import both original 3MF files into this project. Print the body, slider and depth gauge, then assemble them using the designer’s instructions. Keep the original scale and geometry unchanged, and check measurements against a known ruler.",
+    "designer": "3D Print Masters Hub",
+    "site": "MakerWorld",
+    "url": "https://makerworld.com/en/models/198362-vernier-caliper-ruler-two-lengths#profileId-232006",
+    "licence": "MakerWorld Standard Digital File License",
+    "symbol": "ruler.fill",
+    "image": "vernier.png",
+    "imageCredit": "3D Print Masters Hub · original print-profile preview",
+    "detail": "Long version + depth gauge",
+    "source": "makerworld"
+  }
+]

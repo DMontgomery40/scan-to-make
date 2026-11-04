@@ -1,3 +1,5 @@
+import {starterProject, STARTER_ASSETS} from '../starters/catalog.js';
+import {acknowledgePlate, projectPlates, retainedPlateProgress, selectedPlateIdentity, selectingPlate} from './plates.js';
 import {copyFile, mkdir, mkdtemp, open, readFile, rename, rm, stat, writeFile} from 'node:fs/promises';
 import {createHash, randomUUID} from 'node:crypto';
 import {tmpdir} from 'node:os';
@@ -145,7 +147,7 @@ export interface ObjectServiceDeps {
 }
 
 /** What the print sheet sends with Print (PRD §8.5). */
-export interface PrintOptions extends PrintSettings {checked?: boolean; filament?: FilamentChoice}
+export interface PrintOptions extends PrintSettings {expectedPlate?: string; checked?: boolean; filament?: FilamentChoice}
 const BAMBU_TO_STATUS: Record<string, string> = {idle: 'IDLE', preparing: 'PREPARE', printing: 'RUNNING', paused: 'PAUSE', finished: 'FINISH', failed: 'FAILED', cancelled: 'FAILED', offline: 'OFFLINE', busy: 'UNKNOWN'};
 
 export type ObjectPrintAnswer = {action: 'accept'; content: Record<string, ConfirmationValue>} | {action: 'decline' | 'cancel'; content?: never};
@@ -360,11 +362,13 @@ export class ObjectService {
     const there = {works: object.state === 'confirmed', printed: object.state === 'printed' && clean,
       'needs-changes': object.outcome === 'needs-changes',
       'not-printed': clean && (object.current ? object.state === 'ready' : !['printed', 'confirmed', 'sent'].includes(object.state))}[status];
-    if (there && !(status === 'works' && object.pendingFollowup)) return object;
+    if (there && !(status === 'works' && object.pendingFollowup) && !(object.publishedSelection && ['works', 'printed', 'not-printed'].includes(status))) return object;
     if (object.state === 'touching-up' || object.state === 'printing') throw new InvalidStateError('Wait until the current step finishes.');
     if ((status === 'works' || status === 'printed') && !object.current) throw new InvalidStateError("There's no model yet, so it can't be marked printed.");
     const updated = await this.#deps.store.update(id, o => {
       const {outcome: _outcome, ...rest} = o;
+      if (o.publishedSelection && (status === 'works' || status === 'printed' || status === 'not-printed'))
+        rest.plateProgress = acknowledgePlate(o, status === 'not-printed' ? 'not-printed' : 'printed');
       if (status === 'works') {
         const message = o.messages?.find(item => item.id === o.pendingMessageId);
         if (message) rest.completion = {messageId: message.id, note: message.text, atMs: message.atMs, previousStatus: projectStatus(o)};
@@ -394,6 +398,34 @@ export class ObjectService {
       await this.#emit({id: randomUUID(), type: 'project.updated', projectId: id, data: {keys: ['title']}});
       return this.#changed(updated);
     });
+  }
+
+  #starterAdding: Promise<unknown> = Promise.resolve();
+  /** Curated assets only; this never copies an existing project or any of its activity. */
+  addStarter(starterId: string): Promise<StmObject> {
+    const next = this.#starterAdding.catch(() => undefined).then(async () => {
+      const starter = starterProject(starterId);
+      if (!starter) throw new InvalidStateError('Choose one of the starter projects.');
+      const existing = (await this.#deps.store.list()).find(o => o.starterId === starterId);
+      if (existing) return this.get(existing.id);
+      const store = this.#deps.store;
+      const created = await store.create(starter.instructions, 'published');
+      try {
+        const credit = {url: starter.url, designer: starter.designer, site: starter.site, title: starter.title, licence: starter.licence};
+        await store.update(created.id, o => ({...o, starterId, title: starter.title, credit}));
+        if (starter.source === 'bundled' && starter.model) {
+          return await this.#keepPublished(created.id, [join(STARTER_ASSETS, starter.model)], {credit, summary: starter.summary});
+        }
+        // The designer's original files are imported into this person's project, not re-hosted in the app.
+        const ask = {id: randomUUID(), type: 'file' as const,
+          question: `Download the original ${starter.title.toLowerCase()} files from ${starter.site}, then add them here.`,
+          url: starter.url, modelName: starter.title, site: starter.site, accepts: ['3mf' as const, 'stl' as const],
+          answers: ['file' as const], status: 'open' as const, askedAtMs: Date.now()};
+        return this.#changed(await store.update(created.id, o => ({...o, state: 'needs-closeup', ask})));
+      } catch (error) { await store.remove(created.id); throw error; }
+    });
+    this.#starterAdding = next;
+    return next;
   }
 
   async create(instructions?: string, kind?: 'fit' | 'copy' | 'published', url?: string) {
@@ -838,10 +870,24 @@ export class ObjectService {
       detail: {title: projectTitle(object)}});
   }
 
+  /** Select any retained plate, including after printing another one. Shares the print operation gate. */
+  selectPlate(id: string, fileIndex: number, plateIndex: number): Promise<StmObject> {
+    return this.#gate(id, async () => {
+      const object = await this.get(id);
+      if (object.state === 'printing' || object.state === 'touching-up') throw new InvalidStateError('Wait until the current step finishes.');
+      if (object.print?.uncertain) throw new InvalidStateError('Check the current print on your printer before changing plates.');
+      if (!Number.isSafeInteger(fileIndex) || !Number.isSafeInteger(plateIndex) || !projectPlates(object).some(p => p.fileIndex === fileIndex && p.plateIndex === plateIndex))
+        throw new InvalidStateError('Choose a plate in this model.');
+      return this.#changed(await this.#deps.store.update(id, o => selectingPlate(o, fileIndex, plateIndex)));
+    });
+  }
+
   /** Prints the current model through the user's printer MCP. */
   print(id: string, options: PrintOptions = {}): Promise<StmObject> { return this.#gate(id, () => this.#print(id, options)); }
   async #print(id: string, options: PrintOptions): Promise<StmObject> {
     const object = await this.get(id);
+    if (options.expectedPlate && !projectPlates(object).some(p => p.selected && p.id === options.expectedPlate))
+      throw new InvalidStateError('The selected plate changed. Open Print again for the plate you want.');
     // A 3MF owns its filament assignments; the sheets do not offer a single-spool override.
     // Keep the saved preference for other models, but do not silently apply it here.
     const defaults = {...object.preferences?.printDefaults};
@@ -889,13 +935,14 @@ export class ObjectService {
     const stl = await this.#modelBytes(object);
     const manifest = await bundles.create({...(object.kind === 'published' ? {model: {bytes: stl, format: object.current.model.toLowerCase().endsWith('.3mf') ? '3mf' as const : 'stl' as const}} : {stl}), prompt: '', backend: runner.backend, ...(selected ? {selection:selected} : {})});
     const printId = randomUUID();
-    const print = {bundleId: manifest.id, printId, ...(printDestination ? {destination: printDestination, destinationId: printDestination.id} : {}),
+    const plate = selectedPlateIdentity(object);
+    const print = {bundleId: manifest.id, printId, ...(plate ? {plate} : {}), ...(printDestination ? {destination: printDestination, destinationId: printDestination.id} : {}),
       ...(Object.keys(settings).length ? {settings} : {})};
     // PRD §8.10: held from here until the dispatch ends, so the printer's MCP isn't updated under it.
     let release: () => void = () => undefined;
     try { release = this.#deps.printGate?.hold(gated) ?? release; }
     catch (error) { throw error instanceof PrinterUpdatingError ? new InvalidStateError(error.message) : error; }
-    const started = await this.#deps.store.update(id, o => ({...o, state: 'printing', progress: 'Connecting to your printer service…', print, printConfirmation: undefined, failure: undefined}))
+    const started = await this.#deps.store.update(id, o => ({...o, plateProgress: retainedPlateProgress(o), state: 'printing', progress: 'Connecting to your printer service…', print, printConfirmation: undefined, failure: undefined}))
       .catch(error => { release(); throw error; });
     // Only this print's questions: other prints share the relay.
     const unsubscribe = relay.subscribe(pending => {
@@ -1573,6 +1620,7 @@ export class ObjectService {
       const format = extname(file).toLowerCase() === '.stl' ? 'stl' : '3mf';
       let metadata: ModelFileInfo;
       try { metadata = inspectModelFile(bytes, format); } catch (error) { throw new InvalidFileError(error instanceof Error ? error.message : 'That model could not be read.'); }
+      if (receipts.some(receipt => receipt.sha256 === metadata.sha256)) continue;
       const name = `${metadata.sha256}-${basename(file).replace(/[^A-Za-z0-9._ ()-]/g, '_').slice(-120)}`;
       const relative = join('original', name);
       const existing = originals.includes(relative) ? await readModelFile(join(dir, relative)).catch(() => undefined) : undefined;
@@ -1603,7 +1651,7 @@ export class ObjectService {
     const credit = {...(first.credit ?? info.credit), ...(first.designer ? {designer: first.designer} : {}), ...(first.licence ? {licence: first.licence} : {})};
     const ask = options.length > 1 ? {id: randomUUID(), type: 'choice' as const, question: 'Which file and plate would you like to print?', options,
       multiple: false, answers: ['choice' as const], status: 'open' as const, askedAtMs: now} : undefined;
-    const updated = await store.update(id, o => ({...o, state: ask ? 'needs-closeup' : 'ready', progress: undefined, failure: undefined, kind: 'published', current, files: published,
+    const updated = await store.update(id, o => ({...o, ...(o.print ? {plateProgress: retainedPlateProgress(o)} : {}), print: undefined, printConfirmation: undefined, state: ask ? 'needs-closeup' : 'ready', progress: undefined, failure: undefined, kind: 'published', current, files: published,
       publishedSelection: {fileIndex: 0, plateIndex: firstPlate?.index ?? 0, sliced: firstPlate?.sliced ?? false},
       ...(!o.title && (first.title || info.model?.title) ? {title: first.title ?? info.model!.title} : {}), ...(credit.url ? {credit: credit as NonNullable<StmObject['credit']>} : {}),
       ...(ask ? {ask} : o.ask?.status === 'open' ? {ask: {...o.ask, status: 'answered' as const}} : {}),
@@ -1629,8 +1677,7 @@ export class ObjectService {
         const file = object.files.receipts[fileIndex!];
         const plate = file?.plates.find(item => item.index === plateIndex);
         if (!file || (file.format === '3mf' && !plate)) throw new InvalidStateError('Choose a plate in this model.');
-        const updated = await this.#deps.store.update(id, o => ({...o, state: 'ready', ask: {...ask, status: 'answered', choices},
-          current: {...o.current!, model: file.path, renders: plate?.thumbnail ? [plate.thumbnail] : []}, ...(file.credit ? {credit: file.credit} : {}), files: {...o.files!, current: file.path}, publishedSelection: {fileIndex: fileIndex!, plateIndex: plateIndex!, sliced: plate?.sliced ?? false}}));
+        const updated = await this.#deps.store.update(id, o => selectingPlate(o, fileIndex!, plateIndex!));
         await this.#emit({id: randomUUID(), type: 'pass.ready', projectId: id});
         return this.#changed(updated);
       }
@@ -1647,6 +1694,7 @@ export class ObjectService {
     return (async () => {
       const object = await this.get(id);
       if (object.state === 'touching-up' || object.state === 'printing') throw new InvalidStateError('Wait until the current step finishes.');
+      if (object.print?.uncertain) throw new InvalidStateError('Check the current print on your printer before adding files.');
       if (object.kind !== 'published') throw new InvalidStateError('Start a project with the model’s link before sharing its file.');
       if (!/\.(3mf|stl)$/i.test(name)) throw new InvalidStateError('Share the model as a 3MF or STL file.');
       if (/\.3mf$/i.test(name) ? !(bytes[0] === 0x50 && bytes[1] === 0x4b) : bytes.length < 84) throw new InvalidStateError("That file isn't a 3MF or STL model.");

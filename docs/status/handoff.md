@@ -81,6 +81,17 @@ remote native probes and the SSH tunnel were removed after verification.
    lists iOS and macOS drafts; do not remove the Mac platform without understanding that choice.
    Release branch `feat/testflight-readiness` is pushed through `ab455a6` (no PR yet).
    `docs/distribution.md` contains the release procedure and remaining production prerequisites.
+   - **Starter projects and multi-plate printing implemented on the release branch:** welcome/Home and
+     the empty Mac workspace offer the scan platform, Counterpart caliper card and long vernier
+     with depth gauge. The card ships fresh generated model files, branding, QR and preview.
+     MakerWorld starters include credits/instructions and original-file import, not redistributed
+     geometry (PRD §15). No personal project history is copied. All imported plates stay in one
+     project with selection, per-plate print/reprint and persisted completion. Multiple original
+     files can be imported together for the long caliper/depth gauge. Active/uncertain prints
+     lock selection; stale print sheets cannot dispatch a different selected plate. Tests cover
+     a synthetic six-plate project; actual rig-original import and physical prints remain open.
+     New first-launch/plate-selection simulator UI tests pass (2); shared Swift 168, focused
+     companion review checks 75 and caliper checks 13 pass; both native builds pass.
    - **Latest direction:** Linux computer support coming soon, including Tailscale; bring-your-own-AI
      includes Claude Code, Codex, OpenCode and OpenAI-compatible APIs (OpenRouter/local models).
      The saved beta copy identifies Codex/API/endpoint settings as existing options; project routing

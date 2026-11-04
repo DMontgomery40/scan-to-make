@@ -78,6 +78,7 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
     /// Published model attribution and files from the companion, retained for shared search.
     public var credit: JSONValue?
     public var files: JSONValue?
+    public var plates: [ProjectPlate]?
     public var publishedSelection: PublishedSelection?
     public struct PublishedSelection: Codable, Equatable, Sendable { public var fileIndex: Int; public var plateIndex: Int; public var sliced: Bool }
     public var completion: Completion?
@@ -103,7 +104,7 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case id, createdAtMs, updatedAtMs, instructions, state, scan, photos, capture, captureDepth, progress, passes, current, question
-        case failure, canRetryCleanup, print, printerDestinationId, printConfirmation, status, title, kind, ask, directory, settings, outcome, archived, credit, files, publishedSelection, completion, pendingFollowup, pendingMessageId, messages, requestPhotos, pendingPhotos
+        case failure, canRetryCleanup, print, printerDestinationId, printConfirmation, status, title, kind, ask, directory, settings, outcome, archived, credit, files, plates, publishedSelection, completion, pendingFollowup, pendingMessageId, messages, requestPhotos, pendingPhotos
     }
 
     /// One odd object never drops out of the list: missing lists are empty, and an optional that doesn't
@@ -124,6 +125,7 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
         completion = optional(Completion.self, .completion)
         credit = optional(JSONValue.self, .credit)
         files = optional(JSONValue.self, .files)
+        plates = optional([ProjectPlate].self, .plates)
         publishedSelection = optional(PublishedSelection.self, .publishedSelection)
         instructions = optional(String.self, .instructions)
         scan = optional(String.self, .scan)

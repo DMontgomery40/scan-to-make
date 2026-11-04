@@ -1,0 +1,186 @@
+{
+  "name": "Counterpart caliper",
+  "params": {
+    "docs_url": "https://counterpart.dtmont.com/",
+    "printer_url": "https://dmontgomery40.github.io/mcp-3D-printer-server/",
+    "range_mm": 100,
+    "layer": 0.2,
+    "band": 0.4,
+    "body": 3.6,
+    "mark": 0.4,
+    "keeper_t": 1.0,
+    "slot_h": 13.0,
+    "edge_clear": 0.4,
+    "ridge": 0.8,
+    "groove_clear": 0.2,
+    "low_h": 14.0,
+    "up_h": 44.0,
+    "card_left": -148.0,
+    "slot_left": -141.0,
+    "strip_left": -140.0,
+    "zero_x": -122.0,
+    "keeper_w": 7.0,
+    "jaw_ext": 20.0,
+    "jaw_w": 12.0,
+    "head_w": 12.0,
+    "finger_w": 3.5,
+    "finger_len": 14.0,
+    "finger_root": 8.0,
+    "split_lo": 1.6,
+    "split_hi": 2.0,
+    "relief": 0.6,
+    "flex_x": [
+      -38.0,
+      -10.0
+    ],
+    "flex_beam": 1.4,
+    "flex_slit": 0.6,
+    "flex_preload": 0.8,
+    "tick_w": 0.5,
+    "vernier_w": 0.7,
+    "vernier_div": 5,
+    "vernier_modulus": 3,
+    "qr_module": 1.0,
+    "qr_quiet": 2,
+    "fiducial_d": 4.0,
+    "fiducial_big_d": 5.0,
+    "chamfer": [
+      0.3,
+      0.2
+    ]
+  },
+  "reading": {
+    "range_mm": 100,
+    "resolution_mm": 0.2,
+    "vernier_divisions": 5,
+    "vernier_pitch_mm": 2.8,
+    "zero_x": -122.0,
+    "how_to_read": "The whole millimetres are the main-scale value just left of the vernier 0 line. Add 0.2 mm for each vernier division up to the line that lines up best with a main-scale tick (lines are labelled 0 2 4 6 8 in tenths of a millimetre). The same reading is the gap between the OUTSIDE jaws and the span of the INSIDE jaws."
+  },
+  "fiducials": [
+    {
+      "x": -141.0,
+      "y": 51.0,
+      "diameter_mm": 5.0,
+      "through_hole": true
+    },
+    {
+      "x": -12.0,
+      "y": 32.0,
+      "diameter_mm": 4.0,
+      "through_hole": true
+    },
+    {
+      "x": -141.0,
+      "y": -7.0,
+      "diameter_mm": 4.0,
+      "through_hole": true
+    },
+    {
+      "x": -45.0,
+      "y": -7.0,
+      "diameter_mm": 4.0,
+      "through_hole": true
+    }
+  ],
+  "fiducial_note": "Centres in mm in the card frame (x=0 at the fixed jaw face, y=0 at the slot bottom). Use hole centres for scale: printed holes come out undersize.",
+  "qr": [
+    {
+      "url": "https://dmontgomery40.github.io/mcp-3D-printer-server/",
+      "label": "3D printer MCP",
+      "modules": 33,
+      "module_mm": 1.0,
+      "centre_back_view": [
+        74.5,
+        37.0
+      ]
+    },
+    {
+      "url": "https://counterpart.dtmont.com/",
+      "label": "Counterpart docs",
+      "modules": 33,
+      "module_mm": 1.0,
+      "centre_back_view": [
+        117.5,
+        37.0
+      ]
+    }
+  ],
+  "colour_bands": [
+    {
+      "z": [
+        0.0,
+        0.4
+      ],
+      "role": "marking"
+    },
+    {
+      "z": [
+        0.4,
+        3.6
+      ],
+      "role": "body"
+    },
+    {
+      "z": [
+        3.6,
+        4.6
+      ],
+      "role": "marking"
+    }
+  ],
+  "pause_at_z": [
+    0.4,
+    3.6
+  ],
+  "assembled_size_mm": [
+    160.0,
+    105.0,
+    4.6
+  ],
+  "plate": {
+    "card": [
+      209.25,
+      126.0
+    ],
+    "slider": [
+      55.25,
+      93.0
+    ],
+    "footprint_mm": [
+      169.5,
+      138.0
+    ],
+    "bed_centre": [
+      128.0,
+      128.0
+    ],
+    "note": "Positions are plate coordinates of each object origin; the slider is turned face down."
+  },
+  "filament_slots": {
+    "1": "body",
+    "2": "marking"
+  },
+  "files": {
+    "caliper-2colour.3mf": {
+      "sha256": "bf6a4bf6fc4bcecc64ab255afb0435f4fa07d1c135c2691756d02426aa673542",
+      "bytes": 445233
+    },
+    "caliper-1colour.3mf": {
+      "sha256": "d0cd00ac86067483da9f46b2868ecd2616d8fc37b9b6c317431b5b9dd95a7195",
+      "bytes": 445215
+    },
+    "caliper.stl": {
+      "sha256": "381e0638c21c5e25d1cea48485439b194876b4db340bde9403e6586a3e16debb",
+      "bytes": 2043084
+    },
+    "caliper-body.stl": {
+      "sha256": "6a2163ee9bcf2bd5c091b0ebaa3dbf1b7625c9494a7d8db911a2082b460d97d0",
+      "bytes": 67684
+    },
+    "caliper-marking.stl": {
+      "sha256": "a268b4c47d05fb7fa3f6d64e808bb44baf808fe980ad05736623a73352193627",
+      "bytes": 1975484
+    }
+  }
+}

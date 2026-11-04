@@ -29,7 +29,7 @@ struct MainWindow: View {
                 .toolbar { toolbar }
                 .inspector(isPresented: Binding(get: { inspector && newProject == nil }, set: { inspector = $0 })) {
                     Group {
-                        if let object = model.selected { InspectorView(object: object, model: model, print: { printing = object }).id(object.id) }
+                        if let object = model.selected { InspectorView(object: object, model: model, print: { printing = model.objects.first { $0.id == object.id } }).id(object.id) }
                         else { Color.clear }
                     }
                     .inspectorColumnWidth(min: 280, ideal: 320)
@@ -122,11 +122,15 @@ struct MainWindow: View {
                 .navigationTitle("Counterpart")
         default:
             if let object = model.selected {
-                ProjectDetail(object: object, model: model, print: { printing = object }).id(object.id)
+                ProjectDetail(object: object, model: model, print: { printing = model.objects.first { $0.id == object.id } }).id(object.id)
             } else {
-                QuietMessage(title: model.objects.isEmpty ? "Nothing Here Yet" : nil,
-                             text: model.objects.isEmpty ? "Scan something with your iPhone, or drop photos or a model here to start." : "Choose a project on the left.")
-                    .navigationTitle("Counterpart")
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 24) {
+                        Text(model.objects.isEmpty ? "Your next project starts here" : "Choose a project, or make something new").font(.largeTitle.bold())
+                        StarterProjectsView { starter in try await model.addStarter(starter) }
+                        Button("New Project", systemImage: "plus") { startNewProject(NewProjectDraft()) }.buttonStyle(.glassProminent)
+                    }.padding(32).frame(maxWidth: 820)
+                }.navigationTitle("Projects")
             }
         }
     }

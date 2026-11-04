@@ -74,12 +74,15 @@ export interface StmObject {
   archived?: boolean;
   /** The short generated title ("Mic mount"). */
   title?: string;
+  /** Curated starter identity; never inherited by Duplicate. */
+  starterId?: string;
   /** Make something that fits, or copy an object (PRD §1). */
   kind?: 'fit' | 'copy' | 'published';
   /** PRD §8.11: the published model this project prints, credited on the project page (`thumbnail` relative to its folder). */
   credit?: {url: string; designer?: string; site?: string; title?: string; licence?: string; thumbnail?: string};
   /** PRD §8.11: the designer's files as published, and the one that prints. Relative to the project's folder. */
   files?: {original: string[]; current: string; receipts?: (import('@scan-to-make/printer-handoff').ModelFileInfo & {path: string; name: string; credit?: NonNullable<StmObject['credit']>})[]};
+  plateProgress?: Record<string, import('./plates.js').PlateProgress>;
   publishedSelection?: {fileIndex: number; plateIndex: number; sliced: boolean};
   /** The Mac's open (or last) question, with its picture and allowed answers (PRD §4 Ask). */
   ask?: Ask;
@@ -108,7 +111,7 @@ export interface StmObject {
   printConfirmation?: ObjectPrintConfirmation;
   failure?: string;
   /** The last print; `uncertain` when it may have reached the printer and must not be sent again by itself. */
-  print?: {bundleId: string; uncertain?: boolean; destination?: {id: string; name: string}; printerStatus?: {state: string; job?: string; checkedAtMs: number; percent?: number; remainingMinutes?: number}; sliced?: boolean; estimate?: {seconds?: number; grams?: number}; events?: {atMs: number; message: string}[];
+  print?: {plate?: import('./plates.js').PlateIdentity; bundleId: string; uncertain?: boolean; destination?: {id: string; name: string}; printerStatus?: {state: string; job?: string; checkedAtMs: number; percent?: number; remainingMinutes?: number}; sliced?: boolean; estimate?: {seconds?: number; grams?: number}; events?: {atMs: number; message: string}[];
     /** PRD §8.5: one uuid per print, from Print. */
     printId?: string;
     destinationId?: string;

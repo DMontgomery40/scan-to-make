@@ -26,6 +26,7 @@ enum Fixtures {
     nonisolated(unsafe) static var statuses: [String: String] = [:]
     nonisolated(unsafe) static var titles: [String: String] = [:]
     nonisolated(unsafe) static var projectPreferences: [String: [String: Any]] = [:]
+    nonisolated(unsafe) static var selectedPlate = 0
     nonisolated(unsafe) static var duplicates: [[String: Any]] = []
 
     static let ids = (mic: "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a01", potato: "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a02",
@@ -50,6 +51,21 @@ enum Fixtures {
 
     static func objects(now: Date = Date()) -> [[String: Any]] {
         if set == "empty" { return [] }
+        if set == "plates" {
+            let now = now.timeIntervalSince1970 * 1000
+            let sha = String(repeating: "ab", count: 32)
+            let plates: [[String: Any]] = (0..<6).map { i in
+                var plate: [String: Any] = ["id": "\(sha):\(i)", "fileIndex": 0, "plateIndex": i,
+                    "name": "Plate \(i + 1)", "fileName": "platform.3mf", "selected": selectedPlate == i, "sliced": false,
+                    "status": i == 0 ? "printed" : "not-printed", "thumbnail": "renders/plate-\(i + 1).png"]
+                if i == 0 { plate["completedAtMs"] = now - 60_000 }
+                return plate
+            }
+            return [["id": ids.mic, "createdAtMs": now - 120_000, "updatedAtMs": now, "state": "ready",
+                "title": "Six-plate UI fixture", "kind": "published", "photos": [], "messages": [], "passes": [],
+                "current": ["model": "original/platform.3mf", "renders": ["renders/plate-\(selectedPlate + 1).png"]],
+                "publishedSelection": ["fileIndex": 0, "plateIndex": selectedPlate, "sliced": false], "plates": plates]]
+        }
         let ms = now.timeIntervalSince1970 * 1000
         func ago(_ minutes: Double) -> Double { ms - minutes * 60_000 }
         let p1s: [String: Any] = ["id": "current", "name": "P1S"]
@@ -283,6 +299,12 @@ struct FixtureTransport: HTTPTransport {
             if parts.count == 4 && parts[2] == "printers" { return json(["error": ["code": "not-found"]], 404) }
             let id = parts[2]
             if parts.count == 3 { return object(id).map { json(["object": $0]) } ?? json(["error": ["code": "not-found"]], 404) }
+            if parts[3] == "plate-selection", method == "POST",
+               let body = request.httpBody.flatMap({ try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }),
+               let index = body["plateIndex"] as? Int, (0..<6).contains(index) {
+                Fixtures.selectedPlate = index
+                return json(["object": Fixtures.objects()[0]])
+            }
             if parts[3] == "settings", method == "PATCH",
                let body = request.httpBody.flatMap({ try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }) {
                 if let status = body["status"] as? String { Fixtures.statuses[id] = status }

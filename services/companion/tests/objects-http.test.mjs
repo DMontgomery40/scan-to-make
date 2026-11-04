@@ -785,3 +785,22 @@ test('duplicate inherits historical colour only for the same effective printer',
     assert.deepEqual(await store.get(project.id), before, 'duplicating does not rewrite the source history');
   }
 });
+
+test('phone plate selection stays authorized and exposes all retained plates', async t => {
+  const f=await fixture(t);
+  const {createRequire}=await import('node:module');
+  const {zipSync,strToU8}=createRequire(new URL('../../printer-handoff/package.json',import.meta.url))('fflate');
+  const bytes=Buffer.from(zipSync({'[Content_Types].xml':strToU8('<Types/>'),
+    '3D/3dmodel.model':strToU8('<model><resources><object id="1"><mesh/></object></resources><build><item objectid="1"/></build></model>'),
+    'Metadata/model_settings.config':strToU8('<config><plate><metadata key="plater_id" value="1"/></plate><plate><metadata key="plater_id" value="2"/></plate></config>')}));
+  const object=await f.service.create('Platform','published','https://makerworld.com/en/models/1531561');
+  await f.service.addModelFile(object.id,'platform.3mf',bytes);
+  const result=await f.call('POST',`/v1/objects/${object.id}/plate-selection`,{fileIndex:0,plateIndex:1});
+  assert.equal(result.status,200);
+  assert.equal(result.json.object.publishedSelection.plateIndex,1);
+  assert.equal(result.json.object.plates.length,2);
+  assert.deepEqual(f.scopes,['captures:import']);
+  assert.equal((await f.call('POST',`/v1/objects/${object.id}/plate-selection`,{fileIndex:0,plateIndex:-1})).status,400);
+  assert.equal((await f.call('POST',`/v1/objects/${object.id}/plate-selection`,{fileIndex:0,plateIndex:1,id:object.id})).status,400);
+  assert.equal((await f.call('POST',`/v1/objects/${object.id}/plate-selection`,{fileIndex:0,plateIndex:8})).status,409);
+});

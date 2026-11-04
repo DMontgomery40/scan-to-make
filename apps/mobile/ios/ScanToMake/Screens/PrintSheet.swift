@@ -49,6 +49,9 @@ struct PrintSheet: View {
             ScrollViewReader { scroll in
                 ScrollView {
                     VStack(alignment: .leading, spacing: 22) {
+                        if let plate = project?.selectedPlate, (project?.plates?.count ?? 0) > 1 {
+                            Label(plate.name, systemImage: "square.stack.3d.up").font(.headline)
+                        }
                         printers
                         preview
                         if case .failed(let message) = slice.shown(for: estimateKey, fallback: project?.print?.estimate) {
@@ -407,7 +410,7 @@ struct PrintSheet: View {
     }
 
     /// The model, printer and settings an estimate is for. Only an estimate for exactly these is shown.
-    private var estimateKey: String { "\(project?.mediaVersion ?? 0)#\(destinationId)#\(quality)#\(strength)#\(offersCopies ? copies.map(String.init) ?? "profile" : "profile")" }
+    private var estimateKey: String { "\(project?.selectedPlate?.id ?? "")#\(project?.mediaVersion ?? 0)#\(destinationId)#\(quality)#\(strength)#\(offersCopies ? copies.map(String.init) ?? "profile" : "profile")" }
     /// The slice estimate on screen: always for these settings, or pending.
     private var estimate: SliceEstimate? { slice.estimate(for: estimateKey) }
 
@@ -447,7 +450,7 @@ struct PrintSheet: View {
                                  pauseBeforeLayers: offersPauses ? pauses : [])
         do {
             let ticket = store.startRequest()
-            store.replace(try await store.mac.client.print(projectId, choice: choice, overrideDefaults: true), ticket: ticket)
+            store.replace(try await store.mac.client.print(projectId, choice: choice, overrideDefaults: true, expectedPlate: project?.selectedPlate?.id), ticket: ticket)
             if case .tray(let tray)? = colour { LastTray.save(projectId, destinationId: destinationId, slot: tray.slot) }
             dismiss()
         } catch let failure as CompanionError {

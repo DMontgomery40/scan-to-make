@@ -119,6 +119,16 @@ public extension ControlClient {
         let reply: Reply = try await call("objects.settings.set", params)
         return reply.object
     }
+    func addStarter(_ starterId: String) async throws -> Project {
+        struct Reply: Decodable { let object: Project }
+        let reply: Reply = try await call("objects.addStarter", ["starterId": .string(starterId)])
+        return reply.object
+    }
+    func selectPlate(_ id: String, fileIndex: Int, plateIndex: Int) async throws -> Project {
+        struct Reply: Decodable { let object: Project }
+        let reply: Reply = try await call("objects.selectPlate", ["id": .string(id), "fileIndex": .number(Double(fileIndex)), "plateIndex": .number(Double(plateIndex))])
+        return reply.object
+    }
     /// Answers a `choice` Ask with the options picked.
     func answerAsk(_ id: String, askId: String, choices: [String]) async throws -> Project {
         struct Reply: Decodable { let object: Project }

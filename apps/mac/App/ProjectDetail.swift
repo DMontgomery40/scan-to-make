@@ -14,6 +14,7 @@ struct ProjectDetail: View {
     let print: () -> Void
     @State private var note = ""
     @State private var showingSettings = false
+    @State private var choosingModelFiles = false
     @State private var renaming = false
     @State private var projectName = ""
     @FocusState private var noteFocused: Bool
@@ -57,11 +58,45 @@ struct ProjectDetail: View {
                 }
                 .ignoresSafeArea(edges: .top)
             VStack(spacing: 12) {
+                if (object.plates?.count ?? 0) > 1 {
+                    ProjectPlatesView(project: object, busy: working, thumbnail: { plate in
+                        if let url = plate.thumbnail.flatMap(object.projectFile) {
+                            FillImage(url: url, version: object.updatedAtMs)
+                        } else {
+                            Image(systemName: "square.stack.3d.up").font(.largeTitle).frame(maxWidth: .infinity, maxHeight: .infinity)
+                        }
+                    }, select: { plate in
+                        Task { await model.selectPlate(object.id, plate: plate) }
+                    }, printPlate: { plate in
+                        Task { if await model.selectPlate(object.id, plate: plate) { print() } }
+                    })
+                    .padding(12).background(.regularMaterial, in: .rect(cornerRadius: 20))
+                }
+                if object.kind == "published" {
+                    HStack {
+                        Button("Add Model Files", systemImage: "doc.badge.plus") { choosingModelFiles = true }
+                            .buttonStyle(.glass).disabled(working || object.state == .printing || object.state == .touchingUp || object.print?.uncertain == true)
+                        Spacer()
+                    }
+                }
                 card
                 bar
             }
             .frame(maxWidth: 680)
             .padding(24)
+        }
+        .fileImporter(isPresented: $choosingModelFiles, allowedContentTypes: [UTType(filenameExtension: "3mf") ?? .data, UTType(filenameExtension: "stl") ?? .data], allowsMultipleSelection: true) { result in
+            switch result {
+            case .success(let files): Task {
+                for file in files {
+                    let access = file.startAccessingSecurityScopedResource()
+                    let used = await model.useModelFile(file, for: object.id)
+                    if access { file.stopAccessingSecurityScopedResource() }
+                    if !used { break }
+                }
+            }
+            case .failure(let error): dropProblem = error.localizedDescription
+            }
         }
         .navigationTitle(words.title)
         .navigationSubtitle(words.subtitle(request: object.instructions))

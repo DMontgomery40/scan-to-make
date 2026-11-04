@@ -59,6 +59,9 @@ struct PrintSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Print \(words.title)").font(.title2.bold())
+            if let plate = object.selectedPlate, (object.plates?.count ?? 0) > 1 {
+                Label(plate.name, systemImage: "square.stack.3d.up").font(.headline)
+            }
             printers
             HStack(alignment: .top, spacing: 16) {
                 if published {
@@ -131,7 +134,7 @@ struct PrintSheet: View {
         .task(id: printer?.id) { await loadFilaments() }
         // The model's version too: a correction rewrites the same current/model.stl, and a refusal of the old one
         // must not hold Print for the new one.
-        .task(id: "\(printer?.id ?? "")|\(quality)|\(strength)|\(copiesPicked ? copies : 0)|\(object.current?.model ?? "")|\(modelVersion)") { await loadEstimate() }
+        .task(id: "\(printer?.id ?? "")|\(quality)|\(strength)|\(copiesPicked ? copies : 0)|\(object.current?.model ?? "")|\(object.selectedPlate?.id ?? "")|\(modelVersion)") { await loadEstimate() }
     }
 
     // MARK: Printers
@@ -300,7 +303,7 @@ struct PrintSheet: View {
                                      copies: slicedOriginal ? 1 : offersCopies && copiesPicked ? copies : (object.settings?.printDefaults?.copies != nil ? 1 : nil),
                                      pauseBeforeLayers: offersPauses ? pauses : [])
         let filament = published ? nil : chosen
-        Task { if await model.print(object.id, checked: uncertain && checked, settings: settings, filament: filament) { dismiss() } }
+        Task { if await model.print(object.id, checked: uncertain && checked, settings: settings, filament: filament, expectedPlate: object.selectedPlate?.id) { dismiss() } }
     }
 
     private func loadFilaments() async {

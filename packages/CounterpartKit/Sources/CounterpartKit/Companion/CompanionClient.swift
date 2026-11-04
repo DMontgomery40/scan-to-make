@@ -88,7 +88,7 @@ public final class CompanionClient: @unchecked Sendable {
             if is_(one + "/scan") { return "captures:import" }
         case "POST":
             if is_("/v1/blender/(check|update)") { return "projects:write" }
-            if is_("/v1/objects") || is_(one + "/(start|duplicate|corrections|closeup|model|ask|photos|capture|capture-depth)") { return "captures:import" }
+            if is_("/v1/objects") || is_(one + "/(start|duplicate|corrections|closeup|model|ask|plate-selection|photos|capture|capture-depth)") { return "captures:import" }
             if is_(one + "/(print|printer|print-confirmation|estimate|print/pause|print/resume|print/cancel)") { return "printer-handoff:use" }
             if is_("/v1/devices/live-activity-tokens") { return "projects:write" }
             if is_("/v1/settings/(ai/test|fusion/setup)") { return "projects:write" }
@@ -211,6 +211,9 @@ public final class CompanionClient: @unchecked Sendable {
     public func get(_ id: String) async throws -> Project { try await request("GET", "/v1/objects/\(id)", as: One.self, timeout: 10).object }
     /// Creates a project. `kind` is `fit` (make something that fits) or `copy` (copy what you scanned); the
     /// Mac uses Blender for a copy and may use Fusion for a fit. Without it the Mac infers it (a scan means copy).
+    public func addStarter(_ starter: StarterProject) async throws -> Project {
+        try await request("POST", "/v1/objects", json: ["starterId": starter.id], as: One.self).object
+    }
     public func create(_ instructions: String, kind: String? = nil, url: URL? = nil) async throws -> Project {
         let text = instructions.trimmingCharacters(in: .whitespacesAndNewlines)
         var json: [String: Any] = text.isEmpty ? [:] : ["instructions": text]
@@ -237,6 +240,9 @@ public final class CompanionClient: @unchecked Sendable {
         if let text { json["text"] = text }
         json["photoNames"] = photoNames
         return try await request("POST", "/v1/objects/\(id)/closeup", json: json, as: One.self).object
+    }
+    public func selectPlate(_ id: String, fileIndex: Int, plateIndex: Int) async throws -> Project {
+        try await request("POST", "/v1/objects/\(id)/plate-selection", json: ["fileIndex": fileIndex, "plateIndex": plateIndex], as: One.self).object
     }
     public func choosePublishedPlate(_ id: String, askId: String, choice: String) async throws -> Project {
         try await request("POST", "/v1/objects/\(id)/ask", json: ["askId": askId, "choices": [choice]], as: One.self).object
@@ -322,8 +328,9 @@ public final class CompanionClient: @unchecked Sendable {
         return try await request("POST", "/v1/objects/\(id)/estimate", json: json, as: SliceEstimate.self, timeout: 170)
     }
     /// Starts preparing the print. The printer MCP still asks its own confirmation.
-    public func print(_ id: String, choice: PrintChoice, overrideDefaults: Bool = false) async throws -> Project {
+    public func print(_ id: String, choice: PrintChoice, overrideDefaults: Bool = false, expectedPlate: String? = nil) async throws -> Project {
         var body = choice.body
+        if let expectedPlate { body["expectedPlate"] = expectedPlate }
         // Standard is an explicit choice when replacing a saved Fine/Strong project default.
         if overrideDefaults { body["quality"] = choice.quality.rawValue; body["strength"] = choice.strength.rawValue }
         return try await request("POST", "/v1/objects/\(id)/print", json: body, as: One.self).object

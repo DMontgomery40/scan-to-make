@@ -135,3 +135,84 @@ for (const action of ['estimate','print']) test(`pre-sliced original ${action} k
  assert.deepEqual(calls.map(x=>x.name),action==='estimate'?['inspect_print_file']:['inspect_print_file','print_3mf']);
  assert.deepEqual(await readFile(join(service.dir(object.id),(await service.get(object.id)).current.model)),bytes);
 });
+
+test('six plates stay selectable in one project after the initial choice, including over the Mac socket', async t => {
+ const f=await setup(t), object=await f.service.create('Scan platform','published',LINK);
+ const imported=await f.service.addModelFile(object.id,'platform.3mf',model('Scan platform',6));
+ const chosen=await f.service.answerAsk(object.id,imported.ask.id,['0:0']);
+ assert.equal(publicObject(chosen).plates.length,6);
+ const dispatch=createControlDispatcher({auth:{},companionVersion:'test',objects:f.service});
+ const next=(await dispatch('objects.selectPlate',{id:object.id,fileIndex:0,plateIndex:5})).object;
+ assert.equal(next.publishedSelection.plateIndex,5);
+ assert.equal(next.plates.filter(p=>p.selected).length,1);
+ assert.equal(next.plates[5].selected,true);
+ assert.equal(next.state,'ready');
+ assert.equal((await f.service.list()).length,1);
+ await assert.rejects(f.service.selectPlate(object.id,0,6),/plate/i);
+ await assert.rejects(f.service.selectPlate(object.id,0,0.5),/plate/i);
+});
+
+test('plate completion survives switching and restart; failed reprint does not erase an earlier success', async t => {
+ const f=await setup(t), object=await f.service.create('Platform','published',LINK);
+ const imported=await f.service.addModelFile(object.id,'platform.3mf',model('Platform',6));
+ await f.service.answerAsk(object.id,imported.ask.id,['0:0']);
+ const sha=imported.files.receipts[0].sha256;
+ await f.store.update(object.id,o=>({...o,state:'printed',print:{bundleId:'b',printId:'p1',plate:{sha256:sha,plateIndex:0},live:{state:'done'},monitor:{phase:'ended',endState:'done'}}}));
+ await f.service.selectPlate(object.id,0,1);
+ const persisted=await new ObjectStore(join(f.root,'objects')).get(object.id);
+ assert.ok(publicObject(persisted).plates[0].completedAtMs);
+ assert.equal(publicObject(persisted).plates[1].status,'not-printed');
+ assert.equal(persisted.print,undefined);
+ await f.service.selectPlate(object.id,0,0);
+ await f.store.update(object.id,o=>({...o,state:'failed',print:{bundleId:'b2',printId:'p2',plate:{sha256:sha,plateIndex:0},live:{state:'failed'},monitor:{phase:'ended',endState:'failed'}}}));
+ const failed=publicObject(await f.service.selectPlate(object.id,0,2));
+ assert.equal(failed.plates[0].status,'failed');
+ assert.ok(failed.plates[0].completedAtMs);
+ assert.equal(failed.plates.filter(p=>p.completedAtMs).length,1);
+});
+
+test('active or uncertain print locks plate changes; cancelling does not complete the plate', async t => {
+ const f=await setup(t), object=await f.service.create('Platform','published',LINK);
+ const imported=await f.service.addModelFile(object.id,'platform.3mf',model('Platform',6));
+ await f.service.answerAsk(object.id,imported.ask.id,['0:0']);
+ const sha=imported.files.receipts[0].sha256;
+ await f.store.update(object.id,o=>({...o,state:'printing',print:{bundleId:'b',printId:'p',plate:{sha256:sha,plateIndex:0},live:{state:'printing'}}}));
+ await assert.rejects(f.service.selectPlate(object.id,0,1),/finish/i);
+ await f.store.update(object.id,o=>({...o,state:'ready',print:{...o.print,live:{state:'cancelled'},monitor:{phase:'ended',endState:'cancelled'}}}));
+ const cancelled=publicObject(await f.service.selectPlate(object.id,0,1));
+ assert.equal(cancelled.plates[0].status,'cancelled');
+ assert.equal(cancelled.plates[0].completedAtMs,undefined);
+ await f.store.update(object.id,o=>({...o,state:'sent',print:{bundleId:'x',uncertain:true}}));
+ await assert.rejects(f.service.selectPlate(object.id,0,2),/printer/i);
+});
+
+test('a stale sheet cannot dispatch the plate another client selected', async t => {
+ const f=await setup(t), object=await f.service.create('Platform','published',LINK);
+ const imported=await f.service.addModelFile(object.id,'platform.3mf',model('Platform',6));
+ await f.service.answerAsk(object.id,imported.ask.id,['0:0']);
+ const first=publicObject(await f.service.get(object.id)).plates[0].id;
+ await f.service.selectPlate(object.id,0,5);
+ await assert.rejects(f.service.print(object.id,{expectedPlate:first}),/plate changed/i);
+});
+
+test('renamed copies of an original do not duplicate plates or completion counts',async t=>{
+ const f=await setup(t), object=await f.service.create('Platform','published',LINK), bytes=model('Platform',6);
+ await f.service.addModelFile(object.id,'platform.3mf',bytes);
+ const again=await f.service.addModelFile(object.id,'platform (1).3mf',bytes);
+ const plates=publicObject(again).plates;
+ assert.equal(plates.length,6);assert.equal(new Set(plates.map(p=>p.id)).size,6);
+});
+
+test('explicit Printed acknowledges just the selected plate, including unmonitored prints',async t=>{
+ const f=await setup(t), object=await f.service.create('Platform','published',LINK);
+ const imported=await f.service.addModelFile(object.id,'platform.3mf',model('Platform',6));
+ await f.service.answerAsk(object.id,imported.ask.id,['0:0']);
+ await f.store.update(object.id,o=>({...o,state:'sent',print:{bundleId:'b',printId:'p',uncertain:true,plate:{sha256:o.files.receipts[0].sha256,plateIndex:0},monitor:{phase:'ended',endState:'sent'}}}));
+ const acknowledged=publicObject(await f.service.setStatus(object.id,'printed'));
+ assert.equal(acknowledged.plates[0].status,'printed');assert.ok(acknowledged.plates[0].completedAtMs);
+ await f.service.selectPlate(object.id,0,1);
+ const elsewhere=publicObject(await f.service.setStatus(object.id,'works'));
+ assert.equal(elsewhere.plates.filter(p=>p.completedAtMs).length,2);
+ const reset=publicObject(await f.service.setStatus(object.id,'not-printed'));
+ assert.equal(reset.plates[1].status,'not-printed');assert.equal(reset.plates.filter(p=>p.completedAtMs).length,1);
+});

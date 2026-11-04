@@ -1,5 +1,6 @@
 import SwiftUI
 import QuickLook
+import UniformTypeIdentifiers
 import RealityKit
 import ARKit
 import CounterpartKit
@@ -21,6 +22,7 @@ struct ProjectView: View {
     @State private var section = ProjectSection.result
     @State private var note = ""
     @State private var showingSettings = false
+    @State private var choosingModelFiles = false
     @State private var renaming = false
     @State private var projectName = ""
     @State private var working = false
@@ -148,6 +150,21 @@ struct ProjectView: View {
         }
     }
 
+    private func selectAndPrint(_ plate: ProjectPlate, object: Project) {
+        guard !working else { return }
+        working = true; problem = nil
+        Task {
+            defer { working = false }
+            do {
+                let ticket = store.startRequest()
+                let next = try await store.mac.client.selectPlate(object.id, fileIndex: plate.fileIndex, plateIndex: plate.plateIndex)
+                store.replace(next, ticket: ticket)
+                openPrint(next.id)
+            } catch let failure as CompanionError { problem = failure.message }
+            catch { problem = CompanionError.unreachable.message }
+        }
+    }
+
     // MARK: Page
 
     @ViewBuilder private func page(_ object: Project) -> some View {
@@ -188,6 +205,20 @@ struct ProjectView: View {
                 }
                 .padding(.horizontal, 20)
 
+                if (object.plates?.count ?? 0) > 1 {
+                    ProjectPlatesView(project: object, busy: working, thumbnail: { plate in
+                        ProjectImage(project: object, path: plate.thumbnail, maxPixelSize: 400, contentMode: .fit)
+                    }, select: { plate in
+                        act { try await store.mac.client.selectPlate(object.id, fileIndex: plate.fileIndex, plateIndex: plate.plateIndex) }
+                    }, printPlate: { plate in
+                        selectAndPrint(plate, object: object)
+                    }).padding(.horizontal, 20)
+                }
+                if object.kind == "published" {
+                    Button("Add Model Files", systemImage: "doc.badge.plus") { choosingModelFiles = true }
+                        .buttonStyle(.glass).padding(.horizontal, 20)
+                        .disabled(working || object.state == .printing || object.state == .touchingUp || object.print?.uncertain == true)
+                }
                 if object.current == nil, let captureWarning {
                     Label(captureWarning, systemImage: "exclamationmark.triangle").font(.subheadline).foregroundStyle(.orange).padding(.horizontal, 20)
                 }
@@ -291,6 +322,16 @@ struct ProjectView: View {
         .safeAreaBar(edge: .bottom) {
             // A failed pass that left an earlier model still offers changes and Print; with no model, the failed card's Try Again is the way on.
             if object.canAskForChanges || (words.phase != .needsYou && !(words.phase == .failed && object.current == nil)) { bottomBar(object, words) }
+        }
+        .fileImporter(isPresented: $choosingModelFiles, allowedContentTypes: [UTType(filenameExtension: "3mf") ?? .data, UTType(filenameExtension: "stl") ?? .data], allowsMultipleSelection: true) { result in
+            switch result {
+            case .success(let files): act {
+                var updated: Project?
+                for file in files { updated = try await store.mac.client.addModelFile(object.id, file: file) }
+                return updated
+            }
+            case .failure(let error): problem = error.localizedDescription
+            }
         }
         .sheet(isPresented: $showingSettings) {
             PhoneProjectSettings(store: store, id: id, close: close)

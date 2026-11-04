@@ -214,8 +214,9 @@ public extension ControlClient {
         return result.object
     }
     /// Prints with the sheet's settings (`capabilities.printSettings`). A deadline after sending has an unknown outcome.
-    func printObject(_ id: String, checked: Bool, settings: PrintSettings, overrideDefaults: Bool = false) async throws -> Project {
+    func printObject(_ id: String, checked: Bool, settings: PrintSettings, overrideDefaults: Bool = false, expectedPlate: String? = nil) async throws -> Project {
         var params = settings.params
+        if let expectedPlate { params["expectedPlate"] = .string(expectedPlate) }
         if overrideDefaults { params["quality"] = .string(settings.quality.rawValue); params["strength"] = .string(settings.strength.rawValue) }
         params["id"] = .string(id)
         if checked { params["checked"] = .bool(true) }

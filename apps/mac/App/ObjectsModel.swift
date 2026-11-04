@@ -7,6 +7,9 @@ import ControlKit
 
 /// What the objects window needs from the companion: local-control's `objects.*` methods.
 protocol ObjectsCompanion: Sendable {
+    func addStarter(_ starterId: String) async throws -> Project
+    func selectPlate(_ id: String, fileIndex: Int, plateIndex: Int) async throws -> Project
+    func print(_ id: String, checked: Bool, settings: PrintSettings, expectedPlate: String?) async throws -> Project
     func printers() async throws -> PrinterCatalog
     func filaments(_ id: String) async throws -> [PrinterFilament]
     func print(_ id: String, checked: Bool, filament: PrinterFilament) async throws -> Project
@@ -44,6 +47,13 @@ protocol ObjectsCompanion: Sendable {
 }
 
 extension ObjectsCompanion {
+    func addStarter(_ starterId: String) async throws -> Project { throw ControlClientError.unavailable }
+    func selectPlate(_ id: String, fileIndex: Int, plateIndex: Int) async throws -> Project { throw ControlClientError.unavailable }
+    func print(_ id: String, checked: Bool, settings: PrintSettings, expectedPlate: String?) async throws -> Project {
+        guard expectedPlate == nil else { throw ControlClientError.unavailable }
+        return try await print(id, checked: checked, settings: settings)
+    }
+
     func correct(_ id: String, note: String, photos: [String], photoNames: [String]) async throws -> Project { try await correct(id, note: note, photos: photos) }
     func correct(_ id: String, note: String, photoNames: [String]) async throws -> Project { try await correct(id, note: note) }
     func filaments(_ id: String) async throws -> [PrinterFilament] { throw ControlClientError.unavailable }
@@ -78,6 +88,13 @@ extension ObjectsCompanion {
 /// The control socket. A fresh client per call, so a missing socket fails that call, not the model.
 struct SocketObjects: ObjectsCompanion {
     let path: String
+    func addStarter(_ starterId: String) async throws -> Project { try await ControlClient(socketPath: path).addStarter(starterId) }
+    func selectPlate(_ id: String, fileIndex: Int, plateIndex: Int) async throws -> Project {
+        try await ControlClient(socketPath: path).selectPlate(id, fileIndex: fileIndex, plateIndex: plateIndex)
+    }
+    func print(_ id: String, checked: Bool, settings: PrintSettings, expectedPlate: String?) async throws -> Project {
+        try await ControlClient(socketPath: path, timeout: 30).printObject(id, checked: checked, settings: settings, overrideDefaults: true, expectedPlate: expectedPlate)
+    }
     func passActivity(_ id: String, index: Int) async throws -> [Project.Activity] { try await ControlClient(socketPath:path).passActivity(id, index:index) }
     func printers() async throws -> PrinterCatalog { try await ControlClient(socketPath:path).printers() }
     func filaments(_ id: String) async throws -> [PrinterFilament] { try await ControlClient(socketPath:path, timeout:30).filaments(id) }
@@ -264,14 +281,14 @@ struct SocketObjects: ObjectsCompanion {
 
     /// The project's chosen printer; the default one when it chose none or its choice is no longer configured.
     /// Prints with the sheet's settings when the companion takes them, else with the chosen filament as before.
-    @discardableResult func print(_ id: String, checked: Bool, settings: PrintSettings, filament: PrinterFilament?) async -> Bool {
+    @discardableResult func print(_ id: String, checked: Bool, settings: PrintSettings, filament: PrinterFilament?, expectedPlate: String? = nil) async -> Bool {
         guard !working.contains(id) else { return false }
         operations.insert(id)
         defer { operations.remove(id) }
         problem = nil
         do {
             let updated: Project
-            if capabilities?.printSettings == true { updated = try await companion.print(id, checked:checked, settings:settings) }
+            if capabilities?.printSettings == true { updated = try await companion.print(id, checked:checked, settings:settings, expectedPlate: expectedPlate) }
             else if let filament { updated = try await companion.print(id, checked:checked, filament:filament) }
             else { updated = try await companion.print(id, checked:checked) }
             applyReply(updated)
@@ -527,6 +544,17 @@ struct SocketObjects: ObjectsCompanion {
         let done = await change(id) { try await self.companion.setProjectSettings(id, ["archived": .bool(archived)]) }
         if done { await refresh() }
         return done
+    }
+
+    func addStarter(_ starter: StarterProject) async throws {
+        let project = try await companion.addStarter(starter.id)
+        applyReply(project)
+        selection = project.id
+        wake()
+    }
+
+    @discardableResult func selectPlate(_ id: String, plate: ProjectPlate) async -> Bool {
+        await change(id) { try await self.companion.selectPlate(id, fileIndex: plate.fileIndex, plateIndex: plate.plateIndex) }
     }
 
     /// Answers a `choice` Ask (plates, objects, colours) with the options picked.
