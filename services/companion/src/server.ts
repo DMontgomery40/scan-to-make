@@ -154,6 +154,8 @@ export async function startCompanionServer(
     nearby?: {name: string; advertise?: typeof advertise};
     /** The Mac's name as people know it ("Mac mini"), in /healthz so the phone can say which Mac it reached. */
     name?: string;
+    /** Settings -> Printers on the phone: which MCP a printer uses (`PUT /v1/objects/printers/<id>/mcp`). */
+    printerSetup?: Pick<import('./printing/setup.js').PrinterSetup, 'chooseMcp'>;
   } = {}
 ): Promise<{
   url: string;
@@ -207,7 +209,7 @@ export async function startCompanionServer(
   const instanceLock=options.capture?.scanProcessing?await acquireInstanceLock(options.capture.scanProcessing.directory):undefined;
   const captureRoutes=options.capture?createCaptureRoutes(options.capture):undefined;
   const printHandoffRoutes=options.printHandoff?createPrintHandoffRoutes(options.printHandoff):undefined;
-  const objectRoutes=options.objects?createObjectRoutes(options.objects):undefined;
+  const objectRoutes=options.objects?createObjectRoutes(options.objects,options.printerSetup?{printerSetup:options.printerSetup}:{}):undefined;
   const eventRoutes=options.events?createEventRoutes(options.events):undefined;
   let authority = '';
   const handler: RequestListener = async (request, response) => {
@@ -262,7 +264,7 @@ export async function startCompanionServer(
         // Scope name kept from the first protocol so existing pairings still parse.
         await authorize('generation:health');
         // Additive: older phones read only status and protocolVersion.
-        response.end(JSON.stringify({ status: 'ok', protocolVersion: '0.1.0', ...(options.name ? { name: options.name } : {}), capabilities: { genericConfirmations: !!options.objects, materialChoice: !!options.objects, projectSettings: !!options.objects, projectPreferences: !!options.objects, projectRename: !!options.objects, messagePhotos: !!options.objects, publishedModels: !!options.objects, mcpUpdates: !!options.mcpUpdates, blenderAddon: !!options.blenderAddon, printCopies: !!options.objects?.printCopiesAvailable } }));
+        response.end(JSON.stringify({ status: 'ok', protocolVersion: '0.1.0', ...(options.name ? { name: options.name } : {}), capabilities: { genericConfirmations: !!options.objects, materialChoice: !!options.objects, projectSettings: !!options.objects, projectPreferences: !!options.objects, projectRename: !!options.objects, messagePhotos: !!options.objects, publishedModels: !!options.objects, mcpUpdates: !!options.mcpUpdates, blenderAddon: !!options.blenderAddon, printCopies: !!options.objects?.printCopiesAvailable, printerChoices: !!options.objects && !!options.printerSetup } }));
         return;
       }
       if(captureRoutes&&request.url?.startsWith('/v1/saved-projects/')){

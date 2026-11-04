@@ -1206,6 +1206,10 @@ export class ObjectService {
   async printRoute(destinationId: string, route?: PrintRoute['route']): Promise<PrintRoute | undefined> {
     const session = this.#deps.printers?.session(destinationId);
     if (!session) throw new ObjectNotFoundError();
+    // Never mid-print: a project printing there, or the printer last read as printing (no fresh read, so the
+    // change stays inside the caller's time limit).
+    if (route && (await this.printerBusy(destinationId) || this.#deps.printers?.lastState(destinationId) === 'busy'))
+      throw new InvalidStateError('This printer is printing. Change its connection when the print finishes.');
     await session.connect();
     if (!session.hasTool('counterpart_print_route')) return undefined;
     return route ? await setPrintRoute(session, route) : await readPrintRoute(session);

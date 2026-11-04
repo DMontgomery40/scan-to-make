@@ -262,6 +262,7 @@ const server = await startCompanionServer({
   ...(liveActivityTokens ? {liveActivityTokens} : {}),
   ...(presence ? {presence} : {}),
   ...(mcpUpdates ? {mcpUpdates} : {}),
+  ...(printerSetup ? {printerSetup} : {}),
   ...(blenderAddon ? {blenderAddon} : {}),
   ...(icloud ? {icloud} : {}),
   remoteAuth,
