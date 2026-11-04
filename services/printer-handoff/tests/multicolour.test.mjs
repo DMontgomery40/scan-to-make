@@ -71,6 +71,13 @@ test('painting is detected from the model XML', () => {
     '3D/3dmodel.model': strToU8('<model><resources><object id="1"><mesh><triangles><triangle v1="0" v2="1" v3="2" paint_color="8"/></triangles></mesh></object></resources><build><item objectid="1"/></build></model>'),
   }));
   assert.equal(modelHasPainting(painted), true);
+  // Studio keeps the mesh in component files under 3D/Objects/: painting there counts too.
+  const componentPainted = Buffer.from(zipSync({
+    '[Content_Types].xml': strToU8('<Types/>'),
+    '3D/3dmodel.model': strToU8('<model><resources><object id="1"><components><component p:path="/3D/Objects/object_1.model" objectid="1"/></components></object></resources><build><item objectid="1"/></build></model>'),
+    '3D/Objects/object_1.model': strToU8('<model><resources><object id="1"><mesh><triangles><triangle v1="0" v2="1" v3="2" paint_color="8"/></triangles></mesh></object></resources></model>'),
+  }));
+  assert.equal(modelHasPainting(componentPainted), true);
   assert.equal(modelHasPainting(designed), false);
   assert.equal(modelHasPainting(Buffer.from('not a zip')), false);
 });

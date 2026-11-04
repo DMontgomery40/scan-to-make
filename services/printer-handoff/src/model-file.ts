@@ -197,9 +197,15 @@ export function modelFilaments(bytes: Buffer, plateIndex = 0): ModelFilament[] {
 export function modelHasPainting(bytes: Buffer): boolean {
   try {
     if (!bytes.length || bytes.length > 64 * 1024 * 1024 || bytes[0] !== 0x50 || bytes[1] !== 0x4b) return false;
-    const files = unzipSync(bytes, {filter: file => file.name === '3D/3dmodel.model' && file.originalSize <= 32 * 1024 * 1024});
-    const model = files['3D/3dmodel.model'];
-    return !!model && Buffer.from(model).includes('paint_color="');
+    // Studio keeps the mesh — and its painting — in component files under
+    // 3D/Objects/, referenced from the root model; scan those too, bounded.
+    let total = 0, count = 0;
+    const files = unzipSync(bytes, {filter: file => {
+      if (file.name !== '3D/3dmodel.model' && !/^3D\/Objects\/[^/]+\.model$/.test(file.name)) return false;
+      total += file.originalSize;
+      return file.originalSize <= 32 * 1024 * 1024 && total <= 48 * 1024 * 1024 && ++count <= 64;
+    }});
+    return Object.values(files).some(model => Buffer.from(model).includes('paint_color="'));
   } catch { return false; }
 }
 

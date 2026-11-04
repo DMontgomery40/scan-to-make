@@ -162,8 +162,14 @@ struct MainWindow: View {
     }
 
     private func open(_ editor: ModelEditor) {
-        guard let source = model.selected?.modelURL else { return }
+        guard let object = model.selected else { return }
         if editor == .blender {
+            // Blender imports STL: a multi-colour design opens its merged mesh, and a
+            // published 3MF (which has none) says so instead of sending Blender a 3MF.
+            guard let source = object.blenderModelURL else {
+                if object.modelURL != nil { editorError = "Blender can’t open this 3MF. Open it in a slicer instead, or use Show in Finder." }
+                return
+            }
             Task {
                 switch await ModelEditor.openInBlender(source) {
                 case .success(let note):
@@ -175,6 +181,7 @@ struct MainWindow: View {
             }
             return
         }
+        guard let source = object.modelURL else { return }
         if let problem = ModelEditor.open(source, in: editor) { editorError = problem }
     }
 }

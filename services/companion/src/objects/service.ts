@@ -1620,7 +1620,7 @@ export class ObjectService {
             if (confirmation.printing.services.relay.respond(confirmationId, {action: 'decline'})) {
               this.#recheckFailures.set(id, error instanceof Error ? error.message : 'A chosen spool changed before printing started.');
               this.#cancelledPrints.add(id);
-            }
+            } else this.#expiredConfirmations.add(id);
             clearTimeout(confirmation.timer);
             this.#confirmations.delete(id);
             await this.#deps.store.update(id, o => o.printConfirmation?.id === confirmationId ? {...o, printConfirmation: undefined} : o);

@@ -262,6 +262,27 @@ final class ObjectsClientTests: XCTestCase {
         withExtendedLifetime(server) {}
     }
 
+    func testBlenderOpensTheMergedMeshOfAMultiColour3MF() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("controlkit-blender-\(UUID().uuidString)", isDirectory: true)
+        let current = root.appendingPathComponent("current", isDirectory: true)
+        try FileManager.default.createDirectory(at: current, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try Data("3mf".utf8).write(to: current.appendingPathComponent("model.3mf"))
+        func project(model: String) throws -> Project {
+            var object = ready
+            object["directory"] = root.path
+            object["current"] = ["model": model, "renders": []]
+            return try JSONDecoder().decode(Project.self, from: JSONSerialization.data(withJSONObject: object))
+        }
+        let designed = try project(model: "current/model.3mf")
+        XCTAssertEqual(designed.modelURL?.path, current.appendingPathComponent("model.3mf").path, "printing keeps the 3MF")
+        XCTAssertNil(designed.blenderModelURL, "no merged mesh saved yet: nothing honest to send Blender")
+        try Data("stl".utf8).write(to: current.appendingPathComponent("model.stl"))
+        XCTAssertEqual(designed.blenderModelURL?.path, current.appendingPathComponent("model.stl").path, "Blender gets the merged STL beside the 3MF")
+        let plain = try project(model: "current/model.stl")
+        XCTAssertEqual(plain.blenderModelURL?.path, current.appendingPathComponent("model.stl").path, "an STL model opens itself")
+    }
+
     func testFilesResolveInsideTheObjectFolderOnly() throws {
         var object = ready
         object["current"] = ["model": "current/model.stl", "renders": ["current/renders/front.png", "../../elsewhere.png", "/etc/hosts", ""]]

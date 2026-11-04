@@ -144,8 +144,16 @@ public extension Project {
     }
     /// The project's folder on this Mac.
     var folderURL: URL? { directory.flatMap { $0.hasPrefix("/") ? URL(fileURLWithPath: $0, isDirectory: true) : nil } }
-    /// The current model's STL: exactly what will print.
+    /// The current model: exactly what will print (an STL, or a multi-part model's 3MF).
     var modelURL: URL? { current.flatMap { file($0.model) } }
+    /// What Open in Blender sends. Blender imports STL, so a design whose model is a
+    /// multi-colour 3MF opens its merged mesh, saved beside the 3MF — never the 3MF itself.
+    /// Nil when there is no STL to open (a published 3MF), so the action can say so honestly.
+    var blenderModelURL: URL? {
+        guard let url = modelURL else { return nil }
+        if url.pathExtension.lowercased() == "stl" { return url }
+        return file("current/model.stl").flatMap { FileManager.default.fileExists(atPath: $0.path) ? $0 : nil }
+    }
     var renderURLs: [URL] { current?.renders.compactMap(file) ?? [] }
     var photoURLs: [URL] { photos.compactMap { file("photos/\($0)") } }
     var captureURLs: [URL] { (capture ?? []).compactMap { file("capture/\($0)") } }
