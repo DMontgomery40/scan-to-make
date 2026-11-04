@@ -96,3 +96,40 @@ dist/assets/three.module-Dcbj-bkz.js   704.69 kB │ gzip: 181.05 kB
     Finished 2 bundles at:
         /home/david/scan-to-make-work/linux-desktop/app/src-tauri/target/release/bundle/deb/Counterpart_0.1.0_amd64.deb (70.21 MiB)
         /home/david/scan-to-make-work/linux-desktop/app/src-tauri/target/release/bundle/appimage/Counterpart_0.1.0_amd64.AppImage (131.07 MiB)
+
+BUILD-ID upgrade recovery checks, 2026-11-04
+Commit 29f4e21f1c23fc47c39d1b929188d32164fa3efb (linux-runtime-recovery), payload g29f4e21f1c23-node24.22.2-x64
+Namespace agents-136:/home/david/scan-to-make-work/linux-recovery/ (logs in receipts/, packages in artifacts/)
+
+host-tests (tools/linux-host, cargo test --locked): 16 passed
+  new: build_ids_are_strict, a_new_build_at_the_same_path_still_needs_a_restart,
+       the_applied_build_record_round_trips_and_refuses_garbage,
+       modeling_work_blocks_an_upgrade_restart_and_other_work_does_not
+frontend-tests (bundle.sh, tsx): 8 passed
+packaging-tests (bundle.sh, unittest): 2 passed
+rust-tests (apps/linux/src-tauri, cargo test --locked): 12 passed
+
+bundle (apps/linux/scripts/bundle.sh, exit 0)
+Prepared g29f4e21f1c23-node24.22.2-x64 (210M resources)
+Counterpart_0.1.0_amd64.deb (70.23 MiB)
+Counterpart_0.1.0_amd64.AppImage (131.08 MiB)
+
+verify-packages (actual packaged bytes, inside bundle.sh)
+{"internalDependencies":5,"exportsChecked":60,"lanAddressModule":"imported","resources":".../verify.7QycaM/deb/usr/lib/Counterpart"}
+11.19.1
+11.19.1
+{"internalDependencies":5,"exportsChecked":60,"lanAddressModule":"imported","resources":".../verify.7QycaM/appimage/squashfs-root/usr/lib/Counterpart"}
+11.19.1
+11.19.1
+8c31907d1e9df8f718220ef51c7eb431decf2ff83d7b5090deef6f8c0b5a44df  Counterpart_0.1.0_amd64.deb
+66afde7f4096398c3210ee5d357a8cfb679d9f143285922a2ecf9ae671dbc20e  Counterpart_0.1.0_amd64.AppImage
+
+installed-app UI (native AT-SPI/window controls only; see implementation.md)
+pre-upgrade: BUILD-ID ga41b298a488d-node24.22.2-x64, companion MainPID 3025627
+after dpkg -i new .deb: BUILD-ID g29f4e21f1c23-node24.22.2-x64, MainPID still 3025627 (exe deleted),
+  status {"appliedBuildId":null,"buildId":"g29f4e21f1c23-node24.22.2-x64","running":true}
+after UI Repair setup: MainPID 3274065,
+  status {"appliedBuildId":"g29f4e21f1c23-node24.22.2-x64","buildId":"g29f4e21f1c23-node24.22.2-x64","running":true}
+second UI Repair setup: MainPID unchanged 3274065
+AppImage Repair setup: MainPID 3304347, unit runtime/current, exe runtime/g29f4e21f1c23-node24.22.2-x64/host/counterpart-host
+final .deb Repair setup: MainPID 3316914, unit /usr/lib/Counterpart/host/counterpart-host, applied g29f4e21f1c23-node24.22.2-x64
