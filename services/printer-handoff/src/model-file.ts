@@ -197,13 +197,21 @@ export function modelFilaments(bytes: Buffer, plateIndex = 0): ModelFilament[] {
 export function modelHasPainting(bytes: Buffer): boolean {
   try {
     if (!bytes.length || bytes.length > 64 * 1024 * 1024 || bytes[0] !== 0x50 || bytes[1] !== 0x4b) return false;
+    // The root model first, on its own budget: its painting is detected no matter
+    // what surrounds it in the archive (as the root-only scan always did).
+    const root = unzipSync(bytes, {filter: file => file.name === '3D/3dmodel.model' && file.originalSize <= 32 * 1024 * 1024});
+    if (Object.values(root).some(model => Buffer.from(model).includes('paint_color="'))) return true;
     // Studio keeps the mesh — and its painting — in component files under
     // 3D/Objects/, referenced from the root model; scan those too, bounded.
+    // Only accepted entries spend the budget, so an oversized component can
+    // hide neither the root (above) nor smaller components after it.
     let total = 0, count = 0;
     const files = unzipSync(bytes, {filter: file => {
-      if (file.name !== '3D/3dmodel.model' && !/^3D\/Objects\/[^/]+\.model$/.test(file.name)) return false;
+      if (!/^3D\/Objects\/[^/]+\.model$/.test(file.name)) return false;
+      if (file.originalSize > 32 * 1024 * 1024 || total + file.originalSize > 48 * 1024 * 1024 || count >= 64) return false;
       total += file.originalSize;
-      return file.originalSize <= 32 * 1024 * 1024 && total <= 48 * 1024 * 1024 && ++count <= 64;
+      count += 1;
+      return true;
     }});
     return Object.values(files).some(model => Buffer.from(model).includes('paint_color="'));
   } catch { return false; }

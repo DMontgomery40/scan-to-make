@@ -78,6 +78,21 @@ test('painting is detected from the model XML', () => {
     '3D/Objects/object_1.model': strToU8('<model><resources><object id="1"><mesh><triangles><triangle v1="0" v2="1" v3="2" paint_color="8"/></triangles></mesh></object></resources></model>'),
   }));
   assert.equal(modelHasPainting(componentPainted), true);
+  // An oversized component ahead of a painted root spends no budget: root painting still counts,
+  // and a small painted component after the oversized one is still scanned.
+  const bigFirst = Buffer.from(zipSync({
+    '[Content_Types].xml': strToU8('<Types/>'),
+    '3D/Objects/big.model': new Uint8Array(33 * 1024 * 1024),
+    '3D/3dmodel.model': strToU8('<model><resources><object id="1"><mesh><triangles><triangle v1="0" v2="1" v3="2" paint_color="8"/></triangles></mesh></object></resources></model>'),
+  }));
+  assert.equal(modelHasPainting(bigFirst), true, 'root painting survives an oversized neighbour');
+  const bigThenPaintedComponent = Buffer.from(zipSync({
+    '[Content_Types].xml': strToU8('<Types/>'),
+    '3D/Objects/big.model': new Uint8Array(33 * 1024 * 1024),
+    '3D/3dmodel.model': strToU8('<model><resources><object id="1"><mesh/></object></resources></model>'),
+    '3D/Objects/object_1.model': strToU8('<model><resources><object id="1"><mesh><triangles><triangle v1="0" v2="1" v3="2" paint_color="8"/></triangles></mesh></object></resources></model>'),
+  }));
+  assert.equal(modelHasPainting(bigThenPaintedComponent), true, 'a rejected oversized component spends no budget');
   assert.equal(modelHasPainting(designed), false);
   assert.equal(modelHasPainting(Buffer.from('not a zip')), false);
 });
