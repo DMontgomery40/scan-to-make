@@ -6,7 +6,7 @@ import {tmpdir, userInfo} from 'node:os';
 import {execFileSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {prepareTouchupPass} from '../dist/touchup/inputs.js';
-import {buildTouchupInvocation, TOUCHUP_RESULT_SCHEMA, TOUCHUP_SYSTEM_RULES, TOUCHUP_INSTRUCTION} from '../dist/touchup/invocation.js';
+import {buildTouchupInvocation, systemRules, TOUCHUP_RESULT_SCHEMA, TOUCHUP_SYSTEM_RULES, TOUCHUP_INSTRUCTION} from '../dist/touchup/invocation.js';
 
 const fixtures = fileURLToPath(new URL('./fixtures/touchup/', import.meta.url));
 async function pass() {
@@ -114,6 +114,26 @@ test('the rules ask for the fixes the photos show, not just caution', () => {
   assert.match(TOUCHUP_SYSTEM_RULES, /too faint/);
   assert.match(TOUCHUP_SYSTEM_RULES, /Keep real surface detail the photos confirm/);
   assert.equal(/never smooth captured surface/.test(TOUCHUP_SYSTEM_RULES), false, 'a lumpy surface the photos show flat must be fixable');
+});
+
+test('every pass plans how it prints with David\'s FDM core prompt, for copies and new designs alike', async () => {
+  const core = (await readFile(new URL('../prompts/fdm/01_core.txt', import.meta.url), 'utf8')).trim();
+  for (const engine of ['blender', 'fusion']) {
+    const rules = systemRules(engine);
+    assert.ok(rules.includes(core), `${engine} rules carry the core prompt verbatim`);
+    assert.doesNotMatch(rules, /Don't do print preparation/, 'supports and orientation are design choices now');
+    assert.match(rules, /captured objects and new designs alike/);
+    assert.doesNotMatch(rules, /PRINTER_FACTS|MANUFACTURING_GUIDANCE|ENGINE_RULES|ENGINE_NAME/, 'no placeholder survives');
+    assert.match(rules, /largest flat face/, 'the worker knows the print step re-orients today');
+  }
+  // A Blender pass has the whole printer MCP; a Fusion pass only sees fusion_mcp_*.
+  assert.match(systemRules('blender'), /get_printer_filaments/);
+  assert.match(systemRules('blender'), /slicer_result/);
+  assert.match(systemRules('fusion'), /aren't visible to you/);
+  assert.doesNotMatch(systemRules('fusion'), /get_printer_filaments/);
+  // Every provider reads the same rules from --append-system-prompt (project-worker.ts).
+  const inv = buildTouchupInvocation({pass: await pass(), printer, claudePath: '/c', sourceEnv});
+  assert.ok(valueOf(inv.args, '--append-system-prompt').includes(core));
 });
 
 test('the worker loads none of the user\'s personal Claude settings', async () => {

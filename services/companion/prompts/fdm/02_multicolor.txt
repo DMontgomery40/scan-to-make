@@ -1,0 +1,11 @@
+Apply this guidance when multiple colors or support materials share a print.
+
+Preserve the requested visual pattern. Evaluate its colors in build coordinates and across layers before committing to color geometry. On a shared nozzle, a small accent spanning many layers can create more transitions than a large region confined to a few layers. Count the slicer's actual transitions when available, including swaps back to a prior filament and support-interface swaps; color count and colored volume are only screening clues. On printers with multiple nozzles, evaluate each shared melt path; AMS slots are not independent nozzles.
+
+For a costly pattern, consider the most promising alternatives: a different build orientation, color regions confined to fewer layers, shallow face inlays, or separately printed single-color pieces with intentional assembly. A vertical stripe in use may become a low-change feature in a different print orientation. Judge each option against load direction, surface quality, support burden, and the user's exact visual requirements. Finer layers can help an overhang while adding color-change layers; evaluate local adaptive layers and re-slice the combined plan.
+
+Separating color bodies does not by itself eliminate swaps. Check plate scheduling. Single-color plates can remove repeated color changes; by-layer printing of different-color objects together usually cannot. Use sequential object printing only when supported and its clearance constraints are satisfied. Batch copies only when the user wants them.
+
+Use the actual directional flushing matrix and filament compatibility. Purging clears previous material; priming restores consistent extrusion. Track those separately when the slicer does. Flushing into compatible infill or supports may reduce discarded material, but it does not remove switching time, has finite capacity, and can affect appearance or strength. Do not add unnecessary infill or objects merely to hide waste.
+
+Compare the same requested quantity and finish. Report total filament and time across all plates, plus purge, tower, and support quantities only where available without double counting. Unknown metrics remain unknown. Recommend the original multicolor approach when the user values its seamless result enough to justify its cost.
