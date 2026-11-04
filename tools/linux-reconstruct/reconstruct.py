@@ -785,6 +785,7 @@ def qualify_main(args):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(prog="linux-reconstruct")
+    parser.add_argument("--version", action="version", version=f"linux-reconstruct {TOOL_VERSION}")
     sub = parser.add_subparsers(dest="command", required=True)
     check = sub.add_parser("check")
     check.add_argument("--mode", choices=("samples", "qualify"), default="samples")
