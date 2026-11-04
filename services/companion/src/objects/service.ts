@@ -4,7 +4,7 @@ import {tmpdir} from 'node:os';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {basename, dirname, extname, isAbsolute, join} from 'node:path';
-import {DispatchedPrintError, PrinterMcpError, inspectModelFile, modelDeclaredFilaments, modelFilamentSlotCount, modelFilaments, modelPlatePreview, readModelFile, type ModelFileInfo, type ModelFilament, readPrintReport, readPrintRoute, routeArgs, setPrintRoute, sliceEstimate, timeoutsFor, type PrintRoute,
+import {DispatchedPrintError, PrinterMcpError, inspectModelFile, modelDeclaredFilaments, modelFilamentSlotCount, modelFilaments, modelPlateFilaments, modelPlatePreview, readModelFile, type ModelFileInfo, type ModelFilament, readPrintReport, readPrintRoute, routeArgs, setPrintRoute, sliceEstimate, timeoutsFor, type PrintRoute,
   type PrintProgress, type PendingElicitation, type PrinterHandoffConfig, type PrinterSelection, type PrinterSlicer, type PrintReport, type PrinterSession} from '@scan-to-make/printer-handoff';
 import type {PrintEstimate, PrintSettings, ProjectStatus, ProjectSettingsPatch} from '@scan-to-make/contracts/counterpart';
 import {PrintMonitorRunner, matchJob, milestonesFor, type EventDraft, type MonitorClock, type MonitorEnd, type MonitorTarget} from '../printing/monitor.js';
@@ -359,7 +359,11 @@ export class ObjectService {
           if (isAbsolute(path) || path.split('/').some(part => !part || part === '.' || part === '..')) throw new InvalidFileError('The model has an invalid file path.');
           const target = join(this.dir(duplicate.id), path);
           await mkdir(dirname(target), {recursive: true});
-          await copyFile(join(this.dir(id), path), target);
+          // The merged mesh beside a designed 3MF is best-effort: a 3MF with none
+          // (never written by a design pass) still duplicates as a printable model.
+          if (path === 'current/model.stl' && current.model !== path)
+            await copyFile(join(this.dir(id), path), target).catch(error => { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; });
+          else await copyFile(join(this.dir(id), path), target);
         }
         const credit = (source as StmObject & {credit?: unknown}).credit;
         const result = await this.#deps.store.update(duplicate.id, o => ({...o, state: 'ready', current,
@@ -601,15 +605,20 @@ export class ObjectService {
    * Declared colours match file filaments by part name first, then by position
    * when the counts agree — several parts may share one filament.
    */
-  async #modelData(object: StmObject): Promise<{filaments: ModelFilament[]; slots: number; version: string; declaredSlots: ModelFilament[]}> {
+  async #modelData(object: StmObject): Promise<{filaments: ModelFilament[]; slots: number; version: string; declaredSlots: ModelFilament[]; plateUsed?: Set<number>}> {
     const bytes = isMultipart(object) && object.current ? await this.#modelBytes(object).catch(() => Buffer.alloc(0)) : Buffer.alloc(0);
-    // The plate is part of the version: choices made for one plate must not validate on another.
-    const version = createHash('sha256').update(bytes).update(`|plate:${object.publishedSelection?.plateIndex ?? 0}`).digest('hex');
+    // The plate and the declared colours are part of the version: choices made for one
+    // plate (or before a colour-only redesign of a byte-identical 3MF) must not validate.
+    const version = createHash('sha256').update(bytes)
+      .update(`|plate:${object.publishedSelection?.plateIndex ?? 0}|declared:${JSON.stringify(object.current?.filaments ?? [])}`).digest('hex');
     if (!bytes.length) return {filaments: [], slots: 0, version, declaredSlots: []};
     const declaredSlots = modelDeclaredFilaments(bytes);
-    const fromFile = modelFilaments(bytes, object.publishedSelection?.plateIndex ?? 0);
+    const plateIndex = object.publishedSelection?.plateIndex ?? 0;
+    const plateList = modelPlateFilaments(bytes, plateIndex);
+    const plateUsed = plateList ? new Set(plateList) : undefined;
+    const fromFile = modelFilaments(bytes, plateIndex);
     const declared = object.current!.filaments ?? [];
-    if (!fromFile.length) return {filaments: declared.map((entry, i) => ({index: i + 1, ...entry})), slots: declared.length, version, declaredSlots};
+    if (!fromFile.length) return {filaments: declared.map((entry, i) => ({index: i + 1, ...entry})), slots: declared.length, version, declaredSlots, plateUsed};
     // Name matching only where the name is unique on both sides; duplicates fall back to position.
     const count = (values: (string | undefined)[]) => values.reduce((map, name) => name ? map.set(name.trim().toLowerCase(), (map.get(name.trim().toLowerCase()) ?? 0) + 1) : map, new Map<string, number>());
     const declaredCounts = count(declared.map(entry => entry.name)), fileCounts = count(fromFile.map(filament => filament.name));
@@ -623,7 +632,7 @@ export class ObjectService {
         ...((filament.colour ?? declaredEntry?.colour) ? {colour: filament.colour ?? declaredEntry!.colour} : {}),
         ...((filament.material ?? declaredEntry?.material) ? {material: filament.material ?? declaredEntry!.material} : {})};
     });
-    return {filaments, slots: Math.max(modelFilamentSlotCount(bytes), ...filaments.map(filament => filament.index)), version, declaredSlots};
+    return {filaments, slots: Math.max(modelFilamentSlotCount(bytes), ...filaments.map(filament => filament.index)), version, declaredSlots, plateUsed};
   }
 
   /** Whether this object's printer reports AMS trays at all (the gate `liveFilaments` applies). */
@@ -664,12 +673,14 @@ export class ObjectService {
    */
   async #multipartColour(object: StmObject, options: PrintOptions, selection: PrinterSelection | undefined,
       _backend: PrinterHandoffConfig['backend'], destinationOverride?: {destinationId?: string}): Promise<{selection?: PrinterSelection; slicer?: PrinterSlicer; chosenTrays?: LiveFilament[]} | undefined> {
-    const {filaments: model, slots, version, declaredSlots} = await this.#modelData(object);
-    if (!model.length) return undefined;
-    if (options.filaments && options.filamentsModelVersion !== version)
+    const {filaments: model, slots, version, declaredSlots, plateUsed} = await this.#modelData(object);
+    // Explicit choices are validated even when this model's filaments can't be read:
+    // falling back to the MCP's defaults would silently drop the person's spools.
+    if (options.filaments && (options.filamentsModelVersion !== version || !model.length))
       throw new InvalidStateError(options.filamentsModelVersion
         ? 'The model changed since you chose its spools. Reopen the print sheet and check the colours.'
         : 'These spool choices carry no model version. Reopen the print sheet and choose the spools again.');
+    if (!model.length) return undefined;
     let live: LiveFilament[];
     try { live = await this.liveFilaments(object.id, destinationOverride); }
     catch (error) { if (options.filaments) throw error; return undefined; }
@@ -722,7 +733,9 @@ export class ObjectService {
       const [match] = matchColours([declared], fillerPool, {requireMaterial: sliced});
       const tray = match ? live.find(item => item.slot === match.slot) : undefined;
       if (tray && (sliced || tray.profile)) byIndex.set(declared.index, tray);
-      else if (sliced && declared.material)
+      // A slot the selected plate's own list excludes never prints on this plate, so it
+      // can't block it; only a slot that actually prints (or may, with no plate list) refuses.
+      else if (sliced && declared.material && (!plateUsed || plateUsed.has(declared.index)))
         throw new InvalidStateError(`A painted part of this file was sliced for ${declared.material}, and no ${declared.material} spool on the chosen feed source can print it. Load one, then try again.`);
     }
     const at = (index: number) => byIndex.get(index) ?? chosen[0]!;
@@ -1125,13 +1138,17 @@ export class ObjectService {
             await this.#emit({id: randomUUID(), type: 'project.updated', projectId: id, data: {keys: ['print']}});
             return unclear;
           }
-          if (this.#cancelledPrints.has(id)) return this.#deps.store.update(id, o => ({...o, state: 'ready', progress: undefined, printConfirmation: undefined, failure: this.#recheckFailures.get(id)}));
+          if (this.#cancelledPrints.has(id) && !this.#recheckFailures.has(id)) return this.#deps.store.update(id, o => ({...o, state: 'ready', progress: undefined, printConfirmation: undefined, failure: undefined}));
           // Refused before anything reached the printer (review item 23): the phone hears it, with the reason.
           const refused = async (state: 'failed' | 'ready', failure: string) => {
             const updated = await this.#deps.store.update(id, o => ({...o, state, progress: undefined, printConfirmation: undefined, failure}));
             await this.#emit({id: randomUUID(), type: 'print.not-started', ...eventBase, detail: {reason: failure}});
             return updated;
           };
+          // A spool changed under the waiting question: a safety-check refusal like the
+          // dispatch one, so it ends the Live Activity instead of cancelling quietly.
+          const recheckFailure = this.#recheckFailures.get(id);
+          if (recheckFailure) return refused('failed', recheckFailure);
           if (this.#expiredConfirmations.has(id) || (this.#confirmations.get(id)?.pending.expiresAtMs ?? Infinity) <= Date.now())
             return refused('failed', 'Printer confirmation timed out; no print was sent. Press Print to try again.');
           if (error instanceof PrinterMcpError && error.code === 'print-settings-unsupported') return refused('ready', settingsUnsupported(runner.backend, {...options, supports: !!object.current?.supports}));
@@ -1589,9 +1606,12 @@ export class ObjectService {
         if (recheck) {
           try { await recheck(); }
           catch (error) {
-            this.#recheckFailures.set(id, error instanceof Error ? error.message : 'A chosen spool changed before printing started.');
-            this.#cancelledPrints.add(id);
-            confirmation.printing.services.relay.respond(confirmationId, {action: 'decline'});
+            // Only a delivered decline makes this our refusal; an already-expired question
+            // keeps its own timeout outcome in the dispatch handler.
+            if (confirmation.printing.services.relay.respond(confirmationId, {action: 'decline'})) {
+              this.#recheckFailures.set(id, error instanceof Error ? error.message : 'A chosen spool changed before printing started.');
+              this.#cancelledPrints.add(id);
+            }
             clearTimeout(confirmation.timer);
             this.#confirmations.delete(id);
             await this.#deps.store.update(id, o => o.printConfirmation?.id === confirmationId ? {...o, printConfirmation: undefined} : o);

@@ -4,7 +4,7 @@ import {mkdtemp, writeFile, rm} from 'node:fs/promises';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {zipSync, strToU8} from 'fflate';
-import {PrinterHandoffRunner, modelFilaments, modelFilamentSlotCount, printerHandoffConfigSchema} from '../dist/index.js';
+import {PrinterHandoffRunner, modelFilaments, modelFilamentSlotCount, modelPlateFilaments, printerHandoffConfigSchema} from '../dist/index.js';
 
 const published = Buffer.from(zipSync({
   '[Content_Types].xml': strToU8('<Types/>'),
@@ -59,6 +59,10 @@ test('the declared slot count counts unused filaments too, and a sliced plate na
   assert.equal(modelFilamentSlotCount(designed), 0);
   assert.deepEqual(modelFilaments(sliced).map(f => f.index), [1, 3]);
   assert.equal(modelFilaments(sliced)[1].colour, '#FFFFFF');
+  // The plate's own list, on its own: authoritative when present, absent otherwise.
+  assert.deepEqual(modelPlateFilaments(sliced), [1, 3]);
+  assert.equal(modelPlateFilaments(designed), undefined);
+  assert.equal(modelPlateFilaments(Buffer.from('not a zip')), undefined);
 });
 
 test('unreadable bytes give no filaments rather than throwing', () => {

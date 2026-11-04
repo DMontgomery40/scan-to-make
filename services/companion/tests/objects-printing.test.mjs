@@ -232,6 +232,40 @@ test('profiles and mapping cover every declared slot, and choices for an older m
   assert.equal(f.runs.at(-1).options.slicer.filamentColours.split(';').length, 4);
 });
 
+test('a sliced plate is not blocked by a declared material it never uses, but a painted one with no plate list still refuses', async t => {
+  const {zipSync, strToU8} = fflate();
+  const build = plate => Buffer.from(zipSync({'[Content_Types].xml': strToU8('<Types/>'),
+    '3D/3dmodel.model': strToU8('<model><resources><object id="1"><mesh/></object></resources><build><item objectid="1"/></build></model>'),
+    'Metadata/model_settings.config': strToU8('<config><object id="3"><metadata key="name" value="Pick"/><metadata key="extruder" value="1"/>'
+      + '<part id="1" subtype="normal_part"><metadata key="name" value="body"/><metadata key="extruder" value="1"/></part></object></config>'),
+    'Metadata/project_settings.config': strToU8(JSON.stringify({filament_colour: ['#FEC600', '#000000'], filament_type: ['PLA', 'ABS']})),
+    ...(plate ? {'Metadata/plate_1.json': strToU8(JSON.stringify({filament_ids: [0]}))} : {})}));
+  const selection = {fileIndex: 0, plateIndex: 0, sliced: true};
+  // Plate 1 uses only filament 1 (PLA, loaded): the unused ABS slot must not block it.
+  const f = await setup(t, {reports: [status('RUNNING', 10)]});
+  await multipart(f, {bytes: build(true), kind: 'published', publishedSelection: selection});
+  await f.service.print(f.object.id);
+  await f.approve();
+  await f.service.settled(f.object.id);
+  assert.equal(f.runs[0].selection.amsMapping.length, 2, 'the mapping still covers every declared slot');
+  assert.equal(f.runs[0].selection.amsMapping[0], 1, 'the PLA part prints from the loaded PLA spool');
+  // No plate list: slot 2 may be painted, and no ABS spool is loaded — refuse, don't guess.
+  const g = await setup(t, {reports: [status('RUNNING', 10)]});
+  await multipart(g, {bytes: build(false), kind: 'published', publishedSelection: selection});
+  await assert.rejects(g.service.print(g.object.id), /painted part of this file was sliced for ABS/);
+});
+
+test('spool choices for a 3MF whose filaments cannot be read are refused, never dropped', async t => {
+  const {zipSync, strToU8} = fflate();
+  const bare = Buffer.from(zipSync({'[Content_Types].xml': strToU8('<Types/>'),
+    '3D/3dmodel.model': strToU8('<model><resources><object id="1"><mesh/></object></resources><build><item objectid="1"/></build></model>')}));
+  const f = await setup(t, {reports: [status('RUNNING', 10)]});
+  await multipart(f, {bytes: bare});
+  const tray = {slot: 1, colour: '#FEC600', material: 'PLA', filamentId: 'GFA00', destinationId: 'current', name: 'PLA'};
+  await assert.rejects(f.service.print(f.object.id, {filaments: [tray], filamentsModelVersion: 'from-the-old-model'}), /model changed since you chose its spools/);
+  await assert.rejects(f.service.estimate(f.object.id, {filaments: [tray], filamentsModelVersion: 'from-the-old-model'}), /model changed since you chose its spools/);
+});
+
 test('when the inventory cannot be read, a multi-part print falls back to the MCP defaults as before', async t => {
   const f = await setup(t, {reports: [status('RUNNING', 10)]});
   await multipart(f, {bytes: twoPart3mf({filament_colour: ['#000000', '#FFFFFF'], filament_type: ['PLA', 'PLA']}), kind: 'published'});
@@ -273,7 +307,11 @@ test('a spool swapped while the printer’s question waits is caught before the 
   swapped = true;
   await assert.rejects(f.service.answerPrintConfirmation(f.object.id, question.id, {action: 'accept', content: {confirmed: true}}), /changed before printing started/);
   const settled = await f.service.settled(f.object.id);
-  assert.equal(settled.state, 'ready', 'the declined print leaves the project ready, nothing sent');
+  // A safety-check refusal, like the dispatch one: failed, the reason kept, and the phone
+  // hears print.not-started so its Live Activity ends instead of cancelling quietly.
+  assert.equal(settled.state, 'failed', 'the declined print settles as not started, nothing sent');
+  assert.match(settled.failure, /changed before printing started/);
+  assert.ok(f.events.some(event => event.type === 'print.not-started'), 'the refusal is announced, not quiet');
 });
 
 test('the estimate for a multi-colour model slices with the mapped spools’ profiles', async t => {

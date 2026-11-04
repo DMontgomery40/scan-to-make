@@ -188,6 +188,27 @@ export function modelFilaments(bytes: Buffer, plateIndex = 0): ModelFilament[] {
   } catch { return []; }
 }
 
+/**
+ * The filament indices (1-based) the selected plate's `plate_N.json` says it
+ * uses, or undefined when the file carries no usable plate list. When this is
+ * defined it is authoritative: a declared slot outside it does not print on
+ * this plate at all.
+ */
+export function modelPlateFilaments(bytes: Buffer, plateIndex = 0): number[] | undefined {
+  try {
+    if (!bytes.length || bytes.length > 64 * 1024 * 1024 || bytes[0] !== 0x50 || bytes[1] !== 0x4b) return undefined;
+    const plateName = `Metadata/plate_${plateIndex + 1}.json`;
+    const files = unzipSync(bytes, {filter: file => file.name === plateName && file.originalSize <= 8 * 1024 * 1024});
+    const plateFile = files[plateName];
+    if (!plateFile) return undefined;
+    const plate = JSON.parse(Buffer.from(plateFile).toString('utf8')) as {filament_ids?: unknown};
+    const positions = Array.isArray(plate.filament_ids)
+      ? [...new Set(plate.filament_ids.filter((value): value is number => Number.isInteger(value)).map(value => value + 1))].filter(index => index >= 1 && index <= 64)
+      : [];
+    return positions.length ? positions : undefined;
+  } catch { return undefined; }
+}
+
 /** A designer-supplied plate image, copied as a preview; never a substitute for model geometry. */
 export function modelPlatePreview(bytes: Buffer, index: number): Buffer | undefined {
   const name = `Metadata/plate_${index + 1}.png`;

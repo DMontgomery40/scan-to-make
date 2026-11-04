@@ -314,7 +314,7 @@ struct PrintSheet: View {
                         Text("No filament is loaded. Load a spool, then reopen this sheet.").foregroundStyle(.secondary)
                     }
                     if mixedFeedSources {
-                        Text("One print feeds from one source. Put every colour on AMS spools, or every colour on the external spool.")
+                        Text("One print feeds from one source: put every colour on AMS spools, or every colour on the external spool.")
                             .font(.caption).foregroundStyle(.secondary)
                     }
                 }
