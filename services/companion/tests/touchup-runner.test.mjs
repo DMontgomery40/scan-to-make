@@ -38,6 +38,25 @@ test('a request in several colours keeps the printer MCP\'s multi-part 3MF besid
   assert.equal(result.status, 'done');
   assert.equal(result.model, join(pass.outDir, 'touched.stl'));
   assert.equal(result.parts, join(pass.outDir, 'touched.3mf'));
+  assert.deepEqual(result.partColours, [
+    {name: 'body', colour: '#111111', material: 'PLA'},
+    {name: 'letters', colour: '#FFD200'},
+  ]);
+});
+
+test('part colours the worker garbles lose the garbled field but keep their filament’s place', async () => {
+  const {pass, inv} = await setup('multicolourjunk');
+  const result = await runTouchupWorker(inv, pass);
+  assert.equal(result.parts, join(pass.outDir, 'touched.3mf'));
+  // Positions are filaments: dropping an entry would put every later colour on the wrong part.
+  assert.deepEqual(result.partColours, [
+    {name: 'body'}, {colour: '#FFD200'}, {}, {name: 'x'.repeat(256)},
+  ]);
+});
+
+test('part colours without the 3MF they describe do not survive', async () => {
+  const {pass, inv} = await setup('done');
+  assert.equal((await runTouchupWorker(inv, pass)).partColours, undefined);
 });
 
 test('a single-colour pass has no parts file', async () => {

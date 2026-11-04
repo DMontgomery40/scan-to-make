@@ -4,7 +4,7 @@ import {tmpdir} from 'node:os';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {basename, dirname, extname, isAbsolute, join} from 'node:path';
-import {DispatchedPrintError, PrinterMcpError, inspectModelFile, modelPlatePreview, readModelFile, type ModelFileInfo, readPrintReport, readPrintRoute, routeArgs, setPrintRoute, sliceEstimate, timeoutsFor, type PrintRoute,
+import {DispatchedPrintError, PrinterMcpError, inspectModelFile, modelFilamentSlotCount, modelFilaments, modelPlatePreview, readModelFile, type ModelFileInfo, type ModelFilament, readPrintReport, readPrintRoute, routeArgs, setPrintRoute, sliceEstimate, timeoutsFor, type PrintRoute,
   type PrintProgress, type PendingElicitation, type PrinterHandoffConfig, type PrinterSelection, type PrinterSlicer, type PrintReport, type PrinterSession} from '@scan-to-make/printer-handoff';
 import type {PrintEstimate, PrintSettings, ProjectStatus, ProjectSettingsPatch} from '@scan-to-make/contracts/counterpart';
 import {PrintMonitorRunner, matchJob, milestonesFor, type EventDraft, type MonitorClock, type MonitorEnd, type MonitorTarget} from '../printing/monitor.js';
@@ -24,6 +24,7 @@ import {InvalidStateError, SlicerRefusedError} from './errors.js';
 import type {TouchupInput} from '../touchup/touchup.js';
 import {publicTouchupText, type TouchupActivity, type TouchupResult} from '../touchup/runner.js';
 import {ObjectNotFoundError, ObjectStore, type ObjectPrintConfirmation, type StmObject} from './store.js';
+import {matchColours} from './colour-match.js';
 import {macReconstructRunner, type Reconstruct} from './reconstruct.js';
 import type {PrinterCatalog} from './printers.js';
 import type {PrinterDirectory, PublicDestination} from '../printing/directory.js';
@@ -145,7 +146,15 @@ export interface ObjectServiceDeps {
 }
 
 /** What the print sheet sends with Print (PRD §8.5). */
-export interface PrintOptions extends PrintSettings {checked?: boolean; filament?: FilamentChoice}
+export interface PrintOptions extends PrintSettings {checked?: boolean; filament?: FilamentChoice;
+  /** A multi-part 3MF: the spool chosen for each of the model's filaments, in filament order. */
+  filaments?: FilamentChoice[]}
+/** One of a multi-part model's filaments with its suggested (or chosen) spool, for the print sheet. */
+export interface ColourMappingFilament extends ModelFilament {
+  /** The suggested tray's absolute slot; absent when nothing is loaded. */
+  slot?: number; distance?: number; materialMismatch?: boolean; guessed?: boolean;
+}
+export interface ColourMapping {filaments: ColourMappingFilament[]; trays: FilamentChoice[]}
 const BAMBU_TO_STATUS: Record<string, string> = {idle: 'IDLE', preparing: 'PREPARE', printing: 'RUNNING', paused: 'PAUSE', finished: 'FINISH', failed: 'FAILED', cancelled: 'FAILED', offline: 'OFFLINE', busy: 'UNKNOWN'};
 
 export type ObjectPrintAnswer = {action: 'accept'; content: Record<string, ConfirmationValue>} | {action: 'decline' | 'cancel'; content?: never};
@@ -562,6 +571,86 @@ export class ObjectService {
     return live.map(({profile: _profile, ...choice}) => ({...choice, ...(choice === pick || (pick && choice.slot === pick.slot) ? {suggested: true} : {})}));
   }
 
+  /**
+   * The current 3MF's filaments with the colour each belongs in: the file's own
+   * assignments (published files carry colours), overlaid by position with what
+   * the design pass declared (a designed 3MF carries filaments but no colours).
+   */
+  async #modelFilaments(object: StmObject): Promise<ModelFilament[]> {
+    if (!isMultipart(object) || !object.current) return [];
+    const fromFile = modelFilaments(await this.#modelBytes(object).catch(() => Buffer.alloc(0)));
+    const declared = object.current.filaments ?? [];
+    if (!fromFile.length) return declared.map((entry, i) => ({index: i + 1, ...entry}));
+    return fromFile.map(filament => {
+      const declaredEntry = declared[filament.index - 1];
+      return {index: filament.index,
+        ...((filament.name ?? declaredEntry?.name) ? {name: filament.name ?? declaredEntry!.name} : {}),
+        ...((filament.colour ?? declaredEntry?.colour) ? {colour: filament.colour ?? declaredEntry!.colour} : {}),
+        ...((filament.material ?? declaredEntry?.material) ? {material: filament.material ?? declaredEntry!.material} : {})};
+    });
+  }
+
+  /** The print sheet's colour rows for a multi-part model: its filaments, the loaded spools, and the nearest spool for each. */
+  async colourMapping(id: string): Promise<ColourMapping> {
+    const object = await this.get(id);
+    const model = await this.#modelFilaments(object);
+    if (!model.length) return {filaments: [], trays: []};
+    const live = await this.liveFilaments(id);
+    const matches = matchColours(model, live);
+    return {
+      filaments: model.map((filament, i) => ({...filament, ...(matches[i] ? {
+        slot: matches[i]!.slot,
+        ...(matches[i]!.distance !== undefined ? {distance: matches[i]!.distance} : {}),
+        ...(matches[i]!.materialMismatch ? {materialMismatch: true} : {}),
+        ...(matches[i]!.guessed ? {guessed: true} : {}),
+      } : {})})),
+      trays: live.map(({profile: _profile, ...choice}) => choice),
+    };
+  }
+
+  /**
+   * A multi-part 3MF's spools as the MCP's selection and slicing options: the
+   * sheet's validated choices, or the nearest spool per colour. Undefined when
+   * the model's filaments can't be read (the MCP's own defaults then apply, as
+   * before) or this backend reports no live inventory to map against.
+   */
+  async #multipartColour(object: StmObject, options: PrintOptions, selection: PrinterSelection | undefined,
+      backend: PrinterHandoffConfig['backend']): Promise<{selection?: PrinterSelection; slicer?: PrinterSlicer} | undefined> {
+    // AMS mapping is a Bambu concept: the bambu MCP, or the generic MCP driving a Bambu printer.
+    if (backend !== 'bambu-printer-mcp' && selection?.printerType !== 'bambu') return undefined;
+    const model = await this.#modelFilaments(object);
+    if (!model.length) return undefined;
+    const live = await this.liveFilaments(object.id);
+    let chosen: LiveFilament[];
+    if (options.filaments) {
+      if (options.filaments.length !== model.length)
+        throw new InvalidStateError('Choose a spool for every colour in this model, then try again.');
+      chosen = options.filaments.map(choice => {
+        const tray = live.find(item => item.slot === choice.slot && item.colour === choice.colour
+          && item.material === choice.material && item.filamentId === choice.filamentId && item.destinationId === choice.destinationId);
+        if (!tray) throw new InvalidStateError('A chosen filament changed. Choose the current spools and try again.');
+        return tray;
+      });
+    } else {
+      const matches = matchColours(model, live);
+      if (matches.some(match => !match)) throw new InvalidStateError('No filament is loaded. Load a spool in the AMS, then try again.');
+      chosen = matches.map(match => live.find(item => item.slot === match!.slot)!);
+    }
+    const byIndex = new Map(model.map((filament, i) => [filament.index, chosen[i]!]));
+    const top = Math.max(...model.map(filament => filament.index));
+    // Unused project filaments stay unmapped (-1); their slice profile is the first chosen spool's.
+    const at = (index: number) => byIndex.get(index) ?? chosen[0]!;
+    const amsMapping = Array.from({length: top}, (_, i) => byIndex.get(i + 1)?.slot ?? -1);
+    const mapped: PrinterSelection = {...selection,
+      useAms: chosen.some(tray => tray.slot !== 254 && tray.slot !== 255),
+      amsMapping, amsSlots: undefined, autoMatchAms: false};
+    if (object.publishedSelection?.sliced) return {selection: mapped};
+    return {selection: mapped, slicer: {
+      loadFilaments: Array.from({length: top}, (_, i) => at(i + 1).profile).join(';'),
+      filamentColours: Array.from({length: top}, (_, i) => at(i + 1).colour).join(';'),
+    }};
+  }
+
   selectPrinter(id: string, destinationId: string): Promise<StmObject> {
     return this.#gate(id, async () => {
       const object = await this.get(id), catalog = this.#deps.printerCatalog;
@@ -967,6 +1056,12 @@ export class ObjectService {
   /** The print sheet's colour, as the MCP's own selection and slicing options (PRD §8.5 colour v1). */
   async #colour(id: string, options: PrintOptions, selection: PrinterSelection | undefined, backend: PrinterHandoffConfig['backend'])
     : Promise<{selection?: PrinterSelection; slicer?: PrinterSlicer}> {
+    const object = await this.get(id);
+    if (isMultipart(object)) {
+      // A 3MF owns its per-part filaments: map each to a spool, never one spool for the whole model.
+      const multipart = await this.#multipartColour(object, options, selection, backend);
+      if (multipart) return multipart;
+    }
     if (options.filament) {
       const choice = options.filament;
       const live = (await this.liveFilaments(id)).find(item => item.slot === choice.slot && item.colour === choice.colour
@@ -1315,8 +1410,13 @@ export class ObjectService {
     if (capabilities && ((overrides.layerHeightMm !== undefined && !capabilities.quality) || (overrides.wallLoops !== undefined && !capabilities.strength)
         || (copies && !capabilities.copies)))
       throw new InvalidStateError(settingsUnsupported(services.runner.backend, {quality, strength, ...(copies ? {copies} : {})}));
+    // A multi-colour model slices with its mapped spools' profiles, exactly as Print would.
+    // Best effort: an unreadable inventory leaves the estimate to the MCP's own defaults.
+    const multipart = isMultipart(object)
+      ? await this.#multipartColour(object, {}, services.selection, services.runner.backend).catch(() => undefined) : undefined;
+    const slicer = {...overrides, ...(multipart?.slicer ?? {})};
     const model = await this.#modelBytes(object);
-    const key = JSON.stringify([createHash('sha256').update(model).digest('hex'), destinationId ?? 'default', quality, strength, request.copies ?? 'configured', object.publishedSelection?.plateIndex ?? services.selection?.plateIndex ?? 0]);
+    const key = JSON.stringify([createHash('sha256').update(model).digest('hex'), destinationId ?? 'default', quality, strength, request.copies ?? 'configured', object.publishedSelection?.plateIndex ?? services.selection?.plateIndex ?? 0, multipart?.selection?.amsMapping ?? null]);
     let running = this.#estimates2.get(key);
     if (!running) {
       const runner = services.runner;
@@ -1325,7 +1425,7 @@ export class ObjectService {
         try {
           const stlPath = join(work, object.current!.model.toLowerCase().endsWith('.3mf') ? 'model.3mf' : 'model.stl');
           await writeFile(stlPath, model);
-          const {estimate, settings, slicerWarning} = await runner.estimate!({stlPath, ...((services.selection || object.publishedSelection) ? {selection: {...services.selection, ...(object.publishedSelection ? {plateIndex: object.publishedSelection.plateIndex} : {})}} : {}), ...(Object.keys(overrides).length ? {slicer: overrides} : {}),
+          const {estimate, settings, slicerWarning} = await runner.estimate!({stlPath, ...((services.selection || object.publishedSelection) ? {selection: {...services.selection, ...(object.publishedSelection ? {plateIndex: object.publishedSelection.plateIndex} : {})}} : {}), ...(Object.keys(slicer).length ? {slicer} : {}),
             signal: AbortSignal.timeout(150_000), sliceCache: {directory: join(this.#deps.store.dir(id), 'slices')}});
           return {destinationId: destinationId ?? 'current', quality, strength, ...(copies ? {copies} : {}),
             ...(estimate?.seconds !== undefined ? {seconds: estimate.seconds} : {}), ...(estimate?.grams !== undefined ? {grams: estimate.grams} : {}),
@@ -1746,6 +1846,7 @@ export class ObjectService {
       if (result.parts) await copyFile(result.parts, join(currentDir, 'model.3mf'));
       else await rm(join(currentDir, 'model.3mf'), {force: true});
       current = {model: join('current', result.parts ? 'model.3mf' : 'model.stl'), renders, ...(sizeMm ? {sizeMm} : {}), ...(summary ? {summary} : {}),
+        ...(result.parts && result.partColours?.length ? {filaments: result.partColours} : {}),
         ...(result.changes?.length ? {changes: result.changes} : {}), engine, ...(design ? {design} : {})};
     }
     const ask = result.status === 'needs_closeup' ? await this.#ask(id, result) : undefined;

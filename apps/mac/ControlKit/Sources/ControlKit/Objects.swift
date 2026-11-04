@@ -27,6 +27,36 @@ public struct PrinterFilament: Codable, Sendable, Identifiable, Equatable {
     private enum SuggestedKey: String, CodingKey { case suggested }
 }
 
+/// One filament of a multi-part model, with the spool the companion suggests for it (`objects.colourMapping`).
+public struct ModelColourFilament: Codable, Sendable, Identifiable, Equatable {
+    /// 1-based project filament, as the 3MF numbers them.
+    public let index: Int
+    public let name: String?
+    /// The colour this part belongs in, `#RRGGBB`, when the model or its design pass says one.
+    public let colour: String?
+    public let material: String?
+    /// The suggested spool's absolute slot; nil when nothing is loaded.
+    public let slot: Int?
+    /// How far the suggested spool's colour is from `colour` (0 exact); nil when the colour is unknown.
+    public let distance: Double?
+    public let materialMismatch: Bool?
+    /// No colour was known: the suggestion is only a starting point.
+    public let guessed: Bool?
+    public var id: Int { index }
+    public init(index: Int, name: String? = nil, colour: String? = nil, material: String? = nil, slot: Int? = nil,
+                distance: Double? = nil, materialMismatch: Bool? = nil, guessed: Bool? = nil) {
+        self.index = index; self.name = name; self.colour = colour; self.material = material
+        self.slot = slot; self.distance = distance; self.materialMismatch = materialMismatch; self.guessed = guessed
+    }
+}
+
+/// A multi-part model's filaments and the printer's loaded spools: which spool each colour prints from.
+public struct ColourMapping: Codable, Sendable, Equatable {
+    public let filaments: [ModelColourFilament]
+    public let trays: [PrinterFilament]
+    public init(filaments: [ModelColourFilament], trays: [PrinterFilament]) { self.filaments = filaments; self.trays = trays }
+}
+
 /// What the print sheet asks for (PRD §5.5, §8.5). Standard quality and strength send nothing, so the MCP's preset decides.
 public struct PrintSettings: Sendable, Equatable {
     public enum Quality: String, Sendable, CaseIterable { case draft, standard, fine }
@@ -142,6 +172,10 @@ public extension ControlClient {
         let result: Result = try await call("objects.filaments", ["id":.string(id)])
         return result.filaments
     }
+    /// A multi-part model's filaments, the loaded spools, and the suggested spool for each colour.
+    func colourMapping(_ id: String) async throws -> ColourMapping {
+        try await call("objects.colourMapping", ["id":.string(id)])
+    }
     func selectPrinter(_ id: String, destinationId: String) async throws -> Project {
         let result: ObjectReply = try await call("objects.selectPrinter", ["id": .string(id), "destinationId": .string(destinationId)])
         return result.object
@@ -208,10 +242,21 @@ public extension ControlClient {
         let result: ObjectReply = try await call("objects.print", params); return result.object
     }
     func printObject(_ id: String, checked: Bool, filament: PrinterFilament) async throws -> Project {
-        let value: [String: JSONValue] = ["slot":.number(Double(filament.slot)), "colour":.string(filament.colour),
-            "material":.string(filament.material), "name":.string(filament.name), "filamentId":.string(filament.filamentId), "destinationId":.string(filament.destinationId)]
-        let result: ObjectReply = try await call("objects.print", ["id":.string(id), "checked":.bool(checked), "filament":.object(value)])
+        let result: ObjectReply = try await call("objects.print", ["id":.string(id), "checked":.bool(checked), "filament": Self.value(filament)])
         return result.object
+    }
+    /// Prints a multi-part model with the spool chosen for each of its filaments, in filament order.
+    func printObject(_ id: String, checked: Bool, settings: PrintSettings, filaments: [PrinterFilament]) async throws -> Project {
+        var params = settings.params
+        params["id"] = .string(id)
+        if checked { params["checked"] = .bool(true) }
+        params["filaments"] = .array(filaments.map(Self.value))
+        let result: ObjectReply = try await call("objects.print", params)
+        return result.object
+    }
+    private static func value(_ filament: PrinterFilament) -> JSONValue {
+        .object(["slot":.number(Double(filament.slot)), "colour":.string(filament.colour),
+            "material":.string(filament.material), "name":.string(filament.name), "filamentId":.string(filament.filamentId), "destinationId":.string(filament.destinationId)])
     }
     /// Prints with the sheet's settings (`capabilities.printSettings`). A deadline after sending has an unknown outcome.
     func printObject(_ id: String, checked: Bool, settings: PrintSettings, overrideDefaults: Bool = false) async throws -> Project {

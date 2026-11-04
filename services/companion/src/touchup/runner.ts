@@ -26,6 +26,8 @@ export interface TouchupResult {
   model?: string;
   /** A request in several colours: the printer MCP's multi-part 3MF (counterpart_make_3mf), each part on its filament. */
   parts?: string;
+  /** The colour (and material, when named) the worker declares for each of `parts`' filaments, in order. */
+  partColours?: {name?: string; colour?: string; material?: string}[];
   renders: string[];
   checkpoints: string[];
   stats: {seconds: number; toolCalls: number; costUsd?: number};
@@ -57,7 +59,7 @@ interface ResultEvent {
   is_error?: boolean;
   result?: string;
   total_cost_usd?: number;
-  structured_output?: {status?: string; closeup?: string; summary?: string; title?: string; changes?: unknown; ask?: unknown};
+  structured_output?: {status?: string; closeup?: string; summary?: string; title?: string; changes?: unknown; ask?: unknown; parts?: unknown};
 }
 
 /** The worker's title, what-changed list and Ask, checked and made safe to show. */
@@ -83,6 +85,23 @@ function structured(answer: ResultEvent['structured_output'], publicText: (text:
         ? {region: {x: region.x as number, y: region.y as number, width: region.width as number, height: region.height as number}} : {})};
   }
   return out;
+}
+
+/**
+ * The worker's per-filament colours for a multi-colour pass. Positions are
+ * filaments, so a garbled entry keeps its place with the garbled fields
+ * dropped; shifting the list would put later colours on the wrong parts.
+ */
+function partColours(answer: ResultEvent['structured_output'], publicText: (text: string) => string): TouchupResult['partColours'] {
+  if (!Array.isArray(answer?.parts)) return undefined;
+  const entries = answer.parts.slice(0, 64).map((item: unknown) => {
+    const part = item && typeof item === 'object' ? item as Record<string, unknown> : {};
+    const colour = typeof part.colour === 'string' ? /^#([0-9a-fA-F]{6})$/.exec(part.colour.trim()) : null;
+    const name = typeof part.name === 'string' && part.name.trim() ? publicText(part.name).slice(0, 256) : undefined;
+    const material = typeof part.material === 'string' && part.material.trim() ? publicText(part.material).slice(0, 64) : undefined;
+    return {...(name ? {name} : {}), ...(colour ? {colour: `#${colour[1]!.toUpperCase()}`} : {}), ...(material ? {material} : {})};
+  });
+  return entries.some(entry => entry.colour || entry.name || entry.material) ? entries : undefined;
 }
 
 /** A printable STL: every triangle complete and every vertex coordinate finite. Cut-off or corrupt exports fail. */
@@ -217,6 +236,8 @@ export async function runTouchupWorker(inv: TouchupInvocation, pass: TouchupPass
   const base = {renders, checkpoints, ...(parts ? {parts} : {}), ...(worker ? {worker} : {}), stats: {seconds: seconds(), toolCalls, ...(resultEvent?.total_cost_usd !== undefined ? {costUsd: resultEvent.total_cost_usd} : {})}};
   const withModel = model ? {model} : {};
   const answer = resultEvent?.structured_output;
+  const declared = parts ? partColours(answer, publicText) : undefined;
+  if (declared) Object.assign(base, {partColours: declared});
   const summary = {...(answer?.summary ? {summary: publicText(answer.summary)} : {}), ...structured(answer, publicText)};
   const f3d = join(pass.outDir, 'touched.f3d'), parameters = join(pass.outDir, 'touched.parameters.json');
   const design = await stat(f3d).then(info => info.isFile(), () => false)

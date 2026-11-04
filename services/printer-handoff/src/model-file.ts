@@ -4,6 +4,8 @@ import {createHash} from 'node:crypto';
 import {unzipSync} from 'fflate';
 
 export interface ModelPlate {index: number; name: string; objects: string[]; sliced: boolean; thumbnail?: string}
+/** One project filament a part of this model prints with (1-based, as `counterpart_make_3mf` numbers them). */
+export interface ModelFilament {index: number; name?: string; colour?: string; material?: string}
 export interface ModelFileInfo {
   format: 'stl' | '3mf'; sha256: string; byteLength: number;
   title?: string; designer?: string; licence?: string; plates: ModelPlate[];
@@ -74,6 +76,59 @@ export function inspectModelFile(bytes: Buffer, format: 'stl' | '3mf'): ModelFil
     if (!result.plates.length) throw new Error('This 3MF contains previews and settings but no model or printable plate. Download the designer’s model file again.');
   }
   return result;
+}
+
+/**
+ * The filaments this 3MF's parts print with: each part's `extruder` from
+ * `Metadata/model_settings.config`, with the colour and material the project's
+ * `project_settings.config` declares for that filament when the file carries one
+ * (published files do; a `counterpart_make_3mf` design does not). Best effort:
+ * an unreadable archive gives none, never a throw — validity is `inspectModelFile`'s job.
+ */
+export function modelFilaments(bytes: Buffer): ModelFilament[] {
+  try {
+    if (!bytes.length || bytes.length > 64 * 1024 * 1024 || bytes[0] !== 0x50 || bytes[1] !== 0x4b) return [];
+    let total = 0;
+    const files = unzipSync(bytes, {filter: file => {
+      if (!['Metadata/model_settings.config', 'Metadata/project_settings.config'].includes(file.name)) return false;
+      total += file.originalSize;
+      return file.originalSize <= 8 * 1024 * 1024 && total <= 16 * 1024 * 1024;
+    }});
+    const settings = Buffer.from(files['Metadata/model_settings.config'] ?? []).toString('utf8');
+    const byIndex = new Map<number, ModelFilament>();
+    const read = (block: string, part: boolean) => {
+      const extruder = /<metadata\s+key="extruder"\s+value="(\d+)"/.exec(block);
+      if (!extruder) return;
+      const index = Number(extruder[1]);
+      if (index < 1 || index > 64) return;
+      const name = words(/<metadata\s+key="name"\s+value="([^"]*)"/.exec(block)?.[1] ?? '');
+      const existing = byIndex.get(index);
+      // A part's own name beats its assembly object's, whichever is read second.
+      if (!existing) byIndex.set(index, {index, ...(name ? {name} : {})});
+      else if (name && part) existing.name = name;
+    };
+    // Parts never nest; objects contain parts, so read parts first, then object
+    // shells with their part blocks removed (their own name/extruder only).
+    for (const block of settings.matchAll(/<part\b[^>]*>([\s\S]*?)<\/part>/g)) read(block[1]!, true);
+    const shells = settings.replace(/<part\b[^>]*>[\s\S]*?<\/part>/g, '');
+    for (const block of shells.matchAll(/<object\b[^>]*>([\s\S]*?)<\/object>/g)) read(block[1]!, false);
+    const projectFile = files['Metadata/project_settings.config'];
+    if (projectFile) {
+      const project = JSON.parse(Buffer.from(projectFile).toString('utf8')) as Record<string, unknown>;
+      const list = (key: string): string[] => Array.isArray(project[key]) ? (project[key] as unknown[]).map(String) : [];
+      const colours = list('filament_colour'), types = list('filament_type');
+      const count = Math.min(64, Math.max(colours.length, types.length));
+      // No per-part assignments to read: every declared filament is in play.
+      if (!byIndex.size) for (let index = 1; index <= count; index++) byIndex.set(index, {index});
+      for (const filament of byIndex.values()) {
+        const colour = /^#?([0-9a-fA-F]{6})(?:[0-9a-fA-F]{2})?$/.exec(colours[filament.index - 1]?.trim() ?? '');
+        if (colour) filament.colour = `#${colour[1]!.toUpperCase()}`;
+        const material = types[filament.index - 1]?.trim().replace(/[\u0000-\u001f\u007f]/g, ' ').slice(0, 64);
+        if (material) filament.material = material;
+      }
+    }
+    return [...byIndex.values()].sort((a, b) => a.index - b.index);
+  } catch { return []; }
 }
 
 /** A designer-supplied plate image, copied as a preview; never a substitute for model geometry. */

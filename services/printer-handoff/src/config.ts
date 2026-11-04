@@ -42,7 +42,8 @@ export const printerSlicerSchema = z.strictObject({
   profile: z.string().trim().min(1).max(4096).optional(),
   filamentProfile: z.string().trim().min(1).max(4096).optional(),
   loadFilaments: z.string().trim().min(1).max(4096).optional(),
-  filamentColours: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
+  /** One `#RRGGBB` per filament in order, `;`-separated — `slice_stl`'s `filament_colours` shape. */
+  filamentColours: z.string().regex(/^#[0-9a-fA-F]{6}(;#[0-9a-fA-F]{6}){0,63}$/).optional(),
   templateName: z.string().trim().min(1).max(256).optional(),
   /** Print-sheet quality and strength (PRD §8.5), as process overrides through slice_stl. */
   layerHeightMm: z.number().min(0.04).max(1.2).optional(),

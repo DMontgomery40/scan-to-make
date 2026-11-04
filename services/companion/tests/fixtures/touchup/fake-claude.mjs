@@ -21,7 +21,14 @@ switch (scenario) {
     toolUse('mcp__printer__counterpart_make_3mf'); say('Made the pick black with yellow lettering.');
     writeFileSync('out/checkpoints/01.stl', stl); writeFileSync('out/touched.stl', stl); writeFileSync('out/touched.3mf', Buffer.from('PK\x03\x04 two parts'));
     writeFileSync('out/front.png', 'png');
-    result({status: 'done', summary: 'Made the pick black with yellow lettering.'});
+    result({status: 'done', summary: 'Made the pick black with yellow lettering.',
+      parts: [{name: 'body', colour: '#111111', material: 'PLA'}, {name: 'letters', colour: '#FFD200'}]});
+    break;
+  case 'multicolourjunk':
+    toolUse('mcp__printer__counterpart_make_3mf');
+    writeFileSync('out/touched.stl', stl); writeFileSync('out/touched.3mf', Buffer.from('PK\x03\x04 two parts'));
+    result({status: 'done', summary: 'Two colours.',
+      parts: [{name: 'body', colour: 'black'}, {colour: '#ffd200'}, 'oops', {name: 'x'.repeat(300), colour: '#FFF', material: 7}]});
     break;
   case 'needs_closeup':
     toolUse('Read');

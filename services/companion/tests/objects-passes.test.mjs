@@ -50,11 +50,13 @@ async function setup(t, outcomes) {
 }
 
 test('a design in several colours keeps its multi-part 3MF as the model, and is revised from its mesh', async t => {
-  const f = await setup(t, [{engine: 'fusion', parts: true, result: {summary: 'Black pick, yellow Vivi.'}}, {engine: 'fusion', result: {summary: 'One colour now.'}}]);
+  const partColours = [{name: 'body', colour: '#111111'}, {name: 'letters', colour: '#FFD200', material: 'PLA'}];
+  const f = await setup(t, [{engine: 'fusion', parts: true, result: {summary: 'Black pick, yellow Vivi.', partColours}}, {engine: 'fusion', result: {summary: 'One colour now.'}}]);
   const object = await f.service.create('A guitar pick that says Vivi, black with yellow letters', 'fit');
   await f.service.start(object.id);
   const ready = await f.service.settled(object.id);
   assert.equal(ready.current.model, 'current/model.3mf', 'the parts and their filaments are what prints');
+  assert.deepEqual(ready.current.filaments, partColours, 'the colours the parts belong in are kept with the model');
   const dir = f.store.dir(object.id);
   assert.equal((await readFile(join(dir, 'current', 'model.3mf'))).subarray(0, 2).toString(), 'PK');
   assert.ok((await readFile(join(dir, 'current', 'model.stl'), 'utf8')).startsWith('solid'), 'the merged mesh stays for sizing and revisions');
@@ -62,6 +64,7 @@ test('a design in several colours keeps its multi-part 3MF as the model, and is 
   const revised = await f.service.settled(object.id);
   assert.ok(f.inputs[1].scan[0].endsWith(join('current', 'model.stl')), 'the next pass edits the mesh, not the 3MF');
   assert.equal(revised.current.model, 'current/model.stl');
+  assert.equal(revised.current.filaments, undefined, 'a one-colour revision leaves no stale colours');
   await assert.rejects(readFile(join(dir, 'current', 'model.3mf')), {code: 'ENOENT'}, 'a one-colour revision leaves no stale parts file');
 });
 

@@ -26,6 +26,12 @@ export const TOUCHUP_RESULT_SCHEMA = {
         text: {type: 'string', maxLength: 200},
         toleranceMm: {type: 'number', minimum: 0, description: 'For estimated sizes: plus or minus this many millimetres'},
       }}},
+    parts: {type: 'array', maxItems: 64, description: 'Only for a request in more than one colour: the parts of out/touched.3mf in filament order (the first prints on filament 1), each with the colour the person asked for as #RRGGBB, so Counterpart can put it on the nearest loaded spool',
+      items: {type: 'object', additionalProperties: false, required: ['colour'], properties: {
+        name: {type: 'string', maxLength: 128, description: 'The part’s name in the 3MF, like "body" or "letters"'},
+        colour: {type: 'string', pattern: '^#[0-9A-Fa-f]{6}$', description: 'The colour this part should print in, as #RRGGBB'},
+        material: {type: 'string', maxLength: 64, description: 'The material, only when the request names one for this part (for example PLA or PETG)'},
+      }}},
     ask: {type: 'object', additionalProperties: false, required: ['question'], description: 'When status is needs_closeup: the one question, and where to look',
       properties: {
         question: {type: 'string', maxLength: 200, description: 'One plain question, like "Can you take a close-up of the clip on the left side?"'},
@@ -54,7 +60,7 @@ const SYSTEM_RULES_TEMPLATE = `You are making a useful 3D object for a person. U
 - Scans from the phone are in metres. A current-model STL supplied for revision is already in millimetres. Build new designs in millimetres and export every STL in millimetres, the unit printers use.
 - After each fix, export the whole model as an STL to the checkpoints folder (01.stl, 02.stl, …).
 - Render and inspect the candidate from all six sides against the request and reference photos. For a captured object, compare the rear and underside explicitly with the supplied photos, accounting for the object being turned over between photographs. A smooth, closed scan surface can still be a reconstruction defect. Before calling any region unseen, check all supplied views and identify which views support that conclusion; do not infer missing photographic coverage from missing mesh detail. Revise visible discrepancies, or ask for the specific missing evidence when it is actually absent. Check the attachment interfaces, assembly path and dimensions; revise defects you can see. Successful export alone does not establish that the design works.
-- A request in more than one colour or material: model each colour as its own body or object, export each one as an STL, and combine them with the printer MCP's counterpart_make_3mf into out/touched.3mf, one part per colour in the order the request names them (part 1 on filament 1, and so on). Still export the whole model to out/touched.stl. Counterpart prints the 3MF and puts each part on a spool; never tell the person how to slice, which filament slot to use or which layer height to pick.
+- A request in more than one colour or material: model each colour as its own body or object, export each one as an STL, and combine them with the printer MCP's counterpart_make_3mf into out/touched.3mf, one part per colour in the order the request names them (part 1 on filament 1, and so on). Report every part under "parts" in your answer, in that same order, with its name and the colour the person asked for as #RRGGBB (and its material when they named one): the 3MF itself carries no colours, so this list is how Counterpart knows which spool each part belongs on. Still export the whole model to out/touched.stl. Counterpart prints the 3MF and puts each part on a spool; never tell the person how to slice, which filament slot to use or which layer height to pick.
 - Export the final model to out/touched.stl and clear PNG renders to out/, named so the clearest overall view sorts first (for example 1_overview.png). Explain what the part does and any remaining fit assumptions in the final summary.
 - If you can't see a part well enough to fix it, set status to needs_closeup and say what to photograph.
 - If something breaks and you can't finish (for example Blender stops responding), set status to failed and say what happened.`;
