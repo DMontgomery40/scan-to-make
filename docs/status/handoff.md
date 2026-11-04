@@ -75,7 +75,9 @@ remote native probes and the SSH tunnel were removed after verification.
    uploaded as **2.0 (1)** at 22:19 Mountain; processing finished and it is **Waiting for Review**. Internal group
    `Counterpart Team` exists; description and user-supplied review/feedback contacts are saved.
    External group **Counterpart Public Beta** has build 2.0 (1), submitted for Beta App Review.
-   Automatic tester notifications are off; zero testers, no email invitations, no public link enabled. App record currently
+   Automatic tester notifications are off; zero testers, no email invitations. Public link created
+   **https://testflight.apple.com/join/S4tExVzp**, Open to Anyone. Apple says testers cannot join
+   until an approved build is in the group. No public announcement sent. App record currently
    lists iOS and macOS drafts; do not remove the Mac platform without understanding that choice.
    Release branch `feat/testflight-readiness` is pushed through `ab455a6` (no PR yet).
    `docs/distribution.md` contains the release procedure and remaining production prerequisites.

@@ -14,8 +14,9 @@ exported and uploaded **2.0 (1)** on 2026-11-03 at 22:19 Mountain. The app and b
 extensions passed signature, version and Production entitlement checks. Source:
 `b734344`; artifact: `~/scan-to-make-work/testflight-2.0-1/`. Apple accepted the
 upload, finished processing, and now shows **Waiting for Review** for the external
-`Counterpart Public Beta` group. Automatic tester notifications are off. No public
-link is enabled or shared yet.
+`Counterpart Public Beta` group. Automatic tester notifications are off. The public link is **https://testflight.apple.com/join/S4tExVzp**, open to anyone.
+Apple displays: “Testers cannot join public link until this group has an approved build.”
+No tester email invitations or public announcement were sent.
 The internal prerequisite group `Counterpart Team` exists. Beta description and
 David's supplied review/feedback contacts are saved in App Store Connect.
 
