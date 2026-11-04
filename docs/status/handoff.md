@@ -500,8 +500,14 @@ remote native probes and the SSH tunnel were removed after verification.
      runs packaged qualify readiness, and includes the Linux reconstruction manifest digest in host
      BUILD-ID so an embedded runtime replacement causes an upgrade. `52534ee3` updates the Mac payload
      audit to validate the identity file; 15 audit checks pass. Companion build and 29 affected checks pass.
-     Combined Mac payload preparation and Linux .deb/AppImage build are in progress; Linux namespace
-     agents-136 `~/scan-to-make-work/reconstruction-release-6151553/`. Nothing installed or restarted.
+     Mac payload preparation at `52534ee3` passed, including bundled USD module readiness and the payload
+     licence audit. Payload BUILD-ID `mac-e72769e5abe0b2aa6da3f75206e2dfbf2d03c44eb24e21cc9722ba4d53f54f79`.
+     Initial Linux packaging exposed dangling GCC copyright links and an unused Qt development-selector link.
+     Parent `eb767494` pins gcc-16-base to retain its shared notices, rejects missing package copyright files
+     and any dangling distro link, and removes only the unused qt-default selector. Rebuilt runtime
+     `reconstruction-1.2.0-geb7674946d04-linux-x64` passed all 66 .deb hashes, strict closure and relocated check.
+     Linux .deb/AppImage build is in progress in agents-136
+     `~/scan-to-make-work/reconstruction-release-6151553/`. Nothing installed or restarted.
      #293 remains with the merge owner. No further Muse implementation requested; retained artifacts stay.
      Synthetic geometry retained a support disc until explicit region choice; one OpenMVS run crashed then
      succeeded on retry. Neither result establishes real capture quality or automatic print readiness.
