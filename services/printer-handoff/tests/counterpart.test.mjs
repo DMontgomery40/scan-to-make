@@ -120,14 +120,15 @@ test('readiness groups printer states for the printer cards', () => {
   assert.equal(readiness(undefined), 'unknown');
 });
 
-test('copies are offered only where the slice makes them: Bambu, or mcp-3D-printer-server on its Bambu-compatible route', () => {
+test('copies are offered only where the MCP says its slice makes them (capabilities.slicing), whatever the slicer is called', () => {
   const slice = {name: 'slice_stl', inputSchema: {type: 'object', properties: {repetitions: {type: 'number'}}}};
-  const tools = {server: {name: 'x', version: '1'}, tools: [slice]};
-  const bambuConfig = {backend: 'bambu-printer-mcp', process: {command: '/x'}};
-  const prusa = {backend: 'mcp-3d-printer-server', process: {command: '/x'}, slicer: {type: 'prusaslicer'}};
-  const orcaBambu = {backend: 'mcp-3d-printer-server', process: {command: '/x'}, slicer: {type: 'orcaslicer-bambulab'}};
-  assert.equal(detectCapabilities(bambuConfig, tools).copies, true);
-  assert.equal(detectCapabilities(prusa, tools).copies, false, 'PrusaSlicer would slice one');
-  assert.equal(detectCapabilities(orcaBambu, tools).copies, true);
-  assert.equal(detectCapabilities(bambuConfig, {server: tools.server, tools: [{name: 'slice_stl', inputSchema: {type: 'object', properties: {}}}]}).copies, false);
+  const tools = {server: {name: 'x', version: '1'}, tools: [slice, {name: 'counterpart_printer_info'}]};
+  const config = {backend: 'mcp-3d-printer-server', process: {command: '/x'}, slicer: {type: 'prusaslicer'}};
+  const info = copies => ({contract: 'counterpart/1', server: {name: 'x', version: '1'}, printer: {kind: 'bambu', host: 'h'},
+    capabilities: {progress: true, layers: true, camera: 'none', filaments: 'ams', pause: true, resume: true, cancel: true, print3mf: true, gcode: true,
+      ...(copies === undefined ? {} : {slicing: {supports: true, copies, orient: true}})}});
+  assert.equal(detectCapabilities(config, tools, info(true)).copies, true, 'the MCP says so: the slicer type is not the app\'s business');
+  assert.equal(detectCapabilities(config, tools, info(false)).copies, false, 'its slice would make one');
+  assert.equal(detectCapabilities(config, tools, info(undefined)).copies, false, 'an MCP from before the field: Update');
+  assert.equal(detectCapabilities(config, {server: tools.server, tools: [{name: 'slice_stl', inputSchema: {type: 'object', properties: {}}}]}, info(true)).copies, false);
 });

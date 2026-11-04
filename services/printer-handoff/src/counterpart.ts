@@ -25,6 +25,8 @@ export const counterpartPrinterInfoSchema = z.object({
     cameraStream: z.boolean().optional(),
     filaments: z.enum(['ams', 'single', 'none']),
     pause: z.boolean(), resume: z.boolean(), cancel: z.boolean(), print3mf: z.boolean(), gcode: z.boolean(),
+    /** What slice_stl can apply with the MCP's slicer for this printer (PRD §8.0): the app never knows slicers. */
+    slicing: z.object({supports: z.boolean(), copies: z.boolean(), orient: z.boolean()}).optional(),
   }),
 });
 export type CounterpartPrinterInfo = z.infer<typeof counterpartPrinterInfoSchema>;
@@ -306,9 +308,8 @@ export function detectCapabilities(config: PrinterHandoffConfig, catalog: Printe
   const strength = hasArgs(catalog, 'slice_stl', ['strength']);
   const multiColour = has('counterpart_make_3mf');
   // Copies only where the slice really makes them: mcp-3D-printer-server forwards repetitions on its Bambu-compatible route only.
-  const slicerType = (config.slicer?.type ?? '').toLowerCase();
-  const bambuRoute = bambu || config.selection?.printerType === 'bambu' || ['bambustudio', 'orcaslicer-bambulab', 'fulu-orca', 'orca-studio'].includes(slicerType);
-  const copies = hasArgs(catalog, 'slice_stl', ['repetitions']) && bambuRoute;
+  // Copies only where the MCP says its slice makes them (capabilities.slicing, PRD §8.0); older versions say Update.
+  const copies = hasArgs(catalog, 'slice_stl', ['repetitions']) && info?.capabilities.slicing?.copies === true;
   const layerPauses = hasArgs(catalog, 'slice_stl', ['pause_at_layers']);
   // Missing means this version lacks the tool, not that the printer lacks the hardware.
   const missing: CapabilityFeature[] = [];

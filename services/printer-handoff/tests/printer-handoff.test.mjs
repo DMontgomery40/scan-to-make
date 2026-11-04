@@ -28,7 +28,7 @@ const selection = {
   bedType: 'textured_plate', material: 'PLA', plateIndex: 0,
 };
 
-async function setup(t, {progress = false, route, mode = 'bambu', backend = 'bambu-printer-mcp', answer = 'accept', relayTimeoutMs = 5000, choice, dispatch, ephemeral = false, noColour = false, crypto = false, noConnectionType = false, settings = false, supports = false, remote = false, slicer, slicerResult, laidFlat, slicedBytes} = {}) {
+async function setup(t, {progress = false, route, mode = 'bambu', backend = 'bambu-printer-mcp', answer = 'accept', relayTimeoutMs = 5000, choice, dispatch, ephemeral = false, noColour = false, crypto = false, noConnectionType = false, settings = false, supports = false, remote = false, slicer, slicerResult, laidFlat, slicedBytes, slicing} = {}) {
   const root = await mkdtemp(join(tmpdir(), 'printer-handoff-'));
   t.after(() => rm(root, {recursive: true, force: true}));
   const log = join(root, 'calls.jsonl');
@@ -39,7 +39,7 @@ async function setup(t, {progress = false, route, mode = 'bambu', backend = 'bam
   const config = {
     backend,
     process: {command: process.execPath, args: [fixture, mode, log], cwd: root,
-      env: {...(progress ? {HANDOFF_FIXTURE_PROGRESS: '1'} : {}), ...(slicedBytes ? {HANDOFF_FIXTURE_SLICED_FILE: join(root, 'fixture-output.3mf')} : {}), ...(laidFlat !== undefined ? {HANDOFF_FIXTURE_LAID_FLAT: String(laidFlat)} : {}), ...(slicerResult ? {HANDOFF_FIXTURE_SLICER_RESULT: join(slicerResults, `${slicerResult}.json`)} : {}), ...(settings ? {HANDOFF_FIXTURE_SLICE_SETTINGS:'1'} : {}), ...(supports ? {HANDOFF_FIXTURE_SUPPORTS:'1'} : {}), ...(remote ? {HANDOFF_FIXTURE_REMOTE:'1'} : {}), ...(noConnectionType ? {HANDOFF_FIXTURE_NO_CONNECTION_TYPE:'1'} : {}), ...(crypto ? {HANDOFF_FIXTURE_CRYPTO:'1'} : {}), ...(route ? {HANDOFF_FIXTURE_ROUTE: JSON.stringify(route)} : {}), ...(dispatch ? {HANDOFF_FIXTURE_DISPATCH: dispatch} : {}), ...(ephemeral ? {HANDOFF_FIXTURE_EPHEMERAL: '1'} : {}), ...(noColour ? {HANDOFF_FIXTURE_NO_COLOUR:'1'} : {})}},
+      env: {...(progress ? {HANDOFF_FIXTURE_PROGRESS: '1'} : {}), ...(slicedBytes ? {HANDOFF_FIXTURE_SLICED_FILE: join(root, 'fixture-output.3mf')} : {}), ...(laidFlat !== undefined ? {HANDOFF_FIXTURE_LAID_FLAT: String(laidFlat)} : {}), ...(slicerResult ? {HANDOFF_FIXTURE_SLICER_RESULT: join(slicerResults, `${slicerResult}.json`)} : {}), ...(settings ? {HANDOFF_FIXTURE_SLICE_SETTINGS:'1'} : {}), ...(supports ? {HANDOFF_FIXTURE_SUPPORTS:'1'} : {}), ...(slicing ? {HANDOFF_FIXTURE_SLICING: slicing} : {}), ...(remote ? {HANDOFF_FIXTURE_REMOTE:'1'} : {}), ...(noConnectionType ? {HANDOFF_FIXTURE_NO_CONNECTION_TYPE:'1'} : {}), ...(crypto ? {HANDOFF_FIXTURE_CRYPTO:'1'} : {}), ...(route ? {HANDOFF_FIXTURE_ROUTE: JSON.stringify(route)} : {}), ...(dispatch ? {HANDOFF_FIXTURE_DISPATCH: dispatch} : {}), ...(ephemeral ? {HANDOFF_FIXTURE_EPHEMERAL: '1'} : {}), ...(noColour ? {HANDOFF_FIXTURE_NO_COLOUR:'1'} : {})}},
     selection,
     ...(slicer ? {slicer} : {}),
     timeouts: {connectMs: 5000, toolMs: 5000, elicitationMs: relayTimeoutMs},
@@ -218,7 +218,7 @@ test('elicitation relay never answers itself: timeout resolves cancel', async ()
 test('discovery lists fixture tools without calling one', async t => {
   const f = await setup(t);
   const catalog = await f.runner.discover();
-  assert.deepEqual(catalog.tools.map(tool => tool.name), ['lay_flat', 'slice_stl', 'inspect_print_file', 'camera_snapshot', 'print_3mf']);
+  assert.deepEqual(catalog.tools.map(tool => tool.name), ['counterpart_printer_info', 'lay_flat', 'slice_stl', 'inspect_print_file', 'camera_snapshot', 'print_3mf']);
   assert.equal((await f.calls()).filter(entry => entry.tool).length, 0);
 });
 
@@ -291,13 +291,15 @@ test('generic gcode sequence confirms temperatures then uploads with print set',
 });
 
 // PrusaSlicer and Cura have no auto-orient through the MCP and refuse support arguments: the model goes to them as it is.
-test('a non-Bambu slicer gets the model as it is, and a supports choice is refused before slicing', async t => {
-  const f = await setup(t, {mode: 'generic-gcode', backend: 'mcp-3d-printer-server', supports: true});
+test('a slice route without orient or supports gets the model as it is, and a supports choice is refused before slicing', async t => {
+  // As mcp-3d-printer-server 1.2.32 reports a PrusaSlicer route: the app reads it, it never names slicers.
+  const prusa = JSON.stringify({supports: false, copies: false, orient: false});
+  const f = await setup(t, {mode: 'generic-gcode', backend: 'mcp-3d-printer-server', supports: true, slicing: prusa});
   await f.runner.run({stlPath: f.stlPath, selection: {printerType: 'klipper', material: 'PLA'}});
   const slice = (await f.calls()).find(entry => entry.tool === 'slice_stl');
-  assert.equal('orient' in slice.arguments, false, 'orient is Bambu-compatible slicing only');
+  assert.equal('orient' in slice.arguments, false, 'orient only where the MCP says its slice orients');
   assert.equal(slice.arguments.stl_path, f.stlPath);
-  const refused = await setup(t, {mode: 'generic-gcode', backend: 'mcp-3d-printer-server', supports: true});
+  const refused = await setup(t, {mode: 'generic-gcode', backend: 'mcp-3d-printer-server', supports: true, slicing: prusa});
   await assert.rejects(refused.runner.run({stlPath: refused.stlPath, selection: {printerType: 'klipper', material: 'PLA'}, slicer: {enableSupport: false}}), {code: 'print-settings-unsupported'});
   assert.deepEqual((await refused.calls()).filter(entry => entry.tool).map(entry => entry.tool), []);
 });

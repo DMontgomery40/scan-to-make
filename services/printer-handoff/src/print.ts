@@ -14,6 +14,7 @@ import {keepSlice, readSlice, sliceCacheKey, presetDigests} from './slice-cache.
 import type {HandoffBundleStore} from './bundle.js';
 import {PrinterMcpError, toolResultJson, toolResultText, type McpProgress, type PrinterToolCatalog} from './mcp-client.js';
 import {PrinterSession} from './session.js';
+import {readPrinterInfo} from './counterpart.js';
 
 export type PrintStep = 'discover' | 'lay_flat' | 'slice_stl' | 'inspect' | 'print';
 export type PrintPhase = 'connecting' | 'orienting' | 'slicing' | 'inspecting' | 'slice-ready' | 'checking-printer' | 'requesting-print' | 'accepted';
@@ -120,12 +121,6 @@ function resultValue(result: Parameters<typeof toolResultText>[0]): unknown {
   if (result.isError) fail('tool-failed');
   if (result.structuredContent !== undefined) return result.structuredContent;
   try { return toolResultJson(result); } catch { return toolResultText(result); }
-}
-export function isBambuSlicing(config: PrinterHandoffConfig, selection: PrinterSelection, slicer?: PrinterSlicer): boolean {
-  if (config.backend === 'bambu-printer-mcp') return true;
-  if (selection.printerType === 'bambu') return true;
-  const type = (slicer?.type ?? '').toLowerCase();
-  return type === 'bambustudio' || type === 'orcaslicer-bambulab' || type === 'fulu-orca' || type === 'orca-studio';
 }
 
 export interface PrinterHandoffRunnerOptions {
@@ -359,6 +354,9 @@ export class PrinterHandoffRunner {
           fail('filament-selection-unsupported');
       }
     }
+    // What this MCP's slice can apply (supports, copies, orient): the MCP says, the app never knows slicers (PRD §8.0).
+    // An MCP without it (older than bambu-printer-mcp 1.1.58 / mcp-3d-printer-server 1.2.32) gets none of them.
+    const slicing = (await readPrinterInfo(session, {...(signal ? {signal} : {})}).catch(() => undefined))?.capabilities.slicing;
     // A chosen quality or strength the MCP can't apply is refused, never silently printed at preset values.
     {
       const sliceProperties = session.getTool('slice_stl').inputSchema.properties ?? {};
@@ -368,17 +366,17 @@ export class PrinterHandoffRunner {
           || (slicer.wallLoops !== undefined && !Object.hasOwn(sliceProperties, 'wall_loops'))
           || (slicer.sparseInfillDensity !== undefined && !Object.hasOwn(sliceProperties, 'sparse_infill_density'))
           || (slicer.pauseAtLayers?.length && !Object.hasOwn(sliceProperties, 'pause_at_layers'))
-          // Only Bambu-compatible slicing takes the designer's supports; PrusaSlicer and Cura refuse them.
-          || ((slicer.enableSupport !== undefined || slicer.supportType !== undefined) && !isBambuSlicing(this.#config, selection, slicer))
+          // Supports and copies only where the MCP says its slice applies them (capabilities.slicing, PRD §8.0).
+          || ((slicer.enableSupport !== undefined || slicer.supportType !== undefined) && !slicing?.supports)
           || (slicer.enableSupport !== undefined && !Object.hasOwn(sliceProperties, 'enable_support'))
           || (slicer.supportType !== undefined && !Object.hasOwn(sliceProperties, 'support_type'))
-          // mcp-3D-printer-server forwards repetitions only on its Bambu-compatible route; elsewhere it would slice one.
-          || (slicer.repetitions !== undefined && slicer.repetitions > 1 && (!Object.hasOwn(sliceProperties, 'repetitions') || !isBambuSlicing(this.#config, selection, slicer)))) fail('print-settings-unsupported');
+              || (slicer.repetitions !== undefined && slicer.repetitions > 1 && (!Object.hasOwn(sliceProperties, 'repetitions') || !slicing?.copies))) fail('print-settings-unsupported');
     }
     // Every slice_stl argument but the model's path.
     const sliceArgs = {
       slice_plate: threeMf ? (selection.plateIndex ?? 0) + 1 : undefined,
-      bambu_model: isBambuSlicing(this.#config, selection, slicer) ? selection.model : undefined,
+      // The printer's configured model, as the person set it; the MCP decides what its slicer does with it.
+      bambu_model: selection.model,
       nozzle_diameter: selection.nozzleDiameterMm === undefined ? undefined : String(selection.nozzleDiameterMm),
       bed_type: selection.bedType,
       nozzle_type: selection.nozzleType,
@@ -403,9 +401,8 @@ export class PrinterHandoffRunner {
       use_printer_filaments: false,
       arrange: !threeMf || (slicer.repetitions ?? 1) > 1,
       ensure_on_bed: !threeMf,
-      // The slicer orients an STL itself (Bambu Studio's auto-orient); a 3MF keeps its placement. Other slicers
-      // (PrusaSlicer, Cura) have no auto-orient through the MCP: the model goes to them as it is.
-      orient: threeMf ? false : isBambuSlicing(this.#config, selection, slicer) ? true : undefined,
+      // An STL is oriented by the slicer where the MCP says it can (capabilities.slicing.orient); a 3MF keeps its placement.
+      orient: threeMf ? false : slicing?.orient ? true : undefined,
     };
     // The same model sliced the same way before (Print Again, or Print after Estimate): print that file. Only
     // slice_stl is skipped; inspection, the printer checks, Studio's warning and the print call all run as always.

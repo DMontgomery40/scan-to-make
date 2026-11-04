@@ -44,7 +44,12 @@ const genericPrintProps = {
   // The real generic server accepts ams_mapping as an array or an object (anyOf); this fixture takes the array Counterpart sends.
   nozzle_diameter: string, use_ams: bool, ams_mapping: {type: 'array', items: integer}, ams_slots: {type: 'array', items: integer},
 };
+// counterpart_printer_info as bambu-printer-mcp 1.1.58 / mcp-3d-printer-server 1.2.32 answer it. HANDOFF_FIXTURE_SLICING:
+// a JSON capabilities.slicing (e.g. a PrusaSlicer route), or 'none' for an MCP from before the field.
+const slicing = process.env.HANDOFF_FIXTURE_SLICING === 'none' ? undefined
+  : process.env.HANDOFF_FIXTURE_SLICING ? JSON.parse(process.env.HANDOFF_FIXTURE_SLICING) : {supports: true, copies: true, orient: true};
 const tools = [
+  {name: 'counterpart_printer_info', inputSchema: {type: 'object', properties: {}}},
   {name: 'lay_flat', inputSchema: {type: 'object', additionalProperties: false, required: ['stl_path'], properties: {stl_path: string}}},
   {name: 'slice_stl', inputSchema: {type: 'object', additionalProperties: false, required: ['stl_path'], properties: sliceProps}},
   ...(mode === 'bambu' ? [
@@ -123,7 +128,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
     }
   let args = request.params.arguments ?? {};
   if ((name === 'slice_stl' || name === 'print_3mf') && !args.bambu_model) args = await elicitModel(args);
-  record({tool: name, arguments: args});
+  // The read-only capability query is not part of a print's sequence; tests assert what the print sends.
+  if (name !== 'counterpart_printer_info') record({tool: name, arguments: args});
   const directory = ephemeral ?? dirname(args.stl_path ?? args.three_mf_path ?? args.gcode_path ?? process.cwd());
   if (name === 'lay_flat') {
     if (process.env.HANDOFF_FIXTURE_LAID_FLAT === 'false') return {
@@ -153,6 +159,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
     const {mode, type} = JSON.parse(process.env.HANDOFF_FIXTURE_ROUTE);
     return text({route: mode === 'bambu_network' && type === 'cloud' ? 'cloud' : 'lan', mode, type, choices: ['lan', 'cloud'], savedTo: null});
   }
+  if (name === 'counterpart_printer_info') return text({contract: 'counterpart/1', server: {name: 'fixture', version: '0'},
+    printer: {kind: mode === 'bambu' ? 'bambu' : 'octoprint', host: '127.0.0.1'},
+    capabilities: {progress: true, layers: true, camera: 'none', filaments: mode === 'bambu' ? 'ams' : 'single', pause: true, resume: true, cancel: true,
+      print3mf: mode === 'bambu', gcode: true, ...(slicing ? {slicing} : {})}});
   if (name === 'get_printer_status') return text({raw:{hms:[{attr:0x05000500,code:0x00010007}]}});
   if (name === 'clear_hms_errors') {await confirmPrint();return text({status:'success'});}
   if (name === 'camera_snapshot') return text({format: 'jpeg', base64: 'ZmFrZQ==', savedTo: join(directory, 'snapshot.jpg')});

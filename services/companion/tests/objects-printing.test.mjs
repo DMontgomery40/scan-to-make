@@ -34,7 +34,11 @@ async function setup(t, {tools = ['get_printer_status', 'camera_snapshot', 'paus
   let endControl;
   const queue = [...reports];
   const relay = new InMemoryElicitationRelay({timeoutMs: 5000});
-  const catalogTools = [...tools, ...(route ? ['counterpart_print_route'] : [])].map(name => name === 'slice_stl' && (sliceArgs || copies)
+  // Copies come from the MCP's own capabilities.slicing (bambu-printer-mcp 1.1.58+), as the real servers report it.
+  if (copies && !info) info = {contract: 'counterpart/1', server: {name: 'bambu-printer-mcp', version: '1.1.58'}, printer: {kind: 'bambu', host: '192.0.2.1'},
+    capabilities: {progress: true, layers: true, camera: 'bambu-tcp', filaments: 'ams', pause: true, resume: true, cancel: true, print3mf: true, gcode: true,
+      slicing: {supports: true, copies: true, orient: true}}};
+  const catalogTools = [...tools, ...(route ? ['counterpart_print_route'] : []), ...(info && !tools.includes('counterpart_printer_info') ? ['counterpart_printer_info'] : [])].map(name => name === 'slice_stl' && (sliceArgs || copies)
     ? tool(name, {...(sliceArgs ? {quality: {}, strength: {}, layer_height: {}, wall_loops: {}, sparse_infill_density: {}} : {}), ...(copies ? {repetitions: {}} : {})}) : tool(name, controlsRoute && ['cancel_print', 'pause_print', 'resume_print'].includes(name) ? {connection_mode: {}, connection_type: {}} : {}));
   const factory = () => ({
     catalog: undefined,
