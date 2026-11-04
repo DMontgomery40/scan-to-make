@@ -9,7 +9,16 @@ import {
   normalizeQuestion,
   validateAnswer,
 } from "../src/domain.ts";
-import type { Project } from "../src/types.ts";
+import type { Project, ReconstructionReview } from "../src/types.ts";
+import {
+  buildRegionAnswer,
+  buildScaleAnswer,
+  componentWords,
+  formatPreviewExtent,
+  parseExtentMm,
+  selectionBox,
+  suggestedComponent,
+} from "../src/domain.ts";
 const project = {
   id: "p",
   title: "Mount",
@@ -108,4 +117,53 @@ test("a late mutation response cannot replace newer project state", async () => 
     "printing",
   );
   assert.equal(newerProject(project, newer).state, "printing");
+});
+const review: ReconstructionReview = {
+  id: "123e4567-e89b-42d3-a456-426614174000",
+  kind: "region",
+  preview: "reconstruction-preview.stl?reviewId=123e4567-e89b-42d3-a456-426614174000",
+  previewMeshSha256: "a".repeat(64),
+  boundsMin: [0, 0, 0], boundsMax: [10, 4, 2],
+  extents: { x: 10, y: 4, z: 2 }, scaleKnown: false,
+  suggestion: { type: "component", reason: "Largest piece", extents: { x: 8, y: 4, z: 2 } },
+  components: [
+    { index: 0, vertices: 100, faces: 50, share: 0.8, boundsMin: [1, 0, 0], boundsMax: [9, 4, 2], extents: { x: 8, y: 4, z: 2 } },
+    { index: 1, vertices: 10, faces: 5, share: 0.2, boundsMin: [0, 0, 0], boundsMax: [1, 1, 1], extents: { x: 1, y: 1, z: 1 } },
+  ],
+};
+test("reconstruction answers bind to the current review hash and kind", () => {
+  assert.deepEqual(buildRegionAnswer(review, { type: "suggested" }),
+    { type: "region", previewMeshSha256: "a".repeat(64), selection: { type: "suggested" } });
+  assert.deepEqual(buildRegionAnswer(review, { type: "component", index: 1 }).type, "region");
+  assert.throws(() => buildRegionAnswer(review, { type: "component", index: 9 }));
+  assert.throws(() => buildRegionAnswer({ ...review, previewMeshSha256: undefined }, { type: "suggested" }));
+  assert.throws(() => buildScaleAnswer(review, "x", 50));
+  const scale = { ...review, kind: "scale" as const, meshSha256: "b".repeat(64), previewMeshSha256: undefined };
+  assert.deepEqual(buildScaleAnswer(scale, "y", 42.5),
+    { type: "scale", meshSha256: "b".repeat(64), axis: "y", extentMm: 42.5 });
+  assert.throws(() => buildScaleAnswer(scale, "y", Number.NaN));
+  assert.throws(() => buildScaleAnswer(scale, "y", 0.5));
+});
+test("crop must be finite, ordered, and overlap the preview", () => {
+  assert.equal(buildRegionAnswer(review, { type: "crop", min: [2, 0, 0], max: [5, 4, 2] }).type, "region");
+  assert.throws(() => buildRegionAnswer(review, { type: "crop", min: [5, 0, 0], max: [5, 4, 2] }));
+  assert.throws(() => buildRegionAnswer(review, { type: "crop", min: [20, 0, 0], max: [30, 4, 2] }));
+  assert.throws(() => buildRegionAnswer(review, { type: "crop", min: [Number.NaN, 0, 0], max: [5, 4, 2] }));
+});
+test("preview units are never labelled mm without a proven scale", () => {
+  assert.match(formatPreviewExtent(review, 10), /preview units/);
+  assert.doesNotMatch(formatPreviewExtent(review, 10), /mm/);
+  assert.equal(formatPreviewExtent({ ...review, scaleKnown: true, scaleMPerUnit: 0.002 }, 10), "20 mm");
+  assert.match(formatPreviewExtent({ ...review, scaleKnown: true }, 10), /preview units/);
+});
+test("suggestion and component boxes drive the highlight; words stay human", () => {
+  assert.equal(suggestedComponent(review)?.index, 0);
+  assert.deepEqual(selectionBox(review, { type: "suggested" }), { min: [1, 0, 0], max: [9, 4, 2] });
+  assert.deepEqual(selectionBox(review, { type: "component", index: 1 }), { min: [0, 0, 0], max: [1, 1, 1] });
+  const anchor = { ...review, suggestion: { type: "anchor-region" as const, reason: "Near tap", extents: { x: 2, y: 2, z: 2 } } };
+  assert.equal(selectionBox(anchor, { type: "suggested" }), undefined);
+  assert.match(componentWords(review.components![0]!), /Piece 1 — 80% of the model · 50 triangles/);
+  assert.throws(() => parseExtentMm(""), /between 1 and 10,000 mm/);
+  assert.throws(() => parseExtentMm("12x"));
+  assert.equal(parseExtentMm("12.5"), 12.5);
 });

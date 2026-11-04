@@ -63,6 +63,51 @@ export interface Ask {
   multiple?: boolean;
   status: string;
 }
+export type Vec3 = [number, number, number];
+export interface ReconstructionComponent {
+  index: number;
+  vertices: number;
+  faces: number;
+  share: number;
+  boundsMin: Vec3;
+  boundsMax: Vec3;
+  extents: { x: number; y: number; z: number };
+}
+export interface ReconstructionReview {
+  id: string;
+  kind: "region" | "scale";
+  preview: string;
+  previewMeshSha256?: string;
+  meshSha256?: string;
+  boundsMin: Vec3;
+  boundsMax: Vec3;
+  extents: { x: number; y: number; z: number };
+  scaleKnown: boolean;
+  scaleMPerUnit?: number;
+  suggestion?: {
+    type: "anchor-region" | "component";
+    reason: string;
+    extents: { x: number; y: number; z: number };
+    extentsM?: { x: number; y: number; z: number };
+  };
+  components?: ReconstructionComponent[];
+}
+export type ReconstructionSelection =
+  | { type: "suggested" }
+  | { type: "component"; index: number }
+  | { type: "crop"; min: Vec3; max: Vec3 };
+export type ReconstructionAnswer =
+  | {
+      type: "region";
+      previewMeshSha256: string;
+      selection: ReconstructionSelection;
+    }
+  | {
+      type: "scale";
+      meshSha256: string;
+      axis: "x" | "y" | "z";
+      extentMm: number;
+    };
 export interface Pass {
   startedAtMs: number;
   endedAtMs?: number;
@@ -113,6 +158,7 @@ export interface Project {
   files?: { original: string[] };
   plates?: Plate[];
   ask?: Ask;
+  reconstructionReview?: ReconstructionReview;
   question?: { closeup: string };
   status?: { text: string; phase: string; tint: string };
   printerDestinationId?: string;

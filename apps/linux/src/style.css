@@ -947,3 +947,11 @@ hr {
     gap: 16px;
   }
 }
+.reconstruction { margin: 18px 22px; }
+.review-view { position: relative; margin: 12px 0; }
+.review-canvas { height: 380px; min-height: 260px; border-radius: 12px; overflow: hidden; background: #11150f; }
+.review-canvas canvas { display: block; touch-action: none; }
+.review-tools { position: static; transform: none; justify-content: center; margin-top: 8px; }
+.review-controls { display: flex; flex-direction: column; gap: 4px; margin-top: 10px; }
+.crop-grid fieldset { border: 1px solid #dfe7d6; border-radius: 10px; margin: 8px 0; }
+.crop-field input[type="range"] { width: 100%; }
