@@ -247,7 +247,8 @@ const server = await startCompanionServer({
   printHandoff,
   ...(printHandoff ? {remoteMcp: {
     bundleRoot: handoffDirectory!,
-    admit: (id: string) => printGate.hold(id),
+    // The gate is held for the destination whose session actually serves the call (a duplicate's winner, as above).
+    admit: (id: string) => printGate.hold(printerCatalog?.canonical(id) ?? id),
     destinations: () => {
       const services = new Map(printerDestinations ?? []);
       // `/v1/mcp` is the Mac's own printer even when a saved Printer MCP choice made another profile its winner
