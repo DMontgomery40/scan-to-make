@@ -466,3 +466,21 @@ test('a fresh install whose bundle store does not exist yet still answers remote
   assert.equal(text(await client.callTool({name: 'get_printer_status', arguments: {}})), 'get_printer_status ok');
   assert.equal((await client.getPrompt({name: 'fdm_guide', arguments: {topic: 'walls'}})).messages.length, 1);
 });
+
+test('destinations follow the live winner, and current is always the Mac printer', async () => {
+  const {remoteDestinationsFor} = await import('../dist/remote-mcp-http.js');
+  const services = name => ({runner: {session: {name}}, relay: {name}});
+  const current = services('current'), studio = services('studio'), workshop = services('workshop');
+  const live = new Map([['current', current], ['studio', studio], ['workshop', workshop]]);
+  let winners = new Map([['current', 'current'], ['studio', 'studio'], ['workshop', 'workshop']]);
+  const map = () => remoteDestinationsFor(live, id => winners.get(id), current);
+  assert.equal(map().get('current').session.name, 'current');
+  // A Printer MCP choice made while running: studio now wins for the Mac's printer; current's old entry is ignored.
+  winners = new Map([['current', 'studio'], ['studio', 'studio'], ['workshop', 'workshop']]);
+  assert.equal(map().get('current').session.name, 'studio');
+  assert.equal(map().get('workshop').session.name, 'workshop');
+  // The catalog left current out entirely: still served, by its winner, else the handoff's own services.
+  live.delete('current');
+  assert.equal(map().get('current').session.name, 'studio');
+  assert.equal(remoteDestinationsFor(new Map(), () => undefined, current).get('current').session.name, 'current');
+});

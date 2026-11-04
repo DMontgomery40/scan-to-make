@@ -16,6 +16,7 @@ import { instanceName } from './bonjour.js';
 import { computerName, discoverAddresses, localHostName, macDisplayName } from './lan-addresses.js';
 import { RemoteAuthStore } from './remote-auth.js';
 import { createPrintHandoffServices, type PrintHandoffServices } from './print-handoff-http.js';
+import { remoteDestinationsFor } from './remote-mcp-http.js';
 import { PrinterMcpClient, PrinterSessionPool, readPrinterHandoffConfig } from '@scan-to-make/printer-handoff';
 import { PrinterDirectory } from './printing/directory.js';
 import { CameraFrames } from './printing/camera.js';
@@ -249,17 +250,8 @@ const server = await startCompanionServer({
     bundleRoot: handoffDirectory!,
     // The gate is held for the destination whose session actually serves the call (a duplicate's winner, as above).
     admit: (id: string) => printGate.hold(printerCatalog?.canonical(id) ?? id),
-    destinations: () => {
-      const services = new Map(printerDestinations ?? []);
-      // `/v1/mcp` is the Mac's own printer even when a saved Printer MCP choice made another profile its winner
-      // (the catalog then leaves `current` out): the winner's services, else the phone handoff's own.
-      if (!services.has('current')) {
-        const winner = printerCatalog?.canonical('current');
-        services.set('current', (winner ? services.get(winner) : undefined) ?? printHandoff);
-      }
-      return new Map([...services].flatMap(([id, entry]) => entry.runner.session
-        ? [[id, {session: entry.runner.session, relay: entry.relay}] as const] : []));
-    },
+    // Each id is served by its live winner, read on every request like the gate's key above.
+    destinations: () => remoteDestinationsFor(printerDestinations ?? new Map(), id => printerCatalog?.canonical(id), printHandoff),
   }} : {}),
   ...(objects ? {objects} : {}),
   ...(eventLog ? {events: eventLog} : {}),

@@ -22,6 +22,23 @@ export interface RemoteMcpServices {
   questionMs?: number;
   toolTimeoutMs?: number;
 }
+/**
+ * The destinations `/v1/mcp` serves, from the companion's live printer services: every id is served by its live
+ * winner (`canonical`, read on every request, as the print gate's key is), and `current` is always the Mac's own
+ * printer, falling back to the phone handoff's services when the catalog leaves it out.
+ */
+export function remoteDestinationsFor<T extends {runner: {session?: PrinterSession}; relay: ElicitationRelay}>(
+  live: ReadonlyMap<string, T>, canonical: (id: string) => string | undefined, fallback: T | undefined,
+): Map<string, RemoteMcpDestination> {
+  const resolve = (id: string) => live.get(canonical(id) ?? id) ?? (id === 'current' ? fallback : undefined);
+  const result = new Map<string, RemoteMcpDestination>();
+  for (const id of new Set([...live.keys(), 'current'])) {
+    const entry = resolve(id);
+    if (entry?.runner.session) result.set(id, {session: entry.runner.session, relay: entry.relay});
+  }
+  return result;
+}
+
 export interface RemoteMcpDevice { deviceId: string; deviceName: string; scopes: readonly string[] }
 
 const MAX_BODY = 1024 * 1024;
