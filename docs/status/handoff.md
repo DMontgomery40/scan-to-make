@@ -38,12 +38,12 @@ What to build: [`../design/overhaul/PRD.md`](../design/overhaul/PRD.md), journey
 | What | Version | From |
 |---|---|---|
 | Mac app `/Applications/Counterpart.app` | **202611032022** | main @ `2f7f43e` (Resume confirmation deadlock fix; source audit found #295/pause-at-layer absent from this main build, contrary to the older handoff) |
-| iPhone "Davica3" (`00008150-001A488C3642401C`) | **202611022325** | old: has none of #294/#295 or pause-at-layer |
+| iPhone "Davica3" (`00008150-001A488C3642401C`) | **2.0 (202611040322), DEBUG** | Phone/deploy owner verified Nov 4: `feat/phone-pause-and-printer-pickers` around `f03580e`; installed by its child around 03:24 MST. Includes #271 virtual RealityView camera and handheld teardown. Fixture screen launches are not connected-app acceptance. |
 | bambu-printer-mcp (what Counterpart runs) | 1.1.46 install + dist from `feat/one-printer-control-route` @ `587461b` (active since 20:17) (a built `native/bambu-native-print` from `exp/native-plugin-controls` sits beside it, unused for a P1S) | `~/Library/Application Support/Scan to Make/printers/bambu-1.1.46/lib/node_modules/bambu-printer-mcp/dist` |
 | mcp-3D-printer-server | live dist from `56d8fb9`; source `feat/bambu-complete` now `afcf378` (new layer-pause parity not deployed) | runs from its own folder and `.env` |
 | bambu-printer-mcp config | `~/bambu-printer-mcp/.env` (the ssh forced command `cd`s there): `BAMBU_DEFAULT_CONNECTION_MODE=bambu_network`, `…_TYPE=lan` | Counterpart's own environment never crosses the ssh hop |
 | FULU runtime | Colima profile `bambu-fulu`, image `bpm-fulu-e2e:runtime`, plug-in **02.05.02.58** | launcher `~/Library/Application Support/Scan to Make/printers/fulu-authenticated-lan.sh` (in neither repo) |
-| P1S | `01P00C4B2500106`, 192.168.68.148, firmware 01.10.00.00, cloud-bound, not LAN-only/Developer mode | AMS A1 black PLA, A2 yellow PLA, A3 PETG |
+| P1S | `01P00C4B2500106`, 192.168.68.148, firmware last recorded 01.10.00.00; David enabled **LAN Only + Developer Mode Nov 4** | AMS A1 black PLA, A2 yellow PLA, A3 PETG; current app route/credentials acceptance coordinated with MCP owner, no access code in repository |
 
 Earlier deployments are logged in `~/scan-to-make-work/claude-route-20261102/deployment-boundary.txt`.
 This evening's deployment and redacted acceptance receipts are in
