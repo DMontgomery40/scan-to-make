@@ -41,16 +41,18 @@ What to build: [`../design/overhaul/PRD.md`](../design/overhaul/PRD.md), journey
   designer's structured support on/off/type directly to `slice_stl`. Include support args in slice-cache
   identity; use the existing unsupported-settings refusal. No stored rotation, hash-bound plan, receipt
   checks, missing-plan Ask or walls/infill minimum Asks. Counterpart is a bridge to the slicer.
-  The source fix is installed in build 202611040628; design/print acceptance remains open.
+  The source fix is installed in build 202611040900; design/print acceptance remains open.
   Mac UI, companion restarts, installs and MCP Update remain held until the release owner hands control back.
 - No user memories (AGENTS.md). Push after every feature. Clean up worktrees, branches, venvs and build bloat you made.
 - iOS/macOS 27.x, Liquid Glass; read current Apple docs. Use Apple's frameworks; don't hand-roll what Apple ships.
 
 ## Installed right now
 
+Build **202611040900** (source `3b24efcf`) is installed and checked through the actual Mac UI. Nine projects, printer configuration, settings and authentication files are retained unchanged. P1S Ready, Developer Mode, npm Bambu 1.1.54; Codex selected; retained model rendered. No phone or printer operation. Immediate rollback is build 628 at `~/scan-to-make-work/combined-mac-202611040900/Counterpart.previous`.
+
 | What | Version | From |
 |---|---|---|
-| Mac app `/Applications/Counterpart.app` | **202611040628** | release @ `86467621`: includes #295/#299/#302/#303/#300/#301, provider routing, updater script permissions and bundled Node native-addon entitlement. Signed development CloudKit/APNs; installed idle and verified through actual UI Nov 4 13:35Z. |
+| Mac app `/Applications/Counterpart.app` | **202611040900** | release @ `3b24efcf`: final main queue including #293, provider routing, reconstruction qualification, multi-plate/starter support and both updater fixes. Signed entitlements match the previous development app exactly; installed idle and checked through actual UI Nov 4 16:08Z. |
 | iPhone "Davica3" (`00008150-001A488C3642401C`) | **2.0 (202611040322), DEBUG** | Phone/deploy owner verified Nov 4: `feat/phone-pause-and-printer-pickers` around `f03580e`; installed by its child around 03:24 MST. Includes #271 virtual RealityView camera and handheld teardown. Fixture screen launches are not connected-app acceptance. |
 | bambu-printer-mcp (what Counterpart runs) | **Published npm 1.1.54**, installed through actual Settings → Printers → Update Nov 4 13:37Z; replaces hand-copied `587461b`. UI says Updated to 1.1.54, P1S Ready. | `~/Library/Application Support/Scan to Make/printers/bambu-1.1.46/lib/node_modules/bambu-printer-mcp/dist` |
 | mcp-3D-printer-server | live dist from `56d8fb9`; source `feat/bambu-complete` now `afcf378` (new layer-pause parity not deployed) | runs from its own folder and `.env` |
@@ -231,7 +233,21 @@ remote native probes and the SSH tunnel were removed after verification.
      `choosePrinterMcpWithCatalog` to avoid conflicting with main's id-returning method.
      Checks: companion build, 86 affected Node checks, 172 shared Swift checks and unsigned iOS Release build
      pass. Logs in `~/scan-to-make-work/phone-301-integration/`. No phone installation/UI acceptance.
-     Main queue is complete at `127721fa` (#293, Nov 4). The release integration retains the final AMS/3MF behavior alongside reconstruction, starters, provider workers and multi-plate selection. The new mapped-colour Mac print request also sends `expectedPlate`. Companion build, 109 focused companion checks and 19 ControlKit request checks pass; the combined committed-source gate is next. No deployment or physical-print acceptance claimed.
+     **Final main integration:** `127721fa` merged at `167b5770`; final AMS/3MF behavior, reconstruction,
+     starters, provider workers and multi-plate selection coexist. The new mapped-colour Mac print path
+     sends `expectedPlate` too. Combined gate on `167b5770`: 16/18 jobs pass. Licence audit found the
+     two new tool folders: `3b24efcf` supplies host's declared MIT notice and records the first-party
+     reconstruction wrapper under the existing pending-root-licence policy (KAN-105); both licence jobs
+     then pass. Third-party runtime notices/source remain separately required. Phone UI run: 35/37 pass;
+     two selectors predated the editable pause row and Live Activity label. `ab08acaf` corrects those;
+     both targeted simulator UI checks and the previously skipped unsigned iPhone Release build pass.
+     All application source is unchanged after `167b5770`. Branch gate reports SAFE.
+     Receipts: `~/scan-to-make-work/final-main-167b5770/{gate,licence-followup,mobile-followup}`.
+     Build 900 actual Mac UI receipt: `~/scan-to-make-work/combined-mac-202611040900/`; config/settings/auth
+     hashes unchanged, same nine project IDs, Ready P1S, selected Codex, model render. This does not
+     establish physical colour printing, fresh capture or Android/Linux pairing acceptance.
+     Six completed Android/Linux task branch refs were retired after proving every head is an ancestor
+     of the pushed release; exact SHAs retained in `final-main-167b5770/retired-branches.json`.
      Engineering checks: companion build and 125 focused remote/auth/updater/session/printer checks pass.
      Broader handoff/HTTP/control/provider run: 212 pass, 5 skip, one unchanged Mac worker-environment
      assertion fails because the child receives `__CF_USER_TEXT_ENCODING` (secret-leak assertion passes).
@@ -363,7 +379,7 @@ remote native probes and the SSH tunnel were removed after verification.
      carries the complete global install-script policy/verification and Node native-addon entitlement.
      Owner reports package/e2e/licence/Mac build passed at `e179aef`; Node 22/24 companion passed at
      `b0926e2`, whose only additional edits were updater source/tests. branch_check SAFE; Codex no major
-     issues. Release `31353f57` already matches the runtime behavior; final main `127721fa` is integrated with #293, with the combined gate pending.
+     issues. Release `31353f57` already matches the runtime behavior; final main `127721fa` is integrated with #293, with follow-up gate receipts recorded above.
      `verify_apple_distribution.py` is absent on main, so its signed-Node check remains release-only until
      distribution tooling is integrated. No live deployment is needed for the backport.
      Review follow-up (#304 `b0926e2`): both global installs now also force `--loglevel=notice`, so a
@@ -512,7 +528,17 @@ remote native probes and the SSH tunnel were removed after verification.
      bundled library paths to its scanner. Final artifact bytes, not the pre-bundle tree, passed 64 exports,
      5 internal dependencies, npm/npx 11.19.1, reconstruction identity and samples readiness (USD modules,
      COLMAP and all three OpenMVS tools) under env -i. Validator is committed in `3bda30f2`.
-     Artifacts: agents-136 `~/scan-to-make-work/reconstruction-release-6151553/artifacts/`:
+     **Refreshed final-main packages:** app/host source `167b5770`, BUILD-ID
+     `g167b5770a75d-node24.22.2-x64-r4c6014f501e9`, preserving the verified `eb767494` reconstruction runtime.
+     Both actual extracted package formats again pass the runtime/import/npm/reconstruction checks.
+     Current deliverables on the Mac: `~/scan-to-make-work/final-main-167b5770/artifacts/`:
+     - `Counterpart_0.1.0_amd64.deb`: SHA-256 `5ccd136b05a5131b787484ab7913e89862b4ddb068cab2484ca2304f0684e290`.
+     - `Counterpart_0.1.0_amd64.AppImage`: SHA-256 `85833200104092cb5fcafa9c5aecbab2b51ac3802f87570df160ce408cde2d80`.
+     - `Counterpart-debug.apk`: source `3b24efcf`, SHA-256 `5279470750fb944ff390f1fbf3f43cddb0f9e3666586bf52ab668a34454edf3b`;
+       Android 47 checks, build and lint pass. Debug-signed; no Android device acceptance.
+     Remote logs: agents-136 `~/scan-to-make-work/final-release-167b5770/` and agents-173
+     `~/scan-to-make-work/final-android-3b24efcf/`. Owned Rust/frontend/Gradle caches removed, artifacts retained.
+     Earlier pre-final-main artifacts: agents-136 `~/scan-to-make-work/reconstruction-release-6151553/artifacts/`:
      - `Counterpart_0.1.0_amd64.deb`, SHA-256 `f80433771942eaf2e634501e63865b61385c70405826b86387720130fa33c36b`.
      - `Counterpart_0.1.0_amd64.AppImage`, SHA-256 `40a16ad1da3a18feea4be139c6a05eda9970231feb6d3349109fb321cb810ac7`.
      Full receipt `verify-final-packages.log` and build logs remain beside artifacts; generated Rust/frontend
@@ -520,7 +546,7 @@ remote native probes and the SSH tunnel were removed after verification.
      retained for reuse; Muse's agents-171 artifact untouched. Mac generated payload removed after its receipt.
      Nothing installed or restarted. Genuine phone-capture region/scale UI, Android/device pairing and
      physical desktop acceptance remain open; package checks are engineering evidence only.
-     #293 remains with the merge owner. No further Muse implementation requested; retained artifacts stay.
+     #293 is now integrated from final main `127721fa`. No further Muse implementation requested; retained artifacts stay.
      Synthetic geometry retained a support disc until explicit region choice; one OpenMVS run crashed then
      succeeded on retry. Neither result establishes real capture quality or automatic print readiness.
 

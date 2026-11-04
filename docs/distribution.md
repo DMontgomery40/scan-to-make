@@ -50,18 +50,19 @@ independently of David's existing setup:
 - The app's Download/Update MCP actions install npm's latest version independently
   of the iPhone or Mac release. David authorized both combined MCP releases after
   checks on Nov 4; the previous release hold is superseded. The FDM/MCP thread owns
-  the actual app's MCP Update/acceptance. Both combined releases are now published:
-  bambu-printer-mcp **1.1.52** (#99, merge `ff32e5e`, publish run `41796513132`)
-  and mcp-3d-printer-server **1.2.26** (#52, merge `a08c794`, publish run `41796478364`).
-  Registry latest was independently verified for both on Nov 4; visible app acceptance remains open.
-  Do not hand-copy local feature-branch builds. Accept print controls using the
-  visible Counterpart UI with exactly the published packages users receive.
-- Counterpart #298 is merged and included in Mac build 202611040120. These companion-only
-  changes require no new TestFlight phone build. Real New project / Ask for changes
-  acceptance with the published MCPs remains open.
-- David's existing hand-copied MCP reports 1.1.52, so the version-only updater offers no
-  Update despite differing from npm's 1.1.52. The MCP owner reported this obstacle and
-  is awaiting David's choice of remedy; no metadata or project state was changed here.
+  the actual app's MCP Update/acceptance. Published versions reported by that owner on Nov 4
+  are bambu-printer-mcp **1.1.54** and mcp-3d-printer-server **1.2.28**, including slicer support arguments.
+  The actual Mac app successfully installed npm Bambu **1.1.54** through Settings → Printers → Update
+  at 13:37Z. The unused generic MCP checkout remains 1.2.26. Do not hand-copy local feature builds.
+  Accept print controls using visible Counterpart controls with the published packages users receive.
+- The installed development Mac build **202611040900** includes #298 guidance, the orientation/support
+  bridge and updater fixes. Final main **127721fa**, including #293 multi-colour 3MF/AMS mapping,
+  is integrated into the release branch at **167b5770**, alongside Android/Linux and reconstruction.
+  This source integration is not a new public artifact or physical-print acceptance.
+- The hand-copied version-label obstacle is resolved by the newer npm release. The updater now authorizes
+  the selected package's postinstall and verifies it before swapping; bundled Node permits third-party
+  native modules under Hardened Runtime. `--loglevel=notice` also preserves the verification banner
+  when the user's npm configuration is silent. The next public Mac build must carry all these fixes.
 - The legacy macOS installer and Docker image pin older MCP versions. They do not
   reproduce the currently accepted feature-branch installation.
 
