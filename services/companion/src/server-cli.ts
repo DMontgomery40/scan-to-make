@@ -182,6 +182,12 @@ if(handoffConfig&&printHandoff){
     const config=catalog.resolve(destination.id)!;
     return [destination.id,destination.id==='current'?services:createPrintHandoffServices(config,handoffDirectory!,{pool:printerPool,destinationId:destination.id,onConnect:onConnect(destination.id)})] as const;
   }));
+  // PRD §8.10: Update updates the install each printer runs, between prints. The physical printer's own report is
+  // checked with or without objects (a remote `/v1/mcp` print has no project); objects add their project check below.
+  const live=printerDestinations, directory=new PrinterDirectory(catalog,id=>live.get(id)?.runner.session);
+  printerDirectory=directory;
+  printerBusy=id=>directory.printing(id);
+  if(mcpUpdates)directory.useVersions(mcpUpdates);
 }
 if(handoffConfig&&printHandoff&&captureDirectory&&claudePath){
   const objectStore=new ObjectStore(join(captureDirectory,'objects'));
@@ -189,7 +195,6 @@ if(handoffConfig&&printHandoff&&captureDirectory&&claudePath){
   // Dispatched prints keep printing: ObjectService.resume() picks their monitors back up.
   await objectStore.recoverInterrupted({keepPrinting:true});
   const catalog=printerCatalog!, destinations=printerDestinations!;
-  printerDirectory=new PrinterDirectory(catalog,id=>destinations.get(id)?.runner.session);
   objects=new ObjectService({store:objectStore,runTouchup:input=>runTouchup(input),claudePath,handoff:handoffConfig,runningHandoff:()=>runningHandoff()!,printerCatalog:catalog,printers:printerDirectory,
     stlInfo:path=>printerStlSize(runningHandoff()!,path),
     print:{services:printHandoff,destinations},
@@ -197,10 +202,9 @@ if(handoffConfig&&printHandoff&&captureDirectory&&claudePath){
     passTimings:new PassTimings(join(dataRoot,'pass-timings.json')),titleFor:request=>generateTitle(request,claudePath), reportsCompletion:note=>reportsCompletion(note,claudePath),
     ...(eventLog?{events:{emit:async draft=>{await eventLog.append(draft);}}}:{})});
   await companionSettings.load();
-  // PRD §8.10: Update updates the install each printer runs, between prints.
-  const service=objects, directory=printerDirectory;
+  // A project printing there counts too.
+  const service=objects, directory=printerDirectory!;
   printerBusy=async id=>await service.printerBusy(id)||await directory.printing(id);
-  printerDirectory.useVersions(mcpUpdates!);
   await mcpUpdates!.applyOverrides();
   const addonInstaller=new ConfiguredAddonInstaller(()=>runningHandoff()!,hostEnvironment(dataRoot));
   blenderAddon=new BlenderAddonRepair({gate:printGate,workRoot:dataRoot,listening:()=>listening(BLENDER_MCP_PORT),
