@@ -485,20 +485,24 @@ remote native probes and the SSH tunnel were removed after verification.
      CPython/Pillow/usd-core closure can serve qualification; Linux needs the executable reconstruction closure.
      Correct the draft dependency manifest against actual binary/source archives and existing licence inventory
      (it labels usd-core Apache-only, while the audited Mac wheel has a composite licence).
-     **Runtime packaging recovery:** Muse exhausted its subscription at 12:39Z (reset reported 14:12:05Z).
-     Its clean branch `linux-muse-reconstruction` contains pushed `cd0af5c82e8d` (packaging `c26a1cc0`,
-     release merge `686fb05e`, COLMAP libPoseLib follow-up). It was not merged into release yet. Retained runtime:
-     agents-171 `~/scan-to-make-work/linux-reconstruct/final-payload`, BUILD-ID
-     `reconstruction-1.2.0-gcd0af5c82e8d-linux-x64`; receipts beside it. Transcript reports a relocated check
-     and host-payload preparation, not installed reconstruction acceptance.
-     Parent review found remaining release gaps: apt downloads package names without pinned versions/hashes;
-     `ldd` only rejects "not found" and can still use build-host libraries despite the closure claim;
-     readiness probes import only `pxr` rather than the USD modules used by qualification, don't pass their
-     supplied environment to spawn, and leave stderr unread. Cache identity is launcher mtime rather than
-     the packaged build identity. Do not claim dependency independence/readiness from these checks yet.
-     David chose **resume Muse after reset**. Continuation is scheduled for Nov 4 at 14:13Z (07:13 Mountain),
-     after its 14:12:05Z quota reset. No provider switch. Source and retained runtime remain intact;
-     parent continues the separate main integration/Mac build work. #293 remains with the merge owner.
+     **Runtime packaging integrated:** Muse resumed on the requested provider after its quota reset,
+     merged release `9ecf47a8`, and pushed `a5346427ae18f27cded8975467f273aad833ff44`; release fast-forwarded
+     to it. The old `cd0af5c8` completion did not close the review findings and was not accepted as final.
+     New implementation pins .deb versions and SHA-256, rejects non-baseline libraries resolved outside
+     the payload, imports Gf/Usd/UsdGeom/UsdUtils/Vt, passes probe environment, drains bounded stderr,
+     and keys readiness on packaged BUILD-ID. Mac retains its existing pinned Python/USD runtime.
+     Retained Linux runtime: agents-171 `~/scan-to-make-work/linux-reconstruct/final-payload`,
+     BUILD-ID `reconstruction-1.2.0-ga5346427ae18-linux-x64`; manifest SHA-256
+     `2039ce4bce49247d9e09ac0f3d5fd5c3eb36c8c87d6e7010383d5b5b377cc5c5`.
+     Packaged synthetic samples/measurement and camera-scale paths, invalid metadata and cancellation
+     passed per delegate receipts; this remains engineering evidence, not real capture or app acceptance.
+     Parent `6151553e` writes Mac payload BUILD-ID from its actual source archive plus runtime manifest,
+     runs packaged qualify readiness, and includes the Linux reconstruction manifest digest in host
+     BUILD-ID so an embedded runtime replacement causes an upgrade. `52534ee3` updates the Mac payload
+     audit to validate the identity file; 15 audit checks pass. Companion build and 29 affected checks pass.
+     Combined Mac payload preparation and Linux .deb/AppImage build are in progress; Linux namespace
+     agents-136 `~/scan-to-make-work/reconstruction-release-6151553/`. Nothing installed or restarted.
+     #293 remains with the merge owner. No further Muse implementation requested; retained artifacts stay.
      Synthetic geometry retained a support disc until explicit region choice; one OpenMVS run crashed then
      succeeded on retry. Neither result establishes real capture quality or automatic print readiness.
 
