@@ -5,6 +5,7 @@ import type {TouchupActivity, TouchupChange} from '../touchup/runner.js';
 import type {PassStage} from '../touchup/stages.js';
 import type {DesignEngine} from '../touchup/invocation.js';
 import type {Ask} from '@scan-to-make/contracts/counterpart';
+import type {ReconstructionReview} from '@scan-to-make/contracts/reconstruction';
 import type {PrintLive, PrintMonitor, PrintSettings, ProjectPreferences} from '@scan-to-make/contracts/counterpart';
 
 /** `sent`: the printer accepted the print, but Counterpart can't follow it to the end (no evidence it printed). */
@@ -95,7 +96,11 @@ export interface StmObject {
   /** Lossless depth/calibration companions under capture/, separate from viewable images. */
   captureDepth?: string[];
   /** The source phone confirmed the entire finished capture; the digest binds its retained file names. */
-  captureCompletion?: {version: 1; depthRequired: boolean; frameCount: number; sha256: string; completedAtMs: number};
+  captureCompletion?: {version: 1; depthRequired: boolean; cameraMetadataRequired?: boolean; frameCount: number; sha256: string; completedAtMs: number};
+  /** capture-camera v1 was supplied and bound to the saved photos; only its digest is public. */
+  captureCamera?: {sha256: string; frameCount: number};
+  /** A rebuild waiting on the person (which part is the object, or how big it is). Public, path-free. */
+  reconstructionReview?: ReconstructionReview;
   /** What the Mac is doing right now, in words, while it is longer than a moment (building a handheld scan). */
   progress?: string;
   passes: ObjectPass[];

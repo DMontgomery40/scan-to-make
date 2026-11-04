@@ -6,7 +6,7 @@ import {readFile, realpath, open} from 'node:fs/promises';
 import {constants} from 'node:fs';
 import {basename, join, isAbsolute, sep} from 'node:path';
 import type {RemoteScope} from '../remote-auth.js';
-import {InvalidAnswerError, InvalidCaptureManifestError, InvalidStateError, passKind, projectStatus, type ObjectService} from './service.js';
+import {InvalidAnswerError, InvalidCaptureCameraError, InvalidCaptureManifestError, InvalidStateError, passKind, projectStatus, type ObjectService} from './service.js';
 import {CameraUnavailableError, type CameraFrame} from '../printing/camera.js';
 import {CompanionSettingsPatchSchema, type ObjectStatus, type ProjectStatus} from '@scan-to-make/contracts/counterpart';
 import {objectStatus, projectTitle} from '../events/words.js';
@@ -18,7 +18,7 @@ import {PrinterSetupError, type PrinterSetup} from '../printing/setup.js';
 const READ: RemoteScope = 'projects:read', WRITE: RemoteScope = 'captures:import', PRINT: RemoteScope = 'printer-handoff:use';
 const MAX_SCAN = 64 * 1024 * 1024, MAX_PHOTO = 25 * 1024 * 1024, MAX_JSON = 16 * 1024;
 const MAX_DEPTH = 8 * 1024 * 1024;
-const PATH = /^\/v1\/objects(?:\/([0-9a-f-]{36})(?:\/(scan|model|ask|plate-selection|settings|duplicate|photos|capture|capture-depth|start|corrections|closeup|print|print\/pause|print\/resume|print\/cancel|estimate|camera\.jpg|prints\/[0-9a-f-]{36}\/frames\/[0-9a-f-]{36}\.jpg|asks\/[0-9a-f-]{36}\.jpg|filaments|print-confirmation|printer|model\.stl|original\/[0-9]+|passes\/[^/]+\/activity|(?:renders|photos|capture|scan)\/[^/]+))?)?$/;
+const PATH = /^\/v1\/objects(?:\/([0-9a-f-]{36})(?:\/(scan|model|ask|plate-selection|settings|duplicate|photos|capture|capture-depth|capture-camera|reconstruction|reconstruction-preview\.stl|start|corrections|closeup|print|print\/pause|print\/resume|print\/cancel|estimate|camera\.jpg|prints\/[0-9a-f-]{36}\/frames\/[0-9a-f-]{36}\.jpg|asks\/[0-9a-f-]{36}\.jpg|filaments|print-confirmation|printer|model\.stl|original\/[0-9]+|passes\/[^/]+\/activity|(?:renders|photos|capture|scan)\/[^/]+))?)?$/;
 const PRINTER_CAMERA = /^\/v1\/objects\/printers\/([A-Za-z0-9_-]{1,256})\/camera\.jpg$/;
 const PRINTER_SETTINGS = /^\/v1\/objects\/printers\/([A-Za-z0-9_-]{1,256})\/(route|mcp)$/;
 const SETTINGS: RemoteScope = 'projects:write';
@@ -370,6 +370,21 @@ export function createObjectRoutes(service: ObjectService, printerSetup?: Pick<P
           await json<unknown>(request);
           return send(response, 200, {object: publicObject(await service.control(id, action.slice('print/'.length) as 'pause' | 'resume' | 'cancel'))});
         }
+        if (action === 'reconstruction-preview.stl') {
+          if (method !== 'GET') throw new HttpFailure(405, 'method-not-allowed');
+          await authorize(READ);
+          const reviewId = url.searchParams.get('reviewId') ?? '';
+          if (!/^[0-9a-f-]{36}$/i.test(reviewId)) throw new HttpFailure(404, 'not-found');
+          // Only the current review's own preview; the service refuses any other id.
+          const relative = await service.reconstructionPreview(id, reviewId);
+          const bytes = await exportFile(service.dir(id), relative);
+          response.statusCode = 200;
+          response.setHeader('content-type', 'model/stl');
+          response.setHeader('cache-control', 'private, no-store');
+          response.setHeader('x-content-type-options', 'nosniff');
+          response.end(bytes);
+          return;
+        }
         if (action === 'model.stl' || action.startsWith('renders/')) {
           if (method !== 'GET') throw new HttpFailure(405, 'method-not-allowed');
           await authorize(READ);
@@ -406,6 +421,19 @@ export function createObjectRoutes(service: ObjectService, printerSetup?: Pick<P
             const name = url.searchParams.get('name') ?? '';
             if (!/\.(3mf|stl)$/i.test(name) || name.length > 255 || /[\/\\\u0000-\u001f]/.test(name) || name === '.' || name === '..') throw new HttpFailure(400, 'invalid-name');
             object = await service.addModelFile(id, name, await body(request, MAX_SCAN));
+            break;
+          }
+          case 'capture-camera': {
+            // capture-camera v1 JSON, bound by the service to the exact saved photos.
+            const input = await json<unknown>(request, 4 * 1024 * 1024);
+            object = await service.addCaptureCamera(id, input);
+            break;
+          }
+          case 'reconstruction': {
+            const input = await json<{reviewId?: unknown; answer?: unknown}>(request, 64 * 1024);
+            if (!input || typeof input !== 'object' || Array.isArray(input)
+                || Object.keys(input).some(key => !['reviewId', 'answer'].includes(key))) throw new HttpFailure(400, 'invalid-request');
+            object = await service.answerReconstruction(id, input.reviewId, input.answer);
             break;
           }
           case 'capture-depth': {
@@ -482,6 +510,7 @@ export function createObjectRoutes(service: ObjectService, printerSetup?: Pick<P
         if (error instanceof InvalidAnswerError) return send(response, 400, {error: {code: 'invalid-request', message: error.message}});
         if (error instanceof InvalidStateError) return send(response, 409, {error: {code: 'invalid-state', message: error.message}});
         if (error instanceof InvalidCaptureManifestError) return send(response, 400, {error: {code: 'invalid-request', message: error.message}});
+        if (error instanceof InvalidCaptureCameraError) return send(response, 400, {error: {code: 'invalid-request', message: error.message}});
         if (error instanceof CameraUnavailableError) return send(response, error.reason === 'unreachable' ? 503 : 404, {error: {code: error.reason === 'not-supported' ? 'not-supported' : error.reason === 'no-camera' ? 'not-found' : 'unavailable', message: error.message}});
         if (error instanceof Error && error.message === 'Invalid file name') return send(response, 400, {error: {code: 'invalid-name', message: error.message}});
         throw error;

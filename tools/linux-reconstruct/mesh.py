@@ -165,6 +165,27 @@ def write_ply(path, mesh):
             f.write(struct.pack("<Biii", 3, a, b, c))
 
 
+def write_stl(path, mesh):
+    """Binary STL in the mesh's own (reconstruction) coordinates.
+
+    STL carries no units; the header says so plainly so a preview is never
+    read as metres before scale is proven. Same vertices/faces as the PLY.
+    """
+    header = b"Counterpart reconstruction preview - arbitrary units, NOT metres"
+    header = header[:80].ljust(80, b"\0")
+    vs = mesh.vertices
+    with open(path, "wb") as f:
+        f.write(header)
+        f.write(struct.pack("<I", len(mesh.faces)))
+        for a, b, c in mesh.faces:
+            ux, uy, uz = (vs[b][i] - vs[a][i] for i in range(3))
+            vx, vy, vz = (vs[c][i] - vs[a][i] for i in range(3))
+            nx, ny, nz = uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx
+            length = math.sqrt(nx * nx + ny * ny + nz * nz) or 1.0
+            f.write(struct.pack("<3f9fH", nx / length, ny / length, nz / length,
+                                *vs[a], *vs[b], *vs[c], 0))
+
+
 def connected_components(mesh):
     """Vertex-sharing components. Returns list of (vertex_set, face_indices)
     sorted by vertex count descending."""
