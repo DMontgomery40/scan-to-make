@@ -19,6 +19,11 @@ export const importFiles = (
   }>("import_files", { id, kind, forMessage });
 export const artifact = async (id: string, path: string) =>
   new Uint8Array(await invoke<ArrayBuffer>("read_artifact", { id, path }));
+/** Bounded native read of the current review's preview STL; ids only, no path. */
+export const reconstructionPreview = async (id: string, reviewId: string) =>
+  new Uint8Array(
+    await invoke<ArrayBuffer>("read_reconstruction_preview", { id, reviewId }),
+  );
 export const openLink = (url: string) => invoke<void>("open_link", { url });
 export const openProject = (
   id: string,

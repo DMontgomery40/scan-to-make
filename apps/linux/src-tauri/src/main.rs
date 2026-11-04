@@ -137,7 +137,10 @@ async fn control(
     // Reserve capacity for answers. No mutex is held while waiting for an MCP's question.
     let pool = if matches!(
         method.as_str(),
-        "confirmations.answer" | "objects.answerPrintConfirmation" | "confirmations.list"
+        "confirmations.answer"
+            | "objects.answerPrintConfirmation"
+            | "objects.answerReconstruction"
+            | "confirmations.list"
     ) {
         &state.answers
     } else {
@@ -312,6 +315,53 @@ async fn read_artifact(
     Ok(tauri::ipc::Response::new(
         project_file(&app, &id, &path).await?.1,
     ))
+}
+/// The only reconstruction preview path this window can read: derived here from
+/// the review id the companion currently publishes for this object. The caller
+/// supplies ids only, never a path.
+fn reconstruction_preview_path(object: &Value, review_id: &str) -> Result<String> {
+    let parsed = uuid::Uuid::parse_str(review_id)
+        .map_err(|_| "That review is no longer current. Refresh the project.")?;
+    let canonical = parsed.to_string();
+    let review = object.get("reconstructionReview");
+    let current = review.and_then(|r| r.get("id")).and_then(Value::as_str);
+    if current != Some(canonical.as_str()) {
+        return Err("That review has been answered or replaced. Refresh the project.".into());
+    }
+    let expected = format!("reconstruction-preview.stl?reviewId={canonical}");
+    if review.and_then(|r| r.get("preview")).and_then(Value::as_str) != Some(expected.as_str()) {
+        return Err("This review preview does not match the current review. Refresh the project.".into());
+    }
+    Ok(format!("reconstruction/preview-{canonical}.stl"))
+}
+#[tauri::command]
+async fn read_reconstruction_preview(
+    app: tauri::AppHandle,
+    state: State<'_, Bridge>,
+    id: String,
+    review_id: String,
+) -> Result<tauri::ipc::Response> {
+    if uuid::Uuid::parse_str(&id).is_err() {
+        return Err("Invalid project.".into());
+    }
+    let _permit = state
+        .artifacts
+        .acquire()
+        .await
+        .map_err(|_| "Preview reader stopped.")?;
+    // Fresh companion state decides what may be read; a stale review id serves nothing.
+    let value = request(&app, "objects.get", json!({"id":id})).await?;
+    let object = &value["object"];
+    let path = reconstruction_preview_path(object, &review_id)?;
+    let root = PathBuf::from(
+        object["directory"]
+            .as_str()
+            .ok_or("Missing project directory.")?,
+    );
+    let bytes = tauri::async_runtime::spawn_blocking(move || read_scoped(&root, &path))
+        .await
+        .map_err(|_| "Preview reader stopped.")??;
+    Ok(tauri::ipc::Response::new(bytes))
 }
 #[tauri::command]
 async fn preview_file() -> Result<tauri::ipc::Response> {
@@ -669,6 +719,7 @@ fn main() {
             add_discovered_printer,
             store_credential,
             read_artifact,
+            read_reconstruction_preview,
             preview_file,
             import_files,
             pick_inputs,
@@ -697,6 +748,23 @@ mod tests {
         ] {
             assert!(!referenced(&o, p));
         }
+    }
+    #[test]
+    fn reconstruction_preview_is_derived_from_current_review_only() {
+        let id = "123e4567-e89b-42d3-a456-426614174000";
+        let o = json!({"reconstructionReview":{"id":id,"preview":format!("reconstruction-preview.stl?reviewId={id}")}});
+        assert_eq!(
+            reconstruction_preview_path(&o, id).unwrap(),
+            format!("reconstruction/preview-{id}.stl")
+        );
+        // Stale, missing, malformed, or mismatched reviews serve nothing.
+        assert!(reconstruction_preview_path(&o, "123e4567-e89b-42d3-a456-426614174999").is_err());
+        assert!(reconstruction_preview_path(&o, "../secret").is_err());
+        assert!(reconstruction_preview_path(&json!({}), id).is_err());
+        let wrong_preview = json!({"reconstructionReview":{"id":id,"preview":"reconstruction-preview.stl?reviewId=123e4567-e89b-42d3-a456-426614174999"}});
+        assert!(reconstruction_preview_path(&wrong_preview, id).is_err());
+        // The private preview is not a generally referenced artifact either.
+        assert!(!referenced(&o, &format!("reconstruction/preview-{id}.stl")));
     }
 }
 #[cfg(test)]
