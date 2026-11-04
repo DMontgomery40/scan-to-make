@@ -104,6 +104,10 @@ remote native probes and the SSH tunnel were removed after verification.
    lists iOS and macOS drafts; do not remove the Mac platform without understanding that choice.
    Release branch is `feat/testflight-readiness` (no PR yet); release source is `e7d5f6d`.
    `docs/distribution.md` contains the release procedure and remaining production prerequisites.
+   **Latest upload:** **2.0 (3)** from `4a894769` passed distribution checks and uploaded
+   successfully Nov 4 16:16:47Z; Apple reports processing. Receipt/archive/IPA/logs:
+   `~/scan-to-make-work/testflight-2.0-3/`. Build 3 group assignment and external review
+   submission remain unverified; build 2 above is the last observed group state. No phone install.
    - **Starter projects and multi-plate printing implemented on the release branch:** welcome/Home and
      the empty Mac workspace offer the scan platform, Counterpart caliper card and long vernier
      with depth gauge. The card ships fresh generated model files, branding, QR and preview.

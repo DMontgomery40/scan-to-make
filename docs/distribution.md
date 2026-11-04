@@ -22,6 +22,13 @@ Apple review notes now include the live download/setup link and starter details.
 The internal prerequisite group `Counterpart Team` exists. Beta description and
 David's supplied review/feedback contacts are saved in App Store Connect.
 
+**Latest upload:** **2.0 (3)**, source `4a894769`, uploaded successfully on Nov 4 at
+16:16:47Z. It passed app/extension distribution signature and Production entitlement
+checks. Apple reports processing; group assignment and Beta App Review submission for
+build 3 are not yet verified. Build 2’s Waiting for Review status above is the last
+observed group state. Archive, IPA, hashes and upload log: `~/scan-to-make-work/testflight-2.0-3/`.
+No physical phone installation or production relay change was made.
+
 Xcode used cloud-managed Apple Distribution signing for the iPhone. A Developer ID
 Application certificate and matching Production profile are installed for the Mac.
 The current [Mac beta release](https://github.com/DMontgomery40/scan-to-make/releases/tag/v2.0-beta.3)
