@@ -77,6 +77,10 @@ data class Project(
     val slicedOriginal: Boolean get() = selectedPlate?.sliced ?: (raw["publishedSelection"].obj?.get("sliced").bool == true)
     val completedPlateCount: Int get() = plates?.count { it.completedAtMs != null } ?: 0
     val canSelectPlate: Boolean get() = !plates.isNullOrEmpty() && state != State.Printing && state != State.TouchingUp && print?.uncertain != true
+    /** Terminal reports take precedence over stale progress while the project transition arrives. */
+    val printEnded: Boolean get() = print?.live?.state in setOf("finished", "failed", "cancelled") ||
+        print?.monitor?.phase == "ended" || state in setOf(State.Printed, State.Confirmed, State.Failed) ||
+        ProjectWords.phase(this) in setOf(ProjectPhase.Printed, ProjectPhase.Confirmed, ProjectPhase.Failed)
 
     companion object {
         fun decode(o: JsonObject): Project? {

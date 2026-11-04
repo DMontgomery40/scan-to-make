@@ -239,6 +239,10 @@ remote native probes and the SSH tunnel were removed after verification.
      This is engineering evidence only: no Android UI or Linux desktop acceptance yet.
      Android SDK 22.0 (platform/build-tools 35) and JDK17 are on agents-173, not the space-constrained Mac.
      Build source/logs: `/home/david/scan-to-make-work/android-linux-build`; SDK: `/home/david/Android/Sdk`.
+     Android terminal-print handling now stops camera polling, removes live controls/remaining-time claims,
+     closes an open Stop dialog and labels retained camera images as historical. Late active reports cannot
+     override terminal project/monitor evidence. Shared terminal-state vectors, assembleDebug and lintDebug pass;
+     log `source/print-state-final.log` on agents-173. No Android UI acceptance (T3 emulator startup remains blocked).
      User requested Theo's TStack workflow. `/council` is installed under `~/.codex/skills/council`;
      Council reviews are complete: Opus recommended GTK/Rust, Muse Tauri/TypeScript, Sol Electron/TypeScript.
      Parent chose Tauri 2/React/Three.js with a narrow native socket bridge, Secret Service model worker and
@@ -275,11 +279,14 @@ remote native probes and the SSH tunnel were removed after verification.
      the installed package. UI owner reports this fixed in BOTH rebuilt .deb and AppImage by materializing npm
      directory links and providing relocatable npm/npx launchers; extracted packages pass 60 export imports and
      five internal dependency checks. After reinstall, the actual setup button passed address discovery and created
-     the service. The next blocker is host-generated `printer-handoff.json` with relative `process.command='node'`,
+     the service. The next blocker was host-generated `printer-handoff.json` with relative `process.command='node'`,
      rejected by the absolute-path schema (`config.js:80`, retained `companion-error.log`). Sent to the host owner
-     to fix source and coordinate a rebuilt helper/UI retry. No hand-edited installed configuration or connected-app acceptance.
+     to fix source and coordinate a rebuilt helper/UI retry. UI owner now reports installed helper/payload
+     `ga41b298a488d-node24.22.2-x64` passes the actual native **Repair setup** button: connected Projects,
+     companion active, all three starters visible, caliper card started through **Start this project**.
+     This accepts that setup/starter slice only; model creation, device pairing and printing remain unaccepted.
      The delegate created disposable account `stm-hosttest` (UID 1001) with lingering enabled for pending
-     runtime checks; remove only after its owned checks and service cleanup. No real host acceptance yet.
+     runtime checks; remove only after its owned checks and service cleanup. Final host commit/check receipts pending.
 5. **Phone parity implemented on the release branch:** Settings → Printers exposes MCP and
    route selection through authorized routes and per-physical-printer reservations; phone print
    sheet has layer pauses and Resume-specific confirmation. Finished print removes live controls,

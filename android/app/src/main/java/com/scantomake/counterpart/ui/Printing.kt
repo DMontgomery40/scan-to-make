@@ -66,6 +66,9 @@ import com.scantomake.counterpart.api.SliceEstimate
 import com.scantomake.counterpart.app.AppState
 import com.scantomake.counterpart.app.Counterpart
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 
 /** The print sheet (PRD §5.5): printer, quality, strength, filament, estimate, Print. */
@@ -257,6 +260,8 @@ fun PrintingScreen(id: String, back: () -> Unit, project: () -> Unit) {
     val projects by state.projects.collectAsState()
     val catalog by state.catalog.collectAsState()
     val p = projects.firstOrNull { it.id == id }
+    val printEnded = p?.printEnded == true
+    val followPrint = p != null && !printEnded
     var frame by remember { mutableStateOf<CompanionClient.CameraFrame?>(null) }
     var image by remember { mutableStateOf<ImageBitmap?>(null) }
     var cameraProblem by remember { mutableStateOf<String?>(null) }
@@ -265,13 +270,16 @@ fun PrintingScreen(id: String, back: () -> Unit, project: () -> Unit) {
     var confirmStop by remember { mutableStateOf(false) }
     var now by remember { mutableStateOf(System.currentTimeMillis()) }
 
-    LaunchedEffect(id) {
-        // A snapshot every 3 s while this screen shows (the companion shares one camera read between viewers).
+    LaunchedEffect(id, followPrint) {
+        if (!followPrint) return@LaunchedEffect
+        // Ending the print cancels this effect, including an outstanding camera request.
         while (true) {
             try {
                 val next = app.companion.camera(projectId = id, fullScreen = true, previous = frame)
+                currentCoroutineContext().ensureActive()
                 if (next !== frame) { frame = next; image = ImageCache.decode(next.jpeg) }
                 cameraProblem = null
+            } catch (e: CancellationException) { throw e
             } catch (e: CompanionException) {
                 cameraProblem = e.message
                 if (e.code == "no-camera" || e.isUnsupported) break
@@ -280,12 +288,21 @@ fun PrintingScreen(id: String, back: () -> Unit, project: () -> Unit) {
             delay(3_000)
         }
     }
-    LaunchedEffect(id) { while (true) { state.reload(id); delay(10_000) } }
+    LaunchedEffect(id, followPrint) {
+        // Refresh once on entry; active prints retain the fallback alongside the shared event stream.
+        do { state.reload(id); if (followPrint) delay(10_000) } while (followPrint)
+    }
+    LaunchedEffect(id, printEnded) { if (printEnded) confirmStop = false }
 
     fun control(action: CompanionClient.PrintControl) {
+        val latest = state.projects.value.firstOrNull { it.id == id } ?: return
+        if (working || latest.printEnded) return
         working = true; problem = null
         scope.launch {
-            try { state.show(app.companion.control(id, action)) } catch (e: CompanionException) { problem = e.message } catch (e: Exception) { problem = CompanionException.unreachable.message }
+            try { state.show(app.companion.control(id, action)) }
+            catch (e: CancellationException) { throw e }
+            catch (e: CompanionException) { problem = e.message }
+            catch (e: Exception) { problem = CompanionException.unreachable.message }
             finally { working = false }
         }
     }
@@ -305,27 +322,27 @@ fun PrintingScreen(id: String, back: () -> Unit, project: () -> Unit) {
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Box(Modifier.fillMaxWidth().aspectRatio(16f / 10f).clip(RoundedCornerShape(24.dp)).stage(), contentAlignment = Alignment.Center) {
                 image?.let { Image(it, "Camera photo from $printer", Modifier.fillMaxSize(), contentScale = ContentScale.Crop) }
-                    ?: Text(cameraProblem ?: "Asking $printer for a photo…", color = Palette.secondary)
-                frame?.capturedAtMs?.let { Text("$printer · ${Format.ago(it, now)}", Modifier.align(Alignment.BottomStart).padding(10.dp)
+                    ?: Text(if (printEnded) "No camera photo saved for this print." else cameraProblem ?: "Asking $printer for a photo…", color = Palette.secondary)
+                frame?.capturedAtMs?.let { Text(if (printEnded) "Last camera photo from $printer" else "$printer · ${Format.ago(it, now)}", Modifier.align(Alignment.BottomStart).padding(10.dp)
                     .clip(RoundedCornerShape(50)).background(Color.Black.copy(alpha = 0.55f)).padding(8.dp, 4.dp), fontSize = 12.sp) }
             }
-            StatusCapsule(words.phase, if (live?.state == "paused") "Paused" else null)
+            StatusCapsule(words.phase, if (!printEnded && live?.state == "paused") "Paused" else null)
             Text(words.line, fontSize = 17.sp)
             job?.progress?.let { LinearProgressIndicator({ (it / 100).toFloat() }, Modifier.fillMaxWidth().height(8.dp), color = Palette.okGreen) }
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 InfoTile("Done", Format.percent(job?.progress) ?: "–", CIcons.Printer, Modifier.weight(1f))
-                InfoTile("Left", Format.duration(job?.remainingSec) ?: "–", CIcons.Clock, Modifier.weight(1f))
+                if (!printEnded) InfoTile("Left", Format.duration(job?.remainingSec) ?: "–", CIcons.Clock, Modifier.weight(1f))
                 InfoTile("Layer", job?.layer?.let { l -> job.totalLayers?.let { "$l of $it" } ?: "$l" } ?: "–", CIcons.Layers, Modifier.weight(1f))
             }
-            Iso.parse(live?.endsAt)?.let { Text("Ends about ${Format.clock(it)}", color = Palette.secondary) }
-            live?.temps?.let { t ->
+            if (!printEnded) Iso.parse(live?.endsAt)?.let { Text("Ends about ${Format.clock(it)}", color = Palette.secondary) }
+            if (!printEnded) live?.temps?.let { t ->
                 Text(listOfNotNull(t.nozzle?.let { "Nozzle ${Format.temperature(it.actual)}" }, t.bed?.let { "Bed ${Format.temperature(it.actual)}" }).joinToString(" · "), color = Palette.secondary, fontSize = 13.sp)
             }
             live?.problems?.forEach { Text("${it.code}\n${it.message}", color = Palette.needsYou, fontSize = 13.sp) }
-            p.printConfirmation?.let { PrintConfirmationCard(p, it) { body -> scope.launch { try { state.show(app.companion.answerPrintConfirmation(id, body)) } catch (e: CompanionException) { problem = e.message } } } }
+            if (!printEnded) p.printConfirmation?.let { PrintConfirmationCard(p, it) { body -> scope.launch { try { state.show(app.companion.answerPrintConfirmation(id, body)) } catch (e: CompanionException) { problem = e.message } } } }
             problem?.let { Text(it, color = Palette.failed) }
         }
-        Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        if (!printEnded) Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             if (live?.state == "paused") {
                 PrimaryButton("Resume", Modifier.weight(1f), enabled = !working && destination?.canResume != false, icon = CIcons.Play) { control(CompanionClient.PrintControl.Resume) }
             } else {
@@ -334,7 +351,7 @@ fun PrintingScreen(id: String, back: () -> Unit, project: () -> Unit) {
             SecondaryButton("Stop", Modifier.weight(1f), enabled = !working && destination?.canCancel != false, icon = CIcons.Stop, color = Palette.failed) { confirmStop = true }
         }
     }
-    if (confirmStop) AlertDialog(onDismissRequest = { confirmStop = false }, title = { Text("Stop the print?") },
+    if (confirmStop && !printEnded) AlertDialog(onDismissRequest = { confirmStop = false }, title = { Text("Stop the print?") },
         text = { Text("The printer stops now. You can't resume it.") },
         confirmButton = { TextButton({ confirmStop = false; control(CompanionClient.PrintControl.Cancel) }) { Text("Stop Print", color = Palette.failed) } },
         dismissButton = { TextButton({ confirmStop = false }) { Text("Keep Printing") } })

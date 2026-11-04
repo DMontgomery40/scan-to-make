@@ -1,0 +1,14 @@
+[
+  {"name":"preparing without report", "project":{"state":"printing"}, "ended":false},
+  {"name":"running", "project":{"state":"printing","print":{"live":{"state":"printing"}}}, "ended":false},
+  {"name":"paused", "project":{"state":"printing","print":{"live":{"state":"paused"}}}, "ended":false},
+  {"name":"unreachable active monitor", "project":{"state":"printing","print":{"monitor":{"phase":"watching","unreachableSince":"2026-11-04T10:00:00Z"},"live":{"state":"offline"}}}, "ended":false},
+  {"name":"finished before project transition", "project":{"state":"printing","status":{"phase":"printing","text":"Printing"},"print":{"live":{"state":"finished","job":{"remainingSec":600}}}}, "ended":true},
+  {"name":"cancelled before project transition", "project":{"state":"printing","print":{"live":{"state":"cancelled"}}}, "ended":true},
+  {"name":"failed printer report", "project":{"state":"printing","print":{"live":{"state":"failed"}}}, "ended":true},
+  {"name":"completed with stale active report", "project":{"state":"printed","print":{"monitor":{"phase":"ended","endState":"done"},"live":{"state":"printing"}}}, "ended":true},
+  {"name":"ended monitor with stale project", "project":{"state":"printing","print":{"monitor":{"phase":"ended","endState":"cancelled"},"live":{"state":"paused"}}}, "ended":true},
+  {"name":"confirmed with stale paused report", "project":{"state":"confirmed","print":{"live":{"state":"paused"}}}, "ended":true},
+  {"name":"print did not start", "project":{"state":"failed","status":{"phase":"failed","text":"Print did not start"}}, "ended":true},
+  {"name":"new print replaces previous terminal state", "project":{"state":"printing","print":{"monitor":{"phase":"watching"},"live":{"state":"preparing"}}}, "ended":false}
+]

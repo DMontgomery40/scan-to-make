@@ -19,6 +19,9 @@ in sliced originals. Printers includes the MCP-reported connection choices, sele
 and updates through the companion's existing updater. Update events show completion or failure; an uncertain
 update request is never automatically resent. Pairing, status and error wording also supports a Linux computer;
 Linux desktop integration and all Android × Mac/Linux acceptance remain open.
+Finished prints stop camera refreshes and hide Pause/Resume/Stop and remaining-time claims; a retained camera
+image is labeled as the last photo. Terminal project/monitor evidence wins over late active printer reports.
+This behavior has build/contract coverage; device UI acceptance remains pending.
 
 ## Build
 
